@@ -3,6 +3,7 @@
 import hashlib
 import io
 import os
+import re
 from pathlib import Path
 import shutil
 import signal
@@ -73,7 +74,10 @@ def main():
     for symbol in ("64BIT", "MULTIUSER", "PRINTK", "TTY", "SERIAL_8250", "SERIAL_8250_CONSOLE",
                    "BLK_DEV_INITRD", "BINFMT_ELF", "PROC_FS", "SYSFS", "TMPFS", "SHMEM",
                    "DEVTMPFS", "SECURITY", "SECURITY_PATH", "SECURITY_OCTANT_MEDIATION", "IO_URING", "AIO",
-                   "FUTEX", "PCI", "BLOCK", "ACPI"):
+                   "FUTEX", "PCI", "BLOCK", "ACPI", "EPOLL", "EVENTFD", "TIMERFD",
+                   "SIGNALFD", "INOTIFY_USER", "ADVISE_SYSCALLS", "MEMFD_CREATE", "POSIX_TIMERS",
+                   "FILE_LOCKING", "NET", "UNIX", "NAMESPACES", "USER_NS", "PID_NS", "UTS_NS",
+                   "IPC_NS", "NET_NS", "SECCOMP", "SECCOMP_FILTER"):
         run("scripts/config", "--enable", symbol, cwd=kernel, timeout=10)
     run("scripts/config", "--set-str", "LSM", "octant_mediation", cwd=kernel, timeout=10)
     run("make", "olddefconfig", cwd=kernel)
@@ -81,21 +85,53 @@ def main():
     executable = root / "init"
     run("gcc", "-static", "-pthread", "-std=c11", "-Wall", "-Wextra", "-Werror",
         str(repository / "scripts/linux-file-view/kernel_guest.c"), "-o", str(executable), timeout=30)
+    relay = root / "octant-mediation"
+    workload = root / "policy-workload"
+    policy = root / "policy-broker"
+    for source, target in ((native / "broker.c", relay),
+                           (repository / "scripts/linux-file-view/kernel_policy_workload.c", workload)):
+        run("gcc", "-static", "-std=c11", "-Wall", "-Wextra", "-Werror", str(source), "-o", str(target), timeout=30)
+    run("bun", "build", "--compile", str(repository / "scripts/linux-file-view/kernel_policy.ts"),
+        "--outfile", str(policy), timeout=120, cwd=repository)
+    # Copy only this task-owned public executable's dynamic loader/libraries
+    # into the disposable initramfs. Nothing is mounted from the runner home.
+    library_log = root / "policy-libraries.log"
+    with library_log.open("wb") as output:
+        run("ldd", str(policy), timeout=10, output=output)
+    guest_files = {"octant-mediation": relay, "policy-workload": workload, "policy-broker": policy}
+    for path in re.findall(r"(?:=>\s+)?(/[^\s]+)", library_log.read_text()):
+        library = Path(path)
+        if not library.is_file():
+            raise SystemExit("The owned policy binary has an unavailable dynamic dependency.")
+        guest_files[path.removeprefix("/")] = library
     with (root / "initramfs.cpio").open("wb") as output:
         archive_entry(output, "dev", b"", 0o040755, 1)
         archive_entry(output, "dev/console", b"", 0o020600, 2, device=(5, 1))
         archive_entry(output, "init", executable.read_bytes(), 0o100755, 3)
-        archive_entry(output, "TRAILER!!!", b"", 0, 4)
+        number = 4
+        directories = {"dev"}
+        for name, path in guest_files.items():
+            for parent in reversed(Path(name).parents):
+                directory = str(parent)
+                if directory == "." or directory in directories:
+                    continue
+                archive_entry(output, directory, b"", 0o040755, number)
+                number += 1
+                directories.add(directory)
+            archive_entry(output, name, path.read_bytes(), 0o100755, number)
+            number += 1
+        archive_entry(output, "TRAILER!!!", b"", 0, number)
     with (root / "guest.log").open("wb") as output:
         run("timeout", "--kill-after=3s", "45s", "qemu-system-x86_64", "-machine", "accel=tcg",
-            "-cpu", "max", "-m", "256M", "-smp", "2", "-nic", "none", "-nographic",
+            "-cpu", "max", "-m", "512M", "-smp", "2", "-nic", "none", "-nographic",
             "-no-reboot", "-kernel", str(kernel / "arch/x86/boot/bzImage"),
             "-initrd", str(root / "initramfs.cpio"), "-append", "console=ttyS0 panic=-1",
             timeout=50, cwd=root, output=output)
     log = (root / "guest.log").read_text(errors="replace")
     print(log[-20000:])
     if ("OCTANT_KERNEL_EXIT 0" not in log or '"status":"measured-admission-core"' not in log or
-            '"status":"measured-namespace-token"' not in log):
+            '"status":"measured-namespace-token"' not in log or
+            '"status":"measured-original-policy-broker"' not in log):
         raise SystemExit("The guest admission core did not pass; no production proof is inferred.")
 
 

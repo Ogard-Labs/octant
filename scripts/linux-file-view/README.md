@@ -16,7 +16,17 @@ and indexes actual device/inode identity without opening content. Directory
 names and canonical paths retain their original bytes, including invalid Linux
 UTF-8 names; enumeration streams under finite metadata/depth/time budgets. Its
 epoch comparison is optimistic and never substitutes for the kernel admission.
-The reader still needs the owned broker/production launch integration below.
+The candidate native relay now opens the device, creates one-use enrollment,
+and closes all private descriptors before executing the owned command. Its
+inherited FD 3 is a dedicated duplex control channel; provider stdio is never
+used for policy. The separately owned TypeScript broker reads the original
+structured policy and answers the kernel using the actual metadata epoch. It
+bounds control buffers, pending work and lifetimes, and refuses every namespace
+proposal until that classifier is complete. The guest compiles this actual
+broker and checks a late companion against an already-open descriptor, hardlink
+and new mapping while retaining allowed writes and public-key contents. This
+new check still needs its exact-head native result. The shared production
+Bubblewrap launch integration and complete policy below remain missing.
 Account exception forms are captured at enrollment; replacing an account path
 with a symlink never transfers that exception to another sign-in.
 

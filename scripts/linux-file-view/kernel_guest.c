@@ -279,6 +279,21 @@ static int namespace_measure(void)
   return passed && controls && cleaned ? 0 : 29;
 }
 
+static int policy_measure(void)
+{
+  pid_t child = fork();
+  if (!child) {
+    char *arguments[] = {"/policy-broker", NULL};
+    char *environment[] = {"HOME=/tmp", "PATH=/", "LANG=C", NULL};
+    execve(arguments[0], arguments, environment);
+    _exit(31);
+  }
+  if (child < 0) return 32;
+  int result; pid_t joined;
+  do { joined = waitpid(child, &result, 0); } while (joined < 0 && errno == EINTR);
+  return joined == child && WIFEXITED(result) && WEXITSTATUS(result) == 0 ? 0 : 33;
+}
+
 int main(void)
 {
   mkdir("/dev", 0755); mkdir("/proc", 0755); mkdir("/tmp", 0700);
@@ -288,6 +303,7 @@ int main(void)
   } else {
     int result = measure();
     if (!result) result = namespace_measure();
+    if (!result) result = policy_measure();
     printf("OCTANT_KERNEL_EXIT %d\n", result);
   }
   fflush(stdout);
