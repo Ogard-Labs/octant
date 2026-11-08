@@ -40,10 +40,10 @@ bool desktop_artifact_trust(DesktopArtifactTrust& trust) {
   return true;
 }
 bool desktop_artifact_acl(HANDLE object, const DesktopArtifactTrust& trust, bool directory, bool ancestor) {
-  PSID owner = nullptr; PACL acl = nullptr; PSECURITY_DESCRIPTOR descriptor = nullptr;
+  PSID artifact_owner = nullptr; PACL acl = nullptr; PSECURITY_DESCRIPTOR descriptor = nullptr;
   if (GetSecurityInfo(object, SE_FILE_OBJECT, OWNER_SECURITY_INFORMATION | DACL_SECURITY_INFORMATION,
-      &owner, nullptr, &acl, nullptr, &descriptor) != ERROR_SUCCESS) return false;
-  bool sound = trust.accepts(owner) && acl && IsValidAcl(acl);
+      &artifact_owner, nullptr, &acl, nullptr, &descriptor) != ERROR_SUCCESS) return false;
+  bool sound = trust.accepts(artifact_owner) && acl && IsValidAcl(acl);
   const DWORD mutations = WRITE_DAC | WRITE_OWNER | ACCESS_SYSTEM_SECURITY | DELETE | FILE_WRITE_ATTRIBUTES | FILE_WRITE_EA |
     (directory ? FILE_DELETE_CHILD | (ancestor ? 0 : FILE_ADD_FILE | FILE_ADD_SUBDIRECTORY) : FILE_WRITE_DATA | FILE_APPEND_DATA);
   GENERIC_MAPPING mapping{FILE_GENERIC_READ, FILE_GENERIC_WRITE, FILE_GENERIC_EXECUTE, FILE_ALL_ACCESS};
@@ -86,12 +86,12 @@ bool desktop_artifact_component(const std::wstring& name) {
   }
   return true;
 }
-bool desktop_artifact_tree(DesktopArtifact& admitted, const DesktopArtifactTrust& trust,
+bool desktop_artifact_tree(DesktopArtifact& artifact, const DesktopArtifactTrust& trust,
     const std::wstring& directory, size_t depth, ULONGLONG deadline, const std::atomic<bool>& cancelled) {
-  if (depth > 32 || ++admitted.entries > 100000 || !desktop_artifact_current(deadline, cancelled)) return false;
+  if (depth > 32 || ++artifact.entries > 100000 || !desktop_artifact_current(deadline, cancelled)) return false;
   Handle held = open_directory(directory);
   if (!held || !desktop_artifact_acl(held.value, trust, true, false)) return false;
-  admitted.directories.push_back(std::move(held));
+  artifact.directories.push_back(std::move(held));
   WIN32_FIND_DATAW item{};
   const std::wstring pattern = directory + L"\\*";
   HANDLE search = FindFirstFileW(pattern.c_str(), &item);
@@ -103,9 +103,9 @@ bool desktop_artifact_tree(DesktopArtifact& admitted, const DesktopArtifactTrust
       const std::wstring path = directory + L"\\" + item.cFileName;
       if (path.size() >= 32768) return false;
       if ((item.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) != 0) {
-        if (!desktop_artifact_tree(admitted, trust, path, depth + 1, deadline, cancelled)) return false;
+        if (!desktop_artifact_tree(artifact, trust, path, depth + 1, deadline, cancelled)) return false;
       } else {
-        if (++admitted.entries > 100000) return false;
+        if (++artifact.entries > 100000) return false;
         Handle file(CreateFileW(path.c_str(), GENERIC_READ | READ_CONTROL, FILE_SHARE_READ | FILE_SHARE_WRITE,
           nullptr, OPEN_EXISTING, FILE_FLAG_OPEN_REPARSE_POINT, nullptr));
         if (!file || !desktop_artifact_file(file.value, trust)) return false;
@@ -133,13 +133,13 @@ std::unique_ptr<DesktopArtifact> admit_desktop_artifact(const std::wstring& imag
   if (type != DRIVE_FIXED && type != DRIVE_REMOVABLE) return nullptr;
   DesktopArtifactTrust trust;
   if (!desktop_artifact_trust(trust)) return nullptr;
-  auto admitted = std::make_unique<DesktopArtifact>();
-  struct ScannedEntries { size_t& result; const DesktopArtifact& artifact; ~ScannedEntries() { result = artifact.entries; } } receipt{scanned, *admitted};
+  auto artifact = std::make_unique<DesktopArtifact>();
+  struct ScannedEntries { size_t& result; const DesktopArtifact& artifact; ~ScannedEntries() { result = artifact.entries; } } receipt{scanned, *artifact};
   const size_t leaf = ordinary.find_last_of(L'\\');
   std::wstring current = drive;
   Handle root = open_directory(current);
   if (!root || !desktop_artifact_acl(root.value, trust, true, true)) return nullptr;
-  admitted->directories.push_back(std::move(root));
+  artifact->directories.push_back(std::move(root));
   size_t start = 3;
   while (start < leaf) {
     const size_t next = ordinary.find(L'\\', start);
@@ -150,20 +150,20 @@ std::unique_ptr<DesktopArtifact> admit_desktop_artifact(const std::wstring& imag
     if (next == leaf) break;
     Handle directory = open_directory(current);
     if (!directory || !desktop_artifact_acl(directory.value, trust, true, true)) return nullptr;
-    admitted->directories.push_back(std::move(directory));
+    artifact->directories.push_back(std::move(directory));
     if (!desktop_artifact_current(deadline, cancelled)) return nullptr;
     start = next + 1;
   }
-  admitted->image = Handle(CreateFileW(ordinary.c_str(), GENERIC_READ | READ_CONTROL, FILE_SHARE_READ,
+  artifact->image = Handle(CreateFileW(ordinary.c_str(), GENERIC_READ | READ_CONTROL, FILE_SHARE_READ,
     nullptr, OPEN_EXISTING, FILE_FLAG_OPEN_REPARSE_POINT, nullptr));
-  if (!admitted->image || !desktop_artifact_file(admitted->image.value, trust) ||
-      !GetFileInformationByHandleEx(admitted->image.value, FileIdInfo, &admitted->identity, sizeof(admitted->identity))) return nullptr;
+  if (!artifact->image || !desktop_artifact_file(artifact->image.value, trust) ||
+      !GetFileInformationByHandleEx(artifact->image.value, FileIdInfo, &artifact->identity, sizeof(artifact->identity))) return nullptr;
   std::vector<wchar_t> path(32768);
-  const DWORD length = GetFinalPathNameByHandleW(admitted->image.value, path.data(), static_cast<DWORD>(path.size()), FILE_NAME_NORMALIZED | VOLUME_NAME_DOS);
+  const DWORD length = GetFinalPathNameByHandleW(artifact->image.value, path.data(), static_cast<DWORD>(path.size()), FILE_NAME_NORMALIZED | VOLUME_NAME_DOS);
   if (length == 0 || length >= path.size()) return nullptr;
-  admitted->path.assign(path.data(), length);
+  artifact->path.assign(path.data(), length);
   std::wstring canonical;
-  if (!desktop_image_path(admitted->path, canonical) || _wcsicmp(canonical.c_str(), ordinary.c_str()) != 0 ||
-      !desktop_artifact_tree(*admitted, trust, current, 0, deadline, cancelled)) return nullptr;
-  return admitted;
+  if (!desktop_image_path(artifact->path, canonical) || _wcsicmp(canonical.c_str(), ordinary.c_str()) != 0 ||
+      !desktop_artifact_tree(*artifact, trust, current, 0, deadline, cancelled)) return nullptr;
+  return artifact;
 }
