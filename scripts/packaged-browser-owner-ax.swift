@@ -10,7 +10,7 @@ guard (3...5).contains(CommandLine.arguments.count),
 }
 let mode = CommandLine.arguments.count >= 4 ? CommandLine.arguments[3] : "diagnostic"
 let requestedTitle = CommandLine.arguments.count == 5 ? CommandLine.arguments[4] : ""
-guard ["diagnostic", "read", "press", "click", "reveal", "reopen"].contains(mode),
+guard ["diagnostic", "read", "press", "click", "reveal", "reopen", "dock-read"].contains(mode),
       (mode == "press" || mode == "click" || mode == "reveal") == !requestedTitle.isEmpty,
       requestedTitle.count <= 256 else { exit(2) }
 let preferenceTitle = "Keep Browser available without windows"
@@ -301,6 +301,67 @@ if mode == "reopen" {
         }
     }
 }
+var dockObservation: [String: Any] = ["status": "not-requested"]
+if mode == "dock-read" {
+    dockObservation = ["status": "read-only", "interactionDispatched": false]
+    let docks = NSWorkspace.shared.runningApplications.filter {
+        $0.bundleIdentifier == "com.apple.dock" && $0.isTerminated == false &&
+        $0.bundleURL?.resolvingSymlinksInPath().standardizedFileURL.path == "/System/Library/CoreServices/Dock.app"
+    }
+    let live = NSRunningApplication(processIdentifier: processId)
+    dockObservation["ownedAppIdentityMatched"] = treeIdentityMatched && matchingIds == [processId] && live?.isTerminated == false
+    if treeIdentityMatched, matchingIds == [processId], docks.count == 1, let dock = docks.first {
+        let dockElement = AXUIElementCreateApplication(dock.processIdentifier)
+        var queue: [(AXUIElement, Int)] = [(dockElement, 0)]
+        var cursor = 0, matches: [AXUIElement] = []
+        var dockTruncated = false, dockErrors = Set<Int32>()
+        let deadline = Date().addingTimeInterval(1)
+        while cursor < queue.count, cursor < 128, Date() < deadline {
+            let (node, depth) = queue[cursor]
+            cursor += 1
+            var urlValue: CFTypeRef?
+            let urlRead = AXUIElementCopyAttributeValue(node, kAXURLAttribute as CFString, &urlValue)
+            if urlRead == .success, let url = urlValue as? URL, url.isFileURL,
+               url.resolvingSymlinksInPath().standardizedFileURL.path == expectedBundle {
+                matches.append(node)
+            } else if urlRead != .success && urlRead != .attributeUnsupported && urlRead != .noValue {
+                dockErrors.insert(urlRead.rawValue)
+            }
+            if depth >= 8 { dockTruncated = true; continue }
+            var children: CFTypeRef?
+            let childrenRead = AXUIElementCopyAttributeValue(node, kAXChildrenAttribute as CFString, &children)
+            if childrenRead == .success, let elements = children as? [AXUIElement] {
+                if elements.count > 128 - queue.count { dockTruncated = true }
+                queue.append(contentsOf: elements.prefix(max(0, 128 - queue.count)).map { ($0, depth + 1) })
+            } else if childrenRead != .success && childrenRead != .attributeUnsupported && childrenRead != .noValue {
+                dockErrors.insert(childrenRead.rawValue)
+            }
+        }
+        dockObservation["dockPid"] = dock.processIdentifier
+        dockObservation["visited"] = cursor
+        dockObservation["truncated"] = dockTruncated || cursor < queue.count
+        dockObservation["nativeReadErrors"] = dockErrors.sorted()
+        dockObservation["exactOwnedBundleIconMatches"] = matches.count
+        if !dockTruncated, cursor == queue.count, dockErrors.isEmpty, matches.count == 1, let icon = matches.first {
+            var iconPid: pid_t = 0
+            dockObservation["iconPidReadError"] = AXUIElementGetPid(icon, &iconPid).rawValue
+            dockObservation["iconPid"] = iconPid
+            // Read only the exact owned bundle's icon geometry. No other icon's
+            // identity, label, URL or values are retained, and no action is sent.
+            if iconPid == dock.processIdentifier, let frame = bounds(icon) {
+                dockObservation["iconBounds"] = rectangle(frame)
+                let center = CGPoint(x: frame.midX, y: frame.midY)
+                dockObservation["centerOnScreen"] = CGDisplayBounds(CGMainDisplayID()).contains(center)
+                let top = (nativeWindows ?? []).first {
+                    (($0[kCGWindowAlpha as String] as? NSNumber)?.doubleValue ?? 0) > 0 && cgBounds($0)?.contains(center) == true
+                }
+                dockObservation["pointWindowOwnerPid"] = (top?[kCGWindowOwnerPID as String] as? NSNumber)?.int32Value ?? 0
+                dockObservation["pointWindowLayer"] = top?[kCGWindowLayer as String] ?? NSNull()
+                dockObservation["postEventAccess"] = CGPreflightPostEventAccess()
+            }
+        }
+    }
+}
 let evidence: [String: Any] = [
     "capturedPid": processId,
     "diagnosticPid": ProcessInfo.processInfo.processIdentifier,
@@ -318,7 +379,7 @@ let evidence: [String: Any] = [
     "windowsError": windowResult.rawValue, "axWindowCount": (windows as? NSArray)?.count ?? -1,
     "interactiveControls": controls, "treeIdentityMatched": treeIdentityMatched,
     "treeVisited": next, "treeReadErrors": readErrors, "treeNativeErrors": nativeReadErrors.sorted(),
-    "treeTruncated": truncated, "action": action,
+    "treeTruncated": truncated, "action": action, "dockObservation": dockObservation,
     "treeDepthLimited": depthLimited, "treeLabelsLimited": labelsLimited,
     "treeNodeLimited": pending.count >= 512,
     "treeTimeLimited": next < pending.count && Date() >= treeDeadline,

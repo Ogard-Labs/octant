@@ -218,7 +218,10 @@ const timer = setInterval(() => {
           process.env,
           6000,
         );
-      const sdk = (mode: "diagnostic" | "read" | "click" | "reveal" | "reopen", value?: string) =>
+      const sdk = (
+        mode: "diagnostic" | "read" | "click" | "reveal" | "reopen" | "dock-read",
+        value?: string,
+      ) =>
         runBoundedCommand(
           sdkExecutable,
           [String(pid), bundle, mode, ...(value === undefined ? [] : [value])],
@@ -477,14 +480,20 @@ end run`;
           )
             throw Error("Last-window close did not retain the owned macOS process.");
           checks.push("last-window-closed-same-process-alive");
-          // Send the ordinary reopen event to the captured existing PID. Merely
-          // setting AXFrontmost does not deliver Dock/Finder reopen semantics.
-          await native("reopen");
-          await wait("reopen", (s) => s.includes("AXButton"));
-          snapshot = await settings();
-          await recordPersisted("initial-reopened", true);
-          await capture("reopened", snapshot);
-          checks.push("reopened-same-process-persisted-preference-retained");
+          try {
+            await writeFile(
+              join(artifacts, "initial-read-only-dock-feasibility.json"),
+              await sdk("dock-read"),
+            );
+          } catch {
+            await writeFile(
+              join(artifacts, "initial-read-only-dock-feasibility-error.txt"),
+              "Bounded read-only Dock observation unavailable; no interaction attempted.",
+            );
+          }
+          // The separate reopen fixture was refused by the non-prompting
+          // permission preflight (-1744). Do not retry or substitute an action.
+          // Continue only the independent Quit/restart criteria below.
         } else {
           await native("click", preference);
           await recordPersisted("restart-after-opt-out", false);
@@ -554,6 +563,13 @@ end run`;
             "rendered screenshots with read-only preference journal corroboration",
           nativeAxCheckedState: "unavailable-empty-CFString",
           stateChecks: "pending independent visual review",
+          requiredCriteriaComplete: false,
+          lastWindowReopen: {
+            status: "incomplete",
+            reason: "prior owned fixture's non-prompting permission preflight refused",
+            nativePermissionStatus: -1744,
+            newAttempt: false,
+          },
           visualStateImages,
           persistedReadings,
           cleanup: "verified",
@@ -565,6 +581,9 @@ end run`;
         null,
         2,
       ),
+    );
+    throw Error(
+      "Native lifecycle remains incomplete: last-window reopen was not exercised; prior permission refusal -1744 retained.",
     );
   } finally {
     clearTimeout(lifetime);
