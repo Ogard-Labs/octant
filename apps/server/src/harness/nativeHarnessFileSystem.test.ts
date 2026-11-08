@@ -1,4 +1,13 @@
-import { mkdtemp, mkdir, realpath, symlink, utimes, writeFile } from "node:fs/promises";
+import {
+  chmod,
+  mkdtemp,
+  mkdir,
+  readFile,
+  realpath,
+  symlink,
+  utimes,
+  writeFile,
+} from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
@@ -40,6 +49,7 @@ describe("native harness file tools and the secret guard", () => {
       await fs.read({ path: "key-link" }),
       await fs.write({ path: ".ssh/id_new", content: "x" }),
       await fs.edit({ path: ".ssh/id_test", oldText: "fake", newText: "x" }),
+      await fs.editFiles([{ path: ".ssh/id_test", oldText: "fake", newText: "x" }]),
       await fs.grep({ pattern: "fake", path: ".ssh/id_test" }),
     ]) {
       expect(outcome.kind).toBe("refused");
@@ -171,6 +181,93 @@ describe("native harness file system", () => {
     const after = await fs.read({ path: "src/w.ts" });
     expect(after.kind === "file" && after.lines[1]).toBe("    return 2;");
   });
+
+  it("applies several replacements across files in one call, in order within a file", async () => {
+    const { root, fs } = await fixture();
+    await fs.read({ path: "src/a.ts" });
+    await fs.read({ path: "src/nested/c.ts" });
+    const outcome = await fs.editFiles([
+      { path: "src/a.ts", oldText: "const a = 1;", newText: "const a = 2;" },
+      { path: "src/nested/c.ts", oldText: "3", newText: "4" },
+      // Matches only the text the first replacement left.
+      { path: "./src/a.ts", oldText: "a = 2", newText: "a = 5" },
+    ]);
+    expect(outcome).toEqual({
+      kind: "edited",
+      files: [
+        { path: "src/a.ts", replacements: 2, fuzzy: false },
+        { path: "src/nested/c.ts", replacements: 1, fuzzy: false },
+      ],
+    });
+    expect(await readFile(join(root, "src", "a.ts"), "utf8")).toBe(
+      "const a = 5;\nexport const b = a + 1;\n",
+    );
+    expect(await readFile(join(root, "src", "nested", "c.ts"), "utf8")).toBe(
+      "export const c = 4;\n",
+    );
+    // The call's own writes count as read, so the next edit needs no re-read.
+    expect(await fs.edit({ path: "src/a.ts", oldText: "a = 5", newText: "a = 6" })).toMatchObject({
+      kind: "edited",
+    });
+  });
+
+  it("changes no file when any replacement is refused, and names the one that was", async () => {
+    const { root, fs } = await fixture();
+    await fs.read({ path: "src/a.ts" });
+    await fs.read({ path: "src/nested/c.ts" });
+    const before = await readFile(join(root, "src", "a.ts"), "utf8");
+    expect(
+      await fs.editFiles([
+        { path: "src/a.ts", oldText: "const a = 1;", newText: "const a = 2;" },
+        { path: "README.md", oldText: "fixture", newText: "x" },
+      ]),
+    ).toEqual({ kind: "refused", reason: "not-read-first", edit: 1 });
+    expect(
+      await fs.editFiles([
+        { path: "src/a.ts", oldText: "const a = 1;", newText: "const a = 2;" },
+        { path: "src/nested/c.ts", oldText: "missing", newText: "x" },
+      ]),
+    ).toEqual({ kind: "refused", reason: "old-text-not-found", edit: 1 });
+    expect(
+      await fs.editFiles([
+        { path: "src/nested/c.ts", oldText: "3", newText: "4" },
+        { path: "src/a.ts", oldText: "a", newText: "z" },
+      ]),
+    ).toEqual({ kind: "refused", reason: "old-text-ambiguous", edit: 1 });
+    const later = new Date(Date.now() + 5_000);
+    await utimes(join(root, "src", "nested", "c.ts"), later, later);
+    expect(
+      await fs.editFiles([
+        { path: "src/a.ts", oldText: "const a = 1;", newText: "const a = 2;" },
+        { path: "src/nested/c.ts", oldText: "3", newText: "4" },
+      ]),
+    ).toEqual({ kind: "refused", reason: "file-changed-since-read", edit: 1 });
+    expect(await readFile(join(root, "src", "a.ts"), "utf8")).toBe(before);
+    expect(await readFile(join(root, "src", "nested", "c.ts"), "utf8")).toBe(
+      "export const c = 3;\n",
+    );
+  });
+
+  it.skipIf(process.getuid?.() === 0)(
+    "puts back the files it wrote when a later write fails",
+    async () => {
+      const { root, fs } = await fixture();
+      await fs.read({ path: "src/a.ts" });
+      await fs.read({ path: "src/nested/c.ts" });
+      await chmod(join(root, "src", "nested", "c.ts"), 0o444);
+      const outcome = await fs.editFiles([
+        { path: "src/a.ts", oldText: "const a = 1;", newText: "const a = 2;" },
+        { path: "src/nested/c.ts", oldText: "3", newText: "4" },
+      ]);
+      expect(outcome).toEqual({ kind: "write-failed", path: "src/nested/c.ts", unrestored: [] });
+      expect(await readFile(join(root, "src", "a.ts"), "utf8")).toBe(
+        "const a = 1;\nexport const b = a + 1;\n",
+      );
+      expect(await readFile(join(root, "src", "nested", "c.ts"), "utf8")).toBe(
+        "export const c = 3;\n",
+      );
+    },
+  );
 
   it("skips node_modules in glob and grep unless the pattern names it", async () => {
     const { fs } = await fixture();

@@ -202,6 +202,7 @@ function client(
       return result;
     }),
     listDiscoveredTooling: vi.fn(async () => ({ servers: [], plugins: [], notes: [] })),
+    runtimeCompactionDefaults: async () => ({ claude: { autoCompact: true }, codex: {} }),
     mcpServerSignIn: vi.fn(async () => ({ kind: "not-applicable" }) as const),
     projectPins: vi.fn(async () => ({ projects: [], pins: [] })),
     applyDiscoveredTooling: vi.fn(async () => {

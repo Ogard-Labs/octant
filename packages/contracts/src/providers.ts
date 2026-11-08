@@ -1549,6 +1549,12 @@ export const ProviderCapabilities = Schema.Struct({
       code: ProviderCapabilitySupport,
     }).annotations(strict),
   ),
+  /**
+   * Whether the runtime takes the person's compaction point for a session it
+   * opens, so it also compacts at that share inside a long turn. Absent or
+   * unsupported: only the host's between-turn rule applies.
+   */
+  compactionPoint: Schema.optional(ProviderCapabilitySupport),
   citations: ProviderCapabilitySupport,
   harnessAutoReview: ProviderCapabilitySupport,
   /**

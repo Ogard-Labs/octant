@@ -169,6 +169,12 @@ export interface SessionCompactionThreads {
   /** The thread's own scratch folder, where its provider sessions start. */
   readonly scratchRoot?: (threadId: string) => Promise<string>;
   /**
+   * Removes a scratch folder made for one request only, once that request
+   * ended, so nothing of the thread outlives it there. Absent where the
+   * folder is the thread's own and its purge removes it.
+   */
+  readonly releaseScratchRoot?: (threadId: string) => Promise<void>;
+  /**
    * Carries a compaction that ended onto the thread's live stream. Absent
    * where that stream already reads the journaled outcome itself.
    */
@@ -388,7 +394,7 @@ export class SessionCompactionService {
     // when the rule asked.
     const handover =
       cause?.kind === "limit-near" && run.owner === "runtime"
-        ? this.#handoverBasis(run, String(subject.aggregateId))
+        ? this.#tryHandoverBasis(run, String(subject.aggregateId))
         : undefined;
     const reservation = this.#reserve(subject, thread, planned, handover?.reservedTokens ?? 0);
     if (reservation.kind === "refused") return reservation.refusal;
@@ -746,9 +752,9 @@ export class SessionCompactionService {
 
   /**
    * Writes the summary a move to another provider carries, with the thread's
-   * own provider, from the conversation the host holds for it. Chat and Work
-   * hold one; a Code thread's lives in its runtime, so it gets none here. A
-   * summary that fails leaves the compaction to go on without one.
+   * own provider, from the conversation the host holds for it: Chat's and
+   * Work's turns, or a Code thread's public prompts and replies. A summary
+   * that fails leaves the compaction to go on without one.
    */
   async #writeHandover(
     run: AdmittedRun,
@@ -757,7 +763,7 @@ export class SessionCompactionService {
     observeUsage: (usage: ReportedCompactionUsage) => void,
   ): Promise<{ readonly content: string; readonly throughSource: ContextSourceRef } | undefined> {
     const { thread, threads, driver } = run;
-    if (thread.mode === "code" || threads.scratchRoot === undefined) return undefined;
+    if (threads.scratchRoot === undefined) return undefined;
     try {
       const { materials } = basis;
       const generate = makeContextSummaryGenerator({
@@ -782,23 +788,29 @@ export class SessionCompactionService {
       return content.length === 0 ? undefined : { content, throughSource: basis.throughSource };
     } catch {
       return undefined;
+    } finally {
+      await threads.releaseScratchRoot?.(threadId).catch(() => undefined);
     }
   }
 
   /**
    * What a handover summary would read for this thread, and what it may
-   * spend; undefined where none can be written (Code, or a thread whose
-   * conversation the host does not hold).
+   * spend; undefined where none can be written (a thread whose conversation
+   * the host does not hold).
    */
-  #handoverBasis(run: AdmittedRun, threadId: string): HandoverBasis | undefined {
-    const { thread, threads } = run;
-    if (
-      thread.mode === "code" ||
-      threads.conversation === undefined ||
-      threads.scratchRoot === undefined
-    ) {
+  #tryHandoverBasis(run: AdmittedRun, threadId: string): HandoverBasis | undefined {
+    try {
+      return this.#handoverBasis(run, threadId);
+    } catch {
+      // A conversation the host cannot read costs the handover, never the
+      // compaction the rule asked for.
       return undefined;
     }
+  }
+
+  #handoverBasis(run: AdmittedRun, threadId: string): HandoverBasis | undefined {
+    const { threads } = run;
+    if (threads.conversation === undefined || threads.scratchRoot === undefined) return undefined;
     const selected = handoverMaterials(threads.conversation(threadId), () =>
       decodeContextEntryId(this.#options.uuid()),
     );

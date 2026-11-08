@@ -1711,6 +1711,7 @@ describe("SettingsView", () => {
       extensionClient: {
         snapshot: async () => snapshot(),
         listDiscoveredTooling: async () => ({ servers: [], plugins: [], notes: [] }),
+        runtimeCompactionDefaults: async () => ({ claude: { autoCompact: true }, codex: {} }),
         execute,
         effectiveState: async () => ({
           sequence: 1,
@@ -1781,6 +1782,7 @@ describe("SettingsView", () => {
       importLocalPluginReceipt: vi.fn(),
       addUserMcpServer: vi.fn() as never,
       listDiscoveredTooling: vi.fn(async () => ({ servers: [], plugins: [], notes: [] })),
+      runtimeCompactionDefaults: async () => ({ claude: { autoCompact: true }, codex: {} }),
       mcpServerSignIn: vi.fn() as never,
       projectPins: vi.fn() as never,
       applyDiscoveredTooling: vi.fn() as never,
@@ -1853,6 +1855,7 @@ describe("SettingsView", () => {
   it("lists remembered tool approvals beside remembered websites, with the Project's name", async () => {
     const projectId = "44000000-0000-4000-8000-0000000000a1";
     const extensionClient = {
+      runtimeCompactionDefaults: async () => ({ claude: { autoCompact: true }, codex: {} }),
       toolGrantsAvailable: true,
       snapshot: vi.fn(async () => ({ packages: [] })),
       listToolGrants: vi.fn(async () => [
@@ -1884,6 +1887,7 @@ describe("SettingsView", () => {
 
   it("leaves remembered tool approvals out for a client that is not a local window", () => {
     const extensionClient = {
+      runtimeCompactionDefaults: async () => ({ claude: { autoCompact: true }, codex: {} }),
       toolGrantsAvailable: false,
       snapshot: vi.fn(async () => ({ packages: [] })),
       listToolGrants: vi.fn(),

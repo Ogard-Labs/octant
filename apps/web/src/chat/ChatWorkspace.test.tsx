@@ -497,6 +497,7 @@ function extensionClient(): ExtensionClient {
     execute: vi.fn() as never,
     importLocalPluginReceipt: vi.fn() as never,
     listDiscoveredTooling: vi.fn() as never,
+    runtimeCompactionDefaults: vi.fn() as never,
     mcpServerSignIn: vi.fn() as never,
     mcpServerConnections: vi.fn() as never,
     reconnectMcpServer: vi.fn() as never,

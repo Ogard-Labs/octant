@@ -3,6 +3,7 @@ import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { classifyPathContainment } from "@octant/domain";
 import {
   MAX_PROVIDER_TOOL_IMAGE_BASE64_LENGTH,
+  type NativeHarnessReplacement,
   type NativeHarnessToolResultBounds,
   type ProviderToolImage,
 } from "@octant/contracts";
@@ -93,6 +94,37 @@ export type NativeHarnessEditResult =
     }
   | NativeHarnessFileRefused;
 
+/**
+ * Several replacements in one call. A refusal names the replacement that
+ * failed, by its index in the call, and means no file changed. A write that
+ * fails after every check passed puts back the files the call had written;
+ * `unrestored` lists any that could not be put back.
+ */
+export type NativeHarnessEditFilesResult =
+  | {
+      readonly kind: "edited";
+      readonly files: ReadonlyArray<{
+        readonly path: string;
+        readonly replacements: number;
+        readonly fuzzy: boolean;
+      }>;
+    }
+  | (NativeHarnessFileRefused & { readonly edit: number })
+  | {
+      readonly kind: "write-failed";
+      readonly path: string;
+      readonly unrestored: ReadonlyArray<string>;
+    };
+
+/** A file an edit may rewrite: checked against its read, with the content that read saw. */
+export interface NativeHarnessEditTarget {
+  readonly kind: "loaded";
+  /** What the port writes to: the real path. */
+  readonly key: string;
+  readonly path: string;
+  readonly content: string;
+}
+
 export type NativeHarnessWriteResult =
   | {
       readonly kind: "written";
@@ -127,7 +159,7 @@ export type NativeHarnessGlobResult =
  */
 export type NativeHarnessFileSystemPort = Pick<
   NativeHarnessFileSystem,
-  "root" | "read" | "write" | "edit" | "glob" | "grep"
+  "root" | "read" | "write" | "edit" | "editFiles" | "glob" | "grep"
 > & {
   /** The Project's extra folders; the shell reaches them as it reaches `root`. */
   readonly extraRoots?: ReadonlyArray<string>;
@@ -278,9 +310,30 @@ export class NativeHarnessFileSystem {
     readonly newText: string;
     readonly replaceAll?: boolean | undefined;
   }): Promise<NativeHarnessEditResult> {
-    const resolved = await this.#contained(input.path);
+    const target = await this.#loadForEdit(input.path);
+    if (target.kind === "refused") return target;
+    const edited = editedText(target.content, input);
+    if (edited.kind === "refused") return edited;
+    await this.#put(target.key, edited.text);
+    return {
+      kind: "edited",
+      path: target.path,
+      replacements: edited.count,
+      fuzzy: edited.fuzzy,
+    };
+  }
+
+  editFiles(edits: ReadonlyArray<NativeHarnessReplacement>): Promise<NativeHarnessEditFilesResult> {
+    return editFiles(edits, {
+      load: (path) => this.#loadForEdit(path),
+      put: (key, text) => this.#put(key, text),
+    });
+  }
+
+  async #loadForEdit(path: string): Promise<NativeHarnessEditTarget | NativeHarnessFileRefused> {
+    const resolved = await this.#contained(path);
     if (resolved === undefined) return { kind: "refused", reason: "path-escapes-root" };
-    const guarded = this.#protected(this.#lexical(input.path), resolved);
+    const guarded = this.#protected(this.#lexical(path), resolved);
     if (guarded !== undefined) return guarded;
     const mark = this.#readMarks.get(resolved);
     if (mark === undefined) return { kind: "refused", reason: "not-read-first" };
@@ -295,17 +348,14 @@ export class NativeHarnessFileSystem {
       return { kind: "refused", reason: "file-changed-since-read" };
     }
     const content = await readFile(resolved, "utf8");
-    const edited = editedText(content, input);
-    if (edited.kind === "refused") return edited;
-    await writeFile(resolved, edited.text, "utf8");
-    const after = await stat(resolved);
-    this.#readMarks.set(resolved, after.mtime.toISOString());
-    return {
-      kind: "edited",
-      path: this.#display(resolved),
-      replacements: edited.count,
-      fuzzy: edited.fuzzy,
-    };
+    return { kind: "loaded", key: resolved, path: this.#display(resolved), content };
+  }
+
+  async #put(key: string, text: string): Promise<undefined> {
+    await writeFile(key, text, "utf8");
+    const after = await stat(key);
+    this.#readMarks.set(key, after.mtime.toISOString());
+    return undefined;
   }
 
   async glob(input: {
@@ -642,6 +692,83 @@ export function editedText(
     text = text.slice(0, span.start) + input.newText + text.slice(span.end);
   }
   return { kind: "edited", text, count: chosen.length, fuzzy: true };
+}
+
+/**
+ * Applies several replacements all or nothing, wherever the files live.
+ * Every replacement is checked against its file's read, and against the text
+ * the earlier replacements in the same file leave, before any file is
+ * written. `put` refuses or throws on a failed write; the files written
+ * before it are then written back as they were read.
+ */
+export async function editFiles(
+  edits: ReadonlyArray<NativeHarnessReplacement>,
+  port: {
+    readonly load: (path: string) => Promise<NativeHarnessEditTarget | NativeHarnessFileRefused>;
+    readonly put: (key: string, text: string) => Promise<NativeHarnessFileRefused | undefined>;
+  },
+): Promise<NativeHarnessEditFilesResult> {
+  const planned = new Map<
+    string,
+    {
+      readonly target: NativeHarnessEditTarget;
+      text: string;
+      replacements: number;
+      fuzzy: boolean;
+    }
+  >();
+  for (const [index, edit] of edits.entries()) {
+    const target = await port.load(edit.path);
+    if (target.kind === "refused") return { ...target, edit: index };
+    const file = planned.get(target.key) ?? {
+      target,
+      text: target.content,
+      replacements: 0,
+      fuzzy: false,
+    };
+    const edited = editedText(file.text, edit);
+    if (edited.kind === "refused") return { ...edited, edit: index };
+    file.text = edited.text;
+    file.replacements += edited.count;
+    file.fuzzy ||= edited.fuzzy;
+    planned.set(target.key, file);
+  }
+  const written: NativeHarnessEditTarget[] = [];
+  for (const file of planned.values()) {
+    if (await wrote(port, file.target.key, file.text)) {
+      written.push(file.target);
+      continue;
+    }
+    // A failed write can leave its file half written; it is put back too
+    // unless it still reads exactly as it was read.
+    const failed = await port.load(file.target.key).catch(() => undefined);
+    const untouched = failed?.kind === "loaded" && failed.content === file.target.content;
+    const unrestored: string[] = [];
+    for (const target of [...(untouched ? [] : [file.target]), ...[...written].reverse()]) {
+      if (!(await wrote(port, target.key, target.content))) unrestored.push(target.path);
+    }
+    return { kind: "write-failed", path: file.target.path, unrestored };
+  }
+  return {
+    kind: "edited",
+    files: [...planned.values()].map((file) => ({
+      path: file.target.path,
+      replacements: file.replacements,
+      fuzzy: file.fuzzy,
+    })),
+  };
+}
+
+async function wrote(
+  port: { readonly put: (key: string, text: string) => Promise<unknown> },
+  key: string,
+  text: string,
+): Promise<boolean> {
+  try {
+    return (await port.put(key, text)) === undefined;
+  } catch {
+    return false;
+  }
 }
 
 function countOccurrences(haystack: string, needle: string): number {
