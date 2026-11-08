@@ -8,14 +8,24 @@ struct path;
 struct qstr;
 struct renamedata;
 struct cred;
+struct dentry;
 
-/* These hooks never wait, allocate, or call the userspace policy broker. */
+/* Private kernel scope identity, never part of the userspace UAPI. */
+struct octant_metadata_scope {
+	u64 identity;
+	int error;
+};
+
+/* Epoch/final checks never wait. Preparation may wait and belongs only at the
+ * audited user-operation entries, before inode locks and filesystem effects. */
 #ifdef CONFIG_SECURITY_OCTANT_MEDIATION
 void octant_namespace_begin(void);
 void octant_namespace_end(void);
 int octant_namespace_check_rename(const struct renamedata *operation);
 bool octant_mediation_restricted(void);
 int octant_mediation_receive_scm(const struct cred *sender);
+struct octant_metadata_scope octant_metadata_begin(struct dentry *dentry, u32 operation);
+void octant_metadata_end(struct octant_metadata_scope *scope);
 int octant_namespace_prepare(u32 operation, const struct path *source,
 	const struct qstr *name, const struct path *destination,
 	const struct qstr *new_name, u32 flags);
@@ -25,10 +35,23 @@ static inline void octant_namespace_end(void) {}
 static inline int octant_namespace_check_rename(const struct renamedata *operation) { return 0; }
 static inline bool octant_mediation_restricted(void) { return false; }
 static inline int octant_mediation_receive_scm(const struct cred *sender) { return 0; }
+static inline struct octant_metadata_scope octant_metadata_begin(struct dentry *dentry, u32 operation)
+{
+	return (struct octant_metadata_scope) {};
+}
+static inline void octant_metadata_end(struct octant_metadata_scope *scope) {}
 static inline int octant_namespace_prepare(u32 operation, const struct path *source,
 	const struct qstr *name, const struct path *destination,
 	const struct qstr *new_name, u32 flags) { return 0; }
 #endif
+
+/* The automatic end clears even an unused decision on every early return.
+ * The caller must already own a stable native dentry and no inode lock. */
+#define octant_metadata_scope(dentry, operation) \
+	struct octant_metadata_scope octant_metadata_admission \
+		__attribute__((cleanup(octant_metadata_end))) = octant_metadata_begin(dentry, operation); \
+	if (octant_metadata_admission.error) \
+		return octant_metadata_admission.error
 
 static inline void octant_namespace_scope_end(bool *entered)
 {

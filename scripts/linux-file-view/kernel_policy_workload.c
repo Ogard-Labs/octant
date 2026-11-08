@@ -76,6 +76,11 @@ static bool metadata_controls(int held, int public)
     !fremovexattr(public, "user.octant.public") &&
     !fsetxattr(public, "system.posix_acl_access", &acl, sizeof(acl), 0);
   passed = metadata_case("public-xattr-acl-allowed", public_attributes) && passed;
+  // In the capsule, the trusted namespace refuses before the final LSM check.
+  // The unused prepared read must still end, allowing the next public query.
+  errno = 0;
+  bool absent = fgetxattr(public, "trusted.octant.absent", bytes, sizeof(bytes)) == -1 && errno == ENODATA;
+  passed = metadata_case("public-error-clears-scope", absent && !fstat(public, &identity)) && passed;
   return passed;
 }
 

@@ -134,6 +134,15 @@ after the enrolled command exits. The guest explicitly requires tmpfs xattrs and
 tmpfs/ext4 ACL support rather than treating an unsupported operation as refusal.
 Kernel guards for these cases are unfinished until the actual red/fix/native
 result is recorded; this collector and fixture source enables no capability.
+The candidate uses a private per-task, per-operation scope prepared at the
+actual pinned user entrypoints. Cleanup clears unused decisions on every return;
+nesting and counter wrap refuse, child state is zeroed and exec clears it. The
+final metadata/xattr/ACL LSM callbacks compare and consume the exact native
+identity, operation, live context and epoch under short locks only. They never
+perform broker I/O under inode locks. Readlink retains its normal path/name
+cleanup, and xattr scopes begin before either ACL or generic dispatch. Unknown
+unprepared internal paths refuse rather than sharing a preceding operation's
+allow. Native runtime/public-positive proof remains required for this increment.
 
 Dispatch `experiment=kernel-admission` to compile and boot a pinned Linux 6.18
 guest under networkless QEMU TCG in the owned ephemeral runner. The upstream

@@ -13555,6 +13555,14 @@ cards; general Azure CLI credentials remain unavailable by design.
   external writers while userspace inspects metadata. An own-account exception
   retains its initially enrolled lexical/canonical forms; replacing that path
   with a link never transfers the exception to a different sign-in.
+  Metadata mediation includes a protected symlink's own inode and its followed
+  target; a dangling protected link still has link text and metadata. Blocking
+  preparation belongs before inode locks, under one paired user-operation
+  scope. The final LSM check only compares the actual native identity,
+  operation, live context and current epoch and consumes that scope's decision.
+  Every return clears unused state, and fork, clone and exec inherit none.
+  An unprepared internal path refuses until its compatibility is proved; a
+  callback never waits for broker metadata while holding an inode lock.
   _Rationale._ Otherwise deleting a readable `name.pub` marker could make its
   still-existing custom-named private key readable. Retaining all former secret
   inodes forever would instead reject legitimate host changes and require

@@ -97,6 +97,52 @@ def install_scm(kernel: Path) -> None:
         path.write_text(include_bridge(source))
 
 
+def metadata_entry(source: str, name: str, dentry: str, operation: str) -> str:
+    definition = re.compile(
+        rf"(?m)^(?:static\s+)?(?:int|long|ssize_t)\s+{name}\s*\([^;{{]*?\)\s*\{{"
+    )
+    matches = list(definition.finditer(source))
+    if len(matches) != 1:
+        raise ValueError(f"Expected one pinned metadata entry {name}")
+    at = matches[0].end()
+    return source[:at] + f"\n\toctant_metadata_scope({dentry}, OCTANT_MEDIATION_{operation});\n" + source[at:]
+
+
+def install_metadata(kernel: Path) -> None:
+    # Scope the decision to this one actual syscall's pinned native object.
+    # Read/write ACL dispatchers are included before any inode lock. Final
+    # LSM callbacks only compare the token and never perform broker I/O.
+    path = kernel / "fs/stat.c"
+    source = path.read_text()
+    if "octant_metadata_" in source:
+        raise ValueError("Metadata preparation already exists")
+    source = metadata_entry(source, "vfs_statx_path", "path->dentry", "READ")
+    anchor = "\treturn vfs_getattr(&fd_file(f)->f_path, stat, STATX_BASIC_STATS, 0);"
+    if source.count(anchor) != 1:
+        raise ValueError("Pinned retained-fd stat entry differs")
+    source = source.replace(anchor,
+        "\toctant_metadata_scope(fd_file(f)->f_path.dentry, OCTANT_MEDIATION_READ);\n" + anchor, 1)
+    anchor = "\t\terror = security_inode_readlink(path.dentry);"
+    if source.count(anchor) != 1:
+        raise ValueError("Pinned readlink admission differs")
+    source = source.replace(anchor,
+        "\t\tstruct octant_metadata_scope octant_metadata_admission\n"
+        "\t\t\t__attribute__((cleanup(octant_metadata_end))) =\n"
+        "\t\t\toctant_metadata_begin(path.dentry, OCTANT_MEDIATION_READ);\n"
+        "\t\terror = octant_metadata_admission.error;\n"
+        "\t\tif (!error)\n\t" + anchor, 1)
+    path.write_text(include_bridge(source))
+    path = kernel / "fs/xattr.c"
+    source = path.read_text()
+    if "octant_metadata_" in source:
+        raise ValueError("Xattr preparation already exists")
+    for name, dentry, operation in (
+            ("do_getxattr", "d", "READ"), ("listxattr", "d", "READ"),
+            ("do_setxattr", "dentry", "WRITE"), ("removexattr", "d", "WRITE")):
+        source = metadata_entry(source, name, dentry, operation)
+    path.write_text(include_bridge(source))
+
+
 def install_epochs(kernel: Path, native: Path) -> None:
     # Real unconfined writers use these same VFS entry points. These counters
     # describe in-flight mutations, not delayed filesystem-watch notifications.
@@ -169,3 +215,4 @@ def install_epochs(kernel: Path, native: Path) -> None:
     source = source[:at] + "\n\tif (octant_mediation_restricted())\n\t\treturn ERR_PTR(-ENOSYS);\n" + source[at:]
     aio.write_text(include_bridge(source))
     install_scm(kernel)
+    install_metadata(kernel)

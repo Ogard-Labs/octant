@@ -23,6 +23,7 @@
 #include <linux/mutex.h>
 #include <linux/poll.h>
 #include <linux/pid.h>
+#include <linux/posix_acl.h>
 #include <linux/rcupdate.h>
 #include <linux/sched.h>
 #include <linux/sched/task.h>
@@ -67,9 +68,24 @@ struct octant_cred {
 	struct octant_context *context;
 };
 
+struct octant_metadata {
+	u64 next_scope;
+	u64 scope;
+	struct task_struct *owner;
+	struct octant_context *context;
+	u64 inode;
+	u64 epoch;
+	u32 device_major;
+	u32 device_minor;
+	u32 operation;
+	bool active;
+	bool prepared;
+};
+
 /* Per-task rather than per-credential: same-policy threads may propose
  * concurrent namespace operations without replacing each other's token. */
 struct octant_task {
+	struct octant_metadata metadata;
 	struct octant_mediation_request approved;
 	u64 mutation_base;
 	u64 own_changes;
@@ -278,15 +294,156 @@ static int admit_request(struct octant_mediation_request *request,
 	return result;
 }
 
+static bool guarded_inode(struct inode *inode)
+{
+	return inode && (S_ISREG(inode->i_mode) || S_ISDIR(inode->i_mode) || S_ISLNK(inode->i_mode));
+}
+
+static int admit_inode_request(struct inode *inode, u32 operation, struct octant_mediation_request *request)
+{
+	request->operation = operation;
+	request->inode = inode->i_ino;
+	request->device_major = MAJOR(inode->i_sb->s_dev);
+	request->device_minor = MINOR(inode->i_sb->s_dev);
+	return admit_request(request, NULL, NULL);
+}
+
 static int admit_inode(struct inode *inode, u32 operation)
 {
-	struct octant_mediation_request request = { .operation = operation };
-	if (!inode || (!S_ISREG(inode->i_mode) && !S_ISDIR(inode->i_mode)))
+	struct octant_mediation_request request = {};
+	if (!octant_mediation_restricted() || !guarded_inode(inode))
 		return 0;
-	request.inode = inode->i_ino;
-	request.device_major = MAJOR(inode->i_sb->s_dev);
-	request.device_minor = MINOR(inode->i_sb->s_dev);
-	return admit_request(&request, NULL, NULL);
+	return admit_inode_request(inode, operation, &request);
+}
+
+static void clear_metadata(struct octant_metadata *metadata)
+{
+	u64 next = metadata->next_scope;
+	*metadata = (struct octant_metadata) { .next_scope = next };
+}
+
+struct octant_metadata_scope octant_metadata_begin(struct dentry *dentry, u32 operation)
+{
+	struct octant_metadata_scope scope = {};
+	struct inode *inode = d_inode(dentry);
+	struct octant_metadata *metadata;
+	struct octant_mediation_request request = {};
+	if (!octant_mediation_restricted() || !guarded_inode(inode))
+		return scope;
+	metadata = &octant_task()->metadata;
+	if (metadata->active || metadata->next_scope == U64_MAX ||
+	    (operation != OCTANT_MEDIATION_READ && operation != OCTANT_MEDIATION_WRITE)) {
+		scope.error = -EACCES;
+		return scope;
+	}
+	scope.identity = ++metadata->next_scope;
+	metadata->scope = scope.identity;
+	metadata->owner = current;
+	metadata->context = octant_cred(current_cred())->context;
+	metadata->active = true;
+	metadata->prepared = false;
+	scope.error = admit_inode_request(inode, operation, &request);
+	if (!scope.error) {
+		metadata->inode = request.inode;
+		metadata->device_major = request.device_major;
+		metadata->device_minor = request.device_minor;
+		metadata->operation = operation;
+		metadata->epoch = request.namespace_epoch;
+		metadata->prepared = true;
+	}
+	return scope;
+}
+
+void octant_metadata_end(struct octant_metadata_scope *scope)
+{
+	struct octant_metadata *metadata;
+	if (!scope->identity || !initialized)
+		return;
+	metadata = &octant_task()->metadata;
+	if (metadata->active && metadata->scope == scope->identity && metadata->owner == current)
+		clear_metadata(metadata);
+}
+
+/* These final LSM checks can run with an inode lock held. They consume only
+ * this task's paired preflight; they never ask the broker or inspect paths. */
+static int check_metadata(struct dentry *dentry, u32 operation)
+{
+	struct inode *inode = d_inode(dentry);
+	struct octant_context *context;
+	struct octant_metadata *metadata;
+	unsigned long flags;
+	bool valid;
+	if (!octant_mediation_restricted() || !guarded_inode(inode))
+		return 0;
+	context = octant_cred(current_cred())->context;
+	metadata = &octant_task()->metadata;
+	spin_lock_irqsave(&context->lock, flags);
+	spin_lock(&namespace_lock);
+	valid = metadata->active && metadata->prepared && metadata->scope &&
+		metadata->owner == current && metadata->context == context &&
+		!context->dead && broker_alive(context) && !namespace_overflow && !active_mutations &&
+		metadata->epoch == namespace_epoch && metadata->operation == operation &&
+		metadata->inode == inode->i_ino &&
+		metadata->device_major == MAJOR(inode->i_sb->s_dev) &&
+		metadata->device_minor == MINOR(inode->i_sb->s_dev);
+	metadata->prepared = false;
+	spin_unlock(&namespace_lock);
+	spin_unlock_irqrestore(&context->lock, flags);
+	return valid ? 0 : -EACCES;
+}
+
+static int octant_metadata_task_alloc(struct task_struct *task, u64 clone_flags)
+{
+	struct octant_task *state = task->security + octant_blobs.lbs_task;
+	memset(&state->metadata, 0, sizeof(state->metadata));
+	return 0;
+}
+
+static int octant_metadata_getattr(const struct path *path)
+{
+	return check_metadata(path->dentry, OCTANT_MEDIATION_READ);
+}
+
+static int octant_metadata_readlink(struct dentry *dentry)
+{
+	return check_metadata(dentry, OCTANT_MEDIATION_READ);
+}
+
+static int octant_metadata_getxattr(struct dentry *dentry, const char *name)
+{
+	return check_metadata(dentry, OCTANT_MEDIATION_READ);
+}
+
+static int octant_metadata_listxattr(struct dentry *dentry)
+{
+	return check_metadata(dentry, OCTANT_MEDIATION_READ);
+}
+
+static int octant_metadata_get_acl(struct mnt_idmap *idmap, struct dentry *dentry, const char *name)
+{
+	return check_metadata(dentry, OCTANT_MEDIATION_READ);
+}
+
+static int octant_metadata_setxattr(struct mnt_idmap *idmap, struct dentry *dentry,
+	const char *name, const void *value, size_t size, int flags)
+{
+	return check_metadata(dentry, OCTANT_MEDIATION_WRITE);
+}
+
+static int octant_metadata_removexattr(struct mnt_idmap *idmap, struct dentry *dentry, const char *name)
+{
+	return check_metadata(dentry, OCTANT_MEDIATION_WRITE);
+}
+
+static int octant_metadata_set_acl(struct mnt_idmap *idmap, struct dentry *dentry, const char *name,
+	struct posix_acl *acl)
+{
+	return check_metadata(dentry, OCTANT_MEDIATION_WRITE);
+}
+
+static int octant_metadata_remove_acl(struct mnt_idmap *idmap, struct dentry *dentry, const char *name)
+{
+	return check_metadata(dentry, OCTANT_MEDIATION_WRITE);
 }
 
 static int copy_name(struct octant_mediation_name *output, struct inode *parent,
@@ -414,6 +571,7 @@ static int protect_mapping(struct vm_area_struct *vma, unsigned long requested, 
 
 static int check_exec(struct linux_binprm *bprm)
 {
+	clear_metadata(&octant_task()->metadata);
 	return admit_file(bprm->file, OCTANT_MEDIATION_EXEC);
 }
 
@@ -756,6 +914,16 @@ static struct security_hook_list octant_hooks[] __ro_after_init = {
 	LSM_HOOK_INIT(cred_transfer, transfer_cred),
 	LSM_HOOK_INIT(cred_free, free_cred),
 	LSM_HOOK_INIT(file_permission, octant_file_permission),
+	LSM_HOOK_INIT(task_alloc, octant_metadata_task_alloc),
+	LSM_HOOK_INIT(inode_getattr, octant_metadata_getattr),
+	LSM_HOOK_INIT(inode_readlink, octant_metadata_readlink),
+	LSM_HOOK_INIT(inode_getxattr, octant_metadata_getxattr),
+	LSM_HOOK_INIT(inode_listxattr, octant_metadata_listxattr),
+	LSM_HOOK_INIT(inode_get_acl, octant_metadata_get_acl),
+	LSM_HOOK_INIT(inode_setxattr, octant_metadata_setxattr),
+	LSM_HOOK_INIT(inode_removexattr, octant_metadata_removexattr),
+	LSM_HOOK_INIT(inode_set_acl, octant_metadata_set_acl),
+	LSM_HOOK_INIT(inode_remove_acl, octant_metadata_remove_acl),
 	LSM_HOOK_INIT(inode_unlink, check_unlink),
 	LSM_HOOK_INIT(inode_rmdir, check_rmdir),
 	LSM_HOOK_INIT(file_truncate, truncate_file),
