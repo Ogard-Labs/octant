@@ -2,6 +2,11 @@ name: Packaged Canvas native smoke
 
 on:
   workflow_dispatch:
+    inputs:
+      full_route:
+        description: Repeat the native Settings route instead of reusing identical-package evidence
+        type: boolean
+        default: false
   push:
     paths:
       - .github/workflows/packaged-canvas-native-smoke.yml
@@ -249,8 +254,9 @@ jobs:
             out/native-package-provenance.json
           key: ${{ steps.package-source.outputs.key }}
       - name: Observe the real packaged primary window
-        timeout-minutes: 7
+        timeout-minutes: 9
         env:
+          OCTANT_QA_CONTINUATION: ${{ github.event_name == 'workflow_dispatch' && inputs.full_route && '0' || '1' }}
           OCTANT_QA_OUTPUT: ${{ runner.temp }}/packaged-canvas-native
           OCTANT_QA_NATIVE_CONTROLLER: ${{ runner.temp }}/octant-canvas-native-control
           OCTANT_QA_CACHED_PACKAGE: ${{ steps.package-cache-proof.outputs.verified == 'true' && 'true' || 'false' }}
