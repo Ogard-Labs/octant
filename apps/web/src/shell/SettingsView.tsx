@@ -2739,6 +2739,7 @@ function UsageSettingsSection(props: {
   const sourceControl = (
     <OctantToggleGroup<"provider" | "octant" | "diagnostics" | "benchmarks">
       aria-label="Usage source"
+      className="usage-source"
       value={[source]}
       onValueChange={(values) => {
         const next = values[0];

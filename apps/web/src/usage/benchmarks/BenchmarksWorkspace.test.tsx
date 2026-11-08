@@ -246,7 +246,9 @@ describe("importing and exporting a suite as JSON", () => {
     await actor.click(screen.getByRole("button", { name: "Read pasted JSON" }));
 
     expect(await screen.findByRole("form", { name: "Suite editor" })).toBeInTheDocument();
-    expect(screen.getByRole("textbox", { name: "Suite name" })).toHaveValue("Capital cities");
+    expect(screen.getByRole("textbox", { name: "Suite name" })).toHaveValue(
+      "Capital cities (imported)",
+    );
     expect(screen.getByRole("textbox", { name: "Title of case 2" })).toHaveValue(
       "Capital of Sweden",
     );

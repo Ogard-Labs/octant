@@ -19,6 +19,12 @@
   white-space: nowrap;
 }
 
+/* An absolutely placed label escapes the scroller's clip unless the scroller
+   is its containing block, and it widened the whole page at a phone width. */
+.usage-table-scroll:has(.benchmark-visually-hidden) {
+  position: relative;
+}
+
 .benchmark-link,
 .benchmark-sort {
   padding: 0;
@@ -52,10 +58,24 @@
   content: " ↓";
 }
 
-.benchmark-actions {
-  display: flex;
-  justify-content: flex-end;
-  gap: var(--oct-space-1);
+/* A table cell stays a table cell: display:flex on the td pulled it out of the
+   row's width, so the icons ran past the table's edge at a phone width. */
+.usage-table td.benchmark-actions {
+  text-align: right;
+}
+
+.benchmark-actions > * + * {
+  margin-inline-start: var(--oct-space-1);
+}
+
+/* A long suite name truncates (its title carries the whole name) instead of
+   wrapping to several lines in a narrow column. */
+.benchmark-link--name {
+  display: block;
+  max-width: 16rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .benchmark-editor,

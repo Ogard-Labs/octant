@@ -541,6 +541,23 @@ export function importedSuiteToDraft(suite: BenchmarkSuite): SuiteDraft {
   };
 }
 
+const SUITE_NAME_LIMIT = 80;
+
+/**
+ * A suite imported next to one of the same name gets a suffix, so the two rows
+ * can be told apart. The base shrinks before the suffix does, so the result
+ * still fits the name limit.
+ */
+export function nameForImportedSuite(name: string, existing: ReadonlyArray<string>): string {
+  const taken = new Set(existing);
+  if (!taken.has(name)) return name;
+  for (let attempt = 1; ; attempt += 1) {
+    const suffix = attempt === 1 ? " (imported)" : ` (imported ${attempt})`;
+    const candidate = `${name.slice(0, SUITE_NAME_LIMIT - suffix.length).trimEnd()}${suffix}`;
+    if (!taken.has(candidate)) return candidate;
+  }
+}
+
 export type DraftResult =
   | { readonly status: "ok"; readonly request: BenchmarkSuiteSaveRequest }
   | { readonly status: "invalid"; readonly message: string };
