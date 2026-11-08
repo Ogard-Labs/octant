@@ -257,6 +257,14 @@ bool transfer(HANDLE pipe, void* bytes, DWORD length, bool writing, HANDLE stop,
   if (!event) return false;
   OVERLAPPED operation{}; operation.hEvent = event.value;
   DWORD done = 0;
+  // A queued native job can already be expired when its first I/O starts.
+  // Immediate completions need the same admission as overlapped waits.
+  const ULONGLONG now = GetTickCount64();
+  if ((deadline != 0 && now >= deadline) || WaitForSingleObject(stop, 0) != WAIT_TIMEOUT ||
+      (process && WaitForSingleObject(process, 0) != WAIT_TIMEOUT)) {
+    SetLastError(deadline != 0 && now >= deadline ? ERROR_TIMEOUT : ERROR_BROKEN_PIPE);
+    return false;
+  }
   const BOOL immediate = writing ? WriteFile(pipe, bytes, length, &done, &operation) : ReadFile(pipe, bytes, length, &done, &operation);
   if (immediate) { if (done != length) SetLastError(ERROR_INVALID_DATA); return done == length; }
   if (GetLastError() != ERROR_IO_PENDING) return false;
