@@ -415,6 +415,12 @@ if (mode === "refused") {
               exitCode,
               principalRefused,
               jobJoined,
+              child: denied.records
+                .filter((value) => typeof value.copiedTokenChildExitCode === "number")
+                .map(({ copiedTokenChildJoined, copiedTokenChildExitCode }) => ({
+                  copiedTokenChildJoined,
+                  copiedTokenChildExitCode,
+                })),
               failures: denied.records
                 .filter(
                   (value) =>

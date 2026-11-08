@@ -114,6 +114,7 @@ int wmain(int argc, wchar_t** argv) {
   std::printf("{\"lowSubjectCannotStealParentHandles\":%s,\"restrictingSidList\":%s,\"tokenHasRestrictions\":%lu,\"appContainer\":false,\"integrityRid\":%lu,\"originalTokenUnchanged\":true}\n", duplication_refused ? "true" : "false", is_restricted ? "true" : "false", has_restrictions, rid);
   const DWORD waited = WaitForSingleObject(process.value, 12000); DWORD result = 2;
   if (waited == WAIT_OBJECT_0) GetExitCodeProcess(process.value, &result);
+  std::printf("{\"copiedTokenChildJoined\":%s,\"copiedTokenChildExitCode\":%lu}\n", waited == WAIT_OBJECT_0 ? "true" : "false", result);
   if (!TerminateJobObject(job.value, result)) return refuse("job-cleanup");
   const ULONGLONG deadline = GetTickCount64() + 3000;
   for (;;) {
