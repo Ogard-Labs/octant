@@ -23,7 +23,10 @@ import {
 } from "@octant/contracts/canvas-public-share";
 import { CanvasExportRecorded } from "@octant/contracts/canvas-export";
 import { deriveHostRuntimeHostId } from "../packages/host-runtime/src/paths";
-import { makeKeychainCredentialStore } from "../apps/desktop/src/keychainCredentialStore";
+import {
+  makeKeychainCredentialStore,
+  makeKeychainCredentialPurgeStore,
+} from "../apps/desktop/src/keychainCredentialStore";
 import { startShareService } from "../apps/share/src/server";
 import { readShareConfig } from "../apps/share/src/config";
 import { openReadOnlySqlite } from "../apps/server/src/persistence/sqlitePort";
@@ -88,7 +91,7 @@ function groupProcesses(group: number): ReadonlyArray<number> {
 // API-seeded pairing is fixture setup, never evidence of native pairing UI.
 // The production packaged gateway still verifies host identity, pinned TLS,
 // session challenge and a fresh signed proof for every product request.
-async function seedPairedFixture(dataDirectory: string, projectId: string) {
+async function seedPairedFixture(dataDirectory: string, projectId: string, signal: AbortSignal) {
   const hostname = Object.values(networkInterfaces())
     .flat()
     .find((entry) => {
@@ -183,11 +186,13 @@ async function seedPairedFixture(dataDirectory: string, projectId: string) {
             rejectUnauthorized: true,
             servername: "",
             timeout: 8000,
+            signal: AbortSignal.any([request.signal, signal]),
           },
           (response) => {
             const chunks: Buffer[] = [];
             response.on("data", (chunk: Buffer) => chunks.push(chunk));
             response.once("error", reject);
+            response.once("aborted", () => reject(Error("The owned paired response was aborted.")));
             response.once("end", () => {
               const headers = new Headers();
               for (const [key, value] of Object.entries(response.headers)) {
@@ -246,6 +251,8 @@ async function main(): Promise<void> {
   let shareService: ReturnType<typeof startShareService> | undefined;
   let packageProvenance: typeof PackageProvenance.Type | undefined;
   let pairedFixture: Awaited<ReturnType<typeof seedPairedFixture>> | undefined;
+  let fixtureDataDirectory: string | undefined;
+  let scratchHostScope: string | undefined;
   let ownerSecretStore: ReturnType<typeof makeKeychainCredentialStore> | undefined;
   let publishedCredentialRef: string | undefined;
   let ownerSecretCleanupFailed = false;
@@ -308,7 +315,11 @@ async function main(): Promise<void> {
     await writeFile(join(artifacts, "seeded-canvas.txt"), seed);
     const projectId = /Chat Project Canvas fixtures: ([0-9a-f-]{36})/.exec(seed)?.[1];
     if (projectId === undefined) throw Error("The owned Canvas Project seed is missing.");
-    pairedFixture = await seedPairedFixture(join(root, "data"), projectId);
+    fixtureDataDirectory = await realpath(join(root, "data"));
+    if (fixtureDataDirectory !== join(await realpath(root), "data"))
+      throw Error("The unique fixture data directory is not confined to its created root.");
+    scratchHostScope = deriveHostRuntimeHostId(fixtureDataDirectory);
+    pairedFixture = await seedPairedFixture(fixtureDataDirectory, projectId, controller.signal);
     const shareConfig = readShareConfig({
       OCTANT_SHARE_HOST: "127.0.0.1",
       OCTANT_SHARE_PORT: "0",
@@ -632,37 +643,21 @@ const timer = setInterval(() => {
       "canvas-export",
       (snapshot) => hasText(snapshot, "Review export") && hasText(snapshot, "Public link"),
     );
-    // The noninteractive destination-status list follows the destination
-    // select. Public link is the final in-tree destination. The resulting
-    // card must independently name this exact owned host before approval.
-    await runBoundedCommand(
-      nativeControllerPath,
-      [
-        "focus-before-text",
-        String(ownPid),
-        join(artifacts, "destination-focus-target.png"),
-        "Public link",
-      ],
-      process.env,
-      8000,
+    // This is the selected trigger actually observed in the first export
+    // panel. Opening its native menu grants nothing; only the exact owned
+    // Public link card below is eligible for approval.
+    await nativeInput("destination-trigger", "click", "sharehtml.org — Ready");
+    await observeUntil("destination-native-menu", (snapshot) =>
+      hasExactText(snapshot, "Public link — Ready"),
     );
-    await runBoundedCommand(
-      nativeControllerPath,
-      ["enter", String(ownPid), join(artifacts, "destination-menu-target.png"), "Public link"],
-      process.env,
-      8000,
+    await nativeInput(
+      "destination-public-link",
+      "choose-native-menu-item",
+      "Public link — Ready",
+      "Public link — Ready",
     );
-    await runBoundedCommand(
-      nativeControllerPath,
-      ["end", String(ownPid), join(artifacts, "destination-last-option.png"), "Public link"],
-      process.env,
-      8000,
-    );
-    await runBoundedCommand(
-      nativeControllerPath,
-      ["enter", String(ownPid), join(artifacts, "destination-select-target.png"), "Public link"],
-      process.env,
-      8000,
+    await observeUntil("destination-public-link-selected", (snapshot) =>
+      hasText(snapshot, "Canvas page"),
     );
     await runBoundedCommand(
       nativeControllerPath,
@@ -701,7 +696,7 @@ const timer = setInterval(() => {
     ownerSecretStore = makeKeychainCredentialStore(
       join(bundle, "Contents/Resources/native/octant-keychain-helper"),
       {
-        storeScope: deriveHostRuntimeHostId(await realpath(join(root, "data"))),
+        storeScope: scratchHostScope,
         namespace: "canvas-public-share-secret",
         serviceFamily: "octant",
         timeoutMs: 5000,
@@ -771,7 +766,7 @@ const timer = setInterval(() => {
       if (refused.status !== 403)
         throw Error("A genuine paired client was not refused owner export authority.");
     }
-    const showPublicLinks = async (stage: string, closeLabel = "Export canvas", active = true) => {
+    const showPublicLinks = async (stage: string, closeLabel = "Export", active = true) => {
       await nativeInput(`${stage}-close-export`, "escape", closeLabel);
       await observeUntil(
         `${stage}-canvas-tab`,
@@ -781,8 +776,8 @@ const timer = setInterval(() => {
       await nativeInput(`${stage}-open-actions`, "enter", "Signups this week");
       await observeUntil(`${stage}-actions`, (snapshot) => hasText(snapshot, "Share"));
       await nativeInput(`${stage}-share`, "choose-native-menu-item", "Share", "Share…");
-      await observeUntil(`${stage}-share-dialog`, (snapshot) => hasText(snapshot, "Share canvas"));
-      await nativeInput(`${stage}-public-links-scroll`, "scroll-bottom", "Share canvas");
+      await observeUntil(`${stage}-share-dialog`, (snapshot) => hasExactText(snapshot, "Share"));
+      await nativeInput(`${stage}-public-links-scroll`, "scroll-bottom", "Share");
       await observeUntil(
         `${stage}-public-links`,
         (snapshot) => !active || (hasText(snapshot, "Copy link") && hasText(snapshot, "Revoke")),
@@ -890,7 +885,7 @@ const timer = setInterval(() => {
     // real interval, then reopen the real Share panel rather than bypass it.
     for (let second = 0; second < 61 && !controller.signal.aborted; second++) await pause(1000);
     if (controller.signal.aborted) throw Error("The offline retry was interrupted.");
-    await showPublicLinks("retry", "Share canvas", false);
+    await showPublicLinks("retry", "Share", false);
     await waitForProcessCleanup(
       async () => {
         if ((await fetch(publishedUrl, { headers: { cookie } })).status !== 410)
@@ -940,45 +935,6 @@ const timer = setInterval(() => {
     process.removeListener("SIGINT", interrupted);
     pairedFixture?.connection.disconnect();
     if (shareService !== undefined) shareService.stop();
-    if (ownerSecretStore !== undefined && publishedCredentialRef === undefined) {
-      // An upload can finish before its success notice is observed. Recover
-      // only this fixture's journaled reference so a later UI failure cannot
-      // strand an owned Keychain item when its scratch directory is removed.
-      try {
-        const connection = openReadOnlySqlite(join(root, "data", "octant.sqlite3"));
-        try {
-          const row = connection.all(
-            "SELECT payload_json FROM event_journal WHERE event_name = 'canvas.public-share-published@1' ORDER BY global_sequence DESC LIMIT 1",
-          )[0];
-          if (row !== undefined) {
-            const payload = Schema.decodeUnknownSync(
-              Schema.Struct({ payload_json: Schema.String }),
-            )(row);
-            publishedCredentialRef = Schema.decodeUnknownSync(CanvasPublicSharePublished)(
-              JSON.parse(payload.payload_json),
-            ).credentialRef;
-          }
-        } finally {
-          connection.close();
-        }
-      } catch {
-        ownerSecretCleanupFailed = true;
-      }
-    }
-    if (ownerSecretStore !== undefined && publishedCredentialRef !== undefined) {
-      try {
-        await ownerSecretStore.delete(publishedCredentialRef);
-        if (await ownerSecretStore.has(publishedCredentialRef))
-          throw Error("Owned credential remains.");
-        ownerSecretCleanupVerified = true;
-      } catch {
-        ownerSecretCleanupFailed = true;
-        await writeFile(
-          join(artifacts, "owner-secret-cleanup.json"),
-          JSON.stringify({ result: "unverified" }),
-        );
-      }
-    }
     if (app !== undefined && pid !== undefined && bundle !== undefined) {
       const ownPid = pid;
       const ownedApp = app;
@@ -1042,6 +998,97 @@ const timer = setInterval(() => {
         );
       }
       cleanupVerified = true;
+    }
+    if (ownerSecretStore !== undefined && publishedCredentialRef === undefined) {
+      // An upload can finish before its success notice is observed. Recover
+      // only this fixture's journaled reference so a later UI failure cannot
+      // strand an owned Keychain item when its scratch directory is removed.
+      try {
+        const connection = openReadOnlySqlite(join(root, "data", "octant.sqlite3"));
+        try {
+          const row = connection.all(
+            "SELECT payload_json FROM event_journal WHERE event_name = 'canvas.public-share-published@1' ORDER BY global_sequence DESC LIMIT 1",
+          )[0];
+          if (row !== undefined) {
+            const payload = Schema.decodeUnknownSync(
+              Schema.Struct({ payload_json: Schema.String }),
+            )(row);
+            publishedCredentialRef = Schema.decodeUnknownSync(CanvasPublicSharePublished)(
+              JSON.parse(payload.payload_json),
+            ).credentialRef;
+          }
+        } finally {
+          connection.close();
+        }
+      } catch {
+        ownerSecretCleanupFailed = true;
+      }
+    }
+    if (ownerSecretStore !== undefined && publishedCredentialRef !== undefined) {
+      try {
+        await ownerSecretStore.delete(publishedCredentialRef);
+        if (await ownerSecretStore.has(publishedCredentialRef))
+          throw Error("Owned credential remains.");
+        ownerSecretCleanupVerified = true;
+      } catch {
+        ownerSecretCleanupFailed = true;
+        await writeFile(
+          join(artifacts, "owner-secret-cleanup.json"),
+          JSON.stringify({ result: "unverified" }),
+        );
+      }
+    }
+    if (ownerSecretStore !== undefined && bundle !== undefined && cleanupVerified) {
+      try {
+        const currentDataDirectory = await realpath(join(root, "data"));
+        if (
+          fixtureDataDirectory !== currentDataDirectory ||
+          currentDataDirectory !== join(await realpath(root), "data") ||
+          scratchHostScope !== deriveHostRuntimeHostId(currentDataDirectory)
+        )
+          throw Error("The unique scratch-host scope identity changed.");
+        // This helper purges all namespaces inside one store scope. This
+        // brand-new scratch scope contains exclusively our synthetic fixture;
+        // provider identities and all legacy fallback attribution stay empty.
+        const purge = makeKeychainCredentialPurgeStore(
+          join(bundle, "Contents/Resources/native/octant-keychain-helper"),
+          { storeScope: scratchHostScope, serviceFamily: "octant", timeoutMs: 5000 },
+        );
+        const before = await purge.purge({ dryRun: true, providerInstanceIds: [] });
+        if (!before.dryRun) throw Error("The fixture cleanup inventory was not read-only.");
+        if (before.matchedCount > 0) {
+          const removed = await purge.purge({ dryRun: false, providerInstanceIds: [] });
+          if (removed.dryRun || removed.failedCount !== 0)
+            throw Error("Fixture credential cleanup failed.");
+        }
+        const after = await purge.purge({ dryRun: true, providerInstanceIds: [] });
+        if (!after.dryRun || after.matchedCount !== 0) throw Error("Fixture credentials remain.");
+        ownerSecretCleanupVerified = true;
+        ownerSecretCleanupFailed = false;
+        await writeFile(
+          join(artifacts, "owner-secret-cleanup.json"),
+          JSON.stringify(
+            {
+              result: "verified",
+              scope: scratchHostScope,
+              namespaces: "all within the independently verified unique fixture host scope",
+              knownReferenceDeletedFirst: publishedCredentialRef !== undefined,
+              fixtureScopedMatchesBefore: before.matchedCount,
+              fixtureScopedMatchesAfter: 0,
+              legacyFallback: false,
+              appJoinedBeforeCleanup: true,
+            },
+            null,
+            2,
+          ),
+        );
+      } catch {
+        ownerSecretCleanupFailed = true;
+        await writeFile(
+          join(artifacts, "owner-secret-cleanup.json"),
+          JSON.stringify({ result: "unverified" }),
+        );
+      }
     }
     if (shareService !== undefined) {
       const ownService = shareService;
