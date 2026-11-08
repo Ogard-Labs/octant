@@ -9,6 +9,8 @@ import signal
 import subprocess
 import sys
 import tempfile
+import time
+import uuid
 
 ROOT = Path(__file__).resolve().parents[2]
 APP = ROOT / "apps/mobile"
@@ -18,6 +20,41 @@ ACTIVE = set()
 
 def interrupted(_number, _frame):
     raise KeyboardInterrupt("Owned iOS acceptance interrupted")
+
+
+def group_exists(group):
+    try:
+        os.killpg(group, 0)
+        return True
+    except ProcessLookupError:
+        return False
+
+
+def stop_owned_group(child):
+    # A joined leader is not evidence that its detached command group is gone.
+    for action, bound in ((signal.SIGTERM, 3), (signal.SIGKILL, 3)):
+        if not group_exists(child.pid):
+            break
+        try:
+            os.killpg(child.pid, action)
+        except ProcessLookupError:
+            pass
+        deadline = time.monotonic() + bound
+        while group_exists(child.pid) and time.monotonic() < deadline:
+            child.poll()
+            time.sleep(0.05)
+    child.wait(timeout=3)
+    if group_exists(child.pid):
+        raise RuntimeError("Owned command descendants remain after bounded cleanup.")
+
+
+def recovered_creation(document, runtime, name, device_type, before):
+    matches = [entry.get("udid") for entry in document.get("devices", {}).get(runtime, [])
+               if entry.get("name") == name and entry.get("deviceTypeIdentifier") == device_type
+               and entry.get("udid") not in before]
+    if len(matches) != 1 or not isinstance(matches[0], str):
+        return None
+    return matches[0] if re.fullmatch(r"[0-9A-Fa-f]{8}(?:-[0-9A-Fa-f]{4}){3}-[0-9A-Fa-f]{12}", matches[0]) else None
 
 
 def run(arguments, *, cwd=ROOT, timeout=60, capture=False):
@@ -31,13 +68,7 @@ def run(arguments, *, cwd=ROOT, timeout=60, capture=False):
             raise RuntimeError(f"Owned command failed ({child.returncode}): {arguments[0]}")
         return output or ""
     finally:
-        if child.poll() is None:
-            os.killpg(child.pid, signal.SIGTERM)
-            try:
-                child.wait(timeout=5)
-            except subprocess.TimeoutExpired:
-                os.killpg(child.pid, signal.SIGKILL)
-                child.wait(timeout=5)
+        stop_owned_group(child)
         ACTIVE.remove(child)
 
 
@@ -46,7 +77,8 @@ if sys.platform != "darwin" or os.environ.get("GITHUB_ACTIONS") != "true":
 if Path(os.environ.get("GITHUB_WORKSPACE", "")).resolve() != ROOT:
     raise SystemExit("The fixture must run in its checked-out CI workspace.")
 ENV = {name: os.environ[name] for name in (
-    "HOME", "PATH", "TMPDIR", "LANG", "LC_ALL", "DEVELOPER_DIR", "USER", "LOGNAME"
+    "HOME", "PATH", "TMPDIR", "LANG", "LC_ALL", "DEVELOPER_DIR", "USER", "LOGNAME",
+    "RUNNER_TRACKING_ID"
 ) if name in os.environ}
 ENV.update(CI="1", GITHUB_ACTIONS="true", EXPO_NO_TELEMETRY="1",
            EXPO_NO_DOTENV="1", EXPO_OFFLINE="1", NODE_ENV="production",
@@ -66,6 +98,9 @@ artifacts = Path(os.environ["RUNNER_TEMP"]) / "octant-ios-native-acceptance"
 artifacts.mkdir(mode=0o700)
 work = Path(tempfile.mkdtemp(prefix="octant-ios-demo-", dir=os.environ["RUNNER_TEMP"]))
 device = None
+creation_attempted = False
+creation_name = "Octant offline acceptance " + uuid.uuid4().hex
+before_creation = set()
 checks = []
 try:
     cli = next((path for path in (APP / "node_modules/expo/bin/cli", ROOT / "node_modules/expo/bin/cli") if path.is_file()), None)
@@ -81,15 +116,19 @@ try:
         output.write("\nrequire " + json.dumps(helper) + "\n")
         output.write("OctantOfflineNativeTests.prepare(__dir__, " + json.dumps(source) + ")\n")
     run(["pod", "install"], cwd=ios, timeout=900)
-    available = json.loads(run(["xcrun", "simctl", "list", "devices", "available", "-j"], capture=True))
+    available = json.loads(run(["xcrun", "simctl", "list", "devices", "-j"], timeout=180, capture=True))
+    before_creation = {entry["udid"] for entries in available["devices"].values() for entry in entries}
+    if any(entry.get("name") == creation_name for entries in available["devices"].values() for entry in entries):
+        raise RuntimeError("The task-owned Simulator creation name already exists.")
     candidates = [(runtime, entry) for runtime, entries in available["devices"].items()
                   if ".iOS-" in runtime for entry in entries
                   if entry.get("isAvailable") and entry.get("name", "").startswith("iPhone")]
     if not candidates:
         raise RuntimeError("The hosted runner has no available iPhone runtime.")
     runtime, template = candidates[-1]
-    created = run(["xcrun", "simctl", "create", "Octant offline acceptance", template["deviceTypeIdentifier"], runtime], capture=True).strip()
-    if not re.fullmatch(r"[0-9A-Fa-f]{8}(?:-[0-9A-Fa-f]{4}){3}-[0-9A-Fa-f]{12}", created):
+    creation_attempted = True
+    created = run(["xcrun", "simctl", "create", creation_name, template["deviceTypeIdentifier"], runtime], capture=True).strip()
+    if not re.fullmatch(r"[0-9A-Fa-f]{8}(?:-[0-9A-Fa-f]{4}){3}-[0-9A-Fa-f]{12}", created) or created in before_creation:
         raise RuntimeError("The owned Simulator identifier is invalid.")
     device = created
     run(["xcrun", "simctl", "boot", device])
@@ -118,6 +157,16 @@ try:
     }, indent=2) + "\n")
 finally:
     try:
+        if creation_attempted and device is None:
+            observed = json.loads(run(["xcrun", "simctl", "list", "devices", "-j"], capture=True))
+            device = recovered_creation(observed, runtime, creation_name,
+                                        template["deviceTypeIdentifier"], before_creation)
+            if device is None:
+                (artifacts / "cleanup.json").write_text(json.dumps({
+                    "ownedSimulatorAbsent": False, "creationUncertain": True,
+                    "taskCreationName": creation_name,
+                }) + "\n")
+                raise RuntimeError("Uncertain Simulator creation has no unique owned UUID; cleanup is unverified.")
         if device is not None:
             try:
                 run(["xcrun", "simctl", "shutdown", device], timeout=30)
@@ -135,4 +184,5 @@ finally:
             "ownedSimulatorAbsent": True, "ownedCommandsJoined": True,
         }) + "\n")
     finally:
-        shutil.rmtree(work)
+        if not ACTIVE:
+            shutil.rmtree(work)
