@@ -128,12 +128,44 @@ jobs:
       - name: Download Electron only for a fresh package
         if: steps.package-cache-proof.outputs.verified != 'true'
         shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
-          for attempt in 1 2 3; do
+          set -euo pipefail
+          for attempt in 1 2; do
             if node node_modules/electron/install.js; then exit 0; fi
             sleep 2
           done
-          exit 1
+          # The regular release URL has returned repeated upstream 504s.
+          # Use the same first-party release asset through its API, verifying
+          # the lockfile-installed Electron package's own expected checksum.
+          electron_version=$(node -p 'require("./node_modules/electron/package.json").version')
+          [[ "$electron_version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]
+          electron_asset="electron-v$electron_version-darwin-arm64.zip"
+          electron_asset_id=$(gh api "repos/electron/electron/releases/tags/v$electron_version" --jq ".assets[] | select(.name == \"$electron_asset\") | .id")
+          [[ "$electron_asset_id" =~ ^[0-9]+$ ]]
+          export OCTANT_QA_ELECTRON_ARCHIVE="$RUNNER_TEMP/$electron_asset"
+          gh api -H 'Accept: application/octet-stream' "repos/electron/electron/releases/assets/$electron_asset_id" > "$OCTANT_QA_ELECTRON_ARCHIVE"
+          node <<'JS'
+          const fs = require('node:fs');
+          const path = require('node:path');
+          const crypto = require('node:crypto');
+          (async () => {
+            const archive = process.env.OCTANT_QA_ELECTRON_ARCHIVE;
+            const expected = require('./node_modules/electron/checksums.json')[path.basename(archive)];
+            if (!/^[0-9a-f]{64}$/.test(expected)) throw Error('No pinned Electron archive checksum.');
+            const hash = crypto.createHash('sha256');
+            for await (const chunk of fs.createReadStream(archive)) hash.update(chunk);
+            if (hash.digest('hex') !== expected) throw Error('The first-party Electron archive checksum differs.');
+            const dist = path.resolve('node_modules/electron/dist');
+            await require('@electron-internal/extract-zip').extract(archive, { dir: dist });
+            const types = path.join(dist, 'electron.d.ts');
+            if (fs.existsSync(types)) fs.renameSync(types, path.resolve('node_modules/electron/electron.d.ts'));
+            fs.writeFileSync('node_modules/electron/path.txt', 'Electron.app/Contents/MacOS/Electron');
+            fs.unlinkSync(archive);
+          })().catch(() => { console.error('The verified first-party Electron fallback failed.'); process.exitCode = 1; });
+          JS
+          node node_modules/electron/install.js
       - name: Package current source without signing or publication
         if: steps.package-cache-proof.outputs.verified != 'true'
         timeout-minutes: 25
