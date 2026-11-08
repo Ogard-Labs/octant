@@ -623,6 +623,7 @@ export function createHubOwnerRouteHandler(
           options.threadMoves.issueTicket({
             ownerMemberId: String(input.senderMemberId),
             sourceMemberId: String(asked.sourceMemberId),
+            ...(asked.threads === undefined ? {} : { threads: asked.threads }),
           }),
         );
       }

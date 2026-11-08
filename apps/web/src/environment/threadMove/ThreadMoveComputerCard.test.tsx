@@ -91,6 +91,9 @@ function fakeClient(input: {
       dismissed.push(thread.threadId);
       status = { status: "read" };
     },
+    shutdownListing: async () => ({ status: "listed", members: [], rows: [] }),
+    shutdownChallenge: async () => ({ status: "refused", kind: "refused" }),
+    shutdownStart: async () => ({ status: "refused", reason: "refused" }),
   };
   return { client, started, dismissed };
 }
