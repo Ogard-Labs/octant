@@ -1,4 +1,5 @@
 import { decodeThreadWorkingDirectory } from "@octant/contracts";
+import type { ThreadMoveHolds } from "../hub/threadMoveHolds";
 import { approvedWorkingFolderRoot } from "../approvedWorkingFolders";
 import { GitHistoryPort } from "../code/gitHistoryPort";
 import {
@@ -608,7 +609,10 @@ export type CodeDependencies = Pick<ServerStart, "options" | "persistence"> &
     | "managedWorktreeSourcePreview"
     | "probeProviderForThreads"
     | "refreshStandaloneSkills"
-  >;
+  > & {
+    /** Threads a move holds: frozen here while leaving, or arriving and not yet committed. */
+    readonly threadMoveHolds: ThreadMoveHolds;
+  };
 
 export function wireCode(deps: CodeDependencies) {
   const {
@@ -809,6 +813,7 @@ export function wireCode(deps: CodeDependencies) {
       const codeService =
         options.codeService ??
         new CodeService({
+          moveHold: (threadId) => deps.threadMoveHolds.isHeld({ mode: "code", threadId }),
           liveTurns,
           awaitsHarnessApproval: threadAwaitsHarnessApproval,
           gitHistory: new GitHistoryPort(),

@@ -70,6 +70,13 @@ import { SpokePushService } from "./spokePushService";
 import { SpokeSignInService, type SignInAccountState } from "./spokeSignInService";
 import { SpokeWakeService, type WakeRoutineView } from "./spokeWakeService";
 import { WakeService } from "./wakeService";
+import { createThreadMoveRouteHandler } from "./threadMoveRoutes";
+import {
+  ThreadMoveService,
+  type ThreadMoveDestinationHost,
+  type ThreadMoveSourceHost,
+} from "./threadMoveService";
+import { createThreadMoveStateStore } from "./threadMoveStateStore";
 
 /** What a test host's services did for applied offers. */
 export interface ProvisionedByOffer {
@@ -149,6 +156,10 @@ export class HubTestNetwork {
 }
 
 export interface HubTestHost {
+  /** This host's thread moves, both halves, over the real member routes. */
+  readonly threadMoves: ThreadMoveService;
+  /** What the move recorder wrote, in order, by step name. */
+  readonly threadMoveRecords: string[];
   readonly hostId: string;
   readonly origin: string;
   readonly address: string;
@@ -233,6 +244,11 @@ export async function startHubTestHost(input: {
   readonly listenerStatus?: Partial<PrivateListenerHostStatus>;
   /** What a delegation to this host becomes; absent, this host has no Project open for delegated work. */
   readonly delegationHost?: PeerDelegationHost;
+  /** The threads this host can send and receive in a move; absent, it holds none. */
+  readonly threadMoveHosts?: {
+    readonly source: ThreadMoveSourceHost;
+    readonly destination: ThreadMoveDestinationHost;
+  };
   /** This host's own rules for a parent thread; absent, it has no parent thread to delegate for. */
   readonly parent?: DelegatingParentPort;
   /** Wraps the transport this host's delegating side sends through, so a test can lose an answer. */
@@ -681,6 +697,63 @@ export async function startHubTestHost(input: {
     unlock: ownerUnlock,
     record: (change) => records.push(change),
   });
+  const threadMoveRecords: string[] = [];
+  const recordStep = (name: string) => () => {
+    threadMoveRecords.push(name);
+  };
+  const noThreads = {
+    source: {
+      read: async () => ({ status: "missing" as const }),
+      freeze: () => {},
+      unfreeze: () => {},
+      isFrozen: () => false,
+      pack: async () => ({ status: "refused" as const, reason: "refused" as const }),
+      erase: async () => ({ worktreeKept: false }),
+    },
+    destination: {
+      acceptsProject: () => false,
+      arrive: async () => ({ status: "refused" as const, reason: "no-eligible-project" as const }),
+      activate: async () => {},
+      discard: async () => {},
+    },
+  };
+  const moveHosts = input.threadMoveHosts ?? noThreads;
+  const threadMoves = new ThreadMoveService({
+    state: createThreadMoveStateStore(directory),
+    source: moveHosts.source,
+    destination: moveHosts.destination,
+    record: {
+      moveStarted: recordStep("move-started"),
+      movedIn: recordStep("moved-in"),
+      moveCommitted: recordStep("move-committed"),
+      movedOut: recordStep("moved-out"),
+      moveFailed: recordStep("move-failed"),
+    },
+    identity: () => identity,
+    target: (memberId) => spoke.memberTarget(memberId),
+    transport,
+    authenticate: (request) => {
+      const peer = spoke.authenticatePeer(request);
+      if (peer.status === "refused" || peer.peer.member.role === "guest") {
+        return { status: "refused" };
+      }
+      return {
+        status: "member",
+        memberId: String(peer.peer.member.memberId),
+        moveIn: peer.peer.grant.moveIn === true,
+      };
+    },
+    ownerIsCurrent: (ownerMemberId) => {
+      const context = spoke.ownerContext();
+      return (
+        context !== undefined &&
+        context.owners.some((owner) => String(owner.memberId) === ownerMemberId) &&
+        !context.inactiveDeviceMemberIds.includes(ownerMemberId)
+      );
+    },
+    now: Date.now,
+  });
+  const threadMoveRoutes = createThreadMoveRouteHandler({ moves: threadMoves });
   const hubOwnerRoutes = createHubOwnerRouteHandler({
     ...(input.ownerBrowser === undefined ? {} : { browser: input.ownerBrowser }),
     hub,
@@ -688,6 +761,7 @@ export async function startHubTestHost(input: {
     unlock: ownerUnlock,
     postures,
     credentials: credentialCopy,
+    threadMoves,
     provision: spokeProvision,
     signIn,
     spokeSignIn,
@@ -720,6 +794,7 @@ export async function startHubTestHost(input: {
     (await hubLinkRoutes(request)) ??
     (await peerDelegationRoutes(request)) ??
     (await peerCredentialRoutes(request)) ??
+    (await threadMoveRoutes(request)) ??
     hubOwnerRoutes(request);
 
   let gatewayFetch:
@@ -786,6 +861,8 @@ export async function startHubTestHost(input: {
   );
 
   return {
+    threadMoves,
+    threadMoveRecords,
     hostId: String(hostId),
     origin,
     address: input.address,

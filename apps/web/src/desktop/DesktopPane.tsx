@@ -21,6 +21,7 @@ import { DeviceLine } from "../device/DeviceLine";
 import { DeviceSpinner } from "../device/DeviceStage";
 import { OctantButton, OctantIconButton } from "../ui/base/OctantButton";
 import { OctantConfirmDialog } from "../ui/base/OctantConfirmDialog";
+import { DesktopPreview } from "./DesktopPreview";
 import {
   desktopDollars,
   desktopHours,
@@ -308,15 +309,25 @@ export function DesktopPane(props: {
         state={state}
         title={title}
       />
-      {notice === undefined ? null : (
-        <DeviceLine
-          content={{
-            kind: "error",
-            problem: { message: notice },
-            onDismiss: () => setNotice(undefined),
-          }}
-        />
-      )}
+      <div className="desktop-pane__notices">
+        {notice === undefined ? null : (
+          <DeviceLine
+            content={{
+              kind: "error",
+              problem: { message: notice },
+              onDismiss: () => setNotice(undefined),
+            }}
+          />
+        )}
+        {selected?.state === "ready" ? (
+          <DesktopPreview
+            key={`${threadId}:${selected.leaseId}`}
+            client={client}
+            threadId={threadId}
+            leaseId={String(selected.leaseId)}
+          />
+        ) : null}
+      </div>
       <div className="device-stage desktop-pane__stage">
         <DesktopStage
           client={client}

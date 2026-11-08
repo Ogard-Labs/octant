@@ -2,6 +2,9 @@ import {
   type ImageArtifactId,
   type ImageGenerationEnqueueRequest,
   ImageGenerationJobsResponse,
+  type ImageGenerationOfferDecision,
+  ImageGenerationOfferDecisionResult,
+  ImageGenerationOffersResponse,
   ImageGenerationProfilesResponse,
   ImageGenerationSaveResult,
   type ImageGenerationScopeId,
@@ -32,6 +35,12 @@ export interface ImageGenerationClient {
     readonly attachmentId: ImageArtifactId;
     readonly relativePath: string;
   }): Promise<ImageGenerationSaveResult>;
+  /** What the thread's agent is waiting for this window to answer. */
+  offers(input: {
+    readonly threadKind: "chat-thread" | "work-thread" | "code-thread";
+    readonly scopeId: ImageGenerationScopeId;
+  }): Promise<ImageGenerationOffersResponse>;
+  decideOffer(decision: ImageGenerationOfferDecision): Promise<ImageGenerationOfferDecisionResult>;
 }
 
 export class ImageGenerationClientFailure extends Error {
@@ -127,6 +136,29 @@ export function createImageGenerationClient(
           body: JSON.stringify({ relativePath: input.relativePath }),
         },
         decodeHostAnswer(ImageGenerationSaveResult),
+      );
+    },
+    offers(input) {
+      const url = new URL("/api/image/offers", options.baseUrl);
+      url.searchParams.set("threadKind", input.threadKind);
+      url.searchParams.set("scopeId", String(input.scopeId));
+      return requestJson(
+        options,
+        url.pathname + url.search,
+        { method: "GET", headers },
+        decodeHostAnswer(ImageGenerationOffersResponse),
+      );
+    },
+    decideOffer(decision) {
+      return requestJson(
+        options,
+        "/api/image/offers/decide",
+        {
+          method: "POST",
+          headers: { ...headers, "content-type": "application/json" },
+          body: JSON.stringify(decision),
+        },
+        decodeHostAnswer(ImageGenerationOfferDecisionResult),
       );
     },
   };
