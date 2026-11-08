@@ -285,6 +285,7 @@ import {
   KEYCHAIN_HELPER_FILENAME,
   resolveDesktopHostRuntimePaths,
   resolveDesktopNativeHelperPath,
+  WINDOWS_CREDENTIAL_HELPER_FILENAME,
   resolveManagedToolsDirectory,
   resolveTerminalLauncherDirectory,
   type DesktopNativeHelperPathOptions,
@@ -1559,6 +1560,18 @@ function getCredentialBackend(): Promise<DesktopCredentialBackend> {
       resourcesPath: process.resourcesPath,
       moduleUrl: import.meta.url,
     }),
+    ...(process.platform === "win32"
+      ? {
+          windowsCredentialHelperPath: resolveDesktopNativeHelperPath(
+            {
+              packaged: app.isPackaged,
+              resourcesPath: process.resourcesPath,
+              moduleUrl: import.meta.url,
+            },
+            WINDOWS_CREDENTIAL_HELPER_FILENAME,
+          ),
+        }
+      : {}),
     storeScope: desktopHostId,
     serviceFamily: desktopKeychainServiceFamily,
   }).then((backend) => {
@@ -3054,12 +3067,16 @@ function getOwnerUnlockKeyService(): OwnerUnlockKeyService | undefined {
 
 function getHostIdentitySigningService(): HostIdentitySigningService {
   hostIdentitySigningService ??= makeHostIdentitySigningService(
-    resolveKeychainHelperPath({
-      packaged: app.isPackaged,
-      resourcesPath: process.resourcesPath,
-      moduleUrl: import.meta.url,
-    }),
+    resolveDesktopNativeHelperPath(
+      {
+        packaged: app.isPackaged,
+        resourcesPath: process.resourcesPath,
+        moduleUrl: import.meta.url,
+      },
+      process.platform === "win32" ? WINDOWS_CREDENTIAL_HELPER_FILENAME : KEYCHAIN_HELPER_FILENAME,
+    ),
     {
+      ...(process.platform === "win32" ? { platform: "win32" as const } : {}),
       storeScope: desktopHostId,
       serviceFamily: desktopKeychainServiceFamily,
       expectedLegacyFingerprint: readPersistedHostIdentityFingerprint,
