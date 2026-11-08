@@ -10,8 +10,8 @@ guard (3...5).contains(CommandLine.arguments.count),
 }
 let mode = CommandLine.arguments.count >= 4 ? CommandLine.arguments[3] : "diagnostic"
 let requestedTitle = CommandLine.arguments.count == 5 ? CommandLine.arguments[4] : ""
-guard ["diagnostic", "read", "press", "click"].contains(mode),
-      (mode == "press" || mode == "click") == !requestedTitle.isEmpty,
+guard ["diagnostic", "read", "press", "click", "reveal"].contains(mode),
+      (mode == "press" || mode == "click" || mode == "reveal") == !requestedTitle.isEmpty,
       requestedTitle.count <= 256 else { exit(2) }
 let preferenceTitle = "Keep Browser available without windows"
 // Leave time for the matching mouse-up before the owned six-second command bound.
@@ -131,7 +131,7 @@ while next < pending.count, next < 512, Date() < treeDeadline {
             }
         }
         controls.append(control)
-        if (mode == "press" || mode == "click") && (title == requestedTitle || description == requestedTitle) { pressTargets.append(node) }
+        if (mode == "press" || mode == "click" || mode == "reveal") && (title == requestedTitle || description == requestedTitle) { pressTargets.append(node) }
     }
     if depth >= 40 { depthLimited = true; continue }
     var childrenValue: CFTypeRef?
@@ -157,8 +157,8 @@ let candidateWindows = (nativeWindows ?? []).compactMap { row -> [String: Any]? 
 }
 let truncated = depthLimited || labelsLimited || next < pending.count || pending.count >= 512
 var action: [String: Any] = ["status": "not-requested"]
-if mode == "press" || mode == "click" {
-    action = ["status": "refused", "method": mode == "click" ? "native-click" : "AXPress", "matches": pressTargets.count, "requestedTitle": requestedTitle]
+if mode == "press" || mode == "click" || mode == "reveal" {
+    action = ["status": "refused", "method": mode == "click" ? "native-click" : (mode == "reveal" ? "AXScrollToVisible" : "AXPress"), "matches": pressTargets.count, "requestedTitle": requestedTitle]
     let live = NSRunningApplication(processIdentifier: processId)
     if treeIdentityMatched, !truncated, readErrors == 0, pressTargets.count == 1,
        live?.isTerminated == false,
@@ -183,6 +183,16 @@ if mode == "press" || mode == "click" {
         action["availableActions"] = availableActions.prefix(32).map { String($0.prefix(256)) }
         action["actionNamesTruncated"] = actionNamesTruncated
         if targetIdentityRead == .success, targetPid == processId {
+            if mode == "reveal", ["Data & storage", preferenceTitle].contains(requestedTitle),
+               enabledRead == .success, binary(enabledValue) == true,
+               namesRead == .success, !actionNamesTruncated,
+               availableActions.contains("AXScrollToVisible"), live?.isActive == true,
+               NSWorkspace.shared.frontmostApplication?.processIdentifier == processId,
+               Date() < dispatchDeadline {
+                let result = AXUIElementPerformAction(target, "AXScrollToVisible" as CFString)
+                action["status"] = result == .success ? "acknowledged" : "uncertain"
+                action["nativeError"] = result.rawValue
+            }
             if mode == "press" && enabledRead == .success && binary(enabledValue) == true {
                 let result = AXUIElementPerformAction(target, kAXPressAction as CFString)
                 action["status"] = result == .success ? "pressed" : "uncertain"
@@ -192,7 +202,7 @@ if mode == "press" || mode == "click" {
                namesRead == .success, !actionNamesTruncated, live?.isActive == true,
                NSWorkspace.shared.frontmostApplication?.processIdentifier == processId,
                !["AXTextField", "AXTextArea"].contains(label(target, kAXRoleAttribute as CFString)),
-               let targetBounds = bounds(target) {
+               let targetBounds = bounds(target), targetBounds.width >= 12, targetBounds.height >= 12 {
                 action["controlBounds"] = rectangle(targetBounds)
                 var windowValue: CFTypeRef?
                 let windowRead = AXUIElementCopyAttributeValue(target, kAXWindowAttribute as CFString, &windowValue)

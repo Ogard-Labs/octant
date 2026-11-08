@@ -166,7 +166,7 @@ const timer = setInterval(() => {
           process.env,
           6000,
         );
-      const sdk = (mode: "diagnostic" | "read" | "click", value?: string) =>
+      const sdk = (mode: "diagnostic" | "read" | "click" | "reveal", value?: string) =>
         runBoundedCommand(
           sdkExecutable,
           [String(pid), bundle, mode, ...(value === undefined ? [] : [value])],
@@ -174,20 +174,28 @@ const timer = setInterval(() => {
           6000,
         );
       let clickSequence = 0;
+      let revealSequence = 0;
       const native = async (operation: string, value = ""): Promise<string> => {
-        if (operation !== "snapshot" && operation !== "count" && operation !== "click")
+        if (
+          operation !== "snapshot" &&
+          operation !== "count" &&
+          operation !== "click" &&
+          operation !== "reveal"
+        )
           return systemEvents(operation, value);
-        if (operation === "click") await systemEvents("focus");
+        if (operation === "click" || operation === "reveal") await systemEvents("focus");
         const raw = await sdk(
-          operation === "click" ? "click" : "read",
-          operation === "click" ? value : undefined,
+          operation === "click" || operation === "reveal" ? operation : "read",
+          operation === "click" || operation === "reveal" ? value : undefined,
         );
         await writeFile(
           join(
             artifacts,
             operation === "click"
               ? `${phase}-sdk-native-click-${++clickSequence}.json`
-              : `${phase}-sdk-last-${operation}.json`,
+              : operation === "reveal"
+                ? `${phase}-sdk-reveal-${++revealSequence}.json`
+                : `${phase}-sdk-last-${operation}.json`,
           ),
           raw,
         );
@@ -212,6 +220,17 @@ const timer = setInterval(() => {
           !Array.isArray(decoded.interactiveControls)
         )
           throw Error("Native SDK control tree is incomplete.");
+        if (operation === "reveal") {
+          if (
+            !record(decoded.action) ||
+            decoded.action.status !== "acknowledged" ||
+            decoded.action.method !== "AXScrollToVisible" ||
+            decoded.action.matches !== 1
+          )
+            throw Error(`Native SDK refused to reveal the exact owned control: ${value}.`);
+          await pause(200);
+          return "scroll-requested";
+        }
         if (operation === "click") {
           if (
             !record(decoded.action) ||
@@ -338,8 +357,11 @@ end run`;
       const settings = async () => {
         await native("key", ",");
         await wait("settings", (s) => s.includes("Data & storage"));
+        await native("reveal", "Data & storage");
         await native("click", "Data & storage");
-        return wait("preference", (s) => s.includes(preference));
+        const snapshot = await wait("preference", (s) => s.includes(preference));
+        await native("reveal", preference);
+        return snapshot;
       };
       try {
         // Accessibility initialization can rebuild Electron's AX tree. Do it
