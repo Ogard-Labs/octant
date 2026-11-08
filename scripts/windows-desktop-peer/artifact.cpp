@@ -45,6 +45,75 @@ Handle open_directory(const std::wstring& path) {
 }
 #include "../../packages/host-runtime/native/windows-host-owner/desktopArtifact.h"
 
+// Fixed categories and security facts only; no paths, SIDs or descriptors.
+void diagnostic(const char* stage, size_t index, HANDLE handle, const DesktopArtifactTrust* trust) {
+  const DWORD failure = GetLastError();
+  bool trusted_owner = false; DWORD ace_count = 0;
+  PSECURITY_DESCRIPTOR descriptor = nullptr;
+  if (handle && handle != INVALID_HANDLE_VALUE && trust) {
+    PSID principal = nullptr; PACL acl = nullptr;
+    if (GetSecurityInfo(handle, SE_FILE_OBJECT, OWNER_SECURITY_INFORMATION | DACL_SECURITY_INFORMATION,
+        &principal, nullptr, &acl, nullptr, &descriptor) == ERROR_SUCCESS) {
+      trusted_owner = trust->accepts(principal);
+      if (acl && IsValidAcl(acl)) {
+        ace_count = acl->AceCount;
+        for (DWORD entry = 0; entry < acl->AceCount && entry < 64; ++entry) {
+          void* raw = nullptr;
+          if (!GetAce(acl, entry, &raw)) break;
+          const auto header = static_cast<const ACE_HEADER*>(raw);
+          if ((header->AceFlags & INHERIT_ONLY_ACE) != 0) continue;
+          bool trusted_principal = false; DWORD mask = 0;
+          if ((header->AceType == ACCESS_ALLOWED_ACE_TYPE || header->AceType == ACCESS_DENIED_ACE_TYPE) && header->AceSize >= sizeof(ACCESS_ALLOWED_ACE)) {
+            const auto ace = static_cast<const ACCESS_ALLOWED_ACE*>(raw);
+            const PSID sid = const_cast<DWORD*>(&ace->SidStart);
+            if (IsValidSid(sid) && GetLengthSid(sid) <= header->AceSize - offsetof(ACCESS_ALLOWED_ACE, SidStart)) trusted_principal = trust->accepts(sid);
+            mask = ace->Mask;
+          }
+          std::printf("{\"artifactAce\":%lu,\"type\":%u,\"flags\":%u,\"mask\":%lu,\"trustedPrincipal\":%s}\n",
+            entry, static_cast<unsigned int>(header->AceType), static_cast<unsigned int>(header->AceFlags), mask, trusted_principal ? "true" : "false");
+        }
+      }
+    }
+  }
+  if (descriptor) LocalFree(descriptor);
+  std::printf("{\"artifactAdmissionStage\":\"%s\",\"ancestorIndex\":%zu,\"trustedOwner\":%s,\"aceCount\":%lu,\"win32Code\":%lu}\n",
+    stage, index, trusted_owner ? "true" : "false", ace_count, failure);
+}
+void diagnose_artifact(const std::wstring& image) {
+  std::wstring ordinary;
+  if (!desktop_image_path(image, ordinary)) { diagnostic("image-path", 0, nullptr, nullptr); return; }
+  const std::wstring drive = ordinary.substr(0, 3);
+  const UINT type = GetDriveTypeW(drive.c_str());
+  if (type != DRIVE_FIXED && type != DRIVE_REMOVABLE) { diagnostic("drive-type", 0, nullptr, nullptr); return; }
+  DesktopArtifactTrust trust;
+  if (!desktop_artifact_trust(trust)) { diagnostic("trusted-principals", 0, nullptr, nullptr); return; }
+  std::vector<Handle> held;
+  held.push_back(open_directory(drive));
+  if (!held.back()) { diagnostic("root-open", 0, nullptr, nullptr); return; }
+  if (!desktop_artifact_acl(held.back().value, trust, true, true)) { diagnostic("root-acl", 0, held.back().value, &trust); return; }
+  const size_t leaf = ordinary.find_last_of(L'\\');
+  std::wstring current = drive;
+  size_t start = 3, index = 0;
+  while (start < leaf) {
+    const size_t next = ordinary.find(L'\\', start);
+    if (next == std::wstring::npos || next > leaf || next == start) { diagnostic("ancestor-shape", index, nullptr, nullptr); return; }
+    const std::wstring component = ordinary.substr(start, next - start);
+    if (!desktop_artifact_component(component)) { diagnostic("ancestor-component", index, nullptr, nullptr); return; }
+    if (current.back() != L'\\') current += L'\\'; current += component;
+    if (next == leaf) break;
+    ++index; held.push_back(open_directory(current));
+    if (!held.back()) { diagnostic("ancestor-open", index, nullptr, nullptr); return; }
+    if (!desktop_artifact_acl(held.back().value, trust, true, true)) { diagnostic("ancestor-acl", index, held.back().value, &trust); return; }
+    start = next + 1;
+  }
+  held.push_back(open_directory(current));
+  if (!held.back()) { diagnostic("package-open", index + 1, nullptr, nullptr); return; }
+  if (!desktop_artifact_acl(held.back().value, trust, true, false)) { diagnostic("package-acl", index + 1, held.back().value, &trust); return; }
+  Handle file(CreateFileW(ordinary.c_str(), GENERIC_READ | READ_CONTROL, FILE_SHARE_READ, nullptr, OPEN_EXISTING, FILE_FLAG_OPEN_REPARSE_POINT, nullptr));
+  if (!file) { diagnostic("image-open", 0, nullptr, nullptr); return; }
+  diagnostic(desktop_artifact_file(file.value, trust) ? "image-canonical-or-tree" : "image-file", 0, file.value, &trust);
+}
+
 bool absent(const std::wstring& path) {
   if (GetFileAttributesW(path.c_str()) != INVALID_FILE_ATTRIBUTES) return false;
   const DWORD failure = GetLastError(); return failure == ERROR_FILE_NOT_FOUND || failure == ERROR_PATH_NOT_FOUND;
@@ -83,7 +152,7 @@ int wmain(int argc, wchar_t** argv) {
   const ULONGLONG began = GetTickCount64();
   auto package = admit_desktop_artifact(argv[1], began + 20000, cancelled, scanned);
   std::printf("{\"actualPackageArtifactAccepted\":%s,\"elapsedMs\":%llu,\"scannedEntries\":%zu}\n", package ? "true" : "false", GetTickCount64() - began, scanned);
-  if (!package) return refuse("actual-package-admission");
+  if (!package) { diagnose_artifact(argv[1]); return refuse("actual-package-admission"); }
   package.reset();
   Fixture fixture;
   std::vector<unsigned char> user;
