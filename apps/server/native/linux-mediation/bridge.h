@@ -10,6 +10,9 @@ struct renamedata;
 struct cred;
 struct dentry;
 struct file;
+struct fd;
+
+int octant_seek_lock(struct fd *file, bool mediated);
 
 /* Private kernel scope identity, never part of the userspace UAPI. */
 struct octant_metadata_scope {
@@ -24,7 +27,7 @@ void octant_namespace_begin(void);
 void octant_namespace_end(void);
 int octant_namespace_check_rename(const struct renamedata *operation);
 bool octant_mediation_restricted(void);
-int octant_mediation_seek(struct file *file, unsigned int whence);
+struct octant_metadata_scope octant_seek_begin(struct file *file, unsigned int whence);
 int octant_mediation_receive_scm(const struct cred *sender);
 struct octant_metadata_scope octant_metadata_begin(struct dentry *dentry, u32 operation);
 void octant_metadata_end(struct octant_metadata_scope *scope);
@@ -39,7 +42,10 @@ static inline void octant_namespace_begin(void) {}
 static inline void octant_namespace_end(void) {}
 static inline int octant_namespace_check_rename(const struct renamedata *operation) { return 0; }
 static inline bool octant_mediation_restricted(void) { return false; }
-static inline int octant_mediation_seek(struct file *file, unsigned int whence) { return 0; }
+static inline struct octant_metadata_scope octant_seek_begin(struct file *file, unsigned int whence)
+{
+	return (struct octant_metadata_scope) {};
+}
 static inline int octant_mediation_receive_scm(const struct cred *sender) { return 0; }
 static inline struct octant_metadata_scope octant_metadata_begin(struct dentry *dentry, u32 operation)
 {

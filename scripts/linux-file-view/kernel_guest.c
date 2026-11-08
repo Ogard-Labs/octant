@@ -564,9 +564,10 @@ static int seek_position_measure(void)
   struct stat identity = {0};
   struct octant_mediation_request request = {0};
   bool received = false, identified = false, before_reply = false, replied = false;
-  bool reader_ok = false, reader_joined = false, helper_joined = false;
-  bool reader_normal = false, helper_normal = false, same_position = false;
+  bool reader_ok = false, reader_joined = false, helper_joined = false, helper_allowed = false;
+  bool reader_normal = false, helper_normal = false, same_position = false, created = false;
   file = open(path, O_CREAT | O_EXCL | O_RDWR | O_CLOEXEC, 0600);
+  created = file >= 0;
   if (file < 0 || write(file, content, sizeof(content) - 1) != sizeof(content) - 1 ||
       fstat(file, &identity) || lseek(file, 0, SEEK_SET)) goto cleanup;
   broker = open("/dev/octant_mediation", O_RDWR | O_CLOEXEC | O_NONBLOCK);
@@ -601,6 +602,7 @@ static int seek_position_measure(void)
     int moved = 0;
     before_reply = helper > 0 && poll(&ready, 1, 500) == 1 && (ready.revents & POLLIN) &&
       transfer(positions[0], &moved, sizeof(moved), false) && moved == 1;
+    helper_allowed = before_reply;
   }
 cleanup:
   // Release every held request even when the helper's progress assertion failed.
@@ -614,6 +616,10 @@ cleanup:
     int valid = 0;
     reader_ok = transfer(results[0], &valid, sizeof(valid), false) && valid == 1;
   }
+  if (helper > 0 && replied && !helper_allowed) {
+    int moved = 0;
+    helper_allowed = transfer(positions[0], &moved, sizeof(moved), false) && moved == 1;
+  }
   close_owned(&broker); close_owned(&enrollment);
   close_owned(&results[0]); close_owned(&results[1]);
   close_owned(&positions[0]); close_owned(&positions[1]);
@@ -621,9 +627,9 @@ cleanup:
   if (helper > 0) helper_joined = join_owned(helper, &helper_normal);
   if (file >= 0) same_position = lseek(file, 0, SEEK_CUR) == (off_t)sizeof(content) - 1;
   close_owned(&file);
-  bool cleaned = !unlink(path);
+  bool cleaned = !created || !unlink(path);
   bool passed = identified && before_reply && replied && reader_ok && same_position &&
-    reader_joined && reader_normal && helper_joined && helper_normal && cleaned;
+    reader_joined && reader_normal && helper_joined && helper_normal && helper_allowed && cleaned;
   printf("OCTANT_SEEK_POSITION {\"replyHeld\":%s,\"otherPositionBeforeReply\":%s,\"replyReleased\":%s,\"readerAllowed\":%s,\"sameFilePosition\":%s,\"readerJoined\":%s,\"helperJoined\":%s,\"cleaned\":%s}\n",
     identified ? "true" : "false", before_reply ? "true" : "false", replied ? "true" : "false",
     reader_ok ? "true" : "false", same_position ? "true" : "false",

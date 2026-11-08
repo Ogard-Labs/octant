@@ -574,16 +574,15 @@ static int admit_file(struct file *file, u32 operation)
 	return admit_inode(file ? file_inode(file) : NULL, operation);
 }
 
-/* Only audited syscall entries call this before filesystem llseek/inode locks.
- * The retained file fixes identity and the ordinary READ admission orders its
- * live policy epoch. Position-only seeks and native nonseekable errors remain. */
-int octant_mediation_seek(struct file *file, unsigned int whence)
+/* The private seek fd constructor prepares before position/inode locks and
+ * consumes this exact READ scope after acquiring the original position lock. */
+struct octant_metadata_scope octant_seek_begin(struct file *file, unsigned int whence)
 {
 	struct inode *inode = file_inode(file);
 	if ((whence == SEEK_END || whence == SEEK_DATA || whence == SEEK_HOLE) &&
 	    (file->f_mode & FMODE_LSEEK) && S_ISREG(inode->i_mode) && !IS_ANON_FILE(inode))
-		return admit_file(file, OCTANT_MEDIATION_READ);
-	return 0;
+		return octant_metadata_begin(file->f_path.dentry, OCTANT_MEDIATION_READ);
+	return (struct octant_metadata_scope) {};
 }
 
 static int truncate_file(struct file *file)
