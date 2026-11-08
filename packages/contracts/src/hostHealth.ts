@@ -76,11 +76,14 @@ export const HostHealthHistory = Schema.Struct({
   resolution: HostHealthResolution,
   retentionDays: PositiveInt,
   /**
-   * Every distinct host process start seen in the span's minute samples,
-   * oldest first, read before any roll-up so restarts inside one hour are all
-   * counted. The first may predate the span.
+   * The host process starts that replaced an earlier process, oldest first,
+   * read from the minute samples before any roll-up so restarts inside one
+   * hour are all counted. The process already running when the span began is
+   * not a restart, and neither is the first process seen when nothing was
+   * recorded before the span; a process that started inside the span, after one
+   * recorded before it, is.
    */
-  processStarts: Schema.Array(UtcTimestamp).pipe(Schema.maxItems(MAX_HOST_HEALTH_POINTS)),
+  restarts: Schema.Array(UtcTimestamp).pipe(Schema.maxItems(MAX_HOST_HEALTH_POINTS)),
   samples: Schema.Array(HostHealthSample).pipe(Schema.maxItems(MAX_HOST_HEALTH_POINTS)),
 }).annotations(strict);
 export type HostHealthHistory = typeof HostHealthHistory.Type;
