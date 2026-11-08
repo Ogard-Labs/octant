@@ -53,13 +53,29 @@ try {
     $octantPathSpellings = @($octantExecutable)
     if ($octantExecutable -match '^[A-Za-z]:\\') { $octantPathSpellings += '\\?\' + $octantExecutable }
     $octantExpected = @()
+    $octantExpectedRepeated = @()
+    $octantQuotedUrlPattern = [regex]::Escape('"%1"')
     foreach ($octantPath in $octantPathSpellings) {
       foreach ($octantImage in @($octantPath, '"' + $octantPath + '"')) {
         $octantExpected += $octantImage + ' "%1"'
         $octantExpected += $octantImage + ' -- "%1"'
+        foreach ($octantArgumentPath in $octantPathSpellings) {
+          foreach ($octantArgumentImage in @($octantArgumentPath, '"' + $octantArgumentPath + '"')) {
+            $octantExpectedRepeated += '\A' + [regex]::Escape($octantImage) + '[ \t]+' + $octantQuotedUrlPattern + '[ \t]+' + [regex]::Escape($octantArgumentImage) + '[ \t]+' + $octantQuotedUrlPattern + '\z'
+          }
+        }
       }
     }
     $octantOwnedCommand = $octantExpected -icontains $octantCommand
+    if (-not $octantOwnedCommand) {
+      $octantRegexOptions = [System.Text.RegularExpressions.RegexOptions]::IgnoreCase -bor [System.Text.RegularExpressions.RegexOptions]::CultureInvariant
+      foreach ($octantRepeatedPattern in $octantExpectedRepeated) {
+        if ([regex]::IsMatch($octantCommand.Trim(), $octantRepeatedPattern, $octantRegexOptions)) {
+          $octantOwnedCommand = $true
+          break
+        }
+      }
+    }
     if (-not $octantOwnedCommand) {
       $octantTrimmedCommand = $octantCommand.Trim()
       foreach ($octantPath in $octantPathSpellings) {
@@ -144,6 +160,38 @@ try {
             [void]$octantDiagnosticTokens.Add([string]$octantDiagnosticMatch.Value)
           }
           $octantArgumentTokenCount = $octantDiagnosticTokens.Count
+          foreach ($octantToken in $octantDiagnosticTokens) {
+            $octantUnquotedToken = $octantToken.Trim('"')
+            $octantTokenShape = if ($octantToken -ceq '"%1"') {
+              'quoted-url'
+            } elseif ($octantUnquotedToken -ceq '--') {
+              'electron-separator'
+            } elseif ($octantUnquotedToken.Equals($octantPackageAppEntry, [StringComparison]::OrdinalIgnoreCase)) {
+              'owned-app-entry'
+            } elseif ($octantUnquotedToken.Equals($octantPackageAppRoot, [StringComparison]::OrdinalIgnoreCase)) {
+              'owned-app-root'
+            } elseif ($octantUnquotedToken -match '^--[A-Za-z0-9][A-Za-z0-9_-]*(?:=.*)?$') {
+              'option'
+            } elseif ($octantUnquotedToken -match '^[A-Za-z]:\\' -or $octantUnquotedToken.StartsWith('\\?\')) {
+              $octantCandidatePath = $octantUnquotedToken
+              if ($octantCandidatePath.StartsWith('\\?\')) { $octantCandidatePath = $octantCandidatePath.Substring(4) }
+              $octantCandidatePath = [IO.Path]::GetFullPath($octantCandidatePath)
+              if ($octantCandidatePath.StartsWith($octantPackageRoot, [StringComparison]::OrdinalIgnoreCase)) {
+                if ($octantArgumentPathShapes.Count -lt 8) {
+                  $octantArgumentPathShapes += [IO.Path]::GetRelativePath($octantPackageRoot, $octantCandidatePath)
+                }
+              } elseif ($octantArgumentPathShapes.Count -lt 8) {
+                $octantArgumentPathShapes += 'outside-staged-package'
+              }
+              'path-argument'
+            } elseif ($octantToken.StartsWith('"') -and $octantToken.EndsWith('"')) {
+              'quoted-argument'
+            } else {
+              'other-argument'
+            }
+            if ($octantArgumentTokenShapes.Count -lt 8) { $octantArgumentTokenShapes += $octantTokenShape }
+          }
+          $octantArgumentTokenCount = $octantArgumentTokenShapes.Count
           if ($octantDiagnosticTokens.Count -eq 4) {
             foreach ($octantPathIndex in @(0, 2)) {
               $octantPathToken = [string]$octantDiagnosticTokens[$octantPathIndex]
@@ -182,39 +230,9 @@ try {
               $octantArgumentPathKinds[1] -match '^staged-executable-' -and
               $octantArgumentQuotedUrlMatches[1]
           }
-          foreach ($octantToken in $octantDiagnosticTokens) {
-            $octantUnquotedToken = $octantToken.Trim('"')
-            $octantTokenShape = if ($octantToken -ceq '"%1"') {
-              'quoted-url'
-            } elseif ($octantUnquotedToken -ceq '--') {
-              'electron-separator'
-            } elseif ($octantUnquotedToken.Equals($octantPackageAppEntry, [StringComparison]::OrdinalIgnoreCase)) {
-              'owned-app-entry'
-            } elseif ($octantUnquotedToken.Equals($octantPackageAppRoot, [StringComparison]::OrdinalIgnoreCase)) {
-              'owned-app-root'
-            } elseif ($octantUnquotedToken -match '^--[A-Za-z0-9][A-Za-z0-9_-]*(?:=.*)?$') {
-              'option'
-            } elseif ($octantUnquotedToken -match '^[A-Za-z]:\\' -or $octantUnquotedToken.StartsWith('\\?\')) {
-              $octantCandidatePath = $octantUnquotedToken
-              if ($octantCandidatePath.StartsWith('\\?\')) { $octantCandidatePath = $octantCandidatePath.Substring(4) }
-              $octantCandidatePath = [IO.Path]::GetFullPath($octantCandidatePath)
-              if ($octantCandidatePath.StartsWith($octantPackageRoot, [StringComparison]::OrdinalIgnoreCase)) {
-                if ($octantArgumentPathShapes.Count -lt 8) {
-                  $octantArgumentPathShapes += [IO.Path]::GetRelativePath($octantPackageRoot, $octantCandidatePath)
-                }
-              } elseif ($octantArgumentPathShapes.Count -lt 8) {
-                $octantArgumentPathShapes += 'outside-staged-package'
-              }
-              'path-argument'
-            } elseif ($octantToken.StartsWith('"') -and $octantToken.EndsWith('"')) {
-              'quoted-argument'
-            } else {
-              'other-argument'
-            }
-            if ($octantArgumentTokenShapes.Count -lt 8) { $octantArgumentTokenShapes += $octantTokenShape }
-          }
           break
         }
+        if ($octantImageAtStart) { break }
       }
       $octantArgumentShape = if ($octantCommand.EndsWith('"%1"', [StringComparison]::OrdinalIgnoreCase)) { 'quoted-url' } else { 'other' }
       $octantSeparator = $octantCommand.Contains(' -- ')
