@@ -26,7 +26,15 @@ final class OfflineDemoTests: XCTestCase {
 
     @MainActor
     private func enterDemo() {
-        tap(element("mobile-entry-demo"))
+        let demo = element("mobile-entry-demo")
+        XCTAssertTrue(demo.waitForExistence(timeout: 15))
+        let entry = element("mobile-entry")
+        for _ in 0..<8 {
+            if demo.isHittable && app.windows.firstMatch.frame.contains(demo.frame) { break }
+            XCTAssertTrue(entry.isHittable)
+            entry.swipeUp()
+        }
+        tap(demo)
         XCTAssertTrue(element("mobile-mock-banner").waitForExistence(timeout: 15))
         XCTAssertTrue(element("mobile-inbox-home").exists)
     }
