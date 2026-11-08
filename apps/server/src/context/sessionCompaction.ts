@@ -1,8 +1,11 @@
 import { Deferred, Effect, Either, Option, Stream } from "effect";
 import {
   decodeCapacityReservationId,
+  decodeContextEntryId,
   decodeProviderSessionId,
   type ContextCommand,
+  type ContextEntryId,
+  type ContextSourceRef,
   type ContextCommandResult,
   type ContextCompactionAvailability,
   type ContextCompactionCause,
@@ -53,6 +56,7 @@ import {
   ContextSummaryGenerationFailed,
   makeContextSummaryGenerator,
 } from "./contextSummaryGenerator";
+import type { ContextMaintenanceMaterial } from "./contextMaintenancePort";
 
 export type CompactSessionCommand = Extract<ContextCommand, { readonly kind: "compact-session" }>;
 
@@ -379,7 +383,14 @@ export class SessionCompactionService {
     const tokensBefore = run.owner === "runtime" ? this.#occupancy(threads, subject) : undefined;
     if (run.owner === "runtime" && tokensBefore === undefined) return refused("no-session");
 
-    const reservation = this.#reserve(subject, thread, planned);
+    // Fixed now, with the request: the reservation pays for exactly what the
+    // handover will send, and the summary covers the conversation as it was
+    // when the rule asked.
+    const handover =
+      cause?.kind === "limit-near" && run.owner === "runtime"
+        ? this.#handoverBasis(run, String(subject.aggregateId))
+        : undefined;
+    const reservation = this.#reserve(subject, thread, planned, handover?.reservedTokens ?? 0);
     if (reservation.kind === "refused") return reservation.refusal;
 
     let requested: ReturnType<ContextHarnessService["requestCompaction"]>;
@@ -403,7 +414,7 @@ export class SessionCompactionService {
     const key = subjectKey(subject);
     let work: Promise<void>;
     if (run.owner === "runtime" && tokensBefore !== undefined) {
-      work = this.#runRuntime(command, run, windowId, tokensBefore, reservation.release);
+      work = this.#runRuntime(command, run, windowId, tokensBefore, reservation.release, handover);
     } else {
       // Fixed in the turn of the event loop that journaled the request: a plan
       // appended while the summary is being set up must fail this compaction,
@@ -437,6 +448,7 @@ export class SessionCompactionService {
         readonly tokens: number;
         readonly contextWindow: number | undefined;
         readonly keeper: "octant" | "runtime";
+        readonly providerInstanceId: ProviderInstanceId;
       }
     | undefined {
     const kind = String(subject.aggregateType);
@@ -469,7 +481,7 @@ export class SessionCompactionService {
       owner === "host" || this.#options.conversationOwner(thread.providerInstanceId) === "host"
         ? "octant"
         : "runtime";
-    return { tokens, contextWindow, keeper };
+    return { tokens, contextWindow, keeper, providerInstanceId: thread.providerInstanceId };
   }
 
   /** Resolves once every compaction this process started has settled. */
@@ -488,6 +500,8 @@ export class SessionCompactionService {
     subject: ContextSubjectRef,
     thread: SessionCompactionThread,
     planned: ContextInspectorSnapshot | undefined,
+    /** A second request the compaction makes, such as a handover summary. */
+    extraTokens = 0,
   ):
     | { readonly kind: "refused"; readonly refusal: ContextCompactionRefusal }
     | {
@@ -497,7 +511,7 @@ export class SessionCompactionService {
         readonly release: (usage?: ReportedCompactionUsage) => void;
       } {
     const { capacity } = this.#options;
-    const upperBound = upperBoundTokens(planned);
+    const upperBound = upperBoundTokens(planned) + extraTokens;
     const spendReservationId = decodeSpendCeilingReservationId(this.#options.uuid());
     const spend = this.#options.spendCeiling?.admit({
       reservationId: spendReservationId,
@@ -681,11 +695,22 @@ export class SessionCompactionService {
     windowId: WindowId | undefined,
     tokensBefore: KnownTokenMeasurement,
     release: (usage?: ReportedCompactionUsage) => void,
+    handoverBasis?: HandoverBasis,
   ): Promise<void> {
     const { harness } = this.#options;
     const threadId = String(command.subject.aggregateId);
     let usage: ReportedCompactionUsage | undefined;
+    let handoverUsage: ReportedCompactionUsage | undefined;
     try {
+      // Written first, from the conversation the runtime still holds in full:
+      // after its compaction only the runtime's own summary remains, and no
+      // other provider can read that one.
+      const handover =
+        handoverBasis === undefined
+          ? undefined
+          : await this.#writeHandover(run, threadId, handoverBasis, (reported) => {
+              handoverUsage = reported;
+            });
       let answer: RuntimeAnswer;
       try {
         const session = await run.threads.runtimeSessions?.open(threadId, windowId);
@@ -698,20 +723,88 @@ export class SessionCompactionService {
       } catch {
         answer = { kind: "not-asked" };
       }
+      const outcome = this.#runtimeOutcome(run, threadId, answer, tokensBefore);
       harness.settleRuntimeCompaction({
         subject: command.subject,
         compactionId: command.compactionId,
-        outcome: this.#runtimeOutcome(run, threadId, answer, tokensBefore),
-        usage,
+        outcome:
+          outcome.kind === "compacted" && handover !== undefined
+            ? { ...outcome, handover }
+            : outcome,
+        // The handover's request is part of what this compaction spent.
+        usage: combinedUsage(usage, handoverUsage),
       });
     } catch {
       // The runtime was asked; a journal that could not take its answer must
       // not leave the request running, and cannot attest the session is intact.
       this.#failStillRunning(command, "runtime-failed", true);
     } finally {
-      release(usage);
+      release(combinedUsage(usage, handoverUsage));
       this.#announceSettled(command, run.threads);
     }
+  }
+
+  /**
+   * Writes the summary a move to another provider carries, with the thread's
+   * own provider, from the conversation the host holds for it. Chat and Work
+   * hold one; a Code thread's lives in its runtime, so it gets none here. A
+   * summary that fails leaves the compaction to go on without one.
+   */
+  async #writeHandover(
+    run: AdmittedRun,
+    threadId: string,
+    basis: HandoverBasis,
+    observeUsage: (usage: ReportedCompactionUsage) => void,
+  ): Promise<{ readonly content: string; readonly throughSource: ContextSourceRef } | undefined> {
+    const { thread, threads, driver } = run;
+    if (thread.mode === "code" || threads.scratchRoot === undefined) return undefined;
+    try {
+      const { materials } = basis;
+      const generate = makeContextSummaryGenerator({
+        driver,
+        providerInstanceId: thread.providerInstanceId,
+        scratchRoot: await threads.scratchRoot(threadId),
+        sessionId: decodeProviderSessionId(this.#options.uuid()),
+        mode: thread.mode,
+        observeUsage,
+        ...(this.#options.summaryTimeoutMs === undefined
+          ? {}
+          : { timeoutMs: this.#options.summaryTimeoutMs }),
+        ...(this.#options.summaryShutdownTimeoutMs === undefined
+          ? {}
+          : { shutdownTimeoutMs: this.#options.summaryShutdownTimeoutMs }),
+      });
+      const summary = await generate(
+        { providerInstanceId: thread.providerInstanceId, modelId: thread.modelId, materials },
+        NEVER_CANCELLED,
+      );
+      const content = summary.content.trim().slice(0, MAX_HANDOVER_SUMMARY_CHARACTERS).trim();
+      return content.length === 0 ? undefined : { content, throughSource: basis.throughSource };
+    } catch {
+      return undefined;
+    }
+  }
+
+  /**
+   * What a handover summary would read for this thread, and what it may
+   * spend; undefined where none can be written (Code, or a thread whose
+   * conversation the host does not hold).
+   */
+  #handoverBasis(run: AdmittedRun, threadId: string): HandoverBasis | undefined {
+    const { thread, threads } = run;
+    if (
+      thread.mode === "code" ||
+      threads.conversation === undefined ||
+      threads.scratchRoot === undefined
+    ) {
+      return undefined;
+    }
+    const selected = handoverMaterials(threads.conversation(threadId), () =>
+      decodeContextEntryId(this.#options.uuid()),
+    );
+    if (selected === undefined) return undefined;
+    const inputTokens = selected.materials.reduce((sum, material) => sum + material.sizeTokens, 0);
+    return { ...selected, reservedTokens: inputTokens + HANDOVER_SUMMARY_RESERVED_OUTPUT_TOKENS };
   }
 
   /**
@@ -1200,4 +1293,67 @@ function threadTypeOf(thread: SessionCompactionThread): ThreadKind {
 
 function subjectKey(subject: ContextSubjectRef): string {
   return `${subject.aggregateType}\u0000${subject.aggregateId}`;
+}
+
+/**
+ * What a switch can carry in its three summary blocks of 4,000 characters,
+ * less their framing sentence, so the summary's end (usually where the work
+ * stands) is never the part a switch drops. A longer answer is cut, never
+ * refused.
+ */
+const MAX_HANDOVER_SUMMARY_CHARACTERS = 11_500;
+
+/**
+ * The most of a conversation a handover summary reads, newest first. A
+ * runtime thread near its limit can hold more than one request should carry;
+ * the newest exchanges matter most to the next model, and a provider switch
+ * hands those over raw as well.
+ */
+const MAX_HANDOVER_MATERIAL_CHARACTERS = 400_000;
+
+/** What a handover summary may answer with: its stored bound, in tokens, rounded up. */
+const HANDOVER_SUMMARY_RESERVED_OUTPUT_TOKENS = 3_000;
+
+interface HandoverBasis {
+  readonly materials: ReadonlyArray<ContextMaintenanceMaterial>;
+  /** The newest message read; a move checks it is still in the thread. */
+  readonly throughSource: ContextSourceRef;
+  /** The summary request's input plus its bounded answer. */
+  readonly reservedTokens: number;
+}
+
+function handoverMaterials(
+  conversation: ReadonlyArray<SessionConversationMessage>,
+  entryId: () => ContextEntryId,
+):
+  | {
+      readonly materials: ReadonlyArray<ContextMaintenanceMaterial>;
+      readonly throughSource: ContextSourceRef;
+    }
+  | undefined {
+  const kept: Array<ContextMaintenanceMaterial> = [];
+  let throughSource: ContextSourceRef | undefined;
+  let characters = 0;
+  for (let index = conversation.length - 1; index >= 0; index -= 1) {
+    const message = conversation[index];
+    if (message === undefined || message.content.trim().length === 0) continue;
+    const content = `${message.role === "user" ? "User" : "Assistant"}: ${message.content}`;
+    if (characters + content.length > MAX_HANDOVER_MATERIAL_CHARACTERS) break;
+    characters += content.length;
+    throughSource ??= message.source;
+    kept.push({ entryId: entryId(), content, sizeTokens: Math.ceil(content.length / 4) });
+  }
+  return throughSource === undefined ? undefined : { materials: kept.reverse(), throughSource };
+}
+
+function combinedUsage(
+  left: ReportedCompactionUsage | undefined,
+  right: ReportedCompactionUsage | undefined,
+): ReportedCompactionUsage | undefined {
+  if (left === undefined) return right;
+  if (right === undefined) return left;
+  return {
+    inputTokens: left.inputTokens + right.inputTokens,
+    outputTokens: left.outputTokens + right.outputTokens,
+  };
 }

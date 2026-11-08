@@ -187,6 +187,7 @@ describe("Journal", () => {
         autoCompactOctantWindowPercent: 85,
         autoCompactRuntimeWindowPercent: null,
         autoCompactIdleMinutes: null,
+        autoCompactLimitPercent: null,
         lastContextSurface: "project-memory",
         sidebarMaterial: "system",
         workspaceMaterial: "opaque",

@@ -204,6 +204,7 @@ import {
   restartHandoffRecord,
   conversationHandoffRefusalMessage,
   providerSwitchHandoffRecord,
+  withHandoverSummary,
   selectionBelongsToThread,
   type ConversationHandoffRefusal,
 } from "../agentRun/conversationHandoff";
@@ -3450,16 +3451,37 @@ export class ChatService {
       projectId: thread.projectId === undefined ? undefined : String(thread.projectId),
     });
     if (owned !== "ok") return refuse(owned);
+    if (reason === "provider-switch" && source.from !== undefined) {
+      const switched = withHandoverSummary(selection, this.#handoverSummary(thread.id));
+      return {
+        blocks: switched.blocks,
+        selection: switched,
+        record: providerSwitchHandoffRecord(switched, source.from),
+      };
+    }
     return {
       blocks: selection.blocks,
       selection,
       record:
         reason === "rewind"
           ? restartHandoffRecord(selection, "rewind")
-          : reason === "branch" || source.from === undefined
-            ? branchHandoffRecord(selection)
-            : providerSwitchHandoffRecord(selection, source.from),
+          : branchHandoffRecord(selection),
     };
+  }
+
+  /** The limit rule's summary for the thread, if one is waiting for a move. */
+  #handoverSummary(
+    threadId: ChatThreadId,
+  ): { readonly content: string; readonly completedAt: string } | undefined {
+    try {
+      return this.#contextHarness.handoverSummary(
+        decodeContextSubjectRef({ aggregateType: "chat-thread", aggregateId: String(threadId) }),
+        this.sessionCompactionConversation(threadId),
+      );
+    } catch {
+      // A ledger that cannot be read hands over the raw selection, as before.
+      return undefined;
+    }
   }
 
   async #retryTurn(

@@ -15,6 +15,7 @@ const subject = decodeContextSubjectRef({
   aggregateId: "11111111-1111-4111-8111-111111111111",
 });
 const windowId = decodeWindowId("82000000-0000-4000-8000-000000000001");
+const providerInstanceId = decodeProviderInstanceId("81000000-0000-4000-8000-000000000001");
 const endedAt = "2026-11-07T10:00:00.000Z";
 const minutes = (count: number) => Date.parse(endedAt) + count * 60_000;
 
@@ -37,7 +38,7 @@ function harness(input: {
         fills += 1;
         return "fill" in input
           ? input.fill
-          : { tokens: 60_000, contextWindow: 200_000, keeper: "runtime" };
+          : { tokens: 60_000, contextWindow: 200_000, keeper: "runtime", providerInstanceId };
       },
       start: (...args: Start) => {
         starts.push(args);
@@ -157,7 +158,9 @@ describe("compacting a thread that has gone quiet", () => {
     after.idle.turnEnded({ subject, endedAt, windowId });
     after.at(31);
     after.idle.pass();
-    const small = harness({ fill: { tokens: 5_000, contextWindow: 200_000, keeper: "runtime" } });
+    const small = harness({
+      fill: { tokens: 5_000, contextWindow: 200_000, keeper: "runtime", providerInstanceId },
+    });
     small.idle.turnEnded({ subject, endedAt, windowId });
     small.at(31);
     small.idle.pass();
@@ -171,7 +174,12 @@ describe("compacting a thread that has gone quiet", () => {
     let now = minutes(0);
     const idle = new IdleCompactions({
       compactions: {
-        windowFill: () => ({ tokens: 60_000, contextWindow: 200_000, keeper: "runtime" }),
+        windowFill: () => ({
+          tokens: 60_000,
+          contextWindow: 200_000,
+          keeper: "runtime",
+          providerInstanceId,
+        }),
         start: (...args: Start) => {
           starts.push(args);
           return { kind: "compaction-refused", reason: "no-session" };

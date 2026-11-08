@@ -1218,7 +1218,8 @@ Octant compacts a thread on its own only by a rule the person set in Settings: t
 - By default Octant compacts the threads it keeps (Octant Harness, and Chat and Work on a direct endpoint) at 85% of the window, and leaves runtimes that compact by themselves to their own point.
 - Every rule-started compaction records its cause, and the timeline says which rule ran and how full the window was.
 - A rule never switches a thread to another provider; the person picks the next model.
-- Built: the window-fill rule between turns, and the idle rule (off by default). Not built yet: the limit rule with its handover summary, and handing the share to runtimes and to Octant Harness inside a turn.
+- The limit rule (off by default) compacts a thread once per account-limit period and, for Chat and Work, first writes a summary with the thread's own provider that a switch to another provider leads with. The thread then says it is ready to move, with **Switch model**.
+- Built: the window-fill rule, the idle rule, and the limit rule with its handover summary. Not built yet: a handover summary for Code threads, and handing the share to runtimes and to Octant Harness inside a turn.
 
 Status: Partly built. Since: 2026-11-07. Detail: [Automatic compaction](automatic-compaction.md).
 

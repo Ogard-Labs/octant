@@ -96,6 +96,7 @@ const settings = {
   autoCompactOctantWindowPercent: 85,
   autoCompactRuntimeWindowPercent: null,
   autoCompactIdleMinutes: null,
+  autoCompactLimitPercent: null,
   navigatorAssistant: {},
   voice: {},
   imageGeneration: { customSources: [] },

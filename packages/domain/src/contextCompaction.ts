@@ -520,3 +520,58 @@ export function decideIdleCompaction(facts: IdleFacts): ContextCompactionCause |
   if (idleMinutes < thresholdMinutes || tokens < IDLE_COMPACTION_MIN_TOKENS) return undefined;
   return { kind: "idle", idleMinutes, thresholdMinutes };
 }
+
+export interface AccountWindowFacts {
+  readonly window: string;
+  readonly status: "allowed" | "warning" | "exhausted";
+  /** Share used, 0 to 1, when the provider reports one. */
+  readonly utilization?: number | undefined;
+  readonly resetsAt?: string | undefined;
+}
+
+export interface LimitFacts {
+  /** The person's rule, in percent; `null` means never. */
+  readonly thresholdPercent: number | null;
+  /** The account windows the thread's provider instance last reported. */
+  readonly windows: ReadonlyArray<AccountWindowFacts>;
+  /** Epoch milliseconds. */
+  readonly now: number;
+}
+
+/**
+ * Whether the thread's provider is close enough to an account limit to
+ * compact the thread and ready it to move, the cause it records, and the
+ * crossing it answers: one window's period, named by when it resets. The same
+ * crossing seen again is the same compaction, so a thread is compacted once
+ * per limit period, not once per turn. A window that names no reset, or has
+ * already reset, cannot tell one period from the next and is passed over.
+ */
+export function decideLimitCompaction(
+  facts: LimitFacts,
+): { readonly cause: ContextCompactionCause; readonly crossing: string } | undefined {
+  const { thresholdPercent, windows, now } = facts;
+  if (thresholdPercent === null) return undefined;
+  let chosen: { readonly window: AccountWindowFacts; readonly usedPercent: number } | undefined;
+  for (const window of windows) {
+    if (window.resetsAt === undefined || !(Date.parse(window.resetsAt) > now)) continue;
+    const used =
+      window.utilization !== undefined
+        ? // 0.58 × 100 is 57.999…; the nudge keeps a reported 58% at 58.
+          Math.floor(window.utilization * 100 + 1e-9)
+        : window.status === "exhausted"
+          ? 100
+          : undefined;
+    if (used === undefined || used < thresholdPercent) continue;
+    if (chosen === undefined || used > chosen.usedPercent) chosen = { window, usedPercent: used };
+  }
+  if (chosen === undefined) return undefined;
+  return {
+    cause: {
+      kind: "limit-near",
+      window: chosen.window.window,
+      usedPercent: Math.min(100, chosen.usedPercent),
+      thresholdPercent,
+    },
+    crossing: `${chosen.window.window}:${String(chosen.window.resetsAt)}`,
+  };
+}

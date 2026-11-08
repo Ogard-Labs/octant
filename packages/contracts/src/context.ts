@@ -767,6 +767,13 @@ export const AutoCompactIdleMinutes = Schema.Int.pipe(
 );
 export type AutoCompactIdleMinutes = typeof AutoCompactIdleMinutes.Type;
 
+export const MIN_AUTO_COMPACT_LIMIT_PERCENT = 50;
+export const MAX_AUTO_COMPACT_LIMIT_PERCENT = 99;
+export const AutoCompactLimitPercent = Schema.Int.pipe(
+  Schema.between(MIN_AUTO_COMPACT_LIMIT_PERCENT, MAX_AUTO_COMPACT_LIMIT_PERCENT),
+);
+export type AutoCompactLimitPercent = typeof AutoCompactLimitPercent.Type;
+
 /**
  * Why Octant compacted a thread on its own, by a rule the person set. Absent
  * on a compaction the person asked for and on one a runtime made by itself.
@@ -784,6 +791,14 @@ export const ContextCompactionCause = Schema.Union(
     idleMinutes: Schema.Int.pipe(Schema.greaterThanOrEqualTo(0)),
     thresholdMinutes: AutoCompactIdleMinutes,
   }).annotations(strict),
+  Schema.Struct({
+    kind: Schema.Literal("limit-near"),
+    /** The provider's name for the account window, as its usage reading gives it. */
+    window: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(64)),
+    /** How much of that window was used when the rule acted, 0 to 100. */
+    usedPercent: Schema.Int.pipe(Schema.between(0, 100)),
+    thresholdPercent: AutoCompactLimitPercent,
+  }).annotations(strict),
 );
 export type ContextCompactionCause = typeof ContextCompactionCause.Type;
 
@@ -797,6 +812,22 @@ export const ContextCompactionReceipt = Schema.Struct({
   tokensAfter: ContextCompactionTokensAfter,
   tokensFreed: ContextCompactionTokensFreed,
   summary: ContextCompactionSummary,
+  /**
+   * A summary the host wrote alongside a runtime's own compaction, so a move
+   * to another provider can carry it. Only the limit rule writes one; a
+   * compaction the host summarized needs none, since its summary is stored.
+   */
+  handover: Schema.optional(
+    Schema.Struct({
+      summaryId: ContextSummaryId,
+      /**
+       * The last message the summary read. A move carries the summary only
+       * while that message is still in the thread, so a rewind past it never
+       * brings removed turns back.
+       */
+      throughSource: ContextSourceRef,
+    }).annotations(strict),
+  ),
   usage: ContextCompactionUsage,
   completedAt: UtcTimestamp,
 })

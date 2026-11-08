@@ -21,6 +21,7 @@ import type { AgentRunParentContextSelection } from "../agentRun/agentRunParentC
 import {
   conversationHandoffRefusalMessage,
   providerSwitchHandoffRecord,
+  withHandoverSummary,
   restartHandoffRecord,
   selectionBelongsToThread,
   type ConversationHandoffRefusal,
@@ -679,11 +680,15 @@ export class WorkTurnService {
         selection,
         record: restartHandoffRecord(selection, reason === "branch" ? "fork" : "rewind"),
       };
-    return {
-      blocks: selection.blocks,
+    const switched = withHandoverSummary(
       selection,
+      this.#handoverSummary("work-thread", thread.id),
+    );
+    return {
+      blocks: switched.blocks,
+      selection: switched,
       record: providerSwitchHandoffRecord(
-        selection,
+        switched,
         // A handoff that never completed is made again from the provider the
         // conversation came from, not the one that may not have received it.
         previous.handoff?.reason === "provider-switch" && previous.status !== "completed"
@@ -697,6 +702,22 @@ export class WorkTurnService {
             },
       ),
     };
+  }
+
+  /** The limit rule's summary for the thread, if one is waiting for a move. */
+  #handoverSummary(
+    aggregateType: "work-thread",
+    threadId: WorkThreadId,
+  ): { readonly content: string; readonly completedAt: string } | undefined {
+    try {
+      return this.#contextHarness?.handoverSummary(
+        decodeContextSubjectRef({ aggregateType, aggregateId: String(threadId) }),
+        this.sessionCompactionConversation(threadId),
+      );
+    } catch {
+      // A ledger that cannot be read hands over the raw selection, as before.
+      return undefined;
+    }
   }
 
   #agentResultDelivery(command: StartWorkThreadTurnCommand): WorkTurnLookupResult | undefined {

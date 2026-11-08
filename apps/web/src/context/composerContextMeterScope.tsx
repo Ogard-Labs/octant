@@ -26,6 +26,13 @@ export interface ComposerContextMeterScopeValue {
    */
   readonly openUsage?: () => void;
   readonly openNonce: number;
+  /** Counts requests to open the composer's model picker; the picker opens on each change. */
+  readonly modelPickerNonce: number;
+  /**
+   * Opens the composer's model picker, from outside it (the limit notice).
+   * Absent where no composer is in scope to answer.
+   */
+  readonly requestModelPicker?: () => void;
   readonly rebuild: () => void;
   readonly requestOpen: () => void;
   readonly setExcluded: (entryId: ContextEntryId, excluded: boolean) => void;
@@ -83,6 +90,7 @@ const ComposerContextMeterDataContext = createContext<
 >({
   busy: false,
   openNonce: 0,
+  modelPickerNonce: 0,
   rebuild: ignoredRebuild,
   requestOpen: () => undefined,
   setExcluded: ignoredOverride,
@@ -112,6 +120,10 @@ export function ComposerContextMeterProvider(props: ComposerContextMeterProvider
   const requestOpen = useCallback(() => {
     setOpenNonce((current) => current + 1);
   }, []);
+  const [modelPickerNonce, setModelPickerNonce] = useState(0);
+  const requestModelPicker = useCallback(() => {
+    setModelPickerNonce((current) => current + 1);
+  }, []);
   const rebuild = props.onRebuild ?? ignoredRebuild;
   const setExcluded = props.onSetExcluded ?? ignoredOverride;
   const setPinned = props.onSetPinned ?? ignoredOverride;
@@ -119,6 +131,8 @@ export function ComposerContextMeterProvider(props: ComposerContextMeterProvider
     () => ({
       busy: props.busy === true,
       openNonce,
+      modelPickerNonce,
+      requestModelPicker,
       rebuild,
       requestOpen,
       setExcluded,
@@ -136,6 +150,8 @@ export function ComposerContextMeterProvider(props: ComposerContextMeterProvider
       props.compaction,
       props.onOpenUsage,
       openNonce,
+      modelPickerNonce,
+      requestModelPicker,
       props.snapshot,
       props.fallback,
       props.status,

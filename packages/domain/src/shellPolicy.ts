@@ -175,6 +175,7 @@ export function defaultShellSettings(): ShellSettings {
     autoCompactOctantWindowPercent: DEFAULT_AUTO_COMPACT_OCTANT_WINDOW_PERCENT,
     autoCompactRuntimeWindowPercent: null,
     autoCompactIdleMinutes: null,
+    autoCompactLimitPercent: null,
     openInApplications: [...DEFAULT_OPEN_IN_APPLICATIONS],
     transcriptTextSize: "small",
     transcriptWidth: "narrow",

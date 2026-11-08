@@ -1,12 +1,14 @@
 import type {
   ContextCompactionCause,
   ContextCompactionExecutor,
+  ContextCompactionReceipt,
   ContextCompactionFailureReason,
   ContextCompactionRecord,
   ContextCompactionRefusalReason,
 } from "@octant/contracts/context";
 import type { ContextCompactionState } from "@octant/contracts/context-rpc";
 import type { ProviderInstanceId, ProviderModelId } from "@octant/contracts/providers";
+import { providerLimitWindowLabel } from "../providers/providerLimitWindow";
 import { driverLabel, isModelEndpointDriverKind } from "../providers/providerSettingsPresentation";
 import { compactTokenCount } from "./contextInspectorModel";
 
@@ -195,9 +197,29 @@ function sentence(clause: string): string {
   return `${clause.charAt(0).toUpperCase()}${clause.slice(1)}.`;
 }
 
-/** Which rule acted and what it measured: "window 91% full", "idle 31 min". */
+/**
+ * Which rule acted and what it measured: "window 91% full", "idle 31 min",
+ * "5-hour limit 91%".
+ */
 function causeClause(cause: ContextCompactionCause): string {
   if (cause.kind === "window-fill") return `window ${String(cause.filledPercent)}% full`;
+  if (cause.kind === "limit-near") {
+    return `${providerLimitWindowLabel(cause.window)} ${String(cause.usedPercent)}%`;
+  }
   const hours = Math.floor(cause.idleMinutes / 60);
   return hours < 2 ? `idle ${String(cause.idleMinutes)} min` : `idle ${String(hours)} h`;
+}
+
+/**
+ * What the person is told after the limit rule compacted a thread, so they
+ * can move it before the limit stops them; undefined for any other cause.
+ */
+export function limitNearNotice(
+  receipt: ContextCompactionReceipt,
+  names: CompactionNames,
+): string | undefined {
+  const { cause } = receipt;
+  if (cause?.kind !== "limit-near") return undefined;
+  const limit = providerLimitWindowLabel(cause.window);
+  return `${executorName(receipt.executor, names)} is at ${String(cause.usedPercent)}% of its ${limit}. This thread is compacted and ready to move.`;
 }

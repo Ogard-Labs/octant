@@ -6553,7 +6553,10 @@ checkout its window resolved, so a rule compacts a Code thread only under the
 window whose turn crossed it, and only while that window is still open. The requested event and
 the receipt carry the rule's `cause`, and the timeline line reads, for example,
 "Compacted automatically · window 91% full · 41.2K freed · summary by Octant
-Harness". A rule never starts a replacement session on another provider. Which
+Harness". The limit rule, before a runtime compacts a Chat or Work thread, asks
+the thread's own provider for a summary of the conversation the host holds; the
+receipt names it as `handover`, and a provider switch leads its handoff with it.
+A rule never starts a replacement session on another provider. Which
 rules exist, their defaults, and what is built are owned by
 [Automatic compaction](design/automatic-compaction.md).
 
