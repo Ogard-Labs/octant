@@ -135,11 +135,13 @@ function MovableComputerCard(props: ThreadMoveComputerCardProps & { client: Thre
                 takeBackOffered={takeBackOffered}
                 thread={props.thread}
               />
-              {/* A thread that is moving, waiting for its turn, or still
-                  arriving here is held, so it offers no other move. */}
+              {/* A thread that is moving, waiting for its turn, still
+                  arriving here, or handed over is held, so it offers no
+                  other move. */}
               {status?.sending !== undefined ||
               status?.waiting !== undefined ||
-              status?.arriving !== undefined ? null : (
+              status?.arriving !== undefined ||
+              status?.handedOver !== undefined ? null : (
                 <DestinationPicker
                   mode={props.thread.mode}
                   chosenMember={chosenMember}

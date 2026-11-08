@@ -2282,10 +2282,12 @@ a numbered slice. Built, with these narrower readings:
     this computer, and is at most 32 KiB. The thread stays frozen, marked
     Handed over with the branch and whether it was pushed (`push-failed` and
     `no-remote` say the work is on no other computer yet), held across a
-    restart, until **Take back here**. What it does not do yet: the agent's
-    own summary turn, the notice to a chosen destination, Handovers on the
-    destination's start screen, Continue handover, and the erase once a
-    destination continues it.
+    restart, until **Take back here**. While it is held, no move of the
+    thread can start: the move service refuses any frozen thread as busy
+    before touching it, and the Computer card offers no destination. What it
+    does not do yet: the agent's own summary turn, the notice to a chosen
+    destination, Handovers on the destination's start screen, Continue
+    handover, and the erase once a destination continues it.
 
     The ninth part is the handover's destination side. A handover started
     with a chosen member sends it a signed notice (`POST

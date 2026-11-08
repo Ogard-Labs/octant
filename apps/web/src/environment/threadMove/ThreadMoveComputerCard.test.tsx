@@ -335,7 +335,10 @@ describe("the Computer card", () => {
       />,
     );
 
-    await user.click(await screen.findByRole("button", { name: "Hand over instead" }));
+    // The picker is open when the person hands over instead.
+    await user.click(await screen.findByRole("button", { name: "Choose another computer" }));
+    expect(await screen.findByRole("radio", { name: /Desktop/ })).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Hand over instead" }));
     const sheet = await screen.findByRole("dialog");
     expect(sheet).toHaveTextContent("feature/dark-mode");
     expect(sheet).toHaveTextContent("Then pushes it to origin, never forced.");
@@ -345,6 +348,8 @@ describe("the Computer card", () => {
     expect(
       await screen.findByText(/committed and pushed on feature\/dark-mode/),
     ).toBeInTheDocument();
+    // A handed-over thread is held, so it offers no other move.
+    expect(screen.queryByRole("radio", { name: /Desktop/ })).not.toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "Take back here" }));
     await waitFor(() => expect(takenBack).toEqual(["12345678-1234-4234-8234-123456789012"]));
   });

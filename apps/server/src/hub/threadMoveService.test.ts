@@ -294,6 +294,16 @@ describe("moving a thread", () => {
     expect(h.arrived).toEqual([]);
   });
 
+  it("refuses to move a thread a handover holds, and leaves that hold in place", async () => {
+    const h = harness();
+    // Handed over: the thread is frozen by its handover, not by any move.
+    h.frozen.add(chatThread.threadId);
+
+    expect(await start(h)).toEqual({ status: "failed", reason: "busy" });
+    expect(h.frozen.has(chatThread.threadId)).toBe(true);
+    expect(h.arrived).toEqual([]);
+  });
+
   it("answers a member without Move in exactly as one without a ticket", async () => {
     const h = harness({ grant: { moveIn: false } });
     expect(await start(h)).toEqual({ status: "failed", reason: "refused" });
