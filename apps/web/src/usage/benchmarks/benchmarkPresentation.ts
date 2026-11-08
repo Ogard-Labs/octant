@@ -577,6 +577,13 @@ function checkToRaw(
       };
     case "equals":
       if (check.text.trim() === "") return { message: `${where} needs the text to compare to.` };
+      // The contract stores trimmed text only, so an exact match on surrounding
+      // space cannot be saved; saying so beats trimming it behind the person's back.
+      if (!check.trim && check.text !== check.text.trim()) {
+        return {
+          message: `${where} has spaces around its text, and surrounding spaces can't be matched exactly. Remove them or tick "Ignore surrounding space".`,
+        };
+      }
       return { raw: { kind: "equals", text: check.text.trim(), trim: check.trim } };
     case "matches": {
       if (check.pattern.trim() === "") return { message: `${where} needs a pattern.` };

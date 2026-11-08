@@ -1,3 +1,4 @@
+import { OctantButton } from "../../ui/base/OctantButton";
 import { useCallback, useMemo, useState } from "react";
 import type {
   BenchmarkCellMetrics,
@@ -130,9 +131,14 @@ export function BenchmarkLeaderboard(props: BenchmarkLeaderboardProps) {
     );
   const header = (column: LeaderboardColumn, label: string) => (
     <th aria-sort={sort.column === column ? sort.direction : "none"} key={column} scope="col">
-      <button className="benchmark-sort" onClick={() => choose(column)} type="button">
+      <OctantButton
+        variant="bare"
+        className="benchmark-sort"
+        onClick={() => choose(column)}
+        type="button"
+      >
         {label}
-      </button>
+      </OctantButton>
     </th>
   );
 
@@ -167,7 +173,8 @@ export function BenchmarkLeaderboard(props: BenchmarkLeaderboardProps) {
             {sorted.map((row) => (
               <tr key={row.contenderIndex}>
                 <th scope="row">
-                  <button
+                  <OctantButton
+                    variant="bare"
                     aria-expanded={openIndex === row.contenderIndex}
                     className="benchmark-link"
                     onClick={() =>
@@ -178,7 +185,7 @@ export function BenchmarkLeaderboard(props: BenchmarkLeaderboardProps) {
                     type="button"
                   >
                     {labelOf(row)}
-                  </button>
+                  </OctantButton>
                 </th>
                 {COLUMNS.map((spec) => (
                   <td key={spec.column}>{spec.show(row, labelOf)}</td>
@@ -222,14 +229,15 @@ export function BenchmarkLeaderboard(props: BenchmarkLeaderboardProps) {
                     return (
                       <tr key={String(cell.cellId)}>
                         <th scope="row">
-                          <button
+                          <OctantButton
+                            variant="bare"
                             className="benchmark-link"
                             onClick={() => props.onSelectCase(String(cell.caseId))}
                             type="button"
                           >
                             {benchmarkCase?.title ?? "A case"}
                             {props.run.repetitions > 1 ? ` · run ${cell.repetition}` : ""}
-                          </button>
+                          </OctantButton>
                         </th>
                         <td>
                           <CellState state={cell.state} />

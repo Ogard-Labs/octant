@@ -25,9 +25,11 @@
   color: inherit;
   font: inherit;
   text-align: left;
+  white-space: normal;
   background: none;
   border: 0;
   cursor: default;
+  justify-content: flex-start;
 }
 
 .benchmark-link:hover,

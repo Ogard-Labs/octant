@@ -1,3 +1,4 @@
+import { OctantCheckbox } from "../../ui/base/OctantCheckbox";
 import { Play } from "lucide-react";
 import { useMemo, useState } from "react";
 import {
@@ -146,14 +147,12 @@ export function BenchmarkRunBuilder(props: BenchmarkRunBuilderProps) {
               <span className="usage-workspace__note">{instanceName}</span>
               {models.map((model) => (
                 <label className="benchmark-editor__toggle" key={model.key}>
-                  <input
+                  <OctantCheckbox
                     checked={chosen.includes(model.key)}
-                    className="octant-checkbox"
                     disabled={
                       !chosen.includes(model.key) && chosen.length >= MAX_BENCHMARK_CONTENDERS
                     }
                     onChange={(event) => toggle(model.key, event.currentTarget.checked)}
-                    type="checkbox"
                   />
                   <span>{model.label}</span>
                 </label>
