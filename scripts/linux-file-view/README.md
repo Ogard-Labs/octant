@@ -237,10 +237,14 @@ retains uncertainty for unconfirmed identities/groups rather than treating a
 relay exit or closed pipe as complete descendant proof. The added guest session
 cases require readiness before effects, pre-launch cancellation, real early
 exit, deadline/cancellation, duplex pressure, private receipt masking and actual
-owner death. PID1 separately joins the deliberately orphaned worker. Added
-source is not an executed native pass; this port remains unselected, the device
-is root-only, and complete policy/data routes, eligible-host lifecycle and
-controller reliability remain unfinished with production coverage zero.
+owner death. PID1 separately joins the deliberately orphaned worker.
+
+The runtime-expiry case uses the existing ten-second scenario budget so the
+owned worker can finish preparation and prove the command has launched before
+expiry. Preparation still counts toward that same caller deadline.
+The complete session suite has not passed; this port remains unselected, the
+device is root-only, and complete policy/data routes, eligible-host lifecycle
+and controller reliability remain unfinished with production coverage zero.
 
 Dispatch `experiment=kernel-admission` to compile and boot a pinned Linux 6.18
 guest under networkless QEMU TCG in the owned ephemeral runner. The upstream

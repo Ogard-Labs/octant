@@ -163,7 +163,7 @@ if (process.argv[2] === "--linux-mediation-worker") {
         cleanup: "confirmed",
       });
       outcomes.push("caller-cancellation-joins");
-      const bounded = await start("--session-wait", 1_000);
+      const bounded = await start("--session-wait", 10_000);
       assert.deepEqual(await bounded.exited, {
         result: { status: "unavailable", reason: "deadline" },
         cleanup: "confirmed",
