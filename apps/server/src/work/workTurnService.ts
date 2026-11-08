@@ -1,4 +1,5 @@
 import type { ConversationInputReceipt } from "@octant/contracts/conversation-inputs";
+import { THREAD_MOVING_REFUSAL } from "../hub/threadMoveHolds";
 import type { ConversationInputTransfer } from "../attachments/conversationInputTransfer";
 import { conversationInputReceiptBlock } from "../attachments/conversationInputs";
 import { SIDE_CHAT_RETURN_UNAVAILABLE, type SideChatReturnResolver } from "../chat/sideChatReturn";
@@ -266,6 +267,8 @@ export interface ServerWorkTurns {
 }
 
 export interface WorkTurnServiceDependencies {
+  /** Whether a move holds a thread; a held thread starts no turn. */
+  readonly moveHold?: (threadId: string) => boolean;
   readonly resolveSideChatReturns?: SideChatReturnResolver;
   readonly resolveSelectedExtensions?: SelectedExtensionResolver;
   /** The plugins pinned to a Project, offered on every turn there without a per-send selection. */
@@ -574,7 +577,10 @@ export class WorkTurnService {
   readonly #liveTasks = new Map<string, ThreadTaskProgressList>();
   readonly #liveToolSteps = new Map<string, ThreadToolSteps>();
 
+  readonly #moveHold: ((threadId: string) => boolean) | undefined;
+
   constructor(dependencies: WorkTurnServiceDependencies) {
+    this.#moveHold = dependencies.moveHold;
     this.#runningAccess = dependencies.runningAccess ?? new Map();
     this.#contextHarness = dependencies.contextHarness;
     this.#resolveSelectedExtensions = dependencies.resolveSelectedExtensions;
@@ -832,6 +838,9 @@ export class WorkTurnService {
       externalData === undefined ? undefined : workExternalInputReceipt(externalData);
     if (options?.admissionCurrent?.() === false) {
       throw this.#failure("unauthorized", "Work turn admission is no longer current.");
+    }
+    if (this.#moveHold?.(String(command.threadId)) === true) {
+      throw this.#failure("stale", THREAD_MOVING_REFUSAL);
     }
     const thread = await this.#threads.read(authenticatedWindowId, command.threadId);
     // The level this turn runs at, fixed at admission: the thread's own,

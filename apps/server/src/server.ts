@@ -970,6 +970,7 @@ export function startOctantServer(
       workTurnService,
       workflowService,
     } = yield* wireWork({
+      threadMoveHolds,
       conversationInputTransfer,
       codeBoardEventStore,
       personMemoryAccess,
