@@ -4,6 +4,7 @@
 #include <cwchar>
 #include <cstdlib>
 #include <exception>
+#include <cstddef>
 #include <string>
 #include <vector>
 
@@ -58,9 +59,10 @@ int wmain(int argc, wchar_t** argv) {
     // real restricting-SID principal class. Both access checks retain the
     // original enabled identities; native admission must still reject the list.
     std::vector<unsigned char> groups;
-    if (!information(original.value, TokenGroups, groups) || groups.size() < sizeof(TOKEN_GROUPS)) return refuse("restricting-groups");
+    constexpr size_t group_header = offsetof(TOKEN_GROUPS, Groups);
+    if (!information(original.value, TokenGroups, groups) || groups.size() < group_header) return refuse("restricting-groups");
     const auto memberships = reinterpret_cast<const TOKEN_GROUPS*>(groups.data());
-    if (memberships->GroupCount > groups.size() / sizeof(SID_AND_ATTRIBUTES)) return refuse("restricting-group-bound");
+    if (memberships->GroupCount > (groups.size() - group_header) / sizeof(SID_AND_ATTRIBUTES)) return refuse("restricting-group-bound");
     std::vector<SID_AND_ATTRIBUTES> restricted{{reinterpret_cast<const TOKEN_USER*>(user.data())->User.Sid, 0}};
     for (DWORD i = 0; i < memberships->GroupCount; ++i) {
       const auto& group = memberships->Groups[i];
