@@ -30,6 +30,7 @@ export {
   type HostRuntimeOwnershipErrorCode,
   type HostRuntimeRestoreOutcome,
 } from "./owner";
+export { attachWindowsHostRuntimeOwner } from "./windowsHostOwner";
 export {
   acquireWindowsHostProfileOwner,
   resolveWindowsHostProfile,
