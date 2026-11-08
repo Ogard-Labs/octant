@@ -116,6 +116,10 @@ try {
       $octantArgumentLayout = 'image-not-leading'
       $octantArgumentTokenShapes = @()
       $octantArgumentPathShapes = @()
+      $octantArgumentPathKinds = @()
+      $octantArgumentQuotedUrlMatches = @()
+      $octantArgumentTokenCount = 0
+      $octantExactRepeatedImageUrlSequence = $false
       $octantTrimmedCommand = $octantCommand.Trim()
       $octantPackageAppRoot = [IO.Path]::GetFullPath((Join-Path $PackageDirectory 'resources/app'))
       $octantPackageAppEntry = [IO.Path]::GetFullPath((Join-Path $octantPackageAppRoot 'apps/desktop/dist/entry.mjs'))
@@ -134,6 +138,49 @@ try {
             'electron-url'
           } else {
             'extra-or-other-argument'
+          }
+          $octantDiagnosticTokens = @(
+            [regex]::Matches($octantArguments, '"[^"]*"|\S+') |
+              ForEach-Object { $_.Value }
+          )
+          $octantArgumentTokenCount = $octantDiagnosticTokens.Count
+          if ($octantDiagnosticTokens.Count -eq 4) {
+            foreach ($octantPathIndex in @(0, 2)) {
+              $octantPathToken = [string]$octantDiagnosticTokens[$octantPathIndex]
+              $octantPathWasQuoted = $octantPathToken.StartsWith('"') -and $octantPathToken.EndsWith('"')
+              if ($octantPathWasQuoted) { $octantPathToken = $octantPathToken.Substring(1, $octantPathToken.Length - 2) }
+              $octantPathKind = 'outside-staged-package'
+              foreach ($octantPathSpelling in $octantPathSpellings) {
+                if ([string]::Equals($octantPathSpelling, $octantPathToken, [StringComparison]::OrdinalIgnoreCase)) {
+                  $octantPathKind = if ($octantPathSpelling.StartsWith('\\?\')) { 'staged-executable-namespaced' } else { 'staged-executable-ordinary' }
+                  break
+                }
+              }
+              if ($octantPathKind -eq 'outside-staged-package' -and
+                  ($octantPathToken -match '^[A-Za-z]:\\' -or $octantPathToken.StartsWith('\\?\'))) {
+                $octantNormalizedPath = $octantPathToken
+                if ($octantNormalizedPath.StartsWith('\\?\')) { $octantNormalizedPath = $octantNormalizedPath.Substring(4) }
+                $octantNormalizedPath = [IO.Path]::GetFullPath($octantNormalizedPath)
+                if ($octantNormalizedPath.StartsWith($octantPackageRoot, [StringComparison]::OrdinalIgnoreCase)) {
+                  $octantPathKind = 'other-path-in-staged-package'
+                }
+              }
+              if ($octantPathWasQuoted) {
+                $octantPathKind += '-quoted'
+              } else {
+                $octantPathKind += '-unquoted'
+              }
+              $octantArgumentPathKinds += $octantPathKind
+            }
+            $octantArgumentQuotedUrlMatches = @(
+              ($octantDiagnosticTokens[1] -ceq '"%1"'),
+              ($octantDiagnosticTokens[3] -ceq '"%1"')
+            )
+            $octantExactRepeatedImageUrlSequence =
+              $octantArgumentPathKinds[0] -match '^staged-executable-' -and
+              $octantArgumentQuotedUrlMatches[0] -and
+              $octantArgumentPathKinds[1] -match '^staged-executable-' -and
+              $octantArgumentQuotedUrlMatches[1]
           }
           foreach ($octantTokenMatch in [regex]::Matches($octantArguments, '"[^"]*"|\S+')) {
             $octantToken = $octantTokenMatch.Value
@@ -179,6 +226,10 @@ try {
         argumentLayout = $octantArgumentLayout
         argumentTokenShapes = $octantArgumentTokenShapes
         argumentPathShapes = $octantArgumentPathShapes
+        argumentPathKinds = $octantArgumentPathKinds
+        argumentQuotedUrlMatches = $octantArgumentQuotedUrlMatches
+        argumentTokenCount = $octantArgumentTokenCount
+        exactRepeatedImageUrlSequence = $octantExactRepeatedImageUrlSequence
         argument = $octantArgumentShape
         electronSeparator = $octantSeparator
       } | ConvertTo-Json -Compress)
