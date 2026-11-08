@@ -77,7 +77,11 @@ try {
             [regex]::Matches($octantArguments, '"[^"]*"|\S+') |
               ForEach-Object { $_.Value }
           )
-          $octantArgumentImageSpellings = @($octantPath, ('"' + $octantPath + '"'))
+          $octantArgumentImageSpellings = @()
+          foreach ($octantArgumentPath in $octantPathSpellings) {
+            $octantArgumentImageSpellings += $octantArgumentPath
+            $octantArgumentImageSpellings += ('"' + $octantArgumentPath + '"')
+          }
           if (
             $octantArgumentTokens.Count -eq 4 -and
             $octantArgumentImageSpellings -icontains [string]$octantArgumentTokens[0] -and
