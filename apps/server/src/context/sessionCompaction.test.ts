@@ -11,6 +11,7 @@ import {
   decodeModelContextLimits,
   decodeProviderInstance,
   decodeProviderInstanceId,
+  decodeProviderModel,
   decodeProviderModelId,
   decodeProviderServiceLimits,
   decodeProviderSessionId,
@@ -19,6 +20,7 @@ import {
   type WindowId,
   type ProjectProviderPolicy,
   type ProviderInstance,
+  type ProviderModel,
 } from "@octant/contracts";
 import type {
   ProviderAcquireInput,
@@ -140,6 +142,58 @@ describe("compacting a session on request", () => {
     // and the session it starts names none.
     expect(world.provider.sentTools).toEqual([]);
     expect(world.provider.started).not.toHaveProperty("tools");
+    world.close();
+  });
+
+  it("reads a fresh plan, not the last compaction's figure, once a turn replanned after it", async () => {
+    const world = createWorld();
+    planSession(world);
+    world.service.start(command(), "local-window");
+    await world.service.settled();
+    planSession(world);
+    expect(world.service.windowFill(subject)?.tokens).toBe(
+      world.harness.inspect(subject).next.plan.plannedInputTokens,
+    );
+    world.close();
+  });
+
+  it("records a compaction a rule the person set started, and why, on its receipt", async () => {
+    const world = createWorld();
+    planSession(world);
+    const fill = world.service.windowFill(subject);
+    expect(fill).toMatchObject({ keeper: "octant" });
+    expect(fill?.tokens).toBe(world.harness.inspect(subject).next.plan.plannedInputTokens);
+
+    const cause = { kind: "window-fill", filledPercent: 91, thresholdPercent: 85 } as const;
+    expect(world.service.start(command(), "host-policy", undefined, cause)).toMatchObject({
+      kind: "compaction-started",
+    });
+    expect(world.harness.latestCompaction(subject)).toMatchObject({ status: "running", cause });
+    await world.service.settled();
+
+    const record = world.harness.latestCompaction(subject);
+    if (record?.status !== "completed") throw new Error("The compaction completed");
+    expect(record.receipt).toMatchObject({ trigger: "requested", cause });
+    const requestedBy = world.fixture.connection
+      .prepare(
+        "SELECT json_extract(payload_json, '$.requestedBy') AS by FROM event_journal WHERE event_name = ?",
+      )
+      .all("context.compaction-requested@1") as ReadonlyArray<{ readonly by: string }>;
+    expect(requestedBy.map((row) => row.by)).toEqual(["host-policy"]);
+    world.close();
+  });
+
+  it("refuses a rule on a Code thread with no window before journaling anything", () => {
+    const world = createWorld();
+    const codeSubject = decodeContextSubjectRef({
+      aggregateType: "code-thread",
+      aggregateId: "82000000-0000-4000-8000-0000000000c1",
+    });
+    expect(world.service.start(command(codeSubject), "host-policy")).toEqual({
+      kind: "compaction-refused",
+      reason: "no-session",
+    });
+    expect(world.harness.latestCompaction(codeSubject)).toBeUndefined();
     world.close();
   });
 
@@ -1276,6 +1330,26 @@ describe("compacting a session a runtime keeps", () => {
       world.close();
     });
 
+    it("reads a Code thread's window from its model when no report names one", () => {
+      const world = createRuntimeWorld({ answer: { kind: "compacted" } }, "code-thread");
+      world.state.thread = { mode: "code", projectId, providerInstanceId, modelId };
+      world.state.model = decodeProviderModel({
+        id: String(modelId),
+        displayName: "Model",
+        source: "manual",
+        verification: "unverified",
+        reasoning: "supported",
+        inputModalities: ["text"],
+        options: [],
+        contextLimit: 200_000,
+      });
+      expect(world.service.windowFill(codeSubject)).toMatchObject({
+        tokens: 1_200,
+        contextWindow: 200_000,
+      });
+      world.close();
+    });
+
     it("calls an older usage report only an upper bound once a compaction left no figure", async () => {
       const world = createRuntimeWorld({ answer: { kind: "compacted" } }, "code-thread");
       world.state.thread = { mode: "code", projectId, providerInstanceId, modelId };
@@ -1974,6 +2048,7 @@ interface RuntimeWorldState {
   support: "supported" | "unsupported" | "unavailable" | undefined;
   hasSession: boolean;
   occupancy: { readonly tokens: number; readonly observedAt: string } | undefined;
+  model?: ProviderModel;
 }
 
 type RuntimeWorld = ReturnType<typeof createRuntimeWorld>;
@@ -2047,7 +2122,10 @@ function createRuntimeWorld(
     modeEnabled: () => state.modeEnabled,
     conversationOwner: () => "runtime",
     runtimeCompaction: () => state.support,
-    providerFacts: () => ({ provider: codexInstance() }),
+    providerFacts: () => ({
+      provider: codexInstance(),
+      ...(state.model === undefined ? {} : { model: state.model }),
+    }),
     availableDriver: () => (state.providerAvailable ? runtime.driver : undefined),
     capacity,
     spendCeiling: spend,

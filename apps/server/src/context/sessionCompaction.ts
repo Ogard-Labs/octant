@@ -5,6 +5,7 @@ import {
   type ContextCommand,
   type ContextCommandResult,
   type ContextCompactionAvailability,
+  type ContextCompactionCause,
   type ContextCompactionExecutor,
   type ContextCompactionRecord,
   type ContextCompactionRefusalReason,
@@ -21,7 +22,7 @@ import {
   type ProviderModelOptionValues,
   type WindowId,
 } from "@octant/contracts";
-import { isProviderAllowedByProjectPolicy } from "@octant/domain";
+import { isProviderAllowedByProjectPolicy, resolveModelContextWindow } from "@octant/domain";
 import { unsupportedModelOptionValues } from "@octant/domain/chat-policy";
 import {
   decideSessionCompaction,
@@ -132,9 +133,14 @@ export interface RuntimeCompactionSessions {
    * runtime reported it, and when. Absent here, the host's own plan of the
    * thread stands in.
    */
-  readonly occupancy?: (
-    threadId: string,
-  ) => { readonly tokens: number; readonly observedAt: string } | undefined;
+  readonly occupancy?: (threadId: string) =>
+    | {
+        readonly tokens: number;
+        readonly observedAt: string;
+        /** The model's window at that report, when the runtime said. */
+        readonly contextWindow?: number;
+      }
+    | undefined;
   /**
    * How to open that session, resolved when the compaction runs. Undefined
    * when the session, or the room it runs in, is gone; the runtime is then
@@ -238,7 +244,12 @@ export interface SessionCompactionOptions {
   readonly runtimeSettleGraceMs?: number;
 }
 
-type Principal = "local-window" | "remote-device";
+/**
+ * Who asks. `host-policy` is the host acting on a rule the person set in
+ * Settings, which stands in for the confirm a window shows; it is admitted
+ * exactly where a local window is.
+ */
+type Principal = "local-window" | "host-policy" | "remote-device";
 
 const NEVER_CANCELLED = new AbortController().signal;
 
@@ -317,21 +328,34 @@ export class SessionCompactionService {
   }
 
   /**
-   * `windowId` is the window that asked. A Code thread's session runs in its
-   * checkout, which is resolved under that window's authority as its turns are.
+   * `windowId` is the window that asked, or for a rule the window whose turn
+   * crossed it. A Code thread's session runs in its checkout, which is
+   * resolved under that window's authority as its turns are, so a rule never
+   * compacts a Code thread without one. `cause` is the rule's, when a rule asks.
    */
   start(
     command: CompactSessionCommand,
     principal: Principal,
     windowId?: WindowId,
+    cause?: ContextCompactionCause,
   ): SessionCompactionStart {
     const { harness } = this.#options;
     const subject = command.subject;
     // A paired device is refused even for an id it repeats: it may not learn
     // or steer a local window's compaction.
-    if (principal !== "local-window") return refused("remote-client");
+    if (principal === "remote-device") return refused("remote-client");
     const existing = harness.compaction(subject, command.compactionId);
     if (existing !== undefined) return started(existing);
+    // Refused before anything is journaled: a Code session opened without a
+    // window would be asked nothing and leave a failed compaction behind. A
+    // window that asks always names itself; only a rule can lack one.
+    if (
+      principal === "host-policy" &&
+      String(subject.aggregateType) === "code-thread" &&
+      windowId === undefined
+    ) {
+      return refused("no-session");
+    }
 
     const admission = this.#admission(subject, principal);
     if (admission.availability.status === "refused") {
@@ -357,6 +381,8 @@ export class SessionCompactionService {
         subject,
         compactionId: command.compactionId,
         executor,
+        requestedBy: principal === "host-policy" ? "host-policy" : "local-window",
+        ...(cause === undefined ? {} : { cause }),
       });
     } catch (error) {
       reservation.releaseUnstarted();
@@ -390,6 +416,53 @@ export class SessionCompactionService {
     });
     this.#running.set(key, settled);
     return started(requested.record);
+  }
+
+  /**
+   * How full the thread's window was at its latest report, and who keeps its
+   * conversation, for a rule to judge. `keeper` is `octant` where Octant keeps
+   * it (the host plan, or Octant Harness on a direct endpoint) and `runtime`
+   * where a runtime does. Reads stored facts only; undefined for a thread
+   * that is gone or has reported nothing.
+   */
+  windowFill(subject: ContextSubjectRef):
+    | {
+        readonly tokens: number;
+        readonly contextWindow: number | undefined;
+        readonly keeper: "octant" | "runtime";
+      }
+    | undefined {
+    const kind = String(subject.aggregateType);
+    const threadId = String(subject.aggregateId);
+    const threads =
+      kind === "chat-thread" || kind === "work-thread" || kind === "code-thread"
+        ? this.#options.threads[kind]
+        : undefined;
+    const thread = threads?.read(threadId);
+    if (threads === undefined || thread === undefined) return undefined;
+    const owner = this.#owner(threads, thread);
+    const planned = this.#planned(subject);
+    const report = threads.runtimeSessions?.occupancy?.(threadId);
+    // Read as a compaction reads it, so a report older than the latest
+    // compaction is not taken for what the window holds now.
+    const tokens = this.#occupancy(threads, subject)?.tokens;
+    if (tokens === undefined) return undefined;
+    // A runtime's report, else the plan's, else the model's own window as
+    // the request-fitting rules settle it: Octant Harness reports none for a
+    // Code thread, and plans none for it either.
+    const model = this.#options.providerFacts(thread.providerInstanceId, thread.modelId)?.model;
+    const contextWindow =
+      report?.contextWindow ??
+      planned?.latestUsage?.contextWindow ??
+      planned?.next.plan.inspection?.modelLimits.contextWindow ??
+      (model === undefined ? undefined : resolveModelContextWindow(model)?.contextWindow);
+    // A Code thread on an instance whose driver keeps no conversation of its
+    // own runs on Octant Harness, which Octant keeps as it keeps a plan.
+    const keeper =
+      owner === "host" || this.#options.conversationOwner(thread.providerInstanceId) === "host"
+        ? "octant"
+        : "runtime";
+    return { tokens, contextWindow, keeper };
   }
 
   /** Resolves once every compaction this process started has settled. */
@@ -865,7 +938,7 @@ export class SessionCompactionService {
     // Stored facts only, and none of them for a paired device, which is
     // refused before any of this matters.
     const standing =
-      principal === "local-window" && thread !== undefined
+      principal !== "remote-device" && thread !== undefined
         ? threads?.turnRefusal?.(threadId)
         : undefined;
     const facts = {
@@ -874,7 +947,7 @@ export class SessionCompactionService {
       owner,
       runtimeCompaction: support ?? "supported",
       turnAdmission:
-        principal !== "local-window" || thread === undefined
+        principal === "remote-device" || thread === undefined
           ? "admitted"
           : standing === "project-unavailable"
             ? "project-unavailable"

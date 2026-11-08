@@ -522,6 +522,13 @@ export const PROVIDER_CLOUD_TURN_REQUEST_SHAPE = "provider-cloud-turn";
  */
 export const PERSON_MEMORY_USAGE_AGGREGATE_TYPE = "person-memory-usage";
 
+/**
+ * One second opinion on a Work or Code decision. Like a distillation it has no
+ * context plan, and it is recorded under the thread that asked.
+ */
+export const DECISION_REVIEW_REQUEST_SHAPE = "decision-review";
+export const DECISION_REVIEW_USAGE_AGGREGATE_TYPE = "decision-review-usage";
+
 export const UsageReconciliation = Schema.Struct({
   id: UsageReconciliationId,
   planId: Schema.optional(ContextPlanId),
@@ -562,7 +569,8 @@ export const UsageReconciliation = Schema.Struct({
         reconciliation.requestShape === AGENT_RUN_TURN_REQUEST_SHAPE ||
         reconciliation.requestShape === SHIELD_REVIEW_REQUEST_SHAPE ||
         reconciliation.requestShape === PROVIDER_CLOUD_TURN_REQUEST_SHAPE ||
-        reconciliation.requestShape === PERSON_MEMORY_REQUEST_SHAPE
+        reconciliation.requestShape === PERSON_MEMORY_REQUEST_SHAPE ||
+        reconciliation.requestShape === DECISION_REVIEW_REQUEST_SHAPE
       ) {
         return reconciliation.planId === undefined && reconciliation.imageUnits === undefined;
       }
@@ -740,11 +748,36 @@ export const ContextCompactionUsage = Schema.Union(
 );
 export type ContextCompactionUsage = typeof ContextCompactionUsage.Type;
 
+/**
+ * The share of a model's context window at which a rule the person set
+ * compacts a thread. Below half, a compaction would cost more than it frees;
+ * above 95 the next reply may not fit before the runtime runs out of room.
+ */
+export const MIN_AUTO_COMPACT_WINDOW_PERCENT = 50;
+export const MAX_AUTO_COMPACT_WINDOW_PERCENT = 95;
+export const AutoCompactWindowPercent = Schema.Int.pipe(
+  Schema.between(MIN_AUTO_COMPACT_WINDOW_PERCENT, MAX_AUTO_COMPACT_WINDOW_PERCENT),
+);
+export type AutoCompactWindowPercent = typeof AutoCompactWindowPercent.Type;
+
+/**
+ * Why Octant compacted a thread on its own, by a rule the person set. Absent
+ * on a compaction the person asked for and on one a runtime made by itself.
+ */
+export const ContextCompactionCause = Schema.Struct({
+  kind: Schema.Literal("window-fill"),
+  /** How full the window was at the report that crossed the rule, 0 to 100. */
+  filledPercent: Schema.Int.pipe(Schema.between(0, 100)),
+  thresholdPercent: AutoCompactWindowPercent,
+}).annotations(strict);
+export type ContextCompactionCause = typeof ContextCompactionCause.Type;
+
 export const ContextCompactionReceipt = Schema.Struct({
   compactionId: ContextCompactionId,
   subject: ContextSubjectRef,
   executor: ContextCompactionExecutor,
   trigger: Schema.Literal("requested", "automatic"),
+  cause: Schema.optional(ContextCompactionCause),
   tokensBefore: KnownTokenMeasurement,
   tokensAfter: ContextCompactionTokensAfter,
   tokensFreed: ContextCompactionTokensFreed,
@@ -781,7 +814,9 @@ export const ContextCompactionRequested = Schema.Struct({
   subject: ContextSubjectRef,
   executor: ContextCompactionExecutor,
   // Context commands are local-window only; a paired device is refused first.
-  requestedBy: Schema.Literal("local-window"),
+  // `host-policy` is the host acting on a rule the person set in Settings.
+  requestedBy: Schema.Literal("local-window", "host-policy"),
+  cause: Schema.optional(ContextCompactionCause),
   requestedAt: UtcTimestamp,
 }).annotations(strict);
 export type ContextCompactionRequested = typeof ContextCompactionRequested.Type;
@@ -818,6 +853,7 @@ export const ContextCompactionSettledRecord = Schema.Union(
     status: Schema.Literal("failed"),
     compactionId: ContextCompactionId,
     executor: ContextCompactionExecutor,
+    cause: Schema.optional(ContextCompactionCause),
     reason: ContextCompactionFailureReason,
     sessionMayHaveChanged: Schema.Boolean,
     failedAt: UtcTimestamp,
@@ -831,6 +867,7 @@ export const ContextCompactionRecord = Schema.Union(
     status: Schema.Literal("running"),
     compactionId: ContextCompactionId,
     executor: ContextCompactionExecutor,
+    cause: Schema.optional(ContextCompactionCause),
     requestedAt: UtcTimestamp,
   }).annotations(strict),
   ...ContextCompactionSettledRecord.members,

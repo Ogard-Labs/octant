@@ -527,6 +527,7 @@ export function startOctantServer(
       credentialCommandProcess,
       prepareCredentialCommand,
       personMemorySweep,
+      decisionReviewModelPort,
       runtimeForgeChanges,
       followUpCreation,
       restartContinuation,
@@ -546,6 +547,7 @@ export function startOctantServer(
       sideTaskHost,
       sideTaskRoutes,
       hostShield,
+      observeTurnEnded,
       threadWork,
     } = wireHarness({
       personMemory,
@@ -1106,6 +1108,7 @@ export function startOctantServer(
         hostShield,
         liveProjectBrowsers,
         nativeHarnessHooks,
+        observeTurnEnded,
         persistence,
         projectService,
         providerRuntimeRegistry,
@@ -1203,6 +1206,8 @@ export function startOctantServer(
       workRequestRoutes,
       workThreadRoutes,
     } = wireWorkRequests({
+      decisionReviewModelPort,
+      isProjectPolicyTargetAllowed,
       observeWorkThreadRuntime,
       workRequestService,
       agentRunPersistence,

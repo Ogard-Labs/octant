@@ -37,9 +37,32 @@ describe("Code turn decisions", () => {
           { label: "Merge it", recommended: true },
           { label: "Hold", recommended: false },
         ],
+        askedBy: { providerInstanceId: "00000000-0000-4000-8000-000000000a07", modelId: "model-a" },
         answer: { threadId, checkoutId, operationId: asking },
       },
     ]);
+  });
+
+  it("names the model the turn ran on after the thread has moved to another model", async () => {
+    const { decisions } = fixture({
+      message: [decisionBlock],
+      thread: { modelId: "model-b" },
+    });
+    const [request] = await decisions.listForWindow(windowId);
+    expect(request?.kind === "decision" ? request.askedBy : undefined).toEqual({
+      providerInstanceId: "00000000-0000-4000-8000-000000000a07",
+      modelId: "model-a",
+    });
+  });
+
+  it("names no model when the turn's journal does not record one", async () => {
+    const { decisions } = fixture({
+      message: [decisionBlock],
+      thread: { modelId: "model-b" },
+      ranOn: null,
+    });
+    const [request] = await decisions.listForWindow(windowId);
+    expect(request?.kind === "decision" ? "askedBy" in request : undefined).toBe(false);
   });
 
   it("carries the why and urgency the block states onto the request", async () => {
@@ -137,6 +160,8 @@ function fixture(options: {
   readonly newerTurn?: "running";
   readonly unreadable?: boolean;
   readonly admitted?: boolean;
+  /** The model the turn recorded at its start; the turn records none when null. */
+  readonly ranOn?: string | null;
 }) {
   const texts = new Map<string, string>();
   let contentCounter = 0;
@@ -149,7 +174,19 @@ function fixture(options: {
       byteLength: text.length,
     });
   };
+  const ranOn = options.ranOn === undefined ? "model-a" : options.ranOn;
   const events = [
+    ...(ranOn === null
+      ? []
+      : [
+          {
+            kind: "conversation-turn-started",
+            providerInstanceId: "00000000-0000-4000-8000-000000000a07",
+            modelId: ranOn,
+            sessionId: "00000000-0000-4000-8000-000000000a09",
+            prompt: reference("Fix the parser."),
+          },
+        ]),
     ...(options.reasoning === undefined
       ? []
       : [

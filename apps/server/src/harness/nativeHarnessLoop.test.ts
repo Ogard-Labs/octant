@@ -1319,6 +1319,8 @@ describe("fitting a request to the endpoint", () => {
         cacheReadInputTokens: 60,
         cacheWriteInputTokens: 60,
         reasoningTokens: 3,
+        // What the window holds is the last request's input, cache included.
+        contextTokens: 220,
       });
 
       // The same event is what the usage dashboard reads for cache coverage.

@@ -44,7 +44,7 @@ The former decision archive is history in `docs/legacy/` and has no authority.
 | [Transcript records](#transcript-records)                                             | 1         | 1       | 0            | 0                   |
 | [Persistence](#persistence)                                                           | 10        | 9       | 1            | 0                   |
 | [Providers](#providers)                                                               | 6         | 6       | 0            | 0                   |
-| [Context and usage](#context-and-usage)                                               | 8         | 7       | 1            | 0                   |
+| [Context and usage](#context-and-usage)                                               | 9         | 7       | 2            | 0                   |
 | [Native harness](#native-harness)                                                     | 6         | 6       | 0            | 0                   |
 | [Extensions](#extensions)                                                             | 8         | 8       | 0            | 0                   |
 | [Authority and approvals](#authority-and-approvals)                                   | 7         | 7       | 0            | 0                   |
@@ -67,7 +67,7 @@ The former decision archive is history in `docs/legacy/` and has no authority.
 | [Code tooling](#code-tooling)                                                         | 2         | 1       | 1            | 0                   |
 | [Disposable desktops](#disposable-desktops)                                           | 4         | 3       | 1            | 0                   |
 | [Bots](#bots)                                                                         | 1         | 0       | 0            | 1                   |
-| **All areas**                                                                         | **228**   | **192** | **32**       | **4**               |
+| **All areas**                                                                         | **229**   | **192** | **33**       | **4**               |
 
 ## Principles and hard lines
 
@@ -1200,7 +1200,7 @@ Status: Built. Since: —. Detail: [Architecture: Context and usage accounting](
 
 ### Compact session
 
-Compact session replaces what the model sees with a summary and a recent tail, only when the person asks and outside a turn. It never deletes or rewrites the journal.
+Compact session replaces what the model sees with a summary and a recent tail, when the person asks or a rule they set asks for them, and always outside a turn. It never deletes or rewrites the journal.
 
 - Who compacts follows who owns the conversation: the host for host-planned history, the runtime where its adapter claims support. Octant refuses where the runtime cannot compact.
 - The command needs a local window that can open the thread, uses the thread's own provider and model, and needs no tool approval. A paired device is refused, and Plan stays allowed and read-only.
@@ -1209,6 +1209,18 @@ Compact session replaces what the model sees with a summary and a recent tail, o
 - No compaction has been run against a real runtime yet, and two runtimes declare no support.
 
 Status: Partly built. Since: —. Detail: [Architecture: Context and usage accounting](../architecture.md#context-and-usage-accounting).
+
+### Automatic compaction rules
+
+Octant compacts a thread on its own only by a rule the person set in Settings: the window filling past a share, the thread going quiet, or its provider's account limit getting close. Each rule runs the same compaction a window's Compact session does.
+
+- A rule asks as `host-policy` and meets every refusal a window meets; a refused rule leaves nothing behind. A Code thread is compacted only under the window whose turn crossed the rule.
+- By default Octant compacts the threads it keeps (Octant Harness, and Chat and Work on a direct endpoint) at 85% of the window, and leaves runtimes that compact by themselves to their own point.
+- Every rule-started compaction records its cause, and the timeline says which rule ran and how full the window was.
+- A rule never switches a thread to another provider; the person picks the next model.
+- Built: the window-fill rule between turns. Not built yet: the idle rule, the limit rule with its handover summary, and handing the share to runtimes and to Octant Harness inside a turn.
+
+Status: Partly built. Since: 2026-11-07. Detail: [Automatic compaction](automatic-compaction.md).
 
 ### Held standing context and resume
 
