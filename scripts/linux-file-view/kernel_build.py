@@ -290,7 +290,8 @@ def main():
     if (len(fileattr_cases) != 1 or len(fileattr_owners) != 1 or len(fileattr_filesystems) != 1 or
             len(fileattr_brokers) != 1 or fileattr_filesystems[0] != {"ext4": True, "baselineRead": True} or
             any(fileattr_cases[0].get(field) is not True for field in
-                ("privateRefused", "publicChanged", "publicRestored", "permittedWrite")) or
+                ("privateReadRefused", "privateReadOutputUnchanged", "privateRefused", "publicChanged", "publicRestored", "permittedWrite")) or
+            fileattr_cases[0].get("privateReadResult") != -1 or fileattr_cases[0].get("privateReadErrno") != 13 or
             fileattr_cases[0].get("privateErrno") != 13 or fileattr_cases[0].get("privateResult") != -1 or
             any(fileattr_owners[0].get(field) is not True for field in
                 ("measured", "flagsUnchanged", "statUnchanged", "unchanged")) or
@@ -298,7 +299,7 @@ def main():
             fileattr_brokers[0].get("actualBubblewrapBuilder") is not True or
             fileattr_brokers[0].get("ownedCommandJoined") is not True or
             fileattr_brokers[0].get("cleaned") is not True):
-        raise SystemExit("The ext4 flag mutation needs a private refusal, unchanged owner state and public positive controls.")
+        raise SystemExit("The ext4 attributes need private read/mutation refusals, unchanged output/owner state and public positive controls.")
     if any(entry.get("code") != 0 or entry.get("signal") != 0 for entry in processes):
         raise SystemExit("Every untraced policy process must also exit normally with code zero.")
     expected_outside = {"pivot-root", "remount", "mount-setattr", "propagation", "open-create",

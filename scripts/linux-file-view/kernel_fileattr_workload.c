@@ -76,6 +76,13 @@ int main(int argc, char **argv)
     nanosleep(&pause, NULL);
   }
   if (!present) return 6;
+  const unsigned int sentinel = 0x5a5a5a5a;
+  unsigned int private_output = sentinel;
+  errno = 0;
+  int observation = ioctl(held, FS_IOC_GETFLAGS, &private_output);
+  int read_failure = observation < 0 ? errno : 0;
+  bool private_read_refused = observation == -1 && read_failure == EACCES;
+  bool private_output_unchanged = private_output == sentinel;
   unsigned int changed = before.flags ^ FS_NODUMP_FL;
   errno = 0;
   int mutation = ioctl(held, FS_IOC_SETFLAGS, &changed);
@@ -99,8 +106,9 @@ int main(int argc, char **argv)
   int ordinary = open(ROOT "/ordinary", O_WRONLY | O_TRUNC | O_CLOEXEC);
   bool marker = ordinary >= 0 && write(ordinary, permitted, sizeof(permitted) - 1) == sizeof(permitted) - 1;
   if (ordinary >= 0) close(ordinary);
-  printf("OCTANT_FILEATTR_CASE {\"privateRefused\":%s,\"privateResult\":%d,\"privateErrno\":%d,\"publicChanged\":%s,\"publicRestored\":%s,\"permittedWrite\":%s}\n",
-    private_refused ? "true" : "false", mutation, failure, public_changed ? "true" : "false",
+  printf("OCTANT_FILEATTR_CASE {\"privateReadRefused\":%s,\"privateReadResult\":%d,\"privateReadErrno\":%d,\"privateReadOutputUnchanged\":%s,\"privateRefused\":%s,\"privateResult\":%d,\"privateErrno\":%d,\"publicChanged\":%s,\"publicRestored\":%s,\"permittedWrite\":%s}\n",
+    private_read_refused ? "true" : "false", observation, read_failure,
+    private_output_unchanged ? "true" : "false", private_refused ? "true" : "false", mutation, failure, public_changed ? "true" : "false",
     public_restored ? "true" : "false", marker ? "true" : "false");
-  return private_refused && public_changed && public_restored && marker ? 0 : 18;
+  return private_read_refused && private_output_unchanged && private_refused && public_changed && public_restored && marker ? 0 : 18;
 }
