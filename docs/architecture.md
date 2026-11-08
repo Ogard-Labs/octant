@@ -10851,8 +10851,9 @@ access` agree); a thread's own change is journaled as
   chosen a model under Automatic model calls, the host asks it once per
   decision (by that same key) which option it backs, and the item gains an
   optional `review` (`pending`, `reviewed` with the model, option and one-line
-  reason, `withheld`, `failed`, `not-allowed`) and `askedBy` (the asking
-  thread's provider account and model) so the card can show both models; the
+  reason, `withheld`, `failed`, `not-allowed`) and `askedBy` (the provider
+  account and model the asking turn ran on, read from the turn's own start
+  record, absent when it records none) so the card can show both models; the
   review never answers a decision or changes its options. It is off until a
   model is chosen. A list read never waits on it: reviews are queued in the
   background, one at a time, at most 16 queued, 60 seconds each, and a
@@ -10877,8 +10878,10 @@ access` agree); a thread's own change is journaled as
   off, not ready, at its limit or removed, and a timed-out or unreached call,
   are not journaled: the card shows no review and the decision asks again on a
   later read after a five-minute cooldown, never on another account. Each call
-  is a `decision-review` usage row under the asking thread (a withheld reply's
-  usage included). On the board an open decision files the thread under Waiting
+  that was sent is a `decision-review` usage row under the asking thread: a
+  withheld reply's usage included, and a timed-out, interrupted or failed call
+  as an unreported row, since it may have been billed. An account that could
+  not be contacted records none. On the board an open decision files the thread under Waiting
   with `decision-pending` (after recovering and a live request's
   `awaiting-input`, before an interrupted turn); Done still requires the
   delivery target to be satisfied, and a decision blocks neither completing nor

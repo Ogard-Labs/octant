@@ -48,7 +48,9 @@ export type DecisionReviewAnswer =
   | { readonly status: "answered"; readonly text: string; readonly usage?: TurnUsage | undefined }
   /** The call ran and was paid for, but the reply read outside content and is not used. */
   | { readonly status: "withheld"; readonly usage?: TurnUsage | undefined }
-  /** Timed out, never reached, interrupted or failed: nothing was learned. */
+  /** The request was sent but timed out, was interrupted or failed: it may have been billed, and nothing was learned. */
+  | { readonly status: "attempted" }
+  /** The account could not be contacted, so nothing was sent or billed. */
   | { readonly status: "unavailable" };
 
 export interface DecisionReviewDependencies {
@@ -252,16 +254,21 @@ export class DecisionReviews {
       this.#cooldownUntil.set(key, this.#now() + DECISION_REVIEW_COOLDOWN_MS);
       return;
     }
-    // Both a read reply and a withheld one were paid for.
-    // A failure after the paid call must never lead to a second call.
+    // A read reply, a withheld one and a sent call that got no answer may all
+    // have been billed; the last has no reported usage.
+    // A failure after the call must never lead to a second call.
     try {
       this.#dependencies.recordUsage({
         threadId: String(decision.threadId),
         model: chosen,
-        usage: answer.usage,
+        usage: answer.status === "attempted" ? undefined : answer.usage,
       });
     } catch {
       // The spend row is lost; the outcome below is still kept.
+    }
+    if (answer.status === "attempted") {
+      this.#cooldownUntil.set(key, this.#now() + DECISION_REVIEW_COOLDOWN_MS);
+      return;
     }
     if (answer.status === "withheld") {
       this.#record(key, chosen, { kind: "withheld" });

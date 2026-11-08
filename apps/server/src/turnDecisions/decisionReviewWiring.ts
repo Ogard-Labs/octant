@@ -65,9 +65,9 @@ export function createDecisionReviewModelPort(input: {
       if (outcome.status === "completed") {
         return { status: "answered", text: outcome.text, usage: outcome.usage };
       }
-      return outcome.status === "withheld"
-        ? { status: "withheld", usage: outcome.usage }
-        : { status: "unavailable" };
+      if (outcome.status === "withheld") return { status: "withheld", usage: outcome.usage };
+      // An unreached request never left; the others were sent and may be billed.
+      return outcome.status === "unreached" ? { status: "unavailable" } : { status: "attempted" };
     },
     recordUsage: ({ threadId, model, usage }) =>
       recordOneShotUsage(

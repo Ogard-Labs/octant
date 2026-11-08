@@ -197,11 +197,14 @@ describe("a second opinion on a decision", () => {
   });
 
   it("does not journal an unavailable account, shows nothing, and asks again only after the cooldown", async () => {
-    const { service, complete, advance } = reviews({ answer: { status: "unavailable" } });
+    const { service, complete, advance, recordUsage } = reviews({
+      answer: { status: "unavailable" },
+    });
     service.reviewFor(key(1), decision());
     await service.settled();
     expect(service.reviewFor(key(1), decision())).toBeUndefined();
     expect(complete).toHaveBeenCalledOnce();
+    expect(recordUsage).not.toHaveBeenCalled();
     advance(DECISION_REVIEW_COOLDOWN_MS - 1000);
     expect(service.reviewFor(key(1), decision())).toBeUndefined();
     await service.settled();
@@ -217,6 +220,27 @@ describe("a second opinion on a decision", () => {
         limit: 10,
       }),
     ).toEqual([]);
+  });
+
+  it("records one unreported usage row for a sent call that got no answer, and asks again after the cooldown", async () => {
+    const { service, complete, advance, recordUsage } = reviews({
+      answer: { status: "attempted" },
+    });
+    service.reviewFor(key(1), decision());
+    await service.settled();
+    expect(service.reviewFor(key(1), decision())).toBeUndefined();
+    expect(complete).toHaveBeenCalledOnce();
+    expect(recordUsage).toHaveBeenCalledOnce();
+    expect(recordUsage).toHaveBeenCalledWith({
+      threadId: "00000000-0000-4000-8000-000000000910",
+      model: reviewer,
+      usage: undefined,
+    });
+    advance(DECISION_REVIEW_COOLDOWN_MS + 1000);
+    expect(service.reviewFor(key(1), decision())).toEqual({ status: "pending" });
+    await service.settled();
+    expect(complete).toHaveBeenCalledTimes(2);
+    expect(recordUsage).toHaveBeenCalledTimes(2);
   });
 
   it("does not ask an account that is off or at its limit", async () => {
