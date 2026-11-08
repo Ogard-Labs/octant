@@ -50,6 +50,8 @@ import type { ProvidersWiring } from "./providers";
 import type { CodeRuntimeWiring } from "./codeRuntime";
 import type { WorkWiring } from "./work";
 import type { ContextWiring } from "./context";
+import type { HarnessStateWiring } from "./harnessState";
+import { createServerWorkFileListing } from "../serverProjects/serverWorkFiles";
 
 export type WorkFilesDependencies = Pick<ServerStart, "options" | "persistence"> &
   Pick<AuthorityWiring, "windowAuthorityStore"> &
@@ -59,6 +61,7 @@ export type WorkFilesDependencies = Pick<ServerStart, "options" | "persistence">
   Pick<WorkWiring, "workThreadService"> &
   Readonly<{ workThreadProjection: WorkThreadProjection }> &
   Pick<ContextWiring, "windowCanOpenThread"> &
+  Pick<HarnessStateWiring, "serverConnection" | "serverProjectStore"> &
   Pick<FoundationsWiring, "workArtifactProjection" | "workTurnProjection">;
 
 export function wireWorkFiles(deps: WorkFilesDependencies) {
@@ -77,6 +80,8 @@ export function wireWorkFiles(deps: WorkFilesDependencies) {
     workThreadService,
     workThreadProjection,
     workTurnProjection,
+    serverConnection,
+    serverProjectStore,
   } = deps;
 
   const previewHostId = derivePreviewHostId(providerDataDirectory);
@@ -150,6 +155,13 @@ export function wireWorkFiles(deps: WorkFilesDependencies) {
     persistence,
     projects: projectService,
     windowAuthorityStore,
+    server: createServerWorkFileListing({
+      store: serverProjectStore,
+      connection: serverConnection,
+      thread: (id) => workThreadProjection.read(id),
+      canOpen: (windowId, threadId) => windowCanOpenThread(windowId, "work-thread", threadId),
+      clock: () => new Date().toISOString(),
+    }),
   });
   const speechRoutes = createSpeechRouteHandler({
     readVoiceSettings: () =>

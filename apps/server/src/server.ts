@@ -1121,6 +1121,8 @@ export function startOctantServer(
       projectService,
       providerDataDirectory,
       routeCodeService,
+      serverConnection,
+      serverProjectStore,
       shellService,
       windowAuthorityStore,
       windowCanOpenThread,
