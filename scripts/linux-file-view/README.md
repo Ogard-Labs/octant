@@ -281,6 +281,12 @@ reporting confirmed cleanup. Missing acknowledgements remain uncertain, and
 late messages cannot admit a new command or release execution. Integrated native
 acceptance of this correction remains pending.
 
+The unchanged session scenarios run after the three ordinary capsules and
+before the Bun/Node controllers, retaining the exact one-worker orphan join.
+Both runtime checks remain mandatory, followed by a separate bounded PID1 reap
+requiring zero leftovers and `ECHILD`. A later controller failure still fails
+the complete run; earlier session evidence does not waive that failure.
+
 The runtime-expiry case uses the existing ten-second scenario budget so the
 owned worker can finish preparation and prove the command has launched before
 expiry. Preparation still counts toward that same caller deadline.

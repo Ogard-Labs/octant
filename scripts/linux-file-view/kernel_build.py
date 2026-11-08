@@ -252,6 +252,7 @@ def main():
     cases = []
     ordered = []
     runtime_receipts = []
+    runtime_joins = []
     outside = []
     fileattr_cases, fileattr_owners, fileattr_filesystems, fileattr_brokers = [], [], [], []
     probe_addresses, probe_exits, core_notes, core_targets, core_retirements, processes = [], [], [], [], [], []
@@ -286,6 +287,8 @@ def main():
             core_retirements.append(json.loads(line.split(" ", 1)[1]))
         elif line.startswith("OCTANT_POLICY_PROCESS "):
             processes.append(json.loads(line.split(" ", 1)[1]))
+        elif line.startswith("OCTANT_RUNTIME_JOIN "):
+            runtime_joins.append(json.loads(line.split(" ", 1)[1]))
     probe_notes = [note for note in core_notes if note.get("role") == 2]
     probe_targets = [target for target in core_targets if target.get("role") == 2]
     if any(len(items) != 1 for items in (probe_addresses, probe_exits, probe_notes, probe_targets)):
@@ -371,6 +374,8 @@ def main():
     for attempt in range(1, 4):
         if f"OCTANT_BUBBLEWRAP_ATTEMPT {attempt} result=0" not in log:
             raise SystemExit("An uninstrumented ordinary capsule repetition did not complete.")
+    if len(runtime_joins) != 1 or runtime_joins[0] != {"orphansJoined": 0, "remaining": False}:
+        raise SystemExit("Both runtime controllers require a final zero-leftover ECHILD cleanup receipt.")
     if ("OCTANT_KERNEL_EXIT 0" not in log or '"status":"measured-admission-core"' not in log or
             '"status":"measured-namespace-token"' not in log or
             '"status":"measured-original-policy-broker"' not in log or

@@ -1038,6 +1038,28 @@ static int policy_measure(const char *mode)
   if (joined != child || !WIFEXITED(result)) return 34;
   return WEXITSTATUS(result) == 0 ? 0 : 33;
 }
+struct guest_children { unsigned count; bool remaining; };
+static struct guest_children reap_guest_children(void)
+{
+  struct guest_children children = {.remaining = true};
+  struct timespec start;
+  if (clock_gettime(CLOCK_MONOTONIC, &start) || start.tv_sec < 0) return children;
+  for (;;) {
+    struct timespec now;
+    if (clock_gettime(CLOCK_MONOTONIC, &now) || now.tv_sec < start.tv_sec ||
+        (now.tv_sec == start.tv_sec && now.tv_nsec < start.tv_nsec) ||
+        now.tv_sec - start.tv_sec > 3 ||
+        (now.tv_sec - start.tv_sec == 3 && now.tv_nsec >= start.tv_nsec)) return children;
+    pid_t reaped = waitpid(-1, NULL, WNOHANG);
+    if (reaped > 0) children.count++;
+    else if (reaped < 0 && errno != EINTR) {
+      children.remaining = errno != ECHILD;
+      return children;
+    } else if (!reaped) {
+      struct timespec delay = {.tv_nsec = 10000000}; nanosleep(&delay, NULL);
+    }
+  }
+}
 static int session_measure(void)
 {
   pid_t child = fork();
@@ -1054,19 +1076,11 @@ static int session_measure(void)
   if (joined != child) return 34;
   /* This entire guest is task-owned. The deliberately killed session owner
    * leaves one known worker orphan, whose native child has already joined. */
-  unsigned orphans = 0;
-  pid_t reaped = 0;
-  for (unsigned attempt = 0; attempt < 300; attempt++) {
-    reaped = waitpid(-1, NULL, WNOHANG);
-    if (reaped > 0) orphans++;
-    if (!reaped) { struct timespec delay = {.tv_nsec = 10000000}; nanosleep(&delay, NULL); }
-    if (reaped < 0 && errno != EINTR) break;
-  }
-  bool remaining = reaped != -1 || errno != ECHILD;
+  struct guest_children children = reap_guest_children();
   int code = WIFEXITED(status) ? WEXITSTATUS(status) : -1;
   printf("OCTANT_SESSION_JOIN {\"controllerPid\":%ld,\"controllerJoined\":true,\"controllerCode\":%d,\"orphansJoined\":%u,\"remaining\":%s}\n",
-    (long)child, code, orphans, remaining ? "true" : "false");
-  return code == 0 && orphans == 1 && !remaining ? 0 : 35;
+    (long)child, code, children.count, children.remaining ? "true" : "false");
+  return code == 0 && children.count == 1 && !children.remaining ? 0 : 35;
 }
 int main(void)
 {
@@ -1117,10 +1131,20 @@ int main(void)
       result = policy_measure("--bubblewrap");
       printf("OCTANT_BUBBLEWRAP_ATTEMPT %u result=%d\n", attempt + 1, result);
     }
+    // Prove the new owned-tree boundary before an older runtime-controller
+    // failure can prevent it. Both runtime cases remain required for success.
+    if (!result) result = session_measure();
     if (!result) result = policy_measure("--runtime-bun");
     if (!result) result = policy_measure("--runtime-node");
+    // Only normal, retired controllers reach this reap; never release a held
+    // target after an unconfirmed core retirement or a failed session cleanup.
+    if (!result) {
+      struct guest_children children = reap_guest_children();
+      printf("OCTANT_RUNTIME_JOIN {\"orphansJoined\":%u,\"remaining\":%s}\n",
+        children.count, children.remaining ? "true" : "false");
+      if (children.count || children.remaining) result = 36;
+    }
     if (!result) result = fileattr_result;
-    if (!result) result = session_measure();
     printf("OCTANT_KERNEL_EXIT %d\n", result);
   }
   fflush(stdout);
