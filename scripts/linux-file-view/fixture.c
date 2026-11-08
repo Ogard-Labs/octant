@@ -4,6 +4,7 @@
 #include <linux/openat2.h>
 #include <sys/syscall.h>
 #include <sys/stat.h>
+#include <sys/prctl.h>
 #include <errno.h>
 #include <fcntl.h>
 #include <limits.h>
@@ -12,6 +13,8 @@
 #include <string.h>
 #include <unistd.h>
 #include <dirent.h>
+#include <signal.h>
+#include <time.h>
 
 /* Feasibility fixture only. This is not a production policy or launcher. */
 static int backing = -1;
@@ -205,13 +208,33 @@ static const struct fuse_operations operations = {
 };
 
 int main(int argc, char **argv) {
-  if (argc != 3) { fprintf(stderr, "usage: fixture backing-root mountpoint\n"); return 2; }
+  if (argc != 5) { fprintf(stderr, "usage: fixture backing-root mountpoint owner-pid lifetime-seconds\n"); return 2; }
+  char *end;
+  errno = 0;
+  long owner = strtol(argv[3], &end, 10);
+  if (errno || !*argv[3] || *end || owner < 2 || owner > INT_MAX) return 2;
+  errno = 0;
+  long seconds = strtol(argv[4], &end, 10);
+  if (errno || !*argv[4] || *end || seconds < 1 || seconds > 120) return 2;
+  /* The launcher supplies its PID before exec: an already orphaned child must
+     not adopt its replacement parent as the owner. The second check closes
+     the race while arming the kernel's uncatchable parent-death signal. */
+  if (getppid() != (pid_t)owner || prctl(PR_SET_PDEATHSIG, SIGKILL) ||
+      getppid() != (pid_t)owner) return 2;
+  timer_t lifetime;
+  struct sigevent event = {.sigev_notify = SIGEV_SIGNAL, .sigev_signo = SIGKILL};
+  struct itimerspec limit = {.it_value = {.tv_sec = seconds}};
+  if (timer_create(CLOCK_MONOTONIC, &event, &lifetime)) { perror("fixture timer"); return 2; }
+  if (timer_settime(lifetime, 0, &limit, NULL)) { perror("fixture deadline"); return 2; }
+  if (getppid() != (pid_t)owner) return 2;
   if (!realpath(argv[1], backing_path)) { perror("backing root"); return 2; }
   backing = open(backing_path, O_PATH | O_DIRECTORY | O_CLOEXEC);
   if (backing < 0) { perror("backing root"); return 2; }
   char *fuse_argv[] = {argv[0], argv[2], "-f", "-s", "-o",
-    "default_permissions,attr_timeout=0,entry_timeout=0,negative_timeout=0"};
+    "auto_unmount,default_permissions,attr_timeout=0,entry_timeout=0,negative_timeout=0"};
+  if (getppid() != (pid_t)owner) return 2;
   int result = fuse_main(6, fuse_argv, &operations, NULL);
+  timer_delete(lifetime);
   close(backing);
   return result;
 }

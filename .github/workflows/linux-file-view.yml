@@ -97,7 +97,7 @@ jobs:
         run: |
           gcc -std=c11 -D_FILE_OFFSET_BITS=64 -Wall -Wextra -Werror \
             $(pkg-config fuse3 --cflags) scripts/linux-file-view/fixture.c \
-            -o "$RUNNER_TEMP/octant-file-view" $(pkg-config fuse3 --libs)
+            -o "$RUNNER_TEMP/octant-file-view" $(pkg-config fuse3 --libs) -lrt
       - name: Measure the actual mounted view inside Bubblewrap
         run: |
           python3 scripts/linux-file-view/probe.py \

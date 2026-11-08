@@ -307,7 +307,7 @@ On an eligible disposable Linux host with FUSE, Bubblewrap and libfuse3 headers:
 ```sh
 gcc -std=c11 -D_FILE_OFFSET_BITS=64 -Wall -Wextra -Werror \
   $(pkg-config fuse3 --cflags) scripts/linux-file-view/fixture.c \
-  -o /tmp/octant-file-view $(pkg-config fuse3 --libs)
+  -o /tmp/octant-file-view $(pkg-config fuse3 --libs) -lrt
 python3 scripts/linux-file-view/probe.py /tmp/octant-file-view /tmp/file-view-evidence.json
 ```
 
@@ -316,6 +316,29 @@ The runner has a ten-minute maximum; the probe has a two-minute deadline, each
 client operation has a five-second limit, and cleanup stops only its retained
 process identities and private mount. It verifies the mount is gone before
 removing the backing fixture.
+
+The native helper requires the launcher's PID captured before exec and a private
+fixture lifetime of 1–120 seconds. It checks the parent before and after arming
+`PR_SET_PDEATHSIG(SIGKILL)` and again before mounting. A separate monotonic timer
+delivers `SIGKILL` at the lifetime limit; neither Python cleanup nor FUSE signal
+handlers control it. `auto_unmount` retires the mount when the helper exits,
+including after the owner's crash. These use the documented
+[parent-death signal](https://man7.org/linux/man-pages/man2/PR_SET_PDEATHSIG.2const.html),
+[native timer](https://man7.org/linux/man-pages/man2/timer_create.2.html) and
+[FUSE auto-unmount](https://github.com/libfuse/libfuse/blob/fuse-3.14.0/doc/mount.fuse3.8)
+boundaries.
+
+Before the unchanged 17 file measurements, three mandatory lifecycle checks kill
+an owner after mounting, kill it while its child is still waiting before exec,
+and let a two-second native lifetime expire while the owner remains alive. The
+short lifetime exercises the independent deadline without waiting two minutes.
+Each check requires the actual helper wait status, automatic mount removal and
+joined auto-unmount descendants before fallback cleanup. The task-local
+subreaper remains enabled through the ordinary measurements to join their FUSE
+descendants too, then restores its prior setting. Test owners and their pre-exec
+children have independent finite alarms; owners also bind to the probe's PID.
+A lifecycle failure or unconfirmed descendant cleanup fails the job. Its
+`lifecycleMeasurements` are separate from the 17 compatibility observations.
 
 A successfully completed measurement exits zero even if a candidate fails a
 contract measurement. Read each `passed` value and the explicit
