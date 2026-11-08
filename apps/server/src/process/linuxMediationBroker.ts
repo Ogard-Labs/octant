@@ -2,7 +2,11 @@ import { stat } from "node:fs/promises";
 import { spawn } from "node:child_process";
 import { endianness } from "node:os";
 import { Duplex, type Readable, type Writable } from "node:stream";
-import { classifyLinuxMediationMutation } from "./linuxMediationNamespace";
+import {
+  classifyLinuxMediationCreation,
+  classifyLinuxMediationMutation,
+  type LinuxMediationCreation,
+} from "./linuxMediationNamespace";
 import type { SecretGuardMediationPolicy } from "./secretGuard";
 import {
   linuxMediationObjectKey,
@@ -265,7 +269,47 @@ export async function runLinuxMediationBroker(input: {
         const namespace = async () => (await readNamespace()) ?? { epoch: 0n, activeMutations: 1 };
         let allow = false;
         let epoch = 0n;
-        if (operation >= 5 && operation <= 7) {
+        if (operation >= 8 && operation <= 10) {
+          const length = request.readUInt32LE(344);
+          if (
+            length > 255 ||
+            (operation === 10) !== (length === 0) ||
+            request.subarray(36, 328).some((byte) => byte !== 0) ||
+            request.readUInt32LE(348) !== 0 ||
+            request.subarray(352 + length).some((byte) => byte !== 0) ||
+            (operation === 9
+              ? request.readBigUInt64LE(16) === 0n
+              : request.subarray(16, 32).some((byte) => byte !== 0))
+          ) {
+            refuse("broker-protocol");
+            return;
+          }
+          const parent = await verifyParent(request, 1);
+          if (parent === undefined) {
+            refuse("broker-protocol");
+            return;
+          }
+          const destination = {
+            parent: parent.path,
+            name: Buffer.from(request.subarray(352, 352 + length)),
+          };
+          const creation: LinuxMediationCreation =
+            operation === 9
+              ? {
+                  operation: "link",
+                  destination,
+                  sourceObject: `${request.readUInt32LE(24)}:${request.readUInt32LE(28)}:${request.readBigUInt64LE(16)}`,
+                }
+              : { operation: operation === 10 ? "tmpfile" : "create", destination };
+          const decision = await classifyLinuxMediationCreation(input.policy, creation, namespace);
+          const current = await verifyParent(request, 1);
+          if (current?.mount !== parent.mount || current.path !== parent.path) {
+            refuse("broker-protocol");
+            return;
+          }
+          allow = decision.status === "allowed";
+          epoch = decision.epoch;
+        } else if (operation >= 5 && operation <= 7) {
           const source = await verifyParent(request, 0);
           const destination = operation === 7 ? await verifyParent(request, 1) : undefined;
           if (source === undefined || (operation === 7 && destination === undefined)) {

@@ -15,6 +15,13 @@ export interface LinuxMediationMutation {
   readonly destination?: { readonly parent: string; readonly name: Buffer };
   readonly flags: number;
 }
+export type LinuxMediationCreation = {
+  /** Broker-owned retained directory, with its kernel-verified identity. */
+  readonly destination: { readonly parent: string; readonly name: Buffer };
+} & (
+  | { readonly operation: "create" | "tmpfile" }
+  | { readonly operation: "link"; readonly sourceObject: string }
+);
 type MutationResult = {
   readonly status: "allowed" | "refused" | "unavailable";
   readonly epoch: bigint;
@@ -32,6 +39,57 @@ const append = (parent: string, name: string) => `${parent === "/" ? "" : parent
 const absent = () => Object.assign(new Error("Absent in proposed namespace"), { code: "ENOENT" });
 const missing = (error: unknown) =>
   typeof error === "object" && error !== null && "code" in error && error.code === "ENOENT";
+
+/** Classifies a future name without creating a placeholder or inventing an inode. */
+export async function classifyLinuxMediationCreation(
+  policy: SecretGuardMediationPolicy,
+  creation: LinuxMediationCreation,
+  readNamespace: () => Promise<LinuxMediationNamespace>,
+): Promise<MutationResult> {
+  const unavailable: MutationResult = { status: "unavailable", epoch: 0n };
+  try {
+    const { parent, name } = creation.destination;
+    if (
+      !parent.startsWith("/") ||
+      parent.includes("\0") ||
+      (creation.operation === "tmpfile") !== (name.length === 0) ||
+      (creation.operation === "link" && !/^\d+:\d+:[1-9]\d*$/.test(creation.sourceObject))
+    )
+      return unavailable;
+    const identity = await stat(Buffer.from(parent), { bigint: true });
+    if (!identity.isDirectory()) return unavailable;
+    const snapshot = await readLinuxMediationPolicy(policy, readNamespace, undefined, {
+      parentObject: linuxMediationObjectKey(identity),
+      name,
+    });
+    if (snapshot.status !== "ready") return unavailable;
+    const current = await readNamespace();
+    if (current.activeMutations !== 0 || current.epoch !== snapshot.epoch) return unavailable;
+    if (name.length > 0) {
+      try {
+        await lstat(
+          Buffer.concat([Buffer.from(parent.endsWith("/") ? parent : `${parent}/`), name]),
+        );
+        const unchanged = await readNamespace();
+        // The VFS returns EEXIST (or handles an existing O_CREAT target). Any
+        // actual replacement still needs the kernel's final epoch comparison.
+        return unchanged.activeMutations === 0 && unchanged.epoch === snapshot.epoch
+          ? { status: "allowed", epoch: snapshot.epoch }
+          : unavailable;
+      } catch (error) {
+        if (!missing(error)) throw error;
+      }
+    }
+    const final = await readNamespace();
+    if (final.activeMutations !== 0 || final.epoch !== snapshot.epoch) return unavailable;
+    const refused =
+      snapshot.proposedEntryProtected !== false ||
+      (creation.operation === "link" && snapshot.protectedObjects.has(creation.sourceObject));
+    return { status: refused ? "refused" : "allowed", epoch: snapshot.epoch };
+  } catch {
+    return unavailable;
+  }
+}
 
 /**
  * Re-evaluates the original policy in a metadata-only proposed namespace. No

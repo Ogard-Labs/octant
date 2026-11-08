@@ -304,10 +304,29 @@ before output and compares generation writes under the ext4 inode lock before
 reserving the inode buffer. An admitted reservation therefore still reaches its
 native release path. Its earlier scoped native evidence preserves permitted
 generation changes and protected state; compat execution remains unproved.
-The integrated creation fixture adds protected-name and source-link negatives,
-native existing-target errors, permitted creations, hardlink identity and
-anonymous temporary-file linking. These are new acceptance assertions, not
-implemented CREATE/LINK admission or an executed passing result.
+The integrated creation fixture actually reproduces six protected-name and
+source-link failures while native existing-target errors, permitted creations,
+hardlink identity and anonymous temporary-file linking pass. The owner observes
+the unwanted new names and changed link metadata; command joins and cleanup
+remain confirmed. This is the regression baseline, not a passing result.
+
+Paired creation admission now uses the same 608-byte ABI with CREATE, LINK and
+TMPFILE operations. The request carries the actual destination directory and
+copied name; LINK additionally carries the held source inode, including an
+unnamed or descriptor-resolved source. Unused names, flags and padding stay
+zero. Preparation occurs before locks, and a task/context-bound one-use scope
+compares the actual identities, name and epoch immediately before the audited
+filesystem callback. Every return and delegation retry retires the scope;
+the final comparison performs no broker I/O under locks.
+
+The metadata scan checks prospective names against known policy parent
+identities, including absent exact files and SSH companions, without creating
+placeholders or inventing inode metadata. It retains byte names, captured
+account exceptions, permitted unnamed sources and stable native EEXIST cases.
+Focused policy/lifecycle tests and pinned-source generation checks pass; actual
+integrated kernel compilation and creation acceptance remain pending. Internal
+or stacked creation paths without the exact prepared scope refuse; complete
+filesystem/runtime parity is not established by these audited entry points.
 
 Dispatch `experiment=kernel-admission` to compile and boot a pinned Linux 6.18
 guest under networkless QEMU TCG in the owned ephemeral runner. The upstream

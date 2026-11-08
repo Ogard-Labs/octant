@@ -4,6 +4,7 @@ import {
   lstat,
   mkdir,
   mkdtemp,
+  open,
   readFile,
   realpath,
   rename,
@@ -18,7 +19,10 @@ import { NO_PROTECTED_FILES_CHANGES } from "@octant/domain/secret-guard-policy";
 import { applyProtectedFilesChoice, secretGuardMediationPolicy } from "./secretGuard";
 import { linuxMediationObjectKey, readLinuxMediationPolicy } from "./linuxMediationPolicy";
 
-import { classifyLinuxMediationMutation } from "./linuxMediationNamespace";
+import {
+  classifyLinuxMediationCreation,
+  classifyLinuxMediationMutation,
+} from "./linuxMediationNamespace";
 
 const owned: string[] = [];
 afterEach(async () => {
@@ -37,6 +41,111 @@ async function fixture() {
   const key = async (path: string) => linuxMediationObjectKey(await stat(path, { bigint: true }));
   return { directory, home, readNamespace, policy, key };
 }
+
+it("refuses protected future names through directory aliases while preserving permitted and existing targets", async () => {
+  const f = await fixture();
+  const ssh = join(f.home, ".ssh");
+  const alias = join(f.directory, "ssh-alias");
+  await symlink(ssh, alias);
+  await writeFile(join(ssh, "deployment.pub"), "synthetic public marker");
+  await writeFile(join(ssh, "id_existing"), "synthetic existing target");
+  const decide = (name: string) =>
+    classifyLinuxMediationCreation(
+      f.policy(),
+      { operation: "create", destination: { parent: alias, name: Buffer.from(name) } },
+      f.readNamespace,
+    );
+  for (const name of ["id_created", "deployment"])
+    expect(await decide(name)).toEqual({ status: "refused", epoch: 1n });
+  for (const name of ["created.pub", "config", "id_existing"])
+    expect(await decide(name)).toEqual({ status: "allowed", epoch: 1n });
+  await expect(lstat(join(ssh, "id_created"))).rejects.toHaveProperty("code", "ENOENT");
+  await mkdir(join(f.home, ".aws"));
+  const awsAlias = join(f.directory, "aws-alias");
+  await symlink(join(f.home, ".aws"), awsAlias);
+  expect(
+    await classifyLinuxMediationCreation(
+      f.policy(),
+      { operation: "create", destination: { parent: awsAlias, name: Buffer.from("credentials") } },
+      f.readNamespace,
+    ),
+  ).toEqual({ status: "refused", epoch: 1n });
+});
+
+it("binds a new hardlink to its actual source inode and permits an unnamed unprotected source", async () => {
+  const f = await fixture();
+  const secret = join(f.home, ".ssh", "id_source");
+  const publicFile = join(f.home, "public-source");
+  await writeFile(secret, "synthetic protected bytes");
+  await writeFile(publicFile, "synthetic permitted bytes");
+  const decide = (sourceObject: string, name: string, parent = f.home) =>
+    classifyLinuxMediationCreation(
+      f.policy(),
+      { operation: "link", sourceObject, destination: { parent, name: Buffer.from(name) } },
+      f.readNamespace,
+    );
+  expect(await decide(await f.key(secret), "public-alias")).toEqual({
+    status: "refused",
+    epoch: 1n,
+  });
+  expect(await decide(await f.key(publicFile), "id_alias", join(f.home, ".ssh"))).toEqual({
+    status: "refused",
+    epoch: 1n,
+  });
+  expect(await decide(await f.key(publicFile), "permitted-alias")).toEqual({
+    status: "allowed",
+    epoch: 1n,
+  });
+  const held = await open(publicFile);
+  try {
+    await rm(publicFile);
+    expect(
+      await decide(linuxMediationObjectKey(await held.stat({ bigint: true })), "unnamed-alias"),
+    ).toEqual({ status: "allowed", epoch: 1n });
+  } finally {
+    await held.close();
+  }
+});
+
+it("keeps captured account exceptions and refuses changed epochs or unsafe creation names", async () => {
+  const f = await fixture();
+  const account = join(f.home, ".claude");
+  await mkdir(account);
+  const policy = f.policy([account]);
+  const creation = {
+    operation: "create" as const,
+    destination: { parent: account, name: Buffer.from(".credentials.json") },
+  };
+  expect(await classifyLinuxMediationCreation(policy, creation, f.readNamespace)).toEqual({
+    status: "allowed",
+    epoch: 1n,
+  });
+  expect(await classifyLinuxMediationCreation(f.policy(), creation, f.readNamespace)).toEqual({
+    status: "refused",
+    epoch: 1n,
+  });
+  let reads = 0;
+  expect(
+    await classifyLinuxMediationCreation(policy, creation, async () => ({
+      epoch: ++reads === 1 ? 1n : 2n,
+      activeMutations: 0,
+    })),
+  ).toEqual({ status: "unavailable", epoch: 0n });
+  expect(
+    await classifyLinuxMediationCreation(
+      policy,
+      { ...creation, destination: { parent: account, name: Buffer.from("../escape") } },
+      f.readNamespace,
+    ),
+  ).toEqual({ status: "unavailable", epoch: 0n });
+  expect(
+    await classifyLinuxMediationCreation(
+      policy,
+      { operation: "tmpfile", destination: { parent: f.directory, name: Buffer.alloc(0) } },
+      f.readNamespace,
+    ),
+  ).toEqual({ status: "allowed", epoch: 1n });
+});
 
 it("classifies a late companion and its existing hardlink by the actual inode without hiding allowed live files", async () => {
   const f = await fixture();
