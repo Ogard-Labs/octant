@@ -62,7 +62,6 @@ import { createDesktopBrowserRuntimeFromEnvironment } from "../browser/desktopBr
 import { RoutingBrowserRuntime } from "../browser/routingBrowserRuntime";
 import {
   isToolAllowedByAllowlist,
-  browserProfileKey,
   defaultShellSettings,
   enabledModes,
   isBrowserProfileSiteRemembered,
@@ -413,10 +412,7 @@ export function wireBrowser(deps: BrowserDependencies) {
           }),
       ],
       current: currentSessionTarget,
-      profileLabel: async (profile) =>
-        (await browserRuntime.profiles?.list(false).catch(() => undefined))?.find(
-          (row) => browserProfileKey(row.profile) === browserProfileKey(profile),
-        )?.label,
+      profileLabel: (profile) => browserProfileService.labelOfStoredProfile(profile),
       record: browserSessionGrantJournal({
         journal: persistence.journal,
         connection: persistence.connection,
