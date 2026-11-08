@@ -7,6 +7,8 @@ on:
       - .github/workflows/packaged-browser-owner-native.yml
       - scripts/smoke-packaged-browser-owner-native.ts
       - scripts/packaged-browser-owner-ax.swift
+      - scripts/packaged-browser-owner-provider.ts
+      - scripts/packaged-browser-owner-provider.test.ts
 
 permissions:
   contents: read
@@ -36,11 +38,11 @@ jobs:
       - name: Package source without signing or publication
         timeout-minutes: 25
         run: bun run package:desktop
-      - name: Exercise ordinary packaged windows and Settings
+      - name: Register owned no-key endpoint and verify tools through normal UI
         timeout-minutes: 5
         env:
           OCTANT_QA_OUTPUT: ${{ runner.temp }}/packaged-browser-owner-native
-        run: bun scripts/smoke-packaged-browser-owner-native.ts
+        run: bun scripts/smoke-packaged-browser-owner-native.ts --provider-setup
       - uses: actions/upload-artifact@v4
         if: always()
         with:

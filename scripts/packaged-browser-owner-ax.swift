@@ -5,14 +5,26 @@ import Darwin
 
 // Owned-runner native UI QA. Never requests a TCC permission or reads text-field
 // values or credentials. Dock reads retain only the exact staged bundle icon.
-guard (3...5).contains(CommandLine.arguments.count),
-      let processId = Int32(CommandLine.arguments[1]), processId > 1 else {
-    exit(2)
-}
+guard (3...6).contains(CommandLine.arguments.count),
+      let processId = Int32(CommandLine.arguments[1]), processId > 1 else { exit(2) }
 let mode = CommandLine.arguments.count >= 4 ? CommandLine.arguments[3] : "diagnostic"
-let requestedTitle = CommandLine.arguments.count == 5 ? CommandLine.arguments[4] : ""
-guard ["diagnostic", "read", "click", "reveal", "dock-read", "quit-hint", "dock-click", "bundle-census", "bundle-cleanup"].contains(mode),
-      (mode == "click" || mode == "reveal" || mode == "dock-click") == !requestedTitle.isEmpty,
+let fillsFixtureField = mode == "fill-name" || mode == "fill-address"
+let requestedTitle = mode == "fill-name" ? "Name" : mode == "fill-address" ? "Address" :
+    (CommandLine.arguments.count == 5 ? CommandLine.arguments[4] : "")
+let fixtureText = fillsFixtureField && CommandLine.arguments.count == 6 ? CommandLine.arguments[4] : ""
+let fixtureBirthParts = fillsFixtureField && CommandLine.arguments.count == 6 ? CommandLine.arguments[5].split(separator: ":", omittingEmptySubsequences: false) : []
+let fixtureBirth = fixtureBirthParts.compactMap { UInt64($0) }
+let fixtureAddress = URLComponents(string: fixtureText)
+let allowedFixtureText = mode == "fill-name" ? fixtureText == "Owned native Browser fixture" :
+    mode == "fill-address" && fixtureAddress?.scheme == "http" && fixtureAddress?.host == "127.0.0.1" &&
+    fixtureAddress?.path == "/v1" && fixtureAddress?.port.map { (1...65535).contains($0) } == true && fixtureAddress?.user == nil &&
+    fixtureAddress?.password == nil && fixtureAddress?.query == nil && fixtureAddress?.fragment == nil
+if fillsFixtureField {
+    guard CommandLine.arguments.count == 6, fixtureBirthParts.count == 2, fixtureBirth.count == 2,
+          !fixtureText.isEmpty, fixtureText.utf16.count <= 64, allowedFixtureText else { exit(2) }
+} else { guard CommandLine.arguments.count <= 5 else { exit(2) } }
+guard ["diagnostic", "read", "click", "reveal", "dock-read", "quit-hint", "dock-click", "bundle-census", "bundle-cleanup", "fill-name", "fill-address"].contains(mode),
+      (mode == "click" || mode == "reveal" || mode == "dock-click" || fillsFixtureField) == !requestedTitle.isEmpty,
       requestedTitle.count <= 256 else { exit(2) }
 let preferenceTitle = "Keep Browser available without windows"
 // Leave time for the matching mouse-up before the owned six-second command bound.
@@ -99,8 +111,8 @@ var windows: CFTypeRef?
 let windowResult = element.map { AXUIElementCopyAttributeValue($0, kAXWindowsAttribute as CFString, &windows) } ?? AXError.attributeUnsupported
 // Read named controls, never text-field values or static page text. The owned
 // process has already been identified above; this is not a system-wide tree.
-let controlRoles = Set(["AXButton", "AXCheckBox", "AXSwitch", "AXRadioButton", "AXPopUpButton", "AXMenuButton", "AXTextField", "AXTextArea"])
-var pending = (treeIdentityMatched ? (windows as? [AXUIElement] ?? []) : []).map { ($0, 0, false) }
+let controlRoles = Set(["AXButton", "AXCheckBox", "AXSwitch", "AXRadioButton", "AXPopUpButton", "AXMenuButton", "AXTextField", "AXTextArea", "AXDisclosureTriangle", "AXComboBox", "AXMenuItem"])
+var pending = (treeIdentityMatched ? (windows as? [AXUIElement] ?? []) : []).map { ($0, 0, false, false) }
 var visited = Set<CFHashCode>()
 var controls: [[String: Any]] = []
 var pressTargets: [AXUIElement] = []
@@ -159,7 +171,7 @@ func cgBounds(_ row: [String: Any]) -> CGRect? {
     return CGRect(x: values[0], y: values[1], width: values[2], height: values[3])
 }
 while next < pending.count, next < 512, Date() < treeDeadline {
-    let (node, depth, parentIsToast) = pending[next]
+    let (node, depth, parentIsToast, parentIsEndpointDialog) = pending[next]
     next += 1
     guard visited.insert(CFHash(node)).inserted else { continue }
     var roleValue: CFTypeRef?
@@ -170,7 +182,11 @@ while next < pending.count, next < 512, Date() < treeDeadline {
         if roleRead != .success { nativeReadErrors.insert(roleRead.rawValue) }
         continue
     }
-    if nodeRole == "AXSecureTextField" || label(node, kAXSubroleAttribute as CFString) == "AXSecureTextField" { continue }
+    let nodeSubrole = label(node, kAXSubroleAttribute as CFString)
+    if nodeRole == "AXSecureTextField" || nodeSubrole == "AXSecureTextField" { continue }
+    let isEndpointDialog = parentIsEndpointDialog ||
+        (nodeSubrole == "AXApplicationDialog" &&
+         (label(node, kAXTitleAttribute as CFString) == "Add a model endpoint" || label(node, kAXDescriptionAttribute as CFString) == "Add a model endpoint"))
     var isToast = parentIsToast
     if mode == "quit-hint", !isToast, nodeRole == "AXGroup" {
         var classes: CFTypeRef?
@@ -194,7 +210,24 @@ while next < pending.count, next < 512, Date() < treeDeadline {
     if controlRoles.contains(nodeRole) {
         let title = label(node, kAXTitleAttribute as CFString)
         let description = label(node, kAXDescriptionAttribute as CFString)
+        var fieldLabel = ""
+        if isEndpointDialog, nodeRole == "AXTextField" {
+            var associated: CFTypeRef?
+            if AXUIElementCopyAttributeValue(node, kAXTitleUIElementAttribute as CFString, &associated) == .success,
+               let associated, CFGetTypeID(associated) == AXUIElementGetTypeID() {
+                let labelNode = unsafeBitCast(associated, to: AXUIElement.self)
+                var labelPid: pid_t = 0
+                if AXUIElementGetPid(labelNode, &labelPid) == .success, labelPid == processId,
+                   label(labelNode, kAXRoleAttribute as CFString) == "AXStaticText" {
+                    // Associated visible label text is not the field's value.
+                    let text = label(labelNode, kAXValueAttribute as CFString)
+                    if ["Name", "Address"].contains(text) { fieldLabel = text }
+                }
+            }
+        }
         var control: [String: Any] = ["role": nodeRole, "title": title, "description": description, "depth": depth]
+        if !fieldLabel.isEmpty { control["fieldLabel"] = fieldLabel }
+        if isEndpointDialog { control["ownedEndpointDialog"] = true }
         if (nodeRole == "AXCheckBox" || nodeRole == "AXSwitch") && (title == preferenceTitle || description == preferenceTitle) {
             var state: CFTypeRef?
             let stateRead = AXUIElementCopyAttributeValue(node, kAXValueAttribute as CFString, &state)
@@ -225,14 +258,19 @@ while next < pending.count, next < 512, Date() < treeDeadline {
             }
         }
         controls.append(control)
-        if (mode == "click" || mode == "reveal") && (title == requestedTitle || description == requestedTitle) { pressTargets.append(node) }
+        if mode == "click" || mode == "reveal" {
+            if title == requestedTitle || description == requestedTitle { pressTargets.append(node) }
+        } else if fillsFixtureField, isEndpointDialog, nodeRole == "AXTextField",
+                  title == requestedTitle || description == requestedTitle || fieldLabel == requestedTitle {
+            pressTargets.append(node)
+        }
     }
     if depth >= 40 { depthLimited = true; continue }
     var childrenValue: CFTypeRef?
     let childrenRead = AXUIElementCopyAttributeValue(node, kAXChildrenAttribute as CFString, &childrenValue)
     if childrenRead == .success {
         if let children = childrenValue as? [AXUIElement] {
-            pending.append(contentsOf: children.prefix(max(0, 512 - pending.count)).map { ($0, depth + 1, isToast) })
+            pending.append(contentsOf: children.prefix(max(0, 512 - pending.count)).map { ($0, depth + 1, isToast, isEndpointDialog) })
         } else { readErrors += 1 }
     } else if childrenRead != .attributeUnsupported && childrenRead != .noValue {
         readErrors += 1
@@ -251,10 +289,13 @@ let candidateWindows = (nativeWindows ?? []).compactMap { row -> [String: Any]? 
 }
 let truncated = depthLimited || labelsLimited || next < pending.count || pending.count >= 512
 var action: [String: Any] = ["status": "not-requested"]
-if mode == "click" || mode == "reveal" {
-    action = ["status": "refused", "method": mode == "click" ? "native-click" : "AXScrollToVisible", "matches": pressTargets.count, "requestedTitle": requestedTitle]
+if mode == "click" || mode == "reveal" || fillsFixtureField {
+    action = ["status": "refused", "method": fillsFixtureField ? "fixed-nonsecret-fixture-field" : mode == "click" ? "native-click" : "AXScrollToVisible", "matches": pressTargets.count, "requestedTitle": requestedTitle]
     let live = NSRunningApplication(processIdentifier: processId)
-    if treeIdentityMatched, !truncated, readErrors == 0, pressTargets.count == 1,
+    let fillBirthMatches = !fillsFixtureField || (isTaskStagedBundle && fixtureBirth.count == 2 &&
+        initialKernelIdentity?.birthSeconds == fixtureBirth[0] && initialKernelIdentity?.birthMicroseconds == fixtureBirth[1] &&
+        initialKernelIdentity?.executable == expectedBundle + "/Contents/MacOS/Octant")
+    if treeIdentityMatched, fillBirthMatches, !truncated, readErrors == 0, pressTargets.count == 1,
        live?.isTerminated == false,
        live?.bundleURL?.resolvingSymlinksInPath().standardizedFileURL.path == expectedBundle,
        let target = pressTargets.first {
@@ -277,7 +318,7 @@ if mode == "click" || mode == "reveal" {
         action["availableActions"] = availableActions.prefix(32).map { String($0.prefix(256)) }
         action["actionNamesTruncated"] = actionNamesTruncated
         if targetIdentityRead == .success, targetPid == processId {
-            if mode == "reveal", ["Data & storage", preferenceTitle].contains(requestedTitle),
+            if mode == "reveal", ["Data & storage", preferenceTitle, "Octant Harness", "Advanced", "Check and add", "Continue and verify tools (1 request)"].contains(requestedTitle),
                enabledRead == .success, binary(enabledValue) == true,
                namesRead == .success, !actionNamesTruncated,
                availableActions.contains("AXScrollToVisible"), live?.isActive == true,
@@ -287,10 +328,10 @@ if mode == "click" || mode == "reveal" {
                 action["status"] = result == .success ? "acknowledged" : "uncertain"
                 action["nativeError"] = result.rawValue
             }
-            if mode == "click", enabledRead == .success, binary(enabledValue) == true,
+            if mode == "click" || fillsFixtureField, enabledRead == .success, binary(enabledValue) == true,
                namesRead == .success, !actionNamesTruncated, live?.isActive == true,
                NSWorkspace.shared.frontmostApplication?.processIdentifier == processId,
-               !["AXTextField", "AXTextArea"].contains(label(target, kAXRoleAttribute as CFString)),
+               (fillsFixtureField || !["AXTextField", "AXTextArea", "AXComboBox"].contains(label(target, kAXRoleAttribute as CFString))),
                let targetBounds = bounds(target), targetBounds.width >= 12, targetBounds.height >= 12 {
                 action["controlBounds"] = rectangle(targetBounds)
                 var windowValue: CFTypeRef?
@@ -336,6 +377,58 @@ if mode == "click" || mode == "reveal" {
                             up.post(tap: .cghidEventTap)
                             action["status"] = "dispatched"
                             action["center"] = ["x": center.x, "y": center.y]
+                            if fillsFixtureField {
+                                action["status"] = "field-focus-unconfirmed"
+                                action["textDispatched"] = false
+                                let focusDeadline = Date().addingTimeInterval(0.4)
+                                var fieldHasFocus = false
+                                if let element {
+                                    repeat {
+                                        var focus: CFTypeRef?
+                                        if AXUIElementCopyAttributeValue(element, kAXFocusedUIElementAttribute as CFString, &focus) == .success,
+                                           let focus, CFGetTypeID(focus) == AXUIElementGetTypeID(), CFEqual(focus, target) {
+                                            fieldHasFocus = true; break
+                                        }
+                                        usleep(10_000)
+                                    } while Date() < focusDeadline && Date() < dispatchDeadline
+                                }
+                                action["exactNonsecureFieldFocused"] = fieldHasFocus
+                                if fieldHasFocus, isTaskStagedBundle, let original = initialKernelIdentity,
+                                   original.birthSeconds == fixtureBirth[0], original.birthMicroseconds == fixtureBirth[1],
+                                   original.executable == expectedBundle + "/Contents/MacOS/Octant",
+                                   kernelIdentity(processId) == original,
+                                   NSWorkspace.shared.frontmostApplication?.processIdentifier == processId,
+                                   Date() < dispatchDeadline,
+                                   let selectDown = CGEvent(keyboardEventSource: nil, virtualKey: 0, keyDown: true),
+                                   let selectUp = CGEvent(keyboardEventSource: nil, virtualKey: 0, keyDown: false),
+                                   let textDown = CGEvent(keyboardEventSource: nil, virtualKey: 0, keyDown: true),
+                                   let textUp = CGEvent(keyboardEventSource: nil, virtualKey: 0, keyDown: false) {
+                                    selectDown.flags = .maskCommand
+                                    selectUp.flags = .maskCommand
+                                    selectDown.post(tap: .cghidEventTap)
+                                    selectUp.post(tap: .cghidEventTap)
+                                    let characters = Array(fixtureText.utf16)
+                                    characters.withUnsafeBufferPointer { buffer in
+                                        if let base = buffer.baseAddress {
+                                            textDown.keyboardSetUnicodeString(stringLength: buffer.count, unicodeString: base)
+                                            textUp.keyboardSetUnicodeString(stringLength: buffer.count, unicodeString: base)
+                                        }
+                                    }
+                                    usleep(10_000)
+                                    var finalFocus: CFTypeRef?
+                                    if let element,
+                                       AXUIElementCopyAttributeValue(element, kAXFocusedUIElementAttribute as CFString, &finalFocus) == .success,
+                                       let finalFocus, CFGetTypeID(finalFocus) == AXUIElementGetTypeID(), CFEqual(finalFocus, target),
+                                       NSWorkspace.shared.frontmostApplication?.processIdentifier == processId,
+                                       kernelIdentity(processId) == original, Date() < dispatchDeadline {
+                                        textDown.post(tap: .cghidEventTap)
+                                        textUp.post(tap: .cghidEventTap)
+                                        action["status"] = "text-dispatched"
+                                        action["textDispatched"] = true
+                                        action["characterCount"] = characters.count
+                                    }
+                                }
+                            }
                         }
                     }
                 }

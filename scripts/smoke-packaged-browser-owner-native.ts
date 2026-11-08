@@ -8,6 +8,10 @@ import { redactHostRuntimeText } from "@octant/host-runtime";
 import { openReadOnlySqlite } from "../apps/server/src/persistence/sqlitePort";
 import { createQuitAppleScript } from "./package-desktop";
 import {
+  OWNED_BROWSER_FIXTURE_NAME,
+  startOwnedBrowserProvider,
+} from "./packaged-browser-owner-provider";
+import {
   cleanupPackagedProcess,
   runBoundedCommand,
   sanitizedPackagedEnvironment,
@@ -40,6 +44,11 @@ end if
 if operation is "key" then
 set frontmost of candidate to true
 keystroke (item 3 of argv) using command down
+return "sent"
+end if
+if operation is "escape" then
+set frontmost of candidate to true
+key code 53
 return "sent"
 end if
 error "Unsupported captured-process operation."
@@ -76,6 +85,8 @@ function groupProcesses(group: number): ReadonlyArray<number> {
 }
 
 async function main(): Promise<void> {
+  const providerSetup = process.argv.slice(2).join(" ") === "--provider-setup";
+  if (process.argv.length > 2 && !providerSetup) throw Error("Unknown owned native scenario.");
   if (process.platform !== "darwin" || process.arch !== "arm64")
     throw Error("The owned native Browser lifecycle fixture requires Apple Silicon macOS.");
   if (
@@ -92,12 +103,12 @@ async function main(): Promise<void> {
   const artifacts = resolve(process.env.OCTANT_QA_OUTPUT ?? "/tmp/octant-browser-owner-native");
   const root = await mkdtemp(join(tmpdir(), "octant-browser-owner-native."));
   const bundle = stagePackagedAppBundle(resolve("out/Octant.app"));
-  const port = await freePort();
   const controller = new AbortController();
   const interrupted = () => controller.abort();
   process.once("SIGTERM", interrupted);
   process.once("SIGINT", interrupted);
   const lifetime = setTimeout(interrupted, 180_000);
+  let provider: Awaited<ReturnType<typeof startOwnedBrowserProvider>> | undefined;
   let retainOwnedFilesForWatchdog = false;
   const checks: string[] = [];
   const visualStateImages: string[] = [];
@@ -158,6 +169,12 @@ async function main(): Promise<void> {
     throw Error(`Owned UI preference did not persist at ${checkpoint}.`);
   };
   try {
+    if (providerSetup)
+      provider = await startOwnedBrowserProvider({
+        signal: controller.signal,
+        lifetimeMs: 180_000,
+      });
+    const port = await freePort();
     await mkdir(artifacts, { recursive: true });
     await mkdir(join(root, "home"));
     await mkdir(join(root, "tmp"));
@@ -354,7 +371,9 @@ process.once("SIGINT", () => finish(false));`,
         watchdog.stdin?.destroy();
       }
     }
-    for (const phase of ["initial", "restart"] as const) {
+    for (const phase of providerSetup
+      ? (["provider"] as const)
+      : (["initial", "restart"] as const)) {
       const app = spawnPackagedApplication({
         executable: join(bundle, "Contents/MacOS/Octant"),
         env,
@@ -379,12 +398,21 @@ process.once("SIGINT", () => finish(false));`,
           | "quit-hint"
           | "dock-click"
           | "bundle-census"
-          | "bundle-cleanup",
+          | "bundle-cleanup"
+          | "fill-name"
+          | "fill-address",
         value?: string,
+        pinnedBirth?: string,
       ) =>
         runBoundedCommand(
           sdkExecutable,
-          [String(pid), bundle, mode, ...(value === undefined ? [] : [value])],
+          [
+            String(pid),
+            bundle,
+            mode,
+            ...(value === undefined ? [] : [value]),
+            ...(pinnedBirth === undefined ? [] : [pinnedBirth]),
+          ],
           process.env,
           6000,
         );
@@ -436,23 +464,32 @@ process.once("SIGINT", () => finish(false));`,
           operation !== "count" &&
           operation !== "click" &&
           operation !== "reveal" &&
+          operation !== "fill-name" &&
+          operation !== "fill-address" &&
           operation !== "dock-click"
         )
           return systemEvents(operation, value);
-        if (operation === "click" || operation === "reveal") await systemEvents("focus");
+        const fillsField = operation === "fill-name" || operation === "fill-address";
+        if (operation === "click" || operation === "reveal" || fillsField)
+          await systemEvents("focus");
+        if (fillsField && ownerBirth === undefined)
+          throw Error("No original process birth for fixture typing.");
         if (operation === "dock-click" && ownerBirth === undefined)
           throw Error("No pinned original kernel process birth is available for Dock input.");
         const raw = await sdk(
           operation === "dock-click"
             ? "dock-click"
-            : operation === "click" || operation === "reveal"
+            : operation === "click" || operation === "reveal" || fillsField
               ? operation
               : "read",
           operation === "dock-click" && ownerBirth !== undefined
             ? `${ownerBirth.seconds}:${ownerBirth.microseconds}`
-            : operation === "click" || operation === "reveal"
+            : operation === "click" || operation === "reveal" || fillsField
               ? value
               : undefined,
+          fillsField && ownerBirth !== undefined
+            ? `${ownerBirth.seconds}:${ownerBirth.microseconds}`
+            : undefined,
         );
         await writeFile(
           join(
@@ -514,6 +551,20 @@ process.once("SIGINT", () => finish(false));`,
           !Array.isArray(decoded.interactiveControls)
         )
           throw Error("Native SDK control tree is incomplete.");
+        if (fillsField) {
+          if (
+            !record(decoded.action) ||
+            decoded.action.status !== "text-dispatched" ||
+            decoded.action.method !== "fixed-nonsecret-fixture-field" ||
+            decoded.action.matches !== 1 ||
+            decoded.action.exactNonsecureFieldFocused !== true ||
+            decoded.action.textDispatched !== true
+          )
+            throw Error(
+              "Native SDK refused the exact owned nonsecure fixture field. No typing is retried.",
+            );
+          return "text-dispatched";
+        }
         if (operation === "dock-click") {
           if (
             !record(decoded.dockObservation) ||
@@ -558,7 +609,13 @@ process.once("SIGINT", () => finish(false));`,
               (control.value !== undefined && control.value !== 0 && control.value !== 1)
             )
               throw Error("Invalid native SDK control shape.");
-            return `${control.role} | ${control.title} | ${control.description} | ${control.value ?? ""}`;
+            if (
+              control.fieldLabel !== undefined &&
+              (control.ownedEndpointDialog !== true ||
+                !["Name", "Address"].includes(String(control.fieldLabel)))
+            )
+              throw Error("Unexpected fixture field label.");
+            return `${control.role} | ${control.title || control.fieldLabel || ""} | ${control.description} | ${control.value ?? ""}`;
           })
           .join("\n");
       };
@@ -703,7 +760,7 @@ end run`;
         }
         if (!registered) throw Error("Captured native application did not register.");
         await native("initialize");
-        if (phase === "initial") {
+        if (phase !== "restart") {
           await wait(
             "onboarding",
             (s) => s.includes("AXButton") && s.includes("Skip setup"),
@@ -713,74 +770,151 @@ end run`;
           await wait("skip", (s) => s.includes("AXButton") && !s.includes("Skip setup"));
         } else
           await wait("restarted-window", (s) => s.includes("AXButton |  | Settings |"), 45_000);
-        let snapshot = await settings();
-        await capture("preference", snapshot);
-        await recordPersisted(`${phase}-before-toggle`, phase === "restart" ? true : undefined);
-        checks.push(`${phase}-preference-captured-for-independent-visual-review`);
-        if (phase === "initial") {
-          await native("click", preference);
-          await recordPersisted("initial-after-opt-in", true);
-          snapshot = await native("snapshot");
-          await capture("opt-in", snapshot);
-          checks.push("single-ui-opt-in-persisted-in-owned-journal");
-          await native("key", "w");
-          const deadline = Date.now() + 5000;
-          while (Date.now() < deadline && (await native("count")).trim() !== "0") await pause(100);
-          if (
-            (await native("count")).trim() !== "0" ||
-            app.child.exitCode !== null ||
-            app.child.signalCode !== null
+        if (phase === "provider") {
+          if (provider === undefined) throw Error("No owned provider fixture.");
+          await wait("app-settings-entry", (s) => s.includes("AXButton |  | Settings |"));
+          await native("click", "Settings");
+          await wait("settings-harness", (s) => s.includes("Octant Harness"));
+          await native("reveal", "Octant Harness");
+          await native("click", "Octant Harness");
+          await wait("add-endpoint", (s) => s.includes("Add endpoint"));
+          await native("click", "Add endpoint");
+          const kindLabel =
+            "OpenAI-compatible Any service that speaks the OpenAI API: a gateway, a router, or a local server.";
+          const kinds = await wait("endpoint-kinds", (s) => s.includes("OpenAI-compatible"));
+          const kind = kinds
+            .split("\n")
+            .flatMap((row) => row.split(" | ").slice(1, 3))
+            .find((label) => label === kindLabel || label === "OpenAI-compatible");
+          if (kind === undefined) throw Error("Observed endpoint kind has no exact source label.");
+          await native("click", kind);
+          await wait(
+            "endpoint-fixed-fields",
+            (s) => s.includes("AXTextField | Name |") && s.includes("AXTextField | Address |"),
+          );
+          await native("fill-name", OWNED_BROWSER_FIXTURE_NAME);
+          await native("fill-address", provider.baseUrl);
+          await wait("endpoint-advanced", (s) => s.includes("Advanced"));
+          await native("reveal", "Advanced");
+          await native("click", "Advanced");
+          const noKeyLabel =
+            "It takes no key Only for a server on this computer, such as one at 127.0.0.1.";
+          const advanced = await wait("endpoint-no-key", (s) => s.includes("It takes no key"));
+          const noKey = advanced
+            .split("\n")
+            .flatMap((row) => row.split(" | ").slice(1, 3))
+            .find((label) => label === noKeyLabel || label === "It takes no key");
+          if (noKey === undefined) throw Error("Observed no-key choice has no exact source label.");
+          await native("click", noKey);
+          await native("reveal", "Check and add");
+          await native("click", "Check and add");
+          await wait("endpoint-added", (s) => s.includes("AXButton | Continue |"));
+          if (provider.evidence().models < 1)
+            throw Error("Added endpoint did not reach the owned model fixture.");
+          await native("click", "Continue");
+          const verify = "Continue and verify tools (1 request)";
+          await wait("endpoint-models", (s) => s.includes(verify));
+          await native("reveal", verify);
+          await native("click", verify);
+          const probeDeadline = Date.now() + 12_000;
+          while (
+            !controller.signal.aborted &&
+            provider.evidence().chatProbes !== 1 &&
+            Date.now() < probeDeadline
           )
-            throw Error("Last-window close did not retain the owned macOS process.");
-          checks.push("last-window-closed-same-process-alive");
-          try {
-            await writeFile(
-              join(artifacts, "initial-read-only-dock-feasibility.json"),
-              await sdk("dock-read"),
-            );
-          } catch {
-            await writeFile(
-              join(artifacts, "initial-read-only-dock-feasibility-error.txt"),
-              "Bounded read-only Dock observation unavailable; no interaction attempted.",
-            );
-          }
-          const censusRaw = await sdk("bundle-census");
-          await writeFile(join(artifacts, "initial-before-dock-kernel-census.json"), censusRaw);
-          const census: unknown = JSON.parse(censusRaw);
+            await pause(100);
           if (
-            typeof census !== "object" ||
-            census === null ||
-            !("cleanupObservation" in census) ||
-            typeof census.cleanupObservation !== "object" ||
-            census.cleanupObservation === null ||
-            !("censusComplete" in census.cleanupObservation) ||
-            census.cleanupObservation.censusComplete !== true ||
-            !("initialOwned" in census.cleanupObservation) ||
-            !Array.isArray(census.cleanupObservation.initialOwned) ||
-            census.cleanupObservation.initialOwned.length === 0 ||
-            census.cleanupObservation.initialOwned.some(
-              (item: unknown) =>
-                typeof item !== "object" ||
-                item === null ||
-                !("groupPid" in item) ||
-                item.groupPid !== pid,
-            )
+            provider.evidence().chatProbes !== 1 ||
+            provider.evidence().responsesRefused !== 1 ||
+            provider.evidence().rejected !== 0
           )
-            throw Error(
-              "Pre-Dock exact bundle census found unknown or outside-group task ownership.",
-            );
-          await native("dock-click");
-          await wait("dock-reopened", (s) => s.includes("AXButton |  | Settings |"));
-          snapshot = await settings();
-          await recordPersisted("initial-reopened", true);
-          await capture("reopened", snapshot);
-          checks.push("same-original-kernel-process-window-reopened-and-opt-in-persisted");
+            throw Error("Normal Verify tools did not use the exact Responses404 to Chat probe.");
+          const verified = await wait(
+            "endpoint-verified-result",
+            (s) => s.includes("AXButton | Continue |"),
+            12_000,
+            500,
+          );
+          await capture("verify-tools-result", verified);
+          checks.push("normal-native-ui-endpoint-added-and-real-auto-fallback-tool-probe-served");
+          // Closing after registration keeps the endpoint. Do not assign agent
+          // roles or begin a task in this first, independently reviewed gate.
+          await native("escape");
+          await wait(
+            "endpoint-dialog-closed",
+            (s) => !s.includes("Check and add") && !s.includes("AXButton | Continue |"),
+          );
         } else {
-          await native("click", preference);
-          await recordPersisted("restart-after-opt-out", false);
-          snapshot = await native("snapshot");
-          await capture("opt-out", snapshot);
-          checks.push("single-ui-opt-out-persisted-in-owned-journal");
+          let snapshot = await settings();
+          await capture("preference", snapshot);
+          await recordPersisted(`${phase}-before-toggle`, phase === "restart" ? true : undefined);
+          checks.push(`${phase}-preference-captured-for-independent-visual-review`);
+          if (phase === "initial") {
+            await native("click", preference);
+            await recordPersisted("initial-after-opt-in", true);
+            snapshot = await native("snapshot");
+            await capture("opt-in", snapshot);
+            checks.push("single-ui-opt-in-persisted-in-owned-journal");
+            await native("key", "w");
+            const deadline = Date.now() + 5000;
+            while (Date.now() < deadline && (await native("count")).trim() !== "0")
+              await pause(100);
+            if (
+              (await native("count")).trim() !== "0" ||
+              app.child.exitCode !== null ||
+              app.child.signalCode !== null
+            )
+              throw Error("Last-window close did not retain the owned macOS process.");
+            checks.push("last-window-closed-same-process-alive");
+            try {
+              await writeFile(
+                join(artifacts, "initial-read-only-dock-feasibility.json"),
+                await sdk("dock-read"),
+              );
+            } catch {
+              await writeFile(
+                join(artifacts, "initial-read-only-dock-feasibility-error.txt"),
+                "Bounded read-only Dock observation unavailable; no interaction attempted.",
+              );
+            }
+            const censusRaw = await sdk("bundle-census");
+            await writeFile(join(artifacts, "initial-before-dock-kernel-census.json"), censusRaw);
+            const census: unknown = JSON.parse(censusRaw);
+            if (
+              typeof census !== "object" ||
+              census === null ||
+              !("cleanupObservation" in census) ||
+              typeof census.cleanupObservation !== "object" ||
+              census.cleanupObservation === null ||
+              !("censusComplete" in census.cleanupObservation) ||
+              census.cleanupObservation.censusComplete !== true ||
+              !("initialOwned" in census.cleanupObservation) ||
+              !Array.isArray(census.cleanupObservation.initialOwned) ||
+              census.cleanupObservation.initialOwned.length === 0 ||
+              census.cleanupObservation.initialOwned.some(
+                (item: unknown) =>
+                  typeof item !== "object" ||
+                  item === null ||
+                  !("groupPid" in item) ||
+                  item.groupPid !== pid,
+              )
+            )
+              throw Error(
+                "Pre-Dock exact bundle census found unknown or outside-group task ownership.",
+              );
+            await native("dock-click");
+            await wait("dock-reopened", (s) => s.includes("AXButton |  | Settings |"));
+            snapshot = await settings();
+            await recordPersisted("initial-reopened", true);
+            await capture("reopened", snapshot);
+            checks.push("same-original-kernel-process-window-reopened-and-opt-in-persisted");
+          } else {
+            await native("click", preference);
+            await recordPersisted("restart-after-opt-out", false);
+            snapshot = await native("snapshot");
+            await capture("opt-out", snapshot);
+            checks.push("single-ui-opt-out-persisted-in-owned-journal");
+          }
         }
         // The normal visible-window shortcut asks for a second press. With no
         // window, the first press quits directly because no hint can be shown.
@@ -876,32 +1010,48 @@ end run`;
       }
     }
     if (controller.signal.aborted) throw Error("Owned native lifecycle interrupted.");
+    await provider?.close();
+    if (provider !== undefined) checks.push("owned-loopback-provider-listener-and-sockets-joined");
     await writeFile(
-      join(artifacts, "lifecycle-evidence.json"),
+      join(artifacts, providerSetup ? "provider-setup-evidence.json" : "lifecycle-evidence.json"),
       JSON.stringify(
-        {
-          checks,
-          nativeUi: true,
-          nativeInputMethod: "single native click at fresh owned AX bounds",
-          stateVerificationMethod:
-            "rendered screenshots with read-only preference journal corroboration",
-          nativeAxCheckedState: "unavailable-empty-CFString",
-          stateChecks: "pending independent visual review",
-          windowLifecycleCriteriaComplete: true,
-          lastWindowReopen: {
-            status: "same-original-kernel-process-window-reopened",
-            method: "single guarded native Dock click",
-            previousAppleEventRefusal: -1744,
-            appleEventRetried: false,
-          },
-          visualStateImages,
-          persistedReadings,
-          cleanup: "verified",
-          activeExecutionLease: "not-run",
-          profileCookieContinuity: "not-run",
-          personalAccount: false,
-          productionDebuggingUnchanged: true,
-        },
+        providerSetup
+          ? {
+              checks,
+              nativeUi: true,
+              endpointVerification: "pending independent visual review",
+              fixture: provider?.evidence(),
+              protocol: "Automatic: Responses404 to Chat Completions",
+              visualStateImages,
+              cleanup: "verified",
+              reusedWindowLifecycleHead: "4139726ac11dce5affa3c6744be732fa17509e7b",
+              activeExecutionLease: "not-run",
+              profileCookieContinuity: "not-run",
+              personalAccount: false,
+            }
+          : {
+              checks,
+              nativeUi: true,
+              nativeInputMethod: "single native click at fresh owned AX bounds",
+              stateVerificationMethod:
+                "rendered screenshots with read-only preference journal corroboration",
+              nativeAxCheckedState: "unavailable-empty-CFString",
+              stateChecks: "pending independent visual review",
+              windowLifecycleCriteriaComplete: true,
+              lastWindowReopen: {
+                status: "same-original-kernel-process-window-reopened",
+                method: "single guarded native Dock click",
+                previousAppleEventRefusal: -1744,
+                appleEventRetried: false,
+              },
+              visualStateImages,
+              persistedReadings,
+              cleanup: "verified",
+              activeExecutionLease: "not-run",
+              profileCookieContinuity: "not-run",
+              personalAccount: false,
+              productionDebuggingUnchanged: true,
+            },
         null,
         2,
       ),
@@ -910,10 +1060,25 @@ end run`;
     clearTimeout(lifetime);
     process.removeListener("SIGTERM", interrupted);
     process.removeListener("SIGINT", interrupted);
-    if (!retainOwnedFilesForWatchdog) {
-      await rm(root, { recursive: true, force: true });
-      if (bundle.startsWith(join(tmpdir(), "octant-packaged-app.")))
-        await rm(dirname(bundle), { recursive: true, force: true });
+    try {
+      if (provider !== undefined) {
+        let cleanup = "unconfirmed";
+        try {
+          await provider.close();
+          cleanup = "joined";
+        } finally {
+          await writeFile(
+            join(artifacts, "provider-fixture-cleanup.json"),
+            JSON.stringify({ ...provider.evidence(), cleanup }),
+          );
+        }
+      }
+    } finally {
+      if (!retainOwnedFilesForWatchdog) {
+        await rm(root, { recursive: true, force: true });
+        if (bundle.startsWith(join(tmpdir(), "octant-packaged-app.")))
+          await rm(dirname(bundle), { recursive: true, force: true });
+      }
     }
   }
 }
