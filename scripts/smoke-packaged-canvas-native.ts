@@ -1,3 +1,4 @@
+import { Schema } from "effect";
 import { execFileSync, spawn, type ChildProcess } from "node:child_process";
 import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -52,14 +53,9 @@ function groupProcesses(group: number): ReadonlyArray<number> {
 async function main(): Promise<void> {
   if (process.platform !== "darwin" || process.arch !== "arm64")
     throw Error("Packaged native Canvas validation requires Apple Silicon macOS.");
-  const available = await runBoundedCommand(
-    "/usr/bin/osascript",
-    ["-e", 'tell application "System Events" to get UI elements enabled'],
-    process.env,
-    5000,
-  );
-  if (available.trim() !== "true")
-    throw Error("Native Accessibility is unavailable. No permission changes were attempted.");
+  const nativeControllerPath = process.env.OCTANT_QA_NATIVE_CONTROLLER;
+  if (nativeControllerPath === undefined) throw Error("Supply the built owned native controller.");
+  await runBoundedCommand(nativeControllerPath, ["preflight"], process.env, 5000);
   const artifacts = resolve(process.env.OCTANT_QA_OUTPUT ?? "/tmp/octant-packaged-canvas-native");
   const root = await mkdtemp(join(tmpdir(), "octant-canvas-native."));
   let bundle: string | undefined;
@@ -127,141 +123,59 @@ const timer = setInterval(() => {
         stdio: "ignore",
       },
     );
-    const snapshotScript = String.raw`on run argv
-tell application "System Events"
-set candidate to first application process whose unix id is (item 1 of argv as integer)
-set frontmost of candidate to true
-try
-set value of attribute "AXManualAccessibility" of candidate to true
-end try
-if (count of windows of candidate) is 0 then error "Packaged window is not ready."
-set snapshotRows to {}
-repeat with uiElement in (entire contents of first window of candidate)
-try
-set rowRole to role of uiElement as text
-set rowName to ""
-set rowDescription to ""
-set rowValue to ""
-try
-set rowName to name of uiElement as text
-end try
-try
-set rowDescription to description of uiElement as text
-end try
-if rowRole is not "AXSecureTextField" then
-try
-set rowValue to value of uiElement as text
-end try
-end if
-set end of snapshotRows to (rowRole & " | " & rowName & " | " & rowDescription & " | " & rowValue)
-end try
-end repeat
-set AppleScript's text item delimiters to linefeed
-return snapshotRows as text
-end tell
-end run`;
-    let snapshot = "";
+    const Snapshot = Schema.Struct({
+      pid: Schema.Number,
+      windowId: Schema.Number,
+      texts: Schema.Array(Schema.Struct({ text: Schema.String })),
+    });
+    const decodeSnapshot = Schema.decodeUnknownSync(Snapshot);
+    const hasText = (snapshot: typeof Snapshot.Type, value: string) =>
+      snapshot.texts.some((row) => row.text.toLowerCase().includes(value.toLowerCase()));
     let lastNativeError = "";
-    const deadline = Date.now() + 45_000;
-    while (!controller.signal.aborted && Date.now() < deadline) {
-      if (app.child.exitCode !== null || app.child.signalCode !== null)
-        throw Error("The packaged application exited before primary-window inspection.");
-      try {
-        snapshot = await runBoundedCommand(
-          "/usr/bin/osascript",
-          ["-e", snapshotScript, String(ownPid)],
-          process.env,
-          6000,
-        );
-        if (snapshot.includes("AXButton") && snapshot.includes("Welcome to Octant")) break;
-      } catch (error) {
-        lastNativeError =
-          error instanceof Error ? error.message.slice(-1200) : "Native snapshot failed.";
-        // Poll only this owned application's native window while it starts.
+    const observeUntil = async (
+      stage: string,
+      accept: (snapshot: typeof Snapshot.Type) => boolean,
+    ) => {
+      const deadline = Date.now() + 20_000;
+      while (!controller.signal.aborted && Date.now() < deadline) {
+        try {
+          const raw = await runBoundedCommand(
+            nativeControllerPath,
+            ["observe", String(ownPid), join(artifacts, `${stage}.png`), stage],
+            process.env,
+            8000,
+          );
+          await writeFile(join(artifacts, `${stage}.json`), raw);
+          const snapshot = decodeSnapshot(JSON.parse(raw));
+          if (snapshot.pid !== ownPid) throw Error("The observation belongs to another process.");
+          if (accept(snapshot)) return snapshot;
+        } catch (error) {
+          lastNativeError =
+            error instanceof Error ? error.message.slice(-1200) : "Native observation failed.";
+        }
+        await pause(150);
       }
-      await pause(200);
-    }
-    await writeFile(join(artifacts, "primary-window-ax.txt"), snapshot);
-    await writeFile(join(artifacts, "native-controller-diagnostic.txt"), lastNativeError);
+      await writeFile(join(artifacts, "native-controller-diagnostic.txt"), lastNativeError);
+      throw Error(`The real packaged ${stage} state was not observed.`);
+    };
+    await observeUntil("primary-window", (snapshot) => hasText(snapshot, "Welcome to Octant"));
     await runBoundedCommand(
-      "/usr/sbin/screencapture",
-      ["-x", join(artifacts, "primary-window.png")],
+      nativeControllerPath,
+      ["click", String(ownPid), join(artifacts, "skip-setup-target.png"), "Skip setup"],
       process.env,
-      5000,
+      8000,
     );
-    if (!snapshot.includes("AXButton") || !snapshot.includes("Welcome to Octant"))
-      throw Error("The real packaged primary window exposed no first-run native controls.");
+    await observeUntil(
+      "after-skip",
+      (snapshot) => snapshot.texts.length > 0 && !hasText(snapshot, "Welcome to Octant"),
+    );
     await runBoundedCommand(
-      "/usr/bin/osascript",
-      [
-        "-e",
-        String.raw`on run argv
-tell application "System Events"
-set candidate to first application process whose unix id is (item 1 of argv as integer)
-repeat with uiElement in (entire contents of first window of candidate)
-try
-if (role of uiElement as text) is "AXButton" and (name of uiElement as text) is "Skip setup" then
-perform action "AXPress" of uiElement
-return "pressed"
-end if
-end try
-end repeat
-error "The packaged setup skip control is unavailable."
-end tell
-end run`,
-        String(ownPid),
-      ],
+      nativeControllerPath,
+      ["settings", String(ownPid), join(artifacts, "before-settings.png"), "Settings"],
       process.env,
-      6000,
+      8000,
     );
-    const skipDeadline = Date.now() + 10_000;
-    while (!controller.signal.aborted && Date.now() < skipDeadline) {
-      snapshot = await runBoundedCommand(
-        "/usr/bin/osascript",
-        ["-e", snapshotScript, String(ownPid)],
-        process.env,
-        6000,
-      );
-      if (!snapshot.includes("Welcome to Octant")) break;
-      await pause(100);
-    }
-    if (snapshot.includes("Welcome to Octant")) throw Error("Native setup skip did not settle.");
-    await writeFile(join(artifacts, "after-skip-ax.txt"), snapshot);
-    await runBoundedCommand(
-      "/usr/bin/osascript",
-      [
-        "-e",
-        String.raw`on run argv
-tell application "System Events"
-set candidate to first application process whose unix id is (item 1 of argv as integer)
-set frontmost of candidate to true
-keystroke "," using command down
-end tell
-end run`,
-        String(ownPid),
-      ],
-      process.env,
-      6000,
-    );
-    const settingsDeadline = Date.now() + 10_000;
-    while (!controller.signal.aborted && Date.now() < settingsDeadline) {
-      snapshot = await runBoundedCommand(
-        "/usr/bin/osascript",
-        ["-e", snapshotScript, String(ownPid)],
-        process.env,
-        6000,
-      );
-      if (snapshot.includes("Permissions")) break;
-      await pause(100);
-    }
-    await writeFile(join(artifacts, "settings-ax.txt"), snapshot);
-    await runBoundedCommand(
-      "/usr/sbin/screencapture",
-      ["-x", join(artifacts, "settings.png")],
-      process.env,
-      5000,
-    );
-    if (!snapshot.includes("Permissions")) throw Error("The real packaged Settings did not open.");
+    await observeUntil("settings", (snapshot) => hasText(snapshot, "Permissions"));
     if (controller.signal.aborted) throw Error("Native window observation was interrupted.");
     verified = true;
   } finally {
@@ -336,7 +250,7 @@ end run`,
         processId: pid,
         watchdogProcessId: watchdog?.pid,
         port,
-        nativeAccessibility: true,
+        nativeInput: "WindowServer image, Vision and CoreGraphics",
         nativeSetupSkip: true,
         nativeSettings: true,
         productionDebuggingUnchanged: true,

@@ -6,6 +6,7 @@ on:
     paths:
       - .github/workflows/packaged-canvas-native-smoke.yml
       - scripts/smoke-packaged-canvas-native.ts
+      - scripts/native/canvas-smoke-control.swift
 
 permissions:
   contents: read
@@ -26,12 +27,9 @@ jobs:
         run: |
           set -euo pipefail
           test "$(uname -m)" = arm64
-          enabled=$(/usr/bin/osascript -e 'tell application "System Events" to get UI elements enabled')
-          if test "$enabled" != true; then
-            echo "::error::This isolated runner has no native Accessibility controller. No permission changes are attempted."
-            exit 1
-          fi
           mkdir -p "$RUNNER_TEMP/packaged-canvas-native"
+          swiftc scripts/native/canvas-smoke-control.swift -framework AppKit -framework ApplicationServices -framework Vision -o "$RUNNER_TEMP/octant-canvas-native-control"
+          "$RUNNER_TEMP/octant-canvas-native-control" preflight
           /usr/sbin/screencapture -x "$RUNNER_TEMP/packaged-canvas-native/controller-preflight.png"
       - uses: oven-sh/setup-bun@v2
         with:
@@ -45,6 +43,7 @@ jobs:
         timeout-minutes: 3
         env:
           OCTANT_QA_OUTPUT: ${{ runner.temp }}/packaged-canvas-native
+          OCTANT_QA_NATIVE_CONTROLLER: ${{ runner.temp }}/octant-canvas-native-control
         run: bun scripts/smoke-packaged-canvas-native.ts
       - uses: actions/upload-artifact@v4
         if: always()
