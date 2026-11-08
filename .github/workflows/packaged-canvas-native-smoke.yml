@@ -36,14 +36,117 @@ jobs:
           bun-version: 1.4.4
       - run: bun install --frozen-lockfile
       - run: node node_modules/electron/install.js
+      - name: Identify unchanged production inputs for the unsigned package cache
+        id: package-source
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat > "$RUNNER_TEMP/native-package-cache.mjs" <<'JS'
+          import { execFileSync } from 'node:child_process';
+          import { createHash } from 'node:crypto';
+          import { createReadStream } from 'node:fs';
+          import { appendFile, lstat, readFile, readdir, readlink, writeFile } from 'node:fs/promises';
+          import { join } from 'node:path';
+          const base = 'faf9837437d4bec1ed96f279778b50b3e05b7cd7';
+          const git = args => execFileSync('git', args, { encoding: 'utf8' }).trim();
+          try { git(['cat-file', '-e', `${base}^{commit}`]); }
+          catch { git(['fetch', '--no-tags', '--depth=1', 'origin', base]); }
+          const allowed = new Set([
+            '.github/workflows/packaged-canvas-native-smoke.yml',
+            'scripts/smoke-packaged-canvas-native.ts',
+            'scripts/native/canvas-smoke-control.swift',
+          ]);
+          const changed = git(['diff', '--name-only', '-z', base, 'HEAD']).split('\0').filter(Boolean);
+          const image = process.env.ImageVersion ?? '';
+          const inputs = createHash('sha256');
+          for (const path of ['bun.lock', 'package.json', 'scripts/package-desktop.ts']) {
+            inputs.update(path + '\0'); inputs.update(await readFile(path));
+          }
+          const expected = {
+            version: 1, productionBase: base, builderInputs: inputs.digest('hex'),
+            image, architecture: process.arch, bun: Bun.version,
+            electron: JSON.parse(await readFile('node_modules/electron/package.json', 'utf8')).version,
+          };
+          const eligible = changed.every(path => allowed.has(path)) && /^[A-Za-z0-9._-]+$/.test(image);
+          const key = 'native-canvas-package-' + createHash('sha256').update(JSON.stringify(expected)).digest('hex');
+          const output = (name, value) => appendFile(process.env.GITHUB_OUTPUT, `${name}=${value}\n`);
+          async function checksum() {
+            const hash = createHash('sha256');
+            const root = 'out/Octant.app';
+            if (!(await lstat(root)).isDirectory()) throw Error('The package root is not a directory.');
+            async function visit(relative) {
+              const path = join(root, relative);
+              const info = await lstat(path);
+              hash.update(`${relative}\0${info.mode & 0o777}\0`);
+              if (info.isSymbolicLink()) hash.update('link\0' + await readlink(path));
+              else if (info.isDirectory()) {
+                hash.update('directory\0');
+                for (const name of (await readdir(path)).sort()) await visit(join(relative, name));
+              } else if (info.isFile()) {
+                hash.update(`file:${info.size}\0`);
+                for await (const chunk of createReadStream(path)) hash.update(chunk);
+              } else throw Error('An unsupported entry is present in the package.');
+              hash.update('\0');
+            }
+            await visit(''); return hash.digest('hex');
+          }
+          const metadata = 'out/native-package-provenance.json';
+          const mode = process.argv[2];
+          if (mode === 'identify') {
+            await output('eligible', String(eligible)); await output('key', key);
+          } else if (mode === 'verify') {
+            let verified = false;
+            try {
+              const info = await lstat(metadata);
+              if (!info.isFile() || info.size > 8192) throw Error('Invalid cached provenance.');
+              const prior = JSON.parse(await readFile(metadata, 'utf8'));
+              verified = eligible && Object.entries(expected).every(([name, value]) => prior[name] === value)
+                && prior.productionMatchesBase === true && /^[0-9a-f]{40}$/.test(prior.producerHead)
+                && prior.checksum === await checksum();
+            } catch { verified = false; }
+            await output('verified', String(verified));
+            console.log(verified ? 'Verified the cached unsigned package and its immutable production inputs.'
+              : 'Cached provenance or checksum did not verify; building a fresh package.');
+          } else if (mode === 'record') {
+            await writeFile(metadata, JSON.stringify({ ...expected, productionMatchesBase: eligible,
+              producerHead: git(['rev-parse', 'HEAD']), checksum: await checksum() }, null, 2));
+          } else throw Error('Unknown package provenance operation.');
+          JS
+          bun "$RUNNER_TEMP/native-package-cache.mjs" identify
+      - uses: actions/cache/restore@v4
+        id: native-package-cache
+        if: steps.package-source.outputs.eligible == 'true'
+        continue-on-error: true
+        with:
+          path: |
+            out/Octant.app
+            out/native-package-provenance.json
+          key: ${{ steps.package-source.outputs.key }}
+      - name: Verify the exact cached package before reuse
+        id: package-cache-proof
+        if: steps.native-package-cache.outputs.cache-hit == 'true'
+        run: bun "$RUNNER_TEMP/native-package-cache.mjs" verify
       - name: Package current source without signing or publication
+        if: steps.package-cache-proof.outputs.verified != 'true'
         timeout-minutes: 25
         run: bun run package:desktop
+      - name: Record the fresh package provenance and checksum
+        if: steps.package-cache-proof.outputs.verified != 'true'
+        run: bun "$RUNNER_TEMP/native-package-cache.mjs" record
+      - uses: actions/cache/save@v4
+        if: steps.package-source.outputs.eligible == 'true' && steps.native-package-cache.outputs.cache-hit != 'true'
+        continue-on-error: true
+        with:
+          path: |
+            out/Octant.app
+            out/native-package-provenance.json
+          key: ${{ steps.package-source.outputs.key }}
       - name: Observe the real packaged primary window
         timeout-minutes: 4
         env:
           OCTANT_QA_OUTPUT: ${{ runner.temp }}/packaged-canvas-native
           OCTANT_QA_NATIVE_CONTROLLER: ${{ runner.temp }}/octant-canvas-native-control
+          OCTANT_QA_CACHED_PACKAGE: ${{ steps.package-cache-proof.outputs.verified == 'true' && 'true' || 'false' }}
         run: bun scripts/smoke-packaged-canvas-native.ts
       - uses: actions/upload-artifact@v4
         if: always()

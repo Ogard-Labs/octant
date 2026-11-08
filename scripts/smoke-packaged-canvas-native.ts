@@ -1,6 +1,6 @@
 import { Schema } from "effect";
 import { execFileSync, spawn, type ChildProcess } from "node:child_process";
-import { mkdtemp, mkdir, readdir, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { createServer } from "node:net";
@@ -18,6 +18,18 @@ import {
 } from "./packaged-smoke-process";
 
 const pause = (milliseconds: number) => new Promise((resolve) => setTimeout(resolve, milliseconds));
+const PackageProvenance = Schema.Struct({
+  version: Schema.Literal(1),
+  productionBase: Schema.String,
+  builderInputs: Schema.String,
+  image: Schema.String,
+  architecture: Schema.String,
+  bun: Schema.String,
+  electron: Schema.String,
+  productionMatchesBase: Schema.Boolean,
+  producerHead: Schema.String,
+  checksum: Schema.String,
+});
 
 async function freePort(): Promise<number> {
   const listener = createServer();
@@ -65,6 +77,7 @@ async function main(): Promise<void> {
   let app: ReturnType<typeof spawnPackagedApplication> | undefined;
   let watchdog: ChildProcess | undefined;
   let shareService: ReturnType<typeof startShareService> | undefined;
+  let packageProvenance: typeof PackageProvenance.Type | undefined;
   const controller = new AbortController();
   const interrupted = () => controller.abort();
   process.once("SIGTERM", interrupted);
@@ -76,6 +89,23 @@ async function main(): Promise<void> {
   let port: number | undefined;
   try {
     await mkdir(artifacts, { recursive: true });
+    if (process.env.OCTANT_QA_CACHED_PACKAGE !== undefined) {
+      packageProvenance = Schema.decodeUnknownSync(PackageProvenance)(
+        JSON.parse(await readFile(resolve("out/native-package-provenance.json"), "utf8")),
+      );
+      await writeFile(
+        join(artifacts, "package-provenance.json"),
+        JSON.stringify(
+          {
+            ...packageProvenance,
+            cachedPackage: process.env.OCTANT_QA_CACHED_PACKAGE === "true",
+            testHead: execFileSync("git", ["rev-parse", "HEAD"], { encoding: "utf8" }).trim(),
+          },
+          null,
+          2,
+        ),
+      );
+    }
     await mkdir(join(root, "home"));
     await mkdir(join(root, "tmp"));
     port = await freePort();
@@ -544,6 +574,8 @@ const timer = setInterval(() => {
         watchdogProcessId: watchdog?.pid,
         port,
         nativeInput: "WindowServer image, Vision and CoreGraphics",
+        packageProvenance,
+        cachedPackage: process.env.OCTANT_QA_CACHED_PACKAGE === "true",
         nativeSetupSkip: true,
         nativeSettings: true,
         seededCanvasRendered: true,

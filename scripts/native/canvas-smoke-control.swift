@@ -61,6 +61,7 @@ guard CommandLine.arguments.count >= 5, let pid = Int32(CommandLine.arguments[2]
 }
 let imagePath = CommandLine.arguments[3]
 let expected = CommandLine.arguments[4]
+_ = NSApplication.shared
 guard let application = NSRunningApplication(processIdentifier: pid), !application.isTerminated else {
     refuse("The owned application is no longer running.")
 }
@@ -120,7 +121,19 @@ if mode == "click" || mode == "fill" || mode == "toggle-before-field" || mode ==
     // AppKit's actual mouse-down hit test skips windows that ignore input or
     // are transparent at this point. Rectangular WindowServer bounds do not.
     let hit = NSWindow.windowNumber(at: CGPoint(x: point.x, y: primary.frame.height - point.y), belowWindowWithWindowNumber: 0)
-    guard hit > 0 else { refuse("No native window would receive this pointer event.") }
+    guard hit > 0 else {
+        let direct = NSWindow.windowNumber(at: point, belowWindowWithWindowNumber: 0)
+        let display = CGDisplayBounds(CGMainDisplayID())
+        let diagnostic: [String: Any] = ["hit": hit, "directCoordinateHit": direct,
+            "point": [point.x, point.y],
+            "primaryFrame": [primary.frame.minX, primary.frame.minY, primary.frame.width, primary.frame.height],
+            "quartzDisplay": [display.minX, display.minY, display.width, display.height],
+            "ownedBounds": [owned.bounds.minX, owned.bounds.minY, owned.bounds.width, owned.bounds.height]]
+        if let data = try? JSONSerialization.data(withJSONObject: diagnostic), let message = String(data: data, encoding: .utf8) {
+            FileHandle.standardError.write(Data((message + "\n").utf8))
+        }
+        refuse("No native window would receive this pointer event.")
+    }
     let covering = windows().first { (row: [String: Any]) in
         (row[kCGWindowNumber as String] as? NSNumber)?.intValue == hit
     }
