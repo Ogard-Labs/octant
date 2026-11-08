@@ -3990,6 +3990,18 @@ Work fold it into the list they already journal whole. A journal written before
 `task-list` existed holds only `task-progress` and replays exactly as it did,
 dropped steps included.
 
+An Octant Harness lead keeps its list with Octant's own `todo-write` tool, and
+the Harness loop reports it the same way: when the runner answers a
+`todo-write` call without error, the loop emits one `task-progress` per item
+(pending, in progress, done as completed) and a closing `task-list`, keeping a
+row's id by its place in the list as Claude's mapper does. A refused call
+replaced nothing, so it reports nothing. The endpoint drivers that run on the
+loop (OpenAI-compatible, Anthropic-compatible, Azure AI Foundry, Bedrock,
+Ollama) still report `taskProgress` unsupported: that capability says whether
+the endpoint reports a plan of its own, and their conformance runs, which
+offer no `todo-write`, must keep emitting none. The list stays on the harness
+session too, as the Task list below describes.
+
 Each thread surface shows the agent's restated plan as a live "N of M tasks
 completed" panel while any task is open or the turn is still writing: Code from its journaled
 operation events, Chat from `ChatAttempt.tasks` carried on
@@ -7337,7 +7349,9 @@ the model at another size.
   `native-harness-tasks-replaced` frame (a list rewritten unchanged adds
   none), rebuilt on replay, and carried in the session view as `tasks`, so
   the web card, the phone panel, and the terminal show each item as pending,
-  in progress, or done in every mode. It never proposes, revises, or advances
+  in progress, or done in every mode. Each accepted list is also reported as
+  task events, so the thread's Tasks panel shows it as it shows any runtime's
+  checklist ([Agent task display](#agent-task-display)). It never proposes, revises, or advances
   a thread plan and raises no plan review, because the plan's approval policy
   guards what a person has agreed to run and a lead's working notes would
   otherwise be refused at their first step. The person-approved plan and its
@@ -7863,8 +7877,10 @@ the model at another size.
      `ThreadHarnessApproval.test.tsx` and `ThreadHarnessQuestion.test.tsx` the
      inline approval and Work question cards.
   3. **Task list.** `todo-write` records pending, in-progress, and done
-     without a plan approval. Not yet pinned at the offered-set level beyond
-     item 1; the progress states are covered by `nativeHarnessTodo.test.ts`.
+     without a plan approval, and the thread's Tasks panel shows it. Not yet
+     pinned at the offered-set level beyond item 1; the progress states are
+     covered by `nativeHarnessTodo.test.ts` and the panel's task events by
+     `nativeHarnessLoop.test.ts`.
   4. **One session everywhere.** The same session state is visible in web,
      desktop, terminal, and phone: each reads and changes the one journaled
      session through `/api/native-harness/sessions/:threadId`, and none keeps
