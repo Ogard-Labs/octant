@@ -9,7 +9,7 @@ describe("saying what each runtime does on its own", () => {
         codex: { autoCompactTokenLimit: 150_000 },
       }),
     ).toBe(
-      "Your own settings: Claude Code compacts by itself at 167K; Codex at 150K. Octant leaves those files as they are.",
+      "Your own settings: Claude Code compacts by itself at 147K; Codex at 150K. Octant leaves those files as they are.",
     );
   });
 

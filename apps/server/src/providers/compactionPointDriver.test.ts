@@ -2,6 +2,7 @@ import type { ProviderModelId } from "@octant/contracts";
 import type { ProviderConnection, ProviderDriver } from "@octant/provider-sdk/driver";
 import { Effect, Stream } from "effect";
 import { describe, expect, it } from "vitest";
+import { decodeContextUsageWindow } from "./claudeAgentSdkDecoder";
 import { claudeAutoCompactWindow } from "./claudeDriver";
 import { compactionPointFor, withCompactionPoint } from "./compactionPointDriver";
 
@@ -98,12 +99,20 @@ describe("handing a session the person's compaction point", () => {
 
   it("sets Claude Code's window so its own reserve lands on the point, and leaves its own point past it", () => {
     expect(claudeAutoCompactWindow({ tokens: 140_000, contextWindow: 200_000 })).toEqual({
-      autoCompactWindow: 153_000,
+      autoCompactWindow: 173_000,
     });
     // At 95% the point is past where Claude Code already compacts.
     expect(claudeAutoCompactWindow({ tokens: 190_000, contextWindow: 200_000 })).toEqual({});
     // Below the window the runtime accepts at all.
     expect(claudeAutoCompactWindow({ tokens: 50_000, contextWindow: 100_000 })).toEqual({});
     expect(claudeAutoCompactWindow(undefined)).toEqual({});
+  });
+
+  it("reads the Claude runtime's window from its context-usage answer, compaction on or off", () => {
+    expect(decodeContextUsageWindow({ maxTokens: 1_000_000, isAutoCompactEnabled: false })).toBe(
+      1_000_000,
+    );
+    expect(decodeContextUsageWindow({ maxTokens: "big" })).toBeUndefined();
+    expect(decodeContextUsageWindow(undefined)).toBeUndefined();
   });
 });

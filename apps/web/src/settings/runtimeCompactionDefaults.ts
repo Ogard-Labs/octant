@@ -3,8 +3,8 @@ import type { RuntimeCompactionDefaults } from "@octant/contracts/extension-rpc"
 import { useEffect, useState } from "react";
 import { compactTokenCount } from "../context/contextInspectorModel";
 
-/** Claude Code keeps this much of its auto-compact window free (2.1.287). */
-const CLAUDE_AUTO_COMPACT_RESERVE_TOKENS = 13_000;
+/** Claude Code keeps this much of its auto-compact window free (2.1.287, measured live). */
+const CLAUDE_AUTO_COMPACT_RESERVE_TOKENS = 33_000;
 
 /**
  * What each runtime does on its own, from the person's own files, said as the

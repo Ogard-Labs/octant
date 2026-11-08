@@ -1728,6 +1728,9 @@ function makeConnection(
       ...(state.query.initialization.autoCompactThreshold === undefined
         ? {}
         : { autoCompactThreshold: state.query.initialization.autoCompactThreshold }),
+      ...(state.query.initialization.contextWindow === undefined
+        ? {}
+        : { contextWindow: state.query.initialization.contextWindow }),
       callUsage: new Map(),
       requestIds: new Map(),
       taskIds: new Map(),
@@ -3177,9 +3180,10 @@ function withPublishedSnapshots(
 
 /**
  * Claude Code compacts once a session holds its auto-compact window less a
- * fixed 13,000-token reserve, the window being the smaller of the model's and
+ * fixed 33,000-token reserve, the window being the smaller of the model's and
  * the `autoCompactWindow` setting, which it clamps to 100,000 to 1,000,000
- * (read from the 2.1.287 runtime that the agent SDK 0.3.211 bundles). So the
+ * (the 2.1.287 runtime that the agent SDK 0.3.211 bundles; measured live on
+ * 2026-11-08: a 1,000,000 window reports its threshold at 967,000). So the
  * person's point is the setting at point plus the reserve, passed as a flag
  * setting on this query alone, never written to their settings files. A point
  * at or past the runtime's own, or below what the clamp allows, leaves the
@@ -3194,4 +3198,4 @@ export function claudeAutoCompactWindow(point: ProviderCompactionPoint | undefin
   return { autoCompactWindow: window };
 }
 
-const CLAUDE_AUTO_COMPACT_RESERVE_TOKENS = 13_000;
+const CLAUDE_AUTO_COMPACT_RESERVE_TOKENS = 33_000;

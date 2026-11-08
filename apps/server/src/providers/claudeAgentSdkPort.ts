@@ -21,6 +21,7 @@ import {
   claudeOffersTool,
   decodeAccount,
   decodeAutoCompactThreshold,
+  decodeContextUsageWindow,
   decodeContextBreakdown,
   decodeInitialization,
   type ClaudeDecodePhase,
@@ -190,6 +191,8 @@ export interface ClaudeInitialization {
    * compaction is on. Absent when it said nothing usable.
    */
   readonly autoCompactThreshold?: number;
+  /** The session's window in tokens, as the runtime reported it. */
+  readonly contextWindow?: number;
 }
 
 export interface ClaudeSessionMetadata {
@@ -759,8 +762,16 @@ const CONTEXT_USAGE_TIMEOUT_MS = 3_000;
  */
 const TURN_CONTEXT_USAGE_TIMEOUT_MS = 1_500;
 
-function compactionPoint(autoCompactThreshold: number | undefined) {
-  return autoCompactThreshold === undefined ? {} : { autoCompactThreshold };
+function compactionPoint(usage: {
+  readonly autoCompactThreshold: number | undefined;
+  readonly contextWindow: number | undefined;
+}) {
+  return {
+    ...(usage.autoCompactThreshold === undefined
+      ? {}
+      : { autoCompactThreshold: usage.autoCompactThreshold }),
+    ...(usage.contextWindow === undefined ? {} : { contextWindow: usage.contextWindow }),
+  };
 }
 
 /**
@@ -788,11 +799,16 @@ async function askContextUsage(
   }
 }
 
-/** Where the runtime compacts the session, or nothing when it did not say. */
-async function askAutoCompactThreshold(
-  query: ClaudeAgentSdkQueryLike,
-): Promise<number | undefined> {
-  return decodeAutoCompactThreshold(await askContextUsage(query, CONTEXT_USAGE_TIMEOUT_MS));
+/** Where the runtime compacts the session and its window, or nothing it did not say. */
+async function askAutoCompactThreshold(query: ClaudeAgentSdkQueryLike): Promise<{
+  readonly autoCompactThreshold: number | undefined;
+  readonly contextWindow: number | undefined;
+}> {
+  const usage = await askContextUsage(query, CONTEXT_USAGE_TIMEOUT_MS);
+  return {
+    autoCompactThreshold: decodeAutoCompactThreshold(usage),
+    contextWindow: decodeContextUsageWindow(usage),
+  };
 }
 
 const PLAN_USAGE_TIMEOUT_MS = 5_000;

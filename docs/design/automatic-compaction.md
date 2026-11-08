@@ -408,9 +408,9 @@ contextWindow }`, optional on `ProviderSessionStart` and
   so a runtime whose catalogue names no window gets the point from its second
   session on.
 - **Claude Code** (`claudeAutoCompactWindow`): it compacts at its
-  auto-compact window less a fixed 13,000-token reserve, the window being the
+  auto-compact window less a fixed 33,000-token reserve (measured live 2026-11-08), the window being the
   smaller of the model's and the `autoCompactWindow` setting (clamped to
-  100,000 to 1,000,000). The query gets `autoCompactWindow = tokens + 13,000`
+  100,000 to 1,000,000). The query gets `autoCompactWindow = tokens + 33,000`
   as a flag setting, so the person's settings files are untouched. A point at or
   past Claude Code's own, or one the clamp refuses, leaves its own point. The
   runtime's test-only percentage variable is not used.
