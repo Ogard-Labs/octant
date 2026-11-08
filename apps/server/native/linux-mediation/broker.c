@@ -187,9 +187,11 @@ int main(int argc, char **argv)
       struct octant_mediation_request request;
       ssize_t length = read(broker, &request, sizeof(request));
       healthy = length == sizeof(request) && send('R', &request, sizeof(request));
-      pending = healthy;
-      pending_id = request.request_id;
-      pending_request = request;
+      if (healthy) {
+        pending = true;
+        pending_id = request.request_id;
+        pending_request = request;
+      }
     }
   }
   /* Closing the context refuses admissions before any bounded child cleanup. */
