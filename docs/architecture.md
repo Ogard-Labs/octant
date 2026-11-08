@@ -6680,7 +6680,16 @@ prompt is therefore built to be appended, never rewritten:
   appear. It names no tool, folder, provider, date or person, and leaves what a
   mode may touch to the runtime's tools and Octant Harness's mode line. Codex
   and Claude Code bring prompts written for a terminal, and before this nothing
-  told the model it was inside Octant. The instructions then follow one order
+  told the model it was inside Octant. Octant Harness, whose endpoint models
+  bring no prompt of their own, adds one fixed About Octant block to its
+  standing instructions, between its core rules and the mode line
+  (`apps/server/src/harness/nativeHarnessInstructions.ts`): what Octant is, what
+  Chat, Work, and Code may touch, Projects and the board, the Done rule (an
+  agent never marks a thread Done), access levels and read-only Plan mode,
+  Project memory, skills, Canvas, and helper agents. It is the same text in
+  every mode and names a tool only as "when offered", so it holds whether or
+  not a memory, skill, Canvas, or helper-agent tool is in the session and never
+  moves the cached prefix. The instructions then follow one order
   in every mode: orientation, the reply formats it introduces, the mode's own
   rules (Work's folder rule, document delivery, the status file), tool notes,
   and finally anything for the current turn alone.
