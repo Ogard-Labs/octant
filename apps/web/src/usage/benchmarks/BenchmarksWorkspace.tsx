@@ -244,10 +244,70 @@ export function BenchmarksWorkspace(props: BenchmarksWorkspaceProps) {
   const runs = load.status === "ready" ? load.runs : [];
   const selectedSuite = suites.find((suite) => String(suite.suiteId) === selectedSuiteId);
   const suiteRuns = runs.filter((run) => String(run.suiteId) === selectedSuiteId);
+  const knownSuites = new Set(suites.map((suite) => String(suite.suiteId)));
+  const orphanRuns = runs.filter((run) => !knownSuites.has(String(run.suiteId)));
   const metricsByCell = useMemo(
     () =>
       new Map((runRead?.cellMetrics ?? []).map((entry) => [String(entry.cellId), entry.metrics])),
     [runRead],
+  );
+
+  const runsTable = (list: typeof runs, tableLabel: string) => (
+    <div className="usage-table-scroll">
+      <table aria-label={tableLabel} className="usage-table">
+        <thead>
+          <tr>
+            <th scope="col">Started</th>
+            <th scope="col">Status</th>
+            <th scope="col">Contenders</th>
+            <th scope="col">Cells settled</th>
+            <th scope="col">
+              <span className="benchmark-visually-hidden">Actions</span>
+            </th>
+          </tr>
+        </thead>
+        <tbody>
+          {list.map((run) => (
+            <tr key={String(run.runId)}>
+              <th scope="row">
+                <OctantButton
+                  variant="bare"
+                  aria-pressed={String(run.runId) === selectedRunId}
+                  className="benchmark-link"
+                  onClick={() => {
+                    setSelectedCaseId(undefined);
+                    setSelectedRunId(String(run.runId));
+                  }}
+                  type="button"
+                >
+                  {formatWhen(run.startedAt)}
+                </OctantButton>
+              </th>
+              <td>{RUN_STATUS_WORDS[run.status]}</td>
+              <td>
+                {run.contenderCount}
+                {run.repetitions > 1 ? ` × ${run.repetitions}` : ""}
+              </td>
+              <td>
+                {run.settledCount} of {run.cellCount}
+              </td>
+              <td className="benchmark-actions">
+                <OctantButton
+                  aria-label={`Purge the run from ${formatWhen(run.startedAt)}`}
+                  disabled={run.status === "running"}
+                  onClick={() => setPending({ kind: "purge-run", run })}
+                  size="icon"
+                  type="button"
+                  variant="ghost"
+                >
+                  <Trash2 aria-hidden="true" size={14} />
+                </OctantButton>
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
   );
 
   const saveSuite = async (request: BenchmarkSuiteSaveRequest): Promise<string | undefined> => {
@@ -503,7 +563,8 @@ export function BenchmarksWorkspace(props: BenchmarksWorkspaceProps) {
                     return (
                       <tr key={String(suite.suiteId)}>
                         <th scope="row">
-                          <button
+                          <OctantButton
+                            variant="bare"
                             aria-pressed={String(suite.suiteId) === selectedSuiteId}
                             className="benchmark-link"
                             onClick={() => {
@@ -513,7 +574,7 @@ export function BenchmarksWorkspace(props: BenchmarksWorkspaceProps) {
                             type="button"
                           >
                             {suite.name}
-                          </button>
+                          </OctantButton>
                         </th>
                         <td>{suite.cases.length}</td>
                         <td>
@@ -580,63 +641,16 @@ export function BenchmarksWorkspace(props: BenchmarksWorkspaceProps) {
             {suiteRuns.length === 0 ? (
               <p className="usage-workspace__note">This suite has not been run.</p>
             ) : (
-              <div className="usage-table-scroll">
-                <table aria-label="Runs of this suite" className="usage-table">
-                  <thead>
-                    <tr>
-                      <th scope="col">Started</th>
-                      <th scope="col">Status</th>
-                      <th scope="col">Contenders</th>
-                      <th scope="col">Cells settled</th>
-                      <th scope="col">
-                        <span className="benchmark-visually-hidden">Actions</span>
-                      </th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {suiteRuns.map((run) => (
-                      <tr key={String(run.runId)}>
-                        <th scope="row">
-                          <button
-                            aria-pressed={String(run.runId) === selectedRunId}
-                            className="benchmark-link"
-                            onClick={() => {
-                              setSelectedCaseId(undefined);
-                              setSelectedRunId(String(run.runId));
-                            }}
-                            type="button"
-                          >
-                            {formatWhen(run.startedAt)}
-                          </button>
-                        </th>
-                        <td>{RUN_STATUS_WORDS[run.status]}</td>
-                        <td>
-                          {run.contenderCount}
-                          {run.repetitions > 1 ? ` × ${run.repetitions}` : ""}
-                        </td>
-                        <td>
-                          {run.settledCount} of {run.cellCount}
-                        </td>
-                        <td className="benchmark-actions">
-                          <OctantButton
-                            aria-label={`Purge the run from ${formatWhen(run.startedAt)}`}
-                            disabled={run.status === "running"}
-                            onClick={() => setPending({ kind: "purge-run", run })}
-                            size="icon"
-                            type="button"
-                            variant="ghost"
-                          >
-                            <Trash2 aria-hidden="true" size={14} />
-                          </OctantButton>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
+              runsTable(suiteRuns, "Runs of this suite")
             )}
           </SurfaceSection>
         </>
+      )}
+
+      {editing !== undefined || orphanRuns.length === 0 ? null : (
+        <SurfaceSection label="Runs of deleted suites">
+          {runsTable(orphanRuns, "Runs of deleted suites")}
+        </SurfaceSection>
       )}
 
       {editing !== undefined || runRead === undefined ? null : (

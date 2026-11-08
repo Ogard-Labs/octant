@@ -106,4 +106,37 @@ describe("a suite through the editor and back", () => {
     expect(result.request.cases[0]?.prompt).toBe("Answer in JSON.");
     expect(result.request.cases[0]?.checks[0]).toMatchObject({ kind: "contains", text: "x" });
   });
+
+  it("refuses an exact-match text with surrounding spaces instead of trimming it", () => {
+    const draft = suiteToDraft(richSuite());
+    const [first, ...rest] = draft.cases;
+    if (first === undefined) throw new Error("no case");
+    const withEquals = (trim: boolean) =>
+      draftToSaveRequest({
+        ...draft,
+        cases: [
+          {
+            ...first,
+            checks: first.checks.map((check) =>
+              check.kind === "equals" ? { ...check, text: " z ", trim } : check,
+            ),
+          },
+          ...rest,
+        ],
+      });
+
+    const refused = withEquals(false);
+    expect(refused).toMatchObject({ status: "invalid" });
+    expect(refused.status === "invalid" ? refused.message : "").toMatch(
+      /surrounding spaces can't be matched exactly/,
+    );
+
+    const trimmed = withEquals(true);
+    if (trimmed.status !== "ok") throw new Error(trimmed.message);
+    expect(trimmed.request.cases[0]?.checks[3]).toMatchObject({
+      kind: "equals",
+      text: "z",
+      trim: true,
+    });
+  });
 });

@@ -1,3 +1,4 @@
+import { OctantCheckbox } from "../../ui/base/OctantCheckbox";
 import { Plus, Trash2 } from "lucide-react";
 import { useState, type ReactNode } from "react";
 import type { BenchmarkRegexFlags } from "@octant/contracts";
@@ -93,6 +94,7 @@ export function BenchmarkSuiteEditor(props: BenchmarkSuiteEditorProps) {
     <form
       aria-label="Suite editor"
       className="benchmark-editor"
+      noValidate
       onSubmit={(event) => {
         event.preventDefault();
         void save();
@@ -267,16 +269,14 @@ export function BenchmarkSuiteEditor(props: BenchmarkSuiteEditorProps) {
 
       <SurfaceSection label="Judge">
         <label className="benchmark-editor__toggle">
-          <input
+          <OctantCheckbox
             checked={draft.judge.enabled}
-            className="octant-checkbox"
             onChange={(event) =>
               setDraft({
                 ...draft,
                 judge: { ...draft.judge, enabled: event.currentTarget.checked },
               })
             }
-            type="checkbox"
           />
           <span>Score each answer with a judge model</span>
         </label>
@@ -408,11 +408,9 @@ function CheckFields(props: {
             value={check.text}
           />
           <label className="benchmark-editor__toggle">
-            <input
+            <OctantCheckbox
               checked={check.caseSensitive}
-              className="octant-checkbox"
               onChange={(event) => props.update({ caseSensitive: event.currentTarget.checked })}
-              type="checkbox"
             />
             <span>Match case</span>
           </label>
@@ -427,11 +425,9 @@ function CheckFields(props: {
             value={check.text}
           />
           <label className="benchmark-editor__toggle">
-            <input
+            <OctantCheckbox
               checked={check.trim}
-              className="octant-checkbox"
               onChange={(event) => props.update({ trim: event.currentTarget.checked })}
-              type="checkbox"
             />
             <span>Ignore surrounding space</span>
           </label>

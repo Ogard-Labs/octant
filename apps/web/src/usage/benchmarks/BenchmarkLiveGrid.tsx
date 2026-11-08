@@ -130,14 +130,15 @@ export function BenchmarkLiveGrid(props: BenchmarkLiveGridProps) {
             {run.cases.map((benchmarkCase) => (
               <tr key={String(benchmarkCase.caseId)}>
                 <th scope="row">
-                  <button
+                  <OctantButton
+                    variant="bare"
                     aria-pressed={props.selectedCaseId === String(benchmarkCase.caseId)}
                     className="benchmark-link"
                     onClick={() => props.onSelectCase(String(benchmarkCase.caseId))}
                     type="button"
                   >
                     {benchmarkCase.title}
-                  </button>
+                  </OctantButton>
                 </th>
                 {run.contenders.map((_contender, contenderIndex) => (
                   <td key={contenderIndex}>

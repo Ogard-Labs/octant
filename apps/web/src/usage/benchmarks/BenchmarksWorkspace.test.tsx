@@ -412,15 +412,23 @@ describe("the live grid", () => {
   it("clears a failed read's notice when a later poll succeeds", async () => {
     const actor = user();
     let reads = 0;
+    // The poll after the failure waits until the notice has been seen: at a 20 ms
+    // interval it would otherwise clear the notice before a slow runner looks.
+    let release: () => void = () => {};
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
     const readRun = vi.fn(async () => {
       reads += 1;
       if (reads === 2) throw new BenchmarksClientError("The host is busy.");
+      if (reads >= 3) await gate;
       return readResponse("running");
     });
     mount(makeClient({ readRun }));
 
     await openRun(actor);
     expect(await screen.findByText("The host is busy.")).toBeInTheDocument();
+    release();
     await waitFor(() => expect(screen.queryByText("The host is busy.")).toBeNull());
   });
 
@@ -658,5 +666,24 @@ describe("the runs list", () => {
     );
 
     expect(await screen.findByText("Only this Mac's window can edit benchmarks.")).toBeVisible();
+  });
+
+  it("keeps the runs of a deleted suite reachable, to open and to purge", async () => {
+    const actor = user();
+    const client = makeClient({
+      listSuites: vi.fn(async () => ({ suites: [] })),
+    });
+    mount(client);
+
+    const table = await screen.findByRole("table", { name: "Runs of deleted suites" });
+    await actor.click(within(table).getAllByRole("button")[0] as HTMLElement);
+    expect(await screen.findByRole("region", { name: "Live grid" })).toBeInTheDocument();
+    expect(client.readRun).toHaveBeenCalledWith({ runId: RUN_ID });
+
+    await actor.click(within(table).getByRole("button", { name: /Purge the run from/ }));
+    await actor.click(
+      within(await screen.findByRole("dialog")).getByRole("button", { name: "Purge run" }),
+    );
+    await waitFor(() => expect(client.purgeRun).toHaveBeenCalledWith({ runId: RUN_ID }));
   });
 });
