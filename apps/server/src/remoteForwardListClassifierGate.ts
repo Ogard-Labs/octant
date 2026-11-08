@@ -75,6 +75,7 @@ const PRODUCT_PROBES = [
   { path: "/api/usage/dashboard", method: "POST" },
   { path: "/api/usage/query", method: "POST" },
   { path: "/api/usage/diagnostics", method: "POST" },
+  { path: "/api/usage/host-health", method: "POST" },
   { path: "/api/usage/export", method: "POST" },
   { path: "/api/extensions/catalog", method: "POST" },
   { path: "/api/extensions/inspect", method: "POST" },

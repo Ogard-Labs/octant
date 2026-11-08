@@ -700,6 +700,7 @@ describe("authenticated product route dispatch", () => {
       "/api/usage/dashboard",
       "/api/usage/query",
       "/api/usage/diagnostics",
+      "/api/usage/host-health",
       "/api/usage/export",
     ]) {
       expect(
@@ -721,18 +722,19 @@ describe("authenticated product route dispatch", () => {
       "/api/usage/dashboard",
       "/api/usage/query",
       "/api/usage/diagnostics",
+      "/api/usage/host-health",
       "/api/usage/export",
     ]) {
       const response = await product(handoff(path, "POST"));
       expect(response?.status).toBe(200);
     }
-    expect(dispatch).toHaveBeenCalledTimes(4);
+    expect(dispatch).toHaveBeenCalledTimes(5);
 
     for (const path of ["/api/usage/reset", "/api/usage/retain"]) {
       const response = await product(handoff(path, "POST"));
       expect(response?.status).toBe(403);
     }
-    expect(dispatch).toHaveBeenCalledTimes(4);
+    expect(dispatch).toHaveBeenCalledTimes(5);
   });
 
   it("classifies the POST-only Extension, validation, and Context reads as reads", () => {

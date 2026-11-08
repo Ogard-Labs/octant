@@ -823,6 +823,11 @@ const DEFAULT_AUTHENTICATED_ROUTE_MATCHES = [
   },
   {
     kind: "exact" as const,
+    path: "/api/usage/host-health",
+    methods: ["POST"] as const,
+  },
+  {
+    kind: "exact" as const,
     path: "/api/usage/export",
     methods: ["POST"] as const,
   },

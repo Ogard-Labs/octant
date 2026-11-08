@@ -275,6 +275,7 @@ export function classifyProductAction(request: Request): string | undefined {
       (path === "/api/usage/dashboard" ||
         path === "/api/usage/query" ||
         path === "/api/usage/diagnostics" ||
+        path === "/api/usage/host-health" ||
         path === "/api/usage/export")
     ) {
       return "settings.read-non-secret";
