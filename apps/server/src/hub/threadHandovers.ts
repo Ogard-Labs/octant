@@ -99,7 +99,7 @@ export class ThreadHandovers {
     thread: MovedThreadReference,
     destinationMemberId?: string,
   ): Promise<HandoverOutcome> {
-    const claim = `${thread.mode}:${thread.threadId}`;
+    const claim = claimOf(thread);
     // A thread another handover claimed, or one a move or handover already
     // holds, is busy: this attempt never freezes or unfreezes it.
     if (this.#claimed.has(claim) || this.#options.source.isFrozen(thread)) {
@@ -117,16 +117,23 @@ export class ThreadHandovers {
     thread: MovedThreadReference,
     destinationMemberId: string | undefined,
   ): Promise<HandoverOutcome> {
+    // The freeze comes before planning reads whether a turn runs: turn
+    // admission checks the freeze, so no turn can start while the checkout
+    // is inspected and the note written, and one that started before it is
+    // seen as busy by the read that follows.
+    this.#options.source.freeze(thread);
     const planned = await this.#plan(thread);
-    if (planned.status === "refused") return planned;
+    if (planned.status === "refused") {
+      this.#options.source.unfreeze(thread);
+      return planned;
+    }
     const handoverId = decodeHandoverId((this.#options.uuid ?? randomUUID)());
-    // The freeze is recorded before anything is written, and the hold is
+    // The freeze is journaled before anything is written, and the hold is
     // saved before the commit and the push: a stop between them restarts with
     // the thread still held as handed over and not pushed, so it neither
     // becomes writable while its work may be on the remote nor loses the
     // record a continued report looks for. Take back here undoes it.
     this.#options.record.handoverStarted({ handoverId, thread, branch: planned.branch });
-    this.#options.source.freeze(thread);
     const handedOverAt = decodeTimestamp(this.#options.clock());
     this.#saveHandover({
       handoverId,
@@ -195,12 +202,22 @@ export class ThreadHandovers {
     };
   }
 
-  /** Take back here: the thread unfreezes; the branch and its commit stay where they are. */
-  takeBack(handoverId: string): { readonly status: "taken-back" } {
+  /**
+   * Take back here: the thread unfreezes; the branch and its commit stay where
+   * they are. Refused while that handover is still committing or pushing,
+   * which would otherwise save it as handed over again over a thread already
+   * writable here.
+   */
+  takeBack(
+    handoverId: string,
+  ): { readonly status: "taken-back" } | { readonly status: "refused"; readonly reason: "busy" } {
     const state = this.#options.state.load();
     const handover = (state.handovers ?? []).find(
       (entry) => String(entry.handoverId) === handoverId,
     );
+    if (handover !== undefined && this.#claimed.has(claimOf(handover.thread))) {
+      return { status: "refused", reason: "busy" };
+    }
     if (handover !== undefined) {
       this.#options.source.unfreeze(handover.thread);
       this.#options.state.save({
@@ -330,6 +347,10 @@ export function composeHandoverNote(input: {
   while (Buffer.byteLength(body, "utf8") > room)
     body = body.slice(0, Math.floor(body.length * 0.9));
   return `${body}\n\n${trailers}\n`;
+}
+
+function claimOf(thread: MovedThreadReference): string {
+  return `${thread.mode}:${thread.threadId}`;
 }
 
 function same(left: MovedThreadReference, right: MovedThreadReference): boolean {

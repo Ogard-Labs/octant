@@ -2256,33 +2256,36 @@ a numbered slice. Built, with these narrower readings:
     the move sheet and in This thread can't move for a Code thread, opens
     the handover sheet with the branch, the remote, and a preview of the
     note. A thread a move or another handover holds, or one another window
-    is handing over at that moment, is refused as busy. **Commit and push**
-    (or **Commit**, without a remote) then journals the freeze, freezes the
-    thread, and saves it as held (handed over, not pushed) before anything
-    is committed or pushed, so a stop midway restarts with the thread still
-    held until Take back here. The commit is built from a throwaway index,
-    so the checkout is never switched: it lands on the thread's branch (the
-    index follows; the files stay as they are), or on a new
-    `octant/handover/…` branch for the default branch or a detached head,
-    taking the next free name when an earlier handover's branch is still
-    there. The default branch is the one the push remote names, not
-    origin's. The commit takes every change Git does not ignore except files
-    the Secret guard refuses, and its message is the note with the
-    `Octant-Handover` and `Octant-Origin` trailers; a branch that already
-    holds the work and has nothing left to commit still gets a commit
-    carrying the note, because the destination reads the note only from a
-    tip naming this handover. The branch is then pushed to the remote the
-    preview named (the one the checkout's branch tracks, or `origin`), never
-    worked out again for a new handover branch, never forced, and never to
-    the default branch. The note comes from the thread's title, its latest
-    instruction and answer, the changed files, and what stays behind. It is
-    redacted, names no folder on this computer, and is at most 32 KiB. The
-    thread stays frozen, marked Handed over with the branch and whether it
-    was pushed (`push-failed` and `no-remote` say the work is on no other
-    computer yet), held across a restart, until **Take back here**. What it
-    does not do yet: the agent's own summary turn, the notice to a chosen
-    destination, Handovers on the destination's start screen, Continue
-    handover, and the erase once a destination continues it.
+    is handing over at that moment, is refused as busy. The thread is frozen
+    before the plan reads whether a turn runs, so no turn starts while the
+    checkout is inspected, and Take back here is refused while its handover
+    is still committing or pushing. **Commit and push** (or **Commit**,
+    without a remote) then journals the freeze, freezes the thread, and
+    saves it as held (handed over, not pushed) before anything is committed
+    or pushed, so a stop midway restarts with the thread still held until
+    Take back here. The commit is built from a throwaway index, so the
+    checkout is never switched: it lands on the thread's branch (the index
+    follows; the files stay as they are), or on a new `octant/handover/…`
+    branch for the default branch or a detached head, taking the next free
+    name when an earlier handover's branch is still there. The default
+    branch is the one the push remote names, not origin's. The commit takes
+    every change Git does not ignore except files the Secret guard refuses,
+    and its message is the note with the `Octant-Handover` and
+    `Octant-Origin` trailers; a branch that already holds the work and has
+    nothing left to commit still gets a commit carrying the note, because
+    the destination reads the note only from a tip naming this handover. The
+    branch is then pushed to the remote the preview named (the one the
+    checkout's branch tracks, or `origin`), never worked out again for a new
+    handover branch, never forced, and never to the default branch. The note
+    comes from the thread's title, its latest instruction and answer, the
+    changed files, and what stays behind. It is redacted, names no folder on
+    this computer, and is at most 32 KiB. The thread stays frozen, marked
+    Handed over with the branch and whether it was pushed (`push-failed` and
+    `no-remote` say the work is on no other computer yet), held across a
+    restart, until **Take back here**. What it does not do yet: the agent's
+    own summary turn, the notice to a chosen destination, Handovers on the
+    destination's start screen, Continue handover, and the erase once a
+    destination continues it.
 
     The ninth part is the handover's destination side. A handover started
     with a chosen member sends it a signed notice (`POST

@@ -95,6 +95,42 @@ describe("the Handovers card", () => {
     expect(continued).toEqual([{ handoverId: HANDOVER, projectId: PROJECT }]);
   });
 
+  it("offers Continue handover once a Project that fits appears on a later read", async () => {
+    let projects: ReadonlyArray<{ readonly projectId: never; readonly title: string }> = [];
+    render(
+      <Card
+        client={{
+          handoversList: async () => ({
+            status: "listed",
+            handovers: [
+              {
+                handoverId: HANDOVER as never,
+                title: "Fix the flaky test",
+                branch: "feature/flaky",
+                repositoryRemote: "git@github.com:person/octant.git",
+                originMemberId: "33333333-3333-4333-8333-333333333333" as never,
+                originName: "Laptop",
+                projects,
+                receivedAt: "2026-11-08T12:00:00.000Z" as never,
+              },
+            ],
+          }),
+        }}
+        onOpen={() => {}}
+      />,
+    );
+    expect(await screen.findByRole("button", { name: "Continue handover" })).toBeDisabled();
+
+    projects = [{ projectId: PROJECT as never, title: "octant" }];
+    act(() => {
+      window.dispatchEvent(new Event("focus"));
+    });
+
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "Continue handover" })).toBeEnabled(),
+    );
+  });
+
   it("says why it cannot continue without a Project bound to the repository", async () => {
     render(
       <Card

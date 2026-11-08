@@ -97,9 +97,17 @@ function HandoverRow(props: {
   readonly onContinued: (threadId: string) => void;
 }) {
   const { handover } = props;
-  const [project, setProject] = useState<string | undefined>(
-    handover.projects.length === 1 ? String(handover.projects[0]?.projectId) : undefined,
-  );
+  // The eligible Projects change as the card reads again, so the choice is
+  // worked out from them each time: the person's pick while it is still
+  // eligible, otherwise the one Project when exactly one fits.
+  const [chosen, setChosen] = useState<string | undefined>(undefined);
+  const eligible = handover.projects.map((choice) => String(choice.projectId));
+  const project =
+    chosen !== undefined && eligible.includes(chosen)
+      ? chosen
+      : eligible.length === 1
+        ? eligible[0]
+        : undefined;
   const [problem, setProblem] = useState<string | undefined>(undefined);
   const [working, setWorking] = useState(false);
   const continueHandover = async () => {
@@ -130,7 +138,7 @@ function HandoverRow(props: {
       {handover.projects.length > 1 ? (
         <OctantSelectField
           aria-label={`Project for ${handover.title}`}
-          onValueChange={setProject}
+          onValueChange={setChosen}
           options={handover.projects.map((choice) => ({
             id: String(choice.projectId),
             label: choice.title,

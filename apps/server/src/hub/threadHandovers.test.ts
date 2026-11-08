@@ -1,8 +1,8 @@
 import { execFileSync } from "node:child_process";
-import { chmodSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import type { MovedThreadReference } from "@octant/contracts";
 import { HANDOVER_NOTE_MAX_BYTES, ThreadHandovers, composeHandoverNote } from "./threadHandovers";
 import { createThreadMoveStateStore, heldThreadsOf } from "./threadMoveStateStore";
@@ -20,7 +20,13 @@ afterEach(() => {
 const git = (cwd: string, ...args: string[]) =>
   execFileSync("git", args, { cwd, encoding: "utf8" }).trim();
 
-function world(options: { readonly busy?: boolean } = {}) {
+function world(
+  options: {
+    readonly busy?: boolean;
+    /** Runs while the handover plans, before anything is written. */
+    readonly whilePlanning?: () => void;
+  } = {},
+) {
   const base = mkdtempSync(join(tmpdir(), "octant-handover-"));
   folders.push(base);
   const origin = join(base, "origin.git");
@@ -52,10 +58,13 @@ function world(options: { readonly busy?: boolean } = {}) {
     code: {
       checkoutRoot: async () => laptop,
       provider: () => ({ driverKind: "claude", modelId: "model-a" }),
-      latest: async () => ({
-        instruction: "Make the retry deterministic",
-        answer: `The retry now waits on the clock. See ${laptop}/app.ts.`,
-      }),
+      latest: async () => {
+        options.whilePlanning?.();
+        return {
+          instruction: "Make the retry deterministic",
+          answer: `The retry now waits on the clock. See ${laptop}/app.ts.`,
+        };
+      },
     },
     record: { handoverStarted: (input) => recorded.push(input.branch) },
     state,
@@ -200,6 +209,34 @@ describe("a handover that is retried or interrupted", () => {
     expect(git(laptop, "show", "octant/handover/fix-the-flaky-test-77777777:app.ts")).toBe(
       "export const version = 2;",
     );
+  });
+
+  it("freezes the thread before it plans, so no turn can start while the note is written", async () => {
+    const seen: boolean[] = [];
+    const planning = world({
+      whilePlanning: () => seen.push(planning.frozen.has(THREAD.threadId)),
+    });
+    writeFileSync(join(planning.laptop, "app.ts"), "export const version = 2;\n");
+
+    expect(await planning.handovers.handOver(THREAD)).toMatchObject({ status: "handed-over" });
+    expect(seen).toEqual([true]);
+  });
+
+  it("refuses Take back here while the handover is still pushing, and keeps the thread held", async () => {
+    const { base, laptop, frozen, state, handovers } = world();
+    writeFileSync(join(laptop, "app.ts"), "export const version = 2;\n");
+    const pushing = join(base, "pushing");
+    const hook = join(laptop, ".git", "hooks", "pre-push");
+    writeFileSync(hook, `#!/bin/sh\ntouch "${pushing}"\nsleep 1\n`);
+    chmodSync(hook, 0o755);
+
+    const handingOver = handovers.handOver(THREAD);
+    await vi.waitFor(() => expect(existsSync(pushing)).toBe(true), { timeout: 5_000 });
+    expect(handovers.takeBack(HANDOVER)).toEqual({ status: "refused", reason: "busy" });
+
+    expect(await handingOver).toMatchObject({ status: "handed-over", pushed: true });
+    expect(frozen.has(THREAD.threadId)).toBe(true);
+    expect(heldThreadsOf(state.load())).toEqual([THREAD]);
   });
 
   it("has saved the hold before it pushes, so a stop mid-push restarts with the thread held", async () => {
