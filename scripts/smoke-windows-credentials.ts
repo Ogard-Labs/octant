@@ -69,6 +69,14 @@ const owned: Array<{ store: CredentialStore; ref: string }> = [
 let broker: CredentialBroker | undefined;
 const checks: string[] = [];
 let cleanupConfirmed = false;
+let stage = "provider";
+function failureCategory(error: unknown) {
+  const value =
+    typeof error === "object" && error !== null && "category" in error ? error.category : undefined;
+  return value === "failed" || value === "invalid" || value === "missing" || value === "unavailable"
+    ? value
+    : "unclassified";
+}
 function requireValue(value: boolean, check: string) {
   if (!value) throw new Error(`Native credential check failed: ${check}`);
   checks.push(check);
@@ -196,6 +204,7 @@ try {
     (await primary.resolve(ref)) === boundary,
     "malformed requests preserved existing key",
   );
+  stage = "auxiliary";
   for (const [index, auxiliaryStore] of auxiliaryStores.entries()) {
     const isolated = otherAuxiliary[index];
     const testData = nightlyAuxiliary[index];
@@ -237,6 +246,7 @@ try {
       `auxiliary ${index + 1} deletion preserves other stores and provider`,
     );
   }
+  stage = "replica-broker-start";
   broker = await startCredentialBroker(
     desktop.store,
     undefined,
@@ -264,8 +274,10 @@ try {
       await replica.set(keyRef, value);
     },
   };
+  stage = "replica-generate";
   const key = await createReplicaDeviceKey(trackedReplica);
   const payload = Buffer.from("synthetic owned replica acceptance");
+  stage = "replica-sign";
   const signed = await makeReplicaDeviceSigner(replica, key.instanceId).sign(payload);
   requireValue(
     signed.status === "signed" &&
@@ -292,6 +304,7 @@ try {
     unauthenticated.status === 401,
     "native replica route refuses unauthenticated access",
   );
+  stage = "replica-remove";
   await removeReplicaDeviceKey(replica, key.instanceId);
   requireValue(
     !(await replica.has(key.instanceId)) &&
@@ -300,6 +313,11 @@ try {
   );
   await primary.delete(ref);
   requireValue(!(await primary.has(ref)), "explicit delete removes only owned target");
+} catch (error) {
+  console.log(
+    JSON.stringify({ ownedScenarioFailure: true, stage, checks, category: failureCategory(error) }),
+  );
+  throw new Error("Owned native credential scenario failed.");
 } finally {
   // No target is retained even after a failed scenario. A cleanup error fails CI.
   const cleanup = await Promise.allSettled(owned.map(({ store, ref }) => store.delete(ref)));
@@ -313,6 +331,16 @@ try {
       ownedCredentialCleanupConfirmed: cleanupConfirmed,
       ownedTargetCount: owned.length,
       brokerClosed: true,
+      cleanup: cleanup.map((result) =>
+        result.status === "fulfilled" ? "deleted" : failureCategory(result.reason),
+      ),
+      absence: absence.map((result) =>
+        result.status === "fulfilled"
+          ? result.value
+            ? "present"
+            : "absent"
+          : failureCategory(result.reason),
+      ),
     }),
   );
   requireValue(cleanupConfirmed, "all owned targets confirmed absent");
