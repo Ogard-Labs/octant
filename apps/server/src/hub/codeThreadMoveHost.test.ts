@@ -136,7 +136,7 @@ describe("moving a Code thread", () => {
     if (packed.status !== "packed") throw new Error("Nothing was packed.");
     const remotes = [git(laptop, "remote", "get-url", "origin")];
     const offer = offerFor(packed.parts, remotes);
-    expect(await moveHost.destination.acceptsProject(offer)).toBe(true);
+    expect(await moveHost.destination.acceptsProject(placementOf(offer))).toBe(true);
 
     const planned: MovedThreadReference = { mode: "code", threadId: ARRIVING };
     const arrival = await moveHost.destination.arrive({
@@ -191,7 +191,7 @@ describe("moving a Code thread", () => {
     if (packed.status !== "packed") throw new Error("Nothing was packed.");
     expect(
       await moveHost.destination.acceptsProject(
-        offerFor(packed.parts, ["https://github.com/someone/else.git"]),
+        placementOf(offerFor(packed.parts, ["https://github.com/someone/else.git"])),
       ),
     ).toBe(false);
   });
@@ -206,7 +206,20 @@ describe("moving a Code thread", () => {
 
     expect(await moveHost.source.erase({ thread: source, moveId: MOVE })).toEqual({
       worktreeKept: true,
+      changesRemainInCheckout: true,
     });
     expect(purged).toEqual([THREAD]);
   });
 });
+
+function placementOf(offer: ThreadMoveOffer) {
+  return {
+    mode: offer.source.mode,
+    ...(offer.destinationProjectId === undefined
+      ? {}
+      : { destinationProjectId: String(offer.destinationProjectId) }),
+    ...(offer.repositoryRemotes === undefined
+      ? {}
+      : { repositoryRemotes: offer.repositoryRemotes }),
+  };
+}

@@ -27,8 +27,8 @@ export function threadMoveHostsByMode(hosts: Partial<Record<OctantMode, ModeHost
         (await of(input.thread)?.source.erase(input)) ?? { worktreeKept: false },
     },
     destination: {
-      acceptsProject: async (offer) =>
-        (await hosts[offer.source.mode]?.destination.acceptsProject(offer)) ?? false,
+      acceptsProject: async (placement) =>
+        (await hosts[placement.mode]?.destination.acceptsProject(placement)) ?? false,
       arrive: async (input) =>
         (await hosts[input.thread.mode]?.destination.arrive(input)) ?? {
           status: "refused",

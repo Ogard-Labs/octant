@@ -47,7 +47,12 @@ import {
 import { ExternalContentClearStore } from "../context/externalContentClearStore";
 import { readThreadExternalContentTaint } from "../context/externalContentTaintProjection";
 import { ROUTINE_HOST_SCOPE_ID } from "../routineHostScope";
-import { defaultShellSettings, enabledModes, rosterMemberWebOrigin } from "@octant/domain";
+import {
+  defaultShellSettings,
+  enabledModes,
+  peerGrantAllowsMoveIn,
+  rosterMemberWebOrigin,
+} from "@octant/domain";
 import {
   createRemoteGateway,
   type RemoteGateway,
@@ -93,7 +98,10 @@ import type { LiveTurnRegistry } from "../liveTurn/liveTurnRegistry";
 import type { ThreadMoveHolds } from "../hub/threadMoveHolds";
 import { createThreadMoveJournal } from "../hub/threadMoveJournal";
 import { createThreadMoveRouteHandler } from "../hub/threadMoveRoutes";
+import { createThreadMoveAdministrationRouteHandler } from "../hub/threadMoveAdministrationRoutes";
 import { ThreadMoveService } from "../hub/threadMoveService";
+import { createThreadMoveTicketClient } from "../hub/threadMoveTicketClient";
+import { ThreadMovesFromWindow } from "../hub/threadMovesFromWindow";
 import type { ThreadMoveStatePort } from "../hub/threadMoveStateStore";
 import type { ChatService } from "../chat/chatService";
 import { OwnerUnlockService } from "../hub/ownerUnlock";
@@ -1211,13 +1219,49 @@ export function wireRemote(deps: RemoteDependencies) {
       return {
         status: "member",
         memberId: String(peer.peer.member.memberId),
-        moveIn: peer.peer.grant.moveIn === true,
+        moveIn: peerGrantAllowsMoveIn(peer.peer.grant),
       };
     },
     ownerIsCurrent: ownerIsCurrentOnSpoke,
+    projects: (mode) =>
+      persistence
+        .readProjects()
+        .filter((project) => project.type === mode && project.lifecycle === "active")
+        .map((project) => ({ projectId: project.id, title: project.name })),
     now: Date.now,
   });
   const threadMoveRoutes = createThreadMoveRouteHandler({ moves: threadMoves });
+  // A person at a window starts a move from the thread's Environment tool.
+  const threadMovesFromWindow = new ThreadMovesFromWindow({
+    moves: threadMoves,
+    state: deps.threadMoveState,
+    tickets: createThreadMoveTicketClient({
+      identity: resolveHubIdentity,
+      target: (memberId) => spokeLinkService.memberTarget(memberId),
+      transport: hubTransport,
+      now: Date.now,
+    }),
+    source: byMode.source,
+    members: () => {
+      const status = spokeLinkService.status();
+      return status.membership === "member" ? status.roster.roster.members : [];
+    },
+    selfMemberId: () => hubService.hubMemberId(),
+    now: Date.now,
+  });
+  const threadMoveAdministrationRoutes = createThreadMoveAdministrationRouteHandler({
+    desktopBridgeSecret: options.desktopBridgeSecret,
+    windowAuthorityStore,
+    moves: threadMovesFromWindow,
+    state: deps.threadMoveState,
+    authorizeThread: ({ thread, windowId }) =>
+      authorizeAgentRunParentThread({
+        persistence,
+        workThreadProjection,
+        parentThreadId: decodeAgentRunParentThreadId(thread.threadId),
+        windowId,
+      }),
+  });
   // A move that was under way when this host stopped resumes from what its
   // destination holds; only a committed move erases the thread here.
   void threadMoves.recover().catch(() => undefined);
@@ -1659,6 +1703,7 @@ export function wireRemote(deps: RemoteDependencies) {
     ownerBrowserControlService,
     composeHostDiagnostics,
     delegationAdministrationRoutes,
+    threadMoveAdministrationRoutes,
     externalContentRoutes,
     hostControlRoutes,
     supportBundleRoutes,
