@@ -68,7 +68,7 @@ _ = controllerApplication.setActivationPolicy(.prohibited)
 guard let application = NSRunningApplication(processIdentifier: pid), !application.isTerminated else {
     refuse("The owned application is no longer running.")
 }
-if mode == "choose-native-menu-item" || mode == "click" || mode == "fill" || mode == "fill-private" || mode == "toggle-before-field" || mode == "focus-before-text" || mode == "scroll-top" || mode == "scroll-bottom" || mode == "enter" || mode == "end" || mode == "escape" || mode == "settings" {
+if mode == "copy-paragraph" || mode == "choose-native-menu-item" || mode == "click" || mode == "fill" || mode == "fill-private" || mode == "toggle-before-field" || mode == "focus-before-text" || mode == "scroll-top" || mode == "scroll-bottom" || mode == "enter" || mode == "end" || mode == "escape" || mode == "settings" {
     guard CGPreflightPostEventAccess() else { refuse("Native event delivery is unavailable; no permission was requested.") }
     _ = application.activate(options: [.activateIgnoringOtherApps])
 }
@@ -108,7 +108,7 @@ let targets = (request.results ?? []).compactMap { result -> TextTarget? in
 }
 var clicked = false
 var pointerProof: String?
-if mode == "choose-native-menu-item" || mode == "click" || mode == "fill" || mode == "fill-private" || mode == "toggle-before-field" || mode == "focus-before-text" || mode == "scroll-top" || mode == "scroll-bottom" {
+if mode == "copy-paragraph" || mode == "choose-native-menu-item" || mode == "click" || mode == "fill" || mode == "fill-private" || mode == "toggle-before-field" || mode == "focus-before-text" || mode == "scroll-top" || mode == "scroll-bottom" {
     guard !expected.isEmpty else { refuse("Supply a nonempty observed text target.") }
     let partialMatches = (request.results ?? []).flatMap { result -> [TextTarget] in
         guard let value = result.topCandidates(1).first else { return [] }
@@ -208,6 +208,8 @@ if mode == "choose-native-menu-item" || mode == "click" || mode == "fill" || mod
         guard let move = CGEvent(mouseEventSource: nil, mouseType: .mouseMoved, mouseCursorPosition: point, mouseButton: .left),
               let down = CGEvent(mouseEventSource: nil, mouseType: .leftMouseDown, mouseCursorPosition: point, mouseButton: .left),
               let up = CGEvent(mouseEventSource: nil, mouseType: .leftMouseUp, mouseCursorPosition: point, mouseButton: .left) else { refuse("Native pointer events are unavailable.") }
+        down.setIntegerValueField(.mouseEventClickState, value: 1)
+        up.setIntegerValueField(.mouseEventClickState, value: 1)
         move.post(tap: .cghidEventTap)
         usleep(75_000)
         down.post(tap: .cghidEventTap)
@@ -215,7 +217,23 @@ if mode == "choose-native-menu-item" || mode == "click" || mode == "fill" || mod
         up.post(tap: .cghidEventTap)
         clicked = true
     }
-    if mode == "scroll-top" || mode == "scroll-bottom" {
+    if mode == "copy-paragraph" {
+        for count: Int64 in [2, 3] {
+            guard let down = CGEvent(mouseEventSource: nil, mouseType: .leftMouseDown, mouseCursorPosition: point, mouseButton: .left),
+                  let up = CGEvent(mouseEventSource: nil, mouseType: .leftMouseUp, mouseCursorPosition: point, mouseButton: .left) else { refuse("Native paragraph selection is unavailable.") }
+            down.setIntegerValueField(.mouseEventClickState, value: count)
+            up.setIntegerValueField(.mouseEventClickState, value: count)
+            down.post(tap: .cghidEventTap)
+            usleep(50_000)
+            up.post(tap: .cghidEventTap)
+        }
+        guard let down = CGEvent(keyboardEventSource: nil, virtualKey: 8, keyDown: true),
+              let up = CGEvent(keyboardEventSource: nil, virtualKey: 8, keyDown: false) else { refuse("Native copy is unavailable.") }
+        down.flags = .maskCommand
+        up.flags = .maskCommand
+        down.postToPid(pid)
+        up.postToPid(pid)
+    } else if mode == "scroll-top" || mode == "scroll-bottom" {
         for _ in 0..<3 {
             guard let scroll = CGEvent(scrollWheelEvent2Source: nil, units: .line, wheelCount: 1, wheel1: mode == "scroll-top" ? 200 : -200, wheel2: 0, wheel3: 0) else { refuse("Native scrolling is unavailable.") }
             scroll.location = point

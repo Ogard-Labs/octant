@@ -928,6 +928,30 @@ const timer = setInterval(() => {
       if (refused.status !== 403)
         throw Error("A genuine paired client was not refused owner export authority.");
     }
+    await writeFile(
+      join(artifacts, "native-publish-checkpoint.json"),
+      JSON.stringify(
+        {
+          stage: "actual native publish; later update/revoke not yet proven",
+          testHead: execFileSync("git", ["rev-parse", "HEAD"], { encoding: "utf8" }).trim(),
+          packageProducer: packageProvenance?.producerHead,
+          publicService: ownService.publicUrl,
+          publicShareId: String(published.record.publicShareId),
+          url: publishedUrl,
+          targetId: exportRecord.targetId,
+          format: exportRecord.format,
+          nativeApproved: true,
+          journalReceiptVerified: true,
+          scopedOwnerCredentialPresent: true,
+          viewerContentAndHeaders: true,
+          pairedPinnedTLSSignedSessionRead: true,
+          pairedExportAndRevokeRefused403: true,
+          pairedBrowserClipboard: false,
+        },
+        null,
+        2,
+      ),
+    );
     const showPublicLinks = async (stage: string, closeLabel = "Export", active = true) => {
       await nativeInput(`${stage}-close-export`, "escape", closeLabel);
       await observeUntil(
@@ -948,6 +972,18 @@ const timer = setInterval(() => {
     await showPublicLinks("published");
     await nativeInput("native-copy-link", "click", "Copy link");
     await observeUntil("native-copy-confirmed", (snapshot) => hasText(snapshot, "Link copied."));
+    if (
+      (await runBoundedCommand("/usr/bin/pbpaste", [], process.env, 3000)).trim() !== publishedUrl
+    )
+      throw Error("The actual native clipboard did not contain the copied link.");
+    await writeFile(
+      join(artifacts, "native-copy-checkpoint.json"),
+      JSON.stringify({
+        nativeCopyLink: true,
+        actualClipboardMatchesExactPublishedURL: true,
+        pairedBrowserClipboard: false,
+      }),
+    );
     await nativeInput("native-update-link", "click", "Update");
     await observeUntil("update-export", (snapshot) => hasText(snapshot, "Review export"));
     await nativeInput("review-update", "click", "Review export");
@@ -957,9 +993,14 @@ const timer = setInterval(() => {
         snapshot.texts.filter((row) => row.text.trim() === "Export to Public link").length === 1 &&
         hasOwnedCardAccount(snapshot) &&
         hasOwnedStaticPayload(snapshot) &&
-        hasText(snapshot, "Updates") &&
-        hasText(snapshot, publishedUrl),
+        hasText(snapshot, "Updates"),
     );
+    await nativeInput("copy-update-card-target", "copy-paragraph", "Updates");
+    if (
+      (await runBoundedCommand("/usr/bin/pbpaste", [], process.env, 3000)).trim() !==
+      `Updates ${publishedUrl}`
+    )
+      throw Error("The rendered update card did not name the exact original URL.");
     const password = randomBytes(24).toString("base64url");
     const passwordFile = join(root, "private-viewer-input");
     await writeFile(passwordFile, password, { mode: 0o600, flag: "wx" });
