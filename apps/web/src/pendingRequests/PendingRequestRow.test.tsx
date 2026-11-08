@@ -405,7 +405,8 @@ it("keeps the chosen reminder across clock ticks and clears it after deferral", 
   const props = { request, onDefer, onAnswer, onOpenThread: vi.fn() };
   const view = render(<PendingRequestRow {...props} now={NOW} />);
   await user.click(screen.getByRole("combobox", { name: "Defer question until" }));
-  await user.click(screen.getByRole("option", { name: "In 1 hour" }));
+  // The select's list opens a frame after the click, so wait for the option.
+  await user.click(await screen.findByRole("option", { name: "In 1 hour" }));
   const later = NOW + 60_000;
   view.rerender(<PendingRequestRow {...props} now={later} />);
   expect(screen.getByRole("combobox")).toHaveTextContent("In 1 hour");

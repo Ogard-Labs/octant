@@ -83,8 +83,9 @@
   -webkit-line-clamp: 3;
 }
 
-/* The agent's own claim that waiting costs more soon: the word, in the warning role. */
-.pending-request__urgent {
+/* The agent's own claim that waiting costs more soon: the word, in the warning role.
+   Paired with .oct-meta, which loads later and would otherwise paint it grey. */
+.pending-request__urgent.oct-meta {
   flex: 0 0 auto;
   color: var(--oct-warn-fg);
 }
