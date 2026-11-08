@@ -6038,6 +6038,39 @@ as "failed, no reason reported" rather than a guessed one. Turns recorded before
 diagnostics were counted have no `diagnostics` field, and a read leaves them
 out of diagnostic totals rather than counting them as clean.
 
+**Reading how turns went.** `POST /api/usage/diagnostics` answers with a
+report built on each read from the recorded turn frames
+(`buildTurnDiagnosticsReport` in `@octant/domain`), in the same Project scope,
+authentication, and filter as a usage read. A filter on a ledger-only dimension
+(request shape, category, host, quality) is refused rather than ignored, and an
+unknown time zone is refused. The report holds:
+
+- Totals over every matching turn: how turns ended, content-filter stops, tool
+  calls, failures and unfinished calls, retries by reason, approval and
+  question requests, rate-limit reports and turns that ran out, compactions,
+  likely cache misses, and nearest-rank p50, p95 and maximum for
+  time-to-first-token, decode speed, and wall time.
+- One benchmark row per provider instance and model with the same counts and
+  percentiles, input and output tokens, and the prompt-cache read and write
+  tokens over only the turns that reported a cache figure, so a hit rate is
+  weighted by input and a provider that never reports its cache has no rate
+  rather than 0%.
+- Tools ranked by failures, failures grouped by category and process kind with
+  the newest redacted message, and the newest 50 troubled turns (failed,
+  cancelled, cut at the output limit, or with a tool failure or retry) for
+  drilling into the thread.
+- Likely prompt-cache misses: a turn in the same thread, on the same provider
+  and model, that started under five minutes after a turn that read or wrote
+  the cache, sent at least 2,048 input tokens, reported its cache figures, and
+  read none. It is a likelihood, not a provider fact; a changed system prompt
+  or tool list also breaks a cache.
+- A trend by UTC hour or by calendar day in the reader's time zone.
+
+Percentiles count only turns that measured the figure, so a provider that
+reports no timing has no speed rather than zero. A turn recorded before
+diagnostics were counted counts toward how it ended and its speed, never toward
+tool, retry, or limit totals.
+
 **Compacting a session on request.** Built so far: the host path for Chat and
 Work on a direct endpoint — the `compact-session` command, its receipt,
 refusals and journal events, the per-thread `compaction` answer on the
