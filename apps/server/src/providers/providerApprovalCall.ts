@@ -4,8 +4,8 @@ import {
   type ProviderApprovalCall,
 } from "@octant/contracts";
 
-/** Only these complete native file shapes are recoverable; no inferred tool categories. */
-export function completeOwnerFileAction(input: {
+/** Complete native facts, never the redacted or truncated automatic-review summary. */
+export function completeOwnerAction(input: {
   readonly tool: string;
   readonly arguments?: unknown;
   readonly workingDirectory?: string | undefined;
@@ -21,10 +21,26 @@ export function completeOwnerFileAction(input: {
           ? ["file_path", "content"]
           : input.tool === "Edit"
             ? ["file_path", "old_string", "new_string", "replace_all"]
-            : undefined;
+            : input.tool === "Bash"
+              ? ["command", "timeout", "description", "run_in_background"]
+              : undefined;
     if (allowed === undefined || Object.keys(record).some((key) => !allowed.includes(key)))
       return undefined;
-    if (
+    if (input.tool === "Bash") {
+      if (
+        typeof record.command !== "string" ||
+        record.command.trim().length === 0 ||
+        record.command.includes("\0") ||
+        input.workingDirectory === undefined ||
+        !input.workingDirectory.startsWith("/") ||
+        input.workingDirectory.includes("\0") ||
+        (record.timeout !== undefined &&
+          (!Number.isSafeInteger(record.timeout) || Number(record.timeout) <= 0)) ||
+        (record.description !== undefined && typeof record.description !== "string") ||
+        (record.run_in_background !== undefined && record.run_in_background !== false)
+      )
+        return undefined;
+    } else if (
       typeof record.file_path !== "string" ||
       record.file_path.length === 0 ||
       record.file_path.includes("\0")
@@ -49,13 +65,23 @@ export function completeOwnerFileAction(input: {
       return undefined;
     const action = {
       kind:
-        input.tool === "Read" ? "file-read" : input.tool === "Write" ? "file-write" : "file-edit",
+        input.tool === "Read"
+          ? "file-read"
+          : input.tool === "Write"
+            ? "file-write"
+            : input.tool === "Edit"
+              ? "file-edit"
+              : "shell",
       tool: input.tool,
       input: JSON.stringify(args),
       ...(input.workingDirectory === undefined ? {} : { workingDirectory: input.workingDirectory }),
     };
     const text = JSON.stringify(action);
-    if (redactSecretShaped(text) !== text) return undefined;
+    if (
+      redactSecretShaped(text) !== text ||
+      (input.tool === "Bash" && /\[(?:redacted|truncated)\]/i.test(text))
+    )
+      return undefined;
     return decodeOwnerApprovalAction(action);
   } catch {
     return undefined;
@@ -135,6 +161,8 @@ function judged(value: unknown, depth = 0): unknown {
  */
 export function providerApprovalCall(input: {
   readonly tool: string;
+  /** Only an adapter with a validated live command/directory correlation may opt in. */
+  readonly ownerShell?: boolean;
   readonly arguments?: unknown;
   readonly workingDirectory?: string | undefined;
 }): ProviderApprovalCall | undefined {
@@ -151,7 +179,8 @@ export function providerApprovalCall(input: {
     text = undefined;
   }
   const workingDirectory = input.workingDirectory?.trim();
-  const ownerAction = completeOwnerFileAction(input);
+  const ownerAction =
+    input.tool === "Bash" && input.ownerShell !== true ? undefined : completeOwnerAction(input);
   return {
     tool,
     ...(ownerAction === undefined ? {} : { ownerAction }),

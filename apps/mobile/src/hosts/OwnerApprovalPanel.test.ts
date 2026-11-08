@@ -33,11 +33,26 @@ const target = {
     }),
   },
 };
-function fixture() {
+function fixture(shell = false) {
   const refused = async () => ({ status: "refused", kind: "unsupported" }) as const;
   const readApprovals = vi.fn<() => Promise<OwnerActionResult>>(async () => ({
     status: "done",
-    body: { targets: [target], unavailable: 1 },
+    body: {
+      targets: [
+        {
+          ...target,
+          action: shell
+            ? {
+                kind: "shell",
+                tool: "Bash",
+                input: JSON.stringify({ command: "printf full-command-through-final-line" }),
+                workingDirectory: "/fixture",
+              }
+            : target.action,
+        },
+      ],
+      unavailable: 1,
+    },
   }));
   const answerApproval = vi.fn<() => Promise<OwnerActionResult>>(async () => ({
     status: "done",
@@ -97,22 +112,30 @@ async function press(label: string, index = 0) {
 }
 
 describe("phone owner file approval recovery", () => {
-  it("shows complete action facts and clears uncertain answers without retry", async () => {
-    const f = fixture();
-    mount([f.spoke]);
-    await press("Unlock and read approvals");
-    await press("Code: Current task — Write");
-    expect(document.body.textContent).toContain("all content through final line");
-    expect(document.body.textContent).toContain("Runs on Home Mac");
-    await press("Unlock and deny");
-    expect(f.answerApproval).toHaveBeenCalledWith(
-      expect.objectContaining({ approved: false, actionDigest: target.actionDigest }),
-    );
-    expect(buttons("Unlock and deny")).toHaveLength(0);
-    expect(document.body.textContent).not.toContain("all content through final line");
-    expect(document.body.textContent).toContain("will not be retried");
-    expect(f.answerApproval).toHaveBeenCalledOnce();
-  });
+  it.each([false, true])(
+    "shows complete file or Shell facts and clears uncertain answers without retry: %s",
+    async (shell) => {
+      const f = fixture(shell);
+      mount([f.spoke]);
+      await press("Unlock and read approvals");
+      await press(shell ? "Code: Current task — Bash" : "Code: Current task — Write");
+      expect(document.body.textContent).toContain(
+        shell ? "full-command-through-final-line" : "all content through final line",
+      );
+      if (shell) expect(document.body.textContent).toContain("Working folder: /fixture");
+      expect(document.body.textContent).toContain("Runs on Home Mac");
+      await press("Unlock and deny");
+      expect(f.answerApproval).toHaveBeenCalledWith(
+        expect.objectContaining({ approved: false, actionDigest: target.actionDigest }),
+      );
+      expect(buttons("Unlock and deny")).toHaveLength(0);
+      expect(document.body.textContent).not.toContain(
+        shell ? "full-command-through-final-line" : "all content through final line",
+      );
+      expect(document.body.textContent).toContain("will not be retried");
+      expect(f.answerApproval).toHaveBeenCalledOnce();
+    },
+  );
   it("discards private facts from a replaced owner client", async () => {
     const old = fixture(),
       next = fixture(),

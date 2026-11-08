@@ -16,6 +16,23 @@ const answer = {
   approved: true,
 };
 describe("one-use owner approval contracts", () => {
+  it("requires an absolute complete Shell working directory and a supported native tool", () => {
+    const action = {
+      kind: "shell",
+      tool: "Bash",
+      input: JSON.stringify({ command: "printf fixture" }),
+      workingDirectory: "/fixture",
+    };
+    expect(decodeOwnerApprovalAction(action)).toEqual(action);
+    for (const extra of [
+      { workingDirectory: undefined },
+      { workingDirectory: "relative" },
+      { workingDirectory: "/fixture\0" },
+      { tool: "unknown" },
+      { truncated: true },
+    ])
+      expect(() => decodeOwnerApprovalAction({ ...action, ...extra })).toThrow();
+  });
   it("binds one Code or Work answer and refuses remembered grants, raw action bodies and non-owner audit attribution", () => {
     expect(decodeOwnerApprovalAnswer(answer).mode).toBe("code");
     expect(decodeOwnerApprovalAnswer({ ...answer, mode: "work" }).mode).toBe("work");

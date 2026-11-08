@@ -5,13 +5,14 @@ import {
   decodeOwnerApprovalAnswer,
   decodeOwnerApprovalAuditRecord,
   type OwnerApprovalAuditRecord,
+  type OwnerApprovalAction,
 } from "@octant/contracts/owner-approvals";
 import { HubMemberId, decodeCodeThreadId, decodeWorkThreadId } from "@octant/contracts";
 import { Schema } from "effect";
 import type { RuntimeApprovalRecovery } from "../providers/runtimeApprovalRecovery";
 import { createOwnerApprovalHost } from "./ownerApprovalHost";
 
-function fixture(mode: "code" | "work" = "code") {
+function fixture(mode: "code" | "work" = "code", shell = false) {
   const memberId = Schema.decodeUnknownSync(HubMemberId)(randomUUID());
   const threadId =
       mode === "code" ? decodeCodeThreadId(randomUUID()) : decodeWorkThreadId(randomUUID()),
@@ -20,11 +21,18 @@ function fixture(mode: "code" | "work" = "code") {
   let version = 1,
     live = true,
     permitted = true;
-  let action = {
-    kind: "file-write" as const,
-    tool: "Write",
-    input: JSON.stringify({ file_path: "/fixture/a.txt", content: "complete-private-body" }),
-  };
+  let action: OwnerApprovalAction = shell
+    ? {
+        kind: "shell",
+        tool: "Bash",
+        input: JSON.stringify({ command: "printf private-body" }),
+        workingDirectory: "/fixture",
+      }
+    : {
+        kind: "file-write" as const,
+        tool: "Write",
+        input: JSON.stringify({ file_path: "/fixture/a.txt", content: "complete-private-body" }),
+      };
   const answer = vi.fn(async (_approved: boolean, current: () => boolean) => {
     if (!current()) return false;
     live = false;
@@ -82,10 +90,15 @@ function fixture(mode: "code" | "work" = "code") {
     setVersion: () => {
       version += 1;
     },
+    changeDirectory: () => {
+      action = { ...action, workingDirectory: "/changed" };
+    },
     changeAction: () => {
       action = {
         ...action,
-        input: JSON.stringify({ file_path: "/fixture/a.txt", content: "changed-private-body" }),
+        input: shell
+          ? JSON.stringify({ command: "printf changed-private-body" })
+          : JSON.stringify({ file_path: "/fixture/a.txt", content: "changed-private-body" }),
       };
     },
     revoke: () => {
@@ -101,6 +114,31 @@ function fixture(mode: "code" | "work" = "code") {
 }
 
 describe("owner runtime approval recovery", () => {
+  it.each(["code", "work"] as const)(
+    "binds the entire %s Shell command and directory and consumes uncertain answers",
+    async (mode) => {
+      for (const change of ["command", "directory", "proof", "uncertain"] as const) {
+        const f = fixture(mode, true);
+        if (change === "command") f.changeAction();
+        if (change === "directory") f.changeDirectory();
+        if (change === "proof") f.revoke();
+        if (change === "uncertain") f.keepLive();
+        expect(await f.host.answer(f.request, f.authority)).toEqual({
+          status: change === "uncertain" ? "uncertain" : "refused",
+        });
+        if (change !== "uncertain") expect(f.answer).not.toHaveBeenCalled();
+        else {
+          expect(await f.host.answer(f.request, f.authority)).toEqual({ status: "refused" });
+          expect(f.answer).toHaveBeenCalledOnce();
+        }
+        expect(JSON.stringify(f.records)).not.toContain("private-body");
+      }
+      const f = fixture(mode, true);
+      expect(await f.host.answer(f.request, f.authority)).toEqual({ status: "delivered" });
+      expect(await f.host.answer(f.request, f.authority)).toEqual({ status: "refused" });
+      expect(f.answer).toHaveBeenCalledOnce();
+    },
+  );
   it.each(["code", "work"] as const)(
     "delivers one %s answer and records the owner and full action digest without private content",
     async (mode) => {

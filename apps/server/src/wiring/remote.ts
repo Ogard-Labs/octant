@@ -1,4 +1,4 @@
-import { ownerApprovalFileContext } from "../hub/ownerApprovalFile";
+import { ownerApprovalContext } from "../hub/ownerApprovalFile";
 import { createOwnerApprovalHost } from "../hub/ownerApprovalHost";
 import { createOwnerApprovalJournal } from "../hub/ownerApprovalJournal";
 import type { WorkRequestStateWiring } from "./workRequestState";
@@ -982,7 +982,7 @@ export function wireRemote(deps: RemoteDependencies) {
       const file =
         request.action === undefined
           ? undefined
-          : ownerApprovalFileContext(request.action, request.root);
+          : ownerApprovalContext(request.action, request.root);
       if (file === undefined) return undefined;
       const thread =
         request.mode === "code"
@@ -996,6 +996,13 @@ export function wireRemote(deps: RemoteDependencies) {
         project.type !== request.mode ||
         (thread.bindingRevisionId !== undefined &&
           String(thread.bindingRevisionId) !== String(project.bindingHistory.at(-1)?.revisionId))
+      )
+        return undefined;
+      if (
+        request.action?.kind === "shell" &&
+        (("executionPolicy" in thread &&
+          (thread.executionPolicy === "plan" || thread.executionPolicy === "full-access")) ||
+          ("access" in thread && thread.access === "full-access"))
       )
         return undefined;
       const provider =

@@ -1,4 +1,4 @@
-import { completeOwnerFileAction } from "../providers/providerApprovalCall";
+import { completeOwnerAction } from "../providers/providerApprovalCall";
 import { createHash } from "node:crypto";
 import {
   decodeOwnerApprovalAction,
@@ -43,7 +43,7 @@ export function createOwnerApprovalHost(options: {
     if (binding === undefined || pending.action === undefined) return undefined;
     try {
       const action = decodeOwnerApprovalAction(pending.action);
-      const complete = completeOwnerFileAction({
+      const complete = completeOwnerAction({
         tool: action.tool,
         arguments: JSON.parse(action.input),
         workingDirectory: action.workingDirectory,

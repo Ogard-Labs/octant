@@ -24,11 +24,26 @@ const target = {
     }),
   },
 };
-function fixture() {
+function fixture(shell = false) {
   const refused = async () => ({ status: "refused", kind: "unsupported" }) as const;
   const readApprovals = vi.fn<() => Promise<OwnerActionResult>>(async () => ({
     status: "done",
-    body: { targets: [target], unavailable: 1 },
+    body: {
+      targets: [
+        {
+          ...target,
+          action: shell
+            ? {
+                kind: "shell",
+                tool: "Bash",
+                input: JSON.stringify({ command: "printf complete-command-through-final-line" }),
+                workingDirectory: "/fixture",
+              }
+            : target.action,
+        },
+      ],
+      unavailable: 1,
+    },
   }));
   const answerApproval = vi.fn(
     async () => ({ status: "done", body: { status: "delivered" } }) as const,
@@ -50,32 +65,52 @@ function fixture() {
   return { spoke, readApprovals, answerApproval };
 }
 describe("owner approval recovery consent", () => {
-  it("shows all action facts before a fresh one-use answer and clears consumed consent", async () => {
-    const f = fixture(),
-      user = userEvent.setup();
-    render(<OwnerApprovalSection spokes={[f.spoke]} />);
-    expect(f.readApprovals).not.toHaveBeenCalled();
-    await user.click(screen.getByRole("button", { name: "Unlock and read approvals" }));
-    expect(screen.getByText(/1 waiting request/)).toBeVisible();
-    await user.click(screen.getByLabelText("Waiting approval"));
-    await user.click(await screen.findByRole("option", { name: "Work: Fix notes — Write" }));
-    expect(screen.getByText(/complete content including the final line/)).toBeVisible();
-    expect(screen.getByText(/Runs on Home host/)).toBeVisible();
-    await user.click(screen.getByRole("button", { name: "Unlock and allow once" }));
-    expect(f.answerApproval).toHaveBeenCalledWith({
-      ownerMemberId: target.ownerMemberId,
-      hostMemberId: target.hostMemberId,
-      mode: target.mode,
-      threadId: target.threadId,
-      projectId: target.projectId,
-      requestId: target.requestId,
-      targetVersion: target.targetVersion,
-      actionDigest: target.actionDigest,
-      approved: true,
-    });
-    expect(screen.queryByRole("button", { name: "Unlock and allow once" })).toBeNull();
-    expect(screen.queryByText(/complete content including the final line/)).toBeNull();
-  });
+  it.each([false, true])(
+    "shows all file or Shell facts before a fresh one-use answer and clears consumed consent: %s",
+    async (shell) => {
+      const f = fixture(shell),
+        user = userEvent.setup();
+      render(<OwnerApprovalSection spokes={[f.spoke]} />);
+      expect(f.readApprovals).not.toHaveBeenCalled();
+      await user.click(screen.getByRole("button", { name: "Unlock and read approvals" }));
+      expect(screen.getByText(/1 waiting request/)).toBeVisible();
+      await user.click(screen.getByLabelText("Waiting approval"));
+      await user.click(
+        await screen.findByRole("option", {
+          name: shell ? "Work: Fix notes — Bash" : "Work: Fix notes — Write",
+        }),
+      );
+      expect(
+        screen.getByText(
+          shell
+            ? /complete-command-through-final-line/
+            : /complete content including the final line/,
+        ),
+      ).toBeVisible();
+      if (shell) expect(screen.getByText(/Working folder: \/fixture/)).toBeVisible();
+      expect(screen.getByText(/Runs on Home host/)).toBeVisible();
+      await user.click(screen.getByRole("button", { name: "Unlock and allow once" }));
+      expect(f.answerApproval).toHaveBeenCalledWith({
+        ownerMemberId: target.ownerMemberId,
+        hostMemberId: target.hostMemberId,
+        mode: target.mode,
+        threadId: target.threadId,
+        projectId: target.projectId,
+        requestId: target.requestId,
+        targetVersion: target.targetVersion,
+        actionDigest: target.actionDigest,
+        approved: true,
+      });
+      expect(screen.queryByRole("button", { name: "Unlock and allow once" })).toBeNull();
+      expect(
+        screen.queryByText(
+          shell
+            ? /complete-command-through-final-line/
+            : /complete content including the final line/,
+        ),
+      ).toBeNull();
+    },
+  );
   it("discards a late private reading when its owner client changes", async () => {
     const old = fixture(),
       next = fixture();

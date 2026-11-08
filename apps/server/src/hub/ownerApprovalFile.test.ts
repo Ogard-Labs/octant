@@ -3,9 +3,42 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { decodeOwnerApprovalAction } from "@octant/contracts/owner-approvals";
-import { ownerApprovalFileContext } from "./ownerApprovalFile";
+import { ownerApprovalFileContext, ownerApprovalContext } from "./ownerApprovalFile";
 
 describe("owner file approval scope", () => {
+  it.skipIf(process.platform !== "darwin" && process.platform !== "linux")(
+    "binds Shell to the exact live root and refuses changed directories and excluded aliases",
+    () => {
+      const base = mkdtempSync(join(tmpdir(), "octant-owner-shell-scope-"));
+      const root = join(base, "project");
+      mkdirSync(root);
+      const action = (cwd: string) =>
+        decodeOwnerApprovalAction({
+          kind: "shell",
+          tool: "Bash",
+          input: JSON.stringify({ command: "pwd" }),
+          workingDirectory: cwd,
+        });
+      try {
+        const original = ownerApprovalContext(action(root), root);
+        expect(original?.physicalRoot).toBeDefined();
+        mkdirSync(join(root, "nested"));
+        expect(ownerApprovalContext(action(join(root, "nested")), root)).toBeUndefined();
+        expect(ownerApprovalContext(action(base), root)).toBeUndefined();
+        expect(ownerApprovalContext(action(root), undefined)).toBeUndefined();
+        mkdirSync(join(base, ".git"));
+        symlinkSync(join(base, ".git"), join(base, "git-alias"));
+        expect(
+          ownerApprovalContext(action(join(base, "git-alias")), join(base, "git-alias")),
+        ).toBeUndefined();
+        renameSync(root, join(base, "previous"));
+        mkdirSync(root);
+        expect(ownerApprovalContext(action(root), root)?.inode).not.toBe(original?.inode);
+      } finally {
+        rmSync(base, { recursive: true, force: true });
+      }
+    },
+  );
   it.skipIf(process.platform !== "darwin" && process.platform !== "linux")(
     "refuses unresolved existing entries while admitting ordinary new files and resolved inside links",
     () => {

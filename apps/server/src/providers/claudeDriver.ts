@@ -757,6 +757,7 @@ interface InFlightSetup {
 }
 
 interface ClaudePreToolGrant {
+  readonly workingDirectory: string;
   readonly toolName: string;
   readonly inputDigest: string;
   readonly expiresAt: number;
@@ -2274,6 +2275,8 @@ function makeConnection(
             call: providerApprovalCall({
               tool: mapped.request.toolName,
               arguments: request.input,
+              workingDirectory: grant.workingDirectory,
+              ownerShell: sandbox !== undefined && input.executionPolicy !== "plan",
             }),
           };
           activeState.pendingApprovals.set(pending.requestId, pending);
@@ -2408,6 +2411,7 @@ function makeConnection(
               return deny("Claude tool authority state was exhausted.");
             }
             activeState.preToolRequests.set(request.toolUseId, {
+              workingDirectory: request.projectRoot,
               toolName: request.toolName,
               inputDigest: digest,
               expiresAt: Date.now() + PRE_TOOL_GRANT_TTL_MS,

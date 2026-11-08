@@ -7,7 +7,10 @@ import {
   resolveProtectedFiles,
 } from "@octant/domain/secret-guard-policy";
 import { secretGuardRefusal, secretGuardPlatform } from "../process/secretGuard";
-import type { OwnerApprovalAction } from "@octant/contracts/owner-approvals";
+import {
+  decodeOwnerApprovalAction,
+  type OwnerApprovalAction,
+} from "@octant/contracts/owner-approvals";
 
 /** Recovery covers files within the live bound root, never credential or Git administration paths. */
 export function ownerApprovalFileContext(
@@ -91,6 +94,28 @@ export function ownerApprovalFileContext(
       inode: String(rootStat.ino),
       physicalPath,
     };
+  } catch {
+    return undefined;
+  }
+}
+
+/** Shell remains inside its runtime confinement; directory facts do not authorize command effects. */
+export function ownerApprovalContext(action: OwnerApprovalAction, root: string | undefined) {
+  if (action.kind !== "shell") return ownerApprovalFileContext(action, root);
+  if (root === undefined || action.workingDirectory === undefined) return undefined;
+  try {
+    // Supported adapters attest the admitted root itself, never a guessed current directory.
+    if (action.workingDirectory !== root) return undefined;
+    const context = ownerApprovalFileContext(
+      decodeOwnerApprovalAction({
+        kind: "file-read",
+        tool: "Read",
+        input: JSON.stringify({ file_path: action.workingDirectory }),
+      }),
+      root,
+    );
+    if (context === undefined || context.physicalPath !== context.physicalRoot) return undefined;
+    return context;
   } catch {
     return undefined;
   }

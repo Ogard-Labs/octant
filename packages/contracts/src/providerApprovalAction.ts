@@ -2,7 +2,7 @@ import { Schema } from "effect";
 const strict = { parseOptions: { onExcessProperty: "error" as const } };
 export const MAX_OWNER_APPROVAL_BYTES = 65_536;
 export const OwnerApprovalAction = Schema.Struct({
-  kind: Schema.Literal("file-read", "file-write", "file-edit"),
+  kind: Schema.Literal("file-read", "file-write", "file-edit", "shell"),
   tool: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(255)),
   input: Schema.NonEmptyString.pipe(
     Schema.maxLength(MAX_OWNER_APPROVAL_BYTES),
@@ -21,6 +21,11 @@ export const OwnerApprovalAction = Schema.Struct({
   .pipe(
     Schema.filter(
       (action) =>
+        (action.kind !== "shell" ||
+          (action.tool === "Bash" &&
+            action.workingDirectory !== undefined &&
+            action.workingDirectory.startsWith("/") &&
+            !action.workingDirectory.includes("\0"))) &&
         new TextEncoder().encode(JSON.stringify(action)).byteLength <= MAX_OWNER_APPROVAL_BYTES,
     ),
   );
