@@ -2,7 +2,6 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { slowStatementTally } from "../persistence/slowStatementLog";
 import { HostHealthRecorder } from "./hostHealthRecorder";
 
 const directories: string[] = [];
@@ -15,16 +14,36 @@ afterEach(() => {
   }
 });
 
-function recorder(path: string, clock: () => string) {
+function recorder(
+  path: string,
+  clock: () => string,
+  slowStatementWindow: () => { readonly count: number; readonly worstMs: number } = () => ({
+    count: 0,
+    worstMs: 0,
+  }),
+) {
   const created = new HostHealthRecorder({
     path,
     clock,
+    slowStatementWindow,
     memory: () => ({ rss: 1_000_000, heapUsed: 400_000 }),
     databaseBytes: () => 8_192,
     latencyWindow: () => [{ key: "rpc", count: 3, p50Ms: 4, p95Ms: 9, maxMs: 12 }],
   });
   stops.push(created.start.bind(created)());
   return created;
+}
+
+/** A slow-statement window that reports one statement, then none, like the host's tally. */
+function oneSlowStatement(
+  worstMs: number,
+): () => { readonly count: number; readonly worstMs: number } {
+  let pending = true;
+  return () => {
+    if (!pending) return { count: 0, worstMs: 0 };
+    pending = false;
+    return { count: 1, worstMs };
+  };
 }
 
 function scratch(): string {
@@ -38,8 +57,7 @@ describe("the host health recorder", () => {
     const path = scratch();
     let now = Date.parse("2026-11-07T10:00:00.000Z");
     const clock = () => new Date(now).toISOString();
-    const first = recorder(path, clock);
-    slowStatementTally.record(45);
+    const first = recorder(path, clock, oneSlowStatement(45));
     now += 60_000;
     first.sample();
 
@@ -64,8 +82,7 @@ describe("the host health recorder", () => {
   it("counts a slow statement in one window only", () => {
     const path = scratch();
     let now = Date.parse("2026-11-07T10:00:00.000Z");
-    const health = recorder(path, () => new Date(now).toISOString());
-    slowStatementTally.record(30);
+    const health = recorder(path, () => new Date(now).toISOString(), oneSlowStatement(30));
     now += 60_000;
     health.sample();
     now += 60_000;
