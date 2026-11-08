@@ -97,6 +97,7 @@ import {
 } from "../work/workThreadBoardService";
 import { createCanvasAgentTools } from "../canvas/canvasAgentTools";
 import { combineAppManagedToolSets } from "../providers/appManagedToolSet";
+import { withRoutineBrowserProfiles } from "../browser/browserRoutineSessions";
 import { makeConfiguredProviderDriver, type ProvidersWiring } from "./providers";
 import { MAX_JSON_REQUEST_BODY_SIZE, type ServerStart } from "./serverShape";
 import type { AuthorityWiring } from "./authority";
@@ -468,42 +469,49 @@ export function wireWork(deps: WorkDependencies) {
                     : String(current.modelId);
                 },
               });
+        const privateBrowser = !browserSupported
+          ? undefined
+          : createBrowserAppManagedTools({
+              windowId: input.windowId,
+              threadId: input.thread.id as never,
+              mode: "work",
+              modelId: String(input.thread.modelId),
+              resolveModelId: (threadId) => {
+                const current = workThreadProjection.read(threadId as never);
+                return current === undefined ? undefined : String(current.modelId);
+              },
+              modelBindings: browserModelBindings,
+              resolveTaskProfile: () =>
+                workThreadProjection.read(input.thread.id)?.browserTaskProfile,
+              executionPolicy: "approval-gated",
+              resolveAuthority: (threadId, mode) => browserAuthority.resolve(threadId, mode),
+              browser: {
+                inspectThread: (ownerWindowId, threadId) =>
+                  browserAutomationService.inspectThread(ownerWindowId, threadId),
+                create: (command) => browserAutomationService.create(command),
+                act: (command) => browserAutomationService.act(command),
+                saveDownload: (command) => browserAutomationService.saveDownload(command),
+                releaseThread: (ownerWindowId, threadId) =>
+                  browserAutomationService.releaseThread(ownerWindowId, threadId),
+                holdForPerson: (ownerWindowId, threadId) =>
+                  browserAutomationService.holdForPerson(ownerWindowId, threadId),
+                snapshotRefs: (ownerWindowId, threadId) =>
+                  browserAutomationService.snapshotRefs(ownerWindowId, threadId),
+              },
+              flows: browserFlows,
+              approvals: browserToolApprovalService,
+              uploadRoot: () => input.projectRoot,
+              uuid: randomUUID,
+            });
         const browser =
-          routineBrowser ??
-          (!browserSupported
-            ? undefined
-            : createBrowserAppManagedTools({
-                windowId: input.windowId,
-                threadId: input.thread.id as never,
-                mode: "work",
-                modelId: String(input.thread.modelId),
-                resolveModelId: (threadId) => {
-                  const current = workThreadProjection.read(threadId as never);
-                  return current === undefined ? undefined : String(current.modelId);
-                },
-                modelBindings: browserModelBindings,
-                resolveTaskProfile: () =>
-                  workThreadProjection.read(input.thread.id)?.browserTaskProfile,
-                executionPolicy: "approval-gated",
-                resolveAuthority: (threadId, mode) => browserAuthority.resolve(threadId, mode),
-                browser: {
-                  inspectThread: (ownerWindowId, threadId) =>
-                    browserAutomationService.inspectThread(ownerWindowId, threadId),
-                  create: (command) => browserAutomationService.create(command),
-                  act: (command) => browserAutomationService.act(command),
-                  saveDownload: (command) => browserAutomationService.saveDownload(command),
-                  releaseThread: (ownerWindowId, threadId) =>
-                    browserAutomationService.releaseThread(ownerWindowId, threadId),
-                  holdForPerson: (ownerWindowId, threadId) =>
-                    browserAutomationService.holdForPerson(ownerWindowId, threadId),
-                  snapshotRefs: (ownerWindowId, threadId) =>
-                    browserAutomationService.snapshotRefs(ownerWindowId, threadId),
-                },
-                flows: browserFlows,
-                approvals: browserToolApprovalService,
-                uploadRoot: () => input.projectRoot,
-                uuid: randomUUID,
-              }));
+          routineBrowser === undefined
+            ? privateBrowser
+            : privateBrowser === undefined
+              ? routineBrowser
+              : withRoutineBrowserProfiles({
+                  privateTools: privateBrowser,
+                  profileTools: routineBrowser,
+                });
         const sideTaskTools = !browserSupported
           ? undefined
           : createSideTaskTools({

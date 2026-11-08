@@ -1,4 +1,5 @@
 import type { BrowserProfileChoice } from "@octant/contracts/project-browser";
+import { decodeBrowserThreadId } from "@octant/contracts";
 import type { BrowserModelBinding } from "../browser/browserAppManagedTools";
 import type {
   BrowserAutomationSnapshot,
@@ -3753,3 +3754,148 @@ it("retains task staleness and Plan refusals when a routine has its own Browser 
   await tools.close?.();
   expect(close).toHaveBeenCalledOnce();
 });
+
+it("forwards an explicit reviewed download manifest through the Code routine boundary", async () => {
+  const execute = vi.fn(async () => ({ result: { status: "saved" } }));
+  const initial = thread({ executionPolicy: "approval-gated" });
+  let current: CodeThread | undefined = initial;
+  const ready: BrowserAutomationSnapshot = {
+    status: "ready",
+    threadId: decodeBrowserThreadId(threadId),
+    evidence: [],
+  };
+  const tools = createCodeAppManagedTools({
+    windowId: ROUTINE_HOST_SCOPE_ID,
+    thread: initial,
+    readThread: () => current,
+    uuid: uuidFactory(),
+    executeOperation: async () => {
+      throw Error("No terminal operation expected");
+    },
+    terminal: {
+      read: async () => {
+        throw Error("No terminal read expected");
+      },
+    },
+    browser: {
+      resolveAuthority: () => browserAuthority(),
+      inspectThread: () => ready,
+      create: async () => ready,
+      act: async () => ready,
+      releaseThread: async () => ready,
+    },
+    delegatedBrowserTools: {
+      definitions: [
+        { name: CODE_BROWSER_TOOL_NAME, description: "Browser", inputSchema: { type: "object" } },
+      ],
+      execute,
+    },
+  });
+  const inputJson = JSON.stringify({
+    operation: "download-save",
+    downloadId: "d1",
+    downloadPermissionId: "90000000-0000-4000-8000-000000000001",
+  });
+  await tools.execute({
+    name: CODE_BROWSER_TOOL_NAME,
+    inputJson: JSON.stringify({
+      operation: "navigate",
+      url: "https://example.com",
+      profile: "personal",
+    }),
+  });
+  expect(await tools.execute({ name: CODE_BROWSER_TOOL_NAME, inputJson })).toEqual({
+    result: { status: "saved" },
+  });
+  expect(execute).toHaveBeenCalledWith({ name: CODE_BROWSER_TOOL_NAME, inputJson });
+  current = undefined;
+  expect(await tools.execute({ name: CODE_BROWSER_TOOL_NAME, inputJson })).toMatchObject({
+    isError: true,
+    result: { error: "tool-authority-stale" },
+  });
+  current = { ...initial, executionPolicy: "plan" };
+  expect(await tools.execute({ name: CODE_BROWSER_TOOL_NAME, inputJson })).toMatchObject({
+    isError: true,
+    result: { error: "plan-mode-read-only" },
+  });
+  expect(execute).toHaveBeenCalledTimes(2);
+});
+
+it.each([undefined, "private"] as const)(
+  "keeps routine navigation with profile %s on its ordinary remembered-origin path",
+  async (profile) => {
+    let remembered = false;
+    const current = thread({ executionPolicy: "approval-gated" });
+    const ready: BrowserAutomationSnapshot = {
+      status: "ready",
+      threadId: decodeBrowserThreadId(threadId),
+      evidence: [],
+    };
+    let snapshot = ready;
+    const create = vi.fn(async () => {
+      snapshot = browserSnapshot(browserAuthority());
+      return snapshot;
+    });
+    const request = vi.fn(async () => "denied" as const);
+    const delegated = vi.fn(async () => ({
+      result: { error: "browser-session-permission-required" },
+      isError: true,
+    }));
+    const tools = createCodeAppManagedTools({
+      windowId: ROUTINE_HOST_SCOPE_ID,
+      thread: current,
+      readThread: () => current,
+      uuid: uuidFactory(),
+      executeOperation: async () => {
+        throw Error("No terminal operation expected");
+      },
+      terminal: {
+        read: async () => {
+          throw Error("No terminal read expected");
+        },
+      },
+      browserApproval: {
+        isApproved: () => remembered,
+        isOriginRemembered: () => remembered,
+        request,
+        remember: () => {},
+        forget: () => {},
+      },
+      browser: {
+        resolveAuthority: () => browserAuthority(),
+        inspectThread: () => snapshot,
+        create,
+        act: async () => snapshot,
+        releaseThread: async () => {
+          snapshot = ready;
+          return snapshot;
+        },
+      },
+      delegatedBrowserTools: {
+        definitions: [
+          { name: CODE_BROWSER_TOOL_NAME, description: "Browser", inputSchema: { type: "object" } },
+        ],
+        execute: delegated,
+      },
+    });
+    const call = {
+      name: CODE_BROWSER_TOOL_NAME,
+      inputJson: JSON.stringify({
+        operation: "navigate",
+        url: "https://example.com/report",
+        ...(profile === undefined ? {} : { profile }),
+      }),
+    };
+    expect(await tools.execute(call)).toMatchObject({
+      isError: true,
+      result: { error: "browser-approval-denied" },
+    });
+    expect(create).not.toHaveBeenCalled();
+    expect(request).toHaveBeenCalledOnce();
+    remembered = true;
+    expect(await tools.execute(call)).toMatchObject({ isError: false });
+    expect(create).toHaveBeenCalledOnce();
+    expect(delegated).not.toHaveBeenCalled();
+    expect(request).toHaveBeenCalledOnce();
+  },
+);

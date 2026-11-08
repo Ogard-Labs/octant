@@ -1,4 +1,4 @@
-import { expect, it } from "vitest";
+import { expect, it, vi } from "vitest";
 import {
   decodeAutomationThreadId,
   decodeBrowserThreadId,
@@ -18,7 +18,93 @@ import { deriveToolHostId } from "./browserAuthorityResolver";
 import {
   currentRoutineBrowserTarget,
   routineBrowserExecutionIsCurrent,
+  withRoutineBrowserProfiles,
 } from "./browserRoutineSessions";
+import type { AppManagedToolSet } from "../providers/appManagedToolSet";
+
+it("keeps refused stored-profile calls separate until a routine explicitly returns to Private", async () => {
+  const privateExecute = vi.fn(async () => ({ result: { page: "Private" } }));
+  const stop = JSON.stringify({ operation: "stop" });
+  const profileExecute = vi.fn(async (call: Parameters<AppManagedToolSet["execute"]>[0]) =>
+    call.inputJson === stop
+      ? { result: { status: "stopped" }, isError: false }
+      : { result: { error: "browser-session-permission-required" }, isError: true },
+  );
+  const definitions = [{ name: "octant_browser", inputSchema: { type: "object" } }];
+  const tools = withRoutineBrowserProfiles({
+    privateTools: { definitions, execute: privateExecute },
+    profileTools: { definitions, execute: profileExecute },
+  });
+  const execute = (input: unknown) =>
+    tools.execute({ name: "octant_browser", inputJson: JSON.stringify(input) });
+  expect(await execute({ operation: "navigate", url: "https://example.com" })).toEqual({
+    result: { page: "Private" },
+  });
+  expect(
+    await execute({ operation: "navigate", url: "https://example.com", profile: "personal" }),
+  ).toMatchObject({ isError: true, result: { error: "browser-session-permission-required" } });
+  expect(privateExecute).toHaveBeenLastCalledWith({ name: "octant_browser", inputJson: stop });
+  expect(await execute({ operation: "snapshot" })).toMatchObject({
+    isError: true,
+    result: { error: "browser-session-permission-required" },
+  });
+  expect(privateExecute).toHaveBeenCalledTimes(2);
+  expect(
+    await execute({ operation: "navigate", url: "https://example.com", profile: "private" }),
+  ).toEqual({ result: { page: "Private" } });
+  expect(profileExecute).toHaveBeenLastCalledWith({ name: "octant_browser", inputJson: stop });
+});
+
+it("withholds an earlier page's observation and refuses concurrent calls while a routine changes profile", async () => {
+  type Answer = Awaited<ReturnType<AppManagedToolSet["execute"]>>;
+  let finishRead = (_answer: Answer) => {};
+  let finishStop = (_answer: Answer) => {};
+  const reading = new Promise<Answer>((resolve) => {
+    finishRead = resolve;
+  });
+  const stopping = new Promise<Answer>((resolve) => {
+    finishStop = resolve;
+  });
+  const privateExecute = vi.fn(async (call: Parameters<AppManagedToolSet["execute"]>[0]) =>
+    call.inputJson === JSON.stringify({ operation: "stop" }) ? stopping : reading,
+  );
+  const profileExecute = vi.fn(async () => ({ result: { page: "Personal" } }));
+  const definitions = [{ name: "octant_browser", inputSchema: { type: "object" } }];
+  const tools = withRoutineBrowserProfiles({
+    privateTools: { definitions, execute: privateExecute },
+    profileTools: { definitions, execute: profileExecute },
+  });
+  const snapshot = { name: "octant_browser", inputJson: JSON.stringify({ operation: "snapshot" }) };
+  const oldRead = tools.execute(snapshot);
+  const switching = tools.execute({
+    name: "octant_browser",
+    inputJson: JSON.stringify({
+      operation: "navigate",
+      url: "https://example.com",
+      profile: "personal",
+    }),
+  });
+  try {
+    expect(await tools.execute(snapshot)).toMatchObject({
+      isError: true,
+      result: { error: "browser-busy" },
+    });
+    expect(profileExecute).not.toHaveBeenCalled();
+    finishRead({ result: { page: "earlier private content" } });
+    expect(await oldRead).toEqual({
+      result: { error: "browser-context-changed", effect: "unknown" },
+      isError: true,
+    });
+    finishStop({ result: { status: "stopped" } });
+    expect(await switching).toEqual({ result: { page: "Personal" } });
+    expect(profileExecute).toHaveBeenCalledOnce();
+  } finally {
+    finishRead({ result: { status: "stopped" } });
+    finishStop({ result: { status: "stopped" } });
+    await Promise.all([oldRead, switching]);
+    await tools.close?.();
+  }
+});
 
 it("binds a recurring permission to its definition rather than routine observation counters", () => {
   const definition = automationDefinitionFixture();

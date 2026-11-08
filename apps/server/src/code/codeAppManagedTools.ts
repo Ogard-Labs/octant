@@ -95,6 +95,7 @@ import { withToolFamilyHelp, type AppManagedToolSet } from "../providers/appMana
 import { taintAppManagedToolResults } from "../providers/appManagedToolTaint";
 import { pullRequestChangeNeedsPerActApproval } from "@octant/domain/code-pull-request-action-policy";
 import { isRoutineHostScope } from "../routineHostScope";
+import { withRoutineBrowserProfiles } from "../browser/browserRoutineSessions";
 import type { CodeOperationTerminalSnapshot } from "./codeOperationService";
 import type { PullRequestWatchAnswer, PullRequestWatchOutcome } from "./pullRequestWatchPort";
 
@@ -632,22 +633,39 @@ export interface CodeAppManagedToolsOptions {
 
 export function createCodeAppManagedTools(options: CodeAppManagedToolsOptions): AppManagedToolSet {
   const allowlist = options.thread.toolConstraints ?? [];
+  const routineBrowser =
+    options.delegatedBrowserTools === undefined
+      ? undefined
+      : options.browser === undefined
+        ? options.delegatedBrowserTools
+        : withRoutineBrowserProfiles({
+            privateTools: {
+              definitions: [BROWSER_TOOL_DEFINITION],
+              execute: ({ inputJson, signal }) =>
+                browserTool(
+                  options,
+                  parseBrowserToolInput(inputJson, { allowProfile: true }),
+                  signal,
+                ),
+            },
+            profileTools: options.delegatedBrowserTools,
+          });
   const tools: AppManagedToolSet = {
     definitions: [
       // A family whose capability this host did not lend is omitted, not
       // advertised only to be refused on every call.
-      ...(options.delegatedBrowserTools?.definitions ??
+      ...(routineBrowser?.definitions ??
         (options.browser === undefined ? [] : [BROWSER_TOOL_DEFINITION])),
       terminalDefinition,
       ...(options.apple === undefined ? [] : [appleDefinition]),
       ...(options.android === undefined ? [] : [androidDefinition]),
       ...(options.pullRequestApproval === undefined ? [] : [pullRequestDefinition]),
     ].filter((definition) => isToolAllowedByAllowlist(allowlist, definition.name)),
-    ...(options.delegatedBrowserTools?.close === undefined
+    ...(routineBrowser?.close === undefined
       ? {}
       : {
           close: async () => {
-            await options.delegatedBrowserTools?.close?.();
+            await routineBrowser.close?.();
           },
         }),
     execute: async ({ name, inputJson, signal }) => {
@@ -658,15 +676,16 @@ export function createCodeAppManagedTools(options: CodeAppManagedToolsOptions): 
       if (profileFailure !== undefined) {
         return failure("profile-tool-refused", profileFailure);
       }
-      if (name === CODE_BROWSER_TOOL_NAME && options.delegatedBrowserTools !== undefined) {
+      if (name === CODE_BROWSER_TOOL_NAME && routineBrowser !== undefined) {
         const operation = parseBrowserToolInput(inputJson, {
           allowProfile: true,
           allowUploadPermission: true,
+          allowDownloadPermission: true,
         });
         if (operation === undefined) return failure("invalid-browser-input");
         const refused = browserAuthorityFailure(options, operation.operation);
         if (refused !== undefined) return failure(refused);
-        return options.delegatedBrowserTools.execute({
+        return routineBrowser.execute({
           name,
           inputJson,
           ...(signal === undefined ? {} : { signal }),

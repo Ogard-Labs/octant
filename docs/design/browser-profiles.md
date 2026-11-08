@@ -319,6 +319,13 @@ thread made.
 - **Unattended turns.** A routine or managed child uses a stored profile only with
   the explicit [delegated session permission](#delegated-sessions) below; it
   never inherits another caller's page, sign-in permission or authority.
+  A routine's default or explicit Private navigation keeps the ordinary
+  remembered-origin approval path; account delegation does not replace it.
+  Explicitly selecting a stored profile stops the earlier Private context.
+  A refused or expired stored permission never falls back to Private. Returning
+  to Private requires an explicit profile choice and closes the stored context
+  before navigation; concurrent calls refuse until cleanup finishes, and an
+  earlier context's pending observation is withheld.
 - **Terminal Browser grant.** A CLI in a thread terminal may drive the thread's
   Private pages by default. A stored profile needs its own explicit delegated
   session permission, bound to that exact live terminal grant.

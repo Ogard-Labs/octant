@@ -2482,6 +2482,7 @@ and site permission.
 Browser pages may keep sign-in in a Project or Personal profile. Private is the initial default, and extensions are enabled only per profile.
 
 - Private is the initial default. A local person may journal a Work or Code task’s default Browser profile; it is a default, not a pin or an approval grant. Explicit agent profile requests still follow existing policy, and excluded callers never silently substitute Private.
+- Routine account delegation supplements the ordinary Private remembered-origin path. Explicit profile switching closes the earlier context and withholds its pending observations; refused or expired stored access never falls back to Private.
 - Switching a task’s shared page stages a fresh context and makes one final synchronous task/page/authority check with the durable write, pending identity binding and shared-context promotion. Failure keeps the old page and choice; task, conversation and composer draft remain open. Unsaved page forms do not carry over.
 - Work and Code revalidate the fresh binding before agent reads/actions, including a valid remembered site/profile grant for the same model/authority. A different model or authority still asks. Named accounts and idle lifecycle are separate from this default/binding contract.
 - On a profile page the agent needs a site approval for each origin and profile, for reading too. Credential fields stay protected.
