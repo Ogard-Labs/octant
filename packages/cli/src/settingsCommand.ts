@@ -98,6 +98,14 @@ export async function runSettingsCliCommand(input: {
     body: {
       kind: "update-work-settings",
       expectedVersion: settings.version,
+      // The host reads a missing default model as "clear it", so the stored
+      // one is sent back unchanged.
+      ...(settings.defaultProviderInstanceId === undefined || settings.defaultModelId === undefined
+        ? {}
+        : {
+            defaultProviderInstanceId: settings.defaultProviderInstanceId,
+            defaultModelId: settings.defaultModelId,
+          }),
       defaultAccess: access,
     },
   });

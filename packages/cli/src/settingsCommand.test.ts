@@ -31,7 +31,13 @@ function host(options: { refuse?: boolean } = {}) {
           status: 200,
           body: {
             threads: [],
-            settings: { defaultAccess: "ask-first", version: 2, updatedAt: now },
+            settings: {
+              defaultAccess: "ask-first",
+              defaultProviderInstanceId: "50000000-0000-4000-8000-000000000001",
+              defaultModelId: "loopback-model",
+              version: 2,
+              updatedAt: now,
+            },
           },
         };
       }
@@ -115,9 +121,13 @@ describe("settings access", () => {
     });
     expect(code).toBe(0);
     const update = fake.seen.find((request) => request.path === "/api/work/threads/commands");
+    // The stored default model goes back unchanged, so the access change
+    // does not clear it.
     expect(update?.body).toEqual({
       kind: "update-work-settings",
       expectedVersion: 2,
+      defaultProviderInstanceId: "50000000-0000-4000-8000-000000000001",
+      defaultModelId: "loopback-model",
       defaultAccess: "full-access",
     });
   });
