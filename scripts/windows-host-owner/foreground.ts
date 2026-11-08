@@ -11,7 +11,7 @@ import {
 import { createWindowsHostStartup } from "../../packages/host-runtime/src/windowsHostStartup";
 import { attachWindowsHostRuntimeOwner } from "../../packages/host-runtime/src/windowsHostOwner";
 
-const [binding, profile] = process.argv.slice(2);
+const [binding, profile, mode] = process.argv.slice(2);
 const entry = process.env.OCTANT_FOREGROUND_FIXTURE_ENTRY;
 if (
   process.platform !== "win32" ||
@@ -69,6 +69,7 @@ const exit = new Promise<number | null>((resolve, reject) => {
 });
 const lifetime = setTimeout(() => child.kill(), 30000);
 const checks: string[] = [];
+let heldClient: number | undefined;
 function check(value: boolean, name: string) {
   if (!value) throw Error(`Foreground proof failed: ${name}`);
   checks.push(name);
@@ -149,10 +150,85 @@ try {
     backup?.ok === true && backup.backup?.outcome === "created",
     "the actual foreground owner creates a verified native journal backup",
   );
-  check(
-    await attached.attachment.requestStop(),
-    "native owner control requests a graceful foreground drain",
-  );
+  if (mode === "unresponsive-stop") {
+    const ownerRecord = native.lookup(resolved.paths.profileId);
+    if (
+      typeof ownerRecord !== "object" ||
+      ownerRecord === null ||
+      !("secret" in ownerRecord) ||
+      !(ownerRecord.secret instanceof Uint8Array) ||
+      ownerRecord.secret.length !== 32
+    )
+      throw Error("The owned stop fixture could not read its private control material.");
+    const material = Buffer.from(ownerRecord.secret);
+    let command: Buffer;
+    try {
+      command = Buffer.from(
+        JSON.stringify({
+          version: 1,
+          principal: "local",
+          type: "stop",
+          secret: material.toString("base64url"),
+        }),
+      );
+    } finally {
+      material.fill(0);
+      ownerRecord.secret.fill(0);
+    }
+    try {
+      const connectionDeadline = performance.now() + 2000;
+      let opened = native.beginRequest(resolved.paths.profileId, command);
+      while (
+        typeof opened === "object" &&
+        opened !== null &&
+        "status" in opened &&
+        opened.status === "busy" &&
+        performance.now() < connectionDeadline
+      ) {
+        await new Promise<void>((resolve) => setTimeout(resolve, 10));
+        opened = native.beginRequest(resolved.paths.profileId, command);
+      }
+      if (
+        typeof opened !== "object" ||
+        opened === null ||
+        !("status" in opened) ||
+        opened.status !== "pending" ||
+        !("id" in opened) ||
+        typeof opened.id !== "number"
+      )
+        throw Error("The owned stop fixture could not connect.");
+      heldClient = opened.id;
+      const sent = native.pollRequest(heldClient);
+      if (
+        typeof sent !== "object" ||
+        sent === null ||
+        !("status" in sent) ||
+        sent.status !== "pending"
+      )
+        throw Error("The owned stop fixture could not send its authenticated frame.");
+    } finally {
+      command.fill(0);
+    }
+    // The first poll writes only. Deliberately never poll/read the acknowledgement. The native transport's
+    // existing deadline must finish this exact authenticated connection.
+    const deadline = performance.now();
+    try {
+      check(
+        (await exit) === 0 && performance.now() - deadline < 5000,
+        "an authenticated peer that never reads its acknowledgement cannot hold the owner open",
+      );
+    } finally {
+      if (heldClient !== undefined) {
+        native.closeRequest(heldClient);
+        heldClient = undefined;
+      }
+    }
+  } else {
+    check(
+      await attached.attachment.requestStop(),
+      "native owner control requests a graceful foreground drain",
+    );
+  }
   check((await exit) === 0, "the actual server exits successfully after scoped drain");
   check(
     (await startup.readHostInfo()) === undefined &&
@@ -178,6 +254,7 @@ try {
     }),
   );
 } finally {
+  if (heldClient !== undefined) native.closeRequest(heldClient);
   child.stdin.end();
   if (!joined) child.kill();
   await exit.catch(() => undefined);

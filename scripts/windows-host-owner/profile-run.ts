@@ -291,6 +291,7 @@ try {
     );
   } else if (foregroundMode) {
     for (const profile of profiles) await probe(first, profile);
+    await probe(first, "octant", "unresponsive-stop");
     checks.push(
       "both isolated profiles run the actual foreground entry through ready, authenticated backup and scoped shutdown",
     );

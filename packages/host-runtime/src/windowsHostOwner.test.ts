@@ -98,6 +98,39 @@ const ownerOptions = {
 } as const;
 
 describe("native Windows owner admission", () => {
+  it("drains a stop acknowledgement on its exact native connection before stopping the owner", async () => {
+    const fake = nativeFixture();
+    const stop = vi.fn();
+    const owner = await acquireWindowsHostRuntimeOwner({
+      ...ownerOptions,
+      native: fake.native,
+      onStopRequested: stop,
+    });
+    if (owner.kind !== "owner") throw Error("Expected owned fixture.");
+    try {
+      fake.events.push({ status: "connection-closed", responseWritten: true });
+      await vi.waitFor(() => expect(fake.events).toHaveLength(0));
+      expect(stop).not.toHaveBeenCalled();
+      fake.events.push(fake.frame("stop"));
+      await vi.waitFor(() => expect(fake.responses).toHaveLength(1));
+      expect(fake.responses[0]).toEqual({ ok: true });
+      expect(stop).not.toHaveBeenCalled();
+      fake.events.push({ status: "connection-closed", id: 2, responseWritten: true });
+      await vi.waitFor(() => expect(fake.events).toHaveLength(0));
+      expect(stop).not.toHaveBeenCalled();
+      fake.events.push({ status: "connection-closed", id: 1, responseWritten: false });
+      await vi.waitFor(() => expect(fake.events).toHaveLength(0));
+      expect(stop).not.toHaveBeenCalled();
+      fake.events.push({ ...fake.frame("stop"), id: 3 });
+      await vi.waitFor(() => expect(fake.responses).toHaveLength(2));
+      expect(stop).not.toHaveBeenCalled();
+      fake.events.push({ status: "connection-closed", id: 3, responseWritten: true });
+      await vi.waitFor(() => expect(stop).toHaveBeenCalledOnce());
+    } finally {
+      await owner.release();
+    }
+  });
+
   it("discovers absence or refuses uncertain ownership without preparing or claiming", async () => {
     const fake = nativeFixture();
     const prepare = vi.spyOn(fake.native, "prepare");

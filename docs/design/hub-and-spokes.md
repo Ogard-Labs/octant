@@ -349,7 +349,11 @@ the CLI. The hub depends on that:
     catalog/version discovery from launching a third-party executable at boot.
     Linked secret-store state remains unavailable until it has native private
     admission. Ready requires real native journal migration; owned local control
-    mediates verified backup and graceful drain. Shutdown reports unconfirmed
+    mediates verified backup and graceful drain. A stop callback waits for its
+    exact authenticated native connection's written-response/closed receipt,
+    so releasing the owner cannot discard a queued acknowledgement. The existing
+    bounded transport retires a peer that never reads; an unwritten or unrelated
+    connection cannot dispatch a stop. Shutdown reports unconfirmed
     projection cleanup and always attempts native owner release even if broker
     shutdown fails. Foreground admission needs actual entrypoint ready, authority
     refusal, verified-backup and joined-listener/process cleanup evidence for
