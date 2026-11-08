@@ -92,6 +92,8 @@ function fakeClient(
     readonly startAnswersAfterMs?: number;
     /** While false, every started move is still sending. */
     readonly arrives?: () => boolean;
+    /** A thread whose wait for its turn the person stopped after the start. */
+    readonly stopped?: MovedThreadReference;
   } = {},
 ) {
   const challenged: Array<{
@@ -107,33 +109,35 @@ function fakeClient(
     challenge: async () => ({ status: "refused", kind: "refused" }),
     start: async () => ({ status: "refused", reason: "refused" }),
     status: async (thread): Promise<ThreadMoveThreadStatus> =>
-      moved && input.arrives?.() === false
-        ? {
-            status: "read",
-            sending: {
-              moveId: "66666666-6666-4666-8666-666666666666" as never,
-              destinationMemberId: MINI as never,
-              destinationName: "Mac mini",
-              state: "offered",
-              bytesSent: 0,
-              bytesTotal: 1,
-              startedAt: new Date().toISOString() as never,
-            },
-          }
-        : moved
+      moved && input.stopped !== undefined && input.stopped.threadId === thread.threadId
+        ? { status: "read", stopped: { stoppedAt: movedAt as never } }
+        : moved && input.arrives?.() === false
           ? {
               status: "read",
-              departed: {
+              sending: {
                 moveId: "66666666-6666-4666-8666-666666666666" as never,
-                thread,
                 destinationMemberId: MINI as never,
-                destinationThread: thread,
-                changesRemainInCheckout: false,
-                movedAt: movedAt as never,
                 destinationName: "Mac mini",
+                state: "offered",
+                bytesSent: 0,
+                bytesTotal: 1,
+                startedAt: new Date().toISOString() as never,
               },
             }
-          : { status: "read" },
+          : moved
+            ? {
+                status: "read",
+                departed: {
+                  moveId: "66666666-6666-4666-8666-666666666666" as never,
+                  thread,
+                  destinationMemberId: MINI as never,
+                  destinationThread: thread,
+                  changesRemainInCheckout: false,
+                  movedAt: movedAt as never,
+                  destinationName: "Mac mini",
+                },
+              }
+            : { status: "read" },
     stopWaiting: async () => {},
     cancel: async () => "cancelled",
     takeBack: async () => {},
@@ -317,6 +321,51 @@ describe("Prepare to shut down", () => {
     ).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Quit Octant" })).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Move the other 6" })).toBeInTheDocument();
+  });
+
+  it("keeps a Leave here the person chose when the destination changes and changes back", async () => {
+    const user = userEvent.setup();
+    const { client } = fakeClient();
+    render(
+      <PrepareToShutDownDialog
+        client={client}
+        onClose={() => {}}
+        open
+        unlock={{ ownerUnlockSign: async () => ({ status: "done", signature: "c2ln" }) }}
+      />,
+    );
+    await screen.findByText("Add dark mode");
+    await user.click(screen.getByRole("combobox", { name: "Choice for Add dark mode" }));
+    await user.click(await screen.findByRole("option", { name: "Leave here" }));
+    // The Desktop cannot take it, so Leave here is also that destination's default.
+    await user.click(screen.getByRole("combobox", { name: "Move to" }));
+    await user.click(await screen.findByRole("option", { name: /Desktop/ }));
+    await user.click(screen.getByRole("combobox", { name: "Move to" }));
+    await user.click(await screen.findByRole("option", { name: /Mac mini/ }));
+
+    expect(screen.getByRole("combobox", { name: "Choice for Add dark mode" })).toHaveTextContent(
+      "Leave here",
+    );
+    expect(screen.getByRole("button", { name: "Move 1 thread with Touch ID" })).toBeEnabled();
+  });
+
+  it("counts a thread whose wait the person stopped as staying, and finishes the batch", async () => {
+    const user = userEvent.setup();
+    const { client } = fakeClient({ stopped: DARK });
+    render(
+      <PrepareToShutDownDialog
+        client={client}
+        onClose={() => {}}
+        open
+        unlock={{ ownerUnlockSign: async () => ({ status: "done", signature: "c2ln" }) }}
+      />,
+    );
+    await screen.findByText("Plan the trip");
+    await user.click(screen.getByRole("button", { name: "Move 2 threads with Touch ID" }));
+
+    expect(
+      await screen.findByRole("heading", { name: "1 thread stays on this computer" }),
+    ).toBeInTheDocument();
   });
 
   it("asks a computer that is in no hub to join one", async () => {

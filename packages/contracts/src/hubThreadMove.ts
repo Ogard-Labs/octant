@@ -488,6 +488,12 @@ export const ThreadMoveThreadStatus = Schema.Struct({
       destinationName: bounded(256),
     }).annotations(strict),
   ),
+  /**
+   * The person pressed Don't move while it waited for its turn, so it stays
+   * here. Kept until the thread starts another move, so a batch that named it
+   * can count it as staying instead of waiting on it forever.
+   */
+  stopped: Schema.optional(Schema.Struct({ stoppedAt: UtcTimestamp }).annotations(strict)),
   /** Arrived here and not yet committed by its source. */
   arriving: Schema.optional(
     Schema.Struct({

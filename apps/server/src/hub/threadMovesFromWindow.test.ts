@@ -79,6 +79,9 @@ describe("moving a thread after its turn", () => {
     await new Promise((resolve) => setTimeout(resolve, 30));
 
     expect(start).not.toHaveBeenCalled();
+    // A batch that named the thread reads that it stays, rather than waiting on it.
+    expect(moves.status(THREAD).stopped?.stoppedAt).toEqual(expect.any(String));
+    expect(moves.status(THREAD).waiting).toBeUndefined();
     moves.close();
   });
 });

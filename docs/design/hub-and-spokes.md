@@ -2236,8 +2236,12 @@ a numbered slice. Built, with these narrower readings:
     16 KiB. When more are set to move, the dialog says so before the press,
     counts the rest as staying here, and offers to move them next with one
     more Touch ID. It then follows each row to Moved or Can't move and ends
-    on Safe to shut down, or on how many threads stay here. Hiding the
-    dialog leaves its batch moving, and opening it again shows that batch.
+    on Safe to shut down, or on how many threads stay here. A row the
+    person sets themselves keeps its choice through destination changes.
+    Don't move on a row waiting for its turn leaves that thread here, and
+    the thread's status says so until it starts another move, so the batch
+    counts it as staying. Hiding the dialog leaves its batch moving, and
+    opening it again shows that batch.
     **Prepare to Shut Down…** sits in the
     application menu above Quit. The quit confirmation gains **Move threads
     first…** while the window last saw this host in a hub with another

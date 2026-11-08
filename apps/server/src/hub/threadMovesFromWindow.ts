@@ -25,6 +25,7 @@ import type {
   ThreadMoveStartOutcome,
   ThreadMoveStartRequest,
   ThreadMoveThreadStatus,
+  UtcTimestamp,
 } from "@octant/contracts";
 import { mayActivateAnyway, shutdownListing } from "@octant/domain";
 import type { ThreadMoveTicketClient } from "./threadMoveTicketClient";
@@ -173,6 +174,8 @@ interface Waiting {
 export class ThreadMovesFromWindow {
   readonly #options: ThreadMovesFromWindowOptions;
   readonly #waiting = new Map<string, Waiting>();
+  // When the person pressed Don't move, per thread, until it starts another move.
+  readonly #stoppedAt = new Map<string, UtcTimestamp>();
 
   constructor(options: ThreadMovesFromWindowOptions) {
     this.#options = options;
@@ -423,6 +426,7 @@ export class ThreadMovesFromWindow {
     readonly queue: { tail: Promise<void> } | undefined;
   }): void {
     const { thread } = input;
+    this.#stoppedAt.delete(key(thread));
     const run = async () => {
       await this.#options.moves
         .start({
@@ -474,6 +478,9 @@ export class ThreadMovesFromWindow {
 
   /** The person changed their mind before the turn ended. */
   stopWaiting(thread: MovedThreadReference): { readonly status: "stopped" } {
+    if (this.#waiting.has(key(thread))) {
+      this.#stoppedAt.set(key(thread), new Date(this.#options.now()).toISOString() as UtcTimestamp);
+    }
     this.#stopWaiting(thread);
     return { status: "stopped" };
   }
@@ -514,6 +521,7 @@ export class ThreadMovesFromWindow {
     const failure = (state.failures ?? []).find((notice) => same(notice.thread, thread));
     const departure = (state.departures ?? []).findLast((entry) => same(entry.thread, thread));
     const waiting = this.#waiting.get(key(thread));
+    const stoppedAt = this.#stoppedAt.get(key(thread));
     const status: ThreadMoveThreadStatus = {
       status: "read",
       ...(sent === undefined
@@ -540,6 +548,7 @@ export class ThreadMovesFromWindow {
               destinationName: nameOf(String(waiting.destinationMemberId)),
             },
           }),
+      ...(stoppedAt === undefined ? {} : { stopped: { stoppedAt } }),
       ...(received === undefined
         ? {}
         : {

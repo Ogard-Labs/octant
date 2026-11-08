@@ -70,6 +70,8 @@ export function PrepareToShutDownDialog(props: PrepareToShutDownDialogProps) {
   const [loadFailed, setLoadFailed] = useState(false);
   const [destination, setDestination] = useState<string | undefined>(undefined);
   const [choices, setChoices] = useState<ReadonlyMap<string, RowChoice>>(new Map());
+  // Rows whose choice the person set: a destination change leaves them alone.
+  const [edited, setEdited] = useState<ReadonlySet<string>>(new Set());
   const [olderOpen, setOlderOpen] = useState(false);
   const [phase, setPhase] = useState<"choosing" | "running">("choosing");
   const [problem, setProblem] = useState<string | undefined>(undefined);
@@ -93,6 +95,7 @@ export function PrepareToShutDownDialog(props: PrepareToShutDownDialogProps) {
         const start = startingDestination(next);
         setDestination(start);
         setChoices(startingChoices(next, start));
+        setEdited(new Set());
       })
       .catch(() => setLoadFailed(true));
   }, [props.client]);
@@ -117,20 +120,26 @@ export function PrepareToShutDownDialog(props: PrepareToShutDownDialogProps) {
     chooseAgain();
   }, [props.open, chooseAgain]);
 
-  // Changing the destination re-reads every row still on its starting choice.
+  // Changing the destination re-reads every row the person has not set
+  // themselves. Whether a row was set is tracked, never inferred from its
+  // value: a Leave here they chose can equal another destination's default.
   const changeDestination = (memberId: string) => {
     if (listing === undefined) return;
-    const previous = startingChoices(listing, destination);
     const next = startingChoices(listing, memberId);
     setChoices((current) => {
       const updated = new Map(current);
       for (const row of listing.rows) {
         const id = rowKey(row.thread);
-        if (current.get(id) === previous.get(id)) updated.set(id, next.get(id) ?? "leave-here");
+        if (!edited.has(id)) updated.set(id, next.get(id) ?? "leave-here");
       }
       return updated;
     });
     setDestination(memberId);
+  };
+  const choose = (thread: MovedThreadReference, choice: RowChoice) => {
+    const id = rowKey(thread);
+    setChoices((current) => new Map(current).set(id, choice));
+    setEdited((current) => new Set(current).add(id));
   };
 
   // While the batch runs and the dialog shows, each chosen thread's state is read until it settles.
@@ -230,13 +239,16 @@ export function PrepareToShutDownDialog(props: PrepareToShutDownDialogProps) {
   const settled = chosen.map((thread) => settledState(statuses.get(rowKey(thread)), startedAt));
   const moved = settled.filter((state) => state === "moved").length;
   const failed = settled.filter((state) => state === "failed").length;
-  const done = phase === "running" && chosen.length > 0 && moved + failed === chosen.length;
-  const progress = chosen.length === 0 ? 0 : Math.round(((moved + failed) / chosen.length) * 100);
+  // A row whose wait for its turn the person stopped stays here by their choice.
+  const stayed = settled.filter((state) => state === "stayed").length;
+  const ended = moved + failed + stayed;
+  const done = phase === "running" && chosen.length > 0 && ended === chosen.length;
+  const progress = chosen.length === 0 ? 0 : Math.round((ended / chosen.length) * 100);
   useEffect(() => {
     if (done) batchUnsettled.current = false;
   }, [done]);
   // A thread set to move that failed, or that waits for the next batch, still stays here.
-  const staysHere = failed + leftOver;
+  const staysHere = failed + stayed + leftOver;
 
   return (
     <OctantDialog
@@ -324,9 +336,7 @@ export function PrepareToShutDownDialog(props: PrepareToShutDownDialogProps) {
                 choice={choices.get(rowKey(row.thread)) ?? "leave-here"}
                 destination={destination}
                 key={rowKey(row.thread)}
-                onChoose={(choice) =>
-                  setChoices((current) => new Map(current).set(rowKey(row.thread), choice))
-                }
+                onChoose={(choice) => choose(row.thread, choice)}
                 phase={phase}
                 row={row}
                 startedAt={startedAt}
@@ -347,9 +357,7 @@ export function PrepareToShutDownDialog(props: PrepareToShutDownDialogProps) {
                     choice={choices.get(rowKey(row.thread)) ?? "leave-here"}
                     destination={destination}
                     key={rowKey(row.thread)}
-                    onChoose={(choice) =>
-                      setChoices((current) => new Map(current).set(rowKey(row.thread), choice))
-                    }
+                    onChoose={(choice) => choose(row.thread, choice)}
                     phase={phase}
                     row={row}
                     startedAt={startedAt}
@@ -584,9 +592,12 @@ function memberWord(member: ShutdownListedMember): string {
 function settledState(
   status: ThreadMoveThreadStatus | undefined,
   startedAt: number,
-): "moved" | "failed" | "running" {
+): "moved" | "failed" | "stayed" | "running" {
   if (status === undefined || status.sending !== undefined || status.waiting !== undefined) {
     return "running";
+  }
+  if (status.stopped !== undefined && Date.parse(status.stopped.stoppedAt) >= startedAt) {
+    return "stayed";
   }
   if (status.departed !== undefined && Date.parse(status.departed.movedAt) >= startedAt) {
     return "moved";
@@ -606,6 +617,7 @@ function runningWord(
   const state = settledState(status, startedAt);
   if (state === "moved") return "Moved";
   if (state === "failed") return "Can't move";
+  if (state === "stayed") return "Stays here";
   if (status?.waiting !== undefined) return "After this turn";
   if (status?.sending !== undefined) {
     const { bytesSent, bytesTotal } = status.sending;
