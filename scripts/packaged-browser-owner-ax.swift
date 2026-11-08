@@ -124,10 +124,17 @@ while next < pending.count, next < 512, Date() < treeDeadline {
             let stateRead = AXUIElementCopyAttributeValue(node, kAXValueAttribute as CFString, &state)
             control["stateReadError"] = stateRead.rawValue
             control["stateType"] = state.map { CFCopyTypeIDDescription(CFGetTypeID($0)) as String } ?? "nil"
-            // Expose only recognized binary representations of this exact switch.
-            // Unsupported values remain private and still make the tree refuse.
+            control["subrole"] = label(node, kAXSubroleAttribute as CFString)
+            var stateAttributes: CFArray?
+            let attributesRead = AXUIElementCopyAttributeNames(node, &stateAttributes)
+            let stateAttributeNames = stateAttributes as? [String] ?? []
+            control["stateAttributesReadError"] = attributesRead.rawValue
+            control["stateAttributeNames"] = stateAttributeNames.prefix(64).map { String($0.prefix(256)) }
+            control["stateAttributeNamesTruncated"] = stateAttributeNames.count > 64 || stateAttributeNames.contains { $0.count > 256 }
+            // Only safe known switch representations are exposed. These labels
+            // never become a checked bit; unsupported state cannot authorize a toggle.
             if let text = state as? String {
-                control["stateBinaryString"] = ["0", "1", "false", "true"].contains(text) ? text : "unsupported"
+                control["stateBinaryString"] = text.isEmpty ? "empty" : (["0", "1", "false", "true", "on", "off", "mixed"].contains(text) ? text : "unsupported")
             }
             if stateRead == .success,
                let number = state as? NSNumber, number.doubleValue == 0 || number.doubleValue == 1 {
