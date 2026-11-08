@@ -168,7 +168,8 @@ func fixedFolderFrame(_ node: AXUIElement) -> CGRect? {
 func fixedFolderInputPoint(_ target: AXUIElement, _ deadline: Date, _ admit: (AXUIElement) -> Bool, _ expectedFieldRoot: AXUIElement? = nil,
     _ expectedFieldSheets: [AXUIElement] = [], _ fieldCurrent: (() -> Bool)? = nil) -> CGPoint? {
     fixedFolderGeometry = ["targetInsideResolvedWindow": NSNull(), "centerOnScreen": NSNull(),
-        "topPointOwnerMatched": NSNull(), "topFrameMatched": NSNull()]
+        "topPointOwnerMatched": NSNull(), "topFrameMatched": NSNull(), "primaryScreenCoordinateMatched": NSNull(),
+        "mouseDownWindowNumber": NSNull(), "windowSelectionMethod": "public-mouseDown-hit-test"]
     fixedFolderSheetGeometry = ["topLevelMatchesInnerSheet": NSNull(), "targetInsideInnerSheet": NSNull(),
         "topFrameMatchesInnerSheet": NSNull(), "topFrameMatchesOuterSheet": NSNull()]
     fixedFolderSheetFrameAdmitted = false
@@ -234,11 +235,30 @@ func fixedFolderInputPoint(_ target: AXUIElement, _ deadline: Date, _ admit: (AX
     fixedFolderGeometry["targetInsideResolvedWindow"] = targetInsideWindow
     guard targetInsideWindow else { return nil }
     let point = CGPoint(x: targetFrame.midX, y: targetFrame.midY)
-    let centerOnScreen = CGDisplayBounds(CGMainDisplayID()).contains(point)
+    let primaryDisplayId = CGMainDisplayID(), primaryDisplay = CGDisplayBounds(primaryDisplayId)
+    let centerOnScreen = primaryDisplay.contains(point)
     fixedFolderGeometry["centerOnScreen"] = centerOnScreen
     guard centerOnScreen else { return nil }
+    let primaryScreens = NSScreen.screens.filter {
+        ($0.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? NSNumber)?.uint64Value == UInt64(primaryDisplayId)
+    }
+    guard primaryScreens.count == 1 else { fixedFolderGeometry["primaryScreenCoordinateMatched"] = false; return nil }
+    let primaryFrame = primaryScreens[0].frame
+    let coordinatesMatched = [primaryDisplay.minX, primaryDisplay.minY, primaryDisplay.width, primaryDisplay.height,
+        primaryFrame.minX, primaryFrame.minY, primaryFrame.width, primaryFrame.height].allSatisfy({ $0.isFinite }) &&
+        primaryDisplay.origin == .zero && primaryFrame.origin == .zero && primaryDisplay.width > 0 && primaryDisplay.height > 0 &&
+        primaryFrame.width > 0 && primaryFrame.height > 0 && primaryDisplay.size == primaryFrame.size
+    let appKitPoint = NSPoint(x: point.x, y: primaryFrame.height - point.y)
+    fixedFolderGeometry["primaryScreenCoordinateMatched"] = coordinatesMatched && primaryFrame.contains(appKitPoint)
+    guard coordinatesMatched, primaryFrame.contains(appKitPoint) else { return nil }
+    // Zero excludes no windows: AppKit identifies the actual mouse-down
+    // receiver, including higher layers, rather than a bounding-box cover.
+    let mouseDownWindowNumber = NSWindow.windowNumber(at: appKitPoint, belowWindowWithWindowNumber: 0)
+    fixedFolderGeometry["mouseDownWindowNumber"] = mouseDownWindowNumber
+    guard mouseDownWindowNumber > 0, mouseDownWindowNumber <= Int(UInt32.max) else { return nil }
     let top = (CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID) as? [[String: Any]] ?? []).first { row in
-        guard ((row[kCGWindowAlpha as String] as? NSNumber)?.doubleValue ?? 0) > 0,
+        guard (row[kCGWindowNumber as String] as? NSNumber)?.uint64Value == UInt64(mouseDownWindowNumber),
+              ((row[kCGWindowAlpha as String] as? NSNumber)?.doubleValue ?? 0) > 0,
               let values = row[kCGWindowBounds as String] as? [String: Any], let frame = CGRect(dictionaryRepresentation: values as CFDictionary) else { return false }
         return frame.contains(point)
     }
@@ -1426,12 +1446,33 @@ if mode == "click" || mode == "reveal" || fillsFixtureField {
                        let windowBounds = bounds(window) {
                         action["windowBounds"] = rectangle(windowBounds)
                         let center = CGPoint(x: targetBounds.midX, y: targetBounds.midY)
-                        let onScreen = CGDisplayBounds(CGMainDisplayID()).contains(center)
+                        let primaryDisplayId = CGMainDisplayID(), primaryDisplay = CGDisplayBounds(primaryDisplayId)
+                        let onScreen = primaryDisplay.contains(center)
                         action["controlInsideWindow"] = windowBounds.contains(targetBounds)
                         action["centerOnScreen"] = onScreen
+                        let primaryScreens = NSScreen.screens.filter {
+                            ($0.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? NSNumber)?.uint64Value == UInt64(primaryDisplayId)
+                        }
+                        var mouseDownWindowNumber: Int?
+                        action["primaryScreenCoordinateMatched"] = false
+                        if onScreen, primaryScreens.count == 1 {
+                            let primaryFrame = primaryScreens[0].frame
+                            let coordinatesMatched = [primaryDisplay.minX, primaryDisplay.minY, primaryDisplay.width, primaryDisplay.height,
+                                primaryFrame.minX, primaryFrame.minY, primaryFrame.width, primaryFrame.height].allSatisfy({ $0.isFinite }) &&
+                                primaryDisplay.origin == .zero && primaryFrame.origin == .zero && primaryDisplay.width > 0 && primaryDisplay.height > 0 &&
+                                primaryFrame.width > 0 && primaryFrame.height > 0 && primaryDisplay.size == primaryFrame.size
+                            let appKitPoint = NSPoint(x: center.x, y: primaryFrame.height - center.y)
+                            action["primaryScreenCoordinateMatched"] = coordinatesMatched && primaryFrame.contains(appKitPoint)
+                            if coordinatesMatched, primaryFrame.contains(appKitPoint) {
+                                mouseDownWindowNumber = NSWindow.windowNumber(at: appKitPoint, belowWindowWithWindowNumber: 0)
+                            }
+                        }
+                        action["pointWindowSelectionMethod"] = "public-mouseDown-hit-test"
+                        action["pointWindowNumber"] = mouseDownWindowNumber.map { $0 as Any } ?? NSNull()
                         let top = (CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID) as? [[String: Any]] ?? []).first {
-                            (($0[kCGWindowAlpha as String] as? NSNumber)?.doubleValue ?? 0) > 0 &&
-                            cgBounds($0)?.contains(center) == true
+                            guard let mouseDownWindowNumber, mouseDownWindowNumber > 0, mouseDownWindowNumber <= Int(UInt32.max),
+                                  ($0[kCGWindowNumber as String] as? NSNumber)?.uint64Value == UInt64(mouseDownWindowNumber) else { return false }
+                            return (($0[kCGWindowAlpha as String] as? NSNumber)?.doubleValue ?? 0) > 0 && cgBounds($0)?.contains(center) == true
                         }
                         let topPid = (top?[kCGWindowOwnerPID as String] as? NSNumber)?.int32Value ?? 0
                         action["pointWindowOwnerPid"] = topPid
