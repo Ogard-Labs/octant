@@ -9,6 +9,8 @@ import Security
 guard (3...6).contains(CommandLine.arguments.count),
       let processId = Int32(CommandLine.arguments[1]), processId > 1 else { exit(2) }
 let mode = CommandLine.arguments.count >= 4 ? CommandLine.arguments[3] : "diagnostic"
+let fixedFolderModes = ["picker-fill-owned-location", "picker-go-owned-location", "picker-choose-owned-folder", "picker-create-owned-project"]
+let fixesOwnedFolder = fixedFolderModes.contains(mode)
 let fillsFixtureField = mode == "fill-name" || mode == "fill-address"
 let requestedTitle = mode == "fill-name" ? "Name" : mode == "fill-address" ? "Address" :
     (CommandLine.arguments.count == 5 ? CommandLine.arguments[4] : "")
@@ -24,8 +26,8 @@ if fillsFixtureField {
     guard CommandLine.arguments.count == 6, fixtureBirthParts.count == 2, fixtureBirth.count == 2,
           !fixtureText.isEmpty, fixtureText.utf16.count <= 64, allowedFixtureText else { exit(2) }
 } else { guard CommandLine.arguments.count <= 5 else { exit(2) } }
-guard ["diagnostic", "read", "click", "reveal", "dock-read", "quit-hint", "dock-click", "bundle-census", "bundle-cleanup", "fill-name", "fill-address", "picker-metadata", "picker-location-prompt"].contains(mode),
-      (mode == "click" || mode == "reveal" || mode == "dock-click" || fillsFixtureField || mode == "picker-metadata" || mode == "picker-location-prompt") == !requestedTitle.isEmpty,
+guard ["diagnostic", "read", "click", "reveal", "dock-read", "quit-hint", "dock-click", "bundle-census", "bundle-cleanup", "fill-name", "fill-address", "picker-metadata", "picker-location-prompt"].contains(mode) || fixesOwnedFolder,
+      (mode == "click" || mode == "reveal" || mode == "dock-click" || fillsFixtureField || mode == "picker-metadata" || mode == "picker-location-prompt" || fixesOwnedFolder) == !requestedTitle.isEmpty,
       requestedTitle.count <= 256 else { exit(2) }
 let preferenceTitle = "Keep Browser available without windows"
 // Leave time for the matching mouse-up before the owned six-second command bound.
@@ -110,13 +112,225 @@ for name in mode == "diagnostic" ? ["AXManualAccessibility", "AXEnhancedUserInte
 }
 var windows: CFTypeRef?
 let windowResult = element.map { AXUIElementCopyAttributeValue($0, kAXWindowsAttribute as CFString, &windows) } ?? AXError.attributeUnsupported
-if mode == "picker-metadata" || mode == "picker-location-prompt" {
+// These purposes accept numeric pins only. The path comes from this owned
+// controller's executable, never a caller-supplied directory or field value.
+let folderPins = requestedTitle.split(separator: ":", omittingEmptySubsequences: false).compactMap { UInt64($0) }
+func ownedFixturePath() -> String? {
+    guard fixesOwnedFolder, folderPins.count == 11, requestedTitle.split(separator: ":", omittingEmptySubsequences: false).count == 11,
+          let own = kernelIdentity(getpid()), own.executable.hasSuffix("/ax-controller") else { return nil }
+    let root = URL(fileURLWithPath: own.executable).deletingLastPathComponent()
+    guard root.lastPathComponent.hasPrefix("octant-browser-owner-native."),
+          root.lastPathComponent.count <= 128, root.lastPathComponent.count > "octant-browser-owner-native.".count,
+          root.deletingLastPathComponent().path == temporary else { return nil }
+    let directories = [root, root.appendingPathComponent("home"), root.appendingPathComponent("home/owned-browser-project")]
+    for (index, url) in directories.enumerated() {
+        var metadata = stat()
+        guard url.resolvingSymlinksInPath().standardizedFileURL.path == url.path,
+              lstat(url.path, &metadata) == 0, metadata.st_mode & S_IFMT == S_IFDIR,
+              metadata.st_uid == geteuid(), metadata.st_dev >= 0,
+              UInt64(metadata.st_dev) == folderPins[5 + 2 * index], metadata.st_ino == folderPins[6 + 2 * index] else { return nil }
+        if index == 0 && metadata.st_mode & 0o077 != 0 { return nil }
+    }
+    let path = directories[2].path
+    return path.utf8.count < Int(PATH_MAX) ? path : nil
+}
+var fixedFolderNativeStatuses: [String: Int32] = [:]
+func fixedFolderFrame(_ node: AXUIElement) -> CGRect? {
+    var position: CFTypeRef?, size: CFTypeRef?
+    let positionStatus = AXUIElementCopyAttributeValue(node, kAXPositionAttribute as CFString, &position)
+    let sizeStatus = AXUIElementCopyAttributeValue(node, kAXSizeAttribute as CFString, &size)
+    fixedFolderNativeStatuses["position"] = positionStatus.rawValue
+    fixedFolderNativeStatuses["size"] = sizeStatus.rawValue
+    guard positionStatus == .success, sizeStatus == .success,
+          let position, let size, CFGetTypeID(position) == AXValueGetTypeID(), CFGetTypeID(size) == AXValueGetTypeID() else { return nil }
+    var point = CGPoint.zero, dimensions = CGSize.zero
+    guard AXValueGetValue(unsafeBitCast(position, to: AXValue.self), .cgPoint, &point),
+          AXValueGetValue(unsafeBitCast(size, to: AXValue.self), .cgSize, &dimensions),
+          [point.x, point.y, dimensions.width, dimensions.height].allSatisfy({ $0.isFinite }),
+          dimensions.width >= 12, dimensions.height >= 12 else { return nil }
+    return CGRect(origin: point, size: dimensions)
+}
+func fixedFolderHit(_ target: AXUIElement, _ deadline: Date, _ admit: (AXUIElement) -> Bool) -> CGPoint? {
+    guard admit(target), Date() < deadline, ownedFixturePath() != nil, AXIsProcessTrusted(), CGPreflightPostEventAccess(),
+          kernelIdentity(processId) == initialKernelIdentity,
+          NSRunningApplication(processIdentifier: processId)?.bundleURL?.resolvingSymlinksInPath().standardizedFileURL.path == expectedBundle,
+          NSWorkspace.shared.frontmostApplication?.processIdentifier == processId,
+          let targetFrame = fixedFolderFrame(target) else { return nil }
+    var targetPid: pid_t = 0, windowPid: pid_t = 0, windowRaw: CFTypeRef?
+    let targetStatus = AXUIElementGetPid(target, &targetPid)
+    let windowStatus = AXUIElementCopyAttributeValue(target, kAXWindowAttribute as CFString, &windowRaw)
+    fixedFolderNativeStatuses["targetPid"] = targetStatus.rawValue
+    fixedFolderNativeStatuses["targetWindow"] = windowStatus.rawValue
+    guard targetStatus == .success, targetPid == processId, windowStatus == .success,
+          let windowRaw, CFGetTypeID(windowRaw) == AXUIElementGetTypeID() else { return nil }
+    let window = unsafeBitCast(windowRaw, to: AXUIElement.self)
+    guard admit(window), AXUIElementGetPid(window, &windowPid) == .success, windowPid == processId,
+          let windowFrame = fixedFolderFrame(window), windowFrame.contains(targetFrame) else { return nil }
+    let point = CGPoint(x: targetFrame.midX, y: targetFrame.midY)
+    guard CGDisplayBounds(CGMainDisplayID()).contains(point) else { return nil }
+    let top = (CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID) as? [[String: Any]] ?? []).first { row in
+        guard (row[kCGWindowLayer as String] as? NSNumber)?.intValue == 0,
+              ((row[kCGWindowAlpha as String] as? NSNumber)?.doubleValue ?? 0) > 0,
+              let values = row[kCGWindowBounds as String] as? [String: Any], let frame = CGRect(dictionaryRepresentation: values as CFDictionary) else { return false }
+        return frame.contains(point)
+    }
+    guard (top?[kCGWindowOwnerPID as String] as? NSNumber)?.int32Value == processId,
+          let values = top?[kCGWindowBounds as String] as? [String: Any], let frame = CGRect(dictionaryRepresentation: values as CFDictionary),
+          abs(frame.minX - windowFrame.minX) <= 2, abs(frame.minY - windowFrame.minY) <= 2,
+          abs(frame.width - windowFrame.width) <= 2, abs(frame.height - windowFrame.height) <= 2,
+          let element else { return nil }
+    var hit: AXUIElement?
+    let hitStatus = AXUIElementCopyElementAtPosition(element, Float(point.x), Float(point.y), &hit)
+    fixedFolderNativeStatuses["hitTest"] = hitStatus.rawValue
+    guard hitStatus == .success, let hit else { return nil }
+    var cursor = hit, seen = Set<CFHashCode>()
+    for _ in 0..<40 {
+        var pid: pid_t = 0
+        guard admit(cursor), Date() < deadline, seen.insert(CFHash(cursor)).inserted,
+              AXUIElementGetPid(cursor, &pid) == .success, pid == processId else { return nil }
+        if CFEqual(cursor, target) {
+            let live = NSRunningApplication(processIdentifier: processId)
+            guard Date() < deadline, ownedFixturePath() != nil,
+                  kernelIdentity(processId) == initialKernelIdentity,
+                  live?.isTerminated == false,
+                  live?.bundleURL?.resolvingSymlinksInPath().standardizedFileURL.path == expectedBundle,
+                  NSWorkspace.shared.frontmostApplication?.processIdentifier == processId,
+                  AXIsProcessTrusted(), CGPreflightPostEventAccess() else { return nil }
+            return point
+        }
+        var parent: CFTypeRef?
+        guard AXUIElementCopyAttributeValue(cursor, kAXParentAttribute as CFString, &parent) == .success,
+              let parent, CFGetTypeID(parent) == AXUIElementGetTypeID() else { return nil }
+        cursor = unsafeBitCast(parent, to: AXUIElement.self)
+    }
+    return nil
+}
+func fixedFolderButtonEnabled(_ target: AXUIElement) -> Bool {
+    var enabled: CFTypeRef?, actions: CFArray?, pid: pid_t = 0
+    guard AXUIElementGetPid(target, &pid) == .success, pid == processId,
+          AXUIElementCopyAttributeValue(target, kAXEnabledAttribute as CFString, &enabled) == .success,
+          let enabled, CFGetTypeID(enabled) == CFBooleanGetTypeID(), CFEqual(enabled, kCFBooleanTrue),
+          AXUIElementCopyActionNames(target, &actions) == .success,
+          let names = actions as? [String], names.count <= 32, names.contains("AXPress") else { return false }
+    return true
+}
+if mode == "picker-create-owned-project" {
+    let deadline = Date().addingTimeInterval(3)
+    var receipt: [String: Any] = ["status": "blocked", "rawValueCaptured": false, "directoryLabelsRead": false,
+        "projectCreationDispatched": false, "namedReaderReopened": false]
+    var errors: [[String: Any]] = [], seen = Set<CFHashCode>()
+    func ownerCurrent() -> Bool {
+        return folderPins.count == 11 && initialKernelIdentity?.birthSeconds == folderPins[0] &&
+            initialKernelIdentity?.birthMicroseconds == folderPins[1] &&
+            initialKernelIdentity?.executable == expectedBundle + "/Contents/MacOS/Octant" &&
+            kernelIdentity(processId) == initialKernelIdentity && isTaskStagedBundle && treeIdentityMatched &&
+            matchingIds == [processId] && ownedFixturePath() != nil && Date() < deadline
+    }
+    func admit(_ node: AXUIElement) -> Bool {
+        if seen.contains(CFHash(node)) { return Date() < deadline }
+        guard seen.count < 512, Date() < deadline else { return false }
+        seen.insert(CFHash(node)); return true
+    }
+    func fixedText(_ node: AXUIElement, _ attribute: CFString) -> String? {
+        var raw: CFTypeRef?
+        let status = AXUIElementCopyAttributeValue(node, attribute, &raw)
+        if status != .success && status != .noValue && status != .attributeUnsupported {
+            errors.append(["status": status.rawValue]); return nil
+        }
+        return status == .success ? raw as? String : nil
+    }
+    // No picker or general named-control reader is used here. Only roles are
+    // walked until the fixed Create Project dialog is proved inside this app.
+    var targets: [AXUIElement] = [], folderTargets: [AXUIElement] = [], dialogs: [AXUIElement] = []
+    var selectedFolders = 0, complete = true
+    var queue = (ownerCurrent() && windowResult == .success ? (windows as? [AXUIElement] ?? []) : []).map { (node: $0, depth: 0, dialog: false) }
+    var index = 0
+    if queue.count > 512 { complete = false }
+    while complete, index < queue.count, ownerCurrent() {
+        let entry = queue[index]; index += 1
+        guard admit(entry.node) else { complete = false; break }
+        var pid: pid_t = 0
+        let status = AXUIElementGetPid(entry.node, &pid)
+        guard status == .success, pid == processId else { errors.append(["status": status.rawValue]); complete = false; break }
+        guard let role = fixedText(entry.node, kAXRoleAttribute as CFString), role.hasPrefix("AX"), role.count <= 64 else { complete = false; break }
+        let subrole = fixedText(entry.node, kAXSubroleAttribute as CFString) ?? ""
+        if role == "AXSheet" { complete = false; break }
+        if role == "AXSecureTextField" || subrole == "AXSecureTextField" { continue }
+        let isCreateDialog = subrole == "AXApplicationDialog" && fixedText(entry.node, kAXTitleAttribute as CFString) == "Create Project"
+        if isCreateDialog { dialogs.append(entry.node) }
+        let inDialog = entry.dialog || isCreateDialog
+        if inDialog, role == "AXButton" {
+            let text = fixedText(entry.node, kAXTitleAttribute as CFString)
+            if text == "owned-browser-project" || text == "owned-browser-project Change" { selectedFolders += 1; folderTargets.append(entry.node) }
+            if text == "Create Project" {
+                var enabled: CFTypeRef?
+                let enabledStatus = AXUIElementCopyAttributeValue(entry.node, kAXEnabledAttribute as CFString, &enabled)
+                if enabledStatus == .success, let enabled, CFGetTypeID(enabled) == CFBooleanGetTypeID(), CFEqual(enabled, kCFBooleanTrue) {
+                    targets.append(entry.node)
+                } else { errors.append(["status": enabledStatus.rawValue]); complete = false; break }
+            }
+        }
+        guard entry.depth < 40 else { complete = false; break }
+        var children: CFTypeRef?
+        let childStatus = AXUIElementCopyAttributeValue(entry.node, kAXChildrenAttribute as CFString, &children)
+        if childStatus == .success {
+            guard let nodes = children as? [AXUIElement], queue.count + nodes.count <= 512 else { complete = false; break }
+            queue.append(contentsOf: nodes.map { (node: $0, depth: entry.depth + 1, dialog: inDialog) })
+        } else if childStatus != .noValue && childStatus != .attributeUnsupported {
+            errors.append(["status": childStatus.rawValue]); complete = false; break
+        }
+    }
+    receipt["nativeErrors"] = errors
+    receipt["uniqueEnabledCreateProject"] = targets.count == 1
+    receipt["uniqueOwnedFolderDisplayName"] = selectedFolders == 1
+    receipt["complete"] = complete && index == queue.count
+    func stillInsideDialog(_ child: AXUIElement, _ dialog: AXUIElement) -> Bool {
+        var cursor = child, visited = Set<CFHashCode>()
+        for _ in 0..<40 {
+            var pid: pid_t = 0
+            guard ownerCurrent(), admit(cursor), visited.insert(CFHash(cursor)).inserted,
+                  AXUIElementGetPid(cursor, &pid) == .success, pid == processId else { return false }
+            if CFEqual(cursor, dialog) { return true }
+            var raw: CFTypeRef?
+            guard AXUIElementCopyAttributeValue(cursor, kAXParentAttribute as CFString, &raw) == .success,
+                  let raw, CFGetTypeID(raw) == AXUIElementGetTypeID() else { return false }
+            cursor = unsafeBitCast(raw, to: AXUIElement.self)
+        }
+        return false
+    }
+    if complete, index == queue.count, errors.isEmpty, selectedFolders == 1, folderTargets.count == 1,
+       dialogs.count == 1, let dialog = dialogs.first, let folder = folderTargets.first,
+       targets.count == 1, let target = targets.first,
+       ownerCurrent(), stillInsideDialog(target, dialog), stillInsideDialog(folder, dialog),
+       fixedText(dialog, kAXTitleAttribute as CFString) == "Create Project",
+       fixedText(target, kAXTitleAttribute as CFString) == "Create Project", fixedFolderButtonEnabled(target),
+       let point = fixedFolderHit(target, deadline, admit),
+       let down = CGEvent(mouseEventSource: nil, mouseType: .leftMouseDown, mouseCursorPosition: point, mouseButton: .left),
+       let up = CGEvent(mouseEventSource: nil, mouseType: .leftMouseUp, mouseCursorPosition: point, mouseButton: .left),
+       ownerCurrent(), stillInsideDialog(target, dialog), stillInsideDialog(folder, dialog),
+       fixedText(target, kAXTitleAttribute as CFString) == "Create Project", fixedFolderButtonEnabled(target),
+       ["owned-browser-project", "owned-browser-project Change"].contains(fixedText(folder, kAXTitleAttribute as CFString) ?? ""),
+       errors.isEmpty, fixedFolderHit(target, deadline, admit) == point {
+        down.post(tap: .cghidEventTap); up.post(tap: .cghidEventTap)
+        receipt["projectCreationDispatched"] = true; receipt["status"] = "dispatched"
+    }
+    receipt["nativeStatuses"] = fixedFolderNativeStatuses
+    receipt["capturedPid"] = processId
+    receipt["capturedIdentityMatched"] = ownerCurrent()
+    receipt["fixtureIdentityMatched"] = ownedFixturePath() != nil
+    receipt["timeLimitReached"] = Date() >= deadline
+    receipt["metadataNodes"] = seen.count
+    if let data = try? JSONSerialization.data(withJSONObject: receipt, options: [.sortedKeys]), let text = String(data: data, encoding: .utf8) { print(text) }
+    else { exit(2) }
+    exit(0)
+}
+if mode == "picker-metadata" || mode == "picker-location-prompt" || (fixesOwnedFolder && mode != "picker-create-owned-project") {
     // The native chooser may expose filesystem names through ordinary labels.
     // This separate read path never requests titles, descriptions or values.
     let parts = requestedTitle.split(separator: ":", omittingEmptySubsequences: false)
     let birth = parts.compactMap { UInt64($0) }
     let admitted = isTaskStagedBundle && treeIdentityMatched && matchingIds == [processId] &&
-        parts.count == 2 && birth.count == 2 &&
+        parts.count == (fixesOwnedFolder ? 11 : 2) && birth.count == parts.count &&
         initialKernelIdentity?.birthSeconds == birth[0] && initialKernelIdentity?.birthMicroseconds == birth[1] &&
         initialKernelIdentity?.executable == expectedBundle + "/Contents/MacOS/Octant"
     let deadline = Date().addingTimeInterval(3)
@@ -134,7 +348,9 @@ if mode == "picker-metadata" || mode == "picker-location-prompt" {
     var ownedWindowRoots = Set<Int>(), ownedSheets = Set<Int>()
     var rows: [[String: Any]] = [], processRows: [[String: Any]] = []
     var retainedNodes: [AXUIElement] = [], parentRows: [Int?] = []
-    var promptDispatched = false, fixedControlLabelsCompared = false
+    var promptDispatched = false, fixedControlLabelsCompared = false, fixedOwnedFieldCompared = false
+    var fixedFolder: [String: Any] = ["status": fixesOwnedFolder ? "blocked" : "not-requested",
+        "rawValueCaptured": false, "typingDispatched": false, "goDispatched": false, "chooserDispatched": false]
     var locationPrompt: [String: Any] = ["status": "not-requested", "interactionDispatched": false, "typingDispatched": false,
         "confirmationDispatched": false, "selectionDispatched": false, "fieldValuesRead": false,
         "directoryLabelsRead": false]
@@ -190,6 +406,7 @@ if mode == "picker-metadata" || mode == "picker-location-prompt" {
             if let sheetRow = entry.sheetRow, ownedSheets.contains(sheetRow),
                ownedWindowRoots.contains(entry.windowIndex), entry.parentRow != nil,
                let identity = kernelIdentity(nodePid),
+               (!fixesOwnedFolder || (folderPins[2] == UInt64(nodePid) && folderPins[3] == identity.birthSeconds && folderPins[4] == identity.birthMicroseconds && ownedFixturePath() != nil)),
                let service = NSRunningApplication(processIdentifier: nodePid),
                !service.isTerminated,
                service.bundleIdentifier == "com.apple.appkit.xpc.openAndSavePanelService",
@@ -293,7 +510,7 @@ if mode == "picker-metadata" || mode == "picker-location-prompt" {
                         "rootWindowIndex": entry.windowIndex, "ownedSheetRow": sheetRow,
                         "sheetOwnerPid": processId, "identityRechecked": true,
                         "childrenTraversed": false, "codeSigningVerified": true, "interactionDispatched": false]
-                    if mode == "picker-location-prompt" {
+                    if mode == "picker-location-prompt" || fixesOwnedFolder {
                         let sheet = retainedNodes[sheetRow]
                         var knownMetadataNodes = Set(queue.map { CFHash($0.node) })
                         var newMetadataNodes = 0
@@ -359,6 +576,7 @@ if mode == "picker-metadata" || mode == "picker-location-prompt" {
                         let childrenStatus = AXUIElementCopyAttributeValue(sheet, kAXChildrenAttribute as CFString, &directChildren)
                         let defaultStatus = AXUIElementCopyAttributeValue(sheet, kAXDefaultButtonAttribute as CFString, &defaultRaw)
                         var cancelButtons = 0, chooserButtons = 0, defaultButtons = 0, controlsComplete = true
+                        var enabledChooserTargets: [AXUIElement] = []
                         let defaultButton = defaultStatus == .success ? axNode(defaultRaw) : nil
                         if defaultStatus != .success && defaultStatus != .noValue {
                             errors += 1; recordPickerError("picker-default-button", defaultStatus)
@@ -387,6 +605,7 @@ if mode == "picker-metadata" || mode == "picker-location-prompt" {
                                 if fixedLabel(child, kAXTitleAttribute as CFString, "Cancel"), enabledValue == true { cancelButtons += 1 }
                                 if fixedLabel(child, kAXTitleAttribute as CFString, "Open") || fixedLabel(child, kAXTitleAttribute as CFString, "Choose") {
                                     chooserButtons += 1
+                                    if enabledValue == true { enabledChooserTargets.append(child) }
                                     locationPrompt["chooserButtonEnabled"] = enabledValue.map { $0 as Any } ?? NSNull()
                                     locationPrompt["chooserButtonEnabledStatus"] = enabledStatus.rawValue
                                     if let defaultButton, CFEqual(child, defaultButton) {
@@ -409,7 +628,7 @@ if mode == "picker-metadata" || mode == "picker-location-prompt" {
                         locationPrompt["frontmostOwned"] = NSWorkspace.shared.frontmostApplication?.processIdentifier == processId
                         // The fixed chord opens a location prompt; it does not press
                         // the chooser/default button or confirm any selection.
-                        if roleConfirmed, errors == priorErrors, controlsComplete, cancelButtons == 1, chooserButtons == 1,
+                        if mode == "picker-location-prompt", roleConfirmed, errors == priorErrors, controlsComplete, cancelButtons == 1, chooserButtons == 1,
                            let beforeFocus, associationUnchanged(), AXIsProcessTrusted(), CGPreflightPostEventAccess(),
                            NSWorkspace.shared.frontmostApplication?.processIdentifier == processId,
                            let freshFocus = focusInSheet(), CFEqual(freshFocus.node, beforeFocus.node),
@@ -488,13 +707,15 @@ if mode == "picker-metadata" || mode == "picker-location-prompt" {
                                     locationPrompt["focusedParentSubrole"] = parentSubrole
                                     locationPrompt["fixedLongPromptTitleMatched"] = longFixedTitle.map { $0 as Any } ?? NSNull()
                                     locationPrompt["fixedShortPromptTitleMatched"] = shortFixedTitle.map { $0 as Any } ?? NSNull()
+                                    let observedSequence = focused.ancestors.count == 3 && CFEqual(focused.ancestors[2], sheet) &&
+                                        parent.map { CFEqual(focused.ancestors[1], $0) } == true && parentRole == "AXSheet"
+                                    locationPrompt["observedNestedLocationSequence"] = observedSequence
                                     if parentStatus == .success, let parent, !CFEqual(parent, sheet), parentRole == "AXSheet",
-                                       longFixedTitle == true || shortFixedTitle == true,
-                                       associationUnchanged(), errors == priorErrors {
+                                       observedSequence, associationUnchanged(), errors == priorErrors {
                                         locationPrompt["status"] = "observed"
                                         locationPrompt["focusedRole"] = focused.role
                                         locationPrompt["focusedSubrole"] = focused.subrole
-                                        locationPrompt["nestedFixedPromptMatched"] = true
+                                        locationPrompt["nestedFixedPromptMatched"] = longFixedTitle == true || shortFixedTitle == true
                                         locationPrompt["identityAndAssociationRechecked"] = true
                                         break
                                     }
@@ -502,6 +723,119 @@ if mode == "picker-metadata" || mode == "picker-location-prompt" {
                                 }
                                 Thread.sleep(forTimeInterval: 0.05)
                             }
+                        }
+                        if fixesOwnedFolder, let fixturePath = ownedFixturePath(), errors == priorErrors {
+                            func nestedLocation(_ focus: (node: AXUIElement, role: String, subrole: String, ancestors: [AXUIElement])) -> Bool {
+                                guard focus.role == "AXTextField", focus.subrole != "AXSearchField", focus.ancestors.count == 3,
+                                      CFEqual(focus.ancestors[2], sheet), !CFEqual(focus.ancestors[1], sheet) else { return false }
+                                var pid: pid_t = 0
+                                return AXUIElementGetPid(focus.ancestors[1], &pid) == .success && pid == processId &&
+                                    roleOnly(focus.ancestors[1], kAXRoleAttribute as CFString) == "AXSheet" && errors == priorErrors
+                            }
+                            func onlyOriginalSheet(_ focus: (node: AXUIElement, role: String, subrole: String, ancestors: [AXUIElement])) -> Bool {
+                                guard focus.role != "AXTextField", focus.ancestors.last.map({ CFEqual($0, sheet) }) == true else { return false }
+                                var sheets = 0
+                                for ancestor in focus.ancestors {
+                                    var pid: pid_t = 0
+                                    guard Date() < deadline, AXUIElementGetPid(ancestor, &pid) == .success, pid == processId else { return false }
+                                    if roleOnly(ancestor, kAXRoleAttribute as CFString) == "AXSheet" { sheets += 1 }
+                                }
+                                return sheets == 1 && errors == priorErrors
+                            }
+                            func fieldReady(_ field: AXUIElement) -> Bool {
+                                guard ownedFixturePath() == fixturePath, associationUnchanged(),
+                                      let focus = focusInSheet(), CFEqual(focus.node, field), nestedLocation(focus),
+                                      fixedFolderHit(field, deadline, admitMetadataNode) != nil,
+                                      identitiesUnchanged(), errors == priorErrors else { return false }
+                                fixedFolder["fieldFocusIdentityGeometryHitMatched"] = true
+                                return true
+                            }
+                            func exactOwnedValue(_ field: AXUIElement) -> Bool {
+                                guard fieldReady(field) else { return false }
+                                var raw: CFTypeRef?, pid: pid_t = 0
+                                guard AXUIElementGetPid(field, &pid) == .success, pid == processId else { return false }
+                                let status = AXUIElementCopyAttributeValue(field, kAXValueAttribute as CFString, &raw)
+                                fixedOwnedFieldCompared = true
+                                fixedFolder["fixedOwnedFieldValueCompared"] = true
+                                fixedFolder["valueReadStatus"] = status.rawValue
+                                if status != .success { errors += 1; recordPickerError("owned-location-value", status) }
+                                let equal = status == .success && (raw as? String) == fixturePath
+                                fixedFolder["fixedOwnedFieldValueMatched"] = equal
+                                return equal && fieldReady(field)
+                            }
+                            if mode == "picker-fill-owned-location", let focus = focusInSheet(), nestedLocation(focus), fieldReady(focus.node),
+                               let selectDown = CGEvent(keyboardEventSource: nil, virtualKey: 0, keyDown: true),
+                               let selectUp = CGEvent(keyboardEventSource: nil, virtualKey: 0, keyDown: false),
+                               let textDown = CGEvent(keyboardEventSource: nil, virtualKey: 0, keyDown: true),
+                               let textUp = CGEvent(keyboardEventSource: nil, virtualKey: 0, keyDown: false) {
+                                selectDown.flags = .maskCommand; selectUp.flags = .maskCommand
+                                let utf16 = Array(fixturePath.utf16)
+                                utf16.withUnsafeBufferPointer { buffer in
+                                    if let base = buffer.baseAddress {
+                                        textDown.keyboardSetUnicodeString(stringLength: buffer.count, unicodeString: base)
+                                        textUp.keyboardSetUnicodeString(stringLength: buffer.count, unicodeString: base)
+                                    }
+                                }
+                                if fieldReady(focus.node) {
+                                    selectDown.post(tap: .cghidEventTap); selectUp.post(tap: .cghidEventTap)
+                                    fixedFolder["status"] = "select-all-dispatched-no-text"
+                                    if fieldReady(focus.node) {
+                                        textDown.post(tap: .cghidEventTap); textUp.post(tap: .cghidEventTap)
+                                        fixedFolder["typingDispatched"] = true
+                                        fixedFolder["status"] = "typed-value-unconfirmed"
+                                        // Allow the ordinary posted key pair to be
+                                        // consumed before the one equality read.
+                                        Thread.sleep(forTimeInterval: 0.05)
+                                        while Date() < deadline, errors == priorErrors {
+                                            if exactOwnedValue(focus.node) { fixedFolder["status"] = "completed"; break }
+                                            // A mismatch is a refusal, never a text retry.
+                                            break
+                                        }
+                                    }
+                                }
+                            }
+                            if mode == "picker-go-owned-location", let focus = focusInSheet(), nestedLocation(focus),
+                               exactOwnedValue(focus.node), fieldReady(focus.node),
+                               let down = CGEvent(keyboardEventSource: nil, virtualKey: 36, keyDown: true),
+                               let up = CGEvent(keyboardEventSource: nil, virtualKey: 36, keyDown: false) {
+                                if fieldReady(focus.node) {
+                                    down.post(tap: .cghidEventTap); up.post(tap: .cghidEventTap)
+                                    fixedFolder["goDispatched"] = true
+                                    fixedFolder["status"] = "go-dispatched-shape-unconfirmed"
+                                    while Date() < deadline, errors == priorErrors, identitiesUnchanged() {
+                                        if let after = focusInSheet() {
+                                            fixedFolder["postGoFocusRole"] = after.role
+                                            fixedFolder["postGoFocusSubrole"] = after.subrole
+                                            if onlyOriginalSheet(after), associationUnchanged(), ownedFixturePath() == fixturePath {
+                                                fixedFolder["postGoOriginalChooserObserved"] = true
+                                                fixedFolder["status"] = "completed"; break
+                                            }
+                                        }
+                                        Thread.sleep(forTimeInterval: 0.05)
+                                    }
+                                }
+                            }
+                            if mode == "picker-choose-owned-folder", controlsComplete, cancelButtons == 1, chooserButtons == 1,
+                               enabledChooserTargets.count == 1, let target = enabledChooserTargets.first,
+                               let focus = focusInSheet(), onlyOriginalSheet(focus), associationUnchanged(),
+                               fixedFolderButtonEnabled(target),
+                               let point = fixedFolderHit(target, deadline, admitMetadataNode),
+                               let down = CGEvent(mouseEventSource: nil, mouseType: .leftMouseDown, mouseCursorPosition: point, mouseButton: .left),
+                               let up = CGEvent(mouseEventSource: nil, mouseType: .leftMouseUp, mouseCursorPosition: point, mouseButton: .left),
+                               ownedFixturePath() == fixturePath, let finalFocus = focusInSheet(), onlyOriginalSheet(finalFocus),
+                               associationUnchanged(), errors == priorErrors, fixedFolderButtonEnabled(target),
+                               fixedLabel(target, kAXTitleAttribute as CFString, "Open") || fixedLabel(target, kAXTitleAttribute as CFString, "Choose"),
+                               errors == priorErrors, fixedFolderHit(target, deadline, admitMetadataNode) == point,
+                               identitiesUnchanged(), errors == priorErrors {
+                                down.post(tap: .cghidEventTap); up.post(tap: .cghidEventTap)
+                                fixedFolder["chooserDispatched"] = true; fixedFolder["status"] = "dispatched"
+                            }
+                            fixedFolder["nativeStatuses"] = fixedFolderNativeStatuses
+                            fixedFolder["fixtureIdentityMatched"] = ownedFixturePath() == fixturePath
+                            fixedFolder["sharedMetadataNodes"] = queue.count + newMetadataNodes
+                            fixedFolder["timeLimitReached"] = Date() >= deadline
+                            fixedFolder["codeSigningVerified"] = signatureVerified
+                            fixedFolder["signatureSteps"] = signatureSteps
                         }
                         locationPrompt["sharedMetadataNodes"] = queue.count + newMetadataNodes
                         locationPrompt["nodeLimitReached"] = nodeCut
@@ -610,12 +944,13 @@ if mode == "picker-metadata" || mode == "picker-location-prompt" {
         "processes": processRows, "roles": rows, "readErrors": errors,
         "associatedServiceNode": serviceNode, "serviceSubtree": serviceSubtree, "nativeErrors": pickerNativeErrors,
         "locationPrompt": locationPrompt, "fixedControlLabelsCompared": fixedControlLabelsCompared,
+        "fixedFolder": fixedFolder,
         "dialogOrSheetObserved": dialogSeen, "foreignPidBoundaryObserved": foreignPid,
         "truncated": depthCut || nodeCut || foreignPid || index < queue.count,
         "depthLimitReached": depthCut, "nodeLimitReached": nodeCut,
         "timeLimitReached": Date() >= deadline && index < queue.count,
         "interactionDispatched": promptDispatched, "labelsOrValuesRead": fixedControlLabelsCompared,
-        "fieldValuesRead": false, "directoryLabelsRead": false]
+        "fieldValuesRead": fixedOwnedFieldCompared, "rawValueCaptured": false, "directoryLabelsRead": false]
     if let encoded = try? JSONSerialization.data(withJSONObject: output, options: [.sortedKeys]),
        let text = String(data: encoded, encoding: .utf8) { print(text) }
     else { exit(2) }

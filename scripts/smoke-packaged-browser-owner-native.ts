@@ -1,5 +1,5 @@
 import { execFileSync, spawn, type ChildProcess } from "node:child_process";
-import { lstat, mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
+import { lstat, mkdtemp, mkdir, realpath, rm, writeFile } from "node:fs/promises";
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
@@ -132,6 +132,7 @@ async function main(): Promise<void> {
   let retainOwnedFilesForWatchdog = false;
   const checks: string[] = [];
   const visualStateImages: string[] = [];
+  let ownedProjectBindingVerified = false;
   const persistedReadings: Array<{
     readonly checkpoint: string;
     readonly value: boolean | null;
@@ -423,7 +424,11 @@ process.once("SIGINT", () => finish(false));`,
           | "fill-name"
           | "fill-address"
           | "picker-metadata"
-          | "picker-location-prompt",
+          | "picker-location-prompt"
+          | "picker-fill-owned-location"
+          | "picker-go-owned-location"
+          | "picker-choose-owned-folder"
+          | "picker-create-owned-project",
         value?: string,
         pinnedBirth?: string,
       ) =>
@@ -1030,6 +1035,10 @@ end run`;
               prompt.locationPrompt === null ||
               !("status" in prompt.locationPrompt) ||
               prompt.locationPrompt.status !== "observed" ||
+              !("observedNestedLocationSequence" in prompt.locationPrompt) ||
+              prompt.locationPrompt.observedNestedLocationSequence !== true ||
+              !("identityAndAssociationRechecked" in prompt.locationPrompt) ||
+              prompt.locationPrompt.identityAndAssociationRechecked !== true ||
               !("typingDispatched" in prompt.locationPrompt) ||
               prompt.locationPrompt.typingDispatched !== false ||
               !("confirmationDispatched" in prompt.locationPrompt) ||
@@ -1041,8 +1050,201 @@ end run`;
                 "Fixed native Go-to-Folder prompt was refused or remained unconfirmed; no typing or retry.",
               );
             checks.push(
-              "one-native-go-to-folder-chord-and-fixed-focused-prompt-observed-without-typing",
+              "one-native-go-to-folder-chord-and-observed-nested-location-sequence-without-title-assumption",
             );
+            if (
+              !("associatedServiceNode" in prompt) ||
+              typeof prompt.associatedServiceNode !== "object" ||
+              prompt.associatedServiceNode === null
+            )
+              throw Error("No exact signed service identity for owned-folder stages.");
+            const service = prompt.associatedServiceNode;
+            if (
+              !("pid" in service) ||
+              typeof service.pid !== "number" ||
+              !Number.isSafeInteger(service.pid) ||
+              service.pid <= 1 ||
+              service.pid > 2147483647 ||
+              !("birthSeconds" in service) ||
+              typeof service.birthSeconds !== "number" ||
+              !Number.isSafeInteger(service.birthSeconds) ||
+              service.birthSeconds <= 0 ||
+              !("birthMicroseconds" in service) ||
+              typeof service.birthMicroseconds !== "number" ||
+              !Number.isSafeInteger(service.birthMicroseconds) ||
+              service.birthMicroseconds < 0 ||
+              service.birthMicroseconds >= 1000000
+            )
+              throw Error("Signed picker service identity is incomplete.");
+            const canonicalRoot = await realpath(root);
+            const directoryPaths = [
+              canonicalRoot,
+              join(canonicalRoot, "home"),
+              join(canonicalRoot, "home", "owned-browser-project"),
+            ];
+            const directoryPins = await Promise.all(
+              directoryPaths.map((path) => lstat(path, { bigint: true })),
+            );
+            const uid = process.getuid?.();
+            if (uid === undefined) throw Error("No owned fixture UID.");
+            const assertOwnedDirectories = async () => {
+              for (const [index, path] of directoryPaths.entries()) {
+                const pinned = directoryPins[index];
+                const current = await lstat(path, { bigint: true });
+                if (
+                  pinned === undefined ||
+                  !current.isDirectory() ||
+                  current.isSymbolicLink() ||
+                  current.uid !== BigInt(uid) ||
+                  current.dev !== pinned.dev ||
+                  current.ino !== pinned.ino ||
+                  (await realpath(path)) !== path ||
+                  (index === 0 && (current.mode & 0o077n) !== 0n)
+                )
+                  throw Error("Owned fixture directory identity changed; no action retry.");
+              }
+            };
+            await assertOwnedDirectories();
+            const pins = [
+              BigInt(ownerBirth.seconds),
+              BigInt(ownerBirth.microseconds),
+              BigInt(service.pid),
+              BigInt(service.birthSeconds),
+              BigInt(service.birthMicroseconds),
+              ...directoryPins.flatMap((entry) => [entry.dev, entry.ino]),
+            ]
+              .map((entry) => entry.toString(10))
+              .join(":");
+            const fixedStage = async (
+              mode:
+                | "picker-fill-owned-location"
+                | "picker-go-owned-location"
+                | "picker-choose-owned-folder"
+                | "picker-create-owned-project",
+            ) => {
+              if (controller.signal.aborted)
+                throw Error("Owned-folder action cancelled before validation; no dispatch.");
+              await assertOwnedDirectories();
+              if (controller.signal.aborted)
+                throw Error("Owned-folder action cancelled during validation; no dispatch.");
+              const raw = await sdk(mode, pins);
+              await writeFile(join(artifacts, `${mode}.json`), raw);
+              if (controller.signal.aborted)
+                throw Error(
+                  "Owned-folder action cancelled; actual receipt retained and no next effect.",
+                );
+              const parsed: unknown = JSON.parse(raw);
+              if (
+                typeof parsed !== "object" ||
+                parsed === null ||
+                !("capturedIdentityMatched" in parsed) ||
+                parsed.capturedIdentityMatched !== true ||
+                !("capturedPid" in parsed) ||
+                parsed.capturedPid !== pid ||
+                !("directoryLabelsRead" in parsed) ||
+                parsed.directoryLabelsRead !== false
+              )
+                throw Error("Owned-folder command lost its captured process; no replay.");
+              let result: unknown = parsed;
+              if (mode !== "picker-create-owned-project") {
+                if (!("fixedFolder" in parsed))
+                  throw Error("Missing fixed-folder command receipt.");
+                result = parsed.fixedFolder;
+              }
+              const expected =
+                mode === "picker-fill-owned-location" || mode === "picker-go-owned-location"
+                  ? "completed"
+                  : "dispatched";
+              if (
+                typeof result !== "object" ||
+                result === null ||
+                !("status" in result) ||
+                result.status !== expected ||
+                !("fixtureIdentityMatched" in result) ||
+                result.fixtureIdentityMatched !== true ||
+                !("rawValueCaptured" in result) ||
+                result.rawValueCaptured !== false
+              )
+                throw Error("Owned-folder command refused or remained uncertain; no replay.");
+              if (
+                mode !== "picker-create-owned-project" &&
+                (!("codeSigningVerified" in result) || result.codeSigningVerified !== true)
+              )
+                throw Error("Fixed picker command did not retain signature verification.");
+              if (
+                (mode === "picker-fill-owned-location" || mode === "picker-go-owned-location") &&
+                (!("fixedOwnedFieldValueCompared" in result) ||
+                  result.fixedOwnedFieldValueCompared !== true ||
+                  !("fixedOwnedFieldValueMatched" in result) ||
+                  result.fixedOwnedFieldValueMatched !== true)
+              )
+                throw Error("Exact derived owned path was not proven in the location field.");
+            };
+            await fixedStage("picker-fill-owned-location");
+            await fixedStage("picker-go-owned-location");
+            await fixedStage("picker-choose-owned-folder");
+            await fixedStage("picker-create-owned-project");
+            const expectedRoot = directoryPaths[2];
+            if (expectedRoot === undefined) throw Error("No expected owned Project root.");
+            const bindingDeadline = Date.now() + 3000;
+            while (true) {
+              if (controller.signal.aborted) throw Error("Owned Project binding check cancelled.");
+              await assertOwnedDirectories();
+              if (controller.signal.aborted)
+                throw Error("Owned Project binding check cancelled after validation.");
+              const database = openReadOnlySqlite(join(canonicalRoot, "data", "octant.sqlite3"));
+              let rows: ReadonlyArray<unknown>;
+              try {
+                rows =
+                  database.all(`SELECT json_extract(payload_json, '$.project.type') AS project_type,
+                  json_extract(payload_json, '$.project.name') AS project_name,
+                  json_extract(payload_json, '$.project.binding.canonicalRoot') AS root,
+                  global_sequence FROM event_journal WHERE event_name = 'project.created@1'
+                  AND aggregate_type = 'project' AND json_extract(payload_json, '$.project.type') = 'work'
+                  ORDER BY global_sequence DESC LIMIT 2`);
+              } finally {
+                database.close();
+              }
+              if (controller.signal.aborted)
+                throw Error("Owned Project binding check cancelled after read.");
+              const row = rows[0];
+              if (
+                rows.length === 1 &&
+                typeof row === "object" &&
+                row !== null &&
+                "project_type" in row &&
+                row.project_type === "work" &&
+                "project_name" in row &&
+                row.project_name === "owned-browser-project" &&
+                "root" in row &&
+                row.root === expectedRoot &&
+                "global_sequence" in row &&
+                typeof row.global_sequence === "number" &&
+                Number.isSafeInteger(row.global_sequence) &&
+                row.global_sequence > 0
+              ) {
+                ownedProjectBindingVerified = true;
+                await writeFile(
+                  join(artifacts, "owned-project-binding-read-only.json"),
+                  JSON.stringify({
+                    projectType: "work",
+                    exactOwnedRootMatched: true,
+                    expectedNameMatched: true,
+                    eventCount: 1,
+                    globalSequence: row.global_sequence,
+                    journalReadOnly: true,
+                    rawValueCaptured: false,
+                  }),
+                );
+                checks.push(
+                  "ordinary-ui-work-project-created-with-exact-owned-root-journal-binding",
+                );
+                break;
+              }
+              if (rows.length !== 0 || Date.now() >= bindingDeadline)
+                throw Error("Project binding was not the exact owned root; no effect replay.");
+              await pause(100);
+            }
             continue;
           }
         } else {
@@ -1244,12 +1446,15 @@ end run`;
               personalAccount: false,
               ...(projectPickerDiscovery
                 ? {
-                    projectBinding: "not-attempted",
-                    pickerSelection: "not-attempted",
+                    projectBinding: ownedProjectBindingVerified
+                      ? "verified-exact-owned-root"
+                      : "unconfirmed",
+                    pickerSelection: "one normal chooser click; exact binding verified separately",
                     subsequentInteractionDispatched: true,
-                    subsequentInteraction: "one fixed Go-to-Folder chord only",
-                    typingDispatched: false,
-                    confirmationDispatched: false,
+                    subsequentInteraction:
+                      "fixed owned location, normal Go, chooser and Create Project only",
+                    fixedOwnedFieldValueCompared: true,
+                    rawValueCaptured: false,
                   }
                 : {}),
             }
