@@ -710,7 +710,7 @@ napi_value begin_authority_state(napi_env env, napi_callback_info info) {
   const bool writing = mode == "replace"; ULONGLONG length = 0;
   if (!leaf || (mode != "read" && !writing) || (writing && (!integer_arg(env, arguments[5], length) || !authority_writer(env, scope)))) return object(env, "refused");
   for (const auto& entry : authority_sessions)
-    if (entry.second->env == env && entry.second->profile == name && entry.second->purpose == purpose && entry.second->writing == writing) return object(env, "refused");
+    if (writing && entry.second->env == env && entry.second->profile == name && entry.second->purpose == purpose && entry.second->writing) return object(env, "refused");
   bool missing = false;
   auto admission = profile_directory(name, scope, expected_data, true, writing, missing);
   if (!admission) return object(env, missing && !writing ? "missing" : "refused");
