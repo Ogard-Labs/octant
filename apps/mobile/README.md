@@ -100,6 +100,14 @@ Native startup installs WebCrypto before the session code loads. The iOS 27
 scene lifecycle is enabled through `expo-build-properties` on Expo SDK 57.0.24
 or newer. The browser mock keeps its browser-provided crypto.
 
+The **Mobile (iOS offline native acceptance)** workflow builds a Release app
+and exercises public offline entry, a sample reply, foreground return and reset
+on a task-owned Simulator, then repeats entry/reply with larger system text.
+Its XCTest target is added only to the generated native project. It uses no
+store signing, account or paired computer, and retains screenshot protection.
+The job publishes test receipts and cleans up its own Simulator. This does not
+replace physical-device, paired-vault, push or store acceptance.
+
 For a live connection, enable **Settings → Remote access** on the Octant host
 with a private HTTPS address and a certificate trusted by the device. Both
 endpoints must be on the same LAN or user-controlled mesh. With no host paired,
