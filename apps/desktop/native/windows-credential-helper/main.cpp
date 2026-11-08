@@ -1,5 +1,7 @@
 #include <windows.h>
 #include <wincred.h>
+#include <bcrypt.h>
+#include <wincrypt.h>
 #include <sddl.h>
 #include <aclapi.h>
 #include <array>
@@ -140,10 +142,127 @@ public:
   }
 };
 
-int run(HANDLE input, HANDLE output) {
+constexpr std::array<unsigned char, 4> identity_magic{'O', 'C', 'H', 'I'};
+constexpr DWORD identity_key_bytes = 32;
+constexpr DWORD identity_payload_bytes = 12 * 1024;
+static_assert(identity_key_bytes <= CRED_MAX_CREDENTIAL_BLOB_SIZE);
+
+struct IdentityPayload {
+  std::array<unsigned char, identity_payload_bytes> bytes{};
+  ~IdentityPayload() { SecureZeroMemory(bytes.data(), bytes.size()); }
+};
+
+bool identity_hash(unsigned char* input, DWORD size, unsigned char* key, unsigned char* output) {
+  BCRYPT_ALG_HANDLE algorithm = nullptr;
+  if (BCryptOpenAlgorithmProvider(&algorithm, BCRYPT_SHA256_ALGORITHM, nullptr,
+      key == nullptr ? 0 : BCRYPT_ALG_HANDLE_HMAC_FLAG) < 0) return false;
+  const bool success = BCryptHash(algorithm, key, key == nullptr ? 0 : identity_key_bytes,
+    input, size, output, identity_key_bytes) >= 0;
+  BCryptCloseAlgorithmProvider(algorithm, 0);
+  return success;
+}
+
+int identity_reply(HANDLE output, Status status, unsigned char operation = 0,
+    unsigned char* fingerprint = nullptr, unsigned char* signature = nullptr) {
+  std::string response;
+  if (status != Status::ok) {
+    const char* error = status == Status::missing ? "missing" :
+      status == Status::unavailable ? "unavailable" : "failed";
+    response = "{\"version\":1,\"ok\":false,\"error\":\"";
+    response += error;
+    response += "\"}\n";
+  } else {
+    constexpr char hex[] = "0123456789abcdef";
+    const char* name = operation == 1 ? "ensure" : operation == 2 ? "sign" : "rotate";
+    response = "{\"version\":1,\"ok\":true,\"operation\":\"";
+    response += name;
+    response += "\",\"keyId\":\"host-identity\",\"fingerprint\":\"";
+    for (DWORD i = 0; i < identity_key_bytes; ++i) {
+      response += hex[fingerprint[i] >> 4];
+      response += hex[fingerprint[i] & 15];
+    }
+    response += "\"";
+    if (signature != nullptr) {
+      std::array<char, 45> encoded{};
+      DWORD size = static_cast<DWORD>(encoded.size());
+      if (!CryptBinaryToStringA(signature, identity_key_bytes, CRYPT_STRING_BASE64 | CRYPT_STRING_NOCRLF,
+          encoded.data(), &size)) return identity_reply(output, Status::failed);
+      response += ",\"signature\":\"";
+      response += encoded.data();
+      response += "\"";
+    }
+    response += "}\n";
+  }
+  const bool sent = transfer(output, reinterpret_cast<unsigned char*>(response.data()),
+    static_cast<DWORD>(response.size()), true);
+  return sent && status == Status::ok ? 0 : 1;
+}
+
+Status read_identity(const std::wstring& target, Secret& key) {
+  PCREDENTIALW credential = nullptr;
+  if (!CredReadW(target.c_str(), CRED_TYPE_GENERIC, 0, &credential)) return failure(GetLastError());
+  const DWORD size = credential->CredentialBlobSize;
+  const bool valid = credential->Type == CRED_TYPE_GENERIC && size == identity_key_bytes &&
+    credential->CredentialBlob != nullptr;
+  if (valid) CopyMemory(key.bytes.data(), credential->CredentialBlob, identity_key_bytes);
+  if (credential->CredentialBlob != nullptr) SecureZeroMemory(credential->CredentialBlob, size);
+  CredFree(credential);
+  return valid ? Status::ok : Status::failed;
+}
+
+int run_identity(HANDLE input, HANDLE output) {
+  std::array<unsigned char, 43> header{};
+  IdentityPayload payload;
+  Secret key;
+  if (!transfer(input, header.data(), static_cast<DWORD>(header.size()), false))
+    return identity_reply(output, Status::invalid);
+  const auto operation = header[1];
+  const DWORD size = little_endian(header.data() + 39);
+  if (header[0] != 1 || operation < 1 || operation > 3 || header[2] > 1 ||
+      !uuid(header.data() + 3) || size > identity_payload_bytes ||
+      (operation == 2 ? size == 0 : size != 0) ||
+      !transfer(input, payload.bytes.data(), size, false)) return identity_reply(output, Status::invalid);
+  unsigned char extra = 0;
+  DWORD received = 0;
+  const bool ended = ReadFile(input, &extra, 1, &received, nullptr) != FALSE;
+  if ((ended && received != 0) || (!ended && GetLastError() != ERROR_BROKEN_PIPE))
+    return identity_reply(output, Status::invalid);
+  VaultAccess access;
+  if (!access.acquire()) return identity_reply(output, Status::unavailable);
+  // There is no migration or generic credential operation for this namespace.
+  std::wstring target = header[2] == 0 ? L"Octant/desktop-host-identity/v1/octant/" :
+    L"Octant/desktop-host-identity/v1/octant-nightly-test-data/";
+  for (size_t i = 3; i < 39; ++i) target += static_cast<wchar_t>(header[i]);
+  target += L"/host-identity";
+  const Status loaded = operation == 3 ? Status::missing : read_identity(target, key);
+  if (loaded != Status::ok && loaded != Status::missing) return identity_reply(output, loaded);
+  const bool replace = loaded == Status::missing;
+  if (replace && BCryptGenRandom(nullptr, key.bytes.data(), identity_key_bytes,
+      BCRYPT_USE_SYSTEM_PREFERRED_RNG) < 0) return identity_reply(output, Status::unavailable);
+  std::array<unsigned char, identity_key_bytes> fingerprint{};
+  std::array<unsigned char, identity_key_bytes> signature{};
+  if (!identity_hash(key.bytes.data(), identity_key_bytes, nullptr, fingerprint.data()) ||
+      (operation == 2 && !identity_hash(payload.bytes.data(), size, key.bytes.data(), signature.data())))
+    return identity_reply(output, Status::unavailable);
+  // Rotation replaces atomically; an unavailable RNG/hash never removes a key.
+  if (replace) {
+    CREDENTIALW credential{};
+    credential.Type = CRED_TYPE_GENERIC;
+    credential.TargetName = target.data();
+    credential.CredentialBlobSize = identity_key_bytes;
+    credential.CredentialBlob = key.bytes.data();
+    credential.Persist = CRED_PERSIST_LOCAL_MACHINE;
+    if (!CredWriteW(&credential, 0)) return identity_reply(output, failure(GetLastError()));
+  }
+  return identity_reply(output, Status::ok, operation, fingerprint.data(),
+    operation == 2 ? signature.data() : nullptr);
+}
+
+int run(HANDLE input, HANDLE output, const std::array<unsigned char, 4>& prefix) {
   std::array<unsigned char, 84> header{};
   Secret secret;
-  if (!transfer(input, header.data(), static_cast<DWORD>(header.size()), false))
+  CopyMemory(header.data(), prefix.data(), prefix.size());
+  if (!transfer(input, header.data() + 4, static_cast<DWORD>(header.size() - 4), false))
     return reply(output, Status::invalid) ? 0 : 1;
   const DWORD size = little_endian(header.data() + 79);
   const auto operation = header[5];
@@ -215,6 +334,15 @@ int wmain(int argc, wchar_t**) {
   // This private protocol is not a command-line credential tool. Normal use
   // is one broker-owned child, one request, one reply, then process exit.
   if (argc != 1 || GetFileType(input) != FILE_TYPE_PIPE || GetFileType(output) != FILE_TYPE_PIPE) return 1;
-  try { return run(input, output); }
-  catch (...) { return reply(output, Status::failed) ? 0 : 1; }
+  std::array<unsigned char, 4> prefix{};
+  if (!transfer(input, prefix.data(), static_cast<DWORD>(prefix.size()), false))
+    return reply(output, Status::invalid) ? 0 : 1;
+  try {
+    if (prefix == identity_magic) return run_identity(input, output);
+    if (prefix == magic) return run(input, output, prefix);
+    return reply(output, Status::invalid) ? 0 : 1;
+  } catch (...) {
+    if (prefix == identity_magic) return identity_reply(output, Status::failed);
+    return reply(output, Status::failed) ? 0 : 1;
+  }
 }
