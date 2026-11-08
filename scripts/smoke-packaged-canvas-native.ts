@@ -452,6 +452,17 @@ const timer = setInterval(() => {
       snapshot.texts.some((row) => row.text.toLowerCase().includes(value.toLowerCase()));
     const hasExactText = (snapshot: typeof Snapshot.Type, value: string) =>
       snapshot.texts.some((row) => row.text.trim().toLowerCase() === value.toLowerCase());
+    const hasOwnedCardAccount = (snapshot: typeof Snapshot.Type) => {
+      const account = `Posts as ${new URL(ownService.publicUrl).host}`;
+      return snapshot.texts.some(
+        (row) =>
+          row.text.trim() === account ||
+          (row.text.includes("Approve export") && row.text.trim().endsWith(` ${account}`)),
+      );
+    };
+    const hasOwnedStaticPayload = (snapshot: typeof Snapshot.Type) =>
+      snapshot.texts.some((row) => /"kind"\s*:\s*"canvas-public-share-document"/.test(row.text)) &&
+      snapshot.texts.some((row) => /^"Weekly signups brief",?$/.test(row.text.trim()));
     const observeUntil = async (
       stage: string,
       accept: (snapshot: typeof Snapshot.Type) => boolean,
@@ -733,17 +744,19 @@ const timer = setInterval(() => {
       "owned-publish-card",
       (snapshot) =>
         hasText(snapshot, "Export to Public link") &&
-        hasExactText(snapshot, `Posts as ${new URL(ownService.publicUrl).host}`) &&
+        hasOwnedCardAccount(snapshot) &&
+        hasOwnedStaticPayload(snapshot) &&
         hasText(snapshot, "Canvas page") &&
         hasText(snapshot, "Anyone with the link can open it"),
     );
     if ((await readdir(join(root, "share", "shares"))).length !== 0)
       throw Error("Preparing the native approval card unexpectedly published content.");
-    const journalPayload = (event: "published" | "updated" | "export" | "settled") => {
+    const journalPayload = (event: "published" | "updated" | "export" | "pending" | "settled") => {
       const name = {
         published: "canvas.public-share-published@1",
         updated: "canvas.public-share-updated@1",
         export: "canvas.export@1",
+        pending: "canvas.public-share-revocation-pending@1",
         settled: "canvas.public-share-revocation-settled@1",
       }[event];
       const connection = openReadOnlySqlite(join(root, "data", "octant.sqlite3"));
@@ -857,7 +870,8 @@ const timer = setInterval(() => {
       "update-owned-card",
       (snapshot) =>
         hasText(snapshot, "Export to Public link") &&
-        hasExactText(snapshot, `Posts as ${new URL(ownService.publicUrl).host}`) &&
+        hasOwnedCardAccount(snapshot) &&
+        hasOwnedStaticPayload(snapshot) &&
         hasText(snapshot, "Updates") &&
         hasText(snapshot, publishedUrl),
     );
@@ -928,6 +942,7 @@ const timer = setInterval(() => {
     await observeUntil("native-offline-revoke", (snapshot) =>
       hasText(snapshot, "This Mac keeps trying to revoke the link."),
     );
+    journalPayload("pending");
     if (!(await ownerSecretStore.has(publishedCredentialRef)))
       throw Error("The offline revoke discarded the credential needed to retry.");
     const restored = startShareService({
@@ -950,18 +965,21 @@ const timer = setInterval(() => {
     for (let second = 0; second < 61 && !controller.signal.aborted; second++) await pause(1000);
     if (controller.signal.aborted) throw Error("The offline retry was interrupted.");
     await showPublicLinks("retry", "Share", false);
+    const publicationSecrets = ownerSecretStore;
+    const publicationCredentialRef = publishedCredentialRef;
     await waitForProcessCleanup(
       async () => {
         if ((await fetch(publishedUrl, { headers: { cookie } })).status !== 410)
           throw Error("The production pending-revoke retry has not settled.");
+        journalPayload("settled");
+        if (await publicationSecrets.has(publicationCredentialRef))
+          throw Error("The background revoke has not removed its scoped credential yet.");
       },
-      { timeoutMs: 10_000 },
+      { timeoutMs: 15_000 },
     );
     const gone = await fetch(publishedUrl, { headers: { cookie } });
     if (gone.status !== 410) throw Error("The natively revoked publication did not return 410.");
-    journalPayload("settled");
-    if (await ownerSecretStore.has(publishedCredentialRef))
-      throw Error("The native revocation left its scoped owner credential behind.");
+
     ownerSecretCleanupVerified = true;
     await writeFile(
       join(artifacts, "native-publication-evidence.json"),
