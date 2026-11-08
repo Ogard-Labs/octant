@@ -63,6 +63,9 @@ try {
         foreach ($octantArgumentPath in $octantPathSpellings) {
           foreach ($octantArgumentImage in @($octantArgumentPath, '"' + $octantArgumentPath + '"')) {
             $octantExpectedImageArgument += '\A' + [regex]::Escape($octantImage) + '[ \t]+' + [regex]::Escape($octantArgumentImage) + '(?:[ \t]+--)?[ \t]+' + $octantQuotedUrlPattern + '\z'
+            if ($octantImage.StartsWith('"') -and $octantImage.EndsWith('"')) {
+              $octantExpectedImageArgument += '\A' + [regex]::Escape($octantImage) + [regex]::Escape($octantArgumentImage) + '[ \t]+' + $octantQuotedUrlPattern + '\z'
+            }
           }
         }
       }
