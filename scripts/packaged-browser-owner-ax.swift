@@ -10,7 +10,7 @@ guard (3...5).contains(CommandLine.arguments.count),
 }
 let mode = CommandLine.arguments.count >= 4 ? CommandLine.arguments[3] : "diagnostic"
 let requestedTitle = CommandLine.arguments.count == 5 ? CommandLine.arguments[4] : ""
-guard ["diagnostic", "read", "press", "click", "reveal", "reopen", "dock-read"].contains(mode),
+guard ["diagnostic", "read", "press", "click", "reveal", "reopen", "dock-read", "quit-hint"].contains(mode),
       (mode == "press" || mode == "click" || mode == "reveal") == !requestedTitle.isEmpty,
       requestedTitle.count <= 256 else { exit(2) }
 let preferenceTitle = "Keep Browser available without windows"
@@ -46,10 +46,12 @@ let windowResult = AXUIElementCopyAttributeValue(element, kAXWindowsAttribute as
 // Read named controls, never text-field values or static page text. The owned
 // process has already been identified above; this is not a system-wide tree.
 let controlRoles = Set(["AXButton", "AXCheckBox", "AXSwitch", "AXRadioButton", "AXPopUpButton", "AXMenuButton", "AXTextField", "AXTextArea"])
-var pending = (treeIdentityMatched ? (windows as? [AXUIElement] ?? []) : []).map { ($0, 0) }
+var pending = (treeIdentityMatched ? (windows as? [AXUIElement] ?? []) : []).map { ($0, 0, false) }
 var visited = Set<CFHashCode>()
 var controls: [[String: Any]] = []
 var pressTargets: [AXUIElement] = []
+var quitHintTitleSeen = false, quitHintDetailSeen = false
+var quitToastBranches = 0
 var readErrors = 0
 var nativeReadErrors = Set<Int32>()
 var next = 0
@@ -103,7 +105,7 @@ func cgBounds(_ row: [String: Any]) -> CGRect? {
     return CGRect(x: values[0], y: values[1], width: values[2], height: values[3])
 }
 while next < pending.count, next < 512, Date() < treeDeadline {
-    let (node, depth) = pending[next]
+    let (node, depth, parentIsToast) = pending[next]
     next += 1
     guard visited.insert(CFHash(node)).inserted else { continue }
     var roleValue: CFTypeRef?
@@ -115,6 +117,26 @@ while next < pending.count, next < 512, Date() < treeDeadline {
         continue
     }
     if nodeRole == "AXSecureTextField" || label(node, kAXSubroleAttribute as CFString) == "AXSecureTextField" { continue }
+    var isToast = parentIsToast
+    if mode == "quit-hint", !isToast, nodeRole == "AXGroup" {
+        var classes: CFTypeRef?
+        let classRead = AXUIElementCopyAttributeValue(node, "AXDOMClassList" as CFString, &classes)
+        if classRead == .success {
+            isToast = (classes as? [String])?.contains("toast") == true
+            if isToast { quitToastBranches += 1 }
+        }
+        else if classRead != .attributeUnsupported && classRead != .noValue {
+            readErrors += 1
+            nativeReadErrors.insert(classRead.rawValue)
+        }
+    }
+    if mode == "quit-hint", isToast, nodeRole == "AXStaticText" {
+        // Only recognize the two fixed normal confirmation strings inside a
+        // native toast. No other text or any text-field value is retained.
+        let text = label(node, kAXValueAttribute as CFString)
+        if text == "Quit Octant?" { quitHintTitleSeen = true }
+        if text == "Press ⌘Q again to quit Octant" { quitHintDetailSeen = true }
+    }
     if controlRoles.contains(nodeRole) {
         let title = label(node, kAXTitleAttribute as CFString)
         let description = label(node, kAXDescriptionAttribute as CFString)
@@ -156,7 +178,7 @@ while next < pending.count, next < 512, Date() < treeDeadline {
     let childrenRead = AXUIElementCopyAttributeValue(node, kAXChildrenAttribute as CFString, &childrenValue)
     if childrenRead == .success {
         if let children = childrenValue as? [AXUIElement] {
-            pending.append(contentsOf: children.prefix(max(0, 512 - pending.count)).map { ($0, depth + 1) })
+            pending.append(contentsOf: children.prefix(max(0, 512 - pending.count)).map { ($0, depth + 1, isToast) })
         } else { readErrors += 1 }
     } else if childrenRead != .attributeUnsupported && childrenRead != .noValue {
         readErrors += 1
@@ -380,6 +402,9 @@ let evidence: [String: Any] = [
     "interactiveControls": controls, "treeIdentityMatched": treeIdentityMatched,
     "treeVisited": next, "treeReadErrors": readErrors, "treeNativeErrors": nativeReadErrors.sorted(),
     "treeTruncated": truncated, "action": action, "dockObservation": dockObservation,
+    "quitHintObserved": quitHintTitleSeen && quitHintDetailSeen,
+    "quitHintTitleSeen": quitHintTitleSeen, "quitHintDetailSeen": quitHintDetailSeen,
+    "quitToastBranches": quitToastBranches,
     "treeDepthLimited": depthLimited, "treeLabelsLimited": labelsLimited,
     "treeNodeLimited": pending.count >= 512,
     "treeTimeLimited": next < pending.count && Date() >= treeDeadline,

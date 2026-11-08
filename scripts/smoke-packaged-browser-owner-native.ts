@@ -219,7 +219,7 @@ const timer = setInterval(() => {
           6000,
         );
       const sdk = (
-        mode: "diagnostic" | "read" | "click" | "reveal" | "reopen" | "dock-read",
+        mode: "diagnostic" | "read" | "click" | "reveal" | "reopen" | "dock-read" | "quit-hint",
         value?: string,
       ) =>
         runBoundedCommand(
@@ -501,7 +501,42 @@ end run`;
           await capture("opt-out", snapshot);
           checks.push("single-ui-opt-out-persisted-in-owned-journal");
         }
-        await native("key", "q");
+        // The normal visible-window shortcut asks for a second press. With no
+        // window, the first press quits directly because no hint can be shown.
+        if (phase === "restart") {
+          const confirmationDeadline = Date.now() + 1100;
+          await native("key", "q");
+          let observed = false;
+          while (Date.now() < confirmationDeadline - 300 && !controller.signal.aborted) {
+            const raw = await sdk("quit-hint");
+            await writeFile(join(artifacts, "restart-quit-confirmation.json"), raw);
+            const hint: unknown = JSON.parse(raw);
+            if (
+              typeof hint === "object" &&
+              hint !== null &&
+              "capturedPid" in hint &&
+              hint.capturedPid === pid &&
+              "treeIdentityMatched" in hint &&
+              hint.treeIdentityMatched === true &&
+              "treeTruncated" in hint &&
+              hint.treeTruncated === false &&
+              "treeReadErrors" in hint &&
+              hint.treeReadErrors === 0 &&
+              "quitHintObserved" in hint &&
+              hint.quitHintObserved === true
+            ) {
+              observed = true;
+              break;
+            }
+            await pause(30);
+          }
+          if (!observed || Date.now() >= confirmationDeadline - 300)
+            throw Error(
+              "Normal native Quit confirmation was not observed within its bound; no second press sent.",
+            );
+          await native("key", "q");
+          checks.push("normal-visible-window-quit-hint-observed-before-confirmation");
+        } else await native("key", "q");
         if (!(await exited(app.child, 8000)))
           throw Error("Explicit native Quit did not exit the host.");
         checks.push(`${phase}-explicit-quit-exited`);
