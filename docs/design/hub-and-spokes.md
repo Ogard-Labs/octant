@@ -311,6 +311,11 @@ the CLI. The hub depends on that:
     The physical hub directory stays held for the process lifetime. Store calls
     remain synchronous inside the single owner process; services retain their
     existing reload and cancellation-generation fences across asynchronous work.
+    Hosted native QA keeps the pinned runtime versions. When GitHub release
+    delivery fails, the same Bun version may come from its official npm Windows
+    artifact, verified against a pinned SHA-512 before extracting its sole regular
+    executable into the isolated runner's temporary directory. Version and platform
+    are checked before use; this changes test setup only.
     These internal prerequisites do not admit Windows desktop/server startup;
     encrypted-disk setup checks and the boot service
     remain separate composition and acceptance work.
