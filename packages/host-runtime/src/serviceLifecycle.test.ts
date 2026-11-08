@@ -1,7 +1,7 @@
 import { mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   deriveHostServiceState,
   nextRestartBackoff,
@@ -65,6 +65,39 @@ describe("restart backoff", () => {
 });
 
 describe("service policy and bounded logs", () => {
+  it("refuses unsafe native storage instead of reading ordinary files or writing a replacement log", async () => {
+    const replace = vi.fn(() => ({ status: "committed" as const }));
+    const file = {
+      dataDirectory: "/unused",
+      read: () => ({ status: "refused" as const }),
+      replace,
+    };
+    const policy = new ServicePolicyStore({ path: "/unused/policy", privateFile: file });
+    const logs = new BoundedHostLogStore({ path: "/unused/log", privateFile: file });
+    await expect(policy.read()).rejects.toThrow(/unsafe|unavailable/);
+    await expect(
+      logs.append({
+        timestamp: new Date().toISOString(),
+        level: "info",
+        event: "ready",
+        message: "ready",
+      }),
+    ).rejects.toThrow(/unsafe|unavailable/);
+    expect(replace).not.toHaveBeenCalled();
+  });
+
+  it("refuses invalid native UTF-8 rather than treating it as absent policy", async () => {
+    const bytes = Buffer.from([0xff]);
+    const file = {
+      dataDirectory: "/unused",
+      read: () => ({ status: "ready" as const, bytes }),
+      replace: () => ({ status: "refused" as const }),
+    };
+    const policy = new ServicePolicyStore({ path: "/unused/policy", privateFile: file });
+    await expect(policy.read()).rejects.toThrow();
+    expect(bytes.equals(Buffer.alloc(1))).toBe(true);
+  });
+
   it("persists policy without deleting the data store", async () => {
     const root = await mkdtemp(join(tmpdir(), "octant-service-policy-"));
     roots.push(root);

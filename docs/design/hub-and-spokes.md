@@ -317,6 +317,15 @@ the CLI. The hub depends on that:
     held private profile and claimed owner, with inspection before mutation and
     native admission on reopening. These checks rely on the stated local-owner
     trust boundary, rather than excluding arbitrary same-account programs.
+    Foreground composition also uses four closed native boot files: bridge and
+    host-info projections in the data directory, service policy in config, and
+    bounded service logs in logs. Existing schemas, limits, redaction and log
+    cursors remain authoritative. Discovery may read without claiming the host;
+    writes and removal require its actual current owner. The child receives the
+    existing bridge-secret launch seed and publishes its projections after
+    acquisition; the desktop never writes on its behalf. Cleanup checks the
+    expected instance and bridge value before removing only those two leaves.
+    UTF-8 failure or unsafe reads refuse instead of becoming empty/default state.
     Bun connections use immediate close that finalizes all outstanding prepared
     statements; a failed close retains its native guard. A deferred SQLite close
     is insufficient because an ordinary cached statement can retain the file

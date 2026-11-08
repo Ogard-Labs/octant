@@ -505,7 +505,7 @@ bool replace_listener_certificate(const Root& root, const std::wstring& path,
   return FlushFileBuffers(stage.file.value) != FALSE;
 }
 
-enum class ProfileDirectoryKind { Data, Hub, Remote };
+enum class ProfileDirectoryKind { Data, Hub, Remote, Config, Logs };
 struct ProfileDirectory {
   std::unique_ptr<Root> root;
   Handle data, directory;
@@ -539,7 +539,7 @@ std::unique_ptr<ProfileDirectory> profile_directory(const std::string& name, con
   for (size_t i = 0; i < directories.size(); ++i)
     if (std::memcmp(encoded.data() + 9 + i * 24, &directories[i].VolumeSerialNumber, 8) != 0 ||
         std::memcmp(encoded.data() + 17 + i * 24, directories[i].FileId.Identifier, 16) != 0) return nullptr;
-  const std::wstring remote_path = root->path + L"\\data" + (kind == ProfileDirectoryKind::Data ? L"" : kind == ProfileDirectoryKind::Hub ? L"\\hub" : L"\\remote");
+  const std::wstring remote_path = root->path + (kind == ProfileDirectoryKind::Config ? L"\\config" : kind == ProfileDirectoryKind::Logs ? L"\\logs" : L"\\data" + std::wstring(kind == ProfileDirectoryKind::Data ? L"" : kind == ProfileDirectoryKind::Hub ? L"\\hub" : L"\\remote"));
   SECURITY_ATTRIBUTES directory_attributes{sizeof(SECURITY_ATTRIBUTES), root->directory_security, FALSE};
   if (create && !CreateDirectoryW(remote_path.c_str(), &directory_attributes) && GetLastError() != ERROR_ALREADY_EXISTS) return nullptr;
   if (!create && GetFileAttributesW(remote_path.c_str()) == INVALID_FILE_ATTRIBUTES) {
@@ -682,7 +682,19 @@ bool authority_writer(napi_env env, const std::string& scope) {
 }
 const wchar_t* authority_leaf(const std::string& purpose) {
   return purpose == "hub-state" ? L"\\hub-state.json" : purpose == "delegations" ? L"\\delegations.json" :
-    purpose == "tailscale-certificate" ? L"\\tailscale-certificate.json" : nullptr;
+    purpose == "tailscale-certificate" ? L"\\tailscale-certificate.json" :
+    purpose == "bridge-secret" ? L"\\octant-bridge-secret" : purpose == "host-info" ? L"\\octant-host.json" :
+    purpose == "service-policy" ? L"\\service-policy.json" : purpose == "service-log" ? L"\\service.log" : nullptr;
+}
+ProfileDirectoryKind authority_directory(const std::string& purpose) {
+  if (purpose == "bridge-secret" || purpose == "host-info") return ProfileDirectoryKind::Data;
+  if (purpose == "service-policy") return ProfileDirectoryKind::Config;
+  if (purpose == "service-log") return ProfileDirectoryKind::Logs;
+  return ProfileDirectoryKind::Hub;
+}
+ULONGLONG authority_limit(const std::string& purpose) {
+  return purpose == "bridge-secret" ? 44 : purpose == "host-info" ? 4096 :
+    purpose == "service-policy" ? 1024 : purpose == "service-log" ? 1048577 : safe_integer;
 }
 bool authority_regular(HANDLE file, const Root& root, ULONGLONG* length = nullptr, bool unlinked = false) {
   BY_HANDLE_FILE_INFORMATION metadata{}; LARGE_INTEGER size{};
@@ -695,7 +707,7 @@ bool authority_regular(HANDLE file, const Root& root, ULONGLONG* length = nullpt
 }
 bool authority_revalidate(const AuthoritySession& session) {
   bool missing = false;
-  auto current = profile_directory(session.profile, session.scope, session.expected_data, ProfileDirectoryKind::Hub, false, missing);
+  auto current = profile_directory(session.profile, session.scope, session.expected_data, authority_directory(session.purpose), false, missing);
   return current && same_file(current->directory.value, session.admission->directory.value) &&
     same_file(current->data.value, session.admission->data.value) &&
     authority_regular(session.file.value, *current->root, nullptr, !session.writing);
@@ -713,11 +725,11 @@ napi_value begin_authority_state(napi_env env, napi_callback_info info) {
   const std::string expected_data = string_arg(env, arguments[2]), purpose = string_arg(env, arguments[3]);
   const std::string mode = string_arg(env, arguments[4]); const wchar_t* leaf = authority_leaf(purpose);
   const bool writing = mode == "replace"; ULONGLONG length = 0;
-  if (!leaf || (mode != "read" && !writing) || (writing && (!integer_arg(env, arguments[5], length) || !authority_writer(env, scope)))) return object(env, "refused");
+  if (!leaf || (mode != "read" && !writing) || (writing && (!integer_arg(env, arguments[5], length) || length > authority_limit(purpose) || !authority_writer(env, scope)))) return object(env, "refused");
   for (const auto& entry : authority_sessions)
     if (writing && entry.second->env == env && entry.second->profile == name && entry.second->purpose == purpose && entry.second->writing) return object(env, "refused");
   bool missing = false;
-  auto admission = profile_directory(name, scope, expected_data, ProfileDirectoryKind::Hub, writing, missing);
+  auto admission = profile_directory(name, scope, expected_data, authority_directory(purpose), writing, missing);
   if (!admission) return object(env, missing && !writing ? "missing" : "refused");
   const std::wstring path = admission->path + leaf;
   Handle existing(CreateFileW(path.c_str(), GENERIC_READ | READ_CONTROL, FILE_SHARE_READ | FILE_SHARE_DELETE,
@@ -725,6 +737,7 @@ napi_value begin_authority_state(napi_env env, napi_callback_info info) {
   if (!existing && GetLastError() != ERROR_FILE_NOT_FOUND) return object(env, "refused");
   if (!existing && !writing) return object(env, "missing");
   if (existing && !authority_regular(existing.value, *admission->root, writing ? nullptr : &length)) return object(env, "refused");
+  if (!writing && length > authority_limit(purpose)) return object(env, "refused");
   auto session = std::make_unique<AuthoritySession>();
   session->env = env; session->profile = name; session->scope = scope; session->purpose = purpose;
   session->expected_data = expected_data; session->length = length; session->writing = writing;
@@ -739,8 +752,8 @@ napi_value begin_authority_state(napi_env env, napi_callback_info info) {
   } else session->file = std::move(existing);
   if (!session->file || !authority_regular(session->file.value, *session->admission->root) ||
       !GetFileInformationByHandleEx(session->file.value, FileIdInfo, &session->identity, sizeof(session->identity)) || next_authority_session > safe_integer) return object(env, "refused");
-  // Keep the physical hub directory bound for this process, across sessions.
-  auto& retained = profiles.find(name)->second->identity_guards["authority-state-hub"];
+  // Keep each physical private directory bound across read/write sessions.
+  auto& retained = profiles.find(name)->second->identity_guards["authority-directory-" + std::to_string(static_cast<int>(authority_directory(purpose)))];
   if (retained.empty()) {
     HANDLE duplicate = INVALID_HANDLE_VALUE;
     if (!DuplicateHandle(GetCurrentProcess(), session->admission->directory.value, GetCurrentProcess(), &duplicate, 0, FALSE, DUPLICATE_SAME_ACCESS)) return object(env, "refused");
@@ -816,6 +829,24 @@ napi_value close_authority_state(napi_env env, napi_callback_info info) {
     authority_sessions.erase(id);
   }
   return object(env, "closed");
+}
+
+napi_value remove_startup_file(napi_env env, napi_callback_info info) {
+  Guard guard; size_t count = 4; napi_value arguments[4]; napi_get_cb_info(env, info, &count, arguments, nullptr, nullptr);
+  if (count != 4) return object(env, "refused");
+  const std::string profile = string_arg(env, arguments[0]), scope = string_arg(env, arguments[1]);
+  const std::string expected_data = string_arg(env, arguments[2]), purpose = string_arg(env, arguments[3]);
+  if ((purpose != "bridge-secret" && purpose != "host-info") || !authority_writer(env, scope)) return object(env, "refused");
+  bool missing = false;
+  auto directory = profile_directory(profile, scope, expected_data, ProfileDirectoryKind::Data, false, missing);
+  if (!directory) return object(env, "refused");
+  const auto path = directory->path + authority_leaf(purpose);
+  Handle file(CreateFileW(path.c_str(), DELETE | READ_CONTROL | FILE_READ_ATTRIBUTES, FILE_SHARE_READ | FILE_SHARE_DELETE,
+    nullptr, OPEN_EXISTING, FILE_FLAG_OPEN_REPARSE_POINT, nullptr));
+  if (!file) return object(env, GetLastError() == ERROR_FILE_NOT_FOUND ? "removed" : "refused");
+  if (!authority_regular(file.value, *directory->root)) return object(env, "refused");
+  FILE_DISPOSITION_INFO disposition{TRUE};
+  return object(env, SetFileInformationByHandle(file.value, FileDispositionInfo, &disposition, sizeof(disposition)) ? "removed" : "refused");
 }
 
 // SQLite keeps its ordinary Win32 VFS and sidecar lifecycle. Each connection
@@ -1189,6 +1220,7 @@ NAPI_MODULE_INIT() {
     {"writeAuthorityState", nullptr, write_authority_state, nullptr, nullptr, nullptr, napi_default, nullptr},
     {"commitAuthorityState", nullptr, commit_authority_state, nullptr, nullptr, nullptr, napi_default, nullptr},
     {"closeAuthorityState", nullptr, close_authority_state, nullptr, nullptr, nullptr, napi_default, nullptr},
+    {"removeStartupFile", nullptr, remove_startup_file, nullptr, nullptr, nullptr, napi_default, nullptr},
     {"prepare", nullptr, prepare, nullptr, nullptr, nullptr, napi_default, nullptr},
     {"claim", nullptr, claim, nullptr, nullptr, nullptr, napi_default, nullptr},
     {"lookup", nullptr, lookup, nullptr, nullptr, nullptr, napi_default, nullptr},
