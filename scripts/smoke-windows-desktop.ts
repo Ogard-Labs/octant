@@ -93,12 +93,12 @@ function launch(server = false, seed?: string) {
   });
   return child;
 }
-async function window(child: ChildProcess, close = false) {
+async function window(child: ChildProcess, close = false, requireRendered = false) {
   if (!child.pid || child.exitCode !== null || child.signalCode !== null) return false;
   if (close && !births.has(child))
     throw Error("An unobserved process cannot receive native close.");
   const result = await run(
-    "pwsh",
+    "powershell.exe",
     [
       "-NoProfile",
       "-NonInteractive",
@@ -127,7 +127,11 @@ async function window(child: ChildProcess, close = false) {
   )
     throw Error("The native process birth was not observed.");
   births.set(child, value.birth);
-  return "visibleOwnedWindow" in value && value.visibleOwnedWindow === true;
+  return (
+    "visibleOwnedWindow" in value &&
+    value.visibleOwnedWindow === true &&
+    (!requireRendered || ("renderedWelcome" in value && value.renderedWelcome === true))
+  );
 }
 async function joined(child: ChildProcess) {
   await until(
@@ -171,8 +175,8 @@ try {
   if (phase === "owned") {
     const app = launch();
     const first = await ready();
-    await until("normal visible desktop window", () => window(app));
-    check(true, "the normal package opened its owned visible native window");
+    await until("normal rendered welcome window", () => window(app, false, true));
+    check(true, "the normal package opened its owned native window with visible welcome content");
     const receipt = await host.startup.readHostInfo();
     check(
       receipt?.hostId === host.paths.profileId && receipt.serviceMode === "desktop",
@@ -197,7 +201,7 @@ try {
     const first = await ready();
     check(first.bridgeSecret === seed, "the actual foreground child publishes its own launch seed");
     const app = launch();
-    await until("attached visible desktop window", () => window(app));
+    await until("attached rendered welcome window", () => window(app, false, true));
     const attached = await attachWindowsDesktopHost(host);
     check(
       attached?.probe.instanceId === first.probe.instanceId && attached.bridgeSecret === seed,
