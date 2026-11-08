@@ -4372,8 +4372,8 @@ flowchart LR
   `POST /api/usage/host-health` reads a span as minutes, or as hours when the
   minutes would exceed 2,016 points (asked for minutes over a longer span, it
   returns the newest 2,016); an hour sums its minutes' counts and keeps their
-  worst memory, stall, and latency. Every process start in the span is listed
-  from the minutes before any roll-up, so restarts inside one hour all count.
+  worst memory, stall, and latency. A paired device may read it like the usage reads. A restart is a process start inside the span that replaced an earlier process, judged against the last sample before the span
+  and read from the minutes before any roll-up, so restarts inside one hour all count.
   Pruning runs on a host's first sample and then hourly, so a host that
   restarts often still forgets samples past 14 days. It names nothing Project-scoped, so
   any authenticated window may read it. The lifetime counters a diagnostics

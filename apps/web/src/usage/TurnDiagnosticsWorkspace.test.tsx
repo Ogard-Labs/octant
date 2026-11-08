@@ -209,6 +209,71 @@ describe("the Diagnostics report copy", () => {
     await waitFor(() => expect(screen.queryByText("Report copied as JSON.")).toBeNull());
   });
 
+  it("marks the previous figures as old and refuses to copy them while a changed filter loads", async () => {
+    const copyText = vi.fn(async (_text: string) => undefined);
+    let release: (value: TurnDiagnosticsReport) => void = () => undefined;
+    let first = true;
+    const client = {
+      diagnostics: vi.fn(() => {
+        if (first) {
+          first = false;
+          return Promise.resolve(troubledReport);
+        }
+        return new Promise<TurnDiagnosticsReport>((resolve) => {
+          release = resolve;
+        });
+      }),
+    };
+    render(
+      <TurnDiagnosticsWorkspace
+        client={client}
+        copyText={copyText}
+        now={() => now}
+        timeZone="UTC"
+      />,
+    );
+    await screen.findByRole("region", { name: "Summary" });
+    const copy = screen.getByRole("button", { name: "Copy diagnostics report as JSON" });
+    expect(copy).toBeEnabled();
+
+    await userEvent.click(screen.getByRole("combobox", { name: "Filter diagnostics by mode" }));
+    await userEvent.click(await screen.findByRole("option", { name: "Work" }));
+
+    expect(
+      await screen.findByText(/Updating… figures shown are for the previous filters/),
+    ).toBeInTheDocument();
+    expect(copy).toBeDisabled();
+
+    release(report([]));
+    expect(await screen.findByText("No turns in this range")).toBeInTheDocument();
+    expect(screen.queryByText(/Updating…/)).toBeNull();
+    expect(copy).toBeEnabled();
+  });
+
+  it("says the tool figures are partial when a turn's per-tool tallies were cut", async () => {
+    const cut = report([
+      turn({
+        diagnostics: {
+          toolCalls: 40,
+          toolFailures: 0,
+          tools: [
+            { toolName: "Read", calls: 30, failed: 0, unfinished: 0, totalMs: 900, maxMs: 200 },
+          ],
+          toolsTruncated: true,
+        },
+      }),
+    ]);
+    render(
+      <TurnDiagnosticsWorkspace
+        client={{ diagnostics: vi.fn(async () => cut) }}
+        now={() => now}
+        timeZone="UTC"
+      />,
+    );
+
+    expect(await screen.findByText(/Tool figures are partial: 1 turn ran/)).toBeInTheDocument();
+  });
+
   it("says a provider that never reported its cache has no hit rate rather than 0%", async () => {
     const client = {
       diagnostics: vi.fn(async () =>

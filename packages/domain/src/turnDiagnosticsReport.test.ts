@@ -180,6 +180,27 @@ describe("the turn diagnostics report", () => {
     expect(report.totals.unfinishedToolCalls).toBe(1);
   });
 
+  it("counts the turns whose per-tool tallies were cut, so the tool figures can be called partial", () => {
+    const cut = (startMinute: number, truncated: boolean) =>
+      turn(startMinute, {
+        diagnostics: {
+          toolCalls: 40,
+          toolFailures: 0,
+          tools: [
+            { toolName: "Read", calls: 30, failed: 0, unfinished: 0, totalMs: 900, maxMs: 200 },
+          ],
+          ...(truncated ? { toolsTruncated: true as const } : {}),
+        },
+      });
+    const report = buildTurnDiagnosticsReport(
+      [cut(0, true), cut(10, false), cut(20, true)],
+      options,
+    );
+
+    expect(report.totals.toolTalliesTruncatedTurns).toBe(2);
+    expect(report.totals.toolCalls).toBe(120);
+  });
+
   it("states speed percentiles per model only over turns that measured them", () => {
     const timed = (startMinute: number, ttft: number, tokens: number) =>
       turn(startMinute, {
