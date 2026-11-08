@@ -850,8 +850,11 @@ function withoutPinned(thread: CodeThread): Omit<CodeThread, "pinned"> {
 }
 
 /** Drop the flag rather than storing `false`, so a pre-flag journal and an opt-out replay the same. */
-function withoutAutoApprove(thread: CodeThread): Omit<CodeThread, "autoApprove"> {
-  const { autoApprove: _autoApprove, ...rest } = thread;
+/** A thread without the two choices a mode change states afresh. */
+function withoutAccessChoices(
+  thread: CodeThread,
+): Omit<CodeThread, "autoApprove" | "fullAccessSandbox"> {
+  const { autoApprove: _autoApprove, fullAccessSandbox: _fullAccessSandbox, ...rest } = thread;
   return rest;
 }
 
@@ -2310,7 +2313,7 @@ export class CodeService {
                       }
                     : command.kind === "change-code-thread-access"
                       ? {
-                          ...withoutAutoApprove(current),
+                          ...withoutAccessChoices(current),
                           executionPolicy: command.executionPolicy,
                           permissionPersistence: command.permissionPersistence,
                           // Store `true` when enabled; drop the field when disabled so
@@ -2319,6 +2322,11 @@ export class CodeService {
                           ...(command.autoApprove === true ||
                           (command.autoApprove === undefined && current.autoApprove === true)
                             ? { autoApprove: true }
+                            : {}),
+                          // Kept from the command, else from the thread; the
+                          // guardrail stamp drops it below Full access.
+                          ...((command.fullAccessSandbox ?? current.fullAccessSandbox) === true
+                            ? { fullAccessSandbox: true }
                             : {}),
                           version: command.expectedVersion + 1,
                           updatedAt,

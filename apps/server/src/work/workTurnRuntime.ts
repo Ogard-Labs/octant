@@ -5,8 +5,10 @@ import type {
 } from "@octant/contracts";
 import {
   observeTurnMetrics,
+  FULL_ACCESS_SANDBOX_UNSUPPORTED,
   markThreadToolStepOutsideContent,
   outsideContentRecordedOnly,
+  refusesFullAccessSandbox,
   recordThreadShieldReview,
   recordThreadToolStep,
   startTurnMetrics,
@@ -332,6 +334,22 @@ export class WorkTurnRuntime implements WorkTurnRuntimePort {
           if (shieldReviews.get(threadKey) === showShieldReview) shieldReviews.delete(threadKey);
         }),
       );
+      // A thread that asked for the sandbox at Full access never runs open on a
+      // runtime that cannot keep it.
+      if (
+        refusesFullAccessSandbox({
+          access: {
+            ...workThreadAccessOf(input.access ?? DEFAULT_WORK_ACCESS),
+            fullAccessSandbox: input.fullAccessSandbox,
+          },
+          driverKind: input.driver.kind,
+        })
+      ) {
+        return yield* Effect.fail<ProviderFailure>({
+          category: "unsupported",
+          message: FULL_ACCESS_SANDBOX_UNSUPPORTED,
+        });
+      }
       const connection = yield* input.driver.acquire({
         instanceId: input.command.authority.providerInstanceId,
         projectRoot: input.projectRoot,

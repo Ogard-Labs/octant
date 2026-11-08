@@ -4973,6 +4973,7 @@ class RuntimeTurnController implements CodeOperationTurnPort {
       Effect.scoped(
         this.#runner.run({
           thread: active.thread,
+          providerDriverKind: active.driver.kind,
           ...(active.inputsCurrent === undefined ? {} : { inputsCurrent: active.inputsCurrent }),
           sessionId: active.sessionId as never,
           ...(active.resumeCursor === undefined ? {} : { resumeCursor: active.resumeCursor }),

@@ -1859,6 +1859,39 @@ describe("CodeService commands", () => {
       });
     });
 
+    it("keeps a Code thread's sandbox at Full access, takes a new choice with the mode, and drops it below Full access", async () => {
+      const raised = serviceFixture({
+        threads: [thread({ executionPolicy: "full-access" })],
+        approve: false,
+      });
+      const sandboxed = await raised.service.execute(ids.window, {
+        kind: "change-code-thread-access",
+        threadId: ids.thread,
+        expectedVersion: 1 as never,
+        executionPolicy: "full-access",
+        permissionPersistence: "project-default",
+        fullAccessSandbox: true,
+      });
+      expect(sandboxed).toMatchObject({ thread: { fullAccessSandbox: true } });
+
+      const lowered = serviceFixture({
+        threads: [thread({ executionPolicy: "full-access", fullAccessSandbox: true })],
+        approve: false,
+      });
+      const result = await lowered.service.execute(ids.window, {
+        kind: "change-code-thread-access",
+        threadId: ids.thread,
+        expectedVersion: 1 as never,
+        executionPolicy: "approval-gated",
+        permissionPersistence: "current-session",
+      });
+      expect(
+        "thread" in result && result.thread !== undefined
+          ? (result.thread as { fullAccessSandbox?: boolean }).fullAccessSandbox
+          : "missing",
+      ).toBeUndefined();
+    });
+
     it("journals a lowered default in Settings at the global scope", async () => {
       const fixture = serviceFixture({ threads: [] });
       await fixture.service.execute(ids.window, {

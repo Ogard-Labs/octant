@@ -788,6 +788,11 @@ export const CodeCommand = Schema.Union(
     permissionPersistence: PermissionPersistence,
     approvalId: Schema.optional(CodeApprovalId),
     autoApprove: Schema.optional(Schema.Boolean),
+    /**
+     * The opt-in sandbox at Full access, chosen with the mode. Absent keeps
+     * the thread's current choice; the host drops it below Full access.
+     */
+    fullAccessSandbox: Schema.optional(Schema.Boolean),
   }).annotations(strict),
   Schema.Struct({
     kind: Schema.Literal("change-code-thread-provider"),

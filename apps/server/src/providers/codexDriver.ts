@@ -731,11 +731,15 @@ export function codexExecutionSettings(
   fullAccessSandbox?: boolean,
 ): Pick<CodexThreadStartInput, "approvalPolicy" | "sandbox" | "approvalsReviewer"> {
   if (policy === "full-access") {
-    // The opt-in sandbox at Full access: no prompts (`never`), but Codex's own
-    // sandbox stays on at workspace-write instead of danger-full-access.
+    // The opt-in sandbox at Full access runs the process inside Octant's
+    // profile, as the guarded levels do, and macOS refuses a second Seatbelt
+    // inside the first (see below). So Codex is told the same thing they tell
+    // it: the thread starts `read-only` and each turn names the sandbox as
+    // external. Under an external sandbox with `never`, every command runs
+    // without asking, inside Octant's wall.
     return {
       approvalPolicy: "never",
-      sandbox: fullAccessSandbox === true ? "workspace-write" : "danger-full-access",
+      sandbox: fullAccessSandbox === true ? "read-only" : "danger-full-access",
       approvalsReviewer: "user",
     };
   }
@@ -793,14 +797,11 @@ export function codexTurnExecutionSettings(
   // Below Full access the process already runs in Octant's profile, which is
   // the boundary; Codex's own Seatbelt cannot start inside it. `restricted`
   // keeps Codex from telling the model it has open network. A sandboxed Full
-  // access thread tells Codex workspace-write, so Codex's own sandbox holds
-  // too instead of the process being the only boundary.
+  // access thread takes the same external sandbox, with `never`.
   const sandboxPolicy =
     sandbox === "danger-full-access"
       ? ({ type: "dangerFullAccess" } as const)
-      : sandbox === "workspace-write" && policy === "full-access"
-        ? ({ type: "workspaceWrite" } as const)
-        : ({ type: "externalSandbox", networkAccess: "restricted" } as const);
+      : ({ type: "externalSandbox", networkAccess: "restricted" } as const);
   return { ...rest, sandboxPolicy };
 }
 

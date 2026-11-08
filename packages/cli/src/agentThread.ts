@@ -775,6 +775,7 @@ export async function createAgentThread(
           threadId,
           expectedVersion: 1,
           access: workAccess,
+          ...(input.sandbox === true ? { fullAccessSandbox: true } : {}),
         },
       });
       if (changed.status !== 200) {

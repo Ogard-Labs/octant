@@ -139,6 +139,11 @@ export function resolveAgentCliCommand(
     const access = text("access");
     if (theme !== undefined && !isTuiThemeId(theme)) return undefined;
     if (access !== undefined && !isAgentAccessMode(access)) return undefined;
+    // The sandbox only exists at Full access, so asking for it with any other
+    // level (or none) is refused rather than quietly ignored.
+    if (flags.sandbox !== undefined && (flags.sandbox !== true || access !== "full-access")) {
+      return undefined;
+    }
     const mode = text("mode") ?? "auto";
     if (mode !== "chat" && mode !== "work" && mode !== "code" && mode !== "auto") return undefined;
     return {

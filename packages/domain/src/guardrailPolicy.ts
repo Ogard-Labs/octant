@@ -119,6 +119,35 @@ export function resolveAutoReviewer(input: {
   return { status: "none", reason: shield.reason };
 }
 
+export const FULL_ACCESS_SANDBOX_UNSUPPORTED =
+  "This provider can't keep the sandbox at Full access yet, so the turn did not start. Turn the sandbox off for this thread, or use Codex or an Octant Harness model.";
+
+/**
+ * Runtimes that honor the opt-in sandbox at Full access: Codex, whose process
+ * stays inside Octant's profile, and the Octant Harness, whose commands run
+ * on the confined shell. Every other runtime launches unwrapped at Full
+ * access, so a sandboxed thread on one of them is refused rather than run
+ * open while it says it is sandboxed.
+ */
+export function fullAccessSandboxSupported(driverKind: ProviderDriverKind): boolean {
+  return driverKind === "codex" || isNativeHarnessDriverKind(driverKind);
+}
+
+/**
+ * Whether a turn must refuse to start: the thread asked for the sandbox at
+ * Full access and its runtime cannot keep it. An unknown runtime refuses.
+ */
+export function refusesFullAccessSandbox(input: {
+  readonly access: ThreadAccess;
+  readonly driverKind: ProviderDriverKind | undefined;
+}): boolean {
+  return (
+    input.access.executionPolicy === "full-access" &&
+    input.access.fullAccessSandbox === true &&
+    (input.driverKind === undefined || !fullAccessSandboxSupported(input.driverKind))
+  );
+}
+
 /** The picker's words for a stored posture. */
 export function permissionModeOf(access: ThreadAccess): PermissionMode {
   switch (access.executionPolicy) {

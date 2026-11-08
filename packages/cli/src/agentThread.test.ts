@@ -397,6 +397,24 @@ describe("starting a Work thread from the terminal with an asked-for access", ()
     expect(change).toMatchObject({ access: "full-access", expectedVersion: 1 });
   });
 
+  it("carries the sandbox with the Work thread's raise to Full access, so it is not dropped at creation", async () => {
+    const fake = workHost();
+
+    const result = await createAgentThread(fake.session, {
+      mode: "work",
+      title: "Client work",
+      projectName: "Client",
+      access: "full-access",
+      sandbox: true,
+    });
+
+    expect(result).toMatchObject({ kind: "created", mode: "work" });
+    const change = fake
+      .workCommands()
+      .find((command) => command.kind === "change-work-thread-access");
+    expect(change).toMatchObject({ access: "full-access", fullAccessSandbox: true });
+  });
+
   it("refuses --access plan for a Work thread, which has no Plan overlay", async () => {
     const fake = workHost();
 

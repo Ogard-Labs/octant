@@ -1333,6 +1333,48 @@ describe("WorkThreadService", () => {
     ).rejects.toMatchObject({ failure: { category: "invalid" } });
   });
 
+  it("keeps the sandbox a Work thread asked for at Full access, and drops it at any other level", async () => {
+    const raised = serviceFixture({ threads: [thread()] });
+    const sandboxed = await raised.service.execute(ids.window, {
+      kind: "change-work-thread-access",
+      threadId: ids.thread,
+      expectedVersion: 1,
+      access: "full-access",
+      fullAccessSandbox: true,
+    });
+    expect(sandboxed).toMatchObject({
+      kind: "thread-updated",
+      thread: { access: "full-access", fullAccessSandbox: true },
+    });
+
+    // A level change that does not mention the sandbox keeps it at Full access.
+    const kept = serviceFixture({
+      threads: [thread({ access: "full-access", fullAccessSandbox: true })],
+    });
+    await expect(
+      kept.service.execute(ids.window, {
+        kind: "change-work-thread-access",
+        threadId: ids.thread,
+        expectedVersion: 1,
+        access: "full-access",
+      }),
+    ).resolves.toMatchObject({ thread: { fullAccessSandbox: true } });
+
+    // Lowered below Full access, the choice is dropped, not carried to a later raise.
+    const lowered = serviceFixture({
+      threads: [thread({ access: "full-access", fullAccessSandbox: true })],
+    });
+    const result = await lowered.service.execute(ids.window, {
+      kind: "change-work-thread-access",
+      threadId: ids.thread,
+      expectedVersion: 1,
+      access: "auto",
+      fullAccessSandbox: true,
+    });
+    expect(result).toMatchObject({ thread: { access: "auto" } });
+    expect("thread" in result ? result.thread.fullAccessSandbox : "missing").toBeUndefined();
+  });
+
   it("updates thread metadata with optimistic versions and maps concurrency conflicts", async () => {
     const current = thread();
     const fixture = serviceFixture({ threads: [current] });

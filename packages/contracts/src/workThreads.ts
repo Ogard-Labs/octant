@@ -297,6 +297,11 @@ export const ChangeWorkThreadAccessCommand = Schema.Struct({
   kind: Schema.Literal("change-work-thread-access"),
   ...WorkThreadCommandFields,
   access: WorkAccess,
+  /**
+   * The opt-in sandbox at Full access, chosen with the level. Absent keeps
+   * the thread's current choice; the host drops it at any other level.
+   */
+  fullAccessSandbox: Schema.optional(Schema.Boolean),
 }).annotations(strict);
 export type ChangeWorkThreadAccessCommand = typeof ChangeWorkThreadAccessCommand.Type;
 

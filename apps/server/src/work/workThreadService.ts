@@ -904,9 +904,17 @@ export class WorkThreadService {
         // The level takes effect when the next turn starts: a turn fixes its
         // level at admission and journals it, so a running turn keeps the one
         // it started with.
+        // The sandbox choice only means something at Full access: kept from the
+        // command, else from the thread, and dropped at any other level so a
+        // later raise to Full access never inherits a stale choice.
+        const { fullAccessSandbox: currentSandbox, ...unsandboxed } = current;
+        const sandboxed =
+          command.access === "full-access" &&
+          (command.fullAccessSandbox ?? currentSandbox) === true;
         const updated = decodeWorkThread({
-          ...current,
+          ...unsandboxed,
           access: command.access,
+          ...(sandboxed ? { fullAccessSandbox: true } : {}),
           version: command.expectedVersion + 1,
           updatedAt: decodeTimestamp(this.#clock()),
         });
