@@ -334,3 +334,8 @@ export {
 } from "./windowsSqliteStore";
 
 export { createWindowsHostStartup } from "./windowsHostStartup";
+
+export {
+  createWindowsDesktopLauncher,
+  type WindowsDesktopLauncher,
+} from "./windowsDesktopLauncher";

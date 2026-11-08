@@ -2,7 +2,8 @@ param([Parameter(Mandatory=$true)][int]$OwnedPid,
   [Parameter(Mandatory=$true)][string]$Executable,
   [string]$ExpectedBirth = '',
   [string]$CapturePath = '',
-  [Parameter(Mandatory=$true)][ValidateSet('observe','close')][string]$Mode)
+  [Parameter(Mandatory=$true)][ValidateSet('observe','close','host-only','exited')][string]$Mode,
+  [int]$ParentPid = 0, [string]$ParentExecutable = '', [string]$ParentBirth = '')
 $ErrorActionPreference = 'Stop'
 Add-Type -TypeDefinition @'
 using System;
@@ -49,6 +50,16 @@ public static class OctantDesktopWindow {
       return true;
     }
   }
+  public static bool OriginalExited(int pid, string executable, string expectedBirth) {
+    if (String.IsNullOrEmpty(expectedBirth)) throw new InvalidOperationException();
+    try {
+      using (var process = Process.GetProcessById(pid)) {
+        if (process.HasExited || process.StartTime.ToFileTimeUtc().ToString(System.Globalization.CultureInfo.InvariantCulture) != expectedBirth) return true;
+        if (!String.Equals(process.MainModule.FileName, executable, StringComparison.OrdinalIgnoreCase)) throw new InvalidOperationException();
+        return false;
+      }
+    } catch (ArgumentException) { return true; }
+  }
   public static bool Capture(IntPtr dc, int pid) {
     using (var process=Process.GetProcessById(pid)) {
       uint owner; GetWindowThreadProcessId(Window, out owner);
@@ -59,6 +70,29 @@ public static class OctantDesktopWindow {
 }
 '@
 try {
+  if ($Mode -eq 'exited') {
+    $octantGone = [OctantDesktopWindow]::OriginalExited($OwnedPid, $Executable, $ExpectedBirth)
+    [Console]::WriteLine((@{ originalExited=$octantGone } | ConvertTo-Json -Compress))
+    exit 0
+  }
+  if ($Mode -eq 'host-only') {
+    if ($ParentPid -le 0 -or -not $ParentExecutable -or -not $ParentBirth -or -not $ExpectedBirth) { throw 'Supply the owned launch ancestry' }
+    [void][OctantDesktopWindow]::Run($OwnedPid, $Executable, $ExpectedBirth, $false)
+    $octantServerInfo = Get-CimInstance Win32_Process -Filter "ProcessId=$OwnedPid"
+    if ($null -eq $octantServerInfo -or $octantServerInfo.ParentProcessId -le 0) { throw 'Owned server ancestry unavailable' }
+    $octantGuiPid = [int]$octantServerInfo.ParentProcessId
+    $octantGuiInfo = Get-CimInstance Win32_Process -Filter "ProcessId=$octantGuiPid"
+    if ($null -eq $octantGuiInfo -or $octantGuiInfo.ParentProcessId -ne $ParentPid) { throw 'Owned GUI ancestry changed' }
+    [void][OctantDesktopWindow]::Run($ParentPid, $ParentExecutable, $ParentBirth, $false)
+    if ([OctantDesktopWindow]::Run($octantGuiPid, $Executable, '', $false)) { throw 'The host-only launch opened an ordinary window' }
+    $octantGuiBirth = [OctantDesktopWindow]::Birth
+    if ([UInt64]$octantGuiBirth -lt [UInt64]$ParentBirth -or [UInt64]$octantGuiBirth -gt [UInt64]$ExpectedBirth) { throw 'Owned process birth order changed' }
+    [void][OctantDesktopWindow]::Run($OwnedPid, $Executable, $ExpectedBirth, $false)
+    [void][OctantDesktopWindow]::Run($ParentPid, $ParentExecutable, $ParentBirth, $false)
+    if ([OctantDesktopWindow]::Run($octantGuiPid, $Executable, $octantGuiBirth, $false)) { throw 'The host-only window state changed' }
+    [Console]::WriteLine((@{ hostOnly=$true; pid=$octantGuiPid; birth=$octantGuiBirth } | ConvertTo-Json -Compress))
+    exit 0
+  }
   $renderedWelcome = $false
   $found = [OctantDesktopWindow]::Run($OwnedPid, $Executable, $ExpectedBirth, $Mode -eq 'close')
   if ($found -and $Mode -eq 'observe') {

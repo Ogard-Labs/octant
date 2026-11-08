@@ -47,14 +47,16 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: node scripts/ensure-ci-electron.ts
       - name: Build the owned native peer mechanism fixture
+        id: peer_fixture
         run: |
           bun build scripts/windows-desktop-peer/probe.ts --target=node --outfile "$env:RUNNER_TEMP/peer-probe.mjs"
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           cmake -S scripts/windows-desktop-peer -B "$env:RUNNER_TEMP/peer-qa" -A x64
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          cmake --build "$env:RUNNER_TEMP/peer-qa" --config Release --target octant-windows-peer-launcher octant-windows-peer-appcontainer
+          cmake --build "$env:RUNNER_TEMP/peer-qa" --config Release --target octant-windows-peer-launcher octant-windows-peer-appcontainer octant-windows-desktop-artifact-qa
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - name: Build the portable QA archive
+        id: portable
         env:
           OCTANT_PACKAGE_TARGET: win32-x64
         run: bun run package:desktop
@@ -63,6 +65,7 @@ jobs:
       - name: Exercise the packaged private credential helper with owned synthetic entries
         run: bun scripts/smoke-windows-credentials.ts "$pwd/out/Octant-win32-x64/resources/native/octant-credential-helper.exe"
       - name: Build the existing owned Windows job fixture
+        id: job_fixture
         run: |
           cmake -S scripts/windows-desktop-qa -B "$env:RUNNER_TEMP/desktop-owner" -A x64
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
@@ -102,6 +105,11 @@ jobs:
               }
             }
           }
+      - name: Measure and validate the actual packaged artifact boundary
+        if: ${{ !cancelled() && steps.peer_fixture.conclusion == 'success' && steps.portable.conclusion == 'success' && steps.job_fixture.conclusion == 'success' }}
+        run: |
+          & "$env:RUNNER_TEMP/desktop-owner/Release/octant-windows-desktop-owner.exe" --profile-user-owner "$env:RUNNER_TEMP/peer-qa/Release/octant-windows-desktop-artifact-qa.exe" "$pwd/out/Octant-win32-x64/Octant.exe" artifact scan owned
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - name: Start and attach the normal packaged Windows desktop
         run: ./scripts/run-windows-desktop.ps1 -Launcher "$env:RUNNER_TEMP/desktop-owner/Release/octant-windows-desktop-owner.exe" -PackageDirectory "$pwd/out/Octant-win32-x64" -OutputDirectory "$env:RUNNER_TEMP/desktop-proof"
       - name: Build the normal Windows Nightly QA package

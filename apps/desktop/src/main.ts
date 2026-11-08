@@ -4702,7 +4702,9 @@ function startDesktopInstance(): void {
   });
   const hostOnly = (args: ReadonlyArray<string>) =>
     app.isPackaged &&
-    (process.platform === "darwin" || process.platform === "linux") &&
+    (process.platform === "darwin" ||
+      process.platform === "linux" ||
+      process.platform === "win32") &&
     resolvePackagedDesktopLaunch(applicationIdentity, args).kind === "host-only";
   app.on("second-instance", (_event, commandLine) => {
     // A concurrent Nightly launch joins this owner without opening its shell.

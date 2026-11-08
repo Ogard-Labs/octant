@@ -1282,6 +1282,32 @@ pass before the Windows client port is considered usable. Windows test-data
 hosts, installation/update integration and Work/Code confinement retain their
 separate gates.
 
+### Starting a closed Octant on Windows
+
+The actual desktop-mode host owner records its current native `Octant.exe`
+image and physical file/volume identity in one fixed private profile record.
+A foreground Bun or Node process does not select a replacement executable.
+Publication is best effort: inability to record this discovery fact does not
+stop an otherwise valid host. A private host-log entry retains only the fixed
+result/reason and bounded elapsed-time/entry-count measurements.
+
+Nightly requests launch through the native profile port without claiming its
+host owner. Native code reads that fixed record, validates and holds the
+physical no-reparse image, ancestors and package resources against untrusted other-user
+write access and the recorded identity, then uses `CreateProcessW` with only
+`--octant-host-only`, no inherited handles and a minimal native environment.
+JavaScript supplies no executable path, record bytes or environment authority;
+no shell is involved. Validation runs outside the Electron event loop, with a
+finite deadline and cancellation checked before both creation and resume. An
+expired or cancelled suspended child is terminated and joined before refusal.
+
+A started process grants no client authority: fresh kernel-authenticated status
+still precedes the separate window registration. The existing 30-second first
+window grace bounds a host-only launch that gains no client, and normal client
+retention controls shutdown afterward. Missing or unsafe records refuse; the
+person can open Stable and retry. Actual package scan cost and refusal reason
+must be measured before changing the fixed launch-validation budget.
+
 ## Linux client trust
 
 Linux has no code signature or kernel audit token to admit a Nightly main by.

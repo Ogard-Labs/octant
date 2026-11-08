@@ -18,8 +18,8 @@ if (
   process.platform !== "win32" ||
   !packageArgument ||
   !outputArgument ||
-  (phase !== "owned" && phase !== "attached" && phase !== "nightly") ||
-  (phase === "nightly" && !nightlyArgument)
+  (phase !== "owned" && phase !== "attached" && phase !== "nightly" && phase !== "nightly-cold") ||
+  ((phase === "nightly" || phase === "nightly-cold") && !nightlyArgument)
 )
   throw Error("Use the isolated native Windows desktop fixture.");
 const directory = resolve(packageArgument),
@@ -156,6 +156,118 @@ async function ready() {
   if (attachment === undefined) throw Error("The actual native owner was absent after readiness.");
   return attachment;
 }
+async function launcherRecord() {
+  const details = (await host.startup.logs.read({ limit: 20 })).entries
+    .filter((entry) => entry.event === "desktop.launcher.record")
+    .at(-1)?.details;
+  const receipt = {
+    status: details?.status === "recorded" ? "recorded" : "refused",
+    ...(typeof details?.reason === "string" && /^[a-z-]{1,64}$/.test(details.reason)
+      ? { reason: details.reason }
+      : {}),
+    ...(typeof details?.elapsedMs === "number" &&
+    Number.isSafeInteger(details.elapsedMs) &&
+    details.elapsedMs >= 0
+      ? { elapsedMs: details.elapsedMs }
+      : {}),
+    ...(typeof details?.scannedEntries === "number" &&
+    Number.isSafeInteger(details.scannedEntries) &&
+    details.scannedEntries >= 0
+      ? { scannedEntries: details.scannedEntries }
+      : {}),
+  };
+  await writeFile(join(output, `${phase}-launcher.json`), JSON.stringify(receipt));
+  console.log(JSON.stringify({ launcherRecord: receipt }));
+  check(
+    receipt.status === "recorded",
+    "the actual desktop owner recorded its validated native launcher",
+  );
+}
+async function coldHostIdentity(nightly: ChildProcess) {
+  const found = await attachWindowsHostRuntimeOwner({
+    native: host.native,
+    scope: host.paths.profileId,
+    hostId: host.paths.profileId,
+    wireVersion: "1",
+  });
+  const parentBirth = births.get(nightly);
+  if (
+    found.status !== "attached" ||
+    !/^win32:[0-9a-f]{16}$/.test(found.attachment.owner.processStart) ||
+    !nightly.pid ||
+    !parentBirth ||
+    !nightlyExecutable
+  )
+    throw Error("The cold native owner could not be observed.");
+  const owner = found.attachment.owner;
+  const result = await run(
+    "powershell.exe",
+    [
+      "-NoProfile",
+      "-NonInteractive",
+      "-File",
+      resolve(import.meta.dirname, "windows-desktop-window.ps1"),
+      "-Mode",
+      "host-only",
+      "-OwnedPid",
+      String(owner.pid),
+      "-Executable",
+      executable,
+      "-ExpectedBirth",
+      BigInt(`0x${owner.processStart.slice(6)}`).toString(),
+      "-ParentPid",
+      String(nightly.pid),
+      "-ParentExecutable",
+      nightlyExecutable,
+      "-ParentBirth",
+      parentBirth,
+    ],
+    { timeout: 8000, maxBuffer: 8192 },
+  );
+  const value: unknown = JSON.parse(result.stdout);
+  if (
+    typeof value !== "object" ||
+    value === null ||
+    !("hostOnly" in value) ||
+    value.hostOnly !== true ||
+    !("pid" in value) ||
+    typeof value.pid !== "number" ||
+    !Number.isSafeInteger(value.pid) ||
+    value.pid <= 0 ||
+    !("birth" in value) ||
+    typeof value.birth !== "string" ||
+    !/^\d{16,20}$/.test(value.birth)
+  )
+    throw Error("The exact cold host process was not observed.");
+  return { pid: value.pid, birth: value.birth };
+}
+async function coldHostExited(owner: { readonly pid: number; readonly birth: string }) {
+  const result = await run(
+    "powershell.exe",
+    [
+      "-NoProfile",
+      "-NonInteractive",
+      "-File",
+      resolve(import.meta.dirname, "windows-desktop-window.ps1"),
+      "-Mode",
+      "exited",
+      "-OwnedPid",
+      String(owner.pid),
+      "-Executable",
+      executable,
+      "-ExpectedBirth",
+      owner.birth,
+    ],
+    { timeout: 8000, maxBuffer: 8192 },
+  );
+  const value: unknown = JSON.parse(result.stdout);
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    "originalExited" in value &&
+    value.originalExited === true
+  );
+}
 async function stopped(url: string) {
   await until(
     "native projections cleared",
@@ -232,11 +344,12 @@ try {
     );
     await joined(server);
     await stopped(first.probe.url);
-  } else {
+  } else if (phase === "nightly") {
     if (nightlyExecutable === undefined) throw Error("The normal Nightly package is required.");
     const stable = launch();
     const first = await ready();
     await until("Stable rendered welcome window", () => window(stable, false, true));
+    await launcherRecord();
     const nightly = launch(false, undefined, nightlyExecutable);
     await until("Nightly rendered welcome window", () => window(nightly, false, true));
     check(
@@ -256,6 +369,26 @@ try {
     check(await window(stable, true), "Stable closes after its Nightly client exits");
     await joined(stable);
     await stopped(first.probe.url);
+  } else {
+    if (nightlyExecutable === undefined) throw Error("The normal Nightly package is required.");
+    const absent = await attachWindowsHostRuntimeOwner({
+      native,
+      scope: host.paths.profileId,
+      hostId: host.paths.profileId,
+      wireVersion: "1",
+    });
+    check(absent.status === "missing", "the cold launch starts without a native host owner");
+    const nightly = launch(false, undefined, nightlyExecutable);
+    const first = await ready();
+    await until("cold Nightly rendered welcome window", () => window(nightly, false, true));
+    const cold = await coldHostIdentity(nightly);
+    check(true, "Nightly launched the exact Stable host without an ordinary Stable window");
+    await launcherRecord();
+    check(await window(nightly, true), "the cold-started Nightly window closes normally");
+    await joined(nightly);
+    await stopped(first.probe.url);
+    await until("the exact cold-launched Stable process exited", () => coldHostExited(cold), 8000);
+    check(true, "the cold-launched Stable process exited before owned job cleanup");
   }
   const receipt = {
     phase,

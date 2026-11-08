@@ -6,6 +6,7 @@ import {
   desktopIdentity,
   desktopIdentityForPackage,
   desktopWindowStorageDirectory,
+  createWindowsDesktopLauncher,
   loadWindowsHostProfileNative,
   resolveWindowsHostProfile,
 } from "@octant/host-runtime";
@@ -15,6 +16,7 @@ import {
   ensureNightlyHostReady,
   linuxRendererSandboxDisabled,
   loadDesktopPeerStatus,
+  type DesktopPeerStart,
 } from "./desktopPeerStatus";
 import { resolveDesktopHostRuntimePaths, WINDOWS_HOST_OWNER_FILENAME } from "./runtimePaths";
 import { resolveStartupHostRole } from "./nightlyTestData";
@@ -144,6 +146,7 @@ async function launchDesktop(): Promise<void> {
       argv: process.argv,
       env: process.env,
     });
+  const windows = identity.flavor === "nightly" && !unsandboxed ? windowsPeerContext() : undefined;
   const native =
     identity.flavor === "nightly" && !unsandboxed
       ? loadDesktopPeerStatus({
@@ -151,7 +154,7 @@ async function launchDesktop(): Promise<void> {
           platform: process.platform,
           resourcesPath: process.resourcesPath,
           ...linuxPeerEndpoint(),
-          ...windowsPeerEndpoint(),
+          ...(windows === undefined ? {} : { windows: windows.endpoint }),
         })
       : undefined;
   const outcome = await launchDesktopApplication(
@@ -160,7 +163,14 @@ async function launchDesktop(): Promise<void> {
     async () => {
       if (unsandboxed) return { kind: "refused", reason: "unsandboxed-renderer" };
       if (native === undefined) return { kind: "refused", reason: "native-unavailable" };
-      const status = await ensureNightlyHostReady(native);
+      const status = await ensureNightlyHostReady(
+        windows === undefined
+          ? native
+          : {
+              status: () => native.status(),
+              launchStableHost: windows.launchStableHost,
+            },
+      );
       const closed = await closeDesktopPeerStatus(native);
       return closed.kind === "closed" ? status : { kind: "refused", reason: closed.reason };
     },
@@ -202,15 +212,32 @@ function linuxPeerEndpoint() {
   }
 }
 
-/** The existing native profile is discovery only; Nightly never claims its owner. */
-function windowsPeerEndpoint() {
-  if (process.platform !== "win32" || !app.isPackaged) return {};
+/** Metadata may be created; this never claims the host owner or opens its journal. */
+function windowsPeerContext() {
+  if (process.platform !== "win32" || !app.isPackaged) return undefined;
   const native = loadWindowsHostProfileNative(
     join(process.resourcesPath, "native", WINDOWS_HOST_OWNER_FILENAME),
   );
-  if (native === undefined) return {};
+  if (native === undefined) return undefined;
   const profile = resolveWindowsHostProfile({ native, profile: "octant", env: process.env });
-  return profile.status === "ready"
-    ? { windows: { profileId: profile.paths.profileId, version: app.getVersion() } }
-    : {};
+  if (profile.status !== "ready") return undefined;
+  const launcher = createWindowsDesktopLauncher(native, profile.paths);
+  return {
+    endpoint: { profileId: profile.paths.profileId, version: app.getVersion() },
+    launchStableHost: async (): Promise<DesktopPeerStart> => {
+      if (launcher === undefined) return { kind: "refused", reason: "incompatible-host" };
+      const outcome = await launcher.launch();
+      return outcome.status === "started"
+        ? { kind: "started" }
+        : {
+            kind: "refused",
+            reason:
+              outcome.status === "missing"
+                ? "no-launcher-record"
+                : outcome.reason === "deadline-exceeded"
+                  ? "deadline-exceeded"
+                  : "invalid-receipt",
+          };
+    },
+  };
 }

@@ -384,7 +384,7 @@ export async function runNightlyClient(
       exhausted: () => {
         dialog.showErrorBox(
           identity.productName,
-          "Octant Nightly could not reconnect to its matching signed Octant host. Reopen Nightly after Octant is available. Unsaved window layout and drafts were not transferred.",
+          "Octant Nightly could not reconnect to its matching Octant host. Reopen Nightly after Octant is available. Unsaved window layout and drafts were not transferred.",
         );
         app.quit();
       },
@@ -600,7 +600,7 @@ export async function runNightlyClient(
   if (client.kind !== "opened")
     return {
       kind: "refused",
-      message: "Octant Nightly could not register its window with the matching signed Octant host.",
+      message: "Octant Nightly could not register its window with the matching Octant host.",
     };
   return { kind: "started" };
 }

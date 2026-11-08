@@ -35,7 +35,7 @@ const probe = `
   database.close();
   load('node-pty');
   const owner = require(${JSON.stringify(join(nativeDirectory, "octant-windows-host-owner.node"))});
-  if (owner.apiVersion !== 1 || typeof owner.openProfile !== 'function' || typeof owner.prepare !== 'function') process.exit(1);
+  if (owner.apiVersion !== 1 || typeof owner.openProfile !== 'function' || typeof owner.prepare !== 'function' || typeof owner.desktopLauncher !== 'function') process.exit(1);
   const peer = require(${JSON.stringify(join(nativeDirectory, "octant-desktop-peer-windows.node"))});
   for (const name of ['bindEndpoint','start','status','close','listenWindows','replyWindow','stopWindows','openWindow','renewWindow','revokeWindow']) {
     if (typeof peer[name] !== 'function') process.exit(1);

@@ -5,6 +5,7 @@ import { Cause, Effect, Exit, Option } from "effect";
 import {
   acquireWindowsHostProfileOwner,
   createWindowsAuthorityStateFiles,
+  createWindowsDesktopLauncher,
   createWindowsHostStartup,
   createWindowsListenerTlsFiles,
   createWindowsRosterSigningKeyFile,
@@ -122,6 +123,24 @@ export async function runWindowsForeground(
       )
         throw new Error("Native Windows host storage is unavailable.");
       const ownedStartup = startup;
+      // Like the Linux launcher record, absence never takes a valid host down.
+      // Only the actual desktop-mode owner may publish its native image facts.
+      if (launchConfig.hostServiceMode === "desktop") {
+        const result = await createWindowsDesktopLauncher(native, paths)?.record();
+        if (result !== undefined)
+          await ownedStartup.logs
+            .append({
+              timestamp: new Date().toISOString(),
+              level: "info",
+              event: "desktop.launcher.record",
+              message:
+                result.status === "recorded"
+                  ? "Windows desktop launcher recorded."
+                  : "Windows desktop launcher unavailable.",
+              details: { ...result },
+            })
+            .catch(() => undefined);
+      }
       configureSecretGuardLocations({ dataDirectory: paths.dataDirectory });
       process.env.OCTANT_DATA_DIR = paths.dataDirectory;
       if (launchConfig.desktopBridgeSecret !== undefined)

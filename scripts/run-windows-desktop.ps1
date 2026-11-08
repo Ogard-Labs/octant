@@ -22,7 +22,7 @@ if (Test-Path -LiteralPath $OutputDirectory) { throw 'The owned desktop output d
 $octantBun = (Get-Command bun).Source
 $octantJoined = $true
 try {
-  $octantPhases = if ($NightlyPackageDirectory) { @('nightly') } else { @('owned', 'attached') }
+  $octantPhases = if ($NightlyPackageDirectory) { @('nightly', 'nightly-cold') } else { @('owned', 'attached') }
   foreach ($octantPhase in $octantPhases) {
     $octantArguments = @('--profile-user-owner', $octantBun, 'scripts/smoke-windows-desktop.ts', $PackageDirectory, $octantPhase, $OutputDirectory)
     if ($NightlyPackageDirectory) { $octantArguments += $NightlyPackageDirectory }

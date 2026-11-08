@@ -2223,7 +2223,7 @@ if (import.meta.main) {
   } else if (packaged.target.platform === "win32") {
     console.log(`Packaged Windows QA archive: ${packaged.artifactPath}`);
     console.log(
-      "Windows host admission, credentials, confinement, and self-update remain unavailable.",
+      "Windows portable QA: Work/Code, installers and signed updates remain separately gated.",
     );
   } else {
     // The image is not code-signed. In-app update still refuses unless the
