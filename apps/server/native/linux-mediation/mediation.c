@@ -13,6 +13,7 @@
 #include <linux/file.h>
 #include <linux/fdtable.h>
 #include <linux/fcntl.h>
+#include <linux/fiemap.h>
 #include <linux/fs.h>
 #include <linux/init.h>
 #include <linux/io_uring.h>
