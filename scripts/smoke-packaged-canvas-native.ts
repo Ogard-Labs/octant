@@ -166,6 +166,8 @@ const timer = setInterval(() => {
     const decodeSnapshot = Schema.decodeUnknownSync(Snapshot);
     const hasText = (snapshot: typeof Snapshot.Type, value: string) =>
       snapshot.texts.some((row) => row.text.toLowerCase().includes(value.toLowerCase()));
+    const hasExactText = (snapshot: typeof Snapshot.Type, value: string) =>
+      snapshot.texts.some((row) => row.text.trim().toLowerCase() === value.toLowerCase());
     const observeUntil = async (
       stage: string,
       accept: (snapshot: typeof Snapshot.Type) => boolean,
@@ -445,7 +447,8 @@ const timer = setInterval(() => {
       "owned-publish-card",
       (snapshot) =>
         hasText(snapshot, "Export to Public link") &&
-        hasText(snapshot, new URL(ownService.publicUrl).host) &&
+        hasExactText(snapshot, `Posts as ${new URL(ownService.publicUrl).host}`) &&
+        hasText(snapshot, "Canvas page") &&
         hasText(snapshot, "Anyone with the link can open it"),
     );
     if ((await readdir(join(root, "share", "shares"))).length !== 0)

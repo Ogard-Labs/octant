@@ -123,7 +123,23 @@ if mode == "click" || mode == "fill" || mode == "toggle-before-field" || mode ==
     }
     guard let covering,
           (covering[kCGWindowOwnerPID as String] as? NSNumber)?.int32Value == pid else {
-        refuse("Another native window covers the exact observed target.")
+        let owner = (covering?[kCGWindowOwnerPID as String] as? NSNumber)?.int32Value ?? -1
+        let layer = (covering?[kCGWindowLayer as String] as? NSNumber)?.intValue ?? -1
+        let identifier = (covering?[kCGWindowNumber as String] as? NSNumber)?.uint32Value ?? 0
+        let scene: [[String: Any]] = windows().compactMap { row in
+            guard let data = row[kCGWindowBounds as String] as? [String: Any],
+                  let rect = CGRect(dictionaryRepresentation: data as CFDictionary), rect.contains(point) else { return nil }
+            return ["owner": row[kCGWindowOwnerPID as String] ?? -1,
+                "window": row[kCGWindowNumber as String] ?? 0,
+                "layer": row[kCGWindowLayer as String] ?? -1,
+                "alpha": row[kCGWindowAlpha as String] ?? -1,
+                "bounds": [rect.minX, rect.minY, rect.width, rect.height]]
+        }
+        if let data = try? JSONSerialization.data(withJSONObject: ["point": [point.x, point.y], "primary": owned.id, "windowsAtTarget": scene]),
+           let message = String(data: data, encoding: .utf8) {
+            FileHandle.standardError.write(Data((message + "\n").utf8))
+        }
+        refuse("Another native window covers the exact observed target: owner=\(owner), layer=\(layer), window=\(identifier).")
     }
     guard let down = CGEvent(mouseEventSource: nil, mouseType: .leftMouseDown, mouseCursorPosition: point, mouseButton: .left),
           let up = CGEvent(mouseEventSource: nil, mouseType: .leftMouseUp, mouseCursorPosition: point, mouseButton: .left) else { refuse("Native pointer events are unavailable.") }
