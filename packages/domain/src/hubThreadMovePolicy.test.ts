@@ -85,6 +85,22 @@ describe("repository remotes", () => {
     );
   });
 
+  it("stays fast on a remote or a title made of a long run of one character", () => {
+    const started = performance.now();
+    expect(normalizeRepositoryRemote(`https://github.com/${"/".repeat(100_000)}a`)).toBe(
+      "github.com/a",
+    );
+    expect(
+      handoverBranch({
+        currentBranch: undefined,
+        defaultBranch: "main",
+        threadTitle: `${"-".repeat(100_000)}x`,
+        threadId: id(2),
+      }),
+    ).toBe("octant/handover/x-22222222");
+    expect(performance.now() - started).toBeLessThan(1_000);
+  });
+
   it("ignores credentials in a URL and refuses text that names no repository", () => {
     expect(normalizeRepositoryRemote("https://token@github.com/Ogard-Labs/octant.git")).toBe(
       "github.com/ogard-labs/octant",

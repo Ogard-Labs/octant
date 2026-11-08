@@ -85,10 +85,7 @@ export function normalizeRepositoryRemote(remote: string): string | undefined {
     host = url.hostname;
     path = url.pathname;
   }
-  const cleanPath = path
-    .replace(/^\/+/, "")
-    .replace(/\/+$/, "")
-    .replace(/\.git$/i, "");
+  const cleanPath = trimCharacter(path, "/").replace(/\.git$/i, "");
   if (host.length === 0 || cleanPath.length === 0) return undefined;
   return `${host.toLowerCase()}/${cleanPath.toLowerCase()}`;
 }
@@ -344,14 +341,25 @@ export function handoverBranch(input: {
   if (current !== undefined && current.length > 0 && current !== input.defaultBranch) {
     return current;
   }
-  const slug = input.threadTitle
+  const dashed = input.threadTitle
     .toLowerCase()
     .normalize("NFKD")
     .replace(/[\u0300-\u036f]/g, "")
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-+|-+$/g, "")
-    .slice(0, HANDOVER_SLUG_LIMIT)
-    .replace(/-+$/g, "");
+    .replace(/[^a-z0-9]+/g, "-");
+  const slug = trimCharacter(trimCharacter(dashed, "-").slice(0, HANDOVER_SLUG_LIMIT), "-");
   const suffix = input.threadId.replace(/-/g, "").slice(0, 8);
   return `octant/handover/${slug.length > 0 ? `${slug}-` : ""}${suffix}`;
+}
+
+/**
+ * Drops a character from both ends of a text. A loop, not an anchored regular
+ * expression, because a run of the character in untrusted input would make
+ * `/x+$/` take polynomial time.
+ */
+function trimCharacter(text: string, character: string): string {
+  let start = 0;
+  let end = text.length;
+  while (start < end && text[start] === character) start += 1;
+  while (end > start && text[end - 1] === character) end -= 1;
+  return text.slice(start, end);
 }
