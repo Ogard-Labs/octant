@@ -21,6 +21,8 @@
 #include <linux/mm.h>
 #include <linux/mutex.h>
 #include <linux/poll.h>
+#include <linux/pid.h>
+#include <linux/rcupdate.h>
 #include <linux/sched.h>
 #include <linux/sched/task.h>
 #include <linux/slab.h>
@@ -47,6 +49,8 @@ struct octant_context {
 	wait_queue_head_t readable;
 	struct octant_pending pending[OCTANT_MEDIATION_PENDING];
 	kuid_t uid;
+	struct pid *broker_pid;
+	const struct cred *broker_cred;
 	u64 next_id;
 	bool dead;
 };
@@ -147,10 +151,33 @@ void octant_namespace_end(void)
 	spin_unlock_irqrestore(&namespace_lock, flags);
 }
 
+/* A forwarded descriptor is not the broker principal. PID references prevent
+ * reuse from transferring identity; the captured credentials cannot be replaced
+ * by a same-uid process, forked child or an enrolled command. */
+static bool broker_authorized(struct octant_context *context)
+{
+	return task_tgid(current) == context->broker_pid &&
+		current_cred() == context->broker_cred &&
+		!octant_cred(current_cred())->context;
+}
+
+static bool broker_alive(struct octant_context *context)
+{
+	struct task_struct *owner;
+	bool alive;
+	rcu_read_lock();
+	owner = pid_task(context->broker_pid, PIDTYPE_TGID);
+	alive = owner && !READ_ONCE(owner->exit_state);
+	rcu_read_unlock();
+	return alive;
+}
+
 static void release_context(struct kref *reference)
 {
 	struct octant_context *context = container_of(reference, struct octant_context, references);
 	atomic_dec(&contexts);
+	put_pid(context->broker_pid);
+	put_cred(context->broker_cred);
 	kfree(context);
 }
 
@@ -196,7 +223,7 @@ static int admit_request(struct octant_mediation_request *request)
 	if (result)
 		return result;
 	spin_lock_irqsave(&context->lock, flags);
-	if (context->dead || context->next_id == U64_MAX) {
+	if (context->dead || !broker_alive(context) || context->next_id == U64_MAX) {
 		spin_unlock_irqrestore(&context->lock, flags);
 		return -EACCES;
 	}
@@ -222,7 +249,7 @@ static int admit_request(struct octant_mediation_request *request)
 		READ_ONCE(pending->answered) || READ_ONCE(context->dead),
 		msecs_to_jiffies(OCTANT_MEDIATION_TIMEOUT_MS));
 	spin_lock_irqsave(&context->lock, flags);
-	result = waited <= 0 || context->dead ? -EACCES : pending->decision;
+	result = waited <= 0 || context->dead || !broker_alive(context) ? -EACCES : pending->decision;
 	if (!result)
 		request->namespace_epoch = pending->decision_epoch;
 	pending->occupied = false;
@@ -298,6 +325,7 @@ static int check_namespace(u32 operation, struct inode *source, struct dentry *n
 	spin_lock_irqsave(&namespace_lock, flags);
 	valid = task->has_approved && !namespace_overflow &&
 		!READ_ONCE(octant_cred(current_cred())->context->dead) &&
+		broker_alive(octant_cred(current_cred())->context) &&
 		task->approved.operation == actual.operation &&
 		task->approved.flags == actual.flags &&
 		!memcmp(&task->approved.source, &actual.source, sizeof(actual.source)) &&
@@ -414,6 +442,8 @@ static ssize_t read_request(struct file *file, char __user *bytes, size_t length
 	unsigned long flags;
 	bool found = false;
 	int i, result;
+	if (!broker_authorized(context))
+		return -EPERM;
 	if (length != sizeof(request))
 		return -EINVAL;
 	if (file->f_flags & O_NONBLOCK && !has_request(context))
@@ -447,6 +477,8 @@ static ssize_t answer_request(struct file *file, const char __user *bytes, size_
 	struct octant_pending *pending = NULL;
 	unsigned long flags;
 	int i;
+	if (!broker_authorized(context))
+		return -EPERM;
 	if (length != sizeof(answer))
 		return -EINVAL;
 	if (copy_from_user(&answer, bytes, sizeof(answer)))
@@ -482,6 +514,8 @@ static ssize_t answer_request(struct file *file, const char __user *bytes, size_
 static __poll_t poll_requests(struct file *file, poll_table *wait)
 {
 	struct octant_context *context = file->private_data;
+	if (!broker_authorized(context))
+		return EPOLLERR;
 	poll_wait(file, &context->readable, wait);
 	if (READ_ONCE(context->dead))
 		return EPOLLHUP;
@@ -560,6 +594,8 @@ static long broker_ioctl(struct file *file, unsigned int command, unsigned long 
 	struct octant_enrollment *enrollment;
 	unsigned long flags;
 	int descriptor;
+	if (!broker_authorized(context))
+		return -EPERM;
 	if (command == OCTANT_MEDIATION_STATUS) {
 		spin_lock_irqsave(&namespace_lock, flags);
 		status.namespace_epoch = namespace_epoch;
@@ -607,6 +643,8 @@ static int open_broker(struct inode *inode, struct file *file)
 	for (i = 0; i < OCTANT_MEDIATION_PENDING; i++)
 		init_waitqueue_head(&context->pending[i].changed);
 	context->uid = current_euid();
+	context->broker_pid = get_task_pid(current, PIDTYPE_TGID);
+	context->broker_cred = get_current_cred();
 	file->private_data = context;
 	return 0;
 }

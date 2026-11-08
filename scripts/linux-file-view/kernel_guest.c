@@ -111,6 +111,17 @@ static int measure(void)
   if (enrollment < 0 || pipe2(commands, O_CLOEXEC) || pipe2(answers, O_CLOEXEC)) { close(broker); return 6; }
   pid_t child = fork();
   if (child == 0) {
+    struct octant_mediation_status forwarded;
+    struct octant_mediation_request request;
+    struct octant_mediation_answer answer = {0};
+    errno = 0;
+    if (ioctl(broker, OCTANT_MEDIATION_STATUS, &forwarded) != -1 || errno != EPERM) _exit(40);
+    errno = 0;
+    if (read(broker, &request, sizeof(request)) != -1 || errno != EPERM) _exit(41);
+    errno = 0;
+    if (write(broker, &answer, sizeof(answer)) != -1 || errno != EPERM) _exit(42);
+    errno = 0;
+    if (ioctl(broker, OCTANT_MEDIATION_ENROLL_FD, 0) != -1 || errno != EPERM) _exit(43);
     close(broker); close(commands[1]); close(answers[0]);
     workload(enrollment, commands[0], answers[1]);
   }

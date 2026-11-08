@@ -9,7 +9,11 @@ device/inode/operation identity. A one-use enrollment descriptor binds a fresh
 single-thread bootstrap's credentials after `no_new_privs`; existing shared
 address spaces, shared descriptor tables and ring/AIO contexts refuse enrollment.
 Later ordinary threads inherit the same immutable context. A broker close or
-unanswered deadline refuses both pending and subsequent admissions.
+unanswered deadline refuses both pending and subsequent admissions. Broker
+reads, writes, status queries and enrollment minting are bound to the original
+TGID and captured credentials, not possession of a forwarded descriptor. The
+native negative check forwards that descriptor to a same-UID fork and requires
+all four operations to refuse.
 The metadata policy reader consumes the original structured rules rather than
 the startup mount covers, retains exact account exceptions and live companions,
 and indexes actual device/inode identity without opening content. Directory
