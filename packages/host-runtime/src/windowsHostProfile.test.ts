@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import { win32 } from "node:path";
 import {
   acquireWindowsHostProfileOwner,
+  resolveWindowsHostProfile,
   type WindowsHostProfileNative,
 } from "./windowsHostProfile";
 
@@ -54,6 +55,14 @@ const identity = {
 } as const;
 
 describe("Windows persistent profile ownership", () => {
+  it("resolves an admitted profile without preparing or claiming runtime ownership", () => {
+    const fake = fixture();
+    const result = resolveWindowsHostProfile({ ...identity, native: fake.native });
+    expect(result.status).toBe("ready");
+    expect(fake.native.prepare).not.toHaveBeenCalled();
+    expect(fake.receipt()).toBeUndefined();
+  });
+
   it("uses the native persisted profile for the actual control owner and its data paths", async () => {
     const fake = fixture();
     const result = await acquireWindowsHostProfileOwner({ ...identity, native: fake.native });

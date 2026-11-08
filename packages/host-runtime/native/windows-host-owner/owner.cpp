@@ -224,7 +224,7 @@ Handle open_directory(const std::wstring& path) {
       (info.FileAttributes & FILE_ATTRIBUTE_DIRECTORY) == 0 || (info.FileAttributes & FILE_ATTRIBUTE_REPARSE_POINT) != 0) return Handle();
   return handle;
 }
-std::unique_ptr<Root> private_root(const std::vector<std::wstring>& components, bool create, bool inherit) {
+std::unique_ptr<Root> private_root(const std::vector<std::wstring>& components, bool create, bool inherit, bool* missing = nullptr) {
   auto result = std::make_unique<Root>();
   if (!token_sid(GetCurrentProcess(), result->sid_bytes, &result->sid)) return nullptr;
   const std::wstring security = L"O:" + result->sid + L"D:P(A;;FA;;;" + result->sid + L")(A;;FA;;;SY)";
@@ -258,7 +258,10 @@ std::unique_ptr<Root> private_root(const std::vector<std::wstring>& components, 
     SECURITY_ATTRIBUTES attributes{sizeof(SECURITY_ATTRIBUTES), inherited_directory ? result->directory_security : result->security, FALSE};
     path += L"\\" + component;
     if (create && !CreateDirectoryW(path.c_str(), &attributes) && GetLastError() != ERROR_ALREADY_EXISTS) return nullptr;
+    SetLastError(ERROR_SUCCESS);
     Handle handle = open_directory(path);
+    const DWORD open_error = GetLastError();
+    if (!handle && missing && (open_error == ERROR_FILE_NOT_FOUND || open_error == ERROR_PATH_NOT_FOUND)) *missing = true;
     const BYTE flags = inherited_directory ? OBJECT_INHERIT_ACE | CONTAINER_INHERIT_ACE : 0;
     if (!handle || !private_acl(handle.value, *result, flags)) return nullptr;
     result->ancestors.push_back(std::move(handle));
@@ -274,9 +277,9 @@ std::unique_ptr<Root> private_root(const std::vector<std::wstring>& components, 
   result->path.assign(canonical.data(), physical_size);
   return result;
 }
-std::unique_ptr<Root> root_for(const std::string& scope, bool create) {
+std::unique_ptr<Root> root_for(const std::string& scope, bool create, bool* missing = nullptr) {
   if (!uuid(scope)) return nullptr;
-  auto result = private_root({L"runtime", std::wstring(scope.begin(), scope.end())}, create, false);
+  auto result = private_root({L"runtime", std::wstring(scope.begin(), scope.end())}, create, false, missing);
   if (!result) return nullptr;
   std::vector<unsigned char> input(result->sid_bytes);
   input.insert(input.end(), scope.begin(), scope.end());
@@ -1021,13 +1024,17 @@ napi_value claim(napi_env env, napi_callback_info info) {
 napi_value lookup(napi_env env, napi_callback_info info) {
   Guard guard; size_t count = 1; napi_value arguments[1]; napi_get_cb_info(env, info, &count, arguments, nullptr, nullptr);
   if (count != 1) return object(env, "refused");
-  auto root = root_for(string_arg(env, arguments[0]), false);
-  if (!root) return object(env, "refused");
+  bool missing = false;
+  auto root = root_for(string_arg(env, arguments[0]), false, &missing);
+  if (!root) return object(env, missing ? "missing" : "refused");
   Record record; const int found = read_record(*root, record);
   if (found != 1) return object(env, found == 0 ? "missing" : "refused");
   const int status = alive(record.identity);
   napi_value result = object(env, status == 1 ? "existing" : status == 0 ? "dead" : "unknown");
-  if (status == 1) record_fields(env, result, record);
+  if (status == 1) {
+    record_fields(env, result, record);
+    put(env, result, "endpoint", utf8(root->endpoint));
+  }
   return result;
 }
 napi_value poll(napi_env env, napi_callback_info) {

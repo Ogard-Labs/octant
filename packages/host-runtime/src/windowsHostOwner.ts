@@ -178,7 +178,7 @@ async function requestControl(
 
 function previousOwner(
   value: Readonly<Record<string, unknown>>,
-  expected: AcquireWindowsHostOwnerOptions,
+  expected: Pick<AcquireWindowsHostOwnerOptions, "hostId" | "wireVersion">,
   expectedEndpoint: string,
 ): { readonly receipt: HostRuntimeOwnerReceipt; readonly secret: string } | undefined {
   const raw = bytes(value.receipt, 4096);
@@ -214,6 +214,65 @@ function previousOwner(
  * Independent Windows owner prerequisite; ordinary platform startup still
  * refuses Windows. No path, PID, token or endpoint is accepted from a client.
  */
+/** Discover a live owner without preparing or claiming an endpoint. */
+export async function attachWindowsHostRuntimeOwner(
+  options: Pick<AcquireWindowsHostOwnerOptions, "native" | "scope" | "hostId" | "wireVersion">,
+): Promise<
+  | { readonly status: "attached"; readonly attachment: HostRuntimeAttachment }
+  | { readonly status: "missing" | "refused" }
+> {
+  const { native } = options;
+  if (
+    !isMainThread ||
+    !UUID.test(options.scope) ||
+    native.apiVersion !== 1 ||
+    native.frameBytes !== MAX_CONTROL_MESSAGE_BYTES
+  )
+    return { status: "refused" };
+  try {
+    const found = native.lookup(options.scope);
+    if (!record(found)) return { status: "refused" };
+    if (found.status === "missing" || found.status === "dead") return { status: "missing" };
+    if (
+      found.status !== "existing" ||
+      typeof found.endpoint !== "string" ||
+      !ENDPOINT.test(found.endpoint)
+    )
+      return { status: "refused" };
+    const existing = previousOwner(found, options, found.endpoint);
+    if (existing === undefined) return { status: "refused" };
+    const status = await requestControl(native, options.scope, existing.secret, {
+      type: "status",
+      principal: "local",
+    });
+    if (
+      status?.ok !== true ||
+      !record(status.owner) ||
+      status.owner.instanceId !== existing.receipt.instanceId ||
+      status.owner.pid !== existing.receipt.pid ||
+      status.owner.processStart !== existing.receipt.processStart
+    )
+      return { status: "refused" };
+    return {
+      status: "attached",
+      attachment: {
+        kind: "attached",
+        owner: existing.receipt,
+        request: (request) => requestControl(native, options.scope, existing.secret, request),
+        requestStop: async () =>
+          (
+            await requestControl(native, options.scope, existing.secret, {
+              type: "stop",
+              principal: "local",
+            })
+          )?.ok === true,
+      },
+    };
+  } catch {
+    return { status: "refused" };
+  }
+}
+
 export async function acquireWindowsHostRuntimeOwner(
   options: AcquireWindowsHostOwnerOptions,
 ): Promise<HostRuntimeOwnerResult> {
