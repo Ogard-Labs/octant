@@ -175,6 +175,7 @@ const timer=setInterval(()=>{if(alive(owner)&&alive(group)&&alive(-group)&&Date.
       const code = await new Promise<number | null>((resolve) => child.once("close", resolve));
       owner.signal.throwIfAborted();
       if (code !== 0) {
+        if (mode === "observe") throw Error(`The owned native observation is not ready: ${error}`);
         await writeFile(join(artifacts, "native-command-failure.txt"), error);
         throw Error(`The owned native ${mode} refused.`);
       }
@@ -183,8 +184,31 @@ const timer=setInterval(()=>{if(alive(owner)&&alive(group)&&alive(-group)&&Date.
       await writeFile(capture.replace(/\.png$/, ".json"), output);
       return snapshot;
     };
-    const observe = async (name: string, check: (snapshot: typeof Snapshot.Type) => boolean) =>
-      until(name, async () => check(await act("observe", name)));
+    const observe = async (name: string, check: (snapshot: typeof Snapshot.Type) => boolean) => {
+      let diagnostic = "";
+      try {
+        await until(
+          name,
+          async () => {
+            if (ownApp.child.exitCode !== null || ownApp.child.signalCode !== null)
+              throw Error("The owned app exited before its normal window was observed.");
+            try {
+              return check(await act("observe", name));
+            } catch (error) {
+              owner.signal.throwIfAborted();
+              if (ownApp.child.exitCode !== null || ownApp.child.signalCode !== null) throw error;
+              diagnostic =
+                error instanceof Error ? error.message : "Native observation is not ready.";
+              return false;
+            }
+          },
+          20_000,
+        );
+      } catch (error) {
+        await writeFile(join(artifacts, "native-observation-diagnostic.txt"), diagnostic);
+        throw error;
+      }
+    };
     const journal = (event: string): ReadonlyArray<unknown> => {
       const database = openReadOnlySqlite(join(root, "data", "octant.sqlite3"));
       try {
@@ -357,6 +381,24 @@ const timer=setInterval(()=>{if(alive(owner)&&alive(group)&&alive(-group)&&Date.
     clearTimeout(deadline);
     process.removeListener("SIGTERM", abort);
     process.removeListener("SIGINT", abort);
+    if (provider !== undefined) {
+      const { childObservations, ...summary } = provider.evidence();
+      try {
+        await writeFile(
+          join(artifacts, "provider-progress.json"),
+          JSON.stringify({
+            ...summary,
+            noGrantObserved:
+              childObservations[0]?.includes("browser-session-permission-required") === true,
+            publicPageObserved: childObservations[1]?.includes("Example Domain") === true,
+            revokeRefusalObserved:
+              childObservations[2]?.includes("browser-session-permission-required") === true,
+          }),
+        );
+      } catch (error) {
+        cleanupFailures.push(error);
+      }
+    }
     try {
       await provider?.close();
     } catch (error) {
