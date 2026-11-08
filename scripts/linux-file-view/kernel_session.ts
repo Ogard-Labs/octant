@@ -55,19 +55,38 @@ if (process.argv[2] === "--linux-mediation-worker") {
         ownAccountPaths: [],
       }),
     });
-  const stage = async () => {
+  const stage = async (mode: string, session: LinuxMediationSession, maximumMs: number) => {
     const until = performance.now() + 5_000;
+    const completion: { value: Awaited<LinuxMediationSession["exited"]> | undefined } = {
+      value: undefined,
+    };
+    void session.exited.then((value) => {
+      completion.value = value;
+    });
     for (;;) {
-      assert(
-        performance.now() < until && !signal.signal.aborted,
-        "Command never reached its admitted stage",
-      );
+      const withinBound = performance.now() < until && !signal.signal.aborted;
       try {
         await stat(`${root}/session-stage`);
-        return;
-      } catch {
-        await pause(10);
-      }
+        if (withinBound) return;
+      } catch {}
+      const ended = completion.value;
+      assert(
+        withinBound && ended === undefined,
+        JSON.stringify({
+          case: mode,
+          maximumMs,
+          ...(ended === undefined
+            ? { status: "pending" }
+            : ended.result.status === "exited"
+              ? { status: "exited", code: ended.result.code, cleanup: ended.cleanup }
+              : {
+                  status: "unavailable",
+                  reason: ended.result.reason,
+                  cleanup: ended.cleanup,
+                }),
+        }),
+      );
+      await pause(10);
     }
   };
   const start = async (mode: string, maximumMs?: number, owner?: AbortSignal) => {
@@ -90,7 +109,7 @@ if (process.argv[2] === "--linux-mediation-worker") {
     // Real readiness must not fork/exec the command or create its marker.
     await assert.rejects(() => stat(`${root}/session-stage`), { code: "ENOENT" });
     assert.deepEqual(await active.launch(), { status: "released" });
-    await stage();
+    await stage(mode, active, maximumMs ?? 10_000);
     return active;
   };
   try {
