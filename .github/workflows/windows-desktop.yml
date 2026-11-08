@@ -46,6 +46,14 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: node scripts/ensure-ci-electron.ts
+      - name: Build the owned native peer mechanism fixture
+        run: |
+          bun build scripts/windows-desktop-peer/probe.ts --target=node --outfile "$env:RUNNER_TEMP/peer-probe.mjs"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          cmake -S scripts/windows-desktop-peer -B "$env:RUNNER_TEMP/peer-qa" -A x64
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          cmake --build "$env:RUNNER_TEMP/peer-qa" --config Release --target octant-windows-peer-launcher octant-windows-peer-appcontainer
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - name: Build the portable QA archive
         env:
           OCTANT_PACKAGE_TARGET: win32-x64
@@ -59,14 +67,6 @@ jobs:
           cmake -S scripts/windows-desktop-qa -B "$env:RUNNER_TEMP/desktop-owner" -A x64
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           cmake --build "$env:RUNNER_TEMP/desktop-owner" --config Release
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-      - name: Build the owned native peer mechanism fixture
-        run: |
-          bun build scripts/windows-desktop-peer/probe.ts --target=node --outfile "$env:RUNNER_TEMP/peer-probe.mjs"
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          cmake -S scripts/windows-desktop-peer -B "$env:RUNNER_TEMP/peer-qa" -A x64
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          cmake --build "$env:RUNNER_TEMP/peer-qa" --config Release --target octant-windows-peer-launcher octant-windows-peer-appcontainer
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - name: Prove native peer admission and reconnect cleanup in all runtimes
         run: |
