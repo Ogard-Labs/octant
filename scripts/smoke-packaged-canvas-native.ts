@@ -175,7 +175,12 @@ const timer = setInterval(() => {
       process.env,
       8000,
     );
-    await observeUntil("settings", (snapshot) => hasText(snapshot, "Permissions"));
+    await observeUntil(
+      "settings",
+      (snapshot) =>
+        hasText(snapshot, "Settings") &&
+        hasText(snapshot, "Choose app-wide defaults, updates, and network behavior."),
+    );
     if (controller.signal.aborted) throw Error("Native window observation was interrupted.");
     verified = true;
   } finally {
