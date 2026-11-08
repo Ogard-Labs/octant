@@ -119,9 +119,21 @@ if mode == "picker-metadata" {
         initialKernelIdentity?.birthSeconds == birth[0] && initialKernelIdentity?.birthMicroseconds == birth[1] &&
         initialKernelIdentity?.executable == expectedBundle + "/Contents/MacOS/Octant"
     let deadline = Date().addingTimeInterval(3)
-    var queue = (admitted && windowResult == .success ? (windows as? [AXUIElement] ?? []) : []).map { ($0, 0) }
+    struct PickerNode {
+        let node: AXUIElement
+        let depth: Int
+        let parentRow: Int?
+        let windowIndex: Int
+        let sheetRow: Int?
+    }
+    var queue = (admitted && windowResult == .success ? (windows as? [AXUIElement] ?? []) : []).enumerated().map {
+        PickerNode(node: $0.element, depth: 0, parentRow: nil, windowIndex: $0.offset, sheetRow: nil)
+    }
     var seen = Set<CFHashCode>(), processes = Set<pid_t>()
+    var ownedWindowRoots = Set<Int>(), ownedSheets = Set<Int>()
     var rows: [[String: Any]] = [], processRows: [[String: Any]] = []
+    var serviceNode: [String: Any] = ["status": "not-observed", "childrenTraversed": false,
+        "codeSigningVerified": false, "interactionDispatched": false]
     var index = 0, errors = 0
     var depthCut = false, nodeCut = queue.count > 512, foreignPid = false, dialogSeen = false
     queue = Array(queue.prefix(512))
@@ -135,7 +147,8 @@ if mode == "picker-metadata" {
         return text
     }
     while index < queue.count && index < 512 && Date() < deadline {
-        let (node, depth) = queue[index]; index += 1
+        let entry = queue[index]; index += 1
+        let node = entry.node, depth = entry.depth
         guard seen.insert(CFHash(node)).inserted else { continue }
         var nodePid: pid_t = 0
         let pidRead = AXUIElementGetPid(node, &nodePid)
@@ -153,11 +166,67 @@ if mode == "picker-metadata" {
                 "serviceBundleIdentifier": safeBundleId,
                 "capturedApp": nodePid == processId])
         }
-        if nodePid != processId { foreignPid = true; break }
+        if nodePid != processId {
+            foreignPid = true
+            serviceNode["status"] = "unconfirmed"
+            serviceNode["reason"] = "requires-owned-sheet-and-exact-observed-service"
+            // Read one node reached through this owned sheet's AXChildren only.
+            // Never create a service application root or traverse its children.
+            if let sheetRow = entry.sheetRow, ownedSheets.contains(sheetRow),
+               ownedWindowRoots.contains(entry.windowIndex), entry.parentRow != nil,
+               let identity = kernelIdentity(nodePid),
+               let service = NSRunningApplication(processIdentifier: nodePid),
+               !service.isTerminated,
+               service.bundleIdentifier == "com.apple.appkit.xpc.openAndSavePanelService",
+               let bundlePath = service.bundleURL?.resolvingSymlinksInPath().standardizedFileURL.path,
+               bundlePath.hasPrefix("/"), !bundlePath.contains("\0"), bundlePath.utf8.count <= 4096,
+               identity.executable.hasPrefix("/"), !identity.executable.contains("\0"), identity.executable.utf8.count <= 4096,
+               kernelIdentity(processId) == initialKernelIdentity, Date() < deadline {
+                let priorErrors = errors
+                let serviceRole = roleOnly(node, kAXRoleAttribute as CFString)
+                let serviceSubrole = roleOnly(node, kAXSubroleAttribute as CFString)
+                var freshPid: pid_t = 0
+                let nodeRead = AXUIElementGetPid(node, &freshPid)
+                let freshService = NSRunningApplication(processIdentifier: nodePid)
+                let freshOwner = NSRunningApplication(processIdentifier: processId)
+                if nodeRead == .success, freshPid == nodePid, !serviceRole.isEmpty, errors == priorErrors,
+                   kernelIdentity(nodePid) == identity, kernelIdentity(processId) == initialKernelIdentity,
+                   freshService?.isTerminated == false,
+                   freshService?.bundleIdentifier == service.bundleIdentifier,
+                   freshService?.bundleURL?.resolvingSymlinksInPath().standardizedFileURL.path == bundlePath,
+                   freshOwner?.isTerminated == false,
+                   freshOwner?.bundleURL?.resolvingSymlinksInPath().standardizedFileURL.path == expectedBundle,
+                   Date() < deadline {
+                    serviceNode = ["status": "observed", "pid": nodePid,
+                        // Both kernel UID observations are required to equal
+                        // this UID by kernelIdentity; no username is queried.
+                        "uid": geteuid(), "birthSeconds": identity.birthSeconds,
+                        "birthMicroseconds": identity.birthMicroseconds,
+                        "kernelCanonicalExecutable": identity.executable,
+                        "canonicalBundlePath": bundlePath,
+                        "serviceBundleIdentifier": service.bundleIdentifier ?? "unavailable",
+                        "role": serviceRole, "subrole": serviceSubrole,
+                        "parentRow": entry.parentRow.map { $0 as Any } ?? NSNull(),
+                        "rootWindowIndex": entry.windowIndex, "ownedSheetRow": sheetRow,
+                        "sheetOwnerPid": processId, "identityRechecked": true,
+                        "childrenTraversed": false, "codeSigningVerified": false,
+                        "interactionDispatched": false]
+                } else { serviceNode["reason"] = "identity-or-role-read-unconfirmed" }
+            }
+            break
+        }
         let nodeRole = roleOnly(node, kAXRoleAttribute as CFString)
         let subrole = roleOnly(node, kAXSubroleAttribute as CFString)
         if nodeRole.isEmpty { errors += 1; break }
-        rows.append(["pid": nodePid, "role": nodeRole, "subrole": subrole, "depth": depth])
+        if depth == 0 {
+            if nodeRole != "AXWindow" { errors += 1; break }
+            ownedWindowRoots.insert(entry.windowIndex)
+        }
+        let rowIndex = rows.count
+        rows.append(["pid": nodePid, "role": nodeRole, "subrole": subrole, "depth": depth,
+            "parentRow": entry.parentRow.map { $0 as Any } ?? NSNull(), "rootWindowIndex": entry.windowIndex])
+        let sheetRow = nodeRole == "AXSheet" ? rowIndex : entry.sheetRow
+        if nodeRole == "AXSheet" { ownedSheets.insert(rowIndex) }
         if nodeRole == "AXSheet" || nodeRole == "AXDialog" ||
             ["AXDialog", "AXSystemDialog", "AXApplicationDialog"].contains(subrole) { dialogSeen = true }
         if nodeRole == "AXSecureTextField" || subrole == "AXSecureTextField" { continue }
@@ -168,7 +237,9 @@ if mode == "picker-metadata" {
             if let children = children as? [AXUIElement] {
                 let remaining = max(0, 512 - queue.count)
                 if children.count > remaining { nodeCut = true }
-                queue.append(contentsOf: children.prefix(remaining).map { ($0, depth + 1) })
+                queue.append(contentsOf: children.prefix(remaining).map {
+                    PickerNode(node: $0, depth: depth + 1, parentRow: rowIndex, windowIndex: entry.windowIndex, sheetRow: sheetRow)
+                })
             } else { errors += 1 }
         } else if read != .noValue && read != .attributeUnsupported { errors += 1 }
     }
@@ -185,6 +256,7 @@ if mode == "picker-metadata" {
         "nativeAxTrusted": AXIsProcessTrusted(), "windowsError": windowResult.rawValue,
         "windowOwnership": Array(ownedWindows.prefix(64)), "windowOwnershipTruncated": ownedWindows.count > 64,
         "processes": processRows, "roles": rows, "readErrors": errors,
+        "associatedServiceNode": serviceNode,
         "dialogOrSheetObserved": dialogSeen, "foreignPidBoundaryObserved": foreignPid,
         "truncated": depthCut || nodeCut || foreignPid || index < queue.count,
         "depthLimitReached": depthCut, "nodeLimitReached": nodeCut,
