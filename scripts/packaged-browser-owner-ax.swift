@@ -138,6 +138,8 @@ var fixedFolderNativeStatuses: [String: Int32] = [:]
 var fixedFolderWindowAncestryUsed = false
 var fixedFolderGeometry: [String: Any] = ["targetInsideResolvedWindow": NSNull(), "centerOnScreen": NSNull(),
     "topPointOwnerMatched": NSNull(), "topFrameMatched": NSNull()]
+var fixedFolderSheetGeometry: [String: Any] = ["topLevelMatchesInnerSheet": NSNull(), "targetInsideInnerSheet": NSNull(),
+    "topFrameMatchesInnerSheet": NSNull(), "topFrameMatchesOuterSheet": NSNull()]
 func fixedFolderFrame(_ node: AXUIElement) -> CGRect? {
     var position: CFTypeRef?, size: CFTypeRef?
     let positionStatus = AXUIElementCopyAttributeValue(node, kAXPositionAttribute as CFString, &position)
@@ -153,9 +155,12 @@ func fixedFolderFrame(_ node: AXUIElement) -> CGRect? {
           dimensions.width >= 12, dimensions.height >= 12 else { return nil }
     return CGRect(origin: point, size: dimensions)
 }
-func fixedFolderHit(_ target: AXUIElement, _ deadline: Date, _ admit: (AXUIElement) -> Bool, _ expectedFieldRoot: AXUIElement? = nil) -> CGPoint? {
+func fixedFolderHit(_ target: AXUIElement, _ deadline: Date, _ admit: (AXUIElement) -> Bool, _ expectedFieldRoot: AXUIElement? = nil,
+    _ expectedFieldSheets: [AXUIElement] = [], _ fieldCurrent: (() -> Bool)? = nil) -> CGPoint? {
     fixedFolderGeometry = ["targetInsideResolvedWindow": NSNull(), "centerOnScreen": NSNull(),
         "topPointOwnerMatched": NSNull(), "topFrameMatched": NSNull()]
+    fixedFolderSheetGeometry = ["topLevelMatchesInnerSheet": NSNull(), "targetInsideInnerSheet": NSNull(),
+        "topFrameMatchesInnerSheet": NSNull(), "topFrameMatchesOuterSheet": NSNull()]
     guard admit(target), Date() < deadline, ownedFixturePath() != nil, AXIsProcessTrusted(), CGPreflightPostEventAccess(),
           kernelIdentity(processId) == initialKernelIdentity,
           NSRunningApplication(processIdentifier: processId)?.bundleURL?.resolvingSymlinksInPath().standardizedFileURL.path == expectedBundle,
@@ -228,6 +233,68 @@ func fixedFolderHit(_ target: AXUIElement, _ deadline: Date, _ admit: (AXUIEleme
     if let values = top?[kCGWindowBounds as String] as? [String: Any], let frame = CGRect(dictionaryRepresentation: values as CFDictionary) {
         fixedFolderGeometry["topFrameMatched"] = abs(frame.minX - windowFrame.minX) <= 2 && abs(frame.minY - windowFrame.minY) <= 2 &&
             abs(frame.width - windowFrame.width) <= 2 && abs(frame.height - windowFrame.height) <= 2
+    }
+    // Diagnostic only: AXWindow names the attached root, whereas the nearer
+    // top-level element may be a sheet. Keep the original root-frame refusal.
+    if (mode == "picker-fill-owned-location" || mode == "picker-go-owned-location"), expectedFieldSheets.count == 2,
+       fixedFolderGeometry["topFrameMatched"] as? Bool == false,
+       (top?[kCGWindowOwnerPID as String] as? NSNumber)?.int32Value == processId,
+       let values = top?[kCGWindowBounds as String] as? [String: Any], let topFrame = CGRect(dictionaryRepresentation: values as CFDictionary),
+       fieldCurrent?() == true, Date() < deadline, ownedFixturePath() != nil,
+       NSWorkspace.shared.frontmostApplication?.processIdentifier == processId, AXIsProcessTrusted(), CGPreflightPostEventAccess() {
+        let inner = expectedFieldSheets[0], outer = expectedFieldSheets[1]
+        var child = target
+        for (index, sheet) in expectedFieldSheets.enumerated() {
+            var pid: pid_t = 0, parent: CFTypeRef?, role: CFTypeRef?
+            guard admit(sheet), Date() < deadline else { return nil }
+            let pidStatus = AXUIElementGetPid(sheet, &pid)
+            fixedFolderNativeStatuses["diagnosticSheet\(index)Pid"] = pidStatus.rawValue
+            guard pidStatus == .success, pid == processId else { return nil }
+            let roleStatus = AXUIElementCopyAttributeValue(sheet, kAXRoleAttribute as CFString, &role)
+            fixedFolderNativeStatuses["diagnosticSheet\(index)Role"] = roleStatus.rawValue
+            guard roleStatus == .success, (role as? String) == "AXSheet" else { return nil }
+            var childPid: pid_t = 0
+            let childStatus = AXUIElementGetPid(child, &childPid)
+            fixedFolderNativeStatuses["diagnosticSheet\(index)ChildPid"] = childStatus.rawValue
+            guard childStatus == .success, childPid == processId else { return nil }
+            let parentStatus = AXUIElementCopyAttributeValue(child, kAXParentAttribute as CFString, &parent)
+            fixedFolderNativeStatuses["diagnosticSheet\(index)Parent"] = parentStatus.rawValue
+            guard parentStatus == .success, let parent, CFGetTypeID(parent) == AXUIElementGetTypeID(), CFEqual(parent, sheet) else { return nil }
+            child = sheet
+        }
+        var topLevelRaw: CFTypeRef?, targetPid: pid_t = 0
+        guard AXUIElementGetPid(target, &targetPid) == .success, targetPid == processId else { return nil }
+        let topLevelStatus = AXUIElementCopyAttributeValue(target, kAXTopLevelUIElementAttribute as CFString, &topLevelRaw)
+        fixedFolderNativeStatuses["diagnosticTopLevel"] = topLevelStatus.rawValue
+        var topLevelMatches: Bool?
+        if topLevelStatus == .success {
+            guard let topLevelRaw, CFGetTypeID(topLevelRaw) == AXUIElementGetTypeID() else { return nil }
+            let topLevel = unsafeBitCast(topLevelRaw, to: AXUIElement.self)
+            var topLevelPid: pid_t = 0
+            guard admit(topLevel) else { return nil }
+            let topLevelPidStatus = AXUIElementGetPid(topLevel, &topLevelPid)
+            fixedFolderNativeStatuses["diagnosticTopLevelPid"] = topLevelPidStatus.rawValue
+            guard topLevelPidStatus == .success, topLevelPid == processId else { return nil }
+            topLevelMatches = CFEqual(topLevel, inner)
+        } else if topLevelStatus != .noValue && topLevelStatus != .attributeUnsupported { return nil }
+        let innerFrameResult = fixedFolderFrame(inner)
+        fixedFolderNativeStatuses["diagnosticInnerPosition"] = fixedFolderNativeStatuses["position"]
+        fixedFolderNativeStatuses["diagnosticInnerSize"] = fixedFolderNativeStatuses["size"]
+        let outerFrameResult = fixedFolderFrame(outer)
+        fixedFolderNativeStatuses["diagnosticOuterPosition"] = fixedFolderNativeStatuses["position"]
+        fixedFolderNativeStatuses["diagnosticOuterSize"] = fixedFolderNativeStatuses["size"]
+        guard let innerFrame = innerFrameResult, let outerFrame = outerFrameResult else { return nil }
+        func frameMatches(_ frame: CGRect) -> Bool {
+            return abs(topFrame.minX - frame.minX) <= 2 && abs(topFrame.minY - frame.minY) <= 2 &&
+                abs(topFrame.width - frame.width) <= 2 && abs(topFrame.height - frame.height) <= 2
+        }
+        guard fieldCurrent?() == true, Date() < deadline, ownedFixturePath() != nil,
+              kernelIdentity(processId) == initialKernelIdentity,
+              NSWorkspace.shared.frontmostApplication?.processIdentifier == processId,
+              AXIsProcessTrusted(), CGPreflightPostEventAccess() else { return nil }
+        fixedFolderSheetGeometry = ["topLevelMatchesInnerSheet": topLevelMatches.map { $0 as Any } ?? NSNull(),
+            "targetInsideInnerSheet": innerFrame.contains(targetFrame),
+            "topFrameMatchesInnerSheet": frameMatches(innerFrame), "topFrameMatchesOuterSheet": frameMatches(outerFrame)]
     }
     guard (top?[kCGWindowOwnerPID as String] as? NSNumber)?.int32Value == processId,
           let values = top?[kCGWindowBounds as String] as? [String: Any], let frame = CGRect(dictionaryRepresentation: values as CFDictionary),
@@ -801,7 +868,14 @@ if mode == "picker-metadata" || mode == "picker-location-prompt" || (fixesOwnedF
                                 guard ownedFixturePath() == fixturePath, associationUnchanged(),
                                       let focus = focusInSheet(), CFEqual(focus.node, field), nestedLocation(focus),
                                       let rootWindows = windows as? [AXUIElement], rootWindows.indices.contains(entry.windowIndex),
-                                      fixedFolderHit(field, deadline, admitMetadataNode, rootWindows[entry.windowIndex]) != nil,
+                                      fixedFolderHit(field, deadline, admitMetadataNode, rootWindows[entry.windowIndex],
+                                        [focus.ancestors[1], focus.ancestors[2]], {
+                                            guard ownedFixturePath() == fixturePath, identitiesUnchanged(), associationUnchanged(),
+                                                  let fresh = focusInSheet(), CFEqual(fresh.node, field), nestedLocation(fresh),
+                                                  CFEqual(fresh.ancestors[1], focus.ancestors[1]), CFEqual(fresh.ancestors[2], focus.ancestors[2]),
+                                                  errors == priorErrors else { return false }
+                                            return true
+                                        }) != nil,
                                       identitiesUnchanged(), errors == priorErrors else { return false }
                                 fixedFolder["fieldFocusIdentityGeometryHitMatched"] = true
                                 return true
@@ -886,6 +960,7 @@ if mode == "picker-metadata" || mode == "picker-location-prompt" || (fixesOwnedF
                                 down.post(tap: .cghidEventTap); up.post(tap: .cghidEventTap)
                                 fixedFolder["chooserDispatched"] = true; fixedFolder["status"] = "dispatched"
                             }
+                            fixedFolder["ownedSheetFrameChecks"] = fixedFolderSheetGeometry
                             fixedFolder["geometryChecks"] = fixedFolderGeometry
                             fixedFolder["owningWindowFromBoundedParentProof"] = fixedFolderWindowAncestryUsed
                             fixedFolder["nativeStatuses"] = fixedFolderNativeStatuses
