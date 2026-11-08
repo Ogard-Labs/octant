@@ -13,6 +13,7 @@ import { chosenAutoReviewer } from "@octant/domain/guardrail-policy";
 import { readsSecretsThenEgress } from "@octant/domain/shield-judge-policy";
 import { createAutomaticModelAccountCheck } from "../automaticModels/automaticModelAccount";
 import { createPersonMemorySweep } from "../personMemory/personMemoryWiring";
+import { createDecisionReviewModelPort } from "../turnDecisions/decisionReviewWiring";
 import { isProtectedSecretPath } from "../process/secretGuard";
 import { recordShieldReviewUsage } from "../shield/shieldUsageLedger";
 import { createRuntimeForgeChangeObserver } from "../shield/runtimeForgeChanges";
@@ -809,6 +810,13 @@ export function wireHarness(deps: HarnessDependencies) {
     scratchRoot: harnessWorkDirectory,
     protectedSecretPath: (path) => isProtectedSecretPath(path),
   });
+  const decisionReviewModelPort = createDecisionReviewModelPort({
+    persistence,
+    store: personMemory,
+    resolveDriver: resolveConfiguredDriver,
+    accountUnavailable: automaticModelAccountUnavailable,
+    scratchRoot: harnessWorkDirectory,
+  });
   // A provider runtime's own shell reports a command only as it starts, so
   // its pushes and pull-request changes are recorded, never stopped.
   const runtimeForgeChanges = createRuntimeForgeChangeObserver({
@@ -980,6 +988,7 @@ export function wireHarness(deps: HarnessDependencies) {
     credentialCommandProcess: harnessFullAccessProcessPort,
     prepareCredentialCommand,
     personMemorySweep,
+    decisionReviewModelPort,
     runtimeForgeChanges,
     followUpCreation,
     restartContinuation,

@@ -2136,11 +2136,17 @@ a numbered slice. Built, with these narrower readings:
     per-thread history its first turn carries once, the freeze on Code
     commands and turn starts, the provider of the same kind, and the
     erase-time check that moves a worktree out of the managed folder when it
-    holds anything the move did not carry. What it does not do yet: move
-    Work threads, carry attachments and other bulk parts, accept moves on
-    the hub (which keeps no peer grants and needs its own Accept moved
-    threads setting), offer a window route to start a move, or show any
-    screen.
+    holds anything the move did not carry.
+
+    The fourth part moves Work threads between spokes: the conversation as
+    a moved transcript into a Work Project the person picks on the
+    destination (the folder's files stay where they are), the thread opened
+    under the host's own scope on a provider of the same kind, the freeze
+    on Work commands and turn admission, and a delegated Work thread read
+    as one that cannot move. What it does not do yet: carry attachments and
+    other bulk parts, accept moves on the hub (which keeps no peer grants
+    and needs its own Accept moved threads setting), offer a window route
+    to start a move, or show any screen.
 
 Any slice that would deploy an Octant-operated service, create an account, or
 spend money stops for a separate maintainer action.

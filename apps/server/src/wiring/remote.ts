@@ -85,6 +85,7 @@ import { createOwnerPostureHost } from "../hub/ownerPostureHost";
 import { createPeerCredentialRouteHandler } from "../hub/peerCredentialRoutes";
 import { createChatThreadMoveHost } from "../hub/chatThreadMoveHost";
 import { createCodeThreadMoveHost } from "../hub/codeThreadMoveHost";
+import { createWorkThreadMoveHost } from "../hub/workThreadMoveHost";
 import { threadMoveHostsByMode } from "../hub/threadMoveHostsByMode";
 import type { MovedThreadHistory } from "../hub/movedThreadHistory";
 import type { ManagedWorktreeReceiptStore } from "../code/managedWorktreeReceiptStore";
@@ -984,6 +985,17 @@ export function wireRemote(deps: RemoteDependencies) {
     },
     holds: deps.threadMoveHolds,
   });
+  // A moved thread continues on this host's own instance of the provider kind
+  // it ran on, with the same model. Another kind cannot be assumed to know the
+  // model, so a move to a computer without one is refused with its own reason.
+  const resolveMovedProvider = (driverKind: string, modelId: string) => {
+    const sameKind = persistence
+      .readProviderInstances()
+      .find((instance) => instance.enabled && instance.driverKind === driverKind);
+    return sameKind === undefined
+      ? undefined
+      : { providerInstanceId: String(sameKind.id), modelId };
+  };
   const codeThreadMoveHost = createCodeThreadMoveHost({
     readThread: (threadId) => persistence.readCodeThread(threadId),
     isBusy: (threadId) => deps.liveTurns.read(String(threadId)) !== undefined,
@@ -1054,15 +1066,7 @@ export function wireRemote(deps: RemoteDependencies) {
         ),
       };
     },
-    resolveProvider: (driverKind, modelId) => {
-      const enabled = persistence.readProviderInstances().filter((instance) => instance.enabled);
-      const sameKind = enabled.find((instance) => instance.driverKind === driverKind);
-      // Another kind of provider cannot be assumed to know the source's model,
-      // so a move to a computer without one is refused with its own reason.
-      return sameKind === undefined
-        ? undefined
-        : { providerInstanceId: String(sameKind.id), modelId };
-    },
+    resolveProvider: resolveMovedProvider,
     createThread: async (input) => {
       // Decoded by the Code service like any creation; only the files are host-resolved.
       const command = decodeCodeCommand({
@@ -1095,8 +1099,96 @@ export function wireRemote(deps: RemoteDependencies) {
     journalHistory: (input) => deps.movedThreadHistory.journalImported(input),
     holds: deps.threadMoveHolds,
   });
+  const workThreadMoveHost = createWorkThreadMoveHost({
+    readThread: (threadId) => {
+      const thread = workThreadProjection.read(threadId);
+      return thread === undefined
+        ? undefined
+        : {
+            title: thread.title,
+            active: thread.lifecycle === "active",
+            providerInstanceId: String(thread.providerInstanceId),
+            modelId: String(thread.modelId),
+          };
+    },
+    // A turn still preparing its context has not reached the live registry
+    // yet, but it is a turn all the same.
+    isBusy: (threadId) =>
+      deps.liveTurns.read(String(threadId)) !== undefined ||
+      workTurnService.isTurnStarting(threadId),
+    isDelegated: (threadId) =>
+      delegationState.load().received.some((received) => received.threadId === String(threadId)),
+    providerDriverKind: (providerInstanceId) =>
+      persistence
+        .readProviderInstances()
+        .find((instance) => String(instance.id) === providerInstanceId)?.driverKind,
+    transcript: async (threadId) => {
+      const exported = await deps.threadExportService.exportThread(
+        ROUTINE_HOST_SCOPE_ID,
+        "local-window",
+        { mode: "work", threadId: String(threadId) },
+      );
+      // A thread that already moved here once carries its earlier history on.
+      const earlier = deps.movedThreadHistory.history(String(threadId)) ?? [];
+      if (exported.kind !== "exported") return earlier;
+      return [
+        ...earlier,
+        ...exported.bundle.transcript.entries.map((entry) => ({
+          role: entry.role === "user" ? ("person" as const) : ("assistant" as const),
+          text: entry.text,
+          occurredAt: entry.occurredAt,
+        })),
+      ];
+    },
+    externalContentIngested: (threadId) =>
+      readThreadExternalContentTaint(persistence.connection, threadId).externalContentIngested,
+    purge: async (threadId) => {
+      await threadRetention.purge(
+        {
+          scope: { kind: "thread", mode: "work", threadId: decodeRetentionThreadId(threadId) },
+          confirm: true,
+        },
+        "local-window",
+      );
+    },
+    activeWorkProject: (projectId) => {
+      const project = persistence
+        .readProjects()
+        .find((candidate) => String(candidate.id) === projectId);
+      return project?.type === "work" && project.lifecycle === "active";
+    },
+    resolveProvider: resolveMovedProvider,
+    createThread: async (input) => {
+      const project = persistence
+        .readProjects()
+        .find((candidate) => String(candidate.id) === input.projectId);
+      if (project?.type !== "work") throw new Error("The Work Project is gone.");
+      await deps.workThreadServiceWithWorkflows.execute(
+        ROUTINE_HOST_SCOPE_ID,
+        {
+          kind: "create-work-thread",
+          threadId: input.threadId,
+          projectId: input.projectId,
+          title: input.title,
+          providerInstanceId: input.provider.providerInstanceId,
+          modelId: input.provider.modelId,
+          hostId: LOCAL_HOST_ID,
+          bindingRevisionId: String(
+            project.bindingHistory[project.bindingHistory.length - 1]?.revisionId,
+          ),
+        },
+        input.inheritedMark === undefined ? undefined : { inheritedMark: input.inheritedMark },
+      );
+    },
+    journalHistory: (input) => deps.movedThreadHistory.journalImported(input),
+    holds: deps.threadMoveHolds,
+  });
   // Each mode's adapter handles its own threads; the move service sees one host.
-  const byMode = threadMoveHostsByMode({ chat: chatThreadMoveHost, code: codeThreadMoveHost });
+  const byMode = threadMoveHostsByMode({
+    chat: chatThreadMoveHost,
+    code: codeThreadMoveHost,
+    work: workThreadMoveHost,
+  });
   const threadMoves = new ThreadMoveService({
     state: deps.threadMoveState,
     source: byMode.source,

@@ -226,14 +226,6 @@ export function createCodeThreadMoveHost(options: CodeThreadMoveHostOptions): {
       if (planned.mode !== "code" || offer.destinationProjectId === undefined) {
         return { status: "refused", reason: "transfer-failed" };
       }
-      // A thread already started under the planned id was started by an
-      // earlier try that stopped before it was recorded: hold it, start no second.
-      if (codeThreadOf(planned) !== undefined) {
-        options.holds.hold(planned);
-        return { status: "arrived", thread: planned };
-      }
-      const project = options.codeProject(String(offer.destinationProjectId));
-      if (project === undefined) return { status: "refused", reason: "no-eligible-project" };
       const threadPart = offer.manifest.parts.find((part) => part.kind === "thread-bundle");
       const bundlePart = offer.manifest.parts.find((part) => part.kind === "git-bundle");
       const threadPath = threadPart === undefined ? undefined : parts.get(threadPart.partId);
@@ -247,6 +239,23 @@ export function createCodeThreadMoveHost(options: CodeThreadMoveHostOptions): {
       } catch {
         return { status: "refused", reason: "transfer-failed" };
       }
+      const history = {
+        threadId: planned.threadId,
+        moveId: String(offer.moveId),
+        entries: moved.entries,
+      };
+      // A thread already started under the planned id was started by an
+      // earlier try that stopped before it was recorded: hold it and start no
+      // second. That try may have stopped before the history was kept, so it
+      // is kept now (a second import keeps the first), before the source is
+      // told it arrived and erases the only other copy.
+      if (codeThreadOf(planned) !== undefined) {
+        options.holds.hold(planned);
+        options.journalHistory(history);
+        return { status: "arrived", thread: planned };
+      }
+      const project = options.codeProject(String(offer.destinationProjectId));
+      if (project === undefined) return { status: "refused", reason: "no-eligible-project" };
       const received = await receiveCheckoutFromMove({
         repositoryRoot: project.canonicalRoot,
         moveId: String(offer.moveId),
@@ -284,11 +293,7 @@ export function createCodeThreadMoveHost(options: CodeThreadMoveHostOptions): {
         options.holds.release(planned);
         return { status: "refused", reason: "transfer-failed" };
       }
-      options.journalHistory({
-        threadId: planned.threadId,
-        moveId: String(offer.moveId),
-        entries: moved.entries,
-      });
+      options.journalHistory(history);
       return { status: "arrived", thread: planned };
     },
     activate: async (thread) => options.holds.release(thread),

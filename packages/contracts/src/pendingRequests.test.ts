@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
+import { Schema } from "effect";
 import {
+  DecisionReviewRecorded,
   decodePendingRequest,
   decodePendingRequestList,
   MAX_PENDING_REQUESTS,
@@ -172,6 +174,77 @@ describe("pending request contract", () => {
         options: [{ label: "y".repeat(61), recommended: true }],
       }),
     ).toThrow();
+  });
+
+  it("carries a decision's why, urgency and option details, and bounds them", () => {
+    const rich = decodePendingRequest({
+      ...codeDecision,
+      why: "Releasing tonight reaches customers before the weekend.",
+      urgent: true,
+      options: [
+        { label: "Open it", recommended: true, detail: "Rollback is ready in five minutes" },
+        { label: "Wait for review", recommended: false },
+      ],
+    });
+    expect(rich.kind === "decision" && rich.why).toBe(
+      "Releasing tonight reaches customers before the weekend.",
+    );
+    expect(() => decodePendingRequest({ ...codeDecision, why: "w".repeat(241) })).toThrow();
+    expect(() => decodePendingRequest({ ...workDecision, urgent: "yes" })).toThrow();
+    expect(() =>
+      decodePendingRequest({
+        ...workDecision,
+        options: [{ label: "Revenue", recommended: true, detail: "d".repeat(81) }],
+      }),
+    ).toThrow();
+  });
+
+  it("carries who asked and a second opinion, and refuses an unknown review status or a multi-line reason", () => {
+    const instance = "dddddddd-dddd-4ddd-8ddd-dddddddddddd";
+    const reviewed = {
+      status: "reviewed",
+      providerInstanceId: instance,
+      modelId: "gpt-5",
+      backs: "Wait for review",
+      reason: "The change touches the parser.",
+      reviewedAt: requestedAt,
+    } as const;
+    const item = decodePendingRequest({
+      ...codeDecision,
+      askedBy: { providerInstanceId: instance, modelId: "claude-sonnet" },
+      review: reviewed,
+    });
+    expect(item.kind === "decision" && item.review).toEqual(reviewed);
+    for (const status of ["pending", "withheld", "failed", "not-allowed"] as const) {
+      expect(decodePendingRequest({ ...workDecision, review: { status } })).toMatchObject({
+        review: { status },
+      });
+    }
+    expect(() => decodePendingRequest({ ...codeDecision, review: { status: "maybe" } })).toThrow();
+    expect(() =>
+      decodePendingRequest({ ...codeDecision, review: { ...reviewed, reason: "a\nb" } }),
+    ).toThrow();
+    expect(() =>
+      decodePendingRequest({ ...codeDecision, review: { ...reviewed, reason: "r".repeat(101) } }),
+    ).toThrow();
+    expect(() =>
+      decodePendingRequest({ ...codeDecision, review: { status: "pending", extra: true } }),
+    ).toThrow();
+  });
+
+  it("journals only an outcome of a known kind under a decision key", () => {
+    const record = {
+      key: "a".repeat(64),
+      providerInstanceId: "dddddddd-dddd-4ddd-8ddd-dddddddddddd",
+      modelId: "gpt-5",
+      reviewedAt: requestedAt,
+      outcome: { kind: "reviewed", backs: "Open it", reason: "It is ready." },
+    };
+    const decode = Schema.decodeUnknownSync(DecisionReviewRecorded);
+    expect(decode(record)).toEqual(record);
+    expect(() => decode({ ...record, outcome: { kind: "unreached" } })).toThrow();
+    expect(() => decode({ ...record, key: "short" })).toThrow();
+    expect(() => decode({ ...record, extra: 1 })).toThrow();
   });
 
   it("refuses a decision whose send handle names another thread or mode", () => {

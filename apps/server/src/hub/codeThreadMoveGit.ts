@@ -73,11 +73,10 @@ export async function captureCheckoutForMove(input: {
     const stagedIndex = join(scratch, "staged");
     const scratchIndex = join(scratch, "worktree");
     await copyFile(join(gitDir, "index"), stagedIndex).catch(() => undefined);
-    await copyFile(join(gitDir, "index"), scratchIndex).catch(() => undefined);
     const withStagedIndex = { GIT_INDEX_FILE: stagedIndex };
     const withScratchIndex = { GIT_INDEX_FILE: scratchIndex };
     // Everything Git does not ignore, tracked or not, as it stands on disk.
-    await git(root, ["add", "-A", "--", "."], withScratchIndex);
+    await indexDisk(root, scratchIndex, await git(root, ["write-tree"], withStagedIndex));
     const changedIn = async (env: Readonly<Record<string, string>>) =>
       (await git(root, ["diff", "--cached", "--name-only", "--no-renames", "-z", head], env))
         .split("\0")
@@ -155,6 +154,20 @@ export async function captureCheckoutForMove(input: {
   } finally {
     await rm(scratch, { recursive: true, force: true });
   }
+}
+
+/**
+ * Fills a fresh index with the checkout as it stands on disk, starting from
+ * `base`. The index is read from a tree, so it carries no file timestamps and
+ * Git compares every file's content. A copy of the checkout's own index
+ * carried them, and a file edited again within the same instant as its
+ * staging matched by timestamp and size and kept its older content: CI saw a
+ * snapshot with the staged version where the edited one belonged.
+ */
+async function indexDisk(root: string, indexFile: string, base: string): Promise<void> {
+  const env = { GIT_INDEX_FILE: indexFile };
+  await git(root, ["read-tree", base], env);
+  await git(root, ["add", "-A", "--", "."], env);
 }
 
 /** Drops the move's snapshot ref from a checkout once the move is settled. */
@@ -236,12 +249,10 @@ export async function checkoutStillMatchesMove(input: {
     "rev-parse",
     `${moveSnapshotRef(input.moveId)}^{tree}`,
   ]).catch(() => "");
-  const gitDir = await git(root, ["rev-parse", "--absolute-git-dir"]);
   const scratch = await mkdtemp(join(tmpdir(), "octant-move-check-"));
   try {
     const scratchIndex = join(scratch, "index");
-    await copyFile(join(gitDir, "index"), scratchIndex).catch(() => undefined);
-    await git(root, ["add", "-A", "--", "."], { GIT_INDEX_FILE: scratchIndex });
+    await indexDisk(root, scratchIndex, "HEAD");
     const currentTree = await git(root, ["write-tree"], { GIT_INDEX_FILE: scratchIndex });
     const ignoredFiles = (await git(root, ["status", "--porcelain", "--ignored", "-z"]))
       .split("\0")

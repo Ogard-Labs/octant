@@ -222,6 +222,35 @@ describe("WorkThreadService", () => {
     await expect(fixture.service.read(ids.window, ids.thread)).resolves.toBeUndefined();
   });
 
+  it("opens a moved-in thread it already holds, and refuses other commands on a held thread", async () => {
+    const fixture = serviceFixture({
+      threads: [],
+      moveHold: (threadId) => threadId === ids.thread,
+    });
+    await expect(
+      fixture.service.execute(ids.window, {
+        kind: "create-work-thread",
+        threadId: ids.thread,
+        projectId: ids.project,
+        title: "Draft brief",
+        providerInstanceId: ids.provider,
+        modelId: "model-a",
+        hostId: "local",
+        bindingRevisionId: ids.binding,
+      }),
+    ).resolves.toEqual({ kind: "thread-created", thread: thread() });
+
+    const held = serviceFixture({ moveHold: () => true });
+    await expect(
+      held.service.execute(ids.window, {
+        kind: "rename-work-thread",
+        threadId: ids.thread,
+        expectedVersion: 1,
+        title: "Renamed while moving",
+      }),
+    ).rejects.toMatchObject({ failure: { category: "unavailable" } });
+  });
+
   it("creates a thread for the active Work Project with a local-user event", async () => {
     const fixture = serviceFixture({ threads: [] });
 
@@ -1768,6 +1797,7 @@ it("validates the target before journaling an unavailable provider", async () =>
 
 function serviceFixture(
   options: {
+    readonly moveHold?: (threadId: string) => boolean;
     readonly threads?: ReadonlyArray<ReturnType<typeof thread>>;
     readonly accessibleProjects?: ReadonlyArray<{
       id: string;
@@ -1864,6 +1894,7 @@ function serviceFixture(
   };
   const onWorkingDirectoryChanged = vi.fn(async () => undefined);
   const service = new WorkThreadService({
+    ...(options.moveHold === undefined ? {} : { moveHold: options.moveHold }),
     persistence: persistence as never,
     projects: projects as never,
     projection,
