@@ -21,7 +21,9 @@ export async function startOwnedChildProvider(input: {
   const sockets = new Set<Socket>();
   const counts = { requests: 0, probes: 0, parentTurns: 0, childTurns: 0, rejected: 0 };
   let phase: "before-grant" | "after-grant" | "after-revoke" = "before-grant";
-  let held: { readonly response: ServerResponse; readonly reply: () => void } | undefined;
+  let held:
+    | { readonly response: ServerResponse; readonly reply: () => void; readonly cancel: () => void }
+    | undefined;
   let childObservations: ReadonlyArray<string> = [];
   const send = (response: ServerResponse, status: number, body: unknown) => {
     response.writeHead(status, { "content-type": "application/json", connection: "close" });
@@ -55,7 +57,8 @@ export async function startOwnedChildProvider(input: {
       });
       return;
     }
-    response.writeHead(200, { "content-type": "text/event-stream", connection: "close" });
+    if (!response.headersSent)
+      response.writeHead(200, { "content-type": "text/event-stream", connection: "close" });
     const delta =
       tool === undefined
         ? message
@@ -183,8 +186,31 @@ export async function startOwnedChildProvider(input: {
         answer(response, stream, browserCall);
       } else if (counts.childTurns === 2 || counts.childTurns === 3) {
         if (held !== undefined) throw Error("A fixture response is already held.");
-        held = { response, reply: () => answer(response, stream, browserCall) };
+        // The real endpoint gives a connection ten seconds to return headers.
+        // Keep its SSE connection alive while native review runs; emitting no
+        // model tool call until advance preserves the explicit retry boundary.
+        const heartbeat = stream
+          ? setInterval(() => {
+              if (!response.destroyed) response.write(": owned fixture waiting\n\n");
+            }, 1000)
+          : undefined;
+        const cancel = () => {
+          if (heartbeat !== undefined) clearInterval(heartbeat);
+        };
+        if (stream) {
+          response.writeHead(200, { "content-type": "text/event-stream", connection: "close" });
+          response.write(": owned fixture waiting\n\n");
+        }
+        held = {
+          response,
+          cancel,
+          reply: () => {
+            cancel();
+            answer(response, stream, browserCall);
+          },
+        };
         response.once("close", () => {
+          cancel();
           if (held?.response === response) held = undefined;
         });
       } else {
@@ -223,6 +249,7 @@ export async function startOwnedChildProvider(input: {
         if (error !== undefined) reject(error);
         else resolve();
       });
+      held?.cancel();
       for (const socket of sockets) socket.destroy();
       held = undefined;
     });
