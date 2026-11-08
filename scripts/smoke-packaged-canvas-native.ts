@@ -1,10 +1,21 @@
-import { Schema } from "effect";
+import { Effect, Schema } from "effect";
 import { execFileSync, spawn, type ChildProcess } from "node:child_process";
 import { mkdtemp, mkdir, readFile, readdir, rm, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { networkInterfaces, tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { createServer } from "node:net";
-import { randomBytes } from "node:crypto";
+import { createHash, generateKeyPairSync, randomBytes, randomUUID, sign } from "node:crypto";
+import { request as httpsRequest } from "node:https";
+import { decodeWindowId } from "@octant/contracts";
+import { createRemoteConnection } from "../packages/client-runtime/src/remoteConnection";
+import {
+  Persistence,
+  makePersistenceLive,
+} from "../apps/server/src/persistence/persistenceService";
+import { ShellService } from "../apps/server/src/shellService";
+import { PairingDeviceLifecycleService } from "../apps/server/src/remote/pairingDeviceLifecycleService";
+import { createPrivateListenerSetting } from "../apps/server/src/remote/privateListenerSetting";
+import { resolvePrivateListenerHostIdentity } from "../apps/server/src/remote/privateListenerHostIdentity";
 import { realpath } from "node:fs/promises";
 import {
   CanvasPublicSharePublished,
@@ -40,11 +51,11 @@ const PackageProvenance = Schema.Struct({
   checksum: Schema.String,
 });
 
-async function freePort(): Promise<number> {
+async function freePort(hostname = "127.0.0.1"): Promise<number> {
   const listener = createServer();
   await new Promise<void>((resolve, reject) => {
     listener.once("error", reject);
-    listener.listen(0, "127.0.0.1", resolve);
+    listener.listen(0, hostname, resolve);
   });
   const address = listener.address();
   await new Promise<void>((resolve, reject) =>
@@ -74,6 +85,153 @@ function groupProcesses(group: number): ReadonlyArray<number> {
     });
 }
 
+// API-seeded pairing is fixture setup, never evidence of native pairing UI.
+// The production packaged gateway still verifies host identity, pinned TLS,
+// session challenge and a fresh signed proof for every product request.
+async function seedPairedFixture(dataDirectory: string, projectId: string) {
+  const hostname = Object.values(networkInterfaces())
+    .flat()
+    .find((entry) => {
+      if (entry === undefined || entry.internal || entry.family !== "IPv4") return false;
+      const octets = entry.address.split(".").map(Number);
+      return (
+        octets[0] === 10 ||
+        (octets[0] === 192 && octets[1] === 168) ||
+        (octets[0] === 172 && octets[1] !== undefined && octets[1] >= 16 && octets[1] <= 31)
+      );
+    })?.address;
+  if (hostname === undefined) throw Error("No isolated-runner RFC1918 interface for real pairing.");
+  const port = await freePort(hostname);
+  const origin = `https://${hostname}:${port}`;
+  const keys = generateKeyPairSync("ec", { namedCurve: "P-256" });
+  const publicKeyPem = String(keys.publicKey.export({ format: "pem", type: "spki" }));
+  const fingerprint = createHash("sha256")
+    .update(keys.publicKey.export({ format: "der", type: "spki" }))
+    .digest("hex");
+  const knownDevice = await Effect.runPromise(
+    Effect.flatMap(Persistence, (persistence) =>
+      Effect.sync(() => {
+        const identity = resolvePrivateListenerHostIdentity({
+          connection: persistence.connection,
+          dataDirectory,
+        });
+        const lifecycle = new PairingDeviceLifecycleService({
+          hostId: identity.hostId,
+          journal: persistence.journal,
+          connection: persistence.connection,
+        });
+        const device = lifecycle.admitIntroducedDevice({
+          devicePublicKey: publicKeyPem,
+          deviceLabel: "Owned Canvas acceptance client",
+          origin,
+          sourceClass: "lan-private",
+        });
+        const shell = new ShellService({
+          persistence,
+          uuid: randomUUID,
+          clock: () => new Date().toISOString(),
+        });
+        const windowId = decodeWindowId(String(device.deviceId));
+        shell.bootstrap(windowId);
+        shell.execute({
+          kind: "apply-workspace-operation",
+          windowId,
+          expectedVersion: 0,
+          operation: {
+            kind: "switch-project-surface",
+            mode: "chat",
+            surface: {
+              kind: "project",
+              id: randomUUID(),
+              projectId,
+              mode: "chat",
+              title: "Canvas fixtures",
+            },
+          },
+        });
+        return {
+          hostId: String(device.hostId),
+          deviceId: String(device.deviceId),
+          credentialGeneration: device.credentialGeneration,
+          hostKeyFingerprint: identity.signing.hostKeyFingerprint,
+        };
+      }),
+    ).pipe(
+      Effect.provide(makePersistenceLive({ environment: { OCTANT_DATA_DIR: dataDirectory } })),
+    ),
+  );
+  createPrivateListenerSetting(dataDirectory).save({ hostname, port, origin, tls: "self-made" });
+  const certificatePath = join(dataDirectory, "remote", "private-listener-tls-cert.pem");
+  const pinnedFetch: typeof globalThis.fetch = Object.assign(
+    async (
+      input: Parameters<typeof globalThis.fetch>[0],
+      init?: Parameters<typeof globalThis.fetch>[1],
+    ) => {
+      const request = new Request(input, init);
+      const destination = new URL(request.url);
+      if (destination.origin !== origin)
+        throw Error("The paired fixture requested another origin.");
+      const certificate = await readFile(certificatePath);
+      const body = Buffer.from(await request.arrayBuffer());
+      return new Promise<Response>((resolve, reject) => {
+        const connection = httpsRequest(
+          destination,
+          {
+            method: request.method,
+            headers: Object.fromEntries(request.headers),
+            ca: certificate,
+            rejectUnauthorized: true,
+            servername: "",
+            timeout: 8000,
+          },
+          (response) => {
+            const chunks: Buffer[] = [];
+            response.on("data", (chunk: Buffer) => chunks.push(chunk));
+            response.once("error", reject);
+            response.once("end", () => {
+              const headers = new Headers();
+              for (const [key, value] of Object.entries(response.headers)) {
+                if (Array.isArray(value)) for (const item of value) headers.append(key, item);
+                else if (value !== undefined) headers.set(key, value);
+              }
+              const bytes = Buffer.concat(chunks);
+              resolve(
+                new Response(bytes.length === 0 ? null : bytes, {
+                  status: response.statusCode ?? 500,
+                  headers,
+                }),
+              );
+            });
+          },
+        );
+        connection.once("timeout", () =>
+          connection.destroy(Error("Owned paired request timed out.")),
+        );
+        connection.once("error", reject);
+        connection.end(body.length === 0 ? undefined : body);
+      });
+    },
+    { preconnect: () => undefined },
+  );
+  const connection = createRemoteConnection({
+    origin,
+    webBuildVersion: "0.1.0",
+    fetch: pinnedFetch,
+    knownDevice,
+    deviceKey: {
+      loadOrCreate: async () => ({ publicKeyPem, fingerprint }),
+      current: async () => ({ publicKeyPem, fingerprint }),
+      sign: async (payload) =>
+        sign("sha256", Buffer.from(payload), {
+          key: keys.privateKey,
+          dsaEncoding: "ieee-p1363",
+        }).toString("base64url"),
+      clear: async () => undefined,
+    },
+  });
+  return { connection, origin };
+}
+
 async function main(): Promise<void> {
   if (process.platform !== "darwin" || process.arch !== "arm64")
     throw Error("Packaged native Canvas validation requires Apple Silicon macOS.");
@@ -87,6 +245,7 @@ async function main(): Promise<void> {
   let watchdog: ChildProcess | undefined;
   let shareService: ReturnType<typeof startShareService> | undefined;
   let packageProvenance: typeof PackageProvenance.Type | undefined;
+  let pairedFixture: Awaited<ReturnType<typeof seedPairedFixture>> | undefined;
   let ownerSecretStore: ReturnType<typeof makeKeychainCredentialStore> | undefined;
   let publishedCredentialRef: string | undefined;
   let ownerSecretCleanupFailed = false;
@@ -147,6 +306,9 @@ async function main(): Promise<void> {
       30_000,
     );
     await writeFile(join(artifacts, "seeded-canvas.txt"), seed);
+    const projectId = /Chat Project Canvas fixtures: ([0-9a-f-]{36})/.exec(seed)?.[1];
+    if (projectId === undefined) throw Error("The owned Canvas Project seed is missing.");
+    pairedFixture = await seedPairedFixture(join(root, "data"), projectId);
     const shareConfig = readShareConfig({
       OCTANT_SHARE_HOST: "127.0.0.1",
       OCTANT_SHARE_PORT: "0",
@@ -575,8 +737,33 @@ const timer = setInterval(() => {
       throw Error(
         "The actual native publication did not produce the expected private viewer response.",
       );
-    const showPublicLinks = async (stage: string) => {
-      await nativeInput(`${stage}-close-export`, "escape", "Export canvas");
+    await pairedFixture.connection.connect();
+    if (pairedFixture.connection.state() !== "ready")
+      throw Error("The actual packaged paired session is unavailable.");
+    const pairedLinks = await pairedFixture.connection.authenticatedFetch({
+      method: "GET",
+      path: "/api/canvas/public-shares",
+      query: `?canvasId=${encodeURIComponent(String(published.record.canvasId))}`,
+    });
+    const pairedList = await pairedLinks.text();
+    if (!pairedLinks.ok || !pairedList.includes(publishedUrl))
+      throw Error("The genuine paired read did not expose the owned published URL.");
+    for (const path of [
+      "/api/canvas/export-prepare",
+      "/api/canvas/export-decide",
+      "/api/canvas/public-share-revoke",
+    ]) {
+      const refused = await pairedFixture.connection.authenticatedFetch({
+        method: "POST",
+        path,
+        body: "{}",
+        contentType: "application/json",
+      });
+      if (refused.status !== 403)
+        throw Error("A genuine paired client was not refused owner export authority.");
+    }
+    const showPublicLinks = async (stage: string, closeLabel = "Export canvas", active = true) => {
+      await nativeInput(`${stage}-close-export`, "escape", closeLabel);
       await observeUntil(
         `${stage}-canvas-tab`,
         (snapshot) => hasText(snapshot, "v1") && hasText(snapshot, "Signups this week"),
@@ -589,7 +776,7 @@ const timer = setInterval(() => {
       await nativeInput(`${stage}-public-links-scroll`, "scroll-bottom", "Share canvas");
       await observeUntil(
         `${stage}-public-links`,
-        (snapshot) => hasText(snapshot, "Copy link") && hasText(snapshot, "Revoke"),
+        (snapshot) => !active || (hasText(snapshot, "Copy link") && hasText(snapshot, "Revoke")),
       );
     };
     await showPublicLinks("published");
@@ -666,9 +853,41 @@ const timer = setInterval(() => {
       (snapshot) =>
         hasText(snapshot, "Revoke this public link?") && hasText(snapshot, publishedUrl),
     );
+    // Only the owned fixture goes offline. The native owner must journal the
+    // owed revoke before the service returns, retaining its secret for retry.
+    ownService.stop();
     await nativeInput("native-confirm-revoke", "click", "Revoke link");
-    await observeUntil("native-revoked", (snapshot) =>
-      hasText(snapshot, "Link revoked. It no longer opens."),
+    await observeUntil("native-offline-revoke", (snapshot) =>
+      hasText(snapshot, "This Mac keeps trying to revoke the link."),
+    );
+    if (!(await ownerSecretStore.has(publishedCredentialRef)))
+      throw Error("The offline revoke discarded the credential needed to retry.");
+    const restored = startShareService({
+      ...shareConfig.config,
+      port: Number(new URL(ownService.publicUrl).port),
+      usercontentPort: Number(new URL(ownService.usercontentUrl).port),
+      publicOrigin: ownService.publicUrl,
+      usercontentOrigin: ownService.usercontentUrl,
+    });
+    shareService = restored;
+    if (
+      restored.publicUrl !== ownService.publicUrl ||
+      restored.usercontentUrl !== ownService.usercontentUrl
+    )
+      throw Error("The restored owned service changed its origins.");
+    const stillLive = await fetch(publishedUrl, { headers: { cookie } });
+    if (!stillLive.ok) throw Error("The offline revoke was falsely reported as already settled.");
+    // Listings use the production one-minute retry throttle. Wait for that
+    // real interval, then reopen the real Share panel rather than bypass it.
+    for (let second = 0; second < 61 && !controller.signal.aborted; second++) await pause(1000);
+    if (controller.signal.aborted) throw Error("The offline retry was interrupted.");
+    await showPublicLinks("retry", "Share canvas", false);
+    await waitForProcessCleanup(
+      async () => {
+        if ((await fetch(publishedUrl, { headers: { cookie } })).status !== 410)
+          throw Error("The production pending-revoke retry has not settled.");
+      },
+      { timeoutMs: 10_000 },
     );
     const gone = await fetch(publishedUrl, { headers: { cookie } });
     if (gone.status !== 410) throw Error("The natively revoked publication did not return 410.");
@@ -695,8 +914,10 @@ const timer = setInterval(() => {
           nativeCopy: true,
           nativeRevoke410: true,
           scopedOwnerCredentialRemoved: true,
-          pairedClient: "not-run",
-          offlineRetry: "not-run",
+          pairedClient: "actual-packaged-gateway-pinned-TLS-signed-session-read-and-export-refusal",
+          pairedSetup: "API-seeded owned device and Project scope; no native pairing UI",
+          pairedBrowserClipboard: false,
+          offlineRetry: "native-offline-revoke-and-listing-retry-passed",
         },
         null,
         2,
@@ -708,6 +929,7 @@ const timer = setInterval(() => {
     clearTimeout(timer);
     process.removeListener("SIGTERM", interrupted);
     process.removeListener("SIGINT", interrupted);
+    pairedFixture?.connection.disconnect();
     if (shareService !== undefined) shareService.stop();
     if (ownerSecretStore !== undefined && publishedCredentialRef !== undefined) {
       try {
@@ -774,6 +996,17 @@ const timer = setInterval(() => {
         gracefulTimeoutMs: 3000,
         forceTimeoutMs: 2000,
       });
+      if (pairedFixture !== undefined) {
+        const address = new URL(pairedFixture.origin);
+        const probe = createServer();
+        await new Promise<void>((resolve, reject) => {
+          probe.once("error", reject);
+          probe.listen(Number(address.port), address.hostname, resolve);
+        });
+        await new Promise<void>((resolve, reject) =>
+          probe.close((error) => (error ? reject(error) : resolve())),
+        );
+      }
       cleanupVerified = true;
     }
     if (shareService !== undefined) {

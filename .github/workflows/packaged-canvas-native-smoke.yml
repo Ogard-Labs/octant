@@ -35,6 +35,8 @@ jobs:
         with:
           bun-version: 1.4.4
       - run: bun install --frozen-lockfile
+        env:
+          ELECTRON_SKIP_BINARY_DOWNLOAD: "1"
       - name: Identify unchanged production inputs for the unsigned package cache
         id: package-source
         shell: bash

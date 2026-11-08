@@ -171,8 +171,11 @@ if mode == "click" || mode == "fill" || mode == "fill-private" || mode == "toggl
         }
         refuse("Another native window covers the exact observed target: owner=\(owner), layer=\(layer), window=\(identifier).")
     }
-    guard let down = CGEvent(mouseEventSource: nil, mouseType: .leftMouseDown, mouseCursorPosition: point, mouseButton: .left),
+    guard let move = CGEvent(mouseEventSource: nil, mouseType: .mouseMoved, mouseCursorPosition: point, mouseButton: .left),
+          let down = CGEvent(mouseEventSource: nil, mouseType: .leftMouseDown, mouseCursorPosition: point, mouseButton: .left),
           let up = CGEvent(mouseEventSource: nil, mouseType: .leftMouseUp, mouseCursorPosition: point, mouseButton: .left) else { refuse("Native pointer events are unavailable.") }
+    move.post(tap: .cghidEventTap)
+    usleep(75_000)
     down.post(tap: .cghidEventTap)
     usleep(50_000)
     up.post(tap: .cghidEventTap)
