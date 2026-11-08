@@ -10801,7 +10801,12 @@ access` agree); a thread's own change is journaled as
   thread but cannot raise one to Full access or start one at Full access;
   the host refuses those at the route with "Full
   access is chosen in the Octant window on this host." `octant agent` keeps
-  sending Full access exactly when the Project remembers it. A Work thread
+  sending Full access exactly when the Project remembers it, and
+  `octant agent --access <mode>` asks for any mode on a new thread:
+  `full-access` is remembered for the Code Project through the same
+  `change-code-project-access` command `octant project access` sends, so it
+  works the same on a host with no desktop window; a Work thread takes the
+  level through `change-work-thread-access` (no Plan overlay). A Work thread
   takes the same levels without Plan: Settings › Work sets the one a new
   thread starts at and its composer changes it
   ([Modes](#modes-chat-work-and-code)).

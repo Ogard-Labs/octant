@@ -18,11 +18,13 @@ import {
   CodeOperationResult,
   CodeThreadView,
   ProjectBootstrap,
+  type PermissionMode,
   WorkThreadBootstrap,
   WorkThreadCommandResult,
   WorkThreadTranscript,
   decodeHostAnswer,
 } from "@octant/contracts";
+import { threadAccessOf, workAccessOfPermissionMode } from "@octant/domain";
 import {
   answerAgentTurnQuestion,
   changeAgentModel,
@@ -594,6 +596,13 @@ export async function createAgentThread(
     readonly cwd?: string | undefined;
     /** `model` or `endpoint/model`; the first harness model when absent. */
     readonly model?: string | undefined;
+    /**
+     * The access a new Work or Code thread starts at, as the composer's mode
+     * picker names it. `full-access` is remembered for the Code Project first,
+     * the same command `octant project access <name> full-access` sends, so a
+     * terminal thread starts without a per-thread confirmation on any host.
+     */
+    readonly access?: PermissionMode | undefined;
   },
 ): Promise<
   | HostRefusal
@@ -637,6 +646,12 @@ export async function createAgentThread(
     };
   }
   if (mode === "chat") {
+    if (input.access !== undefined) {
+      return {
+        kind: "refused",
+        message: "Chat threads have no access mode; --access applies to Work and Code threads.",
+      };
+    }
     const models = input.model === undefined ? [] : await listAgentModels(session, "chat");
     const model = input.model === undefined ? undefined : pickAgentModel(models, input.model);
     if (input.model !== undefined && model === undefined) {
@@ -732,6 +747,31 @@ export async function createAgentThread(
     if (!("kind" in created) || created.kind !== "thread-created") {
       return { kind: "refused", message: "The host did not create the Work thread." };
     }
+    if (input.access !== undefined) {
+      const workAccess = workAccessOfPermissionMode(input.access);
+      if (workAccess === undefined) {
+        return {
+          kind: "refused",
+          message: "--access plan is not a Work mode; Work has no Plan overlay.",
+        };
+      }
+      const changed = await session.send({
+        path: "/api/work/threads/commands",
+        method: "POST",
+        body: {
+          kind: "change-work-thread-access",
+          threadId,
+          expectedVersion: 1,
+          access: workAccess,
+        },
+      });
+      if (changed.status !== 200) {
+        return {
+          kind: "refused",
+          message: refusalMessage(changed, "The host did not change the Work thread's access."),
+        };
+      }
+    }
     const threadOpened = await openAgentWindow(session, {
       mode,
       projectId: String(project.id),
@@ -769,7 +809,31 @@ export async function createAgentThread(
   // it. Asking the same way lets a terminal thread follow `octant project
   // access <name> full-access`; anywhere else it starts approval-gated, and
   // the host refuses a remembered request the Project no longer backs.
-  const remembered = project.type === "code" && project.codeAccessPersistence === "project-default";
+  let remembered = project.type === "code" && project.codeAccessPersistence === "project-default";
+  const requested = input.access === undefined ? undefined : threadAccessOf(input.access);
+  if (requested?.executionPolicy === "full-access" && !remembered) {
+    // An explicit --access full-access remembers Full access for the Project
+    // first, through the same command `octant project access` sends, so the
+    // new thread starts journaled at Full access and works the same on a
+    // host with no desktop window to confirm on.
+    const granted = await session.send({
+      path: "/api/projects/commands",
+      method: "POST",
+      body: {
+        kind: "change-code-project-access",
+        projectId: project.id,
+        expectedVersion: project.version,
+        codeAccessPersistence: "project-default",
+      },
+    });
+    if (granted.status !== 200) {
+      return {
+        kind: "refused",
+        message: refusalMessage(granted, "The host refused to remember Full access for this Project."),
+      };
+    }
+    remembered = true;
+  }
   const now = new Date().toISOString();
   const threadId = randomUUID();
   const response = await session.send({
@@ -787,8 +851,14 @@ export async function createAgentThread(
         lifecycle: "active",
         providerInstanceId: model.instanceId,
         modelId: model.modelId,
-        executionPolicy: remembered ? "full-access" : "approval-gated",
-        permissionPersistence: remembered ? "project-default" : "current-session",
+        executionPolicy:
+          requested?.executionPolicy ?? (remembered ? "full-access" : "approval-gated"),
+        ...(requested?.autoApprove === true ? { autoApprove: true } : {}),
+        permissionPersistence:
+          (requested?.executionPolicy ?? (remembered ? "full-access" : "approval-gated")) ===
+            "full-access" && remembered
+            ? "project-default"
+            : "current-session",
         deliveryTarget: {
           branchIntent: String(checkout.checkout.head.name),
           remoteName: "origin",

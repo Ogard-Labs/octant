@@ -392,6 +392,10 @@ describe("octant agent command line", () => {
     expect(resolveAgentCliCommand("agent", [], { model: "lm studio/gemma" })).toMatchObject({
       model: "lm studio/gemma",
     });
+    expect(resolveAgentCliCommand("agent", [], { access: "full-access" })).toMatchObject({
+      access: "full-access",
+    });
+    expect(resolveAgentCliCommand("agent", [], { access: "yolo" })).toBeUndefined();
     expect(resolveAgentCliCommand("agent", ["extra"], {})).toBeUndefined();
     expect(resolveAgentCliCommand("agent", [], { bogus: true })).toBeUndefined();
     expect(resolveAgentCliCommand("harness", ["slots"], {})).toEqual({
