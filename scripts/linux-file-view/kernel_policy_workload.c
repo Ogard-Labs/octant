@@ -1,6 +1,7 @@
 /* SPDX-License-Identifier: MIT */
 #define _GNU_SOURCE
 #include <errno.h>
+#include <dirent.h>
 #include <fcntl.h>
 #include <signal.h>
 #include <stdbool.h>
@@ -60,6 +61,12 @@ int main(void)
   errno = 0;
   if (read(private, bytes, sizeof(bytes)) != -1 || errno != EACCES) return 15;
   close(private);
+  DIR *directory = opendir(ROOT "/home/.aws/sso/cache");
+  if (!directory) return 16;
+  errno = 0;
+  bool refused = readdir(directory) == NULL && errno == EACCES;
+  closedir(directory);
+  if (!refused) return 17;
   puts("OCTANT_ORIGINAL_POLICY_WORKLOAD passed");
   return 0;
 }

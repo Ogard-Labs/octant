@@ -17,6 +17,10 @@ try {
   await link(key, `${root}/alias`);
   await writeFile(`${root}/ordinary`, "permitted before", { mode: 0o600 });
   await mkdir(`${root}/empty`, { mode: 0o700 });
+  await mkdir(`${home}/.aws/sso/cache`, { recursive: true, mode: 0o700 });
+  await writeFile(`${home}/.aws/sso/cache/token`, "synthetic guarded folder contents", {
+    mode: 0o600,
+  });
   await writeFile(`${home}/.ssh/id_independent`, "synthetic independently protected", {
     mode: 0o600,
   });

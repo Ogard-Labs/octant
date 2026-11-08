@@ -7,6 +7,7 @@
 struct path;
 struct qstr;
 struct renamedata;
+struct cred;
 
 /* These hooks never wait, allocate, or call the userspace policy broker. */
 #ifdef CONFIG_SECURITY_OCTANT_MEDIATION
@@ -14,6 +15,7 @@ void octant_namespace_begin(void);
 void octant_namespace_end(void);
 int octant_namespace_check_rename(const struct renamedata *operation);
 bool octant_mediation_restricted(void);
+int octant_mediation_receive_scm(const struct cred *sender);
 int octant_namespace_prepare(u32 operation, const struct path *source,
 	const struct qstr *name, const struct path *destination,
 	const struct qstr *new_name, u32 flags);
@@ -22,6 +24,7 @@ static inline void octant_namespace_begin(void) {}
 static inline void octant_namespace_end(void) {}
 static inline int octant_namespace_check_rename(const struct renamedata *operation) { return 0; }
 static inline bool octant_mediation_restricted(void) { return false; }
+static inline int octant_mediation_receive_scm(const struct cred *sender) { return 0; }
 static inline int octant_namespace_prepare(u32 operation, const struct path *source,
 	const struct qstr *name, const struct path *destination,
 	const struct qstr *new_name, u32 flags) { return 0; }

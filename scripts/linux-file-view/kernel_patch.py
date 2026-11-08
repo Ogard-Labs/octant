@@ -65,6 +65,38 @@ def instrument_namespace_preparation(source: str) -> str:
     return source
 
 
+def install_scm(kernel: Path) -> None:
+    header = kernel / "include/net/scm.h"
+    source = header.read_text()
+    anchor = "\tstruct user_struct\t*user;"
+    if source.count(anchor) != 1:
+        raise ValueError("Pinned SCM ownership layout differs")
+    header.write_text(source.replace(anchor, "\tconst struct cred\t*octant_sender;\n" + anchor, 1))
+    path = kernel / "net/core/scm.c"
+    source = path.read_text()
+    changes = {
+        "\t\tfpl->user = NULL;": "\t\tfpl->user = NULL;\n\t\tfpl->octant_sender = get_current_cred();",
+        "\t\tfree_uid(fpl->user);": "\t\tfree_uid(fpl->user);\n\t\tput_cred(fpl->octant_sender);",
+        "\t\tnew_fpl->user = get_uid(fpl->user);": "\t\tnew_fpl->user = get_uid(fpl->user);\n\t\tget_cred(new_fpl->octant_sender);",
+    }
+    for anchor, replacement in changes.items():
+        if source.count(anchor) != 1:
+            raise ValueError("Pinned SCM credential lifetime differs")
+        source = source.replace(anchor, replacement, 1)
+    path.write_text(source)
+    # Native and compat receives share the same sender principal. A refusal
+    # delivers no FD and retains normal MSG_CTRUNC semantics and GC cleanup.
+    for relative in ("net/core/scm.c", "net/compat.c"):
+        path = kernel / relative
+        source = path.read_text()
+        anchor = "\tint err = 0, i;"
+        declaration = "void scm_detach_fds" + ("_compat" if relative.endswith("compat.c") else "")
+        start = source.index(declaration)
+        at = source.index(anchor, start) + len(anchor)
+        source = source[:at] + "\n\tif (octant_mediation_receive_scm(scm->fp->octant_sender))\n\t\tfdmax = 0;\n" + source[at:]
+        path.write_text(include_bridge(source))
+
+
 def install_epochs(kernel: Path, native: Path) -> None:
     # Real unconfined writers use these same VFS entry points. These counters
     # describe in-flight mutations, not delayed filesystem-watch notifications.
@@ -131,3 +163,4 @@ def install_epochs(kernel: Path, native: Path) -> None:
     at = matches[0].end()
     source = source[:at] + "\n\tif (octant_mediation_restricted())\n\t\treturn ERR_PTR(-ENOSYS);\n" + source[at:]
     aio.write_text(include_bridge(source))
+    install_scm(kernel)

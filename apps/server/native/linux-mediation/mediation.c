@@ -17,6 +17,7 @@
 #include <linux/kdev_t.h>
 #include <linux/kref.h>
 #include <linux/lsm_hooks.h>
+#include <linux/magic.h>
 #include <linux/miscdevice.h>
 #include <linux/mm.h>
 #include <linux/mutex.h>
@@ -280,7 +281,7 @@ static int admit_request(struct octant_mediation_request *request,
 static int admit_inode(struct inode *inode, u32 operation)
 {
 	struct octant_mediation_request request = { .operation = operation };
-	if (!inode || !S_ISREG(inode->i_mode))
+	if (!inode || (!S_ISREG(inode->i_mode) && !S_ISDIR(inode->i_mode)))
 		return 0;
 	request.inode = inode->i_ino;
 	request.device_major = MAJOR(inode->i_sb->s_dev);
@@ -414,6 +415,15 @@ static int protect_mapping(struct vm_area_struct *vma, unsigned long requested, 
 static int check_exec(struct linux_binprm *bprm)
 {
 	return admit_file(bprm->file, OCTANT_MEDIATION_EXEC);
+}
+
+/* Credentials are captured at the actual SCM send, retained on the kernel
+ * record and released with it. File opener credentials would wrongly reject
+ * an inherited ordinary FD later passed between peers of the same policy. */
+int octant_mediation_receive_scm(const struct cred *sender)
+{
+	struct octant_context *ours = octant_cred(current_cred())->context;
+	return ours && (!sender || octant_cred(sender)->context != ours) ? -EACCES : 0;
 }
 
 static int receive_file(struct file *file)
@@ -557,9 +567,16 @@ static int close_broker(struct inode *inode, struct file *file)
 	return 0;
 }
 
-static int inherited_ring(const void *unused, struct file *file, unsigned int descriptor)
+static int inherited_unsafe_descriptor(const void *unused, struct file *file, unsigned int descriptor)
 {
-	return io_is_uring_fops(file) ? -EACCES : 0;
+	if (io_is_uring_fops(file) || !IS_ERR(pidfd_pid(file)))
+		return -EACCES;
+	/* A proc memory FD was authorized against its opener, not this new
+	 * workload. Existing directory/O_PATH and ordinary file FDs stay valid. */
+	if (file_inode(file)->i_sb->s_magic == PROC_SUPER_MAGIC &&
+	    !(file->f_mode & FMODE_PATH) && S_ISREG(file_inode(file)->i_mode))
+		return -EACCES;
+	return 0;
 }
 
 static long enroll(struct file *file, unsigned int command, unsigned long argument)
@@ -576,7 +593,7 @@ static long enroll(struct file *file, unsigned int command, unsigned long argume
 	 * share its address space or descriptor table with an unenrolled peer. */
 	if (!current->mm || atomic_read(&current->mm->mm_users) != 1 ||
 	    atomic_read(&current->files->count) != 1 ||
-	    iterate_fd(current->files, 0, inherited_ring, NULL))
+	    iterate_fd(current->files, 0, inherited_unsafe_descriptor, NULL))
 		return -EPERM;
 #ifdef CONFIG_AIO
 	if (rcu_access_pointer(current->mm->ioctx_table))

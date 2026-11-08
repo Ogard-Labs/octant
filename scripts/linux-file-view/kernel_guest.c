@@ -15,6 +15,7 @@
 #include <sys/prctl.h>
 #include <sys/reboot.h>
 #include <sys/stat.h>
+#include <sys/socket.h>
 #include <sys/syscall.h>
 #include <sys/sysmacros.h>
 #include <sys/wait.h>
@@ -40,7 +41,66 @@ static bool transfer(int fd, void *data, size_t length, bool output)
   return (output ? write(fd, data, length) : read(fd, data, length)) == (ssize_t)length;
 }
 
-static void workload(int enrollment, int commands, int results)
+static bool send_descriptor(int socket, int file)
+{
+  char byte = 'F';
+  struct iovec data = {.iov_base = &byte, .iov_len = 1};
+  union { struct cmsghdr align; char bytes[CMSG_SPACE(sizeof(int))]; } control = {0};
+  struct msghdr message = {.msg_iov = &data, .msg_iovlen = 1,
+    .msg_control = control.bytes, .msg_controllen = sizeof(control.bytes)};
+  struct cmsghdr *header = CMSG_FIRSTHDR(&message);
+  header->cmsg_level = SOL_SOCKET; header->cmsg_type = SCM_RIGHTS; header->cmsg_len = CMSG_LEN(sizeof(int));
+  memcpy(CMSG_DATA(header), &file, sizeof(file));
+  return sendmsg(socket, &message, MSG_NOSIGNAL) == 1;
+}
+static int receive_descriptor(int socket, bool *truncated)
+{
+  char byte = 0;
+  struct iovec data = {.iov_base = &byte, .iov_len = 1};
+  union { struct cmsghdr align; char bytes[CMSG_SPACE(sizeof(int))]; } control = {0};
+  struct msghdr message = {.msg_iov = &data, .msg_iovlen = 1,
+    .msg_control = control.bytes, .msg_controllen = sizeof(control.bytes)};
+  if (recvmsg(socket, &message, MSG_CMSG_CLOEXEC) != 1 || byte != 'F') return -2;
+  *truncated = (message.msg_flags & MSG_CTRUNC) != 0;
+  struct cmsghdr *header = CMSG_FIRSTHDR(&message);
+  int file = -1;
+  if (header && header->cmsg_level == SOL_SOCKET && header->cmsg_type == SCM_RIGHTS &&
+      header->cmsg_len == CMSG_LEN(sizeof(int))) memcpy(&file, CMSG_DATA(header), sizeof(file));
+  return file;
+}
+static bool same_policy_transfer(int inherited)
+{
+  int sockets[2];
+  if (socketpair(AF_UNIX, SOCK_DGRAM | SOCK_CLOEXEC, 0, sockets)) return false;
+  pid_t peer = fork();
+  if (!peer) { close(sockets[0]); _exit(send_descriptor(sockets[1], inherited) ? 0 : 1); }
+  close(sockets[1]);
+  if (peer < 0) { close(sockets[0]); return false; }
+  bool truncated = false;
+  int received = receive_descriptor(sockets[0], &truncated);
+  char bytes[64];
+  bool passed = received >= 0 && !truncated && pread(received, bytes, sizeof(bytes), 0) == sizeof(content) - 1;
+  if (received >= 0) close(received);
+  close(sockets[0]);
+  int result = 0; pid_t joined;
+  do { joined = waitpid(peer, &result, 0); } while (joined < 0 && errno == EINTR);
+  return passed && joined == peer && WIFEXITED(result) && WEXITSTATUS(result) == 0;
+}
+static bool same_policy_shared_memory(void)
+{
+  int *page = mmap(NULL, 4096, PROT_READ | PROT_WRITE, MAP_SHARED | MAP_ANONYMOUS, -1, 0);
+  if (page == MAP_FAILED) return false;
+  *page = 42;
+  pid_t peer = fork();
+  if (!peer) { *page = 43; _exit(0); }
+  int result = 0; pid_t joined = -1;
+  if (peer > 0) do { joined = waitpid(peer, &result, 0); } while (joined < 0 && errno == EINTR);
+  bool passed = peer > 0 && joined == peer && WIFEXITED(result) && WEXITSTATUS(result) == 0 && *page == 43;
+  munmap(page, 4096);
+  return passed;
+}
+
+static void workload(int enrollment, int commands, int results, int foreign)
 {
   int held = open("/tmp/ordinary", O_RDONLY | O_CLOEXEC);
   int alias = open("/tmp/alias", O_RDONLY | O_CLOEXEC);
@@ -55,7 +115,16 @@ static void workload(int enrollment, int commands, int results)
     bool denied = command == 'D' || command == 'M' || command == 'X';
     int passed;
     errno = 0;
-    if (command == 'F') {
+    if (command == 'c') {
+      passed = same_policy_transfer(held);
+    } else if (command == 'g') {
+      passed = same_policy_shared_memory();
+    } else if (command == 'n' || command == 'p') {
+      bool truncated = false;
+      int received = receive_descriptor(foreign, &truncated);
+      passed = received == -1 && truncated;
+      if (received >= 0) close(received);
+    } else if (command == 'F') {
       passed = ftruncate(output, 0) == -1 && errno == EACCES;
     } else if (command == 'P') {
       passed = truncate("/tmp/ordinary", 0) == -1 && errno == EACCES;
@@ -92,6 +161,28 @@ static void workload(int enrollment, int commands, int results)
   }
 }
 
+static bool refuses_inherited_proc(int broker)
+{
+  int enrollment = ioctl(broker, OCTANT_MEDIATION_ENROLL_FD, 0);
+  if (enrollment < 0) return false;
+  pid_t child = fork();
+  if (!child) {
+    close(broker);
+    int memory = open("/proc/self/mem", O_RDONLY | O_CLOEXEC);
+    if (memory < 0 || prctl(PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0)) _exit(1);
+    errno = 0;
+    if (ioctl(enrollment, OCTANT_MEDIATION_ENROLL, 0) != -1 || errno != EPERM) _exit(2);
+    close(memory);
+    /* Refusal must not consume enrollment or change the starting principal. */
+    _exit(ioctl(enrollment, OCTANT_MEDIATION_ENROLL, 0) ? 3 : 0);
+  }
+  close(enrollment);
+  if (child < 0) return false;
+  int result; pid_t joined;
+  do { joined = waitpid(child, &result, 0); } while (joined < 0 && errno == EINTR);
+  return joined == child && WIFEXITED(result) && WEXITSTATUS(result) == 0;
+}
+
 static int measure(void)
 {
   signal(SIGALRM, alarmed); alarm(25);
@@ -106,9 +197,11 @@ static int measure(void)
   struct octant_mediation_status status;
   if (ioctl(broker, OCTANT_MEDIATION_STATUS, &status) || status.abi != OCTANT_MEDIATION_ABI ||
       status.production_coverage != 0) { close(broker); return 5; }
+  if (!refuses_inherited_proc(broker)) { close(broker); return 9; }
   int enrollment = ioctl(broker, OCTANT_MEDIATION_ENROLL_FD, 0);
-  int commands[2], answers[2];
-  if (enrollment < 0 || pipe2(commands, O_CLOEXEC) || pipe2(answers, O_CLOEXEC)) { close(broker); return 6; }
+  int commands[2], answers[2], foreign[2];
+  if (enrollment < 0 || pipe2(commands, O_CLOEXEC) || pipe2(answers, O_CLOEXEC) ||
+      socketpair(AF_UNIX, SOCK_DGRAM | SOCK_CLOEXEC, 0, foreign)) { close(broker); return 6; }
   pid_t child = fork();
   if (child == 0) {
     struct octant_mediation_status forwarded;
@@ -125,19 +218,24 @@ static int measure(void)
     struct octant_mediation_parent parent = {0};
     errno = 0;
     if (ioctl(broker, OCTANT_MEDIATION_PARENT_FD, &parent) != -1 || errno != EPERM) _exit(44);
-    close(broker); close(commands[1]); close(answers[0]);
-    workload(enrollment, commands[0], answers[1]);
+    close(broker); close(commands[1]); close(answers[0]); close(foreign[0]);
+    workload(enrollment, commands[0], answers[1], foreign[1]);
   }
-  close(enrollment); close(commands[0]); close(answers[1]);
+  close(enrollment); close(commands[0]); close(answers[1]); close(foreign[1]);
   if (child < 0) { close(broker); close(commands[1]); close(answers[0]); return 7; }
-  const char operations[] = {'r', 'l', 'm', 't', 'w', 'a', 'S', 'D', 'M', 'F', 'P', 'O', 'X', 'X'};
+  const char operations[] = {'r', 'l', 'm', 't', 'c', 'g', 'n', 'p', 'w', 'a', 'S', 'D', 'M', 'F', 'P', 'O', 'X', 'X'};
   bool passed = true;
   unsigned measured = 0;
   unsigned long long previous = 0;
   for (unsigned i = 0; i < sizeof(operations) && passed; i++) {
     char command = operations[i];
-    passed = transfer(commands[1], &command, 1, true);
-    if (passed && command != 'a' && i < 13) {
+    if (command == 'n' || command == 'p') {
+      int file = open(command == 'p' ? "/proc/self/mem" : "/tmp/ordinary", O_RDONLY | O_CLOEXEC);
+      passed = file >= 0 && send_descriptor(foreign[0], file);
+      if (file >= 0) close(file);
+    }
+    passed = passed && transfer(commands[1], &command, 1, true);
+    if (passed && command != 'a' && command != 'g' && command != 'n' && command != 'p' && broker >= 0) {
       struct octant_mediation_request request;
       passed = transfer(broker, &request, sizeof(request), false) &&
         request.request_id > previous && request.reserved == 0 &&
@@ -150,7 +248,7 @@ static int measure(void)
       printf("OCTANT_KERNEL_STEP %u operation=%u epoch=%llu\n", i,
         request.operation, (unsigned long long)request.namespace_epoch);
       previous = request.request_id;
-      if (i == 12) { close(broker); broker = -1; }
+      if (command == 'X') { close(broker); broker = -1; }
       else {
         if (command == 'S') {
           int marker = open("/tmp/ordinary.pub", O_CREAT | O_EXCL | O_WRONLY | O_CLOEXEC, 0600);
@@ -167,7 +265,7 @@ static int measure(void)
         struct octant_mediation_answer answer = {
           .request_id = request.request_id,
           .namespace_epoch = request.namespace_epoch,
-          .allow = i < 7,
+          .allow = command == 'r' || command == 'l' || command == 'm' || command == 't' || command == 'c' || command == 'w' || command == 'S',
         };
         passed = write(broker, &answer, sizeof(answer)) == sizeof(answer);
       }
@@ -183,9 +281,9 @@ static int measure(void)
   do { joined = waitpid(child, &exit, 0); } while (joined < 0 && errno == EINTR);
   bool reaped = joined == child;
   passed = passed && reaped && WIFEXITED(exit) && WEXITSTATUS(exit) == 0;
-  close(commands[1]); close(answers[0]); if (broker >= 0) close(broker);
+  close(commands[1]); close(answers[0]); close(foreign[0]); if (broker >= 0) close(broker);
   bool cleaned = !unlink("/tmp/ordinary.pub") && !unlink("/tmp/alias") && !unlink("/tmp/ordinary");
-  printf("OCTANT_KERNEL_EVIDENCE {\"status\":\"%s\",\"productionReady\":false,\"measurements\":%u,\"pendingAndNewReadDeniedOnBrokerClose\":%s,\"ownedChildJoined\":%s,\"cleaned\":%s}\n",
+  printf("OCTANT_KERNEL_EVIDENCE {\"status\":\"%s\",\"productionReady\":false,\"measurements\":%u,\"inheritedProcRefused\":true,\"pendingAndNewReadDeniedOnBrokerClose\":%s,\"ownedChildJoined\":%s,\"cleaned\":%s}\n",
     passed && cleaned ? "measured-admission-core" : "failed", measured,
     passed ? "true" : "false", reaped ? "true" : "false", cleaned ? "true" : "false");
   return passed && cleaned ? 0 : 8;

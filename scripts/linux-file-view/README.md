@@ -8,7 +8,15 @@ requests, each with a two-second deadline. The actual kernel-held file supplies
 device/inode/operation identity. A one-use enrollment descriptor binds a fresh
 single-thread bootstrap's credentials after `no_new_privs`; existing shared
 address spaces, shared descriptor tables and ring/AIO contexts refuse enrollment.
-Later ordinary threads inherit the same immutable context. A broker close or
+Later ordinary threads inherit the same immutable context. Ordinary future
+shared anonymous memory and same-policy descriptor transfer remain usable.
+SCM records retain the real sending credentials, including through duplicate
+records and socket GC; native and compat receive paths compare that immutable
+sender context with the receiver. Claimed SCM UID/PID fields and a file's
+original opener cannot substitute for that authority. Foreign-policy transfers
+refuse while same-policy transfer of an inherited ordinary descriptor remains
+valid. Initial enrollment refuses inherited proc-data/pidfd and async contexts;
+ordinary descriptors and private bootstrap control remain valid. A broker close or
 unanswered deadline refuses both pending and subsequent admissions. Broker
 reads, writes, status queries and enrollment minting are bound to the original
 TGID and captured credentials, not possession of a forwarded descriptor. The
@@ -73,8 +81,11 @@ reports `production_coverage: 0`; the host never calls it. Namespace begin/end
 and final epoch comparison exist, but complete VFS mutation/pre-effect hooks,
 the effective structured-policy broker, all file/alias/process routes, the real
 production Bubblewrap launch and the complete native compatibility matrix are
-still required. The admission guest check covers fourteen actual read/alias/new-mapping,
-same-policy thread, write/truncate, async-fallback and group-loss cases. The
+still required. The admission guest check adds actual same-policy inherited-FD transfer,
+foreign ordinary/proc-memory FD refusal, and future shared-memory controls to
+the earlier fourteen read/alias/new-mapping, same-policy thread, write/truncate,
+async-fallback and group-loss cases. A separate enrollment control refuses an
+inherited proc-memory FD, then succeeds after it is closed. The
 additional namespace cases check copied identities/names, refused and allowed
 mutations, outside same-parent progress while a proposal waits, stale replies,
 and pending/new mutation refusal after broker loss. Their exact-head hosted
