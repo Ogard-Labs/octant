@@ -270,19 +270,19 @@ export function BenchmarkLeaderboard(props: BenchmarkLeaderboardProps) {
           {blocks.passRate === undefined ? null : (
             <div className="diagnostics-dashboard__panel">
               <h3 className="usage-workspace__subheading">Check pass rate</h3>
-              <BarListBlock block={blocks.passRate} />
+              <BarListBlock block={blocks.passRate} locale="en" />
             </div>
           )}
           {blocks.speed === undefined ? null : (
             <div className="diagnostics-dashboard__panel">
               <h3 className="usage-workspace__subheading">Speed</h3>
-              <BarListBlock block={blocks.speed} />
+              <BarListBlock block={blocks.speed} locale="en" />
             </div>
           )}
           {blocks.cost === undefined ? null : (
             <div className="diagnostics-dashboard__panel">
               <h3 className="usage-workspace__subheading">Cost</h3>
-              <BarListBlock block={blocks.cost} />
+              <BarListBlock block={blocks.cost} locale="en" />
             </div>
           )}
         </div>
