@@ -17,6 +17,7 @@ try {
   await link(original, `${root}/runtime-alias`);
   assert.equal((await stat(original)).ino, (await stat(`${root}/runtime-alias`)).ino);
   await writeFile(`${root}/runtime-alias`, "permitted after");
+  await descriptor.sync();
   await rename(`${root}/runtime-alias`, `${root}/runtime-renamed`);
   assert.equal(await readFile(original, "utf8"), "permitted after");
   const bytes = Buffer.alloc(64);

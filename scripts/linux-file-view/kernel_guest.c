@@ -566,7 +566,8 @@ int main(void)
       result = policy_measure(NULL);
     }
     // Reuse the same scenario, not a broader matrix: the earlier UID-map
-    // failure was timing-sensitive. Each policy process owns its 15s bound;
+    // failure was timing-sensitive. Ordinary policy processes have a 15s
+    // bound and the two runtime processes 25s each;
     // the independent QEMU supervisor owns a 150s maximum for the whole guest.
     for (unsigned attempt = 0; attempt < 3 && !result; attempt++) {
       result = policy_measure("--bubblewrap");

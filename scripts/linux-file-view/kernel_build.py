@@ -81,9 +81,9 @@ def main():
         if f"CONFIG_{symbol}=y" not in configured:
             raise SystemExit(f"Required built-in guest prerequisite is unavailable: {symbol}")
     run("make", "-j2", "bzImage", cwd=kernel)
-    executable = root / "init"
+    init_binary = root / "init"
     run("gcc", "-static", "-pthread", "-std=c11", "-Wall", "-Wextra", "-Werror",
-        str(repository / "scripts/linux-file-view/kernel_guest.c"), "-o", str(executable), timeout=30)
+        str(repository / "scripts/linux-file-view/kernel_guest.c"), "-o", str(init_binary), timeout=30)
     relay = root / "octant-mediation"
     workload = root / "policy-workload"
     policy = root / "policy-broker"
@@ -96,16 +96,16 @@ def main():
     # into the disposable initramfs. Nothing is mounted from the runner home.
     runtime_files = {}
     for name in ("bun", "node"):
-        executable = shutil.which(name)
-        if not executable:
+        runtime_path = shutil.which(name)
+        if not runtime_path:
             raise SystemExit(f"The owned runtime proof requires {name}.")
-        runtime_files[f"usr/bin/{name}"] = Path(executable).resolve(strict=True)
+        runtime_files[f"usr/bin/{name}"] = Path(runtime_path).resolve(strict=True)
     library_log = root / "policy-libraries.log"
     with library_log.open("wb") as output:
         run("ldd", str(policy), timeout=10, output=output)
         run("ldd", "/usr/bin/bwrap", timeout=10, output=output)
-        for executable in runtime_files.values():
-            run("ldd", str(executable), timeout=10, output=output)
+        for runtime_path in runtime_files.values():
+            run("ldd", str(runtime_path), timeout=10, output=output)
     guest_files = {"octant-mediation": relay, "policy-workload": workload,
                    "policy-broker": policy, "usr/bin/bwrap": Path("/usr/bin/bwrap"),
                    "kernel-runtime.mjs": repository / "scripts/linux-file-view/kernel_runtime.mjs",
@@ -121,7 +121,7 @@ def main():
     tree.mkdir(mode=0o755)
     for directory in ("dev", "proc", "sys", "tmp"):
         (tree / directory).mkdir(mode=0o755)
-    guest_files["init"] = executable
+    guest_files["init"] = init_binary
     for name, source in guest_files.items():
         destination = tree / name
         destination.parent.mkdir(parents=True, exist_ok=True)

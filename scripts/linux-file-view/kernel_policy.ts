@@ -1,5 +1,5 @@
 /** Owned, networkless guest entry for the actual structured-policy broker. */
-import { mkdir, readFile, rm, stat, writeFile, link } from "node:fs/promises";
+import { mkdir, readFile, rename, rm, stat, writeFile, link } from "node:fs/promises";
 import { setTimeout as pause } from "node:timers/promises";
 import { runLinuxMediationBroker } from "../../apps/server/src/process/linuxMediationBroker";
 import { buildBubblewrapLaunch } from "../../apps/server/src/process/linuxConfinement";
@@ -73,7 +73,10 @@ try {
         !outsidePublished &&
         (await stat(`${root}/watch-ready`)).isFile()
       ) {
-        await writeFile(`${root}/runtime-outside`, "outside permitted");
+        // Publish completed content atomically. An inotify create event alone
+        // does not promise the writer has finished writing the new file.
+        await writeFile(`${root}/runtime-outside-pending`, "outside permitted");
+        await rename(`${root}/runtime-outside-pending`, `${root}/runtime-outside`);
         outsidePublished = true;
       }
       ready = (await stat(`${root}/stage`)).isFile();
