@@ -1316,9 +1316,11 @@ starts a Code session at the same level, and a Work turn journals `shell` and
   is set only from a window on this host; a paired device is refused. It
   shows the Project terminal and Project actions, the developer surfaces Work
   has today; no thread's authority reads it. A server Work Project's separately
-  journaled choice exposes saved actions only in Settings and the active
-  header/palette, without enabling a general terminal; [Server Projects](design/server-projects.md#threads)
-  owns that narrower surface.
+  journaled choice exposes saved actions in Settings and the active
+  header/palette, plus the person's Project terminal in the bound Settings
+  row. Hiding it closes that person's SSH session without changing task or
+  already admitted saved-action authority; [Server Projects](design/server-projects.md#threads)
+  owns that surface and its lifecycle.
 
 An ACP agent whose shell runs in-process with no protocol request reports
 `unsupported` at Guarded and Reviewed and runs only at Full access, in Work as
@@ -12545,7 +12547,13 @@ approval-gated` command that undoes it. The terminal shows no one-time
   a Work window shows it once the person turns on the Project's **Developer
   tools**, since a terminal is a developer surface, not authority (the host
   serves a Work Project's terminal either way, as Work's shell is not the
-  switch's to grant). Chat has no root. The shell runs at the
+  switch's to grant). A server Work Project instead uses the explicit
+  person-operated SSH terminal in its bound Settings row, with Developer
+  tools required throughout its lifetime; its Full remote posture and exact
+  window/registry/binding checks are owned by
+  [Server Projects](design/server-projects.md#threads). It confers no task
+  authority and a closed SSH session is not proof all remote programs ended.
+  Chat has no root. A local shell runs at the
   Project's bound root at its current binding revision (the Project's own
   folder, never a thread's managed worktree) through the same confinement a
   Code thread's terminal gets, with its own shell state and no credential

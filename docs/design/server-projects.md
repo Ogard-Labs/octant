@@ -254,8 +254,8 @@ host key. A future structured diagnostic must preserve those trust boundaries.
   pseudo-terminal here that runs only `ssh`. It carries no credential, Browser
   grant, or other folder from this host, and Plan starts none. When the
   connection drops the terminal ends; it is never restarted on this host.
-- **Project terminal.** A Code server Project's own terminal (the one with
-  no thread, opened from the dock's quick tools of a new task) is the same SSH
+- **Project terminal.** A server Project's own terminal (the one with
+  no thread) is the same SSH
   login shell in the folder, owned by the local window that opened it and
   journaled as a local Project terminal is. It has no extra folder and no
   browser beside it. A server removed from the registry refuses the next
@@ -263,6 +263,23 @@ host key. A future structured diagnostic must preserve those trust boundaries.
   Full access. _Rationale:_ the posture says what holds the shell, and on a
   server nothing does: Octant has no sandbox there, and the person opening
   their own shell is the approval, as it is for a local Project terminal.
+  A Code Project opens it from the dock's quick tools. A Work Project opens
+  **Open terminal** in its Settings → Access → Servers row, only while this
+  live local window holds that Work Project and its default-off **Developer
+  tools** choice is on. Another Work Project offers its existing explicit
+  **Open Project** transition first. The login user, alias, canonical folder
+  and Full remote access are shown before launch. No folder override or Work
+  task context is accepted: this person's shell starts at the Project root,
+  and grants no task, provider, credential or Browser authority.
+  The host checks the window, Work enablement, Project binding, registry
+  login/profile and Developer tools before dispatch and after acquisition.
+  Switching/closing the window, hiding tools, disabling Work or removing or
+  changing that binding/registry retires its owned local SSH session. Stop
+  during a pending start cancels only that window's exact Project/session
+  and closes any late acquisition. Closing or unmounting the panel does the
+  same. The terminal reuses ordinary input, resize, Stop and exit rendering.
+  A dropped session is never restarted; closing SSH cannot prove every
+  program on the server ended. Unknown replies never replay a start or input.
 - **Saved Project actions.** Settings → Access → Servers edits up to
   twelve saved commands on the server Project's own catalog record. Action
   saves have an optimistic revision and a journaled `server-projects.actions-replaced@1`
@@ -317,9 +334,10 @@ host key. A future structured diagnostic must preserve those trust boundaries.
   in its existing Settings → Access → Servers row. A local-only
   `set-server-work-developer-tools` command journals who and when as
   `server-projects.work-developer-tools-changed@1`. It reveals the action editor,
-  saved-action buttons and active Work header/palette entries; it changes only
-  presentation. It does not enable a general Project terminal, a Developer tools
-  pane or other absent server Work surfaces. A person may turn it off while an
+  saved-action buttons, the person's Project terminal in this Settings row,
+  and active Work header/palette entries. It changes no task authority and
+  enables no general Developer tools pane or other absent server Work surfaces.
+  Hiding it closes the person's SSH session; a person may turn it off while an
   already admitted command keeps its separate execution authority. Work actions
   have closed standard input, refuse interactive terminal writes, and keep their
   output in the action dialog without a terminal handoff. This is an input/UI
@@ -375,8 +393,9 @@ host key. A future structured diagnostic must preserve those trust boundaries.
   extension, issue, or terminal session to start from; and its thread view
   names its server and folder and offers no Browser, extension, image
   generation, or file mention. Its dock keeps only Side chat, Document,
-  Canvas, Plan, and Agents, since Work's Files, terminal, and other tools read
-  a folder of this host and none has a server form yet.
+  Canvas, Plan, and Agents. The person's server Project terminal opens only
+  from the bound Settings row above; the general dock tools still have no
+  server Work form.
 
 ### Panels
 
@@ -503,11 +522,11 @@ host key. A future structured diagnostic must preserve those trust boundaries.
 
 ## Not built yet
 
-- Work Files, research sources, the status file and due dates, and the
-  Project terminal for a Work Project on a server; its threads are built. A
-  local Work Project shows its terminal through its Developer tools switch on
-  its overview. A Work Project on a server offers a saved-action presentation
-  switch in Settings, but has no general Project terminal or tools pane.
+- Work Files, research sources, the status file and due dates for a Work
+  Project on a server; its threads and person-operated Project terminal are
+  built. A local Work Project shows its terminal through its Developer tools
+  switch on its overview. A server Work Project uses the Settings row above;
+  a general Developer tools pane remains absent.
 - Extra folders in a server Project.
 - A Project-level guardrail level or reviewer for a server Project; the
   thread and account levels apply.

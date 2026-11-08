@@ -476,15 +476,34 @@ export function wireCodeTooling(deps: CodeToolingDependencies) {
             serverProject: (projectId) => {
               const project = serverProjectStore.project(String(projectId));
               if (project === undefined) return undefined;
+              const registered = serverProjectStore.serverOf(String(projectId));
+              const bindingRevisionId =
+                project.mode === "work"
+                  ? serverWorkBindingRevisionId(project)
+                  : serverCodeCheckout(project).bindingRevisionId;
               return {
-                ...(project.mode === "work" ? { actionsOnly: true as const } : {}),
-                bindingRevisionId:
-                  project.mode === "work"
-                    ? serverWorkBindingRevisionId(project)
-                    : serverCodeCheckout(project).bindingRevisionId,
+                mode: project.mode ?? "code",
+                bindingRevisionId,
+                ...(project.mode === "work"
+                  ? {
+                      interactiveAllowed: project.developerTools?.enabled === true,
+                      current: () => {
+                        const fresh = serverProjectStore.workProject(String(projectId));
+                        const freshServer = serverProjectStore.serverOf(String(projectId));
+                        return (
+                          fresh !== undefined &&
+                          registered !== undefined &&
+                          String(serverWorkBindingRevisionId(fresh)) ===
+                            String(bindingRevisionId) &&
+                          freshServer?.alias === registered.alias &&
+                          freshServer.user === registered.user &&
+                          freshServer.profile === registered.profile
+                        );
+                      },
+                    }
+                  : {}),
                 // Read at each start, so a server removed from the registry refuses.
                 login: () => {
-                  if (project.mode === "work") return undefined;
                   const address = serverProjectStore.addressOf(String(projectId));
                   return address.kind === "address"
                     ? serverTerminalLogin(serverConnection, address.server, address.folder)
@@ -500,13 +519,16 @@ export function wireCodeTooling(deps: CodeToolingDependencies) {
           });
     projectTerminals?.reconcile();
     // Closing a window revokes its in-memory authority without a journal
-    // commit. Retire its saved actions at that boundary, before another call.
-    onWindowRevoked(() => void projectTerminals?.settleActionAuthorities());
+    // commit. Retire its owned server sessions at that boundary, before another call.
+    onWindowRevoked(() => void projectTerminals?.settleAuthorities());
     const unsubscribeProjectTerminalAuthority = persistence.journal.subscribeCommitted((append) => {
       if (projectTerminals === undefined) return;
       for (const event of append.events) {
-        if (event.aggregateType === "server-projects" || event.aggregateType === "shield-servers")
-          void projectTerminals.settleActionAuthorities();
+        if (event.aggregateType === "server-projects" || event.aggregateType === "shield-servers") {
+          // These catalogs apply their records after append returns. Read the
+          // committed state, rather than keeping a session against the old one.
+          queueMicrotask(() => void projectTerminals.settleAuthorities().catch(() => undefined));
+        }
         if (
           event.aggregateType === "code-thread" ||
           event.aggregateType === "code-checkout" ||
@@ -514,7 +536,7 @@ export function wireCodeTooling(deps: CodeToolingDependencies) {
           event.aggregateType === "shell-settings" ||
           event.aggregateType === "window-workspace"
         )
-          void projectTerminals.settleActionAuthorities();
+          void projectTerminals.settleAuthorities();
         if (
           event.aggregateType === "project" &&
           (event.eventName === "project.lifecycle-changed@1" ||

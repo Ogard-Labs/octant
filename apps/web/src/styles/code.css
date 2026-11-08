@@ -118,7 +118,7 @@
   color: var(--oct-muted);
 }
 
-.code-terminal-pane > [aria-label="Repository terminal"] {
+.code-terminal-pane > :is([aria-label="Repository terminal"], [aria-label="Project terminal"]) {
   min-height: 0;
   flex: 1;
   padding: var(--oct-space-2) var(--oct-space-4) var(--oct-space-3);
@@ -155,7 +155,10 @@
    dock on an OLED preset. */
 html:not([data-octant-reduced-transparency="true"])
   .shell--material-translucent
-  :is(.code-terminal-pane > [aria-label="Repository terminal"], .terminal-leave-hint) {
+  :is(
+    .code-terminal-pane > :is([aria-label="Repository terminal"], [aria-label="Project terminal"]),
+    .terminal-leave-hint
+  ) {
   background: color-mix(in srgb, var(--octant-workspace), var(--octant-text-primary) 12%);
 }
 

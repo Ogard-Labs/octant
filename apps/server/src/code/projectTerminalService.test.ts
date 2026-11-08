@@ -446,7 +446,7 @@ it.each([undefined, "/approved/shared/subfolder"])(
       expect(launch?.admit?.()).toBe(true);
       current = false;
       expect(launch?.admit?.()).toBe(false);
-      await f.service.settleActionAuthorities();
+      await f.service.settleAuthorities();
       expect(f.terminals.terminated).toEqual([ids.terminal]);
       expect(
         await f.service.execute(windowId, "local-window", {
@@ -1084,6 +1084,7 @@ describe("a server Project's terminal", () => {
         serverProject: (id) =>
           String(id) === ids.project && serverProjectId.value
             ? {
+                mode: "code" as const,
                 bindingRevisionId: decodeBindingRevisionId(serverRevision),
                 login: () => (registered.value ? login : undefined),
               }
@@ -1195,6 +1196,165 @@ describe("a server Project's terminal", () => {
   });
 });
 
+describe("a person's terminal in a server Work Project", () => {
+  function workServer() {
+    const state = { tools: true, registered: true, bound: true };
+    const login = { command: "ssh", args: ["-tt", "--", "work-host"], environment: {} };
+    const setup = harness({
+      projects: new Map(),
+      access: (window, id) => state.bound && window === ids.window && id === ids.project,
+      serverProject: () => ({
+        mode: "work" as const,
+        interactiveAllowed: state.tools,
+        current: () => state.registered,
+        bindingRevisionId: decodeBindingRevisionId(ids.revision),
+        login: () => (state.registered ? login : undefined),
+      }),
+    });
+    return { ...setup, state, login };
+  }
+
+  it("opens the person's SSH shell in the bound Work Project and accepts their input", async () => {
+    const { service, terminals, login, events } = workServer();
+    const opened = await service.execute(windowId, "local-window", start());
+    expect(opened).toMatchObject({
+      kind: "project-terminal",
+      terminal: { posture: "full-access", state: "running" },
+    });
+    expect(terminals.launches[0]).toMatchObject({ server: login, credentialReferences: [] });
+    expect(terminals.launches[0]?.extraFolders).toBeUndefined();
+    expect(events()[0]?.payload).toMatchObject({ windowId, projectId });
+    expect(
+      await service.execute(windowId, "local-window", {
+        kind: "write",
+        projectId,
+        terminalId,
+        data: "pwd\n",
+      }),
+    ).toMatchObject({ kind: "project-terminal" });
+    expect(terminals.writes).toEqual(["pwd\n"]);
+  });
+
+  it("starts no Work SSH shell with hidden tools or a supplied folder or task context", async () => {
+    const { service, terminals, state } = workServer();
+    state.tools = false;
+    expect(await service.execute(windowId, "local-window", start())).toMatchObject({
+      kind: "project-terminal-refused",
+    });
+    state.tools = true;
+    for (const command of [
+      { ...start(), folder: "/srv/another" },
+      decodeProjectTerminalCommand({
+        ...start(),
+        workThreadId: "94000000-0000-4000-8000-000000000003",
+      }),
+    ])
+      expect(await service.execute(windowId, "local-window", command)).toMatchObject({
+        kind: "project-terminal-refused",
+      });
+    expect(terminals.launches).toEqual([]);
+  });
+
+  it.each(["tools", "registered", "bound"] as const)(
+    "ends only the owned SSH session when %s authority is withdrawn",
+    async (authority) => {
+      const { service, terminals, state } = workServer();
+      await service.execute(windowId, "local-window", start());
+      state[authority] = false;
+      await service.settleAuthorities();
+      expect(terminals.terminated).toEqual([ids.terminal]);
+      expect(service.owns(windowId, projectId, terminalId)).toBe(false);
+      expect(
+        await service.execute(windowId, "local-window", {
+          kind: "write",
+          projectId,
+          terminalId,
+          data: "echo forbidden\n",
+        }),
+      ).toMatchObject({ kind: "project-terminal-refused" });
+      expect(terminals.writes).toEqual([]);
+    },
+  );
+
+  it("refuses a stale Work launch after SSH acquisition and joins its owned session", async () => {
+    const { service, terminals, state } = workServer();
+    const launch = terminals.launch;
+    terminals.launch = async (request) => {
+      expect(request.admit?.()).toBe(true);
+      const result = await launch(request);
+      state.tools = false;
+      await service.settleAuthorities();
+      return result;
+    };
+    expect(await service.execute(windowId, "local-window", start())).toMatchObject({
+      kind: "project-terminal-refused",
+      reason: "authority-revoked",
+    });
+    expect(terminals.terminated).toEqual([ids.terminal]);
+  });
+
+  it("cancels an owned pending SSH start and refuses another window's guessed stop", async () => {
+    const { service, terminals } = workServer();
+    const launch = terminals.launch;
+    terminals.launch = async (request) => {
+      expect(
+        await service.execute(otherWindowId, "local-window", {
+          kind: "stop",
+          projectId,
+          terminalId,
+        }),
+      ).toMatchObject({
+        kind: "project-terminal-refused",
+        reason: "unauthorized",
+      });
+      expect(request.admit?.()).toBe(true);
+      expect(
+        await service.execute(windowId, "local-window", {
+          kind: "stop",
+          projectId: decodeProjectId(ids.otherProject),
+          terminalId,
+        }),
+      ).toMatchObject({
+        kind: "project-terminal-refused",
+        reason: "unauthorized",
+      });
+      expect(
+        await service.execute(windowId, "remote-device", { kind: "stop", projectId, terminalId }),
+      ).toMatchObject({
+        kind: "project-terminal-refused",
+        reason: "unauthorized",
+      });
+      expect(
+        await service.execute(windowId, "local-window", { kind: "stop", projectId, terminalId }),
+      ).toMatchObject({
+        kind: "project-terminal",
+        terminal: { uncertainty: "server-stop-unconfirmed" },
+      });
+      expect(request.admit?.()).toBe(false);
+      return launch(request);
+    };
+    expect(await service.execute(windowId, "local-window", start())).toMatchObject({
+      kind: "project-terminal-refused",
+      reason: "authority-revoked",
+    });
+    expect(terminals.terminated).toEqual([ids.terminal]);
+  });
+
+  it("reports a dropped Work SSH connection without replaying it", async () => {
+    const { service, terminals, events } = workServer();
+    await service.execute(windowId, "local-window", start());
+    terminals.exit(ids.terminal, 255);
+    expect(
+      await service.execute(windowId, "local-window", { kind: "attach", projectId, terminalId }),
+    ).toMatchObject({
+      kind: "project-terminal",
+      terminal: { state: "interrupted", uncertainty: "server-transport-lost" },
+    });
+    expect(events().at(-1)?.payload).toMatchObject({ reason: "transport-lost", exitCode: 255 });
+    expect(terminals.launches).toHaveLength(1);
+  });
+});
+
 it("runs a preparation recipe through its once-only setup lifecycle in a managed checkout", async () => {
   const actionId = "93000000-0000-4000-8000-000000000001";
   const f = harness({
@@ -1270,7 +1430,7 @@ it("starts a Work terminal in its task folder and refuses a withdrawn task witho
     expect(f.terminals.launches[0]).toMatchObject({ cwd: "/approved/notes/subfolder" });
     current = false;
     expect(f.terminals.launches[0]?.admit?.()).toBe(false);
-    await f.service.settleActionAuthorities();
+    await f.service.settleAuthorities();
     expect(f.terminals.terminated).toContain(ids.terminal);
     expect(
       await f.service.execute(
