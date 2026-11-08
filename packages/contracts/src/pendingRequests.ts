@@ -32,12 +32,22 @@ export const MAX_TURN_DECISION_ASK_LENGTH = 110;
 /** An option is words the person would send, short enough for one button. */
 export const MAX_TURN_DECISION_OPTION_LENGTH = 60;
 export const MAX_TURN_DECISION_OPTIONS = 4;
+/** One line of context the person needs to choose; a card shows it as a short paragraph. */
+export const MAX_TURN_DECISION_WHY_LENGTH = 240;
+/** The consequence or tradeoff of one option, one line under its button. */
+export const MAX_TURN_DECISION_OPTION_DETAIL_LENGTH = 80;
 
 export const TurnDecisionAskText = Schema.NonEmptyTrimmedString.pipe(
   Schema.maxLength(MAX_TURN_DECISION_ASK_LENGTH),
 );
 export const TurnDecisionOptionText = Schema.NonEmptyTrimmedString.pipe(
   Schema.maxLength(MAX_TURN_DECISION_OPTION_LENGTH),
+);
+export const TurnDecisionWhyText = Schema.NonEmptyTrimmedString.pipe(
+  Schema.maxLength(MAX_TURN_DECISION_WHY_LENGTH),
+);
+export const TurnDecisionOptionDetailText = Schema.NonEmptyTrimmedString.pipe(
+  Schema.maxLength(MAX_TURN_DECISION_OPTION_DETAIL_LENGTH),
 );
 
 /**
@@ -46,7 +56,11 @@ export const TurnDecisionOptionText = Schema.NonEmptyTrimmedString.pipe(
  * action: picking one sends it to the agent and does nothing else.
  */
 export const TurnDecisionOptions = Schema.Array(
-  Schema.Struct({ label: TurnDecisionOptionText, recommended: Schema.Boolean }).annotations(strict),
+  Schema.Struct({
+    label: TurnDecisionOptionText,
+    recommended: Schema.Boolean,
+    detail: Schema.optional(TurnDecisionOptionDetailText),
+  }).annotations(strict),
 ).pipe(
   Schema.minItems(1),
   Schema.maxItems(MAX_TURN_DECISION_OPTIONS),
@@ -316,6 +330,8 @@ export const PendingRequest = Schema.Union(
     projectId: ProjectId,
     threadId: WorkThreadId,
     text: TurnDecisionAskText,
+    why: Schema.optional(TurnDecisionWhyText),
+    urgent: Schema.optional(Schema.Boolean),
     options: TurnDecisionOptions,
     answer: WorkPendingDecisionAnswer,
   })
@@ -325,6 +341,8 @@ export const PendingRequest = Schema.Union(
     ...CodePendingRequestFields,
     kind: Schema.Literal("decision"),
     text: TurnDecisionAskText,
+    why: Schema.optional(TurnDecisionWhyText),
+    urgent: Schema.optional(Schema.Boolean),
     options: TurnDecisionOptions,
     answer: CodePendingDecisionAnswer,
   })

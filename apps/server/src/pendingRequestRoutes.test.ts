@@ -434,3 +434,43 @@ it("keeps deferral bound to the current choices and access in every answerable m
     expect(record).toHaveBeenCalledTimes(1);
   }
 });
+
+it("defers a decision by the turn that asked it and brings it back with its deferral", async () => {
+  const decision = decodePendingRequest({
+    mode: "code",
+    kind: "decision",
+    projectId,
+    threadId: "00000000-0000-4000-8000-000000000904",
+    threadTitle: "Fix the parser",
+    text: "Open the pull request now?",
+    options: [{ label: "Open it", recommended: true }],
+    requestedAt: "2026-10-06T08:05:00.000Z",
+    answer: {
+      threadId: "00000000-0000-4000-8000-000000000904",
+      checkoutId: "00000000-0000-4000-8000-000000000905",
+      operationId: "00000000-0000-4000-8000-000000000a02",
+    },
+  });
+  const untilByKey = new Map<string, string>();
+  const service = new PendingRequestService({
+    readSettings: defaultShellSettings,
+    work: async () => [],
+    code: async () => [decision],
+    children: async () => [],
+    chat: () => [],
+    deferrals: {
+      read: (key: string) => untilByKey.get(key),
+      record: (change: { key: string; until: string | null }) => {
+        if (change.until === null) untilByKey.delete(change.key);
+        else untilByKey.set(change.key, change.until);
+      },
+    },
+  });
+  const listed = (await service.list(windowId)).requests[0];
+  const key = listed?.deferralKey ?? "missing";
+  expect(listed?.deferredUntil).toBeUndefined();
+  const until = decodeUtcTimestamp("2099-01-01T00:00:00.000Z");
+  expect(await service.defer(windowId, { key, until }, () => true)).toBe(true);
+  expect((await service.list(windowId)).requests[0]?.deferredUntil).toBe(until);
+  expect(await service.defer(windowId, { key: "a".repeat(64), until }, () => true)).toBe(false);
+});

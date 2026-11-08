@@ -1,4 +1,4 @@
-import { decodePendingRequest } from "@octant/contracts";
+import { decodePendingRequest, decodeUtcTimestamp } from "@octant/contracts";
 import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
@@ -11,6 +11,7 @@ import {
   workLeadQuestion,
 } from "../palette/pendingRequests.test-fixtures";
 import { PendingRequestRow } from "./PendingRequestRow";
+import { answerPendingRequest } from "./pendingRequests";
 
 const NOW = Date.parse("2026-10-06T08:10:00.000Z");
 
@@ -32,7 +33,7 @@ describe("a decision row", () => {
       .getAllByRole("button")
       .slice(1)
       .map((button) => button.textContent);
-    expect(actions).toEqual(["1Open itRecommended", "2Wait for review", "Reply…"]);
+    expect(actions).toEqual(["1Open itRecommended", "2Wait for review", "Add note", "Reply…"]);
   });
 
   it("puts the recommended option first in focus order and sends an option by its number", async () => {
@@ -73,6 +74,138 @@ describe("a decision row", () => {
     await user.click(screen.getByRole("button", { name: "Reply…" }));
     expect(onOpenThread).toHaveBeenCalledExactlyOnceWith(request);
     expect(onAnswer).not.toHaveBeenCalled();
+  });
+});
+
+function richDecision(extra: object = {}) {
+  const base = codeDecision();
+  return decodePendingRequest({
+    ...base,
+    why: "Tests are green and the freeze starts Monday.",
+    options: [
+      { label: "Wait for review", recommended: false },
+      { label: "Open it", recommended: true, detail: "Rollback is ready in five minutes" },
+    ],
+    ...extra,
+  });
+}
+
+describe("a decision card", () => {
+  it("shows the why, each option's detail and an Urgent tag", () => {
+    render(
+      <PendingRequestRow
+        now={NOW}
+        onAnswer={vi.fn()}
+        onOpenThread={vi.fn()}
+        request={richDecision({ urgent: true })}
+      />,
+    );
+    expect(screen.getByText("Tests are green and the freeze starts Monday.")).toBeInTheDocument();
+    expect(screen.getByText("Rollback is ready in five minutes")).toBeInTheDocument();
+    expect(screen.getByText("Urgent")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Open it/ })).toHaveTextContent("Recommended");
+  });
+
+  it("sends the note with the picked option and keeps number keys for text while typing", async () => {
+    const user = userEvent.setup();
+    const onAnswer = vi.fn(async () => ({ status: "answered" as const }));
+    const request = richDecision();
+    render(
+      <PendingRequestRow now={NOW} onAnswer={onAnswer} onOpenThread={vi.fn()} request={request} />,
+    );
+    await user.click(screen.getByRole("button", { name: "Add note" }));
+    await user.type(screen.getByRole("textbox", { name: "Note sent with your choice" }), "2 days");
+    expect(onAnswer).not.toHaveBeenCalled();
+    await user.click(screen.getByRole("button", { name: /Open it/ }));
+    expect(onAnswer).toHaveBeenCalledExactlyOnceWith(request, {
+      kind: "choice",
+      label: "Open it",
+      note: "2 days",
+    });
+  });
+
+  it("closes the note on Escape, sends no hidden note, and offers no note inside an embedding card", async () => {
+    const user = userEvent.setup();
+    const onAnswer = vi.fn(async () => ({ status: "answered" as const }));
+    const request = richDecision();
+    const view = render(
+      <PendingRequestRow now={NOW} onAnswer={onAnswer} onOpenThread={vi.fn()} request={request} />,
+    );
+    await user.click(screen.getByRole("button", { name: "Add note" }));
+    await user.type(screen.getByRole("textbox", { name: "Note sent with your choice" }), "staging");
+    await user.keyboard("{Escape}");
+    await user.click(screen.getByRole("button", { name: /Open it/ }));
+    expect(onAnswer).toHaveBeenCalledExactlyOnceWith(request, { kind: "choice", label: "Open it" });
+    expect(screen.queryByRole("textbox")).not.toBeInTheDocument();
+    view.rerender(
+      <PendingRequestRow
+        embedded
+        now={NOW}
+        onAnswer={vi.fn()}
+        onOpenThread={vi.fn()}
+        request={richDecision()}
+      />,
+    );
+    expect(screen.queryByRole("button", { name: "Add note" })).not.toBeInTheDocument();
+  });
+
+  it("offers the same defer controls for a decision as for a question, and brings a deferred one back", async () => {
+    const user = userEvent.setup();
+    const request = { ...richDecision(), deferralKey: "b".repeat(64) };
+    const onDefer = vi.fn(async () => true);
+    const props = { onAnswer: vi.fn(), onDefer, onOpenThread: vi.fn() };
+    const view = render(<PendingRequestRow {...props} now={NOW} request={request} />);
+    expect(screen.getByRole("combobox", { name: "Defer decision until" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Defer decision" })).toBeDisabled();
+    view.rerender(
+      <PendingRequestRow
+        {...props}
+        now={NOW}
+        request={{ ...request, deferredUntil: decodeUtcTimestamp("2026-10-06T12:00:00.000Z") }}
+      />,
+    );
+    expect(screen.getByRole("status")).toHaveTextContent("The decision remains unanswered.");
+    await user.click(screen.getByRole("button", { name: "Bring back now" }));
+    expect(onDefer).toHaveBeenCalledExactlyOnceWith(expect.anything(), null);
+    expect(props.onAnswer).not.toHaveBeenCalled();
+  });
+});
+
+describe("answering a decision", () => {
+  function answerClients() {
+    return {
+      chatClient: { execute: vi.fn() },
+      codeClient: {
+        executeOperation: vi.fn(async () => ({
+          kind: "provider-turn-state",
+          state: "running",
+        })),
+        putEvidence: vi.fn(async () => ({ evidenceId: "evidence-1" })),
+      },
+      workRequestClient: { execute: vi.fn() },
+      workTurnClient: { startFirstTurn: vi.fn(async () => ({ kind: "accepted" })) },
+    };
+  }
+
+  it("sends the label alone, or the label and the trimmed note as the next turn", async () => {
+    const clients = answerClients();
+    const request = richDecision();
+    const send = (response: Parameters<typeof answerPendingRequest>[2]) =>
+      answerPendingRequest(clients as never, request, response);
+    await send({ kind: "choice", label: "Open it" });
+    await send({ kind: "choice", label: "Open it", note: "  " });
+    await send({ kind: "choice", label: "Open it", note: " after the smoke tests " });
+    const evidence = clients.codeClient.putEvidence.mock.calls as ReadonlyArray<
+      ReadonlyArray<unknown>
+    >;
+    expect(evidence.map((call) => call[1])).toEqual([
+      "Open it",
+      "Open it",
+      "Open it\n\nafter the smoke tests",
+    ]);
+    expect(await send({ kind: "choice", label: "Not an option", note: "x" })).toMatchObject({
+      status: "refused",
+    });
   });
 });
 
@@ -272,7 +405,8 @@ it("keeps the chosen reminder across clock ticks and clears it after deferral", 
   const props = { request, onDefer, onAnswer, onOpenThread: vi.fn() };
   const view = render(<PendingRequestRow {...props} now={NOW} />);
   await user.click(screen.getByRole("combobox", { name: "Defer question until" }));
-  await user.click(screen.getByRole("option", { name: "In 1 hour" }));
+  // The select's list opens a frame after the click, so wait for the option.
+  await user.click(await screen.findByRole("option", { name: "In 1 hour" }));
   const later = NOW + 60_000;
   view.rerender(<PendingRequestRow {...props} now={later} />);
   expect(screen.getByRole("combobox")).toHaveTextContent("In 1 hour");

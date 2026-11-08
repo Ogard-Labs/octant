@@ -10927,7 +10927,16 @@ access` agree); a thread's own change is journaled as
 - **Turn decisions.** A Work or Code turn that cannot continue without the
   person's choice ends its reply with one closing `octant-decision` block: an
   ask (one line, at most 110 characters) and one to four options (at most 60
-  characters each), exactly one recommended. Every Work and Code turn on every
+  characters each), exactly one recommended. Three optional fields let a card
+  be answered without opening the thread: `why` (one line, at most 240
+  characters, the context needed to choose), a per-option `detail` (one line,
+  at most 80 characters, its consequence or tradeoff), and `urgent` (a
+  boolean the agent sets only when waiting has a cost that grows soon). A
+  field that is present but unusable (wrong type, empty, too long, or more
+  than one line) refuses the whole block, like any other malformed part; the
+  fields are absent from a block that omits them, so earlier blocks still
+  read. `urgent` is the agent's own claim: it shows an "Urgent" tag and orders
+  nothing, and the host never acts on it. Every Work and Code turn on every
   provider is asked for the block by one fixed instruction beside the
   follow-up one; Chat is not. The host reads it with the pure domain parser
   (`parseTurnDecision`) from the normalized reply alone — a Code turn's message
@@ -10946,7 +10955,13 @@ access` agree); a thread's own change is journaled as
   answer is the thread's ordinary next turn through `start-provider-turn` or
   `start-work-thread-turn`, with the option's words as the prompt and the
   authority the composer has; there is no answer route, and an option performs
-  no host action. On the board an open decision files the thread under Waiting
+  no host action. A person may add a note (at most 2,000 characters) when
+  choosing: the prompt is then the option's words, a blank line, and the note,
+  and the label alone otherwise; the host reads it as it reads any next turn.
+  A decision can be deferred like a pending question, through the same
+  `POST /api/pending-requests/defer` and the same journaled attention
+  preference; its key is a hash of the mode, thread, and asking turn, so it
+  is stable across reads and a later turn's decision is not deferred. On the board an open decision files the thread under Waiting
   with `decision-pending` (after recovering and a live request's
   `awaiting-input`, before an interrupted turn); Done still requires the
   delivery target to be satisfied, and a decision blocks neither completing nor

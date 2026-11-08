@@ -48,6 +48,16 @@ describe("Work turn decisions", () => {
     });
   });
 
+  it("carries the why and urgency the block states onto the request", () => {
+    const block =
+      '```octant-decision\n{"ask":"Which chart leads?","why":"The board meets today.","urgent":true,"options":[{"label":"Revenue","recommended":true,"detail":"Matches last quarter"}]}\n```';
+    expect(workTurnDecision(workThread(), [turn(1, "completed", block)])).toMatchObject({
+      why: "The board meets today.",
+      urgent: true,
+      options: [{ label: "Revenue", recommended: true, detail: "Matches last quarter" }],
+    });
+  });
+
   it("raises nothing for a reply without an ask, a newer turn, or a turn that did not complete", () => {
     expect(
       workTurnDecision(workThread(), [turn(1, "completed", "Done, nothing needs you.")]),

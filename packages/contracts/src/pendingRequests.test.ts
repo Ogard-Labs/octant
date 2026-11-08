@@ -174,6 +174,29 @@ describe("pending request contract", () => {
     ).toThrow();
   });
 
+  it("carries a decision's why, urgency and option details, and bounds them", () => {
+    const rich = decodePendingRequest({
+      ...codeDecision,
+      why: "Releasing tonight reaches customers before the weekend.",
+      urgent: true,
+      options: [
+        { label: "Open it", recommended: true, detail: "Rollback is ready in five minutes" },
+        { label: "Wait for review", recommended: false },
+      ],
+    });
+    expect(rich.kind === "decision" && rich.why).toBe(
+      "Releasing tonight reaches customers before the weekend.",
+    );
+    expect(() => decodePendingRequest({ ...codeDecision, why: "w".repeat(241) })).toThrow();
+    expect(() => decodePendingRequest({ ...workDecision, urgent: "yes" })).toThrow();
+    expect(() =>
+      decodePendingRequest({
+        ...workDecision,
+        options: [{ label: "Revenue", recommended: true, detail: "d".repeat(81) }],
+      }),
+    ).toThrow();
+  });
+
   it("refuses a decision whose send handle names another thread or mode", () => {
     expect(() =>
       decodePendingRequest({

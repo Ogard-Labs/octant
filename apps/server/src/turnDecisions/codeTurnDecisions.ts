@@ -72,6 +72,8 @@ export class CodeTurnDecisions {
         threadTitle: thread.title,
         requestedAt: open.endedAt,
         text: open.decision.ask,
+        ...(open.decision.why === undefined ? {} : { why: open.decision.why }),
+        ...(open.decision.urgent === true ? { urgent: true } : {}),
         options: open.decision.options,
         answer: {
           threadId: thread.id,

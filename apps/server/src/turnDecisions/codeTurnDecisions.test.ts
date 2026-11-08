@@ -42,6 +42,20 @@ describe("Code turn decisions", () => {
     ]);
   });
 
+  it("carries the why and urgency the block states onto the request", async () => {
+    const { decisions } = fixture({
+      message: [
+        '```octant-decision\n{"ask":"Merge it now?","why":"The freeze starts tonight.","urgent":true,"options":[{"label":"Merge it","recommended":true,"detail":"Ships tonight"}]}\n```',
+      ],
+    });
+    const [request] = await decisions.listForWindow(windowId);
+    expect(request).toMatchObject({
+      why: "The freeze starts tonight.",
+      urgent: true,
+      options: [{ label: "Merge it", recommended: true, detail: "Ships tonight" }],
+    });
+  });
+
   it("raises nothing from reasoning or any content outside the reply", async () => {
     const { decisions } = fixture({
       message: ["Done, nothing needs you."],
