@@ -333,6 +333,9 @@ export function BenchmarksWorkspace(props: BenchmarksWorkspaceProps) {
       setNotice(undefined);
       setSelectedCaseId(undefined);
       setSelectedRunId(String(started.run.runId));
+      // The grid opens on the run the host just accepted; the first read may land
+      // before the host can answer for it, and the poll fills in the figures.
+      setRunRead({ run: started.run, leaderboard: [], cellMetrics: [] });
       await reload();
       return undefined;
     } catch (error) {
