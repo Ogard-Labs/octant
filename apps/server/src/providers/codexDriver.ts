@@ -519,6 +519,8 @@ const capabilities = {
   diffs: "supported",
   taskProgress: "supported",
   nativeChildAgents: "unsupported",
+  // A thread's config takes the point; probing a version lowers it with compaction.
+  compactionPoint: "supported",
   harnessAutoReview: "supported",
   reviewVerdicts: { allow: "supported", deny: "supported" },
   modelSwitch: "supported",

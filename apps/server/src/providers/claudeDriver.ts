@@ -638,6 +638,8 @@ const availableCapabilities: ProviderCapabilities = {
   diffs: "supported",
   taskProgress: "supported",
   nativeChildAgents: "unsupported",
+  // Each query takes the person's compaction point as an `autoCompactWindow` flag setting.
+  compactionPoint: "supported",
   harnessAutoReview: "supported",
   // Claude's reviewer reports a refusal and nothing for a call it approved.
   reviewVerdicts: { allow: "unsupported", deny: "supported" },
@@ -1152,8 +1154,6 @@ function observation(
               work: sessionCompaction,
               code: sessionCompaction,
             },
-            // Every session's query takes an `autoCompactWindow` flag setting.
-            compactionPoint: "supported",
             nativeArtifacts,
           }
         : unavailableCapabilities,
