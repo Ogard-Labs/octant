@@ -86,7 +86,7 @@ struct Runtime {
   PSECURITY_DESCRIPTOR security = nullptr;
   Handle stopping{CreateEventW(nullptr, TRUE, FALSE, nullptr)};
   std::mutex lifecycle, lock, client_lock;
-  std::atomic<bool> closed = false;
+  std::atomic<bool> closed = false, retired = false;
   std::atomic<bool> status_enabled = false, windows_enabled = false;
   std::thread acceptor;
   napi_threadsafe_function callback = nullptr;
@@ -498,6 +498,7 @@ void close_runtime(const std::shared_ptr<Runtime>& state) {
   { std::lock_guard guard(state->lock); state->status_enabled = false; state->windows_enabled = false; for (const auto& item : state->pending) item.second->changed.notify_all(); }
   { std::lock_guard guard(state->lifecycle); if (state->acceptor.joinable()) state->acceptor.join(); state->admission.reset(); }
   { std::lock_guard guard(state->client_lock); state->client_pipe.reset(); state->client_peer.reset(); }
+  state->retired = true;
 }
 Answer close_status(const std::shared_ptr<Runtime>& state) {
   bool release = false;
@@ -644,7 +645,7 @@ void complete(napi_env env, napi_status status, void* data) {
         napi_release_threadsafe_function(job->state->callback, napi_tsfn_abort); job->state->callback = nullptr;
       }
     }
-    if (status == napi_ok && job->answer.kind == "closed" && job->state->closed) {
+    if (status == napi_ok && job->answer.kind == "closed" && job->state->retired) {
       auto replacement = fresh_binding(*job->state);
       std::lock_guard guard(binding_lock);
       if (runtime == job->state && replacement) runtime = std::move(replacement);
