@@ -179,8 +179,8 @@ bool per_user_creation_context() {
   if (needed < sizeof(TOKEN_OWNER) || needed > 65536) return false;
   std::vector<unsigned char> information(needed);
   if (!GetTokenInformation(token.value, TokenOwner, information.data(), needed, &needed)) return false;
-  const auto owner = reinterpret_cast<const TOKEN_OWNER*>(information.data());
-  return owner->Owner != nullptr && IsValidSid(owner->Owner) && EqualSid(owner->Owner, user.data());
+  const auto default_owner = reinterpret_cast<const TOKEN_OWNER*>(information.data());
+  return default_owner->Owner != nullptr && IsValidSid(default_owner->Owner) && EqualSid(default_owner->Owner, user.data());
 }
 bool same_user(DWORD pid, const Root& root) {
   Handle process(OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, pid));

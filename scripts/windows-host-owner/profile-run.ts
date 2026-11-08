@@ -169,7 +169,7 @@ if (first === undefined) throw new Error("Missing owned runtime.");
 async function probe(runtime: string, profile: string, mode = "normal") {
   await run(
     launcher,
-    [runtime, fixture, binding, profile, mode],
+    ["--profile-user-owner", runtime, fixture, binding, profile, mode],
     {
       ...process.env,
       ...(runtime.toLowerCase().endsWith("electron.exe") ? { ELECTRON_RUN_AS_NODE: "1" } : {}),
