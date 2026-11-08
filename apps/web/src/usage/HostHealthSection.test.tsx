@@ -27,7 +27,7 @@ function history(samples: ReadonlyArray<HostHealthSample>): HostHealthHistory {
     resolution: "minute",
     retentionDays: 14,
     samples,
-    processStarts: [...new Set(samples.map((entry) => entry.processStartedAt))].sort() as never,
+    restarts: [...new Set(samples.map((entry) => entry.processStartedAt))].sort().slice(1) as never,
   };
 }
 

@@ -102,9 +102,10 @@ export function HostHealthSection(props: {
   }
   const { history } = state;
   const samples = history.samples;
-  // Each process start after the earliest is a restart; the host counts them
-  // from minutes, so restarts inside one hour are all here.
-  const restarts = history.processStarts.slice(1);
+  // The host counts restarts from minutes, against the process in effect when
+  // the range began, so restarts inside one hour and one just after the range
+  // start are all here.
+  const restarts = history.restarts;
   return (
     <SurfaceSection label="Host health">
       {samples.length === 0 ? (
