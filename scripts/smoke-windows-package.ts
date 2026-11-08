@@ -12,7 +12,9 @@ if (process.platform !== "win32" || process.arch !== "x64") {
 const root = resolve(fileURLToPath(new URL("..", import.meta.url)));
 const version = resolveReleaseVersion(process.env);
 const identity = desktopIdentity(resolveDesktopPackageFlavor(process.env, version));
-const directory = join(root, "out", `${identity.productName}-win32-x64`);
+const directory = resolve(
+  process.argv[2] ?? join(root, "out", `${identity.productName}-win32-x64`),
+);
 const executable = join(directory, `${identity.productName}.exe`);
 const archive = join(root, "out", `${identity.productName}-${version}-win32-x64.zip`);
 await access(archive);

@@ -29,7 +29,7 @@ jobs:
       - uses: actions/checkout@v4
       - name: Validate native desktop fixture syntax
         run: |
-          foreach ($octantScript in @('scripts/run-windows-desktop.ps1', 'scripts/windows-desktop-window.ps1')) {
+          foreach ($octantScript in @('scripts/run-windows-desktop.ps1', 'scripts/windows-desktop-window.ps1', 'scripts/stage-windows-desktop-qa.ps1')) {
             $octantTokens = $null
             $octantParseErrors = $null
             [void][System.Management.Automation.Language.Parser]::ParseFile((Join-Path $pwd $octantScript), [ref]$octantTokens, [ref]$octantParseErrors)
@@ -60,10 +60,12 @@ jobs:
         env:
           OCTANT_PACKAGE_TARGET: win32-x64
         run: bun run package:desktop
+      - name: Stage unchanged normal Stable bytes under the current user known folder
+        run: ./scripts/stage-windows-desktop-qa.ps1 -Mode Stable -PackageDirectory "$pwd/out/Octant-win32-x64"
       - name: Load the packaged native runtime
-        run: bun scripts/smoke-windows-package.ts
+        run: bun scripts/smoke-windows-package.ts "$env:OCTANT_WINDOWS_QA_STABLE"
       - name: Exercise the packaged private credential helper with owned synthetic entries
-        run: bun scripts/smoke-windows-credentials.ts "$pwd/out/Octant-win32-x64/resources/native/octant-credential-helper.exe"
+        run: bun scripts/smoke-windows-credentials.ts "$env:OCTANT_WINDOWS_QA_STABLE/resources/native/octant-credential-helper.exe"
       - name: Build the existing owned Windows job fixture
         id: job_fixture
         run: |
@@ -75,12 +77,12 @@ jobs:
         run: |
           $env:OCTANT_WINDOWS_PEER_QA_LAUNCHER = Join-Path $env:RUNNER_TEMP 'peer-qa/Release/octant-windows-peer-launcher.exe'
           $env:OCTANT_WINDOWS_PEER_QA_APPCONTAINER = Join-Path $env:RUNNER_TEMP 'peer-qa/Release/octant-windows-peer-appcontainer.exe'
-          $octantPeerBinding = Join-Path $pwd 'out/Octant-win32-x64/resources/native/octant-desktop-peer-windows.node'
+          $octantPeerBinding = Join-Path $env:OCTANT_WINDOWS_QA_STABLE 'resources/native/octant-desktop-peer-windows.node'
           $octantPeerReader = Join-Path $env:RUNNER_TEMP 'desktop-owner/Release/octant-windows-desktop-owner.exe'
           $octantPeerRuntimes = @(
             (Get-Command bun).Source
             (Get-Command node).Source
-            (Join-Path $pwd 'out/Octant-win32-x64/Octant.exe')
+            (Join-Path $env:OCTANT_WINDOWS_QA_STABLE 'Octant.exe')
           )
           foreach ($octantPeerRuntime in $octantPeerRuntimes) {
             $octantPeerScope = [guid]::NewGuid().ToString('D')
@@ -108,11 +110,11 @@ jobs:
       - name: Measure and validate the actual packaged artifact boundary
         if: ${{ !cancelled() && steps.peer_fixture.conclusion == 'success' && steps.portable.conclusion == 'success' && steps.job_fixture.conclusion == 'success' }}
         run: |
-          $octantArtifactImage = (Resolve-Path -LiteralPath (Join-Path $pwd 'out/Octant-win32-x64/Octant.exe')).ProviderPath
+          $octantArtifactImage = (Resolve-Path -LiteralPath (Join-Path $env:OCTANT_WINDOWS_QA_STABLE 'Octant.exe')).ProviderPath
           & "$env:RUNNER_TEMP/desktop-owner/Release/octant-windows-desktop-owner.exe" --profile-user-owner "$env:RUNNER_TEMP/peer-qa/Release/octant-windows-desktop-artifact-qa.exe" $octantArtifactImage artifact scan owned
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - name: Start and attach the normal packaged Windows desktop
-        run: ./scripts/run-windows-desktop.ps1 -Launcher "$env:RUNNER_TEMP/desktop-owner/Release/octant-windows-desktop-owner.exe" -PackageDirectory "$pwd/out/Octant-win32-x64" -OutputDirectory "$env:RUNNER_TEMP/desktop-proof"
+        run: ./scripts/run-windows-desktop.ps1 -Launcher "$env:RUNNER_TEMP/desktop-owner/Release/octant-windows-desktop-owner.exe" -PackageDirectory "$env:OCTANT_WINDOWS_QA_STABLE" -OutputDirectory "$env:RUNNER_TEMP/desktop-proof"
       - name: Build the normal Windows Nightly QA package
         env:
           OCTANT_PACKAGE_TARGET: win32-x64
@@ -122,10 +124,14 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           bun run package:desktop
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          bun scripts/smoke-windows-package.ts
+          ./scripts/stage-windows-desktop-qa.ps1 -Mode Nightly -PackageDirectory "$pwd/out/Octant Nightly-win32-x64"
+          bun scripts/smoke-windows-package.ts (Join-Path $env:OCTANT_WINDOWS_QA_ROOT 'Nightly')
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - name: Connect the normal packaged Windows Nightly to Stable
-        run: ./scripts/run-windows-desktop.ps1 -Launcher "$env:RUNNER_TEMP/desktop-owner/Release/octant-windows-desktop-owner.exe" -PackageDirectory "$pwd/out/Octant-win32-x64" -NightlyPackageDirectory "$pwd/out/Octant Nightly-win32-x64" -OutputDirectory "$env:RUNNER_TEMP/nightly-proof"
+        run: ./scripts/run-windows-desktop.ps1 -Launcher "$env:RUNNER_TEMP/desktop-owner/Release/octant-windows-desktop-owner.exe" -PackageDirectory "$env:OCTANT_WINDOWS_QA_STABLE" -NightlyPackageDirectory "$env:OCTANT_WINDOWS_QA_NIGHTLY" -OutputDirectory "$env:RUNNER_TEMP/nightly-proof"
+      - name: Remove only the joined owned package copies
+        if: ${{ always() && env.OCTANT_WINDOWS_QA_ROOT != '' }}
+        run: ./scripts/stage-windows-desktop-qa.ps1 -Mode Cleanup
       - uses: actions/upload-artifact@v4
         if: always()
         with:
