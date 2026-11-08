@@ -6713,7 +6713,16 @@ prompt is therefore built to be appended, never rewritten:
   appear. It names no tool, folder, provider, date or person, and leaves what a
   mode may touch to the runtime's tools and Octant Harness's mode line. Codex
   and Claude Code bring prompts written for a terminal, and before this nothing
-  told the model it was inside Octant. The instructions then follow one order
+  told the model it was inside Octant. Octant Harness, whose endpoint models
+  bring no prompt of their own, adds one fixed About Octant block to its
+  standing instructions, between its core rules and the mode line
+  (`apps/server/src/harness/nativeHarnessInstructions.ts`): what Octant is, what
+  Chat, Work, and Code may touch, Projects and the board, the Done rule (an
+  agent never marks a thread Done), access levels and read-only Plan mode,
+  Project memory, skills, Canvas, and helper agents. It is the same text in
+  every mode and names a tool only as "when offered", so it holds whether or
+  not a memory, skill, Canvas, or helper-agent tool is in the session and never
+  moves the cached prefix. The instructions then follow one order
   in every mode: orientation, the reply formats it introduces, the mode's own
   rules (Work's folder rule, document delivery, the status file), tool notes,
   and finally anything for the current turn alone.
@@ -7519,7 +7528,19 @@ the model at another size.
   every call refuses as `tool-authority-stale` with a message the model
   relays to the person; nothing renews it except the thread becoming usable
   again. Files go through `NativeHarnessFileSystem` (confined to the root, symlinks
-  resolved, edits require a prior read); `bash` writes the command to a
+  resolved, edits require a prior read). One `edit` call may carry up to 20
+  replacements in `edits`, across one or more files, beside the single
+  `path`/`oldText`/`newText` form. It is one call: one authority decision,
+  one approval whose summary gives the file count and then names every file
+  up to the summary's 240-character bound (the Watcher and the Judge read
+  every path), and Plan refuses it whole. It is all or nothing: every
+  replacement is checked against its file's read, its file's state since
+  that read, the secret guard, and the text the earlier replacements in the
+  same file leave, before any file is written; a refusal names the
+  replacement by index and changes nothing. A write that fails after those
+  checks puts back the files the call had written and lists any it could
+  not. Per-file approvals were rejected: a person would answer one call
+  several times, and a denial halfway would leave a partial change. `bash` writes the command to a
   script in its own subdirectory of `harness/scripts` and runs it through the
   same confined owned-process-group port as repository tests (Seatbelt on
   macOS, the bubblewrap sandbox on Linux), so a timeout or cancel ends the
@@ -10611,6 +10632,50 @@ mechanisms are:
     actions and publishing to an outside target included. An agent acts on
     pull requests, pushes, and merges only because the person asked in the
     thread; that is behavior, journaled, not a prompt.
+  - **Opt-in sandbox at Full access.** A Code or Work thread may set
+    `fullAccessSandbox`. Prompts stay off exactly as at Full access, and the
+    thread keeps the confinement the guarded levels have:
+    - **Which runtimes.** Codex, whose app-server stays inside Octant's
+      deny-default profile (writes held to the Project root, the rest of
+      `HOME` denied) and is told the sandbox is external (thread `read-only`,
+      each turn `externalSandbox`, approval `never`), because macOS refuses a
+      second Seatbelt inside the first; and the Octant Harness, whose
+      commands run on the confined shell. Claude Code, ACP agents, OpenCode,
+      and Pi launch unwrapped at Full access, so a sandboxed thread on one of
+      them refuses to start with a plain message
+      (`refusesFullAccessSandbox`, checked before each Code and Work turn)
+      rather than running open.
+    - **Network.** The thread resolves the egress the guarded levels resolve
+      (`provider-endpoints-only`). Commands are held to the provider
+      endpoints and approved hosts only where the host routes them through
+      its egress proxy, which today is behind the Network limits switch
+      ([provider runtime network](#provider-runtime-network)); without it
+      the OS rule is `allow`, as at the guarded levels.
+    - **Helpers.** A helper run carries a posture, not the parent's sandbox
+      choice, so a helper of a sandboxed Full access Code thread runs at
+      Accept edits: inside the same wall, its commands asking.
+    - **Lifecycle.** The access-change commands carry the choice; absent
+      keeps the thread's choice, and it is dropped below Full access so a
+      later raise never inherits a stale one. It is set from the terminal
+      with `octant agent --access full-access --sandbox` (refused without
+      Full access) and replays as off on journals written before it existed.
+    - **Defaults and where it is set.** A new thread at Full access whose
+      request does not say takes its Project's choice
+      (`defaultFullAccessSandbox`, set with the Project's mode through the
+      `change-*-project-permission-mode` commands), else Settings'
+      (`defaultFullAccessSandbox` on Code and Work settings), else off
+      (`defaultFullAccessSandboxFor`). In the app: "Keep the sandbox" under
+      Full access in a thread's mode picker (disabled, with the reason, on a
+      runtime that cannot keep it), "Keep the sandbox at Full access" in
+      Settings › Code › Access and Settings › Work, and "Sandbox at Full
+      access" beside a Project's default mode. In the terminal: `octant
+settings sandbox on|off [--work]`. Only a window on this host can turn
+      it off for a Full access thread, because that change names Full access,
+      which a paired device cannot.
+      Verified with the real Seatbelt profile on macOS: writes inside the
+      Project root succeed, and writes outside it and reads of `HOME` files are
+      denied. A live Codex turn under the external-sandbox mapping is a
+      maintainer check.
   - **Full access is full access for secret files too** (maintainer
     decision, 2026-10-31: "softer guard — full access is full access").
     No runtime or command runs under an OS wall at this level, and a shell

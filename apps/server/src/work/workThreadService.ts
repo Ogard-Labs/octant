@@ -47,6 +47,7 @@ import { THREAD_MOVING_REFUSAL } from "../hub/threadMoveHolds";
 import { Schema } from "effect";
 import { unsupportedModelOptionValues } from "@octant/domain/chat-policy";
 import {
+  defaultFullAccessSandboxFor,
   guardrailLowered,
   permissionModeOf,
   workAccessOfPermissionMode,
@@ -455,6 +456,11 @@ export class WorkThreadService {
                 defaultModelId: command.defaultModelId,
               }),
           defaultAccess: command.defaultAccess,
+          // Absent keeps the stored choice, so a save from a client that does
+          // not show the switch never turns it off.
+          ...((command.defaultFullAccessSandbox ?? current.defaultFullAccessSandbox) === true
+            ? { defaultFullAccessSandbox: true }
+            : {}),
           version: command.expectedVersion + 1,
           updatedAt: decodeTimestamp(this.#clock()),
         });
@@ -611,6 +617,16 @@ export class WorkThreadService {
               ? undefined
               : workAccessOfPermissionMode(project.defaultPermissionMode)) ??
             this.#currentSettings().defaultAccess,
+          // The opt-in sandbox only rides along when the resolved access is
+          // Full access: the request's choice, else the Project's, else Settings'.
+          ...(((project.defaultPermissionMode === undefined
+            ? undefined
+            : workAccessOfPermissionMode(project.defaultPermissionMode)) ??
+            this.#currentSettings().defaultAccess) === "full-access" &&
+          (command.fullAccessSandbox ??
+            defaultFullAccessSandboxFor({ project, settings: this.#currentSettings() }))
+            ? { fullAccessSandbox: true }
+            : {}),
           version: 1,
           createdAt: decodeTimestamp(this.#clock()),
           updatedAt: decodeTimestamp(this.#clock()),
@@ -895,9 +911,17 @@ export class WorkThreadService {
         // The level takes effect when the next turn starts: a turn fixes its
         // level at admission and journals it, so a running turn keeps the one
         // it started with.
+        // The sandbox choice only means something at Full access: kept from the
+        // command, else from the thread, and dropped at any other level so a
+        // later raise to Full access never inherits a stale choice.
+        const { fullAccessSandbox: currentSandbox, ...unsandboxed } = current;
+        const sandboxed =
+          command.access === "full-access" &&
+          (command.fullAccessSandbox ?? currentSandbox) === true;
         const updated = decodeWorkThread({
-          ...current,
+          ...unsandboxed,
           access: command.access,
+          ...(sandboxed ? { fullAccessSandbox: true } : {}),
           version: command.expectedVersion + 1,
           updatedAt: decodeTimestamp(this.#clock()),
         });
@@ -1270,6 +1294,11 @@ export class WorkThreadService {
       bindingRevisionId,
       workingDirectory: ".",
       access: this.#currentSettings().defaultAccess,
+      ...(this.#currentSettings().defaultAccess === "full-access" &&
+      (command.fullAccessSandbox ??
+        defaultFullAccessSandboxFor({ settings: this.#currentSettings() }))
+        ? { fullAccessSandbox: true }
+        : {}),
       version: 1,
       createdAt: decodeTimestamp(this.#clock()),
       updatedAt: decodeTimestamp(this.#clock()),

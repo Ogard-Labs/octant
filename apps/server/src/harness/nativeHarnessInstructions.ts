@@ -21,6 +21,25 @@ const CORE = [
   "When the thread has a goal, work toward its criteria, run goal-check on each one you believe holds, and stop when the goal completes or its budget is spent. Saying the goal is done does not complete it; only passing checks do.",
 ].join("\n");
 
+/**
+ * What Octant is and the product rules a lead acts within. The shared
+ * orientation (`octantOrientation`) already says the model runs inside Octant;
+ * Octant Harness drives endpoint models that bring no prompt of their own, so
+ * they also need the modes, Projects, Done rule, and approvals spelled out.
+ * The same text in every mode, and tools are named only as "when offered", so
+ * it never changes between turns or tool sets.
+ */
+const ABOUT_OCTANT = [
+  "About Octant:",
+  "- Octant is a local-first workspace on the person's computer for Chat, Work, and Code with AI models from several providers.",
+  "- A Chat thread is a conversation with no folder, filesystem, or shell. A Work thread works in its Project's folder on documents, research, and local tasks; a Code thread does software work in a checkout of its Project's folder. Both may read, write, and run commands there at the thread's access level. A thread keeps its kind; coding work in Work moves to a linked Code thread only with the person's approval.",
+  "- A Project groups threads. Work and Code Projects have a board showing each thread's state. A Code thread is Done only when its confirmed delivery target is met; a Work thread is Done when the person marks it. You can never mark a thread Done: report what is finished and what is left.",
+  "- The access level decides which actions the person approves first. Plan mode is read-only: investigate and propose, change nothing.",
+  "- Project memory is the Project's curated notes; they reach every thread in the Project. When a memory tool is offered, propose durable facts and decisions there; the person approves each change.",
+  "- Skills the person turned on arrive as instructions. When a skill tool is offered, load a skill whose description fits the task before you start it.",
+  "- When octant_canvas is offered, put substantial deliverables (reports, plans, comparisons, designs) in a Canvas document. When octant_agents is offered, helper agents can take delegated parts of a task.",
+].join("\n");
+
 const MODE: Readonly<Record<OctantMode, string>> = {
   chat: "This is a Chat thread. It has no filesystem and no shell. Your tool definitions and the list of Octant tools in this session are exactly what you can call; check them before saying a tool is unavailable.",
   work: "This is a Work thread bound to one folder: read, search, and edit files inside it, and run commands in it with bash at the thread's level, which may ask the user first. Document changes in files the user can open.",
@@ -33,7 +52,11 @@ export const NATIVE_HARNESS_INSTRUCTIONS_BLOCK: ProviderContextBlock = {
 };
 
 export function nativeHarnessInstructions(mode: OctantMode): ReadonlyArray<ProviderContextBlock> {
-  return [NATIVE_HARNESS_INSTRUCTIONS_BLOCK, { kind: "instructions", text: MODE[mode] }];
+  return [
+    NATIVE_HARNESS_INSTRUCTIONS_BLOCK,
+    { kind: "instructions", text: ABOUT_OCTANT },
+    { kind: "instructions", text: MODE[mode] },
+  ];
 }
 
 /**

@@ -603,6 +603,12 @@ export async function createAgentThread(
      * terminal thread starts without a per-thread confirmation on any host.
      */
     readonly access?: PermissionMode | undefined;
+    /**
+     * Opt-in sandbox at Full access: the thread records `fullAccessSandbox`,
+     * so its launch stays confined and its network proxied while prompts stay
+     * off. The host drops the flag when the resolved posture is not Full access.
+     */
+    readonly sandbox?: boolean | undefined;
   },
 ): Promise<
   | HostRefusal
@@ -747,6 +753,7 @@ export async function createAgentThread(
         modelId: model.modelId,
         hostId: "local",
         bindingRevisionId: String(project.bindingRevisionId),
+        ...(input.sandbox === true ? { fullAccessSandbox: true } : {}),
       },
     });
     if (response.status !== 200) {
@@ -768,6 +775,7 @@ export async function createAgentThread(
           threadId,
           expectedVersion: 1,
           access: workAccess,
+          ...(input.sandbox === true ? { fullAccessSandbox: true } : {}),
         },
       });
       if (changed.status !== 200) {
@@ -863,6 +871,7 @@ export async function createAgentThread(
         modelId: model.modelId,
         executionPolicy:
           requested?.executionPolicy ?? (remembered ? "full-access" : "approval-gated"),
+        ...(input.sandbox === true ? { fullAccessSandbox: true } : {}),
         ...(requested?.autoApprove === true ? { autoApprove: true } : {}),
         permissionPersistence:
           (requested?.executionPolicy ?? (remembered ? "full-access" : "approval-gated")) ===

@@ -35,7 +35,7 @@ import type { ProjectSummary, ProjectId } from "@octant/contracts/projects";
 import type { BrowserToolApproval } from "@octant/contracts/browser-automation-rpc";
 import { WORK_PERMISSION_MODES, workAccessOfMode, workModeOf } from "./workPermissionModes";
 import { ThreadGuardrailLevel } from "../code/GuardrailLevelIndicator";
-import { PermissionModePicker } from "../code/PermissionModePicker";
+import { PermissionModePicker, threadKeepsFullAccessSandbox } from "../code/PermissionModePicker";
 import { ThreadNativeSetupControl } from "../providers/ThreadNativeSetupControl";
 import { browserApprovalDetail, browserApprovalSummary } from "../browser/browserProfileCopy";
 import {
@@ -840,8 +840,9 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
   const [accessChanging, setAccessChanging] = useState(false);
   // Work and Code share one set of levels; the composer moves this thread to
   // another one, and its next turn runs at it.
-  const changeAccess = async (access: WorkAccess) => {
-    if (thread === undefined || accessChanging || access === thread.access) return;
+  const changeAccess = async (access: WorkAccess, fullAccessSandbox?: boolean) => {
+    if (thread === undefined || accessChanging) return;
+    if (access === thread.access && fullAccessSandbox === undefined) return;
     setAccessChanging(true);
     setErrorMessage(undefined);
     setToolCatalogHandoffRequired(false);
@@ -851,6 +852,7 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
         threadId: thread.id,
         expectedVersion: thread.version,
         access,
+        ...(fullAccessSandbox === undefined ? {} : { fullAccessSandbox }),
       });
       if (!("kind" in result) || result.kind !== "thread-updated") {
         setErrorMessage("This task’s mode could not be saved.");
@@ -2931,6 +2933,14 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
                     }}
                     value={workModeOf(thread.access)}
                     warningScope={{ projectId: String(thread.projectId) }}
+                    fullAccessSandbox={thread.fullAccessSandbox === true}
+                    fullAccessSandboxSupported={threadKeepsFullAccessSandbox(
+                      props.providerGroups ?? [],
+                      thread.providerInstanceId,
+                    )}
+                    onFullAccessSandboxChange={(sandboxed) =>
+                      void changeAccess("full-access", sandboxed)
+                    }
                   />
                 )}
                 {thread === undefined ? null : (
