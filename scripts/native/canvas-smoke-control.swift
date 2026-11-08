@@ -49,6 +49,7 @@ struct Observation: Codable {
     let texts: [TextTarget]
     let clicked: Bool
     let pointerProof: String?
+    let nativeText: String?
 }
 
 guard CommandLine.arguments.count >= 2 else { refuse("Supply preflight, observe, click or settings.") }
@@ -68,7 +69,7 @@ _ = controllerApplication.setActivationPolicy(.prohibited)
 guard let application = NSRunningApplication(processIdentifier: pid), !application.isTerminated else {
     refuse("The owned application is no longer running.")
 }
-if mode == "copy-paragraph" || mode == "choose-native-menu-item" || mode == "click" || mode == "fill" || mode == "fill-private" || mode == "toggle-before-field" || mode == "focus-before-text" || mode == "scroll-top" || mode == "scroll-bottom" || mode == "enter" || mode == "end" || mode == "escape" || mode == "settings" {
+if mode == "choose-native-menu-item" || mode == "click" || mode == "fill" || mode == "fill-private" || mode == "toggle-before-field" || mode == "focus-before-text" || mode == "scroll-top" || mode == "scroll-bottom" || mode == "enter" || mode == "end" || mode == "escape" || mode == "settings" {
     guard CGPreflightPostEventAccess() else { refuse("Native event delivery is unavailable; no permission was requested.") }
     _ = application.activate(options: [.activateIgnoringOtherApps])
 }
@@ -108,7 +109,8 @@ let targets = (request.results ?? []).compactMap { result -> TextTarget? in
 }
 var clicked = false
 var pointerProof: String?
-if mode == "copy-paragraph" || mode == "choose-native-menu-item" || mode == "click" || mode == "fill" || mode == "fill-private" || mode == "toggle-before-field" || mode == "focus-before-text" || mode == "scroll-top" || mode == "scroll-bottom" {
+var nativeText: String?
+if mode == "read-text" || mode == "choose-native-menu-item" || mode == "click" || mode == "fill" || mode == "fill-private" || mode == "toggle-before-field" || mode == "focus-before-text" || mode == "scroll-top" || mode == "scroll-bottom" {
     guard !expected.isEmpty else { refuse("Supply a nonempty observed text target.") }
     let partialMatches = (request.results ?? []).flatMap { result -> [TextTarget] in
         guard let value = result.topCandidates(1).first else { return [] }
@@ -182,7 +184,24 @@ if mode == "copy-paragraph" || mode == "choose-native-menu-item" || mode == "cli
         }
         refuse("Another native window covers the exact observed target: owner=\(owner), layer=\(layer), window=\(identifier).")
     }
-    if mode == "choose-native-menu-item" {
+    if mode == "read-text" {
+        guard AXIsProcessTrusted() else { refuse("Native text accessibility is not already trusted.") }
+        var element: AXUIElement?
+        guard AXUIElementCopyElementAtPosition(AXUIElementCreateSystemWide(), Float(point.x), Float(point.y), &element) == .success,
+              let element else { refuse("The exact owned native text is unavailable.") }
+        var owner: pid_t = 0
+        var role: CFTypeRef?
+        var value: CFTypeRef?
+        guard AXUIElementGetPid(element, &owner) == .success, owner == pid,
+              AXUIElementCopyAttributeValue(element, kAXRoleAttribute as CFString, &role) == .success,
+              role as? String == kAXStaticTextRole,
+              AXUIElementCopyAttributeValue(element, kAXValueAttribute as CFString, &value) == .success,
+              let text = value as? String, text.utf8.count <= 2048 else {
+            refuse("The observed target does not expose bounded owned native static text.")
+        }
+        nativeText = text
+        pointerProof = "owned-native-static-text-read"
+    } else if mode == "choose-native-menu-item" {
         guard CommandLine.arguments.count == 6, AXIsProcessTrusted() else {
             refuse("Native menu accessibility is not already trusted; no permission was requested.")
         }
@@ -217,26 +236,7 @@ if mode == "copy-paragraph" || mode == "choose-native-menu-item" || mode == "cli
         up.post(tap: .cghidEventTap)
         clicked = true
     }
-    if mode == "copy-paragraph" {
-        for count: Int64 in [2, 3] {
-            guard let down = CGEvent(mouseEventSource: nil, mouseType: .leftMouseDown, mouseCursorPosition: point, mouseButton: .left),
-                  let up = CGEvent(mouseEventSource: nil, mouseType: .leftMouseUp, mouseCursorPosition: point, mouseButton: .left) else { refuse("Native paragraph selection is unavailable.") }
-            down.flags = []
-            up.flags = []
-            down.setIntegerValueField(.mouseEventClickState, value: count)
-            up.setIntegerValueField(.mouseEventClickState, value: count)
-            down.post(tap: .cghidEventTap)
-            usleep(50_000)
-            up.post(tap: .cghidEventTap)
-        }
-        usleep(150_000)
-        guard let down = CGEvent(keyboardEventSource: nil, virtualKey: 8, keyDown: true),
-              let up = CGEvent(keyboardEventSource: nil, virtualKey: 8, keyDown: false) else { refuse("Native copy is unavailable.") }
-        down.flags = .maskCommand
-        up.flags = .maskCommand
-        down.postToPid(pid)
-        up.postToPid(pid)
-    } else if mode == "scroll-top" || mode == "scroll-bottom" {
+    if mode == "scroll-top" || mode == "scroll-bottom" {
         for _ in 0..<3 {
             guard let scroll = CGEvent(scrollWheelEvent2Source: nil, units: .line, wheelCount: 1, wheel1: mode == "scroll-top" ? 200 : -200, wheel2: 0, wheel3: 0) else { refuse("Native scrolling is unavailable.") }
             scroll.location = point
@@ -303,7 +303,7 @@ if mode == "copy-paragraph" || mode == "choose-native-menu-item" || mode == "cli
     up.postToPid(pid)
 } else if mode != "observe" && mode != "observe-detail" { refuse("Unknown native controller operation.") }
 do {
-    let encoded = try JSONEncoder().encode(Observation(pid: pid, windowId: owned.id, texts: targets, clicked: clicked, pointerProof: pointerProof))
+    let encoded = try JSONEncoder().encode(Observation(pid: pid, windowId: owned.id, texts: targets, clicked: clicked, pointerProof: pointerProof, nativeText: nativeText))
     try encoded.write(to: URL(fileURLWithPath: imagePath + ".json"), options: .atomic)
     FileHandle.standardOutput.write(encoded)
     print("")

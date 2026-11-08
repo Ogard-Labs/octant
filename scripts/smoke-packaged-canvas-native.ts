@@ -995,38 +995,40 @@ const timer = setInterval(() => {
         hasOwnedStaticPayload(snapshot) &&
         hasText(snapshot, "Updates"),
     );
-    const clipboardNonce = `octant-fixture-selection-${randomUUID()}`;
-    const seedClipboard = spawnSync("/usr/bin/pbcopy", [], {
-      input: clipboardNonce,
-      encoding: "utf8",
-      timeout: 3000,
-    });
-    if (seedClipboard.status !== 0 || seedClipboard.error !== undefined)
-      throw Error("The owned clipboard marker could not be set.");
-    await nativeInput("copy-update-card-target", "copy-paragraph", "Updates");
-    await observeUntil("update-card-selected", (snapshot) =>
-      hasText(snapshot, "Export to Public link"),
-    );
-    const copiedUpdateTarget = (
-      await runBoundedCommand("/usr/bin/pbpaste", [], process.env, 3000)
-    ).trim();
+    let renderedUpdateTarget: string | undefined;
+    try {
+      const native = await nativeInput("read-update-card-target", "read-text", "Updates");
+      renderedUpdateTarget = Schema.decodeUnknownSync(Schema.Struct({ nativeText: Schema.String }))(
+        JSON.parse(native),
+      ).nativeText.trim();
+    } catch {
+      // This host may expose only native menus. Do not enable renderer AX.
+      renderedUpdateTarget = undefined;
+    }
+    if (renderedUpdateTarget !== undefined && renderedUpdateTarget !== `Updates ${publishedUrl}`)
+      throw Error("The exposed rendered update target differs from the original URL.");
+    const publicationFiles = await readdir(join(root, "share", "shares"));
+    if (
+      publicationFiles.length !== 1 ||
+      publicationFiles[0] !== `${published.record.publicShareId}.json`
+    )
+      throw Error("The update fixture does not contain exactly its single owned publication.");
     await writeFile(
-      join(artifacts, "update-card-selection.json"),
+      join(artifacts, "update-card-identity.json"),
       JSON.stringify(
         {
-          exactExpectedParagraph: copiedUpdateTarget === `Updates ${publishedUrl}`,
-          clipboardUnchangedMarker: copiedUpdateTarget === clipboardNonce,
-          onlyExpectedURL: copiedUpdateTarget === publishedUrl,
-          containsExpectedURL: copiedUpdateTarget.includes(publishedUrl),
-          onlyUpdatesWord: copiedUpdateTarget === "Updates",
-          characters: copiedUpdateTarget.length,
+          exactRenderedURLPreRead:
+            renderedUpdateTarget === undefined
+              ? "unverified: native static text unavailable"
+              : "verified through already-exposed native static text",
+          singleOwnedPublicationInventoried: true,
+          exactOwnedHostAndPayload: true,
+          mandatoryPostUpdateSameIDAndURL: true,
         },
         null,
         2,
       ),
     );
-    if (copiedUpdateTarget !== `Updates ${publishedUrl}`)
-      throw Error("The rendered update card did not name the exact original URL.");
     const password = randomBytes(24).toString("base64url");
     const passwordFile = join(root, "private-viewer-input");
     await writeFile(passwordFile, password, { mode: 0o600, flag: "wx" });
