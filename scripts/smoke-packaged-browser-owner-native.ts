@@ -19,13 +19,18 @@ const preference = "Keep Browser available without windows";
 const ax = String.raw`on run argv
 tell application "System Events"
 set candidate to first application process whose unix id is (item 1 of argv as integer)
+set operation to item 2 of argv
+if operation is "registered" then return (unix id of candidate) as text
+if operation is "initialize" then
 try
 set value of attribute "AXManualAccessibility" of candidate to true
 end try
 try
 set value of attribute "AXEnhancedUserInterface" of candidate to true
 end try
-set operation to item 2 of argv
+set frontmost of candidate to true
+return "initialized"
+end if
 if operation is "count" then return (count of windows of candidate) as text
 if operation is "activate" then
 set frontmost of candidate to false
@@ -33,8 +38,8 @@ delay 0.2
 set frontmost of candidate to true
 return "activated"
 end if
-set frontmost of candidate to true
 if operation is "key" then
+set frontmost of candidate to true
 keystroke (item 3 of argv) using command down
 return "sent"
 end if
@@ -289,6 +294,23 @@ end run`;
         return wait("preference", (s) => s.includes(preference));
       };
       try {
+        // Accessibility initialization can rebuild Electron's AX tree. Do it
+        // once after process registration; observations must let that tree settle.
+        const registrationDeadline = Date.now() + 12_000;
+        let registered = false;
+        while (!controller.signal.aborted && Date.now() < registrationDeadline) {
+          try {
+            if ((await native("registered")).trim() === String(pid)) {
+              registered = true;
+              break;
+            }
+          } catch {
+            /* The captured process has not registered its application yet. */
+          }
+          await pause(100);
+        }
+        if (!registered) throw Error("Captured native application did not register.");
+        await native("initialize");
         if (phase === "initial") {
           await wait(
             "onboarding",
