@@ -829,7 +829,10 @@ export async function createAgentThread(
     if (granted.status !== 200) {
       return {
         kind: "refused",
-        message: refusalMessage(granted, "The host refused to remember Full access for this Project."),
+        message: refusalMessage(
+          granted,
+          "The host refused to remember Full access for this Project.",
+        ),
       };
     }
     remembered = true;

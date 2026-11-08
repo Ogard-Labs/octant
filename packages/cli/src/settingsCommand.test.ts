@@ -42,8 +42,12 @@ function host(options: { refuse?: boolean } = {}) {
   };
   const out: string[] = [];
   const err: string[] = [];
-  const stdout = { write: (text: string) => (out.push(text), true) } as unknown as NodeJS.WritableStream;
-  const stderr = { write: (text: string) => (err.push(text), true) } as unknown as NodeJS.WritableStream;
+  const stdout = {
+    write: (text: string) => (out.push(text), true),
+  } as unknown as NodeJS.WritableStream;
+  const stderr = {
+    write: (text: string) => (err.push(text), true),
+  } as unknown as NodeJS.WritableStream;
   return { session, seen, out, err, stdout, stderr };
 }
 

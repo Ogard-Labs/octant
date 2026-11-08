@@ -364,7 +364,9 @@ describe("starting a Work thread from the terminal with an asked-for access", ()
     });
 
     expect(result).toMatchObject({ kind: "created", mode: "work", projectName: "Client" });
-    const change = fake.workCommands().find((command) => command.kind === "change-work-thread-access");
+    const change = fake
+      .workCommands()
+      .find((command) => command.kind === "change-work-thread-access");
     expect(change).toMatchObject({ access: "full-access", expectedVersion: 1 });
   });
 
@@ -379,9 +381,9 @@ describe("starting a Work thread from the terminal with an asked-for access", ()
     });
 
     expect(result).toMatchObject({ kind: "refused" });
-    expect(fake.workCommands().some((command) => command.kind === "change-work-thread-access")).toBe(
-      false,
-    );
+    expect(
+      fake.workCommands().some((command) => command.kind === "change-work-thread-access"),
+    ).toBe(false);
   });
 
   it("refuses --access on a Chat thread", async () => {
