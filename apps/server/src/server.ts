@@ -105,6 +105,8 @@ import { wireThreadNotifications } from "./wiring/notifications";
 import { wireWorkRequests } from "./wiring/workRequests";
 import { wireRoutes } from "./wiring/routes";
 import { wireRemote } from "./wiring/remote";
+import { createThreadMoveHolds } from "./hub/chatThreadMoveHost";
+import { createThreadMoveStateStore, heldThreadsOf } from "./hub/threadMoveStateStore";
 import { wireReplica } from "./wiring/replica";
 
 export { MAX_CHAT_ATTACHMENT_BYTES };
@@ -512,6 +514,10 @@ export function startOctantServer(
       windowAuthorityStore,
       workThreadProjection,
     });
+    // Which threads a move holds is shared by every mode's service and the
+    // move routes, and rebuilt from the saved moves so a restart keeps them held.
+    const threadMoveState = createThreadMoveStateStore(providerDataDirectory);
+    const threadMoveHolds = createThreadMoveHolds(heldThreadsOf(threadMoveState.load()));
     const {
       readHarnessProcessReceipts,
       beginGoogleCliChange,
@@ -891,6 +897,7 @@ export function startOctantServer(
       threadMentionService,
       workspacePresetRoutes,
     } = yield* wireChat({
+      threadMoveHolds,
       conversationInputTransfer,
       personMemoryAccess,
       workRequestRuntime,
@@ -1582,6 +1589,9 @@ export function startOctantServer(
       secretStoresRoutes,
       remoteHost,
     } = wireRemote({
+      chatService,
+      threadMoveHolds,
+      threadMoveState,
       beginGoogleCliChange,
       onSecretStoreLinkChange: () => commands.linkChanged(),
       browserAutomationService,

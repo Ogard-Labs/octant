@@ -270,6 +270,18 @@ export const ThreadHandoverStarted = Schema.Struct({
 }).annotations(strict);
 export type ThreadHandoverStarted = typeof ThreadHandoverStarted.Type;
 
+/**
+ * What an owner device asks the destination for after a fresh own-class
+ * unlock: a one-use ticket letting one named computer move one thread here.
+ */
+export const OwnerThreadMoveTicketRequest = Schema.Struct({
+  sourceMemberId: HubMemberId,
+}).annotations(strict);
+export type OwnerThreadMoveTicketRequest = typeof OwnerThreadMoveTicketRequest.Type;
+
+export const decodeOwnerThreadMoveTicketRequest = Schema.decodeUnknownSync(
+  OwnerThreadMoveTicketRequest,
+);
 export const decodeThreadMoveOffer = Schema.decodeUnknownSync(ThreadMoveOffer);
 export const decodeThreadMoveDestinationState = Schema.decodeUnknownSync(
   ThreadMoveDestinationState,

@@ -13,6 +13,7 @@ import {
   decodeWorkThreadId,
   LOCAL_HOST_ID,
   HubMemberId,
+  ThreadRetentionThreadId,
 } from "@octant/contracts";
 import { Schema } from "effect";
 import { decodeBrowserThreadId } from "@octant/contracts/browser-automation";
@@ -81,6 +82,12 @@ import { OwnerCredentialCopyService } from "../hub/ownerCredentialCopy";
 import { createProviderCredentialCopyBroker } from "../hub/ownerCredentialBroker";
 import { createOwnerPostureHost } from "../hub/ownerPostureHost";
 import { createPeerCredentialRouteHandler } from "../hub/peerCredentialRoutes";
+import { createChatThreadMoveHost, type ThreadMoveHolds } from "../hub/chatThreadMoveHost";
+import { createThreadMoveJournal } from "../hub/threadMoveJournal";
+import { createThreadMoveRouteHandler } from "../hub/threadMoveRoutes";
+import { ThreadMoveService } from "../hub/threadMoveService";
+import type { ThreadMoveStatePort } from "../hub/threadMoveStateStore";
+import type { ChatService } from "../chat/chatService";
 import { OwnerUnlockService } from "../hub/ownerUnlock";
 import { PairedMergeUnlockService } from "../hub/pairedMergeUnlock";
 import { createHubMembershipJournal } from "../hub/hubMembershipJournal";
@@ -212,7 +219,12 @@ export type RemoteDependencies = { readonly onSecretStoreLinkChange?: () => void
   Pick<RoutesWiring, "authenticatedProductDispatch"> &
   Pick<FoundationsWiring, "workThreadProjection"> &
   Pick<FoundationsWiring, "hostMemoryGuard" | "providerRuntimeRegistry"> &
-  Pick<CodeRuntimeWiring, "codeOperationRuntime" | "codeService">;
+  Pick<CodeRuntimeWiring, "codeOperationRuntime" | "codeService"> & {
+    readonly chatService: ChatService;
+    /** Threads a move holds: frozen here while leaving, or arriving and not yet committed. */
+    readonly threadMoveHolds: ThreadMoveHolds;
+    readonly threadMoveState: ThreadMoveStatePort;
+  };
 
 const decodeAgentRunParentThreadId = Schema.decodeUnknownSync(AgentRunParentThreadId);
 
@@ -422,6 +434,7 @@ export function wireRemote(deps: RemoteDependencies) {
             (await hubLinkRoutes(request)) ??
             (await peerDelegationRoutes(request)) ??
             (await peerCredentialRoutes(request)) ??
+            (await threadMoveRoutes(request)) ??
             (await directPushRoutes(request, facts)) ??
             hubOwnerRoutes(request)),
         hubWebOrigin: services.hubWebOrigin ?? (() => spokeLinkService.hubWebOrigin()),
@@ -920,6 +933,79 @@ export function wireRemote(deps: RemoteDependencies) {
     now: Date.now,
   });
   const peerCredentialRoutes = createPeerCredentialRouteHandler({ copy: ownerCredentialCopy });
+  const ownerIsCurrentOnSpoke = (ownerMemberId: string): boolean => {
+    const context = spokeLinkService.ownerContext();
+    return (
+      context !== undefined &&
+      context.owners.some((owner) => String(owner.memberId) === ownerMemberId) &&
+      !context.inactiveDeviceMemberIds.includes(ownerMemberId)
+    );
+  };
+  // Moving a thread between the person's computers. Only Chat threads move in
+  // this part; a thread of another mode reads as one that cannot move.
+  const chatThreadMoveHost = createChatThreadMoveHost({
+    readView: (threadId) => persistence.readChatThreadView(threadId),
+    isBusy: (view) =>
+      view.turns.some((turn) =>
+        turn.attempts.some(
+          (attempt) =>
+            attempt.outcome === "queued" ||
+            attempt.outcome === "streaming" ||
+            attempt.outcome === "waiting",
+        ),
+      ),
+    externalContentIngested: (threadId) =>
+      readThreadExternalContentTaint(persistence.connection, threadId).externalContentIngested,
+    importMovedThread: (input) => deps.chatService.importMovedThread(input),
+    activeChatProject: (projectId) => {
+      const project = persistence
+        .readProjects()
+        .find((candidate) => String(candidate.id) === projectId);
+      return project?.type === "chat" && project.lifecycle === "active";
+    },
+    purge: async (threadId) => {
+      await threadRetention.purge(
+        {
+          scope: { kind: "thread", mode: "chat", threadId: decodeRetentionThreadId(threadId) },
+          confirm: true,
+        },
+        "local-window",
+      );
+    },
+    holds: deps.threadMoveHolds,
+  });
+  const threadMoves = new ThreadMoveService({
+    state: deps.threadMoveState,
+    source: chatThreadMoveHost.source,
+    destination: chatThreadMoveHost.destination,
+    record: createThreadMoveJournal({
+      journal: persistence.journal,
+      connection: persistence.connection,
+      localActorId: OCTANT_LOCAL_ACTOR_ID,
+      uuid: randomUUID,
+      clock: () => new Date().toISOString(),
+    }),
+    identity: resolveHubIdentity,
+    target: (memberId) => spokeLinkService.memberTarget(memberId),
+    transport: hubTransport,
+    authenticate: (request) => {
+      const peer = spokeLinkService.authenticatePeer(request);
+      if (peer.status === "refused" || peer.peer.member.role === "guest") {
+        return { status: "refused" };
+      }
+      return {
+        status: "member",
+        memberId: String(peer.peer.member.memberId),
+        moveIn: peer.peer.grant.moveIn === true,
+      };
+    },
+    ownerIsCurrent: ownerIsCurrentOnSpoke,
+    now: Date.now,
+  });
+  const threadMoveRoutes = createThreadMoveRouteHandler({ moves: threadMoves });
+  // A move that was under way when this host stopped resumes from what its
+  // destination holds; only a committed move erases the thread here.
+  void threadMoves.recover().catch(() => undefined);
   const ownerBrowserControlService = new OwnerBrowserControlService({
     host: browserAutomationService.ownerBrowserHost({
       hostMemberId: () => Schema.decodeUnknownSync(HubMemberId)(hubService.hubMemberId()),
@@ -963,6 +1049,7 @@ export function wireRemote(deps: RemoteDependencies) {
       readProject: (projectId) => persistence.readProject(projectId),
     }),
     credentials: ownerCredentialCopy,
+    threadMoves,
     provision: spokeProvisionService,
     signIn: signInService,
     spokeSignIn: spokeSignInService,
@@ -1372,3 +1459,5 @@ export function wireRemote(deps: RemoteDependencies) {
 }
 
 export type RemoteWiring = ReturnType<typeof wireRemote>;
+
+const decodeRetentionThreadId = Schema.decodeUnknownSync(ThreadRetentionThreadId);

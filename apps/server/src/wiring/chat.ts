@@ -1,4 +1,5 @@
 import { decodeComputerUseOwner } from "@octant/contracts/computer-use-plugin";
+import type { ThreadMoveHolds } from "../hub/chatThreadMoveHost";
 import { randomUUID } from "node:crypto";
 import { approvedWorkingFolderRoot } from "../approvedWorkingFolders";
 import {
@@ -158,6 +159,8 @@ export type ChatDependencies = Pick<ServerStart, "options" | "persistence"> &
     readonly workThreadService: () => WorkThreadService;
     /** Wired by wireWork; read only after startup. */
     readonly workTurnService: () => WorkTurnService;
+    /** Threads a move holds: frozen here while leaving, or arriving and not yet committed. */
+    readonly threadMoveHolds: ThreadMoveHolds;
   } & Pick<FoundationsWiring, "providerRuntimeRegistry" | "conversationInputTransfer">;
 
 export function wireChat(deps: ChatDependencies) {
@@ -422,6 +425,7 @@ export function wireChat(deps: ChatDependencies) {
       persistence,
       issueContext: githubIssueContextService,
       linearIssueContext: linearIssueContextService,
+      moveHold: (threadId) => deps.threadMoveHolds.isHeld({ mode: "chat", threadId }),
       reviewedModelManifest,
       hiddenThreadIds: chatHiddenThreadIds,
       // A Side Chat sidecar is a lane *about* one source thread, so that

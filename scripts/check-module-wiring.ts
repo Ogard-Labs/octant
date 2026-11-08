@@ -97,14 +97,6 @@ export const KNOWN_ISLANDS: ReadonlyMap<string, string> = new Map([
   ],
   // ── Delivered ahead of its first caller by a staged design ──
   [
-    "packages/domain/src/hubThreadMovePolicy.ts",
-    "Thread-move eligibility, the destination's Move in check, Prepare to shut down's starting choices, recovery, and the handover branch, delivered as the contracts-and-policy part of slice 12 in docs/design/hub-and-spokes.md before the server move transport that calls it. Remove once the server's move routes decide with it.",
-  ],
-  [
-    "packages/contracts/src/hubThreadMove.ts",
-    "Thread-move offer, manifest, answers, destination state, handover notice, events, and failure reasons, delivered as the contracts-and-policy part of slice 12 in docs/design/hub-and-spokes.md before the server move routes that decode them. Remove once those routes decode the offer.",
-  ],
-  [
     "packages/domain/src/hostedRelayProtocol.ts",
     "Hosted relay route id derivation, registration message, and frame reader, delivered as the contracts-and-policy slice of docs/design/hosted-relay.md before the relay service and host connector that call it. Remove once the relay service reads frames with it.",
   ],
@@ -728,6 +720,17 @@ export const KNOWN_UNCALLED_ENDPOINTS: ReadonlyMap<string, string> = new Map([
   ].map((endpoint): [string, string] => [
     endpoint,
     "A delegating spoke signs and sends this over the private listener from apps/server (delegatingSpokeService.ts), which builds the path itself; no window or device calls it. Remove when the checker counts apps/server as a caller of its own listener's routes.",
+  ]),
+  ...[
+    "/api/hub/peer/thread-moves",
+    "/api/hub/peer/thread-moves/chunk",
+    "/api/hub/peer/thread-moves/finish",
+    "/api/hub/peer/thread-moves/commit",
+    "/api/hub/peer/thread-moves/status",
+    "/api/hub/peer/thread-moves/discard",
+  ].map((endpoint): [string, string] => [
+    endpoint,
+    "The computer a thread is leaving signs and sends each step of a move here over the private listener from apps/server (threadMoveService.ts), which builds the path itself, against a ticket an owner device made on this host; no window or device calls it. Remove when the checker counts apps/server as a caller of its own listener's routes.",
   ]),
   [
     "/api/hub/peer/credentials",
