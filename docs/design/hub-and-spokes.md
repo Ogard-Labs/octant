@@ -294,7 +294,12 @@ the CLI. The hub depends on that:
     A replacement is exclusively staged and flushed, then renamed into the
     fixed leaf with native POSIX replacement semantics and checked against the
     reopened file identity. Existing read snapshots cannot block a newly
-    committed revocation; a new read sees the replacement. Snapshot readers do
+    committed revocation; a new read sees the replacement. The private stage
+    excludes competing writers and deletion, permits snapshot readers, and is
+    fully flushed before publication with no later content writes. Read handles
+    share the publisher's existing write access so its final rename/flush/close
+    interval cannot make a complete visible snapshot temporarily unreadable.
+    This sharing grants no file permissions. Snapshot readers do
     not erase old lawful bytes. Owner loss aborts writes, environment teardown
     closes its sessions, and incomplete or invalid transfers discard their stage.
     The physical hub directory stays held for the process lifetime. Store calls
