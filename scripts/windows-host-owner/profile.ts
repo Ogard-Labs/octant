@@ -117,7 +117,32 @@ try {
       (await startup.readHostInfo())?.instanceId === ownership.receipt.instanceId,
       "cleanup preserves a different owner's generation",
     );
-    await startup.clearProjections({ instanceId: ownership.receipt.instanceId, bridgeSecret });
+    const clearing = startup.clearProjections({
+      instanceId: ownership.receipt.instanceId,
+      bridgeSecret,
+    });
+    const newerInstance = randomUUID();
+    const newerBridge = "b".repeat(43);
+    await startup.writeHostInfo({
+      schemaVersion: 1,
+      hostId: paths.profileId,
+      instanceId: newerInstance,
+      url: "http://127.0.0.1:13773",
+      controlEndpoint: ownership.receipt.endpoint,
+      serviceMode: "foreground",
+      serverVersion: "fixture",
+      wireVersion: "1",
+      updatedAt: new Date().toISOString(),
+    });
+    await startup.writeBridgeSecret(newerBridge);
+    await clearing;
+    check(
+      (await startup.readHostInfo())?.instanceId === newerInstance &&
+        (await startup.readBridgeSecret()) === newerBridge,
+      "old cleanup cannot remove new projections published while its promise is pending",
+    );
+    await startup.clearProjections({ instanceId: newerInstance, bridgeSecret: newerBridge });
+
     check(
       (await startup.readBridgeSecret()) === undefined &&
         (await startup.readHostInfo()) === undefined,

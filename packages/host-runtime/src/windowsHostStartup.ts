@@ -16,7 +16,7 @@ export function createWindowsHostStartup(
 ) {
   const files = createWindowsHostStartupFiles(native, paths);
   if (files === undefined) return undefined;
-  const readBridgeSecret = async (): Promise<string | undefined> => {
+  const readBridgeSecret = (): string | undefined => {
     const result = readPrivateFileText(files.bridgeSecret, 44);
     if (result.status === "missing") return undefined;
     if (result.status !== "ready")
@@ -25,7 +25,7 @@ export function createWindowsHostStartup(
     if (!BRIDGE_SECRET.test(secret)) throw new Error("The native bridge projection is invalid.");
     return secret;
   };
-  const readHostInfo = async (): Promise<HostInfoReceipt | undefined> => {
+  const readHostInfo = (): HostInfoReceipt | undefined => {
     const result = readPrivateFileText(files.hostInfo, 4096);
     if (result.status === "missing") return undefined;
     if (result.status !== "ready")
@@ -44,8 +44,8 @@ export function createWindowsHostStartup(
       path: win32.join(paths.logsDirectory, "service.log"),
       privateFile: files.serviceLog,
     }),
-    readBridgeSecret,
-    readHostInfo,
+    readBridgeSecret: async () => readBridgeSecret(),
+    readHostInfo: async () => readHostInfo(),
     writeBridgeSecret: async (secret: string): Promise<void> => {
       if (
         !BRIDGE_SECRET.test(secret) ||
@@ -66,7 +66,7 @@ export function createWindowsHostStartup(
       readonly instanceId: string;
       readonly bridgeSecret?: string;
     }): Promise<void> => {
-      const receipt = await readHostInfo();
+      const receipt = readHostInfo();
       if (
         receipt?.instanceId === expected.instanceId &&
         files.hostInfo.remove().status !== "removed"
@@ -74,7 +74,7 @@ export function createWindowsHostStartup(
         throw new Error("The native host projection could not be cleared.");
       if (
         expected.bridgeSecret !== undefined &&
-        (await readBridgeSecret()) === expected.bridgeSecret &&
+        readBridgeSecret() === expected.bridgeSecret &&
         files.bridgeSecret.remove().status !== "removed"
       )
         throw new Error("The native bridge projection could not be cleared.");
