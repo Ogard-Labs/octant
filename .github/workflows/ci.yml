@@ -69,6 +69,45 @@ jobs:
           OCTANT_MOBILE_PUSH=1 EAS_BUILD_PROFILE=production bunx expo config --type introspect --json >/dev/null
       - run: bun run build --filter=!@octant/desktop --filter=!@octant/scripts
 
+  electron-windows:
+    name: Windows Electron installer cleanup and recovery
+    runs-on: windows-2025
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 26
+      - name: Prepare isolated pinned verification dependencies without install scripts
+        run: |
+          $octantDesktopPackage = Get-Content apps/desktop/package.json -Raw | ConvertFrom-Json
+          $octantRootPackage = Get-Content package.json -Raw | ConvertFrom-Json
+          $octantElectronVersion = $octantDesktopPackage.devDependencies.electron
+          $octantVitestVersion = $octantRootPackage.workspaces.catalog.vitest
+          if ($octantElectronVersion -notmatch '^\d+\.\d+\.\d+$' -or $octantVitestVersion -notmatch '^\d+\.\d+\.\d+$') { throw 'Verification versions must be exact repository pins' }
+          $octantVerification = Join-Path $env:RUNNER_TEMP 'octant-electron-verification'
+          if (Test-Path -LiteralPath $octantVerification) { throw 'Verification dependency folder already exists' }
+          if (Test-Path -LiteralPath node_modules) { throw 'Checkout dependency folder already exists' }
+          [void](New-Item -ItemType Directory -Path $octantVerification)
+          npm install --prefix $octantVerification --no-save --package-lock=false --ignore-scripts --no-audit --no-fund "electron@$octantElectronVersion" "vitest@$octantVitestVersion"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          [void](New-Item -ItemType Junction -Path (Join-Path $pwd 'node_modules') -Target (Join-Path $octantVerification 'node_modules'))
+      - name: Prove actual Windows held-child cancellation and recovery boundaries
+        working-directory: scripts
+        run: node ../node_modules/vitest/vitest.mjs run ensure-ci-electron.test.ts
+      - name: Install and execute the exact checksum-verified Windows Electron runtime
+        env:
+          GH_TOKEN: ${{ github.token }}
+          electron_config_cache: ${{ runner.temp }}/octant-electron-cache
+          ELECTRON_RUN_AS_NODE: "1"
+        run: |
+          node scripts/ensure-ci-electron.ts
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $octantElectronVersion = (Get-Content apps/desktop/package.json -Raw | ConvertFrom-Json).devDependencies.electron
+          $env:OCTANT_EXPECTED_ELECTRON = $octantElectronVersion
+          & "$pwd/node_modules/electron/dist/electron.exe" -e 'if(process.versions.electron!==process.env.OCTANT_EXPECTED_ELECTRON)throw Error("Unexpected Electron runtime");console.log(JSON.stringify({platform:process.platform,arch:process.arch,electron:process.versions.electron,node:process.versions.node,ownedRuntimeJoined:true}))'
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
   packages:
     name: Package tests
     runs-on: ubuntu-24.04

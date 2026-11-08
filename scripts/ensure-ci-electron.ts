@@ -286,17 +286,31 @@ export function isUpstreamElectronDownloadFailure(message: string): boolean {
 }
 
 export function requireCiInstallerHost(platform: NodeJS.Platform): void {
-  if (platform !== "darwin" && platform !== "linux")
-    throw Error("The bounded CI installer requires a macOS or Linux process group.");
+  if (platform !== "darwin" && platform !== "linux" && platform !== "win32")
+    throw Error("The bounded CI installer host is unsupported.");
 }
 
-async function normalInstaller(path: string, signal: AbortSignal): Promise<InstallerResult> {
+export async function runElectronInstaller(
+  path: string,
+  signal: AbortSignal,
+): Promise<InstallerResult> {
   requireCiInstallerHost(process.platform);
   signal.throwIfAborted();
   const env = { ...process.env };
   delete env.GH_TOKEN;
   delete env.GITHUB_TOKEN;
-  const child = spawn("node", [path], { env, stdio: ["ignore", "ignore", "pipe"], detached: true });
+  const child = spawn("node", [path], {
+    env,
+    stdio: ["ignore", "ignore", "pipe"],
+    detached: process.platform !== "win32",
+  });
+  const terminate = (signal: NodeJS.Signals) => {
+    // The pinned Windows installer and extractor stay inside this Node
+    // process. Only macOS invokes sysctl; Linux extraction may invoke ldd.
+    // Windows uses the held child handle, never a recycled numeric PID.
+    if (process.platform === "win32") child.kill(signal);
+    else if (child.pid !== undefined) process.kill(-child.pid, signal);
+  };
   let error = "";
   child.stderr.on("data", (chunk: Buffer) => {
     error = (error + chunk.toString()).slice(-8192);
@@ -305,14 +319,14 @@ async function normalInstaller(path: string, signal: AbortSignal): Promise<Insta
   const stop = () => {
     if (child.pid === undefined || child.exitCode !== null || child.signalCode !== null) return;
     try {
-      process.kill(-child.pid, "SIGTERM");
+      terminate("SIGTERM");
     } catch {
       /* The owned installer exited. */
     }
     force ??= setTimeout(() => {
       if (child.pid !== undefined && child.exitCode === null && child.signalCode === null)
         try {
-          process.kill(-child.pid, "SIGKILL");
+          terminate("SIGKILL");
         } catch {
           /* The owned installer exited. */
         }
@@ -381,7 +395,7 @@ async function main() {
   try {
     const result = await ensureCiElectron({
       signal: owner.signal,
-      install: () => normalInstaller(join(dirname(packagePath), "install.js"), owner.signal),
+      install: () => runElectronInstaller(join(dirname(packagePath), "install.js"), owner.signal),
       recover: async () => {
         const { platform, arch } = recoveryTargetFromEnvironment(process.env);
         const target = installedElectron(

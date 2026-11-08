@@ -14653,8 +14653,13 @@ bun run verify     # paths:check, wiring:check, ui:check, style:check, decisions
   verifies its archive against the installed package's checksums, and populates
   the ordinary public Electron download cache, including the checksum manifest.
   The normal installer then verifies and installs it. Its bounded installer
-  process control supports macOS and Linux CI hosts; other hosts refuse before
-  spawning a process. Recovery refuses custom
+  process control uses an owned process group on macOS and Linux, and the held
+  Node child process on Windows. The pinned Windows installer and native
+  extractor do not spawn helper processes; cancellation joins that process
+  after bounded termination, without selecting a numeric PID or process group.
+  Unsupported hosts refuse before spawning. Windows CI checks real cancellation,
+  the shared recovery boundaries and the installed pinned Electron runtime in
+  an isolated runner dependency folder. Recovery refuses custom
   targets or mirrors, forwards API authorization to GitHub's API only, and
   changes no runtime trust, packaging or release behavior.
 - Two stalls are logged once per occurrence so the next one is visible: a

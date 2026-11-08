@@ -1,3 +1,4 @@
+import { spawn } from "node:child_process";
 import { createHash } from "node:crypto";
 import { mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -12,7 +13,13 @@ import {
   recoverCiElectron,
   recoveryTargetFromEnvironment,
   requireCiInstallerHost,
+  runElectronInstaller,
 } from "./ensure-ci-electron";
+
+vi.mock("node:child_process", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("node:child_process")>();
+  return { ...actual, spawn: vi.fn(actual.spawn) };
+});
 
 const version = "43.7.11";
 const archive = `electron-v${version}-darwin-arm64.zip`;
@@ -65,11 +72,51 @@ const responseFixture = (
   });
 
 describe("pinned Electron CI recovery", () => {
-  it("refuses hosts without the process-group cleanup the CI installer requires", () => {
-    expect(() => requireCiInstallerHost("win32")).toThrow(/process group/);
+  it("supports only hosts with an owned installer termination route", () => {
+    expect(() => requireCiInstallerHost("win32")).not.toThrow();
+    expect(() => requireCiInstallerHost("freebsd")).toThrow(/unsupported/);
     expect(() => requireCiInstallerHost("darwin")).not.toThrow();
     expect(() => requireCiInstallerHost("linux")).not.toThrow();
   });
+
+  it("joins an owned installer on cancellation without selecting a Windows PID or process group", async () => {
+    const root = await temporary();
+    const ready = join(root, "ready");
+    const fixture = join(root, "installer.cjs");
+    await writeFile(
+      fixture,
+      `require("node:fs").writeFileSync(${JSON.stringify(ready)}, String(process.pid)); process.on("SIGTERM", () => {}); setTimeout(() => process.exit(0), 8000);`,
+    );
+    const owner = new AbortController();
+    const running = runElectronInstaller(fixture, owner.signal);
+    try {
+      const deadline = Date.now() + 6000;
+      let pid: string | undefined;
+      while (pid === undefined && Date.now() < deadline) {
+        pid = await readFile(ready, "utf8").catch(() => undefined);
+        if (pid === undefined) await new Promise((resolve) => setTimeout(resolve, 20));
+      }
+      if (pid === undefined) throw Error("Owned installer did not become ready.");
+      const captured = vi.mocked(spawn).mock.results.at(-1);
+      if (captured?.type !== "return") throw Error("Owned installer was not spawned.");
+      const child = captured.value;
+      expect(String(child.pid)).toBe(pid);
+      const killed = vi.spyOn(child, "kill");
+      owner.abort();
+      expect(await running).toEqual({ ok: false, upstreamFailure: false });
+      expect(child.exitCode !== null || child.signalCode !== null).toBe(true);
+      expect(spawn).toHaveBeenLastCalledWith(
+        "node",
+        [fixture],
+        expect.objectContaining({ detached: process.platform !== "win32" }),
+      );
+      if (process.platform === "win32") expect(killed).toHaveBeenCalledWith("SIGTERM");
+      else expect(killed).not.toHaveBeenCalled();
+    } finally {
+      owner.abort();
+      await running.catch(() => undefined);
+    }
+  }, 12000);
 
   it("cancels refused HTTP bodies and an accepted body whose destination cannot be opened", async () => {
     const root = await temporary();
