@@ -1,0 +1,48 @@
+param([Parameter(Mandatory=$true)][string]$Launcher,
+  [Parameter(Mandatory=$true)][string]$PackageDirectory,
+  [Parameter(Mandatory=$true)][string]$OutputDirectory)
+$ErrorActionPreference = 'Stop'
+$octantProfile = Join-Path ([Environment]::GetFolderPath('LocalApplicationData')) 'Octant/hosts/octant'
+if (Test-Path -LiteralPath $octantProfile) { throw 'Refusing a pre-existing Windows desktop profile' }
+if (Test-Path -LiteralPath $OutputDirectory) { throw 'The owned desktop output directory already exists' }
+[void](New-Item -ItemType Directory -Path $OutputDirectory)
+$octantBun = (Get-Command bun).Source
+$octantJoined = $true
+try {
+  foreach ($octantPhase in @('owned', 'attached')) {
+    $octantResult = @(& $Launcher --profile-user-owner $octantBun scripts/smoke-windows-desktop.ts $PackageDirectory $octantPhase $OutputDirectory)
+    $octantCode = $LASTEXITCODE
+    $octantResult | Write-Output
+    if (($octantResult -join "`n") -notmatch '"ownedJobJoined":true') { $octantJoined = $false }
+    if ($octantCode -ne 0 -or -not $octantJoined) { throw 'The owned native desktop phase failed or did not join its job' }
+  }
+} finally {
+  if (-not $octantJoined) { throw 'Refusing profile removal before owned processes joined' }
+  $octantScopeFile = Join-Path $OutputDirectory 'scope.json'
+  if (Test-Path -LiteralPath $octantScopeFile) {
+    $octantScope = (Get-Content -LiteralPath $octantScopeFile -Raw | ConvertFrom-Json).scope
+    if ($octantScope -cnotmatch '^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$') { throw 'Invalid owned desktop scope' }
+    foreach ($octantOperation in @('remove', 'absent')) {
+      $octantRequest = @{operation=$octantOperation; family='octant'; scope=$octantScope} | ConvertTo-Json -Compress
+      $octantIdentity = $octantRequest | & pwsh -NoProfile -NonInteractive -File scripts/windows-host-identity-fixture.ps1
+      if ($LASTEXITCODE -ne 0 -or ($octantIdentity -join '').Trim() -ne 'true') { throw 'Owned desktop identity cleanup failed' }
+    }
+    $octantRuntime = Join-Path ([Environment]::GetFolderPath('LocalApplicationData')) "Octant/runtime/$octantScope"
+    foreach ($octantPath in @($octantProfile, $octantRuntime)) {
+      if (Test-Path -LiteralPath $octantPath) {
+        $octantRoot = Get-Item -LiteralPath $octantPath -Force
+        if (-not $octantRoot.PSIsContainer -or ($octantRoot.Attributes -band [IO.FileAttributes]::ReparsePoint)) { throw 'Unsafe owned cleanup root' }
+        $octantOwner = (Get-Acl -LiteralPath $octantPath).GetOwner([Security.Principal.SecurityIdentifier]).Value
+        if ($octantOwner -ne [Security.Principal.WindowsIdentity]::GetCurrent().User.Value) { throw 'Owned cleanup root has another owner' }
+        foreach ($octantEntry in @(Get-ChildItem -LiteralPath $octantPath -Recurse -Force)) {
+          if ($octantEntry.Attributes -band [IO.FileAttributes]::ReparsePoint) { throw 'Refusing cleanup through an alias' }
+        }
+        Remove-Item -LiteralPath $octantPath -Recurse -Force
+      }
+      if (Test-Path -LiteralPath $octantPath) { throw 'Owned desktop path cleanup was not confirmed' }
+    }
+    Write-Output '{"ownedDesktopJobsJoined":true,"ownedProfileAndRuntimeAbsent":true,"ownedIdentityAbsent":true}'
+  } elseif (Test-Path -LiteralPath $octantProfile) {
+    throw 'Owned profile cleanup could not be authenticated without its scope receipt'
+  }
+}

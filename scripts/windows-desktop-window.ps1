@@ -1,0 +1,76 @@
+param([Parameter(Mandatory=$true)][int]$OwnedPid,
+  [Parameter(Mandatory=$true)][string]$Executable,
+  [string]$ExpectedBirth = '',
+  [string]$CapturePath = '',
+  [Parameter(Mandatory=$true)][ValidateSet('observe','close')][string]$Mode)
+$ErrorActionPreference = 'Stop'
+Add-Type -TypeDefinition @'
+using System;
+using System.Collections.Generic;
+using System.Diagnostics;
+using System.Runtime.InteropServices;
+public static class OctantDesktopWindow {
+  public static string Birth;
+  public static IntPtr Window;
+  public static int Width, Height;
+  delegate bool Visit(IntPtr window, IntPtr data);
+  [StructLayout(LayoutKind.Sequential)] struct Rect { public int left, top, right, bottom; }
+  [DllImport("user32.dll")] static extern bool EnumWindows(Visit visit, IntPtr data);
+  [DllImport("user32.dll")] static extern uint GetWindowThreadProcessId(IntPtr window, out uint pid);
+  [DllImport("user32.dll")] static extern bool IsWindowVisible(IntPtr window);
+  [DllImport("user32.dll")] static extern bool GetWindowRect(IntPtr window, out Rect rectangle);
+  [DllImport("user32.dll")] static extern bool PrintWindow(IntPtr window, IntPtr dc, uint flags);
+  [DllImport("user32.dll", SetLastError=true)] static extern IntPtr SendMessageTimeoutW(IntPtr window, uint message, IntPtr w, IntPtr l, uint flags, uint timeout, out IntPtr result);
+  public static bool Run(int pid, string executable, string expectedBirth, bool close) {
+    using (var process = Process.GetProcessById(pid)) {
+      if (process.HasExited || !String.Equals(process.MainModule.FileName, executable, StringComparison.OrdinalIgnoreCase)) throw new InvalidOperationException();
+      Birth = process.StartTime.ToFileTimeUtc().ToString(System.Globalization.CultureInfo.InvariantCulture);
+      if (!String.IsNullOrEmpty(expectedBirth) && expectedBirth != Birth) throw new InvalidOperationException();
+      if (close && String.IsNullOrEmpty(expectedBirth)) throw new InvalidOperationException();
+      var candidates = new List<IntPtr>();
+      EnumWindows((window, data) => {
+        uint owner; Rect bounds;
+        GetWindowThreadProcessId(window, out owner);
+        if (owner == (uint)pid && IsWindowVisible(window) && GetWindowRect(window, out bounds) && bounds.right-bounds.left>100 && bounds.bottom-bounds.top>100) candidates.Add(window);
+        return true;
+      }, IntPtr.Zero);
+      if (candidates.Count == 0) return false;
+      if (candidates.Count != 1) throw new InvalidOperationException();
+      Window = candidates[0]; Rect capture;
+      if (!GetWindowRect(Window, out capture)) throw new InvalidOperationException();
+      Width = capture.right-capture.left; Height = capture.bottom-capture.top;
+      if (Width>4096 || Height>4096) throw new InvalidOperationException();
+      if (close) {
+        uint owner; GetWindowThreadProcessId(candidates[0], out owner);
+        if (process.HasExited || owner != (uint)pid) throw new InvalidOperationException();
+        IntPtr result;
+        if (SendMessageTimeoutW(candidates[0], 0x0010, IntPtr.Zero, IntPtr.Zero, 0x0002, 1000, out result) == IntPtr.Zero) throw new InvalidOperationException();
+      }
+      return true;
+    }
+  }
+  public static bool Capture(IntPtr dc, int pid) {
+    using (var process=Process.GetProcessById(pid)) {
+      uint owner; GetWindowThreadProcessId(Window, out owner);
+      if (process.HasExited || owner!=(uint)pid || process.StartTime.ToFileTimeUtc().ToString(System.Globalization.CultureInfo.InvariantCulture)!=Birth) throw new InvalidOperationException();
+      return PrintWindow(Window, dc, 2);
+    }
+  }
+}
+'@
+try {
+  $found = [OctantDesktopWindow]::Run($OwnedPid, $Executable, $ExpectedBirth, $Mode -eq 'close')
+  if ($found -and $Mode -eq 'observe') {
+    if (-not $CapturePath) { throw 'Supply the owned capture path' }
+    Add-Type -AssemblyName System.Drawing
+    $octantBitmap = [Drawing.Bitmap]::new([OctantDesktopWindow]::Width, [OctantDesktopWindow]::Height)
+    $octantGraphics = [Drawing.Graphics]::FromImage($octantBitmap)
+    try {
+      $octantDc = $octantGraphics.GetHdc()
+      try { if (-not [OctantDesktopWindow]::Capture($octantDc, $OwnedPid)) { throw 'Owned capture refused' } }
+      finally { $octantGraphics.ReleaseHdc($octantDc) }
+      $octantBitmap.Save($CapturePath, [Drawing.Imaging.ImageFormat]::Png)
+    } finally { $octantGraphics.Dispose(); $octantBitmap.Dispose() }
+  }
+  [Console]::WriteLine(@{ visibleOwnedWindow=$found; birth=[OctantDesktopWindow]::Birth; closePosted=($found -and $Mode -eq 'close') } | ConvertTo-Json -Compress)
+} catch { [Console]::WriteLine('{"refused":true}'); exit 1 }

@@ -46,6 +46,21 @@ jobs:
         run: bun scripts/smoke-windows-package.ts
       - name: Exercise the packaged private credential helper with owned synthetic entries
         run: bun scripts/smoke-windows-credentials.ts "$pwd/out/Octant-win32-x64/resources/native/octant-credential-helper.exe"
+      - name: Build the existing owned Windows job fixture
+        run: |
+          cmake -S scripts/windows-desktop-qa -B "$env:RUNNER_TEMP/desktop-owner" -A x64
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          cmake --build "$env:RUNNER_TEMP/desktop-owner" --config Release
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Start and attach the normal packaged Windows desktop
+        run: ./scripts/run-windows-desktop.ps1 -Launcher "$env:RUNNER_TEMP/desktop-owner/Release/octant-windows-desktop-owner.exe" -PackageDirectory "$pwd/out/Octant-win32-x64" -OutputDirectory "$env:RUNNER_TEMP/desktop-proof"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: octant-windows-desktop-lifecycle
+          path: ${{ runner.temp }}/desktop-proof
+          if-no-files-found: warn
+          retention-days: 3
       - uses: actions/upload-artifact@v4
         with:
           name: octant-windows-x64-qa
