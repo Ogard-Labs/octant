@@ -166,6 +166,30 @@ jobs:
           })().catch(() => { console.error('The verified first-party Electron fallback failed.'); process.exitCode = 1; });
           JS
           node node_modules/electron/install.js
+      - name: Stage the pinned signed driver through its first-party release asset
+        if: steps.package-cache-proof.outputs.verified != 'true'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          driver_version=$(bun -e 'import { BUNDLED_CUA_DRIVER } from "./apps/desktop/src/computerUseDriverRelease"; console.log(BUNDLED_CUA_DRIVER.version)')
+          [[ "$driver_version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]
+          driver_asset="cua-driver-rs-$driver_version-darwin-universal-binary.tar.gz"
+          driver_asset_id=$(gh api "repos/trycua/cua/releases/tags/cua-driver-rs-v$driver_version" --jq ".assets[] | select(.name == \"$driver_asset\") | .id")
+          [[ "$driver_asset_id" =~ ^[0-9]+$ ]]
+          export OCTANT_QA_DRIVER_ARCHIVE="$RUNNER_TEMP/$driver_asset"
+          gh api -H 'Accept: application/octet-stream' "repos/trycua/cua/releases/assets/$driver_asset_id" > "$OCTANT_QA_DRIVER_ARCHIVE"
+          bun -e '
+            import { readFile, unlink } from "node:fs/promises";
+            import { resolve } from "node:path";
+            import { BUNDLED_CUA_DRIVER, stageComputerDriver } from "./apps/desktop/src/computerUseDriverRelease";
+            const path = process.env.OCTANT_QA_DRIVER_ARCHIVE;
+            if (!path) throw Error("Missing owned driver archive.");
+            try {
+              await stageComputerDriver(BUNDLED_CUA_DRIVER, resolve(".computer-use-driver"), AbortSignal.timeout(180000), await readFile(path));
+            } finally { await unlink(path); }
+          '
       - name: Package current source without signing or publication
         if: steps.package-cache-proof.outputs.verified != 'true'
         timeout-minutes: 25
