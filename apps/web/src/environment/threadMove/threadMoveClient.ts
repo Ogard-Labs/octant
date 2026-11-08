@@ -1,10 +1,16 @@
 import {
+  decodeHandoverContinueOutcome,
+  decodeHandoverListing,
+  decodeHandoverOutcome,
   decodeShutdownListing,
   decodeShutdownStartOutcome,
   decodeThreadMoveChallengeOutcome,
   decodeThreadMoveDestinations,
   decodeThreadMoveStartOutcome,
   decodeThreadMoveThreadStatus,
+  type HandoverContinueOutcome,
+  type HandoverListing,
+  type HandoverOutcome,
   type MovedThreadReference,
   type ShutdownListing,
   type ShutdownStartOutcome,
@@ -39,6 +45,19 @@ export interface ThreadMoveClient {
     threads: ReadonlyArray<MovedThreadReference>,
   ) => Promise<ThreadMoveChallengeOutcome>;
   readonly shutdownStart: (request: ShutdownStartRequest) => Promise<ShutdownStartOutcome>;
+  /** A Code thread that cannot move: what a handover would do, doing it, and taking it back. */
+  readonly handoverPreview: (thread: MovedThreadReference) => Promise<HandoverOutcome>;
+  readonly handOver: (
+    thread: MovedThreadReference,
+    destinationMemberId?: string,
+  ) => Promise<HandoverOutcome>;
+  readonly handoverTakeBack: (handoverId: string) => Promise<void>;
+  /** Handovers other computers told this one about, and continuing one here. */
+  readonly handoversList: () => Promise<HandoverListing>;
+  readonly handoversContinue: (request: {
+    readonly handoverId: string;
+    readonly projectId: string;
+  }) => Promise<HandoverContinueOutcome>;
 }
 
 export type ThreadMoveCancelOutcome = "cancelled" | "already-moved" | "destination-unreachable";
@@ -100,6 +119,21 @@ export function threadMoveClientOf(hub: HubAdministrationBridge): ThreadMoveClie
       ),
     shutdownStart: async (request) =>
       decodeShutdownStartOutcome(await call("shutdown-start", request)),
+    handoverPreview: async (thread) =>
+      decodeHandoverOutcome(await call("handover-preview", { thread })),
+    handOver: async (thread, destinationMemberId) =>
+      decodeHandoverOutcome(
+        await call("handover", {
+          thread,
+          ...(destinationMemberId === undefined ? {} : { destinationMemberId }),
+        }),
+      ),
+    handoverTakeBack: async (handoverId) => {
+      await call("handover-take-back", { handoverId });
+    },
+    handoversList: async () => decodeHandoverListing(await call("handovers-list", {})),
+    handoversContinue: async (request) =>
+      decodeHandoverContinueOutcome(await call("handovers-continue", request)),
   };
 }
 

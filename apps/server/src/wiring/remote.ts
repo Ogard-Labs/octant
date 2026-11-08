@@ -5,6 +5,7 @@ import { createOwnerBrowserJournal } from "../browser/ownerBrowserJournal";
 import { homedir } from "node:os";
 import {
   AgentRunParentThreadId,
+  type CodeThreadId,
   decodeChatThreadId,
   decodeCodeThreadId,
   decodeImageGenerationScopeId,
@@ -95,6 +96,10 @@ import { createThreadMoveJournal } from "../hub/threadMoveJournal";
 import { createThreadMoveRouteHandler } from "../hub/threadMoveRoutes";
 import { createThreadMoveAdministrationRouteHandler } from "../hub/threadMoveAdministrationRoutes";
 import { ThreadMoveService } from "../hub/threadMoveService";
+import { ThreadHandovers } from "../hub/threadHandovers";
+import { HandoverExchange } from "../hub/handoverExchange";
+import { createHandoverRouteHandler } from "../hub/handoverRoutes";
+import { readHandoverNote } from "../hub/codeThreadHandoverGit";
 import { createThreadMoveSenders } from "../hub/threadMoveSenders";
 import { createThreadMoveTicketClient } from "../hub/threadMoveTicketClient";
 import { hostThreads, ThreadMovesFromWindow } from "../hub/threadMovesFromWindow";
@@ -450,6 +455,7 @@ export function wireRemote(deps: RemoteDependencies) {
             (await peerDelegationRoutes(request)) ??
             (await peerCredentialRoutes(request)) ??
             (await threadMoveRoutes(request)) ??
+            (await handoverRoutes(request)) ??
             (await directPushRoutes(request, facts)) ??
             hubOwnerRoutes(request)),
         hubWebOrigin: services.hubWebOrigin ?? (() => spokeLinkService.hubWebOrigin()),
@@ -991,21 +997,23 @@ export function wireRemote(deps: RemoteDependencies) {
       ? undefined
       : { providerInstanceId: String(sameKind.id), modelId };
   };
+  // Where a Code thread's files are: its managed worktree, or its Project's checkout.
+  const codeCheckoutRoot = async (threadId: CodeThreadId): Promise<string | undefined> => {
+    const thread = persistence.readCodeThread(threadId);
+    if (thread === undefined) return undefined;
+    const checkout = persistence.readCodeCheckout(thread.checkoutId);
+    if (checkout?.kind === "managed-worktree") {
+      return (await deps.managedWorktreeReceipts.load(String(checkout.ownershipReceiptId)))
+        ?.canonicalWorktreePath;
+    }
+    if (checkout?.kind !== "existing-worktree") return undefined;
+    const project = persistence.readProject(thread.projectId);
+    return project?.type === "code" ? project.binding.canonicalRoot : undefined;
+  };
   const codeThreadMoveHost = createCodeThreadMoveHost({
     readThread: (threadId) => persistence.readCodeThread(threadId),
     isBusy: (threadId) => deps.liveTurns.read(String(threadId)) !== undefined,
-    checkoutRoot: async (threadId) => {
-      const thread = persistence.readCodeThread(threadId);
-      if (thread === undefined) return undefined;
-      const checkout = persistence.readCodeCheckout(thread.checkoutId);
-      if (checkout?.kind === "managed-worktree") {
-        return (await deps.managedWorktreeReceipts.load(String(checkout.ownershipReceiptId)))
-          ?.canonicalWorktreePath;
-      }
-      if (checkout?.kind !== "existing-worktree") return undefined;
-      const project = persistence.readProject(thread.projectId);
-      return project?.type === "code" ? project.binding.canonicalRoot : undefined;
-    },
+    checkoutRoot: codeCheckoutRoot,
     ownsManagedWorktree: (threadId) => {
       const thread = persistence.readCodeThread(threadId);
       return (
@@ -1184,6 +1192,13 @@ export function wireRemote(deps: RemoteDependencies) {
     code: codeThreadMoveHost,
     work: workThreadMoveHost,
   });
+  const threadMoveJournal = createThreadMoveJournal({
+    journal: persistence.journal,
+    connection: persistence.connection,
+    localActorId: OCTANT_LOCAL_ACTOR_ID,
+    uuid: randomUUID,
+    clock: () => new Date().toISOString(),
+  });
   // A spoke and the hub each judge a move's sender and target by their own role.
   const threadMoveSenders = createThreadMoveSenders({
     spoke: spokeLinkService,
@@ -1194,13 +1209,7 @@ export function wireRemote(deps: RemoteDependencies) {
     state: deps.threadMoveState,
     source: byMode.source,
     destination: byMode.destination,
-    record: createThreadMoveJournal({
-      journal: persistence.journal,
-      connection: persistence.connection,
-      localActorId: OCTANT_LOCAL_ACTOR_ID,
-      uuid: randomUUID,
-      clock: () => new Date().toISOString(),
-    }),
+    record: threadMoveJournal,
     identity: resolveHubIdentity,
     target: threadMoveSenders.target,
     transport: hubTransport,
@@ -1270,10 +1279,135 @@ export function wireRemote(deps: RemoteDependencies) {
     },
     now: Date.now,
   });
+  // Where a handover goes after its push: a notice to the chosen member, and
+  // Continue handover there, which tells this host to erase its copy.
+  const handoverExchange = new HandoverExchange({
+    state: deps.threadMoveState,
+    authenticate: threadMoveSenders.authenticate,
+    send: (targetMemberId, path, body) => threadMoves.sendSigned(targetMemberId, path, body),
+    memberName: (memberId) => {
+      const target = threadMoveSenders.target(memberId);
+      return target.status === "member" ? target.member.name : "another computer";
+    },
+    codeProjects: () =>
+      persistence
+        .readProjects()
+        .filter((project) => project.type === "code" && project.lifecycle === "active")
+        .map((project) => ({ projectId: project.id, title: project.name })),
+    acceptsProject: (placement) => byMode.destination.acceptsProject(placement),
+    resolveProvider: resolveMovedProvider,
+    readNote: async ({ projectId, branch, handoverId }) => {
+      const project = persistence.readProjects().find((entry) => String(entry.id) === projectId);
+      if (project?.type !== "code") return undefined;
+      return readHandoverNote({
+        repositoryRoot: project.binding.canonicalRoot,
+        branch,
+        handoverId,
+      });
+    },
+    createThread: async (input) => {
+      const project = persistence
+        .readProjects()
+        .find((entry) => String(entry.id) === input.projectId);
+      if (project?.type !== "code") throw new Error("The Code Project is gone.");
+      const command = decodeCodeCommand({
+        kind: "create-managed-code-thread",
+        threadId: input.threadId,
+        projectId: input.projectId,
+        bindingRevisionId: String(
+          project.bindingHistory[project.bindingHistory.length - 1]?.revisionId,
+        ),
+        title: input.title,
+        providerInstanceId: input.provider.providerInstanceId,
+        modelId: input.provider.modelId,
+        executionPolicy: "approval-gated",
+        permissionPersistence: "current-session",
+        deliveryTarget: {
+          branchIntent: input.branch,
+          remoteName: "origin",
+          proposedBaseRepository: input.projectId,
+          proposedBaseBranch: input.branch,
+          outcomeKind: "local-implementation",
+          confirmedAt: new Date().toISOString(),
+        },
+        sourceBranch: input.branch,
+        startFromOrigin: true,
+        remoteName: "origin",
+      });
+      // The note came through a branch others may push to: the thread starts marked.
+      await deps.codeService.execute(ROUTINE_HOST_SCOPE_ID, command, undefined, {
+        inheritedMark: {
+          sourceLabel: "handover-note",
+          contentReference: `handover-${input.handoverId}`,
+        },
+      });
+    },
+    journalNote: ({ threadId, handoverId, note }) =>
+      deps.movedThreadHistory.journalImported({
+        threadId,
+        moveId: handoverId,
+        entries: [{ role: "assistant", text: note, occurredAt: new Date().toISOString() as never }],
+        origin: "handover-note",
+      }),
+    source: byMode.source,
+    clock: () => new Date().toISOString(),
+  });
+  const handoverRoutes = createHandoverRouteHandler({ exchange: handoverExchange });
+  // A Code thread that cannot move hands over through its branch.
+  const threadHandovers = new ThreadHandovers({
+    source: byMode.source,
+    code: {
+      checkoutRoot: async (threadId) => {
+        try {
+          return await codeCheckoutRoot(decodeCodeThreadId(threadId));
+        } catch {
+          return undefined;
+        }
+      },
+      provider: (threadId) => {
+        let thread;
+        try {
+          thread = persistence.readCodeThread(decodeCodeThreadId(threadId));
+        } catch {
+          return undefined;
+        }
+        const driverKind = persistence
+          .readProviderInstances()
+          .find(
+            (instance) => String(instance.id) === String(thread?.providerInstanceId),
+          )?.driverKind;
+        return thread === undefined || driverKind === undefined
+          ? undefined
+          : { driverKind, modelId: String(thread.modelId) };
+      },
+      latest: async (threadId) => {
+        const exported = await deps.threadExportService.exportThread(
+          ROUTINE_HOST_SCOPE_ID,
+          "local-window",
+          { mode: "code", threadId },
+        );
+        if (exported.kind !== "exported") return {};
+        const entries = exported.bundle.transcript.entries;
+        const instruction = entries.findLast((entry) => entry.role === "user")?.text;
+        const answer = entries.findLast((entry) => entry.role !== "user")?.text;
+        return {
+          ...(instruction === undefined ? {} : { instruction }),
+          ...(answer === undefined ? {} : { answer }),
+        };
+      },
+    },
+    record: threadMoveJournal,
+    state: deps.threadMoveState,
+    notify: (destinationMemberId, notice) => handoverExchange.notify(destinationMemberId, notice),
+    originName: () => resolveHubIdentity().displayName,
+    clock: () => new Date().toISOString(),
+  });
   const threadMoveAdministrationRoutes = createThreadMoveAdministrationRouteHandler({
     desktopBridgeSecret: options.desktopBridgeSecret,
     windowAuthorityStore,
     moves: threadMovesFromWindow,
+    handovers: threadHandovers,
+    exchange: handoverExchange,
     state: deps.threadMoveState,
     authorizeThread: ({ thread, windowId }) =>
       authorizeAgentRunParentThread({

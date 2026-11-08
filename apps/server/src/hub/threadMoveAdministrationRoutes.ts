@@ -10,6 +10,9 @@
 
 import { createHash, timingSafeEqual } from "node:crypto";
 import {
+  decodeHandoverContinueRequest,
+  decodeHandoverControlRequest,
+  decodeHandoverRequest,
   decodeShutdownChallengeRequest,
   decodeShutdownStartRequest,
   decodeThreadMoveChallengeRequest,
@@ -21,6 +24,8 @@ import {
 import { isLoopbackHostname } from "../shellRoutes";
 import { WindowAuthorityError, type WindowAuthorityStore } from "../windowAuthorityStore";
 import type { ThreadMoveStatePort } from "./threadMoveStateStore";
+import type { HandoverExchange } from "./handoverExchange";
+import type { ThreadHandovers } from "./threadHandovers";
 import type { ThreadMovesFromWindow } from "./threadMovesFromWindow";
 
 // A batch names up to 64 threads with their Projects.
@@ -40,6 +45,13 @@ export const THREAD_MOVE_ADMINISTRATION_ROUTES = {
   shutdownListing: "/api/desktop/hub/thread-moves/shutdown/listing",
   shutdownChallenge: "/api/desktop/hub/thread-moves/shutdown/challenge",
   shutdownStart: "/api/desktop/hub/thread-moves/shutdown/start",
+  // A Code thread that cannot move hands over through its branch.
+  handoverPreview: "/api/desktop/hub/thread-moves/handover/preview",
+  handover: "/api/desktop/hub/thread-moves/handover",
+  handoverTakeBack: "/api/desktop/hub/thread-moves/handover/take-back",
+  // The handovers other members told this computer about, for the start screen.
+  handoversList: "/api/desktop/hub/thread-moves/handovers/list",
+  handoversContinue: "/api/desktop/hub/thread-moves/handovers/continue",
 } as const;
 
 type RouteValue =
@@ -49,6 +61,8 @@ export interface ThreadMoveAdministrationRouteOptions {
   readonly desktopBridgeSecret: string | undefined;
   readonly windowAuthorityStore: WindowAuthorityStore;
   readonly moves: ThreadMovesFromWindow;
+  readonly handovers: Pick<ThreadHandovers, "preview" | "handOver" | "takeBack">;
+  readonly exchange: Pick<HandoverExchange, "list" | "continueHandover">;
   readonly state: ThreadMoveStatePort;
   /** Whether the window currently holds the thread on its Project. */
   readonly authorizeThread: (input: {
@@ -132,6 +146,37 @@ export function createThreadMoveAdministrationRouteHandler(
           );
         case THREAD_MOVE_ADMINISTRATION_ROUTES.shutdownStart:
           return outcome(await options.moves.shutdownStart(decodeShutdownStartRequest(value)));
+        case THREAD_MOVE_ADMINISTRATION_ROUTES.handoverPreview:
+        case THREAD_MOVE_ADMINISTRATION_ROUTES.handover: {
+          const asked = decodeHandoverRequest(value);
+          if (!holds(asked.thread)) return unavailable();
+          return outcome(
+            route === THREAD_MOVE_ADMINISTRATION_ROUTES.handover
+              ? await options.handovers.handOver(
+                  asked.thread,
+                  asked.destinationMemberId === undefined
+                    ? undefined
+                    : String(asked.destinationMemberId),
+                )
+              : await options.handovers.preview(asked.thread),
+          );
+        }
+        // Continuing a handover is a person's act at a window here, for the whole host.
+        case THREAD_MOVE_ADMINISTRATION_ROUTES.handoversList:
+          return outcome(await options.exchange.list());
+        case THREAD_MOVE_ADMINISTRATION_ROUTES.handoversContinue: {
+          return outcome(
+            await options.exchange.continueHandover(decodeHandoverContinueRequest(value)),
+          );
+        }
+        case THREAD_MOVE_ADMINISTRATION_ROUTES.handoverTakeBack: {
+          const handoverId = String(decodeHandoverControlRequest(value).handoverId);
+          const handed = (options.state.load().handovers ?? []).find(
+            (entry) => String(entry.handoverId) === handoverId,
+          );
+          if (handed === undefined || !holds(handed.thread)) return unavailable();
+          return outcome(options.handovers.takeBack(handoverId));
+        }
         case THREAD_MOVE_ADMINISTRATION_ROUTES.status: {
           // Read-only and names only member computers, so any local window
           // may read it, including for a thread that already moved away.

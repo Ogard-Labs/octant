@@ -94,6 +94,11 @@ function fakeClient(input: {
     shutdownListing: async () => ({ status: "listed", members: [], rows: [] }),
     shutdownChallenge: async () => ({ status: "refused", kind: "refused" }),
     shutdownStart: async () => ({ status: "refused", reason: "refused" }),
+    handoverPreview: async () => ({ status: "refused", reason: "refused" }),
+    handOver: async () => ({ status: "refused", reason: "refused" }),
+    handoverTakeBack: async () => {},
+    handoversList: async () => ({ status: "listed", handovers: [] }),
+    handoversContinue: async () => ({ status: "refused", reason: "refused" }),
   };
   return { client, started, dismissed };
 }
@@ -260,5 +265,87 @@ describe("the Computer card", () => {
     );
     expect(screen.getAllByText("Mac mini")).toHaveLength(2);
     expect(screen.queryByRole("button")).not.toBeInTheDocument();
+  });
+
+  it("hands a Code thread that can't move over through its branch, and takes it back", async () => {
+    const user = userEvent.setup();
+    const { client } = fakeClient({
+      status: {
+        status: "read",
+        failure: {
+          moveId: "66666666-6666-4666-8666-666666666666" as never,
+          reason: "no-eligible-project",
+          failedAt: "2026-11-08T12:00:00.000Z" as never,
+        },
+      },
+    });
+    const handedOver: string[] = [];
+    const takenBack: string[] = [];
+    let status: ThreadMoveThreadStatus = {
+      status: "read",
+      failure: {
+        moveId: "66666666-6666-4666-8666-666666666666" as never,
+        reason: "no-eligible-project",
+        failedAt: "2026-11-08T12:00:00.000Z" as never,
+      },
+    };
+    const handing: ThreadMoveClient = {
+      ...client,
+      status: async () => status,
+      handoverPreview: async () => ({
+        status: "preview",
+        branch: "feature/dark-mode",
+        newBranch: false,
+        remote: "origin",
+        note: "Hand over: Add dark mode",
+      }),
+      handOver: async (thread) => {
+        handedOver.push(thread.threadId);
+        status = {
+          status: "read",
+          handedOver: {
+            handoverId: "12345678-1234-4234-8234-123456789012" as never,
+            thread,
+            branch: "feature/dark-mode",
+            pushed: true,
+            refusedFiles: [],
+            handedOverAt: "2026-11-08T12:00:00.000Z" as never,
+          },
+        };
+        return {
+          status: "handed-over",
+          handoverId: "12345678-1234-4234-8234-123456789012" as never,
+          branch: "feature/dark-mode",
+          pushed: true,
+          refusedFiles: [],
+        };
+      },
+      handoverTakeBack: async (handoverId) => {
+        takenBack.push(handoverId);
+        status = { status: "read" };
+      },
+    };
+    render(
+      <ThreadMoveComputerCard
+        client={handing}
+        hostName="Laptop"
+        isThisComputer
+        thread={THREAD}
+        threadTitle="Add dark mode"
+      />,
+    );
+
+    await user.click(await screen.findByRole("button", { name: "Hand over instead" }));
+    const sheet = await screen.findByRole("dialog");
+    expect(sheet).toHaveTextContent("feature/dark-mode");
+    expect(sheet).toHaveTextContent("Then pushes it to origin, never forced.");
+    await user.click(await screen.findByRole("button", { name: "Commit and push" }));
+
+    await waitFor(() => expect(handedOver).toEqual([THREAD.threadId]));
+    expect(
+      await screen.findByText(/committed and pushed on feature\/dark-mode/),
+    ).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Take back here" }));
+    await waitFor(() => expect(takenBack).toEqual(["12345678-1234-4234-8234-123456789012"]));
   });
 });

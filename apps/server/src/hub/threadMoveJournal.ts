@@ -18,6 +18,8 @@ import {
   ThreadMovedIn,
   ThreadMovedOut,
   UtcTimestamp,
+  type HandoverId,
+  type MovedThreadReference,
 } from "@octant/contracts";
 import { Schema } from "effect";
 import type { EventRegistry } from "../persistence/eventRegistry";
@@ -58,7 +60,9 @@ export interface ThreadMoveJournalOptions {
  * own act (an owner-signed move or a window action) carried out by this host,
  * so each is journaled as this host's system actor.
  */
-export function createThreadMoveJournal(options: ThreadMoveJournalOptions): ThreadMoveRecorder {
+export function createThreadMoveJournal(
+  options: ThreadMoveJournalOptions,
+): ThreadMoveRecorder & ThreadHandoverRecorder {
   const selectHead = options.connection.prepare(
     `SELECT aggregate_version FROM aggregate_heads WHERE aggregate_type = ? AND aggregate_id = ?`,
   );
@@ -110,5 +114,19 @@ export function createThreadMoveJournal(options: ThreadMoveJournalOptions): Thre
         ...input,
         failedAt: now(),
       }),
+    handoverStarted: (input) =>
+      append(String(input.handoverId), THREAD_MOVE_EVENT_NAMES.handoverStarted, {
+        ...input,
+        startedAt: now(),
+      }),
   };
+}
+
+/** The handover's freeze, recorded before anything is committed. */
+export interface ThreadHandoverRecorder {
+  readonly handoverStarted: (input: {
+    readonly handoverId: HandoverId;
+    readonly thread: MovedThreadReference;
+    readonly branch: string;
+  }) => void;
 }

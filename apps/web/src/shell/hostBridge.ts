@@ -289,7 +289,12 @@ export type HubAdministrationOperation =
   | "thread-move-dismiss"
   | "shutdown-listing"
   | "shutdown-challenge"
-  | "shutdown-start";
+  | "shutdown-start"
+  | "handover-preview"
+  | "handover"
+  | "handover-take-back"
+  | "handovers-list"
+  | "handovers-continue";
 
 /**
  * The loopback hub administration, which only a local window reaches. Absent

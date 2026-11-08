@@ -524,6 +524,7 @@ export class ThreadMovesFromWindow {
       (move) => move.state === "arrived" && move.thread !== undefined && same(move.thread, thread),
     );
     const failure = (state.failures ?? []).find((notice) => same(notice.thread, thread));
+    const handedOver = (state.handovers ?? []).find((entry) => same(entry.thread, thread));
     const departure = (state.departures ?? []).findLast((entry) => same(entry.thread, thread));
     const waiting = this.#waiting.get(key(thread));
     const settledAt = this.#settledAt.get(key(thread));
@@ -577,6 +578,7 @@ export class ThreadMovesFromWindow {
               failedAt: failure.failedAt,
             },
           }),
+      ...(handedOver === undefined ? {} : { handedOver }),
       ...(departure === undefined
         ? {}
         : {

@@ -194,6 +194,9 @@ export const HandoverNotice = Schema.Struct({
   title: bounded(256),
   repositoryRemote: bounded(2_048),
   branch: bounded(255),
+  /** The provider kind and model the thread ran on, so the destination continues on its own of that kind. */
+  providerDriverKind: Schema.optional(bounded(64)),
+  modelId: Schema.optional(bounded(256)),
 }).annotations(strict);
 export type HandoverNotice = typeof HandoverNotice.Type;
 
@@ -301,6 +304,11 @@ export const MovedHistoryImported = Schema.Struct({
   moveId: ThreadMoveId,
   entries: Schema.Array(MovedHistoryEntry).pipe(Schema.maxItems(10_000)),
   importedAt: UtcTimestamp,
+  /**
+   * Set when the entry is a handover note read from a Git branch, which the
+   * first turn reads framed as outside content. Absent: a moved conversation.
+   */
+  origin: Schema.optional(Schema.Literal("handover-note")),
 }).annotations(strict);
 export type MovedHistoryImported = typeof MovedHistoryImported.Type;
 
@@ -452,6 +460,18 @@ export const ThreadMoveControlRequest = Schema.Struct({
 }).annotations(strict);
 export type ThreadMoveControlRequest = typeof ThreadMoveControlRequest.Type;
 
+/** A thread handed over from this host: frozen, with its branch, until it is continued or taken back. */
+export const HandedOverThread = Schema.Struct({
+  handoverId: HandoverId,
+  thread: MovedThreadReference,
+  branch: bounded(255),
+  pushed: Schema.Boolean,
+  shortfall: Schema.optional(HandoverShortfall),
+  refusedFiles: Schema.Array(bounded(4_096)).pipe(Schema.maxItems(1_000)),
+  handedOverAt: UtcTimestamp,
+}).annotations(strict);
+export type HandedOverThread = typeof HandedOverThread.Type;
+
 /** A thread that moved away from this host, for its "Moved to" tombstone. */
 export const ThreadMoveDeparture = Schema.Struct({
   moveId: ThreadMoveId,
@@ -513,6 +533,8 @@ export const ThreadMoveThreadStatus = Schema.Struct({
       failedAt: UtcTimestamp,
     }).annotations(strict),
   ),
+  /** Handed over through its branch: frozen here until continued elsewhere or taken back. */
+  handedOver: Schema.optional(HandedOverThread),
   /** The thread moved away and was erased here: its "Moved to" tombstone. */
   departed: Schema.optional(
     Schema.Struct({ ...ThreadMoveDeparture.fields, destinationName: bounded(256) }).annotations(
@@ -616,6 +638,103 @@ export const ShutdownStartOutcome = Schema.Union(
 );
 export type ShutdownStartOutcome = typeof ShutdownStartOutcome.Type;
 
+// ── Handover ───────────────────────────────────────────────────────────────
+
+/** A window asks what a handover would do, or does it. */
+export const HandoverRequest = Schema.Struct({
+  thread: MovedThreadReference,
+  /** The member to tell, so the handover shows under its Handovers before its next fetch. */
+  destinationMemberId: Schema.optional(HubMemberId),
+}).annotations(strict);
+export type HandoverRequest = typeof HandoverRequest.Type;
+
+/** What a handover would do, before anything is frozen or written. */
+export const HandoverPreview = Schema.Struct({
+  status: Schema.Literal("preview"),
+  branch: bounded(255),
+  /** Whether the branch is new: the thread works on the default branch or a detached head. */
+  newBranch: Schema.Boolean,
+  /** The remote it pushes to; absent when the checkout has none. */
+  remote: Schema.optional(bounded(255)),
+  note: Schema.String.pipe(Schema.maxLength(32 * 1024)),
+}).annotations(strict);
+export type HandoverPreview = typeof HandoverPreview.Type;
+
+export const HandoverRefusal = Schema.Literal(
+  "busy",
+  "delegated",
+  "refused",
+  "nothing-to-hand-over",
+  "commit-failed",
+);
+export type HandoverRefusal = typeof HandoverRefusal.Type;
+
+export const HandoverOutcome = Schema.Union(
+  HandoverPreview,
+  Schema.Struct({
+    status: Schema.Literal("handed-over"),
+    handoverId: HandoverId,
+    branch: bounded(255),
+    pushed: Schema.Boolean,
+    shortfall: Schema.optional(HandoverShortfall),
+    refusedFiles: Schema.Array(bounded(4_096)).pipe(Schema.maxItems(1_000)),
+  }),
+  Schema.Struct({ status: Schema.Literal("refused"), reason: HandoverRefusal }),
+);
+export type HandoverOutcome = typeof HandoverOutcome.Type;
+
+export const HandoverControlRequest = Schema.Struct({
+  handoverId: HandoverId,
+}).annotations(strict);
+export type HandoverControlRequest = typeof HandoverControlRequest.Type;
+
+/** The destination tells the source it continued a handover, so the source erases its frozen copy. */
+export const HandoverContinuedReport = Schema.Struct({
+  handoverId: HandoverId,
+  thread: MovedThreadReference,
+}).annotations(strict);
+export type HandoverContinuedReport = typeof HandoverContinuedReport.Type;
+
+/** A handover a member told this computer about, as the Handovers card lists it. */
+export const ReceivedHandoverView = Schema.Struct({
+  handoverId: HandoverId,
+  title: bounded(256),
+  branch: bounded(255),
+  repositoryRemote: bounded(2_048),
+  originMemberId: HubMemberId,
+  originName: bounded(256),
+  /** Code Projects here bound to a clone of the same repository. */
+  projects: Schema.Array(ThreadMoveProjectChoice).pipe(Schema.maxItems(256)),
+  receivedAt: UtcTimestamp,
+}).annotations(strict);
+export type ReceivedHandoverView = typeof ReceivedHandoverView.Type;
+
+export const HandoverListing = Schema.Struct({
+  status: Schema.Literal("listed"),
+  handovers: Schema.Array(ReceivedHandoverView).pipe(Schema.maxItems(256)),
+}).annotations(strict);
+export type HandoverListing = typeof HandoverListing.Type;
+
+export const HandoverContinueRequest = Schema.Struct({
+  handoverId: HandoverId,
+  projectId: ProjectId,
+}).annotations(strict);
+export type HandoverContinueRequest = typeof HandoverContinueRequest.Type;
+
+export const HandoverContinueOutcome = Schema.Union(
+  Schema.Struct({ status: Schema.Literal("continued"), thread: MovedThreadReference }),
+  Schema.Struct({
+    status: Schema.Literal("refused"),
+    reason: Schema.Literal(
+      "refused",
+      "no-eligible-project",
+      "no-matching-provider",
+      "transfer-failed",
+    ),
+  }),
+);
+export type HandoverContinueOutcome = typeof HandoverContinueOutcome.Type;
+
 export const decodeOwnerThreadMoveTicketRequest = Schema.decodeUnknownSync(
   OwnerThreadMoveTicketRequest,
 );
@@ -642,3 +761,10 @@ export const decodeShutdownListing = Schema.decodeUnknownSync(ShutdownListing);
 export const decodeShutdownChallengeRequest = Schema.decodeUnknownSync(ShutdownChallengeRequest);
 export const decodeShutdownStartRequest = Schema.decodeUnknownSync(ShutdownStartRequest);
 export const decodeShutdownStartOutcome = Schema.decodeUnknownSync(ShutdownStartOutcome);
+export const decodeHandoverRequest = Schema.decodeUnknownSync(HandoverRequest);
+export const decodeHandoverOutcome = Schema.decodeUnknownSync(HandoverOutcome);
+export const decodeHandoverControlRequest = Schema.decodeUnknownSync(HandoverControlRequest);
+export const decodeHandoverContinuedReport = Schema.decodeUnknownSync(HandoverContinuedReport);
+export const decodeHandoverListing = Schema.decodeUnknownSync(HandoverListing);
+export const decodeHandoverContinueRequest = Schema.decodeUnknownSync(HandoverContinueRequest);
+export const decodeHandoverContinueOutcome = Schema.decodeUnknownSync(HandoverContinueOutcome);

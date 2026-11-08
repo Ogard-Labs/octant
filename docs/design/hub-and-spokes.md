@@ -2252,6 +2252,48 @@ a numbered slice. Built, with these narrower readings:
     estimate, the menu bar entry and progress, more than one destination's
     unlock in turn, and carrying bulk parts.
 
+    The eighth part is the handover's source side. **Hand over instead**,
+    in the move sheet and in This thread can't move for a Code thread,
+    opens the handover sheet with the branch, the remote, and a preview of
+    the note. **Commit and push** (or **Commit**, without a remote) then
+    journals the freeze and freezes the thread. The commit is built from a
+    throwaway index, so the checkout is never switched: it lands on the
+    thread's branch (the index follows; the files stay as they are), or on
+    a new `octant/handover/…` branch for the default branch or a detached
+    head. The commit takes every change Git does not ignore except files
+    the Secret guard refuses, and its message is the note with the
+    `Octant-Handover` and `Octant-Origin` trailers. The branch is then
+    pushed to the remote it tracks, never forced and never to the default
+    branch. The note comes from the thread's title, its latest instruction
+    and answer, the changed files, and what stays behind. It is redacted,
+    names no folder on this computer, and is at most 32 KiB. The thread
+    stays frozen, marked Handed over with the branch and whether it was
+    pushed (`push-failed` and `no-remote` say the work is on no other
+    computer yet), held across a restart, until **Take back here**. What it
+    does not do yet: the agent's own summary turn, the notice to a chosen
+    destination, Handovers on the destination's start screen, Continue
+    handover, and the erase once a destination continues it.
+
+    The ninth part is the handover's destination side. A handover started
+    with a chosen member sends it a signed notice
+    (`POST /api/hub/peer/handovers`, any member), carrying the remote, the
+    branch, and the provider kind and model, which the destination keeps
+    for its **Handovers** start-screen card. **Continue handover** there
+    picks the one Code Project bound to the same repository (or offers the
+    ones that are). It fetches the branch with the destination's own Git
+    identity, reads the note only from a tip whose `Octant-Handover`
+    trailer names this handover, and opens a managed Code thread on the
+    branch, on the destination's own provider of that kind with the same
+    model. The thread starts marked under the source label
+    `handover-note`, and its first turn reads the note framed as outside
+    content. The destination then reports
+    (`POST /api/hub/peer/handovers/continued`, the handover and the new
+    thread in the body). The source erases its frozen copy the way a moved
+    thread is erased, keeping a worktree that holds anything the handover
+    did not carry, and records "Moved to" for old links. What it does not
+    do yet: a branch found by fetching without a notice, the agent's own
+    summary turn, and the report retried when the source was unreachable.
+
 Any slice that would deploy an Octant-operated service, create an account, or
 spend money stops for a separate maintainer action.
 

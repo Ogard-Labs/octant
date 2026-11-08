@@ -976,6 +976,30 @@ details.thread-move-sheet__section > summary {
   gap: var(--oct-space-2);
 }
 
+/* Hand over instead: quiet, at the sheet's start edge. */
+.thread-move-sheet__aside {
+  margin-inline-end: auto;
+}
+
+.thread-move-sheet__branch {
+  overflow-wrap: anywhere;
+  font-family: var(--oct-font-mono);
+  font-size: var(--oct-text-sm);
+}
+
+.thread-move-sheet__note {
+  max-height: 200px;
+  margin: 0;
+  overflow: auto;
+  padding: var(--oct-space-3);
+  color: var(--oct-fg-2);
+  background: var(--environment-tile-fill);
+  border-radius: var(--oct-radius-sm);
+  font-family: var(--oct-font-mono);
+  font-size: var(--oct-text-xs);
+  white-space: pre-wrap;
+}
+
 /* Prepare to shut down: a fixed head and foot with the thread list scrolling
    between them, reading as a decision already made that the person confirms. */
 .shutdown-dialog {

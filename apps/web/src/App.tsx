@@ -207,6 +207,7 @@ import "./styles/shell.css";
 import "./styles/dock.css";
 import "./styles/environment.css";
 import { PrepareToShutDownHost } from "./environment/threadMove/PrepareToShutDownHost";
+import { threadMoveClientForBridge } from "./environment/threadMove/threadMoveClient";
 // The shared component/material layer loads last so its assignments win.
 import "./styles/components.css";
 import { countSidebarTiles } from "./shell/sidebarTileCounts";
@@ -231,7 +232,7 @@ import {
   useHostFirstPartyPluginsEffective,
 } from "./shell/firstPartyPluginsEffective";
 import { isThreadBoardAvailable } from "./shell/contributionRegistry";
-import type { CodeDeepLink, OctantHostBridge } from "./shell/hostBridge";
+import { hubAdministrationOf, type CodeDeepLink, type OctantHostBridge } from "./shell/hostBridge";
 import { windowIdFromHostBridge } from "./host/windowIdFromHostBridge";
 import { openExternalUrl } from "./shell/openExternalUrl";
 import {
@@ -4997,7 +4998,11 @@ function LaunchedShell(
   // question journals on its own mode's navigation topic.
   const pendingRequestFeedRevision =
     machineChanges.chatNavigation + machineChanges.workNavigation + machineChanges.codeNavigation;
+  const homeStartHub = hubAdministrationOf(props.hostBridge);
   const homeStart = useHomeStart({
+    ...(homeStartHub === undefined || props.hostBridge === undefined
+      ? {}
+      : { threadMoveClient: threadMoveClientForBridge(props.hostBridge, homeStartHub) }),
     routineClient: launchedClients.automationClient,
     onOpenRoutine: actions.openRoutine,
     actions,

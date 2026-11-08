@@ -716,6 +716,18 @@ export class ThreadMoveService {
     return { status: "cancelled" };
   }
 
+  /** Sends one signed member request over the pinned link, for a handover's notice and report. */
+  sendSigned(
+    targetMemberId: string,
+    path: string,
+    body: unknown,
+  ): Promise<
+    | { readonly status: "answered"; readonly body: Record<string, unknown> }
+    | { readonly status: "unreachable" }
+  > {
+    return this.#sendTo(targetMemberId, path, body);
+  }
+
   /** Asks a member which of its Projects would take a thread placed like this. */
   async askProjects(
     targetMemberId: string,
