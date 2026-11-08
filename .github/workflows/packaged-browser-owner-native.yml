@@ -13,6 +13,8 @@ on:
       - scripts/packaged-browser-owner-electron-cache.test.ts
       - scripts/package-desktop.ts
       - scripts/desktop-node-runtime.ts
+      - scripts/packaged-browser-owner-driver-cache.ts
+      - scripts/packaged-browser-owner-driver-cache.test.ts
 
 permissions:
   contents: read
@@ -46,6 +48,9 @@ jobs:
       - run: node node_modules/electron/install.js
         env:
           electron_config_cache: ${{ runner.temp }}/browser-owner-electron-cache
+      - name: Seed only the pinned driver through its canonical verifier
+        timeout-minutes: 5
+        run: bun scripts/packaged-browser-owner-driver-cache.ts
       - name: Package source without signing or publication
         timeout-minutes: 25
         env:
@@ -56,6 +61,10 @@ jobs:
         env:
           OCTANT_QA_OUTPUT: ${{ runner.temp }}/packaged-browser-owner-native
         run: bun scripts/smoke-packaged-browser-owner-native.ts --project-picker-discovery
+      - name: Remove the owned driver fixture cache
+        if: always()
+        timeout-minutes: 1
+        run: bun scripts/packaged-browser-owner-driver-cache.ts --cleanup
       - name: Remove the owned Electron fixture cache
         if: always()
         timeout-minutes: 1
