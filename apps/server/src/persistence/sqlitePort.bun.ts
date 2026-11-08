@@ -24,7 +24,7 @@ export function openBunSqlite(
       PRAGMA busy_timeout = 5000;
     `);
   } catch (error) {
-    database.close();
+    database.close(true);
     throw error;
   }
 
@@ -53,7 +53,7 @@ export function openBunSqlite(
     transaction: (body) => database.transaction(body),
     close: () => {
       if (closed) return;
-      database.close();
+      database.close(true);
       closed = true;
       admission?.close();
     },
@@ -64,6 +64,6 @@ export function openBunSqliteReadOnly(path: string): ReadOnlySqliteConnection {
   const database = new Database(path, { readonly: true });
   return {
     all: (sql) => database.query(sql).all(),
-    close: () => database.close(),
+    close: () => database.close(true),
   };
 }
