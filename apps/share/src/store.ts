@@ -36,6 +36,8 @@ export interface StoredShare {
   /** Bumps on every update, which voids view grants and frame addresses. */
   readonly revision: number;
   readonly viewCount: number;
+  /** Keyed request digest and original receipt; never plaintext password terms. */
+  readonly creation?: { readonly requestDigest: string; readonly expiresAt: string | null };
 }
 
 export type TombstoneReason = "revoked" | "expired" | "taken-down";
@@ -103,7 +105,21 @@ function readStoredShare(text: string): StoredShare | undefined {
     ) {
       return undefined;
     }
+    const creation = parsed.creation;
+    if (
+      creation !== undefined &&
+      (!isRecord(creation) ||
+        typeof creation.requestDigest !== "string" ||
+        !/^[0-9a-f]{64}$/.test(creation.requestDigest) ||
+        (creation.expiresAt !== null && typeof creation.expiresAt !== "string"))
+    )
+      return undefined;
     return {
+      ...(isRecord(creation) &&
+      typeof creation.requestDigest === "string" &&
+      (creation.expiresAt === null || typeof creation.expiresAt === "string")
+        ? { creation: { requestDigest: creation.requestDigest, expiresAt: creation.expiresAt } }
+        : {}),
       document: decodeCanvasPublicShareDocument(parsed["document"]),
       createdAt,
       updatedAt,

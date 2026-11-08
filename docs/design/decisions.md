@@ -2432,6 +2432,7 @@ A public Canvas link is off by default and exists only through the person's expl
 - A link is published only through the export approval card. No agent tool reaches the flow, and a paired device cannot publish.
 - The payload is a frozen copy with no host, Project, thread or source ids, no file contents and no declared images. A Canvas has at most one active link (30-day default expiry, optional password).
 - The service has no accounts. A per-share owner secret lives in the credential broker, separate from provider credentials, and never in the journal.
+- A first-party create commits that secret and a non-secret ownership intent before uploading a document. Owned-create binds a random id, owner and exact approved terms; identical retries do not mutate, conflicting retries refuse, and uncertain publication is withdrawn through durable restart/listing recovery. A host never falls back to legacy create.
 - The service logs no IP address and serves design frames from a separate user-content origin.
 - The reference service lives at `apps/share` in this repository and is self-hosted by each user (Bun or Docker); no service address is set by default, and Ogard Labs operates no instance.
 

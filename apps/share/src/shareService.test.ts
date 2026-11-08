@@ -132,6 +132,75 @@ describe("share service", () => {
     expect(created.expiresAt).toBe(new Date(START + 30 * DAY_MS).toISOString());
   });
 
+  test("replays an owned create without changing its receipt, payload or protected terms", async () => {
+    start();
+    const body = {
+      ...createBody(undefined, { password: "correct horse" }),
+      kind: "canvas-public-share-owned-create",
+      shareId: "B".repeat(22),
+      ownerSecret: "k".repeat(43),
+    };
+    const [first, concurrent] = await Promise.all([create(body), create(body)]);
+    expect(concurrent).toEqual(first);
+    const path = join(dataDir, "shares", `${first.shareId}.json`);
+    const stored = readFileSync(path, "utf8");
+    expect(stored.includes(body.ownerSecret)).toBe(false);
+    expect(stored.includes("correct horse")).toBe(false);
+    now += DAY_MS;
+    expect(await create(body)).toEqual(first);
+    expect(readFileSync(path, "utf8")).toBe(stored);
+    expect(readdirSync(join(dataDir, "shares"))).toHaveLength(1);
+    const changed = await fetch(`${service?.publicUrl}/api/v1/shares/${first.shareId}`, {
+      method: "PUT",
+      headers: owner(body.ownerSecret),
+      body: JSON.stringify({
+        schemaVersion: 1,
+        kind: "canvas-public-share-update",
+        document: documentWith([heading], "Updated snapshot"),
+        expiry: { kind: "never" },
+      }),
+    });
+    expect(changed.status).toBe(200);
+    const updated = readFileSync(path, "utf8");
+    expect(await create(body)).toEqual(first);
+    expect(readFileSync(path, "utf8")).toBe(updated);
+  });
+
+  test("refuses owned-create conflicts after checking the owner without mutating the link", async () => {
+    start();
+    const body = {
+      ...createBody(),
+      kind: "canvas-public-share-owned-create",
+      shareId: "C".repeat(22),
+      ownerSecret: "m".repeat(43),
+    };
+    const created = await create(body);
+    const path = join(dataDir, "shares", `${created.shareId}.json`);
+    const stored = readFileSync(path, "utf8");
+    for (const change of [
+      { document: documentWith([heading], "Changed") },
+      { expiry: { kind: "never" } },
+      { password: "different password" },
+    ]) {
+      const response = await fetch(`${service?.publicUrl}/api/v1/shares`, {
+        method: "POST",
+        body: JSON.stringify({ ...body, ...change }),
+      });
+      expect(response.status).toBe(409);
+      expect(readFileSync(path, "utf8")).toBe(stored);
+    }
+    const wrongOwner = await fetch(`${service?.publicUrl}/api/v1/shares`, {
+      method: "POST",
+      body: JSON.stringify({
+        ...body,
+        ownerSecret: "n".repeat(43),
+        document: documentWith([heading], "Changed"),
+      }),
+    });
+    expect(wrongOwner.status).toBe(403);
+    expect(readFileSync(path, "utf8")).toBe(stored);
+  });
+
   test("stores only a hash of the owner secret", async () => {
     start();
     const created = await create(createBody(undefined, { password: "correct horse" }));
