@@ -47,7 +47,7 @@ import { makePublishedSnapshotSource } from "./publishedSnapshotSource";
 import type { PublishedSnapshotRunRequest, WindowId } from "@octant/contracts";
 import { MAX_CHAT_ATTACHMENT_BYTES } from "./chat/chatAttachmentStore";
 import { MAX_CODE_FILE_BODY_SIZE } from "./codeRoutes";
-import { existsSync } from "node:fs";
+import { existsSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { CANVAS_PREVIEW_ASSET_FOLDER, CANVAS_PREVIEW_PAGE } from "./canvas/canvasPreviewRenderer";
 import { healthResponse } from "./health";
@@ -193,15 +193,19 @@ export function startOctantServer(
     const hostHealth = new HostHealthRecorder({
       path: join(persistence.dataDirectory, "host-health.sqlite3"),
       latencyWindow: () => latencyStats.takeWindow(),
+      // The main file's size on disk, not page_count * page_size: in WAL mode
+      // the page count includes pages that still live in the write-ahead log.
       databaseBytes: () => {
         const row = persistence.connection
-          .prepare(
-            "SELECT page_count * page_size AS bytes FROM pragma_page_count(), pragma_page_size()",
-          )
+          .prepare("SELECT file FROM pragma_database_list WHERE name = 'main'")
           .get();
-        return typeof row === "object" && row !== null && "bytes" in row
-          ? Number(row.bytes)
-          : undefined;
+        if (typeof row !== "object" || row === null || !("file" in row)) return undefined;
+        if (typeof row.file !== "string" || row.file === "") return undefined;
+        try {
+          return statSync(row.file).size;
+        } catch {
+          return undefined;
+        }
       },
     });
     const stopHostHealth = hostHealth.start();

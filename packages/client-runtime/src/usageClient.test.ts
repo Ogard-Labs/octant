@@ -176,6 +176,7 @@ describe("UsageClient.diagnostics", () => {
       {
         key: "2026-11-07",
         turns: 1,
+        finished: 1,
         failed: 0,
         cancelled: 0,
         toolCalls: 0,
@@ -216,7 +217,7 @@ describe("UsageClient.hostHealth", () => {
         generatedAt: "2026-11-07T12:00:00.000Z",
         resolution: "minute",
         retentionDays: 14,
-        processStarts: [],
+        restarts: [],
         samples: [],
       }),
     );

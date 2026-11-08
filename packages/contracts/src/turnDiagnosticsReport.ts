@@ -208,6 +208,8 @@ export const TurnDiagnosticsBucket = Schema.Struct({
   /** The bucket's start: an ISO hour in UTC, or a calendar date in the request's time zone. */
   key: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(32)),
   turns: PositiveInt,
+  /** Turns that ended normally or at the output limit: the same definition as the headline. */
+  finished: NonNegativeInt,
   failed: NonNegativeInt,
   cancelled: NonNegativeInt,
   toolCalls: NonNegativeInt,
@@ -224,6 +226,12 @@ export const TurnDiagnosticsTotals = Schema.Struct({
   toolCalls: NonNegativeInt,
   toolFailures: NonNegativeInt,
   unfinishedToolCalls: NonNegativeInt,
+  /**
+   * Turns whose per-tool tallies were cut to the most-called tools when the
+   * turn was recorded. Their per-tool figures, including unfinished calls, are
+   * partial; the call and failure totals above are not.
+   */
+  toolTalliesTruncatedTurns: Schema.optional(NonNegativeInt),
   retries: Schema.Array(TurnRetryTally).pipe(Schema.maxItems(4)),
   approvalRequests: NonNegativeInt,
   inputRequests: NonNegativeInt,
