@@ -313,6 +313,13 @@ for 5 more points after its last attempt; a restart closes a running rule compac
   completed compaction that left the window above the share was repeated after
   every turn, and that host threads read a usage report older than the latest
   compaction. Both are fixed as described in Slice 1.
+- A second review found that a Code thread on Octant Harness never named its
+  window (the harness reports none, and plans none for Code), so the rule never
+  acted on it, and that a host-planned thread with no usage report kept reading
+  its last compaction's figure after later turns refilled it. `windowFill` now
+  falls back to the model's window as the request-fitting rules settle it, the
+  harness reports each request's input as `contextTokens`, and a plan made after
+  the latest compaction counts as fresher than that compaction's figure.
 
 ### Change log
 
