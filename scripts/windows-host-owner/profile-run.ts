@@ -1,4 +1,4 @@
-import { spawn, type ChildProcess } from "node:child_process";
+import { execFile, spawn, type ChildProcess } from "node:child_process";
 import { createInterface } from "node:readline";
 import {
   lstat,
@@ -17,15 +17,61 @@ import { fileURLToPath } from "node:url";
 const [launcher, binding, fixture, ...runtimes] = process.argv.slice(2);
 if (process.platform !== "win32" || !launcher || !binding || !fixture || runtimes.length !== 3)
   throw new Error("Supply the owned launcher, binding, fixture and three runtimes.");
-const local = process.env.LOCALAPPDATA;
-if (local === undefined) throw new Error("No owned fixture profile.");
+const children = new Set<ChildProcess>();
+const queryExecutable = win32.join(
+  process.env.SystemRoot ?? "C:\\Windows",
+  "System32",
+  "WindowsPowerShell",
+  "v1.0",
+  "powershell.exe",
+);
+const local = await new Promise<string>((resolve, reject) => {
+  const child = execFile(
+    queryExecutable,
+    [
+      "-NoProfile",
+      "-NonInteractive",
+      "-Command",
+      '[Console]::OutputEncoding=[Text.UTF8Encoding]::new($false); [Console]::WriteLine([Environment]::GetFolderPath("LocalApplicationData"))',
+    ],
+    {
+      timeout: 8_000,
+      killSignal: "SIGKILL",
+      maxBuffer: 32768,
+      windowsHide: true,
+      env: Object.fromEntries(
+        Object.entries(process.env).filter(([name]) => name.toLowerCase() !== "psmodulepath"),
+      ),
+    },
+    (error, stdout) => {
+      children.delete(child);
+      if (error !== null) reject(new Error("The independent native known-folder query failed."));
+      else resolve(stdout.trim());
+    },
+  );
+  children.add(child);
+});
+if (!/^[a-z]:\\/i.test(local) || local.includes("\0") || win32.normalize(local) !== local)
+  throw new Error("The native fixture known folder is unavailable.");
+const environmentLocal = process.env.LOCALAPPDATA;
+if (
+  environmentLocal !== undefined &&
+  win32.normalize(environmentLocal).toLowerCase() !== local.toLowerCase()
+) {
+  console.log(
+    JSON.stringify({
+      fixtureKnownFolderMismatchRefused: true,
+      knownFolderQueryProcessJoined: true,
+    }),
+  );
+  process.exit(2);
+}
 const hosts = win32.resolve(local, "Octant", "hosts");
 const transient = win32.resolve(local, "Octant", "runtime");
 const profiles = ["octant", "nightly-test-data"] as const;
 const roots = profiles.map((profile) => win32.join(hosts, profile));
 const cleanup = new Set<string>();
 const identities = new Map<string, string>();
-const children = new Set<ChildProcess>();
 const checks: string[] = [];
 let allJobsJoined = true;
 function record(value: unknown): value is Record<string, unknown> {

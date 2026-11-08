@@ -78,6 +78,23 @@ jobs:
         run: |
           bun scripts/windows-host-owner/run.ts "$pwd/node_modules/electron/dist/electron.exe" "$env:RUNNER_TEMP/owner-smoke.mjs" "$env:RUNNER_TEMP/owner-build/Release/octant-windows-host-owner.node" "$env:RUNNER_TEMP/owner-build/Release/octant-windows-owner-reader.exe"
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Refuse a fixture environment that disagrees with the native known folder
+        run: |
+          $octantNativeLocal = [Environment]::GetFolderPath('LocalApplicationData')
+          foreach ($octantProfile in @('octant', 'nightly-test-data')) {
+            if (Test-Path -LiteralPath (Join-Path $octantNativeLocal "Octant/hosts/$octantProfile")) { throw 'Profile fixture already exists' }
+          }
+          $octantOriginalLocal = $env:LOCALAPPDATA
+          try {
+            $env:LOCALAPPDATA = Join-Path $env:RUNNER_TEMP 'unapproved-profile-location'
+            $octantRefusal = bun scripts/windows-host-owner/profile-run.ts "$env:RUNNER_TEMP/owner-build/Release/octant-windows-owner-reader.exe" "$env:RUNNER_TEMP/owner-build/Release/octant-windows-host-owner.node" "$env:RUNNER_TEMP/profile-smoke.mjs" (Get-Command bun).Source (Get-Command node).Source "$pwd/node_modules/electron/dist/electron.exe"
+            if ($LASTEXITCODE -ne 2 -or ($octantRefusal -join '') -notmatch '"fixtureKnownFolderMismatchRefused":true') { throw 'Mismatched fixture environment was not refused' }
+          } finally { $env:LOCALAPPDATA = $octantOriginalLocal }
+          foreach ($octantProfile in @('octant', 'nightly-test-data')) {
+            if (Test-Path -LiteralPath (Join-Path $octantNativeLocal "Octant/hosts/$octantProfile")) { throw 'Refused fixture changed the actual native profile' }
+          }
+          Write-Output 'Known-folder mismatch refused before profile mutation.'
+          exit 0
       - name: Prove private persistent profiles and actual scoped owner consumers
         run: |
           bun scripts/windows-host-owner/profile-run.ts "$env:RUNNER_TEMP/owner-build/Release/octant-windows-owner-reader.exe" "$env:RUNNER_TEMP/owner-build/Release/octant-windows-host-owner.node" "$env:RUNNER_TEMP/profile-smoke.mjs" (Get-Command bun).Source (Get-Command node).Source "$pwd/node_modules/electron/dist/electron.exe"
