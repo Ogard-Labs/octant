@@ -24,8 +24,8 @@ if fillsFixtureField {
     guard CommandLine.arguments.count == 6, fixtureBirthParts.count == 2, fixtureBirth.count == 2,
           !fixtureText.isEmpty, fixtureText.utf16.count <= 64, allowedFixtureText else { exit(2) }
 } else { guard CommandLine.arguments.count <= 5 else { exit(2) } }
-guard ["diagnostic", "read", "click", "reveal", "dock-read", "quit-hint", "dock-click", "bundle-census", "bundle-cleanup", "fill-name", "fill-address", "picker-metadata"].contains(mode),
-      (mode == "click" || mode == "reveal" || mode == "dock-click" || fillsFixtureField || mode == "picker-metadata") == !requestedTitle.isEmpty,
+guard ["diagnostic", "read", "click", "reveal", "dock-read", "quit-hint", "dock-click", "bundle-census", "bundle-cleanup", "fill-name", "fill-address", "picker-metadata", "picker-location-prompt"].contains(mode),
+      (mode == "click" || mode == "reveal" || mode == "dock-click" || fillsFixtureField || mode == "picker-metadata" || mode == "picker-location-prompt") == !requestedTitle.isEmpty,
       requestedTitle.count <= 256 else { exit(2) }
 let preferenceTitle = "Keep Browser available without windows"
 // Leave time for the matching mouse-up before the owned six-second command bound.
@@ -110,7 +110,7 @@ for name in mode == "diagnostic" ? ["AXManualAccessibility", "AXEnhancedUserInte
 }
 var windows: CFTypeRef?
 let windowResult = element.map { AXUIElementCopyAttributeValue($0, kAXWindowsAttribute as CFString, &windows) } ?? AXError.attributeUnsupported
-if mode == "picker-metadata" {
+if mode == "picker-metadata" || mode == "picker-location-prompt" {
     // The native chooser may expose filesystem names through ordinary labels.
     // This separate read path never requests titles, descriptions or values.
     let parts = requestedTitle.split(separator: ":", omittingEmptySubsequences: false)
@@ -134,6 +134,11 @@ if mode == "picker-metadata" {
     var ownedWindowRoots = Set<Int>(), ownedSheets = Set<Int>()
     var rows: [[String: Any]] = [], processRows: [[String: Any]] = []
     var retainedNodes: [AXUIElement] = [], parentRows: [Int?] = []
+    var promptDispatched = false, fixedControlLabelsCompared = false
+    var locationPrompt: [String: Any] = ["status": "not-requested", "interactionDispatched": false, "typingDispatched": false,
+        "confirmationDispatched": false, "selectionDispatched": false, "fieldValuesRead": false,
+        "directoryLabelsRead": false]
+    if mode == "picker-location-prompt" { locationPrompt["status"] = "blocked" }
     var serviceSubtree: [String: Any] = ["status": "not-observed", "roles": [],
         "interactionDispatched": false, "labelsOrValuesRead": false]
     var serviceNode: [String: Any] = ["status": "not-observed", "childrenTraversed": false,
@@ -288,56 +293,216 @@ if mode == "picker-metadata" {
                         "rootWindowIndex": entry.windowIndex, "ownedSheetRow": sheetRow,
                         "sheetOwnerPid": processId, "identityRechecked": true,
                         "childrenTraversed": false, "codeSigningVerified": true, "interactionDispatched": false]
-                    var subtreeRows: [[String: Any]] = []
-                    var subtree = [(node: node, depth: entry.depth, parent: Optional<Int>.none)]
-                    var subtreeIndex = 0, complete = !serviceRole.isEmpty && errors == priorErrors
-                    // Reuse the original shared node/depth/deadline allowance,
-                    // including nodes already queued in the captured app.
-                    seen.remove(CFHash(node))
-                    while complete && subtreeIndex < subtree.count && Date() < deadline {
-                        let current = subtree[subtreeIndex]; subtreeIndex += 1
-                        guard identitiesUnchanged() else { complete = false; break }
-                        var currentPid: pid_t = 0
-                        let pidStatus = AXUIElementGetPid(current.node, &currentPid)
-                        if pidStatus != .success { errors += 1; recordPickerError("descendant-pid", pidStatus); complete = false; break }
-                        guard currentPid == nodePid else { complete = false; break }
-                        guard seen.insert(CFHash(current.node)).inserted else { continue }
-                        let role = roleOnly(current.node, kAXRoleAttribute as CFString)
-                        let subrole = roleOnly(current.node, kAXSubroleAttribute as CFString)
-                        guard !role.isEmpty, errors == priorErrors, identitiesUnchanged() else { complete = false; break }
-                        let row = subtreeRows.count
-                        subtreeRows.append(["role": role, "subrole": subrole, "depth": current.depth,
-                            "parentRow": current.parent.map { $0 as Any } ?? NSNull()])
-                        if role == "AXSecureTextField" || subrole == "AXSecureTextField" { continue }
-                        if current.depth >= 40 { depthCut = true; complete = false; break }
-                        var children: CFTypeRef?
-                        let status = AXUIElementCopyAttributeValue(current.node, kAXChildrenAttribute as CFString, &children)
-                        serviceNode["childrenTraversed"] = true
-                        if status == .success {
-                            guard let children = children as? [AXUIElement] else { errors += 1; complete = false; break }
-                            let remaining = max(0, 512 - queue.count - subtree.count + 1)
-                            if children.count > remaining { nodeCut = true; complete = false; break }
-                            subtree.append(contentsOf: children.map { (node: $0, depth: current.depth + 1, parent: Optional(row)) })
-                        } else if status != .noValue && status != .attributeUnsupported {
-                            errors += 1; recordPickerError("descendant-children", status); complete = false; break
+                    if mode == "picker-location-prompt" {
+                        let sheet = retainedNodes[sheetRow]
+                        var knownMetadataNodes = Set(queue.map { CFHash($0.node) })
+                        var newMetadataNodes = 0
+                        func admitMetadataNode(_ candidate: AXUIElement) -> Bool {
+                            guard Date() < deadline else { return false }
+                            if knownMetadataNodes.contains(CFHash(candidate)) { return true }
+                            guard queue.count + newMetadataNodes < 512 else { nodeCut = true; return false }
+                            knownMetadataNodes.insert(CFHash(candidate)); newMetadataNodes += 1
+                            return true
                         }
-                    }
-                    let finalAssociation = associationUnchanged() && errors == priorErrors
-                    complete = complete && subtreeIndex == subtree.count && Date() < deadline && finalAssociation
-                    serviceSubtree["status"] = complete ? "observed" : "blocked"
-                    serviceSubtree["reason"] = complete ? "role-only-subtree-observed" : "identity-association-read-or-limit-unconfirmed"
-                    // Never retain a subtree whose association drifted.
-                    serviceSubtree["roles"] = finalAssociation ? subtreeRows : []
-                    serviceSubtree["identityAndAssociationRechecked"] = finalAssociation
-                    serviceSubtree["complete"] = complete
-                    serviceSubtree["depthLimitReached"] = depthCut
-                    serviceSubtree["nodeLimitReached"] = nodeCut
-                    serviceSubtree["timeLimitReached"] = Date() >= deadline
-                    serviceSubtree["sharedQueuedNodes"] = queue.count + subtree.count - 1
-                    if !finalAssociation {
-                        serviceNode["status"] = "unconfirmed"
-                        serviceNode["identityRechecked"] = false
-                        serviceNode.removeValue(forKey: "role"); serviceNode.removeValue(forKey: "subrole")
+                        func axNode(_ value: CFTypeRef?) -> AXUIElement? {
+                            guard let value, CFGetTypeID(value) == AXUIElementGetTypeID() else { return nil }
+                            let candidate = unsafeBitCast(value, to: AXUIElement.self)
+                            return admitMetadataNode(candidate) ? candidate : nil
+                        }
+                        func focusInSheet() -> (node: AXUIElement, role: String, subrole: String)? {
+                            let errorsAtEntry = errors
+                            guard identitiesUnchanged(), let element else { return nil }
+                            var raw: CFTypeRef?
+                            let status = AXUIElementCopyAttributeValue(element, kAXFocusedUIElementAttribute as CFString, &raw)
+                            guard status == .success, let focused = axNode(raw) else {
+                                errors += 1; recordPickerError("picker-focus", status); return nil
+                            }
+                            var cursor = focused, reached = false, ancestry = Set<CFHashCode>()
+                            let ancestorAllowance = max(0, 40 - (rows[sheetRow]["depth"] as? Int ?? 40))
+                            for _ in 0..<ancestorAllowance {
+                                guard Date() < deadline, ancestry.insert(CFHash(cursor)).inserted else { return nil }
+                                var pid: pid_t = 0
+                                let pidStatus = AXUIElementGetPid(cursor, &pid)
+                                guard pidStatus == .success, pid == processId else {
+                                    if pidStatus != .success { errors += 1; recordPickerError("focus-ancestor-pid", pidStatus) }
+                                    return nil
+                                }
+                                if CFEqual(cursor, sheet) { reached = true; break }
+                                var parent: CFTypeRef?
+                                let parentStatus = AXUIElementCopyAttributeValue(cursor, kAXParentAttribute as CFString, &parent)
+                                guard parentStatus == .success, let next = axNode(parent) else {
+                                    errors += 1; recordPickerError("focus-ancestor-parent", parentStatus); return nil
+                                }
+                                cursor = next
+                            }
+                            guard reached else { return nil }
+                            let role = roleOnly(focused, kAXRoleAttribute as CFString)
+                            let subrole = roleOnly(focused, kAXSubroleAttribute as CFString)
+                            guard !role.isEmpty, role != "AXSecureTextField", subrole != "AXSecureTextField",
+                                  errors == errorsAtEntry else { return nil }
+                            return (focused, role, subrole)
+                        }
+                        func fixedLabel(_ candidate: AXUIElement, _ attribute: CFString, _ expected: String) -> Bool {
+                            // Called only for a direct owned-sheet button or the
+                            // nested prompt sheet, never a file-list item/field.
+                            fixedControlLabelsCompared = true
+                            var raw: CFTypeRef?
+                            let status = AXUIElementCopyAttributeValue(candidate, attribute, &raw)
+                            if status != .success && status != .noValue && status != .attributeUnsupported {
+                                errors += 1; recordPickerError("fixed-picker-control-label", status)
+                            }
+                            return status == .success && (raw as? String) == expected
+                        }
+                        var directChildren: CFTypeRef?, defaultRaw: CFTypeRef?
+                        let childrenStatus = AXUIElementCopyAttributeValue(sheet, kAXChildrenAttribute as CFString, &directChildren)
+                        let defaultStatus = AXUIElementCopyAttributeValue(sheet, kAXDefaultButtonAttribute as CFString, &defaultRaw)
+                        var cancelButtons = 0, defaultButtons = 0, controlsComplete = true
+                        if childrenStatus == .success, defaultStatus == .success,
+                           let children = directChildren as? [AXUIElement], children.count <= 512,
+                           let defaultButton = axNode(defaultRaw) {
+                            for child in children {
+                                guard admitMetadataNode(child) else { controlsComplete = false; break }
+                                var pid: pid_t = 0
+                                let pidStatus = AXUIElementGetPid(child, &pid)
+                                guard pidStatus == .success, pid == processId else {
+                                    controlsComplete = false
+                                    if pidStatus != .success { errors += 1; recordPickerError("sheet-control-pid", pidStatus) }
+                                    break
+                                }
+                                guard roleOnly(child, kAXRoleAttribute as CFString) == "AXButton" else { continue }
+                                var enabled: CFTypeRef?
+                                let enabledStatus = AXUIElementCopyAttributeValue(child, kAXEnabledAttribute as CFString, &enabled)
+                                let isEnabled = enabledStatus == .success && enabled.map { CFGetTypeID($0) == CFBooleanGetTypeID() && CFEqual($0, kCFBooleanTrue) } == true
+                                if fixedLabel(child, kAXTitleAttribute as CFString, "Cancel"), isEnabled { cancelButtons += 1 }
+                                if CFEqual(child, defaultButton),
+                                   fixedLabel(child, kAXTitleAttribute as CFString, "Open") || fixedLabel(child, kAXTitleAttribute as CFString, "Choose") {
+                                    defaultButtons += 1
+                                    locationPrompt["defaultButtonEnabled"] = isEnabled
+                                }
+                            }
+                        }
+                        locationPrompt["directControlsComplete"] = controlsComplete
+                        locationPrompt["cancelButtonUniqueAndEnabled"] = cancelButtons == 1
+                        locationPrompt["fixedDefaultButtonUnique"] = defaultButtons == 1
+                        locationPrompt["childrenStatus"] = childrenStatus.rawValue
+                        locationPrompt["defaultStatus"] = defaultStatus.rawValue
+                        let beforeFocus = focusInSheet()
+                        locationPrompt["beforeFocusRole"] = beforeFocus?.role ?? ""
+                        locationPrompt["beforeFocusSubrole"] = beforeFocus?.subrole ?? ""
+                        locationPrompt["frontmostOwned"] = NSWorkspace.shared.frontmostApplication?.processIdentifier == processId
+                        if roleConfirmed, errors == priorErrors, controlsComplete, cancelButtons == 1, defaultButtons == 1,
+                           let beforeFocus, associationUnchanged(), AXIsProcessTrusted(), CGPreflightPostEventAccess(),
+                           NSWorkspace.shared.frontmostApplication?.processIdentifier == processId,
+                           let freshFocus = focusInSheet(), CFEqual(freshFocus.node, beforeFocus.node),
+                           Date() < deadline,
+                           let down = CGEvent(keyboardEventSource: nil, virtualKey: 5, keyDown: true),
+                           let up = CGEvent(keyboardEventSource: nil, virtualKey: 5, keyDown: false) {
+                            down.flags = [.maskCommand, .maskShift]; up.flags = [.maskCommand, .maskShift]
+                            // One fixed ordinary Go-to-Folder chord, never text,
+                            // an arbitrary key, confirmation, or a retry.
+                            guard identitiesUnchanged(), associationUnchanged(), errors == priorErrors, AXIsProcessTrusted(), CGPreflightPostEventAccess(),
+                                  NSWorkspace.shared.frontmostApplication?.processIdentifier == processId,
+                                  let finalFocus = focusInSheet(), CFEqual(finalFocus.node, beforeFocus.node), errors == priorErrors, Date() < deadline else {
+                                locationPrompt["status"] = "blocked-final-dispatch-guard"
+                                break
+                            }
+                            down.post(tap: .cghidEventTap); up.post(tap: .cghidEventTap)
+                            promptDispatched = true
+                            locationPrompt["status"] = "dispatched-observation-unconfirmed"
+                            while Date() < deadline, errors == priorErrors, identitiesUnchanged() {
+                                let observedFocus = focusInSheet()
+                                locationPrompt["focusedRole"] = observedFocus?.role ?? ""
+                                locationPrompt["focusedSubrole"] = observedFocus?.subrole ?? ""
+                                if let focused = observedFocus, focused.role == "AXTextField", focused.subrole != "AXSearchField",
+                                   !CFEqual(focused.node, beforeFocus.node) {
+                                    var parentRaw: CFTypeRef?
+                                    let parentStatus = AXUIElementCopyAttributeValue(focused.node, kAXParentAttribute as CFString, &parentRaw)
+                                    locationPrompt["focusedParentStatus"] = parentStatus.rawValue
+                                    let parent = parentStatus == .success ? axNode(parentRaw) : nil
+                                    var parentPid: pid_t = 0
+                                    let parentPidStatus = parent.map { AXUIElementGetPid($0, &parentPid) } ?? .invalidUIElement
+                                    locationPrompt["focusedParentPidStatus"] = parentPidStatus.rawValue
+                                    guard parentPidStatus == .success, parentPid == processId else {
+                                        if parentPidStatus != .success {
+                                            errors += 1; recordPickerError("prompt-parent-pid", parentPidStatus)
+                                        }
+                                        locationPrompt["status"] = "refused-prompt-parent-identity"
+                                        break
+                                    }
+                                    if parentStatus == .success, let parent, !CFEqual(parent, sheet),
+                                       roleOnly(parent, kAXRoleAttribute as CFString) == "AXSheet",
+                                       fixedLabel(parent, kAXTitleAttribute as CFString, "Go to the folder:") || fixedLabel(parent, kAXTitleAttribute as CFString, "Go to Folder"),
+                                       associationUnchanged(), errors == priorErrors {
+                                        locationPrompt["status"] = "observed"
+                                        locationPrompt["focusedRole"] = focused.role
+                                        locationPrompt["focusedSubrole"] = focused.subrole
+                                        locationPrompt["nestedFixedPromptMatched"] = true
+                                        locationPrompt["identityAndAssociationRechecked"] = true
+                                        break
+                                    }
+                                    if parentStatus != .success { errors += 1; recordPickerError("prompt-focused-parent", parentStatus) }
+                                }
+                                Thread.sleep(forTimeInterval: 0.05)
+                            }
+                        }
+                        locationPrompt["sharedMetadataNodes"] = queue.count + newMetadataNodes
+                        locationPrompt["nodeLimitReached"] = nodeCut
+                        locationPrompt["timeLimitReached"] = Date() >= deadline
+                        locationPrompt["interactionDispatched"] = promptDispatched
+                        locationPrompt["signatureSteps"] = signatureSteps
+                        locationPrompt["codeSigningVerified"] = signatureVerified
+                    } else {
+                        var subtreeRows: [[String: Any]] = []
+                        var subtree = [(node: node, depth: entry.depth, parent: Optional<Int>.none)]
+                        var subtreeIndex = 0, complete = !serviceRole.isEmpty && errors == priorErrors
+                        // Reuse the original shared node/depth/deadline allowance,
+                        // including nodes already queued in the captured app.
+                        seen.remove(CFHash(node))
+                        while complete && subtreeIndex < subtree.count && Date() < deadline {
+                            let current = subtree[subtreeIndex]; subtreeIndex += 1
+                            guard identitiesUnchanged() else { complete = false; break }
+                            var currentPid: pid_t = 0
+                            let pidStatus = AXUIElementGetPid(current.node, &currentPid)
+                            if pidStatus != .success { errors += 1; recordPickerError("descendant-pid", pidStatus); complete = false; break }
+                            guard currentPid == nodePid else { complete = false; break }
+                            guard seen.insert(CFHash(current.node)).inserted else { continue }
+                            let role = roleOnly(current.node, kAXRoleAttribute as CFString)
+                            let subrole = roleOnly(current.node, kAXSubroleAttribute as CFString)
+                            guard !role.isEmpty, errors == priorErrors, identitiesUnchanged() else { complete = false; break }
+                            let row = subtreeRows.count
+                            subtreeRows.append(["role": role, "subrole": subrole, "depth": current.depth,
+                                "parentRow": current.parent.map { $0 as Any } ?? NSNull()])
+                            if role == "AXSecureTextField" || subrole == "AXSecureTextField" { continue }
+                            if current.depth >= 40 { depthCut = true; complete = false; break }
+                            var children: CFTypeRef?
+                            let status = AXUIElementCopyAttributeValue(current.node, kAXChildrenAttribute as CFString, &children)
+                            serviceNode["childrenTraversed"] = true
+                            if status == .success {
+                                guard let children = children as? [AXUIElement] else { errors += 1; complete = false; break }
+                                let remaining = max(0, 512 - queue.count - subtree.count + 1)
+                                if children.count > remaining { nodeCut = true; complete = false; break }
+                                subtree.append(contentsOf: children.map { (node: $0, depth: current.depth + 1, parent: Optional(row)) })
+                            } else if status != .noValue && status != .attributeUnsupported {
+                                errors += 1; recordPickerError("descendant-children", status); complete = false; break
+                            }
+                        }
+                        let finalAssociation = associationUnchanged() && errors == priorErrors
+                        complete = complete && subtreeIndex == subtree.count && Date() < deadline && finalAssociation
+                        serviceSubtree["status"] = complete ? "observed" : "blocked"
+                        serviceSubtree["reason"] = complete ? "role-only-subtree-observed" : "identity-association-read-or-limit-unconfirmed"
+                        // Never retain a subtree whose association drifted.
+                        serviceSubtree["roles"] = finalAssociation ? subtreeRows : []
+                        serviceSubtree["identityAndAssociationRechecked"] = finalAssociation
+                        serviceSubtree["complete"] = complete
+                        serviceSubtree["depthLimitReached"] = depthCut
+                        serviceSubtree["nodeLimitReached"] = nodeCut
+                        serviceSubtree["timeLimitReached"] = Date() >= deadline
+                        serviceSubtree["sharedQueuedNodes"] = queue.count + subtree.count - 1
+                        if !finalAssociation {
+                            serviceNode["status"] = "unconfirmed"
+                            serviceNode["identityRechecked"] = false
+                            serviceNode.removeValue(forKey: "role"); serviceNode.removeValue(forKey: "subrole")
+                        }
                     }
                 }
             }
@@ -386,11 +551,13 @@ if mode == "picker-metadata" {
         "windowOwnership": Array(ownedWindows.prefix(64)), "windowOwnershipTruncated": ownedWindows.count > 64,
         "processes": processRows, "roles": rows, "readErrors": errors,
         "associatedServiceNode": serviceNode, "serviceSubtree": serviceSubtree, "nativeErrors": pickerNativeErrors,
+        "locationPrompt": locationPrompt, "fixedControlLabelsCompared": fixedControlLabelsCompared,
         "dialogOrSheetObserved": dialogSeen, "foreignPidBoundaryObserved": foreignPid,
         "truncated": depthCut || nodeCut || foreignPid || index < queue.count,
         "depthLimitReached": depthCut, "nodeLimitReached": nodeCut,
         "timeLimitReached": Date() >= deadline && index < queue.count,
-        "interactionDispatched": false, "labelsOrValuesRead": false]
+        "interactionDispatched": promptDispatched, "labelsOrValuesRead": fixedControlLabelsCompared,
+        "fieldValuesRead": false, "directoryLabelsRead": false]
     if let encoded = try? JSONSerialization.data(withJSONObject: output, options: [.sortedKeys]),
        let text = String(data: encoded, encoding: .utf8) { print(text) }
     else { exit(2) }

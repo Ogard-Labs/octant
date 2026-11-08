@@ -422,7 +422,8 @@ process.once("SIGINT", () => finish(false));`,
           | "bundle-cleanup"
           | "fill-name"
           | "fill-address"
-          | "picker-metadata",
+          | "picker-metadata"
+          | "picker-location-prompt",
         value?: string,
         pinnedBirth?: string,
       ) =>
@@ -995,6 +996,7 @@ end run`;
                   windowOwnershipTruncated: observation.windowOwnershipTruncated,
                   namedReadsAfterPickerAttempt: false,
                   subsequentInteractionDispatched: false,
+                  checkpoint: "before-dedicated-location-prompt-command",
                   emptyOwnedFolderCreated: true,
                   projectBinding: "not-attempted",
                   pickerSelection: "not-attempted",
@@ -1006,6 +1008,40 @@ end run`;
             );
             checks.push(
               "normal-work-folder-picker-requested-and-read-only-metadata-retained-without-selection",
+            );
+            // This dedicated fixed command does not reopen native(), whose
+            // post-picker privacy latch remains set even after uncertainty.
+            const promptRaw = await sdk("picker-location-prompt", birth);
+            await writeFile(join(artifacts, "project-picker-location-prompt.json"), promptRaw);
+            const prompt: unknown = JSON.parse(promptRaw);
+            if (
+              typeof prompt !== "object" ||
+              prompt === null ||
+              !("capturedPid" in prompt) ||
+              prompt.capturedPid !== pid ||
+              !("capturedIdentityMatched" in prompt) ||
+              prompt.capturedIdentityMatched !== true ||
+              !("fieldValuesRead" in prompt) ||
+              prompt.fieldValuesRead !== false ||
+              !("directoryLabelsRead" in prompt) ||
+              prompt.directoryLabelsRead !== false ||
+              !("locationPrompt" in prompt) ||
+              typeof prompt.locationPrompt !== "object" ||
+              prompt.locationPrompt === null ||
+              !("status" in prompt.locationPrompt) ||
+              prompt.locationPrompt.status !== "observed" ||
+              !("typingDispatched" in prompt.locationPrompt) ||
+              prompt.locationPrompt.typingDispatched !== false ||
+              !("confirmationDispatched" in prompt.locationPrompt) ||
+              prompt.locationPrompt.confirmationDispatched !== false ||
+              !("selectionDispatched" in prompt.locationPrompt) ||
+              prompt.locationPrompt.selectionDispatched !== false
+            )
+              throw Error(
+                "Fixed native Go-to-Folder prompt was refused or remained unconfirmed; no typing or retry.",
+              );
+            checks.push(
+              "one-native-go-to-folder-chord-and-fixed-focused-prompt-observed-without-typing",
             );
             continue;
           }
@@ -1210,7 +1246,10 @@ end run`;
                 ? {
                     projectBinding: "not-attempted",
                     pickerSelection: "not-attempted",
-                    subsequentInteractionDispatched: false,
+                    subsequentInteractionDispatched: true,
+                    subsequentInteraction: "one fixed Go-to-Folder chord only",
+                    typingDispatched: false,
+                    confirmationDispatched: false,
                   }
                 : {}),
             }
