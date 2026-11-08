@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
   decodeProjectId,
+  decodeUtcTimestamp,
   decodeWindowId,
   type ApprovalOutsideContent,
   type ProjectId,
@@ -33,8 +34,8 @@ const marked: ApprovalOutsideContent = {
     {
       sourceLabel: "web-fetch",
       ingestionCount: 1,
-      firstIngestedAt: now,
-      lastIngestedAt: now,
+      firstIngestedAt: decodeUtcTimestamp(now),
+      lastIngestedAt: decodeUtcTimestamp(now),
     },
   ],
   sourceCount: 1,

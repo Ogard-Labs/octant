@@ -23,10 +23,9 @@ import {
   UtcTimestamp,
   WORK_TURN_CAPABILITIES,
   decodeProjectExtraFolder,
-  decodeAggregateVersion,
   decodeContextCompactionId,
   decodeContextSubjectRef,
-  decodeMemoryEntryId,
+  decodeProjectMemoryView,
   decodeProviderRuntimeEvent,
   decodeNativeHarnessSlotCandidate,
   EventActor,
@@ -2471,32 +2470,34 @@ describe("WorkTurnService", () => {
   });
   it("carries the Project's active memory in a Work turn's context, as a Chat turn does", async () => {
     const contexts: Array<ReadonlyArray<ProviderContextBlock>> = [];
-    const entry = (content: string, status: "active" | "superseded") => ({
-      id: decodeMemoryEntryId(
-        status === "active"
-          ? "00000000-0000-4000-8000-000000000a01"
-          : "00000000-0000-4000-8000-000000000a02",
-      ),
+    const entry = (id: string, content: string) => ({
+      id,
       projectId: ids.project,
-      kind: "decision" as const,
+      kind: "decision",
       content,
-      provenance: { kind: "user-authored" as const },
-      author: { kind: "local-user" as const, actorId: OCTANT_LOCAL_ACTOR_ID },
-      version: decodeAggregateVersion(1),
+      provenance: { kind: "user-authored" },
+      author: { kind: "local-user", actorId: OCTANT_LOCAL_ACTOR_ID },
+      version: 1,
       createdAt: "2026-07-14T10:00:00.000Z",
       updatedAt: "2026-07-14T10:00:00.000Z",
     });
-    const readProjectMemory = vi.fn(() => ({
+    const memory = decodeProjectMemoryView({
       projectId: ids.project,
-      active: [{ ...entry("Invoices go out on the 1st.", "active"), status: "active" as const }],
-      history: [
+      active: [
         {
-          ...entry("Invoices go out on the 15th.", "superseded"),
-          status: "superseded" as const,
-          supersededBy: decodeMemoryEntryId("00000000-0000-4000-8000-000000000a01"),
+          ...entry("00000000-0000-4000-8000-000000000a01", "Invoices go out on the 1st."),
+          status: "active",
         },
       ],
-    }));
+      history: [
+        {
+          ...entry("00000000-0000-4000-8000-000000000a02", "Invoices go out on the 15th."),
+          status: "superseded",
+          supersededBy: "00000000-0000-4000-8000-000000000a01",
+        },
+      ],
+    });
+    const readProjectMemory = vi.fn(() => memory);
     const fixture = serviceFixture({
       readProjectMemory,
       turnRuntime: {
