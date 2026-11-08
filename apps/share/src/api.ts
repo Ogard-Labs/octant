@@ -1,9 +1,10 @@
+import { createHmac } from "node:crypto";
 import {
   CANVAS_PUBLIC_SHARE_WIRE_VERSION,
   type CanvasPublicShareDocument,
   type CanvasPublicShareRefusalCode,
   decodeCanvasPublicShareCreated,
-  decodeCanvasPublicShareCreateRequest,
+  decodeCanvasPublicShareIncomingCreateRequest,
   decodeCanvasPublicShareReport,
   decodeCanvasPublicShareRevoked,
   decodeCanvasPublicShareStatus,
@@ -20,6 +21,7 @@ const REPORT_BODY_MAX_BYTES = 8 * 1024;
 
 const REFUSAL_STATUS: Readonly<Record<CanvasPublicShareRefusalCode, number>> = {
   malformed: 400,
+  conflict: 409,
   "too-large": 413,
   unauthorized: 403,
   "not-found": 404,
@@ -154,7 +156,7 @@ async function createShare(
   const parsed = await parseBody(
     request,
     ctx.config.maxDocumentBytes + BODY_ENVELOPE_BYTES,
-    decodeCanvasPublicShareCreateRequest,
+    decodeCanvasPublicShareIncomingCreateRequest,
   );
   if (parsed.status === "refused") return parsed.response;
   const { document, expiry, password } = parsed.value;
@@ -162,10 +164,54 @@ async function createShare(
   if (byteLength > ctx.config.maxDocumentBytes) {
     return refusal("too-large", "The Canvas is larger than this service accepts.");
   }
+  const owned = parsed.value.kind === "canvas-public-share-owned-create" ? parsed.value : undefined;
+  const requestDigest =
+    owned === undefined
+      ? undefined
+      : createHmac("sha256", Buffer.from(owned.ownerSecret, "base64url"))
+          .update(
+            JSON.stringify({
+              shareId: owned.shareId,
+              document,
+              expiry,
+              password: password ?? null,
+            }),
+          )
+          .digest("hex");
+  const replayOwned = (): Response | undefined => {
+    if (owned === undefined || requestDigest === undefined) return undefined;
+    const existing = ctx.store.lookup(owned.shareId);
+    if (existing.status === "missing") return undefined;
+    if (existing.status === "gone") return refusal("gone", "This link was revoked or has expired.");
+    if (!digestsMatch(hashOwnerSecret(owned.ownerSecret), existing.share.ownerSecretHash))
+      return refusal("unauthorized", "The owner secret is missing or wrong.");
+    if (
+      existing.share.creation === undefined ||
+      !digestsMatch(requestDigest, existing.share.creation.requestDigest)
+    )
+      return refusal("conflict", "This id already belongs to a different approved publication.");
+    return jsonResponse(
+      decodeCanvasPublicShareCreated({
+        schemaVersion: CANVAS_PUBLIC_SHARE_WIRE_VERSION,
+        kind: "canvas-public-share-created",
+        shareId: owned.shareId,
+        url: shareUrl(ctx, owned.shareId),
+        ownerSecret: owned.ownerSecret,
+        expiresAt: existing.share.creation.expiresAt,
+      }),
+      201,
+    );
+  };
+  const replay = replayOwned();
+  if (replay !== undefined) return replay;
   const now = ctx.store.now();
   const passwordHash =
     password === undefined ? null : await Bun.password.hash(password, { algorithm: "argon2id" });
-  const ownerSecret = ctx.store.newOwnerSecret();
+  // Password hashing awaits. Another request may have completed this same id
+  // while it ran, so repeat the authenticated idempotency check before write.
+  const completed = replayOwned();
+  if (completed !== undefined) return completed;
+  const ownerSecret = owned?.ownerSecret ?? ctx.store.newOwnerSecret();
   const share: StoredShare = {
     document,
     createdAt: ctx.store.iso(now),
@@ -174,13 +220,20 @@ async function createShare(
     byteLength,
     passwordHash,
     ownerSecretHash: hashOwnerSecret(ownerSecret),
+    ...(requestDigest === undefined
+      ? {}
+      : { creation: { requestDigest, expiresAt: expiryOf(now, expiry) } }),
     revision: 1,
     viewCount: 0,
   };
   for (let attempt = 0; attempt < 3; attempt += 1) {
-    const id = ctx.store.newId();
+    const id = owned?.shareId ?? ctx.store.newId();
     const outcome = ctx.store.create(id, share);
-    if (outcome.status === "id-taken") continue;
+    if (outcome.status === "id-taken") {
+      if (owned !== undefined)
+        return refusal("conflict", "This id already belongs to a publication.");
+      continue;
+    }
     if (outcome.status === "unavailable") {
       return refusal("unavailable", "This service is not accepting new links right now.");
     }

@@ -116,9 +116,25 @@ budget, and the service refuses a larger one.
 
 ## Owner proof
 
-There are no accounts. At create the service returns a per-share owner secret
-(32 random bytes, URL-safe base64) and stores only its SHA-256. The host keeps
-the secret in the credential broker's own namespace for it
+There are no accounts. Before a first-party create sends any document, the
+host generates a 16-byte share id and a 32-byte owner secret with its platform
+CSPRNG, stores the secret in the credential broker and commits a non-secret
+publication intent naming the exact service, share id and credential reference.
+A vault or intent failure sends no document. The owned-create request uses the
+explicit `canvas-public-share-owned-create` discriminator; a service which does
+not implement it refuses before publication. The host never retries using the
+legacy create shape. The reference service still accepts the legacy shape for
+older hosts, but current hosts require owned-create support.
+
+The service stores only the owner's SHA-256 and an owner-keyed HMAC of the
+approved document and link terms. The keyed digest does not provide a cheap
+standalone password test. An identical owned-create retry returns the same
+original receipt without replacing content, expiry or password; it authenticates
+the owner before comparing terms. A different request under that id is refused
+with a conflict and changes nothing. An incorrect owner is refused as on the
+other owner routes. Concurrent identical requests have the same result.
+
+The host keeps the secret in the credential broker's own namespace for it
 (`/v1/canvas-public-share-secrets/*`; a Keychain service and a Secret Service
 attribute of its own) under a random credential reference, never in the
 journal, a projection, a response to a window, or a log. Keeping it apart from
@@ -133,14 +149,22 @@ serving and hourly after that: it deletes the secret first, then journals
 `canvas.public-share-expired@1`, so a failed delete is retried on the next pass
 and a settled link is not visited again.
 
-A link the service created but the journal could not record (a full disk
-refuses the append) would be live, unlisted, and unrevocable, so the host
-withdraws it at once with the secret it still holds and then deletes the
-secret. If the service cannot be reached the revoke is owed and retried like
-any other; when the journal refuses that too, it is owed in memory until the
-host stops. Publishes, updates, revokes, and expiry for one Canvas run one at
-a time on the host, so two approved publishes cannot both create a link; the
-journal's version check is the backstop.
+The publication intent is `canvas.public-share-publication-pending@1` in the
+same link-owned aggregate as pending revocations. It contains no document,
+password, owner secret or Canvas identity. While its create is in flight,
+listing retries cannot withdraw it. A durable published record resolves that
+publication intent only; it never resolves a later real revocation. The
+aggregate's version remains the fence for that later revocation.
+
+If a create's answer is uncertain, or the published record cannot be committed,
+the host retains the already-stored secret and durable intent and withdraws the
+known id. Restart and listing retries recover it even if no published record
+exists. Withdrawal is reported as complete only for a matching confirmed
+receipt or a response establishing that the intended link is gone. Until then
+the host reports that it keeps trying. Publishes, updates, revokes and expiry
+for one Canvas run one at a time; settings are rechecked after awaited vault
+persistence and before the document is sent, and a changed setting after a
+create triggers withdrawal instead of a successful publication.
 
 ## The host's record
 
