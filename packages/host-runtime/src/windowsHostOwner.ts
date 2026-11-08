@@ -84,7 +84,7 @@ export function loadWindowsHostOwnerNative(path: string): WindowsHostOwnerNative
   if (
     process.platform !== "win32" ||
     !isMainThread ||
-    !/^[a-z]:\\/i.test(path) ||
+    !/^(?:\\\\\?\\)?[a-z]:\\/i.test(path) ||
     path.includes("\0") ||
     win32.normalize(path) !== path ||
     win32.basename(path) !== "octant-windows-host-owner.node"

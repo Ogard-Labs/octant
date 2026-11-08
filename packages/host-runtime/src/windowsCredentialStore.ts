@@ -61,7 +61,7 @@ export function makeWindowsCredentialStore(
   );
   if (
     purpose < 0 ||
-    !/^[a-z]:[\\/]/i.test(options.helperPath) ||
+    !/^(?:\\\\\?\\)?[a-z]:\\/i.test(options.helperPath) ||
     options.helperPath.includes("\0") ||
     win32.basename(options.helperPath) !== "octant-credential-helper.exe" ||
     win32.normalize(options.helperPath) !== options.helperPath ||
