@@ -7486,7 +7486,19 @@ the model at another size.
   every call refuses as `tool-authority-stale` with a message the model
   relays to the person; nothing renews it except the thread becoming usable
   again. Files go through `NativeHarnessFileSystem` (confined to the root, symlinks
-  resolved, edits require a prior read); `bash` writes the command to a
+  resolved, edits require a prior read). One `edit` call may carry up to 20
+  replacements in `edits`, across one or more files, beside the single
+  `path`/`oldText`/`newText` form. It is one call: one authority decision,
+  one approval whose summary gives the file count and then names every file
+  up to the summary's 240-character bound (the Watcher and the Judge read
+  every path), and Plan refuses it whole. It is all or nothing: every
+  replacement is checked against its file's read, its file's state since
+  that read, the secret guard, and the text the earlier replacements in the
+  same file leave, before any file is written; a refusal names the
+  replacement by index and changes nothing. A write that fails after those
+  checks puts back the files the call had written and lists any it could
+  not. Per-file approvals were rejected: a person would answer one call
+  several times, and a denial halfway would leave a partial change. `bash` writes the command to a
   script in its own subdirectory of `harness/scripts` and runs it through the
   same confined owned-process-group port as repository tests (Seatbelt on
   macOS, the bubblewrap sandbox on Linux), so a timeout or cancel ends the

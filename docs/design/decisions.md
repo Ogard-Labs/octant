@@ -1288,6 +1288,7 @@ Every harness tool call is authorized under the thread's current authority befor
 - Only harness results that bring in outside content taint the thread. On a tainted thread, shell, edit, write, check and web-fetch need a single-use confirmation, and remembered approvals stop covering them.
 - A tainted thread's search query is refused when it looks like it carries data, before any request leaves; it is a guard the person lowers with the outside-content gate, so at Full access in Work and Code the refusal does not apply.
 - At Full access in Code a tainted thread records the taint and asks no confirmation.
+- An `edit` call may make several replacements across files. It is one call under one approval that names every file, and it is all or nothing: every replacement is checked first, a refusal names the one that failed and changes nothing, and a write that fails afterwards puts the call's earlier writes back.
 - Every tool result is hard-capped with a truncation marker and paging, and nothing variable enters the stable request prefix. _Here only._
 
 Status: Built. Since: —. Detail: [Architecture: Native harness](../architecture.md#native-harness) and [Search queries on a tainted thread](search-query-taint.md).
