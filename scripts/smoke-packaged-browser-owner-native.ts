@@ -22,6 +22,10 @@ import {
 
 const pause = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
 const preference = "Keep Browser available without windows";
+const endpointContinueReady = (snapshot: string): boolean => {
+  const rows = snapshot.split("\n").filter((row) => row.startsWith("AXButton | Continue |"));
+  return rows.length === 1 && rows[0]?.endsWith(" | readiness:true") === true;
+};
 const ax = String.raw`on run argv
 tell application "System Events"
 set candidate to first application process whose unix id is (item 1 of argv as integer)
@@ -647,7 +651,33 @@ process.once("SIGINT", () => finish(false));`,
                 !["Name", "Address"].includes(String(control.fieldLabel)))
             )
               throw Error("Unexpected fixture field label.");
-            return `${control.role} | ${control.title || control.fieldLabel || ""} | ${control.description} | ${control.value ?? ""}`;
+            const row = `${control.role} | ${control.title || control.fieldLabel || ""} | ${control.description} | ${control.value ?? ""}`;
+            if (control.role === "AXButton" && control.title === "Continue") {
+              if (
+                typeof control.continueOwnerMatched !== "boolean" ||
+                typeof control.continueOwnerReadError !== "number" ||
+                !Number.isSafeInteger(control.continueOwnerReadError) ||
+                (control.continueEnabledReadError !== null &&
+                  (typeof control.continueEnabledReadError !== "number" ||
+                    !Number.isSafeInteger(control.continueEnabledReadError))) ||
+                (control.continueEnabled !== null &&
+                  control.continueEnabled !== true &&
+                  control.continueEnabled !== false)
+              )
+                throw Error("Invalid exact Continue readiness shape.");
+              const state =
+                control.continueOwnerMatched === true &&
+                control.continueOwnerReadError === 0 &&
+                control.continueEnabledReadError === 0
+                  ? control.continueEnabled === true
+                    ? "true"
+                    : control.continueEnabled === false
+                      ? "false"
+                      : "unknown"
+                  : "unknown";
+              return `${row} | readiness:${state}`;
+            }
+            return row;
           })
           .join("\n");
       };
@@ -843,7 +873,7 @@ end run`;
           await native("click", noKey);
           await native("reveal", "Check and add");
           await native("click", "Check and add");
-          await wait("endpoint-added", (s) => s.includes("AXButton | Continue |"));
+          await wait("endpoint-added", endpointContinueReady);
           if (provider.evidence().models < 1)
             throw Error("Added endpoint did not reach the owned model fixture.");
           await native("click", "Continue");

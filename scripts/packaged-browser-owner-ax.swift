@@ -1131,6 +1131,26 @@ while next < pending.count, next < 512, Date() < treeDeadline {
             }
         }
         var control: [String: Any] = ["role": nodeRole, "title": title, "description": description, "depth": depth]
+        if mode == "read", nodeRole == "AXButton", title == "Continue" {
+            var ownerPid: pid_t = 0, enabled: CFTypeRef?
+            let ownerStatus = AXUIElementGetPid(node, &ownerPid)
+            control["continueOwnerReadError"] = ownerStatus.rawValue
+            control["continueOwnerMatched"] = ownerStatus == .success && ownerPid == processId
+            control["continueEnabled"] = NSNull()
+            control["continueEnabledReadError"] = NSNull()
+            if ownerStatus == .success, ownerPid == processId {
+                let status = AXUIElementCopyAttributeValue(node, kAXEnabledAttribute as CFString, &enabled)
+                control["continueEnabledReadError"] = status.rawValue
+                if status == .success, let enabled, CFGetTypeID(enabled) == CFBooleanGetTypeID() {
+                    control["continueEnabled"] = CFEqual(enabled, kCFBooleanTrue)
+                } else if status != .success && status != .noValue && status != .attributeUnsupported {
+                    readErrors += 1; nativeReadErrors.insert(status.rawValue)
+                }
+            } else {
+                readErrors += 1
+                if ownerStatus != .success { nativeReadErrors.insert(ownerStatus.rawValue) }
+            }
+        }
         if !fieldLabel.isEmpty { control["fieldLabel"] = fieldLabel }
         if isEndpointDialog { control["ownedEndpointDialog"] = true }
         if (nodeRole == "AXCheckBox" || nodeRole == "AXSwitch") && (title == preferenceTitle || description == preferenceTitle) {
