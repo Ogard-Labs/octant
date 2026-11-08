@@ -370,14 +370,16 @@ the CLI. The hub depends on that:
     restart on macOS), and after a power cut someone unlocks the machine once.
     BitLocker with a TPM, and LUKS unlocked by a TPM, boot unattended. A
     standby keeps the members working meanwhile.
-  - **Windows.** Windows has no Octant design yet. The Windows parts of
-    this design (the Windows service and the access-list key file) are built
-    only when the Windows track starts, after the macOS preview and Linux
-    self-update evidence, as the
-    [release boundary](../architecture.md#current-release-boundary) orders.
-    Even then, a Windows hub runs the hub role, the web app, and the hub's
-    services; running agents on Windows waits for an approved Windows
-    confinement design.
+  - **Windows.** The native track is active. Its private profile, owner/control,
+    identity, credential and storage boundaries compose the foreground host
+    described above. Desktop and Nightly consumers require their own actual
+    bootstrap evidence. Boot-service installation and encrypted-disk setup
+    remain separate from this foreground implementation. Work, Code and
+    executable extensions remain unavailable until native confinement denies
+    the private profile and proves its filesystem, network and process-lifecycle
+    boundaries. The [platform release boundary](../architecture.md#current-release-boundary)
+    owns those admission requirements; storage or packaging evidence alone
+    does not grant them.
 
 - **Serves the web app.** The hub's private listener, on its Tailscale or LAN
   address, serves the same web app the desktop window shows. A phone or
