@@ -38,7 +38,7 @@ def run(*arguments, cwd=None, timeout=900, output=None):
         raise subprocess.CalledProcessError(result, arguments)
 
 
-def controller_image(path: Path) -> None:
+def controller_image(path: Path, module_id=None) -> None:
     # Attest the actual compiled executable used below, not just a matching
     # release version. No symbol file or diagnostic payload leaves this runner.
     identifiers, loads = [], []
@@ -71,7 +71,7 @@ def controller_image(path: Path) -> None:
                         raise SystemExit("Controller executable segment is truncated.")
                     digest.update(block)
                     remaining -= len(block)
-                loads.append({"address": hex(address), "fileBytes": size,
+                loads.append({"address": hex(address), "fileOffset": start, "fileBytes": size,
                               "memoryBytes": memory, "sha256": digest.hexdigest()})
             elif kind == 4:
                 if size > 65536:
@@ -91,8 +91,11 @@ def controller_image(path: Path) -> None:
                     position = value_start + ((value_size + 3) & ~3)
     if not identifiers or not loads:
         raise SystemExit("Controller build identity or executable loads are unavailable.")
-    print("OCTANT_CONTROLLER_IMAGE " + json.dumps({"buildIds": identifiers,
-          "executableLoads": loads, "diagnostic": True}), flush=True)
+    receipt = {"buildIds": identifiers, "executableLoads": loads, "diagnostic": True}
+    if module_id is not None:
+        receipt["moduleId"] = module_id
+    print(("OCTANT_MODULE_IMAGE " if module_id is not None else "OCTANT_CONTROLLER_IMAGE ") +
+          json.dumps(receipt), flush=True)
 
 
 def main():
@@ -160,7 +163,6 @@ def main():
     fileattr_workload = root / "fileattr-workload"
     for source, target in ((native / "broker.c", relay),
                            (repository / "scripts/linux-file-view/kernel_policy_workload.c", workload),
-                           (repository / "scripts/linux-file-view/kernel_core_notes.c", core_notes_binary),
                            (repository / "scripts/linux-file-view/kernel_core_probe.c", core_probe),
                            (repository / "scripts/linux-file-view/kernel_fileattr_workload.c", fileattr_workload)):
         run("gcc", "-static", "-std=c11", "-Wall", "-Wextra", "-Werror", str(source), "-o", str(target), timeout=30)
@@ -193,15 +195,17 @@ def main():
             run("ldd", str(runtime_path), timeout=10, output=output)
     guest_files = {"octant-mediation": relay, "policy-workload": workload,
                    "fileattr-workload": fileattr_workload,
-                   "core-notes": core_notes_binary, "core-probe": core_probe,
+                   "core-probe": core_probe,
                    "policy-broker": policy, "session-cases": session_cases, "usr/bin/bwrap": Path("/usr/bin/bwrap"),
                    "kernel-runtime.mjs": repository / "scripts/linux-file-view/kernel_runtime.mjs",
                    **runtime_files}
+    module_names = {"policy-broker", "core-probe"}
     for path in re.findall(r"(?:=>\s+)?(/[^\s]+)", library_log.read_text()):
         library = Path(path)
         if not library.is_file():
             raise SystemExit("The owned policy binary has an unavailable dynamic dependency.")
         guest_files[path.removeprefix("/")] = library
+        module_names.add(path.removeprefix("/"))
     # pivot_root cannot replace the kernel's initial rootfs. Give Bubblewrap
     # a real disposable root mount, without mounting or installing on the host.
     tree = root / "root-tree"
@@ -214,6 +218,24 @@ def main():
         destination.parent.mkdir(parents=True, exist_ok=True)
         shutil.copyfile(source, destination)
         destination.chmod(0o755)
+    # Only the existing copied ELF inventory becomes fixed identity candidates.
+    # No names from the crashing process or arbitrary runtime files are opened.
+    if len(module_names) > 64:
+        raise SystemExit("The copied diagnostic module inventory exceeds its bound.")
+    entries = []
+    module_ids = {}
+    for module_id, name in enumerate(sorted(module_names), 1):
+        if not re.fullmatch(r"[A-Za-z0-9_./+:-]+", name) or ".." in Path(name).parts:
+            raise SystemExit("A copied diagnostic module path is not a fixed guest path.")
+        module_ids[name] = module_id
+        controller_image(tree / name, module_id)
+        entries.append(f"  {{{module_id}, {json.dumps('/' + name)}}},")
+    (root / "octant_core_modules.h").write_text(
+        "static const struct module modules[] = {\n" + "\n".join(entries) + "\n};\n")
+    run("gcc", "-static", "-std=c11", "-Wall", "-Wextra", "-Werror", "-I", str(root),
+        str(repository / "scripts/linux-file-view/kernel_core_notes.c"), "-o", str(core_notes_binary), timeout=30)
+    shutil.copyfile(core_notes_binary, tree / "core-notes")
+    (tree / "core-notes").chmod(0o755)
     image = root / "root.ext4"
     with image.open("wb") as output:
         output.truncate(512 * 1024 * 1024)
@@ -276,6 +298,8 @@ def main():
             note.get("device") != target.get("device") or note.get("inode") != target.get("inode") or
             ended.get("joined") is not True or ended.get("signalExpected") is not True or ended.get("signal") != 11 or
             note.get("signal") != 11 or note.get("siCode") != 2 or target.get("bound") is not True or
+            note.get("fileMapping") is not True or note.get("moduleId") != module_ids["core-probe"] or
+            note.get("mappingDevice") != target.get("device") or note.get("mappingInode") != target.get("inode") or
             not isinstance(note.get("helperPid"), int) or note["helperPid"] <= 0 or note["helperPid"] == pid or
             any(note.get(field) is not True for field in ("confirmed", "owned", "pidfdValidated", "hardwareFault", "terminationContext", "beforeMemory")) or
             not isinstance(note.get("bytes"), int) or not 0 < note["bytes"] <= 128 * 1024 or

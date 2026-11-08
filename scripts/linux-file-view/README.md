@@ -140,6 +140,19 @@ changed. If the independent default controls do not reproduce the abort, its
 underlying runtime/kernel interaction remains unknown; mitigation is not proof
 of a corrected cause or production eligibility.
 
+The guest-only crash collector retains its fixed controller/probe targets,
+pidfd identity checks, three-second and 128-KiB bounds. After confirming the
+signal notes it may read only the numeric `NT_FILE` entries, stopping before
+all filenames and memory segments. Optional pipe reads have at most 250 ms
+and require a further 250-ms publication reserve within the same total bound.
+A unique fault-address mapping is compared
+through numeric `map_files` metadata with a bounded inventory of already-copied
+guest modules, whose ELF identities and executable file offsets are attested
+at build time. Missing, ambiguous or inaccessible mappings remain unknown;
+they neither erase valid signal evidence nor imply a runtime or library cause.
+The existing genuine probe must prove its actual backing-object identity.
+This reader extension still requires native execution and enables no capability.
+
 Metadata coverage requires the link inode as well as its followed target:
 even a dangling protected symlink has link text and metadata. The policy's
 metadata port therefore distinguishes `lstat` from `stat`, including in proposed

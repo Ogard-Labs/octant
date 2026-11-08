@@ -33,6 +33,8 @@ _Static_assert(NT_SIGINFO == 0x53494749, "native signal note type differs");
 struct input { int fd; size_t bytes; long long deadline; };
 struct notes {
   uint64_t rip, rsp, rbp, rsi, rdx, rax, address, first_load;
+  uint64_t map_start, map_end, file_offset;
+  bool file_mapping;
   int code;
 };
 static long long milliseconds(void)
@@ -82,9 +84,49 @@ static bool discard(struct input *input, size_t size)
   return true;
 }
 
-/* Linux 6.18 writes headers, then the dumping thread's PRSTATUS, PRPSINFO and
- * SIGINFO before any other notes or memory. Stop immediately after SIGINFO.
- * No EOF drain, heap access, raw note persistence or process strings. */
+/* Mapping is optional: preserve the confirmed signal if the bounded numeric
+ * prefix is absent or malformed. Never consume NT_FILE's filename tail. */
+static void mapping(struct input *input, uint64_t end, struct notes *notes)
+{
+  unsigned char header[20], pair[16], entry[24];
+  if (input->bytes > end || end - input->bytes < sizeof(header) ||
+      !take(input, header, sizeof(header)) || u32(header) != 5 ||
+      memcmp(header + 12, "CORE\0", 5)) return;
+  uint32_t size = u32(header + 4), type = u32(header + 8);
+  if (type == 6) { /* Pinned AUXV order; discard values, never print them. */
+    if (size > 4096 || size % 16 || input->bytes > end || size > end - input->bytes ||
+        !discard(input, size) || end - input->bytes < sizeof(header) ||
+        !take(input, header, sizeof(header)) || u32(header) != 5 ||
+        memcmp(header + 12, "CORE\0", 5)) return;
+    size = u32(header + 4); type = u32(header + 8);
+  }
+  if (type != 0x46494c45 || size < sizeof(pair) || input->bytes > end ||
+      size > end - input->bytes || !take(input, pair, sizeof(pair))) return;
+  uint64_t count = u64(pair), page = u64(pair + 8);
+  if (!count || count > 2048 || !page || page > (1u << 30) || (page & (page - 1)) ||
+      count * sizeof(entry) > size - sizeof(pair) ||
+      count * sizeof(entry) > PREFIX_MAX - input->bytes) return;
+  uint64_t previous = 0, start = 0, finish = 0, offset = 0;
+  unsigned matched = 0;
+  for (uint64_t index = 0; index < count; index++) {
+    if (!take(input, entry, sizeof(entry))) return;
+    uint64_t first = u64(entry), last = u64(entry + 8), pages = u64(entry + 16);
+    if (first >= last || first < previous || pages > UINT64_MAX / page) return;
+    previous = last;
+    if (notes->rip >= first && notes->rip < last) {
+      uint64_t base = pages * page;
+      if (notes->rip - first > UINT64_MAX - base) return;
+      start = first; finish = last; offset = base + notes->rip - first; matched++;
+    }
+  }
+  if (matched == 1) {
+    notes->map_start = start; notes->map_end = finish; notes->file_offset = offset;
+    notes->file_mapping = true;
+  }
+}
+
+/* Linux 6.18 writes the three mandatory notes before optional numeric AUXV /
+ * NT_FILE metadata. No EOF drain, memory segments, names or raw persistence. */
 static bool decode(struct input *input, uint32_t tid, unsigned signal, struct notes *notes)
 {
   unsigned char header[64], program[56], value[336], name[8];
@@ -135,10 +177,21 @@ static bool decode(struct input *input, uint32_t tid, unsigned signal, struct no
     }
   }
   notes->first_load = load;
-  return input->bytes <= end && end <= load;
+  if (input->bytes > end || end > load) return false;
+  /* Optional enrichment cannot spend the mandatory receipt's publication
+   * reserve. Restore the absolute outer deadline even after a stalled pipe. */
+  long long total = input->deadline, now = milliseconds();
+  if (now <= total && total - now >= 500) {
+    input->deadline = now + 250;
+    mapping(input, end, notes);
+    input->deadline = total;
+  }
+  return true;
 }
 
 #ifndef OCTANT_CORE_NOTES_TEST
+struct module { unsigned id; const char *path; };
+#include "octant_core_modules.h"
 static int console = -1;
 static void interrupted(int signal)
 {
@@ -186,8 +239,46 @@ static bool identity(uint64_t pid, uint64_t role, uint64_t device, uint64_t inod
   }
   return false;
 }
+static bool mapping_time_available(long long until)
+{
+  long long now = milliseconds();
+  return now < until && until - now > 250;
+}
+static unsigned module_identity(const struct notes *notes, const uint64_t args[8],
+  struct stat *backing, long long until)
+{
+  if (!notes->file_mapping || !mapping_time_available(until) ||
+      !identity(args[0], args[5], args[6], args[7]) || !mapping_time_available(until)) goto unknown;
+  char path[128];
+  snprintf(path, sizeof(path), "/proc/%llu/map_files/%llx-%llx",
+    (unsigned long long)args[0], (unsigned long long)notes->map_start,
+    (unsigned long long)notes->map_end);
+  if (!mapping_time_available(until)) goto unknown;
+  int file = open(path, O_PATH | O_CLOEXEC);
+  bool found = file >= 0 && !fstat(file, backing) && S_ISREG(backing->st_mode);
+  if (file >= 0) close(file);
+  if (!found || !mapping_time_available(until) ||
+      !identity(args[0], args[5], args[6], args[7]) || !mapping_time_available(until)) goto unknown;
+  unsigned matched = 0;
+  for (size_t index = 0; index < sizeof(modules) / sizeof(modules[0]); index++) {
+    if (!mapping_time_available(until)) goto unknown;
+    struct stat installed;
+    file = open(modules[index].path, O_PATH | O_CLOEXEC);
+    bool same = file >= 0 && !fstat(file, &installed) && S_ISREG(installed.st_mode) &&
+      backing->st_dev == installed.st_dev && backing->st_ino == installed.st_ino;
+    if (file >= 0) close(file);
+    if (!mapping_time_available(until)) goto unknown;
+    if (same) { if (matched) return 0; matched = modules[index].id; }
+  }
+  if (!mapping_time_available(until) || !identity(args[0], args[5], args[6], args[7]) ||
+      !mapping_time_available(until)) goto unknown;
+  return matched;
+unknown:
+  *backing = (struct stat){0}; return 0;
+}
 int main(int argc, char **argv)
 {
+  const long long until = deadline(3000);
   signal(SIGALRM, interrupted); signal(SIGTERM, interrupted); signal(SIGINT, interrupted);
   alarm(3);
   if (argc == 2 && !strcmp(argv[1], "inactive")) _exit(0);
@@ -197,7 +288,7 @@ int main(int argc, char **argv)
   for (int index = 1; index < argc && owned; index++) owned = number(argv[index], &args[index - 1]);
   owned = owned && args[0] == args[4] && args[1] > 0 && args[1] <= INT_MAX &&
     args[2] > 0 && args[2] < 65 && args[3] == 3 && identity(args[0], args[5], args[6], args[7]);
-  struct input input = {.fd = STDIN_FILENO, .deadline = deadline(3000)};
+  struct input input = {.fd = STDIN_FILENO, .deadline = until};
   struct notes notes = {0};
   int flags = fcntl(STDIN_FILENO, F_GETFL);
   bool readable = owned && flags >= 0 && !fcntl(STDIN_FILENO, F_SETFL, flags | O_NONBLOCK);
@@ -206,18 +297,23 @@ int main(int argc, char **argv)
   bool confirmed = readable && decode(&input, (uint32_t)args[1], (unsigned)args[2], &notes);
   if (readable && !confirmed) failure = errno;
   if (!confirmed) notes = (struct notes) {0};
+  struct stat backing = {0};
+  unsigned module = confirmed ? module_identity(&notes, args, &backing, until) : 0;
   const char *stage = !owned ? "identity" : !readable ? "stdin" : confirmed ? "notes" :
     failure == ETIMEDOUT ? "timeout" : failure == ENODATA ? "truncated" : "invalid-notes";
   char result[2048];
   int length = snprintf(result, sizeof(result),
-    "OCTANT_CORE_NOTES {\"confirmed\":%s,\"stage\":\"%s\",\"owned\":%s,\"pidfdValidated\":%s,\"pid\":%llu,\"tid\":%llu,\"role\":%llu,\"helperPid\":%ld,\"device\":%llu,\"inode\":%llu,\"signal\":%llu,\"siCode\":%d,\"hardwareFault\":%s,\"terminationContext\":true,\"errno\":%d,\"bytes\":%zu,\"firstLoad\":%llu,\"beforeMemory\":%s,\"address\":\"0x%llx\",\"rip\":\"0x%llx\",\"rsp\":\"0x%llx\",\"rbp\":\"0x%llx\",\"rsi\":\"0x%llx\",\"rdx\":\"0x%llx\",\"rax\":\"0x%llx\"}\n",
+    "OCTANT_CORE_NOTES {\"confirmed\":%s,\"stage\":\"%s\",\"owned\":%s,\"pidfdValidated\":%s,\"pid\":%llu,\"tid\":%llu,\"role\":%llu,\"helperPid\":%ld,\"device\":%llu,\"inode\":%llu,\"signal\":%llu,\"siCode\":%d,\"hardwareFault\":%s,\"terminationContext\":true,\"errno\":%d,\"bytes\":%zu,\"firstLoad\":%llu,\"beforeMemory\":%s,\"address\":\"0x%llx\",\"rip\":\"0x%llx\",\"rsp\":\"0x%llx\",\"rbp\":\"0x%llx\",\"rsi\":\"0x%llx\",\"rdx\":\"0x%llx\",\"rax\":\"0x%llx\",\"fileMapping\":%s,\"mapStart\":\"0x%llx\",\"mapEnd\":\"0x%llx\",\"fileOffset\":\"0x%llx\",\"mappingDevice\":%llu,\"mappingInode\":%llu,\"moduleId\":%u}\n",
     confirmed ? "true" : "false", stage, owned ? "true" : "false", owned ? "true" : "false",
     (unsigned long long)args[0], (unsigned long long)args[1], (unsigned long long)args[5], (long)getpid(),
     (unsigned long long)args[6], (unsigned long long)args[7], (unsigned long long)args[2], notes.code,
     confirmed && args[2] == SIGSEGV && notes.code > 0 ? "true" : "false", failure, input.bytes,
     (unsigned long long)notes.first_load, confirmed ? "true" : "false", (unsigned long long)notes.address,
     (unsigned long long)notes.rip, (unsigned long long)notes.rsp, (unsigned long long)notes.rbp,
-    (unsigned long long)notes.rsi, (unsigned long long)notes.rdx, (unsigned long long)notes.rax);
+    (unsigned long long)notes.rsi, (unsigned long long)notes.rdx, (unsigned long long)notes.rax,
+    notes.file_mapping ? "true" : "false", (unsigned long long)notes.map_start,
+    (unsigned long long)notes.map_end, (unsigned long long)notes.file_offset,
+    (unsigned long long)backing.st_dev, (unsigned long long)backing.st_ino, module);
   if (console >= 0 && length > 0 && length < (int)sizeof(result)) {
     size_t written = 0;
     while (written < (size_t)length && milliseconds() < input.deadline) {
@@ -261,6 +357,21 @@ static size_t fixture(unsigned char *bytes)
   memcpy(bytes + 4096, "unread heap tail", 16);
   return at;
 }
+static size_t mapping_fixture(unsigned char *bytes)
+{
+  size_t at = fixture(bytes);
+  put32(bytes + at, 5); put32(bytes + at + 4, 32); put32(bytes + at + 8, 6);
+  memcpy(bytes + at + 12, "CORE\0", 5); at += 52;
+  put32(bytes + at, 5); put32(bytes + at + 4, 96); put32(bytes + at + 8, 0x46494c45);
+  memcpy(bytes + at + 12, "CORE\0", 5); at += 20;
+  put64(bytes + at, 2); put64(bytes + at + 8, 4096); at += 16;
+  put64(bytes + at, 0x1a80000); put64(bytes + at + 8, 0x1a90000);
+  put64(bytes + at + 16, 16); at += 24;
+  put64(bytes + at, 0x2000000); put64(bytes + at + 8, 0x2100000); at += 24;
+  memcpy(bytes + at, "unread filename sentinel", 24);
+  put64(bytes + 96, at + 32 - 176);
+  return at;
+}
 int main(void)
 {
   alarm(3);
@@ -288,7 +399,49 @@ int main(void)
     }
     close(pipefd[0]);
   }
-  puts("OCTANT_CORE_PARSER valid prefix with unread memory, seven invalid inputs and stalled-input timeout passed");
+  for (unsigned test = 0; test < 12; test++) {
+    unsigned char bytes[8192]; size_t end = mapping_fixture(bytes), length = 4112;
+    const size_t aux = 836, file = aux + 52, values = file + 20, entries = values + 16;
+    if (test == 1) put64(bytes + values + 8, 0);
+    if (test == 2) put64(bytes + entries + 16, UINT64_MAX);
+    if (test == 3) put64(bytes + entries + 24, 0x1a80001);
+    if (test == 4) put64(bytes + values, 2049);
+    if (test == 5) length = end - 1;
+    if (test == 6) put32(bytes + file + 4, 15);
+    if (test == 7) put32(bytes + aux + 4, 4097);
+    if (test == 8) put32(bytes + file + 4, 4096);
+    if (test == 9) put32(bytes + file + 8, 2);
+    if (test == 10) {
+      put64(bytes + entries, 0x1a00000); put64(bytes + entries + 8, 0x1a10000);
+    }
+    if (test == 11) put64(bytes + entries + 16, UINT64_MAX / 4096);
+    int pipefd[2]; if (pipe(pipefd)) return 6;
+    if (write(pipefd[1], bytes, length) != (ssize_t)length) return 7;
+    close(pipefd[1]);
+    struct input input = {.fd = pipefd[0], .deadline = deadline(3000)};
+    struct notes notes = {0};
+    bool valid = decode(&input, 42, SIGSEGV, &notes);
+    if (!valid || notes.rip != 0x1a8c0d5 || notes.address != 0x12345000 ||
+        input.bytes > end || input.bytes >= 4096 ||
+        (!test && (!notes.file_mapping || input.bytes != end || notes.map_start != 0x1a80000 ||
+          notes.map_end != 0x1a90000 || notes.file_offset != 0x1c0d5)) ||
+        (test && notes.file_mapping)) return 8;
+    close(pipefd[0]);
+  }
+  {
+    unsigned char bytes[8192]; size_t end = fixture(bytes);
+    put64(bytes + 96, 1000);
+    int pipefd[2]; if (pipe(pipefd)) return 9;
+    if (write(pipefd[1], bytes, end) != (ssize_t)end) return 10;
+    long long until = deadline(900);
+    struct input input = {.fd = pipefd[0], .deadline = until};
+    struct notes notes = {0};
+    bool valid = decode(&input, 42, SIGSEGV, &notes);
+    close(pipefd[0]); close(pipefd[1]);
+    if (!valid || notes.file_mapping || notes.rip != 0x1a8c0d5 ||
+        input.bytes != end || input.deadline != until || until - milliseconds() < 250) return 11;
+  }
+  puts("OCTANT_CORE_PARSER mandatory fault/timeout checks and optional numeric mapping bounds with unread filename/memory sentinels passed");
   return 0;
 }
 #endif
