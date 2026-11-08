@@ -1761,6 +1761,34 @@ describe("Codex thread and turn lifecycle", () => {
     await acquired.close();
   });
 
+  it("hands the person's compaction point to the thread's own config on start and every resume", async () => {
+    const f = fixture();
+    const acquired = await acquireConnection(makeCodexDriver(f.options()), "code");
+    const compactionPoint = { tokens: 140_000, contextWindow: 200_000 };
+    await Effect.runPromise(
+      acquired.connection.start({
+        sessionId,
+        modelId: "gpt-5.4" as never,
+        executionPolicy: "approval-gated",
+        compactionPoint,
+      }),
+    );
+    await Effect.runPromise(
+      acquired.connection.resume({
+        sessionId: "session-resumed" as never,
+        resumeCursor: { driverKind: "codex", value: "thread-existing" },
+        executionPolicy: "approval-gated",
+        compactionPoint,
+      }),
+    );
+    for (const method of ["thread/start", "thread/resume"]) {
+      expect(f.calls.find((call) => call.method === method)?.input).toMatchObject({
+        config: { model_auto_compact_token_limit: 140_000 },
+      });
+    }
+    await acquired.close();
+  });
+
   it("keeps Codex's shell on and the Project's agent brief off for a Work thread on start and again on every resume", async () => {
     const workOff = {
       project_doc_max_bytes: 0,

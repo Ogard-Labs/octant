@@ -1,4 +1,9 @@
-import { SideTaskResult, ThreadSideTasks, decodeHostAnswer } from "@octant/contracts";
+import {
+  SideTaskResult,
+  ThreadSideTasks,
+  decodeHostAnswer,
+  type SideTaskContext,
+} from "@octant/contracts";
 import { bindFetchPort } from "./bindFetchPort";
 
 export interface SideTaskClientOptions {
@@ -9,7 +14,15 @@ export interface SideTaskClientOptions {
 
 export interface SideTaskClient {
   sideTasks(threadId: string, signal?: AbortSignal): Promise<ThreadSideTasks>;
-  start(threadId: string, sideTaskId: string, signal?: AbortSignal): Promise<SideTaskResult>;
+  /** Starts the offer in a new thread; `context` overrides what the model suggested. */
+  start(
+    threadId: string,
+    sideTaskId: string,
+    context?: SideTaskContext,
+    signal?: AbortSignal,
+  ): Promise<SideTaskResult>;
+  /** "Do it here": the offering thread takes the work on as its next turn. */
+  continueHere(threadId: string, sideTaskId: string, signal?: AbortSignal): Promise<SideTaskResult>;
   dismiss(threadId: string, sideTaskId: string, signal?: AbortSignal): Promise<SideTaskResult>;
 }
 
@@ -53,8 +66,15 @@ export function createSideTaskClient(options: SideTaskClientOptions): SideTaskCl
       });
       return decodeHostAnswer(ThreadSideTasks)((body as { sideTasks?: unknown }).sideTasks);
     },
-    start: (threadId, sideTaskId, signal) =>
-      post(threadId, "start", { sideTaskId, confirmed: true }, signal),
+    start: (threadId, sideTaskId, context, signal) =>
+      post(
+        threadId,
+        "start",
+        { sideTaskId, confirmed: true, ...(context === undefined ? {} : { context }) },
+        signal,
+      ),
+    continueHere: (threadId, sideTaskId, signal) =>
+      post(threadId, "continue", { sideTaskId, confirmed: true }, signal),
     dismiss: (threadId, sideTaskId, signal) => post(threadId, "dismiss", { sideTaskId }, signal),
   };
 }

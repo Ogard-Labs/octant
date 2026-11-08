@@ -222,6 +222,35 @@ describe("WorkThreadService", () => {
     await expect(fixture.service.read(ids.window, ids.thread)).resolves.toBeUndefined();
   });
 
+  it("opens a moved-in thread it already holds, and refuses other commands on a held thread", async () => {
+    const fixture = serviceFixture({
+      threads: [],
+      moveHold: (threadId) => threadId === ids.thread,
+    });
+    await expect(
+      fixture.service.execute(ids.window, {
+        kind: "create-work-thread",
+        threadId: ids.thread,
+        projectId: ids.project,
+        title: "Draft brief",
+        providerInstanceId: ids.provider,
+        modelId: "model-a",
+        hostId: "local",
+        bindingRevisionId: ids.binding,
+      }),
+    ).resolves.toEqual({ kind: "thread-created", thread: thread() });
+
+    const held = serviceFixture({ moveHold: () => true });
+    await expect(
+      held.service.execute(ids.window, {
+        kind: "rename-work-thread",
+        threadId: ids.thread,
+        expectedVersion: 1,
+        title: "Renamed while moving",
+      }),
+    ).rejects.toMatchObject({ failure: { category: "unavailable" } });
+  });
+
   it("creates a thread for the active Work Project with a local-user event", async () => {
     const fixture = serviceFixture({ threads: [] });
 
@@ -1768,6 +1797,7 @@ it("validates the target before journaling an unavailable provider", async () =>
 
 function serviceFixture(
   options: {
+    readonly moveHold?: (threadId: string) => boolean;
     readonly threads?: ReadonlyArray<ReturnType<typeof thread>>;
     readonly accessibleProjects?: ReadonlyArray<{
       id: string;
@@ -1864,6 +1894,7 @@ function serviceFixture(
   };
   const onWorkingDirectoryChanged = vi.fn(async () => undefined);
   const service = new WorkThreadService({
+    ...(options.moveHold === undefined ? {} : { moveHold: options.moveHold }),
     persistence: persistence as never,
     projects: projects as never,
     projection,
@@ -2572,8 +2603,8 @@ describe("forking a Work thread from one of its turns", () => {
   const first = decodeWorkTurnRequestId("72000000-0000-4000-8000-000000000041");
   const second = decodeWorkTurnRequestId("72000000-0000-4000-8000-000000000042");
 
-  /** A source thread with two finished turns, in a real turn projection. */
-  function sourceTurns() {
+  /** A source thread with two turns, in a real turn projection; the second may still run. */
+  function sourceTurns(options: { readonly secondRunning?: boolean } = {}) {
     const turns = new WorkTurnProjection();
     for (const [requestId, turn, prompt, response] of [
       [first, "72000000-0000-4000-8000-000000000051", "Draft the brief", "Here is a draft"],
@@ -2618,7 +2649,7 @@ describe("forking a Work thread from one of its turns", () => {
         requestId,
         threadId: ids.thread,
         turnId: decodeWorkTurnId(turn),
-        status: "completed",
+        status: requestId === second && options.secondRunning === true ? "running" : "completed",
         response,
         updatedAt: now,
       });
@@ -2626,8 +2657,14 @@ describe("forking a Work thread from one of its turns", () => {
     return turns;
   }
 
-  function forkFixture(options: { readonly marked?: boolean } = {}) {
-    const turns = sourceTurns();
+  function forkFixture(
+    options: {
+      readonly marked?: boolean;
+      readonly secondRunning?: boolean;
+      readonly windowReachesProject?: boolean;
+    } = {},
+  ) {
+    const turns = sourceTurns(options);
     let next = 100;
     const record = vi.fn<
       NonNullable<WorkThreadServiceDependencies["recordExternalContentIngestion"]>
@@ -2641,6 +2678,7 @@ describe("forking a Work thread from one of its turns", () => {
       isMarked: () => options.marked === true,
       recordExternalContentIngestion: record,
       uuid: () => `72000000-0000-4000-8000-${String((next += 1)).padStart(12, "0")}`,
+      ...(options.windowReachesProject === false ? { accessibleProjects: [] } : {}),
     });
     return { ...fixture, turns, record };
   }
@@ -2710,6 +2748,26 @@ describe("forking a Work thread from one of its turns", () => {
       fixture.persistence.journal.append.mock.invocationCallOrder[0] ?? 0,
     );
     expect(fixture.turns.listForThread(forkId)).toHaveLength(2);
+  });
+
+  it("refuses a fork through a turn that is still running, creating nothing", async () => {
+    const fixture = forkFixture({ secondRunning: true });
+
+    await expect(fixture.service.execute(ids.window, forkThrough(second))).rejects.toMatchObject({
+      failure: { category: "stale" },
+    });
+    expect(fixture.persistence.journal.append).not.toHaveBeenCalled();
+    expect(fixture.projection.read(forkId)).toBeUndefined();
+  });
+
+  it("refuses a fork for a window that cannot reach the source's Project, creating nothing", async () => {
+    const fixture = forkFixture({ windowReachesProject: false });
+
+    await expect(fixture.service.execute(ids.window, forkThrough(first))).rejects.toMatchObject({
+      failure: { category: "unauthorized" },
+    });
+    expect(fixture.persistence.journal.append).not.toHaveBeenCalled();
+    expect(fixture.projection.read(forkId)).toBeUndefined();
   });
 
   it("refuses a fork through a turn that is no longer in the thread, creating nothing", async () => {

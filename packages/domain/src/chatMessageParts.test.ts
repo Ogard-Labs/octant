@@ -207,6 +207,17 @@ describe("parseChatMessageBody with a closing decision", () => {
   const block =
     '```octant-decision\n{"ask":"Open the pull request now?","options":[{"label":"Open it","recommended":true},{"label":"Wait"}]}\n```';
 
+  it("shows the why under the ask and each option's detail after it", () => {
+    const rich =
+      '```octant-decision\n{"ask":"Release now?","why":"Tests are green.","options":[{"label":"Tonight","recommended":true,"detail":"Rollback is ready"},{"label":"Wait"}]}\n```';
+    expect(parseChatMessageBody(rich)).toEqual([
+      {
+        kind: "markdown",
+        text: "Release now?\n\nTests are green.\n\n1. Tonight (recommended) — Rollback is ready\n2. Wait",
+      },
+    ]);
+  });
+
   it("reads the decision as its ask and numbered options instead of raw JSON", () => {
     expect(parseChatMessageBody(`The fix is ready.\n\n${block}`)).toEqual([
       { kind: "markdown", text: "The fix is ready." },

@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { automaticModelUnavailableReason } from "./automaticModelPolicy";
+import {
+  AUTOMATIC_MODEL_DISCLOSURE,
+  AUTOMATIC_MODEL_JOB_LABELS,
+  DECISION_REVIEW_OFF_LABEL,
+  automaticModelUnavailableReason,
+} from "./automaticModelPolicy";
 
 const on = { enabled: true, displayName: "Work account" };
 
@@ -41,5 +46,15 @@ describe("an account chosen for an automatic call", () => {
         atLimit: false,
       }),
     ).toBe("Work account is not ready.");
+  });
+});
+
+describe("the second opinion on decisions", () => {
+  it("is told apart from the other jobs, names what leaves, and has no default account", () => {
+    expect(AUTOMATIC_MODEL_JOB_LABELS["decision-review"]).toBe("Second opinion on decisions");
+    expect(AUTOMATIC_MODEL_DISCLOSURE["decision-review"]).toContain("at most 3,000 characters");
+    expect(AUTOMATIC_MODEL_DISCLOSURE["decision-review"]).toContain("with secrets removed");
+    expect(AUTOMATIC_MODEL_DISCLOSURE["decision-review"]).toContain("one request");
+    expect(DECISION_REVIEW_OFF_LABEL).toBe("Off");
   });
 });
