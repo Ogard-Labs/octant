@@ -78,6 +78,14 @@ export const PersonMemorySettings = Schema.Struct({
     Schema.maxItems(PERSON_MEMORY_MAX_EXCLUDED_PROJECTS),
   ),
   distillModel: Schema.optional(PersonMemoryModelChoice),
+  /**
+   * The model that gives a second opinion on each Work and Code decision.
+   * Absent means no second opinion: unlike the other automatic jobs it has no
+   * default, because sending a decision to a party the person did not pick is
+   * not a default to make for them. Kept here because this is the one
+   * host-wide settings record only a window on this computer can change.
+   */
+  decisionReviewModel: Schema.optional(PersonMemoryModelChoice),
 }).annotations(strict);
 export type PersonMemorySettings = typeof PersonMemorySettings.Type;
 

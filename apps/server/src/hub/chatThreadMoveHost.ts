@@ -18,7 +18,6 @@ import {
   type ChatThread,
   type ChatThreadView,
   type MovedThreadReference,
-  type ThreadMoveOffer,
 } from "@octant/contracts";
 import { Schema } from "effect";
 import type { MovedChatThreadImport } from "../chat/chatService";
@@ -120,10 +119,10 @@ export function createChatThreadMoveHost(options: ChatThreadMoveHostOptions): {
   };
 
   const destination: ThreadMoveDestinationHost = {
-    acceptsProject: (offer: ThreadMoveOffer) =>
-      offer.source.mode === "chat" &&
-      (offer.destinationProjectId === undefined ||
-        options.activeChatProject(String(offer.destinationProjectId))),
+    acceptsProject: (placement) =>
+      placement.mode === "chat" &&
+      (placement.destinationProjectId === undefined ||
+        options.activeChatProject(placement.destinationProjectId)),
     arrive: async ({ thread: planned, offer, parts }) => {
       if (planned.mode !== "chat") return { status: "refused", reason: "transfer-failed" };
       // A thread already opened under the planned id was opened by an earlier

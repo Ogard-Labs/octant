@@ -11,6 +11,8 @@ import { join } from "node:path";
 import {
   HubMemberId,
   MovedThreadReference,
+  ThreadMoveDeparture,
+  ThreadMoveFailureReason,
   ThreadMoveId,
   ThreadMoveOffer,
   UtcTimestamp,
@@ -68,9 +70,27 @@ export const SentMove = Schema.Struct({
 }).annotations(strict);
 export type SentMove = typeof SentMove.Type;
 
+/**
+ * A move of this thread that could not finish. The thread shows This thread
+ * can't move until the person dismisses it or the thread moves.
+ */
+export const ThreadMoveFailureNotice = Schema.Struct({
+  moveId: ThreadMoveId,
+  thread: MovedThreadReference,
+  reason: ThreadMoveFailureReason,
+  failedAt: UtcTimestamp,
+}).annotations(strict);
+export type ThreadMoveFailureNotice = typeof ThreadMoveFailureNotice.Type;
+
+/** How many departures a host keeps for "Moved to" tombstones; the oldest go first. */
+export const THREAD_MOVE_DEPARTURES_KEPT = 500;
+
 export const ThreadMoveState = Schema.Struct({
   received: Schema.Array(ReceivedMove),
   sent: Schema.Array(SentMove),
+  // Absent in a file written before notices and tombstones were kept.
+  failures: Schema.optional(Schema.Array(ThreadMoveFailureNotice)),
+  departures: Schema.optional(Schema.Array(ThreadMoveDeparture)),
 }).annotations(strict);
 export type ThreadMoveState = typeof ThreadMoveState.Type;
 

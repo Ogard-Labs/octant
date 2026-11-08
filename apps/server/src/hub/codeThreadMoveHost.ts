@@ -19,7 +19,6 @@ import {
   ProviderModelId,
   type CodeThread,
   type MovedThreadReference,
-  type ThreadMoveOffer,
 } from "@octant/contracts";
 import { mayRemoveMovedWorktree, normalizeRepositoryRemote } from "@octant/domain";
 import { Schema } from "effect";
@@ -185,6 +184,8 @@ export function createCodeThreadMoveHost(options: CodeThreadMoveHostOptions): {
       if (code === undefined) return { worktreeKept: false };
       const root = await options.checkoutRoot(code.id);
       let worktreeKept = false;
+      let keptWorktree: string | undefined;
+      let changesRemainInCheckout = false;
       if (root !== undefined) {
         const check = await checkoutStillMatchesMove({
           checkoutRoot: root,
@@ -195,30 +196,34 @@ export function createCodeThreadMoveHost(options: CodeThreadMoveHostOptions): {
           ignoredFiles: check.ignoredFiles,
         });
         await forgetMoveSnapshot(root, String(moveId));
-        if (!removable && options.ownsManagedWorktree(code.id)) {
-          // Out of the managed folder, the purge below leaves it in place.
-          await relocateWorktree({
-            worktreeRoot: root,
-            target: `${root}-moved-out-${String(moveId).slice(0, 8)}`,
-          });
-          worktreeKept = true;
+        if (!options.ownsManagedWorktree(code.id)) {
+          // The Project's own checkout is the person's folder; Octant never
+          // resets it, so the thread's changes remain there.
+          changesRemainInCheckout = true;
+          worktreeKept = !removable;
         } else if (!removable) {
-          // The Project's own checkout is the person's folder; Octant never resets it.
+          // Out of the managed folder, the purge below leaves it in place.
+          keptWorktree = `${root}-moved-out-${String(moveId).slice(0, 8)}`;
+          await relocateWorktree({ worktreeRoot: root, target: keptWorktree });
           worktreeKept = true;
         }
       }
       await options.purge(code.id);
-      return { worktreeKept };
+      return {
+        worktreeKept,
+        ...(keptWorktree === undefined ? {} : { keptWorktree }),
+        ...(changesRemainInCheckout ? { changesRemainInCheckout } : {}),
+      };
     },
   };
 
   const destination: ThreadMoveDestinationHost = {
-    acceptsProject: async (offer: ThreadMoveOffer) => {
-      if (offer.source.mode !== "code" || offer.destinationProjectId === undefined) return false;
-      const project = options.codeProject(String(offer.destinationProjectId));
+    acceptsProject: async (placement) => {
+      if (placement.mode !== "code" || placement.destinationProjectId === undefined) return false;
+      const project = options.codeProject(placement.destinationProjectId);
       if (project === undefined) return false;
       return sharesRepository(
-        offer.repositoryRemotes ?? [],
+        placement.repositoryRemotes ?? [],
         await repositoryRemotes(project.canonicalRoot),
       );
     },
@@ -226,14 +231,6 @@ export function createCodeThreadMoveHost(options: CodeThreadMoveHostOptions): {
       if (planned.mode !== "code" || offer.destinationProjectId === undefined) {
         return { status: "refused", reason: "transfer-failed" };
       }
-      // A thread already started under the planned id was started by an
-      // earlier try that stopped before it was recorded: hold it, start no second.
-      if (codeThreadOf(planned) !== undefined) {
-        options.holds.hold(planned);
-        return { status: "arrived", thread: planned };
-      }
-      const project = options.codeProject(String(offer.destinationProjectId));
-      if (project === undefined) return { status: "refused", reason: "no-eligible-project" };
       const threadPart = offer.manifest.parts.find((part) => part.kind === "thread-bundle");
       const bundlePart = offer.manifest.parts.find((part) => part.kind === "git-bundle");
       const threadPath = threadPart === undefined ? undefined : parts.get(threadPart.partId);
@@ -247,6 +244,23 @@ export function createCodeThreadMoveHost(options: CodeThreadMoveHostOptions): {
       } catch {
         return { status: "refused", reason: "transfer-failed" };
       }
+      const history = {
+        threadId: planned.threadId,
+        moveId: String(offer.moveId),
+        entries: moved.entries,
+      };
+      // A thread already started under the planned id was started by an
+      // earlier try that stopped before it was recorded: hold it and start no
+      // second. That try may have stopped before the history was kept, so it
+      // is kept now (a second import keeps the first), before the source is
+      // told it arrived and erases the only other copy.
+      if (codeThreadOf(planned) !== undefined) {
+        options.holds.hold(planned);
+        options.journalHistory(history);
+        return { status: "arrived", thread: planned };
+      }
+      const project = options.codeProject(String(offer.destinationProjectId));
+      if (project === undefined) return { status: "refused", reason: "no-eligible-project" };
       const received = await receiveCheckoutFromMove({
         repositoryRoot: project.canonicalRoot,
         moveId: String(offer.moveId),
@@ -284,11 +298,7 @@ export function createCodeThreadMoveHost(options: CodeThreadMoveHostOptions): {
         options.holds.release(planned);
         return { status: "refused", reason: "transfer-failed" };
       }
-      options.journalHistory({
-        threadId: planned.threadId,
-        moveId: String(offer.moveId),
-        entries: moved.entries,
-      });
+      options.journalHistory(history);
       return { status: "arrived", thread: planned };
     },
     activate: async (thread) => options.holds.release(thread),

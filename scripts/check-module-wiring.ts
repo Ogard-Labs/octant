@@ -728,6 +728,7 @@ export const KNOWN_UNCALLED_ENDPOINTS: ReadonlyMap<string, string> = new Map([
     "/api/hub/peer/thread-moves/commit",
     "/api/hub/peer/thread-moves/status",
     "/api/hub/peer/thread-moves/discard",
+    "/api/hub/peer/thread-moves/projects",
   ].map((endpoint): [string, string] => [
     endpoint,
     "The computer a thread is leaving signs and sends each step of a move here over the private listener from apps/server (threadMoveService.ts), which builds the path itself, against a ticket an owner device made on this host; no window or device calls it. Remove when the checker counts apps/server as a caller of its own listener's routes.",
