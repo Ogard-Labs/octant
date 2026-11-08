@@ -97,6 +97,17 @@ a different request for that id returns 409 after owner authentication, and a
 wrong owner returns 403. The service persists only an owner hash and an
 owner-keyed request digest, not the secret or plaintext password.
 
+For owned-create, the id is URL-safe base64 of the first 16 bytes of SHA-256 over
+UTF-8 `octant-canvas-public-share-id-v1`, a NUL byte, then the 43-character owner
+secret. The service verifies that proof before accepting a document. A DELETE
+for a missing id may persist a cancellation only when its bearer proves that
+exact id. Its durable owner-hash tombstone fences late uploads, including after
+password hashing or restart; the same owner can repeat DELETE, a wrong owner
+receives 403. New missing-id cancellations consume both existing create and owner
+rate limits. The existing 90-day tombstone retention is unchanged. Clients must
+retain uncertain ownership on generic 403/404; those replies do not acknowledge
+cancellation.
+
 A plain file host or pastebin does not qualify — it must render the Canvas
 document. To share a single Canvas as Markdown instead of a rendered page, use
 the built-in **GitHub Gist** export, which needs no share service.

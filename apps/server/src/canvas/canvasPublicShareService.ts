@@ -1,4 +1,4 @@
-import { randomBytes } from "node:crypto";
+import { createHash, randomBytes } from "node:crypto";
 import type { EventActor, UtcTimestamp } from "@octant/contracts";
 import type { CanvasId, CanvasVersionId } from "@octant/contracts/canvas";
 import type { CanvasExportLinkChoice } from "@octant/contracts/canvas-export";
@@ -271,7 +271,13 @@ export class CanvasPublicShareService {
     const settingsVersion = this.#settings.version;
     const credentialRef = this.#dependencies.uuid().toLowerCase();
     const ownerSecret = randomBytes(32).toString("base64url");
-    const publicShareId = decodeCanvasPublicShareId(randomBytes(16).toString("base64url"));
+    const publicShareId = decodeCanvasPublicShareId(
+      createHash("sha256")
+        .update("octant-canvas-public-share-id-v1\0" + ownerSecret)
+        .digest()
+        .subarray(0, 16)
+        .toString("base64url"),
+    );
     try {
       await secrets.set(credentialRef, ownerSecret);
     } catch {
@@ -838,8 +844,7 @@ function revokeConfirmsGone(
 ): boolean {
   return (
     (outcome.kind === "ok" && String(outcome.value.shareId) === String(expectedId)) ||
-    (outcome.kind === "refused" &&
-      (outcome.code === "gone" || outcome.code === "not-found" || outcome.code === "unauthorized"))
+    (outcome.kind === "refused" && outcome.code === "gone")
   );
 }
 

@@ -43,6 +43,7 @@ export interface StoredShare {
 export type TombstoneReason = "revoked" | "expired" | "taken-down";
 
 export interface Tombstone {
+  readonly ownerSecretHash?: string;
   readonly goneAt: string;
   readonly reason: TombstoneReason;
 }
@@ -142,7 +143,13 @@ function readTombstone(text: string): Tombstone | undefined {
     const { goneAt, reason } = parsed;
     if (typeof goneAt !== "string") return undefined;
     if (reason !== "revoked" && reason !== "expired" && reason !== "taken-down") return undefined;
-    return { goneAt, reason };
+    const ownerSecretHash = parsed.ownerSecretHash;
+    if (
+      ownerSecretHash !== undefined &&
+      (typeof ownerSecretHash !== "string" || !/^[a-f0-9]{64}$/.test(ownerSecretHash))
+    )
+      return undefined;
+    return { goneAt, reason, ...(typeof ownerSecretHash === "string" ? { ownerSecretHash } : {}) };
   } catch {
     return undefined;
   }
@@ -263,6 +270,26 @@ export class ShareStore {
     this.#writeShare(id, { ...current, viewCount: current.viewCount + 1 });
   }
 
+  /** Only the API calls this after verifying a nonexistent id is bound to its bearer proof. */
+  cancelOwned(id: string, ownerSecretHash: string): boolean {
+    if (
+      !isShareId(id) ||
+      !/^[a-f0-9]{64}$/.test(ownerSecretHash) ||
+      existsSync(this.#sharePath(id)) ||
+      existsSync(this.#tombstonePath(id))
+    )
+      return false;
+    this.#writeAtomic(
+      this.#tombstonePath(id),
+      JSON.stringify({
+        goneAt: this.iso(),
+        reason: "revoked",
+        ownerSecretHash,
+      } satisfies Tombstone),
+    );
+    return true;
+  }
+
   /** Deletes the payload and leaves a content-free tombstone. False when no payload exists. */
   remove(id: string, reason: TombstoneReason): boolean {
     const share = this.#readShare(id);
@@ -377,7 +404,11 @@ export class ShareStore {
   #remove(id: string, share: StoredShare, reason: TombstoneReason): void {
     this.#writeAtomic(
       this.#tombstonePath(id),
-      JSON.stringify({ goneAt: this.iso(), reason } satisfies Tombstone),
+      JSON.stringify({
+        goneAt: this.iso(),
+        reason,
+        ...(share.creation === undefined ? {} : { ownerSecretHash: share.ownerSecretHash }),
+      } satisfies Tombstone),
     );
     rmSync(this.#sharePath(id), { force: true });
     this.#totalBytes = Math.max(0, this.#totalBytes - share.byteLength);
