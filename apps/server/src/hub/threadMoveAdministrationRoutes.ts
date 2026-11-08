@@ -10,6 +10,8 @@
 
 import { createHash, timingSafeEqual } from "node:crypto";
 import {
+  decodeShutdownChallengeRequest,
+  decodeShutdownStartRequest,
   decodeThreadMoveChallengeRequest,
   decodeThreadMoveControlRequest,
   decodeThreadMoveStartRequest,
@@ -21,7 +23,8 @@ import { WindowAuthorityError, type WindowAuthorityStore } from "../windowAuthor
 import type { ThreadMoveStatePort } from "./threadMoveStateStore";
 import type { ThreadMovesFromWindow } from "./threadMovesFromWindow";
 
-const BODY_LIMIT = 16 * 1_024;
+// A batch names up to 64 threads with their Projects.
+const BODY_LIMIT = 64 * 1_024;
 
 export const THREAD_MOVE_ADMINISTRATION_ROUTES = {
   destinations: "/api/desktop/hub/thread-moves/destinations",
@@ -33,6 +36,10 @@ export const THREAD_MOVE_ADMINISTRATION_ROUTES = {
   takeBack: "/api/desktop/hub/thread-moves/take-back",
   activate: "/api/desktop/hub/thread-moves/activate",
   dismiss: "/api/desktop/hub/thread-moves/dismiss",
+  // Prepare to shut down acts for the whole host, as its menu entry does.
+  shutdownListing: "/api/desktop/hub/thread-moves/shutdown/listing",
+  shutdownChallenge: "/api/desktop/hub/thread-moves/shutdown/challenge",
+  shutdownStart: "/api/desktop/hub/thread-moves/shutdown/start",
 } as const;
 
 type RouteValue =
@@ -117,6 +124,14 @@ export function createThreadMoveAdministrationRouteHandler(
               String(decodeThreadMoveChallengeRequest(value).destinationMemberId),
             ),
           );
+        case THREAD_MOVE_ADMINISTRATION_ROUTES.shutdownListing:
+          return outcome(await options.moves.shutdownListing());
+        case THREAD_MOVE_ADMINISTRATION_ROUTES.shutdownChallenge:
+          return outcome(
+            await options.moves.shutdownChallenge(decodeShutdownChallengeRequest(value)),
+          );
+        case THREAD_MOVE_ADMINISTRATION_ROUTES.shutdownStart:
+          return outcome(await options.moves.shutdownStart(decodeShutdownStartRequest(value)));
         case THREAD_MOVE_ADMINISTRATION_ROUTES.status: {
           // Read-only and names only member computers, so any local window
           // may read it, including for a thread that already moved away.

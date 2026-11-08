@@ -59,6 +59,7 @@ describe("moving a thread after its turn", () => {
       },
       members: () => [],
       selfMemberId: () => "self",
+      listThreads: async () => [],
       now: Date.now,
       pollMs: 5,
     });

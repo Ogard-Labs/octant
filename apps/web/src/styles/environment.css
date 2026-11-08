@@ -975,3 +975,184 @@ details.thread-move-sheet__section > summary {
   justify-content: flex-end;
   gap: var(--oct-space-2);
 }
+
+/* Prepare to shut down: a fixed head and foot with the thread list scrolling
+   between them, reading as a decision already made that the person confirms. */
+.shutdown-dialog {
+  --octant-dialog-width: 640px;
+  --environment-tile-fill: color-mix(in oklab, var(--oct-fg) 8%, transparent);
+  display: flex;
+  max-height: min(80vh, 720px);
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.shutdown-dialog__head {
+  display: grid;
+  gap: var(--oct-space-2);
+  padding: var(--oct-space-5) var(--oct-space-5) var(--oct-space-3);
+}
+
+.shutdown-dialog__title {
+  display: flex;
+  align-items: center;
+  gap: var(--oct-space-2);
+  margin: 0;
+  font-size: var(--oct-text-base);
+  font-weight: var(--oct-weight-display);
+}
+
+.shutdown-dialog__title--warning {
+  color: var(--octant-warning-text);
+}
+
+.shutdown-dialog__meta,
+.shutdown-dialog__summary,
+.shutdown-dialog__sentence {
+  margin: 0;
+  color: var(--oct-muted);
+  font-size: var(--oct-text-sm);
+  line-height: 1.5;
+}
+
+.shutdown-dialog__summary {
+  font-variant-numeric: tabular-nums;
+}
+
+.shutdown-dialog__sentence > p {
+  margin: 0 0 var(--oct-space-2);
+}
+
+.shutdown-dialog__destination {
+  display: flex;
+  align-items: center;
+  gap: var(--oct-space-3);
+}
+
+.shutdown-dialog__label {
+  flex: none;
+  color: var(--oct-muted);
+  font-size: var(--oct-text-sm);
+}
+
+.shutdown-dialog__list {
+  display: grid;
+  min-height: 0;
+  flex: 1 1 auto;
+  align-content: start;
+  overflow: auto;
+  padding: 0 var(--oct-space-5);
+}
+
+.shutdown-dialog__older > summary {
+  display: flex;
+  min-height: 44px;
+  align-items: center;
+  gap: var(--oct-space-2);
+  color: var(--oct-fg-2);
+  font-size: var(--oct-text-sm);
+  cursor: default;
+}
+
+.shutdown-dialog__count {
+  color: var(--oct-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.shutdown-dialog__foot {
+  display: grid;
+  gap: var(--oct-space-2);
+  padding: var(--oct-space-3) var(--oct-space-5) var(--oct-space-5);
+  border-top: 1px solid var(--oct-hairline);
+}
+
+.shutdown-dialog__problem {
+  margin: 0;
+  color: var(--octant-warning-text);
+  font-size: var(--oct-text-sm);
+}
+
+.shutdown-dialog__buttons {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--oct-space-2);
+}
+
+.shutdown-row {
+  display: flex;
+  min-height: 44px;
+  min-width: 0;
+  align-items: center;
+  gap: var(--oct-space-2);
+  border-bottom: 1px solid var(--oct-hairline);
+  font-size: var(--oct-text-sm);
+}
+
+.shutdown-row__glyph {
+  flex: none;
+  color: var(--oct-muted);
+}
+
+.shutdown-row__title {
+  flex: 1 1 auto;
+  /* The title keeps room to be read; a reason pill gives way first. */
+  min-width: 35%;
+  overflow: hidden;
+  color: var(--oct-fg);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.shutdown-row__project {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--oct-muted);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.shutdown-row__reason {
+  display: flex;
+  min-width: 0;
+  flex: 0 1 auto;
+  overflow: hidden;
+}
+
+.shutdown-row__reason > * {
+  min-width: 0;
+  flex-shrink: 1;
+  justify-content: flex-start;
+  text-overflow: ellipsis;
+}
+
+.shutdown-row__choice {
+  flex: none;
+  width: auto;
+  min-width: 132px;
+}
+
+.shutdown-row__state {
+  flex: none;
+  color: var(--oct-fg-2);
+  font-variant-numeric: tabular-nums;
+}
+
+@media (max-width: 480px) {
+  .octant-dialog__viewport:has(> .shutdown-dialog) {
+    padding: 0;
+  }
+
+  .octant-dialog__popup.shutdown-dialog {
+    width: 100vw;
+    max-width: 100vw;
+    height: 100dvh;
+    max-height: 100dvh;
+    border: 0;
+    border-radius: 0;
+  }
+
+  .shutdown-row__project {
+    display: none;
+  }
+}

@@ -33,6 +33,10 @@ const ARRIVED: MovedThreadReference = {
   mode: "chat",
   threadId: "88888888-8888-4888-8888-888888888888",
 };
+const SECOND: MovedThreadReference = {
+  mode: "chat",
+  threadId: "99999999-9999-4999-8999-999999999999",
+};
 const CONVERSATION = JSON.stringify({ title: "Plan the trip", turns: ["Where should we go?"] });
 
 /** A computer holding one Chat thread it can move away, and nothing it can receive. */
@@ -42,7 +46,8 @@ function leavingThreads(folder: string) {
   const turn = { running: false };
   const source: ThreadMoveSourceHost = {
     read: async (thread) =>
-      thread.threadId === THREAD.threadId && !erased.includes(thread.threadId)
+      (thread.threadId === THREAD.threadId || thread.threadId === SECOND.threadId) &&
+      !erased.includes(thread.threadId)
         ? {
             status: "found",
             title: "Plan the trip",
@@ -72,7 +77,19 @@ function leavingThreads(folder: string) {
     discard: async () => {},
   };
   void folder;
-  return { hosts: { source, destination }, frozen, erased, turn };
+  const listThreads = async () =>
+    [THREAD, SECOND]
+      .filter((thread) => !erased.includes(thread.threadId))
+      .map((thread) => ({
+        thread,
+        title: thread === THREAD ? "Plan the trip" : "Pack the bags",
+        busy: false,
+        delegated: false,
+        open: true,
+        lastActivityAt: Date.now(),
+        repositoryRemotes: [],
+      }));
+  return { hosts: { source, destination, listThreads }, frozen, erased, turn };
 }
 
 /** A computer that opens Chat threads moved to it. */
@@ -370,5 +387,38 @@ describe("moving a thread between two of the person's computers", () => {
     expect(atHub.opened).toEqual([]);
     expect(leaving.erased).toEqual([]);
     expect(leaving.frozen.size).toBe(0);
+  }, 60_000);
+
+  it("moves every chosen thread to one computer with a single unlock when preparing to shut down", async () => {
+    const { laptop, desktop, leaving, arriving, laptopUnlock } = await startWorld({
+      laptopIsOwner: true,
+    });
+    const listing = await laptop.threadMovesFromWindow.shutdownListing();
+    expect(listing.rows.map((row) => row.title)).toEqual(["Plan the trip", "Pack the bags"]);
+    const toDesktop = listing.rows.map((row) =>
+      row.placements.find((placement) => placement.memberId === desktop.hostId),
+    );
+    expect(toDesktop.every((placement) => placement?.reason === undefined)).toBe(true);
+
+    const threads = [THREAD, SECOND];
+    const asked = await laptop.threadMovesFromWindow.shutdownChallenge({
+      destinationMemberId: decodeMemberId(desktop.hostId),
+      threads,
+    });
+    if (asked.status !== "challenge") throw new Error(JSON.stringify(asked));
+    const started = await laptop.threadMovesFromWindow.shutdownStart({
+      destinationMemberId: decodeMemberId(desktop.hostId),
+      rows: threads.map((thread) => ({ thread, timing: "now" as const })),
+      unlock: {
+        challengeId: asked.challenge.challengeId,
+        signature: laptopUnlock.sign(ownerUnlockSigningPayload(asked.challenge)),
+      },
+    });
+
+    expect(started).toEqual({ status: "started" });
+    await vi.waitFor(() =>
+      expect([...leaving.erased].sort()).toEqual([THREAD.threadId, SECOND.threadId].sort()),
+    );
+    expect(arriving.opened).toHaveLength(2);
   }, 60_000);
 });

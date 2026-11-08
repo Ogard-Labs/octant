@@ -10,7 +10,14 @@
 import type {
   HubMemberId,
   MovedThreadReference,
+  ProjectId,
   RosterMember,
+  ShutdownChallengeRequest,
+  ShutdownListing,
+  ShutdownPlacement,
+  ShutdownStartOutcome,
+  ShutdownStartRequest,
+  ShutdownThreadRow,
   ThreadMoveChallengeOutcome,
   ThreadMoveDestination,
   ThreadMoveDestinations,
@@ -19,7 +26,7 @@ import type {
   ThreadMoveStartRequest,
   ThreadMoveThreadStatus,
 } from "@octant/contracts";
-import { mayActivateAnyway } from "@octant/domain";
+import { mayActivateAnyway, shutdownListing } from "@octant/domain";
 import type { ThreadMoveTicketClient } from "./threadMoveTicketClient";
 import {
   THREAD_MOVE_CHUNK_BYTES,
@@ -48,8 +55,25 @@ export interface ThreadMovesFromWindowOptions {
   /** The roster this host holds; empty when it is in no hub. */
   readonly members: () => ReadonlyArray<RosterMember>;
   readonly selfMemberId: () => string;
+  /** Every thread on this host, as Prepare to shut down reads it. */
+  readonly listThreads: () => Promise<ReadonlyArray<ShutdownThreadFacts>>;
   readonly now: () => number;
   readonly pollMs?: number;
+}
+
+/** One thread on this host, as Prepare to shut down reads it. */
+export interface ShutdownThreadFacts {
+  readonly thread: MovedThreadReference;
+  readonly title: string;
+  readonly projectName?: string;
+  readonly busy: boolean;
+  readonly delegated: boolean;
+  /** Not completed, archived, or being deleted. */
+  readonly open: boolean;
+  /** The thread's last journaled activity, in milliseconds. */
+  readonly lastActivityAt: number | undefined;
+  /** For Code: the remote URLs the checkout has. */
+  readonly repositoryRemotes: ReadonlyArray<string>;
 }
 
 interface Waiting {
@@ -74,15 +98,8 @@ export class ThreadMovesFromWindow {
     if (reading.delegated) {
       return { status: "listed", blocked: "delegated", busy: reading.busy, destinations: [] };
     }
-    const self = this.#options.selfMemberId();
-    const candidates = this.#options
-      .members()
-      .filter(
-        (member) =>
-          String(member.memberId) !== self && (member.role === "hub" || member.role === "spoke"),
-      );
     const destinations = await Promise.all(
-      candidates.map(async (member): Promise<ThreadMoveDestination> => {
+      this.#candidates().map(async (member): Promise<ThreadMoveDestination> => {
         const answer = await this.#options.moves.askProjects(String(member.memberId), {
           mode: thread.mode,
           ...(thread.mode === "code" ? { repositoryRemotes: reading.repositoryRemotes } : {}),
@@ -141,25 +158,205 @@ export class ThreadMovesFromWindow {
     });
     if (ticket.status === "refused") return refuse(this.#options, thread, ticket.reason);
 
-    const run = () =>
-      this.#options.moves.start({
-        thread,
-        targetMemberId: String(request.destinationMemberId),
-        ticketId: ticket.ticketId,
-        ...(request.destinationProjectId === undefined
-          ? {}
-          : { destinationProjectId: request.destinationProjectId }),
-        principal: { kind: "local-window" },
-      });
+    this.#launch({
+      thread,
+      destinationMemberId: request.destinationMemberId,
+      ticketId: ticket.ticketId,
+      ...(request.destinationProjectId === undefined
+        ? {}
+        : { destinationProjectId: request.destinationProjectId }),
+      waitForTurn: reading.busy,
+      queue: undefined,
+    });
+    return reading.busy ? { status: "waiting-for-turn" } : { status: "started" };
+  }
 
-    if (!reading.busy) {
-      // Every way it ends is recorded by the move itself, notice included.
-      void run().catch(() => undefined);
-      return { status: "started" };
+  /**
+   * Every thread on this host that Prepare to shut down lists, with whether
+   * each member could take it. Older open threads are marked to fold; closed
+   * ones are left out.
+   */
+  async shutdownListing(): Promise<ShutdownListing> {
+    const now = this.#options.now();
+    const facts = (await this.#options.listThreads()).filter(
+      (entry) =>
+        shutdownListing({
+          thread: {
+            activity: entry.busy ? "running" : "idle",
+            open: entry.open,
+            lastTurnAt: entry.lastActivityAt,
+          },
+          now,
+        }) !== "absent",
+    );
+    const members = this.#candidates();
+    // One question per member for each distinct placement, not per thread.
+    const placementKey = (entry: ShutdownThreadFacts) =>
+      `${entry.thread.mode}|${entry.thread.mode === "code" ? entry.repositoryRemotes.join(" ") : ""}`;
+    const asked = new Map<string, Awaited<ReturnType<ThreadMoveService["askProjects"]>>>();
+    await Promise.all(
+      members.flatMap((member) =>
+        [...new Map(facts.map((entry) => [placementKey(entry), entry])).values()].map(
+          async (entry) => {
+            const answer = await this.#options.moves.askProjects(String(member.memberId), {
+              mode: entry.thread.mode,
+              ...(entry.thread.mode === "code"
+                ? { repositoryRemotes: entry.repositoryRemotes }
+                : {}),
+            });
+            asked.set(`${String(member.memberId)}#${placementKey(entry)}`, answer);
+          },
+        ),
+      ),
+    );
+    const reachable = (memberId: string) =>
+      [...asked.entries()].some(
+        ([askedKey, answer]) => askedKey.startsWith(`${memberId}#`) && answer !== "unreachable",
+      );
+    const refusedBy = (memberId: string) =>
+      [...asked.entries()].some(
+        ([askedKey, answer]) => askedKey.startsWith(`${memberId}#`) && answer === "refused",
+      );
+    const rows: ShutdownThreadRow[] = facts.map((entry) => ({
+      thread: entry.thread,
+      title: entry.title,
+      ...(entry.projectName === undefined ? {} : { projectName: entry.projectName }),
+      busy: entry.busy,
+      older:
+        shutdownListing({
+          thread: { activity: "idle", open: entry.open, lastTurnAt: entry.lastActivityAt },
+          now,
+        }) === "older" && !entry.busy,
+      placements: members.map((member): ShutdownPlacement => {
+        const answer = asked.get(`${String(member.memberId)}#${placementKey(entry)}`);
+        const base = { memberId: member.memberId };
+        if (entry.delegated) {
+          return { ...base, reason: "delegated", projects: [], noProjectAllowed: false };
+        }
+        if (answer === undefined || answer === "unreachable") {
+          return {
+            ...base,
+            reason: "destination-unreachable",
+            projects: [],
+            noProjectAllowed: false,
+          };
+        }
+        if (answer === "refused") {
+          return { ...base, reason: "refused", projects: [], noProjectAllowed: false };
+        }
+        const fits = answer.projects.length > 0 || answer.noProjectAllowed;
+        return {
+          ...base,
+          ...(fits ? {} : { reason: "no-eligible-project" as const }),
+          projects: answer.projects,
+          noProjectAllowed: answer.noProjectAllowed,
+        };
+      }),
+    }));
+    const lastDeparture = this.#options.state.load().departures?.at(-1);
+    return {
+      status: "listed",
+      members: members.map((member) => ({
+        memberId: member.memberId,
+        name: member.name,
+        role: member.role === "hub" ? ("hub" as const) : ("spoke" as const),
+        reachable: reachable(String(member.memberId)),
+        ...(refusedBy(String(member.memberId)) ? { refusal: "refused" as const } : {}),
+      })),
+      rows,
+      ...(lastDeparture === undefined ? {} : { lastMovedTo: lastDeparture.destinationMemberId }),
+    };
+  }
+
+  /** The destination's challenge for one batch: one unlock covers exactly these threads. */
+  shutdownChallenge(request: ShutdownChallengeRequest): Promise<ThreadMoveChallengeOutcome> {
+    return this.#options.tickets.challenge(String(request.destinationMemberId), request.threads);
+  }
+
+  /**
+   * Starts one destination's batch on a single ticket. Threads moving now go
+   * one after another, so most finish early; one set to move after its turn
+   * joins when that turn ends. Every way each ends is recorded by its move.
+   */
+  async shutdownStart(request: ShutdownStartRequest): Promise<ShutdownStartOutcome> {
+    const threads = request.rows.map((row) => row.thread);
+    const ticket = await this.#options.tickets.redeem({
+      destinationMemberId: String(request.destinationMemberId),
+      challengeId: request.unlock.challengeId,
+      signature: request.unlock.signature,
+      threads,
+    });
+    if (ticket.status === "refused") {
+      for (const thread of threads) this.#options.moves.refuseBeforeStart(thread, ticket.reason);
+      return { status: "refused", reason: ticket.reason };
     }
+    const queue = { tail: Promise.resolve() };
+    for (const row of request.rows) {
+      if (this.#waiting.has(key(row.thread))) continue;
+      const reading = await this.#options.source.read(row.thread);
+      this.#launch({
+        thread: row.thread,
+        destinationMemberId: request.destinationMemberId,
+        ticketId: ticket.ticketId,
+        ...(row.destinationProjectId === undefined
+          ? {}
+          : { destinationProjectId: row.destinationProjectId }),
+        waitForTurn: reading.status === "found" && reading.busy && row.timing === "after-turn",
+        queue,
+      });
+    }
+    return { status: "started" };
+  }
 
-    // Move after this turn: the ticket is already in hand, so nothing more is
-    // asked of the person when the turn ends.
+  #candidates(): ReadonlyArray<RosterMember> {
+    const self = this.#options.selfMemberId();
+    return this.#options
+      .members()
+      .filter(
+        (member) =>
+          String(member.memberId) !== self && (member.role === "hub" || member.role === "spoke"),
+      );
+  }
+
+  /**
+   * Moves one thread on a ticket already in hand: now, or once its running
+   * turn ends, so nothing more is asked of the person when it does. A batch
+   * passes its queue, and its moves run one after another.
+   */
+  #launch(input: {
+    readonly thread: MovedThreadReference;
+    readonly destinationMemberId: HubMemberId;
+    readonly ticketId: string;
+    readonly destinationProjectId?: ProjectId;
+    readonly waitForTurn: boolean;
+    readonly queue: { tail: Promise<void> } | undefined;
+  }): void {
+    const { thread } = input;
+    const run = async () => {
+      await this.#options.moves
+        .start({
+          thread,
+          targetMemberId: String(input.destinationMemberId),
+          ticketId: input.ticketId,
+          ...(input.destinationProjectId === undefined
+            ? {}
+            : { destinationProjectId: input.destinationProjectId }),
+          principal: { kind: "local-window" },
+        })
+        // Every way it ends is recorded by the move itself, notice included.
+        .catch(() => undefined);
+    };
+    const enqueue = () => {
+      if (input.queue === undefined) {
+        void run();
+        return;
+      }
+      input.queue.tail = input.queue.tail.then(run);
+    };
+    if (!input.waitForTurn) {
+      enqueue();
+      return;
+    }
     const startedWaitingAt = this.#options.now();
     const timer = setInterval(() => {
       void (async () => {
@@ -177,15 +374,11 @@ export class ThreadMovesFromWindow {
           return;
         }
         this.#stopWaiting(thread);
-        await run().catch(() => undefined);
+        enqueue();
       })();
     }, this.#options.pollMs ?? TURN_POLL_MS);
     timer.unref?.();
-    this.#waiting.set(key(thread), {
-      destinationMemberId: request.destinationMemberId,
-      timer,
-    });
-    return { status: "waiting-for-turn" };
+    this.#waiting.set(key(thread), { destinationMemberId: input.destinationMemberId, timer });
   }
 
   /** The person changed their mind before the turn ended. */
