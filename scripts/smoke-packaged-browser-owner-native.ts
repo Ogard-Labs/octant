@@ -359,9 +359,9 @@ end run`;
         await wait("settings", (s) => s.includes("Data & storage"));
         await native("reveal", "Data & storage");
         await native("click", "Data & storage");
-        const snapshot = await wait("preference", (s) => s.includes(preference));
+        await wait("preference", (s) => s.includes(preference));
         await native("reveal", preference);
-        return snapshot;
+        return wait("preference-state", (s) => switchValue(s, 0) || switchValue(s, 1));
       };
       try {
         // Accessibility initialization can rebuild Electron's AX tree. Do it

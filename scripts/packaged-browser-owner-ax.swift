@@ -132,9 +132,13 @@ while next < pending.count, next < 512, Date() < treeDeadline {
             if stateRead == .success,
                let number = state as? NSNumber, number.doubleValue == 0 || number.doubleValue == 1 {
                 control["value"] = number.intValue
-            } else {
+            } else if stateRead != .success {
                 readErrors += 1
-                if stateRead != .success { nativeReadErrors.insert(stateRead.rawValue) }
+                nativeReadErrors.insert(stateRead.rawValue)
+            } else {
+                // A successful nonbinary read cannot prove checked state. Keep
+                // the named control available for reveal, then require a fresh bit.
+                control["stateUnavailable"] = true
             }
         }
         controls.append(control)
