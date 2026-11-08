@@ -788,6 +788,7 @@ end run`;
             .flatMap((row) => row.split(" | ").slice(1, 3))
             .find((label) => label === kindLabel || label === "OpenAI-compatible");
           if (kind === undefined) throw Error("Observed endpoint kind has no exact source label.");
+          await native("reveal", kind);
           await native("click", kind);
           await wait(
             "endpoint-fixed-fields",
