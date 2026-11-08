@@ -23,11 +23,19 @@ export interface ImageGenerationChoice {
 export type ImageGenerationOfferOutcome =
   | ({ readonly status: "generate" } & ImageGenerationChoice)
   | { readonly status: "agent-draws" }
+  | { readonly status: "save" }
   | { readonly status: "cancelled" }
   | { readonly status: "expired" }
   | { readonly status: "too-many-waiting" };
 
 type ThreadScope = Pick<ImageGenerationOffer, "threadKind" | "scopeId">;
+
+/** An offer as the asking tool describes it; the service stamps its id and time. */
+export type ImageGenerationOfferRequest = ImageGenerationOffer extends infer Offer
+  ? Offer extends ImageGenerationOffer
+    ? Omit<Offer, "offerId" | "requestedAt">
+    : never
+  : never;
 
 export interface ImageGenerationOfferServiceOptions {
   readonly uuid: () => string;
@@ -44,7 +52,8 @@ interface PendingOffer {
 }
 
 /**
- * Image generations an agent asked the person to start, held until they
+ * Image generations an agent asked the person to start, and saves of a
+ * generated image it asked to make, held until they
  * answer, as routine proposals are: visible only to the window whose turn
  * asked, settled by exactly one answer, and given up when the turn stops, the
  * window goes away, or ten minutes pass.
@@ -66,7 +75,7 @@ export class ImageGenerationOfferService {
 
   offer(input: {
     readonly windowId: WindowId;
-    readonly offer: Omit<ImageGenerationOffer, "offerId" | "requestedAt">;
+    readonly offer: ImageGenerationOfferRequest;
     readonly signal?: AbortSignal;
   }): Promise<ImageGenerationOfferOutcome> {
     if (input.signal?.aborted) return Promise.resolve({ status: "cancelled" });

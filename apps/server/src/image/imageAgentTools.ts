@@ -5,7 +5,9 @@ import {
   MAX_IMAGE_PROMPT_CHARACTERS,
   MAX_IMAGE_VARIANTS,
   type ImageGenerationCustomSource,
-  type ImageGenerationOffer,
+  type ImageGenerationGenerateOffer,
+  type ImageGenerationSaveOffer,
+  type ImageGenerationSaveResult,
   type ImageGenerationProfileView,
   type ImageGenerationScopeId,
   type ImageJob,
@@ -29,14 +31,18 @@ export const IMAGE_TOOL_NAME = "octant_create_image";
 const imageToolInputSchema = {
   type: "object",
   properties: {
+    operation: { type: "string", enum: ["generate", "save"] },
     prompt: { type: "string" },
     profileInstanceId: { type: "string" },
     modelId: { type: "string" },
     variantCount: { type: "number" },
     parentAttachmentId: { type: "string" },
+    attachmentId: { type: "string" },
+    relativePath: { type: "string" },
   },
-  required: ["prompt"],
 } as const;
+
+const MAX_SAVE_PATH_CHARACTERS = 512;
 
 const FORBIDDEN_INPUT_KEYS = [
   "apiKey",
@@ -62,10 +68,7 @@ export interface ImageAgentToolPort {
    * on the person's image provider.
    */
   readonly ask: (input: {
-    readonly offer: Omit<
-      ImageGenerationOffer,
-      "offerId" | "requestedAt" | "threadKind" | "scopeId"
-    >;
+    readonly offer: ImageOfferAsk;
     readonly signal?: AbortSignal;
   }) => Promise<ImageGenerationOfferOutcome>;
   /** The choice the person told this thread to keep using without asking. */
@@ -83,7 +86,22 @@ export interface ImageAgentToolPort {
   readonly readsImages?: () => boolean;
   /** How long a call waits for its image before answering that it is still generating. */
   readonly waitMs?: number;
+  /**
+   * Saving a generated image as a new file under the folder the turn works
+   * in. Absent in Chat, which has no folder.
+   */
+  readonly save?: {
+    /** What the turn's level does with a file edit: refuse it, ask first, or allow it. */
+    readonly posture: () => "refuse" | "ask" | "allow";
+    /** Writes a new file under the turn's folder; never overwrites. */
+    readonly write: (relativePath: string, bytes: Uint8Array) => Promise<ImageGenerationSaveResult>;
+  };
 }
+
+/** What the tool asks the person; the binding adds the thread it asks in. */
+export type ImageOfferAsk =
+  | Omit<ImageGenerationGenerateOffer, "offerId" | "requestedAt" | "threadKind" | "scopeId">
+  | Omit<ImageGenerationSaveOffer, "offerId" | "requestedAt" | "threadKind" | "scopeId">;
 
 /**
  * Most generations finish well inside this; a slower one is reported as still
@@ -95,6 +113,7 @@ export const IMAGE_TOOL_WAIT_MS = 120_000;
 const MAX_TOOL_IMAGE_BASE64_LENGTH = 2_097_152;
 
 interface ImageToolInput {
+  readonly operation: "generate";
   readonly prompt: string;
   readonly profileInstanceId?: ProviderInstanceId;
   readonly modelId?: ProviderModelId;
@@ -102,8 +121,14 @@ interface ImageToolInput {
   readonly parentAttachmentId?: string;
 }
 
+interface ImageSaveInput {
+  readonly operation: "save";
+  readonly attachmentId: string;
+  readonly relativePath: string;
+}
+
 const DESCRIPTION =
-  "Generate or revise a picture (a photo, illustration, or rendered scene) with an image model the person set up in Octant. Call it when the person asks for an image instead of drawing one yourself as SVG, HTML, or CSS: a real image model gives a far better result. Keep SVG for logos, icons, and diagrams, or when the person asks for it. Octant shows the person a card in this thread where they pick the model and confirm, because each generation is billed to their image provider; nothing runs until they answer. Describe the image in prompt; profileInstanceId and modelId only suggest what the card preselects. To revise, pass parentAttachmentId from a completed image on this thread. Never pass credentials, endpoints, headers, or filesystem paths. The result says what happened: completed with each image's attachmentId (the images are shown in this thread, and to you when you can read images; use an attachmentId to revise one or to place it in a Canvas design as a generated-image asset), failed with the reason, generating with a jobId when it takes longer than the call waits (it appears in this thread when done; do not start another), agent-draws (the person wants you to make the visual yourself), or cancelled (do not ask again unless they do). Never invent an image URL.";
+  "Generate or revise a picture (a photo, illustration, or rendered scene) with an image model the person set up in Octant. Call it when the person asks for an image instead of drawing one yourself as SVG, HTML, or CSS: a real image model gives a far better result. Keep SVG for logos, icons, and diagrams, or when the person asks for it. Octant shows the person a card in this thread where they pick the model and confirm, because each generation is billed to their image provider; nothing runs until they answer. Describe the image in prompt; profileInstanceId and modelId only suggest what the card preselects. To revise, pass parentAttachmentId from a completed image on this thread. Never pass credentials, endpoints, headers, or filesystem paths. The result says what happened: completed with each image's attachmentId (the images are shown in this thread, and to you when you can read images; use an attachmentId to revise one, to place it in a Canvas design as a generated-image asset, or to save it), failed with the reason, generating with a jobId when it takes longer than the call waits (it appears in this thread when done; do not start another), agent-draws (the person wants you to make the visual yourself), or cancelled (do not ask again unless they do). In a Work or Code thread, operation save with an attachmentId from this thread and a relativePath stores that image as a new file in the folder you work in: it never overwrites a file, Plan refuses it, and at Ask first the person confirms the path. Never invent an image URL.";
 
 /**
  * App-managed image generation for a Chat, Work, or Code thread.
@@ -133,6 +158,7 @@ export function createImageAgentTools(options: {
       if (refusal !== undefined) return { result: { error: refusal }, isError: true };
       const parsed = parseInput(inputJson);
       if ("error" in parsed) return { result: { error: parsed.error }, isError: true };
+      if (parsed.operation === "save") return saveImage(options, parsed, signal);
 
       const profiles = eligibleProfiles(options.port);
       if (profiles.length === 0) {
@@ -167,6 +193,7 @@ export function createImageAgentTools(options: {
       if (choice === undefined) {
         const outcome = await options.port.ask({
           offer: {
+            kind: "generate",
             prompt: parsed.prompt,
             variantCount: parsed.variantCount ?? 1,
             revision: parentArtifactRef !== undefined,
@@ -186,6 +213,7 @@ export function createImageAgentTools(options: {
                   "The person chose not to use an image model for this. Make the visual yourself if the request still calls for one.",
               },
             };
+          case "save":
           case "cancelled":
           case "expired":
             return {
@@ -236,6 +264,88 @@ export function createImageAgentTools(options: {
       }
     },
   };
+}
+
+/**
+ * Saves an image this thread generated as a new file under the folder the
+ * turn works in. The turn's level decides as for any file edit: Plan refuses,
+ * a level that asks before edits shows the person a card naming the path, and
+ * one that lets edits through writes at once. The write is confined to that
+ * folder and never overwrites a file.
+ */
+async function saveImage(
+  options: {
+    readonly scopeId: ImageGenerationScopeId;
+    readonly port: ImageAgentToolPort;
+  },
+  input: ImageSaveInput,
+  signal: AbortSignal | undefined,
+): Promise<{ readonly result: unknown; readonly isError?: boolean }> {
+  const save = options.port.save;
+  if (save === undefined || options.port.readArtifact === undefined) {
+    return {
+      result: { error: "This thread has no folder to save into. Chat images stay in the thread." },
+      isError: true,
+    };
+  }
+  const found = findCompletedJobArtifact(
+    options.port.listJobs(options.scopeId),
+    input.attachmentId,
+  );
+  if (found === undefined) {
+    return {
+      result: { error: "That image is not a finished image of this thread." },
+      isError: true,
+    };
+  }
+  const posture = save.posture();
+  if (posture === "refuse") {
+    return { result: { error: "Plan mode cannot save files." }, isError: true };
+  }
+  if (posture === "ask") {
+    const outcome = await options.port.ask({
+      offer: {
+        kind: "save",
+        jobId: found.job.id,
+        attachmentId: found.artifact.attachmentId,
+        relativePath: input.relativePath,
+      },
+      ...(signal === undefined ? {} : { signal }),
+    });
+    if (outcome.status !== "save") {
+      return {
+        result: {
+          status: "not-saved",
+          message: "The person did not save the image. Do not ask again unless they do.",
+        },
+      };
+    }
+    // The level can change while the card is open; a move to Plan wins.
+    if (save.posture() === "refuse") {
+      return { result: { error: "Plan mode cannot save files." }, isError: true };
+    }
+  }
+  const read = await options.port
+    .readArtifact(found.job.id, found.artifact.attachmentId)
+    .catch(() => undefined);
+  if (read === undefined) {
+    return { result: { error: "The generated image is unavailable." }, isError: true };
+  }
+  const saved = await save.write(input.relativePath, read.bytes);
+  return saved.status === "saved"
+    ? { result: { status: "saved", relativePath: saved.relativePath } }
+    : { result: { status: saved.status, error: saved.reason }, isError: true };
+}
+
+function findCompletedJobArtifact(jobs: ReadonlyArray<ImageJob>, attachmentId: string) {
+  for (const job of jobs) {
+    if (job.status !== "completed") continue;
+    const artifact = job.artifacts.find(
+      (candidate) => String(candidate.attachmentId) === attachmentId,
+    );
+    if (artifact !== undefined) return { job, artifact };
+  }
+  return undefined;
 }
 
 /**
@@ -360,8 +470,11 @@ export function createThreadImageAgentTools(input: {
   readonly refusal?: () => string | undefined;
   /** Whether the model driving this turn accepts images in a tool result. */
   readonly readsImages: () => boolean;
+  /** Saving under the turn's folder; Work and Code only. */
+  readonly save?: ImageAgentToolPort["save"];
 }): AppManagedToolSet | undefined {
   const scope = { threadKind: input.threadKind, scopeId: input.scopeId };
+  const { threadKind, scopeId } = scope;
   return createImageAgentTools({
     ...scope,
     port: {
@@ -369,18 +482,30 @@ export function createThreadImageAgentTools(input: {
       readImageGenerationCustomSources: input.readImageGenerationCustomSources,
       enqueue: (job) => input.jobs.enqueue(job),
       listJobs: (scopeId) => input.jobs.listByScope(scopeId),
-      ask: ({ offer, signal }) =>
-        input.offers.offer({
+      ask: async ({ offer, signal }) => {
+        const options = signal === undefined ? {} : { signal };
+        if (offer.kind === "generate") {
+          return input.offers.offer({
+            windowId: input.windowId,
+            offer: { ...offer, threadKind, scopeId },
+            ...options,
+          });
+        }
+        // A Chat thread has no folder, so it is never asked to save.
+        if (threadKind === "chat-thread") return { status: "cancelled" };
+        return input.offers.offer({
           windowId: input.windowId,
-          offer: { ...offer, ...scope },
-          ...(signal === undefined ? {} : { signal }),
-        }),
+          offer: { ...offer, threadKind, scopeId },
+          ...options,
+        });
+      },
       remembered: () => input.offers.remembered(scope),
       forget: () => input.offers.forget(scope),
       whenTerminal: (jobId) => input.jobs.whenTerminal(jobId),
       readArtifact: (jobId, attachmentId) => input.jobs.readArtifact(jobId, attachmentId),
       readsImages: input.readsImages,
       ...(input.refusal === undefined ? {} : { refusal: input.refusal }),
+      ...(input.save === undefined || threadKind === "chat-thread" ? {} : { save: input.save }),
     },
   });
 }
@@ -437,7 +562,9 @@ function findCompletedArtifact(jobs: ReadonlyArray<ImageJob>, attachmentId: stri
   return undefined;
 }
 
-function parseInput(inputJson: string): ImageToolInput | { readonly error: string } {
+function parseInput(
+  inputJson: string,
+): ImageToolInput | ImageSaveInput | { readonly error: string } {
   let raw: unknown;
   try {
     raw = JSON.parse(inputJson);
@@ -453,6 +580,27 @@ function parseInput(inputJson: string): ImageToolInput | { readonly error: strin
       return { error: "Image generation cannot take credentials, endpoints, or filesystem paths." };
     }
   }
+  const operation = record["operation"] ?? "generate";
+  if (operation === "save") {
+    const attachmentId = record["attachmentId"];
+    const relativePath = record["relativePath"];
+    if (typeof relativePath !== "string" || relativePath.trim().length === 0) {
+      return { error: "A save needs relativePath, a path inside this thread's folder." };
+    }
+    if (relativePath.length > MAX_SAVE_PATH_CHARACTERS) {
+      return { error: "The save path is too long." };
+    }
+    try {
+      return {
+        operation: "save",
+        attachmentId: String(decodeImageArtifactId(attachmentId)),
+        relativePath: relativePath.trim(),
+      };
+    } catch {
+      return { error: "A save needs the attachmentId of a finished image on this thread." };
+    }
+  }
+  if (operation !== "generate") return { error: "The operation is generate or save." };
   const prompt = record["prompt"];
   if (typeof prompt !== "string" || prompt.trim().length === 0) {
     return { error: "The image prompt must not be empty." };
@@ -476,6 +624,7 @@ function parseInput(inputJson: string): ImageToolInput | { readonly error: strin
   const parentAttachmentId = record["parentAttachmentId"];
   try {
     return {
+      operation: "generate",
       prompt: prompt.trim(),
       ...(profileInstanceId === undefined
         ? {}

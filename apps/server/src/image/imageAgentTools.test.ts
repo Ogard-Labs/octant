@@ -96,13 +96,26 @@ function tools(
     readonly bytes?: Uint8Array;
     readonly readsImages?: boolean;
     readonly waitMs?: number;
+    readonly save?: {
+      readonly posture: () => "refuse" | "ask" | "allow";
+      readonly write: (
+        relativePath: string,
+        bytes: Uint8Array,
+      ) => Promise<
+        | { readonly status: "saved"; readonly relativePath: string }
+        | { readonly status: "refused" | "failed"; readonly reason: string }
+      >;
+    };
   } = {},
 ) {
   const enqueue = vi.fn(async () => job());
   let remembered = options.remembered;
   const ask = vi.fn(
     async ({ offer }: Parameters<ImageAgentToolPort["ask"]>[0]) =>
-      options.answer?.(offer) ?? ({ status: "generate", ...offer.suggested } as const),
+      options.answer?.(offer) ??
+      (offer.kind === "generate"
+        ? ({ status: "generate", ...offer.suggested } as const)
+        : ({ status: "save" } as const)),
   );
   const forget = vi.fn(() => {
     remembered = undefined;
@@ -119,6 +132,15 @@ function tools(
       remembered: () => remembered,
       forget,
       ...(options.refusal === undefined ? {} : { refusal: options.refusal }),
+      ...(options.save === undefined
+        ? {}
+        : {
+            save: options.save,
+            readArtifact: async () => ({
+              bytes: Uint8Array.from([0x89, 0x50, 0x4e, 0x47]),
+              mime: "image/png" as const,
+            }),
+          }),
       ...(options.finished === undefined
         ? {}
         : {
@@ -168,6 +190,7 @@ describe("createImageAgentTools", () => {
     expect(ask).toHaveBeenCalledWith(
       expect.objectContaining({
         offer: {
+          kind: "generate",
           prompt: "a red cube",
           variantCount: 1,
           revision: false,
@@ -259,7 +282,9 @@ describe("createImageAgentTools", () => {
       refusal: () => (plan ? "Plan mode cannot generate images." : undefined),
       answer: (offer) => {
         plan = true;
-        return { status: "generate", ...offer.suggested };
+        return offer.kind === "generate"
+          ? { status: "generate", ...offer.suggested }
+          : { status: "cancelled" };
       },
     });
     const outcome = await call(set, { prompt: "a red cube" });
@@ -349,6 +374,89 @@ describe("createImageAgentTools", () => {
       });
       const outcome = await call(set, { prompt: "a red cube" });
       expect(outcome.result).toMatchObject({ status: "generating" });
+    });
+  });
+
+  describe("saving an image the thread made", () => {
+    function saving(posture: "refuse" | "ask" | "allow") {
+      let level = posture;
+      const write = vi.fn(async (relativePath: string) => ({
+        status: "saved" as const,
+        relativePath,
+      }));
+      return {
+        write,
+        setLevel: (next: typeof posture) => {
+          level = next;
+        },
+        save: { posture: () => level, write },
+      };
+    }
+    const save = {
+      operation: "save",
+      attachmentId: parentAttachmentId,
+      relativePath: "art/cube.png",
+    };
+
+    it("writes it at once at a level that lets edits through", async () => {
+      const { save: port, write } = saving("allow");
+      const { ask, set } = tools([imageProfile()], [job("completed")], [], { save: port });
+      const outcome = await call(set, save);
+      expect(ask).not.toHaveBeenCalled();
+      expect(write).toHaveBeenCalledWith("art/cube.png", Uint8Array.from([0x89, 0x50, 0x4e, 0x47]));
+      expect(outcome.result).toEqual({ status: "saved", relativePath: "art/cube.png" });
+    });
+
+    it("asks with the path first at Ask first, and writes nothing when the person says no", async () => {
+      const { save: port, write } = saving("ask");
+      const { ask, set } = tools([imageProfile()], [job("completed")], [], {
+        save: port,
+        answer: () => ({ status: "cancelled" }),
+      });
+      const outcome = await call(set, save);
+      expect(ask).toHaveBeenCalledWith(
+        expect.objectContaining({
+          offer: expect.objectContaining({ kind: "save", relativePath: "art/cube.png" }),
+        }),
+      );
+      expect(write).not.toHaveBeenCalled();
+      expect(outcome.result).toMatchObject({ status: "not-saved" });
+    });
+
+    it("writes after the person confirms, unless the thread moved to Plan meanwhile", async () => {
+      const confirmed = saving("ask");
+      const asked = tools([imageProfile()], [job("completed")], [], { save: confirmed.save });
+      await call(asked.set, save);
+      expect(confirmed.write).toHaveBeenCalledOnce();
+
+      const moved = saving("ask");
+      const planned = tools([imageProfile()], [job("completed")], [], {
+        save: moved.save,
+        answer: () => {
+          moved.setLevel("refuse");
+          return { status: "save" };
+        },
+      });
+      const outcome = await call(planned.set, save);
+      expect(outcome.isError).toBe(true);
+      expect(moved.write).not.toHaveBeenCalled();
+    });
+
+    it("refuses in Plan, in a thread with no folder, and for an image the thread did not make", async () => {
+      const plan = saving("refuse");
+      const inPlan = tools([imageProfile()], [job("completed")], [], { save: plan.save });
+      expect((await call(inPlan.set, save)).isError).toBe(true);
+
+      const chat = tools([imageProfile()], [job("completed")]);
+      expect((await call(chat.set, save)).result).toMatchObject({
+        error: expect.stringMatching(/no folder/),
+      });
+
+      const other = saving("allow");
+      const elsewhere = tools([imageProfile()], [], [], { save: other.save });
+      expect((await call(elsewhere.set, save)).isError).toBe(true);
+      expect(plan.write).not.toHaveBeenCalled();
+      expect(other.write).not.toHaveBeenCalled();
     });
   });
 });

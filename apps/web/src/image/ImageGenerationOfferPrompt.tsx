@@ -1,5 +1,6 @@
 import type { ImageGenerationClient } from "@octant/client-runtime/image-generation-client";
 import type {
+  ImageGenerationGenerateOffer,
   ImageGenerationOffer,
   ImageGenerationOfferDecision,
   ImageGenerationProfileView,
@@ -34,7 +35,7 @@ interface ModelChoice {
 /** Every profile and model the person can generate with, the agent's suggestion first. */
 function modelChoices(
   profiles: ReadonlyArray<ImageGenerationProfileView>,
-  suggested: ImageGenerationOffer["suggested"],
+  suggested: ImageGenerationGenerateOffer["suggested"],
 ): ReadonlyArray<ModelChoice> {
   const choices = profiles.flatMap((profile) =>
     profile.modelAllowlist.map((modelId) => {
@@ -130,10 +131,11 @@ export function ImageGenerationOfferPrompt(props: {
   }, [pendingId]);
 
   if (pending === undefined || client === undefined) return null;
-  const choices = modelChoices(props.profiles, pending.suggested);
+  const choices =
+    pending.kind === "generate" ? modelChoices(props.profiles, pending.suggested) : [];
   const choice = choices.find((candidate) => candidate.id === selected) ?? choices[0];
 
-  async function decide(decision: "generate" | "agent-draws" | "cancel") {
+  async function decide(decision: "generate" | "agent-draws" | "save" | "cancel") {
     if (pending === undefined || client === undefined || busy) return;
     let answer: ImageGenerationOfferDecision;
     if (decision === "generate") {
@@ -164,6 +166,64 @@ export function ImageGenerationOfferPrompt(props: {
     } finally {
       setBusy(false);
     }
+  }
+
+  if (pending.kind === "save") {
+    return (
+      <section
+        aria-label="Asked by the agent"
+        className={`follow-up-cards ${props.className ?? ""}`}
+      >
+        <article aria-label="Image save request" className="follow-up-card">
+          <div className="follow-up-card__head">
+            <span className="follow-up-card__kind">
+              <ImageIcon aria-hidden="true" size={12} /> Image · asked by the agent
+            </span>
+            <OctantIconButton
+              disabled={busy}
+              label="Don't save the image"
+              onClick={() => void decide("cancel")}
+              size="icon-xs"
+              type="button"
+            >
+              <X aria-hidden="true" size={12} />
+            </OctantIconButton>
+          </div>
+          <p className="follow-up-card__title">Save this image as a new file?</p>
+          <p className="follow-up-card__summary">
+            The agent wants to save an image this thread generated in the folder it works in. An
+            existing file is never replaced.
+          </p>
+          <p className="follow-up-card__prompt" title={pending.relativePath}>
+            {pending.relativePath}
+          </p>
+          <div className="follow-up-card__actions">
+            <OctantButton
+              disabled={busy}
+              onClick={() => void decide("cancel")}
+              size="xs"
+              type="button"
+              variant="ghost"
+            >
+              Don't save
+            </OctantButton>
+            <OctantButton
+              disabled={busy}
+              onClick={() => void decide("save")}
+              size="xs"
+              type="button"
+            >
+              Save
+            </OctantButton>
+          </div>
+        </article>
+        {message === undefined ? null : (
+          <OctantAlert className="follow-up-cards__error" tone="danger">
+            {message}
+          </OctantAlert>
+        )}
+      </section>
+    );
   }
 
   const title = pending.revision

@@ -36,6 +36,7 @@ import type { PullRequestWatchPort } from "../code/pullRequestWatchPort";
 import { createGhCommandPort } from "../code/ghPullRequestPort";
 import { GhPullRequestSwitchPort } from "../code/ghPullRequestSwitchPort";
 import { isRoutineHostScope, ROUTINE_HOST_SCOPE_ID } from "../routineHostScope";
+import { saveGeneratedImageUnder } from "../image/generatedImageSave";
 import { createThreadImageAgentTools } from "../image/imageAgentTools";
 import { INHERITED_MARK_REFUSAL } from "../context/inheritedExternalContentMark";
 import {
@@ -78,6 +79,7 @@ import { CodeTurnDecisions } from "../turnDecisions/codeTurnDecisions";
 import { createSideTaskTools } from "../sideTasks/sideTaskTools";
 import { isReplayedAndroidEvidence } from "../android/androidToolchainService";
 import {
+  clampTurnAccessPosture,
   defaultShellSettings,
   isNativeHarnessDriverKind,
   projectExtraFolderRoots,
@@ -469,32 +471,53 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
     };
     // A routine's turn has nobody at a window to answer the image card, so it
     // is not offered the tool.
-    contributeCodeTools(({ windowId, thread, readThread }) =>
-      isRoutineHostScope(windowId)
-        ? undefined
-        : createThreadImageAgentTools({
-            windowId,
-            threadKind: "code-thread",
-            scopeId: decodeImageGenerationScopeId(String(thread.id)),
-            offers: imageGenerationOffers,
-            jobs: imageJobService,
-            listInstances: () => persistence.readProviderInstances(),
-            readImageGenerationCustomSources: () =>
-              (persistence.readShellSettings()?.settings ?? defaultShellSettings()).imageGeneration
-                .customSources,
-            readsImages: () =>
-              providerRuntimeRegistry
-                .observedState(thread.providerInstanceId)
-                ?.models.find((candidate) => String(candidate.id) === String(thread.modelId))
-                ?.inputModalities.includes("image") === true,
-            // Plan changes nothing on the host or outside it, and a generation
-            // calls a paid provider and stores the image.
-            refusal: () =>
-              (readThread()?.executionPolicy ?? thread.executionPolicy) === "plan"
-                ? "Plan mode cannot generate images. Leave Plan mode to generate one."
-                : undefined,
-          }),
-    );
+    contributeCodeTools(({ windowId, thread, readThread, folders }) => {
+      if (isRoutineHostScope(windowId)) return undefined;
+      const checkoutRoot = folders[0];
+      return createThreadImageAgentTools({
+        windowId,
+        threadKind: "code-thread",
+        scopeId: decodeImageGenerationScopeId(String(thread.id)),
+        offers: imageGenerationOffers,
+        jobs: imageJobService,
+        listInstances: () => persistence.readProviderInstances(),
+        readImageGenerationCustomSources: () =>
+          (persistence.readShellSettings()?.settings ?? defaultShellSettings()).imageGeneration
+            .customSources,
+        readsImages: () =>
+          providerRuntimeRegistry
+            .observedState(thread.providerInstanceId)
+            ?.models.find((candidate) => String(candidate.id) === String(thread.modelId))
+            ?.inputModalities.includes("image") === true,
+        // A file edit at the turn's level, under the checkout the turn
+        // works in. The journaled posture and the running one are both
+        // read and the stricter wins, so a session-only grant never lets
+        // this write through without asking.
+        ...(checkoutRoot === undefined
+          ? {}
+          : {
+              save: {
+                posture: () => {
+                  const level = clampTurnAccessPosture({
+                    requested: readThread()?.executionPolicy ?? thread.executionPolicy,
+                    thread:
+                      persistence.readCodeThread(thread.id)?.executionPolicy ??
+                      thread.executionPolicy,
+                  });
+                  return level === "plan" ? "refuse" : level === "approval-gated" ? "ask" : "allow";
+                },
+                write: (relativePath: string, bytes: Uint8Array) =>
+                  saveGeneratedImageUnder({ root: checkoutRoot, relativePath, bytes }),
+              },
+            }),
+        // Plan changes nothing on the host or outside it, and a generation
+        // calls a paid provider and stores the image.
+        refusal: () =>
+          (readThread()?.executionPolicy ?? thread.executionPolicy) === "plan"
+            ? "Plan mode cannot generate images. Leave Plan mode to generate one."
+            : undefined,
+      });
+    });
     contributeCodeTools(({ windowId, thread }) =>
       personMemoryAccess.toolsFor({
         mode: "code",
