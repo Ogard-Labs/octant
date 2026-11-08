@@ -143,3 +143,17 @@ it("refuses a projection from another native owner instance or endpoint rather t
   }
   expect(probeHostInfoReceipt).not.toHaveBeenCalled();
 });
+
+it("waits for its authenticated starting child without requiring unpublished discovery projections", async () => {
+  attached();
+  const host = fixture();
+  vi.mocked(host.startup.readHostInfo).mockResolvedValue(undefined);
+  await expect(attachWindowsDesktopHost(host, instanceId)).resolves.toBeUndefined();
+  expect(host.startup.readHostInfo).not.toHaveBeenCalled();
+  expect(host.startup.readBridgeSecret).not.toHaveBeenCalled();
+  await expect(
+    attachWindowsDesktopHost(host, "33333333-3333-4333-8333-333333333333"),
+  ).rejects.toThrow("discovery changed");
+  vi.mocked(attachWindowsHostRuntimeOwner).mockResolvedValue({ status: "refused" });
+  await expect(attachWindowsDesktopHost(host, instanceId)).rejects.toThrow("authenticate");
+});

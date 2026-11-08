@@ -29,7 +29,10 @@ export function resolveWindowsDesktopHost(options: {
 }
 
 /** Only positive native absence permits launch; unsafe discovery never becomes a second host. */
-export async function attachWindowsDesktopHost(host: WindowsDesktopHost) {
+export async function attachWindowsDesktopHost(
+  host: WindowsDesktopHost,
+  startingInstanceId?: string,
+) {
   const found = await attachWindowsHostRuntimeOwner({
     native: host.native,
     scope: host.paths.profileId,
@@ -40,6 +43,9 @@ export async function attachWindowsDesktopHost(host: WindowsDesktopHost) {
   if (found.status !== "attached")
     throw new Error("Octant could not authenticate its existing native Windows host.");
   const owner = found.attachment.owner;
+  // The authenticated child owns its endpoint before it publishes discovery.
+  // Its own startup wait uses health readiness; only competing owners attach.
+  if (startingInstanceId !== undefined && owner.instanceId === startingInstanceId) return undefined;
   const attached = await resolveStableHostAttachment({
     readReceipt: async () => {
       const receipt = await host.startup.readHostInfo();
