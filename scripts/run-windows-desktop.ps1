@@ -73,9 +73,9 @@ try {
             $octantOwnedCommand = $true
             break
           }
-          $octantArgumentTokens = @()
+          $octantArgumentTokens = [System.Collections.Generic.List[string]]::new()
           foreach ($octantArgumentMatch in [regex]::Matches($octantArguments, '"[^"]*"|\S+')) {
-            $octantArgumentTokens += $octantArgumentMatch.Value
+            [void]$octantArgumentTokens.Add([string]$octantArgumentMatch.Value)
           }
           if ($octantArgumentTokens.Count -eq 4) {
             $octantArgumentPathOne = [string]$octantArgumentTokens[0]
@@ -139,9 +139,9 @@ try {
           } else {
             'extra-or-other-argument'
           }
-          $octantDiagnosticTokens = @()
+          $octantDiagnosticTokens = [System.Collections.Generic.List[string]]::new()
           foreach ($octantDiagnosticMatch in [regex]::Matches($octantArguments, '"[^"]*"|\S+')) {
-            $octantDiagnosticTokens += $octantDiagnosticMatch.Value
+            [void]$octantDiagnosticTokens.Add([string]$octantDiagnosticMatch.Value)
           }
           $octantArgumentTokenCount = $octantDiagnosticTokens.Count
           if ($octantDiagnosticTokens.Count -eq 4) {
@@ -182,8 +182,7 @@ try {
               $octantArgumentPathKinds[1] -match '^staged-executable-' -and
               $octantArgumentQuotedUrlMatches[1]
           }
-          foreach ($octantTokenMatch in [regex]::Matches($octantArguments, '"[^"]*"|\S+')) {
-            $octantToken = $octantTokenMatch.Value
+          foreach ($octantToken in $octantDiagnosticTokens) {
             $octantUnquotedToken = $octantToken.Trim('"')
             $octantTokenShape = if ($octantToken -ceq '"%1"') {
               'quoted-url'
