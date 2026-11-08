@@ -318,7 +318,7 @@ if mode == "click" || mode == "reveal" || fillsFixtureField {
         action["availableActions"] = availableActions.prefix(32).map { String($0.prefix(256)) }
         action["actionNamesTruncated"] = actionNamesTruncated
         if targetIdentityRead == .success, targetPid == processId {
-            if mode == "reveal", ["Data & storage", preferenceTitle, "Octant Harness", "Advanced", "Check and add", "Continue and verify tools (1 request)"].contains(requestedTitle),
+            if mode == "reveal", ["Data & storage", preferenceTitle, "Octant Harness", "Add endpoint", "Advanced", "Check and add", "Continue and verify tools (1 request)"].contains(requestedTitle),
                enabledRead == .success, binary(enabledValue) == true,
                namesRead == .success, !actionNamesTruncated,
                availableActions.contains("AXScrollToVisible"), live?.isActive == true,

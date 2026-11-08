@@ -777,7 +777,8 @@ end run`;
           await wait("settings-harness", (s) => s.includes("Octant Harness"));
           await native("reveal", "Octant Harness");
           await native("click", "Octant Harness");
-          await wait("add-endpoint", (s) => s.includes("Add endpoint"));
+          await wait("add-endpoint", (s) => s.includes("Add endpoint"), 12_000, 500);
+          await native("reveal", "Add endpoint");
           await native("click", "Add endpoint");
           const kindLabel =
             "OpenAI-compatible Any service that speaks the OpenAI API: a gateway, a router, or a local server.";
