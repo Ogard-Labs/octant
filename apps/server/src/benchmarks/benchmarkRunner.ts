@@ -15,9 +15,10 @@ import {
   boundedBenchmarkReason,
   nextBenchmarkCells,
   scoreBenchmarkChecks,
+  type BenchmarkPatternMatcher,
 } from "@octant/domain";
 import { deterministicUuid } from "../deterministicUuid";
-import type { BenchmarkChatPort } from "./benchmarkChatPort";
+import { CAPACITY_UNAVAILABLE_FAILURE_CODE, type BenchmarkChatPort } from "./benchmarkChatPort";
 import type { BenchmarkEventStore } from "./benchmarkEventStore";
 import type { BenchmarkProjection } from "./benchmarkProjection";
 
@@ -29,12 +30,17 @@ const CODE_CASES_LATER = "Code cases arrive in a later version";
 
 export interface BenchmarkRunnerOptions {
   readonly chat: BenchmarkChatPort;
-  readonly projection: Pick<BenchmarkProjection, "run" | "runningRuns">;
-  readonly store: Pick<BenchmarkEventStore, "cellStarted" | "cellSettled" | "runEnded">;
+  readonly projection: Pick<BenchmarkProjection, "run" | "runs" | "runningRuns">;
+  readonly store: Pick<
+    BenchmarkEventStore,
+    "cellStarted" | "cellRequeued" | "cellSettled" | "runEnded"
+  >;
   readonly turnMetrics: {
     readonly forThread: (threadId: string) => ReadonlyArray<TurnMetricsRecord>;
   };
   readonly projectId: ProjectId;
+  /** Tests a hand-written pattern under a deadline; the runner never matches one itself. */
+  readonly matchPattern: BenchmarkPatternMatcher;
   readonly clock: () => string;
   readonly tickMs?: number;
   readonly turnTimeoutMs?: number;
@@ -67,6 +73,8 @@ export function benchmarkCellIdentity(cellId: string): {
 export class BenchmarkRunner {
   readonly #options: BenchmarkRunnerOptions;
   readonly #starting = new Set<string>();
+  /** Cells put back to queued in this pass; they wait for the next tick to try again. */
+  readonly #requeued = new Set<string>();
   #chain: Promise<unknown> = Promise.resolve();
   #tickPending = false;
   #stopped = false;
@@ -80,6 +88,7 @@ export class BenchmarkRunner {
     this.#stopped = false;
     const timer = setInterval(() => void this.tick(), this.#options.tickMs ?? BENCHMARK_TICK_MS);
     timer.unref();
+    void this.#exclusive(() => this.#archiveSettled()).catch(() => undefined);
     void this.tick();
     return () => {
       this.#stopped = true;
@@ -110,6 +119,22 @@ export class BenchmarkRunner {
     return this.#exclusive(() => this.#cancel(runId));
   }
 
+  /**
+   * A settled cell's thread is archived best effort, so a failed archive leaves
+   * it active. Each start tries again for every settled cell, by the cell's
+   * fixed thread identity, so a cell refused after its thread was made is
+   * covered too. Archiving a thread that is gone or already archived does nothing.
+   */
+  async #archiveSettled(): Promise<void> {
+    for (const run of this.#options.projection.runs()) {
+      for (const cell of run.cells) {
+        if (this.#stopped) return;
+        if (cell.state === "queued" || cell.state === "running") continue;
+        await this.#options.chat.archiveThread(benchmarkCellIdentity(String(cell.cellId)).threadId);
+      }
+    }
+  }
+
   #exclusive<T>(work: () => Promise<T>): Promise<T> {
     const result = this.#chain.then(work, work);
     this.#chain = result.then(
@@ -123,6 +148,7 @@ export class BenchmarkRunner {
     const runs = this.#options.projection.runningRuns();
     if (runs.length === 0) return;
     const counts = this.#runningCounts(runs);
+    this.#requeued.clear();
     for (const { runId } of runs) {
       if (this.#stopped) return;
       await this.#advance(runId, counts);
@@ -199,10 +225,20 @@ export class BenchmarkRunner {
           cell,
           "answered",
           undefined,
-          scoreBenchmarkChecks(benchmarkCase.checks, answer),
+          await scoreBenchmarkChecks(benchmarkCase.checks, answer, this.#options.matchPattern),
         );
       }
       await chat.archiveThread(cell.threadId);
+      return true;
+    }
+    if (
+      reading.outcome === "interrupted" &&
+      reading.failureCode === CAPACITY_UNAVAILABLE_FAILURE_CODE
+    ) {
+      // Chat had no room for the attempt. The cell goes back to queued and is
+      // retried on its existing turn at a later tick, never failed for it.
+      this.#options.store.cellRequeued({ runId: run.runId, cellId: cell.cellId });
+      this.#requeued.add(cellId);
       return true;
     }
     if (
@@ -232,13 +268,13 @@ export class BenchmarkRunner {
     const run = this.#options.projection.run(runId);
     if (run === undefined || run.status !== "running") return;
     const candidates = nextBenchmarkCells(run, counts, BENCHMARK_CONCURRENCY_LIMITS);
-    let startedNow = 0;
     for (const candidate of candidates) {
+      if (this.#requeued.has(String(candidate.cellId))) continue;
       const current = this.#options.projection.run(runId);
       if (current === undefined || current.status !== "running") return;
       const spent = this.#spent(current);
-      const runningInRun =
-        current.cells.filter((cell) => cell.state === "running").length + startedNow;
+      // A cell started earlier in this pass is already running in `current`.
+      const runningInRun = current.cells.filter((cell) => cell.state === "running").length;
       const decision = benchmarkBudgetDecision(
         current.budget,
         { tokens: spent.tokens, costUsd: spent.costUsd },
@@ -251,7 +287,6 @@ export class BenchmarkRunner {
       }
       const outcome = await this.#startCell(current, candidate);
       if (outcome === "started") {
-        startedNow += 1;
         const provider = current.contenders[candidate.contenderIndex]?.providerInstanceId;
         if (provider !== undefined) {
           counts.byProvider.set(

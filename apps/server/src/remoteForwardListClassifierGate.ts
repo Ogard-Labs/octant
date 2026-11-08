@@ -9,6 +9,11 @@ const GATE_ORIGIN = "https://octant.example:8443";
  * diagnostics export, and local-only administration.
  */
 const LOCAL_ONLY_PROBES = [
+  { path: "/api/benchmarks/suites/save", method: "POST" },
+  { path: "/api/benchmarks/suites/delete", method: "POST" },
+  { path: "/api/benchmarks/runs/start", method: "POST" },
+  { path: "/api/benchmarks/runs/cancel", method: "POST" },
+  { path: "/api/benchmarks/runs/purge", method: "POST" },
   { path: "/api/usage/reset", method: "POST" },
   { path: "/api/usage/retain", method: "POST" },
   { path: "/api/diagnostics/export", method: "POST" },
@@ -72,6 +77,9 @@ const PRODUCT_PROBES = [
   { path: "/api/integrations/linear/authentication", method: "GET" },
   { path: "/api/integrations/linear/authentication/commands", method: "POST" },
   { path: "/api/integrations/linear/operations", method: "POST" },
+  { path: "/api/benchmarks/suites/list", method: "POST" },
+  { path: "/api/benchmarks/runs/list", method: "POST" },
+  { path: "/api/benchmarks/runs/read", method: "POST" },
   { path: "/api/usage/dashboard", method: "POST" },
   { path: "/api/usage/query", method: "POST" },
   { path: "/api/usage/export", method: "POST" },

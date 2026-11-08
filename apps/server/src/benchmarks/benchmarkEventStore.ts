@@ -6,6 +6,7 @@ import {
   BENCHMARK_SUITE_AGGREGATE_TYPE,
   BenchmarkCellJudged,
   BenchmarkCellRated,
+  BenchmarkCellRequeued,
   BenchmarkCellSettled,
   BenchmarkCellStarted,
   BenchmarkRunEnded,
@@ -35,6 +36,7 @@ export function registerBenchmarkEvents(registry: EventRegistry): EventRegistry 
     .register(BENCHMARK_EVENT_NAMES.suiteDeleted, 1, BenchmarkSuiteDeleted)
     .register(BENCHMARK_EVENT_NAMES.runStarted, 1, BenchmarkRunStarted)
     .register(BENCHMARK_EVENT_NAMES.cellStarted, 1, BenchmarkCellStarted)
+    .register(BENCHMARK_EVENT_NAMES.cellRequeued, 1, BenchmarkCellRequeued)
     .register(BENCHMARK_EVENT_NAMES.cellSettled, 1, BenchmarkCellSettled)
     .register(BENCHMARK_EVENT_NAMES.cellJudged, 1, BenchmarkCellJudged)
     .register(BENCHMARK_EVENT_NAMES.cellRated, 1, BenchmarkCellRated)
@@ -90,6 +92,10 @@ export class BenchmarkEventStore {
 
   cellStarted(payload: BenchmarkCellStarted): void {
     this.#appendRun(String(payload.runId), BENCHMARK_EVENT_NAMES.cellStarted, payload);
+  }
+
+  cellRequeued(payload: BenchmarkCellRequeued): void {
+    this.#appendRun(String(payload.runId), BENCHMARK_EVENT_NAMES.cellRequeued, payload);
   }
 
   cellSettled(payload: BenchmarkCellSettled): void {

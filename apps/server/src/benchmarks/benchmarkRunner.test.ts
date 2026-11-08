@@ -8,6 +8,7 @@ import type {
   BenchmarkTurnStart,
 } from "./benchmarkChatPort";
 import { BENCHMARKS_PROJECT_ID } from "./benchmarkChatPort";
+import { createWorkerPatternMatcher } from "./benchmarkPatternMatcher";
 import { BenchmarkRunner, benchmarkCellIdentity } from "./benchmarkRunner";
 import {
   BENCHMARK_TEST_NOW,
@@ -25,6 +26,7 @@ interface FakeTurn {
   outcome: Extract<BenchmarkTurnReading, { status: "turn" }>["outcome"];
   answer?: string;
   failureMessage?: string;
+  failureCode?: string;
 }
 
 /** A Chat that answers only when the test lets a turn finish. */
@@ -53,6 +55,7 @@ class FakeChat implements BenchmarkChatPort {
       attemptId: "attempt",
       outcome: turn.outcome,
       ...(turn.failureMessage === undefined ? {} : { failureMessage: turn.failureMessage }),
+      ...(turn.failureCode === undefined ? {} : { failureCode: turn.failureCode }),
     };
   }
 
@@ -76,6 +79,8 @@ class FakeChat implements BenchmarkChatPort {
   }
 }
 
+const matcher = createWorkerPatternMatcher(300);
+
 function setup(options: { readonly timeoutMs?: number } = {}) {
   const clock = { now: BENCHMARK_TEST_NOW };
   const opened = openBenchmarkTestStore(() => clock.now);
@@ -87,6 +92,7 @@ function setup(options: { readonly timeoutMs?: number } = {}) {
     store: opened.store,
     turnMetrics: { forThread: (threadId) => metrics.get(threadId) ?? [] },
     projectId: BENCHMARKS_PROJECT_ID,
+    matchPattern: matcher,
     clock: () => clock.now,
     ...(options.timeoutMs === undefined ? {} : { turnTimeoutMs: options.timeoutMs }),
   });
@@ -230,6 +236,7 @@ describe("benchmark runner", () => {
       store,
       turnMetrics: { forThread: () => [] },
       projectId: BENCHMARKS_PROJECT_ID,
+      matchPattern: matcher,
       clock: () => clock.now,
     });
     await first.tick();
@@ -242,6 +249,7 @@ describe("benchmark runner", () => {
       store,
       turnMetrics: { forThread: (id) => metrics.get(id) ?? [] },
       projectId: BENCHMARKS_PROJECT_ID,
+      matchPattern: matcher,
       clock: () => clock.now,
     });
     await restarted.tick();
@@ -305,5 +313,125 @@ describe("benchmark runner", () => {
     expect(cancelled?.cells.every((cell) => cell.state === "cancelled")).toBe(true);
     expect(chat.interrupted).toHaveLength(2);
     expect(projection.runningRuns()).toEqual([]);
+  });
+
+  it("fails a check whose pattern never returns within the deadline and still scores the other cells", async () => {
+    const { store, chat, runner, projection } = setup();
+    const suite = sampleSuite({
+      cases: [
+        {
+          caseId: benchmarkIds.caseA,
+          kind: "prompt",
+          title: "Greeting",
+          prompt: "Say hello.",
+          checks: [{ kind: "matches", pattern: "(a+)+$", flags: "" }],
+        },
+        {
+          caseId: benchmarkIds.caseB,
+          kind: "prompt",
+          title: "Number",
+          prompt: "Say 42.",
+          checks: [{ kind: "contains", text: "42", caseSensitive: true }],
+        },
+      ],
+    });
+    const run = sampleRun({ suite });
+    store.runStarted({ run });
+    await runner.tick();
+    chat.finish(threadOf(String(run.cells[0]!.cellId)), `${"a".repeat(40)}!`);
+    chat.finish(threadOf(String(run.cells[1]!.cellId)), "42");
+    const began = Date.now();
+
+    await runner.tick();
+
+    expect(Date.now() - began).toBeLessThan(2_000);
+    const cells = projection.run(benchmarkIds.run)!.cells;
+    expect(cells[0]).toMatchObject({
+      state: "answered",
+      checks: [{ index: 0, passed: false, detail: "pattern took too long" }],
+    });
+    expect(cells[1]).toMatchObject({ state: "answered", checks: [{ index: 0, passed: true }] });
+  });
+
+  it("archives the threads of settled cells again when the host starts, including a cell that never recorded its thread", async () => {
+    const { store, chat, runner } = setup();
+    const run = sampleRun();
+    store.runStarted({ run });
+    store.cellSettled({
+      runId: run.runId,
+      cellId: run.cells[0]!.cellId,
+      state: "failed",
+      failureReason: "refused",
+      checks: [],
+      settledAt: BENCHMARK_TEST_NOW as never,
+    });
+
+    const stop = runner.start();
+    await runner.tick();
+    stop();
+
+    expect(chat.archived).toContain(threadOf(String(run.cells[0]!.cellId)));
+    expect(chat.archived).not.toContain(threadOf(String(run.cells[1]!.cellId)));
+  });
+
+  it("counts each cell started in a pass once when it projects the budget", async () => {
+    const { store, chat, runner, projection, metrics } = setup();
+    const run = sampleRun({ repetitions: 2, budget: { maxTokens: 400 } });
+    store.runStarted({ run });
+    await runner.tick();
+    for (const cell of run.cells.slice(0, 2)) {
+      const thread = threadOf(String(cell.cellId));
+      metrics.set(thread, [record(thread, 100)]);
+      chat.finish(thread, "hello");
+    }
+
+    await runner.tick();
+
+    // 200 tokens spent over 2 cells, 100 each: two more cells project to 300 and 400, within 400.
+    const cells = projection.run(benchmarkIds.run)!.cells;
+    expect(cells.slice(2).map((cell) => cell.state)).toEqual(["running", "running"]);
+    expect(chat.starts).toHaveLength(4);
+  });
+
+  it("puts a cell back to queued when Chat had no capacity for its attempt, then retries it on its own turn", async () => {
+    const { store, chat, runner, projection } = setup();
+    const run = sampleRun();
+    store.runStarted({ run });
+    await runner.tick();
+    const thread = threadOf(String(run.cells[0]!.cellId));
+    const turn = chat.turns.get(thread)!;
+    turn.outcome = "interrupted";
+    turn.failureCode = "capacity-unavailable";
+    turn.failureMessage = "Waited for a free request slot.";
+
+    await runner.tick();
+
+    const requeued = projection.run(benchmarkIds.run)!.cells[0]!;
+    expect(requeued.state).toBe("queued");
+    expect(requeued.failureReason).toBeUndefined();
+    expect(chat.starts).toHaveLength(2);
+
+    await runner.tick();
+
+    expect(projection.run(benchmarkIds.run)!.cells[0]?.state).toBe("running");
+    expect(chat.starts).toHaveLength(3);
+  });
+
+  it("still fails a cell Chat interrupted for another reason, such as a spend ceiling", async () => {
+    const { store, chat, runner, projection } = setup();
+    const run = sampleRun();
+    store.runStarted({ run });
+    await runner.tick();
+    const turn = chat.turns.get(threadOf(String(run.cells[0]!.cellId)))!;
+    turn.outcome = "interrupted";
+    turn.failureCode = "spend-ceiling-exhausted";
+    turn.failureMessage = "The Project spend ceiling is reached.";
+
+    await runner.tick();
+
+    expect(projection.run(benchmarkIds.run)!.cells[0]).toMatchObject({
+      state: "failed",
+      failureReason: "The Project spend ceiling is reached.",
+    });
   });
 });
