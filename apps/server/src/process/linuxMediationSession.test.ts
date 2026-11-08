@@ -68,6 +68,7 @@ function worker(write: (callback: (error?: Error | null) => void) => void) {
     },
   });
   return Object.assign(child, {
+    control,
     pid: 1001,
     stdin,
     stdout,
@@ -170,6 +171,83 @@ describe("owned mediation session admission and input", () => {
       status: "unavailable",
       reason: "native-unavailable",
     });
+  });
+  it("bounds accepted input during backpressure and settles it uncertain on owner loss without replay", async () => {
+    const owner = new AbortController();
+    const held: Array<(error?: Error | null) => void> = [];
+    const write = vi.fn((done: (error?: Error | null) => void) => {
+      held.push(done);
+    });
+    fixture.spawn.mockReturnValue(worker(write));
+    const prepared = await prepareLinuxMediationSession(input(owner.signal));
+    if (prepared.status !== "ready") throw new Error("Session unavailable");
+    try {
+      expect(await prepared.session.launch()).toEqual({ status: "released" });
+      const drains: Array<Promise<{ readonly status: "drained" | "uncertain" }>> = [];
+      for (let index = 0; index < 4; index++) {
+        const accepted = prepared.session.writeInput(Buffer.alloc(65_536, index));
+        expect(accepted.status).toBe("accepted");
+        if (accepted.status !== "accepted") throw new Error("Input was not accepted.");
+        drains.push(accepted.drained);
+      }
+      expect(prepared.session.writeInput(Buffer.from("over the pending byte bound"))).toEqual({
+        status: "refused",
+      });
+      expect(write).toHaveBeenCalledOnce();
+      owner.abort();
+      expect(await Promise.all(drains)).toEqual(
+        Array.from({ length: 4 }, () => ({ status: "uncertain" })),
+      );
+      expect((await prepared.session.exited).result).toEqual({
+        status: "unavailable",
+        reason: "cancelled",
+      });
+      expect(prepared.session.writeInput(Buffer.from("after owner loss"))).toEqual({
+        status: "refused",
+      });
+      for (const callback of held) callback();
+      await new Promise((resolve) => setImmediate(resolve));
+      expect(write).toHaveBeenCalledOnce();
+    } finally {
+      await prepared.session.close();
+    }
+  });
+  it("never releases execution when the owner cancels during command ownership acquisition", async () => {
+    const owner = new AbortController();
+    let release = () => {},
+      entered = () => {};
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const commandRequested = new Promise<void>((resolve) => {
+      entered = resolve;
+    });
+    fixture.receipt.mockImplementation(async (_options: unknown, _owner: string, pid: number) => {
+      if (pid === 1003) entered();
+      return { ready: pid === 1003 ? gate : Promise.resolve(), remove: async () => undefined };
+    });
+    const child = worker((done) => done());
+    const sent = vi.spyOn(child.control, "write");
+    fixture.spawn.mockReturnValue(child);
+    const prepared = await prepareLinuxMediationSession(input(owner.signal));
+    if (prepared.status !== "ready") throw new Error("Session unavailable");
+    try {
+      const launching = prepared.session.launch();
+      await commandRequested;
+      expect(sent.mock.calls.some(([frame]) => frame === "E")).toBe(false);
+      owner.abort();
+      expect(await launching).toEqual({ status: "refused" });
+      release();
+      expect(await prepared.session.exited).toEqual({
+        result: { status: "unavailable", reason: "cancelled" },
+        cleanup: "confirmed",
+      });
+      expect(sent.mock.calls.some(([frame]) => frame === "E")).toBe(false);
+      expect(fixture.dead.has(1003)).toBe(true);
+    } finally {
+      release();
+      await prepared.session.close();
+    }
   });
   it("retains cleanup uncertainty when a pending identity acquisition fails during shutdown", async () => {
     const owner = new AbortController();
