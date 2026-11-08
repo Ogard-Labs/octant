@@ -7,6 +7,8 @@ on:
       - packages/host-runtime/native/windows-host-owner/**
       - packages/host-runtime/src/windowsHostOwner*
       - packages/host-runtime/src/windowsHostProfile*
+      - packages/host-runtime/src/windowsServerIdentity*
+      - apps/server/src/remote/privateListenerHostIdentity*
       - packages/host-runtime/src/ownerControlProtocol.ts
       - packages/host-runtime/src/owner.ts
       - packages/host-runtime/src/ownerReceipt.ts
@@ -63,6 +65,10 @@ jobs:
           Copy-Item scripts/windows-host-owner/fixtures.ps1 "$env:RUNNER_TEMP/owner-fixtures.ps1"
           bun build scripts/windows-host-owner/profile.ts --target=node --outfile "$env:RUNNER_TEMP/profile-smoke.mjs"
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Bundle the actual server identity consumer
+        run: |
+          bun build scripts/windows-host-owner/server-identity.ts --target=node --outfile "$env:RUNNER_TEMP/server-identity-smoke.mjs"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - name: Prove the native Bun owner and client
         run: |
           bun scripts/windows-host-owner/run.ts (Get-Command bun).Source "$env:RUNNER_TEMP/owner-smoke.mjs" "$env:RUNNER_TEMP/owner-build/Release/octant-windows-host-owner.node" "$env:RUNNER_TEMP/owner-build/Release/octant-windows-owner-reader.exe"
@@ -98,6 +104,10 @@ jobs:
       - name: Prove private persistent profiles and actual scoped owner consumers
         run: |
           bun scripts/windows-host-owner/profile-run.ts "$env:RUNNER_TEMP/owner-build/Release/octant-windows-owner-reader.exe" "$env:RUNNER_TEMP/owner-build/Release/octant-windows-host-owner.node" "$env:RUNNER_TEMP/profile-smoke.mjs" (Get-Command bun).Source (Get-Command node).Source "$pwd/node_modules/electron/dist/electron.exe"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Prove fixed private server identity files in all three runtimes
+        run: |
+          bun scripts/windows-host-owner/profile-run.ts --server-identity "$env:RUNNER_TEMP/owner-build/Release/octant-windows-owner-reader.exe" "$env:RUNNER_TEMP/owner-build/Release/octant-windows-host-owner.node" "$env:RUNNER_TEMP/server-identity-smoke.mjs" (Get-Command bun).Source (Get-Command node).Source "$pwd/node_modules/electron/dist/electron.exe"
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - uses: actions/upload-artifact@v4
         with:

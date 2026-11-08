@@ -291,3 +291,11 @@ export {
   type GithubActionsRepository,
   type GithubActionsCompletedRun,
 } from "./githubActionsSource";
+
+export {
+  createWindowsServerIdentityFiles,
+  type WindowsServerIdentityFiles,
+  type WindowsServerIdentityNative,
+  type ServerIdentityFile,
+  type ServerIdentityFileRead,
+} from "./windowsServerIdentity";

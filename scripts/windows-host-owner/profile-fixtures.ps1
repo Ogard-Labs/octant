@@ -3,7 +3,7 @@ param(
   [ValidateSet('octant', 'nightly-test-data')]
   [string]$Profile,
   [Parameter(Mandatory = $true)]
-  [ValidateSet('inspect', 'unsafe', 'restore', 'prepare-data')]
+  [ValidateSet('inspect', 'unsafe', 'restore', 'prepare-data', 'identity-inspect', 'identity-unsafe', 'identity-restore')]
   [string]$Mode
 )
 $ErrorActionPreference = 'Stop'
@@ -13,6 +13,38 @@ if (-not $octantNode.PSIsContainer -or ($octantNode.Attributes -band [IO.FileAtt
 $octantUser = [Security.Principal.WindowsIdentity]::GetCurrent().User
 $octantAcl = [Security.AccessControl.DirectorySecurity]::new($octantRoot, [Security.AccessControl.AccessControlSections]::Access -bor [Security.AccessControl.AccessControlSections]::Owner)
 if ($octantAcl.GetOwner([Security.Principal.SecurityIdentifier]).Value -ne $octantUser.Value) { throw 'Profile fixture has another owner' }
+if ($Mode.StartsWith('identity-')) {
+  foreach ($octantFile in @('private-listener-host-id', 'private-listener-host-key.pem')) {
+    $octantFilePath = Join-Path $octantRoot "data\remote\$octantFile"
+    $octantFileEntry = Get-Item -LiteralPath $octantFilePath -Force
+    if ($octantFileEntry.PSIsContainer -or ($octantFileEntry.Attributes -band [IO.FileAttributes]::ReparsePoint)) { throw 'Unsafe owned identity fixture file' }
+    $octantFileAccess = [Security.AccessControl.FileSecurity]::new($octantFilePath, [Security.AccessControl.AccessControlSections]::Access -bor [Security.AccessControl.AccessControlSections]::Owner)
+    if ($octantFileAccess.GetOwner([Security.Principal.SecurityIdentifier]).Value -ne $octantUser.Value) { throw 'Identity fixture has another owner' }
+    if ($Mode -eq 'identity-inspect') {
+      $octantFileRules = @($octantFileAccess.GetAccessRules($true, $true, [Security.Principal.SecurityIdentifier]))
+      if (-not $octantFileAccess.AreAccessRulesProtected -or $octantFileRules.Count -ne 2) { throw 'Identity file DACL is not private' }
+      $octantFileSids = @()
+      foreach ($octantRule in $octantFileRules) {
+        if ($octantRule.IsInherited -or $octantRule.AccessControlType -ne [Security.AccessControl.AccessControlType]::Allow -or $octantRule.FileSystemRights -ne [Security.AccessControl.FileSystemRights]::FullControl -or [int]$octantRule.InheritanceFlags -ne 0 -or [int]$octantRule.PropagationFlags -ne 0) { throw 'Unexpected identity file grant' }
+        $octantFileSids += $octantRule.IdentityReference.Value
+      }
+      if ($octantFileSids -notcontains $octantUser.Value -or $octantFileSids -notcontains 'S-1-5-18') { throw 'Identity file grants another principal' }
+    } elseif ($octantFile -eq 'private-listener-host-key.pem') {
+      if ($Mode -eq 'identity-unsafe') {
+        $octantFileAccess.AddAccessRule([Security.AccessControl.FileSystemAccessRule]::new([Security.Principal.SecurityIdentifier]::new('S-1-1-0'), [Security.AccessControl.FileSystemRights]::Read, [Security.AccessControl.AccessControlType]::Allow))
+      } else {
+        foreach ($octantRule in @($octantFileAccess.GetAccessRules($true, $false, [Security.Principal.SecurityIdentifier]))) { [void]$octantFileAccess.RemoveAccessRuleSpecific($octantRule) }
+        $octantFileAccess.SetAccessRuleProtection($true, $false)
+        foreach ($octantSid in @($octantUser, [Security.Principal.SecurityIdentifier]::new('S-1-5-18'))) {
+          $octantFileAccess.AddAccessRule([Security.AccessControl.FileSystemAccessRule]::new($octantSid, [Security.AccessControl.FileSystemRights]::FullControl, [Security.AccessControl.AccessControlType]::Allow))
+        }
+      }
+      [IO.File]::SetAccessControl($octantFilePath, $octantFileAccess)
+    }
+  }
+  Write-Output '{"ownedIdentityFileOwnerAndDaclVerified":true}'
+  exit 0
+}
 if ($Mode -eq 'prepare-data') {
   $octantData = Join-Path $octantRoot 'data'
   if (Test-Path -LiteralPath $octantData) { throw 'Owned replacement must be absent before creation' }

@@ -1,3 +1,4 @@
+import type { WindowsServerIdentityFiles } from "@octant/host-runtime";
 import type { DesktopComputerUsePort } from "../computerUse/desktopComputerUsePort";
 import type { ProviderInstance } from "@octant/contracts";
 import { Data, Effect } from "effect";
@@ -118,6 +119,8 @@ export class ServerStartupFailed extends Data.TaggedError("ServerStartupFailed")
 export interface StartOctantServerOptions {
   readonly hostname: string;
   readonly port: number;
+  /** Internal native-profile storage; absent until Windows host composition supplies it. */
+  readonly serverIdentityFiles?: WindowsServerIdentityFiles;
   readonly instanceId?: string;
   readonly hostId?: string;
   readonly controlEndpoint?: string;

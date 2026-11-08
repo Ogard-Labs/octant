@@ -236,6 +236,29 @@ the CLI. The hub depends on that:
     Credentials held only in a login-bound store, such as a provider app's own
     sign-in, are unavailable until someone logs in, and the hub says which
     ones.
+    The Windows server/member identity prerequisite uses only the native-held
+    closed profile data root and the fixed `remote/private-listener-host-id`
+    and `remote/private-listener-host-key.pem` records. Each read/create
+    revalidates the native known-folder path, profile/control UUID and physical
+    profile/data identities, and exact current-user ownership plus private
+    user-and-SYSTEM DACLs. Reparse points, hardlinks, nonregular files and
+    malformed/oversized records refuse without replacement. The fallback host
+    UUID is separate from the profile/control UUID; an existing journaled host
+    identity and display name retain precedence. The signing contract remains
+    P-256 with SHA-256 over SPKI for its fingerprint and SHA-256/P1363 payload
+    signatures. Private bytes cross only the internal native-storage boundary,
+    never a public signing API, response, error, journal, argument or environment.
+    Key records are capped at 4 KiB; the UUID record is at most 37 UTF-8 bytes.
+    Creation is exclusive and flushed before use; a competing creation refuses
+    or reads the existing winner, never overwrites it. A partial/corrupt record
+    is unavailable and needs explicit recovery; neither restart nor a read
+    silently rotates identity. The remote directory and each admitted record
+    stay held against rename/write until actual process exit. Reading existing
+    push signing never provisions a key or fallback identity. Missing native
+    storage refuses instead of using Windows mode bits as access control.
+    This internal prerequisite does not admit Windows desktop/server startup;
+    roster/TLS/other hub storage, encrypted-disk setup checks and the boot
+    service remain separate composition and acceptance work.
   - **The machine itself.** The hub's setup turns on starting up after a
     power failure where the platform allows it, and explains what full-disk
     encryption asks at boot. FileVault, and LUKS with a passphrase, ask for a
