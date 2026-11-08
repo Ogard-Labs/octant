@@ -97,7 +97,7 @@ import { createThreadMoveAdministrationRouteHandler } from "../hub/threadMoveAdm
 import { ThreadMoveService } from "../hub/threadMoveService";
 import { createThreadMoveSenders } from "../hub/threadMoveSenders";
 import { createThreadMoveTicketClient } from "../hub/threadMoveTicketClient";
-import { ThreadMovesFromWindow } from "../hub/threadMovesFromWindow";
+import { hostThreads, ThreadMovesFromWindow } from "../hub/threadMovesFromWindow";
 import type { ThreadMoveStatePort } from "../hub/threadMoveStateStore";
 import type { ChatService } from "../chat/chatService";
 import { OwnerUnlockService } from "../hub/ownerUnlock";
@@ -1243,26 +1243,11 @@ export function wireRemote(deps: RemoteDependencies) {
       const projectNames = new Map(
         persistence.readProjects().map((project) => [String(project.id), project.name]),
       );
-      const listed = [
-        ...persistence.readChatThreads().map((thread) => ({
-          thread: { mode: "chat" as const, threadId: String(thread.id) },
-          title: thread.title,
-          projectId: thread.projectId === undefined ? undefined : String(thread.projectId),
-          open: thread.lifecycle === "active",
-        })),
-        ...persistence.readCodeThreads().map((thread) => ({
-          thread: { mode: "code" as const, threadId: String(thread.id) },
-          title: thread.title,
-          projectId: String(thread.projectId),
-          open: thread.lifecycle !== "archived",
-        })),
-        ...workThreadProjection.list().map((thread) => ({
-          thread: { mode: "work" as const, threadId: String(thread.id) },
-          title: thread.title,
-          projectId: String(thread.projectId),
-          open: thread.lifecycle === "active" && thread.completionConfirmed !== true,
-        })),
-      ];
+      const listed = hostThreads({
+        chat: persistence.readChatThreads(),
+        code: persistence.readCodeThreads(),
+        work: workThreadProjection.list(),
+      });
       const facts = await Promise.all(
         listed.map(async (entry) => {
           const reading = await byMode.source.read(entry.thread);

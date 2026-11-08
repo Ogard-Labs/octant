@@ -76,6 +76,95 @@ export interface ShutdownThreadFacts {
   readonly repositoryRemotes: ReadonlyArray<string>;
 }
 
+/** A thread as its mode's projection records it, as far as Prepare to shut down reads it. */
+interface RecordedThread {
+  readonly id: unknown;
+  readonly title: string;
+  readonly completedAt?: string | undefined;
+}
+
+/** One thread on this host before its own host is asked whether it is busy. */
+export interface HostThread {
+  readonly thread: MovedThreadReference;
+  readonly title: string;
+  readonly projectId: string | undefined;
+  /** Not completed, archived, or being deleted, as its own mode records that. */
+  readonly open: boolean;
+}
+
+/**
+ * Every Chat, Code and Work thread on this host, with whether it is open.
+ * Putting a thread away as completed sets `completedAt` and leaves its
+ * lifecycle active in every mode, so the lifecycle alone would list a
+ * completed thread as open and preselect it to move.
+ */
+export function hostThreads(input: {
+  readonly chat: ReadonlyArray<
+    RecordedThread & {
+      readonly projectId?: unknown;
+      readonly lifecycle: "active" | "archived" | "deleting" | "deleted";
+    }
+  >;
+  readonly code: ReadonlyArray<
+    RecordedThread & {
+      readonly projectId: unknown;
+      readonly lifecycle: "active" | "archived" | "waiting" | "interrupted";
+    }
+  >;
+  readonly work: ReadonlyArray<
+    RecordedThread & {
+      readonly projectId: unknown;
+      readonly lifecycle: "active" | "archived" | "deleting" | "deleted";
+      readonly completionConfirmed?: boolean | undefined;
+    }
+  >;
+}): ReadonlyArray<HostThread> {
+  return [
+    ...input.chat.map((thread) => ({
+      thread: { mode: "chat" as const, threadId: String(thread.id) },
+      title: thread.title,
+      projectId: thread.projectId === undefined ? undefined : String(thread.projectId),
+      open: thread.lifecycle === "active" && thread.completedAt === undefined,
+    })),
+    ...input.code.map((thread) => ({
+      thread: { mode: "code" as const, threadId: String(thread.id) },
+      title: thread.title,
+      projectId: String(thread.projectId),
+      open: thread.lifecycle !== "archived" && thread.completedAt === undefined,
+    })),
+    ...input.work.map((thread) => ({
+      thread: { mode: "work" as const, threadId: String(thread.id) },
+      title: thread.title,
+      projectId: String(thread.projectId),
+      open:
+        thread.lifecycle === "active" &&
+        thread.completionConfirmed !== true &&
+        thread.completedAt === undefined,
+    })),
+  ];
+}
+
+/** The longest title or Project name a listing row carries. */
+const LISTING_TEXT_MAX = 256;
+
+/**
+ * A thread's own title has no length limit and may keep surrounding spaces,
+ * and the window decodes the listing as a whole, so one such title would keep
+ * every other thread from being listed. The row carries it trimmed and
+ * shortened, never split inside a character.
+ */
+export function shortenedForListing(text: string): string {
+  const trimmed = text.trim();
+  if (trimmed === "") return "Untitled thread";
+  if (trimmed.length <= LISTING_TEXT_MAX) return trimmed;
+  let shortened = "";
+  for (const character of trimmed) {
+    if (shortened.length + character.length > LISTING_TEXT_MAX - 1) break;
+    shortened += character;
+  }
+  return `${shortened.trimEnd()}…`;
+}
+
 interface Waiting {
   readonly destinationMemberId: HubMemberId;
   readonly timer: ReturnType<typeof setInterval>;
@@ -219,8 +308,10 @@ export class ThreadMovesFromWindow {
       );
     const rows: ShutdownThreadRow[] = facts.map((entry) => ({
       thread: entry.thread,
-      title: entry.title,
-      ...(entry.projectName === undefined ? {} : { projectName: entry.projectName }),
+      title: shortenedForListing(entry.title),
+      ...(entry.projectName === undefined
+        ? {}
+        : { projectName: shortenedForListing(entry.projectName) }),
       busy: entry.busy,
       older:
         shutdownListing({

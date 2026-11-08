@@ -2,10 +2,10 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import type { MovedThreadReference } from "@octant/contracts";
+import { decodeShutdownListing, type MovedThreadReference } from "@octant/contracts";
 import type { MovableThreadReading } from "./threadMoveService";
 import { createThreadMoveStateStore } from "./threadMoveStateStore";
-import { ThreadMovesFromWindow } from "./threadMovesFromWindow";
+import { hostThreads, shortenedForListing, ThreadMovesFromWindow } from "./threadMovesFromWindow";
 
 const THREAD: MovedThreadReference = {
   mode: "code",
@@ -80,5 +80,61 @@ describe("moving a thread after its turn", () => {
 
     expect(start).not.toHaveBeenCalled();
     moves.close();
+  });
+});
+
+describe("which threads Prepare to shut down lists", () => {
+  const PROJECT = "44444444-4444-4444-8444-444444444444";
+  const DONE_AT = "2026-11-08T09:00:00.000Z";
+
+  it("counts a thread put away as completed as closed, in every mode", () => {
+    const listed = hostThreads({
+      chat: [
+        { id: "c-open", title: "Plan the trip", lifecycle: "active" },
+        { id: "c-done", title: "Booked", lifecycle: "active", completedAt: DONE_AT },
+      ],
+      code: [
+        { id: "k-open", title: "Add dark mode", projectId: PROJECT, lifecycle: "waiting" },
+        {
+          id: "k-done",
+          title: "Fix the build",
+          projectId: PROJECT,
+          lifecycle: "active",
+          completedAt: DONE_AT,
+        },
+      ],
+      work: [
+        { id: "w-open", title: "Weekly digest", projectId: PROJECT, lifecycle: "active" },
+        {
+          id: "w-done",
+          title: "Quarterly report",
+          projectId: PROJECT,
+          lifecycle: "active",
+          completedAt: DONE_AT,
+        },
+      ],
+    });
+
+    expect(listed.filter((entry) => entry.open).map((entry) => entry.thread.threadId)).toEqual([
+      "c-open",
+      "k-open",
+      "w-open",
+    ]);
+  });
+
+  it("lists a thread whose own title is longer than a listing row allows", () => {
+    const title = `  ${"A very long title ".repeat(30)}😀 end  `;
+    const shortened = shortenedForListing(title);
+
+    expect(shortened.length).toBeLessThanOrEqual(256);
+    expect(shortened.endsWith("…")).toBe(true);
+    expect(shortenedForListing("   ")).toBe("Untitled thread");
+    expect(
+      decodeShutdownListing({
+        status: "listed",
+        members: [],
+        rows: [{ thread: THREAD, title: shortened, busy: false, older: false, placements: [] }],
+      }).rows[0]?.title,
+    ).toBe(shortened);
   });
 });
