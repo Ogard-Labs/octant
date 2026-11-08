@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process";
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, statSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -49,6 +49,43 @@ function repositories() {
 const show = (cwd: string, object: string) => git(cwd, "show", object);
 
 describe("carrying a Code checkout between computers", () => {
+  it("keeps an edit made in the same second as the staging, which a copied index would miss", async () => {
+    const { laptop, desktop } = repositories();
+    const file = join(laptop, "app.ts");
+    writeFileSync(file, "export const version = 3;\n");
+    git(laptop, "add", "app.ts");
+    const staged = statSync(file);
+    writeFileSync(file, "export const version = 4;\n");
+    // Same size and the staged timestamp, as an edit within the same second
+    // has; Git compares whole seconds. A second later the checkout's index
+    // reads as older than nothing in it, so a copy of it trusts the stamp.
+    utimesSync(file, staged.atime, staged.mtime);
+    await new Promise((resolve) => setTimeout(resolve, 1_100));
+    const bundlePath = join(laptop, "..", "same-second.bundle");
+
+    await captureCheckoutForMove({ checkoutRoot: laptop, moveId: MOVE, bundlePath });
+    const received = await receiveCheckoutFromMove({
+      repositoryRoot: desktop,
+      moveId: MOVE,
+      bundlePath,
+    });
+    if (received.status !== "received") throw new Error("The bundle was refused.");
+    expect(show(desktop, `${received.checkout.worktreeTree}:app.ts`)).toBe(
+      "export const version = 4;",
+    );
+    expect((await checkoutStillMatchesMove({ checkoutRoot: laptop, moveId: MOVE })).matches).toBe(
+      true,
+    );
+
+    // An edit after the snapshot, with the same size and stamp, is still an
+    // edit the move did not carry: the worktree must be kept.
+    writeFileSync(file, "export const version = 5;\n");
+    utimesSync(file, staged.atime, staged.mtime);
+    expect((await checkoutStillMatchesMove({ checkoutRoot: laptop, moveId: MOVE })).matches).toBe(
+      false,
+    );
+  });
+
   it("carries unpushed commits, staged and unstaged versions apart, and untracked files, but never ignored files", async () => {
     const { laptop, desktop } = repositories();
     writeFileSync(join(laptop, "app.ts"), "export const version = 2;\n");
