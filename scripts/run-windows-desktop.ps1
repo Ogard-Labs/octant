@@ -77,20 +77,34 @@ try {
             [regex]::Matches($octantArguments, '"[^"]*"|\S+') |
               ForEach-Object { $_.Value }
           )
-          $octantArgumentImageSpellings = @()
-          foreach ($octantArgumentPath in $octantPathSpellings) {
-            $octantArgumentImageSpellings += $octantArgumentPath
-            $octantArgumentImageSpellings += ('"' + $octantArgumentPath + '"')
-          }
-          if (
-            $octantArgumentTokens.Count -eq 4 -and
-            $octantArgumentImageSpellings -icontains [string]$octantArgumentTokens[0] -and
-            $octantArgumentTokens[1] -ceq '"%1"' -and
-            $octantArgumentImageSpellings -icontains [string]$octantArgumentTokens[2] -and
-            $octantArgumentTokens[3] -ceq '"%1"'
-          ) {
-            $octantOwnedCommand = $true
-            break
+          if ($octantArgumentTokens.Count -eq 4) {
+            $octantArgumentPathOne = [string]$octantArgumentTokens[0]
+            $octantArgumentPathTwo = [string]$octantArgumentTokens[2]
+            if ($octantArgumentPathOne.StartsWith('"') -and $octantArgumentPathOne.EndsWith('"')) {
+              $octantArgumentPathOne = $octantArgumentPathOne.Substring(1, $octantArgumentPathOne.Length - 2)
+            }
+            if ($octantArgumentPathTwo.StartsWith('"') -and $octantArgumentPathTwo.EndsWith('"')) {
+              $octantArgumentPathTwo = $octantArgumentPathTwo.Substring(1, $octantArgumentPathTwo.Length - 2)
+            }
+            $octantArgumentPathOneIsOwned = $false
+            $octantArgumentPathTwoIsOwned = $false
+            foreach ($octantArgumentPath in $octantPathSpellings) {
+              if ([string]::Equals($octantArgumentPath, $octantArgumentPathOne, [StringComparison]::OrdinalIgnoreCase)) {
+                $octantArgumentPathOneIsOwned = $true
+              }
+              if ([string]::Equals($octantArgumentPath, $octantArgumentPathTwo, [StringComparison]::OrdinalIgnoreCase)) {
+                $octantArgumentPathTwoIsOwned = $true
+              }
+            }
+            if (
+              $octantArgumentPathOneIsOwned -and
+              $octantArgumentTokens[1] -ceq '"%1"' -and
+              $octantArgumentPathTwoIsOwned -and
+              $octantArgumentTokens[3] -ceq '"%1"'
+            ) {
+              $octantOwnedCommand = $true
+              break
+            }
           }
         }
         if ($octantOwnedCommand) { break }
