@@ -8919,6 +8919,10 @@ MCP session. Loaded instructions are capped at 32,000 characters per call; a
 cut says how much was left out and the offset that continues. Skills selected
 or pinned for the turn are already in context, and the tool description says so.
 A Side Chat and a child run are not offered it.
+Rationale: a loaded skill does not mark the thread as having read outside
+content, exactly as a selected skill does not, because only a skill a person
+already enabled and trusted through the activation ladder can be loaded. A skill
+that is not yet effective for the thread is refused and never reaches the model.
 
 - Executable components are quarantined until explicitly reviewed and then run
   in supervised, sandboxed processes with a ready handshake, bounded output,
