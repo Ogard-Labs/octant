@@ -812,6 +812,8 @@ if mode == "picker-metadata" || mode == "picker-location-prompt" || (fixesOwnedF
                             down.post(tap: .cghidEventTap); up.post(tap: .cghidEventTap)
                             promptDispatched = true
                             locationPrompt["status"] = "dispatched-observation-unconfirmed"
+                            // Let the presented sheet establish its initial focus ancestry.
+                            Thread.sleep(forTimeInterval: min(0.2, max(0, deadline.timeIntervalSinceNow)))
                             var firstChangedChainRecorded = false
                             while Date() < deadline, errors == priorErrors, identitiesUnchanged() {
                                 let observedFocus = focusInSheet()
