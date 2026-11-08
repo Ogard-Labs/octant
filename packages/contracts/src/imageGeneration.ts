@@ -1,5 +1,6 @@
 import { Schema } from "effect";
 import { AggregateVersion, UtcTimestamp } from "./events";
+import { personDecides } from "./hostAnswer";
 import {
   GeminiImageAspectRatio,
   GeminiImageResolution,
@@ -314,6 +315,112 @@ export const ImageGenerationSaveResult = Schema.Union(
   }).annotations(strict),
 );
 export type ImageGenerationSaveResult = typeof ImageGenerationSaveResult.Type;
+
+export const ImageGenerationOfferId = brandedUuid("ImageGenerationOfferId");
+export type ImageGenerationOfferId = typeof ImageGenerationOfferId.Type;
+
+export const MAX_PENDING_IMAGE_GENERATION_OFFERS = 32;
+
+/**
+ * An agent asking, in its thread, to generate an image with a configured
+ * image model instead of drawing it itself. Nothing is spent until the person
+ * answers: they pick the profile and model, may let the agent draw it after
+ * all, or may say not to ask again in this thread. `suggested` is what the
+ * card preselects; the person's choice is what runs.
+ */
+export const ImageGenerationGenerateOffer = Schema.Struct({
+  offerId: ImageGenerationOfferId,
+  kind: Schema.Literal("generate"),
+  threadKind: Schema.Literal("chat-thread", "work-thread", "code-thread"),
+  scopeId: ImageGenerationScopeId,
+  prompt: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(MAX_IMAGE_PROMPT_CHARACTERS)),
+  variantCount: PositiveInt.pipe(Schema.lessThanOrEqualTo(MAX_IMAGE_VARIANTS)),
+  /** The agent asked to revise an image this thread already generated. */
+  revision: Schema.Boolean,
+  suggested: Schema.Struct({
+    profileInstanceId: ProviderInstanceId,
+    modelId: ProviderModelId,
+  }).annotations(strict),
+  requestedAt: UtcTimestamp,
+}).annotations(strict);
+export type ImageGenerationGenerateOffer = typeof ImageGenerationGenerateOffer.Type;
+
+/**
+ * An agent asking, in a Work or Code thread whose level asks before edits, to
+ * save an image this thread generated as a new file under the folder its turn
+ * works in. The path is relative to that folder; the host confines it there
+ * and never overwrites a file.
+ */
+export const ImageGenerationSaveOffer = Schema.Struct({
+  offerId: ImageGenerationOfferId,
+  kind: Schema.Literal("save"),
+  threadKind: Schema.Literal("work-thread", "code-thread"),
+  scopeId: ImageGenerationScopeId,
+  jobId: ImageJobId,
+  attachmentId: ImageArtifactId,
+  relativePath: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(512)),
+  requestedAt: UtcTimestamp,
+}).annotations(strict);
+export type ImageGenerationSaveOffer = typeof ImageGenerationSaveOffer.Type;
+
+export const ImageGenerationOffer = Schema.Union(
+  ImageGenerationGenerateOffer,
+  ImageGenerationSaveOffer,
+).annotations(personDecides);
+export type ImageGenerationOffer = typeof ImageGenerationOffer.Type;
+
+export const ImageGenerationOffersResponse = Schema.Struct({
+  offers: Schema.Array(ImageGenerationOffer).pipe(
+    Schema.maxItems(MAX_PENDING_IMAGE_GENERATION_OFFERS),
+  ),
+}).annotations(strict);
+export type ImageGenerationOffersResponse = typeof ImageGenerationOffersResponse.Type;
+
+/**
+ * The person's answer. `generate` names the profile and model they chose and
+ * whether this thread may generate with that choice from now on without
+ * asking; `agent-draws` lets the agent make the visual with its own output;
+ * `save` writes the image a save offer names; `cancel` does nothing.
+ */
+export const ImageGenerationOfferDecision = Schema.Union(
+  Schema.Struct({
+    offerId: ImageGenerationOfferId,
+    decision: Schema.Literal("generate"),
+    profileInstanceId: ProviderInstanceId,
+    modelId: ProviderModelId,
+    rememberForThread: Schema.Boolean,
+  }).annotations(strict),
+  Schema.Struct({
+    offerId: ImageGenerationOfferId,
+    /** `save` answers a save offer; `agent-draws` a generate offer; `cancel` either. */
+    decision: Schema.Literal("agent-draws", "save", "cancel"),
+  }).annotations(strict),
+);
+export type ImageGenerationOfferDecision = typeof ImageGenerationOfferDecision.Type;
+
+export const ImageGenerationOfferDecisionResult = Schema.Union(
+  Schema.Struct({ kind: Schema.Literal("image-offer-answered") }).annotations(strict),
+  /** The offer is no longer waiting: answered, expired, or its turn stopped. */
+  Schema.Struct({ kind: Schema.Literal("image-offer-gone") }).annotations(strict),
+  /** The chosen profile or model is not one this host can generate with now. */
+  Schema.Struct({
+    kind: Schema.Literal("image-offer-refused"),
+    reason: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(2_000)),
+  }).annotations(strict),
+);
+export type ImageGenerationOfferDecisionResult = typeof ImageGenerationOfferDecisionResult.Type;
+
+export const decodeImageGenerationOfferId = Schema.decodeUnknownSync(ImageGenerationOfferId);
+export const decodeImageGenerationOffer = Schema.decodeUnknownSync(ImageGenerationOffer);
+export const decodeImageGenerationOffersResponse = Schema.decodeUnknownSync(
+  ImageGenerationOffersResponse,
+);
+export const decodeImageGenerationOfferDecision = Schema.decodeUnknownSync(
+  ImageGenerationOfferDecision,
+);
+export const decodeImageGenerationOfferDecisionResult = Schema.decodeUnknownSync(
+  ImageGenerationOfferDecisionResult,
+);
 
 export const decodeImageGenerationProfileView = Schema.decodeUnknownSync(
   ImageGenerationProfileView,

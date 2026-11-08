@@ -1,4 +1,5 @@
 import { decodeThreadWorkingDirectory } from "@octant/contracts";
+import { THREAD_MOVING_REFUSAL } from "../hub/threadMoveHolds";
 import type { ConversationInputPolicy } from "@octant/contracts/conversation-inputs";
 import { projectExtraFolderRoots, unsupportedModelOptionValues } from "@octant/domain";
 import { guardrailLowered, permissionModeOf } from "@octant/domain/guardrail-policy";
@@ -643,6 +644,12 @@ export interface CodeServiceExecutionContext {
   readonly inheritedMark?: InheritedExternalContentMark;
   /** Host observer, called before the first worktree or thread-creation mutation. */
   readonly onCreationBoundary?: () => void;
+  /**
+   * The files a thread moved here from another computer starts from: the
+   * index and working-tree snapshots its move carried, already fetched into
+   * this clone. Host-resolved only, like a fork's files; no command carries it.
+   */
+  readonly movedFiles?: CodeForkFiles;
 }
 
 export interface CodeServiceOptions {
@@ -778,6 +785,8 @@ export interface CodeServiceOptions {
   }) => Promise<void>;
   readonly waitForThreadChange?: (signal: AbortSignal) => Promise<void>;
   readonly issueContext?: GithubIssueContextPort;
+  /** Whether a move holds a thread; a held thread takes no command. */
+  readonly moveHold?: (threadId: string) => boolean;
   readonly linearIssueContext?: LinearIssueContextPort;
   readonly terminalSessions?: TerminalSessionImportPort;
   /**
@@ -973,6 +982,7 @@ export class CodeService {
   readonly #liveTurns: LiveTurnRegistry | undefined;
   readonly #awaitsHarnessApproval: ((threadId: string) => boolean) | undefined;
   readonly #issueContext?: GithubIssueContextPort;
+  readonly #moveHold?: (threadId: string) => boolean;
   readonly #terminalSessions: TerminalSessionImportPort | undefined;
   readonly #linearIssueContext?: LinearIssueContextPort;
   /**
@@ -1027,6 +1037,9 @@ export class CodeService {
     this.#awaitsHarnessApproval = options.awaitsHarnessApproval;
     if (options.issueContext !== undefined) {
       this.#issueContext = options.issueContext;
+    }
+    if (options.moveHold !== undefined) {
+      this.#moveHold = options.moveHold;
     }
     this.#terminalSessions = options.terminalSessions;
     if (options.linearIssueContext !== undefined) {
@@ -1358,9 +1371,19 @@ export class CodeService {
       } catch {
         throw this.#failure("invalid", "Code command is invalid.");
       }
+      // A creation names a thread that does not exist yet, except the move's own
+      // arrival, which opens the planned thread it already holds.
+      if (
+        "threadId" in command &&
+        command.kind !== "create-managed-code-thread" &&
+        this.#moveHold?.(String(command.threadId)) === true
+      ) {
+        throw this.#failure("conflict", THREAD_MOVING_REFUSAL);
+      }
       // A fork is a managed creation whose start the host resolves itself, so
       // it runs every gate that creation runs, plus laying the files down.
-      let sourceFiles: CodeForkFiles | undefined;
+      let sourceFiles: CodeForkFiles | undefined =
+        command.kind === "create-managed-code-thread" ? executionContext?.movedFiles : undefined;
       if (command.kind === "fork-code-thread") {
         const fork = await this.#forkCreation(authenticatedWindowId, command);
         command = fork.command;

@@ -23,6 +23,19 @@ import type {
   DesktopRecipe,
   UtcTimestamp,
 } from "@octant/contracts";
+import type {
+  DesktopPreviewOpening,
+  DesktopPreviewOpened,
+  DesktopPreviewPrepared,
+} from "./desktopPreview";
+export type {
+  DesktopPreviewOpening,
+  DesktopPreviewOpened,
+  DesktopPreviewPrepared,
+  DesktopPreviewRelay,
+  DesktopPreviewRequest,
+  DesktopPreviewUpgrade,
+} from "./desktopPreview";
 
 export const DESKTOP_PROVIDER_CONTRIBUTION_KIND = "desktop-provider" as const;
 export type DesktopProviderContributionKind = typeof DESKTOP_PROVIDER_CONTRIBUTION_KIND;
@@ -225,6 +238,11 @@ export interface DesktopProvider {
   ) => Promise<DesktopListMachinesResult>;
   /** Whether the provider can be used on this host now. Performs no work. */
   readonly status: () => Promise<DesktopProviderStatusResult>;
+  /** Absent means this provider cannot expose the approved host port inside a lease. */
+  readonly openPreview?: (
+    handle: DesktopHandle,
+    input: DesktopPreviewOpening,
+  ) => Promise<DesktopPreviewOpened>;
   /** Creates one desktop tagged with the lease id and host tag. */
   readonly acquire: (request: DesktopAcquireRequest) => Promise<DesktopAcquireResult>;
   readonly extend: (handle: DesktopHandle, expiresAt: UtcTimestamp) => Promise<DesktopExtendResult>;
@@ -312,6 +330,11 @@ export type DesktopLaunchListResult =
  * remain. `deliver` is the only way a file reaches the desktop's inbox.
  */
 export interface DesktopLaunchPort {
+  /** One private IPC endpoint inside this lease; no host directory or loopback access is granted. */
+  readonly preparePreview?: (
+    leaseId: DesktopLeaseId,
+    input: DesktopPreviewOpening,
+  ) => Promise<DesktopPreviewPrepared>;
   /** Whether this host can run a desktop that needs `programs`. Performs no work. */
   readonly readiness: (programs: ReadonlyArray<string>) => DesktopProviderStatusResult;
   readonly launch: (request: DesktopLaunchRequest) => Promise<DesktopLaunchResult>;

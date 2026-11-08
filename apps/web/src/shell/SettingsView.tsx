@@ -116,6 +116,7 @@ import type { ProviderToolingClient } from "@octant/client-runtime/provider-tool
 import type { ShieldServersClient } from "@octant/client-runtime/shield-servers-client";
 import type { ServerProjectsClient } from "@octant/client-runtime/server-projects-client";
 import { ServerAccessSettings } from "../settings/ServerProjectsSettings";
+import { RemoteSetupGuide } from "../settings/RemoteSetupGuide";
 import type { ReplicaSyncStatusClient } from "@octant/client-runtime/replica-sync-status-client";
 import { AutomationNotificationSettings } from "../host/AutomationNotificationSettings";
 import { PhoneNotificationSettings } from "../host/PhoneNotificationSettings";
@@ -1277,22 +1278,46 @@ function ActiveSectionContent({
           </section>
         );
       const administration = remoteAccessAdministrationOf(props.hostBridge);
-      return administration !== undefined ? (
-        <RemoteAccessSettingsSection
-          bridge={administration}
-          hub={hubAdministrationOf(props.hostBridge)}
-          ownerUnlock={ownerUnlockOf(props.hostBridge)}
-          pairedComputers={pairedComputersOf(props.hostBridge)}
+      const setupGuide = (
+        <RemoteSetupGuide
+          canConfigureHost={administration !== undefined}
+          onContinue={(intent) =>
+            onApplyDeepLink(
+              intent === "control-host"
+                ? { section: "remote-access", setting: settingId("remote-listener") }
+                : {
+                    section: "access",
+                    setting: settingId(
+                      intent === "server-folder" ? "server-projects" : "shield-servers-add",
+                    ),
+                  },
+            )
+          }
         />
+      );
+      return administration !== undefined ? (
+        <div className="settings-section-stack">
+          {setupGuide}
+          <RemoteAccessSettingsSection
+            bridge={administration}
+            focusedSetting={focusedSetting}
+            hub={hubAdministrationOf(props.hostBridge)}
+            ownerUnlock={ownerUnlockOf(props.hostBridge)}
+            pairedComputers={pairedComputersOf(props.hostBridge)}
+          />
+        </div>
       ) : (
-        <section aria-label="Remote access" id="settings-remote-access">
-          <p>
-            Enabling the remote listener and pairing devices happen on the host machine, in the
-            Octant desktop app or with the <code>octant pair</code> and <code>octant auth</code>{" "}
-            commands.
-          </p>
-          <BrowserHubSection hubAdministration={hubAdministrationOf(props.hostBridge)} />
-        </section>
+        <div className="settings-section-stack">
+          {setupGuide}
+          <section aria-label="Remote access" id="settings-remote-access">
+            <p>
+              Enabling the remote listener and pairing devices happen on the host machine, in the
+              Octant desktop app or with the <code>octant pair</code> and <code>octant auth</code>{" "}
+              commands.
+            </p>
+            <BrowserHubSection hubAdministration={hubAdministrationOf(props.hostBridge)} />
+          </section>
+        </div>
       );
     }
     case "host": {

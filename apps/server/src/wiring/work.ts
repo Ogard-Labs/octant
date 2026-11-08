@@ -10,6 +10,7 @@ import {
   decodeCodeOperationId,
   decodeCodeThreadId,
   decodeContextSubjectRef,
+  decodeImageGenerationScopeId,
   decodeProviderSessionId,
   decodeThreadMessageQueueScope,
   decodeWindowId,
@@ -95,6 +96,8 @@ import {
   type WorkBoardRuntimeActivity,
 } from "../work/workThreadBoardService";
 import { createCanvasAgentTools } from "../canvas/canvasAgentTools";
+import { saveGeneratedImageUnder } from "../image/generatedImageSave";
+import { createThreadImageAgentTools } from "../image/imageAgentTools";
 import { combineAppManagedToolSets } from "../providers/appManagedToolSet";
 import { makeConfiguredProviderDriver, type ProvidersWiring } from "./providers";
 import { MAX_JSON_REQUEST_BODY_SIZE, type ServerStart } from "./serverShape";
@@ -122,6 +125,7 @@ export type WorkDependencies = Pick<ServerStart, "persistence"> &
     | "browserCaptures"
     | "browserModelBindings"
     | "codeSessionAuthority"
+    | "imageGenerationOffers"
     | "liveTurns"
     | "onWindowRevoked"
     | "routineProposalService"
@@ -250,6 +254,7 @@ export function wireWork(deps: WorkDependencies) {
     restartContinuation,
     githubIssueContextService,
     goalService,
+    imageGenerationOffers,
     imageJobService,
     linearIssueContextService,
     liveTurns,
@@ -567,6 +572,42 @@ export function wireWork(deps: WorkDependencies) {
               },
               port: canvasAgentToolPort,
             });
+        // A routine's turn has nobody at a window to answer the card.
+        const imageTools =
+          !browserSupported || isRoutineHostScope(input.windowId)
+            ? undefined
+            : createThreadImageAgentTools({
+                windowId: input.windowId,
+                threadKind: "work-thread",
+                scopeId: decodeImageGenerationScopeId(String(input.thread.id)),
+                offers: imageGenerationOffers,
+                jobs: imageJobService,
+                listInstances: () => persistence.readProviderInstances(),
+                readImageGenerationCustomSources: () =>
+                  (persistence.readShellSettings()?.settings ?? defaultShellSettings())
+                    .imageGeneration.customSources,
+                readsImages: () =>
+                  providerRuntimeRegistry
+                    .observedState(input.thread.providerInstanceId)
+                    ?.models.find(
+                      (candidate) => String(candidate.id) === String(input.thread.modelId),
+                    )
+                    ?.inputModalities.includes("image") === true,
+                // A file edit at the turn's level: Ask first and Auto ask the
+                // person, Accept edits and Full access write at once.
+                save: {
+                  posture: () => {
+                    const access = runningWorkTurns.get(String(input.thread.id))?.access;
+                    const level =
+                      access === undefined
+                        ? "approval-gated"
+                        : workThreadAccessOf(access).executionPolicy;
+                    return level === "approval-gated" ? "ask" : "allow";
+                  },
+                  write: (relativePath, bytes) =>
+                    saveGeneratedImageUnder({ root: input.projectRoot, relativePath, bytes }),
+                },
+              });
         const computerOwner = decodeComputerUseOwner({
           windowId: input.windowId,
           threadId: input.thread.id,
@@ -594,7 +635,8 @@ export function wireWork(deps: WorkDependencies) {
           routineTools === undefined &&
           agentsTools === undefined &&
           computer === undefined &&
-          canvasTools === undefined
+          canvasTools === undefined &&
+          imageTools === undefined
         )
           return undefined;
         return combineAppManagedToolSets(
@@ -606,6 +648,7 @@ export function wireWork(deps: WorkDependencies) {
           routineTools,
           agentsTools,
           canvasTools,
+          imageTools,
           pastThreads,
         );
       },
