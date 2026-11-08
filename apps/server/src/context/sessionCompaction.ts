@@ -194,6 +194,12 @@ export interface SessionCompactionOptions {
     providerInstanceId: ProviderInstanceId,
   ) => "runtime" | "host" | undefined;
   /**
+   * Whether a window is still open. A rule compacts a Code thread only under
+   * an open window, since a closed one could not resume the session and would
+   * leave a failed compaction behind. Absent, every window counts as open.
+   */
+  readonly windowOpen?: (windowId: WindowId) => boolean;
+  /**
    * Whether the runtime that keeps the instance's sessions in this mode can
    * compact them, as its adapter last reported. Undefined while the host has
    * not observed that runtime yet: it may compact once it is reachable, so it
@@ -346,13 +352,14 @@ export class SessionCompactionService {
     if (principal === "remote-device") return refused("remote-client");
     const existing = harness.compaction(subject, command.compactionId);
     if (existing !== undefined) return started(existing);
-    // Refused before anything is journaled: a Code session opened without a
-    // window would be asked nothing and leave a failed compaction behind. A
-    // window that asks always names itself; only a rule can lack one.
+    // Refused before anything is journaled: a Code session opened without an
+    // open window would be asked nothing and leave a failed compaction behind.
+    // A window that asks always names itself; only a rule can lack one, or
+    // hold one that has since closed.
     if (
       principal === "host-policy" &&
       String(subject.aggregateType) === "code-thread" &&
-      windowId === undefined
+      (windowId === undefined || this.#options.windowOpen?.(windowId) === false)
     ) {
       return refused("no-session");
     }

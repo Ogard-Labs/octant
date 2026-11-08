@@ -238,6 +238,16 @@ describe("SettingsView", () => {
     expect(props.onSettingsChange).toHaveBeenCalledWith({ autoCompactOctantWindowPercent: null });
   });
 
+  it("leaves quiet threads alone by default and compacts them after the time the person picks", async () => {
+    const user = userEvent.setup();
+    const { props } = renderSettings();
+    const idle = screen.getByRole("combobox", { name: "Compact quiet threads" });
+    expect(idle).toHaveTextContent("Never");
+    await user.click(idle);
+    await user.click(await screen.findByRole("option", { name: "After 30 minutes" }));
+    expect(props.onSettingsChange).toHaveBeenCalledWith({ autoCompactIdleMinutes: 30 });
+  });
+
   it("presents one section at a time, defaulting to General", () => {
     renderSettings();
 

@@ -494,3 +494,29 @@ export function decideWindowFillCompaction(
   }
   return { kind: "window-fill", filledPercent, thresholdPercent };
 }
+
+/**
+ * The least a window must hold before the idle rule compacts it. Below this
+ * the next turn re-reads little, so the compaction's own full read of the
+ * window would cost more than it saves.
+ */
+export const IDLE_COMPACTION_MIN_TOKENS = 20_000;
+
+export interface IdleFacts {
+  /** The person's rule, in minutes; `null` means never. */
+  readonly thresholdMinutes: number | null;
+  /** When the thread's last turn ended, and now, in epoch milliseconds. */
+  readonly lastTurnEndedAt: number;
+  readonly now: number;
+  /** What the window held at the thread's latest report. */
+  readonly tokens: number;
+}
+
+/** Whether the thread has been quiet long enough, and holds enough, to compact. */
+export function decideIdleCompaction(facts: IdleFacts): ContextCompactionCause | undefined {
+  const { thresholdMinutes, lastTurnEndedAt, now, tokens } = facts;
+  if (thresholdMinutes === null) return undefined;
+  const idleMinutes = Math.floor((now - lastTurnEndedAt) / 60_000);
+  if (idleMinutes < thresholdMinutes || tokens < IDLE_COMPACTION_MIN_TOKENS) return undefined;
+  return { kind: "idle", idleMinutes, thresholdMinutes };
+}

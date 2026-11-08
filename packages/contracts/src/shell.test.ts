@@ -95,6 +95,7 @@ const settings = {
   completedThreadArchiveAfterDays: 7,
   autoCompactOctantWindowPercent: 85,
   autoCompactRuntimeWindowPercent: null,
+  autoCompactIdleMinutes: null,
   navigatorAssistant: {},
   voice: {},
   imageGeneration: { customSources: [] },

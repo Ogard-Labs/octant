@@ -1979,6 +1979,39 @@ function AutoCompactWindowSelect(props: {
   );
 }
 
+const AUTO_COMPACT_IDLE_CHOICES: ReadonlyArray<number> = [15, 30, 60, 120, 240];
+
+function idleChoiceLabel(minutes: number): string {
+  return minutes < 60
+    ? `After ${String(minutes)} minutes`
+    : minutes === 60
+      ? "After 1 hour"
+      : `After ${String(minutes / 60)} hours`;
+}
+
+/** How long a thread may sit with no turn before the idle rule compacts it, plus off. */
+function AutoCompactIdleSelect(props: {
+  readonly minutes: number | null;
+  readonly onChange: (minutes: number | null) => void;
+}) {
+  const choices =
+    props.minutes === null || AUTO_COMPACT_IDLE_CHOICES.includes(props.minutes)
+      ? AUTO_COMPACT_IDLE_CHOICES
+      : [...AUTO_COMPACT_IDLE_CHOICES, props.minutes].sort((left, right) => left - right);
+  return (
+    <OctantSelectField
+      aria-label="Compact quiet threads"
+      id="auto-compact-idle"
+      onValueChange={(value) => props.onChange(value === "off" ? null : Number(value))}
+      options={[
+        { id: "off", label: "Never" },
+        ...choices.map((minutes) => ({ id: String(minutes), label: idleChoiceLabel(minutes) })),
+      ]}
+      value={props.minutes === null ? "off" : String(props.minutes)}
+    />
+  );
+}
+
 function ProfileSection({ focusedSetting, props }: SectionProps) {
   return (
     <section aria-label="Profile" className="settings-section-stack" id="settings-profile">
@@ -2129,6 +2162,18 @@ function GeneralSection({ focusedSetting, props }: SectionProps) {
                 props.onSettingsChange({ autoCompactRuntimeWindowPercent: percent })
               }
               percent={props.settings.autoCompactRuntimeWindowPercent}
+            />
+          </SettingRow>
+          <SettingRow
+            description="When no turn has run on a thread for this long, Octant compacts it once, so the reply you come back to starts from a summary. Threads holding little are left alone."
+            focused={focusedSetting === settingId("auto-compact-idle")}
+            label="Compact quiet threads"
+            scope="host"
+            settingId="auto-compact-idle"
+          >
+            <AutoCompactIdleSelect
+              minutes={props.settings.autoCompactIdleMinutes}
+              onChange={(minutes) => props.onSettingsChange({ autoCompactIdleMinutes: minutes })}
             />
           </SettingRow>
         </div>

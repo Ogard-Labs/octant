@@ -15,6 +15,7 @@ import {
   decodeProviderModelId,
   decodeProviderServiceLimits,
   decodeProviderSessionId,
+  decodeWindowId,
   type ContextCompactionRefusalReason,
   type ContextSubjectRef,
   type WindowId,
@@ -183,7 +184,7 @@ describe("compacting a session on request", () => {
     world.close();
   });
 
-  it("refuses a rule on a Code thread with no window before journaling anything", () => {
+  it("refuses a rule on a Code thread with no open window before journaling anything", () => {
     const world = createWorld();
     const codeSubject = decodeContextSubjectRef({
       aggregateType: "code-thread",
@@ -193,6 +194,10 @@ describe("compacting a session on request", () => {
       kind: "compaction-refused",
       reason: "no-session",
     });
+    // A window that has closed since its turn could not resume the session.
+    expect(
+      world.service.start(command(codeSubject), "host-policy", decodeWindowId(CLOSED_WINDOW)),
+    ).toEqual({ kind: "compaction-refused", reason: "no-session" });
     expect(world.harness.latestCompaction(codeSubject)).toBeUndefined();
     world.close();
   });
@@ -1703,6 +1708,8 @@ function providerInstance(overrides: { readonly dataTags?: ReadonlyArray<"eu" | 
   });
 }
 
+const CLOSED_WINDOW = "83000000-0000-4000-8000-0000000000c2";
+
 function createWorld(providerOptions: FakeProviderOptions = {}) {
   const fixture = createFixture();
   const provider = fakeProvider(providerOptions);
@@ -1755,6 +1762,7 @@ function createWorld(providerOptions: FakeProviderOptions = {}) {
     harness: fixture.harness,
     threads: { "chat-thread": threadsFor(), "work-thread": threadsFor() },
     modeEnabled: () => state.modeEnabled,
+    windowOpen: (windowId) => String(windowId) !== CLOSED_WINDOW,
     conversationOwner: () => (state.ownership === "provider" ? "runtime" : "host"),
     providerFacts: () => ({ provider: state.provider }),
     harnessAdmission: () => (state.harnessPaused ? "paused" : "admitted"),

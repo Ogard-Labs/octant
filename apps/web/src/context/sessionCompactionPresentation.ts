@@ -1,4 +1,5 @@
 import type {
+  ContextCompactionCause,
   ContextCompactionExecutor,
   ContextCompactionFailureReason,
   ContextCompactionRecord,
@@ -160,7 +161,7 @@ export function compactionResultLine(
     // a compaction they did not ask for this time is never a mystery.
     const parts = [
       "Compacted automatically",
-      `window ${String(receipt.cause.filledPercent)}% full`,
+      causeClause(receipt.cause),
       ...(freed.kind === "unknown"
         ? []
         : [freed.tokens === 0 ? "nothing freed" : `${compactTokenCount(freed.tokens)} freed`]),
@@ -192,4 +193,11 @@ export function refusalLine(reason: ContextCompactionRefusalReason): string {
 
 function sentence(clause: string): string {
   return `${clause.charAt(0).toUpperCase()}${clause.slice(1)}.`;
+}
+
+/** Which rule acted and what it measured: "window 91% full", "idle 31 min". */
+function causeClause(cause: ContextCompactionCause): string {
+  if (cause.kind === "window-fill") return `window ${String(cause.filledPercent)}% full`;
+  const hours = Math.floor(cause.idleMinutes / 60);
+  return hours < 2 ? `idle ${String(cause.idleMinutes)} min` : `idle ${String(hours)} h`;
 }

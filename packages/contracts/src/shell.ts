@@ -12,7 +12,7 @@ import { HostId, LOCAL_HOST_ID } from "./host";
 import { OctantMode } from "./modes";
 import { ProjectId } from "./projects";
 import { CanvasId } from "./canvas";
-import { AutoCompactWindowPercent } from "./context";
+import { AutoCompactIdleMinutes, AutoCompactWindowPercent } from "./context";
 import {
   PreviewDisplayName,
   PreviewHostId,
@@ -691,6 +691,15 @@ export const ShellSettings = Schema.Struct({
    * that to the runtime.
    */
   autoCompactRuntimeWindowPercent: Schema.optionalWith(Schema.NullOr(AutoCompactWindowPercent), {
+    default: () => null,
+  }),
+  /**
+   * Compact a thread once no turn has run on it for this many minutes, so the
+   * next turn starts from a summary rather than re-reading a window whose
+   * provider cache has long expired. `null`, the default, means never: a
+   * compaction of a thread nobody returns to is pure cost.
+   */
+  autoCompactIdleMinutes: Schema.optionalWith(Schema.NullOr(AutoCompactIdleMinutes), {
     default: () => null,
   }),
   /**

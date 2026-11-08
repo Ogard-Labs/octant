@@ -6550,7 +6550,7 @@ service, as the `host-policy` caller: it is admitted wherever a local window is
 and refused wherever one would be, and the person's setting stands in for the
 confirm. A refused rule journals nothing. A Code thread's session runs in the
 checkout its window resolved, so a rule compacts a Code thread only under the
-window whose turn crossed it, and never without one. The requested event and
+window whose turn crossed it, and only while that window is still open. The requested event and
 the receipt carry the rule's `cause`, and the timeline line reads, for example,
 "Compacted automatically · window 91% full · 41.2K freed · summary by Octant
 Harness". A rule never starts a replacement session on another provider. Which

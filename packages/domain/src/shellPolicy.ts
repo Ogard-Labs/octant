@@ -174,6 +174,7 @@ export function defaultShellSettings(): ShellSettings {
     completedThreadArchiveAfterDays: DEFAULT_COMPLETED_THREAD_ARCHIVE_AFTER_DAYS,
     autoCompactOctantWindowPercent: DEFAULT_AUTO_COMPACT_OCTANT_WINDOW_PERCENT,
     autoCompactRuntimeWindowPercent: null,
+    autoCompactIdleMinutes: null,
     openInApplications: [...DEFAULT_OPEN_IN_APPLICATIONS],
     transcriptTextSize: "small",
     transcriptWidth: "narrow",
