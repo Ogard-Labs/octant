@@ -16,10 +16,10 @@ describe("CodeTerminalPane", () => {
       ".code-terminal-pane__context-menu {\n  display: block;\n  width: 100%;\n  height: 100%;",
     );
     expect(codeStyles).toContain(
-      '.code-terminal-pane > [aria-label="Repository terminal"] {\n  min-height: 0;',
+      '.code-terminal-pane > :is([aria-label="Repository terminal"], [aria-label="Project terminal"]) {\n  min-height: 0;',
     );
     expect(codeStyles).not.toContain(
-      '.code-terminal-pane > [aria-label="Repository terminal"] {\n  min-height: 0;\n  flex: 1;\n  padding: var(--oct-space-3)',
+      '.code-terminal-pane > :is([aria-label="Repository terminal"], [aria-label="Project terminal"]) {\n  min-height: 0;\n  flex: 1;\n  padding: var(--oct-space-3)',
     );
     expect(codeStyles).toContain("overflow: hidden;");
   });
