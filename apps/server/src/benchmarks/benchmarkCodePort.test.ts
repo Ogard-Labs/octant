@@ -104,6 +104,10 @@ function setup(
     windowId: "66700000-0000-4000-8000-0000000000d1" as never,
     readThread: (id) => threads.get(id),
     awaitsPerson: () => approval,
+    pendingApproval: () => ({
+      since: "2026-11-07T09:50:00.000Z",
+      summary: "Run ls in the worktree",
+    }),
     evidence: {
       put: (text) => {
         evidence.push(text);
@@ -221,6 +225,8 @@ describe("benchmark Code port", () => {
     expect(await port.readTurn(thread, submission)).toMatchObject({
       state: "in-flight",
       awaitingApproval: true,
+      waitingSince: "2026-11-07T09:50:00.000Z",
+      approvalSummary: "Run ls in the worktree",
     });
 
     setApproval(false);

@@ -320,6 +320,48 @@ describe("benchmark Code cells", () => {
     expect(cell().state).toBe("blocked-on-approval");
   });
 
+  it("ends a cell as blocked-on-approval, with what was asked, when the turn times out while an approval waits", async () => {
+    const { runner, code, cell, command } = setup({
+      checks: [{ kind: "command-exits-zero", command: "bun test", timeoutSeconds: 60 }],
+    });
+    await runner.tick();
+    code.turn = {
+      ...code.turn,
+      awaitingApproval: true,
+      approvalSummary: "Run `ls src` in the worktree",
+    };
+    await runner.tick();
+    expect(cell().state).toBe("running");
+
+    // The provider gives up after its inactivity limit; the approval was never answered.
+    code.turn = {
+      status: "turn",
+      turnId: code.turn.turnId,
+      state: "failed",
+      awaitingApproval: false,
+      failureMessage: "Code turn timed out after provider inactivity",
+    };
+    await runner.tick();
+
+    expect(cell().state).toBe("blocked-on-approval");
+    expect(cell().failureReason).toContain("Run `ls src` in the worktree");
+    expect(command.runs).toHaveLength(0);
+  });
+
+  it("still fails a cell whose turn fails with no approval pending", async () => {
+    const { runner, code, cell } = setup();
+    await runner.tick();
+    code.turn = {
+      status: "turn",
+      turnId: code.turn.turnId,
+      state: "failed",
+      awaitingApproval: false,
+      failureMessage: "Provider refused.",
+    };
+    await runner.tick();
+    expect(cell()).toMatchObject({ state: "failed", failureReason: "Provider refused." });
+  });
+
   it("starts the approval clock again when the approval is answered", async () => {
     const { runner, code, cell, advance } = setup();
     await runner.tick();

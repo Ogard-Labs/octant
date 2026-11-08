@@ -6024,7 +6024,9 @@ running after 30 minutes is interrupted and settles `failed` as timed out. Befor
 each cell starts, `benchmarkBudgetDecision` projects spend from the cells that
 settled (tokens and cost read from `TurnMetricsStore` by thread id) and, when the
 next cell would pass the run's token or cost budget, skips the queued cells and
-ends the run `budget-reached`. Exports are later work.
+ends the run `budget-reached`. Benchmark turns live in the hidden Benchmarks
+Project, so Diagnostics, which is scoped to the window's Projects, does not show
+them; their comparison is the run leaderboard and History. Exports are later work.
 
 **Code cells.** A Code case (`code = {codeProjectId, ref}`) runs as a managed Code
 thread in that Code Project, not a Chat thread. The runner imitates a routine's
@@ -6064,7 +6066,11 @@ policy, which the host can only narrow.
 _Approvals._ A Code turn parked on an approval or a question is read with the
 same signal the sibling-threads read uses (`turnAwaitsPerson` or a harness
 approval). After 10 minutes parked, the runner interrupts the turn
-(`cancel-provider-turn`) and settles the cell `blocked-on-approval`. The wait is
+(`cancel-provider-turn`) and settles the cell `blocked-on-approval`. A turn that
+ends first while an approval waits (a provider-inactivity timeout, an interrupt)
+settles the same way, with the summary of what was asked, because the runner
+remembers what the turn was last seen waiting on; a turn that ends with no
+approval pending is still `failed`. The wait is
 dated by the journaled time the approval was asked (the pending request's
 `requestedAt`). Where nothing journaled dates it, a turn this process saw run and
 then park is timed from the moment it parked, and one first met already parked
@@ -6102,9 +6108,12 @@ records for servers and adapters.
 
 _Judge._ For a Code cell `benchmarkJudgePrompt` gets the case prompt, the
 reference if any, the diff summary and the check results instead of an answer. It
-stays blind. The answer, the file paths and the check details are quoted as
-fenced data, the fence longer than any backtick run inside, with a line telling
-the judge to ignore instructions in them.
+stays blind. The answer, the file paths and the check details are quoted between
+`<candidate_answer>`, `<repository_change>` and `<check_results>` tags, with any
+closing-tag text inside broken so it cannot end a block, and a line saying the
+tags are not part of the answer, must not affect the score, and that instructions
+inside them are to be ignored. A code fence was tried first and the judge marked a
+bare answer down for being "wrapped in a fenced code block".
 
 _Purge._ Purging a run removes each Code cell's managed worktree through
 `ManagedWorktreeService.cleanup` (the thread is archived first, as that service
