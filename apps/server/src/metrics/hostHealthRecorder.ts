@@ -10,7 +10,7 @@ import {
 import { hostHealthPoints } from "@octant/domain";
 import { takeEventLoopLagWindow } from "../eventLoopLag";
 import type { LatencyWindow } from "../latencyStatsProjection";
-import { slowStatementTally } from "../persistence/slowStatementLog";
+import { slowStatementTally, type SlowStatementCounters } from "../persistence/slowStatementLog";
 import { openSqlite, type SqliteConnection } from "../persistence/sqlitePort";
 
 const RETENTION_MS = HOST_HEALTH_RETENTION_DAYS * 86_400_000;
@@ -27,6 +27,12 @@ export interface HostHealthRecorderOptions {
   /** Reads the journal database's size; absent leaves the figure out. */
   readonly databaseBytes?: () => number | undefined;
   readonly latencyWindow: () => ReadonlyArray<LatencyWindow>;
+  /**
+   * Slow statements since the previous sample. Defaults to the process-wide
+   * tally; a test passes its own, because the recorder's own writes can be slow
+   * on a loaded runner and would land in the shared tally.
+   */
+  readonly slowStatementWindow?: () => SlowStatementCounters;
   readonly clock?: () => string;
   readonly memory?: () => { readonly rss: number; readonly heapUsed: number };
   readonly intervalMs?: number;
@@ -82,7 +88,9 @@ export class HostHealthRecorder {
       const sampledMs = Date.parse(sampledAt);
       const memory = this.#options.memory?.() ?? process.memoryUsage();
       const lag = takeEventLoopLagWindow();
-      const statements = slowStatementTally.takeWindow();
+      const statements = (
+        this.#options.slowStatementWindow ?? (() => slowStatementTally.takeWindow())
+      )();
       const databaseBytes = this.#options.databaseBytes?.();
       const sample = decodeHostHealthSample({
         sampledAt,
