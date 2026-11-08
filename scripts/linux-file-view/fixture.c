@@ -5,6 +5,7 @@
 #include <sys/syscall.h>
 #include <sys/stat.h>
 #include <sys/prctl.h>
+#include <sys/wait.h>
 #include <errno.h>
 #include <fcntl.h>
 #include <limits.h>
@@ -15,6 +16,7 @@
 #include <dirent.h>
 #include <signal.h>
 #include <time.h>
+#include <poll.h>
 
 /* Feasibility fixture only. This is not a production policy or launcher. */
 static int backing = -1;
@@ -207,6 +209,57 @@ static const struct fuse_operations operations = {
   .rename = view_rename, .unlink = view_unlink, .fsync = view_fsync,
 };
 
+static void retire_mount(int fixture, int ready, const char *mountpoint, long seconds) {
+  /* Forked before FUSE opens any descriptors: only this stable process handle
+     connects retirement to the fixture. No daemon descriptor can keep it alive. */
+  timer_t lifetime;
+  struct sigevent event = {.sigev_notify = SIGEV_SIGNAL, .sigev_signo = SIGKILL};
+  struct itimerspec limit = {.it_value = {.tv_sec = seconds + 4}};
+  if (timer_create(CLOCK_MONOTONIC, &event, &lifetime) ||
+      timer_settime(lifetime, 0, &limit, NULL)) _exit(2);
+  if (write(ready, "R", 1) != 1) _exit(2);
+  close(ready);
+  struct pollfd parent = {.fd = fixture, .events = POLLIN};
+  int observed;
+  do { observed = poll(&parent, 1, (int)(seconds + 1) * 1000); } while (observed < 0 && errno == EINTR);
+  close(fixture);
+  if (observed != 1 || !(parent.revents & POLLIN)) _exit(2);
+
+  pid_t owner = getpid();
+  pid_t unmount = fork();
+  if (unmount < 0) _exit(2);
+  if (!unmount) {
+    if (getppid() != owner || prctl(PR_SET_PDEATHSIG, SIGKILL) || getppid() != owner) _exit(2);
+    /* Unlike the supervisor's POSIX timer, this alarm survives setuid exec. */
+    if (signal(SIGALRM, SIG_DFL) == SIG_ERR) _exit(2);
+    alarm(3);
+    execl("/usr/bin/fusermount3", "fusermount3", "-uz", "--", mountpoint, (char *)NULL);
+    _exit(2);
+  }
+
+  /* Keep the supervisor across exec: POSIX timers are not inherited by the
+     unmount child, and a setuid exec can clear its parent-death signal. */
+  struct timespec until;
+  if (clock_gettime(CLOCK_MONOTONIC, &until)) { kill(unmount, SIGKILL); }
+  else {
+    until.tv_sec += 2;
+    for (;;) {
+      int status;
+      pid_t joined = waitpid(unmount, &status, WNOHANG);
+      if (joined == unmount) _exit(WIFEXITED(status) && !WEXITSTATUS(status) ? 0 : 2);
+      if (joined < 0 && errno != EINTR) _exit(2);
+      struct timespec now;
+      if (clock_gettime(CLOCK_MONOTONIC, &now) || now.tv_sec > until.tv_sec ||
+          (now.tv_sec == until.tv_sec && now.tv_nsec >= until.tv_nsec)) break;
+      struct timespec pause = {.tv_nsec = 10000000};
+      nanosleep(&pause, NULL);
+    }
+    kill(unmount, SIGKILL);
+  }
+  while (waitpid(unmount, NULL, 0) < 0 && errno == EINTR) {}
+  _exit(2);
+}
+
 int main(int argc, char **argv) {
   if (argc != 5) { fprintf(stderr, "usage: fixture backing-root mountpoint owner-pid lifetime-seconds\n"); return 2; }
   char *end;
@@ -227,11 +280,25 @@ int main(int argc, char **argv) {
   if (timer_create(CLOCK_MONOTONIC, &event, &lifetime)) { perror("fixture timer"); return 2; }
   if (timer_settime(lifetime, 0, &limit, NULL)) { perror("fixture deadline"); return 2; }
   if (getppid() != (pid_t)owner) return 2;
+  int fixture = (int)syscall(SYS_pidfd_open, getpid(), 0);
+  if (fixture < 0) { perror("fixture process handle"); return 2; }
+  int ready[2];
+  if (pipe2(ready, O_CLOEXEC)) { close(fixture); perror("retirement readiness"); return 2; }
+  pid_t retirement = fork();
+  if (retirement < 0) { close(fixture); close(ready[0]); close(ready[1]); perror("mount retirement"); return 2; }
+  if (!retirement) { close(ready[0]); retire_mount(fixture, ready[1], argv[2], seconds); }
+  close(ready[1]);
+  close(fixture);
+  char receipt;
+  ssize_t received;
+  do { received = read(ready[0], &receipt, 1); } while (received < 0 && errno == EINTR);
+  close(ready[0]);
+  if (received != 1 || receipt != 'R') return 2;
   if (!realpath(argv[1], backing_path)) { perror("backing root"); return 2; }
   backing = open(backing_path, O_PATH | O_DIRECTORY | O_CLOEXEC);
   if (backing < 0) { perror("backing root"); return 2; }
   char *fuse_argv[] = {argv[0], argv[2], "-f", "-s", "-o",
-    "auto_unmount,default_permissions,attr_timeout=0,entry_timeout=0,negative_timeout=0"};
+    "default_permissions,attr_timeout=0,entry_timeout=0,negative_timeout=0"};
   if (getppid() != (pid_t)owner) return 2;
   int result = fuse_main(6, fuse_argv, &operations, NULL);
   timer_delete(lifetime);

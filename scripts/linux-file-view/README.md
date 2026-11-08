@@ -321,11 +321,22 @@ The native helper requires the launcher's PID captured before exec and a private
 fixture lifetime of 1–120 seconds. It checks the parent before and after arming
 `PR_SET_PDEATHSIG(SIGKILL)` and again before mounting. A separate monotonic timer
 delivers `SIGKILL` at the lifetime limit; neither Python cleanup nor FUSE signal
-handlers control it. `auto_unmount` retires the mount when the helper exits,
-including after the owner's crash. These use the documented
+handlers control it. Before opening backing or FUSE descriptors, the fixture
+captures its own stable process handle and forks a mount-retirement child. That
+child acknowledges its independent timer before the fixture can mount. It
+waits for the exact fixture to exit, then runs the fixed `fusermount3 -uz`
+command against its private mount. It retains and waits that unmount process,
+kills it after two seconds if needed, and has its own independent monotonic
+lifetime bound. The unmount process also has a three-second alarm that survives
+exec, bounding it even if its supervisor dies after a setuid exec clears its
+parent-death signal. This replaces `auto_unmount`: native owner-loss and deadline
+measurements on libfuse 3.14.0-5build1 joined the helper and its descendants but
+still observed the mount present. The exact internal reason was not measured.
+These use the documented
 [parent-death signal](https://man7.org/linux/man-pages/man2/PR_SET_PDEATHSIG.2const.html),
-[native timer](https://man7.org/linux/man-pages/man2/timer_create.2.html) and
-[FUSE auto-unmount](https://github.com/libfuse/libfuse/blob/fuse-3.14.0/doc/mount.fuse3.8)
+[native timer](https://man7.org/linux/man-pages/man2/timer_create.2.html),
+[stable process handle](https://man7.org/linux/man-pages/man2/pidfd_open.2.html)
+and [FUSE unmount](https://github.com/libfuse/libfuse/blob/fuse-3.14.0/doc/mount.fuse3.8)
 boundaries.
 
 Before the unchanged 17 file measurements, three mandatory lifecycle checks kill
@@ -333,7 +344,7 @@ an owner after mounting, kill it while its child is still waiting before exec,
 and let a two-second native lifetime expire while the owner remains alive. The
 short lifetime exercises the independent deadline without waiting two minutes.
 Each check requires the actual helper wait status, automatic mount removal and
-joined auto-unmount descendants before fallback cleanup. The task-local
+joined mount-retirement descendants before fallback cleanup. The task-local
 subreaper remains enabled through the ordinary measurements to join their FUSE
 descendants too, then restores its prior setting. Test owners and their pre-exec
 children have independent finite alarms; owners also bind to the probe's PID.

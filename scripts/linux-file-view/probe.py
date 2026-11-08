@@ -127,7 +127,7 @@ def birth(pid):
 
 def retire_fixture_children():
     # Called only after every retained Popen child has been waited. The remaining
-    # direct children are this probe's adopted FUSE auto-unmount descendants.
+    # direct children are this probe's adopted FUSE mount-retirement descendants.
     known = {}
     until = time.monotonic()+3
     force_after = time.monotonic()+1
