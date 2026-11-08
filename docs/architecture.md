@@ -15354,6 +15354,10 @@ inheritance, so ordinary descendants do not acquire the process token's broader
 default DACL. The separate transient control namespace retains its existing
 non-inheriting DACLs. Native-held canonical directory handles exclude reparse
 points and prevent rename/replacement for the writer process's lifetime.
+Before any profile mutation the native boundary requires the process token's
+default owner to equal its user SID: inherited ACLs alone do not determine a
+new file's owner. A context whose default owner is an administrator group is
+unsupported and refused; production never changes the host or account token.
 
 A bounded, private native profile record binds a random persistent UUID to its
 profile kind and physical profile/data directory identities. A missing record can be

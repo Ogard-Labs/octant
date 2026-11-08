@@ -206,6 +206,13 @@ async function acl(profile: string, mode: string) {
 }
 let runFailure: unknown;
 try {
+  for (const profile of profiles) {
+    await run(first, [fixture, binding, profile, "refuse"], { ...process.env }, 30_000);
+    for (const root of roots)
+      if (!(await absent(root)))
+        throw new Error("Refused default-owner context mutated a profile.");
+  }
+  checks.push("the original administrator default-owner context refuses before profile creation");
   for (const runtime of runtimes) {
     for (const profile of profiles) {
       await probe(runtime, profile);

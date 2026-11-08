@@ -1,6 +1,7 @@
 #include <windows.h>
 #include <cstdio>
 #include <string>
+#include <vector>
 
 namespace {
 struct Handle {
@@ -15,6 +16,13 @@ int refused(const char* stage) {
 bool inherit_standard(DWORD name, Handle& output) {
   return DuplicateHandle(GetCurrentProcess(), GetStdHandle(name), GetCurrentProcess(),
     &output.value, 0, TRUE, DUPLICATE_SAME_ACCESS) != FALSE;
+}
+bool token_information(HANDLE token, TOKEN_INFORMATION_CLASS type, std::vector<unsigned char>& output) {
+  DWORD needed = 0;
+  GetTokenInformation(token, type, nullptr, 0, &needed);
+  if (needed == 0 || needed > 65536) return false;
+  output.resize(needed);
+  return GetTokenInformation(token, type, output.data(), needed, &needed) != FALSE;
 }
 }
 
@@ -32,8 +40,19 @@ int wmain(int argc, wchar_t** argv) {
   }
   if (command.size() > 32766) return 2;
   Handle original, restricted;
-  if (!OpenProcessToken(GetCurrentProcess(), TOKEN_DUPLICATE | TOKEN_QUERY | TOKEN_ASSIGN_PRIMARY, &original.value)) return refused("own-token");
+  if (!OpenProcessToken(GetCurrentProcess(), TOKEN_DUPLICATE | TOKEN_QUERY | TOKEN_ASSIGN_PRIMARY | TOKEN_ADJUST_DEFAULT, &original.value)) return refused("own-token");
   if (!CreateRestrictedToken(original.value, DISABLE_MAX_PRIVILEGE, 0, nullptr, 0, nullptr, 0, nullptr, &restricted.value)) return refused("restricted-token");
+  std::vector<unsigned char> user, before, after, copied_owner;
+  if (!token_information(restricted.value, TokenUser, user) || !token_information(original.value, TokenOwner, before)) return refused("owned-token-identity");
+  const auto user_identity = reinterpret_cast<const TOKEN_USER*>(user.data());
+  TOKEN_OWNER expected_owner{user_identity->User.Sid};
+  // Only the disposable copy changes. Ordinary app data must be created under
+  // its user SID rather than the hosted administrator token's default group.
+  if (!SetTokenInformation(restricted.value, TokenOwner, &expected_owner, sizeof(expected_owner)) ||
+      !token_information(restricted.value, TokenOwner, copied_owner) ||
+      !EqualSid(reinterpret_cast<const TOKEN_OWNER*>(copied_owner.data())->Owner, expected_owner.Owner) ||
+      !token_information(original.value, TokenOwner, after) ||
+      !EqualSid(reinterpret_cast<const TOKEN_OWNER*>(before.data())->Owner, reinterpret_cast<const TOKEN_OWNER*>(after.data())->Owner)) return refused("copied-default-owner");
   LUID debug{};
   PRIVILEGE_SET privileges{};
   privileges.PrivilegeCount = 1;
@@ -64,7 +83,7 @@ int wmain(int argc, wchar_t** argv) {
     return refused("owned-job-assignment");
   }
   if (ResumeThread(thread.value) == static_cast<DWORD>(-1)) return refused("owned-resume");
-  std::puts("{\"fixtureRestricted\":true}");
+  std::puts("{\"fixtureRestricted\":true,\"fixtureDefaultOwnerIsUser\":true,\"originalTokenOwnerUnchanged\":true}");
   const DWORD waited = WaitForSingleObject(process.value, 40000);
   DWORD result = 2;
   if (waited == WAIT_OBJECT_0) GetExitCodeProcess(process.value, &result);
