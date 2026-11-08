@@ -73,6 +73,21 @@ try {
             $octantOwnedCommand = $true
             break
           }
+          $octantArgumentTokens = @(
+            [regex]::Matches($octantArguments, '"[^"]*"|\S+') |
+              ForEach-Object { $_.Value }
+          )
+          $octantArgumentImageSpellings = @($octantPath, ('"' + $octantPath + '"'))
+          if (
+            $octantArgumentTokens.Count -eq 4 -and
+            $octantArgumentImageSpellings -icontains [string]$octantArgumentTokens[0] -and
+            $octantArgumentTokens[1] -ceq '"%1"' -and
+            $octantArgumentImageSpellings -icontains [string]$octantArgumentTokens[2] -and
+            $octantArgumentTokens[3] -ceq '"%1"'
+          ) {
+            $octantOwnedCommand = $true
+            break
+          }
         }
         if ($octantOwnedCommand) { break }
       }
