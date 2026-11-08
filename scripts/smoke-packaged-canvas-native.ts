@@ -87,6 +87,19 @@ async function main(): Promise<void> {
         ? {}
         : { RUNNER_TRACKING_ID: process.env.RUNNER_TRACKING_ID }),
     };
+    const seed = await runBoundedCommand(
+      process.execPath,
+      [
+        "scripts/seed-canvas-fixtures.ts",
+        "--data-dir",
+        join(root, "data"),
+        "--fixture",
+        "document",
+      ],
+      { ...env, OCTANT_DATA_DIR: join(root, "seed-controller") },
+      30_000,
+    );
+    await writeFile(join(artifacts, "seeded-canvas.txt"), seed);
     app = spawnPackagedApplication({ executable, env });
     pid = app.child.pid;
     if (pid === undefined) throw Error("No owned packaged application process.");
@@ -181,6 +194,32 @@ const timer = setInterval(() => {
         hasText(snapshot, "Settings") &&
         hasText(snapshot, "Choose app-wide defaults, updates, and network behavior."),
     );
+    await runBoundedCommand(
+      nativeControllerPath,
+      ["click", String(ownPid), join(artifacts, "back-to-app-target.png"), "Back to app"],
+      process.env,
+      8000,
+    );
+    await observeUntil("fixture-project", (snapshot) => hasText(snapshot, "Canvas fixtures"));
+    await runBoundedCommand(
+      nativeControllerPath,
+      ["click", String(ownPid), join(artifacts, "fixture-project-target.png"), "Canvas fixtures"],
+      process.env,
+      8000,
+    );
+    await observeUntil("fixture-thread", (snapshot) => hasText(snapshot, "Weekly signups brief"));
+    await runBoundedCommand(
+      nativeControllerPath,
+      [
+        "click",
+        String(ownPid),
+        join(artifacts, "fixture-thread-target.png"),
+        "Weekly signups brief",
+      ],
+      process.env,
+      8000,
+    );
+    await observeUntil("fixture-canvas", (snapshot) => hasText(snapshot, "Signups this week"));
     if (controller.signal.aborted) throw Error("Native window observation was interrupted.");
     verified = true;
   } finally {
@@ -258,6 +297,7 @@ const timer = setInterval(() => {
         nativeInput: "WindowServer image, Vision and CoreGraphics",
         nativeSetupSkip: true,
         nativeSettings: true,
+        seededCanvasRendered: true,
         productionDebuggingUnchanged: true,
         cleanup: "verified",
         publishAcceptance: "not-run",

@@ -89,7 +89,20 @@ let targets = (request.results ?? []).compactMap { result -> TextTarget? in
 }
 var clicked = false
 if mode == "click" {
-    let matches = targets.filter { $0.text.caseInsensitiveCompare(expected) == .orderedSame }
+    guard !expected.isEmpty else { refuse("Supply a nonempty observed text target.") }
+    let matches = (request.results ?? []).flatMap { result -> [TextTarget] in
+        guard let value = result.topCandidates(1).first else { return [] }
+        var matches: [TextTarget] = []
+        var remaining = value.string.startIndex..<value.string.endIndex
+        while let range = value.string.range(of: expected, options: .caseInsensitive, range: remaining) {
+            guard let box = try? value.boundingBox(for: range) else { return [] }
+            matches.append(TextTarget(text: expected,
+                x: Double(owned.bounds.minX + box.boundingBox.midX * owned.bounds.width),
+                y: Double(owned.bounds.minY + (1 - box.boundingBox.midY) * owned.bounds.height)))
+            remaining = range.upperBound..<value.string.endIndex
+        }
+        return matches
+    }
     guard matches.count == 1, let match = matches.first else { refuse("The current owned image has no unique exact text target: " + expected) }
     let current = window(pid)
     guard current.id == owned.id, current.bounds == owned.bounds else { refuse("The owned window moved after its capture.") }
