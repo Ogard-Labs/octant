@@ -1,6 +1,7 @@
 import { afterEach, expect, it } from "vitest";
 import {
   link,
+  lstat,
   mkdir,
   mkdtemp,
   readFile,
@@ -74,6 +75,15 @@ it("retains exact original name rules, symlink target identity, account exceptio
   const target = join(f.home, "ordinary-target");
   await writeFile(target, "synthetic bytes");
   await symlink(target, secret);
+  const dangling = join(f.home, ".ssh", "id_dangling");
+  await symlink("synthetic protected link text", dangling);
+  const publicTarget = join(f.home, "public-target");
+  const publicLink = join(f.home, ".ssh", "public.pub");
+  await writeFile(publicTarget, "synthetic public bytes");
+  await symlink(publicTarget, publicLink);
+  const secretLinkIdentity = linuxMediationObjectKey(await lstat(secret, { bigint: true }));
+  const danglingIdentity = linuxMediationObjectKey(await lstat(dangling, { bigint: true }));
+  const publicLinkIdentity = linuxMediationObjectKey(await lstat(publicLink, { bigint: true }));
   const companionFolder = join(f.home, ".ssh", "deployment");
   await mkdir(companionFolder);
   await writeFile(`${companionFolder}.pub`, "public companion");
@@ -91,12 +101,18 @@ it("retains exact original name rules, symlink target identity, account exceptio
   );
   if (snapshot.status !== "ready") throw Error("Missing policy snapshot");
   expect(snapshot.protectedObjects.has(await f.key(target))).toBe(true);
+  expect(snapshot.protectedObjects.has(secretLinkIdentity)).toBe(true);
+  expect(snapshot.protectedObjects.has(danglingIdentity)).toBe(true);
+  expect(snapshot.protectedObjects.has(publicLinkIdentity)).toBe(false);
+  expect(snapshot.protectedObjects.has(await f.key(publicTarget))).toBe(false);
   expect(snapshot.protectedObjects.has(await f.key(nested))).toBe(true);
   expect(snapshot.protectedObjects.has(await f.key(account))).toBe(false);
   applyProtectedFilesChoice({ added: [account, custom], removed: ["ssh-private-keys"] });
   const changed = await readLinuxMediationPolicy(f.policy([own]), f.readNamespace);
   if (changed.status !== "ready") throw Error("Missing changed policy snapshot");
   expect(changed.protectedObjects.has(await f.key(target))).toBe(false);
+  expect(changed.protectedObjects.has(secretLinkIdentity)).toBe(false);
+  expect(changed.protectedObjects.has(danglingIdentity)).toBe(false);
   expect(changed.protectedObjects.has(await f.key(nested))).toBe(false);
   expect(changed.protectedObjects.has(await f.key(account))).toBe(true);
   expect(changed.protectedObjects.has(await f.key(custom))).toBe(true);

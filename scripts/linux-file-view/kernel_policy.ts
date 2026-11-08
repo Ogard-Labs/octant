@@ -1,5 +1,6 @@
 /** Owned, networkless guest entry for the actual structured-policy broker. */
-import { mkdir, readFile, rename, rm, stat, writeFile, link } from "node:fs/promises";
+import { mkdir, readFile, rename, rm, stat, symlink, writeFile, link } from "node:fs/promises";
+import { spawnSync } from "node:child_process";
 import { setTimeout as pause } from "node:timers/promises";
 import { runLinuxMediationBroker } from "../../apps/server/src/process/linuxMediationBroker";
 import { buildBubblewrapLaunch } from "../../apps/server/src/process/linuxConfinement";
@@ -20,6 +21,7 @@ const maximum = setTimeout(() => owner.abort(), runtime === undefined ? 15_000 :
 let result = false;
 let cleaned = false;
 let ready = false;
+let metadataVerified = false;
 let ended: Awaited<ReturnType<typeof runLinuxMediationBroker>> | undefined;
 let running: ReturnType<typeof runLinuxMediationBroker> | undefined;
 try {
@@ -53,6 +55,8 @@ try {
     mode: 0o600,
   });
   await writeFile(`${home}/.ssh/id_independent.pub`, "public independent", { mode: 0o600 });
+  await symlink("synthetic protected link text", `${home}/.ssh/id_link`);
+  await symlink("deployment.pub", `${home}/.ssh/link.pub`);
   running = runLinuxMediationBroker({
     nativeExecutable: "/octant-mediation",
     command: launch.command,
@@ -93,12 +97,19 @@ try {
     await link(`${root}/unrelated.pub`, `${key}.pub`);
   } else owner.abort();
   ended = await running;
+  metadataVerified =
+    runtime !== undefined ||
+    (ended.status === "exited" &&
+      ended.code === 0 &&
+      spawnSync("/policy-workload", ["--verify-metadata"], { stdio: "inherit", timeout: 2_000 })
+        .status === 0);
   result =
     ready &&
     ended.status === "exited" &&
     ended.code === 0 &&
     (await readFile(`${root}/ordinary`, "utf8")) === "permitted after" &&
-    (await readFile(key, "utf8")) === "synthetic original-policy bytes";
+    (await readFile(key, "utf8")) === "synthetic original-policy bytes" &&
+    metadataVerified;
 } finally {
   clearTimeout(maximum);
   owner.abort();
@@ -120,6 +131,7 @@ console.log(
     lateCompanion: ready,
     actualBubblewrapBuilder: capsule,
     runtime: runtime ?? "native",
+    ...(runtime === undefined ? { metadataUnchanged: metadataVerified } : {}),
     ownedCommandJoined: ended?.status === "exited",
     cleaned,
   }),

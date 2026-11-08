@@ -64,7 +64,8 @@ def main():
     run("make", "tinyconfig", cwd=kernel)
     for symbol in ("64BIT", "SMP", "MULTIUSER", "PRINTK", "TTY", "SERIAL_8250", "SERIAL_8250_CONSOLE",
                    "BLK_DEV_INITRD", "BINFMT_ELF", "PROC_FS", "SYSFS", "TMPFS", "SHMEM",
-                   "DEVTMPFS", "SECURITY", "SECURITY_PATH", "SECURITY_OCTANT_MEDIATION", "IO_URING", "AIO",
+                   "DEVTMPFS", "TMPFS_XATTR", "TMPFS_POSIX_ACL", "EXT4_FS_POSIX_ACL",
+                   "SECURITY", "SECURITY_PATH", "SECURITY_OCTANT_MEDIATION", "IO_URING", "AIO",
                    "FUTEX", "PCI", "BLOCK", "ACPI", "EPOLL", "EVENTFD", "TIMERFD",
                    "SIGNALFD", "INOTIFY_USER", "ADVISE_SYSCALLS", "MEMFD_CREATE", "POSIX_TIMERS",
                    "FILE_LOCKING", "NET", "UNIX", "NAMESPACES", "USER_NS", "PID_NS", "UTS_NS",
@@ -78,7 +79,8 @@ def main():
     configured = set((kernel / ".config").read_text().splitlines())
     for symbol in ("SMP", "BLOCK", "BLK_DEV", "PCI", "VIRTIO_MENU", "VIRTIO_PCI", "VIRTIO_BLK",
                    "EXT4_FS", "DEVTMPFS", "DEVTMPFS_MOUNT", "USER_NS", "PID_NS", "NET_NS",
-                   "SECURITY", "SECURITY_PATH", "SECURITY_OCTANT_MEDIATION"):
+                   "SECURITY", "SECURITY_PATH", "SECURITY_OCTANT_MEDIATION",
+                   "TMPFS_XATTR", "TMPFS_POSIX_ACL", "EXT4_FS_POSIX_ACL"):
         if f"CONFIG_{symbol}=y" not in configured:
             raise SystemExit(f"Required built-in guest prerequisite is unavailable: {symbol}")
     if "CONFIG_NR_CPUS=2" not in configured:
@@ -175,6 +177,8 @@ def main():
             case.get("ownedCommandJoined") is not True or case.get("cleaned") is not True or
             case.get("lateCompanion") is not True for case in cases):
         raise SystemExit("Every original-policy case needs an actual exit/join/cleanup receipt.")
+    if any(case.get("metadataUnchanged") is not True for case in [*capsules, *direct]):
+        raise SystemExit("The independent owner must verify private xattrs and mode unchanged.")
     expected = {"bun", "node"}
     if {case.get("runtime") for case in runtime_receipts} != expected or len(runtime_receipts) != 2 or any(
             case.get("actualBubblewrapBuilder") is not True for case in runtime_cases):

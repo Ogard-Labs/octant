@@ -1,6 +1,6 @@
 import { protectedEntryFor } from "@octant/domain/secret-guard-policy";
 import type { BigIntStats } from "node:fs";
-import { opendir, realpath, stat } from "node:fs/promises";
+import { lstat, opendir, realpath, stat } from "node:fs/promises";
 import { join } from "node:path";
 import type { SecretGuardMediationPolicy } from "./secretGuard";
 
@@ -30,11 +30,13 @@ export function linuxMediationObjectKey(identity: {
 }
 
 export interface LinuxMediationMetadata {
+  readonly lstat: (path: Buffer) => Promise<BigIntStats>;
   readonly stat: (path: Buffer) => Promise<BigIntStats>;
   readonly realpath: (path: Buffer) => Promise<Buffer>;
   readonly names: (path: Buffer) => AsyncIterable<string>;
 }
 const HOST_METADATA: LinuxMediationMetadata = {
+  lstat: (path) => lstat(path, { bigint: true }),
   stat: (path) => stat(path, { bigint: true }),
   realpath: (path) => realpath(path, { encoding: "buffer" }),
   async *names(path) {
@@ -92,11 +94,20 @@ export async function readLinuxMediationPolicy(
     const inspect = async (path: string, forced = false) => {
       if (!checkBudget()) return undefined;
       try {
-        const identity = await metadata.stat(nativePath(path));
+        const link = await metadata.lstat(nativePath(path));
+        // A protected dangling link still has readable link text/metadata.
+        // Record its own inode before following, without turning a missing
+        // target into an omitted protected object or an account exemption.
+        if (forced || protectedEntryFor([path], entries, own) !== undefined)
+          objects.add(linuxMediationObjectKey(link));
+        if (!checkBudget()) return undefined;
+        const identity = link.isSymbolicLink() ? await metadata.stat(nativePath(path)) : link;
         if (!checkBudget()) return undefined;
         const actual = (await metadata.realpath(nativePath(path))).toString("latin1");
-        if (forced || protectedEntryFor([path, actual], entries, own) !== undefined)
+        if (forced || protectedEntryFor([path, actual], entries, own) !== undefined) {
+          objects.add(linuxMediationObjectKey(link));
           objects.add(linuxMediationObjectKey(identity));
+        }
         return identity;
       } catch (error) {
         if (missing(error)) return undefined;

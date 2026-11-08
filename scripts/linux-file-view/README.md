@@ -123,6 +123,18 @@ source is not an executed pass. Public runtimes and loader dependencies are
 copied only into the private 512-MiB guest image, never installed on a live host.
 No provider credentials, requests, network services or accounts are involved.
 
+Metadata coverage requires the link inode as well as its followed target:
+even a dangling protected symlink has link text and metadata. The policy's
+metadata port therefore distinguishes `lstat` from `stat`, including in proposed
+namespaces, while retaining exact account exceptions and byte names. The native
+workload checks late protected stat/readlink/xattr reads, listing, writes and
+removal, plus the ACL dispatch and ordinary/public positive controls. A separate
+unconfined, two-second owner check verifies private attributes and mode unchanged
+after the enrolled command exits. The guest explicitly requires tmpfs xattrs and
+tmpfs/ext4 ACL support rather than treating an unsupported operation as refusal.
+Kernel guards for these cases are unfinished until the actual red/fix/native
+result is recorded; this collector and fixture source enables no capability.
+
 Dispatch `experiment=kernel-admission` to compile and boot a pinned Linux 6.18
 guest under networkless QEMU TCG in the owned ephemeral runner. The upstream
 archive has a fixed SHA-256, and only the original admission files enter its
