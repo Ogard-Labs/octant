@@ -132,7 +132,10 @@ try {
     // Attach rejection handling immediately; a failed spawn must not escape cleanup.
     void readerExit.catch(() => undefined);
     const readerDeadline = setTimeout(() => reader.kill(), 8000);
-    reader.stderr.resume();
+    let readerDiagnostic = "";
+    reader.stderr.on("data", (bytes: Buffer) => {
+      readerDiagnostic = (readerDiagnostic + bytes.toString("utf8")).slice(-4096);
+    });
     try {
       await new Promise<void>((resolve, reject) => {
         reader.stdout.once("data", (bytes: Buffer) => {
@@ -150,8 +153,21 @@ try {
         await startup.writeHostInfo({ ...receipt, serverVersion: `fixture-${publication}` });
       }
       reader.stdin.end();
+      const readerCode = await readerExit;
+      if (readerCode !== 0) {
+        const reason = readerDiagnostic.includes(
+          "The native host projection is unsafe or unavailable.",
+        )
+          ? "snapshot-refused"
+          : readerDiagnostic.includes("Published snapshot unavailable.")
+            ? "snapshot-missing"
+            : readerDiagnostic.includes("No publication reads completed.")
+              ? "no-reads"
+              : "reader-failed";
+        console.log(JSON.stringify({ publicationReaderFailure: reason, exitCode: readerCode }));
+      }
       check(
-        (await readerExit) === 0,
+        readerCode === 0,
         "independent native readers observe complete snapshots throughout atomic publication",
       );
     } finally {

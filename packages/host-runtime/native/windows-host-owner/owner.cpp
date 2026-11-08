@@ -739,7 +739,10 @@ napi_value begin_authority_state(napi_env env, napi_callback_info info) {
     nullptr, OPEN_EXISTING, FILE_FLAG_OPEN_REPARSE_POINT, nullptr));
   if (!existing && GetLastError() != ERROR_FILE_NOT_FOUND) return object(env, "refused");
   if (!existing && !writing) return object(env, "missing");
-  if (existing && !authority_regular(existing.value, *admission->root, writing ? nullptr : &length)) return object(env, "refused");
+  // An atomic replacement may unlink this old snapshot after CreateFile and
+  // before validation. Read sessions already retain lawful unlinked snapshots;
+  // admission has the same rule, while writers still require a linked target.
+  if (existing && !authority_regular(existing.value, *admission->root, writing ? nullptr : &length, !writing)) return object(env, "refused");
   if (!writing && length > authority_limit(purpose)) return object(env, "refused");
   auto session = std::make_unique<AuthoritySession>();
   session->env = env; session->profile = name; session->scope = scope; session->purpose = purpose;
