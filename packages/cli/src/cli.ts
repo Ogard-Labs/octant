@@ -743,6 +743,10 @@ const USAGE: ReadonlyArray<{ readonly octant: string; readonly nightly?: string 
     octant:
       "settings access ask-first|accept-edits|auto|plan|full-access [--work]  (the default new threads start at, Code unless --work)",
   },
+  {
+    octant:
+      "settings sandbox on|off [--work]  (whether new Full access threads keep the sandbox, Code unless --work)",
+  },
   { octant: "plugin install npm:<package>[@<version or range>]" },
   { octant: "plugin check-update <package>" },
   { octant: "plugin create <name> [--mcp-url <https address>]" },

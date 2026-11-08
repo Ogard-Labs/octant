@@ -47,6 +47,7 @@ import { THREAD_MOVING_REFUSAL } from "../hub/threadMoveHolds";
 import { Schema } from "effect";
 import { unsupportedModelOptionValues } from "@octant/domain/chat-policy";
 import {
+  defaultFullAccessSandboxFor,
   guardrailLowered,
   permissionModeOf,
   workAccessOfPermissionMode,
@@ -455,6 +456,11 @@ export class WorkThreadService {
                 defaultModelId: command.defaultModelId,
               }),
           defaultAccess: command.defaultAccess,
+          // Absent keeps the stored choice, so a save from a client that does
+          // not show the switch never turns it off.
+          ...((command.defaultFullAccessSandbox ?? current.defaultFullAccessSandbox) === true
+            ? { defaultFullAccessSandbox: true }
+            : {}),
           version: command.expectedVersion + 1,
           updatedAt: decodeTimestamp(this.#clock()),
         });
@@ -612,12 +618,13 @@ export class WorkThreadService {
               : workAccessOfPermissionMode(project.defaultPermissionMode)) ??
             this.#currentSettings().defaultAccess,
           // The opt-in sandbox only rides along when the resolved access is
-          // Full access; the CLI asks with --sandbox beside --access full-access.
-          ...(command.fullAccessSandbox === true &&
-          ((project.defaultPermissionMode === undefined
+          // Full access: the request's choice, else the Project's, else Settings'.
+          ...(((project.defaultPermissionMode === undefined
             ? undefined
             : workAccessOfPermissionMode(project.defaultPermissionMode)) ??
-            this.#currentSettings().defaultAccess) === "full-access"
+            this.#currentSettings().defaultAccess) === "full-access" &&
+          (command.fullAccessSandbox ??
+            defaultFullAccessSandboxFor({ project, settings: this.#currentSettings() }))
             ? { fullAccessSandbox: true }
             : {}),
           version: 1,
@@ -1287,8 +1294,9 @@ export class WorkThreadService {
       bindingRevisionId,
       workingDirectory: ".",
       access: this.#currentSettings().defaultAccess,
-      ...(command.fullAccessSandbox === true &&
-      this.#currentSettings().defaultAccess === "full-access"
+      ...(this.#currentSettings().defaultAccess === "full-access" &&
+      (command.fullAccessSandbox ??
+        defaultFullAccessSandboxFor({ settings: this.#currentSettings() }))
         ? { fullAccessSandbox: true }
         : {}),
       version: 1,

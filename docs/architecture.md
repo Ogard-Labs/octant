@@ -10572,6 +10572,19 @@ mechanisms are:
       later raise never inherits a stale one. It is set from the terminal
       with `octant agent --access full-access --sandbox` (refused without
       Full access) and replays as off on journals written before it existed.
+    - **Defaults and where it is set.** A new thread at Full access whose
+      request does not say takes its Project's choice
+      (`defaultFullAccessSandbox`, set with the Project's mode through the
+      `change-*-project-permission-mode` commands), else Settings'
+      (`defaultFullAccessSandbox` on Code and Work settings), else off
+      (`defaultFullAccessSandboxFor`). In the app: "Keep the sandbox" under
+      Full access in a thread's mode picker (disabled, with the reason, on a
+      runtime that cannot keep it), "Keep the sandbox at Full access" in
+      Settings › Code › Access and Settings › Work, and "Sandbox at Full
+      access" beside a Project's default mode. In the terminal: `octant
+settings sandbox on|off [--work]`. Only a window on this host can turn
+      it off for a Full access thread, because that change names Full access,
+      which a paired device cannot.
       Verified with the real Seatbelt profile on macOS: writes inside the
       Project root succeed, and writes outside it and reads of `HOME` files are
       denied. A live Codex turn under the external-sandbox mapping is a

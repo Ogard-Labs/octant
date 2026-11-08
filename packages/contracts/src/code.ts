@@ -479,6 +479,11 @@ export const CodeSettings = Schema.Struct({
    */
   defaultAutoApprove: Schema.optional(Schema.Boolean),
   /**
+   * New Code threads at Full access keep the sandbox (`fullAccessSandbox`)
+   * unless the thread says otherwise. Absent is off: Full access stays open.
+   */
+  defaultFullAccessSandbox: Schema.optional(Schema.Boolean),
+  /**
    * Who answers prompts at Auto, as an account default a Code Project may
    * override. Absent means the provider's own reviewer where it has one and
    * Octant Shield everywhere else, which is also what "provider" means on a
@@ -709,6 +714,8 @@ export const CodeCommand = Schema.Union(
     defaultDiffLayout: Schema.optional(CodeDiffLayout),
     bundledLanguageServer: Schema.optional(Schema.Boolean),
     defaultAutoApprove: Schema.optional(Schema.Boolean),
+    /** Absent keeps the stored choice. */
+    defaultFullAccessSandbox: Schema.optional(Schema.Boolean),
     /** Absent keeps the stored choice. */
     autoReviewer: Schema.optional(AutoReviewer),
     /** Absent keeps the stored choice; null returns to each thread's own provider. */

@@ -498,6 +498,20 @@ export function guardrailLowered(from: PermissionMode, to: PermissionMode): bool
 }
 
 /**
+ * Whether a new thread that starts at Full access keeps the sandbox, when the
+ * request that created it did not say: the Project's choice, else Settings',
+ * else off (Full access stays open, as it always was).
+ */
+export function defaultFullAccessSandboxFor(input: {
+  readonly project?: { readonly defaultFullAccessSandbox?: boolean | undefined } | undefined;
+  readonly settings?: { readonly defaultFullAccessSandbox?: boolean | undefined } | undefined;
+}): boolean {
+  return (
+    input.project?.defaultFullAccessSandbox ?? input.settings?.defaultFullAccessSandbox ?? false
+  );
+}
+
+/**
  * The mode a new Work thread starts in: the Project's own choice, else Work's
  * default in Settings, else Ask first.
  */

@@ -338,6 +338,8 @@ export const WorkSettings = Schema.Struct({
   defaultProviderInstanceId: Schema.optional(ProviderInstanceId),
   defaultModelId: Schema.optional(ProviderModelId),
   defaultAccess: WorkAccess,
+  /** New Work threads at Full access keep the sandbox. Absent is off. */
+  defaultFullAccessSandbox: Schema.optional(Schema.Boolean),
   version: AggregateVersion,
   updatedAt: UtcTimestamp,
 })
@@ -357,6 +359,8 @@ export const UpdateWorkSettingsCommand = Schema.Struct({
   defaultProviderInstanceId: Schema.optional(ProviderInstanceId),
   defaultModelId: Schema.optional(ProviderModelId),
   defaultAccess: WorkAccess,
+  /** Absent keeps the stored choice. */
+  defaultFullAccessSandbox: Schema.optional(Schema.Boolean),
 })
   .annotations(strict)
   .pipe(

@@ -499,6 +499,54 @@ describe("WorkThreadService", () => {
     });
   });
 
+  it("starts a new Full access thread with the sandbox its Project or Settings choose, and keeps the Settings choice through a save that does not mention it", async () => {
+    const fixture = serviceFixture({ threads: [] });
+    await fixture.service.execute(ids.window, {
+      kind: "update-work-settings",
+      expectedVersion: 0,
+      defaultAccess: "full-access",
+      defaultFullAccessSandbox: true,
+    });
+    // A later save that does not mention the sandbox keeps it.
+    await expect(
+      fixture.service.execute(ids.window, {
+        kind: "update-work-settings",
+        expectedVersion: 1,
+        defaultAccess: "full-access",
+      }),
+    ).resolves.toMatchObject({ settings: { defaultFullAccessSandbox: true } });
+    const create = {
+      kind: "create-work-thread" as const,
+      projectId: ids.project,
+      title: "Draft brief",
+      providerInstanceId: ids.provider,
+      modelId: "model-a" as never,
+      hostId: "local" as const,
+      bindingRevisionId: ids.binding,
+    };
+    await expect(
+      fixture.service.execute(ids.window, { ...create, threadId: ids.thread }),
+    ).resolves.toMatchObject({
+      thread: { access: "full-access", fullAccessSandbox: true },
+    });
+
+    // A Project that turned the sandbox off wins over Settings.
+    const projectOff = serviceFixture({
+      threads: [],
+      project: {
+        ...workProject(),
+        defaultPermissionMode: "full-access",
+        defaultFullAccessSandbox: false,
+      } as Project,
+    });
+    const created = await projectOff.service.execute(ids.window, {
+      ...create,
+      threadId: ids.thread,
+    });
+    expect(created).toMatchObject({ thread: { access: "full-access" } });
+    expect("thread" in created ? created.thread.fullAccessSandbox : "missing").toBeUndefined();
+  });
+
   it("starts a new thread at its Work Project's own mode, over Work's default in Settings", async () => {
     const fixture = serviceFixture({
       threads: [],

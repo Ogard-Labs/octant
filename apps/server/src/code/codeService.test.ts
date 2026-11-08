@@ -1578,6 +1578,39 @@ describe("CodeService commands", () => {
     ).resolves.toMatchObject({ thread: { executionPolicy: "full-access" } });
   });
 
+  it("starts a new Full access thread with its Project's sandbox choice unless the request says otherwise", async () => {
+    const sandboxedProject = {
+      ...(rememberedFullAccessProject as Project),
+      defaultFullAccessSandbox: true,
+    } as Project;
+    const fixture = serviceFixture({ threads: [], project: sandboxedProject });
+    await expect(
+      fixture.service.execute(ids.window, {
+        kind: "create-code-thread",
+        thread: thread({
+          executionPolicy: "full-access",
+          permissionPersistence: "project-default",
+        }),
+      }),
+    ).resolves.toMatchObject({ thread: { fullAccessSandbox: true } });
+
+    // An explicit "off" in the request wins over the Project's default.
+    const explicit = serviceFixture({ threads: [], project: sandboxedProject });
+    const created = await explicit.service.execute(ids.window, {
+      kind: "create-code-thread",
+      thread: thread({
+        executionPolicy: "full-access",
+        permissionPersistence: "project-default",
+        fullAccessSandbox: false,
+      }),
+    });
+    expect(
+      "thread" in created && created.thread !== undefined
+        ? (created.thread as { fullAccessSandbox?: boolean }).fullAccessSandbox
+        : "missing",
+    ).toBeUndefined();
+  });
+
   it("snapshots the profile's instructions and skill allowlist onto the thread", async () => {
     const created = thread({
       executionPolicy: "approval-gated",

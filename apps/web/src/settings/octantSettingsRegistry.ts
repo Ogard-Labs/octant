@@ -592,6 +592,12 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
           scope: "host",
           keywords: "work access ask first auto-accept accept edits approvals files permissions",
         },
+        {
+          id: settingId("work-full-access-sandbox"),
+          label: "Keep the sandbox at Full access",
+          scope: "host",
+          keywords: "work full access sandbox seatbelt confinement secrets network prompts",
+        },
       ],
     },
     {
@@ -639,6 +645,13 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
           label: "Auto reviewer",
           scope: "app",
           keywords: "auto reviewer octant shield provider review approvals approve automatic judge",
+        },
+        {
+          id: settingId("code-full-access-sandbox"),
+          label: "Keep the sandbox at Full access",
+          scope: "app",
+          keywords:
+            "full access sandbox seatbelt confinement secrets network prompts codex harness",
         },
         {
           id: settingId("code-editor-executable"),

@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   AUTO_UNSUPPORTED_REASON,
+  defaultFullAccessSandboxFor,
   defaultPermissionModeFor,
   defaultWorkPermissionModeFor,
   guardrailLowered,
@@ -9,6 +10,7 @@ import {
   outsideContentRecordedOnly,
   permissionModeOf,
   permissionModeOfWorkAccess,
+  refusesFullAccessSandbox,
   clampWorkAccess,
   chosenAutoReviewer,
   resolveAutoReviewer,
@@ -114,6 +116,43 @@ describe("guardrail levels", () => {
         capabilities: claudeOrCodex,
       }),
     ).toMatchObject({ sandbox: "none", egress: "unrestricted" });
+  });
+
+  it("keeps the sandbox at Full access only on Codex and the Octant Harness, and refuses it elsewhere or on an unknown runtime", () => {
+    const sandboxed = { executionPolicy: "full-access", fullAccessSandbox: true } as const;
+    expect(refusesFullAccessSandbox({ access: sandboxed, driverKind: "codex" })).toBe(false);
+    expect(refusesFullAccessSandbox({ access: sandboxed, driverKind: "openai-compatible" })).toBe(
+      false,
+    );
+    for (const driverKind of ["claude", "opencode", "pi", "mistral-vibe", undefined] as const) {
+      expect(refusesFullAccessSandbox({ access: sandboxed, driverKind })).toBe(true);
+    }
+    // Without the choice, or below Full access, nothing refuses.
+    expect(
+      refusesFullAccessSandbox({
+        access: { executionPolicy: "full-access" },
+        driverKind: "claude",
+      }),
+    ).toBe(false);
+    expect(
+      refusesFullAccessSandbox({
+        access: { executionPolicy: "approval-gated", fullAccessSandbox: true },
+        driverKind: "claude",
+      }),
+    ).toBe(false);
+  });
+
+  it("takes a new Full access thread's sandbox from its Project, else Settings, else off", () => {
+    expect(defaultFullAccessSandboxFor({})).toBe(false);
+    expect(defaultFullAccessSandboxFor({ settings: { defaultFullAccessSandbox: true } })).toBe(
+      true,
+    );
+    expect(
+      defaultFullAccessSandboxFor({
+        project: { defaultFullAccessSandbox: false },
+        settings: { defaultFullAccessSandbox: true },
+      }),
+    ).toBe(false);
   });
 
   it("runs Full access with no sandbox for every runtime, wrapped or not", () => {
