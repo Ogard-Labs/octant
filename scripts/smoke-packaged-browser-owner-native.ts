@@ -3,6 +3,7 @@ import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import { createQuitAppleScript } from "./package-desktop";
 import {
   cleanupPackagedProcess,
@@ -172,6 +173,72 @@ const timer = setInterval(() => {
           process.env,
           6000,
         );
+      const diagnose = async (name: string) => {
+        const script = String.raw`on run argv
+tell application "System Events"
+set candidate to first application process whose unix id is (item 1 of argv as integer)
+set diagnosticRows to {"captured PID: " & (unix id of candidate as text)}
+repeat with attributeName in {"AXManualAccessibility", "AXEnhancedUserInterface"}
+try
+set value of attribute attributeName of candidate to true
+set end of diagnosticRows to ((attributeName as text) & " set succeeded")
+on error errorText number errorNumber
+set end of diagnosticRows to ((attributeName as text) & " set failed: " & errorNumber & " " & errorText)
+end try
+end repeat
+try
+set end of diagnosticRows to ("role: " & (role of candidate as text))
+end try
+try
+set end of diagnosticRows to ("attributes: " & (name of every attribute of candidate as text))
+end try
+try
+set end of diagnosticRows to ("windows: " & (count of windows of candidate as text))
+end try
+set AppleScript's text item delimiters to linefeed
+return diagnosticRows as text
+end tell
+end run`;
+        try {
+          await writeFile(
+            join(artifacts, `${phase}-${name}-system-events.txt`),
+            await runBoundedCommand(
+              "/usr/bin/osascript",
+              ["-e", script, String(pid)],
+              process.env,
+              6000,
+            ),
+          );
+        } catch (error) {
+          await writeFile(
+            join(artifacts, `${phase}-${name}-system-events.txt`),
+            error instanceof Error ? error.message : "System Events diagnostic failed.",
+          );
+        }
+        try {
+          const executable = join(root, "ax-read-diagnostic");
+          await runBoundedCommand(
+            "/usr/bin/xcrun",
+            [
+              "swiftc",
+              fileURLToPath(new URL("./packaged-browser-owner-ax.swift", import.meta.url)),
+              "-o",
+              executable,
+            ],
+            process.env,
+            30_000,
+          );
+          await writeFile(
+            join(artifacts, `${phase}-${name}-native-ax.json`),
+            await runBoundedCommand(executable, [String(pid), bundle], process.env, 6000),
+          );
+        } catch (error) {
+          await writeFile(
+            join(artifacts, `${phase}-${name}-native-ax-error.txt`),
+            error instanceof Error ? error.message : "Native AX diagnostic failed.",
+          );
+        }
+      };
       const wait = async (
         name: string,
         predicate: (snapshot: string) => boolean,
@@ -193,6 +260,7 @@ const timer = setInterval(() => {
         }
         await writeFile(join(artifacts, `${phase}-${name}-failed-ax.txt`), snapshot);
         await writeFile(join(artifacts, `${phase}-${name}-native-error.txt`), lastError);
+        await diagnose(name);
         await runBoundedCommand(
           "/usr/sbin/screencapture",
           ["-x", join(artifacts, `${phase}-${name}-failed.png`)],

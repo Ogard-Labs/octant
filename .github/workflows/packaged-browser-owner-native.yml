@@ -6,6 +6,7 @@ on:
     paths:
       - .github/workflows/packaged-browser-owner-native.yml
       - scripts/smoke-packaged-browser-owner-native.ts
+      - scripts/packaged-browser-owner-ax.swift
 
 permissions:
   contents: read
