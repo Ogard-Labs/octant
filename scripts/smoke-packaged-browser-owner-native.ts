@@ -873,7 +873,7 @@ end run`;
           await native("click", noKey);
           await native("reveal", "Check and add");
           await native("click", "Check and add");
-          await wait("endpoint-added", endpointContinueReady);
+          await wait("endpoint-added", endpointContinueReady, 12_000, 500);
           if (provider.evidence().models < 1)
             throw Error("Added endpoint did not reach the owned model fixture.");
           await native("click", "Continue");
