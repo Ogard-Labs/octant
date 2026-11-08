@@ -163,9 +163,12 @@ export class ThreadMovesFromWindow {
     const startedWaitingAt = this.#options.now();
     const timer = setInterval(() => {
       void (async () => {
-        const waiting = this.#waiting.get(key(thread));
-        if (waiting === undefined || waiting.timer !== timer) return;
+        const current = () => this.#waiting.get(key(thread))?.timer === timer;
+        if (!current()) return;
         const now = await this.#options.source.read(thread);
+        // Don't move may have been pressed, or another tick may have started
+        // the move, while the thread was read: only the wait still current acts.
+        if (!current()) return;
         if (now.status === "found" && now.busy) {
           if (this.#options.now() - startedWaitingAt > TICKET_WAIT_LIMIT_MS) {
             this.#stopWaiting(thread);
