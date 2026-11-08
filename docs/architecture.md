@@ -14647,6 +14647,14 @@ bun run dev        # Vite renderer + Electron with hot reload; server spawned fr
 bun run verify     # paths:check, wiring:check, ui:check, style:check, decisions:check, fmt:check, lint, typecheck, test, build
 ```
 
+- Native CI checks first use Electron's unchanged installer. If its upstream
+  release download fails, the CI-only recovery fetches the same installed
+  version, platform and architecture through the official GitHub release API,
+  verifies its archive against the installed package's checksums, and populates
+  the ordinary public Electron download cache, including the checksum manifest.
+  The normal installer then verifies and installs it. Recovery refuses custom
+  targets or mirrors, forwards API authorization to GitHub's API only, and
+  changes no runtime trust, packaging or release behavior.
 - Two stalls are logged once per occurrence so the next one is visible: a
   SQLite statement slower than `OCTANT_SLOW_STATEMENT_MS` (default 20) logs
   its SQL shape and duration, never bound values, and an event-loop lag over
