@@ -288,7 +288,3 @@
   border: 0;
   gap: var(--oct-space-1);
 }
-
-.benchmark-stars__star[aria-checked="true"] {
-  color: var(--oct-fg);
-}
