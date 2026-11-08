@@ -887,6 +887,13 @@ interface ProviderRuntimeRegistryLike {
   ) => ProviderObservedState | undefined;
 }
 
+/** The thread a command names, read before it is decoded so every dispatch path can check it. */
+function threadIdNamedBy(input: unknown): string | undefined {
+  if (typeof input !== "object" || input === null || !("threadId" in input)) return undefined;
+  const threadId = (input as { readonly threadId?: unknown }).threadId;
+  return typeof threadId === "string" ? threadId : undefined;
+}
+
 /** Why a command on a thread held by a move is refused. */
 export const THREAD_MOVING_REFUSAL =
   "This thread is moving between your computers and cannot change until the move finishes.";
@@ -894,6 +901,8 @@ export const THREAD_MOVING_REFUSAL =
 /** A Chat conversation carried by a move, as the destination opens it. */
 export interface MovedChatThreadImport {
   readonly moveId: string;
+  /** The id the move planned for the thread before it existed. */
+  readonly threadId: ChatThreadId;
   readonly title: string;
   readonly projectId?: ChatThread["projectId"];
   readonly externalContentIngested: boolean;
@@ -1601,13 +1610,16 @@ export class ChatService {
   ): Promise<ChatCommandResult | ThreadWorkCommandResult> {
     try {
       this.#assertChatEnabled();
+      // Checked before either dispatch path, so a work item or follow-up on a
+      // thread a move holds is refused too; the source would purge it unmoved.
+      const named = threadIdNamedBy(input);
+      if (named !== undefined && this.#moveHold?.(named) === true) {
+        throw new ChatServiceError({ category: "unavailable", message: THREAD_MOVING_REFUSAL });
+      }
       if (this.#isThreadWorkCommand(input)) {
         return await this.#threadWork.execute(input);
       }
       const command = decodeChatCommand(input);
-      if ("threadId" in command && this.#moveHold?.(String(command.threadId)) === true) {
-        throw new ChatServiceError({ category: "unavailable", message: THREAD_MOVING_REFUSAL });
-      }
       switch (command.kind) {
         case "create-chat-thread":
           return await this.#createThread(command, executionContext?.inheritedMark);
@@ -3267,7 +3279,8 @@ export class ChatService {
   async importMovedThread(input: MovedChatThreadImport): Promise<ChatThread> {
     this.#assertReady();
     if (input.projectId !== undefined) this.#assertActiveChatProject(input.projectId);
-    const threadId = decodeChatThreadId(this.#uuid());
+    const threadId = input.threadId;
+    this.#assertThreadIdFree(threadId);
     const settings = this.#requireChatSettings();
     const timestamp = decodeTimestamp(this.#clock());
     const copiedContent: PreparedChatContent[] = [];

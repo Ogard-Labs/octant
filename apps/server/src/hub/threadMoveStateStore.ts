@@ -86,8 +86,12 @@ const decodeState = Schema.decodeUnknownSync(ThreadMoveState);
 export function heldThreadsOf(state: ThreadMoveState): ReadonlyArray<MovedThreadReference> {
   return [
     ...state.sent.map((move) => move.thread),
+    // A receiving move names its thread before the thread exists, so a stop
+    // between opening it and recording the arrival still holds it.
     ...state.received.flatMap((move) =>
-      move.state === "arrived" && move.thread !== undefined ? [move.thread] : [],
+      (move.state === "arrived" || move.state === "receiving") && move.thread !== undefined
+        ? [move.thread]
+        : [],
     ),
   ];
 }

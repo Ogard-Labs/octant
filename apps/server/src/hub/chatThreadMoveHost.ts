@@ -146,7 +146,14 @@ export function createChatThreadMoveHost(options: ChatThreadMoveHostOptions): {
       offer.source.mode === "chat" &&
       (offer.destinationProjectId === undefined ||
         options.activeChatProject(String(offer.destinationProjectId))),
-    arrive: async ({ offer, parts }) => {
+    arrive: async ({ thread: planned, offer, parts }) => {
+      if (planned.mode !== "chat") return { status: "refused", reason: "transfer-failed" };
+      // A thread already opened under the planned id was opened by an earlier
+      // try that stopped before it was recorded: hold it, never open a second.
+      if (viewOf(planned) !== undefined) {
+        options.holds.hold(planned);
+        return { status: "arrived", thread: planned };
+      }
       const bundle = offer.manifest.parts.find((part) => part.kind === "thread-bundle");
       const path = bundle === undefined ? undefined : parts.get(bundle.partId);
       if (offer.source.mode !== "chat" || path === undefined) {
@@ -164,8 +171,10 @@ export function createChatThreadMoveHost(options: ChatThreadMoveHostOptions): {
       ) {
         return { status: "refused", reason: "no-eligible-project" };
       }
+      options.holds.hold(planned);
       const created = await options.importMovedThread({
         moveId: String(offer.moveId),
+        threadId: decodeChatThreadId(planned.threadId),
         title: conversation.title,
         ...(offer.destinationProjectId === undefined
           ? {}
@@ -192,7 +201,8 @@ export function createChatThreadMoveHost(options: ChatThreadMoveHostOptions): {
     activate: async (thread) => options.holds.release(thread),
     discard: async (thread) => {
       options.holds.release(thread);
-      await options.purge(decodeChatThreadId(thread.threadId));
+      // A planned thread that was never opened has nothing to erase.
+      if (viewOf(thread) !== undefined) await options.purge(decodeChatThreadId(thread.threadId));
     },
   };
 

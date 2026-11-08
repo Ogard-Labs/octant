@@ -12,7 +12,7 @@ import type {
 import type { HubHostIdentity } from "./hubService";
 import type { HubTransport } from "./pinnedHubTransport";
 import type { MemberTarget } from "./spokeLinkService";
-import { createThreadMoveStateStore } from "./threadMoveStateStore";
+import { createThreadMoveStateStore, heldThreadsOf } from "./threadMoveStateStore";
 import {
   THREAD_MOVE_CHUNK_BYTES,
   THREAD_MOVE_ROUTES,
@@ -57,6 +57,7 @@ interface Harness {
     up: boolean;
     dropNextAnswerTo: string | undefined;
     dropChunkAfter: number | undefined;
+    stopAfterOpening: boolean;
   };
   readonly clock: { now: number };
   ticket: () => string;
@@ -83,10 +84,11 @@ function harness(
     up: true,
     dropNextAnswerTo: undefined,
     dropChunkAfter: undefined,
+    stopAfterOpening: false,
   };
   const clock = { now: Date.parse("2026-11-08T12:00:00Z") };
   let sequence = 0;
-  let tickets = 0;
+  const opened = new Set<string>();
   const uuid = () => id(6 + (sequence++ % 3));
   let chunkRequests = 0;
 
@@ -201,9 +203,15 @@ function harness(
     },
     destination: {
       acceptsProject: (offer) => offer.source.mode === "chat",
-      arrive: async () => {
-        const thread: MovedThreadReference = { mode: "chat", threadId: id(9) };
+      arrive: async ({ thread }) => {
+        // Idempotent by the planned id, as a real host must be.
+        if (opened.has(thread.threadId)) return { status: "arrived", thread };
+        opened.add(thread.threadId);
         arrived.push(thread);
+        if (network.stopAfterOpening) {
+          network.stopAfterOpening = false;
+          throw new Error("The host stopped after opening the thread.");
+        }
         return { status: "arrived", thread };
       },
       activate: async (thread) => {
@@ -223,7 +231,8 @@ function harness(
     authenticate,
     ownerIsCurrent: (owner) => owner === String(ownerId),
     now: () => clock.now,
-    uuid: () => `ticket-${String(tickets++)}`,
+    // Tickets and planned thread ids are kept apart, so one fixed id serves both.
+    uuid: () => id(9),
   });
   mini = miniHost;
   const ticket = () => {
@@ -344,6 +353,39 @@ describe("moving a thread", () => {
     expect(await h.laptop.cancel(moveId)).toEqual({ status: "cancelled" });
     expect(h.frozen.size).toBe(0);
     expect(h.erased).toEqual([]);
+  });
+
+  it("holds a thread planned for a move that was still receiving when the host stopped", async () => {
+    const h = harness();
+    h.network.stopAfterOpening = true;
+    await start(h);
+    const miniState = createThreadMoveStateStore(folders[1] ?? "");
+    expect(heldThreadsOf(miniState.load())).toEqual([{ mode: "chat", threadId: id(9) }]);
+  });
+
+  it("opens one thread, not two, when the destination stopped between opening it and recording it", async () => {
+    const h = harness();
+    h.network.stopAfterOpening = true;
+    expect(await start(h)).toEqual({ status: "interrupted" });
+    expect(h.erased).toEqual([]);
+
+    const [recovered] = await h.laptop.recover();
+    expect(recovered?.status).toBe("moved");
+    expect(h.arrived).toEqual([{ mode: "chat", threadId: id(9) }]);
+    expect(h.active).toEqual([id(9)]);
+    expect(h.erased).toEqual([chatThread.threadId]);
+  });
+
+  it("finishes the erase when a cancel learns the destination was activated anyway", async () => {
+    const h = harness();
+    h.network.dropNextAnswerTo = THREAD_MOVE_ROUTES.finish;
+    await start(h);
+    h.clock.now += 5 * 60 * 1000;
+    expect((await h.mini.activateAnyway(id(6))).body.state).toBe("committed");
+
+    expect(await h.laptop.cancel(id(6))).toEqual({ status: "already-moved" });
+    expect(h.erased).toEqual([chatThread.threadId]);
+    expect(h.frozen.size).toBe(0);
   });
 
   it("offers Activate anyway only after the source has been silent for five minutes", async () => {

@@ -9146,6 +9146,7 @@ describe("ChatService", () => {
       const { service } = openFixture({ moveHold: (threadId) => held.has(threadId) });
       const imported = await service.importMovedThread({
         moveId: "99999999-9999-4999-8999-999999999999",
+        threadId: "dddddddd-0000-4000-8000-000000000000" as never,
         title: "Plan the trip",
         externalContentIngested: false,
         turns: [
@@ -9186,6 +9187,19 @@ describe("ChatService", () => {
           threadId: imported.id,
           expectedVersion: view.thread.version,
           prompt: "And in summer?",
+        }),
+      ).rejects.toMatchObject({ failure: { category: "unavailable" } });
+      // A work item would be purged with the source unmoved, so it is refused too.
+      await expect(
+        service.execute({
+          kind: "add-chat-work-item",
+          threadId: imported.id,
+          expectedVersion: 0,
+          itemId: "eeeeeeee-0000-4000-8000-000000000000",
+          title: "Book flights",
+          status: "pending",
+          position: 0,
+          origin: "user",
         }),
       ).rejects.toMatchObject({ failure: { category: "unavailable" } });
 

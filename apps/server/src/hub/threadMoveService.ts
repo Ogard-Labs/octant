@@ -103,8 +103,14 @@ export interface ThreadMoveSourceHost {
 export interface ThreadMoveDestinationHost {
   /** Whether the offer's destination Project fits the thread's mode (and, for Code, its repository). */
   readonly acceptsProject: (offer: ThreadMoveOffer) => boolean;
-  /** Opens the new thread, held so it cannot take a turn. */
+  /**
+   * Opens the new thread under the id the move planned for it, held so it
+   * cannot take a turn. Called again with the same id after a stop between
+   * opening the thread and recording it, so a thread that already exists
+   * under that id is held and answered as arrived, never opened twice.
+   */
   readonly arrive: (input: {
+    readonly thread: MovedThreadReference;
     readonly offer: ThreadMoveOffer;
     readonly parts: ReadonlyMap<string, string>;
     readonly origin: { readonly memberId: HubMemberId; readonly thread: MovedThreadReference };
@@ -360,7 +366,15 @@ export class ThreadMoveService {
       parts.set(part.partId, path);
     }
     const origin = { memberId: move.senderMemberId, thread: move.offer.source };
+    // The new thread's id is recorded before the thread exists, so a host that
+    // stops between the two finds it on restart, holds it, and opens no second.
+    const planned: MovedThreadReference = move.thread ?? {
+      mode: move.offer.source.mode,
+      threadId: this.#uuid(),
+    };
+    if (move.thread === undefined) this.#saveReceived({ ...move, thread: planned });
     const arrival = await this.#options.destination.arrive({
+      thread: planned,
       offer: move.offer,
       parts,
       origin,
@@ -603,8 +617,12 @@ export class ThreadMoveService {
     const answer = await this.#send(move, THREAD_MOVE_ROUTES.discard, { moveId: move.moveId });
     if (answer.status === "unreachable") return { status: "destination-unreachable" };
     if (answer.body.state === "committed") {
-      await this.#erase(move, undefined);
-      return { status: "already-moved" };
+      // Activate anyway may have committed it while this host never heard the
+      // destination's thread; the committed answer names it.
+      const erased = await this.#erase(move, threadOf(answer.body));
+      return erased.status === "moved"
+        ? { status: "already-moved" }
+        : { status: "destination-unreachable" };
     }
     await this.#unfreezeSent(move);
     return { status: "cancelled" };
