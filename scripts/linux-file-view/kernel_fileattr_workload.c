@@ -69,6 +69,32 @@ static bool ordinary_seeks(int file, off_t size)
     lseek(file, -7, SEEK_CUR) == 0;
 }
 
+// The pinned ext4 UAPI also exposes generation under this native command.
+#define EXT4_NATIVE_GETVERSION _IOR('f', 3, long)
+struct integer_observation { int result; int error; unsigned int value; bool unchanged; };
+static struct integer_observation inode_integer(int file, unsigned int command)
+{
+  const unsigned int sentinel = 0x5a5a5a5a;
+  unsigned int value = sentinel;
+  errno = 0;
+  int result = ioctl(file, command, &value);
+  int error = result < 0 ? errno : 0;
+  return (struct integer_observation) { .result = result, .error = error,
+    .value = value, .unchanged = value == sentinel };
+}
+static bool inode_queries_allowed(int file)
+{
+  struct integer_observation legacy = inode_integer(file, FS_IOC_GETVERSION);
+  struct integer_observation version = inode_integer(file, EXT4_NATIVE_GETVERSION);
+  struct integer_observation block = inode_integer(file, FIGETBSZ);
+  return legacy.result == 0 && version.result == 0 && legacy.value == version.value &&
+    block.result == 0 && block.value > 0;
+}
+static bool integer_refused(struct integer_observation observation)
+{
+  return observation.result == -1 && observation.error == EACCES && observation.unchanged;
+}
+
 struct extent_observation { int result; int error; unsigned int count; bool unchanged; };
 static struct extent_observation extent_count(int file)
 {
@@ -112,6 +138,7 @@ int main(int argc, char **argv)
   if (!ordinary_seeks(held, before.identity.st_size)) return 8;
   struct extent_observation before_extents = extent_count(held);
   if (before_extents.result || !before_extents.count) return 9;
+  if (!inode_queries_allowed(held)) return 10;
   puts("OCTANT_FILEATTR_FILESYSTEM {\"ext4\":true,\"baselineRead\":true}");
   int saved = open(BASELINE, O_CREAT | O_EXCL | O_WRONLY | O_CLOEXEC | O_NOFOLLOW, 0600);
   if (saved < 0 || write(saved, &before, sizeof(before)) != sizeof(before) || fsync(saved)) return 4;
@@ -145,6 +172,9 @@ int main(int argc, char **argv)
   int usage_errno = usage_result < 0 ? errno : 0;
   bool available_refused = available_result == -1 && available_errno == EACCES && private_available == available_sentinel;
   bool usage_refused = usage_result == -1 && usage_errno == EACCES && private_usage == usage_sentinel;
+  struct integer_observation private_legacy = inode_integer(held, FS_IOC_GETVERSION);
+  struct integer_observation private_version = inode_integer(held, EXT4_NATIVE_GETVERSION);
+  struct integer_observation private_block = inode_integer(held, FIGETBSZ);
   struct extent_observation private_extents = extent_count(held);
   bool extents_refused = private_extents.result == -1 && private_extents.error == EACCES && private_extents.unchanged;
   struct seek_observation seek_end = protected_seek(held, SEEK_END);
@@ -175,9 +205,15 @@ int main(int argc, char **argv)
     !ioctl(public, FIOQSIZE, &public_usage) && public_usage >= 0;
   struct stat public_identity;
   bool public_seeks = public >= 0 && !fstat(public, &public_identity) && ordinary_seeks(public, public_identity.st_size);
+  bool public_inode_queries = inode_queries_allowed(public);
   struct extent_observation public_extents = extent_count(public);
   bool extents_allowed = public_extents.result == 0 && public_extents.count > 0;
   if (public >= 0) close(public);
+  printf("OCTANT_INODE_IOCTL_METADATA {\"baselineAllowed\":true,\"legacyRefused\":%s,\"legacyResult\":%d,\"legacyErrno\":%d,\"versionRefused\":%s,\"versionResult\":%d,\"versionErrno\":%d,\"blockRefused\":%s,\"blockResult\":%d,\"blockErrno\":%d,\"publicAllowed\":%s}\n",
+    integer_refused(private_legacy) ? "true" : "false", private_legacy.result, private_legacy.error,
+    integer_refused(private_version) ? "true" : "false", private_version.result, private_version.error,
+    integer_refused(private_block) ? "true" : "false", private_block.result, private_block.error,
+    public_inode_queries ? "true" : "false");
   printf("OCTANT_FIEMAP_METADATA {\"baselineAllowed\":true,\"privateRefused\":%s,\"privateResult\":%d,\"privateErrno\":%d,\"outputUnchanged\":%s,\"publicAllowed\":%s}\n",
     extents_refused ? "true" : "false", private_extents.result, private_extents.error,
     private_extents.unchanged ? "true" : "false", extents_allowed ? "true" : "false");
@@ -203,6 +239,7 @@ int main(int argc, char **argv)
     public_restored ? "true" : "false", marker ? "true" : "false");
   return private_read_refused && private_output_unchanged && private_refused && public_changed && public_restored && marker &&
     available_refused && usage_refused && public_queries && pipe_allowed && socket_allowed &&
-    extents_refused && extents_allowed &&
+    extents_refused && extents_allowed && public_inode_queries &&
+    integer_refused(private_legacy) && integer_refused(private_version) && integer_refused(private_block) &&
     seek_end.refused && seek_data.refused && seek_hole.refused && private_position && public_seeks ? 0 : 18;
 }
