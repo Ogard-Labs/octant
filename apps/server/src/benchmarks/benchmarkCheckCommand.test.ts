@@ -176,4 +176,47 @@ describe("benchmark check command", () => {
     expect(output).not.toContain(handedOut);
     expect(output).not.toContain(tokenShaped);
   });
+
+  it("ends the command's whole process group when the check is aborted", async () => {
+    const fake = createFakeSandboxConfinement();
+    directories.push(fake.root);
+    const scripts = directory();
+    const worktree = directory();
+    const child = fakeChild(4_244);
+    const spawn = vi.fn(() => child);
+    // A group that exits once it is signalled, as a real one does.
+    const killProcessGroup = vi.fn((_group: number, signal: NodeJS.Signals) => {
+      child.close(null, signal);
+    });
+    const port = new RepositoryTestProcessPort({
+      temporaryDirectory: fake.temporaryDirectory,
+      networkEgress: "none",
+      harnessShellScriptDirectory: scripts,
+      confinement: fake.confinement,
+      spawn,
+      killProcessGroup,
+      processGroupExists: () => false,
+    });
+    const commands = createBenchmarkCheckCommandPort(
+      createBenchmarkCheckShell({
+        process: port,
+        scriptDirectory: scripts,
+        homeDirectory: fake.temporaryDirectory,
+      }),
+    );
+    const controller = new AbortController();
+
+    const running = commands.run({
+      command: "sleep 999",
+      cwd: worktree,
+      timeoutMs: 600_000,
+      signal: controller.signal,
+    });
+    await vi.waitFor(() => expect(spawn).toHaveBeenCalled());
+    controller.abort();
+
+    await expect(running).resolves.toMatchObject({ status: "unavailable" });
+    expect(killProcessGroup).toHaveBeenCalled();
+    expect(killProcessGroup.mock.calls[0]?.[0]).toBe(-4_244);
+  });
 });

@@ -41,6 +41,8 @@ import type { BenchmarkEventStore } from "./benchmarkEventStore";
 import type { BenchmarkProjection } from "./benchmarkProjection";
 
 export const BENCHMARK_TICK_MS = 2_000;
+/** How long stopping waits for aborted check commands to end. */
+export const BENCHMARK_STOP_WAIT_MS = 5_000;
 /** A turn still running after this long is interrupted and settles failed. */
 export const BENCHMARK_TURN_TIMEOUT_MS = 30 * 60_000;
 
@@ -70,6 +72,7 @@ export interface BenchmarkRunnerOptions {
   readonly clock: () => string;
   readonly tickMs?: number;
   readonly turnTimeoutMs?: number;
+  readonly stopWaitMs?: number;
 }
 
 /** The deterministic identities of one cell's thread and turn submission. */
@@ -143,6 +146,7 @@ export class BenchmarkRunner {
     string,
     {
       readonly controller: AbortController;
+      done: Promise<void>;
       result?: { readonly checks: ReadonlyArray<BenchmarkCheckResult> };
     }
   >();
@@ -154,16 +158,36 @@ export class BenchmarkRunner {
     this.#options = options;
   }
 
-  /** Starts ticking and resumes any running run now; the returned function stops it. */
-  start(): () => void {
+  /**
+   * Starts ticking and resumes any running run now. The returned function stops
+   * it: it aborts every check command still running, which makes the confined
+   * port end each command's process group, waits a bounded time for them to end,
+   * and resolves. No further command of a check sequence starts after the abort.
+   */
+  start(): () => Promise<void> {
     this.#stopped = false;
     const timer = setInterval(() => void this.tick(), this.#options.tickMs ?? BENCHMARK_TICK_MS);
     timer.unref();
     void this.#exclusive(() => this.#archiveSettled()).catch(() => undefined);
     void this.tick();
-    return () => {
+    return async () => {
       this.#stopped = true;
       clearInterval(timer);
+      const running = [...this.#checking.values()];
+      for (const entry of running) entry.controller.abort();
+      if (running.length > 0) {
+        let deadline: ReturnType<typeof setTimeout> | undefined;
+        await Promise.race([
+          Promise.allSettled(running.map((entry) => entry.done)),
+          new Promise<void>((resolve) => {
+            deadline = setTimeout(resolve, this.#options.stopWaitMs ?? BENCHMARK_STOP_WAIT_MS);
+            deadline.unref();
+          }),
+        ]);
+        if (deadline !== undefined) clearTimeout(deadline);
+      }
+      // Whatever those commands reported was cut short; a later start checks again.
+      this.#checking.clear();
     };
   }
 
@@ -770,10 +794,11 @@ export class BenchmarkRunner {
       const controller = new AbortController();
       const entry: {
         readonly controller: AbortController;
+        done: Promise<void>;
         result?: { readonly checks: ReadonlyArray<BenchmarkCheckResult> };
-      } = { controller };
+      } = { controller, done: Promise.resolve() };
       this.#checking.set(cellId, entry);
-      void this.#codeChecks(cell, benchmarkCase, controller.signal).then(
+      entry.done = this.#codeChecks(cell, benchmarkCase, controller.signal).then(
         (checks) => {
           entry.result = { checks };
         },
@@ -862,6 +887,16 @@ export class BenchmarkRunner {
         continue;
       }
       if (check.kind !== "command-exits-zero") continue;
+      // Once stopped or cancelled, no further command of the sequence starts.
+      if (signal.aborted) {
+        results.push(
+          benchmarkCommandResult(index, {
+            status: "unavailable",
+            message: "The check was cancelled.",
+          }),
+        );
+        continue;
+      }
       const root =
         code === undefined || cell.threadId === undefined
           ? undefined
