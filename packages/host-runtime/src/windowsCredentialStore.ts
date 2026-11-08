@@ -5,6 +5,17 @@ import type { KeychainServiceFamily } from "./desktopIdentity";
 
 /** Win32's one atomic generic credential blob is limited to 5 * 512 bytes. */
 export const WINDOWS_CREDENTIAL_MAX_BYTES = 2_560;
+const NAMESPACES = [
+  "provider",
+  "replica-device-key",
+  "replica-store-credential",
+  "canvas-public-share-secret",
+  "mcp-server-credential",
+  "desktop-provider-credential",
+  "push-platform-credential",
+  "ssh-key",
+] as const;
+export type WindowsCredentialNamespace = (typeof NAMESPACES)[number];
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 const MAGIC = "OCCR";
 const RESPONSE_HEADER_BYTES = 9;
@@ -31,20 +42,23 @@ export interface MakeWindowsCredentialStoreOptions {
   readonly helperPath: string;
   readonly storeScope: string;
   readonly serviceFamily?: KeychainServiceFamily;
+  readonly namespace?: WindowsCredentialNamespace;
   readonly timeoutMs?: number;
   readonly execute?: WindowsCommandExecutor;
 }
 
 /**
  * Only the credential broker receives this store. The native helper owns one
- * fixed provider namespace; it never accepts a target name or enumerates keys.
+ * closed purpose namespace; it never accepts a target name or enumerates keys.
  * No unscoped legacy target is read, migrated or removed implicitly.
  */
 export function makeWindowsCredentialStore(
   options: MakeWindowsCredentialStoreOptions,
 ): CredentialStore {
   const timeoutMs = options.timeoutMs ?? 5_000;
+  const purpose = NAMESPACES.indexOf(options.namespace ?? "provider");
   if (
+    purpose < 0 ||
     !/^[a-z]:[\\/]/i.test(options.helperPath) ||
     options.helperPath.includes("\0") ||
     win32.basename(options.helperPath) !== "octant-credential-helper.exe" ||
@@ -71,15 +85,16 @@ export function makeWindowsCredentialStore(
       value.fill(0);
       throw new CredentialStoreFailure("invalid");
     }
-    const input = Buffer.alloc(83 + value.length);
+    const input = Buffer.alloc(84 + value.length);
     input.write(MAGIC, 0, "ascii");
-    input[4] = 1;
+    input[4] = 2;
     input[5] = operation;
     input[6] = options.serviceFamily === "octant-nightly-test-data" ? 1 : 0;
     input.write(options.storeScope, 7, "ascii");
     input.write(ref, 43, "ascii");
     input.writeUInt32LE(value.length, 79);
-    value.copy(input, 83);
+    input[83] = purpose;
+    value.copy(input, 84);
     value.fill(0);
     let output: Buffer | undefined;
     try {
