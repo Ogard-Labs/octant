@@ -8,10 +8,10 @@ guard CommandLine.arguments.count == 3,
       let processId = Int32(CommandLine.arguments[1]), processId > 1 else {
     exit(2)
 }
-let expectedBundle = URL(fileURLWithPath: CommandLine.arguments[2]).standardizedFileURL.path
+let expectedBundle = URL(fileURLWithPath: CommandLine.arguments[2]).resolvingSymlinksInPath().standardizedFileURL.path
 let application = NSRunningApplication(processIdentifier: processId)
 let matchingApplications = NSWorkspace.shared.runningApplications.filter {
-    $0.bundleURL?.standardizedFileURL.path == expectedBundle
+    $0.bundleURL?.resolvingSymlinksInPath().standardizedFileURL.path == expectedBundle
 }
 let matchingIds = Set(matchingApplications.map { $0.processIdentifier })
 let element = AXUIElementCreateApplication(processId)
@@ -46,8 +46,9 @@ let candidateWindows = (nativeWindows ?? []).compactMap { row -> [String: Any]? 
 let evidence: [String: Any] = [
     "capturedPid": processId,
     "diagnosticPid": ProcessInfo.processInfo.processIdentifier,
+    "expectedStagedBundle": expectedBundle,
     "capturedExecutable": application?.executableURL?.path ?? "unavailable",
-    "capturedBundle": application?.bundleURL?.standardizedFileURL.path ?? "unavailable",
+    "capturedBundle": application?.bundleURL?.resolvingSymlinksInPath().standardizedFileURL.path ?? "unavailable",
     "stagedBundleMatches": matchingApplications.map { ["pid": $0.processIdentifier, "executable": $0.executableURL?.path ?? "unavailable"] },
     "nativeAxTrusted": AXIsProcessTrusted(),
     "attributeNamesError": attributeResult.rawValue,
