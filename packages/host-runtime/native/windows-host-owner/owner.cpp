@@ -169,6 +169,19 @@ bool token_sid(HANDLE process, std::vector<unsigned char>& output, std::wstring*
   }
   return true;
 }
+bool per_user_creation_context() {
+  std::vector<unsigned char> user;
+  if (!token_sid(GetCurrentProcess(), user)) return false;
+  HANDLE raw = nullptr;
+  if (!OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &raw)) return false;
+  Handle token(raw); DWORD needed = 0;
+  GetTokenInformation(token.value, TokenOwner, nullptr, 0, &needed);
+  if (needed < sizeof(TOKEN_OWNER) || needed > 65536) return false;
+  std::vector<unsigned char> information(needed);
+  if (!GetTokenInformation(token.value, TokenOwner, information.data(), needed, &needed)) return false;
+  const auto owner = reinterpret_cast<const TOKEN_OWNER*>(information.data());
+  return owner->Owner != nullptr && IsValidSid(owner->Owner) && EqualSid(owner->Owner, user.data());
+}
 bool same_user(DWORD pid, const Root& root) {
   Handle process(OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, pid));
   std::vector<unsigned char> sid;
@@ -401,7 +414,9 @@ napi_value open_profile(napi_env env, napi_callback_info info) {
   if (count != 1) return object(env, "refused");
   const std::string name = string_arg(env, arguments[0]);
   const unsigned char kind = name == "octant" ? 1 : name == "nightly-test-data" ? 2 : 0;
-  if (kind == 0) return object(env, "refused");
+  // Inherited DACLs do not choose a new file's owner. Refuse an elevated
+  // default group owner before creating any profile or ordinary descendants.
+  if (kind == 0 || !per_user_creation_context()) return object(env, "refused");
   auto profile = std::make_unique<Profile>();
   profile->root = private_root({L"hosts", std::wstring(name.begin(), name.end())}, true, true);
   if (!profile->root) return object(env, "refused");
