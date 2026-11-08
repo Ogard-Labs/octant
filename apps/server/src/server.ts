@@ -102,6 +102,7 @@ import { wireWorkFiles } from "./wiring/workFiles";
 import { wireProviderCloudSessions } from "./wiring/providerCloudSessions";
 import { wireCanvas } from "./wiring/canvas";
 import { wireAutomation } from "./wiring/automation";
+import { ROUTINE_HOST_SCOPE_ID } from "./routineHostScope";
 import { wireBenchmarks, type BenchmarkThreadPurgeSlot } from "./wiring/benchmarks";
 import { integrationEventSources } from "./integration/integrationEventSources";
 import { wireThreadNotifications } from "./wiring/notifications";
@@ -505,6 +506,7 @@ export function startOctantServer(
       resolveSelectedExtensions,
       pinnedExtensionIds,
       reviewedModelManifest,
+      managedWorktreeService,
       skillDiscoveryService,
     } = yield* wireProviders({
       serverRegistry,
@@ -535,6 +537,7 @@ export function startOctantServer(
       beginGoogleCliChange,
       recoverGoogleCliCommands,
       credentialCommandProcess,
+      benchmarkCheckShell,
       prepareCredentialCommand,
       personMemorySweep,
       runtimeForgeChanges,
@@ -1185,6 +1188,25 @@ export function startOctantServer(
     });
     const benchmarkThreadPurge: BenchmarkThreadPurgeSlot = {};
     const { benchmarkRoutes, benchmarkRunner } = wireBenchmarks({
+      awaitsPerson: (threadId) =>
+        codeOperationRuntime?.turnAwaitsPerson?.(threadId) === true ||
+        threadAwaitsHarnessApproval(threadId),
+      // The journaled time an approval or question was asked, so a restart
+      // keeps counting the wait from when it began.
+      pendingSince: async (threadId) => {
+        const pending = await codeOperationRuntime?.pendingRequests?.(ROUTINE_HOST_SCOPE_ID);
+        const asked = (pending ?? [])
+          .filter((request) => String(request.threadId) === threadId)
+          .map((request) => String(request.requestedAt))
+          .sort();
+        return asked[0];
+      },
+      codeEvidence,
+      benchmarkCheckShell,
+      managedWorktreeReceipts,
+      managedWorktreeService,
+      roots,
+      routeCodeService,
       chatService,
       personMemory,
       persistence,
@@ -1669,12 +1691,12 @@ export function startOctantServer(
       workTurnService,
       agentRunAdmission,
     });
-    benchmarkThreadPurge.purge = async (threadId) => {
+    benchmarkThreadPurge.purge = async (threadId, mode) => {
       const outcome = await threadRetention.purge(
         {
           scope: {
             kind: "thread",
-            mode: "chat",
+            mode,
             threadId: decodeThreadRetentionThreadId(threadId),
           },
           confirm: true,

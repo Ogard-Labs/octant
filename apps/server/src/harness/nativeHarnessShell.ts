@@ -21,6 +21,13 @@ export interface SandboxedProcessPort {
 export interface NativeHarnessShellOptions {
   readonly process: SandboxedProcessPort;
   /**
+   * Variables every command gets, laid over the rest. A shell given neither the
+   * cloud, SSH nor Google options starts commands with these and the process
+   * port's own small inherited set (PATH, HOME, temp folders, locale) and
+   * nothing else.
+   */
+  readonly environment?: Readonly<Record<string, string>>;
+  /**
    * The process port's script directory: it runs only a script in its own
    * subdirectory there, which no confined command can write.
    */
@@ -160,6 +167,7 @@ async function runScript(
           ...(await options.cloudCliEnvironment?.().catch(() => ({}))),
           ...credentials?.environment,
           ...commandEnvironment(options.sshAgentSocket?.()),
+          ...options.environment,
         },
         timeoutMs: input.timeoutMs,
         ...(egressProxy === undefined ? {} : { egressProxy }),

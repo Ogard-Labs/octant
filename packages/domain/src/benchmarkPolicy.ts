@@ -1,5 +1,6 @@
 import {
   MAX_BENCHMARK_HISTORY_RUNS,
+  BENCHMARK_CHECK_DETAIL_CHARS,
   BENCHMARK_CODE_ONLY_CHECK_KINDS,
   BENCHMARK_FAILURE_REASON_CHARS,
   BENCHMARK_JUDGE_REASON_CHARS,
@@ -14,9 +15,18 @@ import {
   type BenchmarkLeaderboardRow,
   type BenchmarkOverhead,
   type BenchmarkRun,
+  type BenchmarkExecutionLevel,
   type BenchmarkRunSummary,
+  type PermissionMode,
+  type ProviderExecutionPolicy,
   type TurnMetricsRecord,
 } from "@octant/contracts";
+import {
+  clampWorkAccess,
+  threadAccessOf,
+  workAccessOfPermissionMode,
+  permissionModeOfWorkAccess,
+} from "./guardrailPolicy";
 import { percentile } from "./turnDiagnosticsReport";
 
 /** At most two cells at once per provider instance and four per host. */
@@ -277,20 +287,54 @@ export function benchmarkRunStatusAfter(
 /** A candidate answer longer than this is cut before the judge reads it. */
 export const BENCHMARK_JUDGE_ANSWER_CHARS = 50_000;
 
+/** The most files a Code cell's diff summary names; the count is always the whole total. */
+export const BENCHMARK_CODE_DIFF_FILES = 100;
+
+/** A check command's output is cut to this many bytes before anything is kept. */
+export const BENCHMARK_COMMAND_OUTPUT_BYTES = 4 * 1024;
+
+/** The longest a check command may run, whatever the case asks for. */
+export const BENCHMARK_COMMAND_MAX_SECONDS = 600;
+
+/** A Code turn parked on an approval this long ends its cell as blocked. */
+export const BENCHMARK_APPROVAL_WAIT_MS = 10 * 60_000;
+
+/** The files a Code turn changed: paths and line counts, never diff text. */
+export interface BenchmarkCodeDiffSummary {
+  readonly files: ReadonlyArray<{
+    readonly path: string;
+    readonly insertions: number;
+    readonly deletions: number;
+  }>;
+  /** Every path that changed, including those `files` leaves out. */
+  readonly total: number;
+}
+
+/** One check and how it came out, as the judge reads it. */
+export interface BenchmarkCodeCheckLine {
+  readonly description: string;
+  readonly passed: boolean;
+  readonly detail?: string | undefined;
+}
+
 /**
  * What the judge is asked. It is built only from the rubric, the case, and the
- * answer, so it cannot name the contender, its provider, or its model.
+ * answer, so it cannot name the contender, its provider, or its model. A Code
+ * case has no answer to read: the judge gets the diff summary and the check
+ * results instead.
  */
 export function benchmarkJudgePrompt(input: {
   readonly rubric: string;
   readonly casePrompt: string;
   readonly referenceAnswer?: string | undefined;
-  readonly candidateAnswer: string;
+  readonly candidateAnswer?: string | undefined;
+  readonly code?:
+    | {
+        readonly diff: BenchmarkCodeDiffSummary | undefined;
+        readonly checks: ReadonlyArray<BenchmarkCodeCheckLine>;
+      }
+    | undefined;
 }): string {
-  const cut = input.candidateAnswer.length > BENCHMARK_JUDGE_ANSWER_CHARS;
-  const candidate = cut
-    ? input.candidateAnswer.slice(0, BENCHMARK_JUDGE_ANSWER_CHARS)
-    : input.candidateAnswer;
   const parts = [
     "You are grading one answer to a task. Judge it only against the rubric below.",
     `Rubric:\n${input.rubric}`,
@@ -299,11 +343,168 @@ export function benchmarkJudgePrompt(input: {
   if (input.referenceAnswer !== undefined && input.referenceAnswer !== "") {
     parts.push(`Reference answer:\n${input.referenceAnswer}`);
   }
-  parts.push(`Answer to grade${cut ? " (cut at 50,000 characters)" : ""}:\n${candidate}`);
+  if (input.code !== undefined) {
+    parts.push(
+      `Change the answerer made to the repository:\n${benchmarkDiffText(input.code.diff)}`,
+    );
+    parts.push(
+      `Check results:\n${
+        input.code.checks.length === 0
+          ? "No checks were set for this task."
+          : input.code.checks
+              .map(
+                (check) =>
+                  `- ${check.passed ? "passed" : "failed"}: ${check.description}${
+                    check.detail === undefined || check.detail === "" ? "" : ` (${check.detail})`
+                  }`,
+              )
+              .join("\n")
+      }`,
+    );
+  } else {
+    const answer = input.candidateAnswer ?? "";
+    const cut = answer.length > BENCHMARK_JUDGE_ANSWER_CHARS;
+    parts.push(
+      `Answer to grade${cut ? " (cut at 50,000 characters)" : ""}:\n${
+        cut ? answer.slice(0, BENCHMARK_JUDGE_ANSWER_CHARS) : answer
+      }`,
+    );
+  }
   parts.push(
     `Reply with exactly one JSON object and nothing else: {"score": <integer from 1 to 10>, "reason": "<at most ${BENCHMARK_JUDGE_REASON_CHARS} characters>"}`,
   );
   return parts.join("\n\n");
+}
+
+/** The diff summary as short lines: one per file, then how many more there were. */
+export function benchmarkDiffText(diff: BenchmarkCodeDiffSummary | undefined): string {
+  if (diff === undefined) return "The files that changed could not be read.";
+  if (diff.total === 0) return "No files changed.";
+  const shown = diff.files.slice(0, BENCHMARK_CODE_DIFF_FILES);
+  const lines = shown.map((file) => `${file.path} +${file.insertions} -${file.deletions}`);
+  const left = diff.total - shown.length;
+  if (left > 0) lines.push(`and ${left} more ${left === 1 ? "file" : "files"}`);
+  return `${diff.total} ${diff.total === 1 ? "file" : "files"} changed\n${lines.join("\n")}`;
+}
+
+/** A check in words, for the judge. */
+export function benchmarkCheckDescription(check: BenchmarkCheck): string {
+  switch (check.kind) {
+    case "command-exits-zero":
+      return `the command "${check.command}" exits 0`;
+    case "max-files-changed":
+      return `at most ${check.count} files changed`;
+    case "contains":
+      return `the answer contains "${check.text}"`;
+    case "not-contains":
+      return `the answer does not contain "${check.text}"`;
+    case "matches":
+      return `the answer matches /${check.pattern}/${check.flags}`;
+    case "equals":
+      return `the answer equals "${check.text}"`;
+    case "valid-json":
+      return "the answer is valid JSON";
+  }
+}
+
+/** The branch a Code cell works on: fixed by the run and the cell, so a restart finds it again. */
+export function benchmarkCodeBranch(runId: string, cellId: string): string {
+  const hex = (id: string) => id.replace(/-/g, "").toLowerCase();
+  return `benchmark/${hex(runId).slice(0, 8)}/${hex(cellId).slice(0, 12)}`;
+}
+
+export type BenchmarkExecutionLevelDecision =
+  | {
+      readonly status: "ok";
+      readonly mode: PermissionMode;
+      readonly executionPolicy: ProviderExecutionPolicy;
+      readonly autoApprove: boolean;
+      /** True when the Project's own level lowered what the run asked for. */
+      readonly clamped: boolean;
+    }
+  | { readonly status: "refused"; readonly message: string };
+
+/**
+ * The level a Code cell's thread starts at. A run asks for Auto, Accept edits,
+ * or Full access, and asks first when it names nothing. The Project's own level
+ * is a ceiling the same way it is for a routine: a thread takes the lower of
+ * the two. Full access is never reached by a pick alone, so a run that asks for
+ * it where the Project does not already hold it is refused whole.
+ */
+export function benchmarkExecutionLevel(
+  picked: BenchmarkExecutionLevel | undefined,
+  projectMode: PermissionMode,
+): BenchmarkExecutionLevelDecision {
+  const asked =
+    picked === undefined ? "ask-first" : picked === "accept-edits" ? "auto-accept-edits" : picked;
+  // Plan holds no level a run could use, so a Plan Project asks first.
+  const project = workAccessOfPermissionMode(projectMode) ?? "ask-first";
+  if (asked === "full-access" && project !== "full-access") {
+    return {
+      status: "refused",
+      message:
+        "Full access is not allowed in this Code Project, so the run was not started. Pick a lower level or turn Full access on for the Project first.",
+    };
+  }
+  const level = clampWorkAccess(project, asked);
+  const mode = permissionModeOfWorkAccess(level);
+  const access = threadAccessOf(mode);
+  return {
+    status: "ok",
+    mode,
+    executionPolicy: access.executionPolicy,
+    autoApprove: access.autoApprove,
+    clamped: level !== asked,
+  };
+}
+
+/** A worktree check on the number of files the turn changed. */
+export function benchmarkFilesChangedResult(
+  index: number,
+  limit: number,
+  changed: number | undefined,
+): BenchmarkCheckResult {
+  if (changed === undefined) {
+    return { index, passed: false, detail: "the files that changed were not observed" };
+  }
+  return changed <= limit
+    ? { index, passed: true, detail: `${changed} files changed` }
+    : { index, passed: false, detail: `${changed} files changed, more than ${limit}` };
+}
+
+/** How a check command ended. The output is whatever it printed, cut by the host. */
+export type BenchmarkCommandOutcome =
+  | { readonly status: "exited"; readonly exitCode: number; readonly output: string }
+  | { readonly status: "timed-out"; readonly output: string }
+  | { readonly status: "unavailable"; readonly message: string };
+
+/**
+ * A worktree check on a command. Only the first 4 KB of output is read and only
+ * 200 characters of it are kept, as the detail of a failure.
+ */
+export function benchmarkCommandResult(
+  index: number,
+  outcome: BenchmarkCommandOutcome,
+): BenchmarkCheckResult {
+  if (outcome.status === "unavailable") {
+    return {
+      index,
+      passed: false,
+      detail: boundedBenchmarkReason(outcome.message, BENCHMARK_CHECK_DETAIL_CHARS),
+    };
+  }
+  const output = outcome.output.slice(0, BENCHMARK_COMMAND_OUTPUT_BYTES);
+  if (outcome.status === "exited" && outcome.exitCode === 0) return { index, passed: true };
+  const lead = outcome.status === "timed-out" ? "timed out" : `exit ${outcome.exitCode}`;
+  const tail = boundedBenchmarkReason(output, BENCHMARK_CHECK_DETAIL_CHARS);
+  return {
+    index,
+    passed: false,
+    detail: boundedBenchmarkReason(
+      tail === "" ? lead : `${lead}: ${tail}`,
+      BENCHMARK_CHECK_DETAIL_CHARS,
+    ),
+  };
 }
 
 export type BenchmarkJudgeReading =

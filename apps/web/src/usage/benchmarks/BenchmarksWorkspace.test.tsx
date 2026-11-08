@@ -293,7 +293,9 @@ describe("importing and exporting a suite as JSON", () => {
     await actor.click(screen.getByRole("button", { name: "Read pasted JSON" }));
 
     expect(await screen.findByRole("form", { name: "Suite editor" })).toBeInTheDocument();
-    expect(screen.getByRole("textbox", { name: "Suite name" })).toHaveValue("Capital cities");
+    expect(screen.getByRole("textbox", { name: "Suite name" })).toHaveValue(
+      "Capital cities (imported)",
+    );
     expect(screen.getByRole("textbox", { name: "Title of case 2" })).toHaveValue(
       "Capital of Sweden",
     );
@@ -383,6 +385,60 @@ describe("the run builder", () => {
       budget: { maxCostUsd: 1 },
     });
     expect(await screen.findByRole("region", { name: "Live grid" })).toBeInTheDocument();
+  });
+
+  it("shows the commands a suite runs and holds Start until they are confirmed, then says so in the request", async () => {
+    const actor = user();
+    const commandSuite = suite({
+      cases: [
+        {
+          caseId: CASE_ONE,
+          kind: "code",
+          title: "Fix the parser",
+          prompt: "Fix it.",
+          checks: [{ kind: "command-exits-zero", command: "bun test parser", timeoutSeconds: 120 }],
+          code: { codeProjectId: "77000000-0000-4000-8000-0000000000f9", ref: "main" },
+        },
+      ],
+    });
+    const client = makeClient({ listSuites: vi.fn(async () => ({ suites: [commandSuite] })) });
+    mount(client);
+
+    await openSuite(actor);
+    const commands = await screen.findByRole("list", { name: "Commands this suite runs" });
+    expect(within(commands).getByText("Fix the parser")).toBeInTheDocument();
+    expect(within(commands).getByText("bun test parser").tagName).toBe("CODE");
+    const contenders = await screen.findByRole("group", { name: "Contenders" });
+    await actor.click(within(contenders).getAllByRole("checkbox")[0] as HTMLElement);
+    await actor.type(screen.getByRole("textbox", { name: "Cost budget in US dollars" }), "1");
+    const start = screen.getByRole("button", { name: "Start run" });
+    expect(start).toBeDisabled();
+
+    await actor.click(
+      screen.getByRole("checkbox", {
+        name: /I've read these commands\. They run on this Mac, confined to each cell's copy, with no network\./,
+      }),
+    );
+    expect(start).toBeEnabled();
+    await actor.click(start);
+
+    await waitFor(() => expect(client.startRun).toHaveBeenCalledTimes(1));
+    expect(client.startRun.mock.calls[0]?.[0]).toMatchObject({ confirmedCommands: true });
+  });
+
+  it("asks for no confirmation when a suite runs no commands", async () => {
+    const actor = user();
+    const client = makeClient();
+    mount(client);
+    await openSuite(actor);
+    await screen.findByRole("group", { name: "Contenders" });
+    expect(screen.queryByRole("list", { name: "Commands this suite runs" })).toBeNull();
+    const contenders = screen.getByRole("group", { name: "Contenders" });
+    await actor.click(within(contenders).getAllByRole("checkbox")[0] as HTMLElement);
+    await actor.type(screen.getByRole("textbox", { name: "Cost budget in US dollars" }), "1");
+    await actor.click(screen.getByRole("button", { name: "Start run" }));
+    await waitFor(() => expect(client.startRun).toHaveBeenCalledTimes(1));
+    expect(client.startRun.mock.calls[0]?.[0]).not.toHaveProperty("confirmedCommands");
   });
 
   it("holds Start back until a contender and a budget are chosen", async () => {

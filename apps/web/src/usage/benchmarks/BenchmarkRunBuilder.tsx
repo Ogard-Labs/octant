@@ -67,6 +67,18 @@ export function BenchmarkRunBuilder(props: BenchmarkRunBuilderProps) {
   const [pending, setPending] = useState(false);
 
   const hasCode = props.suite.cases.some((candidate) => candidate.kind === "code");
+  // A suite may be someone else's file. Its commands run here, so they are
+  // shown and must be read and confirmed before Start.
+  const commands = props.suite.cases.flatMap((candidate) =>
+    candidate.checks.flatMap((check) =>
+      check.kind === "command-exits-zero"
+        ? [{ title: candidate.title, command: check.command }]
+        : [],
+    ),
+  );
+  const commandsKey = JSON.stringify([String(props.suite.suiteId), props.suite.revision, commands]);
+  const [confirmedKey, setConfirmedKey] = useState<string | undefined>(undefined);
+  const commandsConfirmed = commands.length === 0 || confirmedKey === commandsKey;
   const contenders = useMemo(
     () =>
       chosen.flatMap((key) => {
@@ -96,7 +108,9 @@ export function BenchmarkRunBuilder(props: BenchmarkRunBuilderProps) {
             ? "The cost budget must be a number above zero."
             : estimate.cells > MAX_BENCHMARK_CELLS
               ? `This run would have ${estimate.cells.toLocaleString("en")} cells, and a run holds at most ${MAX_BENCHMARK_CELLS.toLocaleString("en")}.`
-              : undefined;
+              : !commandsConfirmed
+                ? "Read the commands above and confirm them."
+                : undefined;
 
   const toggle = (key: string, on: boolean) =>
     setChosen((current) =>
@@ -116,6 +130,7 @@ export function BenchmarkRunBuilder(props: BenchmarkRunBuilderProps) {
           ...(costBudget === undefined ? {} : { maxCostUsd: costBudget }),
         },
         ...(hasCode ? { executionLevel: level } : {}),
+        ...(commands.length > 0 ? { confirmedCommands: true } : {}),
       });
     } catch (error) {
       setMessage(`The run does not fit the benchmark format: ${decodeFailure(error)}`);
@@ -206,6 +221,33 @@ export function BenchmarkRunBuilder(props: BenchmarkRunBuilderProps) {
         ) : null}
       </div>
 
+      {commands.length === 0 ? null : (
+        <div className="benchmark-commands">
+          <p className="usage-workspace__note">
+            This suite runs these commands after each Code task.
+          </p>
+          <ul aria-label="Commands this suite runs" className="benchmark-commands__list">
+            {commands.map((entry, index) => (
+              <li key={`${entry.title}:${index}`}>
+                <span>{entry.title}</span>
+                <code className="benchmark-commands__command">{entry.command}</code>
+              </li>
+            ))}
+          </ul>
+          <label className="benchmark-editor__toggle">
+            <OctantCheckbox
+              checked={commandsConfirmed}
+              onChange={(event) =>
+                setConfirmedKey(event.currentTarget.checked ? commandsKey : undefined)
+              }
+            />
+            <span>
+              I&apos;ve read these commands. They run on this Mac, confined to each cell&apos;s
+              copy, with no network.
+            </span>
+          </label>
+        </div>
+      )}
       <p aria-live="polite" className="benchmark-estimate" role="status">
         {contenders.length === 0
           ? "Choose contenders to see an estimate."

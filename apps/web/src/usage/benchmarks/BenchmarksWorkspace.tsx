@@ -38,6 +38,7 @@ import {
   exportFileName,
   exportSuiteJson,
   importSuiteJson,
+  nameForImportedSuite,
   READ_ONLY_WINDOW_SENTENCE,
   RUN_STATUS_WORDS,
   suiteToDraft,
@@ -467,7 +468,13 @@ export function BenchmarksWorkspace(props: BenchmarksWorkspaceProps) {
     setImportError(undefined);
     setImportOpen(false);
     setPasted("");
-    setEditing(result.draft);
+    setEditing({
+      ...result.draft,
+      name: nameForImportedSuite(
+        result.draft.name,
+        suites.map((existing) => existing.name),
+      ),
+    });
   };
 
   const exportRun = async (runId: BenchmarkRunExportRequest["runId"], format: "json" | "csv") => {
@@ -649,7 +656,8 @@ export function BenchmarksWorkspace(props: BenchmarksWorkspaceProps) {
                           <OctantButton
                             variant="bare"
                             aria-pressed={String(suite.suiteId) === selectedSuiteId}
-                            className="benchmark-link"
+                            className="benchmark-link benchmark-link--name"
+                            title={suite.name}
                             onClick={() => {
                               setSelectedSuiteId(String(suite.suiteId));
                               setSelectedRunId(undefined);

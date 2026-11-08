@@ -8,6 +8,7 @@ import {
   draftToSaveRequest,
   exportSuiteJson,
   importSuiteJson,
+  nameForImportedSuite,
   suiteToDraft,
 } from "./benchmarkPresentation";
 
@@ -138,5 +139,35 @@ describe("a suite through the editor and back", () => {
       text: "z",
       trim: true,
     });
+  });
+});
+
+describe("naming an imported suite", () => {
+  it("keeps a name no suite has", () => {
+    expect(nameForImportedSuite("Capitals", ["Other"])).toBe("Capitals");
+  });
+
+  it("marks a copy of an existing suite, then numbers further copies", () => {
+    expect(nameForImportedSuite("Capitals", ["Capitals"])).toBe("Capitals (imported)");
+    expect(nameForImportedSuite("Capitals", ["Capitals", "Capitals (imported)"])).toBe(
+      "Capitals (imported 2)",
+    );
+    expect(
+      nameForImportedSuite("Capitals", [
+        "Capitals",
+        "Capitals (imported)",
+        "Capitals (imported 2)",
+      ]),
+    ).toBe("Capitals (imported 3)");
+  });
+
+  it("shortens the base so the copy still fits the 80-character name limit", () => {
+    const name = "x".repeat(80);
+    const copy = nameForImportedSuite(name, [name]);
+    expect(copy).toHaveLength(80);
+    expect(copy.endsWith(" (imported)")).toBe(true);
+    const second = nameForImportedSuite(name, [name, copy]);
+    expect(second).toHaveLength(80);
+    expect(second.endsWith(" (imported 2)")).toBe(true);
   });
 });

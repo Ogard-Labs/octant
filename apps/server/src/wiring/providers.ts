@@ -2111,6 +2111,7 @@ export function wireProviders(deps: ProvidersDependencies) {
       localUsageHistoryRoutes,
       managedCodeThreadCreation,
       managedWorktreeRefsList,
+      managedWorktreeService,
       worktreePreparation,
       childWorktreeSources,
       resolveChildWorktree: agentRunChildWorktree.current.preparationReceipt,

@@ -2,6 +2,7 @@ import {
   MAX_BENCHMARK_CELLS,
   decodeBenchmarkCellId,
   decodeBenchmarkRun,
+  decodeBenchmarkRunId,
   decodeBenchmarkSuite,
   decodeUtcTimestamp,
   type BenchmarkCellMetrics,
@@ -18,6 +19,8 @@ import {
   type BenchmarkSuite,
   type BenchmarkSuiteDeleteRequest,
   type BenchmarkSuiteSaveRequest,
+  type PermissionMode,
+  type ProjectId,
   type ProviderInstanceId,
   type ProviderModelId,
   type TurnMetricsRecord,
@@ -25,6 +28,8 @@ import {
 } from "@octant/contracts";
 import {
   benchmarkCellCount,
+  benchmarkCodeBranch,
+  benchmarkExecutionLevel,
   benchmarkCellMetrics,
   benchmarkLeaderboard,
   benchmarkOverhead,
@@ -68,7 +73,28 @@ export interface BenchmarkServiceOptions {
     { readonly status: "ready" } | { readonly status: "refused"; readonly message: string }
   >;
   /** Purges one cell thread through the ordinary thread purge path. */
-  readonly purgeThread: (threadId: string) => Promise<"purged" | "absent" | "failed">;
+  readonly purgeThread: (
+    threadId: string,
+    mode: "chat" | "code",
+  ) => Promise<"purged" | "absent" | "failed">;
+  /** What a run with Code cases needs of the host; absent where Code cells cannot run. */
+  readonly codeCases?: {
+    /** The mode a new thread starts in; absent unless it is an active Code Project. */
+    readonly projectMode: (projectId: ProjectId) => PermissionMode | undefined;
+    /** Resolves the ref to the commit every cell of the case will start from. */
+    readonly checkRef: (
+      projectId: ProjectId,
+      ref: string,
+    ) => Promise<
+      | { readonly status: "ok"; readonly commit: string }
+      | { readonly status: "refused"; readonly message: string }
+    >;
+    /** Removes a cell's managed worktree; a missing one is "absent", which counts as done. */
+    readonly removeWorktree: (
+      threadId: string,
+      branch: string,
+    ) => Promise<"removed" | "absent" | { readonly status: "refused"; readonly message: string }>;
+  };
   readonly clock: () => string;
   readonly uuid: () => string;
 }
@@ -137,7 +163,7 @@ export class BenchmarkService {
   }
 
   readRun(request: BenchmarkRunReadRequest): BenchmarkOutcome<BenchmarkRunReadResponse> {
-    const run = this.#options.projection.run(String(request.runId));
+    const run = this.#options.projection.run(runKey(request.runId));
     if (run === undefined) return refused("not-found", "That run does not exist.");
     const metricsByThread = new Map<string, BenchmarkCellMetrics>();
     const cellMetrics: Array<{
@@ -176,7 +202,7 @@ export class BenchmarkService {
     readonly cellId: BenchmarkRun["cells"][number]["cellId"];
     readonly rating: BenchmarkRating;
   }> {
-    const run = this.#options.projection.run(String(request.runId));
+    const run = this.#options.projection.run(runKey(request.runId));
     if (run === undefined) return refused("not-found", "That run does not exist.");
     const cell = run.cells.find((candidate) => candidate.cellId === request.cellId);
     if (cell === undefined) return refused("not-found", "That cell is not in the run.");
@@ -217,7 +243,7 @@ export class BenchmarkService {
     request: BenchmarkRunStartRequest,
   ): Promise<BenchmarkOutcome<BenchmarkRun>> {
     const { projection, store, clock, uuid } = this.#options;
-    const existing = projection.run(String(request.runId));
+    const existing = projection.run(runKey(request.runId));
     if (existing !== undefined) {
       return existing.suiteId === request.suiteId
         ? ok(existing)
@@ -225,6 +251,19 @@ export class BenchmarkService {
     }
     const suite = projection.suite(String(request.suiteId));
     if (suite === undefined) return refused("not-found", "That suite does not exist.");
+    // A suite can come from someone else's file; its commands run on this host,
+    // so a person must have read them before the run starts.
+    if (
+      request.confirmedCommands !== true &&
+      suite.cases.some((candidate) =>
+        candidate.checks.some((check) => check.kind === "command-exits-zero"),
+      )
+    ) {
+      return refused(
+        "invalid",
+        "This suite runs commands on this Mac. Read them and confirm before starting the run.",
+      );
+    }
     const cells = benchmarkCellCount(
       suite.cases.length,
       request.contenders.length,
@@ -246,10 +285,12 @@ export class BenchmarkService {
         `Contender ${unavailable + 1} is not an enabled provider model on this host.`,
       );
     }
+    const codeChecked = await this.#checkCodeCases(suite.cases, request.executionLevel);
+    if (codeChecked.status === "refused") return codeChecked;
     const project = await this.#options.ensureProject(windowId);
     if (project.status === "refused") return refused("unavailable", project.message);
     const run = decodeBenchmarkRun({
-      runId: request.runId,
+      runId: decodeBenchmarkRunId(runKey(request.runId)),
       suiteId: suite.suiteId,
       suiteRevision: suite.revision,
       suiteName: suite.name,
@@ -259,6 +300,7 @@ export class BenchmarkService {
       repetitions: request.repetitions,
       budget: request.budget,
       ...(request.executionLevel === undefined ? {} : { executionLevel: request.executionLevel }),
+      ...(codeChecked.commits.length === 0 ? {} : { codeCommits: codeChecked.commits }),
       status: "running",
       startedAt: decodeUtcTimestamp(clock()),
       cells: planBenchmarkCells(suite.cases, request.contenders, request.repetitions, () =>
@@ -270,15 +312,74 @@ export class BenchmarkService {
     return ok(run);
   }
 
+  /**
+   * Everything a Code case needs, checked before any cell runs: a host that can
+   * run it, a Code Project that exists, a level the Project allows, and a ref
+   * that resolves. The first problem refuses the whole run with a sentence.
+   */
+  async #checkCodeCases(
+    cases: BenchmarkSuite["cases"],
+    executionLevel: BenchmarkRunStartRequest["executionLevel"],
+  ): Promise<
+    | BenchmarkRefusal
+    | {
+        readonly status: "ok";
+        readonly commits: ReadonlyArray<{
+          readonly caseId: BenchmarkSuite["cases"][number]["caseId"];
+          readonly commit: string;
+        }>;
+      }
+  > {
+    const codeCases = cases.filter((candidate) => candidate.code !== undefined);
+    if (codeCases.length === 0) return { status: "ok", commits: [] };
+    const support = this.#options.codeCases;
+    if (support === undefined) {
+      return refused("unavailable", "Code cases cannot run on this host.");
+    }
+    // The ref is read once per Project and ref, and every case on it is pinned
+    // to that commit, so the cells of a run compare on the same files.
+    const checked = new Map<string, string>();
+    const commits: Array<{
+      readonly caseId: BenchmarkSuite["cases"][number]["caseId"];
+      readonly commit: string;
+    }> = [];
+    for (const benchmarkCase of codeCases) {
+      const target = benchmarkCase.code;
+      if (target === undefined) continue;
+      const mode = support.projectMode(target.codeProjectId);
+      if (mode === undefined) {
+        return refused(
+          "invalid",
+          `The Code Project for "${benchmarkCase.title}" does not exist or is not a Code Project.`,
+        );
+      }
+      const level = benchmarkExecutionLevel(executionLevel, mode);
+      if (level.status === "refused") return refused("invalid", level.message);
+      const key = `${String(target.codeProjectId)}\0${target.ref}`;
+      let commit = checked.get(key);
+      if (commit === undefined) {
+        const ref = await support.checkRef(target.codeProjectId, target.ref);
+        if (ref.status === "refused") {
+          return refused("invalid", `"${benchmarkCase.title}": ${ref.message}`);
+        }
+        commit = ref.commit;
+        checked.set(key, commit);
+      }
+      // Only a full SHA-1 can be pinned; any other form keeps resolving per cell.
+      if (/^[a-f0-9]{40}$/.test(commit)) commits.push({ caseId: benchmarkCase.caseId, commit });
+    }
+    return { status: "ok", commits };
+  }
+
   async cancelRun(request: BenchmarkRunCancelRequest): Promise<BenchmarkOutcome<BenchmarkRun>> {
-    const run = await this.#options.runner.cancel(String(request.runId));
+    const run = await this.#options.runner.cancel(runKey(request.runId));
     return run === undefined ? refused("not-found", "That run does not exist.") : ok(run);
   }
 
   async purgeRun(
     request: BenchmarkRunPurgeRequest,
   ): Promise<BenchmarkOutcome<{ readonly runId: BenchmarkRun["runId"] }>> {
-    const run = this.#options.projection.run(String(request.runId));
+    const run = this.#options.projection.run(runKey(request.runId));
     if (run === undefined) return refused("not-found", "That run does not exist.");
     if (run.status === "running") {
       return refused("conflict", "Cancel the run before purging it.");
@@ -287,15 +388,37 @@ export class BenchmarkService {
     // every cell's fixed thread identity is purged. A thread that was never made
     // is "absent", which counts as done.
     for (const cell of run.cells) {
+      const isCode =
+        run.cases.find((candidate) => candidate.caseId === cell.caseId)?.kind === "code";
+      const cellThreadId = cell.threadId ?? benchmarkCellIdentity(String(cell.cellId)).threadId;
+      if (isCode) {
+        // The worktree goes first: once the thread is purged nothing names it.
+        const removal =
+          this.#options.codeCases === undefined
+            ? "absent"
+            : await this.#options.codeCases.removeWorktree(
+                cellThreadId,
+                benchmarkCodeBranch(String(run.runId), String(cell.cellId)),
+              );
+        if (typeof removal === "object") {
+          return refused(
+            "unavailable",
+            `A cell's worktree could not be removed, so the run was kept: ${removal.message}`,
+          );
+        }
+      }
       // The judge's thread is found by its fixed identity too; it is absent when
-      // the suite had no judge or the cell never reached it.
-      const threadIds = new Set([
-        benchmarkCellIdentity(String(cell.cellId)).threadId,
-        benchmarkJudgeIdentity(String(cell.cellId)).threadId,
-      ]);
-      if (cell.threadId !== undefined) threadIds.add(cell.threadId);
-      for (const threadId of threadIds) {
-        if ((await this.#options.purgeThread(threadId)) === "failed") {
+      // the suite had no judge or the cell never reached it. It is a Chat thread.
+      const threads: Array<readonly [string, "chat" | "code"]> = [
+        [benchmarkCellIdentity(String(cell.cellId)).threadId, isCode ? "code" : "chat"],
+        [benchmarkJudgeIdentity(String(cell.cellId)).threadId, "chat"],
+      ];
+      if (cell.threadId !== undefined) threads.push([cell.threadId, isCode ? "code" : "chat"]);
+      const seen = new Set<string>();
+      for (const [threadId, mode] of threads) {
+        if (seen.has(threadId)) continue;
+        seen.add(threadId);
+        if ((await this.#options.purgeThread(threadId, mode)) === "failed") {
           return refused("unavailable", "A cell thread could not be purged, so the run was kept.");
         }
       }
@@ -303,6 +426,15 @@ export class BenchmarkService {
     this.#options.store.runPurged({ runId: run.runId });
     return ok({ runId: run.runId });
   }
+}
+
+/**
+ * A run id is a UUID, and the contract accepts either case. The branch a Code
+ * cell works on is derived from it, so the host keeps one canonical lower-case
+ * form and every lookup folds to it.
+ */
+function runKey(runId: BenchmarkRun["runId"]): string {
+  return String(runId).toLowerCase();
 }
 
 function ok<T>(value: T): BenchmarkOutcome<T> {
