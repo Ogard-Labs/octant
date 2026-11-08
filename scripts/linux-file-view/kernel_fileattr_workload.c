@@ -20,7 +20,7 @@
 #define ROOT "/octant-fileattr"
 #define KEY ROOT "/home/.ssh/deployment"
 #define BASELINE ROOT "/fileattr-before"
-struct baseline { struct stat identity; unsigned int flags; };
+struct baseline { struct stat identity; unsigned int flags; unsigned int generation; };
 
 static bool same_time(struct timespec left, struct timespec right)
 {
@@ -30,14 +30,15 @@ static int verify(void)
 {
   struct baseline before = {0};
   struct stat after = {0};
-  unsigned int flags = 0;
+  unsigned int flags = 0, generation = 0;
   int saved = open(BASELINE, O_RDONLY | O_CLOEXEC | O_NOFOLLOW);
   bool loaded = saved >= 0 && read(saved, &before, sizeof(before)) == sizeof(before);
   if (saved >= 0) close(saved);
   int held = open(KEY, O_RDONLY | O_CLOEXEC | O_NOFOLLOW);
   bool measured = loaded && held >= 0 && !fstat(held, &after) &&
-    !ioctl(held, FS_IOC_GETFLAGS, &flags);
+    !ioctl(held, FS_IOC_GETFLAGS, &flags) && !ioctl(held, FS_IOC_GETVERSION, &generation);
   bool flags_unchanged = measured && flags == before.flags;
+  bool generation_unchanged = measured && generation == before.generation;
   bool stat_unchanged = measured &&
     after.st_dev == before.identity.st_dev && after.st_ino == before.identity.st_ino &&
     after.st_mode == before.identity.st_mode && after.st_uid == before.identity.st_uid &&
@@ -46,9 +47,9 @@ static int verify(void)
     same_time(after.st_mtim, before.identity.st_mtim) &&
     same_time(after.st_ctim, before.identity.st_ctim);
   if (held >= 0) close(held);
-  bool unchanged = flags_unchanged && stat_unchanged;
-  printf("OCTANT_FILEATTR_OWNER {\"pid\":%ld,\"parent\":%ld,\"measured\":%s,\"flagsUnchanged\":%s,\"statUnchanged\":%s,\"unchanged\":%s}\n",
-    (long)getpid(), (long)getppid(), measured ? "true" : "false", flags_unchanged ? "true" : "false",
+  bool unchanged = flags_unchanged && stat_unchanged && generation_unchanged;
+  printf("OCTANT_FILEATTR_OWNER {\"pid\":%ld,\"parent\":%ld,\"measured\":%s,\"flagsUnchanged\":%s,\"generationUnchanged\":%s,\"statUnchanged\":%s,\"unchanged\":%s}\n",
+    (long)getpid(), (long)getppid(), measured ? "true" : "false", flags_unchanged ? "true" : "false", generation_unchanged ? "true" : "false",
     stat_unchanged ? "true" : "false", unchanged ? "true" : "false");
   return unchanged ? 0 : 1;
 }
@@ -71,6 +72,7 @@ static bool ordinary_seeks(int file, off_t size)
 
 // The pinned ext4 UAPI also exposes generation under this native command.
 #define EXT4_NATIVE_GETVERSION _IOR('f', 3, long)
+#define EXT4_NATIVE_SETVERSION _IOW('f', 4, long)
 struct integer_observation { int result; int error; unsigned int value; bool unchanged; };
 static struct integer_observation inode_integer(int file, unsigned int command)
 {
@@ -93,6 +95,20 @@ static bool inode_queries_allowed(int file)
 static bool integer_refused(struct integer_observation observation)
 {
   return observation.result == -1 && observation.error == EACCES && observation.unchanged;
+}
+
+static bool generation_changes(int file)
+{
+  struct integer_observation before = inode_integer(file, FS_IOC_GETVERSION);
+  if (before.result) return false;
+  unsigned int changed = before.value ^ 0x01010101;
+  bool written = !ioctl(file, FS_IOC_SETVERSION, &changed);
+  struct integer_observation after = inode_integer(file, EXT4_NATIVE_GETVERSION);
+  // Always restore the owned positive control, including a failed readback.
+  bool restored = !ioctl(file, EXT4_NATIVE_SETVERSION, &before.value);
+  struct integer_observation final = inode_integer(file, FS_IOC_GETVERSION);
+  return written && after.result == 0 && after.value == changed && restored &&
+    final.result == 0 && final.value == before.value;
 }
 
 struct extent_observation { int result; int error; unsigned int count; bool unchanged; };
@@ -139,6 +155,9 @@ int main(int argc, char **argv)
   struct extent_observation before_extents = extent_count(held);
   if (before_extents.result || !before_extents.count) return 9;
   if (!inode_queries_allowed(held)) return 10;
+  struct integer_observation initial_generation = inode_integer(held, FS_IOC_GETVERSION);
+  if (initial_generation.result) return 11;
+  before.generation = initial_generation.value;
   puts("OCTANT_FILEATTR_FILESYSTEM {\"ext4\":true,\"baselineRead\":true}");
   int saved = open(BASELINE, O_CREAT | O_EXCL | O_WRONLY | O_CLOEXEC | O_NOFOLLOW, 0600);
   if (saved < 0 || write(saved, &before, sizeof(before)) != sizeof(before) || fsync(saved)) return 4;
@@ -181,6 +200,16 @@ int main(int argc, char **argv)
   struct seek_observation seek_data = protected_seek(held, SEEK_DATA);
   struct seek_observation seek_hole = protected_seek(held, SEEK_HOLE);
   bool private_position = lseek(held, 7, SEEK_SET) == 7 && lseek(held, -7, SEEK_CUR) == 0;
+  unsigned int legacy_generation = before.generation ^ 0x01010101;
+  unsigned int native_generation = before.generation ^ 0x02020202;
+  errno = 0;
+  int legacy_set = ioctl(held, FS_IOC_SETVERSION, &legacy_generation);
+  int legacy_set_errno = legacy_set < 0 ? errno : 0;
+  errno = 0;
+  int native_set = ioctl(held, EXT4_NATIVE_SETVERSION, &native_generation);
+  int native_set_errno = native_set < 0 ? errno : 0;
+  bool generations_refused = legacy_set == -1 && legacy_set_errno == EACCES &&
+    native_set == -1 && native_set_errno == EACCES;
   unsigned int changed = before.flags ^ FS_NODUMP_FL;
   errno = 0;
   int mutation = ioctl(held, FS_IOC_SETFLAGS, &changed);
@@ -205,10 +234,14 @@ int main(int argc, char **argv)
     !ioctl(public, FIOQSIZE, &public_usage) && public_usage >= 0;
   struct stat public_identity;
   bool public_seeks = public >= 0 && !fstat(public, &public_identity) && ordinary_seeks(public, public_identity.st_size);
+  bool public_generations = generation_changes(public);
   bool public_inode_queries = inode_queries_allowed(public);
   struct extent_observation public_extents = extent_count(public);
   bool extents_allowed = public_extents.result == 0 && public_extents.count > 0;
   if (public >= 0) close(public);
+  printf("OCTANT_INODE_GENERATION_WRITE {\"privateRefused\":%s,\"legacyResult\":%d,\"legacyErrno\":%d,\"nativeResult\":%d,\"nativeErrno\":%d,\"publicChangedRestored\":%s}\n",
+    generations_refused ? "true" : "false", legacy_set, legacy_set_errno, native_set, native_set_errno,
+    public_generations ? "true" : "false");
   printf("OCTANT_INODE_IOCTL_METADATA {\"baselineAllowed\":true,\"legacyRefused\":%s,\"legacyResult\":%d,\"legacyErrno\":%d,\"versionRefused\":%s,\"versionResult\":%d,\"versionErrno\":%d,\"blockRefused\":%s,\"blockResult\":%d,\"blockErrno\":%d,\"publicAllowed\":%s}\n",
     integer_refused(private_legacy) ? "true" : "false", private_legacy.result, private_legacy.error,
     integer_refused(private_version) ? "true" : "false", private_version.result, private_version.error,
@@ -239,7 +272,7 @@ int main(int argc, char **argv)
     public_restored ? "true" : "false", marker ? "true" : "false");
   return private_read_refused && private_output_unchanged && private_refused && public_changed && public_restored && marker &&
     available_refused && usage_refused && public_queries && pipe_allowed && socket_allowed &&
-    extents_refused && extents_allowed && public_inode_queries &&
+    extents_refused && extents_allowed && public_inode_queries && generations_refused && public_generations &&
     integer_refused(private_legacy) && integer_refused(private_version) && integer_refused(private_block) &&
     seek_end.refused && seek_data.refused && seek_hole.refused && private_position && public_seeks ? 0 : 18;
 }
