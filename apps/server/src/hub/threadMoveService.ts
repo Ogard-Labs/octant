@@ -22,13 +22,19 @@ import {
   ThreadMoveId,
   decodeThreadMoveDestinationState,
   decodeThreadMoveOffer,
+  decodeThreadMoveProjects,
+  decodeThreadMoveProjectsRequest,
   THREAD_MOVE_FAILURE_REASONS,
   type AuditActingPrincipal,
   type MovedThreadReference,
+  type ThreadMoveDeparture,
   type ThreadMoveDestinationState,
   type ThreadMoveFailureReason,
   type ThreadMoveOffer,
   type ThreadMovePartKind,
+  type ThreadMoveProjectChoice,
+  type ThreadMoveProjects,
+  type ThreadMoveProjectsRequest,
   type UtcTimestamp,
 } from "@octant/contracts";
 import { mayActivateAnyway, recoverSourceMove } from "@octant/domain";
@@ -39,7 +45,12 @@ import type { HubHostIdentity } from "./hubService";
 import { memberOrigin } from "./memberOrigin";
 import type { HubTransport } from "./pinnedHubTransport";
 import type { MemberTarget } from "./spokeLinkService";
-import type { ReceivedMove, SentMove, ThreadMoveStatePort } from "./threadMoveStateStore";
+import {
+  THREAD_MOVE_DEPARTURES_KEPT,
+  type ReceivedMove,
+  type SentMove,
+  type ThreadMoveStatePort,
+} from "./threadMoveStateStore";
 
 export const THREAD_MOVE_ROUTES = {
   offer: "/api/hub/peer/thread-moves",
@@ -48,6 +59,7 @@ export const THREAD_MOVE_ROUTES = {
   commit: "/api/hub/peer/thread-moves/commit",
   status: "/api/hub/peer/thread-moves/status",
   discard: "/api/hub/peer/thread-moves/discard",
+  projects: "/api/hub/peer/thread-moves/projects",
 } as const;
 
 /** Bytes of one part per chunk; a chunk travels base64 in a JSON body under the route's 1 MiB cap. */
@@ -55,7 +67,12 @@ export const THREAD_MOVE_CHUNK_BYTES = 512 * 1024;
 /** The body cap the gateway holds the chunk route to. */
 export const THREAD_MOVE_CHUNK_MAX_BODY_BYTES = 1024 * 1024;
 /** A move ticket outlives one unlock, because the person goes back to the source next. */
-export const THREAD_MOVE_TICKET_LIFETIME_MS = 120_000;
+/**
+ * How long the ticket an owner unlock buys stays good. Long enough for Move
+ * after this turn to wait for an ordinary turn to end; a turn that runs longer
+ * ends the move with `unlock-required`, and the person unlocks again.
+ */
+export const THREAD_MOVE_TICKET_LIFETIME_MS = 15 * 60_000;
 /** How long a destination keeps a transfer that stopped part way. */
 export const THREAD_MOVE_PARTIAL_LIFETIME_MS = 7 * 24 * 60 * 60 * 1000;
 const MAX_OPEN_TICKETS = 16;
@@ -98,13 +115,29 @@ export interface ThreadMoveSourceHost {
   readonly erase: (input: {
     readonly thread: MovedThreadReference;
     readonly moveId: ThreadMoveId;
-  }) => Promise<{ readonly worktreeKept: boolean }>;
+  }) => Promise<ErasedThread>;
+}
+
+/** What the erase left behind on this host. */
+export interface ErasedThread {
+  readonly worktreeKept: boolean;
+  /** The worktree moved out of the managed folder, because it held what the move did not carry. */
+  readonly keptWorktree?: string;
+  /** The thread worked in the Project's own checkout, which keeps its changes. */
+  readonly changesRemainInCheckout?: boolean;
+}
+
+/** Where an offer would put the thread on the destination. */
+export interface ThreadMovePlacement {
+  readonly mode: MovedThreadReference["mode"];
+  readonly destinationProjectId?: string;
+  readonly repositoryRemotes?: ReadonlyArray<string>;
 }
 
 /** The destination host's side: accepting a Project, opening a thread from parts, and activating it. */
 export interface ThreadMoveDestinationHost {
-  /** Whether the offer's destination Project fits the thread's mode (and, for Code, its repository). */
-  readonly acceptsProject: (offer: ThreadMoveOffer) => boolean | Promise<boolean>;
+  /** Whether the destination Project fits the thread's mode (and, for Code, its repository). */
+  readonly acceptsProject: (placement: ThreadMovePlacement) => boolean | Promise<boolean>;
   /**
    * Opens the new thread under the id the move planned for it, held so it
    * cannot take a turn. Called again with the same id after a stop between
@@ -177,6 +210,8 @@ export interface ThreadMoveServiceOptions {
   readonly authenticate: (request: SignedRequest) => MoveSender;
   /** Whether this host still lists the owner as an owner device that is not revoked. */
   readonly ownerIsCurrent: (ownerMemberId: string) => boolean;
+  /** This host's active Projects of a mode, the candidates a move may name. */
+  readonly projects: (mode: MovedThreadReference["mode"]) => ReadonlyArray<ThreadMoveProjectChoice>;
   readonly now: () => number;
   readonly uuid?: () => string;
 }
@@ -290,7 +325,7 @@ export class ThreadMoveService {
     if (!sender.moveIn || !this.#options.ownerIsCurrent(ticket.ownerMemberId)) {
       return refusedAnswer(offer.moveId, "refused");
     }
-    if (!(await this.#options.destination.acceptsProject(offer))) {
+    if (!(await this.#options.destination.acceptsProject(placementOf(offer)))) {
       return refusedAnswer(offer.moveId, "no-eligible-project");
     }
     const now = this.#timestamp();
@@ -309,6 +344,39 @@ export class ThreadMoveService {
       httpStatus: 200,
       body: { status: "ready", moveId: offer.moveId, ticket: offer.moveId },
     };
+  }
+
+  /**
+   * A member asks which Projects here would take a thread of a mode. Only a
+   * member this host lets move threads in is answered; every other sender gets
+   * the one refusal a move would.
+   */
+  async listProjects(request: SignedRequest): Promise<DestinationAnswer> {
+    const sender = this.#authenticate(request);
+    if (sender === undefined || !sender.moveIn) return refusedAnswer(undefined, "refused");
+    let asked: ThreadMoveProjectsRequest;
+    try {
+      asked = decodeThreadMoveProjectsRequest(JSON.parse(request.body));
+    } catch {
+      return { httpStatus: 400, body: { status: "refused", reason: "invalid" } };
+    }
+    const projects: ThreadMoveProjectChoice[] = [];
+    for (const project of this.#options.projects(asked.mode)) {
+      const fits = await this.#options.destination.acceptsProject({
+        mode: asked.mode,
+        destinationProjectId: String(project.projectId),
+        ...(asked.repositoryRemotes === undefined
+          ? {}
+          : { repositoryRemotes: asked.repositoryRemotes }),
+      });
+      if (fits) projects.push(project);
+    }
+    const listed: ThreadMoveProjects = {
+      status: "listed",
+      projects,
+      noProjectAllowed: asked.mode === "chat",
+    };
+    return { httpStatus: 200, body: { ...listed } };
   }
 
   async receiveChunk(request: SignedRequest): Promise<DestinationAnswer> {
@@ -472,12 +540,13 @@ export class ThreadMoveService {
   }): Promise<MoveOutcome> {
     const target = this.#options.target(input.targetMemberId);
     if (target.status === "refused" || memberOrigin(target.member) === undefined) {
-      return { status: "failed", reason: "destination-unreachable" };
+      return this.#refuseUnfrozen(input.thread, "destination-unreachable");
     }
     const reading = await this.#options.source.read(input.thread);
-    if (reading.status === "missing") return { status: "failed", reason: "refused" };
-    if (reading.delegated) return { status: "failed", reason: "delegated" };
-    if (reading.busy) return { status: "failed", reason: "busy" };
+    if (reading.status === "missing") return this.#refuseUnfrozen(input.thread, "refused");
+    if (reading.delegated) return this.#refuseUnfrozen(input.thread, "delegated");
+    if (reading.busy) return this.#refuseUnfrozen(input.thread, "busy");
+    // A second move of a thread already moving is refused without touching the first.
     if (this.#sentFor(input.thread) !== undefined) return { status: "failed", reason: "busy" };
 
     const moveId = decodeMoveId(this.#uuid());
@@ -633,6 +702,40 @@ export class ThreadMoveService {
     return { status: "cancelled" };
   }
 
+  /** Asks a member which of its Projects would take a thread placed like this. */
+  async askProjects(
+    targetMemberId: string,
+    request: ThreadMoveProjectsRequest,
+  ): Promise<ThreadMoveProjects | "refused" | "unreachable"> {
+    const answer = await this.#sendTo(targetMemberId, THREAD_MOVE_ROUTES.projects, request);
+    if (answer.status === "unreachable") return "unreachable";
+    try {
+      return decodeThreadMoveProjects(answer.body);
+    } catch {
+      return "refused";
+    }
+  }
+
+  /** The person dismisses This thread can't move. */
+  dismissFailure(thread: MovedThreadReference): void {
+    const state = this.#options.state.load();
+    this.#options.state.save({
+      ...state,
+      failures: (state.failures ?? []).filter((notice) => !sameThread(notice.thread, thread)),
+    });
+  }
+
+  /**
+   * A move the window could not even start (the unlock was declined or
+   * expired, or the destination could not be reached for the ticket) still
+   * ends in the explicit error, journaled like any other.
+   */
+  refuseBeforeStart(thread: MovedThreadReference, reason: ThreadMoveFailureReason): void {
+    const moveId = decodeMoveId(this.#uuid());
+    this.#options.record.moveFailed({ moveId, thread, reason });
+    this.#noteFailure(thread, moveId, reason);
+  }
+
   /**
    * Take back here: the person unfreezes a thread whose destination cannot be
    * reached to confirm a discard. The destination may still hold a copy.
@@ -770,13 +873,51 @@ export class ThreadMoveService {
     });
     this.#options.source.unfreeze(move.thread);
     await this.#forgetSent(move);
+    // The tombstone an old link shows, and no notice: the thread moved.
+    const state = this.#options.state.load();
+    const departure: ThreadMoveDeparture = {
+      moveId: move.moveId,
+      thread: move.thread,
+      destinationMemberId: move.targetMemberId,
+      destinationThread: destination,
+      ...(erased.keptWorktree === undefined ? {} : { keptWorktree: erased.keptWorktree }),
+      changesRemainInCheckout: erased.changesRemainInCheckout === true,
+      movedAt: this.#timestamp(),
+    };
+    this.#options.state.save({
+      ...state,
+      failures: (state.failures ?? []).filter((notice) => !sameThread(notice.thread, move.thread)),
+      departures: [...(state.departures ?? []), departure].slice(-THREAD_MOVE_DEPARTURES_KEPT),
+    });
     return { status: "moved", destination, worktreeKept: erased.worktreeKept };
+  }
+
+  #refuseUnfrozen(thread: MovedThreadReference, reason: ThreadMoveFailureReason): MoveOutcome {
+    this.refuseBeforeStart(thread, reason);
+    return { status: "failed", reason };
   }
 
   async #fail(move: SentMove, reason: ThreadMoveFailureReason): Promise<MoveOutcome> {
     this.#options.record.moveFailed({ moveId: move.moveId, thread: move.thread, reason });
     await this.#unfreezeSent(move);
+    this.#noteFailure(move.thread, move.moveId, reason);
     return { status: "failed", reason };
+  }
+
+  /** This thread can't move: kept until the person dismisses it or the thread moves. */
+  #noteFailure(
+    thread: MovedThreadReference,
+    moveId: ThreadMoveId,
+    reason: ThreadMoveFailureReason,
+  ): void {
+    const state = this.#options.state.load();
+    this.#options.state.save({
+      ...state,
+      failures: [
+        ...(state.failures ?? []).filter((notice) => !sameThread(notice.thread, thread)),
+        { moveId, thread, reason, failedAt: this.#timestamp() },
+      ],
+    });
   }
 
   async #unfreezeSent(move: SentMove): Promise<void> {
@@ -839,7 +980,18 @@ export class ThreadMoveService {
     | { readonly status: "answered"; readonly body: Record<string, unknown> }
     | { readonly status: "unreachable" }
   > {
-    const target = this.#options.target(String(move.targetMemberId));
+    return this.#sendTo(String(move.targetMemberId), path, body);
+  }
+
+  async #sendTo(
+    targetMemberId: string,
+    path: string,
+    body: unknown,
+  ): Promise<
+    | { readonly status: "answered"; readonly body: Record<string, unknown> }
+    | { readonly status: "unreachable" }
+  > {
+    const target = this.#options.target(targetMemberId);
     if (target.status === "refused") return { status: "unreachable" };
     const origin = memberOrigin(target.member);
     if (origin === undefined) return { status: "unreachable" };
@@ -978,6 +1130,22 @@ function destinationState(move: ReceivedMove): Record<string, unknown> {
     case "discarded":
       return { state: "discarded", moveId: move.moveId };
   }
+}
+
+function sameThread(left: MovedThreadReference, right: MovedThreadReference): boolean {
+  return left.mode === right.mode && left.threadId === right.threadId;
+}
+
+function placementOf(offer: ThreadMoveOffer): ThreadMovePlacement {
+  return {
+    mode: offer.source.mode,
+    ...(offer.destinationProjectId === undefined
+      ? {}
+      : { destinationProjectId: String(offer.destinationProjectId) }),
+    ...(offer.repositoryRemotes === undefined
+      ? {}
+      : { repositoryRemotes: offer.repositoryRemotes }),
+  };
 }
 
 function refusedAnswer(

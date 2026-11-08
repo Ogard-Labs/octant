@@ -16,6 +16,7 @@ import { createThreadMoveStateStore, heldThreadsOf } from "./threadMoveStateStor
 import {
   THREAD_MOVE_CHUNK_BYTES,
   THREAD_MOVE_ROUTES,
+  THREAD_MOVE_TICKET_LIFETIME_MS,
   ThreadMoveService,
   type DestinationAnswer,
   type MoveSender,
@@ -121,6 +122,7 @@ function harness(
     [THREAD_MOVE_ROUTES.commit]: (request) => (mini as ThreadMoveService).commit(request),
     [THREAD_MOVE_ROUTES.status]: (request) => (mini as ThreadMoveService).status(request),
     [THREAD_MOVE_ROUTES.discard]: (request) => (mini as ThreadMoveService).discard(request),
+    [THREAD_MOVE_ROUTES.projects]: (request) => (mini as ThreadMoveService).listProjects(request),
   };
   const transport: HubTransport = () => async (url, init) => {
     const path = new URL(String(url)).pathname;
@@ -188,6 +190,7 @@ function harness(
     transport,
     authenticate: () => ({ status: "refused" }),
     ownerIsCurrent: () => true,
+    projects: () => [],
     now: () => clock.now,
     uuid,
   });
@@ -202,7 +205,7 @@ function harness(
       erase: async () => ({ worktreeKept: false }),
     },
     destination: {
-      acceptsProject: (offer) => offer.source.mode === "chat",
+      acceptsProject: (placement) => placement.mode === "chat",
       arrive: async ({ thread }) => {
         // Idempotent by the planned id, as a real host must be.
         if (opened.has(thread.threadId)) return { status: "arrived", thread };
@@ -230,6 +233,9 @@ function harness(
     transport,
     authenticate,
     ownerIsCurrent: (owner) => owner === String(ownerId),
+    projects: (mode) => [
+      { projectId: id(4) as never, title: mode === "chat" ? "Trips" : "Reports" },
+    ],
     now: () => clock.now,
     // Tickets and planned thread ids are kept apart, so one fixed id serves both.
     uuid: () => id(9),
@@ -296,7 +302,7 @@ describe("moving a thread", () => {
   it("asks for a fresh unlock when the ticket expired before the offer came", async () => {
     const h = harness();
     const ticketId = h.ticket();
-    h.clock.now += 121_000;
+    h.clock.now += THREAD_MOVE_TICKET_LIFETIME_MS + 1_000;
     expect(await start(h, ticketId)).toEqual({ status: "failed", reason: "unlock-required" });
   });
 
@@ -400,5 +406,22 @@ describe("moving a thread", () => {
     h.clock.now += 5 * 60 * 1000;
     expect((await h.mini.activateAnyway(moveId)).body.state).toBe("committed");
     expect(h.active).toEqual([id(9)]);
+  });
+
+  it("lists only the Projects that would take the thread, and nothing for a member without Move in", async () => {
+    const h = harness();
+    expect(await h.laptop.askProjects(miniId, { mode: "chat" })).toEqual({
+      status: "listed",
+      projects: [{ projectId: id(4), title: "Trips" }],
+      noProjectAllowed: true,
+    });
+    // The destination lists its Work Project, but it does not take this placement.
+    expect(await h.laptop.askProjects(miniId, { mode: "work" })).toEqual({
+      status: "listed",
+      projects: [],
+      noProjectAllowed: false,
+    });
+    const refused = harness({ grant: { moveIn: false } });
+    expect(await refused.laptop.askProjects(miniId, { mode: "chat" })).toBe("refused");
   });
 });

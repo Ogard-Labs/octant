@@ -150,6 +150,7 @@ export const REMOTE_HUB_LINK_ROUTE_IDS = {
   threadMoveCommit: "hub-link-thread-move-commit",
   threadMoveStatus: "hub-link-thread-move-status",
   threadMoveDiscard: "hub-link-thread-move-discard",
+  threadMoveProjects: "hub-link-thread-move-projects",
 } as const;
 
 /**
@@ -190,6 +191,11 @@ const THREAD_MOVE_PEER_ROUTES: ReadonlyArray<{
     id: REMOTE_HUB_LINK_ROUTE_IDS.threadMoveDiscard,
     path: "/api/hub/peer/thread-moves/discard",
     maxBodyBytes: 4_096,
+  },
+  {
+    id: REMOTE_HUB_LINK_ROUTE_IDS.threadMoveProjects,
+    path: "/api/hub/peer/thread-moves/projects",
+    maxBodyBytes: 64 * 1024,
   },
 ];
 

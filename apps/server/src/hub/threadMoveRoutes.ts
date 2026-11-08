@@ -24,6 +24,8 @@ export const THREAD_MOVE_ROUTE_BODY_BYTES: Readonly<Record<string, number>> = {
   [THREAD_MOVE_ROUTES.commit]: 4_096,
   [THREAD_MOVE_ROUTES.status]: 4_096,
   [THREAD_MOVE_ROUTES.discard]: 4_096,
+  // Sixteen repository remotes of at most 2 KiB each.
+  [THREAD_MOVE_ROUTES.projects]: 64 * 1024,
 };
 
 export function createThreadMoveRouteHandler(options: {
@@ -39,6 +41,7 @@ export function createThreadMoveRouteHandler(options: {
       [THREAD_MOVE_ROUTES.commit]: (signed) => options.moves.commit(signed),
       [THREAD_MOVE_ROUTES.status]: (signed) => options.moves.status(signed),
       [THREAD_MOVE_ROUTES.discard]: (signed) => options.moves.discard(signed),
+      [THREAD_MOVE_ROUTES.projects]: (signed) => options.moves.listProjects(signed),
     };
   return async (request) => {
     const url = new URL(request.url);

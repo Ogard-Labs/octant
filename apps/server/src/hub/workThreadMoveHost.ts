@@ -14,7 +14,6 @@ import {
   ProviderModelId,
   WorkThreadId,
   type MovedThreadReference,
-  type ThreadMoveOffer,
 } from "@octant/contracts";
 import { Schema } from "effect";
 import type { ThreadMoveHolds } from "./threadMoveHolds";
@@ -143,10 +142,10 @@ export function createWorkThreadMoveHost(options: WorkThreadMoveHostOptions): {
   };
 
   const destination: ThreadMoveDestinationHost = {
-    acceptsProject: (offer: ThreadMoveOffer) =>
-      offer.source.mode === "work" &&
-      offer.destinationProjectId !== undefined &&
-      options.activeWorkProject(String(offer.destinationProjectId)),
+    acceptsProject: (placement) =>
+      placement.mode === "work" &&
+      placement.destinationProjectId !== undefined &&
+      options.activeWorkProject(placement.destinationProjectId),
     arrive: async ({ thread: planned, offer, parts }) => {
       const id = idOf(planned);
       if (id === undefined || offer.destinationProjectId === undefined) {

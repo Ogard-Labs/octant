@@ -19,7 +19,6 @@ import {
   ProviderModelId,
   type CodeThread,
   type MovedThreadReference,
-  type ThreadMoveOffer,
 } from "@octant/contracts";
 import { mayRemoveMovedWorktree, normalizeRepositoryRemote } from "@octant/domain";
 import { Schema } from "effect";
@@ -185,6 +184,8 @@ export function createCodeThreadMoveHost(options: CodeThreadMoveHostOptions): {
       if (code === undefined) return { worktreeKept: false };
       const root = await options.checkoutRoot(code.id);
       let worktreeKept = false;
+      let keptWorktree: string | undefined;
+      let changesRemainInCheckout = false;
       if (root !== undefined) {
         const check = await checkoutStillMatchesMove({
           checkoutRoot: root,
@@ -195,30 +196,34 @@ export function createCodeThreadMoveHost(options: CodeThreadMoveHostOptions): {
           ignoredFiles: check.ignoredFiles,
         });
         await forgetMoveSnapshot(root, String(moveId));
-        if (!removable && options.ownsManagedWorktree(code.id)) {
-          // Out of the managed folder, the purge below leaves it in place.
-          await relocateWorktree({
-            worktreeRoot: root,
-            target: `${root}-moved-out-${String(moveId).slice(0, 8)}`,
-          });
-          worktreeKept = true;
+        if (!options.ownsManagedWorktree(code.id)) {
+          // The Project's own checkout is the person's folder; Octant never
+          // resets it, so the thread's changes remain there.
+          changesRemainInCheckout = true;
+          worktreeKept = !removable;
         } else if (!removable) {
-          // The Project's own checkout is the person's folder; Octant never resets it.
+          // Out of the managed folder, the purge below leaves it in place.
+          keptWorktree = `${root}-moved-out-${String(moveId).slice(0, 8)}`;
+          await relocateWorktree({ worktreeRoot: root, target: keptWorktree });
           worktreeKept = true;
         }
       }
       await options.purge(code.id);
-      return { worktreeKept };
+      return {
+        worktreeKept,
+        ...(keptWorktree === undefined ? {} : { keptWorktree }),
+        ...(changesRemainInCheckout ? { changesRemainInCheckout } : {}),
+      };
     },
   };
 
   const destination: ThreadMoveDestinationHost = {
-    acceptsProject: async (offer: ThreadMoveOffer) => {
-      if (offer.source.mode !== "code" || offer.destinationProjectId === undefined) return false;
-      const project = options.codeProject(String(offer.destinationProjectId));
+    acceptsProject: async (placement) => {
+      if (placement.mode !== "code" || placement.destinationProjectId === undefined) return false;
+      const project = options.codeProject(placement.destinationProjectId);
       if (project === undefined) return false;
       return sharesRepository(
-        offer.repositoryRemotes ?? [],
+        placement.repositoryRemotes ?? [],
         await repositoryRemotes(project.canonicalRoot),
       );
     },

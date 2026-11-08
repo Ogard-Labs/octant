@@ -70,10 +70,14 @@ import { SpokePushService } from "./spokePushService";
 import { SpokeSignInService, type SignInAccountState } from "./spokeSignInService";
 import { SpokeWakeService, type WakeRoutineView } from "./spokeWakeService";
 import { WakeService } from "./wakeService";
+import { peerGrantAllowsMoveIn } from "@octant/domain";
 import { createThreadMoveRouteHandler } from "./threadMoveRoutes";
+import { createThreadMoveTicketClient } from "./threadMoveTicketClient";
+import { ThreadMovesFromWindow } from "./threadMovesFromWindow";
 import {
   ThreadMoveService,
   type ThreadMoveDestinationHost,
+  type ThreadMoveServiceOptions,
   type ThreadMoveSourceHost,
 } from "./threadMoveService";
 import { createThreadMoveStateStore } from "./threadMoveStateStore";
@@ -158,6 +162,8 @@ export class HubTestNetwork {
 export interface HubTestHost {
   /** This host's thread moves, both halves, over the real member routes. */
   readonly threadMoves: ThreadMoveService;
+  /** What a window on this host asks of a move, through the same pieces production wires. */
+  readonly threadMovesFromWindow: ThreadMovesFromWindow;
   /** What the move recorder wrote, in order, by step name. */
   readonly threadMoveRecords: string[];
   readonly hostId: string;
@@ -248,6 +254,8 @@ export async function startHubTestHost(input: {
   readonly threadMoveHosts?: {
     readonly source: ThreadMoveSourceHost;
     readonly destination: ThreadMoveDestinationHost;
+    /** The Projects a move may name here; absent, none. */
+    readonly projects?: ThreadMoveServiceOptions["projects"];
   };
   /** This host's own rules for a parent thread; absent, it has no parent thread to delegate for. */
   readonly parent?: DelegatingParentPort;
@@ -718,8 +726,9 @@ export async function startHubTestHost(input: {
     },
   };
   const moveHosts = input.threadMoveHosts ?? noThreads;
+  const threadMoveState = createThreadMoveStateStore(directory);
   const threadMoves = new ThreadMoveService({
-    state: createThreadMoveStateStore(directory),
+    state: threadMoveState,
     source: moveHosts.source,
     destination: moveHosts.destination,
     record: {
@@ -740,7 +749,7 @@ export async function startHubTestHost(input: {
       return {
         status: "member",
         memberId: String(peer.peer.member.memberId),
-        moveIn: peer.peer.grant.moveIn === true,
+        moveIn: peerGrantAllowsMoveIn(peer.peer.grant),
       };
     },
     ownerIsCurrent: (ownerMemberId) => {
@@ -751,9 +760,29 @@ export async function startHubTestHost(input: {
         !context.inactiveDeviceMemberIds.includes(ownerMemberId)
       );
     },
+    projects: input.threadMoveHosts?.projects ?? (() => []),
     now: Date.now,
   });
   const threadMoveRoutes = createThreadMoveRouteHandler({ moves: threadMoves });
+  const threadMovesFromWindow = new ThreadMovesFromWindow({
+    moves: threadMoves,
+    state: threadMoveState,
+    tickets: createThreadMoveTicketClient({
+      identity: () => identity,
+      target: (memberId) => spoke.memberTarget(memberId),
+      transport,
+      now: Date.now,
+    }),
+    source: moveHosts.source,
+    members: () => {
+      const status = spoke.status();
+      return status.membership === "member" ? status.roster.roster.members : [];
+    },
+    selfMemberId: () => hub.hubMemberId(),
+    now: Date.now,
+    pollMs: 50,
+  });
+  input.cleanups.push(() => threadMovesFromWindow.close());
   const hubOwnerRoutes = createHubOwnerRouteHandler({
     ...(input.ownerBrowser === undefined ? {} : { browser: input.ownerBrowser }),
     hub,
@@ -862,6 +891,7 @@ export async function startHubTestHost(input: {
 
   return {
     threadMoves,
+    threadMovesFromWindow,
     threadMoveRecords,
     hostId: String(hostId),
     origin,
