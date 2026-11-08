@@ -183,6 +183,12 @@ export const TurnDiagnosticsTotals = Schema.Struct({
   toolCalls: NonNegativeInt,
   toolFailures: NonNegativeInt,
   unfinishedToolCalls: NonNegativeInt,
+  /**
+   * Turns whose per-tool tallies were cut to the most-called tools when the
+   * turn was recorded. Their per-tool figures, including unfinished calls, are
+   * partial; the call and failure totals above are not.
+   */
+  toolTalliesTruncatedTurns: Schema.optional(NonNegativeInt),
   retries: Schema.Array(TurnRetryTally).pipe(Schema.maxItems(4)),
   approvalRequests: NonNegativeInt,
   inputRequests: NonNegativeInt,
