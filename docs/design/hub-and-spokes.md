@@ -937,11 +937,15 @@ dies or loses power without warning hands nothing over; that would need a
 continuously updated copy on another member, and threads are in no replica
 log.
 
-**Who starts it.** Only a person: from **Move to another computer…** in the
-thread's header menu and its row's context menu, from
-[Prepare to shut down](#prepare-to-shut-down), or from an owner device acting
-on the source host. An agent, a routine, the hub, a standby, and a peer cannot
-start a move or a handover, and no tool offers either.
+**Who starts it.** Only a person, and for one thread only from that thread's
+Environment tool: its Computer card lists the member computers, and the move
+sheet states what moves, what stays, and that the source is erased
+([Design system: moving a thread](../../DESIGN.md#shell-and-layout) owns the
+screens). No header menu, row menu, or command palette entry moves a thread.
+[Prepare to shut down](#prepare-to-shut-down) is the one host-wide entry,
+for many threads at once. An owner device acting on the source host uses the
+same Environment view. An agent, a routine, the hub, a standby, and a peer
+cannot start a move or a handover, and no tool offers either.
 
 **Every move is an owner act on the destination** ([decision H20](#decisions)).
 The destination accepts a move only when it carries a fresh unlock, of the
@@ -1092,8 +1096,12 @@ host's active threads, each with what can happen to it: move to a member
 it here. The person chooses per thread or for all. A batch is one offer per
 destination naming every thread in it, so one unlock covers the batch it names
 and nothing else. The screen shows progress and says **Safe to shut down**
-when every chosen thread is committed or handed over; a thread whose move
-cannot finish offers **Hand over instead**.
+only when every chosen thread is committed or handed over and pushed. A thread
+whose move cannot finish shows
+[This thread can't move](#a-thread-that-cannot-move) with its reason on its
+row, and a Code thread there offers **Hand over instead**. While any chosen
+thread failed, the screen says how many threads stay on this computer and lists
+them instead of saying Safe to shut down.
 
 #### Handover
 
@@ -1145,9 +1153,33 @@ able to push to, so it is framed as outside content and marks the thread with
 `thread.external-content-ingested@1` under the source label `handover-note`.
 
 Chat and Work threads have no branch to carry them, so they have no handover:
-when their move cannot finish they stay on the source, unfrozen, and the
-receipt says to move them later. Nothing is exported to a file
-([decision H23](#decisions)).
+when their move cannot finish they stay on the source, unfrozen. Nothing is
+exported to a file ([decision H23](#decisions)).
+
+#### A thread that cannot move
+
+A move that cannot finish always ends in an explicit error, never a silent
+return to the source. The source journals `thread.move-failed@1` with one
+reason, unfreezes the thread, and shows **This thread can't move** with that
+reason in the move sheet and as a notice on the thread itself, which stays until
+the person dismisses it or the thread moves. The reasons are:
+
+| Reason                    | Meaning                                                                                                                                              |
+| ------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `busy`                    | A turn runs, the thread waits on the person, or a child run or remote child run is still going, and the person did not choose Stop and move          |
+| `delegated`               | The thread was delegated to this host by a peer and belongs to that delegation                                                                       |
+| `unlock-required`         | The person declined the unlock, it expired, or this device is not an owner on the destination                                                        |
+| `refused`                 | The destination refused: no Move in item, Owners unticked, or the source is no longer in its roster. It answers every one of these in the same words |
+| `no-eligible-project`     | The destination has no Project of the thread's mode that accepts it (for Code, none bound to the same repository)                                    |
+| `destination-unreachable` | The destination could not be reached before the offer, or stopped answering during the transfer and the person gave up waiting                       |
+| `transfer-failed`         | A part failed its digest check twice, or the destination could not unpack it                                                                         |
+
+For a Code thread the same error offers **Hand over instead**. A handover that
+cannot finish its push says so as its own error (`push-failed`, or `no-remote`
+when the branch has no remote): the commit and note stay on this computer, and
+the receipt says the work is not on any other computer yet. Rationale: the
+person is about to switch the computer off, so a thread left behind without a
+clear error would look moved and be unreachable until the computer comes back.
 
 Rationale: a move is a fork to another computer with an erase behind it, not a
 shared or replicated journal. Each host keeps one writer and its own journal,
@@ -1379,7 +1411,7 @@ choice to the design, the design's recommendation was taken.
 | H20 | What authorizes a move on the destination?                                  | An owner device's own fresh unlock for every move, and the destination's Move in peer-grant item, which is in the full-member grant. The moved thread is the person's own thread there                                                                                                                           |
 | H21 | What happens to the source's copy?                                          | It is erased through the ordinary thread purge once the destination commits, and its tombstone points to the destination                                                                                                                                                                                         |
 | H22 | Is a move limited in size?                                                  | No. Attachments, original inputs, captures, owned Canvases, and a Code thread's whole branch and uncommitted work travel whatever their size; ignored files never do                                                                                                                                             |
-| H23 | What happens when a move cannot finish?                                     | There is no file export. A Code thread hands over: everything is committed to its branch with a generated note, pushed when there is a remote, and continued from that branch on another computer. Chat and Work threads stay where they are                                                                     |
+| H23 | What happens when a move cannot finish?                                     | There is no file export. A Code thread hands over: everything is committed to its branch with a generated note, pushed when there is a remote, and continued from that branch on another computer. Chat and Work threads stay where they are, and every failed move shows an explicit error with its reason      |
 
 On 2026-11-07 the maintainer added messaging between members: an agent on one
 computer must be able to message a running thread on another when that thread
@@ -1981,8 +2013,10 @@ a numbered slice. Built, with these narrower readings:
     own-unlock challenge for a move, the offer, chunk, finish, commit, and
     cancel member routes, the freeze, arriving, committed, and moved-out
     events, the source erase and its tombstone, recovery on both ends, Prepare
-    to shut down, and the handover: note, commit, push, notice, continued
-    report, and Continue handover.
+    to shut down, the handover (note, commit, push, notice, continued report,
+    and Continue handover), and the screens: Environment's Computer card, the
+    move and handover sheets, the frozen bar, the tombstone, the Arriving
+    pill, and This thread can't move.
     Acceptance: a move without an own fresh unlock, or to a member without
     Move in or with Owners unticked, is refused before any part is sent; at no
     point can both copies start a turn unless the person chose Take back here
@@ -1996,7 +2030,13 @@ a numbered slice. Built, with these narrower readings:
     destination lacks its repository falls back to a handover whose commit
     holds every change and whose message is the note; a handover never forces
     a push or pushes to the default branch; continuing a handover marks the
-    thread with outside content and erases the frozen source. Verification:
+    thread with outside content and erases the frozen source; every move that
+    cannot finish journals `thread.move-failed@1` with one listed reason,
+    unfreezes the thread, and shows This thread can't move in the move sheet,
+    on the thread, and in Prepare to shut down, which then never says Safe to
+    shut down; no header menu, row menu, or palette entry starts a move.
+    Verification: the closest web component tests, rendered QA of each screen
+    state at a wide window and at 390px,
     contract and domain tests, server tests, and a two-host loopback smoke with
     fake providers covering a large worktree and a cut transfer; a move between
     two real computers with a real Touch ID unlock before a real shutdown is a
