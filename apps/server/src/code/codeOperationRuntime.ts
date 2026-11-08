@@ -639,6 +639,11 @@ export interface CodeOperationRuntimeOptions {
     readonly thread: CodeThread;
     readonly windowId: WindowId;
   }) => string | undefined;
+  /**
+   * The active Project memory entries this thread's turn carries, as a Chat
+   * or Work turn in the Project does. Absent gives none.
+   */
+  readonly projectMemoryEntries?: (thread: CodeThread) => ReadonlyArray<string>;
   readonly nativeHarness?: {
     readonly contextFor: (scope: NativeHarnessTurnScope) => ReadonlyArray<ProviderContextBlock>;
     /** Octant Shield's record of the remote commands a runtime runs with its own shell tool. */
@@ -4917,7 +4922,17 @@ class RuntimeTurnController implements CodeOperationTurnPort {
       personMemoryText === undefined
         ? []
         : [{ kind: "person-memory" as const, text: personMemoryText }];
-    const fullContext = [...harnessContext, ...hostGuidance, ...personMemory, ...(context ?? [])];
+    // After person memory, as in Chat and Work, and counted with it.
+    const projectMemory = (this.#options.projectMemoryEntries?.(active.thread) ?? []).map(
+      (text) => ({ kind: "project-memory" as const, text }),
+    );
+    const fullContext = [
+      ...harnessContext,
+      ...hostGuidance,
+      ...personMemory,
+      ...projectMemory,
+      ...(context ?? []),
+    ];
     // A runtime that keeps its own conversation already holds the standing
     // context an earlier completed turn of this session carried; only what is
     // new goes out, and only that is counted as this turn's copy.
@@ -4945,6 +4960,7 @@ class RuntimeTurnController implements CodeOperationTurnPort {
             ...sentNow([
               ...hostGuidance,
               ...personMemory,
+              ...projectMemory,
               ...(active.sentContext?.instructions ?? []),
             ]),
           ],

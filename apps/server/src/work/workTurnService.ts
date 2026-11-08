@@ -77,6 +77,7 @@ import {
   type HarnessRetryNotice,
   type Project,
   type ProjectId,
+  type ProjectMemoryView,
   type ProviderAttachmentInput,
   type ProviderContextBlock,
   type ProviderResumeCursor,
@@ -277,6 +278,8 @@ export interface WorkTurnServiceDependencies {
   readonly persistence: {
     readonly status: () => { readonly state: string; readonly integrity: string };
     readonly readProject: (projectId: ProjectId) => Project | undefined;
+    /** The Project's memory, whose active entries every turn in it carries. */
+    readonly readProjectMemory?: (projectId: ProjectId) => ProjectMemoryView;
     readonly readProviderInstance: (
       instanceId: WorkThread["providerInstanceId"],
     ) => ProviderInstance | undefined;
@@ -1363,6 +1366,9 @@ export class WorkTurnService {
               ? undefined
               : this.#personMemoryBlock?.({ thread, windowId: authenticatedWindowId }),
           ),
+          ...(project === undefined
+            ? []
+            : projectMemoryContributions(this.#persistence.readProjectMemory?.(project.id))),
           ...(project === undefined ? [] : extraFolderContributions(project)),
           ...(project === undefined
             ? []
@@ -3213,6 +3219,23 @@ function withoutPublishedSnapshots(toolSteps: ThreadToolSteps): ThreadToolSteps 
       return { ...step, published: page };
     }),
   };
+}
+
+/**
+ * The Project's active memory, one entry each, as a Chat turn in the Project
+ * carries it: after person memory and before the Project's own files.
+ */
+function projectMemoryContributions(
+  memory: ProjectMemoryView | undefined,
+): ReadonlyArray<WorkTurnContextContribution> {
+  return (memory?.active ?? []).map((entry) => ({
+    text: entry.content,
+    sourceKind: "memory",
+    referenceId: String(entry.id),
+    category: "project-memory",
+    posture: "compressible",
+    block: { kind: "project-memory", text: entry.content },
+  }));
 }
 
 /** What Octant remembers about the person, placed after instructions and before the Project's own context. */
