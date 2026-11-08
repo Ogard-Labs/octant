@@ -20,7 +20,14 @@
 #define ROOT "/octant-fileattr"
 #define KEY ROOT "/home/.ssh/deployment"
 #define BASELINE ROOT "/fileattr-before"
-struct baseline { struct stat identity; unsigned int flags; };
+struct baseline { struct stat identity; unsigned int flags; unsigned int generation; };
+static const char *private_created[] = {
+  ROOT "/home/.ssh/id_created_open", ROOT "/home/.ssh/id_created_node",
+  ROOT "/home/.ssh/id_created_directory", ROOT "/home/.ssh/id_created_symlink",
+  ROOT "/home/.ssh/id_created_alias", ROOT "/private-source-link",
+};
+static const char public_created[] = "permitted creation";
+
 
 static bool same_time(struct timespec left, struct timespec right)
 {
@@ -30,25 +37,38 @@ static int verify(void)
 {
   struct baseline before = {0};
   struct stat after = {0};
-  unsigned int flags = 0;
+  unsigned int flags = 0, generation = 0;
   int saved = open(BASELINE, O_RDONLY | O_CLOEXEC | O_NOFOLLOW);
   bool loaded = saved >= 0 && read(saved, &before, sizeof(before)) == sizeof(before);
   if (saved >= 0) close(saved);
   int held = open(KEY, O_RDONLY | O_CLOEXEC | O_NOFOLLOW);
   bool measured = loaded && held >= 0 && !fstat(held, &after) &&
-    !ioctl(held, FS_IOC_GETFLAGS, &flags);
+    !ioctl(held, FS_IOC_GETFLAGS, &flags) && !ioctl(held, FS_IOC_GETVERSION, &generation);
   bool flags_unchanged = measured && flags == before.flags;
+  bool generation_unchanged = measured && generation == before.generation;
   bool stat_unchanged = measured &&
     after.st_dev == before.identity.st_dev && after.st_ino == before.identity.st_ino &&
+    after.st_nlink == before.identity.st_nlink &&
     after.st_mode == before.identity.st_mode && after.st_uid == before.identity.st_uid &&
     after.st_gid == before.identity.st_gid && after.st_size == before.identity.st_size &&
     same_time(after.st_atim, before.identity.st_atim) &&
     same_time(after.st_mtim, before.identity.st_mtim) &&
     same_time(after.st_ctim, before.identity.st_ctim);
   if (held >= 0) close(held);
-  bool unchanged = flags_unchanged && stat_unchanged;
-  printf("OCTANT_FILEATTR_OWNER {\"pid\":%ld,\"parent\":%ld,\"measured\":%s,\"flagsUnchanged\":%s,\"statUnchanged\":%s,\"unchanged\":%s}\n",
-    (long)getpid(), (long)getppid(), measured ? "true" : "false", flags_unchanged ? "true" : "false",
+  bool names_absent = true;
+  for (unsigned i = 0; i < sizeof(private_created) / sizeof(private_created[0]); i++) {
+    struct stat entry;
+    errno = 0;
+    if (lstat(private_created[i], &entry) != -1 || errno != ENOENT) names_absent = false;
+  }
+  char bytes[sizeof(public_created)] = {0};
+  int publication = open(ROOT "/home/.ssh/created.pub", O_RDONLY | O_CLOEXEC | O_NOFOLLOW);
+  bool public_persisted = publication >= 0 && read(publication, bytes, sizeof(bytes)) == sizeof(public_created) - 1 &&
+    !memcmp(bytes, public_created, sizeof(public_created) - 1);
+  if (publication >= 0) close(publication);
+  bool unchanged = flags_unchanged && stat_unchanged && generation_unchanged && names_absent && public_persisted;
+  printf("OCTANT_FILEATTR_OWNER {\"pid\":%ld,\"parent\":%ld,\"measured\":%s,\"flagsUnchanged\":%s,\"generationUnchanged\":%s,\"createdNamesAbsent\":%s,\"publicCreationPersisted\":%s,\"statUnchanged\":%s,\"unchanged\":%s}\n",
+    (long)getpid(), (long)getppid(), measured ? "true" : "false", flags_unchanged ? "true" : "false", generation_unchanged ? "true" : "false", names_absent ? "true" : "false", public_persisted ? "true" : "false",
     stat_unchanged ? "true" : "false", unchanged ? "true" : "false");
   return unchanged ? 0 : 1;
 }
@@ -62,11 +82,132 @@ static bool queued_bytes(int pair[2])
   return allowed;
 }
 
+static bool refused_creation(const char *kind, int result, int error)
+{
+  bool refused = result == -1 && error == EACCES;
+  printf("OCTANT_CREATE_CASE {\"kind\":\"%s\",\"result\":%d,\"errno\":%d,\"refused\":%s}\n",
+    kind, result, error, refused ? "true" : "false");
+  return refused;
+}
+static bool creation_controls(void)
+{
+  errno = 0;
+  int existing = open(KEY, O_CREAT | O_EXCL | O_WRONLY | O_CLOEXEC, 0600);
+  bool existing_open = existing == -1 && errno == EEXIST;
+  if (existing >= 0) close(existing);
+  errno = 0;
+  bool existing_link = link(KEY, KEY ".pub") == -1 && errno == EEXIST;
+  errno = 0;
+  bool existing_symlink = symlink("synthetic target", KEY) == -1 && errno == EEXIST;
+  int public = open(ROOT "/home/.ssh/created.pub", O_CREAT | O_EXCL | O_RDWR | O_CLOEXEC, 0600);
+  bool published = public >= 0 && write(public, public_created, sizeof(public_created) - 1) == sizeof(public_created) - 1;
+  if (public >= 0) close(public);
+  bool directory = !mkdir(ROOT "/created-directory", 0700);
+  bool directory_removed = directory && !rmdir(ROOT "/created-directory");
+  bool fifo = !mkfifo(ROOT "/created-pipe", 0600);
+  struct stat pipe_identity;
+  bool pipe_observed = fifo && !lstat(ROOT "/created-pipe", &pipe_identity) && S_ISFIFO(pipe_identity.st_mode);
+  bool pipe_removed = fifo && !unlink(ROOT "/created-pipe");
+  const char target[] = "home/.ssh/deployment.pub";
+  char target_read[sizeof(target)] = {0};
+  bool symbolic = !symlink(target, ROOT "/created-link");
+  bool symbolic_observed = symbolic && readlink(ROOT "/created-link", target_read, sizeof(target_read)) == sizeof(target) - 1 &&
+    !memcmp(target, target_read, sizeof(target) - 1);
+  bool symbolic_removed = symbolic && !unlink(ROOT "/created-link");
+  struct stat source = {0}, alias = {0};
+  bool hardlink = !link(KEY ".pub", ROOT "/created-alias");
+  bool same_inode = hardlink && !stat(KEY ".pub", &source) && !stat(ROOT "/created-alias", &alias) &&
+    source.st_dev == alias.st_dev && source.st_ino == alias.st_ino && source.st_nlink >= 2;
+  bool alias_removed = hardlink && !unlink(ROOT "/created-alias");
+  int temporary = open(ROOT, O_TMPFILE | O_RDWR | O_CLOEXEC, 0600);
+  char descriptor[64];
+  snprintf(descriptor, sizeof(descriptor), "/proc/self/fd/%d", temporary);
+  bool temporary_written = temporary >= 0 && write(temporary, "ok", 2) == 2;
+  bool temporary_linked = temporary_written && !linkat(AT_FDCWD, descriptor, AT_FDCWD,
+    ROOT "/temporary-alias", AT_SYMLINK_FOLLOW);
+  bool temporary_observed = temporary_linked && !fstat(temporary, &source) && !stat(ROOT "/temporary-alias", &alias) &&
+    source.st_dev == alias.st_dev && source.st_ino == alias.st_ino && alias.st_size == 2;
+  bool temporary_removed = temporary_linked && !unlink(ROOT "/temporary-alias");
+  if (temporary >= 0) close(temporary);
+  printf("OCTANT_CREATE_PUBLIC {\"existingErrors\":%s,\"regularPersisted\":%s,\"directory\":%s,\"fifo\":%s,\"symlink\":%s,\"hardlinkIdentity\":%s,\"anonymousLinked\":%s}\n",
+    existing_open && existing_link && existing_symlink ? "true" : "false",
+    published ? "true" : "false", directory_removed ? "true" : "false", pipe_observed && pipe_removed ? "true" : "false",
+    symbolic_observed && symbolic_removed ? "true" : "false", same_inode && alias_removed ? "true" : "false",
+    temporary_observed && temporary_removed ? "true" : "false");
+  bool positives = existing_open && existing_link && existing_symlink && published && directory_removed && pipe_observed && pipe_removed && symbolic_observed &&
+    symbolic_removed && same_inode && alias_removed && temporary_observed && temporary_removed;
+  errno = 0;
+  int opened = open(private_created[0], O_CREAT | O_EXCL | O_WRONLY | O_CLOEXEC, 0600);
+  int error = opened < 0 ? errno : 0;
+  bool denied = refused_creation("regular-open", opened < 0 ? -1 : 0, error);
+  if (opened >= 0) close(opened);
+  errno = 0;
+  int result = mknod(private_created[1], S_IFREG | 0600, 0);
+  error = result < 0 ? errno : 0;
+  denied = refused_creation("regular-node", result, error) && denied;
+  errno = 0;
+  result = mkdir(private_created[2], 0700); error = result < 0 ? errno : 0;
+  denied = refused_creation("directory", result, error) && denied;
+  errno = 0;
+  result = symlink("synthetic target", private_created[3]); error = result < 0 ? errno : 0;
+  denied = refused_creation("symlink", result, error) && denied;
+  errno = 0;
+  result = link(KEY, private_created[5]); error = result < 0 ? errno : 0;
+  denied = refused_creation("protected-source-link", result, error) && denied;
+  // Last: an unguarded implementation could turn the public source inode into
+  // a protected alias and spoil later unrelated positive controls.
+  errno = 0;
+  result = link(KEY ".pub", private_created[4]); error = result < 0 ? errno : 0;
+  denied = refused_creation("protected-destination-link", result, error) && denied;
+  return positives && denied;
+}
+
 static bool ordinary_seeks(int file, off_t size)
 {
   return lseek(file, 0, SEEK_END) == size && lseek(file, 0, SEEK_DATA) == 0 &&
     lseek(file, 0, SEEK_HOLE) == size && lseek(file, 7, SEEK_SET) == 7 &&
     lseek(file, -7, SEEK_CUR) == 0;
+}
+
+// The pinned ext4 UAPI also exposes generation under this native command.
+#define EXT4_NATIVE_GETVERSION _IOR('f', 3, long)
+#define EXT4_NATIVE_SETVERSION _IOW('f', 4, long)
+struct integer_observation { int result; int error; unsigned int value; bool unchanged; };
+static struct integer_observation inode_integer(int file, unsigned int command)
+{
+  const unsigned int sentinel = 0x5a5a5a5a;
+  unsigned int value = sentinel;
+  errno = 0;
+  int result = ioctl(file, command, &value);
+  int error = result < 0 ? errno : 0;
+  return (struct integer_observation) { .result = result, .error = error,
+    .value = value, .unchanged = value == sentinel };
+}
+static bool inode_queries_allowed(int file)
+{
+  struct integer_observation legacy = inode_integer(file, FS_IOC_GETVERSION);
+  struct integer_observation version = inode_integer(file, EXT4_NATIVE_GETVERSION);
+  struct integer_observation block = inode_integer(file, FIGETBSZ);
+  return legacy.result == 0 && version.result == 0 && legacy.value == version.value &&
+    block.result == 0 && block.value > 0;
+}
+static bool integer_refused(struct integer_observation observation)
+{
+  return observation.result == -1 && observation.error == EACCES && observation.unchanged;
+}
+
+static bool generation_changes(int file)
+{
+  struct integer_observation before = inode_integer(file, FS_IOC_GETVERSION);
+  if (before.result) return false;
+  unsigned int changed = before.value ^ 0x01010101;
+  bool written = !ioctl(file, FS_IOC_SETVERSION, &changed);
+  struct integer_observation after = inode_integer(file, EXT4_NATIVE_GETVERSION);
+  // Always restore the owned positive control, including a failed readback.
+  bool restored = !ioctl(file, EXT4_NATIVE_SETVERSION, &before.value);
+  struct integer_observation final = inode_integer(file, FS_IOC_GETVERSION);
+  return written && after.result == 0 && after.value == changed && restored &&
+    final.result == 0 && final.value == before.value;
 }
 
 struct extent_observation { int result; int error; unsigned int count; bool unchanged; };
@@ -112,6 +253,10 @@ int main(int argc, char **argv)
   if (!ordinary_seeks(held, before.identity.st_size)) return 8;
   struct extent_observation before_extents = extent_count(held);
   if (before_extents.result || !before_extents.count) return 9;
+  if (!inode_queries_allowed(held)) return 10;
+  struct integer_observation initial_generation = inode_integer(held, FS_IOC_GETVERSION);
+  if (initial_generation.result) return 11;
+  before.generation = initial_generation.value;
   puts("OCTANT_FILEATTR_FILESYSTEM {\"ext4\":true,\"baselineRead\":true}");
   int saved = open(BASELINE, O_CREAT | O_EXCL | O_WRONLY | O_CLOEXEC | O_NOFOLLOW, 0600);
   if (saved < 0 || write(saved, &before, sizeof(before)) != sizeof(before) || fsync(saved)) return 4;
@@ -145,12 +290,25 @@ int main(int argc, char **argv)
   int usage_errno = usage_result < 0 ? errno : 0;
   bool available_refused = available_result == -1 && available_errno == EACCES && private_available == available_sentinel;
   bool usage_refused = usage_result == -1 && usage_errno == EACCES && private_usage == usage_sentinel;
+  struct integer_observation private_legacy = inode_integer(held, FS_IOC_GETVERSION);
+  struct integer_observation private_version = inode_integer(held, EXT4_NATIVE_GETVERSION);
+  struct integer_observation private_block = inode_integer(held, FIGETBSZ);
   struct extent_observation private_extents = extent_count(held);
   bool extents_refused = private_extents.result == -1 && private_extents.error == EACCES && private_extents.unchanged;
   struct seek_observation seek_end = protected_seek(held, SEEK_END);
   struct seek_observation seek_data = protected_seek(held, SEEK_DATA);
   struct seek_observation seek_hole = protected_seek(held, SEEK_HOLE);
   bool private_position = lseek(held, 7, SEEK_SET) == 7 && lseek(held, -7, SEEK_CUR) == 0;
+  unsigned int legacy_generation = before.generation ^ 0x01010101;
+  unsigned int native_generation = before.generation ^ 0x02020202;
+  errno = 0;
+  int legacy_set = ioctl(held, FS_IOC_SETVERSION, &legacy_generation);
+  int legacy_set_errno = legacy_set < 0 ? errno : 0;
+  errno = 0;
+  int native_set = ioctl(held, EXT4_NATIVE_SETVERSION, &native_generation);
+  int native_set_errno = native_set < 0 ? errno : 0;
+  bool generations_refused = legacy_set == -1 && legacy_set_errno == EACCES &&
+    native_set == -1 && native_set_errno == EACCES;
   unsigned int changed = before.flags ^ FS_NODUMP_FL;
   errno = 0;
   int mutation = ioctl(held, FS_IOC_SETFLAGS, &changed);
@@ -175,9 +333,19 @@ int main(int argc, char **argv)
     !ioctl(public, FIOQSIZE, &public_usage) && public_usage >= 0;
   struct stat public_identity;
   bool public_seeks = public >= 0 && !fstat(public, &public_identity) && ordinary_seeks(public, public_identity.st_size);
+  bool public_generations = generation_changes(public);
+  bool public_inode_queries = inode_queries_allowed(public);
   struct extent_observation public_extents = extent_count(public);
   bool extents_allowed = public_extents.result == 0 && public_extents.count > 0;
   if (public >= 0) close(public);
+  printf("OCTANT_INODE_GENERATION_WRITE {\"privateRefused\":%s,\"legacyResult\":%d,\"legacyErrno\":%d,\"nativeResult\":%d,\"nativeErrno\":%d,\"publicChangedRestored\":%s}\n",
+    generations_refused ? "true" : "false", legacy_set, legacy_set_errno, native_set, native_set_errno,
+    public_generations ? "true" : "false");
+  printf("OCTANT_INODE_IOCTL_METADATA {\"baselineAllowed\":true,\"legacyRefused\":%s,\"legacyResult\":%d,\"legacyErrno\":%d,\"versionRefused\":%s,\"versionResult\":%d,\"versionErrno\":%d,\"blockRefused\":%s,\"blockResult\":%d,\"blockErrno\":%d,\"publicAllowed\":%s}\n",
+    integer_refused(private_legacy) ? "true" : "false", private_legacy.result, private_legacy.error,
+    integer_refused(private_version) ? "true" : "false", private_version.result, private_version.error,
+    integer_refused(private_block) ? "true" : "false", private_block.result, private_block.error,
+    public_inode_queries ? "true" : "false");
   printf("OCTANT_FIEMAP_METADATA {\"baselineAllowed\":true,\"privateRefused\":%s,\"privateResult\":%d,\"privateErrno\":%d,\"outputUnchanged\":%s,\"publicAllowed\":%s}\n",
     extents_refused ? "true" : "false", private_extents.result, private_extents.error,
     private_extents.unchanged ? "true" : "false", extents_allowed ? "true" : "false");
@@ -201,8 +369,10 @@ int main(int argc, char **argv)
     private_read_refused ? "true" : "false", observation, read_failure,
     private_output_unchanged ? "true" : "false", private_refused ? "true" : "false", mutation, failure, public_changed ? "true" : "false",
     public_restored ? "true" : "false", marker ? "true" : "false");
-  return private_read_refused && private_output_unchanged && private_refused && public_changed && public_restored && marker &&
+  bool creations = creation_controls();
+  return creations && private_read_refused && private_output_unchanged && private_refused && public_changed && public_restored && marker &&
     available_refused && usage_refused && public_queries && pipe_allowed && socket_allowed &&
-    extents_refused && extents_allowed &&
+    extents_refused && extents_allowed && public_inode_queries && generations_refused && public_generations &&
+    integer_refused(private_legacy) && integer_refused(private_version) && integer_refused(private_block) &&
     seek_end.refused && seek_data.refused && seek_hole.refused && private_position && public_seeks ? 0 : 18;
 }

@@ -254,8 +254,9 @@ is replayed. Owner disconnect retires admission. The native relay retains its
 separate binary FD3 channel; neither control channel becomes command stdio.
 Healthy completion requires actual child EXIT plus payload EOF and IPC
 disconnect; a channel or kill error never counts as EXIT. Existing caller and
-cleanup deadlines remain in force. Native Linux acceptance of this transport
-correction is pending; the working host IPC check is not capsule proof.
+cleanup deadlines remain in force. Integrated native Linux acceptance passes
+the session transport scenarios; the working host IPC check alone is not
+capsule proof.
 
 Preparation and execution share a caller deadline of at most the candidate's
 existing 180 seconds; normal output drains until EOF or that deadline. Input
@@ -279,7 +280,8 @@ Even during cancellation, the session requires that validated terminal
 acknowledgement, actual worker exit, IPC disconnect and owned retirement before
 reporting confirmed cleanup. Missing acknowledgements remain uncertain, and
 late messages cannot admit a new command or release execution. Integrated native
-acceptance of this correction remains pending.
+acceptance passes all seven scenarios and the exact one-worker orphan join;
+the earlier twelve-orphan failure remains the regression baseline.
 
 The unchanged session scenarios run after the three ordinary capsules and
 before the Bun/Node controllers, retaining the exact one-worker orphan join.
@@ -290,9 +292,22 @@ the complete run; earlier session evidence does not waive that failure.
 The runtime-expiry case uses the existing ten-second scenario budget so the
 owned worker can finish preparation and prove the command has launched before
 expiry. Preparation still counts toward that same caller deadline.
-The complete session suite has not passed; this port remains unselected, the
-device is root-only, and complete policy/data routes, eligible-host lifecycle
-and controller reliability remain unfinished with production coverage zero.
+The complete session suite and both subsequent default runtime controls pass
+at the recorded acceptance snapshot, including the final zero-leftover join.
+Earlier intermittent controller crashes are not explained by that pass. This
+port remains unselected, the device is root-only, and complete policy/data
+routes, eligible-host lifecycle and controller reliability remain unfinished
+with production coverage zero.
+
+The inode-query increment admits regular-file generation and block-size reads
+before output and compares generation writes under the ext4 inode lock before
+reserving the inode buffer. An admitted reservation therefore still reaches its
+native release path. Its earlier scoped native evidence preserves permitted
+generation changes and protected state; compat execution remains unproved.
+The integrated creation fixture adds protected-name and source-link negatives,
+native existing-target errors, permitted creations, hardlink identity and
+anonymous temporary-file linking. These are new acceptance assertions, not
+implemented CREATE/LINK admission or an executed passing result.
 
 Dispatch `experiment=kernel-admission` to compile and boot a pinned Linux 6.18
 guest under networkless QEMU TCG in the owned ephemeral runner. The upstream

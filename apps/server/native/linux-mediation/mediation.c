@@ -13,6 +13,7 @@
 #include <linux/file.h>
 #include <linux/fdtable.h>
 #include <linux/fcntl.h>
+#include <linux/ext4.h>
 #include <linux/fiemap.h>
 #include <linux/fs.h>
 #include <linux/init.h>
@@ -607,11 +608,24 @@ static int octant_file_permission(struct file *file, int mask)
 static int octant_file_ioctl(struct file *file, unsigned int command, unsigned long argument)
 {
 	struct inode *inode = file_inode(file);
-	if ((command == FIONREAD || command == FIOQSIZE || command == FS_IOC_FIEMAP) &&
+	if ((command == FIONREAD || command == FIOQSIZE || command == FS_IOC_FIEMAP ||
+	     command == FIGETBSZ || command == FS_IOC_GETVERSION || command == EXT4_IOC_GETVERSION) &&
 	    S_ISREG(inode->i_mode) && !IS_ANON_FILE(inode))
 		return admit_file(file, OCTANT_MEDIATION_READ);
 	return 0;
 }
+
+#ifdef CONFIG_COMPAT
+static int octant_file_ioctl_compat(struct file *file, unsigned int command, unsigned long argument)
+{
+	/* ext4 translates these two fixed 32-bit encodings after the LSM entry. */
+	if (command == FS_IOC32_GETVERSION)
+		command = FS_IOC_GETVERSION;
+	else if (command == EXT4_IOC32_GETVERSION)
+		command = EXT4_IOC_GETVERSION;
+	return octant_file_ioctl(file, command, argument);
+}
+#endif
 
 static int mmap_file(struct file *file, unsigned long requested, unsigned long prot,
 		     unsigned long flags)
@@ -971,7 +985,7 @@ static struct security_hook_list octant_hooks[] __ro_after_init = {
 	LSM_HOOK_INIT(file_permission, octant_file_permission),
 	LSM_HOOK_INIT(file_ioctl, octant_file_ioctl),
 #ifdef CONFIG_COMPAT
-	LSM_HOOK_INIT(file_ioctl_compat, octant_file_ioctl),
+	LSM_HOOK_INIT(file_ioctl_compat, octant_file_ioctl_compat),
 #endif
 	LSM_HOOK_INIT(task_alloc, octant_metadata_task_alloc),
 	LSM_HOOK_INIT(inode_getattr, octant_metadata_getattr),

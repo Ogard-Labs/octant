@@ -253,6 +253,41 @@ def install_fileattr_reads(kernel: Path) -> None:
     path.write_text(source)
 
 
+def install_inode_generation_write(kernel: Path) -> None:
+    path = kernel / "fs/ext4/ioctl.c"
+    source = path.read_text()
+    if "octant_metadata_" in source:
+        raise ValueError("Inode generation admission already exists")
+    start = source.index("\tcase EXT4_IOC_SETVERSION:\n")
+    end = source.index("\tcase EXT4_IOC_GROUP_EXTEND:", start)
+    operation = source[start:end]
+    lock = "\t\tinode_lock(inode);"
+    unlock = "\t\tinode_unlock(inode);"
+    effect = "\t\terr = ext4_reserve_inode_write(handle, inode, &iloc);"
+    if any(operation.count(anchor) != 1 for anchor in (lock, unlock, effect)):
+        raise ValueError("Pinned inode generation lock/effect differs")
+    # Preserve native ownership, checksum, mount-write and copyin refusals.
+    # The nested scope ends before mount-write cleanup, including goto exits.
+    operation = operation.replace(lock,
+        "\t\t{\n\t\t\tstruct octant_metadata_scope admission\n"
+        "\t\t\t\t__attribute__((cleanup(octant_metadata_end))) =\n"
+        "\t\t\t\toctant_metadata_begin(filp->f_path.dentry, OCTANT_MEDIATION_WRITE);\n"
+        "\t\t\terr = admission.error;\n\t\t\tif (err)\n\t\t\t\tgoto setversion_out;\n" + lock, 1)
+    # A successful reservation owns iloc.bh until ext4_mark_iloc_dirty consumes
+    # it. Refuse before reserving so a stale decision cannot leak that reference.
+    operation = operation.replace(effect,
+        "\t\terr = octant_metadata_check_write(filp->f_path.dentry);\n"
+        "\t\tif (!err)\n\t" + effect, 1)
+    operation = operation.replace(unlock, unlock + "\n\t\t}", 1)
+    body_start = operation.index(lock)
+    body_end = operation.index("\n\t\t}\nsetversion_out:", body_start)
+    body = operation[body_start:body_end]
+    body = "\n".join("\t" + line if line.startswith("\t") else line for line in body.split("\n"))
+    operation = operation[:body_start] + body + operation[body_end:]
+    source = source[:start] + operation + source[end:]
+    path.write_text(include_bridge(source))
+
+
 def install_seek_reads(kernel: Path) -> None:
     path = kernel / "fs/read_write.c"
     source = path.read_text()
@@ -434,3 +469,4 @@ def install_epochs(kernel: Path, native: Path) -> None:
     install_fileattr_writes(kernel)
     install_fileattr_reads(kernel)
     install_seek_reads(kernel)
+    install_inode_generation_write(kernel)

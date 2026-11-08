@@ -239,7 +239,9 @@ def main():
     image = root / "root.ext4"
     with image.open("wb") as output:
         output.truncate(512 * 1024 * 1024)
-    run("mke2fs", "-q", "-F", "-t", "ext4", "-d", str(tree), str(image), timeout=30)
+    # SETVERSION is natively unsupported with metadata checksums. Reuse this
+    # same owned image without that optional feature to prove real mutations.
+    run("mke2fs", "-q", "-F", "-t", "ext4", "-O", "^metadata_csum", "-d", str(tree), str(image), timeout=30)
     with (root / "guest.log").open("wb") as output:
         run("timeout", "--kill-after=3s", "150s", "qemu-system-x86_64", "-machine", "accel=tcg",
             "-cpu", "max", "-m", "512M", "-smp", "2", "-nic", "none", "-nographic",
