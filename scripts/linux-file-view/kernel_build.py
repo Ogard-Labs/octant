@@ -69,10 +69,16 @@ def main():
                    "FILE_LOCKING", "NET", "UNIX", "NAMESPACES", "USER_NS", "PID_NS", "UTS_NS",
                    "IPC_NS", "NET_NS", "SECCOMP", "SECCOMP_FILTER", "INET", "SYSVIPC",
                    "UNIX98_PTYS", "DEVPTS_FS", "BLK_DEV", "EXT4_FS", "VIRTIO",
-                   "VIRTIO_PCI", "VIRTIO_BLK", "DEVTMPFS_MOUNT"):
+                   "VIRTIO_MENU", "VIRTIO_PCI", "VIRTIO_BLK", "DEVTMPFS_MOUNT"):
         run("scripts/config", "--enable", symbol, cwd=kernel, timeout=10)
     run("scripts/config", "--set-str", "LSM", "octant_mediation", cwd=kernel, timeout=10)
     run("make", "olddefconfig", cwd=kernel)
+    configured = set((kernel / ".config").read_text().splitlines())
+    for symbol in ("BLOCK", "BLK_DEV", "PCI", "VIRTIO_MENU", "VIRTIO_PCI", "VIRTIO_BLK",
+                   "EXT4_FS", "DEVTMPFS", "DEVTMPFS_MOUNT", "USER_NS", "PID_NS", "NET_NS",
+                   "SECURITY", "SECURITY_PATH", "SECURITY_OCTANT_MEDIATION"):
+        if f"CONFIG_{symbol}=y" not in configured:
+            raise SystemExit(f"Required built-in guest prerequisite is unavailable: {symbol}")
     run("make", "-j2", "bzImage", cwd=kernel)
     executable = root / "init"
     run("gcc", "-static", "-pthread", "-std=c11", "-Wall", "-Wextra", "-Werror",
