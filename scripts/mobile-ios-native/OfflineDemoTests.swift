@@ -81,7 +81,9 @@ final class OfflineDemoTests: XCTestCase {
         XCTAssertTrue(transcript.exists)
         XCTAssertTrue(followUpComposer.exists)
         XCTAssertGreaterThan(transcript.frame.height, 0)
-        XCTAssertLessThanOrEqual(transcript.frame.maxY, followUpComposer.frame.minY)
+        // The shared edge arrived 0.000019 points apart from separately
+        // rounded native origins/sizes; compare at their Float32 precision.
+        XCTAssertLessThanOrEqual(Float(transcript.frame.maxY), Float(followUpComposer.frame.minY))
         // A long paragraph may exceed the viewport. Prove its beginning and
         // end can each be reached rather than requiring both at once.
         for _ in 0..<8 {
