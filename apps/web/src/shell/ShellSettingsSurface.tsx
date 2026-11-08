@@ -23,6 +23,7 @@ import type { ShieldServersClient } from "@octant/client-runtime/shield-servers-
 import type { ServerProjectsClient } from "@octant/client-runtime/server-projects-client";
 import type { ReplicaSyncStatusClient } from "@octant/client-runtime/replica-sync-status-client";
 import type { HostFederationLifecycle } from "@octant/client-runtime/host-federation-lifecycle";
+import type { BenchmarksClient, ChatClient } from "@octant/client-runtime";
 import type { UsageClient } from "@octant/client-runtime/usage-client";
 import type { ProviderUsageLimitsClient } from "@octant/client-runtime/provider-usage-limits-client";
 import type { LocalUsageHistoryClient } from "@octant/client-runtime/provider-usage-history-client";
@@ -101,6 +102,9 @@ export interface ShellSettingsSurfaceProps {
   readonly githubClient: GithubClient;
   readonly integrationClient?: IntegrationClient;
   readonly usageClient: UsageClient;
+  readonly benchmarksClient?: BenchmarksClient;
+  readonly chatClient?: Pick<ChatClient, "thread">;
+  readonly codeProjects?: ReadonlyArray<{ readonly id: string; readonly name: string }>;
   readonly providerUsageLimitsClient?: ProviderUsageLimitsClient;
   readonly localUsageHistoryClient?: LocalUsageHistoryClient;
   readonly onOpenUsageSubject?: (subjectType: string, subjectId: string) => void;
@@ -222,6 +226,11 @@ export function ShellSettingsSurface(props: ShellSettingsSurfaceProps) {
               ? {}
               : { integrationClient: props.integrationClient })}
             usageClient={props.usageClient}
+            {...(props.benchmarksClient === undefined
+              ? {}
+              : { benchmarksClient: props.benchmarksClient })}
+            {...(props.chatClient === undefined ? {} : { chatClient: props.chatClient })}
+            {...(props.codeProjects === undefined ? {} : { codeProjects: props.codeProjects })}
             {...(props.providerUsageLimitsClient === undefined
               ? {}
               : { providerUsageLimitsClient: props.providerUsageLimitsClient })}

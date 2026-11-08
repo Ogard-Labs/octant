@@ -97,10 +97,6 @@ export const KNOWN_ISLANDS: ReadonlyMap<string, string> = new Map([
   ],
   // ── Delivered ahead of its first caller by a staged design ──
   [
-    "packages/client-runtime/src/benchmarksClient.ts",
-    "Benchmarks host client, delivered with the benchmark routes it calls in the engine slice of docs/design/model-benchmarks.md before the Benchmarks pages that use it. Remove once the Usage workspace's Benchmarks source imports it.",
-  ],
-  [
     "packages/domain/src/hostedRelayProtocol.ts",
     "Hosted relay route id derivation, registration message, and frame reader, delivered as the contracts-and-policy slice of docs/design/hosted-relay.md before the relay service and host connector that call it. Remove once the relay service reads frames with it.",
   ],
