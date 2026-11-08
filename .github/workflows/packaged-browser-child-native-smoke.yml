@@ -1,0 +1,271 @@
+name: Packaged Browser child native smoke
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - .github/workflows/packaged-browser-child-native-smoke.yml
+      - scripts/smoke-packaged-browser-child-native.ts
+      - scripts/native/browser-child-smoke-control.swift
+      - scripts/packaged-browser-child-provider.ts
+      - scripts/packaged-browser-child-setup.ts
+
+permissions:
+  contents: read
+
+concurrency:
+  group: packaged-browser-child-native-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  native:
+    name: Packaged primary-window native controller
+    runs-on: macos-15
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+      - name: Require existing native interaction permission
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(uname -m)" = arm64
+          mkdir -p "$RUNNER_TEMP/packaged-browser-child-native"
+          swiftc scripts/native/browser-child-smoke-control.swift -framework AppKit -framework ApplicationServices -framework Vision -o "$RUNNER_TEMP/octant-browser-child-native-control"
+          "$RUNNER_TEMP/octant-browser-child-native-control" preflight
+          /usr/sbin/screencapture -x "$RUNNER_TEMP/packaged-browser-child-native/controller-preflight.png"
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.4
+      - run: bun install --frozen-lockfile
+        env:
+          ELECTRON_SKIP_BINARY_DOWNLOAD: "1"
+      - name: Identify unchanged production inputs for the unsigned package cache
+        id: package-source
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat > "$RUNNER_TEMP/native-package-cache.mjs" <<'JS'
+          import { execFileSync } from 'node:child_process';
+          import { createHash } from 'node:crypto';
+          import { createReadStream } from 'node:fs';
+          import { appendFile, lstat, readFile, readdir, readlink, writeFile } from 'node:fs/promises';
+          import { join } from 'node:path';
+          const base = 'c0af367e35911cca367bec197bdc771a94fa1a03';
+          const git = args => execFileSync('git', args, { encoding: 'utf8' }).trim();
+          try { git(['cat-file', '-e', `${base}^{commit}`]); }
+          catch { git(['fetch', '--no-tags', '--depth=1', 'origin', base]); }
+          const allowed = new Set([
+            '.github/workflows/packaged-browser-child-native-smoke.yml',
+            'scripts/smoke-packaged-browser-child-native.ts',
+            'scripts/native/browser-child-smoke-control.swift',
+            '.github/workflows/browser-child-native-qa.yml',
+            'scripts/browser-child-native-qa.ts',
+            'scripts/browser-child-native-qa-main.ts',
+            'scripts/packaged-browser-child-provider.ts',
+            'scripts/packaged-browser-child-setup.ts',
+          ]);
+          const changed = git(['diff', '--name-only', '-z', base, 'HEAD']).split('\0').filter(Boolean);
+          const image = process.env.ImageVersion ?? '';
+          const inputs = createHash('sha256');
+          for (const path of ['bun.lock', 'package.json', 'scripts/package-desktop.ts']) {
+            inputs.update(path + '\0'); inputs.update(await readFile(path));
+          }
+          const expected = {
+            version: 1, productionBase: base, builderInputs: inputs.digest('hex'),
+            image, architecture: process.arch, bun: Bun.version,
+            electron: JSON.parse(await readFile('node_modules/electron/package.json', 'utf8')).version,
+          };
+          const eligible = changed.every(path => allowed.has(path)) && /^[A-Za-z0-9._-]+$/.test(image);
+          const key = 'native-browser-child-package-' + createHash('sha256').update(JSON.stringify(expected)).digest('hex');
+          const output = (name, value) => appendFile(process.env.GITHUB_OUTPUT, `${name}=${value}\n`);
+          async function checksum() {
+            const hash = createHash('sha256');
+            const root = 'out/Octant.app';
+            if (!(await lstat(root)).isDirectory()) throw Error('The package root is not a directory.');
+            async function visit(relative) {
+              const path = join(root, relative);
+              const info = await lstat(path);
+              hash.update(`${relative}\0${info.mode & 0o777}\0`);
+              if (info.isSymbolicLink()) hash.update('link\0' + await readlink(path));
+              else if (info.isDirectory()) {
+                hash.update('directory\0');
+                for (const name of (await readdir(path)).sort()) await visit(join(relative, name));
+              } else if (info.isFile()) {
+                hash.update(`file:${info.size}\0`);
+                for await (const chunk of createReadStream(path)) hash.update(chunk);
+              } else throw Error('An unsupported entry is present in the package.');
+              hash.update('\0');
+            }
+            await visit(''); return hash.digest('hex');
+          }
+          const metadata = 'out/native-package-provenance.json';
+          const mode = process.argv[2];
+          if (mode === 'identify') {
+            await output('eligible', String(eligible)); await output('key', key);
+          } else if (mode === 'verify') {
+            let verified = false;
+            try {
+              const info = await lstat(metadata);
+              if (!info.isFile() || info.size > 8192) throw Error('Invalid cached provenance.');
+              const prior = JSON.parse(await readFile(metadata, 'utf8'));
+              verified = eligible && Object.entries(expected).every(([name, value]) => prior[name] === value)
+                && prior.productionMatchesBase === true && /^[0-9a-f]{40}$/.test(prior.producerHead)
+                && prior.checksum === await checksum();
+            } catch { verified = false; }
+            await output('verified', String(verified));
+            console.log(verified ? 'Verified the cached unsigned package and its immutable production inputs.'
+              : 'Cached provenance or checksum did not verify; building a fresh package.');
+          } else if (mode === 'record') {
+            await writeFile(metadata, JSON.stringify({ ...expected, productionMatchesBase: eligible,
+              producerHead: git(['rev-parse', 'HEAD']), checksum: await checksum() }, null, 2));
+          } else throw Error('Unknown package provenance operation.');
+          JS
+          bun "$RUNNER_TEMP/native-package-cache.mjs" identify
+      - uses: actions/cache/restore@v4
+        id: native-package-cache
+        if: steps.package-source.outputs.eligible == 'true'
+        continue-on-error: true
+        with:
+          path: |
+            out/Octant.app
+            out/native-package-provenance.json
+          key: ${{ steps.package-source.outputs.key }}
+      - name: Verify the exact cached package before reuse
+        id: package-cache-proof
+        if: steps.native-package-cache.outputs.cache-hit == 'true'
+        run: bun "$RUNNER_TEMP/native-package-cache.mjs" verify
+      - name: Download Electron only for a fresh package
+        if: steps.package-cache-proof.outputs.verified != 'true'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          # The regular release URL has returned repeated upstream 504s.
+          # Use the same first-party release asset through its API, verifying
+          # the lockfile-installed Electron package's own expected checksum.
+          electron_version=$(node -p 'require("./node_modules/electron/package.json").version')
+          [[ "$electron_version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]
+          electron_asset="electron-v$electron_version-darwin-arm64.zip"
+          electron_asset_id=$(gh api "repos/electron/electron/releases/tags/v$electron_version" --jq ".assets[] | select(.name == \"$electron_asset\") | .id")
+          [[ "$electron_asset_id" =~ ^[0-9]+$ ]]
+          export OCTANT_QA_ELECTRON_ARCHIVE="$RUNNER_TEMP/$electron_asset"
+          gh api -H 'Accept: application/octet-stream' "repos/electron/electron/releases/assets/$electron_asset_id" > "$OCTANT_QA_ELECTRON_ARCHIVE"
+          node <<'JS'
+          const fs = require('node:fs');
+          const path = require('node:path');
+          const crypto = require('node:crypto');
+          (async () => {
+            const archive = process.env.OCTANT_QA_ELECTRON_ARCHIVE;
+            const expected = require('./node_modules/electron/checksums.json')[path.basename(archive)];
+            if (!/^[0-9a-f]{64}$/.test(expected)) throw Error('No pinned Electron archive checksum.');
+            const hash = crypto.createHash('sha256');
+            for await (const chunk of fs.createReadStream(archive)) hash.update(chunk);
+            if (hash.digest('hex') !== expected) throw Error('The first-party Electron archive checksum differs.');
+            const dist = path.resolve('node_modules/electron/dist');
+            await require('@electron-internal/extract-zip').extract(archive, { dir: dist });
+            const types = path.join(dist, 'electron.d.ts');
+            if (fs.existsSync(types)) fs.renameSync(types, path.resolve('node_modules/electron/electron.d.ts'));
+            fs.writeFileSync('node_modules/electron/path.txt', 'Electron.app/Contents/MacOS/Electron');
+            fs.writeFileSync(path.join(process.env.RUNNER_TEMP, "SHASUMS256.txt"),
+              Object.entries(require("./node_modules/electron/checksums.json"))
+                .map(([name, checksum]) => `${checksum} *${name}`).join("\n") + "\n");
+          })().catch(() => { console.error('The verified first-party Electron fallback failed.'); process.exitCode = 1; });
+          JS
+          node node_modules/electron/install.js
+      - name: Stage the pinned signed driver through its first-party release asset
+        if: steps.package-cache-proof.outputs.verified != 'true'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          driver_version=$(bun -e 'import { BUNDLED_CUA_DRIVER } from "./apps/desktop/src/computerUseDriverRelease"; console.log(BUNDLED_CUA_DRIVER.version)')
+          [[ "$driver_version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]
+          driver_asset="cua-driver-rs-$driver_version-darwin-universal-binary.tar.gz"
+          driver_asset_id=$(gh api "repos/trycua/cua/releases/tags/cua-driver-rs-v$driver_version" --jq ".assets[] | select(.name == \"$driver_asset\") | .id")
+          [[ "$driver_asset_id" =~ ^[0-9]+$ ]]
+          export OCTANT_QA_DRIVER_ARCHIVE="$RUNNER_TEMP/$driver_asset"
+          gh api -H 'Accept: application/octet-stream' "repos/trycua/cua/releases/assets/$driver_asset_id" > "$OCTANT_QA_DRIVER_ARCHIVE"
+          bun -e '
+            import { readFile, unlink } from "node:fs/promises";
+            import { resolve } from "node:path";
+            import { BUNDLED_CUA_DRIVER, stageComputerDriver } from "./apps/desktop/src/computerUseDriverRelease";
+            const path = process.env.OCTANT_QA_DRIVER_ARCHIVE;
+            if (!path) throw Error("Missing owned driver archive.");
+            try {
+              await stageComputerDriver(BUNDLED_CUA_DRIVER, resolve(".computer-use-driver"), AbortSignal.timeout(180000), await readFile(path));
+            } finally { await unlink(path); }
+          '
+      - name: Package current source without signing or publication
+        if: steps.package-cache-proof.outputs.verified != 'true'
+        timeout-minutes: 25
+        run: |
+          cat > "$RUNNER_TEMP/native-electron-build.mjs" <<'JS'
+          import { readFile } from 'node:fs/promises';
+          import { join } from 'node:path';
+          const version = JSON.parse(await readFile('node_modules/electron/package.json', 'utf8')).version;
+          if (!/^\d+\.\d+\.\d+$/.test(version)) throw Error('Invalid installed Electron version.');
+          const asset = `electron-v${version}-darwin-arm64.zip`;
+          const files = new Map([
+            [`/v${version}/${asset}`, join(process.env.RUNNER_TEMP, asset)],
+            [`/v${version}/SHASUMS256.txt`, join(process.env.RUNNER_TEMP, 'SHASUMS256.txt')],
+          ]);
+          const server = Bun.serve({ hostname: '127.0.0.1', port: 0, fetch(request) {
+            const path = files.get(new URL(request.url).pathname);
+            if (!path || !['GET', 'HEAD'].includes(request.method)) return new Response(null, { status: 404 });
+            return new Response(request.method === 'HEAD' ? null : Bun.file(path));
+          }});
+          let child;
+          let stopping = false;
+          const stop = () => {
+            if (stopping) return;
+            stopping = true;
+            server.stop(true);
+            if (child) {
+              try { process.kill(-child.pid, 'SIGTERM'); } catch {}
+              const force = setTimeout(() => { try { process.kill(-child.pid, 'SIGKILL'); } catch {} }, 3000);
+              force.unref();
+            }
+          };
+          process.on('SIGTERM', stop);
+          process.on('SIGINT', stop);
+          process.on('exit', stop);
+          const deadline = setTimeout(stop, 20 * 60 * 1000);
+          try {
+            child = Bun.spawn(['bun', 'run', 'package:desktop'], {
+              env: { ...process.env, ELECTRON_MIRROR: `http://127.0.0.1:${server.port}/` },
+              stdout: 'inherit', stderr: 'inherit', detached: true,
+            });
+            process.exitCode = await child.exited;
+          } finally {
+            clearTimeout(deadline);
+            stop();
+          }
+          JS
+          bun "$RUNNER_TEMP/native-electron-build.mjs"
+      - name: Record the fresh package provenance and checksum
+        if: steps.package-cache-proof.outputs.verified != 'true'
+        run: bun "$RUNNER_TEMP/native-package-cache.mjs" record
+      - uses: actions/cache/save@v4
+        if: steps.package-source.outputs.eligible == 'true' && steps.native-package-cache.outputs.cache-hit != 'true'
+        continue-on-error: true
+        with:
+          path: |
+            out/Octant.app
+            out/native-package-provenance.json
+          key: ${{ steps.package-source.outputs.key }}
+      - name: Observe the real packaged primary window
+        timeout-minutes: 7
+        env:
+          OCTANT_QA_OUTPUT: ${{ runner.temp }}/packaged-browser-child-native
+          OCTANT_QA_NATIVE_CONTROLLER: ${{ runner.temp }}/octant-browser-child-native-control
+          OCTANT_QA_CACHED_PACKAGE: ${{ steps.package-cache-proof.outputs.verified == 'true' && 'true' || 'false' }}
+        run: bun scripts/smoke-packaged-browser-child-native.ts
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: packaged-browser-child-native
+          path: ${{ runner.temp }}/packaged-browser-child-native
+          if-no-files-found: ignore
+          retention-days: 7

@@ -35,7 +35,7 @@ export async function createOwnedChildProject(input: {
         kind: "create-work-project",
         projectId,
         expectedVersion: 0,
-        name: "Owned child Browser Project",
+        name: "Owned Browser fixture",
         receiptId: binding.receiptId,
         hostId: "local",
       },
@@ -66,7 +66,7 @@ export async function createOwnedChildProject(input: {
             id: randomUUID(),
             projectId,
             mode: "work",
-            title: "Owned child Browser Project",
+            title: "Owned Browser fixture",
           },
         },
       },
@@ -120,7 +120,7 @@ export async function createOwnedChildProject(input: {
       },
       "create the owned idle Work thread",
     );
-    return { projectId, threadId };
+    return { projectId, threadId, setupWindowId: window.windowId };
   };
   const outcome = await setup().then(
     (value) => ({ kind: "ok", value }) as const,

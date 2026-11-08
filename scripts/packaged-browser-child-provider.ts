@@ -2,8 +2,8 @@ import { createServer, type ServerResponse } from "node:http";
 import type { Socket } from "node:net";
 
 export const CHILD_FIXTURE_MODEL = "owned-browser-child";
-export const CHILD_FIXTURE_PARENT_TASK = "Owned Browser delegation acceptance parent";
-const CHILD_TASK = "Owned Browser delegation acceptance child";
+export const CHILD_FIXTURE_PARENT_TASK = "Owned Browser parent";
+const CHILD_TASK = "Owned Browser child";
 const ORIGIN = "https://example.com";
 
 function record(value: unknown): value is Readonly<Record<string, unknown>> {
