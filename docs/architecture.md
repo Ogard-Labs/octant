@@ -7884,6 +7884,8 @@ the model at another size.
      `journal-lookup` in every mode when the host supplies the journal (and,
      in Code, the turn's secret list). Offered
      when the host supplies the port: `ask-user` and `goal` (every mode),
+     `skill` (every mode, Plan included, since it only reads; see
+     [on-demand skills](#extensions-and-skills)),
      and `web-fetch` and `web-search` (Work and Code; Chat only while its
      research is on, and `web-search` only with a search endpoint). Its one
      child-run tool is `octant_agents`, added beside the harness set in
@@ -7891,8 +7893,8 @@ the model at another size.
      exception: a side conversation about
      another thread is not the lead of a thread the person is steering, so it
      is offered only `context-remaining`, `second-opinion`, and (while its
-     research is on) the web tools, never `todo-write`, `ask-user`, or
-     `goal`, and not the `octant_agents` child-run tool either. A Code thread in Plan is offered only what Plan allows:
+     research is on) the web tools, never `todo-write`, `ask-user`,
+     `goal`, or `skill`, and not the `octant_agents` child-run tool either. A Code thread in Plan is offered only what Plan allows:
      `read`, `grep`, and `glob`, the web tools, and the rest of the lead
      set above, with no `edit`, `write`, `bash`, or `goal-check`. Plan does
      not refuse `web-fetch` (a tainted thread still confirms it afresh), so
@@ -8905,6 +8907,18 @@ belongs to the scope's Project, so archiving it or moving it to another Project
 changes `allowed` (and a move changes the scope); the Project allows it only
 while it is active and of the scope's mode, so archiving or removing it does the
 same. This holds in Chat, Work, and Code.
+
+**On-demand skills.** A Harness lead's `skill` tool lists the skills effective
+for its thread (name and description) and loads one skill's instructions by
+name, so a lead can reach a skill the person did not select. It reads the same
+catalog a turn's selections resolve against and loads a skill exactly as a `$`
+selection of it would, through the activation ladder at provider handoff, so a
+skill that is not effective for the thread is refused with its reason and never
+loaded. It cannot install, trust, enable, or activate anything, and connects no
+MCP session. Loaded instructions are capped at 32,000 characters per call; a
+cut says how much was left out and the offset that continues. Skills selected
+or pinned for the turn are already in context, and the tool description says so.
+A Side Chat and a child run are not offered it.
 
 - Executable components are quarantined until explicitly reviewed and then run
   in supervised, sandboxed processes with a ready handshake, bounded output,

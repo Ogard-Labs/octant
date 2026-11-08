@@ -3,6 +3,7 @@ import { validateQuestionnaireAnswer } from "@octant/domain";
 import {
   DEFAULT_WEB_SEARCH_RESULTS,
   decodeUtcTimestamp,
+  MAX_NATIVE_HARNESS_SKILL_CHARACTERS,
   MAX_NATIVE_HARNESS_TOOL_DETAIL,
   NATIVE_HARNESS_TOOL_DEFINITIONS,
   NATIVE_HARNESS_TOOL_NAMES,
@@ -20,6 +21,7 @@ import {
   type NativeHarnessJournalLookupArguments,
   type NativeHarnessReadArguments,
   type NativeHarnessSecondOpinionArguments,
+  type NativeHarnessSkillArguments,
   type NativeHarnessTodoItem,
   type NativeHarnessTodoWriteArguments,
   type NativeHarnessToolCall,
@@ -100,6 +102,34 @@ export interface NativeHarnessWebFetchResult {
   readonly finalUrl: string;
 }
 
+/** A refusal names its reason, and its message says what the lead can do instead. */
+interface NativeHarnessSkillRefusal {
+  readonly status: "refused";
+  readonly reason: string;
+  readonly message: string;
+}
+
+/**
+ * The skills effective for one thread, read through the same catalog and
+ * activation ladder a person's selection goes through. Neither call changes
+ * what is installed, trusted, enabled, or active.
+ */
+export interface NativeHarnessSkillPort {
+  readonly list: () => Promise<
+    | {
+        readonly status: "listed";
+        readonly skills: ReadonlyArray<{ readonly name: string; readonly description?: string }>;
+      }
+    | NativeHarnessSkillRefusal
+  >;
+  readonly load: (
+    name: string,
+  ) => Promise<
+    | { readonly status: "loaded"; readonly name: string; readonly instructions: string }
+    | NativeHarnessSkillRefusal
+  >;
+}
+
 /**
  * What the harness may reach. Every port is optional: a mode or a host that
  * lacks one simply does not offer the tool, it never fakes it.
@@ -163,6 +193,8 @@ export interface NativeHarnessToolPorts {
   >;
   /** The thread's goal, when the host can reach it. */
   readonly goal?: NativeHarnessGoalPort;
+  /** The skills effective for the thread, when the host can resolve them. */
+  readonly skills?: NativeHarnessSkillPort;
   /** Queued notes from the person, handed to the lead inside the next tool result. */
   readonly steering?: () => ReadonlyArray<string>;
   /** Told when an authorized call has finished, whether or not it ran a command. */
@@ -384,6 +416,8 @@ function isOffered(
       return (
         ports.goal !== undefined && ports.shell !== undefined && ports.filesystem !== undefined
       );
+    case "skill":
+      return ports.skills !== undefined;
   }
 }
 
@@ -544,7 +578,52 @@ async function execute(
       // Runs through `checkGoalCriterion` with the command fixed before
       // approval; reaching here would mean a check with nothing approved.
       return refused("tool-unavailable");
+    case "skill": {
+      const input = args as NativeHarnessSkillArguments;
+      const port = ports.skills;
+      if (port === undefined) return refused("tool-unavailable");
+      if (input.operation === "list") {
+        const listed = await port.list();
+        return listed.status === "listed"
+          ? ok({ skills: listed.skills })
+          : refused(listed.reason, listed.message);
+      }
+      const loaded = await port.load(input.name);
+      if (loaded.status === "refused") return refused(loaded.reason, loaded.message);
+      return pagedSkillInstructions(loaded.name, loaded.instructions, input.offset ?? 0);
+    }
   }
+}
+
+/**
+ * One page of a skill's instructions. A cut is never silent: the result says
+ * how many characters were left out and the offset that continues.
+ */
+function pagedSkillInstructions(
+  name: string,
+  instructions: string,
+  offset: number,
+): { readonly result: unknown; readonly isError?: boolean } {
+  if (offset > 0 && offset >= instructions.length) {
+    return refused(
+      "offset-out-of-range",
+      `${name} has ${instructions.length} characters; offset must be below that.`,
+    );
+  }
+  const end = offset + MAX_NATIVE_HARNESS_SKILL_CHARACTERS;
+  const page = instructions.slice(offset, end);
+  if (end >= instructions.length) {
+    return ok({ name, instructions: page, truncated: false });
+  }
+  const omittedCharacters = instructions.length - end;
+  return ok({
+    name,
+    instructions: page,
+    truncated: true,
+    omittedCharacters,
+    nextOffset: end,
+    note: `Cut after ${MAX_NATIVE_HARNESS_SKILL_CHARACTERS} characters; ${omittedCharacters} more remain. Load ${name} again with offset ${end} to read on.`,
+  });
 }
 
 /**
@@ -698,6 +777,9 @@ function detailFor(
 
 function intentFor(name: NativeHarnessToolName, args: unknown): string {
   const record = (args ?? {}) as Record<string, unknown>;
+  if (name === "skill") {
+    return typeof record.name === "string" ? `skill: ${record.name}`.slice(0, 2_048) : name;
+  }
   const detail =
     typeof record.path === "string"
       ? record.path

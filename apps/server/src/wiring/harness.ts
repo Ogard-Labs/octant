@@ -125,6 +125,7 @@ export type HarnessDependencies = Pick<ServerStart, "options" | "persistence"> &
   Pick<
     ProvidersWiring,
     | "configuredDriverOptions"
+    | "effectiveSkills"
     | "nativeHarnessLeadFallback"
     | "nativeHarnessTranscripts"
     | "providerDataDirectory"
@@ -846,6 +847,7 @@ export function wireHarness(deps: HarnessDependencies) {
         ? shieldServerStore.recordTag({ threadId, tag: "reads-secrets-then-egress", command })
         : "not-tagged",
     goals: goalService,
+    skills: deps.effectiveSkills,
     questions: nativeHarnessQuestions,
     approvals: nativeHarnessApprovals,
     shield: hostShield,
