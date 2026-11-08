@@ -966,6 +966,32 @@ describe("WorkTurnService", () => {
     }
   });
 
+  it("starts a sandboxed Full access turn with the sandbox, and records it for the turn's commands", async () => {
+    const release = deferred<void>();
+    const seen: Array<unknown> = [];
+    const runningAccess: RunningWorkTurnAccess = new Map();
+    const fixture = serviceFixture({
+      threadAccess: "full-access",
+      fullAccessSandbox: true,
+      runningAccess,
+      turnRuntime: {
+        run: async (input) => {
+          seen.push(
+            input.fullAccessSandbox,
+            runningAccess.get(String(ids.thread))?.fullAccessSandbox,
+          );
+          await release.promise;
+          return { kind: "completed", response: "Done" };
+        },
+      },
+    });
+    await fixture.service.startFirstTurn(ids.window, startCommand());
+    await vi.waitFor(() => expect(seen).toHaveLength(2));
+    release.resolve();
+    await fixture.waitForIdle();
+    expect(seen).toEqual([true, true]);
+  });
+
   it("offers the runtime's artifact tool only to a thread that chose it, and keeps Canvas for the rest", async () => {
     const seen: Array<{ readonly nativeArtifacts: boolean; readonly context: string }> = [];
     for (const documentDelivery of [undefined, "canvas", "native-artifacts"] as const) {
@@ -4181,6 +4207,44 @@ describe("WorkTurnService", () => {
         .flatMap(([request]) => request.events)
         .map((event: { readonly payload: unknown }) => event.payload);
 
+    it("refuses a turn whose thread a move froze while the turn was still being prepared", async () => {
+      // Clear when the turn is admitted, held by the time its context is ready.
+      let reads = 0;
+      const run = vi.fn();
+      const fixture = serviceFixture({
+        moveHold: () => {
+          reads += 1;
+          return reads > 1;
+        },
+        turnRuntime: { run },
+      });
+
+      await expect(
+        fixture.service.startFirstTurn(ids.window, startCommand()),
+      ).rejects.toMatchObject({ message: expect.stringContaining("moving") });
+      expect(run).not.toHaveBeenCalled();
+      expect((await fixture.service.transcript(ids.window, ids.thread)).turns).toEqual([]);
+    });
+
+    it("refuses to rewind a thread a move holds, so the conversation it carries stays whole", async () => {
+      let moving = false;
+      const fixture = serviceFixture({ moveHold: () => moving });
+      await fixture.service.startFirstTurn(ids.window, startCommand());
+      await fixture.waitForIdle();
+      await fixture.service.startFirstTurn(ids.window, secondCommand());
+      await fixture.waitForIdle(secondRequest);
+      moving = true;
+
+      await expect(
+        fixture.service.rewindThread(ids.window, rewindFrom(secondRequest)),
+      ).rejects.toMatchObject({ message: expect.stringContaining("moving") });
+      expect(
+        (await fixture.service.transcript(ids.window, ids.thread)).turns.map(
+          (turn) => turn.requestId,
+        ),
+      ).toEqual([ids.request, secondRequest]);
+    });
+
     it("removes the turns, returns the removed prompt, and hands only the kept turns to a fresh session", async () => {
       const { fixture, run } = await twoTurns(true);
 
@@ -4339,6 +4403,14 @@ describe("WorkTurnService", () => {
     expect(
       (await fixture.service.transcript(ids.window, ids.thread)).turns.at(-1)?.handoff,
     ).toMatchObject({ reason: "fork", messages: 2 });
+    // The handoff is journaled with the turn's acceptance, before the
+    // provider is sent anything.
+    const append = fixture.persistence.journal.append.mock;
+    const accepted = append.calls.findIndex((call) =>
+      JSON.stringify(call[0]).includes('"handoff":{"reason":"fork"'),
+    );
+    expect(accepted).not.toBe(-1);
+    expect(append.invocationCallOrder[accepted]).toBeLessThan(run.mock.invocationCallOrder[0] ?? 0);
   });
 
   it("refuses a changed tool catalogue before acceptance and preserves the conversation on explicit continuation", async () => {
@@ -5171,6 +5243,7 @@ function serviceFixture(
     readonly turnFileObserver?: WorkTurnServiceDependencies["turnFileObserver"];
     readonly readProviderModel?: WorkTurnServiceDependencies["persistence"]["readProviderModel"];
     readonly threadAccess?: WorkAccess;
+    readonly fullAccessSandbox?: boolean;
     readonly documentDelivery?: "canvas" | "native-artifacts";
     readonly onTurnRequested?: WorkTurnServiceDependencies["onTurnRequested"];
     readonly onTurnCancelled?: WorkTurnServiceDependencies["onTurnCancelled"];
@@ -5185,6 +5258,8 @@ function serviceFixture(
     /** Whether the thread had taken in outside content when a handoff is read. */
     readonly externalContentIngested?: boolean;
     readonly serverProjects?: WorkTurnServiceDependencies["serverProjects"];
+    /** Read on every admission and rewind, so a test can freeze the thread for a move. */
+    readonly moveHold?: (threadId: string) => boolean;
   } = {},
 ) {
   const projection = new WorkTurnProjection();
@@ -5296,6 +5371,7 @@ function serviceFixture(
         bindingRevisionId: ids.binding,
         workingDirectory: ".",
         ...(options.threadAccess === undefined ? {} : { access: options.threadAccess }),
+        ...(options.fullAccessSandbox === true ? { fullAccessSandbox: true } : {}),
         ...(options.completionConfirmed?.() === true ? { completionConfirmed: true } : {}),
         ...(options.documentDelivery === undefined
           ? {}
@@ -5378,6 +5454,7 @@ function serviceFixture(
       ? {}
       : { turnFileObserver: options.turnFileObserver }),
     ...(options.onTurnRequested === undefined ? {} : { onTurnRequested: options.onTurnRequested }),
+    ...(options.moveHold === undefined ? {} : { moveHold: options.moveHold }),
     ...(options.onTurnCancelled === undefined ? {} : { onTurnCancelled: options.onTurnCancelled }),
     ...(options.agentRuns === undefined ? {} : { agentRuns: options.agentRuns }),
     ...(options.runningAccess === undefined ? {} : { runningAccess: options.runningAccess }),

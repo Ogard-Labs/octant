@@ -74,7 +74,11 @@ checks a mirrored feed against the shared release keys. Hub-started sign-in is
 built (the Sign-in grant item, a request the hub relays and a spoke's person
 accepts, and one outcome word back), read narrowly as the delivery plan's
 closing note records; it has run only between hosts on loopback with a fake
-view of the provider's own app, never against a real provider sign-in. After this slice every delivery-plan slice is built. What remains is
+view of the provider's own app, never against a real provider sign-in. After this slice every delivery-plan slice up to 10 is built. Slice 11,
+[messaging between members](#messaging-between-members), was added on
+2026-11-07 and is designed, not built. Slice 12,
+[moving a thread to another member](#moving-a-thread-to-another-member), was
+added the same day and is designed, not built. What remains of slices 1 to 10 is
 the maintainer's: the live checks the slices name (a real Wake-on-LAN wake, a
 delivery to a real phone, a phone, passkey, and Touch ID run, a failover on a
 real network, a browser against a real hub, a real Claude or Codex sign-in on a
@@ -111,11 +115,14 @@ in a browser at its Tailscale name. After that:
    and switch back when the hub returns;
 5. routines can be scheduled to run on a spoke that is asleep, and the hub
    wakes it;
-6. phone notifications from every spoke go out through the hub; and
+6. phone notifications from every spoke go out through the hub;
 7. a device the person marks as their own (an owner device) can set up and run
    any member as if sitting at it, after Face ID, Touch ID, a device passcode,
    or a passkey, so a headless hub never needs a screen or a shell after the
-   first owner exists.
+   first owner exists; and
+8. before shutting down or restarting a computer, the person can move its
+   threads to another member and carry on there, and a Code thread that cannot
+   move hands over through its branch.
 
 **Not in scope:** members that are not the person's own devices (teams, shared
 machines, other people's computers), cloud machines Octant provisions, and
@@ -709,12 +716,14 @@ A peer grant names:
   Code approval-gated, or Plan read-only; Full access only when an owner chose
   it for that peer and Project with a fresh unlock, and only where B's own
   Project allows Full access);
-- which provider profiles on B that work may use; and
-- whether A may read B's status.
+- which provider profiles on B that work may use;
+- whether A may read B's status; and
+- whether A may list and message B's tagged threads (the Message item, see
+  [Messaging between members](#messaging-between-members)).
 
-The full-member grant lets A read B's status and delegate into every Project
-on B, at Work ask-first or Code approval-gated (never Full access), with B's
-default provider profile. For a guest it is the ordinary paired-device
+The full-member grant lets A read B's status, message B's tagged threads, and
+delegate into every Project on B, at Work ask-first or Code approval-gated
+(never Full access), with B's default provider profile. For a guest it is the ordinary paired-device
 authority in every Project on B, including answering B's approvals the way a
 paired phone does today. A browser guest reaches a spoke the way
 [decision H15](#decisions) settles.
@@ -763,6 +772,519 @@ Rationale: delegation as a remote child run reuses the existing subagent rule
 (equal or narrower, clamped server-side) and the existing paired-principal
 path, so B never needs a new authority model. The result coming back as data
 keeps a compromised spoke from steering another spoke's agent.
+
+### Messaging between members
+
+An agent's thread on one member can message a running thread on another
+member, so agents on the person's computers can coordinate, whichever provider
+each runs. It extends the one-host channel in
+[Architecture: agent-to-agent messaging](../architecture.md#modes-chat-work-and-code):
+everything that rule says holds on each host, and this section states only what
+changes when the two threads live on different members. Delegation hands work
+to another spoke; a message hands text to a thread that already runs there.
+
+**The tag.** A Code thread takes part only when a person turned on **Reachable
+from my other computers** for it, in the thread's header menu and its row's
+context menu, on the host that owns the thread (a window there, or an owner
+device after a fresh unlock). It is off for every thread by default; an agent,
+the hub, and a peer cannot turn it on; and turning it on or off is journaled on
+that host as `thread.member-reachable-set@1` with its principal. A thread that
+is completed, archived, deleted, or in Plan keeps its tag but takes part in
+nothing until it is active Code outside Plan again. Both ends need the tag: a
+thread may send to another member only while it is tagged itself, so the
+person opted in on both sides and the recipient can always answer. Turning the
+tag on also turns on the thread's **Wake when a message arrives** switch,
+which can then be turned off on its own (see
+[Waking an idle thread](#waking-an-idle-thread)).
+
+**Who.** Spokes, the hub's own threads (the hub is also its own spoke), and a
+standby's own threads may send and receive; a guest runs no agents and does
+neither. Only Code to Code, as on one host: Chat, Work, and child runs neither
+send nor receive across members, and a delegated thread on B takes part only if
+a person tags it.
+
+**The Message item.** A peer grant gains one item, **Message**: member A may
+list B's tagged threads and send them messages. It is in the full-member grant
+(decision H2), because the tag, off by default, is the consent that matters,
+and the item only says which members may use it. A spoke also holds a peer
+grant for its hub whose only item is Message, ticked at join and changeable
+there, so the hub's own threads can take part. Rationale: a compromised hub can
+already introduce a fake member that gets the full-member grant, so this adds
+no power a compromised hub lacked; a spoke that wants none unticks it.
+
+**Finding a thread.** `octant_threads list` takes an optional `member`, a roster
+member id. A's host then asks B with a signed member request
+(`POST /api/hub/peer/threads`), and B answers with its active tagged Code
+threads, at most 32, in the row shape of a local `list` (reference, title,
+state, when the state changed). A remote reference is
+`<thread id>@<project id>@<member id>`; the local form stays as it is. A `list`
+with no `member` stays local, and `read` and `wait` stay local only. B answers
+a member without the Message item, and one it does not hold, with an empty
+list, the same answer as a member with no tagged threads, so the answer
+reveals nothing.
+
+**Sending.** A's host admits the send under the local rules (Code, not Plan,
+the profile names `octant_threads.send`, at most four recipients, a 64 KiB
+body, eight messages waiting per sender), journals `agent.message-sent@1` with
+the remote recipient's reference, and keeps the body in its own store. It then
+sends B a signed member request (`POST /api/hub/peer/messages`) over B's
+pinned listener, signed with A's identity key the way delegation is. B checks
+that A is in the roster it holds, that A's peer grant carries Message, and that
+the recipient is an active tagged Code thread. If all hold, B journals
+`agent.message-received@1` on its own `agent-message` aggregate with principal
+`peer:A`, the sender's remote reference, and an opaque reference to the body in
+B's store, and answers `accepted`; A journals `agent.message-forwarded@1` and
+deletes its copy of the body. Any other answer is `unauthorized`, in the same
+words for every reason, and A journals `agent.message-refused@1`. B holds at
+most eight waiting messages per remote sender thread and 32 per member; past
+either, it refuses until a turn carries some.
+
+**A member that cannot be reached.** A message B has not answered stays
+waiting on A. A sends it again with backoff while the member is unreachable,
+until B answers or the 24-hour deadline passes, when A journals
+`agent.message-expired@1`. Every try carries the same message id, and B keeps
+one message per id, so a lost answer never doubles a message. Rationale:
+Architecture says nothing queues offline work for another host. A message is
+not work: it carries no authority, starts nothing, and B decides afresh when it
+arrives. Waiting on the sender is what the one-host channel already does, so
+this is the same rule with a network in between.
+
+**Delivery on B.** Delivery follows the one-host rule on B. When the
+recipient's next Code turn assembles its context, B rechecks that the recipient
+is still active and tagged, that A is still in the roster, that A's grant
+still carries Message, and that A has not withdrawn the message (below), and
+refuses otherwise. A delivered message marks the
+recipient with `thread.external-content-ingested@1` under the source label
+`member-message` and joins the turn as one context block: a host sentence that
+names the sending member and the sender's remote reference, then the body
+inside the shared external-data frame. A message grants no authority on B and
+never answers an approval there; the only turn it can start is the wake turn
+below. The agent on B replies by sending to the reference in that sentence.
+
+#### Waking an idle thread
+
+Waking follows the one-host rule in
+[Architecture: agent-to-agent messaging](../architecture.md#modes-chat-work-and-code):
+a message to an idle thread whose **Wake when a message arrives** switch is on
+starts one bounded, `agent`-initiated turn there. Across members, only these
+parts differ:
+
+- B starts the wake turn when it accepts the message, and the turn's host
+  sentence and the thread's row name the member that woke it. The turn is
+  journaled with the initiator kind `member-message`.
+- The hop count travels in A's signed request, set by A from its own record.
+  B cannot check it, so a member that sends a false count is still held by
+  B's one-at-a-time and hourly bounds, which B counts itself and which cover
+  local and member messages together.
+- Turning the tag off stops new wake turns from members, as turning off the
+  wake switch does.
+
+Rationale: a compromised member could otherwise turn one message into
+unbounded turns on B. B's own bounds cap what it can spend there without B
+having to trust anything A counts.
+
+**The sender's end after B accepts.** The one-host rule rechecks the sender at
+delivery. Across members B cannot see the sender, so A tells it. When a
+sending thread stops being eligible (it is completed, archived, deleted, or
+purged, or a person turns its tag off), A sends B a signed member request
+(`POST /api/hub/peer/messages/withdraw`) naming every message from that thread
+that B accepted and has not yet delivered. B refuses each one at once, deletes
+its body, and sends the `refused` receipt back. A withdraw that cannot reach B
+is sent again with the same ids until B answers or the message's 24-hour
+deadline passes. A thread that only dropped to Plan withdraws nothing, because
+Plan stops a thread from sending, not from having sent. Rationale: if B asked A
+before every delivery, delivery would depend on A being online, and waiting for
+an unreachable member would no longer work. The cost is a window: while A
+cannot reach B, B may still deliver a message whose sender A already closed.
+That message is unchanged text the sender wrote while it was eligible, framed
+and tainting, so the window exposes nothing the person had not allowed when it
+was sent.
+
+**Receipts.** B sends `delivered`, `acknowledged`, `refused`, and `expired`
+back to A as signed member requests (`POST /api/hub/peer/messages/receipts`)
+that name only the message id. A records them on its own message, so the
+sender's `receipts` reads the same states as on one host, plus `forwarded`. A
+receipt that cannot reach A is sent again with the same id until A answers or
+a day has passed; a receipt A cannot match to a message it sent is dropped.
+
+**Leaving and revoking.** When B's person unticks Message for A, removes A, or
+B sees A's removal in a newer roster, B refuses every waiting message from A at
+its next delivery check, and every new one. Turning off a thread's tag makes B
+refuse messages to it the same way. On A, messages waiting for a member that
+left the roster are refused at the sender's next send. The hub never carries a
+message: members reach each other directly, as for delegation, and the hub only
+introduces them.
+
+Rationale: tagging threads rather than whole Projects lets a person open one
+long-running coordinator on each computer without exposing every thread there.
+Reusing delegation's signed member request gives each message a sender
+identity checked against the roster and a receiver that keeps the final say,
+so no host trusts another more than the hub-and-spoke rules already allow.
+
+### Moving a thread to another member
+
+A person about to shut down or restart the computer a thread runs on can move
+that thread to another of their computers and carry on there. The move happens
+before the source goes away: the source freezes the thread and sends it
+directly to the chosen member, which opens it as a new thread with the whole
+history and the work in progress, and the source erases its copy once the
+destination has it. When a move cannot finish, a Code thread falls back to a
+**handover**: its work is committed to its branch with a note, so the person
+picks it up on any computer that can fetch that branch.
+
+Only planned moves are in scope ([decision H19](#decisions)). A computer that
+dies or loses power without warning hands nothing over; that would need a
+continuously updated copy on another member, and threads are in no replica
+log.
+
+**Who starts it.** Only a person, and for one thread only from that thread's
+Environment tool: its Computer card lists the member computers, and the move
+sheet states what moves, what stays, and that the source is erased
+([Design system: moving a thread](../../DESIGN.md#shell-and-layout) owns the
+screens). No header menu, row menu, or command palette entry moves a thread.
+[Prepare to shut down](#prepare-to-shut-down) is the one host-wide entry,
+for many threads at once. An owner device acting on the source host uses the
+same Environment view. An agent, a routine, the hub, a standby, and a peer
+cannot start a move or a handover, and no tool offers either.
+
+**Every move is an owner act on the destination** ([decision H20](#decisions)).
+The destination accepts a move only when it carries a fresh unlock, of the
+own-unlock class (an administration session never covers it), from an owner
+device on the destination's own owner list, and only when the destination's
+peer grant for the source has the **Move in** item. Move in is in the
+full-member grant ([decision H2](#decisions)); a destination with Owners
+unticked refuses every move. Usually the source is itself an owner device, so
+the person touches Touch ID on the laptop they are leaving; a phone that is an
+owner on both hosts can start the move instead. A source that is not an owner
+on the destination is told so, with how to mark it.
+
+A full member's grant stored before Move in existed has no such item. It
+reads as on while the rest of it is still exactly the full-member grant, and
+as off once the person narrowed it, so existing hubs take moves without
+re-joining. Rationale: a member joining now gets Move in, and the owner
+unlock, not the item, is what authorizes a move.
+
+**The hub as a destination.** The hub keeps no peer grants, so its own
+**Accept moved threads** setting stands where a spoke's Move in item does. It
+is on by default, only a window on the hub turns it on or off (Settings ›
+Hub › Moved threads), and each change is journaled. The hub checks a move's
+sender against the identity key that member joined with, takes moves only
+from a spoke or a standby (never a guest), and still requires the fresh
+own-class unlock from an owner device on the hub's own owner list. Off, it
+answers every move with the same `refused` as a spoke without Move in. A
+host whose hub role is on judges a move only as the hub, as its owner routes
+do: a spoke that turned its hub role on keeps its old link, and the peer grants
+from that link never let a move past Accept moved threads. The hub moves no
+thread away: no spoke grants it Move in.
+
+On a Mac source, the window asks its own host for the destination's owner
+challenge, which the source fetches signed with its member identity and which
+names the ticket route and that exact request body; the desktop's unlock key
+signs it after Touch ID, and only the signature passes back through the
+source, which sends the ticket request with it. The ticket that answers lasts
+fifteen minutes and opens one move from that source. Rationale: Move after
+this turn waits for the turn to end without asking the person again, and a
+turn that outlasts the ticket ends the move with `unlock-required`.
+
+**The person is the same everywhere.** A host has one person, and every member
+is that person's own device, so a moved thread arrives as the person's own
+thread, as if they had made it in a window on the destination. It is journaled
+with the owner device and `owner-unlock`, never as `peer:A`, and its history is
+the person's own conversation, not outside content. Taint the history already
+carried travels with it. Rationale: the owner unlock is what makes this safe. A
+member key alone cannot plant a thread with an invented history, because a
+move without the person's presence on an owner device is refused.
+
+**Where it can go.** A thread moves only into a Project of its own mode, and
+its kind never converts:
+
+- a Chat thread into a Chat Project, or into no Project;
+- a Work thread into a Work Project the person picks; the files in its source
+  folder do not move, only the thread; and
+- a Code thread only into a Code Project bound to a clone of the same
+  repository: a remote the source checkout also has, and a base commit the
+  destination holds or fetches with its own Git identity.
+
+A move is refused for a thread delegated to this host by a peer (it belongs to
+that delegation), a thread with a running turn, a thread waiting on the
+person, and a thread with a running child run or a pending remote child run.
+The move sheet offers **Move after this turn**, which waits for the turn to
+end, and **Stop and move**, which stops it and cancels its pending approvals
+and questions.
+
+**What moves.**
+
+- The thread's journal cut in the `octant.thread-bundle/1` form (transcript,
+  evidence, provenance, and taint), plus each thread-owned part that export
+  lists as an omission: attachment bytes, admitted original inputs, generated
+  images, retained Browser captures, and the Canvases the thread owns with
+  their versions.
+- For a Code thread, a Git bundle of its checkout: the commits on the thread's
+  branch that the source's remote-tracking refs do not hold, and the
+  uncommitted work as two snapshot commits that never join the branch: an
+  index commit whose tree is the staged state, on the branch's head, and a
+  working-tree commit on top of it whose tree is the working tree, including
+  untracked files Git does not ignore. The destination restores the index from
+  the first and the working tree from the second, so a file with both staged
+  and unstaged edits arrives with both. Rationale: one commit holds one tree,
+  and a file staged at one version and edited again holds two. The Secret
+  guard checks every file that travels; a file it refuses stays behind and is
+  listed. Ignored files (build output, installed dependencies, `.env` files)
+  never travel.
+- There is no size limit ([decision H22](#decisions)). A large thread or
+  worktree takes longer; the move sheet shows the size and an estimate.
+- Never: credentials and sign-ins, the provider's own session, remembered Full
+  access, session grants and "always allow" answers, running terminals and
+  processes, dev-server previews, Browser pages and profiles, device panes,
+  routines, the Reachable tag, Project memory, and Project artifacts (which
+  [artifact replica sync](artifact-replica-sync.md) carries when it is on).
+  The receipt names each one that applied to the thread.
+
+**Steps.**
+
+Before the person picks a destination, the Computer card asks each member
+which of its Projects would take the thread
+(`POST /api/hub/peer/thread-moves/projects`, naming the mode and, for Code,
+the source checkout's remotes). A member answers with Project names and ids
+only when its peer grant for the source has Move in; every other sender gets
+the refusal a move would, and a member that does not answer is listed as
+unreachable.
+
+1. **Freeze.** The source journals `thread.move-started@1`, and the thread
+   becomes read-only, showing "Moving to" and the member's name. Nothing leaves
+   the source before the freeze is recorded, so at most one copy can take a
+   turn.
+2. **Offer.** The source asks the destination for an owner challenge naming
+   the offer route and the offer's hash, the person unlocks, and the source
+   sends the signed offer (`POST /api/hub/peer/thread-moves`): the move id, the
+   mode, the destination Project, and the manifest of parts with their sizes
+   and digests. The destination checks the unlock, the Move in item, and the
+   Project rule above, and answers `ready` with a one-use receiving ticket
+   bound to that move id.
+3. **Transfer.** The source sends the parts in chunks
+   (`POST /api/hub/peer/thread-moves/chunk`, naming the move, part, and chunk) directly over the
+   destination's pinned listener; the hub carries nothing. Each chunk is
+   checked against its digest. A cut transfer resumes from the last chunk the
+   destination acknowledged, after a reconnect or a source restart, and the
+   destination keeps a partial transfer for seven days.
+4. **Arrive.** `POST /api/hub/peer/thread-moves/finish`. The
+   destination checks the whole manifest, creates the new thread with its own
+   id, journals `thread.moved-in@1` with the origin member, the origin thread
+   reference, and the move id, and holds the thread as **arriving**: listed,
+   read-only, and unable to start a turn. For Code it makes a managed
+   worktree, checks out the branch (keeping its name when that is free there,
+   otherwise adding a suffix), and restores the index and the working tree
+   from their two snapshots. It answers
+   `arrived` with the new thread's reference.
+5. **Commit.** The source sends
+   `POST /api/hub/peer/thread-moves/commit`. The destination journals
+   `thread.move-committed@1`, makes the thread active, and answers
+   `committed`. The source then journals `thread.moved-out@1` and erases its
+   copy.
+
+Every request carries the move id and is idempotent, the way a delegation
+request is: a lost answer is asked again, and a state the destination already
+reached is answered again rather than repeated.
+
+**Erase on the source** ([decision H21](#decisions)). Once the destination
+answers `committed`, the source erases the thread through the ordinary thread
+purge: its bulk content, projections, attachments, and child runs go, and its
+token and cost aggregates stay for host accounting, as for any purge. The
+journaled `thread.moved-out@1` keeps the move id and the destination reference,
+so an old link, a notification, or a search on the source shows "Moved to" the
+member with **Open there**; the purge tombstone itself stays as it is for
+every purge. A managed worktree the thread owned is removed with its
+local branch only when everything in it travelled. When it holds anything that
+stayed behind (a file the Secret guard refused, or any ignored file such as a
+`.env` or a local configuration, or an edit made in the folder after the
+snapshot), the source moves the worktree out of the managed folder, beside it
+as `<worktree>-moved-out-<move>`, so the purge leaves it in place; it is no
+longer owned by any thread, and the tombstone lists those files with **Remove
+worktree**, which only a person can choose. The source decides this at erase
+time by comparing the folder with the snapshot it sent, because a Code
+thread's freeze stops its turns and commands but not an editor or terminal the
+person has open there. The move sheet names the same
+files before the move starts. Rationale: those files have no other copy, so
+removing the folder would destroy work the move never carried. Nothing is
+pushed or deleted on a remote. A thread that worked
+in the Project's current checkout leaves that folder as it is, because Octant
+never resets the person's own checkout, and the receipt says the changes also
+remain there. The purge also starts the existing withdrawals: messages the
+thread sent that are not yet delivered are withdrawn, and messages waiting for
+it are refused.
+
+**Interruptions.**
+
+- **The source goes away after `arrived` and before `commit`.** Once the
+  source has been unreachable for five minutes, the destination offers
+  **Activate anyway** on the arriving thread, a person's act there (a window,
+  or an owner device with a fresh unlock). The source's freeze is already
+  recorded, so the source cannot have continued. When the two next reach each
+  other, the source learns `committed` and erases.
+- **The source restarts during a move.** A frozen thread with a move in
+  progress resumes by itself: a `committed` answer erases it, `arrived` sends
+  the commit, a partial transfer resumes, and a refused, discarded, or unknown
+  move unfreezes it with a receipt that says why.
+- **Cancel.** The person can cancel until `committed`. The source asks the
+  destination to discard what it holds and unfreezes when the destination
+  answers. While the destination cannot be reached the thread stays frozen and
+  offers **Take back here**, which unfreezes it at once and journals that the
+  destination may still hold a copy. If that copy is later activated, both
+  threads show "Also continues on" the other member, and neither is erased
+  automatically.
+
+**Continuing on the destination.** The thread keeps its guardrail level where
+the destination Project allows it; Full access never carries and needs its
+own unlock there. Its provider and model are re-resolved against the
+destination's catalog, as for any handoff: a Code thread arrives on the
+destination's own instance of the provider kind it ran on, with the same
+model, and a destination with no provider of that kind refuses the move with
+`no-matching-provider`, because another kind cannot be assumed to know the
+model. A Code thread arrives as a managed thread started from the moved
+commit and the two snapshots, and its earlier conversation arrives as a moved
+transcript the first turn carries once; past operations are not recreated
+one by one.
+The next turn runs on the destination's own sign-in with the ordinary
+disclosed text handoff and original-input checks
+([Architecture: stop reasons](../architecture.md#stop-reasons)). The
+provider's own session never moves.
+
+#### Prepare to shut down
+
+Prepare to shut down moves many threads at once, for the moment the person is
+leaving. It asks before anything moves, and its defaults are chosen so that
+the usual case is one press and one unlock.
+
+- **Where it opens.** From **Prepare to Shut Down…** in the application menu
+  and the menu bar, and from the existing quit confirmation: when Quit would
+  ask about open sessions and this host is in a hub with a member that can take
+  at least one of its threads, the confirmation gains **Move threads first…**,
+  which opens Prepare to shut down instead of quitting. Cancel stays the
+  default there and Quit and stop work is unchanged. An operating-system
+  shutdown, logout, or updater restart stays immediate and offers nothing,
+  because it cannot wait for a person.
+- **Which threads.** Every thread on this host with a running turn or a
+  question waiting on the person, and every open (not completed or archived)
+  thread with a turn in the last 14 days. Older open threads fold under one
+  "Older threads" row, closed, each staying here unless the person opens it and
+  chooses otherwise. Delegated threads are listed as staying here with their
+  reason.
+- **The destination.** One **Move to** choice applies to every row set to
+  move: the member the person last moved a thread to, otherwise the hub when it
+  can take threads, otherwise the first eligible member that is online. A row
+  may name another member through its own choice.
+- **Each row's starting choice.** A thread the destination can take starts on
+  **Move**. One with a running turn or a waiting question starts on **Move
+  after this turn**; nothing is stopped unless the person picks Stop and move.
+  One the destination cannot take starts on **Leave here** with its
+  [reason](#a-thread-that-cannot-move) shown, and when it is a Code thread its
+  choice also offers **Hand over**. A handover writes a commit and may push, so
+  it is never preselected. Changing the destination re-evaluates every row that
+  still holds its starting choice and leaves the person's own choices alone.
+- **One press, one unlock per destination.** The primary action moves every
+  row set to move or hand over. A batch is one offer per destination naming
+  every thread in it, so one unlock covers the batch it names and nothing
+  else. Threads go smallest first, so most are done early, and a thread set to
+  move after its turn starts when that turn ends.
+- **Finishing.** The screen says **Safe to shut down** only when every chosen
+  thread is committed, or handed over and pushed. A thread whose move cannot
+  finish shows [This thread can't move](#a-thread-that-cannot-move) with its
+  reason and recovery on its row, and while any chosen thread failed, the
+  screen says how many threads stay on this computer and lists them instead.
+  When it was opened from the quit confirmation, it ends with Quit Octant as
+  its primary action; quitting still goes through the guarded shutdown.
+
+Rationale: a person shutting down wants their work to come with them, so
+moving is the default wherever it can succeed, and the screen asks once, not
+once per thread. Anything that writes outside the thread (a commit, a push) or
+stops work (Stop and move) stays a choice the person makes.
+
+#### Handover
+
+When a Code thread cannot move properly (no member is reachable, the
+destination has no Project bound to the repository, the destination refuses,
+or the transfer fails or cannot finish in time), or the person picks **Hand
+over instead**, the source offers a handover:
+
+1. **Freeze**, as for a move, journaled as `thread.handover-started@1`.
+2. **Write the note.** The host composes it from the journal: the thread's
+   title and objective or delivery target, the person's latest instructions,
+   the agent's latest answer, the plan or task list, the files changed against
+   the branch's base, the last recorded check or test result, the approvals and
+   questions the freeze cancelled, and what stays behind (ignored files,
+   terminals, previews). When the thread's provider is reachable and the person
+   left **Ask the agent to summarize** on, one bounded turn of the thread's own
+   agent adds where the work stands and what comes next; if that turn fails or
+   runs past two minutes, the note goes without it. The note is at most
+   32 KiB, passes the Secret guard and redaction, and names no absolute path.
+3. **Commit everything.** One commit on the thread's branch, or on a new
+   `octant/handover/<thread slug>` branch when the thread works on the default
+   branch or a detached head, takes the tracked changes and the untracked files
+   Git does not ignore, under the Secret guard as for a move. Its message is
+   the note, with the trailers `Octant-Handover: <handover id>` and
+   `Octant-Origin: <member name>`, under the thread's own commit identity.
+4. **Push**, when the branch has a remote: the existing Code push with the
+   person's own Git identity, never forced and never to the default branch.
+   Without a remote, or when the push fails, the handover stays on this
+   computer and the receipt says so.
+5. **Tell the destination**, when one was chosen and can be reached: a signed
+   notice (`POST /api/hub/peer/handovers`) naming the repository remote, the
+   branch, and the handover id, so it shows under **Handovers** on the
+   destination's start screen before its next fetch.
+
+The source thread stays frozen, marked "Handed over" with the branch. It is
+erased the same way as a moved thread once a destination reports that it
+continued the handover (`POST /api/hub/peer/handovers/:handoverId/continued`),
+then or the next time the two reach each other. **Take back here** unfreezes it
+instead; a handover continued after that leaves both threads with the "Also
+continues on" notice.
+
+On the destination, **Continue handover** is a person's act. It fetches the
+branch with the destination's own Git identity, creates a Code thread in a
+Project bound to that repository on a managed worktree at that branch, and gives
+the first turn the note as a labeled text handoff. A branch whose tip carries
+an `Octant-Handover` trailer is listed after the destination's next fetch even
+without a notice. A note read from a branch came through a remote others may be
+able to push to, so it is framed as outside content and marks the thread with
+`thread.external-content-ingested@1` under the source label `handover-note`.
+
+Chat and Work threads have no branch to carry them, so they have no handover:
+when their move cannot finish they stay on the source, unfrozen. Nothing is
+exported to a file ([decision H23](#decisions)).
+
+#### A thread that cannot move
+
+A move that cannot finish always ends in an explicit error, never a silent
+return to the source. The source journals `thread.move-failed@1` with one
+reason, unfreezes the thread, and shows **This thread can't move** with that
+reason in the move sheet and as a notice on the thread itself, which stays until
+the person dismisses it or the thread moves. The reasons are:
+
+| Reason                    | Meaning                                                                                                                                              |
+| ------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `busy`                    | A turn runs, the thread waits on the person, or a child run or remote child run is still going, and the person did not choose Stop and move          |
+| `delegated`               | The thread was delegated to this host by a peer and belongs to that delegation                                                                       |
+| `unlock-required`         | The person declined the unlock, it expired, or this device is not an owner on the destination                                                        |
+| `refused`                 | The destination refused: no Move in item, Owners unticked, or the source is no longer in its roster. It answers every one of these in the same words |
+| `no-eligible-project`     | The destination has no Project of the thread's mode that accepts it (for Code, none bound to the same repository)                                    |
+| `destination-unreachable` | The destination could not be reached before the offer, or stopped answering during the transfer and the person gave up waiting                       |
+| `transfer-failed`         | A part failed its digest check twice, or the destination could not unpack it                                                                         |
+| `no-matching-provider`    | The destination has no provider of the kind the thread ran on, so it cannot continue it                                                              |
+
+For a Code thread the same error offers **Hand over instead**. A handover that
+cannot finish its push says so as its own error (`push-failed`, or `no-remote`
+when the branch has no remote): the commit and note stay on this computer, and
+the receipt says the work is not on any other computer yet. Rationale: the
+person is about to switch the computer off, so a thread left behind without a
+clear error would look moved and be unreachable until the computer comes back.
+
+Rationale: a move is a fork to another computer with an erase behind it, not a
+shared or replicated journal. Each host keeps one writer and its own journal,
+which the rest of this design depends on, and freezing before anything is sent
+and erasing only after `committed` means two copies can take turns only when
+the person chose Take back or Activate anyway. Git carries a handover because a
+Code thread's work already lives there and every member fetches it with its
+own identity, so no new transport or file format is needed.
 
 ### Connectivity
 
@@ -904,16 +1426,20 @@ notifications from all of them after joining once:
 
 ### Journal and authority boundaries
 
-| Item                                              | Owner and journal                                          | Never                                               |
-| ------------------------------------------------- | ---------------------------------------------------------- | --------------------------------------------------- |
-| Threads, turns, approvals, Done                   | The spoke that runs them                                   | Mirrored into the hub's journal                     |
-| Joining, hub grant, peer grants, leave            | The member, locally or by an owner's unlocked act          | Changed by the hub or a peer                        |
-| Roster, standby order, removal                    | The hub; a standby adds and removes while standing in      | Changed in standby order by a standby               |
-| Delegation request and result reference           | The delegating spoke (A)                                   | Treated as authority on B                           |
-| Delegated thread                                  | The receiving spoke (B), principal `peer:A`                | Approvable from A or the hub                        |
-| Wake times (routine id, next time, hardware addr) | The hub and standbys, rebuilt from spoke reports           | Holds the routine's prompt, Project, or profile     |
-| Push envelopes in transit                         | Not journaled on the hub; counts and failure category only | Readable by the hub                                 |
-| Credentials                                       | The broker of each host that holds them                    | Copied except by an owner's unlocked act; journaled |
+| Item                                              | Owner and journal                                                                                                         | Never                                                                                                       |
+| ------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------- |
+| Threads, turns, approvals, Done                   | The spoke that runs them                                                                                                  | Mirrored into the hub's journal                                                                             |
+| Joining, hub grant, peer grants, leave            | The member, locally or by an owner's unlocked act                                                                         | Changed by the hub or a peer                                                                                |
+| Roster, standby order, removal                    | The hub; a standby adds and removes while standing in                                                                     | Changed in standby order by a standby                                                                       |
+| Delegation request and result reference           | The delegating spoke (A)                                                                                                  | Treated as authority on B                                                                                   |
+| Delegated thread                                  | The receiving spoke (B), principal `peer:A`                                                                               | Approvable from A or the hub                                                                                |
+| A message between members                         | The sender (A) until B accepts it, then B, `peer:A`                                                                       | Carried by the hub; a body in either journal                                                                |
+| A moved thread                                    | The source until the destination commits, then the destination, as the person's own thread (owner device, `owner-unlock`) | Able to take turns on two hosts unless the person chose Take back or Activate anyway; journaled as `peer:A` |
+| A handover                                        | The source until a destination reports it continued, then the destination's new thread                                    | Carried by the hub; a credential or an absolute path in its note                                            |
+| A thread's Reachable tag                          | The host that owns the thread, set by a person                                                                            | Set by an agent, the hub, or a peer                                                                         |
+| Wake times (routine id, next time, hardware addr) | The hub and standbys, rebuilt from spoke reports                                                                          | Holds the routine's prompt, Project, or profile                                                             |
+| Push envelopes in transit                         | Not journaled on the hub; counts and failure category only                                                                | Readable by the hub                                                                                         |
+| Credentials                                       | The broker of each host that holds them                                                                                   | Copied except by an owner's unlocked act; journaled                                                         |
 
 Hub and spoke membership state (the hub's roster and members, and a spoke's
 hub link, grant, and roster) lives in one file in the Octant data folder that
@@ -928,15 +1454,16 @@ reads each spoke directly.
 
 ## Threat model
 
-| Party                      | Can                                                                                                                                                                                                                                          | Cannot, and why                                                                                                                                                                                                                         |
-| -------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| A compromised hub          | Use every hub grant each spoke gave it; add a fake member to the roster, which spokes accept as a full member unless they turned on Confirm new members, and which every spoke alerts on; drop or delay wakes and push; read roster metadata | Approve on a spoke itself, hide a new-member alert, read a spoke's credentials, add an owner to any host's owner list, change a hub or peer grant, loosen a sandbox, read sealed push content, or act on a spoke that never granted Act |
-| A compromised standby      | While standing in, what a compromised hub can, limited to the spokes whose grant covers the standby                                                                                                                                          | Stand in while members still reach the hub, change the standby order, promote itself, or anything a compromised hub cannot                                                                                                              |
-| A compromised spoke        | Use the peer grants other spokes gave it; send bad results back to a delegating spoke; claim to be standing in as hub                                                                                                                        | Exceed those grants; answer approvals on another spoke; make another spoke's agent follow its output as instructions; stand in unless it is a named standby in the hub-signed roster                                                    |
-| A stolen owner device      | What an ordinary member can, until removed or revoked                                                                                                                                                                                        | Use owner powers without the person's face, finger, passcode, or passkey                                                                                                                                                                |
-| A lost or stolen phone     | What each spoke allows that guest, until revoked                                                                                                                                                                                             | Run agents, receive delegated work, or outlive Remove on the hub and revocation on each spoke                                                                                                                                           |
-| A spoke's agent            | Ask its own host to delegate within its thread's authority                                                                                                                                                                                   | Choose the peer grant, approve on the receiver, widen authority, carry a credential                                                                                                                                                     |
-| Someone on the private net | Reach members' listeners, as today, and send Wake-on-LAN packets, as anyone on that LAN already can                                                                                                                                          | Pass device authentication; make a spoke run anything: a wake starts no routine the spoke did not define                                                                                                                                |
+| Party                                | Can                                                                                                                                                                                                                                                                                                                 | Cannot, and why                                                                                                                                                                                                                                         |
+| ------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| A compromised hub                    | Use every hub grant each spoke gave it; add a fake member to the roster, which spokes accept as a full member unless they turned on Confirm new members, and which every spoke alerts on; drop or delay wakes and push; read roster metadata                                                                        | Approve on a spoke itself, hide a new-member alert, read a spoke's credentials, add an owner to any host's owner list, change a hub or peer grant, loosen a sandbox, read sealed push content, or act on a spoke that never granted Act                 |
+| A compromised standby                | While standing in, what a compromised hub can, limited to the spokes whose grant covers the standby                                                                                                                                                                                                                 | Stand in while members still reach the hub, change the standby order, promote itself, or anything a compromised hub cannot                                                                                                                              |
+| A compromised spoke                  | Use the peer grants other spokes gave it; send bad results back to a delegating spoke; post text into the threads other members tagged Reachable, which arrives framed and tainting and can wake an idle tagged thread within the wake bounds, spending that spoke's provider usage; claim to be standing in as hub | Exceed those grants; answer approvals on another spoke; make another spoke's agent follow its output as instructions; stand in unless it is a named standby in the hub-signed roster; move a thread onto another member without an owner's fresh unlock |
+| A stolen owner device                | What an ordinary member can, until removed or revoked                                                                                                                                                                                                                                                               | Use owner powers without the person's face, finger, passcode, or passkey                                                                                                                                                                                |
+| A lost or stolen phone               | What each spoke allows that guest, until revoked                                                                                                                                                                                                                                                                    | Run agents, receive delegated work, or outlive Remove on the hub and revocation on each spoke                                                                                                                                                           |
+| A spoke's agent                      | Ask its own host to delegate within its thread's authority; from a tagged thread, message other members' tagged threads                                                                                                                                                                                             | Choose the peer grant, tag a thread, start more than the bounded wake turns on a tagged receiver, approve on the receiver, widen authority, carry a credential                                                                                          |
+| Someone on the private net           | Reach members' listeners, as today, and send Wake-on-LAN packets, as anyone on that LAN already can                                                                                                                                                                                                                 | Pass device authentication; make a spoke run anything: a wake starts no routine the spoke did not define                                                                                                                                                |
+| Someone who can push to a repository | Push a branch whose tip carries an `Octant-Handover` trailer, which a member lists under Handovers                                                                                                                                                                                                                  | Make its note more than outside content, or start a turn: only a person continues a handover                                                                                                                                                            |
 
 The biggest risk is the hub as introducer: whoever controls the hub can tell a
 spoke that an attacker's key belongs to another member, and with full
@@ -977,8 +1504,28 @@ choice to the design, the design's recommendation was taken.
 | H15 | How does a browser guest reach a spoke?                                     | Directly: each spoke serves its own web app at its own Tailscale name, and the hub's web app links to it, so the hub never sees spoke traffic                                                                                                                                                                    |
 | H16 | Do spokes honor owner devices by default?                                   | Yes: ticked at join, clearly labeled, and untickable                                                                                                                                                                                                                                                             |
 | H17 | How long does one unlock last?                                              | One Face ID, Touch ID, passcode, or passkey check covers five minutes of administration screens; Full access, merge, credential copy, and owner changes each need their own                                                                                                                                      |
+| H19 | Which thread moves are in scope?                                            | Planned moves only. A computer that dies without warning hands nothing over; a continuously updated copy on another member is not designed                                                                                                                                                                       |
+| H20 | What authorizes a move on the destination?                                  | An owner device's own fresh unlock for every move, and the destination's Move in peer-grant item, which is in the full-member grant. The moved thread is the person's own thread there                                                                                                                           |
+| H21 | What happens to the source's copy?                                          | It is erased through the ordinary thread purge once the destination commits, and its tombstone points to the destination                                                                                                                                                                                         |
+| H22 | Is a move limited in size?                                                  | No. Attachments, original inputs, captures, owned Canvases, and a Code thread's whole branch and uncommitted work travel whatever their size; ignored files never do                                                                                                                                             |
+| H23 | What happens when a move cannot finish?                                     | There is no file export. A Code thread hands over: everything is committed to its branch with a generated note, pushed when there is a remote, and continued from that branch on another computer. Chat and Work threads stay where they are, and every failed move shows an explicit error with its reason      |
 
-Earlier the same day the maintainer settled that a standby hub exists (was
+On 2026-11-07 the maintainer added messaging between members: an agent on one
+computer must be able to message a running thread on another when that thread
+is tagged, across providers, using this topology rather than a new host-to-host
+channel. The design took its own recommendation for the rest (a per-thread tag
+on both ends, the Message peer-grant item, a message waiting on the sender while
+the receiver is unreachable); see
+[Messaging between members](#messaging-between-members).
+
+The same day the maintainer asked for moving an active thread to another member
+before its computer shuts down or restarts, and settled H19 to H23: planned
+moves only, every move owner-signed (the person is the same on every member),
+the source erased once the destination commits, no size limit, and a handover
+through the thread's branch instead of an offline file path; see
+[Moving a thread to another member](#moving-a-thread-to-another-member).
+
+Earlier on 2026-10-28 the maintainer settled that a standby hub exists (was
 H1), and that no member acts as a relay or introducer except the hub and a
 named standby (was H9).
 
@@ -1538,6 +2085,142 @@ a numbered slice. Built, with these narrower readings:
   words are written; the schema has no field for a token, a code, an address, or
   an account name.
 
+11. **Messaging between members.** The Reachable tag and its event, the
+    Message peer-grant item (in the full-member grant, and a Message-only
+    grant for the hub), remote references, `list` with a `member`, the
+    threads, messages, receipts, and withdraw member routes, sending with retry and
+    the 24-hour deadline, delivery on the receiver, waking an idle thread,
+    and receipts back.
+    Acceptance: an untagged thread is never listed and refuses a message in
+    the same words as an unknown one; a sender thread without the tag cannot
+    send to a member; a member without Message gets an empty list and
+    `unauthorized`; a message sent while the receiver is down arrives once
+    after it returns and expires after 24 hours; a message to an idle thread
+    with the wake switch on starts one `agent`-initiated turn, a busy or
+    waiting thread is not interrupted, and the hourly and hop bounds stop a
+    reply loop after three rounds; nothing that arrives reaches an approval on
+    the receiver; untagging or revoking refuses
+    waiting messages; closing or untagging the sender withdraws what B still
+    holds; a Claude thread on one host and a Codex thread on another
+    exchange a message and a reply. Verification: server tests and a
+    three-host loopback smoke with fake providers; a run between two real
+    computers and real providers is a maintainer gate. **Linux container:
+    yes, except that gate.**
+12. **Moving a thread to another member.** The Move in peer-grant item, the
+    own-unlock challenge for a move, the offer, chunk, finish, commit, and
+    cancel member routes, the freeze, arriving, committed, and moved-out
+    events, the source erase and its tombstone, recovery on both ends, Prepare
+    to shut down, the handover (note, commit, push, notice, continued report,
+    and Continue handover), and the screens: Environment's Computer card, the
+    move and handover sheets, the frozen bar, the tombstone, the Arriving
+    pill, and This thread can't move.
+    Acceptance: a move without an own fresh unlock, or to a member without
+    Move in or with Owners unticked, is refused before any part is sent; at no
+    point can both copies start a turn unless the person chose Take back here
+    or Activate anyway; a transfer cut at any chunk resumes and arrives once; a
+    lost commit answer neither duplicates nor loses the thread; the source
+    erases only after `committed`, and its tombstone opens the destination; a
+    Code thread arrives with its branch, its commits, its staged and unstaged
+    versions of a file edited both ways, and its uncommitted and
+    untracked work identical to the source, and with no ignored file; a file
+    the Secret guard refuses stays behind and is listed, and the source keeps
+    a worktree that still holds a refused or ignored file; no credential,
+    provider session, grant, or Full access arrives; a Code thread whose
+    destination lacks its repository falls back to a handover whose commit
+    holds every change and whose message is the note; a handover never forces
+    a push or pushes to the default branch; continuing a handover marks the
+    thread with outside content and erases the frozen source; every move that
+    cannot finish journals `thread.move-failed@1` with one listed reason,
+    unfreezes the thread, and shows This thread can't move in the move sheet,
+    on the thread, and in Prepare to shut down, which then never says Safe to
+    shut down; no header menu, row menu, or palette entry starts a move;
+    Prepare to shut down moves nothing before the person presses its primary
+    action, starts each row on the choice above, never preselects a handover
+    or Stop and move, and needs one unlock per destination for the batch.
+    Verification: the closest web component tests, rendered QA of each screen
+    state at a wide window and at 390px,
+    contract and domain tests, server tests, and a two-host loopback smoke with
+    fake providers covering a large worktree and a cut transfer; a move between
+    two real computers with a real Touch ID unlock before a real shutdown is a
+    maintainer gate. **Linux container: yes, except that gate.**
+
+    Slice 12 lands in parts. The first part is the contracts (the move offer,
+    manifest, answers and destination state, the handover notice, the move
+    events, the failure reasons, and the Move in item on the peer grant, in
+    the full-member grant for new members) and the pure policy (eligibility,
+    the destination's Move in check, Prepare to shut down's starting choices
+    and destination, recovery, Activate anyway, keeping a worktree that holds
+    unmoved files, and the handover branch). A grant stored before Move in
+    existed read as off until the fifth part, which reads it as described
+    under [Every move is an owner act](#moving-a-thread-to-another-member).
+
+    The second part is the move itself for Chat threads between spokes: the
+    owner route that issues the one-use ticket (own-class unlock, every
+    time), the six member routes (`/api/hub/peer/thread-moves` for the offer,
+    and `chunk`, `finish`, `commit`, `status`, and `discard` under it, each
+    `POST` with the move id in the body), the move state each host keeps so a
+    restart resumes, the freeze as a hold every Chat command checks, the
+    Chat conversation carried as real turns the way a branch carries them,
+    the erase through the ordinary purge, the journal events, and recovery at
+    startup. A two-host loopback smoke moves a thread with a real owner
+    unlock.
+
+    The third part moves Code threads between spokes: the Git bundle with
+    the index and working-tree snapshot commits under a move ref, fetched
+    into a destination clone whose remote names the same repository (a
+    local path or `file://` remote by its path), the managed thread started
+    from them under the host's own scope, the moved transcript as a
+    per-thread history its first turn carries once, the freeze on Code
+    commands and turn starts, the provider of the same kind, and the
+    erase-time check that moves a worktree out of the managed folder when it
+    holds anything the move did not carry.
+
+    The fourth part moves Work threads between spokes: the conversation as
+    a moved transcript into a Work Project the person picks on the
+    destination (the folder's files stay where they are), the thread opened
+    under the host's own scope on a provider of the same kind, the freeze
+    on Work commands and turn admission, and a delegated Work thread read
+    as one that cannot move. What it does not do yet: carry attachments and
+    other bulk parts, accept moves on the hub (which keeps no peer grants
+    and needs its own Accept moved threads setting), offer a window route
+    to start a move, or show any screen.
+
+    The fifth part lets a person start a move from the thread's Environment.
+    The window route, under `/api/desktop/hub/thread-moves/`, is
+    loopback-only behind the desktop secret and a window capability, and
+    acts only on a thread the window shows. It lists the member computers
+    and their Projects (through the new `projects` member route), fetches
+    the destination's owner challenge for this Mac's Touch ID, redeems the
+    signature for the ticket and starts the move now or after the running
+    turn, and reads where the thread stands: sending with its progress,
+    waiting for its turn, arriving with Activate anyway after five minutes
+    of silence, its This thread can't move notice until dismissed, and the
+    "Moved to" record with any kept worktree. Cancel, Take back here, and
+    Activate anyway go through it too. The notices and the last 500 records
+    are kept beside the move state, so a restart keeps them, and a move
+    refused before anything froze (the unlock declined or expired, the
+    destination unreachable, a busy or delegated thread) journals its
+    reason the same way. The desktop forwards each as a hub administration
+    operation. Environment's Computer card lists the computers with their
+    pills, picks the one fitting Project, opens the move sheet (what moves,
+    what stays, the erase sentence, Move with Touch ID, or Move after this
+    turn for a busy thread), and shows the progress line with Cancel move,
+    Take back here, the This thread can't move notice with Choose another
+    computer and Dismiss, the Arriving notice with Activate anyway, and the
+    Moved notice. What it does not do yet: replace the composer with the
+    frozen bar (the held thread still refuses every command with the
+    moving reason), the pane tombstone with Open there and Remove worktree,
+    sizes and an estimate in the sheet, Stop and move, Hand over instead,
+    an unlock other than this Mac's Touch ID, carry bulk parts, accept
+    moves on the hub, or Prepare to shut down.
+
+    The sixth part lets the hub take moved threads: its Accept moved
+    threads setting (on by default, a window on the hub only, journaled),
+    the hub checking a move's sender against the key that member joined
+    with, the hub's own owner list for the unlock, and the hub listed in the
+    Computer card like any member. What it does not do yet: carry bulk
+    parts or Prepare to shut down.
+
 Any slice that would deploy an Octant-operated service, create an account, or
 spend money stops for a separate maintainer action.
 
@@ -1548,5 +2231,7 @@ it. The invariants every slice must keep testable: the spoke is the only
 authority over its threads; the hub principal is refused outside its grant;
 no approval, credential, or sandbox change can come from the hub, a standby,
 or a peer; owner powers need a fresh unlock and never reach an agent or
-routine; results from another spoke are data; joining happens only over a
-private network; the hub runs and serves the web app with no desktop window; and every hub service is off until the person turns it on.
+routine; results from another spoke are data; a moved thread takes turns on one host at
+a time unless the person chooses otherwise, needs an owner's own fresh unlock,
+and leaves the source only after the destination commits; joining happens only
+over a private network; the hub runs and serves the web app with no desktop window; and every hub service is off until the person turns it on.

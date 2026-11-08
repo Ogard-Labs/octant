@@ -28,6 +28,7 @@ import {
 } from "@octant/contracts";
 import type {
   ProviderAcquireInput,
+  ProviderCompactionPoint,
   ProviderConnection,
   ProviderDriver,
   ProviderSessionCompaction,
@@ -140,6 +141,12 @@ export interface CodexThreadConfig {
   readonly "features.plugins"?: false;
   readonly "features.apps"?: false;
   readonly project_doc_max_bytes?: 0;
+  /**
+   * The person's compaction point for this thread, in tokens: Codex compacts
+   * once the context passes it, mid-turn too. Passed in the thread's own
+   * config, never written to the account's `config.toml`.
+   */
+  readonly model_auto_compact_token_limit?: number;
   readonly mcp_servers?: Readonly<Record<string, { readonly enabled: false }>>;
   readonly skills?: {
     readonly config: ReadonlyArray<{ readonly path: string; readonly enabled: false }>;
@@ -453,6 +460,7 @@ interface SessionState {
   readonly modelId: string;
   readonly executionPolicy: ProviderExecutionPolicy;
   readonly autoApprove: boolean | undefined;
+  readonly fullAccessSandbox: boolean | undefined;
   readonly threadId: string;
   readonly correlationId: CorrelationId;
   readonly turnOverrides?: Pick<CodexTurnStartInput, "model" | "effort">;
@@ -512,6 +520,8 @@ const capabilities = {
   diffs: "supported",
   taskProgress: "supported",
   nativeChildAgents: "unsupported",
+  // A thread's config takes the point; probing a version lowers it with compaction.
+  compactionPoint: "supported",
   harnessAutoReview: "supported",
   reviewVerdicts: { allow: "supported", deny: "supported" },
   modelSwitch: "supported",
@@ -551,7 +561,17 @@ function codexChatCapabilities(
       work: sessionCompaction,
       code: sessionCompaction,
     },
+    // A thread's config carries `model_auto_compact_token_limit` (Codex has
+    // applied a thread's `config` since 0.56.0), so every version that can
+    // compact can take the point.
+    compactionPoint: sessionCompaction,
   };
+}
+
+function codexCompactionLimit(
+  point: ProviderCompactionPoint | undefined,
+): Pick<CodexThreadConfig, "model_auto_compact_token_limit"> {
+  return point === undefined ? {} : { model_auto_compact_token_limit: point.tokens };
 }
 
 /**
@@ -727,9 +747,20 @@ function request<A>(operation: () => Promise<A>): Effect.Effect<A, ProviderFailu
 export function codexExecutionSettings(
   policy: ProviderExecutionPolicy,
   autoApprove?: boolean,
+  fullAccessSandbox?: boolean,
 ): Pick<CodexThreadStartInput, "approvalPolicy" | "sandbox" | "approvalsReviewer"> {
   if (policy === "full-access") {
-    return { approvalPolicy: "never", sandbox: "danger-full-access", approvalsReviewer: "user" };
+    // The opt-in sandbox at Full access runs the process inside Octant's
+    // profile, as the guarded levels do, and macOS refuses a second Seatbelt
+    // inside the first (see below). So Codex is told the same thing they tell
+    // it: the thread starts `read-only` and each turn names the sandbox as
+    // external. Under an external sandbox with `never`, every command runs
+    // without asking, inside Octant's wall.
+    return {
+      approvalPolicy: "never",
+      sandbox: fullAccessSandbox === true ? "read-only" : "danger-full-access",
+      approvalsReviewer: "user",
+    };
   }
   if (policy === "approval-gated" || policy === "auto-accept-edits") {
     // Every posture below Full access runs inside Octant's profile, and macOS
@@ -779,11 +810,13 @@ export function codexExecutionSettings(
 export function codexTurnExecutionSettings(
   policy: ProviderExecutionPolicy,
   autoApprove?: boolean,
+  fullAccessSandbox?: boolean,
 ): Pick<CodexTurnStartInput, "approvalPolicy" | "sandboxPolicy" | "approvalsReviewer"> {
-  const { sandbox, ...rest } = codexExecutionSettings(policy, autoApprove);
+  const { sandbox, ...rest } = codexExecutionSettings(policy, autoApprove, fullAccessSandbox);
   // Below Full access the process already runs in Octant's profile, which is
   // the boundary; Codex's own Seatbelt cannot start inside it. `restricted`
-  // keeps Codex from telling the model it has open network.
+  // keeps Codex from telling the model it has open network. A sandboxed Full
+  // access thread takes the same external sandbox, with `never`.
   const sandboxPolicy =
     sandbox === "danger-full-access"
       ? ({ type: "dangerFullAccess" } as const)
@@ -1084,14 +1117,23 @@ export function makeCodexDriver(options: CodexDriverOptions): ProviderDriver {
       // A lease that runs Codex's own subagents is its own process: the flag
       // rides on the command line and cannot change on a running process, so
       // it is part of the posture the key names.
-      const leaseKey = (executionPolicy: ProviderExecutionPolicy, ownSubagents = false) =>
+      const leaseKey = (
+        executionPolicy: ProviderExecutionPolicy,
+        ownSubagents = false,
+        fullAccessSandbox = false,
+      ) =>
         JSON.stringify([
           projectRoot,
           extraFolders,
           threadMode,
           ownSubagents ? `${executionPolicy}+own-subagents` : executionPolicy,
+          ...(fullAccessSandbox ? ["+sandbox"] : []),
         ]);
-      const leaseFor = (executionPolicy: ProviderExecutionPolicy, ownSubagents: boolean) =>
+      const leaseFor = (
+        executionPolicy: ProviderExecutionPolicy,
+        ownSubagents: boolean,
+        fullAccessSandbox = false,
+      ) =>
         Effect.gen(function* () {
           const runtime = yield* acquireRuntime(
             options,
@@ -1103,8 +1145,9 @@ export function makeCodexDriver(options: CodexDriverOptions): ProviderDriver {
               mode: threadMode,
               executionPolicy,
               ...(ownSubagents ? { ownSubagents: true as const } : {}),
+              ...(fullAccessSandbox ? { fullAccessSandbox: true as const } : {}),
             },
-            leaseKey(executionPolicy, ownSubagents),
+            leaseKey(executionPolicy, ownSubagents, fullAccessSandbox),
           );
           // Turn starts probe first, but not every caller does (compaction,
           // summaries, agent runs), so the session itself refuses too.
@@ -1133,10 +1176,11 @@ export function makeCodexDriver(options: CodexDriverOptions): ProviderDriver {
       const closeIdleOtherLeases = (
         executionPolicy: ProviderExecutionPolicy,
         ownSubagents: boolean,
+        fullAccessSandbox = false,
       ) =>
         Effect.promise(() =>
           options.runtimeRegistry.closeIdleLeasesWhere(options.instanceId, (lease) => {
-            if (lease === leaseKey(executionPolicy, ownSubagents)) return false;
+            if (lease === leaseKey(executionPolicy, ownSubagents, fullAccessSandbox)) return false;
             const parsed = codexThreadLease(lease);
             return parsed?.root === projectRoot && parsed.mode === threadMode;
           }),
@@ -1182,7 +1226,7 @@ function codexThreadLease(
   } catch {
     return undefined;
   }
-  if (!Array.isArray(parsed) || parsed.length !== 4) return undefined;
+  if (!Array.isArray(parsed) || (parsed.length !== 4 && parsed.length !== 5)) return undefined;
   const [root, , mode] = parsed;
   return typeof root === "string" && typeof mode === "string" ? { root, mode } : undefined;
 }
@@ -1469,10 +1513,12 @@ function makeConnection(
   leaseFor: (
     executionPolicy: ProviderExecutionPolicy,
     ownSubagents: boolean,
+    fullAccessSandbox?: boolean,
   ) => Effect.Effect<CodexLeasedRuntime, ProviderFailure, Scope.Scope>,
   closeIdleOtherLeases: (
     executionPolicy: ProviderExecutionPolicy,
     ownSubagents: boolean,
+    fullAccessSandbox?: boolean,
   ) => Effect.Effect<void>,
   projectRoot: string,
   extraFolders: ReadonlyArray<string>,
@@ -1485,6 +1531,7 @@ function makeConnection(
     let version = "";
     let leasedPolicy: ProviderExecutionPolicy | undefined;
     let leasedOwnSubagents = false;
+    let leasedFullAccessSandbox = false;
     let closed = false;
     const queue = yield* Queue.unbounded<ProviderRuntimeEvent>();
     const sessions = new Map<ProviderSessionId, SessionState>();
@@ -1934,10 +1981,13 @@ function makeConnection(
     const ensureRuntime = (
       executionPolicy: ProviderExecutionPolicy,
       ownSubagents: boolean,
+      fullAccessSandbox = false,
     ): Effect.Effect<void, ProviderFailure> =>
       Effect.suspend(() => {
         const sameAuthority = () =>
-          leasedPolicy === executionPolicy && leasedOwnSubagents === ownSubagents;
+          leasedPolicy === executionPolicy &&
+          leasedOwnSubagents === ownSubagents &&
+          leasedFullAccessSandbox === fullAccessSandbox;
         if (leasedPolicy !== undefined) {
           return sameAuthority()
             ? Effect.void
@@ -1948,7 +1998,10 @@ function makeConnection(
                 ),
               );
         }
-        return Scope.extend(leaseFor(executionPolicy, ownSubagents), connectionScope).pipe(
+        return Scope.extend(
+          leaseFor(executionPolicy, ownSubagents, fullAccessSandbox),
+          connectionScope,
+        ).pipe(
           Effect.flatMap((runtime) => {
             if (leasedPolicy !== undefined && !sameAuthority()) {
               return Effect.fail(
@@ -1963,6 +2016,7 @@ function makeConnection(
               version = runtime.version;
               leasedPolicy = executionPolicy;
               leasedOwnSubagents = ownSubagents;
+              leasedFullAccessSandbox = fullAccessSandbox;
               const lost = () => {
                 if (!closed) runtimeLost();
               };
@@ -2003,6 +2057,7 @@ function makeConnection(
         readonly sessionId: ProviderSessionId;
         readonly executionPolicy: ProviderExecutionPolicy;
         readonly autoApprove?: boolean;
+        readonly fullAccessSandbox?: boolean;
       },
       thread: CodexThreadResult,
       modelId: string,
@@ -2023,6 +2078,7 @@ function makeConnection(
         modelId,
         executionPolicy: input.executionPolicy,
         autoApprove: input.autoApprove,
+        fullAccessSandbox: input.fullAccessSandbox,
         threadId: thread.thread.id,
         ...(turnOverrides === undefined ? {} : { turnOverrides }),
         carriedTools,
@@ -2048,9 +2104,17 @@ function makeConnection(
       start: (input) =>
         withPendingLifecycle(() =>
           Effect.gen(function* () {
-            yield* ensureRuntime(input.executionPolicy, codexRunsOwnSubagents(input));
+            yield* ensureRuntime(
+              input.executionPolicy,
+              codexRunsOwnSubagents(input),
+              input.fullAccessSandbox === true,
+            );
             ensureSubscribed();
-            const settings = codexExecutionSettings(input.executionPolicy, input.autoApprove);
+            const settings = codexExecutionSettings(
+              input.executionPolicy,
+              input.autoApprove,
+              input.fullAccessSandbox,
+            );
             const requestedOptions = input.modelOptionValues;
             let optionSettings: Pick<CodexThreadStartInput, "serviceTier" | "config"> = {};
             if (requestedOptions !== undefined && Object.keys(requestedOptions).length > 0) {
@@ -2072,7 +2136,11 @@ function makeConnection(
             }
             const dynamicTools = codexDynamicTools(input.tools);
             const modeConfig = yield* modeThreadConfig(input.nativeSetup);
-            const config = { ...optionSettings.config, ...modeConfig };
+            const config = {
+              ...optionSettings.config,
+              ...modeConfig,
+              ...codexCompactionLimit(input.compactionPoint),
+            };
             const thread = yield* request(() =>
               client.threadStart({
                 cwd: projectRoot,
@@ -2154,7 +2222,11 @@ function makeConnection(
         }
         return withPendingLifecycle(() =>
           Effect.gen(function* () {
-            yield* ensureRuntime(input.executionPolicy, codexRunsOwnSubagents(input));
+            yield* ensureRuntime(
+              input.executionPolicy,
+              codexRunsOwnSubagents(input),
+              input.fullAccessSandbox === true,
+            );
             ensureSubscribed();
             const modeConfig = yield* modeThreadConfig(input.nativeSetup);
             const resumeRequest = () =>
@@ -2171,7 +2243,7 @@ function makeConnection(
                   // the same overrides, so they are stated on every resume.
                   client.threadResume({
                     threadId: input.resumeCursor.value,
-                    config: modeConfig,
+                    config: { ...modeConfig, ...codexCompactionLimit(input.compactionPoint) },
                   }),
                 catch: (error) =>
                   error instanceof CodexRpcClientFailure ? error : providerFailure(error),
@@ -2183,7 +2255,11 @@ function makeConnection(
                 Effect.catchAll((error) =>
                   isActiveWriterConflict(error) && attempt < CODEX_RESUME_WRITER_CONFLICT_ATTEMPTS
                     ? (attempt === 1
-                        ? closeIdleOtherLeases(input.executionPolicy, codexRunsOwnSubagents(input))
+                        ? closeIdleOtherLeases(
+                            input.executionPolicy,
+                            codexRunsOwnSubagents(input),
+                            input.fullAccessSandbox === true,
+                          )
                         : Effect.void
                       ).pipe(
                         Effect.zipRight(
@@ -2274,7 +2350,11 @@ function makeConnection(
                     const turn = await client.turnStart({
                       threadId: state.threadId,
                       ...codexTurnRequest(withCarriedToolRules(input, state.carriedTools), version),
-                      ...codexTurnExecutionSettings(state.executionPolicy, state.autoApprove),
+                      ...codexTurnExecutionSettings(
+                        state.executionPolicy,
+                        state.autoApprove,
+                        state.fullAccessSandbox,
+                      ),
                       ...state.turnOverrides,
                       ...(mode === "chat" ? { environments: [] as const } : {}),
                     });

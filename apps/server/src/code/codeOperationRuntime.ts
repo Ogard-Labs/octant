@@ -1,4 +1,6 @@
+import { withHandoverSummary } from "../agentRun/conversationHandoff";
 import { MAX_PROVIDER_ATTACHMENTS } from "@octant/contracts";
+import { THREAD_MOVING_REFUSAL } from "../hub/threadMoveHolds";
 import type {
   ConversationInputReceipt,
   ConversationInputPurpose,
@@ -296,6 +298,11 @@ function defaultAcpTerminalConfinement(): CodeAcpTerminalConfinement {
 
 export interface CodeOperationRuntimeOptions {
   readonly prepareWorktree?: CodeOperationServiceOptions["prepareWorktree"];
+  /**
+   * Whether a move holds the thread: frozen while it leaves this computer, or
+   * arriving and not yet committed. A held thread starts no turn.
+   */
+  readonly moveHold?: (threadId: string) => boolean;
   /** Where a running turn's start time and latest step are kept for the navigation read. */
   readonly liveTurns?: LiveTurnRegistry;
   /**
@@ -481,6 +488,13 @@ export interface CodeOperationRuntimeOptions {
    * this host cannot hand a conversation over, so a turn on a provider other
    * than its session's is refused, naming that reason.
    */
+  /**
+   * The summary the limit rule wrote with the thread's earlier provider, when
+   * it still covers the thread's conversation; a provider switch leads with it.
+   */
+  readonly handoverSummary?: (
+    thread: CodeThread,
+  ) => { readonly content: string; readonly completedAt: string } | undefined;
   readonly providerSwitchContext?: (input: {
     readonly thread: CodeThread;
     readonly excludeOperationId: CodeOperationId;
@@ -552,6 +566,8 @@ export interface CodeOperationRuntimeOptions {
   readonly sideTasks?: (input: {
     readonly windowId: WindowId;
     readonly thread: CodeThread;
+    /** The operation the tools serve; an offer names it as its turn. */
+    readonly operationId: string;
     readonly planner?: CodePlannerToolPort;
   }) => AppManagedToolSet | undefined;
   /**
@@ -917,7 +933,9 @@ export interface CodeOperationRuntime {
     /** How full its window was at the thread's latest usage report, and when. */
     readonly occupancy: (
       threadId: string,
-    ) => { readonly tokens: number; readonly observedAt: string } | undefined;
+    ) =>
+      | { readonly tokens: number; readonly observedAt: string; readonly contextWindow?: number }
+      | undefined;
     /**
      * How to open it, under the asking window's authority over the thread's
      * checkout; undefined when that window may not, or the session is gone.
@@ -2396,7 +2414,16 @@ export function threadWithActiveTurnPosture(
     requested: active.thread.executionPolicy,
     thread: thread.executionPolicy,
   });
-  return executionPolicy === thread.executionPolicy ? thread : { ...thread, executionPolicy };
+  // A turn that started sandboxed stays sandboxed: turning the sandbox off
+  // takes effect from the next turn, as a wider posture does.
+  const keepsSandbox =
+    active.thread.fullAccessSandbox === true && thread.fullAccessSandbox !== true;
+  if (executionPolicy === thread.executionPolicy && !keepsSandbox) return thread;
+  return {
+    ...thread,
+    executionPolicy,
+    ...(keepsSandbox ? { fullAccessSandbox: true } : {}),
+  };
 }
 
 /** The Code thread whose running turn holds this provider session, if any. */
@@ -2734,6 +2761,10 @@ class RuntimeTurnController implements CodeOperationTurnPort {
 
   async start(input: Parameters<CodeOperationTurnPort["start"]>[0]) {
     const key = String(input.thread.id);
+    if (this.#options.moveHold?.(key) === true) {
+      this.settleSpendReservation(input.operationId);
+      return turnState("failed", { category: "failed", message: THREAD_MOVING_REFUSAL });
+    }
     const existing = this.#active.get(key);
     if (
       existing !== undefined &&
@@ -3547,10 +3578,18 @@ class RuntimeTurnController implements CodeOperationTurnPort {
       if (inherited.source.projectId !== String(thread.projectId))
         return refused({ subject: "inherited", reason: "foreign-project" });
     }
+    // A switch to another provider leads with the summary the limit rule
+    // wrote, when one waits. A fork's handoff also carries its source's turns,
+    // which that summary never read, so a fork hands over as before.
+    const handover =
+      reason === "provider-switch" && origin === undefined
+        ? this.#handoverSummary(thread)
+        : undefined;
+    const carried = withHandoverSummary(selection, handover);
     return {
       status: "ready",
-      blocks: selection.blocks,
-      inputSelection: selection,
+      blocks: carried.blocks,
+      inputSelection: carried,
       record: {
         kind: "context-handoff-attached",
         reason,
@@ -3559,9 +3598,10 @@ class RuntimeTurnController implements CodeOperationTurnPort {
         previousSessionId: previous.sessionId,
         providerInstanceId: thread.providerInstanceId,
         modelId: thread.modelId,
-        messages: selection.blocks.length - 1,
-        omissions: selection.omissions,
-        externalContentIngested: selection.source.externalContentIngested,
+        messages: carried.blocks.filter((block) => block.kind !== "conversation-summary").length,
+        omissions: carried.omissions,
+        externalContentIngested: carried.source.externalContentIngested,
+        ...(carried === selection ? {} : { handoverSummary: true as const }),
         ...(origin === undefined || inherited === undefined
           ? {}
           : {
@@ -3575,6 +3615,17 @@ class RuntimeTurnController implements CodeOperationTurnPort {
         hiddenReasoningTransferred: false,
       },
     };
+  }
+
+  /** The limit rule's summary for the thread, if one waits; a read that fails hands over as before. */
+  #handoverSummary(
+    thread: CodeThread,
+  ): { readonly content: string; readonly completedAt: string } | undefined {
+    try {
+      return this.#options.handoverSummary?.(thread);
+    } catch {
+      return undefined;
+    }
   }
 
   /**
@@ -4770,6 +4821,7 @@ class RuntimeTurnController implements CodeOperationTurnPort {
         this.#options.sideTasks?.({
           windowId: active.windowId,
           thread: active.thread,
+          operationId: String(active.operationId),
           ...(this.#options.planner === undefined ? {} : { planner: this.#options.planner }),
         }),
         this.#options.canvas?.({ windowId: active.windowId, thread: active.thread }),
@@ -4851,6 +4903,7 @@ class RuntimeTurnController implements CodeOperationTurnPort {
       providerInstanceId: active.thread.providerInstanceId,
       modelId: active.thread.modelId,
       projectId: active.thread.projectId,
+      windowId: active.windowId,
     };
     const harnessContext = this.#options.nativeHarness?.contextFor(harnessScope) ?? [];
     this.#options.nativeHarness?.turnStarted(harnessScope);
@@ -4957,6 +5010,7 @@ class RuntimeTurnController implements CodeOperationTurnPort {
       Effect.scoped(
         this.#runner.run({
           thread: active.thread,
+          providerDriverKind: active.driver.kind,
           ...(active.inputsCurrent === undefined ? {} : { inputsCurrent: active.inputsCurrent }),
           sessionId: active.sessionId as never,
           ...(active.resumeCursor === undefined ? {} : { resumeCursor: active.resumeCursor }),

@@ -794,7 +794,12 @@ export class ProjectService implements ProjectServiceApi {
           kind = "code-project-access-changed";
           eventName = "project.code-access-changed@1";
         } else if (command.kind === "change-code-project-permission-mode") {
-          project = changeCodeProjectPermissionMode(current, command.permissionMode, timestamp);
+          project = changeCodeProjectPermissionMode(
+            current,
+            command.permissionMode,
+            timestamp,
+            command.fullAccessSandbox,
+          );
           kind = "code-project-access-changed";
           eventName = "project.code-permission-mode-changed@1";
         } else if (command.kind === "change-code-project-auto-reviewer") {
@@ -888,7 +893,12 @@ export class ProjectService implements ProjectServiceApi {
           kind = "work-project-developer-tools-changed";
           eventName = "project.work-developer-tools-changed@1";
         } else if (command.kind === "change-work-project-permission-mode") {
-          project = changeWorkProjectPermissionMode(current, command.permissionMode, timestamp);
+          project = changeWorkProjectPermissionMode(
+            current,
+            command.permissionMode,
+            timestamp,
+            command.fullAccessSandbox,
+          );
           kind = "work-project-permission-mode-changed";
           eventName = "project.work-permission-mode-changed@1";
         } else if (command.kind === "change-work-project-actions") {

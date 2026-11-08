@@ -167,6 +167,7 @@ export const MAX_NATIVE_HARNESS_GREP_MATCHES = 500;
 export const MAX_NATIVE_HARNESS_COMMAND_LENGTH = 16_384;
 export const MAX_NATIVE_HARNESS_COMMAND_TIMEOUT_MS = 10 * 60_000;
 export const MAX_NATIVE_HARNESS_EDIT_TEXT_LENGTH = 65_536;
+export const MAX_NATIVE_HARNESS_EDITS_PER_CALL = 20;
 export const MAX_NATIVE_HARNESS_WRITE_LENGTH = 512 * 1024;
 export const MAX_NATIVE_HARNESS_FETCH_BYTES = 512 * 1024;
 export const MAX_NATIVE_HARNESS_SEARCH_RESULTS = 10;
@@ -216,7 +217,7 @@ export type NativeHarnessBashArguments = typeof NativeHarnessBashArguments.Type;
  * Search-and-replace. Exact match first; the runtime retries once with
  * whitespace normalized; more than one match refuses unless `replaceAll`.
  */
-export const NativeHarnessEditArguments = Schema.Struct({
+export const NativeHarnessReplacement = Schema.Struct({
   path: ToolPath,
   oldText: Schema.String.pipe(
     Schema.minLength(1),
@@ -225,6 +226,22 @@ export const NativeHarnessEditArguments = Schema.Struct({
   newText: Schema.String.pipe(Schema.maxLength(MAX_NATIVE_HARNESS_EDIT_TEXT_LENGTH)),
   replaceAll: Schema.optional(Schema.Boolean),
 }).annotations(strict);
+export type NativeHarnessReplacement = typeof NativeHarnessReplacement.Type;
+
+/**
+ * One replacement, or several in `edits`, across one or more files. Several
+ * are all or nothing: every one is checked before any file is written, and
+ * replacements in the same file apply in the order given.
+ */
+export const NativeHarnessEditArguments = Schema.Union(
+  NativeHarnessReplacement,
+  Schema.Struct({
+    edits: Schema.Array(NativeHarnessReplacement).pipe(
+      Schema.minItems(1),
+      Schema.maxItems(MAX_NATIVE_HARNESS_EDITS_PER_CALL),
+    ),
+  }).annotations(strict),
+);
 export type NativeHarnessEditArguments = typeof NativeHarnessEditArguments.Type;
 
 export const NativeHarnessWriteArguments = Schema.Struct({
@@ -441,8 +458,7 @@ export const NATIVE_HARNESS_TOOL_DEFINITIONS: ReadonlyArray<ProviderToolDefiniti
   },
   {
     name: "edit",
-    description:
-      "Replace oldText with newText in a file you have read. Exact match; set replaceAll for every occurrence.",
+    description: `Replace oldText with newText in a file you have read. Exact match; set replaceAll for every occurrence. For several changes, in one file or many, pass edits instead (up to ${MAX_NATIVE_HARNESS_EDITS_PER_CALL}, each with path, oldText, newText, and optional replaceAll): they apply in order, and if any one fails no file changes and the result names which one.`,
     inputSchema: {
       type: "object",
       properties: {
@@ -450,8 +466,22 @@ export const NATIVE_HARNESS_TOOL_DEFINITIONS: ReadonlyArray<ProviderToolDefiniti
         oldText: { type: "string" },
         newText: { type: "string" },
         replaceAll: { type: "boolean" },
+        edits: {
+          type: "array",
+          minItems: 1,
+          maxItems: MAX_NATIVE_HARNESS_EDITS_PER_CALL,
+          items: {
+            type: "object",
+            properties: {
+              path: pathProperty,
+              oldText: { type: "string" },
+              newText: { type: "string" },
+              replaceAll: { type: "boolean" },
+            },
+            required: ["path", "oldText", "newText"],
+          },
+        },
       },
-      required: ["path", "oldText", "newText"],
     },
   },
   {

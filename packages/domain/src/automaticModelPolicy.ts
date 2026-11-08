@@ -5,11 +5,12 @@ import type { ProviderReadiness } from "@octant/contracts";
  * Judge and person memory's distilling. Each job is told apart in Settings,
  * the journal and Usage by this name.
  */
-export type AutomaticModelJob = "shield-judge" | "person-memory";
+export type AutomaticModelJob = "shield-judge" | "person-memory" | "decision-review";
 
 export const AUTOMATIC_MODEL_JOB_LABELS: Readonly<Record<AutomaticModelJob, string>> = {
   "shield-judge": "Octant Shield's Judge",
   "person-memory": "Memory distilling",
+  "decision-review": "Second opinion on decisions",
 };
 
 /**
@@ -22,11 +23,20 @@ export const AUTOMATIC_MODEL_DISCLOSURE: Readonly<Record<AutomaticModelJob, stri
     "What the Judge reviews goes to this provider: your recent messages, the pending action and the project's root. It never sees files, tool output or web pages.",
   "person-memory":
     "What memory distils goes to this provider: the title of a finished thread, the messages you wrote in it and the memories already kept (so it does not repeat them), with secrets removed. It never sees answers, tool output or files.",
+  "decision-review":
+    "What the second opinion reads goes to this provider: the decision's question, why and options, and the end of the agent's reply before it (at most 3,000 characters), with secrets removed. It never sees files, tool output or web pages. Each decision costs one request.",
 };
 
-/** Settings' note for both jobs: one choice, no automatic switching. */
+/**
+ * A second opinion has no default account. The thread's own model would only
+ * agree with itself, and sending a decision's text to a provider is a choice
+ * the person makes, so the job stays off until one is picked.
+ */
+export const DECISION_REVIEW_OFF_LABEL = "Off";
+
+/** Settings' note for every job: one choice, no automatic switching. */
 export const AUTOMATIC_MODEL_NO_SWITCH_NOTE =
-  "Octant never moves a job to another account by itself. If the account you chose is off or at its limit, the Judge asks you and memory waits.";
+  "Octant never moves a job to another account by itself. If the account you chose is off or at its limit, the Judge asks you, memory waits and a second opinion is skipped.";
 
 /**
  * What stands between an account the person chose and a call on it, as one

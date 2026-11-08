@@ -13,7 +13,7 @@ import {
 } from "./codeOperations";
 import { AggregateVersion, UtcTimestamp } from "./events";
 import { ProjectId } from "./projects";
-import { ProviderModelId } from "./providers";
+import { ProviderInstanceId, ProviderModelId } from "./providers";
 import { MAX_WORK_REQUEST_OPTIONS, WorkRequestId, WorkRequestSanitizedText } from "./workRequests";
 import { WorkThreadId } from "./workThreads";
 import { WorkTurnAuthority, WorkTurnId } from "./workTurns";
@@ -32,12 +32,22 @@ export const MAX_TURN_DECISION_ASK_LENGTH = 110;
 /** An option is words the person would send, short enough for one button. */
 export const MAX_TURN_DECISION_OPTION_LENGTH = 60;
 export const MAX_TURN_DECISION_OPTIONS = 4;
+/** One line of context the person needs to choose; a card shows it as a short paragraph. */
+export const MAX_TURN_DECISION_WHY_LENGTH = 240;
+/** The consequence or tradeoff of one option, one line under its button. */
+export const MAX_TURN_DECISION_OPTION_DETAIL_LENGTH = 80;
 
 export const TurnDecisionAskText = Schema.NonEmptyTrimmedString.pipe(
   Schema.maxLength(MAX_TURN_DECISION_ASK_LENGTH),
 );
 export const TurnDecisionOptionText = Schema.NonEmptyTrimmedString.pipe(
   Schema.maxLength(MAX_TURN_DECISION_OPTION_LENGTH),
+);
+export const TurnDecisionWhyText = Schema.NonEmptyTrimmedString.pipe(
+  Schema.maxLength(MAX_TURN_DECISION_WHY_LENGTH),
+);
+export const TurnDecisionOptionDetailText = Schema.NonEmptyTrimmedString.pipe(
+  Schema.maxLength(MAX_TURN_DECISION_OPTION_DETAIL_LENGTH),
 );
 
 /**
@@ -46,7 +56,11 @@ export const TurnDecisionOptionText = Schema.NonEmptyTrimmedString.pipe(
  * action: picking one sends it to the agent and does nothing else.
  */
 export const TurnDecisionOptions = Schema.Array(
-  Schema.Struct({ label: TurnDecisionOptionText, recommended: Schema.Boolean }).annotations(strict),
+  Schema.Struct({
+    label: TurnDecisionOptionText,
+    recommended: Schema.Boolean,
+    detail: Schema.optional(TurnDecisionOptionDetailText),
+  }).annotations(strict),
 ).pipe(
   Schema.minItems(1),
   Schema.maxItems(MAX_TURN_DECISION_OPTIONS),
@@ -58,6 +72,46 @@ export const TurnDecisionOptions = Schema.Array(
   ),
 );
 export type TurnDecisionOptions = typeof TurnDecisionOptions.Type;
+
+/** A reviewer's reason is one short sentence beside the option it backs. */
+export const MAX_TURN_DECISION_REVIEW_REASON_LENGTH = 100;
+export const TurnDecisionReviewReasonText = Schema.NonEmptyTrimmedString.pipe(
+  Schema.maxLength(MAX_TURN_DECISION_REVIEW_REASON_LENGTH),
+  Schema.pattern(/^[^\r\n]+$/),
+);
+
+/** The model that asked: the asking turn's provider account and model. */
+export const TurnDecisionAskedBy = Schema.Struct({
+  providerInstanceId: ProviderInstanceId,
+  modelId: ProviderModelId,
+}).annotations(strict);
+export type TurnDecisionAskedBy = typeof TurnDecisionAskedBy.Type;
+
+/**
+ * A second opinion on one decision, from the model the person chose. It is
+ * advisory: it never answers the decision or changes its options. `pending`
+ * is queued or running; the other non-reviewed states say the opinion will not
+ * come, so a card can stop waiting. Absent when no second opinion is chosen or
+ * the chosen account cannot be asked right now.
+ */
+export const TurnDecisionReview = Schema.Union(
+  Schema.Struct({ status: Schema.Literal("pending") }).annotations(strict),
+  Schema.Struct({
+    status: Schema.Literal("reviewed"),
+    providerInstanceId: ProviderInstanceId,
+    modelId: ProviderModelId,
+    providerName: Schema.optional(Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(128))),
+    /** The reviewer account's driver, so a card can draw its provider mark. */
+    driverKind: Schema.optional(Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(64))),
+    backs: TurnDecisionOptionText,
+    reason: TurnDecisionReviewReasonText,
+    reviewedAt: UtcTimestamp,
+  }).annotations(strict),
+  Schema.Struct({ status: Schema.Literal("withheld") }).annotations(strict),
+  Schema.Struct({ status: Schema.Literal("failed") }).annotations(strict),
+  Schema.Struct({ status: Schema.Literal("not-allowed") }).annotations(strict),
+);
+export type TurnDecisionReview = typeof TurnDecisionReview.Type;
 
 /**
  * One approval, question, or decision waiting on the person, in a thread the reading
@@ -316,7 +370,11 @@ export const PendingRequest = Schema.Union(
     projectId: ProjectId,
     threadId: WorkThreadId,
     text: TurnDecisionAskText,
+    why: Schema.optional(TurnDecisionWhyText),
+    urgent: Schema.optional(Schema.Boolean),
     options: TurnDecisionOptions,
+    askedBy: Schema.optional(TurnDecisionAskedBy),
+    review: Schema.optional(TurnDecisionReview),
     answer: WorkPendingDecisionAnswer,
   })
     .annotations(strict)
@@ -325,7 +383,11 @@ export const PendingRequest = Schema.Union(
     ...CodePendingRequestFields,
     kind: Schema.Literal("decision"),
     text: TurnDecisionAskText,
+    why: Schema.optional(TurnDecisionWhyText),
+    urgent: Schema.optional(Schema.Boolean),
     options: TurnDecisionOptions,
+    askedBy: Schema.optional(TurnDecisionAskedBy),
+    review: Schema.optional(TurnDecisionReview),
     answer: CodePendingDecisionAnswer,
   })
     .annotations(strict)
@@ -392,3 +454,30 @@ export const PendingQuestionDeferral = Schema.Struct({
   until: Schema.NullOr(UtcTimestamp),
 }).annotations(strict);
 export type PendingQuestionDeferral = typeof PendingQuestionDeferral.Type;
+
+/**
+ * What a decision's second opinion settled on, as journaled. An account that
+ * could not be asked (off, at its limit, removed) or a call that timed out is
+ * never journaled: nothing was learned, so a later read asks again.
+ */
+export const DecisionReviewOutcome = Schema.Union(
+  Schema.Struct({
+    kind: Schema.Literal("reviewed"),
+    backs: TurnDecisionOptionText,
+    reason: TurnDecisionReviewReasonText,
+  }).annotations(strict),
+  Schema.Struct({ kind: Schema.Literal("withheld") }).annotations(strict),
+  Schema.Struct({ kind: Schema.Literal("failed") }).annotations(strict),
+  Schema.Struct({ kind: Schema.Literal("not-allowed") }).annotations(strict),
+);
+export type DecisionReviewOutcome = typeof DecisionReviewOutcome.Type;
+
+/** `decision-review.recorded@1`: keyed like a decision's deferral, so it names the turn that asked. */
+export const DecisionReviewRecorded = Schema.Struct({
+  key: Schema.String.pipe(Schema.pattern(/^[a-f0-9]{64}$/)),
+  providerInstanceId: ProviderInstanceId,
+  modelId: ProviderModelId,
+  reviewedAt: UtcTimestamp,
+  outcome: DecisionReviewOutcome,
+}).annotations(strict);
+export type DecisionReviewRecorded = typeof DecisionReviewRecorded.Type;

@@ -29,6 +29,7 @@ import {
 } from "@octant/contracts";
 import type {
   ProviderAcquireInput,
+  ProviderCompactionPoint,
   ProviderConnection,
   ProviderDriver,
   ProviderSessionCompaction,
@@ -637,6 +638,8 @@ const availableCapabilities: ProviderCapabilities = {
   diffs: "supported",
   taskProgress: "supported",
   nativeChildAgents: "unsupported",
+  // Each query takes the person's compaction point as an `autoCompactWindow` flag setting.
+  compactionPoint: "supported",
   harnessAutoReview: "supported",
   // Claude's reviewer reports a refusal and nothing for a call it approved.
   reviewVerdicts: { allow: "unsupported", deny: "supported" },
@@ -1725,6 +1728,9 @@ function makeConnection(
       ...(state.query.initialization.autoCompactThreshold === undefined
         ? {}
         : { autoCompactThreshold: state.query.initialization.autoCompactThreshold }),
+      ...(state.query.initialization.contextWindow === undefined
+        ? {}
+        : { contextWindow: state.query.initialization.contextWindow }),
       callUsage: new Map(),
       requestIds: new Map(),
       taskIds: new Map(),
@@ -1919,6 +1925,7 @@ function makeConnection(
         readonly singleUse?: boolean;
         readonly nativeArtifacts?: boolean;
         readonly nativeSetup?: ProviderNativeSetup;
+        readonly compactionPoint?: ProviderCompactionPoint;
       },
       signal: AbortSignal,
       resumeSessionId?: string,
@@ -2518,6 +2525,7 @@ function makeConnection(
               ...(input.singleUse === true ? { persistSession: false as const } : {}),
               tools: executionOptions.tools,
               ...(nativeSetup === undefined ? {} : { nativeSetup }),
+              ...claudeAutoCompactWindow(input.compactionPoint),
               ...(sandbox === undefined ? {} : { sandbox }),
               canUseTool,
               preToolUse,
@@ -2763,6 +2771,9 @@ function makeConnection(
                 : { modelOptionValues: input.modelOptionValues }),
               ...(input.nativeArtifacts === true ? { nativeArtifacts: true } : {}),
               ...(input.nativeSetup === undefined ? {} : { nativeSetup: input.nativeSetup }),
+              ...(input.compactionPoint === undefined
+                ? {}
+                : { compactionPoint: input.compactionPoint }),
             },
             signal,
             input.resumeCursor.value,
@@ -3166,3 +3177,25 @@ function withPublishedSnapshots(
     }),
   };
 }
+
+/**
+ * Claude Code compacts once a session holds its auto-compact window less a
+ * fixed 33,000-token reserve, the window being the smaller of the model's and
+ * the `autoCompactWindow` setting, which it clamps to 100,000 to 1,000,000
+ * (the 2.1.287 runtime that the agent SDK 0.3.211 bundles; measured live on
+ * 2026-11-08: a 1,000,000 window reports its threshold at 967,000). So the
+ * person's point is the setting at point plus the reserve, passed as a flag
+ * setting on this query alone, never written to their settings files. A point
+ * at or past the runtime's own, or below what the clamp allows, leaves the
+ * runtime its own point.
+ */
+export function claudeAutoCompactWindow(point: ProviderCompactionPoint | undefined): {
+  readonly autoCompactWindow?: number;
+} {
+  if (point === undefined) return {};
+  const window = point.tokens + CLAUDE_AUTO_COMPACT_RESERVE_TOKENS;
+  if (window >= point.contextWindow || window < 100_000 || window > 1_000_000) return {};
+  return { autoCompactWindow: window };
+}
+
+const CLAUDE_AUTO_COMPACT_RESERVE_TOKENS = 33_000;
