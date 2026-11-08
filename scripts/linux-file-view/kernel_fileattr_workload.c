@@ -60,6 +60,24 @@ static bool queued_bytes(int pair[2])
   return allowed;
 }
 
+static bool ordinary_seeks(int file, off_t size)
+{
+  return lseek(file, 0, SEEK_END) == size && lseek(file, 0, SEEK_DATA) == 0 &&
+    lseek(file, 0, SEEK_HOLE) == size && lseek(file, 7, SEEK_SET) == 7 &&
+    lseek(file, -7, SEEK_CUR) == 0;
+}
+
+struct seek_observation { off_t result; int error; bool refused; };
+static struct seek_observation protected_seek(int file, int origin)
+{
+  bool reset = lseek(file, 0, SEEK_SET) == 0;
+  errno = 0;
+  off_t result = lseek(file, 0, origin);
+  int error = result < 0 ? errno : 0;
+  return (struct seek_observation) { .result = result, .error = error,
+    .refused = reset && result == -1 && error == EACCES && lseek(file, 0, SEEK_CUR) == 0 };
+}
+
 int main(int argc, char **argv)
 {
   alarm(12);
@@ -77,6 +95,7 @@ int main(int argc, char **argv)
   long long before_usage = -1;
   if (ioctl(held, FIONREAD, &before_available) || before_available != before.identity.st_size ||
       ioctl(held, FIOQSIZE, &before_usage) || before_usage < 0) return 7;
+  if (!ordinary_seeks(held, before.identity.st_size)) return 8;
   puts("OCTANT_FILEATTR_FILESYSTEM {\"ext4\":true,\"baselineRead\":true}");
   int saved = open(BASELINE, O_CREAT | O_EXCL | O_WRONLY | O_CLOEXEC | O_NOFOLLOW, 0600);
   if (saved < 0 || write(saved, &before, sizeof(before)) != sizeof(before) || fsync(saved)) return 4;
@@ -110,6 +129,10 @@ int main(int argc, char **argv)
   int usage_errno = usage_result < 0 ? errno : 0;
   bool available_refused = available_result == -1 && available_errno == EACCES && private_available == available_sentinel;
   bool usage_refused = usage_result == -1 && usage_errno == EACCES && private_usage == usage_sentinel;
+  struct seek_observation seek_end = protected_seek(held, SEEK_END);
+  struct seek_observation seek_data = protected_seek(held, SEEK_DATA);
+  struct seek_observation seek_hole = protected_seek(held, SEEK_HOLE);
+  bool private_position = lseek(held, 7, SEEK_SET) == 7 && lseek(held, -7, SEEK_CUR) == 0;
   unsigned int changed = before.flags ^ FS_NODUMP_FL;
   errno = 0;
   int mutation = ioctl(held, FS_IOC_SETFLAGS, &changed);
@@ -132,7 +155,14 @@ int main(int argc, char **argv)
   long long public_usage = -1;
   bool public_queries = public >= 0 && !ioctl(public, FIONREAD, &public_available) && public_available >= 0 &&
     !ioctl(public, FIOQSIZE, &public_usage) && public_usage >= 0;
+  struct stat public_identity;
+  bool public_seeks = public >= 0 && !fstat(public, &public_identity) && ordinary_seeks(public, public_identity.st_size);
   if (public >= 0) close(public);
+  printf("OCTANT_LLSEEK_METADATA {\"baselineAllowed\":true,\"endRefused\":%s,\"endResult\":%lld,\"endErrno\":%d,\"dataRefused\":%s,\"dataResult\":%lld,\"dataErrno\":%d,\"holeRefused\":%s,\"holeResult\":%lld,\"holeErrno\":%d,\"positionAllowed\":%s,\"publicAllowed\":%s}\n",
+    seek_end.refused ? "true" : "false", (long long)seek_end.result, seek_end.error,
+    seek_data.refused ? "true" : "false", (long long)seek_data.result, seek_data.error,
+    seek_hole.refused ? "true" : "false", (long long)seek_hole.result, seek_hole.error,
+    private_position ? "true" : "false", public_seeks ? "true" : "false");
   int pipe_fds[2] = {-1, -1}, socket_fds[2] = {-1, -1};
   bool pipe_allowed = !pipe2(pipe_fds, O_CLOEXEC) && queued_bytes(pipe_fds);
   bool socket_allowed = !socketpair(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0, socket_fds) && queued_bytes(socket_fds);
@@ -149,5 +179,6 @@ int main(int argc, char **argv)
     private_output_unchanged ? "true" : "false", private_refused ? "true" : "false", mutation, failure, public_changed ? "true" : "false",
     public_restored ? "true" : "false", marker ? "true" : "false");
   return private_read_refused && private_output_unchanged && private_refused && public_changed && public_restored && marker &&
-    available_refused && usage_refused && public_queries && pipe_allowed && socket_allowed ? 0 : 18;
+    available_refused && usage_refused && public_queries && pipe_allowed && socket_allowed &&
+    seek_end.refused && seek_data.refused && seek_hole.refused && private_position && public_seeks ? 0 : 18;
 }
