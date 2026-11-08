@@ -30,6 +30,7 @@ import { spawn } from "node:child_process";
 import { join } from "node:path";
 import { openLocalControlSession, type OpenedLocalControlSession } from "./localControl";
 import { resolveProjectCliCommand, runProjectCliCommand } from "./projectCommand";
+import { resolveSettingsCliCommand, runSettingsCliCommand } from "./settingsCommand";
 import { runPluginAuthoringCommand } from "./pluginAuthoring";
 import {
   isPluginAuthoringCommand,
@@ -364,6 +365,21 @@ export async function runCli(
         command,
         session,
         cwd: process.cwd(),
+        stdout: process.stdout,
+        stderr: process.stderr,
+      }),
+    );
+  }
+  if (args.command === "settings") {
+    const command = resolveSettingsCliCommand(args.positional, args.flags);
+    if (command === undefined) {
+      printUsage(context.identity);
+      return 1;
+    }
+    return await withLocalControlSession(context, (session) =>
+      runSettingsCliCommand({
+        command,
+        session,
         stdout: process.stdout,
         stderr: process.stderr,
       }),
@@ -723,6 +739,10 @@ const USAGE: ReadonlyArray<{ readonly octant: string; readonly nightly?: string 
   { octant: "project remove <name>" },
   { octant: "project rename <name> <new name>" },
   { octant: "project access <name> full-access|approval-gated" },
+  {
+    octant:
+      "settings access ask-first|accept-edits|auto|plan|full-access [--work]  (the default new threads start at, Code unless --work)",
+  },
   { octant: "plugin install npm:<package>[@<version or range>]" },
   { octant: "plugin check-update <package>" },
   { octant: "plugin create <name> [--mcp-url <https address>]" },
