@@ -601,12 +601,12 @@ static int octant_file_permission(struct file *file, int mask)
 }
 
 /* The pinned native and compat syscall entries call these hooks before
- * do_vfs_ioctl copies regular-file size/allocation data, without inode locks.
- * Descriptor flags and pipe/socket queries retain their native behavior. */
+ * do_vfs_ioctl copies regular-file size/allocation or extent data, without
+ * inode locks. Descriptor flags and pipe/socket queries keep their behavior. */
 static int octant_file_ioctl(struct file *file, unsigned int command, unsigned long argument)
 {
 	struct inode *inode = file_inode(file);
-	if ((command == FIONREAD || command == FIOQSIZE) &&
+	if ((command == FIONREAD || command == FIOQSIZE || command == FS_IOC_FIEMAP) &&
 	    S_ISREG(inode->i_mode) && !IS_ANON_FILE(inode))
 		return admit_file(file, OCTANT_MEDIATION_READ);
 	return 0;
