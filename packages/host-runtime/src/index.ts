@@ -31,6 +31,15 @@ export {
   type HostRuntimeRestoreOutcome,
 } from "./owner";
 export {
+  acquireWindowsHostProfileOwner,
+  loadWindowsHostProfileNative,
+  type AcquireWindowsHostProfileOptions,
+  type WindowsHostProfile,
+  type WindowsHostProfileNative,
+  type WindowsHostProfileOwnership,
+  type WindowsHostProfilePaths,
+} from "./windowsHostProfile";
+export {
   decodeHeadlessArtifactManifest,
   encodeHeadlessArtifactManifest,
   HEADLESS_ARTIFACT_MANIFEST_FILENAME,

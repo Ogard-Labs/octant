@@ -7,6 +7,8 @@
 #include <node_api.h>
 #include <algorithm>
 #include <array>
+#include <cstring>
+#include <cwchar>
 #include <map>
 #include <memory>
 #include <string>
@@ -57,7 +59,11 @@ struct Root {
   std::wstring path, display_path, endpoint, sid;
   std::vector<unsigned char> sid_bytes;
   PSECURITY_DESCRIPTOR security = nullptr;
-  ~Root() { if (security != nullptr) LocalFree(security); }
+  PSECURITY_DESCRIPTOR directory_security = nullptr;
+  ~Root() {
+    if (security != nullptr) LocalFree(security);
+    if (directory_security != nullptr) LocalFree(directory_security);
+  }
 };
 struct Owner {
   napi_env env = nullptr;
@@ -80,6 +86,8 @@ struct Client {
   ULONGLONG started = 0;
 };
 struct AdmissionGuard { std::unique_ptr<Root> root; Handle record; };
+struct Profile { std::unique_ptr<Root> root; Handle identity; std::string scope; };
+std::map<std::string, std::unique_ptr<Profile>> profiles;
 std::vector<AdmissionGuard> admitted;
 std::unique_ptr<Owner> owner;
 char module_identity;
@@ -166,21 +174,21 @@ bool same_user(DWORD pid, const Root& root) {
   std::vector<unsigned char> sid;
   return process && token_sid(process.value, sid) && EqualSid(sid.data(), const_cast<unsigned char*>(root.sid_bytes.data()));
 }
-bool private_acl(HANDLE handle, const Root& root) {
+bool private_acl(HANDLE handle, const Root& root, BYTE expected_flags = 0, bool protected_dacl = true) {
   PSID principal = nullptr; PACL acl = nullptr; PSECURITY_DESCRIPTOR descriptor = nullptr;
   if (GetSecurityInfo(handle, SE_FILE_OBJECT, OWNER_SECURITY_INFORMATION | DACL_SECURITY_INFORMATION,
       &principal, nullptr, &acl, nullptr, &descriptor) != ERROR_SUCCESS) return false;
   SECURITY_DESCRIPTOR_CONTROL control = 0; DWORD revision = 0;
   std::array<unsigned char, SECURITY_MAX_SID_SIZE> system{}; DWORD system_size = static_cast<DWORD>(system.size());
   bool sound = principal != nullptr && IsValidSid(principal) && EqualSid(principal, const_cast<unsigned char*>(root.sid_bytes.data())) && acl != nullptr && acl->AceCount == 2 &&
-    GetSecurityDescriptorControl(descriptor, &control, &revision) && (control & SE_DACL_PROTECTED) != 0 &&
+    GetSecurityDescriptorControl(descriptor, &control, &revision) && ((control & SE_DACL_PROTECTED) != 0) == protected_dacl &&
     CreateWellKnownSid(WinLocalSystemSid, nullptr, system.data(), &system_size);
   bool saw_user = false, saw_system = false;
   for (DWORD i = 0; sound && i < acl->AceCount; ++i) {
     void* raw = nullptr;
     if (!GetAce(acl, i, &raw)) { sound = false; break; }
     const auto ace = static_cast<const ACCESS_ALLOWED_ACE*>(raw);
-    if (ace->Header.AceType != ACCESS_ALLOWED_ACE_TYPE || ace->Header.AceSize < sizeof(ACCESS_ALLOWED_ACE) || ace->Header.AceFlags != 0 || ace->Mask != FILE_ALL_ACCESS) { sound = false; break; }
+    if (ace->Header.AceType != ACCESS_ALLOWED_ACE_TYPE || ace->Header.AceSize < sizeof(ACCESS_ALLOWED_ACE) || ace->Header.AceFlags != expected_flags || ace->Mask != FILE_ALL_ACCESS) { sound = false; break; }
     const auto sid = const_cast<DWORD*>(&ace->SidStart);
     if (!IsValidSid(sid)) { sound = false; break; }
     if (EqualSid(sid, const_cast<unsigned char*>(root.sid_bytes.data())) && !saw_user) saw_user = true;
@@ -198,12 +206,15 @@ Handle open_directory(const std::wstring& path) {
       (info.FileAttributes & FILE_ATTRIBUTE_DIRECTORY) == 0 || (info.FileAttributes & FILE_ATTRIBUTE_REPARSE_POINT) != 0) return Handle();
   return handle;
 }
-std::unique_ptr<Root> root_for(const std::string& scope, bool create) {
-  if (!uuid(scope)) return nullptr;
+std::unique_ptr<Root> private_root(const std::vector<std::wstring>& components, bool create, bool inherit) {
   auto result = std::make_unique<Root>();
   if (!token_sid(GetCurrentProcess(), result->sid_bytes, &result->sid)) return nullptr;
   const std::wstring security = L"O:" + result->sid + L"D:P(A;;FA;;;" + result->sid + L")(A;;FA;;;SY)";
   if (!ConvertStringSecurityDescriptorToSecurityDescriptorW(security.c_str(), SDDL_REVISION_1, &result->security, nullptr)) return nullptr;
+  if (inherit) {
+    const std::wstring directories = L"O:" + result->sid + L"D:P(A;OICI;FA;;;" + result->sid + L")(A;OICI;FA;;;SY)";
+    if (!ConvertStringSecurityDescriptorToSecurityDescriptorW(directories.c_str(), SDDL_REVISION_1, &result->directory_security, nullptr)) return nullptr;
+  }
   PWSTR local = nullptr;
   if (FAILED(SHGetKnownFolderPath(FOLDERID_LocalAppData, KF_FLAG_DEFAULT, nullptr, &local))) return nullptr;
   std::wstring base(local); CoTaskMemFree(local);
@@ -220,13 +231,18 @@ std::unique_ptr<Root> root_for(const std::string& scope, bool create) {
     if (separator == std::wstring::npos) break;
     end = separator + 1;
   }
-  SECURITY_ATTRIBUTES attributes{sizeof(SECURITY_ATTRIBUTES), result->security, FALSE};
   std::wstring path = base;
-  for (const std::wstring& component : {std::wstring(L"Octant"), std::wstring(L"runtime"), std::wstring(scope.begin(), scope.end())}) {
+  std::vector<std::wstring> segments{L"Octant"};
+  segments.insert(segments.end(), components.begin(), components.end());
+  size_t index = 0;
+  for (const std::wstring& component : segments) {
+    const bool inherited_directory = inherit && index++ > 0;
+    SECURITY_ATTRIBUTES attributes{sizeof(SECURITY_ATTRIBUTES), inherited_directory ? result->directory_security : result->security, FALSE};
     path += L"\\" + component;
     if (create && !CreateDirectoryW(path.c_str(), &attributes) && GetLastError() != ERROR_ALREADY_EXISTS) return nullptr;
     Handle handle = open_directory(path);
-    if (!handle || !private_acl(handle.value, *result)) return nullptr;
+    const BYTE flags = inherited_directory ? OBJECT_INHERIT_ACE | CONTAINER_INHERIT_ACE : 0;
+    if (!handle || !private_acl(handle.value, *result, flags)) return nullptr;
     result->ancestors.push_back(std::move(handle));
   }
   std::vector<wchar_t> canonical(32768);
@@ -238,6 +254,12 @@ std::unique_ptr<Root> root_for(const std::string& scope, bool create) {
     canonical.data(), static_cast<DWORD>(canonical.size()), FILE_NAME_NORMALIZED | VOLUME_NAME_GUID);
   if (physical_size == 0 || physical_size >= canonical.size()) return nullptr;
   result->path.assign(canonical.data(), physical_size);
+  return result;
+}
+std::unique_ptr<Root> root_for(const std::string& scope, bool create) {
+  if (!uuid(scope)) return nullptr;
+  auto result = private_root({L"runtime", std::wstring(scope.begin(), scope.end())}, create, false);
+  if (!result) return nullptr;
   std::vector<unsigned char> input(result->sid_bytes);
   input.insert(input.end(), scope.begin(), scope.end());
   BCRYPT_ALG_HANDLE algorithm = nullptr;
@@ -305,6 +327,102 @@ std::string utf8(const std::wstring& value) {
   if (size <= 0) return {};
   std::string result(static_cast<size_t>(size), '\0');
   WideCharToMultiByte(CP_UTF8, WC_ERR_INVALID_CHARS, value.data(), static_cast<int>(value.size()), result.data(), size, nullptr, nullptr); return result;
+}
+constexpr BYTE directory_inheritance = OBJECT_INHERIT_ACE | CONTAINER_INHERIT_ACE;
+constexpr size_t profile_record_size = 73;
+constexpr size_t profile_scope_offset = profile_record_size - 16;
+const std::array<unsigned char, 8> profile_magic{'O','C','T','P','R','O','0','1'};
+std::string profile_scope(const unsigned char* bytes) {
+  if ((bytes[6] & 0xf0) != 0x40 || (bytes[8] & 0xc0) != 0x80) return {};
+  const char* hex = "0123456789abcdef";
+  std::string result;
+  for (size_t i = 0; i < 16; ++i) {
+    if (i == 4 || i == 6 || i == 8 || i == 10) result += '-';
+    result += hex[bytes[i] >> 4]; result += hex[bytes[i] & 15];
+  }
+  return result;
+}
+bool profile_directory(Root& root, const wchar_t* name) {
+  const std::wstring path = root.path + L"\\" + name;
+  SECURITY_ATTRIBUTES attributes{sizeof(SECURITY_ATTRIBUTES), root.directory_security, FALSE};
+  if (!CreateDirectoryW(path.c_str(), &attributes) && GetLastError() != ERROR_ALREADY_EXISTS) return false;
+  Handle directory = open_directory(path);
+  if (!directory || !private_acl(directory.value, root, directory_inheritance)) return false;
+  root.ancestors.push_back(std::move(directory)); return true;
+}
+Handle profile_identity(const Root& root, unsigned char kind, const std::array<FILE_ID_INFO, 2>& directories, std::string& scope) {
+  const std::wstring path = root.path + L"\\profile.bin";
+  // This file is metadata, not a signing key. Its explicit protected ACL is
+  // independent of the inheritable ACL used by ordinary persistent data.
+  Handle file(CreateFileW(path.c_str(), GENERIC_READ | READ_CONTROL, FILE_SHARE_READ,
+    nullptr, OPEN_EXISTING, FILE_FLAG_OPEN_REPARSE_POINT, nullptr));
+  std::string created_scope;
+  if (!file) {
+    if (GetLastError() != ERROR_FILE_NOT_FOUND) return Handle();
+    SECURITY_ATTRIBUTES attributes{sizeof(SECURITY_ATTRIBUTES), root.security, FALSE};
+    Handle created(CreateFileW(path.c_str(), GENERIC_READ | GENERIC_WRITE | READ_CONTROL,
+      FILE_SHARE_READ, &attributes, CREATE_NEW, FILE_FLAG_WRITE_THROUGH, nullptr));
+    if (!created || !private_acl(created.value, root)) return Handle();
+    std::array<unsigned char, profile_record_size> encoded{};
+    std::copy(profile_magic.begin(), profile_magic.end(), encoded.begin()); encoded[8] = kind;
+    for (size_t i = 0; i < directories.size(); ++i) {
+      std::memcpy(encoded.data() + 9 + i * 24, &directories[i].VolumeSerialNumber, 8);
+      std::memcpy(encoded.data() + 17 + i * 24, directories[i].FileId.Identifier, 16);
+    }
+    if (BCryptGenRandom(nullptr, encoded.data() + profile_scope_offset, 16, BCRYPT_USE_SYSTEM_PREFERRED_RNG) < 0) return Handle();
+    encoded[profile_scope_offset + 6] = static_cast<unsigned char>((encoded[profile_scope_offset + 6] & 15) | 0x40);
+    encoded[profile_scope_offset + 8] = static_cast<unsigned char>((encoded[profile_scope_offset + 8] & 63) | 0x80);
+    created_scope = profile_scope(encoded.data() + profile_scope_offset);
+    DWORD wrote = 0;
+    if (!WriteFile(created.value, encoded.data(), static_cast<DWORD>(encoded.size()), &wrote, nullptr) ||
+        wrote != encoded.size() || !FlushFileBuffers(created.value)) return Handle();
+    created.reset();
+    file = Handle(CreateFileW(path.c_str(), GENERIC_READ | READ_CONTROL, FILE_SHARE_READ,
+      nullptr, OPEN_EXISTING, FILE_FLAG_OPEN_REPARSE_POINT, nullptr));
+  }
+  BY_HANDLE_FILE_INFORMATION metadata{}; LARGE_INTEGER size{};
+  if (!file || !private_acl(file.value, root) || !GetFileInformationByHandle(file.value, &metadata) ||
+      metadata.nNumberOfLinks != 1 || (metadata.dwFileAttributes & (FILE_ATTRIBUTE_DIRECTORY | FILE_ATTRIBUTE_REPARSE_POINT)) != 0 ||
+      !GetFileSizeEx(file.value, &size) || size.QuadPart != static_cast<LONGLONG>(profile_record_size)) return Handle();
+  std::array<unsigned char, profile_record_size> encoded{}; DWORD got = 0;
+  if (!ReadFile(file.value, encoded.data(), static_cast<DWORD>(encoded.size()), &got, nullptr) || got != encoded.size() ||
+      !std::equal(profile_magic.begin(), profile_magic.end(), encoded.begin()) || encoded[8] != kind) return Handle();
+  for (size_t i = 0; i < directories.size(); ++i)
+    if (std::memcmp(encoded.data() + 9 + i * 24, &directories[i].VolumeSerialNumber, 8) != 0 ||
+        std::memcmp(encoded.data() + 17 + i * 24, directories[i].FileId.Identifier, 16) != 0) return Handle();
+  scope = profile_scope(encoded.data() + profile_scope_offset);
+  if (scope.empty() || (!created_scope.empty() && scope != created_scope)) return Handle();
+  return file;
+}
+napi_value open_profile(napi_env env, napi_callback_info info) {
+  Guard guard; size_t count = 1; napi_value arguments[1]; napi_get_cb_info(env, info, &count, arguments, nullptr, nullptr);
+  if (count != 1) return object(env, "refused");
+  const std::string name = string_arg(env, arguments[0]);
+  const unsigned char kind = name == "octant" ? 1 : name == "nightly-test-data" ? 2 : 0;
+  if (kind == 0) return object(env, "refused");
+  auto profile = std::make_unique<Profile>();
+  profile->root = private_root({L"hosts", std::wstring(name.begin(), name.end())}, true, true);
+  if (!profile->root) return object(env, "refused");
+  std::array<FILE_ID_INFO, 2> directories{};
+  if (!GetFileInformationByHandleEx(profile->root->ancestors.back().value, FileIdInfo, &directories[0], sizeof(FILE_ID_INFO))) return object(env, "refused");
+  for (const wchar_t* child : {L"data", L"config", L"state", L"logs"}) {
+    if (!profile_directory(*profile->root, child)) return object(env, "refused");
+    if (std::wcscmp(child, L"data") == 0 && !GetFileInformationByHandleEx(profile->root->ancestors.back().value, FileIdInfo, &directories[1], sizeof(FILE_ID_INFO))) return object(env, "refused");
+  }
+  profile->identity = profile_identity(*profile->root, kind, directories, profile->scope);
+  if (!profile->identity) return object(env, "refused");
+  const auto existing = profiles.find(name);
+  if (existing != profiles.end() && existing->second->scope != profile->scope) return object(env, "refused");
+  if (!pin_module()) return object(env, "refused");
+  napi_value result = object(env, "ready");
+  put(env, result, "profile", name); put(env, result, "profileId", profile->scope);
+  put(env, result, "rootDirectory", utf8(profile->root->display_path));
+  for (const auto& child : {std::pair<const char*, const wchar_t*>{"dataDirectory", L"data"}, {"configDirectory", L"config"}, {"stateDirectory", L"state"}, {"logsDirectory", L"logs"}})
+    put(env, result, child.first, utf8(profile->root->display_path + L"\\" + child.second));
+  if (existing == profiles.end()) profiles.emplace(name, std::move(profile));
+  // Persistent writers may outlive their control connection or environment.
+  // Native guards and the identity handle remain until this process exits.
+  return result;
 }
 void record_fields(napi_env env, napi_value result, const Record& record) {
   number(env, result, "pid", record.identity.pid); put(env, result, "processStart", birth(record.identity.born));
@@ -507,6 +625,7 @@ napi_value close_request(napi_env env, napi_callback_info info) {
 NAPI_MODULE_INIT() {
   napi_add_env_cleanup_hook(env, cleanup_env, env);
   const napi_property_descriptor methods[] = {
+    {"openProfile", nullptr, open_profile, nullptr, nullptr, nullptr, napi_default, nullptr},
     {"prepare", nullptr, prepare, nullptr, nullptr, nullptr, napi_default, nullptr},
     {"claim", nullptr, claim, nullptr, nullptr, nullptr, napi_default, nullptr},
     {"lookup", nullptr, lookup, nullptr, nullptr, nullptr, napi_default, nullptr},
