@@ -320,7 +320,13 @@ try {
   throw new Error("Owned native credential scenario failed.");
 } finally {
   // No target is retained even after a failed scenario. A cleanup error fails CI.
-  const cleanup = await Promise.allSettled(owned.map(({ store, ref }) => store.delete(ref)));
+  // Keep cleanup a single ordered native lifecycle per owned target, so a
+  // failed absence check remains attributable to that target's delete.
+  const cleanup: Array<PromiseSettledResult<void>> = [];
+  for (const { store, ref } of owned) {
+    const [result] = await Promise.allSettled([store.delete(ref)]);
+    if (result !== undefined) cleanup.push(result);
+  }
   await broker?.close();
   const absence = await Promise.allSettled(owned.map(({ store, ref }) => store.has(ref)));
   cleanupConfirmed =
@@ -329,6 +335,7 @@ try {
   console.log(
     JSON.stringify({
       ownedCredentialCleanupConfirmed: cleanupConfirmed,
+      checks,
       ownedTargetCount: owned.length,
       brokerClosed: true,
       cleanup: cleanup.map((result) =>
