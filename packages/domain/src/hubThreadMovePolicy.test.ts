@@ -101,6 +101,36 @@ describe("repository remotes", () => {
     expect(performance.now() - started).toBeLessThan(1_000);
   });
 
+  it("keeps a self-hosted repository's path case and a non-default port as part of its identity", () => {
+    expect(normalizeRepositoryRemote("ssh://git@git.example/team/Foo.git")).not.toBe(
+      normalizeRepositoryRemote("ssh://git@git.example/team/foo.git"),
+    );
+    expect(normalizeRepositoryRemote("ssh://git@git.example:2222/team/foo.git")).not.toBe(
+      normalizeRepositoryRemote("ssh://git@git.example:2223/team/foo.git"),
+    );
+    expect(normalizeRepositoryRemote("ssh://git@git.example:22/team/foo.git")).toBe(
+      normalizeRepositoryRemote("git@git.example:team/foo.git"),
+    );
+    expect(normalizeRepositoryRemote("https://git.example:443/team/foo")).toBe(
+      normalizeRepositoryRemote("https://git.example/team/foo.git"),
+    );
+  });
+
+  it("refuses a Code destination bound to a same-named repository on another port", () => {
+    const thread = {
+      ...codeThread,
+      repositoryRemotes: ["ssh://git@git.example:2222/team/app.git"],
+    };
+    const destination = {
+      ...reachable,
+      projects: [project(5, "code", ["ssh://git@git.example:2223/team/app.git"])],
+    };
+    expect(decideMoveEligibility({ thread, destination })).toEqual({
+      status: "cannot-move",
+      reason: "no-eligible-project",
+    });
+  });
+
   it("ignores credentials in a URL and refuses text that names no repository", () => {
     expect(normalizeRepositoryRemote("https://token@github.com/Ogard-Labs/octant.git")).toBe(
       "github.com/ogard-labs/octant",

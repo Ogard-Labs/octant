@@ -62,17 +62,39 @@ export type MoveEligibility =
   | { readonly status: "cannot-move"; readonly reason: ThreadMoveFailureReason };
 
 /**
- * Remote URLs name the same repository when they agree after the transport
- * and the `.git` suffix are set aside, so an SSH clone and an HTTPS clone of
- * one repository match. Credentials in a URL are never compared.
+ * Hosts whose repository paths are case-insensitive, so `Team/Repo` and
+ * `team/repo` name one repository there. Every other host keeps the path's
+ * case, because a self-hosted server may serve both as different repositories.
+ */
+const CASE_INSENSITIVE_HOSTS: ReadonlySet<string> = new Set([
+  "github.com",
+  "gitlab.com",
+  "bitbucket.org",
+]);
+
+/** A transport's own port, which a URL may spell out without naming another service. */
+const DEFAULT_PORTS: Readonly<Record<string, string>> = {
+  "ssh:": "22",
+  "git:": "9418",
+  "https:": "443",
+  "http:": "80",
+};
+
+/**
+ * Remote URLs name the same repository when they agree after the transport,
+ * credentials, and the `.git` suffix are set aside, so an SSH clone and an
+ * HTTPS clone of one repository match. A non-default port stays part of the
+ * identity, since one host may serve different repositories on different
+ * ports, and the path keeps its case except on hosts known to ignore it.
  */
 export function normalizeRepositoryRemote(remote: string): string | undefined {
   const trimmed = remote.trim();
   if (trimmed.length === 0) return undefined;
   const scp = /^[^@/\s]+@([^:/\s]+):(.+)$/.exec(trimmed);
   let host: string;
+  let port = "";
   let path: string;
-  if (scp !== null) {
+  if (scp !== null && !trimmed.includes("://")) {
     host = scp[1] ?? "";
     path = scp[2] ?? "";
   } else {
@@ -83,11 +105,14 @@ export function normalizeRepositoryRemote(remote: string): string | undefined {
       return undefined;
     }
     host = url.hostname;
+    port = url.port === DEFAULT_PORTS[url.protocol] ? "" : url.port;
     path = url.pathname;
   }
+  const lowerHost = host.toLowerCase();
   const cleanPath = trimCharacter(path, "/").replace(/\.git$/i, "");
-  if (host.length === 0 || cleanPath.length === 0) return undefined;
-  return `${host.toLowerCase()}/${cleanPath.toLowerCase()}`;
+  if (lowerHost.length === 0 || cleanPath.length === 0) return undefined;
+  const comparedPath = CASE_INSENSITIVE_HOSTS.has(lowerHost) ? cleanPath.toLowerCase() : cleanPath;
+  return `${lowerHost}${port.length > 0 ? `:${port}` : ""}/${comparedPath}`;
 }
 
 function sharesRepository(left: ReadonlyArray<string>, right: ReadonlyArray<string>): boolean {
