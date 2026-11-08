@@ -67,6 +67,25 @@ static bool send(char tag, void *bytes, size_t length)
   return transfer(&tag, 1, true) && transfer(bytes, length, true);
 }
 
+static bool wait_start(char expected, int broker)
+{
+  while (!stopped) {
+    struct pollfd ready = {.fd = CONTROL, .events = POLLIN};
+    int count = poll(&ready, 1, 20);
+    if (count < 0 && errno == EINTR) continue;
+    if (count < 0 || ready.revents & (POLLHUP | POLLERR | POLLNVAL)) return false;
+    if (ready.revents & POLLIN) {
+      char tag;
+      if (!transfer(&tag, 1, false)) return false;
+      if (tag == expected) return true;
+      struct octant_mediation_status status;
+      if (expected != 'G' || tag != 'S' || ioctl(broker, OCTANT_MEDIATION_STATUS, &status) ||
+          !send('S', &status, sizeof(status))) return false;
+    }
+  }
+  return false;
+}
+
 static void end_child(pid_t child, bool *joined, int *status)
 {
   /* Only the process group created for this one enrolled command is touched. */
@@ -99,23 +118,37 @@ int main(int argc, char **argv)
   struct octant_mediation_status status;
   if (broker < 0 || ioctl(broker, OCTANT_MEDIATION_STATUS, &status) ||
       status.abi != OCTANT_MEDIATION_ABI || status.production_coverage != 0) return 66;
+  /* The host must inspect the real device and structured policy before even
+   * forking a command. There is no legacy launch-before-ready path. */
+  if (!send('H', &status, sizeof(status)) || !wait_start('G', broker)) { close(broker); return 67; }
   int enrollment = ioctl(broker, OCTANT_MEDIATION_ENROLL_FD, 0);
   if (enrollment < 0) { close(broker); return 67; }
+  int execution[2];
+  if (pipe2(execution, O_CLOEXEC)) { close(enrollment); close(broker); return 67; }
   pid_t owner = getpid();
   pid_t child = fork();
   if (!child) {
+    close(execution[1]);
     /* A lost trusted owner cannot leave this direct capsule launcher alive. */
+    char release;
     if (prctl(PR_SET_PDEATHSIG, SIGKILL) || getppid() != owner || setpgid(0, 0) ||
+        read(execution[0], &release, 1) != 1 || release != 'E' ||
         prctl(PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0) || ioctl(enrollment, OCTANT_MEDIATION_ENROLL, 0) ||
         syscall(SYS_close_range, 3u, UINT_MAX, 0u)) _exit(68);
     execv(argv[1], &argv[1]);
     _exit(69);
   }
+  close(execution[0]);
   close(enrollment);
-  if (child < 0) { close(broker); return 70; }
+  if (child < 0) { close(execution[1]); close(broker); return 70; }
   /* Close the fork/setpgid scheduling race; EACCES means exec already won. */
   if (setpgid(child, child) && errno != EACCES && errno != ESRCH) stopped = SIGTERM;
-  bool joined = false, pending = false, healthy = true;
+  uint32_t command_pid = (uint32_t)child;
+  bool joined = false, pending = false;
+  /* Hold exec until the host has persisted this actual PID/birth identity. */
+  bool healthy = !stopped && send('C', &command_pid, sizeof(command_pid)) && wait_start('E', broker) &&
+    write(execution[1], "E", 1) == 1;
+  close(execution[1]);
   int child_status = 0;
   uint64_t pending_id = 0;
   int parents[2] = {-1, -1};

@@ -1,7 +1,7 @@
 import { stat } from "node:fs/promises";
 import { spawn } from "node:child_process";
 import { endianness } from "node:os";
-import { Duplex } from "node:stream";
+import { Duplex, type Readable, type Writable } from "node:stream";
 import { classifyLinuxMediationMutation } from "./linuxMediationNamespace";
 import type { SecretGuardMediationPolicy } from "./secretGuard";
 import {
@@ -17,7 +17,7 @@ const CONTROL_DEADLINE_MS = 500;
 const POLICY_DEADLINE_MS = 1_500;
 const MAXIMUM_MS = 180_000;
 
-type BrokerRefusal =
+export type BrokerRefusal =
   | "unsupported-platform"
   | "native-unavailable"
   | "broker-protocol"
@@ -41,6 +41,12 @@ export async function runLinuxMediationBroker(input: {
   readonly args: ReadonlyArray<string>;
   readonly policy: SecretGuardMediationPolicy;
   readonly signal: AbortSignal;
+  readonly lifecycle?: {
+    readonly ready: (relayPid: number) => Promise<boolean>;
+    readonly command: (pid: number) => Promise<boolean>;
+    readonly stdio: readonly [Readable, Writable, Writable];
+    readonly environment: Readonly<Record<string, string>>;
+  };
 }): Promise<LinuxMediationBrokerResult> {
   if (process.platform !== "linux" || endianness() !== "LE")
     return { status: "unavailable", reason: "unsupported-platform" };
@@ -49,7 +55,12 @@ export async function runLinuxMediationBroker(input: {
     return { status: "unavailable", reason: "native-unavailable" };
   return new Promise((resolve) => {
     const child = spawn(input.nativeExecutable, [input.command, ...input.args], {
-      stdio: ["inherit", "inherit", "inherit", "pipe"],
+      stdio:
+        input.lifecycle === undefined
+          ? ["inherit", "inherit", "inherit", "pipe"]
+          : ["pipe", "pipe", "pipe", "pipe"],
+      detached: true,
+      ...(input.lifecycle === undefined ? {} : { env: input.lifecycle.environment }),
       windowsHide: true,
     });
     const control = child.stdio[3];
@@ -58,6 +69,7 @@ export async function runLinuxMediationBroker(input: {
     let working = false;
     let commandExit: number | undefined;
     let previousRequest = 0n;
+    let phase: "hello" | "policy" | "command" | "running" = "hello";
     let bytes = Buffer.alloc(0);
     let statusWait:
       | {
@@ -84,7 +96,13 @@ export async function runLinuxMediationBroker(input: {
       // The native relay first closes the kernel context, then kills/joins
       // only its retained command group. Its independent alarm is a fallback.
       child.kill("SIGTERM");
-      stopTimer = setTimeout(() => child.kill("SIGKILL"), 3_000);
+      stopTimer = setTimeout(() => {
+        child.kill("SIGKILL");
+        child.stdin?.destroy();
+        child.stdout?.destroy();
+        child.stderr?.destroy();
+        complete(null);
+      }, 3_000);
     };
     const refuse = (reason: BrokerRefusal) => {
       refusal ??= reason;
@@ -116,6 +134,19 @@ export async function runLinuxMediationBroker(input: {
       refusal ??= "native-unavailable";
     });
     child.once("close", complete);
+    child.once("error", () => complete(null));
+    if (input.lifecycle !== undefined) {
+      if (child.stdin === null || child.stdout === null || child.stderr === null) {
+        refuse("native-unavailable");
+        return;
+      }
+      input.lifecycle.stdio[0].pipe(child.stdin);
+      child.stdout.pipe(input.lifecycle.stdio[1], { end: false });
+      child.stderr.pipe(input.lifecycle.stdio[2], { end: false });
+      child.stdin.on("error", () => refuse("native-unavailable"));
+      child.stdout.on("error", () => refuse("native-unavailable"));
+      child.stderr.on("error", () => refuse("native-unavailable"));
+    }
     input.signal.addEventListener("abort", abort, { once: true });
     if (!(control instanceof Duplex)) {
       refuse("native-unavailable");
@@ -294,6 +325,23 @@ export async function runLinuxMediationBroker(input: {
         working = false;
       }
     };
+    const prepare = async () => {
+      const snapshot = await readLinuxMediationPolicy(
+        input.policy,
+        async () => (await readNamespace()) ?? { epoch: 0n, activeMutations: 1 },
+      );
+      if (snapshot.status !== "ready" || child.pid === undefined) {
+        refuse("policy-unavailable");
+        return;
+      }
+      if (input.lifecycle !== undefined && !(await input.lifecycle.ready(child.pid))) {
+        refuse("cancelled");
+        return;
+      }
+      if (refusal !== undefined || settled) return;
+      phase = "command";
+      write(Buffer.from("G"));
+    };
     control.on("error", () => refuse("broker-protocol"));
     control.on("data", (chunk: Buffer) => {
       if (settled || refusal !== undefined) return;
@@ -307,11 +355,11 @@ export async function runLinuxMediationBroker(input: {
         const length =
           tag === 82
             ? REQUEST_BYTES
-            : tag === 83
+            : tag === 83 || tag === 72
               ? STATUS_BYTES
               : tag === 80
                 ? 40
-                : tag === 88
+                : tag === 88 || tag === 67
                   ? 4
                   : -1;
         if (length < 0) {
@@ -321,9 +369,37 @@ export async function runLinuxMediationBroker(input: {
         if (bytes.length < length + 1) return;
         const frame = bytes.subarray(1, length + 1);
         bytes = bytes.subarray(length + 1);
-        if (tag === 82) {
+        if (tag === 72) {
+          if (
+            phase !== "hello" ||
+            frame.readUInt32LE(12) !== 2 ||
+            frame.readBigUInt64LE(16) !== 0n
+          ) {
+            refuse("broker-protocol");
+            return;
+          }
+          phase = "policy";
+          void prepare().catch(() => refuse("policy-unavailable"));
+        } else if (tag === 67) {
+          if (phase !== "command" || frame.readUInt32LE(0) < 1) {
+            refuse("broker-protocol");
+            return;
+          }
+          phase = "running";
+          void (async () => {
+            if (
+              input.lifecycle !== undefined &&
+              !(await input.lifecycle.command(frame.readUInt32LE(0)))
+            ) {
+              refuse("cancelled");
+              return;
+            }
+            write(Buffer.from("E"));
+          })().catch(() => refuse("native-unavailable"));
+        } else if (tag === 82) {
           const requestId = frame.readBigUInt64LE(0);
           if (
+            phase !== "running" ||
             requestId <= previousRequest ||
             frame.readUInt32LE(36) !== 0 ||
             frame.readUInt32LE(44) !== 0
