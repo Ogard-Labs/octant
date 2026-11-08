@@ -170,19 +170,27 @@ const timer = setInterval(() => {
       ) => {
         const deadline = Date.now() + bound;
         let snapshot = "";
+        let lastError = "";
         while (!controller.signal.aborted && Date.now() < deadline) {
           if (app.child.exitCode !== null || app.child.signalCode !== null)
             throw Error("Owned app exited during native inspection.");
           try {
             snapshot = await native("snapshot");
-          } catch {
-            /* A starting window has no AX tree yet. */
+          } catch (error) {
+            lastError = error instanceof Error ? error.message.slice(-1200) : "Native read failed.";
           }
           if (predicate(snapshot)) return snapshot;
           await pause(150);
         }
         await writeFile(join(artifacts, `${phase}-${name}-failed-ax.txt`), snapshot);
-        throw Error(`Native ${name} did not settle.`);
+        await writeFile(join(artifacts, `${phase}-${name}-native-error.txt`), lastError);
+        await runBoundedCommand(
+          "/usr/sbin/screencapture",
+          ["-x", join(artifacts, `${phase}-${name}-failed.png`)],
+          process.env,
+          5000,
+        );
+        throw Error(`Native ${name} did not settle. ${lastError}`);
       };
       const capture = async (name: string, snapshot: string) => {
         await writeFile(join(artifacts, `${phase}-${name}-ax.txt`), snapshot);
