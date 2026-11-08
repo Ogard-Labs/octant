@@ -5,6 +5,7 @@
 #include <objbase.h>
 #include <cstdio>
 #include <cwchar>
+#include <cstddef>
 #include <cstdlib>
 #include <array>
 #include <string>
@@ -46,7 +47,7 @@ bool transfer(HANDLE pipe, Wire& wire, bool writing) {
   const BOOL immediate = writing ? WriteFile(pipe, &wire, sizeof(wire), &done, &pending) : ReadFile(pipe, &wire, sizeof(wire), &done, &pending);
   if (immediate) return done == sizeof(wire);
   if (GetLastError() != ERROR_IO_PENDING) return false;
-  if (WaitForSingleObject(event.value, 2500) != WAIT_OBJECT_0) { CancelIoEx(pipe, &pending); GetOverlappedResult(pipe, &pending, &done, TRUE); return false; }
+  if (WaitForSingleObject(event.value, 2500) != WAIT_OBJECT_0) { CancelIoEx(pipe, &pending); GetOverlappedResult(pipe, &pending, &done, TRUE); SetLastError(ERROR_TIMEOUT); return false; }
   return GetOverlappedResult(pipe, &pending, &done, FALSE) && done == sizeof(wire);
 }
 bool status(const std::wstring& endpoint) {
@@ -56,8 +57,31 @@ bool status(const std::wstring& endpoint) {
   DWORD mode = PIPE_READMODE_MESSAGE;
   if (!SetNamedPipeHandleState(pipe.value, &mode, nullptr, nullptr)) return false;
   Wire request, reply; request.sequence = 1;
-  return transfer(pipe.value, request, true) && transfer(pipe.value, reply, false) && reply.magic == request.magic &&
-    reply.protocol == 1 && reply.operation == 0 && reply.sequence == 1 && reply.status == 1;
+  if (!transfer(pipe.value, request, true) || !transfer(pipe.value, reply, false) || reply.magic != request.magic ||
+      reply.protocol != 1 || reply.operation != 0 || reply.sequence != 1 || reply.status != 1) return false;
+  const auto bytes = reinterpret_cast<const unsigned char*>(&reply);
+  for (size_t i = offsetof(Wire, payload) + sizeof(reply.payload); i < sizeof(reply); ++i) if (bytes[i] != 0) return false;
+  return true;
+}
+bool malformed(const std::wstring& endpoint) {
+  for (unsigned mode : {1u, 2u}) {
+    Handle pipe; pipe.value = CreateFileW(endpoint.c_str(), GENERIC_READ | GENERIC_WRITE, 0, nullptr, OPEN_EXISTING,
+      FILE_FLAG_OVERLAPPED | SECURITY_SQOS_PRESENT | SECURITY_IDENTIFICATION | SECURITY_CONTEXT_TRACKING, nullptr);
+    DWORD read_mode = PIPE_READMODE_MESSAGE;
+    if (!pipe || !SetNamedPipeHandleState(pipe.value, &read_mode, nullptr, nullptr)) return false;
+    Wire request, reply; request.sequence = 1;
+    if (mode == 1) request.magic = 0;
+    else {
+      request.operation = 1; request.generation = 1;
+      std::memset(request.window, 'X', 36);
+      std::memcpy(request.payload + 1, "native-main-v1", sizeof("native-main-v1"));
+    }
+    if (!transfer(pipe.value, request, true)) return false;
+    if (transfer(pipe.value, reply, false)) return false;
+    const DWORD failure = GetLastError();
+    if (failure != ERROR_BROKEN_PIPE && failure != ERROR_PIPE_NOT_CONNECTED && failure != ERROR_NO_DATA) return false;
+  }
+  return status(endpoint);
 }
 struct Fixture {
   std::wstring name, profile, scratch, executable;
@@ -142,6 +166,8 @@ int wmain(int argc, wchar_t** argv) {
   if (identity.size() != 64) return refuse("endpoint-digest");
   const std::wstring endpoint = L"\\\\.\\pipe\\Octant-desktop-" + std::wstring(identity.begin(), identity.end());
   if (!status(endpoint)) return refuse("unconfined-endpoint-control");
+  if (!malformed(endpoint)) return refuse("malformed-native-frames");
+  std::puts("{\"unconfinedNativeEndpointControl\":true,\"malformedNativeFramesRefused\":true,\"nativeFramePaddingZero\":true}");
   Fixture fixture;
   std::array<unsigned char, 16> nonce{};
   if (BCryptGenRandom(nullptr, nonce.data(), static_cast<ULONG>(nonce.size()), BCRYPT_USE_SYSTEM_PREFERRED_RNG) < 0) return refuse("owned-profile-nonce");

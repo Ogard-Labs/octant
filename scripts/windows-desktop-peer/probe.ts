@@ -51,6 +51,7 @@ function check(value: boolean, message: string) {
 }
 const native = load(binding);
 const version = mode === "server-new" ? "1.2.4" : "1.2.3";
+const lateWindow = "55555555-5555-4555-8555-555555555555";
 if (mode === "refused") {
   check(
     native.bindEndpoint(scope, version) === false,
@@ -84,6 +85,7 @@ if (mode === "refused") {
     const status = ownDesktopPeerStatus(native);
     let holdExits = false;
     const heldExits: unknown[] = [];
+    const timers = new Set<ReturnType<typeof setTimeout>>();
     let forward: ((event: unknown) => void) | undefined;
     const broker: NativeWindowBroker = {
       listenWindows: (callback) => {
@@ -97,6 +99,24 @@ if (mode === "refused") {
             }
           } else if (record(event) && record(event.request)) {
             console.log(JSON.stringify({ request: event.request }));
+            if (
+              event.request.windowId === lateWindow &&
+              typeof event.request.requestId === "number"
+            ) {
+              const requestId = event.request.requestId;
+              // Controlled late native reply exercises the real operation bound,
+              // not a production delay or a new native test entry point.
+              const timer = setTimeout(() => {
+                timers.delete(timer);
+                const accepted = native.replyWindow(requestId, {
+                  kind: "refused",
+                  reason: "unavailable",
+                });
+                console.log(JSON.stringify({ lateReplyAccepted: accepted }));
+              }, 2700);
+              timers.add(timer);
+              return;
+            }
           }
           callback(event);
         });
@@ -141,6 +161,7 @@ if (mode === "refused") {
       console.log(JSON.stringify({ serverReady: true }));
       await stop;
     } finally {
+      for (const timer of timers) clearTimeout(timer);
       check((await leases.close()).kind === "closed", "production lease cleanup confirms closure");
       check((await status.close()).kind === "closed", "native status cleanup joins its workers");
       clearTimeout(lifetime);
@@ -313,6 +334,23 @@ if (mode === "refused") {
       );
       checks.push(
         "same-process reconnect survives delayed old EOF with production lease enforcement",
+      );
+      const began = performance.now();
+      const late = await replacement.openWindow(lateWindow, 3);
+      check(
+        kind(late, "refused") && performance.now() - began < 3500,
+        "a withheld native response refuses within the actual operation bound",
+      );
+      await until(
+        () => server.records.some((value) => value.lateReplyAccepted === false),
+        "an answer after native expiry cannot settle the old request",
+      );
+      check(
+        kind(await replacement.renewWindow(replacementHandle, 2), "renewed"),
+        "a late answer neither settles a following renewal nor revokes another live lease",
+      );
+      checks.push(
+        "actual withheld-response deadline and late-answer correlation preserve other windows",
       );
       const client = start(process.execPath, [entry, binding, scope, "client-exit"]);
       await until(
