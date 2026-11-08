@@ -1,0 +1,36 @@
+name: Native managed-child Browser QA
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - .github/workflows/browser-child-native-qa.yml
+      - scripts/browser-child-native-qa.ts
+      - scripts/browser-child-native-qa-main.ts
+permissions:
+  contents: read
+concurrency:
+  group: browser-child-native-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  native:
+    runs-on: macos-15
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.4
+      - run: bun install --frozen-lockfile
+      - run: node node_modules/electron/install.js
+      - name: Run actual Electron views, stores, broker and child admission
+        timeout-minutes: 4
+        env:
+          OCTANT_QA_OUTPUT: ${{ runner.temp }}/browser-child-native
+        run: bun scripts/browser-child-native-qa.ts
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: browser-child-native
+          path: ${{ runner.temp }}/browser-child-native
+          if-no-files-found: ignore
+          retention-days: 7
