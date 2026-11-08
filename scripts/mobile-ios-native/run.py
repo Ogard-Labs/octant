@@ -57,6 +57,28 @@ def recovered_creation(document, runtime, name, device_type, before):
     return matches[0] if re.fullmatch(r"[0-9A-Fa-f]{8}(?:-[0-9A-Fa-f]{4}){3}-[0-9A-Fa-f]{12}", matches[0]) else None
 
 
+def record_command_cleanup_failure(child, arguments, error):
+    receipt = {"command": Path(arguments[0]).name, "pid": child.pid,
+               "returnCode": child.returncode, "cleanupVerified": False,
+               "errorType": type(error).__name__, "errno": getattr(error, "errno", None)}
+    try:
+        observed = subprocess.run(
+            ["/bin/ps", "-g", str(child.pid), "-o", "pid=,ppid=,pgid=,uid=,stat="],
+            env=ENV, capture_output=True, text=True, timeout=3)
+        receipt["groupInspectionExitCode"] = observed.returncode
+        receipt["groupProcesses"] = observed.stdout[-8192:]
+    except Exception as inspection_error:
+        receipt["inspectionErrorType"] = type(inspection_error).__name__
+    # Diagnostics never turn an unknown group into absence or authorize a
+    # broader signal. Keep only numeric ownership/state, never command args.
+    try:
+        with (artifacts / "command-cleanup-failures.jsonl").open("a") as output:
+            output.write(json.dumps(receipt) + "\n")
+    except OSError:
+        pass
+    print("OCTANT_COMMAND_CLEANUP_FAILURE " + json.dumps(receipt), flush=True)
+
+
 def run(arguments, *, cwd=ROOT, timeout=60, capture=False):
     child = subprocess.Popen(arguments, cwd=cwd, env=ENV, start_new_session=True,
                              stdout=subprocess.PIPE if capture else None,
@@ -68,7 +90,11 @@ def run(arguments, *, cwd=ROOT, timeout=60, capture=False):
             raise RuntimeError(f"Owned command failed ({child.returncode}): {arguments[0]}")
         return output or ""
     finally:
-        stop_owned_group(child)
+        try:
+            stop_owned_group(child)
+        except BaseException as cleanup_error:
+            record_command_cleanup_failure(child, arguments, cleanup_error)
+            raise
         ACTIVE.remove(child)
 
 
@@ -85,6 +111,8 @@ ENV.update(CI="1", GITHUB_ACTIONS="true", EXPO_NO_TELEMETRY="1",
            OCTANT_MOBILE_PUSH="0")
 signal.signal(signal.SIGTERM, interrupted)
 signal.signal(signal.SIGINT, interrupted)
+artifacts = Path(os.environ["RUNNER_TEMP"]) / "octant-ios-native-acceptance"
+artifacts.mkdir(mode=0o700)
 versions = []
 for path in Path("/Applications").glob("Xcode*.app"):
     match = re.fullmatch(r"Xcode_(\d+)\.(\d+)(?:\.(\d+))?\.app", path.name)
@@ -94,8 +122,6 @@ if not versions:
     raise SystemExit("No supported release Xcode is installed on this runner.")
 ENV["DEVELOPER_DIR"] = str(max(versions)[1] / "Contents/Developer")
 run(["xcodebuild", "-version"])
-artifacts = Path(os.environ["RUNNER_TEMP"]) / "octant-ios-native-acceptance"
-artifacts.mkdir(mode=0o700)
 work = Path(tempfile.mkdtemp(prefix="octant-ios-demo-", dir=os.environ["RUNNER_TEMP"]))
 device = None
 creation_attempted = False
