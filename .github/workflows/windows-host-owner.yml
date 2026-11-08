@@ -38,11 +38,51 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: oven-sh/setup-bun@v2
+        id: bun-setup
+        continue-on-error: true
         with:
           bun-version: 1.4.4
       - uses: actions/setup-node@v4
         with:
           node-version: 26
+      - name: Recover pinned Bun from its integrity-checked official npm artifact
+        if: steps.bun-setup.outcome == 'failure'
+        run: |
+          $octantBunRoot = Join-Path $env:RUNNER_TEMP 'octant-native-bun-1.4.4'
+          if (Test-Path -LiteralPath $octantBunRoot) { throw 'Pinned Bun fallback directory already exists' }
+          [void](New-Item -ItemType Directory -Path $octantBunRoot)
+          $octantBunArchive = Join-Path $octantBunRoot 'bun-windows-x64-1.4.4.tgz'
+          Invoke-WebRequest 'https://registry.npmjs.org/@oven/bun-windows-x64/-/bun-windows-x64-1.4.4.tgz' -OutFile $octantBunArchive
+          $octantBunExpected = '6b72cd72d0553bc3e378fb0565fc0395e17625761fd817d0d6efcf2d19c10cb9c2d918a697ee3e2e02692a3e31446841f762b0786c902393d769390ff6aca931'
+          $octantBunActual = (Get-FileHash -LiteralPath $octantBunArchive -Algorithm SHA512).Hash.ToLowerInvariant()
+          if ($octantBunActual -ne $octantBunExpected) { throw 'Pinned Bun npm artifact integrity mismatch' }
+          $octantBunEntries = @(& tar -tzf $octantBunArchive)
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          foreach ($octantBunEntry in $octantBunEntries) {
+            if ($octantBunEntry.StartsWith('/') -or $octantBunEntry.Contains('\') -or $octantBunEntry -match '(^|/)\.\.(/|$)' -or $octantBunEntry -match '^[A-Za-z]:') { throw 'Unsafe pinned Bun archive path' }
+          }
+          if (@($octantBunEntries | Where-Object { $_ -ieq 'package/bin/bun.exe' }).Count -ne 1 -or @($octantBunEntries | Where-Object { $_ -ceq 'package/bin/bun.exe' }).Count -ne 1) { throw 'Ambiguous pinned Bun executable entry' }
+          $octantBunListing = @(& tar -tvzf $octantBunArchive package/bin/bun.exe)
+          if ($LASTEXITCODE -ne 0 -or $octantBunListing.Count -ne 1 -or $octantBunListing[0] -notmatch '^-[rwxstST-]{9}\s') { throw 'Pinned Bun executable is not a regular archive entry' }
+          tar -xzf $octantBunArchive -C $octantBunRoot package/bin/bun.exe
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $octantBunBin = Join-Path $octantBunRoot 'package/bin'
+          $octantBunExe = Join-Path $octantBunBin 'bun.exe'
+          foreach ($octantBunNode in @($octantBunRoot, (Join-Path $octantBunRoot 'package'), $octantBunBin, $octantBunExe)) {
+            $octantBunMetadata = Get-Item -LiteralPath $octantBunNode -Force
+            if (($octantBunMetadata.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) { throw 'Pinned Bun extraction contains a reparse point' }
+          }
+          if ((Get-Item -LiteralPath $octantBunExe).PSIsContainer) { throw 'Pinned Bun executable is not a file' }
+          $octantBunVersion = (& $octantBunExe --version).Trim()
+          if ($LASTEXITCODE -ne 0 -or $octantBunVersion -ne '1.4.4') { throw 'Pinned Bun fallback version mismatch' }
+          $octantBunPlatform = & $octantBunExe -e 'console.log(process.platform + "/" + process.arch)'
+          if ($LASTEXITCODE -ne 0 -or $octantBunPlatform.Trim() -ne 'win32/x64') { throw 'Pinned Bun fallback platform mismatch' }
+          Add-Content -LiteralPath $env:GITHUB_PATH -Value $octantBunBin -Encoding utf8
+          Write-Output 'Official npm Bun1.4.4 win32/x64 artifact verified with pinned SHA512; isolated runner binary selected.'
+      - name: Verify the selected pinned Bun runtime
+        run: |
+          $octantSelectedBun = (bun --version).Trim()
+          if ($LASTEXITCODE -ne 0 -or $octantSelectedBun -ne '1.4.4') { throw 'Selected Bun version differs from the pinned runtime' }
       - run: bun install --frozen-lockfile --ignore-scripts
       - name: Prepare the public Node-API SDK
         run: |
