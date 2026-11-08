@@ -2504,7 +2504,8 @@ account and model). The rules behind them are in
 [Octant Shield](docs/architecture.md#octant-shield). Built for Code: Auto
 reviewer in Settings › Code › Access, **Automatic model calls** in Settings ›
 Providers & Models (a section with one select per job, a plain note of where the
-work goes, and the account's problem when it has one), and the reviewer
+work goes, and the account's problem when it has one; the second opinion on
+decisions starts at **Off** and is the only job with no default account), and the reviewer
 override as a select on a Code Project's overview; **Servers** is built below
 Safe networks in Settings › Access as an account list and a **Project**
 picker that says whether the chosen Project uses the account's servers or

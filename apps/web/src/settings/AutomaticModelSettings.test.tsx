@@ -196,4 +196,64 @@ describe("Automatic model calls", () => {
       ),
     ).toBeVisible();
   });
+
+  it("starts the second opinion off, says what it reads, and saves an account in memory's settings", async () => {
+    const { client, change } = fakeMemory(memoryView({ pastThreadSearch: false }));
+    render(
+      <AutomaticModelSettings
+        codeSettings={codeSettings}
+        onCodeUpdate={vi.fn(async () => true)}
+        personMemoryClient={client}
+        providerSnapshot={snapshot}
+      />,
+    );
+    const field = await screen.findByRole("combobox", {
+      name: "Model for second opinions on decisions",
+    });
+    await vi.waitFor(() => expect(field).toBeEnabled());
+    expect(field).toHaveTextContent("Off");
+    expect(screen.getByText(/at most 3,000 characters/)).toBeVisible();
+    expect(screen.getByText(/While it is off, nothing is sent\./)).toBeVisible();
+    await chooseSelectFieldOption(userEvent.setup(), field, "Team key (API key) · Key mini");
+    expect(change).toHaveBeenCalledWith({
+      kind: "change-person-memory-settings",
+      expectedVersion: 3,
+      settings: {
+        enabled: true,
+        pastThreadSearch: false,
+        excludedProjectIds: [],
+        decisionReviewModel: { providerInstanceId: KEYED, modelId: "key-mini" },
+      },
+    });
+  });
+
+  it("returns the second opinion to off without touching memory's own model", async () => {
+    const { client, change } = fakeMemory(
+      memoryView({
+        distillModel: { providerInstanceId: LOCAL, modelId: "local-small" },
+        decisionReviewModel: { providerInstanceId: KEYED, modelId: "key-mini" },
+      }),
+    );
+    render(
+      <AutomaticModelSettings
+        codeSettings={codeSettings}
+        onCodeUpdate={vi.fn(async () => true)}
+        personMemoryClient={client}
+        providerSnapshot={snapshot}
+      />,
+    );
+    const field = await screen.findByRole("combobox", {
+      name: "Model for second opinions on decisions",
+    });
+    await vi.waitFor(() => expect(field).toBeEnabled());
+    await chooseSelectFieldOption(userEvent.setup(), field, "Off");
+    expect(change).toHaveBeenCalledWith(
+      expect.objectContaining({
+        settings: expect.objectContaining({
+          distillModel: { providerInstanceId: LOCAL, modelId: "local-small" },
+        }),
+      }),
+    );
+    expect(change.mock.calls[0]?.[0].settings).not.toHaveProperty("decisionReviewModel");
+  });
 });

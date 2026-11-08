@@ -522,6 +522,13 @@ export const PROVIDER_CLOUD_TURN_REQUEST_SHAPE = "provider-cloud-turn";
  */
 export const PERSON_MEMORY_USAGE_AGGREGATE_TYPE = "person-memory-usage";
 
+/**
+ * One second opinion on a Work or Code decision. Like a distillation it has no
+ * context plan, and it is recorded under the thread that asked.
+ */
+export const DECISION_REVIEW_REQUEST_SHAPE = "decision-review";
+export const DECISION_REVIEW_USAGE_AGGREGATE_TYPE = "decision-review-usage";
+
 export const UsageReconciliation = Schema.Struct({
   id: UsageReconciliationId,
   planId: Schema.optional(ContextPlanId),
@@ -562,7 +569,8 @@ export const UsageReconciliation = Schema.Struct({
         reconciliation.requestShape === AGENT_RUN_TURN_REQUEST_SHAPE ||
         reconciliation.requestShape === SHIELD_REVIEW_REQUEST_SHAPE ||
         reconciliation.requestShape === PROVIDER_CLOUD_TURN_REQUEST_SHAPE ||
-        reconciliation.requestShape === PERSON_MEMORY_REQUEST_SHAPE
+        reconciliation.requestShape === PERSON_MEMORY_REQUEST_SHAPE ||
+        reconciliation.requestShape === DECISION_REVIEW_REQUEST_SHAPE
       ) {
         return reconciliation.planId === undefined && reconciliation.imageUnits === undefined;
       }

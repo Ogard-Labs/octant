@@ -668,6 +668,13 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
             "automatic model calls memory distilling writes memory account api key provider smallest model background",
         },
         {
+          id: settingId("automatic-model-decision-review"),
+          label: "Second opinion on decisions",
+          scope: "host",
+          keywords:
+            "automatic model calls second opinion decisions review independent model account api key provider off needs you card disagree",
+        },
+        {
           id: settingId("opencode-managed-update"),
           label: "OpenCode update",
           scope: "host",

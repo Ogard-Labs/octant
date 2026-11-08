@@ -527,6 +527,7 @@ export function startOctantServer(
       credentialCommandProcess,
       prepareCredentialCommand,
       personMemorySweep,
+      decisionReviewModelPort,
       runtimeForgeChanges,
       followUpCreation,
       restartContinuation,
@@ -971,6 +972,7 @@ export function startOctantServer(
       workTurnService,
       workflowService,
     } = yield* wireWork({
+      threadMoveHolds,
       conversationInputTransfer,
       codeBoardEventStore,
       personMemoryAccess,
@@ -1204,6 +1206,8 @@ export function startOctantServer(
       workRequestRoutes,
       workThreadRoutes,
     } = wireWorkRequests({
+      decisionReviewModelPort,
+      isProjectPolicyTargetAllowed,
       observeWorkThreadRuntime,
       workRequestService,
       agentRunPersistence,
