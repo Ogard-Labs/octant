@@ -2095,6 +2095,16 @@ a numbered slice. Built, with these narrower readings:
     two real computers with a real Touch ID unlock before a real shutdown is a
     maintainer gate. **Linux container: yes, except that gate.**
 
+    Slice 12 lands in parts. The first part is the contracts (the move offer,
+    manifest, answers and destination state, the handover notice, the move
+    events, the failure reasons, and the Move in item on the peer grant, in
+    the full-member grant for new members) and the pure policy (eligibility,
+    the destination's Move in check, Prepare to shut down's starting choices
+    and destination, recovery, Activate anyway, keeping a worktree that holds
+    unmoved files, and the handover branch). Nothing reaches them from the
+    product yet. A grant stored before Move in existed reads as off until the
+    server part upgrades full members.
+
 Any slice that would deploy an Octant-operated service, create an account, or
 spend money stops for a separate maintainer action.
 
