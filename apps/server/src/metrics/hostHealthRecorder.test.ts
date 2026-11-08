@@ -79,6 +79,27 @@ describe("the host health recorder", () => {
     });
   });
 
+  it("counts a restart inside the range when the previous process was last sampled before it", () => {
+    const path = scratch();
+    let now = Date.parse("2026-11-07T08:00:00.000Z");
+    const clock = () => new Date(now).toISOString();
+    const first = recorder(path, clock);
+    now += 60_000;
+    first.sample();
+    now = Date.parse("2026-11-07T10:00:00.000Z");
+    const second = recorder(path, clock);
+    now += 60_000;
+    second.sample();
+
+    const inRange = second.read({ from: "2026-11-07T09:00:00.000Z" as never });
+    const wholeSpan = second.read({ from: "2026-11-07T07:00:00.000Z" as never });
+    const afterRestart = second.read({ from: "2026-11-07T10:00:30.000Z" as never });
+
+    expect(inRange.restarts).toEqual(["2026-11-07T10:00:00.000Z"]);
+    expect(wholeSpan.restarts).toEqual(["2026-11-07T10:00:00.000Z"]);
+    expect(afterRestart.restarts).toEqual([]);
+  });
+
   it("counts a slow statement in one window only", () => {
     const path = scratch();
     let now = Date.parse("2026-11-07T10:00:00.000Z");

@@ -157,14 +157,32 @@ export class HostHealthRecorder {
         // Unreadable rows are left for retention to remove.
       }
     }
-    const points = hostHealthPoints(samples, request.resolution);
+    const points = hostHealthPoints(samples, request.resolution, this.#baselineProcessStart(from));
     return {
       generatedAt,
       resolution: points.resolution,
       retentionDays: HOST_HEALTH_RETENTION_DAYS,
       samples: points.samples,
-      processStarts: points.processStarts,
+      // A restart is a start inside the span: a replacement first sampled inside
+      // it but started before it belongs to an earlier span.
+      restarts: points.restarts.filter((start) => start >= from),
     };
+  }
+
+  /** The process start of the last sample before the span: the process then in effect. */
+  #baselineProcessStart(from: string): UtcTimestamp | undefined {
+    try {
+      const row = this.#open()
+        .prepare(
+          "SELECT sample FROM host_health_samples WHERE sampled_at < ? ORDER BY sampled_at DESC LIMIT 1",
+        )
+        .get(from);
+      if (typeof row !== "object" || row === null || !("sample" in row)) return undefined;
+      if (typeof row.sample !== "string") return undefined;
+      return decodeHostHealthSample(JSON.parse(row.sample)).processStartedAt;
+    } catch {
+      return undefined;
+    }
   }
 
   #open(): SqliteConnection {

@@ -189,8 +189,25 @@ function observeToolResult(
   };
 }
 
+/**
+ * A tool label as a provider states it: ACP titles are free text such as
+ * "Fetch https://user:pw@host/x?token=1", so the label loses URL userinfo,
+ * query strings and absolute paths, gets the failure message's redaction, and
+ * is replaced by a fixed placeholder when it still reads like a secret. The
+ * call is still counted, under the placeholder.
+ */
+const REDACTED_TOOL_LABEL = "[redacted]";
+
 function boundedToolName(name: string): string {
-  const trimmed = name.trim();
+  const withoutUrlDetail = name
+    .replace(/(\b[a-z][a-z0-9+.-]*:\/\/)[^\s/@]*@/gi, "$1")
+    .replace(/(\b[a-z][a-z0-9+.-]*:\/\/[^\s?#]*)[?#]\S*/gi, "$1");
+  const redacted = SECRET_IN_WORDS.test(withoutUrlDetail)
+    ? undefined
+    : redactDiagnosticText(withoutUrlDetail).text.replace(ABSOLUTE_PATH, "$1[redacted-path]");
+  if (redacted === undefined || stillContainsSecret(redacted)) return REDACTED_TOOL_LABEL;
+  const trimmed = redacted.replace(/\s+/g, " ").trim();
+  if (trimmed.length === 0) return REDACTED_TOOL_LABEL;
   return trimmed.length > MAX_TOOL_NAME_LENGTH
     ? trimmed.slice(0, MAX_TOOL_NAME_LENGTH).trimEnd()
     : trimmed;
