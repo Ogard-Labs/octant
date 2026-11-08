@@ -380,9 +380,23 @@ from the host's next list. The Inbox lists each decision, each waiting subagent,
 harness approval as the same row (a decision answered in place, a subagent
 request reviewed in its Agents tab, an approval reviewed in its thread, where
 the approval card decides it), above its other waiting threads, and a thread
-with a listed approval is not listed again as waiting for approval. A finished
-turn is never listed in the Inbox or counted by its tile or the dock badge; it
-belongs to To review, and its one-shot banner is unchanged. The list is read at a local
+with a listed approval is not listed again as waiting for approval. The Inbox
+is a triage view: a line under its title reads "N waiting", with "· M urgent" in
+the warning colour when any decision is marked urgent, and a single-choice group
+of chips (**All**, **Urgent**, **Decide**, **Stuck**, **Finished**, each with its
+count) narrows it. Urgent is the decisions marked urgent, Decide every decision,
+Stuck every approval, question and waiting subagent, and Finished the threads
+whose turn ended and wait for what is next. A chip with nothing stays in place
+with a count of 0, and its list says so in one line. Only All also shows the
+assigned GitHub and Linear work, and a due follow-up shows under All only. The
+waiting items are grouped under their Project (a folder mark, the Project name,
+its count, and "N urgent" when any), with waits that belong to no Project under
+"No Project". A group holding an urgent item that is not deferred comes first, then the group that
+has waited longest; inside a group urgent items lead, then the oldest, then
+deferred ones, urgent or not. The choice lives in the open Inbox and is not remembered. A
+finished turn is never counted by the Inbox's tile or the dock badge, and All
+does not list it; it belongs to To review (the Finished chip is the one place the
+Inbox lists it), and its one-shot banner is unchanged. The list is read at a local
 window only, so a remote window has no Needs you source. What it includes and leaves out is in
 [Architecture: pending requests across modes](../architecture.md#security-and-authority).
 With every window closed, the desktop menu bar carries the same waiting threads
