@@ -198,7 +198,9 @@ bool private_acl(HANDLE handle, const Root& root, BYTE expected_flags = 0, bool 
   LocalFree(descriptor); return sound && saw_user && saw_system;
 }
 Handle open_directory(const std::wstring& path) {
-  Handle handle(CreateFileW(path.c_str(), FILE_READ_ATTRIBUTES | READ_CONTROL,
+  // Metadata-only opens do not participate in share-access checks. The real
+  // data-directory rename probe requires a read/list right to hold its name.
+  Handle handle(CreateFileW(path.c_str(), FILE_LIST_DIRECTORY | FILE_READ_ATTRIBUTES | READ_CONTROL,
     FILE_SHARE_READ | FILE_SHARE_WRITE, nullptr, OPEN_EXISTING,
     FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT, nullptr));
   FILE_ATTRIBUTE_TAG_INFO info{};
