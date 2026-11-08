@@ -80,8 +80,55 @@ describe("moving a thread after its turn", () => {
 
     expect(start).not.toHaveBeenCalled();
     // A batch that named the thread reads that it stays, rather than waiting on it.
-    expect(moves.status(THREAD).stopped?.stoppedAt).toEqual(expect.any(String));
+    expect(moves.status(THREAD).settled?.settledAt).toEqual(expect.any(String));
     expect(moves.status(THREAD).waiting).toBeUndefined();
+    moves.close();
+  });
+});
+
+describe("where a moved thread stands", () => {
+  it("still says a move ended after its failure notice was put away", async () => {
+    const folder = mkdtempSync(join(tmpdir(), "octant-move-settled-"));
+    folders.push(folder);
+    // The move fails and its notice has already been dismissed: the state holds none.
+    const start = vi.fn(async () => ({ status: "failed" as const, reason: "refused" as const }));
+    const moves = new ThreadMovesFromWindow({
+      moves: {
+        askProjects: async () => "unreachable",
+        start,
+        cancel: async () => ({ status: "cancelled" }),
+        takeBack: async () => {},
+        activateAnyway: async () => ({ httpStatus: 409, body: {} }),
+        dismissFailure: () => {},
+        refuseBeforeStart: () => {},
+      },
+      state: createThreadMoveStateStore(folder),
+      tickets: {
+        challenge: async () => ({ status: "refused", kind: "refused" }),
+        redeem: async () => ({ status: "issued", ticketId: "ticket" }),
+      },
+      source: { read: async () => reading(false) },
+      members: () => [],
+      selfMemberId: () => "self",
+      listThreads: async () => [],
+      now: Date.now,
+    });
+
+    expect(moves.status(THREAD).settled).toBeUndefined();
+    expect(
+      await moves.start({
+        thread: THREAD,
+        destinationMemberId: DESKTOP as never,
+        timing: "now",
+        unlock: { challengeId: "12345678-1234-4234-8234-123456789012", signature: "c2ln" },
+      }),
+    ).toEqual({ status: "started" });
+
+    await vi.waitFor(() => expect(start).toHaveBeenCalledOnce());
+    await vi.waitFor(() =>
+      expect(moves.status(THREAD).settled?.settledAt).toEqual(expect.any(String)),
+    );
+    expect(moves.status(THREAD).failure).toBeUndefined();
     moves.close();
   });
 });

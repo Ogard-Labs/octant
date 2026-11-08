@@ -2238,12 +2238,13 @@ a numbered slice. Built, with these narrower readings:
     more Touch ID. It then follows each row to Moved or Can't move and ends
     on Safe to shut down, or on how many threads stay here. A row the
     person sets themselves keeps its choice through destination changes.
-    Don't move on a row waiting for its turn leaves that thread here, and
-    the thread's status says so until it starts another move, so the batch
-    counts it as staying. Hiding the dialog leaves its batch moving, and
-    opening it again shows that batch.
-    **Prepare to Shut Down…** sits in the
-    application menu above Quit. The quit confirmation gains **Move threads
+    Each thread's status says when the last move or wait a window started
+    for it ended, never dismissed and kept until it starts another move, so
+    a row that ended without moving (Don't move pressed, or its failure
+    notice already put away) counts as staying rather than waiting forever.
+    Hiding the dialog leaves its batch moving, and opening it again shows
+    that batch. **Prepare to Shut Down…** sits in the application menu above
+    Quit. The quit confirmation gains **Move threads
     first…** while the window last saw this host in a hub with another
     member, and the dialog then ends with Quit Octant through the guarded
     quit. What it does not do yet: Hand over and Stop and move as row

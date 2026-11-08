@@ -174,8 +174,9 @@ interface Waiting {
 export class ThreadMovesFromWindow {
   readonly #options: ThreadMovesFromWindowOptions;
   readonly #waiting = new Map<string, Waiting>();
-  // When the person pressed Don't move, per thread, until it starts another move.
-  readonly #stoppedAt = new Map<string, UtcTimestamp>();
+  // When the last move or wait a window started for each thread ended, until
+  // that thread starts another; a failure notice can be dismissed, this cannot.
+  readonly #settledAt = new Map<string, UtcTimestamp>();
 
   constructor(options: ThreadMovesFromWindowOptions) {
     this.#options = options;
@@ -381,7 +382,10 @@ export class ThreadMovesFromWindow {
       threads,
     });
     if (ticket.status === "refused") {
-      for (const thread of threads) this.#options.moves.refuseBeforeStart(thread, ticket.reason);
+      for (const thread of threads) {
+        this.#options.moves.refuseBeforeStart(thread, ticket.reason);
+        this.#settle(thread);
+      }
       return { status: "refused", reason: ticket.reason };
     }
     const queue = { tail: Promise.resolve() };
@@ -426,7 +430,7 @@ export class ThreadMovesFromWindow {
     readonly queue: { tail: Promise<void> } | undefined;
   }): void {
     const { thread } = input;
-    this.#stoppedAt.delete(key(thread));
+    this.#settledAt.delete(key(thread));
     const run = async () => {
       await this.#options.moves
         .start({
@@ -440,6 +444,8 @@ export class ThreadMovesFromWindow {
         })
         // Every way it ends is recorded by the move itself, notice included.
         .catch(() => undefined);
+      // An interrupted move keeps its sending record, so it still reads as moving.
+      this.#settle(thread);
     };
     const enqueue = () => {
       if (input.queue === undefined) {
@@ -465,6 +471,7 @@ export class ThreadMovesFromWindow {
           if (this.#options.now() - startedWaitingAt > TICKET_WAIT_LIMIT_MS) {
             this.#stopWaiting(thread);
             this.#options.moves.refuseBeforeStart(thread, "unlock-required");
+            this.#settle(thread);
           }
           return;
         }
@@ -478,9 +485,7 @@ export class ThreadMovesFromWindow {
 
   /** The person changed their mind before the turn ended. */
   stopWaiting(thread: MovedThreadReference): { readonly status: "stopped" } {
-    if (this.#waiting.has(key(thread))) {
-      this.#stoppedAt.set(key(thread), new Date(this.#options.now()).toISOString() as UtcTimestamp);
-    }
+    if (this.#waiting.has(key(thread))) this.#settle(thread);
     this.#stopWaiting(thread);
     return { status: "stopped" };
   }
@@ -521,7 +526,7 @@ export class ThreadMovesFromWindow {
     const failure = (state.failures ?? []).find((notice) => same(notice.thread, thread));
     const departure = (state.departures ?? []).findLast((entry) => same(entry.thread, thread));
     const waiting = this.#waiting.get(key(thread));
-    const stoppedAt = this.#stoppedAt.get(key(thread));
+    const settledAt = this.#settledAt.get(key(thread));
     const status: ThreadMoveThreadStatus = {
       status: "read",
       ...(sent === undefined
@@ -548,7 +553,7 @@ export class ThreadMovesFromWindow {
               destinationName: nameOf(String(waiting.destinationMemberId)),
             },
           }),
-      ...(stoppedAt === undefined ? {} : { stopped: { stoppedAt } }),
+      ...(settledAt === undefined ? {} : { settled: { settledAt } }),
       ...(received === undefined
         ? {}
         : {
@@ -588,6 +593,10 @@ export class ThreadMovesFromWindow {
   close(): void {
     for (const waiting of this.#waiting.values()) clearInterval(waiting.timer);
     this.#waiting.clear();
+  }
+
+  #settle(thread: MovedThreadReference): void {
+    this.#settledAt.set(key(thread), new Date(this.#options.now()).toISOString() as UtcTimestamp);
   }
 
   #stopWaiting(thread: MovedThreadReference): void {

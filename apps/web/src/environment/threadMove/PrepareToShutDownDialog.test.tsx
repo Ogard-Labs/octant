@@ -92,8 +92,8 @@ function fakeClient(
     readonly startAnswersAfterMs?: number;
     /** While false, every started move is still sending. */
     readonly arrives?: () => boolean;
-    /** A thread whose wait for its turn the person stopped after the start. */
-    readonly stopped?: MovedThreadReference;
+    /** A thread whose move ended with nothing to show: Don't move, or its notice put away. */
+    readonly settled?: MovedThreadReference;
   } = {},
 ) {
   const challenged: Array<{
@@ -109,8 +109,8 @@ function fakeClient(
     challenge: async () => ({ status: "refused", kind: "refused" }),
     start: async () => ({ status: "refused", reason: "refused" }),
     status: async (thread): Promise<ThreadMoveThreadStatus> =>
-      moved && input.stopped !== undefined && input.stopped.threadId === thread.threadId
-        ? { status: "read", stopped: { stoppedAt: movedAt as never } }
+      moved && input.settled !== undefined && input.settled.threadId === thread.threadId
+        ? { status: "read", settled: { settledAt: movedAt as never } }
         : moved && input.arrives?.() === false
           ? {
               status: "read",
@@ -349,9 +349,9 @@ describe("Prepare to shut down", () => {
     expect(screen.getByRole("button", { name: "Move 1 thread with Touch ID" })).toBeEnabled();
   });
 
-  it("counts a thread whose wait the person stopped as staying, and finishes the batch", async () => {
+  it("counts a thread whose move ended without moving or a notice as staying, and finishes the batch", async () => {
     const user = userEvent.setup();
-    const { client } = fakeClient({ stopped: DARK });
+    const { client } = fakeClient({ settled: DARK });
     render(
       <PrepareToShutDownDialog
         client={client}

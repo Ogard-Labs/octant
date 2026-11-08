@@ -239,7 +239,7 @@ export function PrepareToShutDownDialog(props: PrepareToShutDownDialogProps) {
   const settled = chosen.map((thread) => settledState(statuses.get(rowKey(thread)), startedAt));
   const moved = settled.filter((state) => state === "moved").length;
   const failed = settled.filter((state) => state === "failed").length;
-  // A row whose wait for its turn the person stopped stays here by their choice.
+  // A row that ended without moving or a notice to show stays here.
   const stayed = settled.filter((state) => state === "stayed").length;
   const ended = moved + failed + stayed;
   const done = phase === "running" && chosen.length > 0 && ended === chosen.length;
@@ -596,14 +596,16 @@ function settledState(
   if (status === undefined || status.sending !== undefined || status.waiting !== undefined) {
     return "running";
   }
-  if (status.stopped !== undefined && Date.parse(status.stopped.stoppedAt) >= startedAt) {
-    return "stayed";
-  }
+
   if (status.departed !== undefined && Date.parse(status.departed.movedAt) >= startedAt) {
     return "moved";
   }
   if (status.failure !== undefined && Date.parse(status.failure.failedAt) >= startedAt) {
     return "failed";
+  }
+  // Ended with no departure: Don't move was pressed, or its failure notice was put away.
+  if (status.settled !== undefined && Date.parse(status.settled.settledAt) >= startedAt) {
+    return "stayed";
   }
   return "running";
 }

@@ -489,11 +489,12 @@ export const ThreadMoveThreadStatus = Schema.Struct({
     }).annotations(strict),
   ),
   /**
-   * The person pressed Don't move while it waited for its turn, so it stays
-   * here. Kept until the thread starts another move, so a batch that named it
-   * can count it as staying instead of waiting on it forever.
+   * The last move or wait a window started for this thread has ended: it
+   * moved, could not move, or the person pressed Don't move. Kept until the
+   * thread starts another move and never dismissed, so a batch that named the
+   * thread reads that it ended even after its failure notice is put away.
    */
-  stopped: Schema.optional(Schema.Struct({ stoppedAt: UtcTimestamp }).annotations(strict)),
+  settled: Schema.optional(Schema.Struct({ settledAt: UtcTimestamp }).annotations(strict)),
   /** Arrived here and not yet committed by its source. */
   arriving: Schema.optional(
     Schema.Struct({
