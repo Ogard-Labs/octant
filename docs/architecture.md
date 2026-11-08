@@ -5331,6 +5331,18 @@ modelId }`, and the model picker is provider-first. Each Claude instance is
   each image job after the turn the person opened at or before the job was
   queued, by the rule its Canvases use, and lists only the jobs it cannot
   place below the transcript.
+  In a Work or Code thread the same tool's `save` operation stores a finished
+  image of that thread as a new file under the folder the turn works in: the
+  Work thread's bound folder, or the Code turn's own checkout. The turn's
+  level decides as for any file edit: Plan refuses it, Ask first and Auto show
+  the person a card naming the path (Auto's reviewer does not answer it), and
+  Accept edits and Full access write at once; for Code the stricter of the
+  journaled and running posture applies, so a session-only grant still asks.
+  The write runs the Work confinement sequence (resolve for create inside the
+  folder, then an exclusive create through the proved parent), so a path that
+  leaves the folder, a symlinked component, or an existing file is refused.
+  Chat threads have no folder and are never offered it. A person's Save to
+  Project uses the same confined write under the Project's folder.
   With no image profile ready the icon opens Settings › Voice & images
   instead, and it is absent where the host serves no image generation. Work and
   Code keep their existing saves of a result: a Save click is the consent in

@@ -217,6 +217,17 @@ export function createImageRouteHandler(dependencies: ImageRouteDependencies) {
         if (!(await dependencies.authorizeScope(windowId, waiting.threadKind, waiting.scopeId))) {
           return failure("Image offers are unavailable.", 404, origin);
         }
+        const fits =
+          decision.decision === "cancel" ||
+          (waiting.kind === "generate"
+            ? decision.decision === "generate" || decision.decision === "agent-draws"
+            : decision.decision === "save");
+        if (!fits) {
+          return answer({
+            kind: "image-offer-refused",
+            reason: "That answer does not fit this request.",
+          });
+        }
         const claimed = dependencies.offers?.claim(windowId, decision.offerId);
         if (claimed === undefined) return answer({ kind: "image-offer-gone" });
         if (decision.decision === "generate") {
@@ -228,7 +239,12 @@ export function createImageRouteHandler(dependencies: ImageRouteDependencies) {
           claimed.settle({ status: "generate", ...choice });
         } else {
           claimed.settle({
-            status: decision.decision === "agent-draws" ? "agent-draws" : "cancelled",
+            status:
+              decision.decision === "agent-draws"
+                ? "agent-draws"
+                : decision.decision === "save"
+                  ? "save"
+                  : "cancelled",
           });
         }
         return answer({ kind: "image-offer-answered" });

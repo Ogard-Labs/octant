@@ -328,8 +328,9 @@ export const MAX_PENDING_IMAGE_GENERATION_OFFERS = 32;
  * all, or may say not to ask again in this thread. `suggested` is what the
  * card preselects; the person's choice is what runs.
  */
-export const ImageGenerationOffer = Schema.Struct({
+export const ImageGenerationGenerateOffer = Schema.Struct({
   offerId: ImageGenerationOfferId,
+  kind: Schema.Literal("generate"),
   threadKind: Schema.Literal("chat-thread", "work-thread", "code-thread"),
   scopeId: ImageGenerationScopeId,
   prompt: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(MAX_IMAGE_PROMPT_CHARACTERS)),
@@ -341,9 +342,31 @@ export const ImageGenerationOffer = Schema.Struct({
     modelId: ProviderModelId,
   }).annotations(strict),
   requestedAt: UtcTimestamp,
-})
-  .annotations(strict)
-  .annotations(personDecides);
+}).annotations(strict);
+export type ImageGenerationGenerateOffer = typeof ImageGenerationGenerateOffer.Type;
+
+/**
+ * An agent asking, in a Work or Code thread whose level asks before edits, to
+ * save an image this thread generated as a new file under the folder its turn
+ * works in. The path is relative to that folder; the host confines it there
+ * and never overwrites a file.
+ */
+export const ImageGenerationSaveOffer = Schema.Struct({
+  offerId: ImageGenerationOfferId,
+  kind: Schema.Literal("save"),
+  threadKind: Schema.Literal("work-thread", "code-thread"),
+  scopeId: ImageGenerationScopeId,
+  jobId: ImageJobId,
+  attachmentId: ImageArtifactId,
+  relativePath: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(512)),
+  requestedAt: UtcTimestamp,
+}).annotations(strict);
+export type ImageGenerationSaveOffer = typeof ImageGenerationSaveOffer.Type;
+
+export const ImageGenerationOffer = Schema.Union(
+  ImageGenerationGenerateOffer,
+  ImageGenerationSaveOffer,
+).annotations(personDecides);
 export type ImageGenerationOffer = typeof ImageGenerationOffer.Type;
 
 export const ImageGenerationOffersResponse = Schema.Struct({
@@ -357,7 +380,7 @@ export type ImageGenerationOffersResponse = typeof ImageGenerationOffersResponse
  * The person's answer. `generate` names the profile and model they chose and
  * whether this thread may generate with that choice from now on without
  * asking; `agent-draws` lets the agent make the visual with its own output;
- * `cancel` starts nothing.
+ * `save` writes the image a save offer names; `cancel` does nothing.
  */
 export const ImageGenerationOfferDecision = Schema.Union(
   Schema.Struct({
@@ -369,7 +392,8 @@ export const ImageGenerationOfferDecision = Schema.Union(
   }).annotations(strict),
   Schema.Struct({
     offerId: ImageGenerationOfferId,
-    decision: Schema.Literal("agent-draws", "cancel"),
+    /** `save` answers a save offer; `agent-draws` a generate offer; `cancel` either. */
+    decision: Schema.Literal("agent-draws", "save", "cancel"),
   }).annotations(strict),
 );
 export type ImageGenerationOfferDecision = typeof ImageGenerationOfferDecision.Type;

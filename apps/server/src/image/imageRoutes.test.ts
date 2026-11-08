@@ -239,6 +239,7 @@ describe("image routes", () => {
     const scope = { threadKind: "code-thread" as const, scopeId: scopeId as never };
     const offer = {
       ...scope,
+      kind: "generate" as const,
       prompt: "a lighthouse at dusk",
       variantCount: 1,
       revision: false,
@@ -256,7 +257,7 @@ describe("image routes", () => {
       const { handler, offers } = setup();
       const outcome = offers.offer({ windowId: windowId as never, offer });
       const [waiting] = await listed(handler);
-      expect(waiting?.prompt).toBe("a lighthouse at dusk");
+      expect(waiting).toMatchObject({ kind: "generate", prompt: "a lighthouse at dusk" });
       const response = await handler(
         request("/api/image/offers/decide", {
           method: "POST",
@@ -369,6 +370,46 @@ describe("image routes", () => {
       expect(offers.remembered(scope)).toBeUndefined();
       await Promise.resolve();
       expect(settled).toBe(false);
+      offers.close();
+    });
+
+    it("saves only on a save request, and refuses an answer that fits the other kind", async () => {
+      const { handler, offers } = setup();
+      const saveOutcome = offers.offer({
+        windowId: windowId as never,
+        offer: {
+          ...scope,
+          kind: "save",
+          jobId: jobId as never,
+          attachmentId: attachmentId as never,
+          relativePath: "art/lighthouse.png",
+        },
+      });
+      void offers.offer({ windowId: windowId as never, offer });
+      const [saveOffer, generateOffer] = offers.list(windowId as never, scope);
+      const decide = async (body: unknown) =>
+        decodeImageGenerationOfferDecisionResult(
+          await (await handler(
+            request("/api/image/offers/decide", { method: "POST", body }),
+          ))!.json(),
+        );
+
+      expect(await decide({ offerId: generateOffer?.offerId, decision: "save" })).toMatchObject({
+        kind: "image-offer-refused",
+      });
+      expect(
+        await decide({
+          offerId: saveOffer?.offerId,
+          decision: "generate",
+          profileInstanceId: profileId,
+          modelId: "gpt-image-2",
+          rememberForThread: false,
+        }),
+      ).toMatchObject({ kind: "image-offer-refused" });
+      expect(await decide({ offerId: saveOffer?.offerId, decision: "save" })).toEqual({
+        kind: "image-offer-answered",
+      });
+      await expect(saveOutcome).resolves.toEqual({ status: "save" });
       offers.close();
     });
 

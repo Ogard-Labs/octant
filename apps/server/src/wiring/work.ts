@@ -96,6 +96,7 @@ import {
   type WorkBoardRuntimeActivity,
 } from "../work/workThreadBoardService";
 import { createCanvasAgentTools } from "../canvas/canvasAgentTools";
+import { saveGeneratedImageUnder } from "../image/generatedImageSave";
 import { createThreadImageAgentTools } from "../image/imageAgentTools";
 import { combineAppManagedToolSets } from "../providers/appManagedToolSet";
 import { makeConfiguredProviderDriver, type ProvidersWiring } from "./providers";
@@ -592,6 +593,20 @@ export function wireWork(deps: WorkDependencies) {
                       (candidate) => String(candidate.id) === String(input.thread.modelId),
                     )
                     ?.inputModalities.includes("image") === true,
+                // A file edit at the turn's level: Ask first and Auto ask the
+                // person, Accept edits and Full access write at once.
+                save: {
+                  posture: () => {
+                    const access = runningWorkTurns.get(String(input.thread.id))?.access;
+                    const level =
+                      access === undefined
+                        ? "approval-gated"
+                        : workThreadAccessOf(access).executionPolicy;
+                    return level === "approval-gated" ? "ask" : "allow";
+                  },
+                  write: (relativePath, bytes) =>
+                    saveGeneratedImageUnder({ root: input.projectRoot, relativePath, bytes }),
+                },
               });
         const computerOwner = decodeComputerUseOwner({
           windowId: input.windowId,

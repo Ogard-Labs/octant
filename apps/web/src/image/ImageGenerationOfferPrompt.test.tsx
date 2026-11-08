@@ -37,6 +37,7 @@ const profiles = [
 function offer(overrides: Partial<ImageGenerationOffer> = {}): ImageGenerationOffer {
   return {
     offerId,
+    kind: "generate",
     threadKind: "code-thread",
     scopeId,
     prompt: "A lighthouse at dusk, oil painting",
@@ -135,5 +136,29 @@ describe("ImageGenerationOfferPrompt", () => {
     renderPrompt(fake);
     await waitFor(() => expect(fake.offers).toHaveBeenCalled());
     expect(screen.queryByRole("article", { name: "Image generation request" })).toBeNull();
+  });
+
+  it("asks to save an image under the path the agent named, and saves on one click", async () => {
+    const user = userEvent.setup();
+    const fake = client([
+      {
+        offerId,
+        kind: "save",
+        threadKind: "code-thread",
+        scopeId,
+        jobId: "cc000000-0000-4000-8000-000000000030",
+        attachmentId: "cc000000-0000-4000-8000-000000000031",
+        relativePath: "public/hero.png",
+        requestedAt: "2026-11-07T10:00:00.000Z",
+      } as ImageGenerationOffer,
+    ]);
+    renderPrompt(fake);
+    const card = await screen.findByRole("article", { name: "Image save request" });
+    expect(card).toHaveTextContent("public/hero.png");
+    expect(card).toHaveTextContent("never replaced");
+    await user.click(screen.getByRole("button", { name: "Save" }));
+    await waitFor(() =>
+      expect(fake.decideOffer).toHaveBeenCalledExactlyOnceWith({ offerId, decision: "save" }),
+    );
   });
 });
