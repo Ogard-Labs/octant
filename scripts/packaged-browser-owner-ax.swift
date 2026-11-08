@@ -10,7 +10,7 @@ guard (3...5).contains(CommandLine.arguments.count),
 }
 let mode = CommandLine.arguments.count >= 4 ? CommandLine.arguments[3] : "diagnostic"
 let requestedTitle = CommandLine.arguments.count == 5 ? CommandLine.arguments[4] : ""
-guard ["diagnostic", "read", "press", "click", "reveal"].contains(mode),
+guard ["diagnostic", "read", "press", "click", "reveal", "reopen"].contains(mode),
       (mode == "press" || mode == "click" || mode == "reveal") == !requestedTitle.isEmpty,
       requestedTitle.count <= 256 else { exit(2) }
 let preferenceTitle = "Keep Browser available without windows"
@@ -270,6 +270,35 @@ if mode == "press" || mode == "click" || mode == "reveal" {
                 }
             }
         } else { action["identityReadError"] = targetIdentityRead.rawValue }
+    }
+}
+if mode == "reopen" {
+    action = ["status": "refused", "method": "PID-targeted-reopen", "targetPid": processId]
+    let live = NSRunningApplication(processIdentifier: processId)
+    if treeIdentityMatched, live?.isTerminated == false,
+       live?.bundleURL?.resolvingSymlinksInPath().standardizedFileURL.path == expectedBundle,
+       Date() < dispatchDeadline {
+        // The standard Dock/Finder reopen event targets the existing PID, never
+        // LaunchServices or a bundle name that could start a second instance.
+        let target = NSAppleEventDescriptor(processIdentifier: processId)
+        let permission = AEDeterminePermissionToAutomateTarget(target.aeDesc,
+            AEEventClass(kCoreEventClass), AEEventID(kAEReopenApplication), false)
+        action["permissionStatus"] = permission
+        if permission == noErr {
+            let event = NSAppleEventDescriptor(eventClass: AEEventClass(kCoreEventClass),
+                eventID: AEEventID(kAEReopenApplication), targetDescriptor: target,
+                returnID: AEReturnID(kAutoGenerateReturnID), transactionID: AETransactionID(kAnyTransactionID))
+            do {
+                let reply = try event.sendEvent(options: [.waitForReply, .neverInteract], timeout: 2)
+                let replyError = reply.paramDescriptor(forKeyword: AEKeyword(keyErrorNumber))?.int32Value ?? 0
+                action["nativeError"] = replyError
+                action["status"] = replyError == 0 ? "acknowledged" : "uncertain"
+            } catch let error as NSError {
+                action["status"] = "uncertain"
+                action["nativeError"] = error.code
+                action["nativeErrorDomain"] = error.domain
+            }
+        }
     }
 }
 let evidence: [String: Any] = [

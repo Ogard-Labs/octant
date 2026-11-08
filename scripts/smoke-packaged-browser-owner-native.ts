@@ -33,12 +33,6 @@ end try
 set frontmost of candidate to true
 return "initialized"
 end if
-if operation is "activate" then
-set frontmost of candidate to false
-delay 0.2
-set frontmost of candidate to true
-return "activated"
-end if
 if operation is "focus" then
 set frontmost of candidate to true
 return "focused"
@@ -224,7 +218,7 @@ const timer = setInterval(() => {
           process.env,
           6000,
         );
-      const sdk = (mode: "diagnostic" | "read" | "click" | "reveal", value?: string) =>
+      const sdk = (mode: "diagnostic" | "read" | "click" | "reveal" | "reopen", value?: string) =>
         runBoundedCommand(
           sdkExecutable,
           [String(pid), bundle, mode, ...(value === undefined ? [] : [value])],
@@ -238,12 +232,15 @@ const timer = setInterval(() => {
           operation !== "snapshot" &&
           operation !== "count" &&
           operation !== "click" &&
-          operation !== "reveal"
+          operation !== "reveal" &&
+          operation !== "reopen"
         )
           return systemEvents(operation, value);
         if (operation === "click" || operation === "reveal") await systemEvents("focus");
         const raw = await sdk(
-          operation === "click" || operation === "reveal" ? operation : "read",
+          operation === "click" || operation === "reveal" || operation === "reopen"
+            ? operation
+            : "read",
           operation === "click" || operation === "reveal" ? value : undefined,
         );
         await writeFile(
@@ -278,6 +275,18 @@ const timer = setInterval(() => {
           !Array.isArray(decoded.interactiveControls)
         )
           throw Error("Native SDK control tree is incomplete.");
+        if (operation === "reopen") {
+          if (
+            !record(decoded.action) ||
+            decoded.action.status !== "acknowledged" ||
+            decoded.action.method !== "PID-targeted-reopen" ||
+            decoded.action.targetPid !== pid ||
+            decoded.action.permissionStatus !== 0 ||
+            decoded.action.nativeError !== 0
+          )
+            throw Error("Native reopen was refused or uncertain. It is never retried.");
+          return "acknowledged";
+        }
         if (operation === "reveal") {
           if (
             !record(decoded.action) ||
@@ -468,9 +477,9 @@ end run`;
           )
             throw Error("Last-window close did not retain the owned macOS process.");
           checks.push("last-window-closed-same-process-alive");
-          // Activate only the captured existing process. LaunchServices may
-          // otherwise start a second instance outside the owned process group.
-          await native("activate");
+          // Send the ordinary reopen event to the captured existing PID. Merely
+          // setting AXFrontmost does not deliver Dock/Finder reopen semantics.
+          await native("reopen");
           await wait("reopen", (s) => s.includes("AXButton"));
           snapshot = await settings();
           await recordPersisted("initial-reopened", true);
