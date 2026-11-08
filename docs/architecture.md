@@ -10378,6 +10378,7 @@ and the marketplace and plugin registry are no longer extraction candidates.
 | Linear, Azure Resource Manager reads                                  | Bundled Integration plugins with no switch; integration ports and contributed views                                     |
 | Canvas, preview viewers, backgrounds, theme presets                   | Core; scoped artifact contracts, registered viewers, and appearance contributions                                       |
 | Usage, diagnostics, Navigator, automations UI                         | Core; underlying authority stays in the host                                                                            |
+| Project memory and its agent tool                                     | Core; the journal, the person's confirmation, and purge stay host-owned                                                 |
 | Browser/computer use, agent hierarchy, remote/mobile, Apple workbench | Core; capability, lifecycle, and security remain app-managed                                                            |
 | Marketplace and plugin registry                                       | Core; they stay in the host because they admit and activate other components                                            |
 | Provider drivers                                                      | Bundled vendor plugins through provider-sdk; generic ACP transport and honest-capability enforcement stay host-owned    |
