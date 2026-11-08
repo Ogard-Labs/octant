@@ -16,7 +16,7 @@ export async function createOwnedChildProject(input: {
   const window = await registerWindowAuthority(input.serverUrl, input.desktopBridgeSecret);
   const projectId = randomUUID();
   const threadId = randomUUID();
-  try {
+  const setup = async () => {
     const receipt = await fetch(`${input.serverUrl}/api/desktop/project-binding-receipts`, {
       method: "POST",
       headers: {
@@ -121,7 +121,12 @@ export async function createOwnedChildProject(input: {
       "create the owned idle Work thread",
     );
     return { projectId, threadId };
-  } finally {
+  };
+  const outcome = await setup().then(
+    (value) => ({ kind: "ok", value }) as const,
+    (error: unknown) => ({ kind: "failed", error }) as const,
+  );
+  try {
     const revoked = await fetch(`${input.serverUrl}/api/desktop/window-authorities`, {
       method: "DELETE",
       headers: {
@@ -132,5 +137,14 @@ export async function createOwnedChildProject(input: {
       signal: AbortSignal.timeout(3000),
     });
     if (revoked.status !== 204) throw Error("The setup authority could not be revoked.");
+  } catch (error) {
+    if (outcome.kind === "failed")
+      throw new AggregateError(
+        [outcome.error, error],
+        "Owned setup and authority revocation failed.",
+      );
+    throw error;
   }
+  if (outcome.kind === "failed") throw outcome.error;
+  return outcome.value;
 }
