@@ -340,6 +340,28 @@ describe("the run builder", () => {
     expect(await screen.findByRole("region", { name: "Live grid" })).toBeInTheDocument();
   });
 
+  it("opens the new run's live grid at once, even when the first read of it fails", async () => {
+    const actor = user();
+    const client = makeClient({
+      readRun: vi
+        .fn()
+        .mockRejectedValueOnce(new Error("not readable yet"))
+        .mockResolvedValue(readResponse("running")),
+    });
+    mount(client);
+
+    await openSuite(actor);
+    const contenders = await screen.findByRole("group", { name: "Contenders" });
+    await actor.click(
+      within(contenders).getByRole("checkbox", { name: "Provider A · Fast model" }),
+    );
+    await actor.type(screen.getByRole("textbox", { name: "Cost budget in US dollars" }), "1");
+    await actor.click(screen.getByRole("button", { name: "Start run" }));
+
+    expect(await screen.findByRole("region", { name: "Live grid" })).toBeInTheDocument();
+    expect(client.readRun).toHaveBeenCalled();
+  });
+
   it("holds Start back until a contender and a budget are chosen", async () => {
     const actor = user();
     mount(makeClient());
