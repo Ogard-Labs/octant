@@ -35,9 +35,12 @@ const MAX_INTERACTIVE_ROWS = 24;
 export function BarListBlock({
   block,
   actionRuntime,
+  locale,
 }: {
   readonly block: CanvasBarListBlock;
   readonly actionRuntime?: CanvasActionRuntime | undefined;
+  /** Reads the figures in this locale; absent follows the person's own. */
+  readonly locale?: string | undefined;
 }) {
   const [showAll, setShowAll] = useState(false);
   const [direction, setDirection] = useState<BarListDirection>("desc");
@@ -107,11 +110,15 @@ export function BarListBlock({
                 <PathLabel label={row.label} />
               </span>
               <span className="canvas-block__bar-list-value">
-                {formatCanvasValue(row.value, block.format)}
+                {formatCanvasValue(row.value, block.format, locale)}
               </span>
               {row.secondaryValue === undefined ? null : (
                 <span className="canvas-block__bar-list-secondary">
-                  {formatCanvasValue(row.secondaryValue, block.secondaryFormat ?? block.format)}
+                  {formatCanvasValue(
+                    row.secondaryValue,
+                    block.secondaryFormat ?? block.format,
+                    locale,
+                  )}
                 </span>
               )}
             </span>
@@ -124,7 +131,9 @@ export function BarListBlock({
                 sourceId={row.sourceId}
               />
             )}
-            {activeIndex === row.index ? <ChartTooltip anchor={rowAnchor(block, row)} /> : null}
+            {activeIndex === row.index ? (
+              <ChartTooltip anchor={rowAnchor(block, row, locale)} />
+            ) : null}
           </li>
         ))}
       </ol>
@@ -141,24 +150,32 @@ export function BarListBlock({
             : `Show all ${String(block.rows.length)}`}
         </OctantButton>
       )}
-      <BarListData actionRuntime={actionRuntime} block={block} rows={ranked} />
+      <BarListData actionRuntime={actionRuntime} block={block} locale={locale} rows={ranked} />
     </figure>
   );
 }
 
-function rowAnchor(block: CanvasBarListBlock, row: CanvasBarListRowLayout): ChartTooltipAnchor {
+function rowAnchor(
+  block: CanvasBarListBlock,
+  row: CanvasBarListRowLayout,
+  locale: string | undefined,
+): ChartTooltipAnchor {
   const readings = [
     {
       seriesIndex: 0,
       seriesLabel: block.valueLabel ?? "Value",
-      valueLabel: formatCanvasValue(row.value, block.format),
+      valueLabel: formatCanvasValue(row.value, block.format, locale),
     },
   ];
   if (row.secondaryValue !== undefined) {
     readings.push({
       seriesIndex: 1,
       seriesLabel: block.secondaryLabel ?? "Second",
-      valueLabel: formatCanvasValue(row.secondaryValue, block.secondaryFormat ?? block.format),
+      valueLabel: formatCanvasValue(
+        row.secondaryValue,
+        block.secondaryFormat ?? block.format,
+        locale,
+      ),
     });
   }
   // The tooltip is drawn inside the row it belongs to, so it sits on the row
@@ -207,7 +224,9 @@ function BarListData({
   block,
   rows,
   actionRuntime,
+  locale,
 }: {
+  readonly locale: string | undefined;
   readonly block: CanvasBarListBlock;
   readonly rows: ReadonlyArray<CanvasBarListRowLayout>;
   readonly actionRuntime: CanvasActionRuntime | undefined;
@@ -237,7 +256,7 @@ function BarListData({
             {rows.map((row) => (
               <tr key={row.label}>
                 <th scope="row">{row.label}</th>
-                <td>{formatCanvasValue(row.value, block.format)}</td>
+                <td>{formatCanvasValue(row.value, block.format, locale)}</td>
                 {hasSecondary ? (
                   <td>
                     {row.secondaryValue === undefined
@@ -245,6 +264,7 @@ function BarListData({
                       : formatCanvasValue(
                           row.secondaryValue,
                           block.secondaryFormat ?? block.format,
+                          locale,
                         )}
                   </td>
                 ) : null}

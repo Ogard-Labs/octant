@@ -139,6 +139,8 @@ export class BenchmarkRunner {
   readonly #requeued = new Set<string>();
   /** When this process first saw a Code turn park on an approval nothing journaled dated. */
   readonly #approvalSince = new Map<string, number>();
+  /** What a Code turn was last seen waiting on, so a turn that ends while parked ends the cell as blocked. */
+  readonly #approvalSeen = new Map<string, string>();
   /** Code cells this process has already read once; a first sight says nothing about how long a wait has lasted. */
   readonly #sighted = new Set<string>();
   /** Check commands running in the background for Code cells whose turns finished. */
@@ -818,13 +820,27 @@ export class BenchmarkRunner {
     }
     if (reading.state === "interrupted" || reading.state === "failed") {
       this.#approvalSince.delete(cellId);
-      this.#settle(run, cell, "failed", reading.failureMessage ?? `The turn ${reading.state}.`);
+      // A turn that ends while an approval waits (a provider-inactivity timeout,
+      // an interrupt) was blocked by it, not broken: say so, with what it asked.
+      const waitedOn = this.#approvalSeen.get(cellId);
+      this.#approvalSeen.delete(cellId);
+      if (waitedOn !== undefined) {
+        this.#settle(
+          run,
+          cell,
+          "blocked-on-approval",
+          `The turn ended while waiting for an approval nobody gave: ${waitedOn}`,
+        );
+      } else {
+        this.#settle(run, cell, "failed", reading.failureMessage ?? `The turn ${reading.state}.`);
+      }
       await code.archiveThread(threadId);
       return true;
     }
     const now = Date.parse(this.#options.clock());
     const startedMs = cell.startedAt === undefined ? Number.NaN : Date.parse(cell.startedAt);
     if (reading.awaitingApproval) {
+      this.#approvalSeen.set(cellId, reading.approvalSummary ?? "a request for approval");
       // The wait began when the journal says the approval was asked. Without
       // that, a turn this process saw run and then park is timed from the
       // moment it parked; one first met already parked (after a restart) is
@@ -838,18 +854,21 @@ export class BenchmarkRunner {
       if (Number.isNaN(journaled)) this.#approvalSince.set(cellId, since);
       if (now - since >= (this.#options.approvalWaitMs ?? BENCHMARK_APPROVAL_WAIT_MS)) {
         this.#approvalSince.delete(cellId);
+        const asked = this.#approvalSeen.get(cellId);
+        this.#approvalSeen.delete(cellId);
         await code.interruptTurn(threadId, submissionId);
         this.#settle(
           run,
           cell,
           "blocked-on-approval",
-          "The turn waited 10 minutes for an approval nobody gave.",
+          `The turn waited 10 minutes for an approval nobody gave${asked === undefined ? "." : `: ${asked}`}`,
         );
         await code.archiveThread(threadId);
         return true;
       }
     } else {
       this.#approvalSince.delete(cellId);
+      this.#approvalSeen.delete(cellId);
     }
     this.#sighted.add(cellId);
     if (now - startedMs > (this.#options.turnTimeoutMs ?? BENCHMARK_TURN_TIMEOUT_MS)) {
@@ -1007,6 +1026,7 @@ export class BenchmarkRunner {
         this.#checking.get(String(live.cellId))?.controller.abort();
         this.#checking.delete(String(live.cellId));
         this.#approvalSince.delete(String(live.cellId));
+        this.#approvalSeen.delete(String(live.cellId));
         await this.#options.code?.interruptTurn(
           live.threadId,
           benchmarkCellIdentity(String(live.cellId)).submissionId,

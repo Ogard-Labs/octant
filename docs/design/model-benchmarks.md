@@ -67,8 +67,9 @@ already measures every turn. Benchmarks add three things on top:
   or tag, never pushed, with delivery target "local only". The run picks an
   execution level at a local window: Auto or Accept edits, clamped to the
   Project's level, or Full access only where the Project already allows it. An
-  approval that still blocks the turn for 10 minutes ends the cell as
-  `blocked-on-approval`, which counts as a failure with that reason. The
+  approval that still blocks the turn ends the cell as `blocked-on-approval`,
+  either after 10 minutes or when the turn ends first; it counts as a failure
+  with that reason. The
   worktree is removed when the run is purged.
 
 ## Scoring

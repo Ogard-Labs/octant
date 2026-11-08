@@ -1192,15 +1192,19 @@ export function startOctantServer(
       awaitsPerson: (threadId) =>
         codeOperationRuntime?.turnAwaitsPerson?.(threadId) === true ||
         threadAwaitsHarnessApproval(threadId),
-      // The journaled time an approval or question was asked, so a restart
-      // keeps counting the wait from when it began.
-      pendingSince: async (threadId) => {
+      // The oldest approval or question the thread's turn waits on: when it was
+      // asked, from the journal, so a restart keeps counting from then, and what
+      // it asks, for a cell that ends blocked.
+      pendingApproval: async (threadId) => {
         const pending = await codeOperationRuntime?.pendingRequests?.(ROUTINE_HOST_SCOPE_ID);
-        const asked = (pending ?? [])
+        const oldest = (pending ?? [])
           .filter((request) => String(request.threadId) === threadId)
-          .map((request) => String(request.requestedAt))
-          .sort();
-        return asked[0];
+          .sort((left, right) =>
+            String(left.requestedAt).localeCompare(String(right.requestedAt)),
+          )[0];
+        return oldest === undefined
+          ? undefined
+          : { since: String(oldest.requestedAt), summary: oldest.text };
       },
       codeEvidence,
       benchmarkCheckCommands,

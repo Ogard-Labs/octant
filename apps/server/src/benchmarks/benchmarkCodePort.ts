@@ -43,6 +43,8 @@ export type BenchmarkCodeTurnReading =
        * cannot say, which a restart must not read as "just now".
        */
       readonly waitingSince?: string;
+      /** What the pending approval or question asks, when the host can say. */
+      readonly approvalSummary?: string;
       readonly failureMessage?: string;
     };
 
@@ -150,7 +152,12 @@ export interface CreateBenchmarkCodePortOptions {
   /** Whether the thread's running turn waits on an approval or a question. */
   readonly awaitsPerson: (threadId: string) => boolean;
   /** When the thread's oldest pending request was asked, from the journal; absent when unknown. */
-  readonly pendingSince?: (threadId: string) => Promise<string | undefined> | string | undefined;
+  readonly pendingApproval?: (
+    threadId: string,
+  ) =>
+    | Promise<{ readonly since: string; readonly summary: string } | undefined>
+    | { readonly since: string; readonly summary: string }
+    | undefined;
   readonly evidence: { readonly put: (text: string) => CodeEvidenceReference };
   readonly clock: () => string;
   readonly resolveRoot: (threadId: string) => Promise<string | undefined>;
@@ -397,13 +404,15 @@ export function createBenchmarkCodePort(
               ? "failed"
               : "in-flight";
       const awaitingApproval = state === "in-flight" && options.awaitsPerson(threadId);
-      const waitingSince = awaitingApproval ? await options.pendingSince?.(threadId) : undefined;
+      const pending = awaitingApproval ? await options.pendingApproval?.(threadId) : undefined;
       return {
         status: "turn",
         turnId: operationId,
         state,
         awaitingApproval,
-        ...(waitingSince === undefined ? {} : { waitingSince }),
+        ...(pending === undefined
+          ? {}
+          : { waitingSince: pending.since, approvalSummary: pending.summary }),
         ...(turn.failure === undefined ? {} : { failureMessage: turn.failure.message }),
       };
     },

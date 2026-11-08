@@ -72,7 +72,9 @@ export type BenchmarksDependencies = Pick<ServerStart, "persistence"> &
     ) => Promise<boolean> | boolean;
     readonly awaitsPerson: (threadId: string) => boolean;
     /** When the thread's oldest pending request was asked, from the journal; absent when unknown. */
-    readonly pendingSince: (threadId: string) => Promise<string | undefined>;
+    readonly pendingApproval: (
+      threadId: string,
+    ) => Promise<{ readonly since: string; readonly summary: string } | undefined>;
     /** The confined, network-less launcher check commands run through, with a private folder per cell. */
     readonly benchmarkCheckCommands: BenchmarkCheckCommandPort;
     readonly managedWorktreeService: Pick<ManagedWorktreeService, "cleanup">;
@@ -99,7 +101,7 @@ export function wireBenchmarks(deps: BenchmarksDependencies) {
   const {
     awaitsPerson,
     canAccessCodeProject,
-    pendingSince,
+    pendingApproval,
     codeEvidence,
     benchmarkCheckCommands,
     managedWorktreeReceipts,
@@ -232,7 +234,7 @@ export function wireBenchmarks(deps: BenchmarksDependencies) {
                 };
           },
           awaitsPerson,
-          pendingSince,
+          pendingApproval,
           evidence: codeEvidence,
           clock: () => new Date().toISOString(),
           resolveRoot,
