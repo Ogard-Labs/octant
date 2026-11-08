@@ -12,6 +12,7 @@
 
 import {
   decodeConfirmNewMembersRequest,
+  decodeHubAcceptMovedThreadsRequest,
   decodeHubGrant,
   decodeHubAutoApplyRequest,
   decodeHubDirectPushCredentialRemoveRequest,
@@ -154,6 +155,11 @@ export const HUB_ADMINISTRATION_OPERATIONS = {
     method: "POST",
     path: "/api/desktop/hub/wake",
     decodeBody: decodeHubWakeSwitchRequest,
+  },
+  "accept-moved-threads": {
+    method: "POST",
+    path: "/api/desktop/hub/accept-moved-threads",
+    decodeBody: decodeHubAcceptMovedThreadsRequest,
   },
   "wake-hardware-address": {
     method: "POST",

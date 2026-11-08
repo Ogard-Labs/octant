@@ -325,6 +325,9 @@ describe("hub administration controls", () => {
     const { calls, runtime: controls } = runtime(() => Response.json({ status: "changed" }));
 
     await sendHubAdministrationOperation(controls, "wake", { enabled: true });
+    expect(
+      await sendHubAdministrationOperation(controls, "accept-moved-threads", { enabled: "no" }),
+    ).toMatchObject({ status: 400 });
     await sendHubAdministrationOperation(controls, "wake-hardware-address", {
       address: "aa:bb:cc:00:11:22",
     });

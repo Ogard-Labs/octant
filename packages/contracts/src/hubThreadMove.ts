@@ -498,6 +498,19 @@ export const ThreadMoveThreadStatus = Schema.Struct({
 }).annotations(strict);
 export type ThreadMoveThreadStatus = typeof ThreadMoveThreadStatus.Type;
 
+/**
+ * A window on the hub turning Accept moved threads on or off. The hub keeps
+ * no peer grants, so this switch stands where a spoke's Move in item does;
+ * every move still needs an owner's own fresh unlock on the hub.
+ */
+export const HubAcceptMovedThreadsRequest = Schema.Struct({
+  enabled: Schema.Boolean,
+}).annotations(strict);
+export type HubAcceptMovedThreadsRequest = typeof HubAcceptMovedThreadsRequest.Type;
+export const decodeHubAcceptMovedThreadsRequest = Schema.decodeUnknownSync(
+  HubAcceptMovedThreadsRequest,
+);
+
 export const decodeOwnerThreadMoveTicketRequest = Schema.decodeUnknownSync(
   OwnerThreadMoveTicketRequest,
 );
