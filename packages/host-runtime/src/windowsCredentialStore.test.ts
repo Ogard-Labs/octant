@@ -6,7 +6,11 @@ vi.mock("node:child_process", async (importOriginal) => {
   return { ...actual, spawn: vi.fn(actual.spawn) };
 });
 import { CredentialStoreFailure } from "./credentialStore";
-import { makeWindowsCredentialStore, type WindowsCommandSpec } from "./windowsCredentialStore";
+import {
+  makeWindowsCredentialStore,
+  type WindowsCredentialNamespace,
+  type WindowsCommandSpec,
+} from "./windowsCredentialStore";
 
 const providerInstanceId = "72000000-0000-4000-8000-000000000005";
 const storeScope = "72000000-0000-4000-8000-000000000006";
@@ -20,11 +24,12 @@ function reply(status = 0, value = "") {
   bytes.copy(result, 9);
   return { exitCode: 0, stdout: result };
 }
-function fixture(response = reply()) {
+function fixture(response = reply(), namespace?: WindowsCredentialNamespace) {
   const calls: WindowsCommandSpec[] = [];
   const store = makeWindowsCredentialStore({
     helperPath,
     storeScope,
+    ...(namespace === undefined ? {} : { namespace }),
     serviceFamily: "octant-nightly-test-data",
     execute: async (spec) => {
       calls.push({ ...spec, input: Buffer.from(spec.input) });
@@ -45,13 +50,41 @@ describe("Windows provider credentials", () => {
     expect(call?.environment).toEqual({});
     const input = Buffer.from(call?.input ?? []);
     expect(input.toString("ascii", 0, 4)).toBe("OCCR");
-    expect(input[4]).toBe(1);
+    expect(input[4]).toBe(2);
     expect(input[5]).toBe(1);
     expect(input[6]).toBe(1);
     expect(input.toString("ascii", 7, 43)).toBe(storeScope);
     expect(input.toString("ascii", 43, 79)).toBe(providerInstanceId);
     expect(input.readUInt32LE(79)).toBe(Buffer.byteLength("synthetic-λ-key"));
-    expect(input.toString("utf8", 83)).toBe("synthetic-λ-key");
+    expect(input[83]).toBe(0);
+    expect(input.toString("utf8", 84)).toBe("synthetic-λ-key");
+  });
+
+  it("keeps every auxiliary purpose distinct from the provider and each other", async () => {
+    const namespaces: ReadonlyArray<WindowsCredentialNamespace> = [
+      "provider",
+      "replica-device-key",
+      "replica-store-credential",
+      "canvas-public-share-secret",
+      "mcp-server-credential",
+      "desktop-provider-credential",
+      "push-platform-credential",
+      "ssh-key",
+    ];
+    for (const [purpose, namespace] of namespaces.entries()) {
+      const { store, calls } = fixture(reply(), namespace);
+      await store.set(providerInstanceId, "synthetic");
+      await store.has(providerInstanceId);
+      await store.delete(providerInstanceId);
+      expect(calls.map((call) => Buffer.from(call.input)[83])).toEqual([purpose, purpose, purpose]);
+    }
+    expect(() =>
+      makeWindowsCredentialStore({
+        helperPath,
+        storeScope,
+        ...JSON.parse('{"namespace":"other"}'),
+      }),
+    ).toThrow(CredentialStoreFailure);
   });
 
   it("accepts the exact native byte cap and refuses overflow before invoking the helper", async () => {

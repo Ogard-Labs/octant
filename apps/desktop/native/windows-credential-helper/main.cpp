@@ -57,13 +57,13 @@ bool reply(HANDLE output, Status status, unsigned char* secret = nullptr, DWORD 
 }
 
 int run(HANDLE input, HANDLE output) {
-  std::array<unsigned char, 83> header{};
+  std::array<unsigned char, 84> header{};
   Secret secret;
   if (!transfer(input, header.data(), static_cast<DWORD>(header.size()), false))
     return reply(output, Status::invalid) ? 0 : 1;
   const DWORD size = little_endian(header.data() + 79);
   const auto operation = header[5];
-  bool valid = header[4] == 1 && operation >= 1 && operation <= 4 && header[6] <= 1 &&
+  bool valid = header[4] == 2 && operation >= 1 && operation <= 4 && header[6] <= 1 && header[83] < 8 &&
     uuid(header.data() + 7) && uuid(header.data() + 43) && size <= max_secret &&
     (operation == 1 ? size > 0 : size == 0);
   for (size_t i = 0; i < magic.size(); ++i) valid = valid && header[i] == magic[i];
@@ -78,7 +78,16 @@ int run(HANDLE input, HANDLE output) {
       reinterpret_cast<const char*>(secret.bytes.data()), static_cast<int>(size), nullptr, 0) == 0)
     return reply(output, Status::invalid) ? 0 : 1;
 
-  std::wstring target = header[6] == 0 ? L"Octant/provider/v1/octant/" : L"Octant/provider/v1/octant-nightly-test-data/";
+  // The purpose is closed in both peers. In particular the existing provider
+  // prefix is unchanged; auxiliary requests can never name that target.
+  constexpr std::array<const wchar_t*, 8> purposes{
+    L"provider", L"replica-device-key", L"replica-store-credential",
+    L"canvas-public-share-secret", L"mcp-server-credential",
+    L"desktop-provider-credential", L"push-platform-credential", L"ssh-key"
+  };
+  std::wstring target = L"Octant/";
+  target += purposes[header[83]];
+  target += header[6] == 0 ? L"/v1/octant/" : L"/v1/octant-nightly-test-data/";
   for (size_t i = 7; i < 43; ++i) target += static_cast<wchar_t>(header[i]);
   target += L"/";
   for (size_t i = 43; i < 79; ++i) target += static_cast<wchar_t>(header[i]);
