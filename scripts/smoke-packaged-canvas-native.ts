@@ -1,5 +1,5 @@
 import { Effect, Schema } from "effect";
-import { execFileSync, spawn, type ChildProcess } from "node:child_process";
+import { execFileSync, spawn, spawnSync, type ChildProcess } from "node:child_process";
 import { mkdtemp, mkdir, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { networkInterfaces, tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
@@ -328,6 +328,15 @@ async function main(): Promise<void> {
     if (fixtureDataDirectory !== join(await realpath(root), "data"))
       throw Error("The unique fixture data directory is not confined to its created root.");
     scratchHostScope = deriveHostRuntimeHostId(fixtureDataDirectory);
+    ownerSecretStore = makeKeychainCredentialStore(
+      join(bundle, "Contents/Resources/native/octant-keychain-helper"),
+      {
+        storeScope: scratchHostScope,
+        namespace: "canvas-public-share-secret",
+        serviceFamily: "octant",
+        timeoutMs: 5000,
+      },
+    );
     pairedFixture = await seedPairedFixture(fixtureDataDirectory, projectId, controller.signal);
     const shareConfig = readShareConfig({
       OCTANT_SHARE_HOST: "127.0.0.1",
@@ -393,6 +402,77 @@ async function main(): Promise<void> {
         ),
       );
     }
+    const keychainProbeResults: Array<{ environment: string; status: string; category?: string }> =
+      [];
+    for (const [name, probeEnvironment] of [
+      ["runner-home", process.env],
+      ["fixture-home", { ...process.env, HOME: env.HOME }],
+    ] as const) {
+      const probeRef = randomUUID();
+      const probeStore = makeKeychainCredentialStore(
+        join(bundle, "Contents/Resources/native/octant-keychain-helper"),
+        {
+          storeScope: scratchHostScope,
+          namespace: "canvas-public-share-secret",
+          serviceFamily: "octant",
+          timeoutMs: 5000,
+          execute: async (spec, limits) => {
+            const result = spawnSync(spec.command, spec.args, {
+              input: spec.stdin,
+              env: probeEnvironment,
+              encoding: "utf8",
+              timeout: limits.timeoutMs,
+              maxBuffer: limits.maxBytes,
+            });
+            if (result.error !== undefined) throw Error("Owned Keychain probe transport failed.");
+            return { exitCode: result.status, stdout: result.stdout, stderr: result.stderr };
+          },
+        },
+      );
+      try {
+        await probeStore.set(probeRef, randomBytes(32).toString("base64url"));
+        if (!(await probeStore.has(probeRef))) throw Error("Owned fixture probe was not readable.");
+        keychainProbeResults.push({ environment: name, status: "set-and-has-passed" });
+      } catch (error) {
+        const category =
+          typeof error === "object" &&
+          error !== null &&
+          "category" in error &&
+          typeof error.category === "string"
+            ? error.category
+            : "unavailable";
+        keychainProbeResults.push({ environment: name, status: "failed", category });
+      } finally {
+        await ownerSecretStore.delete(probeRef);
+        if (await ownerSecretStore.has(probeRef))
+          throw Error("An owned Keychain diagnostic probe remains.");
+      }
+    }
+    const signature = spawnSync(
+      "/usr/bin/codesign",
+      ["-dv", "--verbose=2", join(bundle, "Contents/Resources/native/octant-keychain-helper")],
+      { encoding: "utf8", timeout: 3000 },
+    );
+    await writeFile(
+      join(artifacts, "keychain-environment-probe.json"),
+      JSON.stringify(
+        {
+          probes: keychainProbeResults,
+          setup: "synthetic secret in exact unique scratch-host scope; values never recorded",
+          helperSignatureExit: signature.status,
+          helperSignatureFacts: signature.stderr
+            .split("\n")
+            .filter((line) => /^(CodeDirectory|Signature=|TeamIdentifier=)/.test(line)),
+          exactProbeReferencesRemoved: true,
+        },
+        null,
+        2,
+      ),
+    );
+    if (keychainProbeResults.some((result) => result.status === "failed"))
+      throw Error(
+        "Packaged Keychain synthetic environment probe failed; see sanitized fixture evidence.",
+      );
     app = spawnPackagedApplication({ executable, env });
     pid = app.child.pid;
     if (pid === undefined) throw Error("No owned packaged application process.");
@@ -770,15 +850,6 @@ const timer = setInterval(() => {
         connection.close();
       }
     };
-    ownerSecretStore = makeKeychainCredentialStore(
-      join(bundle, "Contents/Resources/native/octant-keychain-helper"),
-      {
-        storeScope: scratchHostScope,
-        namespace: "canvas-public-share-secret",
-        serviceFamily: "octant",
-        timeoutMs: 5000,
-      },
-    );
     await nativeInput("approve-owned-export", "click", "Approve export");
     await observeUntil("native-published", (snapshot) => hasText(snapshot, "Exported."));
     const published = Schema.decodeUnknownSync(CanvasPublicSharePublished)(
@@ -1120,7 +1191,11 @@ const timer = setInterval(() => {
         );
       }
     }
-    if (ownerSecretStore !== undefined && bundle !== undefined && cleanupVerified) {
+    if (
+      ownerSecretStore !== undefined &&
+      bundle !== undefined &&
+      (app === undefined || cleanupVerified)
+    ) {
       try {
         const currentDataDirectory = await realpath(join(root, "data"));
         if (
