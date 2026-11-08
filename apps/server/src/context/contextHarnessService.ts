@@ -1384,7 +1384,14 @@ export class ContextHarnessService {
             tokens: planned.next.plan.plannedInputTokens,
             accuracy: "conservative-heuristic",
           };
-    const changedSince = this.#compactedSince(subject, report?.observedAt);
+    // Without a report, the plan's estimate is as fresh as the plan: a plan
+    // made after the latest compaction already counts what it left, so that
+    // compaction's figure must not stand for every turn after it.
+    const changedSince = this.#compactedSince(
+      subject,
+      report?.observedAt ??
+        (planned === undefined ? undefined : String(planned.next.plan.createdAt)),
+    );
     if (changedSince !== undefined) {
       if (changedSince.kind === "known") return changedSince;
       return report === undefined
