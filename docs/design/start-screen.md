@@ -49,8 +49,8 @@ decision's options as full-width buttons with the recommended one first, a
 trailing "Recommended" in meta text rather than a hue, and the option's detail
 as a second meta line; a decision also shows its why as a meta paragraph under
 the ask, an "Urgent" tag in the warning role beside the wait when the agent
-marked it urgent, and an **Add note** control; when a second opinion exists, a meta line under the recommended
-option naming the asking model and, under the option the reviewer backs, a line naming the
+marked it urgent, and an **Add note** control; when a second opinion exists, a meta line inside the recommended
+option's button naming the asking model and, inside the option the reviewer backs, a line naming the
 reviewer's model and its one-sentence reason, each led by a 12px provider mark, and a
 "Second opinion differs" tag in the warning role beside Urgent when the two options differ).
 Rows
@@ -164,10 +164,10 @@ card) reveals a short text field: picking an option while it has text sends the
 option's words and the note, and Escape closes it; number keys type into the
 field rather than pick. **Reply…** opens the thread. When the person has chosen a second-opinion
 model (Settings › Providers & Models › Automatic model calls, off by default), a decision also
-shows who asked and who reviewed: under the recommended option a small muted line with the asking
-thread's provider mark and model and "· asking thread", and under the option the reviewer backs a
-line with the reviewer's mark and model and "· Second opinion: " and its reason (both under one
-option when they agree). A "Second opinion differs" tag sits beside Urgent when the reviewer backs
+shows who asked and who reviewed: inside the recommended option's button, under its detail, a small muted line with the asking
+thread's provider mark and model and "· asking thread", and inside the option the reviewer backs a
+line with the reviewer's mark and model and "· Second opinion: " and its reason (both inside one
+option when they agree, so each backer reads as part of the option it backs). A "Second opinion differs" tag sits beside Urgent when the reviewer backs
 another option. While the review is queued one muted line under the options says "Getting a second
 opinion…"; when none will come (the reviewer's answer could not be read, it read outside content,
 or the Project does not allow the chosen provider) it says "No second opinion" with the reason as

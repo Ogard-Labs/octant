@@ -166,16 +166,17 @@
   padding: 0;
 }
 
-/* A model's name under the option it stands behind: the mark, the model, and one
-   short line. It sits below its option's button, level with the button's label. */
-.pending-request__option {
-  display: grid;
-  width: 100%;
+/* A model's name inside the option it stands behind: the mark, the model, and one
+   short line, under the option's detail. */
+.pending-request__model-line {
+  display: flex;
   min-width: 0;
-  gap: 2px;
+  align-items: center;
+  gap: var(--oct-space-1);
+  font-weight: 400;
+  overflow-wrap: anywhere;
 }
 
-.pending-request__model-line,
 .pending-request__review-note {
   display: flex;
   min-width: 0;
@@ -205,8 +206,9 @@
   white-space: nowrap;
 }
 
-/* The two models disagree: the words, in the warning role the Urgent tag uses. */
-.pending-request__differs {
+/* The two models disagree: the words, in the warning role the Urgent tag uses.
+   Paired with .oct-meta, which loads later and would otherwise paint it grey. */
+.pending-request__differs.oct-meta {
   flex: 0 0 auto;
   color: var(--oct-warn-fg);
 }

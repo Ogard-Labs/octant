@@ -322,7 +322,15 @@ export function PendingRequestRow(props: PendingRequestRowProps) {
           ) : (
             <>
               {choices.map((choice, index) => {
-                const button = (
+                // The models that back an option sit inside its button, so
+                // each backer reads as part of the option it backs.
+                const askedBy =
+                  decision !== undefined && choice.recommended === true
+                    ? decision.askedBy
+                    : undefined;
+                const backedBy =
+                  reviewed !== undefined && reviewed.backs === choice.label ? reviewed : undefined;
+                return (
                   <OctantButton
                     className="pending-request__choice"
                     disabled={busy}
@@ -348,45 +356,34 @@ export function PendingRequestRow(props: PendingRequestRowProps) {
                           {choice.detail}
                         </span>
                       )}
+                      {askedBy === undefined ? null : (
+                        <span className="oct-meta pending-request__model-line">
+                          <ProviderGlyph
+                            className="pending-request__model-mark"
+                            displayName={props.provider?.displayName ?? String(askedBy.modelId)}
+                            driverKind={props.provider?.driverKind ?? ""}
+                            size={12}
+                          />
+                          <span className="pending-request__model-text">
+                            {`${String(askedBy.modelId)} · asking thread`}
+                          </span>
+                        </span>
+                      )}
+                      {backedBy === undefined ? null : (
+                        <span className="oct-meta pending-request__model-line">
+                          <ProviderGlyph
+                            className="pending-request__model-mark"
+                            displayName={backedBy.providerName ?? String(backedBy.modelId)}
+                            driverKind={backedBy.driverKind ?? ""}
+                            size={12}
+                          />
+                          <span className="pending-request__model-text">
+                            {`${String(backedBy.modelId)} · Second opinion: ${backedBy.reason}`}
+                          </span>
+                        </span>
+                      )}
                     </span>
                   </OctantButton>
-                );
-                if (decision === undefined) return button;
-                const askedLine = choice.recommended === true && decision.askedBy !== undefined;
-                const reviewLine = reviewed !== undefined && reviewed.backs === choice.label;
-                if (!askedLine && !reviewLine) return button;
-                return (
-                  <div className="pending-request__option" key={choice.label}>
-                    {button}
-                    {askedLine && decision.askedBy !== undefined ? (
-                      <p className="oct-meta pending-request__model-line">
-                        <ProviderGlyph
-                          className="pending-request__model-mark"
-                          displayName={
-                            props.provider?.displayName ?? String(decision.askedBy.modelId)
-                          }
-                          driverKind={props.provider?.driverKind ?? ""}
-                          size={12}
-                        />
-                        <span className="pending-request__model-text">
-                          {`${String(decision.askedBy.modelId)} · asking thread`}
-                        </span>
-                      </p>
-                    ) : null}
-                    {reviewLine && reviewed !== undefined ? (
-                      <p className="oct-meta pending-request__model-line" title={reviewed.reason}>
-                        <ProviderGlyph
-                          className="pending-request__model-mark"
-                          displayName={reviewed.providerName ?? String(reviewed.modelId)}
-                          driverKind={reviewed.driverKind ?? ""}
-                          size={12}
-                        />
-                        <span className="pending-request__model-text">
-                          {`${String(reviewed.modelId)} · Second opinion: ${reviewed.reason}`}
-                        </span>
-                      </p>
-                    ) : null}
-                  </div>
                 );
               })}
               {decision === undefined || embedded ? null : (

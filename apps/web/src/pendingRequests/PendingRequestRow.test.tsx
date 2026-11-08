@@ -114,8 +114,12 @@ describe("a decision's second opinion", () => {
         request={richDecision({ askedBy, review: review("Wait for review") })}
       />,
     );
-    expect(screen.getByText("claude-sonnet · asking thread")).toBeInTheDocument();
-    expect(screen.getByText("gpt-5 · Second opinion: Review is not finished.")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Open it/ })).toHaveTextContent(
+      "claude-sonnet · asking thread",
+    );
+    expect(screen.getByRole("button", { name: /Wait for review/ })).toHaveTextContent(
+      "gpt-5 · Second opinion: Review is not finished.",
+    );
     expect(screen.getByText("Second opinion differs")).toBeInTheDocument();
   });
 
@@ -130,9 +134,8 @@ describe("a decision's second opinion", () => {
     );
     const lines = screen.getAllByText(/ · (asking thread|Second opinion: )/);
     expect(lines).toHaveLength(2);
-    expect(lines[0]?.closest(".pending-request__option")).toBe(
-      lines[1]?.closest(".pending-request__option"),
-    );
+    const recommended = screen.getByRole("button", { name: /Open it/ });
+    expect(lines.every((line) => recommended.contains(line))).toBe(true);
     expect(screen.queryByText("Second opinion differs")).not.toBeInTheDocument();
   });
 
