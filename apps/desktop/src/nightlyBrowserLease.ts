@@ -10,7 +10,7 @@ import {
 
 export interface NativeWindowRequest {
   readonly requestId: number;
-  /** Derived from the kernel audit token by the fixed native binding. */
+  /** Native incarnation/connection identity; stale EOF cannot name a replacement. */
   readonly peer: string;
   readonly windowId: string;
   readonly generation: number;

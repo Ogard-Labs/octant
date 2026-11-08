@@ -60,6 +60,48 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           cmake --build "$env:RUNNER_TEMP/desktop-owner" --config Release
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Build the owned native peer mechanism fixture
+        run: |
+          bun build scripts/windows-desktop-peer/probe.ts --target=node --outfile "$env:RUNNER_TEMP/peer-probe.mjs"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          cmake -S scripts/windows-desktop-peer -B "$env:RUNNER_TEMP/peer-qa" -A x64
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          cmake --build "$env:RUNNER_TEMP/peer-qa" --config Release --target octant-windows-peer-launcher octant-windows-peer-appcontainer
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Prove native peer admission and reconnect cleanup in all runtimes
+        run: |
+          $env:OCTANT_WINDOWS_PEER_QA_LAUNCHER = Join-Path $env:RUNNER_TEMP 'peer-qa/Release/octant-windows-peer-launcher.exe'
+          $env:OCTANT_WINDOWS_PEER_QA_APPCONTAINER = Join-Path $env:RUNNER_TEMP 'peer-qa/Release/octant-windows-peer-appcontainer.exe'
+          $octantPeerBinding = Join-Path $pwd 'out/Octant-win32-x64/resources/native/octant-desktop-peer-windows.node'
+          $octantPeerReader = Join-Path $env:RUNNER_TEMP 'desktop-owner/Release/octant-windows-desktop-owner.exe'
+          $octantPeerRuntimes = @(
+            (Get-Command bun).Source
+            (Get-Command node).Source
+            (Join-Path $pwd 'out/Octant-win32-x64/Octant.exe')
+          )
+          foreach ($octantPeerRuntime in $octantPeerRuntimes) {
+            $octantPeerScope = [guid]::NewGuid().ToString('D')
+            $octantPeerCopy = Join-Path $env:RUNNER_TEMP "octant-peer-copy-$octantPeerScope.node"
+            if (Test-Path -LiteralPath $octantPeerCopy) { throw 'Refusing a pre-existing peer fixture copy' }
+            Copy-Item -LiteralPath $octantPeerBinding -Destination $octantPeerCopy
+            $env:OCTANT_WINDOWS_PEER_QA_COPY_BINDING = $octantPeerCopy
+            if ($octantPeerRuntime -like '*Octant.exe') { $env:ELECTRON_RUN_AS_NODE = '1' }
+            else { Remove-Item Env:\ELECTRON_RUN_AS_NODE -ErrorAction SilentlyContinue }
+            $octantPeerJoined = $false
+            try {
+              $octantPeerResult = @(& $octantPeerReader --profile-user-owner $octantPeerRuntime "$env:RUNNER_TEMP/peer-probe.mjs" $octantPeerBinding $octantPeerScope controller)
+              $octantPeerCode = $LASTEXITCODE
+              $octantPeerResult | Write-Output
+              $octantPeerJoined = ($octantPeerResult -join "`n") -match '"ownedJobJoined":true'
+              if ($octantPeerCode -ne 0 -or -not $octantPeerJoined) { throw 'The owned native peer mechanism proof failed or did not join' }
+            } finally {
+              if ($octantPeerJoined) {
+                Remove-Item -LiteralPath $octantPeerCopy
+                if (Test-Path -LiteralPath $octantPeerCopy) { throw 'Owned peer copy cleanup was not confirmed' }
+                Write-Output '{"ownedPeerCopiedBindingAbsent":true}'
+              }
+            }
+          }
       - name: Start and attach the normal packaged Windows desktop
         run: ./scripts/run-windows-desktop.ps1 -Launcher "$env:RUNNER_TEMP/desktop-owner/Release/octant-windows-desktop-owner.exe" -PackageDirectory "$pwd/out/Octant-win32-x64" -OutputDirectory "$env:RUNNER_TEMP/desktop-proof"
       - name: Build the normal Windows Nightly QA package

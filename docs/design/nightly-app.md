@@ -1254,9 +1254,11 @@ named pipe in the selected native private profile's scope. The native binding
 derives its endpoint from the current user's SID, logon/session and canonical
 profile UUID; JavaScript supplies neither a pipe path nor a peer identity.
 Remote pipe clients refuse. Both directions retain the kernel-reported peer
-process and creation time and check its user, logon and session. Restricted-token
-and AppContainer peers refuse. Process exit or connection closure revokes that
-incarnation's window leases; a reused PID never inherits them.
+process and creation time and check its user, logon and session. Tokens carrying restricting SIDs, AppContainer peers and subjects below medium
+integrity refuse. Each connection adds a fresh native nonce to
+its kernel-principal key. Process exit retires that incarnation's connections;
+closing one connection revokes only its leases, so delayed EOF cannot revoke a
+replacement connection. A reused PID never inherits them.
 
 The existing fixed status/window frames, bounded operations and peer count,
 15-second leases and server-owned window/native-main authority apply unchanged.
@@ -1268,8 +1270,12 @@ The fixed packaged launch roles and Chromium renderer sandbox remain required.
 
 This authenticates a local user and process incarnation, not signed application
 code. Unconfined code running as that same user in the same logon/session can
-pass. Current Windows desktop supports Node-mode workers, so its executable does
-not attest a GUI-only principal. Stronger signed-code admission would require a
+pass. Admission binds a connection; it does not claim Linux's per-message
+sender-credential semantics. Trusted unconfined same-user code can relay requests
+or deliberately pass transport handles. Normal native connections are
+non-inheritable, and JavaScript receives no transport handle. Current Windows
+desktop supports Node-mode workers, so its executable does not attest a GUI-only
+principal. Stronger signed-code admission would require a
 separate worker identity and sealed desktop entry; it is not implied by this
 kernel boundary. Native and packaged positive/negative lifecycle evidence must
 pass before the Windows client port is considered usable. Windows test-data
