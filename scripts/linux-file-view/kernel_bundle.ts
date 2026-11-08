@@ -16,14 +16,20 @@ if (
 const prefix = `
 import { openSync as octantTraceOpen, writeSync as octantTraceWrite, closeSync as octantTraceClose } from "node:fs";
 const octantTraceFd = process.argv[2] === "--bubblewrap" ? octantTraceOpen("/tmp/octant-broker-frames.trace", "w", 0o600) : undefined;
-let octantTraceRemaining = 128;
+const octantTraceRing: string[] = [];
 const octantGuestTrace = (event: string, values: unknown) => {
-  if (octantTraceFd !== undefined && octantTraceRemaining-- > 0)
-    octantTraceWrite(octantTraceFd, JSON.stringify({ event, values }) + "\\n");
+  if (octantTraceFd === undefined) return;
+  octantTraceRing.push(JSON.stringify({ event, at: Math.round(performance.now()), values }) + "\\n");
+  if (octantTraceRing.length > 128) octantTraceRing.shift();
+  if (event === "close") octantTraceWrite(octantTraceFd, octantTraceRing.join(""));
 };
 process.once("exit", () => { if (octantTraceFd !== undefined) octantTraceClose(octantTraceFd); });
 `;
 const changes: ReadonlyArray<readonly [string, string]> = [
+  [
+    "const complete = (code: number | null) => {",
+    'const complete = (code: number | null) => { octantGuestTrace("close", {code, working, refusal});',
+  ],
   [
     "const refuse = (reason: BrokerRefusal) => {",
     'const refuse = (reason: BrokerRefusal) => { octantGuestTrace("refuse", {reason, working, status: statusWait !== undefined, parent: parentWait !== undefined});',

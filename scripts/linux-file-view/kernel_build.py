@@ -36,16 +36,6 @@ def run(*arguments, cwd=None, timeout=900, output=None):
         raise subprocess.CalledProcessError(result, arguments)
 
 
-def archive_entry(output, name, data, mode, number, device=(0, 0)):
-    encoded = name.encode() + b"\0"
-    fields = [number, mode, 0, 0, 1, 0, len(data), 0, 0, device[0], device[1], len(encoded), 0]
-    output.write(b"070701" + b"".join(f"{field:08x}".encode() for field in fields))
-    output.write(encoded)
-    output.write(b"\0" * (-(110 + len(encoded)) % 4))
-    output.write(data)
-    output.write(b"\0" * (-len(data) % 4))
-
-
 def main():
     if sys.platform != "linux" or os.environ.get("GITHUB_ACTIONS") != "true":
         raise SystemExit("The kernel build is restricted to the owned ephemeral Linux CI job.")
@@ -78,7 +68,8 @@ def main():
                    "SIGNALFD", "INOTIFY_USER", "ADVISE_SYSCALLS", "MEMFD_CREATE", "POSIX_TIMERS",
                    "FILE_LOCKING", "NET", "UNIX", "NAMESPACES", "USER_NS", "PID_NS", "UTS_NS",
                    "IPC_NS", "NET_NS", "SECCOMP", "SECCOMP_FILTER", "INET", "SYSVIPC",
-                   "UNIX98_PTYS", "DEVPTS_FS"):
+                   "UNIX98_PTYS", "DEVPTS_FS", "BLK_DEV", "EXT4_FS", "VIRTIO",
+                   "VIRTIO_PCI", "VIRTIO_BLK", "DEVTMPFS_MOUNT"):
         run("scripts/config", "--enable", symbol, cwd=kernel, timeout=10)
     run("scripts/config", "--set-str", "LSM", "octant_mediation", cwd=kernel, timeout=10)
     run("make", "olddefconfig", cwd=kernel)
@@ -107,28 +98,28 @@ def main():
         if not library.is_file():
             raise SystemExit("The owned policy binary has an unavailable dynamic dependency.")
         guest_files[path.removeprefix("/")] = library
-    with (root / "initramfs.cpio").open("wb") as output:
-        archive_entry(output, "dev", b"", 0o040755, 1)
-        archive_entry(output, "dev/console", b"", 0o020600, 2, device=(5, 1))
-        archive_entry(output, "init", executable.read_bytes(), 0o100755, 3)
-        number = 4
-        directories = {"dev"}
-        for name, path in guest_files.items():
-            for parent in reversed(Path(name).parents):
-                directory = str(parent)
-                if directory == "." or directory in directories:
-                    continue
-                archive_entry(output, directory, b"", 0o040755, number)
-                number += 1
-                directories.add(directory)
-            archive_entry(output, name, path.read_bytes(), 0o100755, number)
-            number += 1
-        archive_entry(output, "TRAILER!!!", b"", 0, number)
+    # pivot_root cannot replace the kernel's initial rootfs. Give Bubblewrap
+    # a real disposable root mount, without mounting or installing on the host.
+    tree = root / "root-tree"
+    tree.mkdir(mode=0o755)
+    for directory in ("dev", "proc", "sys", "tmp"):
+        (tree / directory).mkdir(mode=0o755)
+    guest_files["init"] = executable
+    for name, source in guest_files.items():
+        destination = tree / name
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(source, destination)
+        destination.chmod(0o755)
+    image = root / "root.ext4"
+    with image.open("wb") as output:
+        output.truncate(256 * 1024 * 1024)
+    run("mke2fs", "-q", "-F", "-t", "ext4", "-d", str(tree), str(image), timeout=30)
     with (root / "guest.log").open("wb") as output:
         run("timeout", "--kill-after=3s", "45s", "qemu-system-x86_64", "-machine", "accel=tcg",
             "-cpu", "max", "-m", "512M", "-smp", "2", "-nic", "none", "-nographic",
             "-no-reboot", "-kernel", str(kernel / "arch/x86/boot/bzImage"),
-            "-initrd", str(root / "initramfs.cpio"), "-append", "console=ttyS0 panic=-1",
+            "-drive", f"file={image},format=raw,if=virtio",
+            "-append", "console=ttyS0 root=/dev/vda rootfstype=ext4 rw init=/init panic=-1",
             timeout=50, cwd=root, output=output)
     log = (root / "guest.log").read_text(errors="replace")
     print(log[-20000:])

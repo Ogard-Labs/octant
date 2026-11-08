@@ -66,6 +66,13 @@ this transport boundary. They remain distinct from the actual original-policy
 broker guest cases above and cannot substitute for them. Neither suite proves
 all namespace, filesystem, alias, syscall or runtime routes.
 
+The guest boots from a private ext4 image assembled with `mke2fs -d`; it is
+never mounted or installed on the runner. The kernel's initial initramfs
+`rootfs` cannot be replaced by `pivot_root`, so it is not a suitable root for
+measuring the unchanged Bubblewrap launch. The image contains only the owned
+synthetic executables and their public loader/libraries. Test data still lives
+on a private guest tmpfs.
+
 The next guest layer executes the unchanged production `buildBubblewrapLaunch`
 output with network egress `none`, under the same native broker. It prepares the
 normal startup covers before populating the synthetic protected files, then
@@ -74,7 +81,10 @@ composition rather than a reconstruction of Bubblewrap flags. Its result is
 separate from the direct native broker cases and never implies complete parity.
 The SCM controls also queue a foreign FD before enrollment and reap a same-policy
 sender before receiving its queued FD; send-time credentials must survive both
-transitions.
+transitions. Guest-build-only diagnostics retain at most the last 128 control
+events (operation/request/status/decision/exit, no paths or content) and flush
+only when the owned relay closes. Instrumented execution is diagnostic evidence;
+a final integration pass must run the original uninstrumented broker.
 
 Dispatch `experiment=kernel-admission` to compile and boot a pinned Linux 6.18
 guest under networkless QEMU TCG in the owned ephemeral runner. The upstream

@@ -42,7 +42,7 @@ jobs:
       - name: Prepare build tooling only in the disposable runner
         run: |
           sudo apt-get update
-          sudo apt-get install -y --no-install-recommends build-essential flex bison libssl-dev libelf-dev bc qemu-system-x86 bubblewrap
+          sudo apt-get install -y --no-install-recommends build-essential flex bison libssl-dev libelf-dev bc qemu-system-x86 bubblewrap e2fsprogs
       - name: Build and boot the pinned networkless guest, never install its kernel
         run: python3 scripts/linux-file-view/kernel_build.py
       - uses: actions/upload-artifact@v4
