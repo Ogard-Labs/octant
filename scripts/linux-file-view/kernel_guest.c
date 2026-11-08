@@ -824,7 +824,8 @@ static int policy_measure(const char *mode)
     joined == child && WIFEXITED(result) ? WEXITSTATUS(result) : -1,
     joined == child && WIFSIGNALED(result) ? WTERMSIG(result) : 0,
     joined < 0 ? errno : 0);
-  return joined == child && WIFEXITED(result) && WEXITSTATUS(result) == 0 ? 0 : 33;
+  if (joined != child || !WIFEXITED(result)) return 34;
+  return WEXITSTATUS(result) == 0 ? 0 : 33;
 }
 int main(void)
 {
@@ -858,6 +859,12 @@ int main(void)
       alarm(0);
       result = core_probe_measure();
     }
+    // Measure the new criterion before an intermittent older controller crash.
+    // Its own failure must not suppress the original acceptance cases.
+    int fileattr_result = !result ? policy_measure("--fileattr") : 0;
+    // An unconfirmed retirement or crashed controller cannot safely be
+    // followed by another launch. Other failures are held for final reporting.
+    if (fileattr_result == 34) result = fileattr_result;
     if (!result) result = policy_measure(NULL);
     // Reuse the same scenario, not a broader matrix: the earlier UID-map
     // failure was timing-sensitive. Ordinary policy processes have a 15s
@@ -869,7 +876,7 @@ int main(void)
     }
     if (!result) result = policy_measure("--runtime-bun");
     if (!result) result = policy_measure("--runtime-node");
-    if (!result) result = policy_measure("--fileattr");
+    if (!result) result = fileattr_result;
     printf("OCTANT_KERNEL_EXIT %d\n", result);
   }
   fflush(stdout);
