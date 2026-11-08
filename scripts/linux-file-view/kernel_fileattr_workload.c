@@ -21,6 +21,13 @@
 #define KEY ROOT "/home/.ssh/deployment"
 #define BASELINE ROOT "/fileattr-before"
 struct baseline { struct stat identity; unsigned int flags; unsigned int generation; };
+static const char *private_created[] = {
+  ROOT "/home/.ssh/id_created_open", ROOT "/home/.ssh/id_created_node",
+  ROOT "/home/.ssh/id_created_directory", ROOT "/home/.ssh/id_created_symlink",
+  ROOT "/home/.ssh/id_created_alias", ROOT "/private-source-link",
+};
+static const char public_created[] = "permitted creation";
+
 
 static bool same_time(struct timespec left, struct timespec right)
 {
@@ -41,15 +48,27 @@ static int verify(void)
   bool generation_unchanged = measured && generation == before.generation;
   bool stat_unchanged = measured &&
     after.st_dev == before.identity.st_dev && after.st_ino == before.identity.st_ino &&
+    after.st_nlink == before.identity.st_nlink &&
     after.st_mode == before.identity.st_mode && after.st_uid == before.identity.st_uid &&
     after.st_gid == before.identity.st_gid && after.st_size == before.identity.st_size &&
     same_time(after.st_atim, before.identity.st_atim) &&
     same_time(after.st_mtim, before.identity.st_mtim) &&
     same_time(after.st_ctim, before.identity.st_ctim);
   if (held >= 0) close(held);
-  bool unchanged = flags_unchanged && stat_unchanged && generation_unchanged;
-  printf("OCTANT_FILEATTR_OWNER {\"pid\":%ld,\"parent\":%ld,\"measured\":%s,\"flagsUnchanged\":%s,\"generationUnchanged\":%s,\"statUnchanged\":%s,\"unchanged\":%s}\n",
-    (long)getpid(), (long)getppid(), measured ? "true" : "false", flags_unchanged ? "true" : "false", generation_unchanged ? "true" : "false",
+  bool names_absent = true;
+  for (unsigned i = 0; i < sizeof(private_created) / sizeof(private_created[0]); i++) {
+    struct stat entry;
+    errno = 0;
+    if (lstat(private_created[i], &entry) != -1 || errno != ENOENT) names_absent = false;
+  }
+  char bytes[sizeof(public_created)] = {0};
+  int publication = open(ROOT "/home/.ssh/created.pub", O_RDONLY | O_CLOEXEC | O_NOFOLLOW);
+  bool public_persisted = publication >= 0 && read(publication, bytes, sizeof(bytes)) == sizeof(public_created) - 1 &&
+    !memcmp(bytes, public_created, sizeof(public_created) - 1);
+  if (publication >= 0) close(publication);
+  bool unchanged = flags_unchanged && stat_unchanged && generation_unchanged && names_absent && public_persisted;
+  printf("OCTANT_FILEATTR_OWNER {\"pid\":%ld,\"parent\":%ld,\"measured\":%s,\"flagsUnchanged\":%s,\"generationUnchanged\":%s,\"createdNamesAbsent\":%s,\"publicCreationPersisted\":%s,\"statUnchanged\":%s,\"unchanged\":%s}\n",
+    (long)getpid(), (long)getppid(), measured ? "true" : "false", flags_unchanged ? "true" : "false", generation_unchanged ? "true" : "false", names_absent ? "true" : "false", public_persisted ? "true" : "false",
     stat_unchanged ? "true" : "false", unchanged ? "true" : "false");
   return unchanged ? 0 : 1;
 }
@@ -61,6 +80,77 @@ static bool queued_bytes(int pair[2])
     !ioctl(pair[0], FIONREAD, &available) && available == 2;
   close(pair[0]); close(pair[1]);
   return allowed;
+}
+
+static bool refused_creation(const char *kind, int result, int error)
+{
+  bool refused = result == -1 && error == EACCES;
+  printf("OCTANT_CREATE_CASE {\"kind\":\"%s\",\"result\":%d,\"errno\":%d,\"refused\":%s}\n",
+    kind, result, error, refused ? "true" : "false");
+  return refused;
+}
+static bool creation_controls(void)
+{
+  int public = open(ROOT "/home/.ssh/created.pub", O_CREAT | O_EXCL | O_RDWR | O_CLOEXEC, 0600);
+  bool published = public >= 0 && write(public, public_created, sizeof(public_created) - 1) == sizeof(public_created) - 1;
+  if (public >= 0) close(public);
+  bool directory = !mkdir(ROOT "/created-directory", 0700);
+  bool directory_removed = directory && !rmdir(ROOT "/created-directory");
+  bool fifo = !mkfifo(ROOT "/created-pipe", 0600);
+  struct stat pipe_identity;
+  bool pipe_observed = fifo && !lstat(ROOT "/created-pipe", &pipe_identity) && S_ISFIFO(pipe_identity.st_mode);
+  bool pipe_removed = fifo && !unlink(ROOT "/created-pipe");
+  const char target[] = "home/.ssh/deployment.pub";
+  char target_read[sizeof(target)] = {0};
+  bool symbolic = !symlink(target, ROOT "/created-link");
+  bool symbolic_observed = symbolic && readlink(ROOT "/created-link", target_read, sizeof(target_read)) == sizeof(target) - 1 &&
+    !memcmp(target, target_read, sizeof(target) - 1);
+  bool symbolic_removed = symbolic && !unlink(ROOT "/created-link");
+  struct stat source = {0}, alias = {0};
+  bool hardlink = !link(KEY ".pub", ROOT "/created-alias");
+  bool same_inode = hardlink && !stat(KEY ".pub", &source) && !stat(ROOT "/created-alias", &alias) &&
+    source.st_dev == alias.st_dev && source.st_ino == alias.st_ino && source.st_nlink >= 2;
+  bool alias_removed = hardlink && !unlink(ROOT "/created-alias");
+  int temporary = open(ROOT, O_TMPFILE | O_RDWR | O_CLOEXEC, 0600);
+  char descriptor[64];
+  snprintf(descriptor, sizeof(descriptor), "/proc/self/fd/%d", temporary);
+  bool temporary_written = temporary >= 0 && write(temporary, "ok", 2) == 2;
+  bool temporary_linked = temporary_written && !linkat(AT_FDCWD, descriptor, AT_FDCWD,
+    ROOT "/temporary-alias", AT_SYMLINK_FOLLOW);
+  bool temporary_observed = temporary_linked && !fstat(temporary, &source) && !stat(ROOT "/temporary-alias", &alias) &&
+    source.st_dev == alias.st_dev && source.st_ino == alias.st_ino && alias.st_size == 2;
+  bool temporary_removed = temporary_linked && !unlink(ROOT "/temporary-alias");
+  if (temporary >= 0) close(temporary);
+  printf("OCTANT_CREATE_PUBLIC {\"regularPersisted\":%s,\"directory\":%s,\"fifo\":%s,\"symlink\":%s,\"hardlinkIdentity\":%s,\"anonymousLinked\":%s}\n",
+    published ? "true" : "false", directory_removed ? "true" : "false", pipe_observed && pipe_removed ? "true" : "false",
+    symbolic_observed && symbolic_removed ? "true" : "false", same_inode && alias_removed ? "true" : "false",
+    temporary_observed && temporary_removed ? "true" : "false");
+  bool positives = published && directory_removed && pipe_observed && pipe_removed && symbolic_observed &&
+    symbolic_removed && same_inode && alias_removed && temporary_observed && temporary_removed;
+  errno = 0;
+  int opened = open(private_created[0], O_CREAT | O_EXCL | O_WRONLY | O_CLOEXEC, 0600);
+  int error = opened < 0 ? errno : 0;
+  bool denied = refused_creation("regular-open", opened < 0 ? -1 : 0, error);
+  if (opened >= 0) close(opened);
+  errno = 0;
+  int result = mknod(private_created[1], S_IFREG | 0600, 0);
+  error = result < 0 ? errno : 0;
+  denied = refused_creation("regular-node", result, error) && denied;
+  errno = 0;
+  result = mkdir(private_created[2], 0700); error = result < 0 ? errno : 0;
+  denied = refused_creation("directory", result, error) && denied;
+  errno = 0;
+  result = symlink("synthetic target", private_created[3]); error = result < 0 ? errno : 0;
+  denied = refused_creation("symlink", result, error) && denied;
+  errno = 0;
+  result = link(KEY, private_created[5]); error = result < 0 ? errno : 0;
+  denied = refused_creation("protected-source-link", result, error) && denied;
+  // Last: an unguarded implementation could turn the public source inode into
+  // a protected alias and spoil later unrelated positive controls.
+  errno = 0;
+  result = link(KEY ".pub", private_created[4]); error = result < 0 ? errno : 0;
+  denied = refused_creation("protected-destination-link", result, error) && denied;
+  return positives && denied;
 }
 
 static bool ordinary_seeks(int file, off_t size)
@@ -270,7 +360,8 @@ int main(int argc, char **argv)
     private_read_refused ? "true" : "false", observation, read_failure,
     private_output_unchanged ? "true" : "false", private_refused ? "true" : "false", mutation, failure, public_changed ? "true" : "false",
     public_restored ? "true" : "false", marker ? "true" : "false");
-  return private_read_refused && private_output_unchanged && private_refused && public_changed && public_restored && marker &&
+  bool creations = creation_controls();
+  return creations && private_read_refused && private_output_unchanged && private_refused && public_changed && public_restored && marker &&
     available_refused && usage_refused && public_queries && pipe_allowed && socket_allowed &&
     extents_refused && extents_allowed && public_inode_queries && generations_refused && public_generations &&
     integer_refused(private_legacy) && integer_refused(private_version) && integer_refused(private_block) &&
