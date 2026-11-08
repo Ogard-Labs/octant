@@ -107,7 +107,9 @@ function fakeClient(state: { overview: Overview }) {
 }
 
 const kinds = (requests: ReadonlyArray<DesktopPaneRequest>) =>
-  requests.map((request) => request.kind).filter((kind) => kind !== "overview");
+  requests
+    .map((request) => request.kind)
+    .filter((kind) => kind !== "overview" && kind !== "preview-read");
 
 beforeEach(() => {
   let next = 0;

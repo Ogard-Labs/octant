@@ -93,9 +93,11 @@ states that unsent drafts and local view state stay on their source screen,
 while host-held inputs, task state and pending feedback stay with the task. A
 paired browser can copy its already authenticated origin's task link. A missing
 browser-verifiable listener offers the existing paired app's task selection
-instead; opening the flow never pairs a device or enables a listener. Moving
-execution to another host remains subject to the existing supported host paths
-and is not implied by changing screens.
+instead; opening the flow never pairs a device or enables a listener. Changing
+screens never moves execution. Moving a thread to another of the person's
+computers is its own owner-signed act, started from the thread's Environment
+tool (its Computer card), under
+[Hub and spokes: moving a thread](hub-and-spokes.md#moving-a-thread-to-another-member).
 
 ## Navigation and Projects
 

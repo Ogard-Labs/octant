@@ -268,6 +268,9 @@ jobs:
       - env:
           OCTANT_REQUIRE_LINUX_ISOLATION: "1"
         run: bun run --cwd scripts test -- build-desktop-peer-linux.test.ts
+      - env:
+          OCTANT_REQUIRE_DESKTOP_PREVIEW_ISOLATION: "1"
+        run: bun run --cwd apps/server test -- src/computerUse/desktopPreview.process.test.ts
       # The real-page Browser suite drives the runner's Chrome through
       # Playwright; its launch hook timed out on ubuntu-24.04 (run
       # 42205818274). It is not part of Linux client trust, and the macOS job

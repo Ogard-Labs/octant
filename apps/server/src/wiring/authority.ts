@@ -45,6 +45,7 @@ import { createProtectedFilesRouteHandler } from "../protectedFilesRoutes";
 import { ExtensionToolApprovalService } from "../extensions/extensionToolApprovalService";
 import { AutomationEventStore } from "../automation/automationEventStore";
 import { RoutineProposalService } from "../automation/routineProposalService";
+import { ImageGenerationOfferService } from "../image/imageGenerationOfferService";
 import {
   chatThreadStandsInProject,
   isDeviceRegistrationCurrent,
@@ -193,6 +194,14 @@ export function wireAuthority(deps: AuthorityDependencies) {
     now: Date.now,
     onChanged: () => machineChangeFeed.publish(["tool-approvals"]),
   });
+  // Image generations an agent asked the person to start, answered from a
+  // card in the thread. A prompt like the routine proposals above, so it
+  // rides the same change topic.
+  const imageGenerationOffers = new ImageGenerationOfferService({
+    uuid: randomUUID,
+    now: Date.now,
+    onChanged: () => machineChangeFeed.publish(["tool-approvals"]),
+  });
   // One Automation event store for the host: the Automation area writes
   // definitions and runs through it, and a Work or Code run's own turn
   // reports its result through it, so both share one append path.
@@ -267,6 +276,7 @@ export function wireAuthority(deps: AuthorityDependencies) {
         (id) => androidInputGrants.revokeWindow(String(id)),
         (id) => extensionToolApprovalService.revokeWindow(id),
         (id) => routineProposalService.revokeWindow(id),
+        (id) => imageGenerationOffers.revokeWindow(id),
         (id) => codeSessionAuthority.revokeWindow(id),
         (id) => {
           for (const [requestId, binding] of agentRunExecutionWindows) {
@@ -318,6 +328,7 @@ export function wireAuthority(deps: AuthorityDependencies) {
     codeSessionAuthority,
     extensionToolApprovalService,
     routineProposalService,
+    imageGenerationOffers,
     isPairedDeviceScope,
     liveTurns,
     machineChangeFeed,

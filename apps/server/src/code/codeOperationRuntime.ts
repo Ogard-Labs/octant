@@ -1,4 +1,5 @@
 import { MAX_PROVIDER_ATTACHMENTS } from "@octant/contracts";
+import { THREAD_MOVING_REFUSAL } from "../hub/threadMoveHolds";
 import type {
   ConversationInputReceipt,
   ConversationInputPurpose,
@@ -296,6 +297,11 @@ function defaultAcpTerminalConfinement(): CodeAcpTerminalConfinement {
 
 export interface CodeOperationRuntimeOptions {
   readonly prepareWorktree?: CodeOperationServiceOptions["prepareWorktree"];
+  /**
+   * Whether a move holds the thread: frozen while it leaves this computer, or
+   * arriving and not yet committed. A held thread starts no turn.
+   */
+  readonly moveHold?: (threadId: string) => boolean;
   /** Where a running turn's start time and latest step are kept for the navigation read. */
   readonly liveTurns?: LiveTurnRegistry;
   /**
@@ -2738,6 +2744,10 @@ class RuntimeTurnController implements CodeOperationTurnPort {
 
   async start(input: Parameters<CodeOperationTurnPort["start"]>[0]) {
     const key = String(input.thread.id);
+    if (this.#options.moveHold?.(key) === true) {
+      this.settleSpendReservation(input.operationId);
+      return turnState("failed", { category: "failed", message: THREAD_MOVING_REFUSAL });
+    }
     const existing = this.#active.get(key);
     if (
       existing !== undefined &&

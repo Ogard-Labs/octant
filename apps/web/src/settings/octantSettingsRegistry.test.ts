@@ -121,6 +121,7 @@ describe("octantSettingsRegistry", () => {
       "safe-networks",
       "shield-servers-list",
       "shield-servers-add",
+      "server-projects",
     ]);
     expect(section("secret-stores")?.label).toBe("Secret stores");
     expect(section("secret-stores")?.scope).toBe("host");

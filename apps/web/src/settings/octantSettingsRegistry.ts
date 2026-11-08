@@ -1137,6 +1137,12 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
           keywords:
             "add register server ssh host alias user profile read-only operate admin deploy commands runbook notes ssh agent",
         },
+        {
+          id: settingId("server-projects"),
+          label: "Bind a remote folder",
+          scope: "host",
+          keywords: "bind remote folder project code work ssh setup",
+        },
       ],
     },
     {

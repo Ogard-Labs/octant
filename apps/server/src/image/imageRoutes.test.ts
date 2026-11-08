@@ -1,12 +1,15 @@
 import { describe, expect, it, vi } from "vitest";
 import {
   decodeImageGenerationJobsResponse,
+  decodeImageGenerationOfferDecisionResult,
+  decodeImageGenerationOffersResponse,
   decodeImageGenerationProfilesResponse,
   decodeImageJob,
   decodeProviderInstanceId,
   type ImageJob,
   type ProviderInstance,
 } from "@octant/contracts";
+import { ImageGenerationOfferService } from "./imageGenerationOfferService";
 import { createImageRouteHandler } from "./imageRoutes";
 import type { ImageJobService } from "./imageJobService";
 import { WindowAuthorityStore } from "../windowAuthorityStore";
@@ -70,7 +73,13 @@ function setup(
     reason: "Chat artifacts grant no filesystem authority.",
   }));
   const authorizeScope = vi.fn(async () => options.authorized !== false);
+  let uuid = 0;
+  const offers = new ImageGenerationOfferService({
+    uuid: () => `b3000000-0000-4000-8000-${String(++uuid).padStart(12, "0")}`,
+    now: () => nowMs,
+  });
   const handler = createImageRouteHandler({
+    offers,
     jobs: {
       enqueue,
       cancel,
@@ -88,7 +97,7 @@ function setup(
     windowAuthorityStore,
     now: () => nowMs,
   });
-  return { handler, enqueue, cancel, saveToProject, authorizeScope };
+  return { handler, enqueue, cancel, saveToProject, authorizeScope, offers };
 }
 
 function request(
@@ -224,5 +233,192 @@ describe("image routes", () => {
       request(`/api/image/jobs?threadKind=chat-thread&scopeId=${scopeId}`),
     );
     expect(response?.status).toBe(404);
+  });
+
+  describe("an agent's image offer", () => {
+    const scope = { threadKind: "code-thread" as const, scopeId: scopeId as never };
+    const offer = {
+      ...scope,
+      kind: "generate" as const,
+      prompt: "a lighthouse at dusk",
+      variantCount: 1,
+      revision: false,
+      suggested: { profileInstanceId: profileId as never, modelId: "gpt-image-2" as never },
+    };
+
+    async function listed(handler: ReturnType<typeof setup>["handler"]) {
+      const response = await handler(
+        request(`/api/image/offers?threadKind=code-thread&scopeId=${scopeId}`),
+      );
+      return decodeImageGenerationOffersResponse(await response!.json()).offers;
+    }
+
+    it("shows the waiting offer to the asking window and runs the model the person chose", async () => {
+      const { handler, offers } = setup();
+      const outcome = offers.offer({ windowId: windowId as never, offer });
+      const [waiting] = await listed(handler);
+      expect(waiting).toMatchObject({ kind: "generate", prompt: "a lighthouse at dusk" });
+      const response = await handler(
+        request("/api/image/offers/decide", {
+          method: "POST",
+          body: {
+            offerId: waiting?.offerId,
+            decision: "generate",
+            profileInstanceId: profileId,
+            modelId: "gpt-image-2",
+            rememberForThread: true,
+          },
+        }),
+      );
+      expect(decodeImageGenerationOfferDecisionResult(await response!.json())).toEqual({
+        kind: "image-offer-answered",
+      });
+      await expect(outcome).resolves.toEqual({
+        status: "generate",
+        profileInstanceId: profileId,
+        modelId: "gpt-image-2",
+      });
+      expect(offers.remembered(scope)).toEqual({
+        profileInstanceId: profileId,
+        modelId: "gpt-image-2",
+      });
+      expect(await listed(handler)).toEqual([]);
+    });
+
+    it("keeps the offer waiting when the chosen model is not one the host can run", async () => {
+      const { handler, offers } = setup();
+      void offers.offer({ windowId: windowId as never, offer });
+      const [waiting] = await listed(handler);
+      const response = await handler(
+        request("/api/image/offers/decide", {
+          method: "POST",
+          body: {
+            offerId: waiting?.offerId,
+            decision: "generate",
+            profileInstanceId: profileId,
+            modelId: "not-on-the-allowlist",
+            rememberForThread: true,
+          },
+        }),
+      );
+      expect(decodeImageGenerationOfferDecisionResult(await response!.json())).toMatchObject({
+        kind: "image-offer-refused",
+      });
+      expect(await listed(handler)).toHaveLength(1);
+      expect(offers.remembered(scope)).toBeUndefined();
+    });
+
+    it("lets the agent draw it without remembering anything, and answers a second click as gone", async () => {
+      const { handler, offers } = setup();
+      const outcome = offers.offer({ windowId: windowId as never, offer });
+      const [waiting] = await listed(handler);
+      const decide = () =>
+        handler(
+          request("/api/image/offers/decide", {
+            method: "POST",
+            body: { offerId: waiting?.offerId, decision: "agent-draws" },
+          }),
+        );
+      await decide();
+      await expect(outcome).resolves.toEqual({ status: "agent-draws" });
+      expect(decodeImageGenerationOfferDecisionResult(await (await decide())!.json())).toEqual({
+        kind: "image-offer-gone",
+      });
+      expect(offers.remembered(scope)).toBeUndefined();
+    });
+
+    it("shows another window nothing and lets it answer nothing", async () => {
+      const { handler, offers } = setup();
+      const otherWindow = "70000000-0000-4000-8000-000000000002";
+      const outcome = offers.offer({ windowId: otherWindow as never, offer });
+      expect(await listed(handler)).toEqual([]);
+      const [waiting] = offers.list(otherWindow as never, scope);
+      const response = await handler(
+        request("/api/image/offers/decide", {
+          method: "POST",
+          body: { offerId: waiting?.offerId, decision: "cancel" },
+        }),
+      );
+      expect(decodeImageGenerationOfferDecisionResult(await response!.json())).toEqual({
+        kind: "image-offer-gone",
+      });
+      offers.revokeWindow(otherWindow as never);
+      await expect(outcome).resolves.toEqual({ status: "cancelled" });
+    });
+
+    it("refuses an answer from a window that can no longer open the thread and keeps the offer waiting", async () => {
+      const { handler, offers } = setup({ authorized: false });
+      let settled = false;
+      void offers.offer({ windowId: windowId as never, offer }).then(() => {
+        settled = true;
+      });
+      const [waiting] = offers.list(windowId as never, scope);
+      const response = await handler(
+        request("/api/image/offers/decide", {
+          method: "POST",
+          body: {
+            offerId: waiting?.offerId,
+            decision: "generate",
+            profileInstanceId: profileId,
+            modelId: "gpt-image-2",
+            rememberForThread: true,
+          },
+        }),
+      );
+      expect(response?.status).toBe(404);
+      expect(offers.list(windowId as never, scope)).toHaveLength(1);
+      expect(offers.remembered(scope)).toBeUndefined();
+      await Promise.resolve();
+      expect(settled).toBe(false);
+      offers.close();
+    });
+
+    it("saves only on a save request, and refuses an answer that fits the other kind", async () => {
+      const { handler, offers } = setup();
+      const saveOutcome = offers.offer({
+        windowId: windowId as never,
+        offer: {
+          ...scope,
+          kind: "save",
+          jobId: jobId as never,
+          attachmentId: attachmentId as never,
+          relativePath: "art/lighthouse.png",
+        },
+      });
+      void offers.offer({ windowId: windowId as never, offer });
+      const [saveOffer, generateOffer] = offers.list(windowId as never, scope);
+      const decide = async (body: unknown) =>
+        decodeImageGenerationOfferDecisionResult(
+          await (await handler(
+            request("/api/image/offers/decide", { method: "POST", body }),
+          ))!.json(),
+        );
+
+      expect(await decide({ offerId: generateOffer?.offerId, decision: "save" })).toMatchObject({
+        kind: "image-offer-refused",
+      });
+      expect(
+        await decide({
+          offerId: saveOffer?.offerId,
+          decision: "generate",
+          profileInstanceId: profileId,
+          modelId: "gpt-image-2",
+          rememberForThread: false,
+        }),
+      ).toMatchObject({ kind: "image-offer-refused" });
+      expect(await decide({ offerId: saveOffer?.offerId, decision: "save" })).toEqual({
+        kind: "image-offer-answered",
+      });
+      await expect(saveOutcome).resolves.toEqual({ status: "save" });
+      offers.close();
+    });
+
+    it("does not list offers for a thread the window cannot open", async () => {
+      const { handler } = setup({ authorized: false });
+      const response = await handler(
+        request(`/api/image/offers?threadKind=code-thread&scopeId=${scopeId}`),
+      );
+      expect(response?.status).toBe(404);
+    });
   });
 });
