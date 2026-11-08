@@ -70,8 +70,10 @@ The guest boots from a private ext4 image assembled with `mke2fs -d`; it is
 never mounted or installed on the runner. The kernel's initial initramfs
 `rootfs` cannot be replaced by `pivot_root`, so it is not a suitable root for
 measuring the unchanged Bubblewrap launch. The image contains only the owned
-synthetic executables and their public loader/libraries. Test data still lives
-on a private guest tmpfs.
+synthetic executables and their public loader/libraries. Ordinary policy and
+runtime data lives on a private guest tmpfs. The filesystem-attribute fixture
+instead uses the existing guest ext4 root and verifies its filesystem type;
+it adds no mount or image.
 
 The next guest layer executes the unchanged production `buildBubblewrapLaunch`
 output with network egress `none`, under the same native broker. It prepares the
@@ -181,6 +183,22 @@ lifetime, filesystem ioctls and stacked mutation routes remain unfinished. A
 global guard without those lifetimes would break legitimate public writes or
 cause blocking under locks. Existing public ACL/truncate and real runtime proof
 must still pass, and production coverage remains zero.
+
+Ordinary filesystem-attribute GET and SET entries prepare separate READ and
+WRITE scopes using their held file/path before the shared VFS operation. Read
+scopes end before copyout; write scopes end before mount-write release. The
+exported getter consumes only the exact prepared READ. Only the setter's
+private internal getter can inspect its prepared WRITE without consuming it;
+the final setter consumes that decision immediately before the filesystem
+callback. Both comparisons retain native checks and match the current task,
+context, inode and epoch without broker I/O under inode locks. Ordinary reads
+cannot select the private inspection purpose or borrow WRITE authority.
+The ext4 fixture requires late-protected GET refusal with unchanged output,
+NODUMP SET refusal with independently unchanged flags/metadata, and permitted
+public toggle/readback/restoration and writes. This covers the audited ordinary
+entries, not all attribute/ioctl routes, internal calls, stacked filesystems or
+kernel credential overrides; those lifetimes and policy semantics remain
+unproved. Production coverage remains zero.
 
 Dispatch `experiment=kernel-admission` to compile and boot a pinned Linux 6.18
 guest under networkless QEMU TCG in the owned ephemeral runner. The upstream
