@@ -16,6 +16,7 @@ module OctantOfflineNativeTests
     target.add_file_references([source])
     target.build_configurations.each do |configuration|
       configuration.build_settings.merge!({
+        'PRODUCT_NAME' => name,
         'PRODUCT_BUNDLE_IDENTIFIER' => 'app.octant.mobile.offline-native-tests',
         'GENERATE_INFOPLIST_FILE' => 'YES',
         'SWIFT_VERSION' => '6.0',
