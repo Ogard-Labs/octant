@@ -1,6 +1,8 @@
+import { randomUUID } from "node:crypto";
 import {
   decodeProviderFailure,
   decodeProviderSessionId,
+  NativeHarnessTodoWriteArguments,
   type CorrelationId,
   type NativeHarnessTranscriptToolCall,
   type NativeHarnessTranscriptToolResult,
@@ -21,7 +23,7 @@ import {
 import type { ProviderConnection, ProviderSessionCompaction } from "@octant/provider-sdk/driver";
 import { estimateTurnCostUsd } from "@octant/domain/turn-metrics-display";
 import { renderProviderTurnPrompt } from "@octant/provider-sdk/chat-conformance";
-import { Effect, PubSub, Stream, type Scope } from "effect";
+import { Effect, Option, PubSub, Schema, Stream, type Scope } from "effect";
 import { isContextOverflowFailure } from "../providers/contextOverflowRefusal";
 import { isEndpointRetriesExhausted } from "../providers/endpointRetry";
 import type { ObservedRateLimitBucket } from "../providers/rateLimitHeaders";
@@ -199,6 +201,12 @@ interface SessionState {
   pending: PendingStep | undefined;
   /** Every call answered in this turn, so a retried answer after its step moved on is ignored. */
   readonly answered: Set<string>;
+  /**
+   * The task id of each place in the lead's task list. `todo-write` restates
+   * the whole list with no ids of its own, so a row keeps its id by its place
+   * and the Tasks panel updates it in place instead of adding a new row.
+   */
+  readonly todoTaskIds: Map<number, string>;
   /** The turn in flight, kept so a fallback model can be asked whether it accepts it. */
   turn: ProviderTurnInput | undefined;
   /**
@@ -357,6 +365,7 @@ export function createNativeHarnessConnection(
       tools: input.tools ?? [],
       pending: undefined,
       answered: new Set(),
+      todoTaskIds: new Map(),
       turn: undefined,
       turnMessage: undefined,
       fallback: undefined,
@@ -853,6 +862,32 @@ export function createNativeHarnessConnection(
       });
     };
 
+    /**
+     * The lead's task list, as the same `task-progress` and `task-list` events
+     * a runtime's own checklist produces, so Chat, Work, and Code show it in
+     * their Tasks panel. Only a call the runner answered without error counts:
+     * a refused `todo-write` never replaced the session's list.
+     */
+    const emitTaskList = (state: SessionState, call: NativeHarnessTranscriptToolCall) => {
+      const written = decodeTodoWrite(call.argumentsJson);
+      if (written === undefined) return;
+      const taskIds = written.items.map((item, position) => {
+        let taskId = state.todoTaskIds.get(position);
+        if (taskId === undefined) {
+          taskId = randomUUID();
+          state.todoTaskIds.set(position, taskId);
+        }
+        emit(state, {
+          kind: "task-progress",
+          taskId,
+          status: TODO_TASK_STATUS[item.status],
+          summary: item.title,
+        });
+        return taskId;
+      });
+      emit(state, { kind: "task-list", taskIds });
+    };
+
     const emitBucket = (state: SessionState, bucket: ObservedRateLimitBucket) =>
       emit(state, { kind: "rate-limit-bucket", ...bucket });
 
@@ -1323,6 +1358,10 @@ export function createNativeHarnessConnection(
             }
             pending.answers.set(input.requestId, input);
             state.answered.add(input.requestId);
+            const call = pending.calls.find(
+              (candidate) => candidate.toolCallId === input.requestId,
+            );
+            if (call?.toolName === "todo-write" && !input.isError) emitTaskList(state, call);
             state.transcripts.settle(state.transcriptId, {
               toolCallId: input.requestId,
               resultJson: input.resultJson,
@@ -1466,6 +1505,22 @@ function compactionSummaryMessage(
     role: "user",
     text: `${replaced} no longer shown in full. ${workStillReflected(mode)} Summary:\n\n${compaction.summary}`,
   };
+}
+
+const TODO_TASK_STATUS = {
+  pending: "pending",
+  "in-progress": "in-progress",
+  done: "completed",
+} as const;
+
+function decodeTodoWrite(argumentsJson: string): NativeHarnessTodoWriteArguments | undefined {
+  try {
+    return Option.getOrUndefined(
+      Schema.decodeUnknownOption(NativeHarnessTodoWriteArguments)(JSON.parse(argumentsJson)),
+    );
+  } catch {
+    return undefined;
+  }
 }
 
 /**

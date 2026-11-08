@@ -3585,11 +3585,19 @@ approved by the maintainer on 2026-10-12. This section is the effective rule.
   send journals `agent.message-sent@1` on the `agent-message` aggregate, one
   message per recipient, and keeps the body in the host's store under an
   opaque reference; bodies never enter the journal. The sender is told `sent`
-  and nothing more: sending starts no turn, grants no authority, and returns
-  no reply. Bounds are four recipients per send, a 64 KiB body, and eight
+  and nothing more: sending grants no authority and returns no reply, and it
+  starts a turn only as the bounded wake below. Bounds are four recipients per send, a 64 KiB body, and eight
   messages per sender that no turn has carried yet; a waiting message whose
   recipient closed or left the Project is refused at the sender's next send,
   so it stops holding a slot.
+- **Across a person's computers.** A tagged Code thread may also message a
+  tagged Code thread on another member of its hub, under that member's peer
+  grant. Each host applies the rules above to its own end, and the receiver
+  keeps the final say; the extra rules (the Reachable tag, the Message item,
+  remote references, waiting on the sender while the receiver is unreachable,
+  a bounded wake turn for an idle recipient, receipts back) are in
+  [Hub and spokes: messaging between members](design/hub-and-spokes.md#messaging-between-members).
+  Designed, not built.
 - **Delivery.** Admission is not delivery. When the recipient's next Code turn
   assembles its context, the host rechecks that the sender is still active,
   that both threads still share a Project, and that the recipient is active,
@@ -3607,6 +3615,47 @@ approved by the maintainer on 2026-10-12. This section is the effective rule.
   into the next turn too; a host stop never drops a message unread. The block
   reaches every Code provider the way a `#thread` mention does and is part of
   that turn only.
+- **Waking an idle recipient.** Every Code thread has a **Wake when a message
+  arrives** switch in its header menu and its row's context menu. It is off by
+  default, only a person sets it (a window on the host, or an owner device
+  after a fresh unlock; never an agent, a routine, or a peer), and each change
+  is journaled as `thread.message-wake-set@1` with its principal. When a
+  message is admitted for a thread with the switch on and the thread is idle,
+  the host starts one turn to carry it, so agents can coordinate without a
+  person starting each turn.
+  - **Idle** means the thread is active Code outside Plan, has no turn running
+    or queued, and is not waiting for a person (an approval, a question, or a
+    usage-limit pause). A thread that is not idle carries the message in its
+    next turn as before; a running turn is never interrupted.
+  - **The wake turn** is a host-run turn with the `agent` initiator, the way a
+    routine's Code turn starts, so every approval waits for a person. It runs
+    under the thread's own posture, provider profile, and model and takes the
+    ordinary turn admission: capacity gating, the Done lock, and usage limits
+    apply, and a turn refused there starts nothing and leaves the messages
+    waiting. Its prompt is a host sentence naming the sender thread that woke
+    it; the messages arrive as the ordinary delivery block after the ordinary
+    delivery checks, and when every waiting message is refused there, no turn
+    starts. It is journaled with the initiator kind `agent-message` and the
+    message ids, and the thread's row and transcript say which thread woke it.
+  - **Bounds.** One wake turn at a time per thread and at most six per thread
+    in any hour; a message past either bound waits for the next turn. Each
+    message carries a hop count: zero from a turn a person or a routine
+    started, and one more than the message that woke the sender's turn
+    otherwise. A message whose hop count is three or more is delivered but
+    wakes nothing, so two agents answering each other stop waking each other
+    after three rounds and continue only when a person runs a turn.
+  - Turning the switch off stops new wake turns; one already running finishes
+    like any turn, and cancelling it is the ordinary cancel.
+
+  Rationale: a wake turn starts nothing a person could not have started on
+  that thread, under the posture the person chose, with approvals still waiting
+  for a person, so a message can spend provider usage but cannot widen what the
+  recipient's agent may do. It is off by default on one host because a thread's
+  siblings were never asked whether they may start its turns; the hop count and
+  hourly bound keep two agents from turning one message into unbounded turns.
+  Waking across a person's computers adds the rules in
+  [Hub and spokes: waking an idle thread](design/hub-and-spokes.md#waking-an-idle-thread).
+
 - **Bodies.** A body lives only while its message waits: delivery and refusal
   delete it, purging either thread deletes it with the message, and at start
   the host keeps only the bodies of waiting messages. A message an earlier
@@ -3940,6 +3989,29 @@ may send either kind. Code journals it as its own operation event; Chat and
 Work fold it into the list they already journal whole. A journal written before
 `task-list` existed holds only `task-progress` and replays exactly as it did,
 dropped steps included.
+
+An Octant Harness lead keeps its list with Octant's own `todo-write` tool, and
+the Harness loop reports it the same way: when the runner answers a
+`todo-write` call without error, the loop emits one `task-progress` per item
+(pending, in progress, done as completed) and a closing `task-list`, keeping a
+row's id by its place in the list as Claude's mapper does. A refused call
+replaced nothing, so it reports nothing. The list stays on the harness
+session too, as the Task list below describes.
+
+Settings reports task progress supported for a Harness endpoint instance
+(OpenAI-compatible, Anthropic-compatible, Azure AI Foundry, Bedrock, Ollama,
+or an outside Harness endpoint) once one of its models has passed Verify
+tools, because only such a model is offered `todo-write`; before that it
+reports the driver's own answer. The host adds this when it reports the
+instance (`hostedProviderCapabilities`, applied to the registry snapshot and
+the probe result), so the runtime-integration facts list task progress too.
+The driver's own probe still reports `taskProgress` unsupported. Rationale:
+provider-sdk conformance holds a driver that claims an event-backed
+capability to emitting that event in every scripted turn, and a Harness
+endpoint's scripted turns call no tool. Claiming it in the driver would mean
+scripting `todo-write` into every endpoint fixture or loosening that check
+for every provider, while the reported card answers what a person needs to
+know.
 
 Each thread surface shows the agent's restated plan as a live "N of M tasks
 completed" panel while any task is open or the turn is still writing: Code from its journaled
@@ -4598,6 +4670,10 @@ or .zip>` write the same files, built by one host command
   of the journal — transcript, evidence, and provenance, named with the
   instant it was taken. A missing thread and one the caller cannot read get
   the same `not-found` refusal, so an export never reveals a hidden thread.
+  Moving a thread to another hub member sends the same cut with the
+  thread-owned parts it omits; the destination opens it as a new thread under
+  its own journal and adopts nothing else
+  ([Hub and spokes: moving a thread](design/hub-and-spokes.md#moving-a-thread-to-another-member)).
   Secrets, raw provider payloads, and filesystem
   paths never appear; attachment bytes and other bulk content outside the
   journal are listed as omissions. The thread's generated images and retained
@@ -5241,8 +5317,43 @@ modelId }`, and the model picker is provider-first. Each Claude instance is
   images, which every renderer surface lists alongside them). The
   composer of an open Chat, Work, or Code thread also carries a **Create
   image…** icon beside attach and dictate. It opens the same generation sheet,
-  scoped to that thread, so the result lands there as a thread artifact; it is
-  a person-driven action only, because the agent's image tool stays in Chat.
+  scoped to that thread, so the result lands there as a thread artifact.
+  The agent's tool is offered in Chat, Work, and Code turns whose provider
+  carries app-managed tools (never a Side Chat or a routine's turn, which has
+  nobody to answer), and only while an enabled image profile exists; every
+  provider is also told, in the turn's tool host lines, to call it for a
+  picture instead of drawing one as SVG or HTML. A call spends nothing by
+  itself: the host holds an image offer for the window whose turn asked, and
+  the thread shows it as a card where the person picks the profile and model,
+  lets the agent draw the visual itself, or cancels. Generate runs only a
+  profile and model the host can run when the answer arrives, checked again
+  before the job is queued. "Don't ask again in this thread" keeps that
+  profile and model for the thread in host memory only, so a restart asks
+  again, and a kept choice the host can no longer run is dropped and asked
+  again rather than swapped. An offer lives at most ten minutes and is given
+  up when its turn stops or its window goes away; Plan refuses the call,
+  because a generation calls a paid provider and stores the result.
+  After Generate the call waits up to two minutes for the job. A finished job
+  answers with each image's attachment id, and the images themselves through
+  the provider's tool-image channel when the turn's model reads images and an
+  image is a PNG or JPEG within that channel's bound; the result says when one
+  was left out. A job still running when the wait ends answers that it is
+  generating, and a failed one gives the provider's reason. A thread draws
+  each image job after the turn the person opened at or before the job was
+  queued, by the rule its Canvases use, and lists only the jobs it cannot
+  place below the transcript.
+  In a Work or Code thread the same tool's `save` operation stores a finished
+  image of that thread as a new file under the folder the turn works in: the
+  Work thread's bound folder, or the Code turn's own checkout. The turn's
+  level decides as for any file edit: Plan refuses it, Ask first and Auto show
+  the person a card naming the path (Auto's reviewer does not answer it), and
+  Accept edits and Full access write at once; for Code the stricter of the
+  journaled and running posture applies, so a session-only grant still asks.
+  The write runs the Work confinement sequence (resolve for create inside the
+  folder, then an exclusive create through the proved parent), so a path that
+  leaves the folder, a symlinked component, or an existing file is refused.
+  Chat threads have no folder and are never offered it. A person's Save to
+  Project uses the same confined write under the Project's folder.
   With no image profile ready the icon opens Settings › Voice & images
   instead, and it is absent where the host serves no image generation. Work and
   Code keep their existing saves of a result: a Save click is the consent in
@@ -7288,7 +7399,9 @@ the model at another size.
   `native-harness-tasks-replaced` frame (a list rewritten unchanged adds
   none), rebuilt on replay, and carried in the session view as `tasks`, so
   the web card, the phone panel, and the terminal show each item as pending,
-  in progress, or done in every mode. It never proposes, revises, or advances
+  in progress, or done in every mode. Each accepted list is also reported as
+  task events, so the thread's Tasks panel shows it as it shows any runtime's
+  checklist ([Agent task display](#agent-task-display)). It never proposes, revises, or advances
   a thread plan and raises no plan review, because the plan's approval policy
   guards what a person has agreed to run and a lead's working notes would
   otherwise be refused at their first step. The person-approved plan and its
@@ -7814,8 +7927,10 @@ the model at another size.
      `ThreadHarnessApproval.test.tsx` and `ThreadHarnessQuestion.test.tsx` the
      inline approval and Work question cards.
   3. **Task list.** `todo-write` records pending, in-progress, and done
-     without a plan approval. Not yet pinned at the offered-set level beyond
-     item 1; the progress states are covered by `nativeHarnessTodo.test.ts`.
+     without a plan approval, and the thread's Tasks panel shows it. Not yet
+     pinned at the offered-set level beyond item 1; the progress states are
+     covered by `nativeHarnessTodo.test.ts` and the panel's task events by
+     `nativeHarnessLoop.test.ts`.
   4. **One session everywhere.** The same session state is visible in web,
      desktop, terminal, and phone: each reads and changes the one journaled
      session through `/api/native-harness/sessions/:threadId`, and none keeps
@@ -11568,7 +11683,7 @@ access` agree); a thread's own change is journaled as
   | `cloudSessions`           | `absent`                                                                                      | `absent`                                                                                     | `absent`                                                                                                 | `absent`                                                                                          | `absent`                                                                                                           | `absent`                                                                                | `absent`; eligible official API endpoints offer separate Code cloud jobs through the optional driver seam | `absent`; a matching observed outside protocol may report `supported` for separate Code jobs | `absent`                              |
   | `fileChanges`             | `supported`                                                                                   | `supported`                                                                                  | `unsupported`; `supported` from 2.2.0                                                                    | `unavailable`                                                                                     | `unavailable`                                                                                                      | `unsupported`                                                                           | `unsupported`                                                                                             | `unsupported`                                                                                | `unavailable`                         |
   | `diffs`                   | `supported`                                                                                   | `supported`                                                                                  | `supported`                                                                                              | `unavailable`                                                                                     | `unavailable`                                                                                                      | `unsupported`                                                                           | `unsupported`                                                                                             | `unsupported`                                                                                | `unavailable`                         |
-  | `taskProgress`            | `supported`                                                                                   | `supported`                                                                                  | `supported`                                                                                              | `unavailable`                                                                                     | `supported`                                                                                                        | `unsupported`                                                                           | `unsupported`                                                                                             | `unsupported`                                                                                | `unavailable`                         |
+  | `taskProgress`            | `supported`                                                                                   | `supported`                                                                                  | `supported`                                                                                              | `unavailable`                                                                                     | `supported`                                                                                                        | `unsupported`; Settings reports `supported` once a model passes Verify tools            | `unsupported`; Settings reports `supported` once a model passes Verify tools                              | `unsupported`; Settings reports `supported` once a model passes Verify tools                 | `unavailable`                         |
   | `nativeChildAgents`       | `unsupported`; Octant owns its delegation; Claude's own subagents are `nativeSetup.subagents` | `unsupported`; Octant owns its delegation; Codex's own subagents are `nativeSetup.subagents` | `unsupported`; its own delegation is `nativeSetup.subagents`                                             | `unsupported`                                                                                     | `unavailable`                                                                                                      | `unsupported`                                                                           | `unsupported`                                                                                             | `unsupported`                                                                                | `unsupported`                         |
   | `nativeAttachments`       | `unsupported`                                                                                 | `unsupported`; `supported` when a model takes image input                                    | `unsupported`; `supported` when a model takes non-text input                                             | `unsupported`                                                                                     | `unsupported`                                                                                                      | `varies`: `supported` when a model takes images                                         | `unsupported`                                                                                             | `unsupported`                                                                                | `unsupported`                         |
   | `nativeWebResearch`       | `unsupported`                                                                                 | `unsupported`                                                                                | `unsupported`                                                                                            | `unsupported`                                                                                     | `unsupported`                                                                                                      | `unsupported`                                                                           | `unsupported`                                                                                             | `unsupported`                                                                                | `unsupported`                         |
@@ -13259,7 +13374,10 @@ access` agree); a thread's own change is journaled as
   registry work, not a new trust boundary. Conflicting facts stay under their owning host;
   create and mutation routing name one destination and refuse when that host is
   not routable — they never queue offline work or convert one host's read model
-  into authority on another. An all-hosts list keeps every registered host;
+  into authority on another. An agent message to a thread on another hub
+  member is not offline work: it carries no authority and the receiver admits
+  it afresh, so it waits on the sender until that member answers
+  ([Hub and spokes: messaging between members](design/hub-and-spokes.md#messaging-between-members)). An all-hosts list keeps every registered host;
   an unreachable host's cached items stay listed as stale and read-only, and
   an authority-bearing mutation is allowed only on a host whose read model is
   ready. The hub-and-spoke design keeps this rule: a hub introduces hosts and
@@ -14444,7 +14562,9 @@ documents its authority, privacy, and release boundaries):
   the web app over a private network such as Tailscale) enrolls the person's
   other computers and phones, introduces them, fails over to a standby, and
   runs their wake and push services, including a self-hosted wake service
-  ([Hub and spokes](design/hub-and-spokes.md#wake-service)). An
+  ([Hub and spokes](design/hub-and-spokes.md#wake-service)). A person can
+  move a thread from one member to another before a planned shutdown
+  ([moving a thread](design/hub-and-spokes.md#moving-a-thread-to-another-member)). An
   Octant-operated wake service is not in scope.
 - Connectors (MCP servers added by hand, imported from other tools on this Mac,
   signed in to, or chosen from the bundled catalog): user-added packages

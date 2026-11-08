@@ -144,7 +144,54 @@ export const REMOTE_HUB_LINK_ROUTE_IDS = {
   delegationStatus: "hub-link-delegation-status",
   delegationCancel: "hub-link-delegation-cancel",
   credentialTransfer: "hub-link-credential-transfer",
+  threadMoveOffer: "hub-link-thread-move-offer",
+  threadMoveChunk: "hub-link-thread-move-chunk",
+  threadMoveFinish: "hub-link-thread-move-finish",
+  threadMoveCommit: "hub-link-thread-move-commit",
+  threadMoveStatus: "hub-link-thread-move-status",
+  threadMoveDiscard: "hub-link-thread-move-discard",
 } as const;
+
+/**
+ * A thread move's member routes and the body each may carry. Only a chunk
+ * carries part bytes (512 KiB base64 in JSON); the offer carries the manifest.
+ */
+const THREAD_MOVE_PEER_ROUTES: ReadonlyArray<{
+  readonly id: (typeof REMOTE_HUB_LINK_ROUTE_IDS)[keyof typeof REMOTE_HUB_LINK_ROUTE_IDS];
+  readonly path: string;
+  readonly maxBodyBytes: number;
+}> = [
+  {
+    id: REMOTE_HUB_LINK_ROUTE_IDS.threadMoveOffer,
+    path: "/api/hub/peer/thread-moves",
+    maxBodyBytes: 262_144,
+  },
+  {
+    id: REMOTE_HUB_LINK_ROUTE_IDS.threadMoveChunk,
+    path: "/api/hub/peer/thread-moves/chunk",
+    maxBodyBytes: 1_048_576,
+  },
+  {
+    id: REMOTE_HUB_LINK_ROUTE_IDS.threadMoveFinish,
+    path: "/api/hub/peer/thread-moves/finish",
+    maxBodyBytes: 4_096,
+  },
+  {
+    id: REMOTE_HUB_LINK_ROUTE_IDS.threadMoveCommit,
+    path: "/api/hub/peer/thread-moves/commit",
+    maxBodyBytes: 4_096,
+  },
+  {
+    id: REMOTE_HUB_LINK_ROUTE_IDS.threadMoveStatus,
+    path: "/api/hub/peer/thread-moves/status",
+    maxBodyBytes: 4_096,
+  },
+  {
+    id: REMOTE_HUB_LINK_ROUTE_IDS.threadMoveDiscard,
+    path: "/api/hub/peer/thread-moves/discard",
+    maxBodyBytes: 4_096,
+  },
+];
 
 const DEFAULT_PRE_AUTH_ROUTES: readonly RemoteRouteDefinition[] = [
   {
@@ -547,6 +594,22 @@ const DEFAULT_PRE_AUTH_ROUTES: readonly RemoteRouteDefinition[] = [
     maxBodyBytes: 16_384,
     maxResponseBytes: 4_096,
   },
+  // A thread move another member sends. The offer is accepted only against a
+  // one-time ticket an owner made on this host with a fresh unlock, and each
+  // later request names a move that sender owns.
+  ...THREAD_MOVE_PEER_ROUTES.map(
+    (route): RemoteRouteDefinition => ({
+      id: route.id,
+      match: { kind: "exact", path: route.path },
+      surface: "pre-auth",
+      methods: ["POST"],
+      allowQuery: false,
+      allowedRequestHeaders: ["content-type", HUB_LINK_HEADER, HUB_PEER_KEY_HEADER],
+      allowedContentTypes: ["application/json"],
+      maxBodyBytes: route.maxBodyBytes,
+      maxResponseBytes: 16_384,
+    }),
+  ),
   // An owner device's administration of a host, signed like the routes above
   // and checked against the host's own owner list and a fresh unlock.
   {
