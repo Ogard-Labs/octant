@@ -3585,11 +3585,19 @@ approved by the maintainer on 2026-10-12. This section is the effective rule.
   send journals `agent.message-sent@1` on the `agent-message` aggregate, one
   message per recipient, and keeps the body in the host's store under an
   opaque reference; bodies never enter the journal. The sender is told `sent`
-  and nothing more: sending starts no turn, grants no authority, and returns
-  no reply. Bounds are four recipients per send, a 64 KiB body, and eight
+  and nothing more: sending grants no authority and returns no reply, and it
+  starts a turn only as the bounded wake below. Bounds are four recipients per send, a 64 KiB body, and eight
   messages per sender that no turn has carried yet; a waiting message whose
   recipient closed or left the Project is refused at the sender's next send,
   so it stops holding a slot.
+- **Across a person's computers.** A tagged Code thread may also message a
+  tagged Code thread on another member of its hub, under that member's peer
+  grant. Each host applies the rules above to its own end, and the receiver
+  keeps the final say; the extra rules (the Reachable tag, the Message item,
+  remote references, waiting on the sender while the receiver is unreachable,
+  a bounded wake turn for an idle recipient, receipts back) are in
+  [Hub and spokes: messaging between members](design/hub-and-spokes.md#messaging-between-members).
+  Designed, not built.
 - **Delivery.** Admission is not delivery. When the recipient's next Code turn
   assembles its context, the host rechecks that the sender is still active,
   that both threads still share a Project, and that the recipient is active,
@@ -3607,6 +3615,47 @@ approved by the maintainer on 2026-10-12. This section is the effective rule.
   into the next turn too; a host stop never drops a message unread. The block
   reaches every Code provider the way a `#thread` mention does and is part of
   that turn only.
+- **Waking an idle recipient.** Every Code thread has a **Wake when a message
+  arrives** switch in its header menu and its row's context menu. It is off by
+  default, only a person sets it (a window on the host, or an owner device
+  after a fresh unlock; never an agent, a routine, or a peer), and each change
+  is journaled as `thread.message-wake-set@1` with its principal. When a
+  message is admitted for a thread with the switch on and the thread is idle,
+  the host starts one turn to carry it, so agents can coordinate without a
+  person starting each turn.
+  - **Idle** means the thread is active Code outside Plan, has no turn running
+    or queued, and is not waiting for a person (an approval, a question, or a
+    usage-limit pause). A thread that is not idle carries the message in its
+    next turn as before; a running turn is never interrupted.
+  - **The wake turn** is a host-run turn with the `agent` initiator, the way a
+    routine's Code turn starts, so every approval waits for a person. It runs
+    under the thread's own posture, provider profile, and model and takes the
+    ordinary turn admission: capacity gating, the Done lock, and usage limits
+    apply, and a turn refused there starts nothing and leaves the messages
+    waiting. Its prompt is a host sentence naming the sender thread that woke
+    it; the messages arrive as the ordinary delivery block after the ordinary
+    delivery checks, and when every waiting message is refused there, no turn
+    starts. It is journaled with the initiator kind `agent-message` and the
+    message ids, and the thread's row and transcript say which thread woke it.
+  - **Bounds.** One wake turn at a time per thread and at most six per thread
+    in any hour; a message past either bound waits for the next turn. Each
+    message carries a hop count: zero from a turn a person or a routine
+    started, and one more than the message that woke the sender's turn
+    otherwise. A message whose hop count is three or more is delivered but
+    wakes nothing, so two agents answering each other stop waking each other
+    after three rounds and continue only when a person runs a turn.
+  - Turning the switch off stops new wake turns; one already running finishes
+    like any turn, and cancelling it is the ordinary cancel.
+
+  Rationale: a wake turn starts nothing a person could not have started on
+  that thread, under the posture the person chose, with approvals still waiting
+  for a person, so a message can spend provider usage but cannot widen what the
+  recipient's agent may do. It is off by default on one host because a thread's
+  siblings were never asked whether they may start its turns; the hop count and
+  hourly bound keep two agents from turning one message into unbounded turns.
+  Waking across a person's computers adds the rules in
+  [Hub and spokes: waking an idle thread](design/hub-and-spokes.md#waking-an-idle-thread).
+
 - **Bodies.** A body lives only while its message waits: delivery and refusal
   delete it, purging either thread deletes it with the message, and at start
   the host keeps only the bodies of waiting messages. A message an earlier
@@ -3940,6 +3989,29 @@ may send either kind. Code journals it as its own operation event; Chat and
 Work fold it into the list they already journal whole. A journal written before
 `task-list` existed holds only `task-progress` and replays exactly as it did,
 dropped steps included.
+
+An Octant Harness lead keeps its list with Octant's own `todo-write` tool, and
+the Harness loop reports it the same way: when the runner answers a
+`todo-write` call without error, the loop emits one `task-progress` per item
+(pending, in progress, done as completed) and a closing `task-list`, keeping a
+row's id by its place in the list as Claude's mapper does. A refused call
+replaced nothing, so it reports nothing. The list stays on the harness
+session too, as the Task list below describes.
+
+Settings reports task progress supported for a Harness endpoint instance
+(OpenAI-compatible, Anthropic-compatible, Azure AI Foundry, Bedrock, Ollama,
+or an outside Harness endpoint) once one of its models has passed Verify
+tools, because only such a model is offered `todo-write`; before that it
+reports the driver's own answer. The host adds this when it reports the
+instance (`hostedProviderCapabilities`, applied to the registry snapshot and
+the probe result), so the runtime-integration facts list task progress too.
+The driver's own probe still reports `taskProgress` unsupported. Rationale:
+provider-sdk conformance holds a driver that claims an event-backed
+capability to emitting that event in every scripted turn, and a Harness
+endpoint's scripted turns call no tool. Claiming it in the driver would mean
+scripting `todo-write` into every endpoint fixture or loosening that check
+for every provider, while the reported card answers what a person needs to
+know.
 
 Each thread surface shows the agent's restated plan as a live "N of M tasks
 completed" panel while any task is open or the turn is still writing: Code from its journaled
@@ -4598,6 +4670,10 @@ or .zip>` write the same files, built by one host command
   of the journal — transcript, evidence, and provenance, named with the
   instant it was taken. A missing thread and one the caller cannot read get
   the same `not-found` refusal, so an export never reveals a hidden thread.
+  Moving a thread to another hub member sends the same cut with the
+  thread-owned parts it omits; the destination opens it as a new thread under
+  its own journal and adopts nothing else
+  ([Hub and spokes: moving a thread](design/hub-and-spokes.md#moving-a-thread-to-another-member)).
   Secrets, raw provider payloads, and filesystem
   paths never appear; attachment bytes and other bulk content outside the
   journal are listed as omissions. The thread's generated images and retained
@@ -5241,8 +5317,43 @@ modelId }`, and the model picker is provider-first. Each Claude instance is
   images, which every renderer surface lists alongside them). The
   composer of an open Chat, Work, or Code thread also carries a **Create
   image…** icon beside attach and dictate. It opens the same generation sheet,
-  scoped to that thread, so the result lands there as a thread artifact; it is
-  a person-driven action only, because the agent's image tool stays in Chat.
+  scoped to that thread, so the result lands there as a thread artifact.
+  The agent's tool is offered in Chat, Work, and Code turns whose provider
+  carries app-managed tools (never a Side Chat or a routine's turn, which has
+  nobody to answer), and only while an enabled image profile exists; every
+  provider is also told, in the turn's tool host lines, to call it for a
+  picture instead of drawing one as SVG or HTML. A call spends nothing by
+  itself: the host holds an image offer for the window whose turn asked, and
+  the thread shows it as a card where the person picks the profile and model,
+  lets the agent draw the visual itself, or cancels. Generate runs only a
+  profile and model the host can run when the answer arrives, checked again
+  before the job is queued. "Don't ask again in this thread" keeps that
+  profile and model for the thread in host memory only, so a restart asks
+  again, and a kept choice the host can no longer run is dropped and asked
+  again rather than swapped. An offer lives at most ten minutes and is given
+  up when its turn stops or its window goes away; Plan refuses the call,
+  because a generation calls a paid provider and stores the result.
+  After Generate the call waits up to two minutes for the job. A finished job
+  answers with each image's attachment id, and the images themselves through
+  the provider's tool-image channel when the turn's model reads images and an
+  image is a PNG or JPEG within that channel's bound; the result says when one
+  was left out. A job still running when the wait ends answers that it is
+  generating, and a failed one gives the provider's reason. A thread draws
+  each image job after the turn the person opened at or before the job was
+  queued, by the rule its Canvases use, and lists only the jobs it cannot
+  place below the transcript.
+  In a Work or Code thread the same tool's `save` operation stores a finished
+  image of that thread as a new file under the folder the turn works in: the
+  Work thread's bound folder, or the Code turn's own checkout. The turn's
+  level decides as for any file edit: Plan refuses it, Ask first and Auto show
+  the person a card naming the path (Auto's reviewer does not answer it), and
+  Accept edits and Full access write at once; for Code the stricter of the
+  journaled and running posture applies, so a session-only grant still asks.
+  The write runs the Work confinement sequence (resolve for create inside the
+  folder, then an exclusive create through the proved parent), so a path that
+  leaves the folder, a symlinked component, or an existing file is refused.
+  Chat threads have no folder and are never offered it. A person's Save to
+  Project uses the same confined write under the Project's folder.
   With no image profile ready the icon opens Settings › Voice & images
   instead, and it is absent where the host serves no image generation. Work and
   Code keep their existing saves of a result: a Save click is the consent in
@@ -6464,6 +6575,24 @@ _Failures._
 | The thread is deleted while compacting                                                                             | The result is discarded and the request ends `failed` (`subject-unavailable`), because an ordinary delete keeps the ledger until a purge and a request left open would read as running. Usage the provider reported is still journaled, because the request was spent; the thread's purge erases the compaction and keeps that usage.                                                                                                                                                                                                                                                                                                                                                                           |
 | The host restarts mid-compaction                                                                                   | Recorded as `failed` (`interrupted`); for a runtime the line says it may have compacted, and the next usage report settles it.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
 
+**Compacting a session by a rule.** A person can also have Octant compact a
+thread without asking each time, by a rule set in Settings (General →
+Compaction). A rule runs exactly the compaction above, through the same
+service, as the `host-policy` caller: it is admitted wherever a local window is
+and refused wherever one would be, and the person's setting stands in for the
+confirm. A refused rule journals nothing. A Code thread's session runs in the
+checkout its window resolved, so a rule compacts a Code thread only under the
+window whose turn crossed it, and only while that window is still open. The requested event and
+the receipt carry the rule's `cause`, and the timeline line reads, for example,
+"Compacted automatically · window 91% full · 41.2K freed · summary by Octant
+Harness". The limit rule, before a runtime compacts a thread, asks the thread's
+own provider for a summary of the conversation the host holds (for Code, its
+public prompts and replies, read in a private host folder, not the checkout); the
+receipt names it as `handover`, and a provider switch leads its handoff with it.
+A rule never starts a replacement session on another provider. Which
+rules exist, their defaults, and what is built are owned by
+[Automatic compaction](design/automatic-compaction.md).
+
 ### Held standing context
 
 A provider that keeps its own conversation (`conversationOwnership: "provider"`:
@@ -7320,7 +7449,9 @@ the model at another size.
   `native-harness-tasks-replaced` frame (a list rewritten unchanged adds
   none), rebuilt on replay, and carried in the session view as `tasks`, so
   the web card, the phone panel, and the terminal show each item as pending,
-  in progress, or done in every mode. It never proposes, revises, or advances
+  in progress, or done in every mode. Each accepted list is also reported as
+  task events, so the thread's Tasks panel shows it as it shows any runtime's
+  checklist ([Agent task display](#agent-task-display)). It never proposes, revises, or advances
   a thread plan and raises no plan review, because the plan's approval policy
   guards what a person has agreed to run and a lead's working notes would
   otherwise be refused at their first step. The person-approved plan and its
@@ -7846,8 +7977,10 @@ the model at another size.
      `ThreadHarnessApproval.test.tsx` and `ThreadHarnessQuestion.test.tsx` the
      inline approval and Work question cards.
   3. **Task list.** `todo-write` records pending, in-progress, and done
-     without a plan approval. Not yet pinned at the offered-set level beyond
-     item 1; the progress states are covered by `nativeHarnessTodo.test.ts`.
+     without a plan approval, and the thread's Tasks panel shows it. Not yet
+     pinned at the offered-set level beyond item 1; the progress states are
+     covered by `nativeHarnessTodo.test.ts` and the panel's task events by
+     `nativeHarnessLoop.test.ts`.
   4. **One session everywhere.** The same session state is visible in web,
      desktop, terminal, and phone: each reads and changes the one journaled
      session through `/api/native-harness/sessions/:threadId`, and none keeps
@@ -7883,25 +8016,83 @@ the top of the composer of each local thread pane.
 
 Side tasks are the mid-turn counterpart (`apps/server/src/sideTasks`). On any
 provider that runs app-managed tools, every Chat, Work, and Code turn's tool
-set includes `octant_offer_side_task` (a Side Chat's excepted; see
-[Side Chat reads](#security-and-authority)); Work and Code turns also carry browser
-and computer use. The
-model offers out-of-scope work it noticed (title, one-sentence reason,
-standalone prompt, and in a Code thread in a Project a worktree or the current
-checkout). The call only journals the offer (`thread-side-tasks`, at most five
-open per thread) and returns at once; it grants nothing. In a Code Project's
-designated planner thread it also takes target `board`, which records a
-pending planner proposal for the person to confirm in the Project planner
-instead of a card (see the planner's agent tools above). `/api/side-tasks/:threadId`
-lists offers and starts or dismisses one. Starting is the person's
-confirmation: the host creates the thread through `createFollowUp` on the
-offering model, marks the offer started, and sends the prompt as the first
-message through the mode's ordinary turn command on the confirming window
-(`send-chat-turn`, `start-work-thread-turn`, or staged evidence plus
-`start-provider-turn`); a Code thread still starts approval-gated. This is the
-one place a prompt is sent for the person, and only on their click. If the
-message does not go out, the thread stays and the prompt waits in its
-composer. The web shows open offers as cards above the chips.
+set includes `octant_offer_side_task`; Work and Code turns also carry browser
+and computer use. The model offers work that should run as a task of its own:
+out-of-scope work it noticed, a piece the person asked to split off or run
+separately, or a real next step its reply recommends. An offer carries a
+title, a one-sentence reason, a standalone prompt, a suggested context
+(`fresh`, the prompt alone, or `fork`, this conversation through the offering
+turn and then the prompt), and in a Code thread in a Project a worktree or the
+current checkout. The host stamps the offering turn's own identity (`turnId`:
+a Chat turn, a Work turn, or a Code operation). The call only journals the
+offer (`thread-side-tasks`, at most five open per thread) and returns at once;
+it grants nothing, and the model is told not to wait for the answer or do the
+work itself. In a Code thread a `fork` offer always targets a worktree.
+`GET /api/side-tasks/:threadId` lists offers; `POST` to its `start`,
+`continue`, and `dismiss` actions answers one, each refused before anything
+is created or sent unless the window may act on the offering thread.
+
+The web renders each offer inline in the transcript, after the reply of the
+turn that made it (offers without a `turnId` sit after the last reply), as a
+card that asks one question: start this in a new thread, or do it here. The
+card shows the title, the reason, and the exact prompt behind a disclosure,
+and a settled offer shrinks to a one-line receipt (started, with a link to the
+thread; done here; dismissed). Three answers are possible, and each is the
+person's confirmation:
+
+- **New thread.** The host creates the thread on the offering model and sends
+  the prompt as its first message through the mode's ordinary turn command on
+  the confirming window (`send-chat-turn`, `start-work-thread-turn`, or staged
+  evidence plus `start-provider-turn`); a Code thread still starts
+  approval-gated. A `fresh` start goes through `createFollowUp`. A `fork`
+  start goes through the mode's own fork: `branch-chat-thread` through the
+  offering Chat turn, `fork-code-thread` through the offering Code operation
+  (always its own worktree, carrying the checkout as that turn left it), and
+  `fork-work-thread` through the offering Work turn. The person may switch
+  the context on the card; a fork whose offering turn has not finished is
+  refused `turn-running` before anything is created, by the rule the mode's
+  fork applies (a Chat branch waits for every reply in the thread, a Work fork
+  for every turn it carries, a Code fork for the named operation), and the
+  card holds the fork choice until the reply ends. An offer without a `turnId`
+  can only start fresh. The fork's own rules apply unchanged: its handoff,
+  marks, and refusals, and the prompt is sent only while the fork runs on the
+  model that made the offer.
+- **Do it here.** The prompt goes to the offering thread itself: as its next
+  turn through the same ordinary turn command when the thread is idle, or into
+  its message queue behind the running turn, with the queue's usual holds.
+  The queue answers where the thread stands for the window and holds its
+  ordering while an idle thread is sent the prompt; a thread whose last
+  message may not have gone out is sent nothing. Before dispatch the offer
+  journals `side-task-continued-here` with delivery `unconfirmed`, a claim
+  that prevents a second send or queue even after a restart. A confirmed
+  result refines that delivery to `sent` or `queued`. An explicit no-effect
+  refusal journals `side-task-continuation-refused` and reopens the offer.
+  An exception, uncertain send, or failed receipt write retains the claim:
+  the card says delivery is unconfirmed and asks the person to inspect the
+  thread and its queued messages before sending the prompt themselves.
+  It offers no retry and the host never replays that uncertain action. A lost
+  action response or unavailable post-action read holds the card's actions
+  until a fresh authoritative read confirms its state.
+- **Dismiss.** The offer closes and nothing is sent.
+
+These are the only places a prompt is sent for the person, and only on their
+click. If a new thread's first message does not go out, the thread stays and
+the prompt waits in its composer.
+
+**Work fork.** `fork-work-thread` creates a Work thread in the source's
+Project on the source's provider and model, with a `forkedFrom` origin naming
+the source thread and a finished Work turn, and copies the source's turns
+through that point as carried turns in one journal unit with its creation.
+The host checks, as for a Code fork, that the source's Project is readable by
+the confirming window and that every carried turn exists and has settled. The
+fork's first own turn on a provider that keeps its own session starts a new
+one with the carried conversation as a text handoff (the turn's `handoff`,
+reason `fork`), built by the same selector and bounds as a provider switch's
+Work handoff and journaled with the turn's acceptance, before the provider is
+sent anything; a handoff that cannot be built refuses the turn with its
+reason. A Work fork shares the Project root, so it inherits no session grant,
+running turn, or Done mark, and starts at Ask first. A thread forked from a
+marked source starts marked (label `work-fork`).
 
 ### Harness tool egress rules
 
@@ -10683,7 +10874,20 @@ access` agree); a thread's own change is journaled as
   thread but cannot raise one to Full access or start one at Full access;
   the host refuses those at the route with "Full
   access is chosen in the Octant window on this host." `octant agent` keeps
-  sending Full access exactly when the Project remembers it. A Work thread
+  sending Full access exactly when the Project remembers it, and
+  `octant agent --access <mode>` asks for any mode on a new thread:
+  `full-access` is remembered for the Code Project through the same
+  `change-code-project-access` command `octant project access` sends, so it
+  works the same on a host with no desktop window; a Work thread takes the
+  level through `change-work-thread-access` (no Plan overlay). Because the
+  flag saves Full access on the Project rather than only on the new thread,
+  the terminal says so and prints the `octant project access <name>
+approval-gated` command that undoes it. The terminal shows no one-time
+  Full access warning: typing the flag is the explicit choice the warning
+  asks for in a window.
+  `octant settings access <mode> [--work]` sets the global default new
+  threads start at, Code unless `--work`, through `update-code-settings` /
+  `update-work-settings`. A Work thread
   takes the same levels without Plan: Settings › Work sets the one a new
   thread starts at and its composer changes it
   ([Modes](#modes-chat-work-and-code)).
@@ -10786,7 +10990,16 @@ access` agree); a thread's own change is journaled as
 - **Turn decisions.** A Work or Code turn that cannot continue without the
   person's choice ends its reply with one closing `octant-decision` block: an
   ask (one line, at most 110 characters) and one to four options (at most 60
-  characters each), exactly one recommended. Every Work and Code turn on every
+  characters each), exactly one recommended. Three optional fields let a card
+  be answered without opening the thread: `why` (one line, at most 240
+  characters, the context needed to choose), a per-option `detail` (one line,
+  at most 80 characters, its consequence or tradeoff), and `urgent` (a
+  boolean the agent sets only when waiting has a cost that grows soon). A
+  field that is present but unusable (wrong type, empty, too long, or more
+  than one line) refuses the whole block, like any other malformed part; the
+  fields are absent from a block that omits them, so earlier blocks still
+  read. `urgent` is the agent's own claim: it shows an "Urgent" tag and orders
+  nothing, and the host never acts on it. Every Work and Code turn on every
   provider is asked for the block by one fixed instruction beside the
   follow-up one; Chat is not. The host reads it with the pure domain parser
   (`parseTurnDecision`) from the normalized reply alone — a Code turn's message
@@ -10805,7 +11018,48 @@ access` agree); a thread's own change is journaled as
   answer is the thread's ordinary next turn through `start-provider-turn` or
   `start-work-thread-turn`, with the option's words as the prompt and the
   authority the composer has; there is no answer route, and an option performs
-  no host action. On the board an open decision files the thread under Waiting
+  no host action. A person may add a note (at most 2,000 characters) when
+  choosing: the prompt is then the option's words, a blank line, and the note,
+  and the label alone otherwise; the host reads it as it reads any next turn.
+  A decision can be deferred like a pending question, through the same
+  `POST /api/pending-requests/defer` and the same journaled attention
+  preference; its key is a hash of the mode, thread, and asking turn, so it
+  is stable across reads and a later turn's decision is not deferred.
+  A decision may carry a **second opinion**, advisory only: when the person has
+  chosen a model under Automatic model calls, the host asks it once per
+  decision (by that same key) which option it backs, and the item gains an
+  optional `review` (`pending`, `reviewed` with the model, option and one-line
+  reason, `withheld`, `failed`, `not-allowed`) and `askedBy` (the provider
+  account and model the asking turn ran on, read from the turn's own start
+  record, absent when it records none) so the card can show both models; the
+  review never answers a decision or changes its options. It is off until a
+  model is chosen. A list read never waits on it: reviews are queued in the
+  background, one at a time, at most 16 queued, 60 seconds each, and a
+  decision that closed before its turn is skipped. The reviewer is a
+  tool-less one-shot in a scratch folder and reads only the ask, why, options
+  with their details and the recommended one, and the last 3,000 characters of
+  the reply before the block, secrets removed; its fixed instructions carry
+  nothing about the thread, and it must answer one JSON object naming one
+  option label exactly and a reason of at most 100 characters, else the review
+  is `failed`. A reply steered by outside content is `withheld`; a Project
+  whose provider policy refuses the account sends nothing and is
+  `not-allowed`. A decision in a thread marked Leave no trace, or in a Project
+  kept out of memory, is never sent: it is treated as if the setting were off,
+  nothing is journaled, and the card has no review. These outcomes are
+  journaled as `decision-review.recorded@1` on one host aggregate (latest
+  record per key, records over 30 days old drop on replay, and a record that
+  cannot be decoded is skipped so it never blocks startup). An outcome is final
+  for that decision and the chosen model, so a restart neither shows nor pays
+  again; a changed choice of model ignores the old record and asks again. A
+  failure to journal or to record usage after a paid call keeps the outcome in
+  memory for the host's lifetime rather than asking again. An account that is
+  off, not ready, at its limit or removed, and a timed-out or unreached call,
+  are not journaled: the card shows no review and the decision asks again on a
+  later read after a five-minute cooldown, never on another account. Each call
+  that was sent is a `decision-review` usage row under the asking thread: a
+  withheld reply's usage included, and a timed-out, interrupted or failed call
+  as an unreported row, since it may have been billed. An account that could
+  not be contacted records none. On the board an open decision files the thread under Waiting
   with `decision-pending` (after recovering and a live request's
   `awaiting-input`, before an interrupted turn); Done still requires the
   delivery target to be satisfied, and a decision blocks neither completing nor
@@ -11492,7 +11746,7 @@ access` agree); a thread's own change is journaled as
   | `cloudSessions`           | `absent`                                                                                      | `absent`                                                                                     | `absent`                                                                                                 | `absent`                                                                                          | `absent`                                                                                                           | `absent`                                                                                | `absent`; eligible official API endpoints offer separate Code cloud jobs through the optional driver seam | `absent`; a matching observed outside protocol may report `supported` for separate Code jobs | `absent`                              |
   | `fileChanges`             | `supported`                                                                                   | `supported`                                                                                  | `unsupported`; `supported` from 2.2.0                                                                    | `unavailable`                                                                                     | `unavailable`                                                                                                      | `unsupported`                                                                           | `unsupported`                                                                                             | `unsupported`                                                                                | `unavailable`                         |
   | `diffs`                   | `supported`                                                                                   | `supported`                                                                                  | `supported`                                                                                              | `unavailable`                                                                                     | `unavailable`                                                                                                      | `unsupported`                                                                           | `unsupported`                                                                                             | `unsupported`                                                                                | `unavailable`                         |
-  | `taskProgress`            | `supported`                                                                                   | `supported`                                                                                  | `supported`                                                                                              | `unavailable`                                                                                     | `supported`                                                                                                        | `unsupported`                                                                           | `unsupported`                                                                                             | `unsupported`                                                                                | `unavailable`                         |
+  | `taskProgress`            | `supported`                                                                                   | `supported`                                                                                  | `supported`                                                                                              | `unavailable`                                                                                     | `supported`                                                                                                        | `unsupported`; Settings reports `supported` once a model passes Verify tools            | `unsupported`; Settings reports `supported` once a model passes Verify tools                              | `unsupported`; Settings reports `supported` once a model passes Verify tools                 | `unavailable`                         |
   | `nativeChildAgents`       | `unsupported`; Octant owns its delegation; Claude's own subagents are `nativeSetup.subagents` | `unsupported`; Octant owns its delegation; Codex's own subagents are `nativeSetup.subagents` | `unsupported`; its own delegation is `nativeSetup.subagents`                                             | `unsupported`                                                                                     | `unavailable`                                                                                                      | `unsupported`                                                                           | `unsupported`                                                                                             | `unsupported`                                                                                | `unsupported`                         |
   | `nativeAttachments`       | `unsupported`                                                                                 | `unsupported`; `supported` when a model takes image input                                    | `unsupported`; `supported` when a model takes non-text input                                             | `unsupported`                                                                                     | `unsupported`                                                                                                      | `varies`: `supported` when a model takes images                                         | `unsupported`                                                                                             | `unsupported`                                                                                | `unsupported`                         |
   | `nativeWebResearch`       | `unsupported`                                                                                 | `unsupported`                                                                                | `unsupported`                                                                                            | `unsupported`                                                                                     | `unsupported`                                                                                                      | `unsupported`                                                                           | `unsupported`                                                                                             | `unsupported`                                                                                | `unsupported`                         |
@@ -13183,7 +13437,10 @@ access` agree); a thread's own change is journaled as
   registry work, not a new trust boundary. Conflicting facts stay under their owning host;
   create and mutation routing name one destination and refuse when that host is
   not routable — they never queue offline work or convert one host's read model
-  into authority on another. An all-hosts list keeps every registered host;
+  into authority on another. An agent message to a thread on another hub
+  member is not offline work: it carries no authority and the receiver admits
+  it afresh, so it waits on the sender until that member answers
+  ([Hub and spokes: messaging between members](design/hub-and-spokes.md#messaging-between-members)). An all-hosts list keeps every registered host;
   an unreachable host's cached items stay listed as stale and read-only, and
   an authority-bearing mutation is allowed only on a host whose read model is
   ready. The hub-and-spoke design keeps this rule: a hub introduces hosts and
@@ -14087,27 +14344,39 @@ included. Shield
 sends no telemetry, and its calls count against the existing spend ceilings.
 
 **Automatic model calls.** The jobs Octant runs on a model without the
-person typing, today the Judge and person memory's distilling, share one
+person typing, today the Judge, person memory's distilling and the second
+opinion on decisions, share one
 Settings surface: Settings › Providers & Models › Automatic model calls. For
 each job the person keeps the default (the provider of the thread the work is
 about, with that provider's smallest model, unchanged) or picks one configured
-account and one of its models, an API-key account included. The Judge's choice
-is stored as `CodeSettings.shieldModel` and memory's as
-`PersonMemorySettings.distillModel`; the surface is the one place either is
-chosen, and both are changed only from a window on this host (a paired device
+account and one of its models, an API-key account included. The second opinion has no default and is **off** until the person picks an
+account and model. The Judge's choice
+is stored as `CodeSettings.shieldModel`, memory's as
+`PersonMemorySettings.distillModel` and the second opinion's as
+`PersonMemorySettings.decisionReviewModel` (the one host-wide record only a
+local window reads or changes); the surface is the one place any is
+chosen, and all are changed only from a window on this host (a paired device
 cannot). The surface says in plain words that what the job reads goes to the
 chosen provider: the Judge's input (the person's recent messages, the pending
 call and the Project's root, never tool results or outside content) and
 memory's (a thread's title and the person's own messages, secrets redacted as
-today). Rationale: account selection is fully manual by decision, so there is
+today) and the second opinion's (the decision's ask, why and options and at
+most 3,000 characters of the reply before it, secrets removed; never files,
+tool output or web pages; one request per decision). Rationale for "off until
+chosen": a second opinion from the thread's own model would only agree with
+itself, and sending a decision's text to a provider the person did not pick is
+not a default to make for them, so unlike the other two jobs it starts at
+none. Rationale: account selection is fully manual by decision, so there is
 no rotation and no failover; if the chosen account is removed, turned off, not
 ready or at a reported usage limit, the Judge sends that decision to the person
 (`model-account-unavailable`, journaled with the chosen account) and never
 allows it itself, and distilling returns the thread to the next pass without
-calling another account. A rule that decides without a model (a fast allow, a
+calling another account, and a second opinion is simply not shown and asks again
+later. A decision in a Leave no trace thread or a Project kept out of memory is
+never sent for a second opinion. A rule that decides without a model (a fast allow, a
 hard line) is unaffected. Each call is journaled with its account: the Judge
-decision names its model, and the call's `shield-review` or `person-memory`
-usage row names the provider account and model, so Usage shows which account
+decision names its model, and the call's `shield-review`, `person-memory` or
+`decision-review` usage row names the provider account and model, so Usage shows which account
 spent it. The surface keeps the two existing stored fields rather than adding a third
 setting, so no migration is needed and the default is exactly the old behavior;
 "at its limit" means only a limit the provider has reported. The harness's advisor review is a separate, slot-routed job and is
@@ -14356,7 +14625,9 @@ documents its authority, privacy, and release boundaries):
   the web app over a private network such as Tailscale) enrolls the person's
   other computers and phones, introduces them, fails over to a standby, and
   runs their wake and push services, including a self-hosted wake service
-  ([Hub and spokes](design/hub-and-spokes.md#wake-service)). An
+  ([Hub and spokes](design/hub-and-spokes.md#wake-service)). A person can
+  move a thread from one member to another before a planned shutdown
+  ([moving a thread](design/hub-and-spokes.md#moving-a-thread-to-another-member)). An
   Octant-operated wake service is not in scope.
 - Connectors (MCP servers added by hand, imported from other tools on this Mac,
   signed in to, or chosen from the bundled catalog): user-added packages

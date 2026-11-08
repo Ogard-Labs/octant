@@ -1,4 +1,5 @@
 import { threadWorkingDirectoryCurrent } from "../threadWorkingDirectoryAuthority";
+import type { ThreadMoveHolds } from "../hub/threadMoveHolds";
 import { approvedWorkingFolderRoot } from "../approvedWorkingFolders";
 import { rememberModelBinding } from "../browser/browserAppManagedTools";
 import { standingMergeAllowanceFor } from "../code/standingMergeAllowance";
@@ -14,6 +15,7 @@ import {
   decodeCodeRelativePath,
   decodeCodeThreadId,
   decodeContextSubjectRef,
+  decodeImageGenerationScopeId,
   decodeThreadWorkingDirectory,
   LOCAL_TOOL_HOST_ID,
   THREAD_RETENTION_EVENT_NAMES,
@@ -34,7 +36,9 @@ import { CodeProjectPullRequestSwitchService } from "../code/codeProjectPullRequ
 import type { PullRequestWatchPort } from "../code/pullRequestWatchPort";
 import { createGhCommandPort } from "../code/ghPullRequestPort";
 import { GhPullRequestSwitchPort } from "../code/ghPullRequestSwitchPort";
-import { ROUTINE_HOST_SCOPE_ID } from "../routineHostScope";
+import { isRoutineHostScope, ROUTINE_HOST_SCOPE_ID } from "../routineHostScope";
+import { saveGeneratedImageUnder } from "../image/generatedImageSave";
+import { createThreadImageAgentTools } from "../image/imageAgentTools";
 import { INHERITED_MARK_REFUSAL } from "../context/inheritedExternalContentMark";
 import {
   createCodeProfileSkillResolver,
@@ -75,7 +79,12 @@ import {
 import { CodeTurnDecisions } from "../turnDecisions/codeTurnDecisions";
 import { createSideTaskTools } from "../sideTasks/sideTaskTools";
 import { isReplayedAndroidEvidence } from "../android/androidToolchainService";
-import { isNativeHarnessDriverKind, projectExtraFolderRoots } from "@octant/domain";
+import {
+  clampTurnAccessPosture,
+  defaultShellSettings,
+  isNativeHarnessDriverKind,
+  projectExtraFolderRoots,
+} from "@octant/domain";
 import { createCanvasAgentTools } from "../canvas/canvasAgentTools";
 import { type CodeWiring, stableCodeFileId } from "./code";
 import { makeConfiguredProviderDriver, type ProvidersWiring } from "./providers";
@@ -263,6 +272,7 @@ export type CodeRuntimeDependencies = Pick<ServerStart, "options" | "persistence
     | "codeActiveTurns"
     | "codeApprovalStore"
     | "codeSessionAuthority"
+    | "imageGenerationOffers"
     | "liveTurns"
     | "machineChangeFeed"
     | "onWindowRevoked"
@@ -319,6 +329,7 @@ export type CodeRuntimeDependencies = Pick<ServerStart, "options" | "persistence
     | "configuredDriverOptions"
     | "extensionApiService"
     | "extensionPackageStore"
+    | "imageJobService"
     | "nativeHarnessTranscripts"
     | "probeProviderForThreads"
     | "providerDataDirectory"
@@ -356,7 +367,11 @@ export type CodeRuntimeDependencies = Pick<ServerStart, "options" | "persistence
     | "codeEvidence"
     | "providerRuntimeRegistry"
     | "selectCodeConversation"
-  >;
+    | "codeSessionConversation"
+  > & {
+    /** Threads a move holds: frozen here while leaving, or arriving and not yet committed. */
+    readonly threadMoveHolds: ThreadMoveHolds;
+  };
 
 export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
   const {
@@ -404,6 +419,8 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
     liveTurns,
     machineChangeFeed,
     hostShield,
+    imageGenerationOffers,
+    imageJobService,
     runtimeForgeChanges,
     nativeHarnessComposition,
     nativeHarnessHooks,
@@ -431,6 +448,7 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
     roots,
     runtimeOutsideContentMarks,
     selectCodeConversation,
+    codeSessionConversation,
     siblingThreadsService,
     serverConnection,
     serverProjectStore,
@@ -457,6 +475,55 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
     ): void => {
       codeToolContributors.push(contributor);
     };
+    // A routine's turn has nobody at a window to answer the image card, so it
+    // is not offered the tool.
+    contributeCodeTools(({ windowId, thread, readThread, folders }) => {
+      if (isRoutineHostScope(windowId)) return undefined;
+      const checkoutRoot = folders[0];
+      return createThreadImageAgentTools({
+        windowId,
+        threadKind: "code-thread",
+        scopeId: decodeImageGenerationScopeId(String(thread.id)),
+        offers: imageGenerationOffers,
+        jobs: imageJobService,
+        listInstances: () => persistence.readProviderInstances(),
+        readImageGenerationCustomSources: () =>
+          (persistence.readShellSettings()?.settings ?? defaultShellSettings()).imageGeneration
+            .customSources,
+        readsImages: () =>
+          providerRuntimeRegistry
+            .observedState(thread.providerInstanceId)
+            ?.models.find((candidate) => String(candidate.id) === String(thread.modelId))
+            ?.inputModalities.includes("image") === true,
+        // A file edit at the turn's level, under the checkout the turn
+        // works in. The journaled posture and the running one are both
+        // read and the stricter wins, so a session-only grant never lets
+        // this write through without asking.
+        ...(checkoutRoot === undefined
+          ? {}
+          : {
+              save: {
+                posture: () => {
+                  const level = clampTurnAccessPosture({
+                    requested: readThread()?.executionPolicy ?? thread.executionPolicy,
+                    thread:
+                      persistence.readCodeThread(thread.id)?.executionPolicy ??
+                      thread.executionPolicy,
+                  });
+                  return level === "plan" ? "refuse" : level === "approval-gated" ? "ask" : "allow";
+                },
+                write: (relativePath: string, bytes: Uint8Array) =>
+                  saveGeneratedImageUnder({ root: checkoutRoot, relativePath, bytes }),
+              },
+            }),
+        // Plan changes nothing on the host or outside it, and a generation
+        // calls a paid provider and stores the image.
+        refusal: () =>
+          (readThread()?.executionPolicy ?? thread.executionPolicy) === "plan"
+            ? "Plan mode cannot generate images. Leave Plan mode to generate one."
+            : undefined,
+      });
+    });
     contributeCodeTools(({ windowId, thread }) =>
       personMemoryAccess.toolsFor({
         mode: "code",
@@ -582,6 +649,7 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
         }),
       );
       codeOperationRuntime = createCodeOperationRuntime({
+        moveHold: (threadId) => deps.threadMoveHolds.isHeld({ mode: "code", threadId }),
         prepareWorktree: async (thread, root, current) => {
           const checkout = persistence.readCodeCheckout(thread.checkoutId);
           if (checkout?.kind !== "managed-worktree") return undefined;
@@ -881,6 +949,14 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
               globalSequence,
             ),
         },
+        handoverSummary: (thread) =>
+          contextHarness.handoverSummary(
+            decodeContextSubjectRef({
+              aggregateType: "code-thread",
+              aggregateId: String(thread.id),
+            }),
+            () => codeSessionConversation(thread.id) ?? [],
+          ),
         providerSwitchContext: ({ thread, excludeOperationId, inheritedFrom, purpose }) =>
           selectCodeConversation(thread.id, {
             purpose: purpose ?? "provider-switch",
@@ -1256,12 +1332,13 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
         carryAgentMessages: (threadId) => agentMessageService.carryIntoTurn(threadId),
         confirmAgentMessagesDelivered: (messageIds) =>
           agentMessageService.confirmDelivered(messageIds),
-        sideTasks: ({ windowId, thread, planner }) =>
+        sideTasks: ({ windowId, thread, operationId, planner }) =>
           createSideTaskTools({
             store: sideTasks,
             threadId: String(thread.id),
             mode: "code",
             projectId: thread.projectId,
+            turnId: operationId,
             suggestedBy: thread,
             uuid: randomUUID,
             clock: () => new Date().toISOString(),

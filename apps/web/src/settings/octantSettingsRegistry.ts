@@ -22,7 +22,7 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
       label: "General",
       scope: "app",
       keywords:
-        "general enabled modes startup default chat work updates version release threads completed put away archive snooze",
+        "general enabled modes startup default chat work updates version release threads completed put away archive snooze compact compaction context window",
       settings: [
         {
           id: settingId("enable-chat"),
@@ -56,6 +56,34 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
           scope: "host",
           keywords:
             "put away complete completed threads archive automatically days never snooze snoozed shelf sidebar",
+        },
+        {
+          id: settingId("auto-compact-octant"),
+          label: "Compact Octant threads",
+          scope: "host",
+          keywords:
+            "compact compaction auto-compact automatic context window full summary summarize octant harness chat work endpoint",
+        },
+        {
+          id: settingId("auto-compact-runtime"),
+          label: "Compact runtime threads",
+          scope: "host",
+          keywords:
+            "compact compaction auto-compact automatic context window full summary runtime claude code codex opencode pi",
+        },
+        {
+          id: settingId("auto-compact-idle"),
+          label: "Compact quiet threads",
+          scope: "host",
+          keywords:
+            "compact compaction auto-compact automatic idle inactive inactivity quiet minutes hours summary",
+        },
+        {
+          id: settingId("auto-compact-limit"),
+          label: "Compact near a usage limit",
+          scope: "host",
+          keywords:
+            "compact compaction auto-compact automatic usage limit rate limit quota 5-hour weekly handover hand over switch provider model summary",
         },
         {
           id: settingId("app-update-automatic-checks"),
@@ -654,6 +682,13 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
             "automatic model calls memory distilling writes memory account api key provider smallest model background",
         },
         {
+          id: settingId("automatic-model-decision-review"),
+          label: "Second opinion on decisions",
+          scope: "host",
+          keywords:
+            "automatic model calls second opinion decisions review independent model account api key provider off needs you card disagree",
+        },
+        {
           id: settingId("opencode-managed-update"),
           label: "OpenCode update",
           scope: "host",
@@ -1123,6 +1158,12 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
           keywords:
             "add register server ssh host alias user profile read-only operate admin deploy commands runbook notes ssh agent",
         },
+        {
+          id: settingId("server-projects"),
+          label: "Bind a remote folder",
+          scope: "host",
+          keywords: "bind remote folder project code work ssh setup",
+        },
       ],
     },
     {
@@ -1393,6 +1434,13 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
           scope: "host",
           keywords:
             "tailscale certificate https ts.net browser web app trusted certificate transparency hub",
+        },
+        {
+          id: settingId("hub-accept-moved-threads"),
+          label: "Accept moved threads",
+          scope: "host",
+          keywords:
+            "hub move thread moved threads shut down restart another computer touch id owner accept",
         },
         {
           id: settingId("hub-wake-service"),

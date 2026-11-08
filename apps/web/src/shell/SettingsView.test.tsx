@@ -223,6 +223,41 @@ describe("SettingsView", () => {
     expect(props.onSettingsChange).toHaveBeenCalledWith({ completedThreadArchiveAfterDays: null });
   });
 
+  it("compacts Octant threads at 85% by default and leaves runtimes to themselves", async () => {
+    const user = userEvent.setup();
+    const { props } = renderSettings();
+    const octant = screen.getByRole("combobox", { name: "Compact Octant threads" });
+    const runtime = screen.getByRole("combobox", { name: "Compact runtime threads" });
+    expect(octant).toHaveTextContent("At 85% full");
+    expect(runtime).toHaveTextContent("Runtime decides");
+    await user.click(runtime);
+    await user.click(await screen.findByRole("option", { name: "At 70% full" }));
+    expect(props.onSettingsChange).toHaveBeenCalledWith({ autoCompactRuntimeWindowPercent: 70 });
+    await user.click(octant);
+    await user.click(await screen.findByRole("option", { name: "Never" }));
+    expect(props.onSettingsChange).toHaveBeenCalledWith({ autoCompactOctantWindowPercent: null });
+  });
+
+  it("leaves quiet threads alone by default and compacts them after the time the person picks", async () => {
+    const user = userEvent.setup();
+    const { props } = renderSettings();
+    const idle = screen.getByRole("combobox", { name: "Compact quiet threads" });
+    expect(idle).toHaveTextContent("Never");
+    await user.click(idle);
+    await user.click(await screen.findByRole("option", { name: "After 30 minutes" }));
+    expect(props.onSettingsChange).toHaveBeenCalledWith({ autoCompactIdleMinutes: 30 });
+  });
+
+  it("leaves the limit rule off by default and turns it on at the share the person picks", async () => {
+    const user = userEvent.setup();
+    const { props } = renderSettings();
+    const limit = screen.getByRole("combobox", { name: "Compact near a usage limit" });
+    expect(limit).toHaveTextContent("Never");
+    await user.click(limit);
+    await user.click(await screen.findByRole("option", { name: "At 90% used" }));
+    expect(props.onSettingsChange).toHaveBeenCalledWith({ autoCompactLimitPercent: 90 });
+  });
+
   it("presents one section at a time, defaulting to General", () => {
     renderSettings();
 
@@ -471,6 +506,36 @@ describe("SettingsView", () => {
     expect(screen.queryByRole("button", { name: "Create pairing code" })).toBeNull();
     expect(screen.queryByRole("button", { name: "Create pairing link" })).toBeNull();
     expect(screen.queryByRole("img", { name: "Pairing code QR" })).toBeNull();
+  });
+
+  it("takes the remote server-folder journey to the existing binding form without sending a command", async () => {
+    const user = userEvent.setup();
+    const command = vi.fn();
+    renderSettings({
+      initialDeepLink: { section: "remote-access" },
+      serverProjectsClient: { read: async () => ({ projects: [] }), command } as never,
+      shieldServersClient: {
+        read: async () => ({
+          servers: [
+            {
+              serverId: "10000000-0000-4000-8000-000000000001",
+              alias: "web-1",
+              user: "deploy",
+              profile: "read-only",
+              deployCommands: [],
+            },
+          ],
+          sshAgent: "available",
+        }),
+        command,
+      } as never,
+    });
+    await user.click(screen.getByRole("button", { name: "Work in a server folder" }));
+    await user.click(screen.getByRole("button", { name: "Continue to server Projects" }));
+
+    const form = await screen.findByRole("form", { name: "Bind a folder on a server" });
+    await waitFor(() => expect(within(form).getByLabelText("Project name")).toHaveFocus());
+    expect(command).not.toHaveBeenCalled();
   });
 
   it("takes the Add a model endpoint button on a harness slot to the add-endpoint row", async () => {
@@ -1979,6 +2044,7 @@ describe("SettingsView", () => {
       "Updates",
       "Files",
       "Threads",
+      "Compaction",
     ]);
     const updates = screen.getByRole("heading", { name: "Updates" }).closest("section")!;
     updates.scrollIntoView = vi.fn();

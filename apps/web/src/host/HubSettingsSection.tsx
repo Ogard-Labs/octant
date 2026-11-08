@@ -265,6 +265,8 @@ interface HubStatus {
   readonly ownerCandidates: ReadonlyArray<OwnerCandidateRow>;
   /** The standby hubs this hub's roster names, in the order members try them. */
   readonly standbyOrder: ReadonlyArray<string>;
+  /** Whether this hub takes threads its members move to it. */
+  readonly acceptMovedThreads: boolean;
   readonly wake?: WakeView;
   readonly push?: PushView;
   readonly directPush?: DirectPushView;
@@ -693,6 +695,25 @@ export function HubSettingsSection({ hub, pairing, ownerUnlock, now }: HubSettin
     if (reply !== undefined) {
       setStandbyDraft(undefined);
       setMessage("Standby order saved.");
+    }
+    await refresh();
+  };
+
+  const setAcceptMovedThreads = async (on: boolean) => {
+    const reply = await act(
+      "accept-moved-threads",
+      { enabled: on },
+      "changed",
+      on
+        ? "Octant could not turn on Accept moved threads."
+        : "Octant could not turn off Accept moved threads.",
+    );
+    if (reply !== undefined) {
+      setMessage(
+        on
+          ? "Accept moved threads is on. Each move still asks for an owner's Touch ID."
+          : "Accept moved threads is off. This hub refuses every move.",
+      );
     }
     await refresh();
   };
@@ -1245,7 +1266,7 @@ export function HubSettingsSection({ hub, pairing, ownerUnlock, now }: HubSettin
         {message === undefined ? null : (
           <SettingsState
             kind={
-              /^(Approved|Denied|Removed|Left|Added|Confirm|Dismissed|The hub grant is saved|Standby order saved|This computer is now the hub|Wake service is|Push sender is|Direct sending is|Apple key (stored|removed)|Apple notifications go|Google service account (stored|removed)|Offers are|Offered|Offer withdrawn|Offer applied|Hardware address)/.test(
+              /^(Approved|Denied|Removed|Left|Added|Confirm|Dismissed|The hub grant is saved|Standby order saved|This computer is now the hub|Wake service is|Accept moved threads is|Push sender is|Direct sending is|Apple key (stored|removed)|Apple notifications go|Google service account (stored|removed)|Offers are|Offered|Offer withdrawn|Offer applied|Hardware address)/.test(
                 message,
               )
                 ? "success"
@@ -1509,6 +1530,26 @@ export function HubSettingsSection({ hub, pairing, ownerUnlock, now }: HubSettin
             >
               Save the standby order
             </OctantButton>
+          </div>
+        </SettingsSection>
+      )}
+
+      {!hubOn || status === undefined ? null : (
+        <SettingsSection title="Moved threads">
+          <div className="setgroup">
+            <SettingRow
+              description="Let your other computers move a thread to this hub before they shut down. Every move still needs your Touch ID on an owner device this hub lists. On by default."
+              label="Accept moved threads"
+              scope="host"
+              settingId="hub-accept-moved-threads"
+            >
+              <OctantSwitch
+                checked={status.acceptMovedThreads}
+                disabled={busy}
+                label="Accept moved threads"
+                onCheckedChange={(on) => void setAcceptMovedThreads(on)}
+              />
+            </SettingRow>
           </div>
         </SettingsSection>
       )}
@@ -2287,6 +2328,7 @@ function readStatus(body: unknown): HubStatus | undefined {
       owners: readOwners(field(hub, "owners")),
       ownerCandidates: readOwnerCandidates(field(hub, "ownerCandidates")),
       standbyOrder,
+      acceptMovedThreads: field(hub, "acceptMovedThreads") !== false,
       ...(wake === undefined ? {} : { wake }),
       ...(push === undefined ? {} : { push }),
       ...(directPush === undefined ? {} : { directPush }),
@@ -2320,6 +2362,7 @@ function readStatus(body: unknown): HubStatus | undefined {
     owners: readOwners(field(hub, "owners")),
     ownerCandidates: readOwnerCandidates(field(hub, "ownerCandidates")),
     standbyOrder,
+    acceptMovedThreads: field(hub, "acceptMovedThreads") !== false,
     ...(wake === undefined ? {} : { wake }),
     ...(push === undefined ? {} : { push }),
     ...(directPush === undefined ? {} : { directPush }),

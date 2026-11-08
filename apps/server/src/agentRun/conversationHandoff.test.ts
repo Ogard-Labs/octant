@@ -8,6 +8,7 @@ import {
   conversationHandoffRefusalMessage,
   providerSwitchHandoffRecord,
   selectionBelongsToThread,
+  withHandoverSummary,
   type ConversationHandoffRefusal,
 } from "./conversationHandoff";
 
@@ -48,6 +49,56 @@ const selection = (
     },
   };
 };
+
+describe("handing a thread to another provider after the limit rule", () => {
+  const previous = {
+    providerInstanceId: "00000000-0000-4000-8000-000000000001" as never,
+    modelId: "model-a" as never,
+  };
+  const handover = { content: "Rotate the key first.", completedAt: "2026-11-07T10:00:00.000Z" };
+
+  it("leads with the earlier provider's summary, keeps the messages, and says so on the record", () => {
+    const switched = withHandoverSummary(selection(), handover);
+    expect(switched.blocks.map((block) => block.kind)).toEqual([
+      "conversation-summary",
+      "conversation-summary",
+      "user-message",
+      "assistant-message",
+    ]);
+    expect(switched.blocks[1]?.text).toContain("Rotate the key first.");
+    expect(providerSwitchHandoffRecord(switched, previous)).toMatchObject({
+      messages: 2,
+      handoverSummary: true,
+    });
+  });
+
+  it("makes room by dropping the oldest messages, counted as earlier ones", () => {
+    const many = selection();
+    const full = {
+      ...many,
+      blocks: [
+        many.blocks[0] ?? { kind: "conversation-summary" as const, text: "summary" },
+        ...Array.from({ length: 23 }, (_, index) => ({
+          kind: "user-message" as const,
+          text: `message ${String(index)}`,
+        })),
+      ],
+    };
+    const switched = withHandoverSummary(full, { ...handover, content: "x".repeat(5_000) });
+    expect(switched.blocks).toHaveLength(24);
+    expect(switched.blocks.at(-1)?.text).toBe("message 22");
+    expect(switched.blocks[3]?.text).toBe("message 2");
+    expect(switched.omissions.earlierMessages).toBe(omissions.earlierMessages + 2);
+    expect(switched.blocks.every((block) => block.text.length <= 4_000)).toBe(true);
+  });
+
+  it("hands over the selection unchanged when no summary waits", () => {
+    expect(withHandoverSummary(selection(), undefined)).toEqual(selection());
+    expect(providerSwitchHandoffRecord(selection(), previous)).not.toHaveProperty(
+      "handoverSummary",
+    );
+  });
+});
 
 describe("conversation handoff records", () => {
   it("counts the messages carried, not the summary, and states nothing native moved", () => {

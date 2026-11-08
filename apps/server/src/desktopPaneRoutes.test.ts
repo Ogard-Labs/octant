@@ -54,7 +54,10 @@ function post(
   return request;
 }
 
-function routes(recipeKey?: Parameters<typeof createDesktopPaneRouteHandler>[0]["recipeKey"]) {
+function routes(
+  recipeKey?: Parameters<typeof createDesktopPaneRouteHandler>[0]["recipeKey"],
+  previews?: Parameters<typeof createDesktopPaneRouteHandler>[0]["previews"],
+) {
   const store = new WindowAuthorityStore();
   store.register({ windowId: windowId as never, capability, now: 1 });
   const service = {
@@ -136,6 +139,7 @@ function routes(recipeKey?: Parameters<typeof createDesktopPaneRouteHandler>[0][
   };
   const handler = createDesktopPaneRouteHandler({
     windowAuthorityStore: store,
+    ...(previews === undefined ? {} : { previews }),
     service,
     localActorId,
     now: () => 2,
@@ -348,5 +352,33 @@ describe("Desktop pane routes", () => {
   it("leaves every other path to the routes that own it", async () => {
     const { handler } = routes();
     await expect(handler(post("/api/code/board", {}))).resolves.toBeUndefined();
+  });
+  it("allows preview decisions only from the authenticated local window and refuses paired devices before dispatch", async () => {
+    const previews = vi.fn<
+      NonNullable<Parameters<typeof createDesktopPaneRouteHandler>[0]["previews"]>
+    >(async () => ({ status: "preview-state", available: true }));
+    const { handler } = routes(undefined, previews);
+    const request = { kind: "preview-read", threadId, leaseId };
+    const local = await handler(post("/api/code/desktops", request));
+    await expect(local?.json()).resolves.toEqual({ status: "preview-state", available: true });
+    const remote = await handler(post("/api/code/desktops", request, { remote: true }));
+    await expect(remote?.json()).resolves.toEqual({
+      status: "preview-refused",
+      reason: "not-permitted",
+    });
+    const forged = await handler(
+      post(
+        "/api/code/desktops",
+        { ...request, actor: { kind: "local-user", actorId: localActorId } },
+        { remote: true },
+      ),
+    );
+    expect(forged?.status).toBe(400);
+    expect(previews).toHaveBeenCalledOnce();
+    expect(previews.mock.calls[0]?.[0]).toMatchObject({
+      actor: { kind: "local-user" },
+      scopeId: windowId,
+      leaseId,
+    });
   });
 });

@@ -121,6 +121,7 @@ describe("octantSettingsRegistry", () => {
       "safe-networks",
       "shield-servers-list",
       "shield-servers-add",
+      "server-projects",
     ]);
     expect(section("secret-stores")?.label).toBe("Secret stores");
     expect(section("secret-stores")?.scope).toBe("host");
@@ -219,6 +220,7 @@ describe("octantSettingsRegistry", () => {
     expect(providers?.settings.map((setting) => setting.id)).toEqual([
       "automatic-model-judge",
       "automatic-model-memory",
+      "automatic-model-decision-review",
       "opencode-managed-update",
       "provider-display-name",
       "provider-binary-path",
