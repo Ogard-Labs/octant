@@ -270,6 +270,10 @@ try {
   if (authorityMode) {
     for (const profile of profiles) await probe(first, profile, "missing");
     checks.push("missing reads create nothing and prepare-only processes cannot write");
+    for (const runtime of runtimes) await probe(runtime, "octant", "environment-loss");
+    checks.push(
+      "worker environment loss closes incomplete sessions and refuses cross-environment access",
+    );
     for (const runtime of runtimes)
       for (const profile of profiles) {
         await probe(runtime, profile);

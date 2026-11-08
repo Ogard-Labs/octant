@@ -1,3 +1,4 @@
+import { Worker } from "node:worker_threads";
 import { randomUUID } from "node:crypto";
 import { existsSync, readdirSync } from "node:fs";
 import { win32 } from "node:path";
@@ -102,6 +103,56 @@ try {
       status(begin("hub-state", "replace", 2), "refused"),
       "preparing without claiming does not grant writes",
     );
+  } else if (mode === "environment-loss") {
+    const worker = new Worker(new URL("./owner-worker.mjs", import.meta.url), {
+      workerData: {
+        bindingPath: win32.resolve(binding),
+        scope: paths.profileId,
+        authorityProfile: profile,
+        authorityDataDirectory: paths.dataDirectory,
+      },
+    });
+    try {
+      const id = await new Promise<number>((resolve, reject) => {
+        const timeout = setTimeout(
+          () => reject(Error("Owned authority worker did not start.")),
+          8000,
+        );
+        worker.once("error", () => {
+          clearTimeout(timeout);
+          reject(Error("Owned authority worker failed."));
+        });
+        worker.once("message", (message: unknown) => {
+          clearTimeout(timeout);
+          if (
+            !record(message) ||
+            message.productionWorkerRefused !== true ||
+            typeof message.authoritySession !== "number"
+          )
+            reject(Error("Owned authority worker unavailable."));
+          else resolve(message.authoritySession);
+        });
+      });
+      check(
+        status(native.writeAuthorityState(id, 1, Buffer.from("}")), "refused"),
+        "another environment cannot use a live write session",
+      );
+      await worker.terminate();
+      check(
+        status(native.writeAuthorityState(id, 1, Buffer.from("}")), "refused"),
+        "environment teardown retires its write session",
+      );
+      check(
+        readdirSync(win32.join(paths.dataDirectory, "hub")).every((name) => !name.endsWith(".tmp")),
+        "environment teardown removes incomplete stages",
+      );
+      check(
+        files.hub.read().status === "missing",
+        "an aborted first write creates no authority record",
+      );
+    } finally {
+      await worker.terminate();
+    }
   } else {
     held = await acquireWindowsHostProfileOwner({
       native,
