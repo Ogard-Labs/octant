@@ -2020,7 +2020,10 @@ this is how it looks.
   uncommitted `+`/`-` counts (Code), and Canvases. A total line gives the size
   and an estimate. **Stays here** is a closed disclosure naming each part that
   applies (terminals, previews, Browser pages, ignored files with their count,
-  Full access and grants, sign-ins). One sentence states the consequence in
+  Full access and grants, sign-ins). When the worktree holds files that stay
+  behind (refused by the Secret guard, or ignored), the disclosure opens by
+  itself, lists them, and says the worktree folder stays on this computer
+  with them. One sentence states the consequence in
   plain words, never a warning colour: "This thread is erased from this
   computer once" and the member's name "has it." A busy thread adds a two-way
   choice above the buttons, Move after this turn (selected) and Stop and move.
@@ -2044,7 +2047,10 @@ this is how it looks.
   window already reads that host, and copies its link otherwise. The thread's
   sidebar row leaves this host's list; a window that reads both hosts shows it
   under the destination with the cloud glyph, so it appears to travel rather
-  than vanish. One notification says the move finished.
+  than vanish. One notification says the move finished. When the worktree was
+  kept, the tombstone adds one row under the route line: the files that stayed
+  with it, and **Remove worktree** as a quiet button that asks once before
+  removing it.
 - **This thread can't move.** A failed move unfreezes the composer and puts an
   inline notice above it and in the Computer row's open content: the title
   "This thread can't move", the reason in one sentence, and its recovery as
