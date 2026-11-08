@@ -81,7 +81,10 @@ try {
       $octantImageShape = 'other'
       $octantImageAtStart = $false
       $octantArgumentLayout = 'image-not-leading'
+      $octantArgumentTokenShapes = @()
       $octantTrimmedCommand = $octantCommand.Trim()
+      $octantPackageAppRoot = [IO.Path]::GetFullPath((Join-Path $PackageDirectory 'resources/app'))
+      $octantPackageAppEntry = [IO.Path]::GetFullPath((Join-Path $octantPackageAppRoot 'apps/desktop/dist/entry.mjs'))
       foreach ($octantPath in $octantPathSpellings) {
         if ($octantCommand.IndexOf($octantPath, [StringComparison]::OrdinalIgnoreCase) -ge 0) {
           $octantImageShape = if ($octantPath.StartsWith('\\?\')) { 'staged-namespaced' } else { 'staged-ordinary' }
@@ -97,6 +100,28 @@ try {
           } else {
             'extra-or-other-argument'
           }
+          foreach ($octantTokenMatch in [regex]::Matches($octantArguments, '"[^"]*"|\S+')) {
+            $octantToken = $octantTokenMatch.Value
+            $octantUnquotedToken = $octantToken.Trim('"')
+            $octantTokenShape = if ($octantToken -ceq '"%1"') {
+              'quoted-url'
+            } elseif ($octantUnquotedToken -ceq '--') {
+              'electron-separator'
+            } elseif ($octantUnquotedToken.Equals($octantPackageAppEntry, [StringComparison]::OrdinalIgnoreCase)) {
+              'owned-app-entry'
+            } elseif ($octantUnquotedToken.Equals($octantPackageAppRoot, [StringComparison]::OrdinalIgnoreCase)) {
+              'owned-app-root'
+            } elseif ($octantUnquotedToken -match '^--[A-Za-z0-9][A-Za-z0-9_-]*(?:=.*)?$') {
+              'option'
+            } elseif ($octantUnquotedToken -match '^[A-Za-z]:\\' -or $octantUnquotedToken.StartsWith('\\?\')) {
+              'path-argument'
+            } elseif ($octantToken.StartsWith('"') -and $octantToken.EndsWith('"')) {
+              'quoted-argument'
+            } else {
+              'other-argument'
+            }
+            if ($octantArgumentTokenShapes.Count -lt 8) { $octantArgumentTokenShapes += $octantTokenShape }
+          }
           break
         }
       }
@@ -107,6 +132,7 @@ try {
         executable = $octantImageShape
         executableAtStart = $octantImageAtStart
         argumentLayout = $octantArgumentLayout
+        argumentTokenShapes = $octantArgumentTokenShapes
         argument = $octantArgumentShape
         electronSeparator = $octantSeparator
       } | ConvertTo-Json -Compress)
