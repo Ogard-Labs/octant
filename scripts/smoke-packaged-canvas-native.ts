@@ -6,7 +6,7 @@ import { dirname, join, resolve } from "node:path";
 import { createServer } from "node:net";
 import { createHash, generateKeyPairSync, randomBytes, randomUUID, sign } from "node:crypto";
 import { request as httpsRequest } from "node:https";
-import { decodeWindowId, decodeUtcTimestamp } from "@octant/contracts";
+import { ActorId, decodeWindowId, decodeUtcTimestamp } from "@octant/contracts";
 import { CanvasPublicShareService } from "../apps/server/src/canvas/canvasPublicShareService";
 import { createHttpCanvasPublicShareServicePort } from "../apps/server/src/canvas/canvasPublicShareServicePort";
 import { createRemoteConnection } from "../packages/client-runtime/src/remoteConnection";
@@ -357,7 +357,7 @@ async function main(): Promise<void> {
               secrets: undefined,
               uuid: randomUUID,
               clock: () => decodeUtcTimestamp(new Date().toISOString()),
-              actor: { kind: "system", actorId: randomUUID() },
+              actor: { kind: "system", actorId: Schema.decodeUnknownSync(ActorId)(randomUUID()) },
             });
             const result = links.changeSettings(
               decodeCanvasPublicLinkSettingsCommand({
