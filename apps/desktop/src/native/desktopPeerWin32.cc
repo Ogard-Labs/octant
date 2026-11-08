@@ -326,13 +326,14 @@ std::string window_reply(Runtime& state, const Peer& peer, const Wire& request) 
   notice->operation = request.operation == 1 ? "register" : request.operation == 2 ? "renew" : "revoke";
   notice->id = id; notice->generation = request.generation;
   const bool sent = notify(state, std::move(notice));
-  std::string answer;
+  std::string answer; bool expired = false;
   if (sent) {
     std::unique_lock guard(pending->lock);
-    pending->changed.wait_for(guard, std::chrono::milliseconds(operation_bound), [&] { return pending->answered || stopped(state) || !state.windows_enabled; });
+    expired = !pending->changed.wait_for(guard, std::chrono::milliseconds(operation_bound), [&] { return pending->answered || stopped(state) || !state.windows_enabled; });
     if (pending->answered && !stopped(state)) answer = pending->payload;
   }
   { std::lock_guard guard(state.lock); state.pending.erase(id); }
+  if (expired) return "{\"kind\":\"refused\",\"reason\":\"deadline-exceeded\"}";
   return answer.empty() ? unavailable() : answer;
 }
 void serve(const std::shared_ptr<Runtime>& state, Connection& connection) {
