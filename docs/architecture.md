@@ -14775,7 +14775,11 @@ Work and Code remain refused until their native confinement boundary is proven.
   Nightly's own renderer with a short server-enforced lease. It never loads
   the host-owning module, owns a host or migrates shared data; it can ask a
   validated installed Stable to start without a window. Incompatible
-  or unsigned builds refuse. Bounded embedded frames and human input use the
+  builds refuse; macOS additionally requires the signed application identity.
+  Linux and Windows use the explicitly stated local-user kernel trust floor
+  ([Linux](design/nightly-app.md#linux-client-trust),
+  [Windows](design/nightly-app.md#windows-client-trust)), which does not attest
+  application code. Bounded embedded frames and human input use the
   existing native Browser owner; complete Browser parity, other native brokers
   remain unfinished. Current-client retention precedes the existing terminal
   shutdown path; full signed lifecycle acceptance remains separate.

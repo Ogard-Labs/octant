@@ -4717,6 +4717,14 @@ function startDesktopInstance(): void {
           packaged: app.isPackaged,
           platform: process.platform,
           resourcesPath: process.resourcesPath,
+          ...(desktopWindowsHost === undefined
+            ? {}
+            : {
+                windows: {
+                  profileId: desktopWindowsHost.paths.profileId,
+                  version: app.getVersion(),
+                },
+              }),
           ...(linux
             ? {
                 linux: {

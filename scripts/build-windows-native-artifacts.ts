@@ -10,9 +10,10 @@ const root = resolve(import.meta.dirname, "..");
 export const WINDOWS_NATIVE_ARTIFACTS = [
   "octant-windows-host-owner.node",
   "octant-credential-helper.exe",
+  "octant-desktop-peer-windows.node",
 ] as const;
 
-/** Native resources contain only the two runtime artifacts, never QA readers or build files. */
+/** Native resources contain only the fixed runtime artifacts, never QA readers or build files. */
 export async function validateWindowsNativeArtifacts(directory: string): Promise<void> {
   const entries = await readdir(directory, { withFileTypes: true });
   if (
@@ -70,6 +71,7 @@ export async function buildWindowsNativeArtifacts(destination: string): Promise<
     );
     const ownerBuild = join(stage, "owner");
     const credentialBuild = join(stage, "credentials");
+    const peerBuild = join(stage, "desktop-peer");
     await run(
       "cmake",
       [
@@ -106,6 +108,25 @@ export async function buildWindowsNativeArtifacts(destination: string): Promise<
       ["--build", credentialBuild, "--config", "Release", "--target", "octant-credential-helper"],
       { cwd: root },
     );
+    await run(
+      "cmake",
+      [
+        "-S",
+        join(root, "apps/desktop/native/windows-desktop-peer"),
+        "-B",
+        peerBuild,
+        "-A",
+        "x64",
+        `-DOCTANT_NODE_HEADERS=${join(sdk, version, "include/node")}`,
+        `-DOCTANT_NODE_IMPORT_LIB=${join(sdk, version, "x64/node.lib")}`,
+      ],
+      { cwd: root },
+    );
+    await run(
+      "cmake",
+      ["--build", peerBuild, "--config", "Release", "--target", "octant-desktop-peer-windows"],
+      { cwd: root },
+    );
     await mkdir(destination, { recursive: true });
     await cp(
       join(ownerBuild, "Release", WINDOWS_NATIVE_ARTIFACTS[0]),
@@ -114,6 +135,10 @@ export async function buildWindowsNativeArtifacts(destination: string): Promise<
     await cp(
       join(credentialBuild, "Release", WINDOWS_NATIVE_ARTIFACTS[1]),
       join(destination, WINDOWS_NATIVE_ARTIFACTS[1]),
+    );
+    await cp(
+      join(peerBuild, "Release", WINDOWS_NATIVE_ARTIFACTS[2]),
+      join(destination, WINDOWS_NATIVE_ARTIFACTS[2]),
     );
     await validateWindowsNativeArtifacts(destination);
   } finally {

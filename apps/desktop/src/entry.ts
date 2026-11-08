@@ -6,6 +6,8 @@ import {
   desktopIdentity,
   desktopIdentityForPackage,
   desktopWindowStorageDirectory,
+  loadWindowsHostProfileNative,
+  resolveWindowsHostProfile,
 } from "@octant/host-runtime";
 import { launchDesktopApplication, resolvePackagedDesktopLaunch } from "./desktopLaunch";
 import {
@@ -14,7 +16,7 @@ import {
   linuxRendererSandboxDisabled,
   loadDesktopPeerStatus,
 } from "./desktopPeerStatus";
-import { resolveDesktopHostRuntimePaths } from "./runtimePaths";
+import { resolveDesktopHostRuntimePaths, WINDOWS_HOST_OWNER_FILENAME } from "./runtimePaths";
 import { resolveStartupHostRole } from "./nightlyTestData";
 import { createNightlyLaunchLinks } from "./nightlyLaunchLinks";
 
@@ -28,7 +30,8 @@ const launchLinks = createNightlyLaunchLinks(identity.scheme);
 
 if (
   identity.flavor === "nightly" ||
-  (app.isPackaged && (process.platform === "darwin" || process.platform === "linux"))
+  (app.isPackaged &&
+    (process.platform === "darwin" || process.platform === "linux" || process.platform === "win32"))
 ) {
   const role = resolvePackagedDesktopLaunch(
     identity,
@@ -131,11 +134,11 @@ async function launchDesktop(): Promise<void> {
       return;
     }
   }
-  // A Linux Nightly whose renderers would run unsandboxed never reaches the
+  // A Nightly on these platforms whose renderers would run unsandboxed never reaches the
   // binding, so it neither starts Octant's host nor registers a window.
   const unsandboxed =
     identity.flavor === "nightly" &&
-    process.platform === "linux" &&
+    (process.platform === "linux" || process.platform === "win32") &&
     linuxRendererSandboxDisabled({
       hasSwitch: (name) => app.commandLine.hasSwitch(name),
       argv: process.argv,
@@ -148,6 +151,7 @@ async function launchDesktop(): Promise<void> {
           platform: process.platform,
           resourcesPath: process.resourcesPath,
           ...linuxPeerEndpoint(),
+          ...windowsPeerEndpoint(),
         })
       : undefined;
   const outcome = await launchDesktopApplication(
@@ -196,4 +200,17 @@ function linuxPeerEndpoint() {
     // Unresolvable host paths leave the binding unloaded: native-unavailable.
     return {};
   }
+}
+
+/** The existing native profile is discovery only; Nightly never claims its owner. */
+function windowsPeerEndpoint() {
+  if (process.platform !== "win32" || !app.isPackaged) return {};
+  const native = loadWindowsHostProfileNative(
+    join(process.resourcesPath, "native", WINDOWS_HOST_OWNER_FILENAME),
+  );
+  if (native === undefined) return {};
+  const profile = resolveWindowsHostProfile({ native, profile: "octant", env: process.env });
+  return profile.status === "ready"
+    ? { windows: { profileId: profile.paths.profileId, version: app.getVersion() } }
+    : {};
 }

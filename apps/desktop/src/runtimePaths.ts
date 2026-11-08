@@ -101,6 +101,7 @@ export function resolveDesktopHostRoot(options: {
 export const DESKTOP_PEER_STATUS_FILENAME = "octant-desktop-peer-status.node";
 /** The Linux binding: same exports, a path socket and kernel peer checks. */
 export const DESKTOP_PEER_LINUX_FILENAME = "octant-desktop-peer-linux.node";
+export const DESKTOP_PEER_WINDOWS_FILENAME = "octant-desktop-peer-windows.node";
 export const BROWSER_TEXT_INPUT_FILENAME = "octant-browser-text-input.node";
 
 /**

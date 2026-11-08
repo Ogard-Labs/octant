@@ -68,7 +68,7 @@ export async function runNightlyClient(
   // The entry already refused this before any status check; repeated here so
   // no later path can register a window from unsandboxed renderers.
   if (
-    process.platform === "linux" &&
+    (process.platform === "linux" || process.platform === "win32") &&
     linuxRendererSandboxDisabled({
       hasSwitch: (name) => app.commandLine.hasSwitch(name),
       argv: process.argv,

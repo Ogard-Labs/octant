@@ -27,6 +27,7 @@ it("refuses missing, foreign-architecture and QA-only native resources before ar
       "fixed runtime artifacts",
     );
     await writeFile(helper, pe(false));
+    await writeFile(join(directory, "octant-desktop-peer-windows.node"), pe(true));
     await expect(validateWindowsNativeArtifacts(directory)).resolves.toBeUndefined();
     const arm = pe(true);
     arm.writeUInt16LE(0xaa64, 68);
