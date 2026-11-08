@@ -1,6 +1,7 @@
 import { spawn } from "node:child_process";
 import { createPublicKey, randomUUID, verify } from "node:crypto";
 import { resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import { resolveDesktopCredentialBackend } from "../apps/desktop/src/desktopCredentialStore";
 import {
   startCredentialBroker,
@@ -93,6 +94,69 @@ async function refuses(action: () => Promise<unknown>, category: string) {
     );
   }
   return false;
+}
+
+let coordinationProcessesJoined = 0;
+async function withCoordination(
+  mode: "hold" | "unsafe" | "abandoned",
+  action: () => Promise<void>,
+) {
+  const child = spawn(
+    "powershell.exe",
+    [
+      "-NoProfile",
+      "-NonInteractive",
+      "-File",
+      fileURLToPath(new URL("./windows-credential-coordination.ps1", import.meta.url)),
+      mode,
+    ],
+    { stdio: ["pipe", "pipe", "ignore"], windowsHide: true },
+  );
+  let code: number | null = null;
+  let failed = false;
+  let output = "";
+  const ready = new Promise<void>((accept, refuse) => {
+    child.stdout.on("data", (chunk: Buffer) => {
+      output += chunk.toString("utf8");
+      if (output.length > 64 || output.includes("fixture-failed")) {
+        failed = true;
+        child.kill();
+      } else if (output.trim() === "ready") accept();
+    });
+    child.once("error", () => {
+      failed = true;
+    });
+    child.once("close", () =>
+      refuse(new Error("Owned coordination fixture ended before acceptance.")),
+    );
+  });
+  const closed = new Promise<void>((accept) =>
+    child.once("close", (exitCode) => {
+      code = exitCode;
+      accept();
+    }),
+  );
+  const deadline = setTimeout(() => {
+    failed = true;
+    child.kill();
+  }, 25_000);
+  child.stdin.on("error", () => {
+    failed = true;
+    child.kill();
+  });
+  let actionFailure: unknown;
+  try {
+    await ready;
+    await action();
+  } catch (error) {
+    actionFailure = error;
+  }
+  child.stdin.end("stop\n");
+  await closed;
+  clearTimeout(deadline);
+  coordinationProcessesJoined += 1;
+  if (failed || code !== 0) throw new Error("Owned coordination fixture did not exit cleanly.");
+  if (actionFailure !== undefined) throw actionFailure;
 }
 
 // Every target uses fresh opaque references. No enumerate, account lookup,
@@ -246,6 +310,49 @@ try {
       `auxiliary ${index + 1} deletion preserves other stores and provider`,
     );
   }
+  stage = "coordination";
+  await withCoordination("unsafe", async () => {
+    requireValue(
+      await refuses(() => primary.set(ref, "synthetic-refused"), "unavailable"),
+      "unsafe existing coordination DACL refuses before mutation",
+    );
+  });
+  requireValue(
+    (await primary.resolve(ref)) === boundary,
+    "unsafe coordination preserves the stored value",
+  );
+  await withCoordination("hold", async () => {
+    const started = performance.now();
+    const refused = await refuses(() => primary.set(ref, "synthetic-refused"), "unavailable");
+    const elapsed = performance.now() - started;
+    requireValue(
+      refused && elapsed >= 2500 && elapsed < 5000,
+      "held coordination refuses within the adapter deadline",
+    );
+  });
+  requireValue(
+    (await primary.resolve(ref)) === boundary,
+    "blocked coordination preserves the stored value",
+  );
+  await withCoordination("abandoned", async () => {
+    requireValue(
+      await refuses(() => primary.set(ref, "synthetic-refused"), "unavailable"),
+      "abandoned coordination refuses without replay",
+    );
+    requireValue(
+      (await primary.resolve(ref)) === boundary,
+      "abandonment releases owned coordination and preserves the value",
+    );
+  });
+  const concurrent = owned.slice();
+  await Promise.all(
+    concurrent.map(({ store, ref }, index) => store.set(ref, `synthetic-parallel-${index}`)),
+  );
+  const preserved = await Promise.all(concurrent.map(({ store, ref }) => store.resolve(ref)));
+  requireValue(
+    preserved.every((value, index) => value === `synthetic-parallel-${index}`),
+    "concurrent writes preserve all eight purposes across families and stores",
+  );
   stage = "replica-broker-start";
   broker = await startCredentialBroker(
     desktop.store,
@@ -320,13 +427,7 @@ try {
   throw new Error("Owned native credential scenario failed.");
 } finally {
   // No target is retained even after a failed scenario. A cleanup error fails CI.
-  // Keep cleanup a single ordered native lifecycle per owned target, so a
-  // failed absence check remains attributable to that target's delete.
-  const cleanup: Array<PromiseSettledResult<void>> = [];
-  for (const { store, ref } of owned) {
-    const [result] = await Promise.allSettled([store.delete(ref)]);
-    if (result !== undefined) cleanup.push(result);
-  }
+  const cleanup = await Promise.allSettled(owned.map(({ store, ref }) => store.delete(ref)));
   await broker?.close();
   const absence = await Promise.allSettled(owned.map(({ store, ref }) => store.has(ref)));
   cleanupConfirmed =
@@ -338,6 +439,7 @@ try {
       checks,
       ownedTargetCount: owned.length,
       brokerClosed: true,
+      coordinationProcessesJoined,
       cleanup: cleanup.map((result) =>
         result.status === "fulfilled" ? "deleted" : failureCategory(result.reason),
       ),
