@@ -82,6 +82,15 @@ export interface ProviderSessionStart {
    */
   readonly autoApprove?: boolean;
   /**
+   * The thread opted into the sandbox at Full access: with `executionPolicy`
+   * `full-access` and this set, the session runs with no approval prompts but
+   * inside the confinement the guarded levels have. A driver either keeps
+   * that confinement or refuses the session; it never runs such a session
+   * open. The host already refuses before start for runtimes it knows cannot
+   * keep it. Absent means Full access runs open, as it always did.
+   */
+  readonly fullAccessSandbox?: boolean;
+  /**
    * User-chosen values for options the model declares (`ProviderModel.options`),
    * keyed by option id. Drivers apply the ids they understand and ignore the
    * rest; absent means provider defaults.
@@ -130,6 +139,8 @@ export interface ProviderSessionResume {
   readonly resumeCursor: ProviderResumeCursor;
   readonly executionPolicy: ProviderExecutionPolicy;
   readonly autoApprove?: boolean;
+  /** Same meaning as in {@link ProviderSessionStart.fullAccessSandbox}. */
+  readonly fullAccessSandbox?: boolean;
   /**
    * The thread's current model. A driver that reports `modelSwitch` as
    * supported runs the resumed session on it; any other driver keeps the model
