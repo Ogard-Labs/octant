@@ -39,6 +39,8 @@ connected-but-refusing target reports `refused` honestly.
 
 - `index.mjs` — `createPageHostExportTarget(config)` factory + the `canvasExport`
   entry a host loads from the plugin package.
+- `octant-canvas-export.json` — the local-folder package document, pointing at
+  the built `dist/index.mjs` module.
 - `index.test.mjs` — vitest, so it runs with the package suite:
   `bun run --filter @octant/plugin-api test` (12 tests in this file).
 - `apps/server/src/canvas/canvasExportService.test.ts` — the host registers this
@@ -56,16 +58,52 @@ credential reference is refused before any request. Anonymous hosts can omit
 both. The example's default export has no credential and reads only an optional
 `DOCS_MD_API_BASE` address from the environment.
 
-## Host registration
+## Build and install the local package
+
+Use a host that supports `octant-canvas-export.json` and supervised Canvas export
+workers. Older hosts do not load this package format. Execution currently needs
+the macOS native worker boundary; Linux and Windows remain unavailable until
+their equivalent confinement is implemented and validated.
+
+From the repository root, after its dependencies are installed:
+
+```sh
+bun build packages/plugin-api/examples/docs-md-export/index.mjs \
+  --target=node --minify \
+  --outfile packages/plugin-api/examples/docs-md-export/dist/index.mjs
+```
+
+The bundle includes the public port's runtime schemas. Installing the unbundled
+entry would leave a bare SDK import that the isolated package cannot resolve
+from the host checkout.
+
+In Settings, add `packages/plugin-api/examples/docs-md-export` as a local plugin
+folder. Review its manifest, trust its source, and enable both the package and
+its export component. Installation alone grants neither trust nor enablement.
+An effective destination appears on the Canvas export panel; review the exact
+rendered payload and destination before approving an export. Disabling the
+component removes it and invalidates a held approval.
+
+The example's anonymous default targets `https://docs-md.com/api/v1`; its API is
+illustrative and must be checked before use. To build for another compatible
+host, set the default entry's `apiBase` explicitly and replace the manifest's
+`allowedOrigins` with that exact HTTPS origin before rebuilding and reviewing
+the package. The worker receives no inherited host environment, so setting
+`DOCS_MD_API_BASE` on Octant does not configure an installed package. A protected
+service can refuse the anonymous request; this example does not invent an
+authenticated connection or read a host key.
+
+## Host registration contract
 
 This example is a callable `CanvasExportTarget` factory for a host to register,
 as the in-tree destinations are registered. The host owns package resolution and
 the installed/trusted/enabled/effective facts; the factory cannot supply those
-facts or approve itself. There is no Settings installer for arbitrary JavaScript
-export modules, and this example is not a claim that selecting its folder loads
-code into the server. The integration test proves the supported host
-registration and approval path without importing untrusted code into the
-authority process.
+facts or approve itself. The local package loader resolves only the reviewed
+module named by the package document and starts a supervised worker; it never
+imports package code into the authority process. Hosts can also register the
+factory directly, as the in-tree destinations are registered. The integration
+test proves that registration and approval contract independently of native
+package execution.
 
 A refused or unreadable response after upload does not prove the remote host
 created nothing. The example does not retry uploads automatically.
