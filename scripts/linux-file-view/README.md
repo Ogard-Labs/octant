@@ -332,11 +332,35 @@ placeholders or inventing inode metadata. It retains byte names, captured
 account exceptions, permitted unnamed sources and stable native EEXIST cases.
 Focused policy/lifecycle tests and pinned-source generation checks pass. Actual
 integrated kernel compilation, all six creation refusals, permitted controls
-and unchanged protected state pass. That run then fails session startup before
-its marker, without a worker acknowledgement; an unconfirmed core event does
-not identify the cause. The full native run remains red. Internal or stacked
-creation paths without the exact prepared scope refuse; complete filesystem/
-runtime parity is not established by these audited entry points.
+and unchanged protected state pass. The first integrated run then fails session
+startup before its marker without a worker acknowledgement; an unconfirmed core
+event does not identify the cause. A subsequent scoped run passes all seven
+sessions, the exact one-worker orphan join, both default runtime workloads and
+final zero-leftover cleanup. It does not diagnose the earlier controller faults.
+
+The next compatibility fixture creates an ordinary filesystem Unix socket but
+its bind wrongly returns EACCES: that kernel caller reaches the creation guard
+without a prepared scope. The protected bind and previous creation controls
+pass. Its correction must pair the audited bind caller's start/end path and
+preserve failed-bind rollback, including native EINVAL on binding an already
+bound socket to a second pathname without leaving the second node. Rollback
+requires fresh UNLINK admission outside the parent lock and revalidation of
+the exact created object after reacquiring it; a replacement is never removed.
+Only this rollback may wait through a pending signal within the unchanged
+two-second admission limit. This permits unwind without masking signals or
+changing ordinary interruptible waits. Broker loss, policy refusal and changed
+identity or epoch still refuse cleanup, and every exit discards unused approval.
+Native acceptance of the caller and rollback correction remains pending.
+
+That fixture run also observes an owned process reaped between two proc-stat
+reads. The session controller now snapshots first, tolerates only ENOENT/ESRCH,
+and revalidates the exact receipt identity before using the snapshot's state.
+Every other error still fails. The exact orphan-one/PID1 join and the five-second
+observation and thirty-five-second suite limits stay unchanged; actual-source
+replay covers disappearance, reused identity, other errors and orphan/live states.
+The next guest run must establish native acceptance of this fixture correction.
+Internal or stacked creation paths without the exact prepared scope refuse;
+complete filesystem/runtime parity is not established by these audited entries.
 
 Dispatch `experiment=kernel-admission` to compile and boot a pinned Linux 6.18
 guest under networkless QEMU TCG in the owned ephemeral runner. The upstream

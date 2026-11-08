@@ -13555,6 +13555,17 @@ cards; general Azure CLI credentials remain unavailable by design.
   external writers while userspace inspects metadata. An own-account exception
   retains its initially enrolled lexical/canonical forms; replacing that path
   with a link never transfers the exception to a different sign-in.
+  Audited creation entries prepare the actual parent, copied name and any
+  held hardlink source before inode locks. A task/context-bound one-use scope
+  compares those identities and the current epoch immediately before the
+  filesystem effect; every return and delegation retry retires it. Filesystem
+  Unix socket binding follows the same rule. Its failed-bind rollback obtains
+  a fresh UNLINK decision outside the parent lock, then revalidates the exact
+  created socket before removal. It never removes a replacement. Only that
+  rollback may wait through a pending signal, within the existing two-second
+  admission ceiling, so ordinary interruption need not strand its own new
+  node. Broker loss, policy refusal and changed identity or epoch still refuse;
+  unused approval is discarded. Other admission waits remain interruptible.
   The disposable candidate's owned session prepares the unchanged shared
   Bubblewrap builder in a separate trusted worker, carrying the exact protected
   file configuration and structured policy. Real ABI/status and a policy
