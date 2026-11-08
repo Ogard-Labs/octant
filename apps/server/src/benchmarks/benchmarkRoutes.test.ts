@@ -1,5 +1,6 @@
-import { BENCHMARK_ROUTE_PATHS } from "@octant/contracts";
+import { BENCHMARK_ROUTE_PATHS, BENCHMARK_RUN_AGGREGATE_TYPE } from "@octant/contracts";
 import { afterEach, describe, expect, it } from "vitest";
+import { erasePurgedThread } from "../persistence/threadPurge";
 import { createRemoteDevicePrincipal } from "../clientPrincipal";
 import { bindPrincipalRouteContext } from "../principalRouteContext";
 import { WindowAuthorityStore } from "../windowAuthorityStore";
@@ -21,7 +22,13 @@ const capability = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnop0";
 const windowId = "66500000-0000-4000-8000-000000000001";
 
 function setup(
-  options: { readonly available?: boolean; readonly purge?: "purged" | "absent" | "failed" } = {},
+  options: {
+    readonly available?: boolean;
+    readonly purge?: "purged" | "absent" | "failed";
+    // Erase the thread the way the host's own thread purge does, so the test
+    // sees what that purge leaves behind in the journal.
+    readonly erasesJournal?: boolean;
+  } = {},
 ) {
   const opened = openBenchmarkTestStore();
   const windowAuthorityStore = new WindowAuthorityStore();
@@ -43,6 +50,13 @@ function setup(
     },
     purgeThread: async (threadId) => {
       purged.push(threadId);
+      if (options.erasesJournal === true) {
+        erasePurgedThread({
+          connection: opened.connection,
+          mode: "chat",
+          threadId: threadId as never,
+        });
+      }
       return options.purge ?? "purged";
     },
     clock: () => BENCHMARK_TEST_NOW,
@@ -267,6 +281,29 @@ describe("benchmark routes", () => {
     for (const cell of run.cells)
       expect(purged).toContain(benchmarkCellIdentity(String(cell.cellId)).threadId);
     expect(projection.run(benchmarkIds.run)).toBeUndefined();
+  });
+
+  it("lists no purged run right after the purge, even though the thread purge erases journal events that name its threads", async () => {
+    const { handler, store, journal } = setup({ erasesJournal: true });
+    const run = sampleRun();
+    store.runStarted({ run });
+    store.cellStarted({
+      runId: run.runId,
+      cellId: run.cells[0]!.cellId,
+      threadId: "66700000-0000-4000-8000-000000000001",
+      startedAt: BENCHMARK_TEST_NOW as never,
+    });
+    store.runEnded({ runId: run.runId, status: "finished", endedAt: BENCHMARK_TEST_NOW as never });
+    const purge = await handler(post(BENCHMARK_ROUTE_PATHS.runsPurge, { runId: benchmarkIds.run }));
+    expect(purge?.status).toBe(200);
+    const listed = await handler(post(BENCHMARK_ROUTE_PATHS.runsList, {}));
+    expect(await listed?.json()).toEqual({ runs: [] });
+    // The run's own history stays in the journal, so a restart replays it to
+    // the same purged state instead of finding a lone purge event.
+    const history = journal
+      .replay({ afterSequence: 0, limit: 100 } as never)
+      .filter((event) => event.aggregateType === BENCHMARK_RUN_AGGREGATE_TYPE);
+    expect(history.length).toBeGreaterThan(1);
   });
 
   it("keeps a run when one of its threads cannot be purged", async () => {
