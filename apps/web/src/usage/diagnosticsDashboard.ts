@@ -148,7 +148,7 @@ export function diagnosticsDashboard(
       format: "percent",
       good: "up",
       prior: before?.successRate,
-      sparkline: trend.map((bucket) => 1 - (bucket.failed + bucket.cancelled) / bucket.turns),
+      sparkline: trend.map((bucket) => bucket.finished / bucket.turns),
     }),
     tile("failed", "Failed turns", now.failed, {
       format: "number",
@@ -250,7 +250,7 @@ export function diagnosticsDashboard(
             "Finished",
             buckets.map((bucket) => ({
               x: tick(bucket.key),
-              y: bucket.turns - bucket.failed - bucket.cancelled,
+              y: bucket.finished,
             })),
           ),
           // Third in the series order takes the alarm hue, so failures read red.
@@ -264,6 +264,19 @@ export function diagnosticsDashboard(
             "Failed",
             buckets.map((bucket) => ({ x: tick(bucket.key), y: bucket.failed })),
           ),
+          // Turns still waiting for an answer are neither finished nor failed.
+          buckets.some(
+            (bucket) => bucket.turns > bucket.finished + bucket.failed + bucket.cancelled,
+          )
+            ? series(
+                "other",
+                "Still waiting",
+                buckets.map((bucket) => ({
+                  x: tick(bucket.key),
+                  y: bucket.turns - bucket.finished - bucket.failed - bucket.cancelled,
+                })),
+              )
+            : undefined,
         ]);
   const troubledShareOverTime =
     buckets.length === 0
