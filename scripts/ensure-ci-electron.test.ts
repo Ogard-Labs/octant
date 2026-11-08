@@ -8,6 +8,7 @@ import {
   ensureCiElectron,
   fetchElectronAsset,
   installedElectron,
+  isUpstreamElectronDownloadFailure,
   recoverCiElectron,
   recoveryTargetFromEnvironment,
 } from "./ensure-ci-electron";
@@ -63,6 +64,20 @@ const responseFixture = (
   });
 
 describe("pinned Electron CI recovery", () => {
+  it("recognizes upstream failures without treating checksum, extraction or missing assets as network errors", () => {
+    expect(
+      isUpstreamElectronDownloadFailure("HTTPError: Response code 504 (Gateway Timeout)"),
+    ).toBe(true);
+    expect(isUpstreamElectronDownloadFailure("RequestError: connect ETIMEDOUT")).toBe(true);
+    for (const message of [
+      "SHA256 checksum mismatch",
+      "Cannot load native extraction binding",
+      "HTTPError: Response code 404 for electron-v43.7.504.zip",
+      "The installer exceeded its deadline.",
+    ])
+      expect(isUpstreamElectronDownloadFailure(message)).toBe(false);
+  });
+
   it("keeps a successful normal installation independent of recovery", async () => {
     const recover = vi.fn();
     const install = vi.fn(async () => ({ ok: true, upstreamFailure: false }));

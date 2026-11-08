@@ -267,6 +267,12 @@ export async function recoverCiElectron(input: {
   }
 }
 
+export function isUpstreamElectronDownloadFailure(message: string): boolean {
+  return /Response code (?:429|5\d\d)\b|HTTPError:\s*(?:429|5\d\d)\b|ETIMEDOUT|ECONNRESET|EAI_AGAIN|ENOTFOUND|ENETUNREACH|EHOSTUNREACH|UND_ERR_CONNECT_TIMEOUT|fetch failed|network timeout/i.test(
+    message,
+  );
+}
+
 async function normalInstaller(path: string, signal: AbortSignal): Promise<InstallerResult> {
   signal.throwIfAborted();
   const env = { ...process.env };
@@ -277,7 +283,6 @@ async function normalInstaller(path: string, signal: AbortSignal): Promise<Insta
   child.stderr.on("data", (chunk: Buffer) => {
     error = (error + chunk.toString()).slice(-8192);
   });
-  let timedOut = false;
   let force: ReturnType<typeof setTimeout> | undefined;
   const stop = () => {
     if (child.pid === undefined || child.exitCode !== null || child.signalCode !== null) return;
@@ -295,10 +300,7 @@ async function normalInstaller(path: string, signal: AbortSignal): Promise<Insta
         }
     }, 3000);
   };
-  const timer = setTimeout(() => {
-    timedOut = true;
-    stop();
-  }, 90_000);
+  const timer = setTimeout(stop, 90_000);
   signal.addEventListener("abort", stop, { once: true });
   try {
     const code = await new Promise<number | null>((resolve, reject) => {
@@ -307,11 +309,7 @@ async function normalInstaller(path: string, signal: AbortSignal): Promise<Insta
     });
     return {
       ok: code === 0,
-      upstreamFailure:
-        timedOut ||
-        /Response code 5\d\d|HTTPError[^\n]*5\d\d|ETIMEDOUT|ECONNRESET|EAI_AGAIN|ENOTFOUND|fetch failed|network timeout/i.test(
-          error,
-        ),
+      upstreamFailure: isUpstreamElectronDownloadFailure(error),
     };
   } finally {
     clearTimeout(timer);
