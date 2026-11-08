@@ -73,7 +73,18 @@ if (process.argv[2] === "--linux-mediation-worker") {
   const start = async (mode: string, maximumMs?: number, owner?: AbortSignal) => {
     await rm(`${root}/session-stage`, { force: true });
     const prepared = await prepare(mode, maximumMs, owner);
-    assert.equal(prepared.status, "ready");
+    assert.equal(
+      prepared.status,
+      "ready",
+      JSON.stringify({
+        case: mode,
+        maximumMs: maximumMs ?? 10_000,
+        status: prepared.status,
+        ...(prepared.status === "unavailable"
+          ? { reason: prepared.reason, cleanup: prepared.cleanup }
+          : {}),
+      }),
+    );
     if (prepared.status !== "ready") throw new Error("Session unavailable");
     active = prepared.session;
     // Real readiness must not fork/exec the command or create its marker.
@@ -97,7 +108,18 @@ if (process.argv[2] === "--linux-mediation-worker") {
       assert.equal((await readdir(receipts)).filter((name) => name.endsWith(".json")).length, 0);
       outcomes.push("invalid-deadline-refuses-before-spawn");
       const prepared = await prepare("--session-wait");
-      assert.equal(prepared.status, "ready");
+      assert.equal(
+        prepared.status,
+        "ready",
+        JSON.stringify({
+          case: "close-before-launch",
+          maximumMs: 10_000,
+          status: prepared.status,
+          ...(prepared.status === "unavailable"
+            ? { reason: prepared.reason, cleanup: prepared.cleanup }
+            : {}),
+        }),
+      );
       if (prepared.status !== "ready") throw new Error("Session unavailable");
       active = prepared.session;
       assert.deepEqual(await active.close(), {
