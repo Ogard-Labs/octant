@@ -10,6 +10,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/ioctl.h>
+#include <time.h>
 #include <sys/mman.h>
 #include <sys/mount.h>
 #include <sys/prctl.h>
@@ -400,6 +401,132 @@ static int namespace_measure(void)
   return passed && controls && cleaned ? 0 : 29;
 }
 
+struct ordered_read {
+  int file, identity, first_done;
+  bool twice;
+  int passed;
+};
+static void *ordered_reader(void *argument)
+{
+  struct ordered_read *input = argument;
+  if (input->twice) {
+    pid_t tid = (pid_t)syscall(SYS_gettid);
+    if (!transfer(input->identity, &tid, sizeof(tid), true)) return NULL;
+  }
+  char bytes[64];
+  input->passed = pread(input->file, bytes, sizeof(bytes), 0) == sizeof(content) - 1 &&
+    !memcmp(bytes, content, sizeof(content) - 1);
+  if (input->twice && input->passed) {
+    char done = 'D';
+    if (!transfer(input->first_done, &done, 1, true)) { input->passed = 0; return NULL; }
+    input->passed = pread(input->file, bytes, sizeof(bytes), 0) == sizeof(content) - 1 &&
+      !memcmp(bytes, content, sizeof(content) - 1);
+  }
+  return NULL;
+}
+static bool reader_waiting(pid_t child, pid_t tid)
+{
+  char path[128];
+  snprintf(path, sizeof(path), "/proc/%d/task/%d/stat", child, tid);
+  for (unsigned attempt = 0; attempt < 500; attempt++) {
+    FILE *file = fopen(path, "re");
+    char bytes[512] = {0};
+    if (!file) return false;
+    bool read = fgets(bytes, sizeof(bytes), file) != NULL;
+    fclose(file);
+    char *end = read ? strrchr(bytes, ')') : NULL;
+    if (end && end[1] == ' ' && end[2] == 'S') return true;
+    struct timespec pause = {.tv_nsec = 1000000}; nanosleep(&pause, NULL);
+  }
+  return false;
+}
+
+static int ordered_measure(void)
+{
+  int file = open("/tmp/ordered", O_CREAT | O_EXCL | O_RDWR | O_CLOEXEC, 0600);
+  if (file < 0 || write(file, content, sizeof(content) - 1) != sizeof(content) - 1) return 50;
+  struct stat expected;
+  if (fstat(file, &expected)) return 60;
+  int broker = open("/dev/octant_mediation", O_RDWR | O_CLOEXEC | O_NONBLOCK);
+  int enrollment = broker < 0 ? -1 : ioctl(broker, OCTANT_MEDIATION_ENROLL_FD, 0);
+  int commands[2], identity[2], done[2], results[2];
+  if (enrollment < 0 || pipe2(commands, O_CLOEXEC) || pipe2(identity, O_CLOEXEC) ||
+      pipe2(done, O_CLOEXEC) || pipe2(results, O_CLOEXEC)) return 51;
+  pid_t child = fork();
+  if (!child) {
+    close(broker); close(commands[1]); close(identity[0]); close(done[0]); close(results[0]);
+    signal(SIGALRM, SIG_DFL); alarm(8);
+    if (prctl(PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0) || ioctl(enrollment, OCTANT_MEDIATION_ENROLL, 0)) _exit(52);
+    close(enrollment);
+    struct ordered_read first = {.file = file, .identity = identity[1], .first_done = done[1], .twice = true};
+    struct ordered_read second = {.file = file};
+    pthread_t a, b;
+    if (pthread_create(&a, NULL, ordered_reader, &first)) _exit(53);
+    char command;
+    if (!transfer(commands[0], &command, 1, false) || command != 'B' ||
+        pthread_create(&b, NULL, ordered_reader, &second)) _exit(54);
+    if (pthread_join(a, NULL) || pthread_join(b, NULL)) _exit(55);
+    int passed = first.passed && second.passed;
+    if (!transfer(results[1], &passed, sizeof(passed), true)) _exit(56);
+    _exit(passed ? 0 : 57);
+  }
+  close(enrollment); close(commands[0]); close(identity[1]); close(done[1]); close(results[1]);
+  if (child < 0) return 58;
+  pid_t tid = 0;
+  struct octant_mediation_request first = {0}, second = {0}, third = {0};
+  bool passed = transfer(identity[0], &tid, sizeof(tid), false) &&
+    transfer(broker, &first, sizeof(first), false);
+  char start = 'B';
+  passed = passed && transfer(commands[1], &start, 1, true);
+  /* R1 is delivered and held. POLLIN now proves R2 is queued, without
+   * consuming it; a later R3 can then reuse the completed first slot. */
+  struct pollfd queued = {.fd = broker, .events = POLLIN};
+  passed = passed && poll(&queued, 1, 1000) == 1 && (queued.revents & POLLIN);
+  struct octant_mediation_answer answer = {.request_id = first.request_id,
+    .namespace_epoch = first.namespace_epoch, .allow = 1};
+  passed = passed && write(broker, &answer, sizeof(answer)) == sizeof(answer);
+  char completed = 0;
+  /* After A signals first-read completion, its only blocking operation is
+   * the next guarded pread. Its sleeping task state proves R3 is queued. */
+  passed = passed && transfer(done[0], &completed, 1, false) && completed == 'D' && reader_waiting(child, tid);
+  passed = passed && transfer(broker, &second, sizeof(second), false);
+  bool oldest_first = passed && first.request_id > 0 && second.request_id == first.request_id + 1;
+  if (passed) {
+    answer = (struct octant_mediation_answer) {.request_id = second.request_id,
+      .namespace_epoch = second.namespace_epoch, .allow = 1};
+    passed = write(broker, &answer, sizeof(answer)) == sizeof(answer) &&
+      transfer(broker, &third, sizeof(third), false);
+  }
+  oldest_first = oldest_first && third.request_id == first.request_id + 2;
+  const struct octant_mediation_request *requests[] = {&first, &second, &third};
+  for (unsigned i = 0; i < sizeof(requests) / sizeof(requests[0]); i++) {
+    const struct octant_mediation_request *request = requests[i];
+    passed = passed && request->operation == OCTANT_MEDIATION_READ && !request->reserved &&
+      request->inode == (unsigned long long)expected.st_ino &&
+      request->device_major == major(expected.st_dev) && request->device_minor == minor(expected.st_dev);
+  }
+  if (passed) {
+    answer = (struct octant_mediation_answer) {.request_id = third.request_id,
+      .namespace_epoch = third.namespace_epoch, .allow = 1};
+    passed = write(broker, &answer, sizeof(answer)) == sizeof(answer);
+  }
+  int reads = 0;
+  passed = passed && transfer(results[0], &reads, sizeof(reads), false) && reads == 1;
+  close(broker);
+  if (!passed) kill(child, SIGKILL);
+  int exit; pid_t joined;
+  do { joined = waitpid(child, &exit, 0); } while (joined < 0 && errno == EINTR);
+  bool reaped = joined == child;
+  passed = passed && oldest_first && reaped && WIFEXITED(exit) && WEXITSTATUS(exit) == 0;
+  close(file); close(commands[1]); close(identity[0]); close(done[0]); close(results[0]);
+  bool cleaned = unlink("/tmp/ordered") == 0;
+  printf("OCTANT_ORDERED_ADMISSIONS {\"status\":\"%s\",\"first\":%llu,\"second\":%llu,\"third\":%llu,\"ownedChildJoined\":%s,\"cleaned\":%s,\"productionReady\":false}\n",
+    passed && cleaned ? "measured-ordered-admissions" : "failed", (unsigned long long)first.request_id,
+    (unsigned long long)second.request_id, (unsigned long long)third.request_id,
+    reaped ? "true" : "false", cleaned ? "true" : "false");
+  return passed && cleaned ? 0 : 59;
+}
+
 static int policy_measure(bool capsule)
 {
   pid_t child = fork();
@@ -433,6 +560,7 @@ int main(void)
   } else {
     int result = measure();
     if (!result) result = namespace_measure();
+    if (!result) result = ordered_measure();
     if (!result) {
       alarm(0);
       result = policy_measure(false);

@@ -2,6 +2,7 @@
 
 import hashlib
 import io
+import json
 import os
 import re
 from pathlib import Path
@@ -54,27 +55,6 @@ def main():
     destination.mkdir()
     for name in ("mediation.c", "octant_mediation.h", "bridge.h"):
         shutil.copyfile(native / name, destination / name)
-    # Observe only an already-selected exceptional outcome in this owned copy.
-    # The original kernel source and return values remain unchanged. This
-    # diagnostic kernel must not substitute for the final uninstrumented run.
-    mediation = destination / "mediation.c"
-    source = mediation.read_text()
-    changes = {
-        "#include <linux/anon_inodes.h>": "#include <linux/anon_inodes.h>\n#include <linux/sched/signal.h>",
-        "static atomic_t contexts = ATOMIC_INIT(0);": "static atomic_t contexts = ATOMIC_INIT(0);\nstatic atomic_t octant_guest_losses = ATOMIC_INIT(0);",
-        "struct path source_pin = {}, destination_pin = {};": "struct path source_pin = {}, destination_pin = {};\n\tbool octant_guest_loss;",
-        "result = waited <= 0 || context->dead || !broker_alive(context) ? -EACCES : pending->decision;":
-            "result = waited <= 0 || context->dead || !broker_alive(context) ? -EACCES : pending->decision;\n\toctant_guest_loss = waited <= 0 || context->dead || !broker_alive(context);",
-        "\tif (source_pin.dentry)":
-            '\tif (octant_guest_loss && atomic_inc_return(&octant_guest_losses) <= 16)\n'
-            '\t\tpr_info("OCTANT_GUEST_ADMISSION_LOSS op=%u waited=%ld result=%d dead=%d owner=%d signal=%d\\n", request->operation, waited, result, context->dead, broker_alive(context), signal_pending(current));\n'
-            '\tif (source_pin.dentry)',
-    }
-    for anchor, replacement in changes.items():
-        if source.count(anchor) != 1:
-            raise SystemExit("Pinned guest exception diagnostic anchor differs.")
-        source = source.replace(anchor, replacement, 1)
-    mediation.write_text(source)
     install_epochs(kernel, native)
     (destination / "Makefile").write_text("obj-y += mediation.o\n")
     with (kernel / "security/Makefile").open("a") as output:
@@ -110,8 +90,8 @@ def main():
     for source, target in ((native / "broker.c", relay),
                            (repository / "scripts/linux-file-view/kernel_policy_workload.c", workload)):
         run("gcc", "-static", "-std=c11", "-Wall", "-Wextra", "-Werror", str(source), "-o", str(target), timeout=30)
-    run("bun", str(repository / "scripts/linux-file-view/kernel_bundle.ts"), str(policy),
-        timeout=120, cwd=repository)
+    run("bun", "build", "--compile", str(repository / "scripts/linux-file-view/kernel_policy.ts"),
+        "--outfile", str(policy), timeout=120, cwd=repository)
     # Copy only this task-owned public executable's dynamic loader/libraries
     # into the disposable initramfs. Nothing is mounted from the runner home.
     library_log = root / "policy-libraries.log"
@@ -150,6 +130,28 @@ def main():
             timeout=95, cwd=root, output=output)
     log = (root / "guest.log").read_text(errors="replace")
     print(log[-20000:])
+    cases = []
+    ordered = []
+    for line in log.splitlines():
+        if line.startswith("{"):
+            value = json.loads(line)
+            if value.get("status") == "measured-original-policy-broker":
+                cases.append(value)
+        elif line.startswith("OCTANT_ORDERED_ADMISSIONS "):
+            ordered.append(json.loads(line.split(" ", 1)[1]))
+    capsules = [case for case in cases if case.get("actualBubblewrapBuilder") is True]
+    direct = [case for case in cases if case.get("actualBubblewrapBuilder") is False]
+    if len(capsules) != 3 or len(direct) != 1 or any(
+            case.get("ended") != {"status": "exited", "code": 0} or
+            case.get("ownedCommandJoined") is not True or case.get("cleaned") is not True or
+            case.get("lateCompanion") is not True for case in cases):
+        raise SystemExit("Every original-policy case needs an actual exit/join/cleanup receipt.")
+    if len(ordered) != 1 or ordered[0].get("status") != "measured-ordered-admissions" or \
+            ordered[0].get("ownedChildJoined") is not True or ordered[0].get("cleaned") is not True:
+        raise SystemExit("The controlled queued-read ordering proof did not pass.")
+    for attempt in range(1, 4):
+        if f"OCTANT_BUBBLEWRAP_ATTEMPT {attempt} result=0" not in log:
+            raise SystemExit("An uninstrumented ordinary capsule repetition did not complete.")
     if ("OCTANT_KERNEL_EXIT 0" not in log or '"status":"measured-admission-core"' not in log or
             '"status":"measured-namespace-token"' not in log or
             '"status":"measured-original-policy-broker"' not in log or

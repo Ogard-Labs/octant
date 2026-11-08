@@ -469,6 +469,7 @@ static ssize_t read_request(struct file *file, char __user *bytes, size_t length
 {
 	struct octant_context *context = file->private_data;
 	struct octant_mediation_request request = {0};
+	struct octant_pending *oldest = NULL;
 	unsigned long flags;
 	bool found = false;
 	int i, result;
@@ -486,12 +487,17 @@ static ssize_t read_request(struct file *file, char __user *bytes, size_t length
 	spin_lock_irqsave(&context->lock, flags);
 	for (i = 0; i < OCTANT_MEDIATION_PENDING; i++) {
 		struct octant_pending *pending = &context->pending[i];
-		if (pending->occupied && !pending->delivered) {
-			request = pending->request;
-			pending->delivered = true;
-			found = true;
-			break;
-		}
+		if (pending->occupied && !pending->delivered &&
+		    (!oldest || pending->request.request_id < oldest->request.request_id))
+			oldest = pending;
+	}
+	/* A completed slot may be reused while an older request waits in another
+	 * slot. Slot order is not queue order; the broker's replay guard requires
+	 * monotonically delivered identities and older work must not starve. */
+	if (oldest) {
+		request = oldest->request;
+		oldest->delivered = true;
+		found = true;
 	}
 	spin_unlock_irqrestore(&context->lock, flags);
 	result = !found ? -EAGAIN : copy_to_user(bytes, &request, sizeof(request)) ? -EFAULT : sizeof(request);

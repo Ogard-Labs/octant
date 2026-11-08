@@ -83,11 +83,14 @@ The SCM controls also queue a foreign FD before enrollment and reap a same-polic
 sender before receiving its queued FD; send-time credentials must survive both
 transitions. The same actual Bubblewrap scenario runs three times to check
 the previously observed UID-map timing failure; it is not a broader acceptance
-matrix. The current diagnostic build observes only already-selected exceptional
-admission outcomes and denied/unavailable snapshots, with no per-frame logging
-on the success path. It preserves the original authority checks and return
-values. These observations remain diagnostic evidence; final integration still
-requires the original uninstrumented kernel and broker.
+matrix. The kernel delivers the oldest undelivered request identity rather than
+reused array-slot order, preserving the broker's strict monotonic/replay guard.
+A controlled native case holds the first admission, queues an older second
+reader, then reuses the first slot for a third admission. Its actual IDs,
+matching inode/operation decisions, successful reads, join and cleanup must pass.
+Guest compilation uses the original uninstrumented kernel and broker. Earlier
+exception-only observations remain diagnostic evidence in the PR; they do not
+substitute for this ordinary run.
 
 Dispatch `experiment=kernel-admission` to compile and boot a pinned Linux 6.18
 guest under networkless QEMU TCG in the owned ephemeral runner. The upstream
