@@ -553,6 +553,84 @@ static bool join_owned(pid_t child, bool *normal)
   return joined == child;
 }
 
+/* A real shared open-file description must not be locked while its reader's
+ * policy reply is held. Synthetic allow checks ordering, not policy contents. */
+static int seek_position_measure(void)
+{
+  const char *path = "/tmp/octant-seek-position";
+  int file = -1, broker = -1, enrollment = -1;
+  int results[2] = {-1, -1}, positions[2] = {-1, -1};
+  pid_t reader = -1, helper = -1;
+  struct stat identity = {0};
+  struct octant_mediation_request request = {0};
+  bool received = false, identified = false, before_reply = false, replied = false;
+  bool reader_ok = false, reader_joined = false, helper_joined = false;
+  bool reader_normal = false, helper_normal = false, same_position = false;
+  file = open(path, O_CREAT | O_EXCL | O_RDWR | O_CLOEXEC, 0600);
+  if (file < 0 || write(file, content, sizeof(content) - 1) != sizeof(content) - 1 ||
+      fstat(file, &identity) || lseek(file, 0, SEEK_SET)) goto cleanup;
+  broker = open("/dev/octant_mediation", O_RDWR | O_CLOEXEC | O_NONBLOCK);
+  if (broker < 0) goto cleanup;
+  enrollment = ioctl(broker, OCTANT_MEDIATION_ENROLL_FD, 0);
+  if (enrollment < 0 || pipe2(results, O_CLOEXEC) || pipe2(positions, O_CLOEXEC)) goto cleanup;
+  reader = fork();
+  if (!reader) {
+    close(broker); close(results[0]); close(positions[0]); close(positions[1]);
+    if (prctl(PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0) || ioctl(enrollment, OCTANT_MEDIATION_ENROLL, 0)) _exit(1);
+    close(enrollment);
+    int valid = lseek(file, 0, SEEK_END) == (off_t)sizeof(content) - 1;
+    bool sent = transfer(results[1], &valid, sizeof(valid), true);
+    _exit(valid && sent ? 0 : 2);
+  }
+  close_owned(&enrollment); close_owned(&results[1]);
+  if (reader < 0) goto cleanup;
+  received = transfer(broker, &request, sizeof(request), false);
+  identified = received && request.request_id > 0 && request.operation == OCTANT_MEDIATION_READ &&
+    request.inode == (unsigned long long)identity.st_ino &&
+    request.device_major == major(identity.st_dev) && request.device_minor == minor(identity.st_dev);
+  if (identified) {
+    helper = fork();
+    if (!helper) {
+      close(broker); close(results[0]); close(positions[0]);
+      int moved = lseek(file, 7, SEEK_SET) == 7;
+      bool sent = transfer(positions[1], &moved, sizeof(moved), true);
+      _exit(moved && sent ? 0 : 3);
+    }
+    close_owned(&positions[1]);
+    struct pollfd ready = {.fd = positions[0], .events = POLLIN};
+    int moved = 0;
+    before_reply = helper > 0 && poll(&ready, 1, 500) == 1 && (ready.revents & POLLIN) &&
+      transfer(positions[0], &moved, sizeof(moved), false) && moved == 1;
+  }
+cleanup:
+  // Release every held request even when the helper's progress assertion failed.
+  if (received && broker >= 0) {
+    struct octant_mediation_answer answer = {.request_id = request.request_id,
+      .namespace_epoch = request.namespace_epoch, .allow = identified ? 1u : 0u};
+    replied = write(broker, &answer, sizeof(answer)) == sizeof(answer);
+  }
+  if (!replied) close_owned(&broker);
+  if (reader > 0 && replied) {
+    int valid = 0;
+    reader_ok = transfer(results[0], &valid, sizeof(valid), false) && valid == 1;
+  }
+  close_owned(&broker); close_owned(&enrollment);
+  close_owned(&results[0]); close_owned(&results[1]);
+  close_owned(&positions[0]); close_owned(&positions[1]);
+  if (reader > 0) reader_joined = join_owned(reader, &reader_normal);
+  if (helper > 0) helper_joined = join_owned(helper, &helper_normal);
+  if (file >= 0) same_position = lseek(file, 0, SEEK_CUR) == (off_t)sizeof(content) - 1;
+  close_owned(&file);
+  bool cleaned = !unlink(path);
+  bool passed = identified && before_reply && replied && reader_ok && same_position &&
+    reader_joined && reader_normal && helper_joined && helper_normal && cleaned;
+  printf("OCTANT_SEEK_POSITION {\"replyHeld\":%s,\"otherPositionBeforeReply\":%s,\"replyReleased\":%s,\"readerAllowed\":%s,\"sameFilePosition\":%s,\"readerJoined\":%s,\"helperJoined\":%s,\"cleaned\":%s}\n",
+    identified ? "true" : "false", before_reply ? "true" : "false", replied ? "true" : "false",
+    reader_ok ? "true" : "false", same_position ? "true" : "false",
+    reader_joined ? "true" : "false", helper_joined ? "true" : "false", cleaned ? "true" : "false");
+  return passed ? 0 : 62;
+}
+
 #define EPOCH_ROOT "/tmp/octant-epoch-mount"
 #define EPOCH_FILE "/tmp/octant-epoch-content"
 static const char *epoch_cases[] = {
@@ -882,6 +960,7 @@ int main(void)
     printf("OCTANT_KERNEL_CPUS %ld\n", cpus);
     int result = cpus == 2 ? policy_measure("--metadata-control") : 61;
     if (!result) result = measure();
+    if (!result) result = seek_position_measure();
     if (!result) result = namespace_measure();
     if (!result) result = ordered_measure();
     if (!result) result = outside_epoch_measure();
