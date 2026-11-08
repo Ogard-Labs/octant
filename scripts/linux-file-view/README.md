@@ -92,6 +92,19 @@ Guest compilation uses the original uninstrumented kernel and broker. Earlier
 exception-only observations remain diagnostic evidence in the PR; they do not
 substitute for this ordinary run.
 
+The parallel guest requires `CONFIG_SMP=y`, exactly two configured CPUs and an
+actual two-online-CPU receipt. Earlier pthread receipts used a single online
+CPU despite the QEMU `-smp 2` option, so they do not establish parallel-CPU
+behavior. An unenrolled writer performs pivot-root, remount, mount attributes,
+propagation, create, unnamed temporary-file creation, empty-path link, rename
+and bind-mount operations in its own disposable mount namespace. Each operation
+must advance the epoch, refuse an already-pending stale allow, preserve a fresh
+permitted read, and join both owned children before cleanup. The writer stays
+alive until the parent reads its result so namespace destruction cannot hide
+an absent mutation hook. These are operation-specific epoch controls, not a
+complete filesystem/atomic-open or alias policy proof. Exact native results
+remain required; no coverage bit is promoted by the added source.
+
 The next runtime layer runs the actual Bun and Node executables through that
 same broker and unchanged production builder. It checks native async file I/O,
 fsync, held descriptors, hardlink identity, rename, child spawn/join and an

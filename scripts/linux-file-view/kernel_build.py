@@ -62,7 +62,7 @@ def main():
     with (kernel / "security/Kconfig").open("a") as output:
         output.write('\nconfig SECURITY_OCTANT_MEDIATION\n\tbool "Octant disposable admission bridge"\n\tdepends on SECURITY\n\tselect SECURITY_PATH\n\tdefault n\n')
     run("make", "tinyconfig", cwd=kernel)
-    for symbol in ("64BIT", "MULTIUSER", "PRINTK", "TTY", "SERIAL_8250", "SERIAL_8250_CONSOLE",
+    for symbol in ("64BIT", "SMP", "MULTIUSER", "PRINTK", "TTY", "SERIAL_8250", "SERIAL_8250_CONSOLE",
                    "BLK_DEV_INITRD", "BINFMT_ELF", "PROC_FS", "SYSFS", "TMPFS", "SHMEM",
                    "DEVTMPFS", "SECURITY", "SECURITY_PATH", "SECURITY_OCTANT_MEDIATION", "IO_URING", "AIO",
                    "FUTEX", "PCI", "BLOCK", "ACPI", "EPOLL", "EVENTFD", "TIMERFD",
@@ -72,14 +72,17 @@ def main():
                    "UNIX98_PTYS", "DEVPTS_FS", "BLK_DEV", "EXT4_FS", "VIRTIO",
                    "VIRTIO_MENU", "VIRTIO_PCI", "VIRTIO_BLK", "DEVTMPFS_MOUNT"):
         run("scripts/config", "--enable", symbol, cwd=kernel, timeout=10)
+    run("scripts/config", "--set-val", "NR_CPUS", "2", cwd=kernel, timeout=10)
     run("scripts/config", "--set-str", "LSM", "octant_mediation", cwd=kernel, timeout=10)
     run("make", "olddefconfig", cwd=kernel)
     configured = set((kernel / ".config").read_text().splitlines())
-    for symbol in ("BLOCK", "BLK_DEV", "PCI", "VIRTIO_MENU", "VIRTIO_PCI", "VIRTIO_BLK",
+    for symbol in ("SMP", "BLOCK", "BLK_DEV", "PCI", "VIRTIO_MENU", "VIRTIO_PCI", "VIRTIO_BLK",
                    "EXT4_FS", "DEVTMPFS", "DEVTMPFS_MOUNT", "USER_NS", "PID_NS", "NET_NS",
                    "SECURITY", "SECURITY_PATH", "SECURITY_OCTANT_MEDIATION"):
         if f"CONFIG_{symbol}=y" not in configured:
             raise SystemExit(f"Required built-in guest prerequisite is unavailable: {symbol}")
+    if "CONFIG_NR_CPUS=2" not in configured:
+        raise SystemExit("The guest requires exactly two configured CPUs for parallel native proof.")
     run("make", "-j2", "bzImage", cwd=kernel)
     init_binary = root / "init"
     run("gcc", "-static", "-pthread", "-std=c11", "-Wall", "-Wextra", "-Werror",
@@ -143,6 +146,7 @@ def main():
     cases = []
     ordered = []
     runtime_receipts = []
+    outside = []
     for line in log.splitlines():
         if line.startswith("{"):
             value = json.loads(line)
@@ -152,6 +156,16 @@ def main():
                 runtime_receipts.append(value)
         elif line.startswith("OCTANT_ORDERED_ADMISSIONS "):
             ordered.append(json.loads(line.split(" ", 1)[1]))
+        elif line.startswith("OCTANT_OUTSIDE_EPOCH "):
+            outside.append(json.loads(line.split(" ", 1)[1]))
+    expected_outside = {"pivot-root", "remount", "mount-setattr", "propagation", "open-create",
+                        "tmpfile", "empty-link", "rename", "bind-mount"}
+    if ("OCTANT_KERNEL_CPUS 2" not in log or len(outside) != len(expected_outside) or
+            {case.get("case") for case in outside} != expected_outside or any(
+                any(case.get(field) is not True for field in
+                    ("mutationSucceeded", "epochAdvanced", "staleRefused", "freshAllowed",
+                     "childrenJoined", "cleaned", "passed")) for case in outside)):
+        raise SystemExit("Every outside-mutation epoch case requires actual stale/fresh/cleanup proof on two CPUs.")
     capsules = [case for case in cases if case.get("actualBubblewrapBuilder") is True and
                 case.get("runtime") == "native"]
     direct = [case for case in cases if case.get("actualBubblewrapBuilder") is False]

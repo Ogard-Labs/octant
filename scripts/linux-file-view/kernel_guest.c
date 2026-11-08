@@ -4,6 +4,7 @@
 #include <fcntl.h>
 #include <poll.h>
 #include <pthread.h>
+#include <sched.h>
 #include <signal.h>
 #include <stdbool.h>
 #include <stdio.h>
@@ -18,6 +19,7 @@
 #include <sys/stat.h>
 #include <sys/vfs.h>
 #include <linux/magic.h>
+#include <linux/mount.h>
 #include <sys/socket.h>
 #include <sys/syscall.h>
 #include <sys/sysmacros.h>
@@ -527,6 +529,199 @@ static int ordered_measure(void)
   return passed && cleaned ? 0 : 59;
 }
 
+static void close_owned(int *descriptor)
+{
+  if (*descriptor >= 0) close(*descriptor);
+  *descriptor = -1;
+}
+
+static bool join_owned(pid_t child, bool *normal)
+{
+  if (child <= 0) return false;
+  int status = 0;
+  pid_t joined = 0;
+  for (unsigned attempt = 0; attempt < 100; attempt++) {
+    joined = waitpid(child, &status, WNOHANG);
+    if (joined == child || (joined < 0 && errno != EINTR)) break;
+    struct timespec pause = {.tv_nsec = 1000000}; nanosleep(&pause, NULL);
+  }
+  if (!joined || (joined < 0 && errno == EINTR)) {
+    kill(child, SIGKILL);
+    do { joined = waitpid(child, &status, 0); } while (joined < 0 && errno == EINTR);
+  }
+  *normal = joined == child && WIFEXITED(status) && WEXITSTATUS(status) == 0;
+  return joined == child;
+}
+
+#define EPOCH_ROOT "/tmp/octant-epoch-mount"
+#define EPOCH_FILE "/tmp/octant-epoch-content"
+static const char *epoch_cases[] = {
+  "pivot-root", "remount", "mount-setattr", "propagation", "open-create",
+  "tmpfile", "empty-link", "rename", "bind-mount",
+};
+
+/* An unenrolled writer owns a private mount namespace. It signals completion
+ * before it exits, so namespace destruction cannot hide a missing epoch hook. */
+static void outside_mutation(unsigned operation, int command, int result)
+{
+  alarm(8);
+  int temporary = -1;
+  if (unshare(CLONE_NEWNS) || mount(NULL, "/", NULL, MS_REC | MS_PRIVATE, NULL)) _exit(1);
+  if (operation == 0 && (mount("/", "/", NULL, MS_BIND | MS_REC, NULL) || chdir("/") || chroot("."))) _exit(2);
+  if (mount("tmpfs", EPOCH_ROOT, "tmpfs", 0, "size=64k") ||
+      mkdir(EPOCH_ROOT "/old", 0700) || mkdir(EPOCH_ROOT "/mount", 0700)) _exit(3);
+  if (operation == 6) {
+    temporary = open(EPOCH_ROOT, O_TMPFILE | O_RDWR | O_CLOEXEC, 0600);
+    if (temporary < 0) _exit(4);
+  }
+  if (operation == 7) {
+    int file = open(EPOCH_ROOT "/move", O_CREAT | O_EXCL | O_WRONLY | O_CLOEXEC, 0600);
+    if (file < 0) _exit(5);
+    close(file);
+  }
+  int ready = 1;
+  char next;
+  if (!transfer(result, &ready, sizeof(ready), true) ||
+      !transfer(command, &next, 1, false) || next != 'M') _exit(6);
+  int changed = -1;
+  switch (operation) {
+    case 0: changed = syscall(SYS_pivot_root, EPOCH_ROOT, EPOCH_ROOT "/old"); break;
+    case 1: changed = mount(NULL, EPOCH_ROOT, NULL, MS_REMOUNT | MS_RDONLY, NULL); break;
+    case 2: {
+      struct mount_attr attributes = {.attr_set = MOUNT_ATTR_RDONLY};
+      changed = syscall(SYS_mount_setattr, AT_FDCWD, EPOCH_ROOT, 0, &attributes, sizeof(attributes));
+      break;
+    }
+    case 3: changed = mount(NULL, EPOCH_ROOT, NULL, MS_SHARED, NULL); break;
+    case 4: {
+      int file = open(EPOCH_ROOT "/created", O_CREAT | O_EXCL | O_WRONLY | O_CLOEXEC, 0600);
+      changed = file < 0 ? -1 : close(file);
+      break;
+    }
+    case 5: {
+      int file = open(EPOCH_ROOT, O_TMPFILE | O_RDWR | O_CLOEXEC, 0600);
+      changed = file < 0 ? -1 : close(file);
+      break;
+    }
+    case 6: changed = linkat(temporary, "", AT_FDCWD, EPOCH_ROOT "/linked", AT_EMPTY_PATH); break;
+    case 7: changed = rename(EPOCH_ROOT "/move", EPOCH_ROOT "/moved"); break;
+    case 8: changed = mount(EPOCH_ROOT "/old", EPOCH_ROOT "/mount", NULL, MS_BIND, NULL); break;
+  }
+  int outcome = changed ? errno : 0;
+  if (!transfer(result, &outcome, sizeof(outcome), true) || !transfer(command, &next, 1, false) || next != 'q') _exit(7);
+  if (temporary >= 0) close(temporary);
+  _exit(0);
+}
+
+static bool outside_epoch_case(unsigned operation)
+{
+  int actor_commands[2] = {-1, -1}, actor_results[2] = {-1, -1};
+  int commands[2] = {-1, -1}, results[2] = {-1, -1};
+  int broker = -1, enrollment = -1;
+  pid_t actor = -1, reader = -1;
+  bool ready = false, changed = false, advanced = false, stale = false, fresh = false;
+  bool file_created = false, directory_created = false;
+  bool actor_joined = false, reader_joined = false, actor_normal = false, reader_normal = false;
+  int seed = open(EPOCH_FILE, O_CREAT | O_EXCL | O_WRONLY | O_CLOEXEC, 0600);
+  file_created = seed >= 0;
+  bool seeded = seed >= 0 && write(seed, content, sizeof(content) - 1) == sizeof(content) - 1;
+  close_owned(&seed);
+  if (!seeded || mkdir(EPOCH_ROOT, 0700)) goto cleanup;
+  directory_created = true;
+  if (pipe2(actor_commands, O_CLOEXEC) ||
+      pipe2(actor_results, O_CLOEXEC) || pipe2(commands, O_CLOEXEC) || pipe2(results, O_CLOEXEC)) goto cleanup;
+  actor = fork();
+  if (!actor) {
+    close(actor_commands[1]); close(actor_results[0]);
+    close(commands[0]); close(commands[1]); close(results[0]); close(results[1]);
+    outside_mutation(operation, actor_commands[0], actor_results[1]);
+  }
+  if (actor < 0) goto cleanup;
+  close_owned(&actor_commands[0]); close_owned(&actor_results[1]);
+  int message = 0;
+  ready = transfer(actor_results[0], &message, sizeof(message), false) && message == 1;
+  if (!ready) goto cleanup;
+  broker = open("/dev/octant_mediation", O_RDWR | O_CLOEXEC);
+  if (broker < 0) goto cleanup;
+  enrollment = ioctl(broker, OCTANT_MEDIATION_ENROLL_FD, 0);
+  if (enrollment < 0) goto cleanup;
+  reader = fork();
+  if (!reader) {
+    close(broker); close(actor_commands[1]); close(actor_results[0]);
+    close(commands[1]); close(results[0]);
+    int file = open(EPOCH_FILE, O_RDONLY | O_CLOEXEC);
+    if (file < 0 || prctl(PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0) || ioctl(enrollment, OCTANT_MEDIATION_ENROLL, 0)) _exit(1);
+    close(enrollment);
+    for (;;) {
+      char command;
+      if (!transfer(commands[0], &command, 1, false)) _exit(2);
+      if (command == 'q') _exit(0);
+      char bytes[64]; errno = 0;
+      ssize_t count = pread(file, bytes, sizeof(bytes), 0);
+      int valid = command == 'S' ? count == -1 && errno == EAGAIN :
+        count == sizeof(content) - 1 && !memcmp(bytes, content, sizeof(content) - 1);
+      if (!transfer(results[1], &valid, sizeof(valid), true)) _exit(3);
+    }
+  }
+  close_owned(&enrollment); close_owned(&commands[0]); close_owned(&results[1]);
+  if (reader < 0) goto cleanup;
+  struct stat identity;
+  if (stat(EPOCH_FILE, &identity)) goto cleanup;
+  char command = 'S';
+  struct octant_mediation_request request;
+  if (!transfer(commands[1], &command, 1, true) || !transfer(broker, &request, sizeof(request), false) ||
+      request.operation != OCTANT_MEDIATION_READ || request.inode != (unsigned long long)identity.st_ino ||
+      request.device_major != major(identity.st_dev) || request.device_minor != minor(identity.st_dev)) goto cleanup;
+  command = 'M'; message = -1;
+  changed = transfer(actor_commands[1], &command, 1, true) &&
+    transfer(actor_results[0], &message, sizeof(message), false) && message == 0;
+  if (!changed) goto cleanup;
+  struct octant_mediation_status after;
+  if (ioctl(broker, OCTANT_MEDIATION_STATUS, &after)) goto cleanup;
+  advanced = after.active_mutations == 0 && after.namespace_epoch > request.namespace_epoch;
+  struct octant_mediation_answer answer = {.request_id = request.request_id,
+    .namespace_epoch = request.namespace_epoch, .allow = 1};
+  if (write(broker, &answer, sizeof(answer)) != sizeof(answer)) goto cleanup;
+  message = 0;
+  stale = transfer(results[0], &message, sizeof(message), false) && message == 1;
+  unsigned long long previous = request.request_id;
+  command = 'A';
+  if (!transfer(commands[1], &command, 1, true) || !transfer(broker, &request, sizeof(request), false) ||
+      request.request_id <= previous || request.operation != OCTANT_MEDIATION_READ ||
+      request.inode != (unsigned long long)identity.st_ino || request.namespace_epoch != after.namespace_epoch) goto cleanup;
+  answer = (struct octant_mediation_answer) {.request_id = request.request_id,
+    .namespace_epoch = request.namespace_epoch, .allow = 1};
+  if (write(broker, &answer, sizeof(answer)) != sizeof(answer)) goto cleanup;
+  message = 0;
+  fresh = transfer(results[0], &message, sizeof(message), false) && message == 1;
+cleanup:
+  if (reader > 0 && fresh) { char quit = 'q'; transfer(commands[1], &quit, 1, true); }
+  if (actor > 0 && ready && changed) { char quit = 'q'; transfer(actor_commands[1], &quit, 1, true); }
+  close_owned(&broker); close_owned(&enrollment);
+  close_owned(&actor_commands[0]); close_owned(&actor_commands[1]);
+  close_owned(&actor_results[0]); close_owned(&actor_results[1]);
+  close_owned(&commands[0]); close_owned(&commands[1]); close_owned(&results[0]); close_owned(&results[1]);
+  if (reader > 0) reader_joined = join_owned(reader, &reader_normal);
+  if (actor > 0) actor_joined = join_owned(actor, &actor_normal);
+  bool file_removed = file_created && !unlink(EPOCH_FILE);
+  bool directory_removed = directory_created && !rmdir(EPOCH_ROOT);
+  bool cleaned = file_removed && directory_removed;
+  bool passed = changed && advanced && stale && fresh && actor_joined && reader_joined && actor_normal && reader_normal && cleaned;
+  printf("OCTANT_OUTSIDE_EPOCH {\"case\":\"%s\",\"mutationSucceeded\":%s,\"epochAdvanced\":%s,\"staleRefused\":%s,\"freshAllowed\":%s,\"childrenJoined\":%s,\"cleaned\":%s,\"passed\":%s,\"productionReady\":false}\n",
+    epoch_cases[operation], changed ? "true" : "false", advanced ? "true" : "false", stale ? "true" : "false",
+    fresh ? "true" : "false", actor_joined && reader_joined ? "true" : "false", cleaned ? "true" : "false", passed ? "true" : "false");
+  return passed;
+}
+
+static int outside_epoch_measure(void)
+{
+  alarm(30);
+  bool passed = true;
+  for (unsigned operation = 0; operation < sizeof(epoch_cases) / sizeof(epoch_cases[0]); operation++)
+    if (!outside_epoch_case(operation)) passed = false;
+  return passed ? 0 : 60;
+}
+
 static int policy_measure(const char *mode)
 {
   pid_t child = fork();
@@ -544,6 +739,7 @@ static int policy_measure(const char *mode)
 
 int main(void)
 {
+  signal(SIGPIPE, SIG_IGN);
   mkdir("/dev", 0755); mkdir("/proc", 0755); mkdir("/tmp", 0700);
   struct statfs device_filesystem;
   struct stat console, null;
@@ -558,9 +754,12 @@ int main(void)
   } else if (mount("tmpfs", "/tmp", "tmpfs", 0, "size=1m")) {
     printf("OCTANT_KERNEL_FAILURE private guest tmpfs mount errno=%d\n", errno);
   } else {
-    int result = measure();
+    long cpus = sysconf(_SC_NPROCESSORS_ONLN);
+    printf("OCTANT_KERNEL_CPUS %ld\n", cpus);
+    int result = cpus == 2 ? measure() : 61;
     if (!result) result = namespace_measure();
     if (!result) result = ordered_measure();
+    if (!result) result = outside_epoch_measure();
     if (!result) {
       alarm(0);
       result = policy_measure(NULL);
