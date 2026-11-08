@@ -75,6 +75,37 @@ function sink() {
 
 describe("octant agent command line", () => {
   it.each([{ threadId: "existing" }, { last: true }])(
+    "refuses an access level while attaching to an existing thread, rather than running at another one",
+    async (attachment) => {
+      const stderr = sink();
+      const seen: LocalControlRequest[] = [];
+      const code = await runAgentCliCommand({
+        command: {
+          action: "agent",
+          mode: "code",
+          access: "ask-first",
+          prompt: "Do not send",
+          json: true,
+          plain: false,
+          quiet: true,
+          last: false,
+          ...attachment,
+        },
+        session: session((request) => {
+          seen.push(request);
+          return { status: 404, body: {} };
+        }),
+        stdin: Readable.from([]),
+        stdout: sink(),
+        stderr,
+      });
+      expect(code).toBe(1);
+      expect(stderr.text()).toContain("--access sets a new thread's level");
+      expect(seen).toEqual([]);
+    },
+  );
+
+  it.each([{ threadId: "existing" }, { last: true }])(
     "refuses a model override while attaching to an existing thread",
     async (attachment) => {
       const stderr = sink();
@@ -392,6 +423,10 @@ describe("octant agent command line", () => {
     expect(resolveAgentCliCommand("agent", [], { model: "lm studio/gemma" })).toMatchObject({
       model: "lm studio/gemma",
     });
+    expect(resolveAgentCliCommand("agent", [], { access: "full-access" })).toMatchObject({
+      access: "full-access",
+    });
+    expect(resolveAgentCliCommand("agent", [], { access: "yolo" })).toBeUndefined();
     expect(resolveAgentCliCommand("agent", ["extra"], {})).toBeUndefined();
     expect(resolveAgentCliCommand("agent", [], { bogus: true })).toBeUndefined();
     expect(resolveAgentCliCommand("harness", ["slots"], {})).toEqual({
