@@ -25,6 +25,23 @@ if ($Mode -eq 'inspect') {
     if ($octantEntry.PSIsContainer) { $octantAccess = [Security.AccessControl.DirectorySecurity]::new($octantPath, [Security.AccessControl.AccessControlSections]::Access -bor [Security.AccessControl.AccessControlSections]::Owner) }
     else { $octantAccess = [Security.AccessControl.FileSecurity]::new($octantPath, [Security.AccessControl.AccessControlSections]::Access -bor [Security.AccessControl.AccessControlSections]::Owner) }
     $octantRules = @($octantAccess.GetAccessRules($true, $true, [Security.Principal.SecurityIdentifier]))
+    $octantOwner = $octantAccess.GetOwner([Security.Principal.SecurityIdentifier]).Value
+    $octantDiagnostic = @{
+      descendantKind = $(if ($octantEntry.PSIsContainer) { 'directory' } else { 'file' })
+      ownerSid = $octantOwner
+      userSid = $octantUser.Value
+      protectedDacl = $octantAccess.AreAccessRulesProtected
+      ruleCount = $octantRules.Count
+      rules = @($octantRules | Select-Object -First 8 | ForEach-Object { @{
+        sid = $_.IdentityReference.Value
+        inherited = $_.IsInherited
+        rights = [int64]$_.FileSystemRights
+        inheritance = [int]$_.InheritanceFlags
+        propagation = [int]$_.PropagationFlags
+        access = [int]$_.AccessControlType
+      } })
+    }
+    Write-Output ($octantDiagnostic | ConvertTo-Json -Depth 4 -Compress)
     if ($octantAccess.AreAccessRulesProtected -or $octantAccess.GetOwner([Security.Principal.SecurityIdentifier]).Value -ne $octantUser.Value -or $octantRules.Count -ne 2) { throw 'Descendant did not inherit only private access' }
     $octantIdentities = @()
     foreach ($octantRule in $octantRules) {
