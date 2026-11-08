@@ -221,12 +221,15 @@ if mode == "copy-paragraph" || mode == "choose-native-menu-item" || mode == "cli
         for count: Int64 in [2, 3] {
             guard let down = CGEvent(mouseEventSource: nil, mouseType: .leftMouseDown, mouseCursorPosition: point, mouseButton: .left),
                   let up = CGEvent(mouseEventSource: nil, mouseType: .leftMouseUp, mouseCursorPosition: point, mouseButton: .left) else { refuse("Native paragraph selection is unavailable.") }
+            down.flags = []
+            up.flags = []
             down.setIntegerValueField(.mouseEventClickState, value: count)
             up.setIntegerValueField(.mouseEventClickState, value: count)
             down.post(tap: .cghidEventTap)
             usleep(50_000)
             up.post(tap: .cghidEventTap)
         }
+        usleep(150_000)
         guard let down = CGEvent(keyboardEventSource: nil, virtualKey: 8, keyDown: true),
               let up = CGEvent(keyboardEventSource: nil, virtualKey: 8, keyDown: false) else { refuse("Native copy is unavailable.") }
         down.flags = .maskCommand

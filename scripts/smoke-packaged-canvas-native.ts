@@ -995,11 +995,37 @@ const timer = setInterval(() => {
         hasOwnedStaticPayload(snapshot) &&
         hasText(snapshot, "Updates"),
     );
+    const clipboardNonce = `octant-fixture-selection-${randomUUID()}`;
+    const seedClipboard = spawnSync("/usr/bin/pbcopy", [], {
+      input: clipboardNonce,
+      encoding: "utf8",
+      timeout: 3000,
+    });
+    if (seedClipboard.status !== 0 || seedClipboard.error !== undefined)
+      throw Error("The owned clipboard marker could not be set.");
     await nativeInput("copy-update-card-target", "copy-paragraph", "Updates");
-    if (
-      (await runBoundedCommand("/usr/bin/pbpaste", [], process.env, 3000)).trim() !==
-      `Updates ${publishedUrl}`
-    )
+    await observeUntil("update-card-selected", (snapshot) =>
+      hasText(snapshot, "Export to Public link"),
+    );
+    const copiedUpdateTarget = (
+      await runBoundedCommand("/usr/bin/pbpaste", [], process.env, 3000)
+    ).trim();
+    await writeFile(
+      join(artifacts, "update-card-selection.json"),
+      JSON.stringify(
+        {
+          exactExpectedParagraph: copiedUpdateTarget === `Updates ${publishedUrl}`,
+          clipboardUnchangedMarker: copiedUpdateTarget === clipboardNonce,
+          onlyExpectedURL: copiedUpdateTarget === publishedUrl,
+          containsExpectedURL: copiedUpdateTarget.includes(publishedUrl),
+          onlyUpdatesWord: copiedUpdateTarget === "Updates",
+          characters: copiedUpdateTarget.length,
+        },
+        null,
+        2,
+      ),
+    );
+    if (copiedUpdateTarget !== `Updates ${publishedUrl}`)
       throw Error("The rendered update card did not name the exact original URL.");
     const password = randomBytes(24).toString("base64url");
     const passwordFile = join(root, "private-viewer-input");
