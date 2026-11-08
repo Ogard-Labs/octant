@@ -255,8 +255,8 @@ flowchart LR
 - Bot `1 — *` Project grant `* — 1` Project.
 - Bot lifecycle: `active → deleting → deleted`. Navigator never leaves
   `active`.
-- Bot computer lifecycle: `absent → creating → running ⇄ stopped →
-  destroying → destroyed`, with `failed` and `destroy-failed` (retried, as
+- Bot computer lifecycle: absent → creating → running ⇄ stopped →
+  destroying → destroyed, with `failed` and `destroy-failed` (retried, as
   disposable desktops are).
 
 Invariants:
