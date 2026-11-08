@@ -1,6 +1,13 @@
 import { Database } from "bun:sqlite";
+import { migrateStoreWithBackup } from "../../apps/server/src/persistence/migrationBackup";
+import { MIGRATIONS } from "../../apps/server/src/persistence/migrations";
+import {
+  createStoreBackup,
+  restoreStoreBackup,
+} from "../../apps/server/src/persistence/storeBackup";
+import { MigrationInterruptedRestored } from "../../apps/server/src/persistence/dataLifecycleErrors";
 import { randomUUID } from "node:crypto";
-import { existsSync, readFileSync, renameSync } from "node:fs";
+import { existsSync, readFileSync, renameSync, linkSync, unlinkSync } from "node:fs";
 import { win32 } from "node:path";
 import {
   acquireWindowsHostProfileOwner,
@@ -151,6 +158,102 @@ try {
   renameSync(originalPath, originalPath + ".moved");
   renameSync(originalPath + ".moved", originalPath);
   checks.push("the production server adapter joins SQLite before releasing its native guard");
+  const openOwned = (path: string) => {
+    if (path !== originalPath) throw Error("Foreign primary file refused.");
+    const next = stores.main();
+    if (next.status !== "ready") throw Error("Owned primary file unavailable.");
+    return openAdmittedSqlite(next);
+  };
+  const cleared = openOwned(originalPath);
+  cleared.exec("DROP TABLE proof");
+  cleared.close();
+  const migrationInput = {
+    dataDirectory: held.paths.dataDirectory,
+    databasePath: originalPath,
+    migrations: MIGRATIONS,
+    clock: () => new Date().toISOString(),
+    windowsFiles: stores,
+    openConnection: openOwned,
+  };
+  const migrated = migrateStoreWithBackup(migrationInput);
+  check(
+    migrated.status.currentVersion === MIGRATIONS.at(-1)?.version,
+    "the production migration boundary builds and verifies the complete journal schema",
+  );
+  const snapshot = originalPath + ".backup-native-proof";
+  const receipt = createStoreBackup({
+    connection: migrated.connection,
+    dataDirectory: held.paths.dataDirectory,
+    backupPath: snapshot,
+    windowsFiles: stores,
+  });
+  check(
+    receipt.byteLength > 0 && receipt.migrationVersion === migrated.status.currentVersion,
+    "the production backup boundary admits and verifies a native snapshot",
+  );
+  migrated.connection.exec("CREATE TABLE after_snapshot(value TEXT)");
+  migrated.connection.close();
+  restoreStoreBackup({
+    dataDirectory: held.paths.dataDirectory,
+    databasePath: originalPath,
+    backupPath: snapshot,
+    windowsFiles: stores,
+  });
+  const restored = openOwned(originalPath);
+  check(
+    restored.prepare("SELECT name FROM sqlite_master WHERE name='after_snapshot'").get() ===
+      undefined,
+    "the production restore atomically replaces the store after closing its prior connection",
+  );
+  restored.close();
+  let interrupted: unknown;
+  try {
+    migrateStoreWithBackup({
+      ...migrationInput,
+      migrations: [
+        ...MIGRATIONS,
+        {
+          version: (MIGRATIONS.at(-1)?.version ?? 0) + 1,
+          name: "native_failure_proof",
+          sql: "CREATE TABLE partial_native_migration(value TEXT); INSERT INTO absent_native_proof VALUES (1)",
+        },
+      ],
+    });
+  } catch (error) {
+    interrupted = error;
+  }
+  check(
+    interrupted instanceof MigrationInterruptedRestored && interrupted.restored,
+    "a failed production migration restores the verified native pre-migration snapshot",
+  );
+  const inspected = openOwned(originalPath);
+  check(
+    inspected
+      .prepare("SELECT name FROM sqlite_master WHERE name='partial_native_migration'")
+      .get() === undefined,
+    "failed migration recovery leaves no partial schema",
+  );
+  inspected.close();
+  for (const alias of [
+    originalPath + ".backup-alias",
+    originalPath + "-wal",
+    originalPath + `.restore-${process.pid}.tmp`,
+  ]) {
+    linkSync(originalPath, alias);
+    try {
+      check(
+        stores.inspect(alias.endsWith("-wal") ? originalPath : alias).status === "refused",
+        "native lifecycle admission refuses an exposed backup, sidecar or restore-stage alias",
+      );
+    } finally {
+      unlinkSync(alias);
+    }
+  }
+  check(
+    stores.backup("../outside").status === "refused",
+    "backup labels never carry path authority",
+  );
+
   console.log(
     JSON.stringify({
       profile,

@@ -308,7 +308,19 @@ the CLI. The hub depends on that:
     keeps its WAL/SHM/rollback lifecycle and connection sharing; native main-file
     guards end after actual connection close so migration recovery may replace
     the store. Foreign read-only consumers, checkpoints, migration snapshots,
-    restore and crash recovery must retain their behavior.
+    restore and crash recovery must retain their behavior. The existing bounded
+    backup labels resolve only to the native-owned main database's backup family;
+    its restore stage is fixed to the current process. Native no-create inspection
+    checks main, backup, stage and sidecar aliases before lifecycle operations,
+    and backup verification uses the same actual-handle admission as the live
+    connection. Existing VACUUM and atomic copy/rename recovery run under the
+    held private profile and claimed owner, with inspection before mutation and
+    native admission on reopening. These checks rely on the stated local-owner
+    trust boundary, rather than excluding arbitrary same-account programs.
+    Bun connections use immediate close that finalizes all outstanding prepared
+    statements; a failed close retains its native guard. A deferred SQLite close
+    is insufficient because an ordinary cached statement can retain the file
+    past the application connection's lifetime.
     This boundary does not protect from other unconfined programs running as
     the same owner. Admitted remote clients, provider replies and plugins must
     have no store-path mutation route. Work and Code stay refused until their

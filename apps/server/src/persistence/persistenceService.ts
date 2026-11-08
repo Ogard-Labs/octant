@@ -1,3 +1,5 @@
+import type { WindowsHostProfilePaths, WindowsSqliteStores } from "@octant/host-runtime";
+import { win32 } from "node:path";
 import { readThreadNativeSetup } from "./threadNativeSetupProjection";
 import { homedir } from "node:os";
 import type {
@@ -148,7 +150,7 @@ import {
   type ProjectedEnvironmentPresentation,
 } from "./shellProjection";
 import { withStartupFailureReason } from "../startupFailureReason";
-import { openSqlite, type SqliteConnection } from "./sqlitePort";
+import { openAdmittedSqlite, openSqlite, type SqliteConnection } from "./sqlitePort";
 import { prepareStore } from "./storePath";
 import { loadZenSpace, loadZenSpaceByWindowId, loadZenSpaces } from "./zenProjection";
 import { readThemeSettings, type ProjectedThemeSettings } from "./themeProjection";
@@ -297,6 +299,10 @@ export class PersistenceStartupFailed extends Data.TaggedError("PersistenceStart
 }> {}
 
 export interface PersistenceLiveOptions {
+  readonly windowsProfile?: {
+    readonly paths: WindowsHostProfilePaths;
+    readonly files: WindowsSqliteStores;
+  };
   readonly dataDirectory?: string;
   readonly environment?: Readonly<Record<string, string | undefined>>;
   readonly clock?: () => string;
@@ -322,13 +328,39 @@ export const PersistenceLive = makePersistenceLive({ environment: process.env })
 
 async function acquirePersistence(options: PersistenceLiveOptions): Promise<PersistenceService> {
   const clock = options.clock ?? (() => new Date().toISOString());
-  const store = await prepareStore({
-    env:
-      options.environment ??
-      (options.dataDirectory === undefined ? {} : { OCTANT_DATA_DIR: options.dataDirectory }),
-    platform: process.platform,
-    home: homedir(),
-  });
+  if (process.platform === "win32" && options.windowsProfile === undefined)
+    throw new PersistenceStartupFailed({
+      category: "storage-unavailable",
+      message: "Windows storage requires its native owned profile.",
+    });
+  const windows = options.windowsProfile;
+  const store =
+    windows === undefined
+      ? await prepareStore({
+          env:
+            options.environment ??
+            (options.dataDirectory === undefined ? {} : { OCTANT_DATA_DIR: options.dataDirectory }),
+          platform: process.platform,
+          home: homedir(),
+        })
+      : {
+          directory: windows.paths.dataDirectory,
+          databasePath: win32.join(windows.paths.dataDirectory, "octant.sqlite3"),
+        };
+  if (windows?.files.inspect(store.databasePath).status === "refused")
+    throw new PersistenceStartupFailed({
+      category: "storage-unavailable",
+      message: "Windows storage requires its native owned profile.",
+    });
+  const openConnection =
+    windows === undefined
+      ? (options.openConnection ?? openSqlite)
+      : (path: string) => {
+          if (path !== store.databasePath) throw new Error("Windows store admission was refused.");
+          const admission = windows.files.main();
+          if (admission.status !== "ready") throw new Error("Windows store admission was refused.");
+          return openAdmittedSqlite(admission);
+        };
   // A staged database is an authoritative pending destructive operation. Do
   // not create a replacement canonical store on ordinary startup: recovery
   // must reconcile the Keychain result through the maintenance remove command.
@@ -348,7 +380,8 @@ async function acquirePersistence(options: PersistenceLiveOptions): Promise<Pers
     dataDirectory: store.directory,
     migrations: MIGRATIONS,
     clock,
-    openConnection: options.openConnection ?? openSqlite,
+    openConnection,
+    ...(windows === undefined ? {} : { windowsFiles: windows.files }),
   });
   const connection = migration.connection;
 
@@ -440,6 +473,7 @@ async function acquirePersistence(options: PersistenceLiveOptions): Promise<Pers
           connection,
           dataDirectory: store.directory,
           backupPath,
+          ...(windows === undefined ? {} : { windowsFiles: windows.files }),
         });
         return { ...receipt, path: backupPath };
       },
