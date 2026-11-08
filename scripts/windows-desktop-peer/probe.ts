@@ -24,6 +24,7 @@ type Native = NativeDesktopPeerStatus &
 const [binding, scope, mode] = process.argv.slice(2);
 const launcher = process.env.OCTANT_WINDOWS_PEER_QA_LAUNCHER;
 const copy = process.env.OCTANT_WINDOWS_PEER_QA_COPY_BINDING;
+const appcontainer = process.env.OCTANT_WINDOWS_PEER_QA_APPCONTAINER;
 if (process.platform !== "win32" || !binding || !scope || !mode)
   throw Error("Supply owned native peer artifacts.");
 function record(value: unknown): value is Readonly<Record<string, unknown>> {
@@ -162,7 +163,8 @@ if (mode === "refused") {
       lines.close();
     }
   } else if (mode === "controller") {
-    if (!launcher || !copy) throw Error("Supply the owned launcher and copied public binding.");
+    if (!launcher || !copy || !appcontainer)
+      throw Error("Supply the owned launcher, AppContainer probe and copied public binding.");
     const children: {
       readonly child: ChildProcessWithoutNullStreams;
       readonly exit: Promise<number | null>;
@@ -357,6 +359,28 @@ if (mode === "refused") {
       }
       checks.push(
         "real restricting-SID and low-integrity normal API refusals without changing original tokens",
+      );
+      const container = start(appcontainer, [scope, String(process.pid)]);
+      container.child.stdin.end();
+      check(
+        (await container.exit) === 0 &&
+          container.records.some(
+            (value) =>
+              value.actualAppContainer === true &&
+              value.appContainerPeerRefused === true &&
+              value.appContainerCannotStealParentHandles === true,
+          ) &&
+          container.records.some(
+            (value) =>
+              value.ownedAppContainerJobJoined === true &&
+              value.ownedAppContainerProfileRemoved === true &&
+              value.ownedAppContainerStorageAbsent === true &&
+              value.ownedAppContainerPathsAbsent === true,
+          ),
+        "an actual AppContainer cannot use the peer or steal its handles, and its unique profile/job/public fixture are removed",
+      );
+      checks.push(
+        "actual AppContainer peer and parent-handle refusal with owned profile/storage/path cleanup",
       );
       check(
         kind(await replacement.revokeWindow(replacementHandle, 2), "revoked"),
