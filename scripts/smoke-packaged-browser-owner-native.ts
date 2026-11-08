@@ -98,6 +98,7 @@ async function main(): Promise<void> {
   process.once("SIGTERM", interrupted);
   process.once("SIGINT", interrupted);
   const lifetime = setTimeout(interrupted, 180_000);
+  let retainOwnedFilesForWatchdog = false;
   const checks: string[] = [];
   const visualStateImages: string[] = [];
   const persistedReadings: Array<{
@@ -182,6 +183,177 @@ async function main(): Promise<void> {
       process.env,
       30_000,
     );
+    const ownWatchdog = (pid: number, label: string, lifetimeMs = 200_000) => {
+      const watchdog = spawn(
+        process.execPath,
+        [
+          "-e",
+          String.raw`
+const { spawnSync } = require("node:child_process");
+const { writeFileSync, rmSync } = require("node:fs");
+const group = Number(process.env.OCTANT_QA_GROUP);
+const deadline = Date.now() + Number(process.env.OCTANT_QA_LIFETIME_MS);
+let finishing = false;
+const finish = (removeOwnedFiles = false) => {
+  if (finishing) return;
+  finishing = true;
+  clearInterval(timer);
+  try {
+    const result = spawnSync(process.env.OCTANT_QA_AX_EXECUTABLE,
+      [String(group), process.env.OCTANT_QA_BUNDLE, "bundle-cleanup"],
+      { env: { ...process.env, TMPDIR: process.env.OCTANT_QA_STAGE_TMPDIR }, timeout: 6000,
+        killSignal: "SIGKILL", encoding: "utf8", maxBuffer: 256000 });
+    const receipt = JSON.parse(result.stdout).cleanupObservation;
+    writeFileSync(process.env.OCTANT_QA_WATCHDOG_RECEIPT, JSON.stringify(receipt));
+    if (result.status !== 0 || receipt?.status !== "absent" || receipt?.censusComplete !== true) process.exit(1);
+    if (removeOwnedFiles) {
+      rmSync(process.env.OCTANT_QA_STAGING, { recursive: true, force: true });
+      rmSync(process.env.OCTANT_QA_SCRATCH, { recursive: true, force: true });
+    }
+    process.exit(0);
+  } catch { process.exit(1); }
+};
+const timer = setInterval(() => { if (Date.now() >= deadline) finish(true); }, 100);
+// Only the controller holds the pipe's write end. EOF remains reliable even
+// when the controller's numeric PID has already been reused.
+process.stdin.once("end", () => finish(true));
+process.stdin.once("close", () => finish(true));
+process.stdin.once("error", () => finish(true));
+process.stdin.resume();
+process.once("SIGTERM", () => finish(false));
+process.once("SIGINT", () => finish(false));`,
+        ],
+        {
+          detached: true,
+          env: {
+            ...env,
+            OCTANT_QA_GROUP: String(pid),
+            OCTANT_QA_LIFETIME_MS: String(lifetimeMs),
+            OCTANT_QA_AX_EXECUTABLE: sdkExecutable,
+            OCTANT_QA_BUNDLE: bundle,
+            OCTANT_QA_STAGE_TMPDIR: tmpdir(),
+            OCTANT_QA_SCRATCH: root,
+            OCTANT_QA_STAGING: dirname(bundle),
+            OCTANT_QA_WATCHDOG_RECEIPT: join(artifacts, `${label}-watchdog-exact-cleanup.json`),
+          },
+          stdio: ["pipe", "ignore", "ignore"],
+        },
+      );
+      watchdog.unref();
+      return watchdog;
+    };
+    {
+      retainOwnedFilesForWatchdog = true;
+      const fixture = spawn(join(bundle, "Contents/Resources/native/octant-code-file-helper"), [], {
+        detached: true,
+        env,
+        stdio: ["pipe", "ignore", "ignore"],
+      });
+      const fixturePid = fixture.pid;
+      if (fixturePid === undefined) throw Error("Owned packaged cleanup fixture did not start.");
+      const watchdog = ownWatchdog(fixturePid, "cleanup-fixture", 15_000);
+      const kernelCommand = async (mode: "bundle-census" | "bundle-cleanup") => {
+        const raw = await runBoundedCommand(
+          sdkExecutable,
+          [String(fixturePid), bundle, mode],
+          process.env,
+          6000,
+        );
+        await writeFile(join(artifacts, `outside-group-fixture-${mode}.json`), raw);
+        const decoded: unknown = JSON.parse(raw);
+        if (
+          typeof decoded !== "object" ||
+          decoded === null ||
+          !("cleanupObservation" in decoded) ||
+          typeof decoded.cleanupObservation !== "object" ||
+          decoded.cleanupObservation === null
+        )
+          throw Error("Owned cleanup fixture has no kernel ownership receipt.");
+        return decoded.cleanupObservation;
+      };
+      try {
+        const before = await kernelCommand("bundle-census");
+        if (
+          !("censusComplete" in before) ||
+          before.censusComplete !== true ||
+          !("initialOwned" in before) ||
+          !Array.isArray(before.initialOwned) ||
+          before.initialOwned.length !== 1
+        )
+          throw Error("Owned cleanup fixture census is incomplete or ambiguous.");
+        const identity: unknown = before.initialOwned[0];
+        if (
+          typeof identity !== "object" ||
+          identity === null ||
+          !("pid" in identity) ||
+          identity.pid !== fixturePid ||
+          !("groupPid" in identity) ||
+          identity.groupPid !== fixturePid ||
+          identity.groupPid === process.pid ||
+          !("birthSeconds" in identity) ||
+          typeof identity.birthSeconds !== "number" ||
+          !Number.isSafeInteger(identity.birthSeconds) ||
+          identity.birthSeconds <= 0 ||
+          !("birthMicroseconds" in identity) ||
+          typeof identity.birthMicroseconds !== "number" ||
+          !Number.isSafeInteger(identity.birthMicroseconds) ||
+          identity.birthMicroseconds < 0 ||
+          identity.birthMicroseconds >= 1_000_000 ||
+          !("kernelCanonicalExecutable" in identity) ||
+          typeof identity.kernelCanonicalExecutable !== "string" ||
+          !identity.kernelCanonicalExecutable.endsWith(
+            "/Contents/Resources/native/octant-code-file-helper",
+          ) ||
+          !("underExactStagedBundle" in identity) ||
+          identity.underExactStagedBundle !== true
+        )
+          throw Error("Owned cleanup fixture kernel birth/path/group is not proven.");
+        const after = await kernelCommand("bundle-cleanup");
+        if (
+          !("status" in after) ||
+          after.status !== "absent" ||
+          !("censusComplete" in after) ||
+          after.censusComplete !== true ||
+          !("remainingOwned" in after) ||
+          !Array.isArray(after.remainingOwned) ||
+          after.remainingOwned.length !== 0 ||
+          !("initialOwned" in after) ||
+          !Array.isArray(after.initialOwned) ||
+          after.initialOwned.length !== 1 ||
+          !("signalCount" in after) ||
+          typeof after.signalCount !== "number" ||
+          !Number.isSafeInteger(after.signalCount) ||
+          after.signalCount < 1
+        )
+          throw Error("Detached packaged helper cleanup did not prove joined kernel absence.");
+        const stopped: unknown = after.initialOwned[0];
+        if (
+          typeof stopped !== "object" ||
+          stopped === null ||
+          !("pid" in stopped) ||
+          stopped.pid !== fixturePid ||
+          !("birthSeconds" in stopped) ||
+          stopped.birthSeconds !== identity.birthSeconds ||
+          !("birthMicroseconds" in stopped) ||
+          stopped.birthMicroseconds !== identity.birthMicroseconds ||
+          !("kernelCanonicalExecutable" in stopped) ||
+          stopped.kernelCanonicalExecutable !== identity.kernelCanonicalExecutable ||
+          !(await exited(fixture, 2000)) ||
+          groupProcesses(fixturePid).length !== 0
+        )
+          throw Error("Detached packaged helper identity or join differs from its census.");
+        watchdog.kill("SIGTERM");
+        if (!(await exited(watchdog, 6000)) || watchdog.exitCode !== 0)
+          throw Error("Detached cleanup fixture watchdog did not join.");
+        retainOwnedFilesForWatchdog = false;
+        checks.push(
+          "detached-real-packaged-helper-cleaned-by-kernel-birth-and-executable-before-app-launch",
+        );
+      } finally {
+        fixture.stdin?.destroy();
+        watchdog.stdin?.destroy();
+      }
+    }
     for (const phase of ["initial", "restart"] as const) {
       const app = spawnPackagedApplication({
         executable: join(bundle, "Contents/MacOS/Octant"),
@@ -189,28 +361,7 @@ async function main(): Promise<void> {
       });
       const pid = app.child.pid;
       if (pid === undefined) throw Error("Owned app did not start.");
-      const watchdog = spawn(
-        process.execPath,
-        [
-          "-e",
-          String.raw`
-const owner = Number(process.env.OCTANT_QA_OWNER), group = Number(process.env.OCTANT_QA_GROUP);
-const deadline = Date.now() + 200000;
-const alive = pid => { try { process.kill(pid, 0); return true; } catch (e) { return e?.code !== "ESRCH"; } };
-const timer = setInterval(() => {
-  if (alive(owner) && alive(group) && Date.now() < deadline) return;
-  clearInterval(timer);
-  if (!alive(-group)) process.exit(0);
-  try { process.kill(-group, "SIGTERM"); } catch {}
-  setTimeout(() => { try { process.kill(-group, "SIGKILL"); } catch {} process.exit(0); }, 1000);
-}, 100);`,
-        ],
-        {
-          detached: true,
-          env: { ...env, OCTANT_QA_OWNER: String(process.pid), OCTANT_QA_GROUP: String(pid) },
-          stdio: "ignore",
-        },
-      );
+      const watchdog = ownWatchdog(pid, phase);
       const systemEvents = (operation: string, value = "") =>
         runBoundedCommand(
           "/usr/bin/osascript",
@@ -219,7 +370,16 @@ const timer = setInterval(() => {
           6000,
         );
       const sdk = (
-        mode: "diagnostic" | "read" | "click" | "reveal" | "reopen" | "dock-read" | "quit-hint",
+        mode:
+          | "diagnostic"
+          | "read"
+          | "click"
+          | "reveal"
+          | "dock-read"
+          | "quit-hint"
+          | "dock-click"
+          | "bundle-census"
+          | "bundle-cleanup",
         value?: string,
       ) =>
         runBoundedCommand(
@@ -228,6 +388,46 @@ const timer = setInterval(() => {
           process.env,
           6000,
         );
+      let ownerBirth:
+        | { readonly seconds: number; readonly microseconds: number; readonly executable: string }
+        | undefined;
+      const ownedBundleCleanup = async () => {
+        retainOwnedFilesForWatchdog = true;
+        const raw = await sdk("bundle-cleanup");
+        await writeFile(join(artifacts, `${phase}-exact-bundle-cleanup.json`), raw);
+        const decoded: unknown = JSON.parse(raw);
+        if (
+          typeof decoded !== "object" ||
+          decoded === null ||
+          !("cleanupObservation" in decoded) ||
+          typeof decoded.cleanupObservation !== "object" ||
+          decoded.cleanupObservation === null
+        )
+          throw Error("Exact task bundle cleanup did not return an ownership receipt.");
+        const result = decoded.cleanupObservation;
+        if (
+          !("status" in result) ||
+          result.status !== "absent" ||
+          !("censusComplete" in result) ||
+          result.censusComplete !== true ||
+          !("remainingOwned" in result) ||
+          !Array.isArray(result.remainingOwned) ||
+          result.remainingOwned.length !== 0
+        )
+          throw Error(
+            "Exact task bundle kernel census could not confirm all owned processes exited.",
+          );
+        if (!("initialOwned" in result) || !Array.isArray(result.initialOwned))
+          throw Error("Exact task bundle cleanup did not describe its initial ownership.");
+        watchdog.kill("SIGTERM");
+        if (!(await exited(watchdog, 6000)) || watchdog.exitCode !== 0)
+          throw Error("Owned exact-bundle cleanup watchdog did not join successfully.");
+        retainOwnedFilesForWatchdog = false;
+        if (result.initialOwned.length !== 0)
+          throw Error(
+            "Unexpected task bundle process existed outside normal joined cleanup; its cleanup receipt is retained.",
+          );
+      };
       let clickSequence = 0;
       let revealSequence = 0;
       const native = async (operation: string, value = ""): Promise<string> => {
@@ -236,15 +436,23 @@ const timer = setInterval(() => {
           operation !== "count" &&
           operation !== "click" &&
           operation !== "reveal" &&
-          operation !== "reopen"
+          operation !== "dock-click"
         )
           return systemEvents(operation, value);
         if (operation === "click" || operation === "reveal") await systemEvents("focus");
+        if (operation === "dock-click" && ownerBirth === undefined)
+          throw Error("No pinned original kernel process birth is available for Dock input.");
         const raw = await sdk(
-          operation === "click" || operation === "reveal" || operation === "reopen"
-            ? operation
-            : "read",
-          operation === "click" || operation === "reveal" ? value : undefined,
+          operation === "dock-click"
+            ? "dock-click"
+            : operation === "click" || operation === "reveal"
+              ? operation
+              : "read",
+          operation === "dock-click" && ownerBirth !== undefined
+            ? `${ownerBirth.seconds}:${ownerBirth.microseconds}`
+            : operation === "click" || operation === "reveal"
+              ? value
+              : undefined,
         );
         await writeFile(
           join(
@@ -271,6 +479,34 @@ const timer = setInterval(() => {
           decoded.axWindowCount < 0
         )
           throw Error("Native SDK refused the captured window identity or read.");
+        const identity = decoded.ownerKernelIdentity;
+        if (
+          !record(identity) ||
+          identity.pid !== pid ||
+          identity.underExactStagedBundle !== true ||
+          typeof identity.birthSeconds !== "number" ||
+          !Number.isSafeInteger(identity.birthSeconds) ||
+          identity.birthSeconds <= 0 ||
+          typeof identity.birthMicroseconds !== "number" ||
+          !Number.isSafeInteger(identity.birthMicroseconds) ||
+          identity.birthMicroseconds < 0 ||
+          identity.birthMicroseconds >= 1_000_000 ||
+          typeof identity.kernelCanonicalExecutable !== "string" ||
+          !identity.kernelCanonicalExecutable.endsWith("/Contents/MacOS/Octant")
+        )
+          throw Error("Native SDK did not prove the owned kernel process identity.");
+        if (ownerBirth === undefined)
+          ownerBirth = {
+            seconds: identity.birthSeconds,
+            microseconds: identity.birthMicroseconds,
+            executable: identity.kernelCanonicalExecutable,
+          };
+        else if (
+          ownerBirth.seconds !== identity.birthSeconds ||
+          ownerBirth.microseconds !== identity.birthMicroseconds ||
+          ownerBirth.executable !== identity.kernelCanonicalExecutable
+        )
+          throw Error("Native SDK original process birth or executable changed.");
         if (operation === "count") return String(decoded.axWindowCount);
         if (
           decoded.treeTruncated !== false ||
@@ -278,17 +514,16 @@ const timer = setInterval(() => {
           !Array.isArray(decoded.interactiveControls)
         )
           throw Error("Native SDK control tree is incomplete.");
-        if (operation === "reopen") {
+        if (operation === "dock-click") {
           if (
-            !record(decoded.action) ||
-            decoded.action.status !== "acknowledged" ||
-            decoded.action.method !== "PID-targeted-reopen" ||
-            decoded.action.targetPid !== pid ||
-            decoded.action.permissionStatus !== 0 ||
-            decoded.action.nativeError !== 0
+            !record(decoded.dockObservation) ||
+            decoded.dockObservation.status !== "dispatched" ||
+            decoded.dockObservation.interactionDispatched !== true
           )
-            throw Error("Native reopen was refused or uncertain. It is never retried.");
-          return "acknowledged";
+            throw Error(
+              "Fresh Dock-specific actionability guards refused input. No action is retried.",
+            );
+          return "dispatched";
         }
         if (operation === "reveal") {
           if (
@@ -509,9 +744,37 @@ end run`;
               "Bounded read-only Dock observation unavailable; no interaction attempted.",
             );
           }
-          // The separate reopen fixture was refused by the non-prompting
-          // permission preflight (-1744). Do not retry or substitute an action.
-          // Continue only the independent Quit/restart criteria below.
+          const censusRaw = await sdk("bundle-census");
+          await writeFile(join(artifacts, "initial-before-dock-kernel-census.json"), censusRaw);
+          const census: unknown = JSON.parse(censusRaw);
+          if (
+            typeof census !== "object" ||
+            census === null ||
+            !("cleanupObservation" in census) ||
+            typeof census.cleanupObservation !== "object" ||
+            census.cleanupObservation === null ||
+            !("censusComplete" in census.cleanupObservation) ||
+            census.cleanupObservation.censusComplete !== true ||
+            !("initialOwned" in census.cleanupObservation) ||
+            !Array.isArray(census.cleanupObservation.initialOwned) ||
+            census.cleanupObservation.initialOwned.length === 0 ||
+            census.cleanupObservation.initialOwned.some(
+              (item: unknown) =>
+                typeof item !== "object" ||
+                item === null ||
+                !("groupPid" in item) ||
+                item.groupPid !== pid,
+            )
+          )
+            throw Error(
+              "Pre-Dock exact bundle census found unknown or outside-group task ownership.",
+            );
+          await native("dock-click");
+          await wait("dock-reopened", (s) => s.includes("AXButton |  | Settings |"));
+          snapshot = await settings();
+          await recordPersisted("initial-reopened", true);
+          await capture("reopened", snapshot);
+          checks.push("same-original-kernel-process-window-reopened-and-opt-in-persisted");
         } else {
           await native("click", preference);
           await recordPersisted("restart-after-opt-out", false);
@@ -521,13 +784,13 @@ end run`;
         }
         // The normal visible-window shortcut asks for a second press. With no
         // window, the first press quits directly because no hint can be shown.
-        if (phase === "restart") {
+        {
           const confirmationDeadline = Date.now() + 1100;
           await native("key", "q");
           let observed = false;
           while (Date.now() < confirmationDeadline - 300 && !controller.signal.aborted) {
             const raw = await sdk("quit-hint");
-            await writeFile(join(artifacts, "restart-quit-confirmation.json"), raw);
+            await writeFile(join(artifacts, `${phase}-quit-confirmation.json`), raw);
             const hint: unknown = JSON.parse(raw);
             if (
               typeof hint === "object" &&
@@ -553,8 +816,8 @@ end run`;
               "Normal native Quit confirmation was not observed within its bound; no second press sent.",
             );
           await native("key", "q");
-          checks.push("normal-visible-window-quit-hint-observed-before-confirmation");
-        } else await native("key", "q");
+          checks.push(`${phase}-normal-visible-window-quit-hint-observed-before-confirmation`);
+        }
         if (!(await exited(app.child, 8000)))
           throw Error("Explicit native Quit did not exit the host.");
         checks.push(`${phase}-explicit-quit-exited`);
@@ -565,42 +828,50 @@ end run`;
             redactHostRuntimeText(app.outputTail()),
           );
         } finally {
-          await cleanupPackagedProcess({
-            child: app.child,
-            requestQuit: () =>
-              runBoundedCommand(
-                "/usr/bin/osascript",
-                ["-e", createQuitAppleScript(bundle)],
-                process.env,
-                3000,
-              ).then(() => undefined),
-            waitForExit: (_child, bound) => exited(app.child, bound),
-            signalGroup: (group, signal) => {
-              if (group !== pid) throw Error("Unowned process group.");
-              try {
-                process.kill(-group, signal);
-              } catch (e) {
-                if (!(typeof e === "object" && e !== null && "code" in e && e.code === "ESRCH"))
-                  throw e;
-              }
-            },
-            waitForServerCleanup: () =>
-              waitForProcessCleanup(
-                async () => {
-                  const response = await fetch(`http://127.0.0.1:${port}/health`, {
-                    signal: AbortSignal.timeout(300),
-                  }).catch(() => undefined);
-                  if (response !== undefined) throw Error("Owned host listener remains.");
-                },
-                { timeoutMs: 3000 },
-              ),
-            assertNoProcesses: async () => {
-              if (groupProcesses(pid).length !== 0 || !(await exited(watchdog, 2000)))
-                throw Error("Owned app/watchdog cleanup incomplete.");
-            },
-            gracefulTimeoutMs: 3000,
-            forceTimeoutMs: 2000,
-          });
+          try {
+            await cleanupPackagedProcess({
+              child: app.child,
+              requestQuit: () =>
+                runBoundedCommand(
+                  "/usr/bin/osascript",
+                  ["-e", createQuitAppleScript(bundle)],
+                  process.env,
+                  3000,
+                ).then(() => undefined),
+              waitForExit: (_child, bound) => exited(app.child, bound),
+              signalGroup: (group, signal) => {
+                if (group !== pid) throw Error("Unowned process group.");
+                try {
+                  process.kill(-group, signal);
+                } catch (e) {
+                  if (!(typeof e === "object" && e !== null && "code" in e && e.code === "ESRCH"))
+                    throw e;
+                }
+              },
+              waitForServerCleanup: () =>
+                waitForProcessCleanup(
+                  async () => {
+                    const response = await fetch(`http://127.0.0.1:${port}/health`, {
+                      signal: AbortSignal.timeout(300),
+                    }).catch(() => undefined);
+                    if (response !== undefined) throw Error("Owned host listener remains.");
+                  },
+                  { timeoutMs: 3000 },
+                ),
+              assertNoProcesses: async () => {
+                if (groupProcesses(pid).length !== 0)
+                  throw Error("Owned app process-group cleanup incomplete.");
+              },
+              gracefulTimeoutMs: 3000,
+              forceTimeoutMs: 2000,
+            });
+          } finally {
+            try {
+              await ownedBundleCleanup();
+            } finally {
+              watchdog.stdin?.destroy();
+            }
+          }
         }
       }
     }
@@ -616,12 +887,12 @@ end run`;
             "rendered screenshots with read-only preference journal corroboration",
           nativeAxCheckedState: "unavailable-empty-CFString",
           stateChecks: "pending independent visual review",
-          requiredCriteriaComplete: false,
+          windowLifecycleCriteriaComplete: true,
           lastWindowReopen: {
-            status: "incomplete",
-            reason: "prior owned fixture's non-prompting permission preflight refused",
-            nativePermissionStatus: -1744,
-            newAttempt: false,
+            status: "same-original-kernel-process-window-reopened",
+            method: "single guarded native Dock click",
+            previousAppleEventRefusal: -1744,
+            appleEventRetried: false,
           },
           visualStateImages,
           persistedReadings,
@@ -635,16 +906,15 @@ end run`;
         2,
       ),
     );
-    throw Error(
-      "Native lifecycle remains incomplete: last-window reopen was not exercised; prior permission refusal -1744 retained.",
-    );
   } finally {
     clearTimeout(lifetime);
     process.removeListener("SIGTERM", interrupted);
     process.removeListener("SIGINT", interrupted);
-    await rm(root, { recursive: true, force: true });
-    if (bundle.startsWith(join(tmpdir(), "octant-packaged-app.")))
-      await rm(dirname(bundle), { recursive: true, force: true });
+    if (!retainOwnedFilesForWatchdog) {
+      await rm(root, { recursive: true, force: true });
+      if (bundle.startsWith(join(tmpdir(), "octant-packaged-app.")))
+        await rm(dirname(bundle), { recursive: true, force: true });
+    }
   }
 }
 

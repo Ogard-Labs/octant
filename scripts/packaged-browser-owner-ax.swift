@@ -4,34 +4,87 @@ import Foundation
 import Darwin
 
 // Owned-runner native UI QA. Never requests a TCC permission or reads text-field
-// values, credentials, or another app's tree. Only one named switch has a value.
+// values or credentials. Dock reads retain only the exact staged bundle icon.
 guard (3...5).contains(CommandLine.arguments.count),
       let processId = Int32(CommandLine.arguments[1]), processId > 1 else {
     exit(2)
 }
 let mode = CommandLine.arguments.count >= 4 ? CommandLine.arguments[3] : "diagnostic"
 let requestedTitle = CommandLine.arguments.count == 5 ? CommandLine.arguments[4] : ""
-guard ["diagnostic", "read", "press", "click", "reveal", "reopen", "dock-read", "quit-hint"].contains(mode),
-      (mode == "press" || mode == "click" || mode == "reveal") == !requestedTitle.isEmpty,
+guard ["diagnostic", "read", "click", "reveal", "dock-read", "quit-hint", "dock-click", "bundle-census", "bundle-cleanup"].contains(mode),
+      (mode == "click" || mode == "reveal" || mode == "dock-click") == !requestedTitle.isEmpty,
       requestedTitle.count <= 256 else { exit(2) }
 let preferenceTitle = "Keep Browser available without windows"
 // Leave time for the matching mouse-up before the owned six-second command bound.
 let dispatchDeadline = Date().addingTimeInterval(4)
 let expectedBundle = URL(fileURLWithPath: CommandLine.arguments[2]).resolvingSymlinksInPath().standardizedFileURL.path
-let application = NSRunningApplication(processIdentifier: processId)
+let bundleURL = URL(fileURLWithPath: expectedBundle)
+let staging = bundleURL.deletingLastPathComponent()
+let temporary = URL(fileURLWithPath: NSTemporaryDirectory()).resolvingSymlinksInPath().standardizedFileURL.path
+let isTaskStagedBundle = bundleURL.lastPathComponent == "Octant.app" &&
+    staging.lastPathComponent.hasPrefix("octant-packaged-app.") && staging.deletingLastPathComponent().path == temporary
+struct KernelIdentity: Equatable {
+    let pid: pid_t
+    let parentPid: UInt32
+    let groupPid: UInt32
+    let birthSeconds: UInt64
+    let birthMicroseconds: UInt64
+    let executable: String
+    var evidence: [String: Any] { ["pid": pid, "parentPid": parentPid, "groupPid": groupPid,
+        "birthSeconds": birthSeconds, "birthMicroseconds": birthMicroseconds,
+        "kernelCanonicalExecutable": executable,
+        "underExactStagedBundle": executable.hasPrefix(expectedBundle + "/")] }
+}
+func kernelIdentity(_ pid: pid_t) -> KernelIdentity? {
+    guard pid > 1 else { return nil }
+    var before = proc_bsdinfo(), after = proc_bsdinfo()
+    var path = [CChar](repeating: 0, count: 4 * Int(PATH_MAX))
+    let size = Int32(MemoryLayout<proc_bsdinfo>.size)
+    let first = proc_pidinfo(pid, PROC_PIDTBSDINFO, 0, &before, size)
+    let pathRead = proc_pidpath(pid, &path, UInt32(path.count))
+    let second = proc_pidinfo(pid, PROC_PIDTBSDINFO, 0, &after, size)
+    guard first == size, second == size, pathRead > 0,
+          before.pbi_pid == UInt32(pid), after.pbi_pid == UInt32(pid),
+          before.pbi_uid == geteuid(), after.pbi_uid == geteuid(),
+          before.pbi_pgid == after.pbi_pgid,
+          before.pbi_start_tvsec == after.pbi_start_tvsec,
+          before.pbi_start_tvusec == after.pbi_start_tvusec else { return nil }
+    return KernelIdentity(pid: pid, parentPid: before.pbi_ppid, groupPid: before.pbi_pgid,
+        birthSeconds: before.pbi_start_tvsec, birthMicroseconds: before.pbi_start_tvusec,
+        executable: URL(fileURLWithPath: String(cString: path)).resolvingSymlinksInPath().standardizedFileURL.path)
+}
+func bundleCensus(_ deadline: Date) -> (complete: Bool, owned: [KernelIdentity]) {
+    var pids = [pid_t](repeating: 0, count: 4096)
+    // proc_listpids returns bytes, unlike proc_listpgrppids' PID count.
+    let bytes = proc_listpids(UInt32(PROC_UID_ONLY), geteuid(), &pids, Int32(pids.count * MemoryLayout<pid_t>.stride))
+    let count = max(0, Int(bytes) / MemoryLayout<pid_t>.stride)
+    var complete = bytes > 0 && count < pids.count
+    var owned: [KernelIdentity] = []
+    for pid in pids.prefix(min(count, pids.count)) where pid > 1 {
+        if Date() >= deadline { complete = false; break }
+        if let identity = kernelIdentity(pid) {
+            if identity.executable.hasPrefix(expectedBundle + "/") { owned.append(identity) }
+        } else if kill(pid, 0) == 0 || errno != ESRCH { complete = false }
+    }
+    return (complete, owned)
+}
+let initialKernelIdentity = kernelIdentity(processId)
+let kernelOnly = mode == "bundle-census" || mode == "bundle-cleanup"
+let application = kernelOnly ? nil : NSRunningApplication(processIdentifier: processId)
 let capturedBundle = application?.bundleURL?.resolvingSymlinksInPath().standardizedFileURL.path
 let treeIdentityMatched = capturedBundle == expectedBundle && application?.isTerminated == false
-let matchingApplications = NSWorkspace.shared.runningApplications.filter {
+let matchingApplications = (kernelOnly ? [] : NSWorkspace.shared.runningApplications).filter {
     $0.bundleURL?.resolvingSymlinksInPath().standardizedFileURL.path == expectedBundle
 }
 let matchingIds = Set(matchingApplications.map { $0.processIdentifier })
-let element = AXUIElementCreateApplication(processId)
+let element = kernelOnly ? nil : AXUIElementCreateApplication(processId)
 var attributes: CFArray?
-let attributeResult = AXUIElementCopyAttributeNames(element, &attributes)
+let attributeResult = element.map { AXUIElementCopyAttributeNames($0, &attributes) } ?? AXError.attributeUnsupported
 var role: CFTypeRef?
-let roleResult = AXUIElementCopyAttributeValue(element, kAXRoleAttribute as CFString, &role)
+let roleResult = element.map { AXUIElementCopyAttributeValue($0, kAXRoleAttribute as CFString, &role) } ?? AXError.attributeUnsupported
 var attributeSets: [[String: Any]] = []
 for name in mode == "diagnostic" ? ["AXManualAccessibility", "AXEnhancedUserInterface"] : [] {
+    guard let element else { continue }
     let result = AXUIElementSetAttributeValue(element, name as CFString, kCFBooleanTrue)
     var value: CFTypeRef?
     let read = AXUIElementCopyAttributeValue(element, name as CFString, &value)
@@ -43,7 +96,7 @@ for name in mode == "diagnostic" ? ["AXManualAccessibility", "AXEnhancedUserInte
     ])
 }
 var windows: CFTypeRef?
-let windowResult = AXUIElementCopyAttributeValue(element, kAXWindowsAttribute as CFString, &windows)
+let windowResult = element.map { AXUIElementCopyAttributeValue($0, kAXWindowsAttribute as CFString, &windows) } ?? AXError.attributeUnsupported
 // Read named controls, never text-field values or static page text. The owned
 // process has already been identified above; this is not a system-wide tree.
 let controlRoles = Set(["AXButton", "AXCheckBox", "AXSwitch", "AXRadioButton", "AXPopUpButton", "AXMenuButton", "AXTextField", "AXTextArea"])
@@ -172,7 +225,7 @@ while next < pending.count, next < 512, Date() < treeDeadline {
             }
         }
         controls.append(control)
-        if (mode == "press" || mode == "click" || mode == "reveal") && (title == requestedTitle || description == requestedTitle) { pressTargets.append(node) }
+        if (mode == "click" || mode == "reveal") && (title == requestedTitle || description == requestedTitle) { pressTargets.append(node) }
     }
     if depth >= 40 { depthLimited = true; continue }
     var childrenValue: CFTypeRef?
@@ -186,7 +239,7 @@ while next < pending.count, next < 512, Date() < treeDeadline {
         nativeReadErrors.insert(childrenRead.rawValue)
     }
 }
-let nativeWindows = CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID) as? [[String: Any]]
+let nativeWindows = kernelOnly ? nil : CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID) as? [[String: Any]]
 let candidateWindows = (nativeWindows ?? []).compactMap { row -> [String: Any]? in
     guard let owner = row[kCGWindowOwnerPID as String] as? NSNumber else { return nil }
     let name = row[kCGWindowOwnerName as String] as? String ?? ""
@@ -198,8 +251,8 @@ let candidateWindows = (nativeWindows ?? []).compactMap { row -> [String: Any]? 
 }
 let truncated = depthLimited || labelsLimited || next < pending.count || pending.count >= 512
 var action: [String: Any] = ["status": "not-requested"]
-if mode == "press" || mode == "click" || mode == "reveal" {
-    action = ["status": "refused", "method": mode == "click" ? "native-click" : (mode == "reveal" ? "AXScrollToVisible" : "AXPress"), "matches": pressTargets.count, "requestedTitle": requestedTitle]
+if mode == "click" || mode == "reveal" {
+    action = ["status": "refused", "method": mode == "click" ? "native-click" : "AXScrollToVisible", "matches": pressTargets.count, "requestedTitle": requestedTitle]
     let live = NSRunningApplication(processIdentifier: processId)
     if treeIdentityMatched, !truncated, readErrors == 0, pressTargets.count == 1,
        live?.isTerminated == false,
@@ -232,11 +285,6 @@ if mode == "press" || mode == "click" || mode == "reveal" {
                Date() < dispatchDeadline {
                 let result = AXUIElementPerformAction(target, "AXScrollToVisible" as CFString)
                 action["status"] = result == .success ? "acknowledged" : "uncertain"
-                action["nativeError"] = result.rawValue
-            }
-            if mode == "press" && enabledRead == .success && binary(enabledValue) == true {
-                let result = AXUIElementPerformAction(target, kAXPressAction as CFString)
-                action["status"] = result == .success ? "pressed" : "uncertain"
                 action["nativeError"] = result.rawValue
             }
             if mode == "click", enabledRead == .success, binary(enabledValue) == true,
@@ -295,38 +343,9 @@ if mode == "press" || mode == "click" || mode == "reveal" {
         } else { action["identityReadError"] = targetIdentityRead.rawValue }
     }
 }
-if mode == "reopen" {
-    action = ["status": "refused", "method": "PID-targeted-reopen", "targetPid": processId]
-    let live = NSRunningApplication(processIdentifier: processId)
-    if treeIdentityMatched, live?.isTerminated == false,
-       live?.bundleURL?.resolvingSymlinksInPath().standardizedFileURL.path == expectedBundle,
-       Date() < dispatchDeadline {
-        // The standard Dock/Finder reopen event targets the existing PID, never
-        // LaunchServices or a bundle name that could start a second instance.
-        let target = NSAppleEventDescriptor(processIdentifier: processId)
-        let permission = AEDeterminePermissionToAutomateTarget(target.aeDesc,
-            AEEventClass(kCoreEventClass), AEEventID(kAEReopenApplication), false)
-        action["permissionStatus"] = permission
-        if permission == noErr {
-            let event = NSAppleEventDescriptor(eventClass: AEEventClass(kCoreEventClass),
-                eventID: AEEventID(kAEReopenApplication), targetDescriptor: target,
-                returnID: AEReturnID(kAutoGenerateReturnID), transactionID: AETransactionID(kAnyTransactionID))
-            do {
-                let reply = try event.sendEvent(options: [.waitForReply, .neverInteract], timeout: 2)
-                let replyError = reply.paramDescriptor(forKeyword: AEKeyword(keyErrorNumber))?.int32Value ?? 0
-                action["nativeError"] = replyError
-                action["status"] = replyError == 0 ? "acknowledged" : "uncertain"
-            } catch let error as NSError {
-                action["status"] = "uncertain"
-                action["nativeError"] = error.code
-                action["nativeErrorDomain"] = error.domain
-            }
-        }
-    }
-}
 var dockObservation: [String: Any] = ["status": "not-requested"]
-if mode == "dock-read" {
-    dockObservation = ["status": "read-only", "interactionDispatched": false]
+if (mode == "dock-read" || mode == "dock-click") && isTaskStagedBundle {
+    dockObservation = ["status": mode == "dock-click" ? "refused" : "read-only", "interactionDispatched": false]
     let docks = NSWorkspace.shared.runningApplications.filter {
         $0.bundleIdentifier == "com.apple.dock" && $0.isTerminated == false &&
         $0.bundleURL?.resolvingSymlinksInPath().standardizedFileURL.path == "/System/Library/CoreServices/Dock.app"
@@ -336,24 +355,9 @@ if mode == "dock-read" {
     if treeIdentityMatched, matchingIds == [processId], docks.count == 1, let dock = docks.first {
         var groupPids = [pid_t](repeating: 0, count: 128)
         let groupCount = proc_listpgrppids(processId, &groupPids, Int32(groupPids.count * MemoryLayout<pid_t>.stride))
-        var inventory: [[String: Any]] = []
-        for member in groupPids.prefix(max(0, min(Int(groupCount), 128))) where member > 1 {
-            var before = proc_bsdinfo(), after = proc_bsdinfo()
-            var path = [CChar](repeating: 0, count: 4 * Int(PATH_MAX))
-            let size = Int32(MemoryLayout<proc_bsdinfo>.size)
-            let first = proc_pidinfo(member, PROC_PIDTBSDINFO, 0, &before, size)
-            let pathRead = proc_pidpath(member, &path, UInt32(path.count))
-            let second = proc_pidinfo(member, PROC_PIDTBSDINFO, 0, &after, size)
-            if first == size, second == size, pathRead > 0,
-               before.pbi_pid == UInt32(member), after.pbi_pid == UInt32(member),
-               before.pbi_pgid == UInt32(processId), after.pbi_pgid == UInt32(processId),
-               before.pbi_start_tvsec == after.pbi_start_tvsec, before.pbi_start_tvusec == after.pbi_start_tvusec {
-                let executable = URL(fileURLWithPath: String(cString: path)).resolvingSymlinksInPath().standardizedFileURL.path
-                inventory.append(["pid": member, "parentPid": before.pbi_ppid, "groupPid": before.pbi_pgid,
-                    "birthSeconds": before.pbi_start_tvsec, "birthMicroseconds": before.pbi_start_tvusec,
-                    "kernelCanonicalExecutable": executable,
-                    "underExactStagedBundle": executable.hasPrefix(expectedBundle + "/")])
-            }
+        let inventory = groupPids.prefix(max(0, min(Int(groupCount), 128))).compactMap { member -> [String: Any]? in
+            guard let identity = kernelIdentity(member), identity.groupPid == UInt32(processId) else { return nil }
+            return identity.evidence
         }
         dockObservation["ownedGroupKernelInventory"] = inventory
         dockObservation["ownedGroupKernelInventoryTruncated"] = groupCount >= 128
@@ -398,9 +402,25 @@ if mode == "dock-read" {
             // identity, label, URL or values are retained, and no action is sent.
             if iconPid == dock.processIdentifier, let frame = bounds(icon) {
                 dockObservation["iconBounds"] = rectangle(frame)
-                var enabled: CFTypeRef?
-                dockObservation["iconEnabledReadError"] = AXUIElementCopyAttributeValue(icon, kAXEnabledAttribute as CFString, &enabled).rawValue
+                var enabled: CFTypeRef?, running: CFTypeRef?, iconRoleValue: CFTypeRef?, iconSubroleValue: CFTypeRef?, names: CFArray?
+                let enabledRead = AXUIElementCopyAttributeValue(icon, kAXEnabledAttribute as CFString, &enabled)
+                let runningRead = AXUIElementCopyAttributeValue(icon, kAXIsApplicationRunningAttribute as CFString, &running)
+                let iconRoleRead = AXUIElementCopyAttributeValue(icon, kAXRoleAttribute as CFString, &iconRoleValue)
+                let iconSubroleRead = AXUIElementCopyAttributeValue(icon, kAXSubroleAttribute as CFString, &iconSubroleValue)
+                let namesRead = AXUIElementCopyActionNames(icon, &names)
+                let namesList = names as? [String] ?? []
+                let namesComplete = namesList.count <= 32 && namesList.allSatisfy { $0.count <= 256 }
+                dockObservation["iconEnabledReadError"] = enabledRead.rawValue
                 dockObservation["iconEnabled"] = binary(enabled).map { $0 as Any } ?? NSNull()
+                dockObservation["iconRunningReadError"] = runningRead.rawValue
+                dockObservation["iconRunning"] = binary(running).map { $0 as Any } ?? NSNull()
+                dockObservation["iconRoleReadError"] = iconRoleRead.rawValue
+                dockObservation["iconRole"] = iconRoleValue as? String ?? "unavailable"
+                dockObservation["iconSubroleReadError"] = iconSubroleRead.rawValue
+                dockObservation["iconSubrole"] = iconSubroleValue as? String ?? "unavailable"
+                dockObservation["iconActionsReadError"] = namesRead.rawValue
+                dockObservation["iconActions"] = namesList.prefix(32).map { String($0.prefix(256)) }
+                dockObservation["iconActionsTruncated"] = !namesComplete
                 let center = CGPoint(x: frame.midX, y: frame.midY)
                 dockObservation["centerOnScreen"] = CGDisplayBounds(CGMainDisplayID()).contains(center)
                 var hit: AXUIElement?
@@ -426,20 +446,86 @@ if mode == "dock-read" {
                 dockObservation["pointWindowOwnerPid"] = (top?[kCGWindowOwnerPID as String] as? NSNumber)?.int32Value ?? 0
                 dockObservation["pointWindowLayer"] = top?[kCGWindowLayer as String] ?? NSNull()
                 dockObservation["postEventAccess"] = CGPreflightPostEventAccess()
+                let birthParts = requestedTitle.split(separator: ":", omittingEmptySubsequences: false)
+                let expectedBirth = birthParts.compactMap { UInt64($0) }
+                let enabledPermitsDock = (enabledRead == .success && binary(enabled) == true) || enabledRead == .noValue
+                let currentMatches = NSWorkspace.shared.runningApplications.filter {
+                    $0.bundleURL?.resolvingSymlinksInPath().standardizedFileURL.path == expectedBundle && !$0.isTerminated
+                }
+                if mode == "dock-click", birthParts.count == 2, expectedBirth.count == 2,
+                   windowResult == .success, (windows as? NSArray)?.count == 0,
+                   let original = initialKernelIdentity, original.pid == processId,
+                   original.birthSeconds == expectedBirth[0], original.birthMicroseconds == expectedBirth[1],
+                   original.executable == expectedBundle + "/Contents/MacOS/Octant",
+                   currentMatches.count == 1, currentMatches.first?.processIdentifier == processId,
+                   iconRoleRead == .success, (iconRoleValue as? String) == (kAXDockItemRole as String),
+                   iconSubroleRead == .success, (iconSubroleValue as? String) == (kAXApplicationDockItemSubrole as String),
+                   enabledPermitsDock, runningRead == .success, binary(running) == true,
+                   namesRead == .success, namesComplete, namesList.contains(kAXPressAction as String),
+                   frame.width >= 12, frame.height >= 12, CGDisplayBounds(CGMainDisplayID()).contains(frame),
+                   hitRead == .success, hitPid == dock.processIdentifier, belongs,
+                   (top?[kCGWindowOwnerPID as String] as? NSNumber)?.int32Value == dock.processIdentifier,
+                   (top?[kCGWindowLayer as String] as? NSNumber)?.intValue == 20,
+                   CGPreflightPostEventAccess(), Date() < dispatchDeadline,
+                   kernelIdentity(processId) == original,
+                   let down = CGEvent(mouseEventSource: nil, mouseType: .leftMouseDown, mouseCursorPosition: center, mouseButton: .left),
+                   let up = CGEvent(mouseEventSource: nil, mouseType: .leftMouseUp, mouseCursorPosition: center, mouseButton: .left) {
+                    down.setIntegerValueField(.mouseEventClickState, value: 1)
+                    up.setIntegerValueField(.mouseEventClickState, value: 1)
+                    down.post(tap: .cghidEventTap)
+                    usleep(50_000)
+                    up.post(tap: .cghidEventTap)
+                    dockObservation["status"] = "dispatched"
+                    dockObservation["interactionDispatched"] = true
+                    dockObservation["ownerKernelIdentity"] = original.evidence
+                }
             }
         }
     }
 }
+var cleanupObservation: [String: Any] = ["status": "not-requested"]
+if mode == "bundle-census" || mode == "bundle-cleanup" {
+    if isTaskStagedBundle {
+        let deadline = Date().addingTimeInterval(2.5)
+        let graceful = Date().addingTimeInterval(1)
+        var sent = Set<String>(), stopErrors = 0
+        var census = bundleCensus(deadline)
+        let initial = census.owned.map { $0.evidence }
+        while mode == "bundle-cleanup", (!census.complete || !census.owned.isEmpty), Date() < deadline {
+            let signal = Date() < graceful ? SIGTERM : SIGKILL
+            for identity in census.owned {
+                let key = "\(identity.pid):\(identity.birthSeconds):\(identity.birthMicroseconds):\(signal)"
+                if sent.contains(key) { continue }
+                // Revalidate kernel birth and exact canonical executable immediately
+                // before each signal. Never signal Dock or a process by app name.
+                guard let current = kernelIdentity(identity.pid), current == identity,
+                      current.executable.hasPrefix(expectedBundle + "/") else { continue }
+                sent.insert(key)
+                if kill(identity.pid, signal) != 0 && errno != ESRCH { stopErrors += 1 }
+            }
+            usleep(50_000)
+            census = bundleCensus(deadline)
+        }
+        let status = census.complete && census.owned.isEmpty && stopErrors == 0 ? "absent" :
+            (mode == "bundle-census" && census.complete ? "owned-present" : "incomplete")
+        cleanupObservation = ["status": status,
+            "censusComplete": census.complete, "initialOwned": initial,
+            "remainingOwned": census.owned.map { $0.evidence }, "signalCount": sent.count, "stopErrors": stopErrors,
+            "readOnly": mode == "bundle-census"]
+    } else { cleanupObservation = ["status": "refused-invalid-task-staging-root"] }
+}
 let evidence: [String: Any] = [
     "capturedPid": processId,
+    "ownerKernelIdentity": initialKernelIdentity?.evidence ?? [:],
+    "cleanupObservation": cleanupObservation,
     "diagnosticPid": ProcessInfo.processInfo.processIdentifier,
     "expectedStagedBundle": expectedBundle,
     "capturedExecutable": application?.executableURL?.path ?? "unavailable",
     "capturedBundle": capturedBundle ?? "unavailable",
     "stagedBundleMatches": matchingApplications.map { ["pid": $0.processIdentifier, "executable": $0.executableURL?.path ?? "unavailable"] },
-    "nativeAxTrusted": AXIsProcessTrusted(),
+    "nativeAxTrusted": kernelOnly ? (NSNull() as Any) : AXIsProcessTrusted(),
     "ownerAppActive": application?.isActive ?? false,
-    "frontmostPid": NSWorkspace.shared.frontmostApplication?.processIdentifier ?? 0,
+    "frontmostPid": kernelOnly ? (NSNull() as Any) : (NSWorkspace.shared.frontmostApplication?.processIdentifier ?? 0),
     "attributeNamesError": attributeResult.rawValue,
     "attributeNames": attributes as? [String] ?? [],
     "roleError": roleResult.rawValue, "role": role as? String ?? "unavailable",
