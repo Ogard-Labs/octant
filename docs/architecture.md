@@ -6119,6 +6119,15 @@ reason, never a guessed score. The judge thread is archived when it settles
 (again at host start) and purged with the run, found by its fixed identity even
 when no event names it.
 
+Benchmark threads, contenders and judges alike, take no part in person memory.
+The runner sends its turns with no window, which person memory never serves, and
+the host also puts the Benchmarks Project on the memory settings' "Projects kept
+out" list before first creating it, so no memory block or past-threads tool is
+offered, nothing a benchmark prompt or answer says is learned, and a person who
+later takes the Project off that list is making that choice. The judge reads the
+candidate answer from the cell's archived thread, which stays readable (only a
+deleted thread is refused).
+
 The judge thread is a plain Chat turn. It selects no extension components, so
 Octant offers it no MCP or connector tools, and Chat has no shell or files. The
 provider's own tools that Chat leaves on for that provider (for example web

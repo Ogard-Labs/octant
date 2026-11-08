@@ -1208,6 +1208,7 @@ export function startOctantServer(
       roots,
       routeCodeService,
       chatService,
+      personMemory,
       persistence,
       projectService,
       threadPurge: benchmarkThreadPurge,

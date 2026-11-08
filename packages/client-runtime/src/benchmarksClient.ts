@@ -106,18 +106,16 @@ export function createBenchmarksClient(options: BenchmarksClientOptions): Benchm
   return {
     listSuites: () => call(BENCHMARK_ROUTE_PATHS.suitesList, {}, BenchmarkSuitesListResponse),
     saveSuite: (request) =>
-      call(BENCHMARK_ROUTE_PATHS.suitesSave, request, BenchmarkSuiteSaveResponse, SAVE_TIMEOUT_MS),
+      call("/api/benchmarks/suites/save", request, BenchmarkSuiteSaveResponse, SAVE_TIMEOUT_MS),
     deleteSuite: (request) =>
-      call(BENCHMARK_ROUTE_PATHS.suitesDelete, request, BenchmarkSuiteDeleteResponse),
+      call("/api/benchmarks/suites/delete", request, BenchmarkSuiteDeleteResponse),
     listRuns: (request) => call(BENCHMARK_ROUTE_PATHS.runsList, request, BenchmarkRunsListResponse),
     readRun: (request) => call(BENCHMARK_ROUTE_PATHS.runsRead, request, BenchmarkRunReadResponse),
     startRun: (request) =>
-      call(BENCHMARK_ROUTE_PATHS.runsStart, request, BenchmarkRunStartResponse, SAVE_TIMEOUT_MS),
+      call("/api/benchmarks/runs/start", request, BenchmarkRunStartResponse, SAVE_TIMEOUT_MS),
     cancelRun: (request) =>
-      call(BENCHMARK_ROUTE_PATHS.runsCancel, request, BenchmarkRunCancelResponse),
-    purgeRun: (request) =>
-      call(BENCHMARK_ROUTE_PATHS.runsPurge, request, BenchmarkRunPurgeResponse),
-    rateCell: (request) =>
-      call(BENCHMARK_ROUTE_PATHS.cellsRate, request, BenchmarkCellRateResponse),
+      call("/api/benchmarks/runs/cancel", request, BenchmarkRunCancelResponse),
+    purgeRun: (request) => call("/api/benchmarks/runs/purge", request, BenchmarkRunPurgeResponse),
+    rateCell: (request) => call("/api/benchmarks/cells/rate", request, BenchmarkCellRateResponse),
   };
 }

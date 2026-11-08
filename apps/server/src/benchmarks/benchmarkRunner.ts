@@ -202,7 +202,10 @@ export class BenchmarkRunner {
         if (this.#stopped) return;
         if (cell.state === "queued" || cell.state === "running") continue;
         await this.#archiveCell(run, cell);
-        if (run.judge !== undefined && cell.state === "answered") {
+        // A judge still owed (for instance waiting to retry for capacity) stays
+        // active: Chat refuses to retry on an archived thread.
+        const judgeSettled = run.status !== "running" || cell.judge !== undefined;
+        if (run.judge !== undefined && cell.state === "answered" && judgeSettled) {
           await this.#options.chat.archiveThread(
             benchmarkJudgeIdentity(String(cell.cellId)).threadId,
           );
@@ -314,9 +317,11 @@ export class BenchmarkRunner {
     const inFlight = new Set<string>();
     for (const cell of benchmarkCellsOwingJudgement(run)) {
       const cellId = String(cell.cellId);
+      // Only a turn that was counted as running frees a place when it settles.
+      const counted = this.#judgeInFlight(cellId);
       const outcome = await this.#reconcileJudge(run, cell);
       if (outcome === "running") inFlight.add(cellId);
-      if (outcome === "settled") {
+      if (outcome === "settled" && counted) {
         counts.byProvider.set(
           judgeProvider,
           Math.max(0, (counts.byProvider.get(judgeProvider) ?? 0) - 1),
@@ -957,6 +962,16 @@ export class BenchmarkRunner {
         await this.#options.chat.archiveThread(live.threadId);
       }
       this.#settle(current, live, "cancelled", "Cancelled by a person.");
+    }
+    // A judge turn in flight for an answered cell keeps spending unless it is stopped.
+    for (const cell of benchmarkCellsOwingJudgement(run)) {
+      const { threadId, submissionId } = benchmarkJudgeIdentity(String(cell.cellId));
+      const reading = this.#options.chat.readTurn(threadId, submissionId);
+      if (reading.status === "turn" && !turnEnded(reading.outcome)) {
+        await this.#options.chat.interruptTurn(threadId, reading.turnId);
+      }
+      await this.#options.chat.archiveThread(threadId);
+      this.#judgeSeen.delete(String(cell.cellId));
     }
     const latest = this.#options.projection.run(runId);
     if (latest !== undefined) {
