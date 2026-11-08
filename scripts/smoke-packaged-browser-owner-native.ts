@@ -385,19 +385,30 @@ end run`;
         name: string,
         predicate: (snapshot: string) => boolean,
         bound = 12_000,
+        settleMs = 0,
       ) => {
         const deadline = Date.now() + bound;
         let snapshot = "";
         let lastError = "";
+        let matchingSnapshot: string | undefined;
+        let matchingSince = 0;
         while (!controller.signal.aborted && Date.now() < deadline) {
           if (app.child.exitCode !== null || app.child.signalCode !== null)
             throw Error("Owned app exited during native inspection.");
           try {
             snapshot = await native("snapshot");
+            lastError = "";
+            if (predicate(snapshot)) {
+              if (settleMs === 0) return snapshot;
+              if (matchingSnapshot !== snapshot) {
+                matchingSnapshot = snapshot;
+                matchingSince = Date.now();
+              } else if (Date.now() - matchingSince >= settleMs) return snapshot;
+            } else matchingSnapshot = undefined;
           } catch (error) {
+            matchingSnapshot = undefined;
             lastError = error instanceof Error ? error.message.slice(-1200) : "Native read failed.";
           }
-          if (predicate(snapshot)) return snapshot;
           await pause(150);
         }
         await writeFile(join(artifacts, `${phase}-${name}-failed-ax.txt`), snapshot);
@@ -428,7 +439,12 @@ end run`;
         await wait("settings", (s) => s.includes("Data & storage"));
         await native("reveal", "Data & storage");
         await native("click", "Data & storage");
-        await wait("preference", (s) => s.includes(preference));
+        await wait(
+          "loaded-preference",
+          (s) => s.includes(preference) && s.includes("New account profile…"),
+          12_000,
+          500,
+        );
         await native("reveal", preference);
         // This method records rendered state for independent visual review.
         // An empty native AXValue never becomes a checked bit.
