@@ -3,7 +3,7 @@ param(
   [ValidateSet('octant', 'nightly-test-data')]
   [string]$Profile,
   [Parameter(Mandatory = $true)]
-  [ValidateSet('inspect', 'unsafe', 'restore', 'seal-data')]
+  [ValidateSet('inspect', 'unsafe', 'restore', 'prepare-data')]
   [string]$Mode
 )
 $ErrorActionPreference = 'Stop'
@@ -11,13 +11,32 @@ $octantRoot = Join-Path ([Environment]::GetFolderPath('LocalApplicationData')) "
 $octantNode = Get-Item -LiteralPath $octantRoot -Force
 if (-not $octantNode.PSIsContainer -or ($octantNode.Attributes -band [IO.FileAttributes]::ReparsePoint)) { throw 'Unsafe owned profile fixture' }
 $octantUser = [Security.Principal.WindowsIdentity]::GetCurrent().User
-if ($Mode -eq 'seal-data') {
-  $octantRoot = Join-Path $octantRoot 'data'
-  $octantNode = Get-Item -LiteralPath $octantRoot -Force
-  if (-not $octantNode.PSIsContainer -or ($octantNode.Attributes -band [IO.FileAttributes]::ReparsePoint)) { throw 'Unsafe owned replacement fixture' }
-}
 $octantAcl = [Security.AccessControl.DirectorySecurity]::new($octantRoot, [Security.AccessControl.AccessControlSections]::Access -bor [Security.AccessControl.AccessControlSections]::Owner)
 if ($octantAcl.GetOwner([Security.Principal.SecurityIdentifier]).Value -ne $octantUser.Value) { throw 'Profile fixture has another owner' }
+if ($Mode -eq 'prepare-data') {
+  $octantData = Join-Path $octantRoot 'data'
+  if (Test-Path -LiteralPath $octantData) { throw 'Owned replacement must be absent before creation' }
+  $octantPrivate = [Security.AccessControl.DirectorySecurity]::new()
+  $octantPrivate.SetOwner($octantUser)
+  $octantPrivate.SetAccessRuleProtection($true, $false)
+  foreach ($octantSid in @($octantUser, [Security.Principal.SecurityIdentifier]::new('S-1-5-18'))) {
+    $octantPrivate.AddAccessRule([Security.AccessControl.FileSystemAccessRule]::new($octantSid, [Security.AccessControl.FileSystemRights]::FullControl, [Security.AccessControl.InheritanceFlags]::ContainerInherit -bor [Security.AccessControl.InheritanceFlags]::ObjectInherit, [Security.AccessControl.PropagationFlags]::None, [Security.AccessControl.AccessControlType]::Allow))
+  }
+  [void][IO.Directory]::CreateDirectory($octantData, $octantPrivate)
+  $octantMade = Get-Item -LiteralPath $octantData -Force
+  if (-not $octantMade.PSIsContainer -or ($octantMade.Attributes -band [IO.FileAttributes]::ReparsePoint)) { throw 'Unsafe owned replacement fixture' }
+  $octantVerified = [Security.AccessControl.DirectorySecurity]::new($octantData, [Security.AccessControl.AccessControlSections]::Access -bor [Security.AccessControl.AccessControlSections]::Owner)
+  $octantVerifiedRules = @($octantVerified.GetAccessRules($true, $true, [Security.Principal.SecurityIdentifier]))
+  if (-not $octantVerified.AreAccessRulesProtected -or $octantVerified.GetOwner([Security.Principal.SecurityIdentifier]).Value -ne $octantUser.Value -or $octantVerifiedRules.Count -ne 2) { throw 'Replacement is not privately user-owned' }
+  $octantVerifiedSids = @()
+  foreach ($octantRule in $octantVerifiedRules) {
+    if ($octantRule.IsInherited -or $octantRule.AccessControlType -ne [Security.AccessControl.AccessControlType]::Allow -or $octantRule.FileSystemRights -ne [Security.AccessControl.FileSystemRights]::FullControl -or [int]$octantRule.InheritanceFlags -ne 3 -or [int]$octantRule.PropagationFlags -ne 0) { throw 'Unexpected replacement grant' }
+    $octantVerifiedSids += $octantRule.IdentityReference.Value
+  }
+  if ($octantVerifiedSids -notcontains $octantUser.Value -or $octantVerifiedSids -notcontains 'S-1-5-18') { throw 'Replacement grants another principal' }
+  Write-Output '{"ownedReplacementHasExactPrivateOwnerAndDacl":true}'
+  exit 0
+}
 if ($Mode -eq 'inspect') {
   foreach ($octantPath in @((Join-Path $octantRoot 'data\proof'), (Join-Path $octantRoot 'data\proof\written.txt'))) {
     $octantEntry = Get-Item -LiteralPath $octantPath -Force

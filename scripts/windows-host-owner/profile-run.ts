@@ -1,16 +1,6 @@
 import { execFile, spawn, type ChildProcess } from "node:child_process";
 import { createInterface } from "node:readline";
-import {
-  lstat,
-  readFile,
-  writeFile,
-  rename,
-  rm,
-  symlink,
-  unlink,
-  link,
-  mkdir,
-} from "node:fs/promises";
+import { lstat, readFile, writeFile, rename, rm, symlink, unlink, link } from "node:fs/promises";
 import { win32 } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -269,11 +259,20 @@ try {
   checks.push("profile and data reparse replacements refuse");
 
   const data = win32.join(stable, "data");
+  const originalDataIdentity = await lstat(data, { bigint: true });
   await rename(data, data + ".original");
   try {
-    await mkdir(data);
-    await acl("octant", "seal-data");
+    await acl("octant", "prepare-data");
+    const replacement = await lstat(data, { bigint: true });
+    if (
+      originalDataIdentity.ino === 0n ||
+      replacement.ino === 0n ||
+      (originalDataIdentity.ino === replacement.ino && originalDataIdentity.dev === replacement.dev)
+    )
+      throw new Error("The owned replacement is not a different physical directory.");
     await probe(first, "octant", "refuse");
+    if (!(await readFile(recordPath)).equals(original))
+      throw new Error("Refused replacement changed persistent metadata.");
   } finally {
     await rm(data, { recursive: true, force: true });
     await rename(data + ".original", data);
