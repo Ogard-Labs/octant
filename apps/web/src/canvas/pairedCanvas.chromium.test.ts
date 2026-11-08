@@ -21,19 +21,22 @@ it.runIf(process.env.OCTANT_PAIRED_CANVAS_RENDERED === "1")(
     let browser: BrowserServer | undefined;
     let browserClosing: Promise<void> | undefined;
     const close = async () => {
-      if (browser !== undefined) {
-        const owned = browser;
-        browserClosing ??= (async () => {
-          const force = setTimeout(() => void owned.kill(), 3000);
-          try {
-            await owned.close();
-          } finally {
-            clearTimeout(force);
-          }
-        })();
-        await browserClosing;
+      try {
+        if (browser !== undefined) {
+          const owned = browser;
+          browserClosing ??= (async () => {
+            const force = setTimeout(() => void owned.kill(), 3000);
+            try {
+              await owned.close();
+            } finally {
+              clearTimeout(force);
+            }
+          })();
+          await browserClosing;
+        }
+      } finally {
+        await server.close();
       }
-      await server.close();
     };
     const stop = () => {
       void close();
@@ -67,6 +70,19 @@ it.runIf(process.env.OCTANT_PAIRED_CANVAS_RENDERED === "1")(
         expect(await page.getByRole("menuitem", { name: "Refine…" }).count()).toBe(0);
         expect(await page.getByRole("menuitem", { name: "Export…" }).count()).toBe(0);
         await page.getByRole("menuitem", { name: "Share…" }).click();
+        const dialog = page.getByRole("dialog", { name: "Share canvas" });
+        expect(
+          await page
+            .locator(".octant-dialog__viewport")
+            .last()
+            .evaluate((element) => getComputedStyle(element).position),
+        ).toBe("fixed");
+        const bounds = await dialog.boundingBox();
+        if (bounds === null) throw Error("The shared dialog is not rendered.");
+        expect(bounds.x).toBeGreaterThanOrEqual(0);
+        expect(bounds.y).toBeGreaterThanOrEqual(0);
+        expect(bounds.x + bounds.width).toBeLessThanOrEqual(width + 1);
+        expect(bounds.y + bounds.height).toBeLessThanOrEqual(845);
         await page.getByRole("button", { name: "Copy link" }).click();
         expect(await page.evaluate(() => navigator.clipboard.readText())).toBe(
           "https://shares.example.test/s/AAAAAAAAAAAAAAAAAAAAAA",
@@ -75,7 +91,6 @@ it.runIf(process.env.OCTANT_PAIRED_CANVAS_RENDERED === "1")(
         expect(await page.getByRole("button", { name: "Revoke", exact: true }).count()).toBe(0);
         await page.screenshot({
           path: resolve(artifacts, `public-links-${width}.png`),
-          fullPage: true,
         });
         await page.keyboard.press("Escape");
         await page.getByRole("button", { name: "More Canvas actions" }).focus();
@@ -93,7 +108,6 @@ it.runIf(process.env.OCTANT_PAIRED_CANVAS_RENDERED === "1")(
       await page.getByText("Public links could not be read from this host.").waitFor();
       await page.screenshot({
         path: resolve(artifacts, "public-links-unavailable.png"),
-        fullPage: true,
       });
       expect(failures).toEqual([]);
       await context.close();
