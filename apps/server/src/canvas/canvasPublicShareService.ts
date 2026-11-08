@@ -835,8 +835,8 @@ function refusedSettings(
 }
 
 /**
- * The service answers an unknown id as it answers a wrong secret, and a link
- * past its tombstone is unknown, so either refusal means it is gone.
+ * Only a matching-id acknowledgement or explicit gone response settles ownership.
+ * Unknown-id and wrong-secret refusals keep the owner proof available for recovery.
  */
 function revokeConfirmsGone(
   outcome: Awaited<ReturnType<CanvasPublicShareServicePort["revoke"]>>,
