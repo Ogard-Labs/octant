@@ -14,3 +14,4 @@ foreach(target octant-windows-peer-launcher octant-windows-peer-appcontainer oct
   target_link_libraries(${target} PRIVATE advapi32)
 endforeach()
 target_link_libraries(octant-windows-peer-appcontainer PRIVATE userenv bcrypt ole32)
+target_link_libraries(octant-windows-desktop-artifact-qa PRIVATE shell32 ole32)
