@@ -8,7 +8,7 @@ import type {
   ImageJobThreadKind,
 } from "@octant/contracts";
 import type { ImageGenerationClient } from "@octant/client-runtime/image-generation-client";
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { documentIsVisible, scheduleVisibleInterval } from "../polling/documentVisibility";
 import { samePollingData } from "../polling/samePollingData";
 import { GeneratedImageCard } from "./GeneratedImageCard";
@@ -26,13 +26,22 @@ export interface GeneratedImageListProps {
   readonly canSaveToProject?: boolean;
 }
 
-export function GeneratedImageList(props: GeneratedImageListProps) {
-  const workspace = useWorkspaceContentView();
+const NO_JOBS: ReadonlyArray<ImageJob> = [];
+
+/**
+ * The image jobs of one thread or the Image generator, read once for every
+ * place that shows them: a thread draws each job after the turn that made it
+ * and lists only the rest. The list re-reads at once when the host reports a
+ * job queued or finished, fast while one is in flight, and slowly otherwise.
+ */
+export function useGeneratedImageJobs(input: {
+  readonly client: ImageGenerationClient | undefined;
+  readonly threadKind: ImageJobThreadKind;
+  readonly scopeId: ImageGenerationScopeId | undefined;
+}): { readonly jobs: ReadonlyArray<ImageJob>; readonly refresh: () => void } {
+  const { client, scopeId, threadKind } = input;
   const changeRevision = useImageJobChangeRevision();
-  const [jobs, setJobs] = useState<ReadonlyArray<ImageJob>>([]);
-  const [revise, setRevise] = useState<
-    { readonly job: ImageJob; readonly artifact: ImageArtifactRecord } | undefined
-  >(undefined);
+  const [jobs, setJobs] = useState<ReadonlyArray<ImageJob>>(NO_JOBS);
   const inFlightGeneration = useRef<number | undefined>(undefined);
   const generation = useRef(0);
   const refreshRef = useRef<(afterChange?: boolean) => void>(() => undefined);
@@ -41,8 +50,11 @@ export function GeneratedImageList(props: GeneratedImageListProps) {
   useEffect(() => {
     let cancelled = false;
     const refreshGeneration = ++generation.current;
-    setJobs([]);
-    setRevise(undefined);
+    setJobs(NO_JOBS);
+    if (client === undefined || scopeId === undefined) {
+      refreshRef.current = () => undefined;
+      return;
+    }
     let readAgain = false;
     const refresh = (afterChange = false) => {
       if (!documentIsVisible()) return;
@@ -53,8 +65,8 @@ export function GeneratedImageList(props: GeneratedImageListProps) {
         return;
       }
       inFlightGeneration.current = refreshGeneration;
-      void props.client
-        .list({ threadKind: props.threadKind, scopeId: props.scopeId })
+      void client
+        .list({ threadKind, scopeId })
         .then((outcome) => {
           if (cancelled || generation.current !== refreshGeneration) return;
           setJobs((current) => (samePollingData(current, outcome.jobs) ? current : outcome.jobs));
@@ -80,7 +92,7 @@ export function GeneratedImageList(props: GeneratedImageListProps) {
     return () => {
       cancelled = true;
     };
-  }, [props.client, props.scopeId, props.threadKind]);
+  }, [client, scopeId, threadKind]);
 
   // The host says when a job is queued or finishes, including the ones the
   // agent started. The first revision is the mount's own read.
@@ -96,6 +108,41 @@ export function GeneratedImageList(props: GeneratedImageListProps) {
     () => scheduleVisibleInterval(() => refreshRef.current(), hasPendingJob ? 750 : 30_000),
     [hasPendingJob],
   );
+
+  const refresh = useCallback(() => refreshRef.current(), []);
+  return { jobs, refresh };
+}
+
+export function GeneratedImageList(props: GeneratedImageListProps) {
+  const { jobs, refresh } = useGeneratedImageJobs({
+    client: props.client,
+    threadKind: props.threadKind,
+    scopeId: props.scopeId,
+  });
+  return <GeneratedImageJobs {...props} jobs={jobs} onEnqueued={refresh} />;
+}
+
+/**
+ * Image jobs as the thread shows them: a status line while one runs and a
+ * card per finished image, each of which can be attached, saved, or revised.
+ */
+export function GeneratedImageJobs(
+  props: GeneratedImageListProps & {
+    readonly jobs: ReadonlyArray<ImageJob>;
+    /** A revision was queued here; the caller re-reads the jobs. */
+    readonly onEnqueued: () => void;
+    readonly label?: string;
+    readonly className?: string;
+  },
+) {
+  const workspace = useWorkspaceContentView();
+  const [revise, setRevise] = useState<
+    { readonly job: ImageJob; readonly artifact: ImageArtifactRecord } | undefined
+  >(undefined);
+
+  useEffect(() => {
+    setRevise(undefined);
+  }, [props.client, props.scopeId, props.threadKind]);
 
   async function submitRevision(draft: ImageGenerationDraft) {
     const parent = revise?.artifact;
@@ -121,18 +168,18 @@ export function GeneratedImageList(props: GeneratedImageListProps) {
     setRevise(undefined);
     // The slow cadence assumes an enqueue re-reads the list itself; without
     // this the new job stayed invisible for up to thirty seconds.
-    refreshRef.current();
+    props.onEnqueued();
   }
 
-  if (jobs.length === 0) return null;
+  if (props.jobs.length === 0) return null;
 
   return (
     <section
-      aria-label="Generated images"
-      className="stack generated-image-list"
+      aria-label={props.label ?? "Generated images"}
+      className={`stack generated-image-list${props.className === undefined ? "" : ` ${props.className}`}`}
       data-testid="generated-image-list"
     >
-      {jobs.map((job) => (
+      {props.jobs.map((job) => (
         <div key={String(job.id)}>
           {job.status !== "completed" ? (
             <p className="meta" role="status">
@@ -180,7 +227,7 @@ export function GeneratedImageList(props: GeneratedImageListProps) {
                           mime: nextArtifact.mime,
                         }}
                         onCloseWorkspace={close}
-                        onEnqueued={() => refreshRef.current()}
+                        onEnqueued={props.onEnqueued}
                       />
                     ),
                   );

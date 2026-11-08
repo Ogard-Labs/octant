@@ -91,12 +91,12 @@ import { useDelayedForceStop } from "../composer/useDelayedForceStop";
 import { ComposerVoiceButton } from "../voice/ComposerVoiceButton";
 import { appendTranscript } from "../voice/appendTranscript";
 import type { ImageGenerationClient } from "@octant/client-runtime/image-generation-client";
-import type { ImageGenerationProfileView } from "@octant/contracts";
+import type { ImageArtifactRecord, ImageGenerationProfileView, ImageJob } from "@octant/contracts";
 import { decodeBrowserThreadId, decodeImageGenerationScopeId } from "@octant/contracts";
 import { parseAutomationFollowUpTurnPrompt } from "@octant/contracts/automation";
 import { ScheduledFollowUpMark } from "../automation/ScheduledFollowUpMark";
 import { BrowserCaptureList } from "../browser/BrowserCaptureList";
-import { GeneratedImageList } from "../image/GeneratedImageList";
+import { GeneratedImageJobs, useGeneratedImageJobs } from "../image/GeneratedImageList";
 import { ImageGenerationAction } from "../image/ImageGenerationAction";
 import { ImageGenerationOfferPrompt } from "../image/ImageGenerationOfferPrompt";
 import type { CanvasClient } from "@octant/client-runtime/canvas-client";
@@ -110,7 +110,7 @@ import {
   threadMayChooseArtifacts,
 } from "../canvas/ThreadArtifactsChoice";
 import { publishedSnapshotRunRuntimeFor } from "../canvas/blocks/designRunningFrame";
-import { placeThreadCanvases, threadTurnSpans } from "../canvas/threadCanvasPlacement";
+import { placeByTurn, placeThreadCanvases, threadTurnSpans } from "../canvas/threadCanvasPlacement";
 import { useThreadCanvasCards } from "../canvas/useThreadCanvasCards";
 import { LOCAL_HOST_ID, type HostId } from "@octant/contracts/host";
 import {
@@ -2127,6 +2127,13 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
             props.onCanvasReferencesObserved?.(String(props.threadId), cards),
         }),
   });
+  // The transcript draws each image after the turn that made it; the trail
+  // below the transcript shows the rest.
+  const threadImages = useGeneratedImageJobs({
+    client: props.imageGenerationClient,
+    threadKind: "work-thread",
+    scopeId: decodeImageGenerationScopeId(String(props.threadId)),
+  });
   const canvasClient = props.canvasClient;
   const openInSidebar = props.onOpenCanvasInSidebar;
   const canvasPlacement = placeThreadCanvases(
@@ -2137,6 +2144,33 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
     ),
     threadCanvases.cards,
   );
+  const imagePlacement = placeByTurn(
+    threadTurnSpans(
+      transcriptRows,
+      (row) => row.key,
+      (row) => (row.kind === "message" && row.entry.role === "user" ? row.at : undefined),
+    ),
+    threadImages.jobs,
+    (job) => String(job.createdAt),
+    (job) => String(job.id),
+  );
+  const imageClient = props.imageGenerationClient;
+  const imageProfiles = props.imageGenerationProfiles;
+  const saveGeneratedImage = (job: ImageJob, artifact: ImageArtifactRecord) => {
+    void props.imageGenerationClient
+      ?.save({
+        jobId: job.id,
+        attachmentId: artifact.attachmentId,
+        relativePath: `generated/${String(artifact.attachmentId).slice(0, 8)}.png`,
+      })
+      .then((result) => {
+        if (result.status === "saved") setStatus(`Saved ${result.relativePath}.`);
+        else setStatus(result.reason);
+      })
+      .catch(() => {
+        setStatus("The image could not be saved.");
+      });
+  };
 
   // Offered once: an answer either way is the thread's journaled choice.
   const artifactsOfferRow = threadArtifactsOfferRow({
@@ -2207,16 +2241,33 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
               </>
             }
             listClassName="thread-column"
-            {...(canvasClient === undefined
+            {...(canvasClient === undefined &&
+            (imageClient === undefined || imageProfiles === undefined)
               ? {}
               : {
                   afterItem: (row: WorkTranscriptRow) => (
                     <>
-                      <ThreadCanvases
-                        cards={canvasPlacement.byRow.get(row.key)}
-                        client={canvasClient}
-                        {...(openInSidebar === undefined ? {} : { onOpen: openInSidebar })}
-                      />
+                      {canvasClient === undefined ? null : (
+                        <ThreadCanvases
+                          cards={canvasPlacement.byRow.get(row.key)}
+                          client={canvasClient}
+                          {...(openInSidebar === undefined ? {} : { onOpen: openInSidebar })}
+                        />
+                      )}
+                      {imageClient === undefined || imageProfiles === undefined ? null : (
+                        <GeneratedImageJobs
+                          canSaveToProject
+                          client={imageClient}
+                          jobs={imagePlacement.byRow.get(row.key) ?? []}
+                          label="Images from this turn"
+                          onAttach={(file) => images.attach([file])}
+                          onEnqueued={threadImages.refresh}
+                          onSaveToProject={saveGeneratedImage}
+                          profiles={imageProfiles}
+                          scopeId={decodeImageGenerationScopeId(String(props.threadId))}
+                          threadKind="work-thread"
+                        />
+                      )}
                       {row.key === artifactsOfferRow ? (
                         <ThreadArtifactsOffer
                           onChoose={(choice) => void changeDocumentDelivery(choice)}
@@ -2472,26 +2523,15 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
                 <div className="work-thread-workspace__transcript-trail">
                   {props.imageGenerationClient === undefined ||
                   props.imageGenerationProfiles === undefined ? null : (
-                    <GeneratedImageList
+                    <GeneratedImageJobs
                       canSaveToProject
                       client={props.imageGenerationClient}
+                      jobs={threadImages.jobs.filter(
+                        (job) => !imagePlacement.placed.has(String(job.id)),
+                      )}
                       onAttach={(file) => images.attach([file])}
-                      onSaveToProject={(job, artifact) => {
-                        void props.imageGenerationClient
-                          ?.save({
-                            jobId: job.id,
-                            attachmentId: artifact.attachmentId,
-                            relativePath: `generated/${String(artifact.attachmentId).slice(0, 8)}.png`,
-                          })
-                          .then((result) => {
-                            if (result.status === "saved")
-                              setStatus(`Saved ${result.relativePath}.`);
-                            else setStatus(result.reason);
-                          })
-                          .catch(() => {
-                            setStatus("The image could not be saved.");
-                          });
-                      }}
+                      onEnqueued={threadImages.refresh}
+                      onSaveToProject={saveGeneratedImage}
                       profiles={props.imageGenerationProfiles}
                       scopeId={decodeImageGenerationScopeId(String(props.threadId))}
                       threadKind="work-thread"
