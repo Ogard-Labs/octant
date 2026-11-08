@@ -136,6 +136,7 @@ func ownedFixturePath() -> String? {
 }
 var fixedFolderNativeStatuses: [String: Int32] = [:]
 var fixedFolderWindowAncestryUsed = false
+var fixedFolderSheetFrameAdmitted = false
 var fixedFolderGeometry: [String: Any] = ["targetInsideResolvedWindow": NSNull(), "centerOnScreen": NSNull(),
     "topPointOwnerMatched": NSNull(), "topFrameMatched": NSNull()]
 var fixedFolderSheetGeometry: [String: Any] = ["topLevelMatchesInnerSheet": NSNull(), "targetInsideInnerSheet": NSNull(),
@@ -161,6 +162,7 @@ func fixedFolderHit(_ target: AXUIElement, _ deadline: Date, _ admit: (AXUIEleme
         "topPointOwnerMatched": NSNull(), "topFrameMatched": NSNull()]
     fixedFolderSheetGeometry = ["topLevelMatchesInnerSheet": NSNull(), "targetInsideInnerSheet": NSNull(),
         "topFrameMatchesInnerSheet": NSNull(), "topFrameMatchesOuterSheet": NSNull()]
+    fixedFolderSheetFrameAdmitted = false
     guard admit(target), Date() < deadline, ownedFixturePath() != nil, AXIsProcessTrusted(), CGPreflightPostEventAccess(),
           kernelIdentity(processId) == initialKernelIdentity,
           NSRunningApplication(processIdentifier: processId)?.bundleURL?.resolvingSymlinksInPath().standardizedFileURL.path == expectedBundle,
@@ -234,9 +236,10 @@ func fixedFolderHit(_ target: AXUIElement, _ deadline: Date, _ admit: (AXUIEleme
         fixedFolderGeometry["topFrameMatched"] = abs(frame.minX - windowFrame.minX) <= 2 && abs(frame.minY - windowFrame.minY) <= 2 &&
             abs(frame.width - windowFrame.width) <= 2 && abs(frame.height - windowFrame.height) <= 2
     }
-    // Diagnostic only: AXWindow names the attached root, whereas the nearer
-    // top-level element may be a sheet. Keep the original root-frame refusal.
+    // A location sheet's frame can differ from its attached root. Only the
+    // fixed field may use its independently proved inner sheet's frame.
     if (mode == "picker-fill-owned-location" || mode == "picker-go-owned-location"), expectedFieldSheets.count == 2,
+       let expectedFieldRoot, CFEqual(window, expectedFieldRoot),
        fixedFolderGeometry["topFrameMatched"] as? Bool == false,
        (top?[kCGWindowOwnerPID as String] as? NSNumber)?.int32Value == processId,
        let values = top?[kCGWindowBounds as String] as? [String: Any], let topFrame = CGRect(dictionaryRepresentation: values as CFDictionary),
@@ -295,11 +298,12 @@ func fixedFolderHit(_ target: AXUIElement, _ deadline: Date, _ admit: (AXUIEleme
         fixedFolderSheetGeometry = ["topLevelMatchesInnerSheet": topLevelMatches.map { $0 as Any } ?? NSNull(),
             "targetInsideInnerSheet": innerFrame.contains(targetFrame),
             "topFrameMatchesInnerSheet": frameMatches(innerFrame), "topFrameMatchesOuterSheet": frameMatches(outerFrame)]
+        fixedFolderSheetFrameAdmitted = innerFrame.contains(targetFrame) && frameMatches(innerFrame)
     }
     guard (top?[kCGWindowOwnerPID as String] as? NSNumber)?.int32Value == processId,
           let values = top?[kCGWindowBounds as String] as? [String: Any], let frame = CGRect(dictionaryRepresentation: values as CFDictionary),
-          abs(frame.minX - windowFrame.minX) <= 2, abs(frame.minY - windowFrame.minY) <= 2,
-          abs(frame.width - windowFrame.width) <= 2, abs(frame.height - windowFrame.height) <= 2 else { return nil }
+          (abs(frame.minX - windowFrame.minX) <= 2 && abs(frame.minY - windowFrame.minY) <= 2 &&
+           abs(frame.width - windowFrame.width) <= 2 && abs(frame.height - windowFrame.height) <= 2) || fixedFolderSheetFrameAdmitted else { return nil }
     var hit: AXUIElement?
     let hitStatus = AXUIElementCopyElementAtPosition(element, Float(point.x), Float(point.y), &hit)
     fixedFolderNativeStatuses["hitTest"] = hitStatus.rawValue
@@ -311,7 +315,8 @@ func fixedFolderHit(_ target: AXUIElement, _ deadline: Date, _ admit: (AXUIEleme
               AXUIElementGetPid(cursor, &pid) == .success, pid == processId else { return nil }
         if CFEqual(cursor, target) {
             let live = NSRunningApplication(processIdentifier: processId)
-            guard Date() < deadline, ownedFixturePath() != nil,
+            guard (!fixedFolderSheetFrameAdmitted || fieldCurrent?() == true),
+                  Date() < deadline, ownedFixturePath() != nil,
                   kernelIdentity(processId) == initialKernelIdentity,
                   live?.isTerminated == false,
                   live?.bundleURL?.resolvingSymlinksInPath().standardizedFileURL.path == expectedBundle,
@@ -960,6 +965,7 @@ if mode == "picker-metadata" || mode == "picker-location-prompt" || (fixesOwnedF
                                 down.post(tap: .cghidEventTap); up.post(tap: .cghidEventTap)
                                 fixedFolder["chooserDispatched"] = true; fixedFolder["status"] = "dispatched"
                             }
+                            fixedFolder["fieldSheetFrameAdmitted"] = fixedFolderSheetFrameAdmitted
                             fixedFolder["ownedSheetFrameChecks"] = fixedFolderSheetGeometry
                             fixedFolder["geometryChecks"] = fixedFolderGeometry
                             fixedFolder["owningWindowFromBoundedParentProof"] = fixedFolderWindowAncestryUsed
