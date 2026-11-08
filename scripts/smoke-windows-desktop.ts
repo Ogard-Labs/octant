@@ -139,7 +139,7 @@ async function ready() {
   if (attachment === undefined) throw Error("The actual native owner was absent after readiness.");
   return attachment;
 }
-async function stopped() {
+async function stopped(url: string) {
   await until(
     "native projections cleared",
     async () =>
@@ -154,6 +154,10 @@ async function stopped() {
     wireVersion: "1",
   });
   check(found.status === "missing", "native discovery confirms the owner stopped");
+  const listening = await fetch(new URL("/health", url), { signal: AbortSignal.timeout(500) })
+    .then(() => true)
+    .catch(() => false);
+  check(!listening, "the owned server health listener is closed");
 }
 try {
   if (phase === "owned") {
@@ -177,7 +181,7 @@ try {
       "normal owned window close was posted without focus or input injection",
     );
     await joined(app);
-    await stopped();
+    await stopped(first.probe.url);
   } else {
     const seed = randomBytes(32).toString("base64url");
     const server = launch(true, seed);
@@ -209,12 +213,13 @@ try {
       "authenticated native control accepts an explicit owner stop",
     );
     await joined(server);
-    await stopped();
+    await stopped(first.probe.url);
   }
   const receipt = {
     phase,
     checks,
     normalPackagedDesktop: true,
+    nativeMetadataPreparedByFixture: true,
     personalAccountsUsed: false,
     workCodeEnabled: false,
   };
