@@ -102,6 +102,11 @@ export const TurnDiagnosticsModelRow = Schema.Struct({
   ),
   likelyCacheMisses: NonNegativeInt,
   costUsd: Schema.optional(NonNegativeNumber),
+  /**
+   * How many of this row's turns reported a cost, which is what `costUsd` sums.
+   * A mean cost per turn divides by this, not by `turns`. Absent with `costUsd`.
+   */
+  costTurns: Schema.optional(NonNegativeInt),
 }).annotations(strict);
 export type TurnDiagnosticsModelRow = typeof TurnDiagnosticsModelRow.Type;
 

@@ -11,7 +11,6 @@ import {
   type BenchmarkRunStatus,
   type BenchmarkSuite,
   type BenchmarkSuiteSaveRequest,
-  type TurnDiagnosticsModelRow,
   type TurnDiagnosticsReport,
 } from "@octant/contracts";
 import {
@@ -317,17 +316,6 @@ export interface CostEstimate {
  * report's model rows. A contender that cannot be priced is left out and named,
  * so the figure is never a quiet undercount.
  */
-/**
- * How many of a model row's turns its cost sum covers. The row sums cost only
- * over turns that reported usage but keeps no count of them, and dividing by
- * every turn would understate the mean, so there is no honest divisor yet and
- * every contender reads as having no history. Return the count here once the
- * report carries one.
- */
-function turnsThatReportedCost(_row: TurnDiagnosticsModelRow): number | undefined {
-  return undefined;
-}
-
 export function estimateRunCost(input: {
   readonly report: TurnDiagnosticsReport | undefined;
   readonly contenders: ReadonlyArray<ContenderRef>;
@@ -343,8 +331,10 @@ export function estimateRunCost(input: {
         String(candidate.providerInstanceId) === String(contender.providerInstanceId) &&
         String(candidate.modelId) === String(contender.modelId),
     );
-    const priced = row === undefined ? undefined : turnsThatReportedCost(row);
-    if (row === undefined || row.costUsd === undefined || priced === undefined) {
+    // The cost sum covers only the turns that reported one, so the mean divides
+    // by that count; a row with none cannot price the contender.
+    const priced = row?.costTurns;
+    if (row === undefined || row.costUsd === undefined || priced === undefined || priced === 0) {
       unpriced.push(contender);
       continue;
     }

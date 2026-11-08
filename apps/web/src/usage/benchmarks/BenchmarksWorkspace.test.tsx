@@ -298,23 +298,34 @@ describe("importing and exporting a suite as JSON", () => {
 });
 
 describe("the run builder", () => {
-  it("says there is no estimate when a model's earlier cost cannot be averaged honestly, and starts with the chosen contenders", async () => {
+  it("estimates the cost from the turns that reported one, names a contender it cannot price, and starts with the chosen contenders", async () => {
     const actor = user();
     const client = makeClient();
     mount(client, { diagnosticsClient: { diagnostics: vi.fn(async () => pricedReport()) } });
 
     await openSuite(actor);
     const contenders = await screen.findByRole("group", { name: "Contenders" });
+    // No turn of this model has a cost, so nothing can price the run yet.
+    await actor.click(
+      within(contenders).getByRole("checkbox", { name: "Provider A · Deep model" }),
+    );
+    expect(await screen.findByText(/No estimate yet/)).toBeInTheDocument();
+
     await actor.click(
       within(contenders).getByRole("checkbox", { name: "Provider A · Fast model" }),
     );
     await actor.click(screen.getByRole("button", { name: "Increase Repetitions" }));
-    // The report sums cost over turns that reported usage but does not count
-    // them, so a mean would be understated and none is shown.
-    expect(await screen.findByText(/No estimate yet/)).toBeInTheDocument();
-    expect(screen.queryByText(/Estimated cost/)).toBeNull();
+    expect(
+      await screen.findByText(
+        /Estimated cost \$0\.4000 for 8 cells, not counting Provider A · Deep model/,
+      ),
+    ).toBeInTheDocument();
 
+    await actor.click(
+      within(contenders).getByRole("checkbox", { name: "Provider A · Deep model" }),
+    );
     await actor.type(screen.getByRole("textbox", { name: "Cost budget in US dollars" }), "1");
+    expect(await screen.findByText(/Estimated cost \$0\.4000 for 4 cells\./)).toBeInTheDocument();
     await actor.click(screen.getByRole("button", { name: "Start run" }));
 
     await waitFor(() => expect(client.startRun).toHaveBeenCalledTimes(1));
