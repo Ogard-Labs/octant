@@ -250,10 +250,19 @@ if (process.argv[2] === "--linux-mediation-worker") {
         for (;;) {
           let live = 0;
           for (const { receipt } of known) {
+            let text: string;
+            try {
+              text = await readFile(`/proc/${receipt.pid}/stat`, "utf8");
+            } catch (error) {
+              const code = (error as NodeJS.ErrnoException).code;
+              if (code === "ENOENT" || code === "ESRCH") continue;
+              throw error;
+            }
+            // A joined sibling can disappear between observations. Validate
+            // the retained receipt after the snapshot before using its state.
             const identity = await readProcessIdentity(receipt.pid);
             if (identity === undefined) continue;
             assert.equal(identity, receipt.processIdentity);
-            const text = await readFile(`/proc/${receipt.pid}/stat`, "utf8");
             const fields = text
               .slice(text.lastIndexOf(")") + 1)
               .trim()
