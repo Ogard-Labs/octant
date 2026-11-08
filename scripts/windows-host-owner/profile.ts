@@ -1,3 +1,4 @@
+import { createWindowsHostStartup } from "../../packages/host-runtime/src/windowsHostStartup";
 import { attachWindowsHostRuntimeOwner } from "../../packages/host-runtime/src/windowsHostOwner";
 import { lstat, mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { win32 } from "node:path";
@@ -69,6 +70,60 @@ try {
       "runtime receipt uses the persisted control-scope UUID",
     );
     console.log(JSON.stringify({ fixtureScope: paths.profileId }));
+    const startup = createWindowsHostStartup(native, paths);
+    if (startup === undefined) throw Error("Native startup storage unavailable.");
+    check(
+      (await startup.servicePolicy.read()).enabled,
+      "native startup policy preserves its enabled default",
+    );
+    await startup.servicePolicy.setEnabled(false);
+    check(
+      !(await startup.servicePolicy.read()).enabled,
+      "native startup policy persists an explicit owner change",
+    );
+    await startup.servicePolicy.setEnabled(true);
+    await startup.logs.append({
+      timestamp: new Date().toISOString(),
+      level: "info",
+      event: "native.ready",
+      message: "credential=fixture-private-value",
+    });
+    check(
+      (await startup.logs.read()).entries.every(
+        (entry) => !entry.message.includes("fixture-private-value"),
+      ),
+      "native service logs retain bounded redacted entries",
+    );
+    const bridgeSecret = "a".repeat(43);
+    await startup.writeBridgeSecret(bridgeSecret);
+    await startup.writeHostInfo({
+      schemaVersion: 1,
+      hostId: paths.profileId,
+      instanceId: ownership.receipt.instanceId,
+      url: "http://127.0.0.1:13773",
+      controlEndpoint: ownership.receipt.endpoint,
+      serviceMode: "foreground",
+      serverVersion: "fixture",
+      wireVersion: "1",
+      updatedAt: new Date().toISOString(),
+    });
+    check(
+      (await startup.readBridgeSecret()) === bridgeSecret &&
+        (await startup.readHostInfo())?.instanceId === ownership.receipt.instanceId,
+      "the actual owner publishes native bridge and host discovery projections",
+    );
+    await startup.clearProjections({ instanceId: randomUUID() });
+    check(
+      (await startup.readHostInfo())?.instanceId === ownership.receipt.instanceId,
+      "cleanup preserves a different owner's generation",
+    );
+    await startup.clearProjections({ instanceId: ownership.receipt.instanceId, bridgeSecret });
+    check(
+      (await startup.readBridgeSecret()) === undefined &&
+        (await startup.readHostInfo()) === undefined,
+      "owner-bound native cleanup removes only matching bridge and host projections",
+    );
+
     const proof = win32.join(paths.dataDirectory, "proof");
     const file = win32.join(proof, "written.txt");
     await mkdir(proof, { recursive: true });
@@ -170,6 +225,17 @@ try {
       "explicit external path overrides refuse without selecting another store",
     );
     await ownership.release();
+    check(
+      (await startup.servicePolicy.read()).enabled,
+      "native discovery can read policy without claiming an owner",
+    );
+    let refusedWrite = false;
+    try {
+      await startup.servicePolicy.setEnabled(false);
+    } catch {
+      refusedWrite = true;
+    }
+    check(refusedWrite, "native policy mutation refuses after owner release");
     held = undefined;
     const after = await acquireWindowsHostProfileOwner(options);
     if (after.status === "ready") held = after;

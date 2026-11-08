@@ -1,3 +1,5 @@
+import type { WindowsAuthorityStateFile } from "./windowsAuthorityState";
+import { readPrivateFileText, replacePrivateFileText } from "./privateFileText";
 import { chmod, lstat, mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { dirname, isAbsolute, join } from "node:path";
 import { randomUUID } from "node:crypto";
@@ -40,6 +42,7 @@ export class HostLogStoreError extends Error {
 export interface BoundedHostLogStoreOptions {
   readonly path: string;
   readonly uid?: number;
+  readonly privateFile?: WindowsAuthorityStateFile;
 }
 
 interface StoredHostLogEntry extends HostLogEntry {
@@ -48,7 +51,8 @@ interface StoredHostLogEntry extends HostLogEntry {
 
 export class BoundedHostLogStore {
   readonly #path: string;
-  readonly #uid: number;
+  readonly #uid: number | undefined;
+  readonly #privateFile: WindowsAuthorityStateFile | undefined;
   #writeChain: Promise<void> = Promise.resolve();
 
   constructor(options: BoundedHostLogStoreOptions) {
@@ -56,7 +60,10 @@ export class BoundedHostLogStore {
       throw new HostLogStoreError("Log path must be absolute.");
     }
     this.#path = options.path;
-    this.#uid = options.uid ?? process.getuid?.() ?? 0;
+    this.#uid = options.uid ?? process.getuid?.();
+    this.#privateFile = options.privateFile;
+    if (process.platform === "win32" && this.#privateFile === undefined)
+      throw new HostLogStoreError("Windows service logs require native private storage.");
   }
 
   get path(): string {
@@ -77,6 +84,14 @@ export class BoundedHostLogStore {
     const entries = [...existing, entry].slice(-MAX_LOG_ENTRIES);
     const lines = entries.map((item) => JSON.stringify(item)).join("\n");
     const bounded = Buffer.byteLength(lines) > MAX_LOG_BYTES ? trimBytes(entries) : lines;
+    if (this.#privateFile !== undefined) {
+      if (
+        replacePrivateFileText(this.#privateFile, bounded === "" ? "" : `${bounded}\n`).status !==
+        "committed"
+      )
+        throw new HostLogStoreError("Service log could not be written.");
+      return;
+    }
     const directory = dirname(this.#path);
     await mkdir(directory, { recursive: true, mode: 0o700 });
     await assertOwnerOnlyDirectory(directory, this.#uid);
@@ -108,11 +123,19 @@ export class BoundedHostLogStore {
   async #readEntries(): Promise<StoredHostLogEntry[]> {
     let raw: string;
     try {
-      const metadata = await lstat(this.#path);
-      if (!metadata.isFile() || metadata.uid !== this.#uid || (metadata.mode & 0o077) !== 0) {
-        throw new HostLogStoreError("Service log is not an owner-only file.");
+      if (this.#privateFile !== undefined) {
+        const result = readPrivateFileText(this.#privateFile, MAX_LOG_BYTES + 1);
+        if (result.status === "missing") return [];
+        if (result.status !== "ready")
+          throw new HostLogStoreError("Service log is unavailable or unsafe.");
+        raw = result.text;
+      } else {
+        const metadata = await lstat(this.#path);
+        if (!metadata.isFile() || metadata.uid !== this.#uid || (metadata.mode & 0o077) !== 0) {
+          throw new HostLogStoreError("Service log is not an owner-only file.");
+        }
+        raw = await readFile(this.#path, "utf8");
       }
-      raw = await readFile(this.#path, "utf8");
     } catch (error) {
       if (isMissing(error)) return [];
       if (error instanceof HostLogStoreError) throw error;
@@ -263,14 +286,14 @@ function trimBytes(entries: ReadonlyArray<StoredHostLogEntry>): string {
   return kept.join("\n");
 }
 
-async function assertOwnerOnlyDirectory(path: string, uid: number): Promise<void> {
+async function assertOwnerOnlyDirectory(path: string, uid: number | undefined): Promise<void> {
   const metadata = await lstat(path);
   if (!metadata.isDirectory() || metadata.uid !== uid || (metadata.mode & 0o077) !== 0) {
     throw new HostLogStoreError("Service log directory is not owner-only.");
   }
 }
 
-async function assertExistingLogSafe(path: string, uid: number): Promise<void> {
+async function assertExistingLogSafe(path: string, uid: number | undefined): Promise<void> {
   try {
     const metadata = await lstat(path);
     if (!metadata.isFile() || metadata.uid !== uid || (metadata.mode & 0o077) !== 0) {
