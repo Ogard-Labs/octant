@@ -18,7 +18,6 @@ const preference = "Keep Browser available without windows";
 const ax = String.raw`on run argv
 tell application "System Events"
 set candidate to first application process whose unix id is (item 1 of argv as integer)
-set frontmost of candidate to true
 try
 set value of attribute "AXManualAccessibility" of candidate to true
 end try
@@ -27,6 +26,13 @@ set value of attribute "AXEnhancedUserInterface" of candidate to true
 end try
 set operation to item 2 of argv
 if operation is "count" then return (count of windows of candidate) as text
+if operation is "activate" then
+set frontmost of candidate to false
+delay 0.2
+set frontmost of candidate to true
+return "activated"
+end if
+set frontmost of candidate to true
 if operation is "key" then
 keystroke (item 3 of argv) using command down
 return "sent"
@@ -243,7 +249,9 @@ const timer = setInterval(() => {
           )
             throw Error("Last-window close did not retain the owned macOS process.");
           checks.push("last-window-closed-same-process-alive");
-          await runBoundedCommand("/usr/bin/open", ["-a", bundle], process.env, 5000);
+          // Activate only the captured existing process. LaunchServices may
+          // otherwise start a second instance outside the owned process group.
+          await native("activate");
           await wait("reopen", (s) => s.includes("AXButton"));
           snapshot = await settings();
           if (!switchValue(snapshot, 1)) throw Error("Reopened window lost opt-in.");
