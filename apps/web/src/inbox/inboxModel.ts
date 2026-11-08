@@ -213,7 +213,10 @@ export interface InboxProjectGroup {
 
 export const NO_PROJECT_NAME = "No Project";
 
-const waitingRank = (item: InboxWaitingItem) => (item.urgent ? 0 : item.deferred ? 2 : 1);
+// Deferring takes a wait out of the active queue, urgent or not, until it comes back.
+const waitingRank = (item: InboxWaitingItem) => (item.deferred ? 2 : item.urgent ? 0 : 1);
+const activeUrgent = (group: InboxProjectGroup) =>
+  group.items.some((item) => item.urgent && !item.deferred);
 const oldestFirst = (left: number | undefined, right: number | undefined) =>
   (left ?? Number.POSITIVE_INFINITY) === (right ?? Number.POSITIVE_INFINITY)
     ? 0
@@ -222,9 +225,9 @@ const oldestFirst = (left: number | undefined, right: number | undefined) =>
       : 1;
 
 /**
- * Groups waits under their Project. Groups holding an urgent wait lead, then
- * the group that has waited longest; inside a group urgent waits come first,
- * then the rest oldest first, then deferred ones.
+ * Groups waits under their Project. Groups holding an active urgent wait lead,
+ * then the group that has waited longest; inside a group urgent waits come
+ * first, then the rest oldest first, then deferred ones, urgent or not.
  */
 export function groupInboxByProject(
   items: ReadonlyArray<InboxWaitingItem>,
@@ -258,7 +261,7 @@ export function groupInboxByProject(
     );
   return groups.toSorted(
     (left, right) =>
-      Number(right.urgentCount > 0) - Number(left.urgentCount > 0) ||
+      Number(activeUrgent(right)) - Number(activeUrgent(left)) ||
       oldestFirst(oldest(left), oldest(right)) ||
       left.name.localeCompare(right.name),
   );
