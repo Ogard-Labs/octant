@@ -20,6 +20,7 @@ import {
   commitHandover,
   pushHandover,
   readHandoverCheckout,
+  unusedHandoverBranch,
   type HandoverCheckout,
 } from "./codeThreadHandoverGit";
 import type { ThreadHandoverRecorder } from "./threadMoveJournal";
@@ -97,9 +98,23 @@ export class ThreadHandovers {
     const planned = await this.#plan(thread);
     if (planned.status === "refused") return planned;
     const handoverId = decodeHandoverId((this.#options.uuid ?? randomUUID)());
-    // The freeze is recorded before anything is written.
+    // The freeze is recorded before anything is written, and the hold is
+    // saved before the commit and the push: a stop between them restarts with
+    // the thread still held as handed over and not pushed, so it neither
+    // becomes writable while its work may be on the remote nor loses the
+    // record a continued report looks for. Take back here undoes it.
     this.#options.record.handoverStarted({ handoverId, thread, branch: planned.branch });
     this.#options.source.freeze(thread);
+    const handedOverAt = decodeTimestamp(this.#options.clock());
+    this.#saveHandover({
+      handoverId,
+      thread,
+      branch: planned.branch,
+      pushed: false,
+      shortfall: "push-failed",
+      refusedFiles: [],
+      handedOverAt,
+    });
     // A branch that already holds the work and has nothing left to commit
     // still gets a commit carrying the note: the destination reads the note
     // only from a tip whose trailer names this handover.
@@ -110,6 +125,7 @@ export class ThreadHandovers {
       noteWhenUnchanged: planned.branch === planned.checkout.branch,
     });
     if (committed.status === "refused") {
+      this.#dropHandover(String(handoverId));
       this.#options.source.unfreeze(thread);
       return {
         status: "refused",
@@ -144,16 +160,9 @@ export class ThreadHandovers {
       pushed: pushed.status === "pushed",
       ...(pushed.status === "pushed" ? {} : { shortfall: pushed.shortfall }),
       refusedFiles: committed.status === "committed" ? committed.refusedFiles : [],
-      handedOverAt: decodeTimestamp(this.#options.clock()),
+      handedOverAt,
     };
-    const state = this.#options.state.load();
-    this.#options.state.save({
-      ...state,
-      handovers: [
-        ...(state.handovers ?? []).filter((entry) => !same(entry.thread, thread)),
-        record,
-      ],
-    });
+    this.#saveHandover(record);
     return {
       status: "handed-over",
       handoverId,
@@ -182,6 +191,25 @@ export class ThreadHandovers {
     return { status: "taken-back" };
   }
 
+  #saveHandover(record: HandedOverThread): void {
+    const state = this.#options.state.load();
+    this.#options.state.save({
+      ...state,
+      handovers: [
+        ...(state.handovers ?? []).filter((entry) => !same(entry.thread, record.thread)),
+        record,
+      ],
+    });
+  }
+
+  #dropHandover(handoverId: string): void {
+    const state = this.#options.state.load();
+    this.#options.state.save({
+      ...state,
+      handovers: (state.handovers ?? []).filter((entry) => String(entry.handoverId) !== handoverId),
+    });
+  }
+
   async #plan(thread: MovedThreadReference): Promise<
     | {
         readonly status: "planned";
@@ -208,12 +236,13 @@ export class ThreadHandovers {
     } catch {
       return { status: "refused", reason: "refused" };
     }
-    const branch = handoverBranch({
+    const named = handoverBranch({
       currentBranch: checkout.branch,
       defaultBranch: checkout.defaultBranch,
       threadTitle: reading.title,
       threadId: thread.threadId,
     });
+    const branch = named === checkout.branch ? named : await unusedHandoverBranch(root, named);
     const latest = await this.#options.code.latest(thread.threadId).catch(() => ({}));
     const remote = checkout.remote;
     const originName = this.#options.originName();

@@ -63,6 +63,8 @@ export interface HandoverExchangeOptions {
   /** Fetches the branch into the Project's clone and reads the handover note from its tip, or nothing. */
   readonly readNote: (input: {
     readonly projectId: string;
+    /** The repository the notice named, which the clone may know by any remote name. */
+    readonly repositoryRemote: string;
     readonly branch: string;
     readonly handoverId: string;
   }) => Promise<string | undefined>;
@@ -79,6 +81,7 @@ export interface HandoverExchangeOptions {
     readonly threadId: CodeThreadId;
     readonly projectId: string;
     readonly title: string;
+    readonly repositoryRemote: string;
     /** The fetched handover branch the thread starts from. */
     readonly branch: string;
     /** The thread's own branch: the handover's name, or a suffixed one when that name is taken. */
@@ -190,6 +193,7 @@ export class HandoverExchange {
     const note = await this.#options
       .readNote({
         projectId: String(request.projectId),
+        repositoryRemote: notice.repositoryRemote,
         branch: notice.branch,
         handoverId: String(notice.handoverId),
       })
@@ -209,6 +213,7 @@ export class HandoverExchange {
         threadId,
         projectId: String(request.projectId),
         title: notice.title,
+        repositoryRemote: notice.repositoryRemote,
         branch: notice.branch,
         threadBranch,
         provider,

@@ -3,7 +3,13 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { commitHandover, pushHandover, readHandoverCheckout } from "./codeThreadHandoverGit";
+import {
+  commitHandover,
+  pushHandover,
+  readHandoverCheckout,
+  readHandoverNote,
+  remoteNamedFor,
+} from "./codeThreadHandoverGit";
 
 const folders: string[] = [];
 afterEach(() => {
@@ -132,5 +138,63 @@ describe("handing a Code thread over through its branch", () => {
     expect(
       await commitHandover({ checkoutRoot: laptop, branch: "main", message: "Hand over\n" }),
     ).toEqual({ status: "refused", reason: "nothing-to-commit" });
+  });
+});
+
+describe("which remote and default branch a handover uses", () => {
+  it("reads the default branch from the remote the work goes to, not from origin", async () => {
+    const base = mkdtempSync(join(tmpdir(), "octant-handover-git-"));
+    folders.push(base);
+    const upstream = join(base, "upstream.git");
+    const laptop = join(base, "laptop");
+    git(base, "init", "-q", "--bare", "-b", "master", upstream);
+    const seed = join(base, "seed");
+    git(base, "clone", "-q", upstream, seed);
+    git(seed, "config", "user.name", "Person");
+    git(seed, "config", "user.email", "person@example.invalid");
+    writeFileSync(join(seed, "app.ts"), "export const version = 1;\n");
+    git(seed, "add", ".");
+    git(seed, "commit", "-q", "-m", "first");
+    git(seed, "push", "-q", "origin", "master");
+    // The clone's only remote is `upstream`, and its default branch is `master`.
+    git(base, "clone", "-q", "-o", "upstream", upstream, laptop);
+
+    const checkout = await readHandoverCheckout(laptop);
+    expect(checkout).toMatchObject({ remote: "upstream", defaultBranch: "master" });
+    expect(
+      await pushHandover({
+        checkoutRoot: laptop,
+        branch: "master",
+        defaultBranch: checkout.defaultBranch,
+        remote: checkout.remote,
+      }),
+    ).toEqual({ status: "not-pushed", shortfall: "push-failed" });
+  });
+
+  it("fetches the note through whichever remote the destination clone names the repository by", async () => {
+    const { origin, laptop } = repository();
+    git(laptop, "checkout", "-q", "-b", "feature/flaky");
+    writeFileSync(join(laptop, "app.ts"), "export const version = 2;\n");
+    await commitHandover({
+      checkoutRoot: laptop,
+      branch: "feature/flaky",
+      message: "Hand over\n\nOctant-Handover: 1234\n",
+    });
+    git(laptop, "push", "-q", "origin", "feature/flaky");
+    const desktop = join(laptop, "..", "desktop");
+    git(join(laptop, ".."), "clone", "-q", "-o", "upstream", origin, desktop);
+    git(desktop, "remote", "add", "fork", join(laptop, "..", "elsewhere.git"));
+
+    const remote = await remoteNamedFor(desktop, origin);
+    expect(remote).toBe("upstream");
+    expect(
+      await readHandoverNote({
+        repositoryRoot: desktop,
+        remote: remote ?? "",
+        branch: "feature/flaky",
+        handoverId: "1234",
+      }),
+    ).toContain("Octant-Handover: 1234");
+    expect(await remoteNamedFor(desktop, "git@github.com:someone/else.git")).toBeUndefined();
   });
 });

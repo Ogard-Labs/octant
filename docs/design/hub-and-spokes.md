@@ -2256,11 +2256,15 @@ a numbered slice. Built, with these narrower readings:
     in the move sheet and in This thread can't move for a Code thread,
     opens the handover sheet with the branch, the remote, and a preview of
     the note. **Commit and push** (or **Commit**, without a remote) then
-    journals the freeze and freezes the thread. The commit is built from a
+    journals the freeze, freezes the thread, and saves it as held (handed
+    over, not pushed) before anything is committed or pushed, so a stop
+    midway restarts with the thread still held until Take back here. The commit is built from a
     throwaway index, so the checkout is never switched: it lands on the
     thread's branch (the index follows; the files stay as they are), or on
     a new `octant/handover/…` branch for the default branch or a detached
-    head. The commit takes every change Git does not ignore except files
+    head, taking the next free name when an earlier handover's branch is
+    still there. The default branch is the one the push remote names, not
+    origin's. The commit takes every change Git does not ignore except files
     the Secret guard refuses, and its message is the note with the
     `Octant-Handover` and `Octant-Origin` trailers; a branch that already
     holds the work and has nothing left to commit still gets a commit
@@ -2285,7 +2289,7 @@ a numbered slice. Built, with these narrower readings:
     for its **Handovers** start-screen card. **Continue handover** there
     picks the one Code Project bound to the same repository (or offers the
     ones that are). It fetches the branch with the destination's own Git
-    identity, reads the note only from a tip whose `Octant-Handover`
+    identity, through whichever remote the clone names that repository by, reads the note only from a tip whose `Octant-Handover`
     trailer names this handover, and opens a managed Code thread started
     from that branch, on the destination's own provider of that kind with
     the same model. When the clone already has a local branch of that

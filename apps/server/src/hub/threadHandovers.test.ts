@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -62,7 +62,7 @@ function world(options: { readonly busy?: boolean } = {}) {
     clock: () => "2026-11-08T12:00:00.000Z",
     uuid: () => HANDOVER,
   });
-  return { origin, laptop, frozen, recorded, state, handovers };
+  return { base, origin, laptop, frozen, recorded, state, handovers };
 }
 
 describe("handing over a Code thread that cannot move", () => {
@@ -159,6 +159,48 @@ describe("where a handover's work goes", () => {
       `Octant-Handover: ${HANDOVER}`,
     );
     expect(git(origin, "show", "feature/flaky:app.ts")).toBe("export const version = 2;");
+  });
+});
+
+describe("a handover that is retried or interrupted", () => {
+  it("takes the next free branch name for a second handover after Take back here", async () => {
+    const { laptop, handovers } = world();
+    writeFileSync(join(laptop, "app.ts"), "export const version = 2;\n");
+    expect(await handovers.handOver(THREAD)).toMatchObject({
+      branch: "octant/handover/fix-the-flaky-test-77777777",
+    });
+    handovers.takeBack(HANDOVER);
+
+    writeFileSync(join(laptop, "app.ts"), "export const version = 3;\n");
+    expect(await handovers.handOver(THREAD)).toMatchObject({
+      status: "handed-over",
+      branch: "octant/handover/fix-the-flaky-test-77777777-2",
+      pushed: true,
+    });
+    // The earlier handover's branch is left as it was.
+    expect(git(laptop, "show", "octant/handover/fix-the-flaky-test-77777777:app.ts")).toBe(
+      "export const version = 2;",
+    );
+  });
+
+  it("has saved the hold before it pushes, so a stop mid-push restarts with the thread held", async () => {
+    const { base, laptop, handovers } = world();
+    writeFileSync(join(laptop, "app.ts"), "export const version = 2;\n");
+    // The push copies what this host had saved at that moment.
+    const snapshot = join(base, "saved-at-push.json");
+    const hook = join(laptop, ".git", "hooks", "pre-push");
+    writeFileSync(
+      hook,
+      `#!/bin/sh\ncp "${join(base, "data", "hub", "thread-moves.json")}" "${snapshot}"\n`,
+    );
+    chmodSync(hook, 0o755);
+
+    expect(await handovers.handOver(THREAD)).toMatchObject({ pushed: true });
+
+    const saved = JSON.parse(readFileSync(snapshot, "utf8")) as {
+      readonly handovers?: ReadonlyArray<{ readonly thread: MovedThreadReference }>;
+    };
+    expect(saved.handovers?.map((entry) => entry.thread)).toEqual([THREAD]);
   });
 });
 

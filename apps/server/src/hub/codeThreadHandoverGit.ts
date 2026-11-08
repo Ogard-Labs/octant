@@ -15,7 +15,8 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
-import { holdsSecret } from "./codeThreadMoveGit";
+import { normalizeRepositoryRemote } from "@octant/domain";
+import { branchExists, holdsSecret } from "./codeThreadMoveGit";
 
 const run = promisify(execFile);
 const GIT_MAX_BUFFER = 64 * 1024 * 1024;
@@ -54,13 +55,23 @@ export interface HandoverCheckout {
 export async function readHandoverCheckout(root: string): Promise<HandoverCheckout> {
   const head = await git(root, ["rev-parse", "HEAD"]);
   const branch = await git(root, ["symbolic-ref", "--short", "-q", "HEAD"]).catch(() => "");
-  const remoteHead = await git(root, [
-    "symbolic-ref",
-    "--short",
-    "-q",
-    "refs/remotes/origin/HEAD",
-  ]).catch(() => "");
-  const defaultBranch = remoteHead.length > 0 ? remoteHead.replace(/^origin\//, "") : "main";
+  const remote = await pushRemote(root, branch);
+  // The default branch is the one the remote the work will go to names, not
+  // origin's: a clone whose remote is `upstream` with `master` would
+  // otherwise read as `main` and let a handover push straight to `master`.
+  const remoteHead =
+    remote === undefined
+      ? ""
+      : await git(root, ["symbolic-ref", "--short", "-q", `refs/remotes/${remote}/HEAD`]).catch(
+          () => "",
+        );
+  const defaultBranch =
+    remoteHead.length > 0
+      ? remoteHead.slice(`${remote ?? ""}/`.length)
+      : // Unknown: protect whichever conventional name the checkout is on.
+        branch === "master"
+        ? "master"
+        : "main";
   const changes = (await git(root, ["status", "--porcelain", "-z"]))
     .split("\0")
     .filter((entry) => entry.length > 3 && !entry.startsWith("!!"))
@@ -68,7 +79,6 @@ export async function readHandoverCheckout(root: string): Promise<HandoverChecko
   const ignoredFiles = (await git(root, ["status", "--porcelain", "--ignored", "-z"]))
     .split("\0")
     .filter((entry) => entry.startsWith("!! ")).length;
-  const remote = await pushRemote(root, branch);
   const remoteUrl =
     remote === undefined ? "" : await git(root, ["remote", "get-url", remote]).catch(() => "");
   return {
@@ -215,6 +225,8 @@ export async function pushHandover(input: {
  */
 export async function readHandoverNote(input: {
   readonly repositoryRoot: string;
+  /** The remote the clone names the handover's repository by; see {@link remoteNamedFor}. */
+  readonly remote: string;
   readonly branch: string;
   readonly handoverId: string;
 }): Promise<string | undefined> {
@@ -223,17 +235,52 @@ export async function readHandoverNote(input: {
     await git(root, [
       "fetch",
       "--quiet",
-      "origin",
-      `refs/heads/${input.branch}:refs/remotes/origin/${input.branch}`,
+      input.remote,
+      `refs/heads/${input.branch}:refs/remotes/${input.remote}/${input.branch}`,
     ]);
     const message = await git(root, [
       "log",
       "-1",
       "--format=%B",
-      `refs/remotes/origin/${input.branch}`,
+      `refs/remotes/${input.remote}/${input.branch}`,
     ]);
     return message.includes(`Octant-Handover: ${input.handoverId}`) ? message : undefined;
   } catch {
     return undefined;
   }
+}
+
+/**
+ * The name a clone gives the repository a handover named by URL. A Project
+ * whose matching remote is `upstream` rather than `origin` is still offered,
+ * so the fetch and the new thread must use that remote, not `origin`.
+ */
+export async function remoteNamedFor(
+  repositoryRoot: string,
+  repositoryRemote: string,
+): Promise<string | undefined> {
+  const wanted = normalizeRepositoryRemote(repositoryRemote);
+  if (wanted === undefined) return undefined;
+  const names = (await git(repositoryRoot, ["remote"]).catch(() => ""))
+    .split("\n")
+    .filter((name) => name.length > 0);
+  for (const name of names) {
+    const url = await git(repositoryRoot, ["remote", "get-url", name]).catch(() => "");
+    if (normalizeRepositoryRemote(url) === wanted) return name;
+  }
+  return undefined;
+}
+
+/**
+ * A handover branch name the checkout does not have yet. Take back keeps the
+ * earlier handover's branch, so a second handover of the same thread takes
+ * the next free name instead of failing on the one already there.
+ */
+export async function unusedHandoverBranch(root: string, wanted: string): Promise<string> {
+  if (!(await branchExists(root, wanted))) return wanted;
+  for (let attempt = 2; attempt < 100; attempt += 1) {
+    const candidate = `${wanted}-${String(attempt)}`;
+    if (!(await branchExists(root, candidate))) return candidate;
+  }
+  return `${wanted}-${String(Date.now())}`;
 }

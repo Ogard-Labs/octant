@@ -99,7 +99,7 @@ import { ThreadMoveService } from "../hub/threadMoveService";
 import { ThreadHandovers } from "../hub/threadHandovers";
 import { HandoverExchange } from "../hub/handoverExchange";
 import { createHandoverRouteHandler } from "../hub/handoverRoutes";
-import { readHandoverNote } from "../hub/codeThreadHandoverGit";
+import { readHandoverNote, remoteNamedFor } from "../hub/codeThreadHandoverGit";
 import { branchExists } from "../hub/codeThreadMoveGit";
 import { createThreadMoveSenders } from "../hub/threadMoveSenders";
 import { createThreadMoveTicketClient } from "../hub/threadMoveTicketClient";
@@ -1297,11 +1297,14 @@ export function wireRemote(deps: RemoteDependencies) {
         .map((project) => ({ projectId: project.id, title: project.name })),
     acceptsProject: (placement) => byMode.destination.acceptsProject(placement),
     resolveProvider: resolveMovedProvider,
-    readNote: async ({ projectId, branch, handoverId }) => {
+    readNote: async ({ projectId, repositoryRemote, branch, handoverId }) => {
       const project = persistence.readProjects().find((entry) => String(entry.id) === projectId);
       if (project?.type !== "code") return undefined;
+      const remote = await remoteNamedFor(project.binding.canonicalRoot, repositoryRemote);
+      if (remote === undefined) return undefined;
       return readHandoverNote({
         repositoryRoot: project.binding.canonicalRoot,
+        remote,
         branch,
         handoverId,
       });
@@ -1315,6 +1318,12 @@ export function wireRemote(deps: RemoteDependencies) {
         .readProjects()
         .find((entry) => String(entry.id) === input.projectId);
       if (project?.type !== "code") throw new Error("The Code Project is gone.");
+      // The clone may name the handover's repository `upstream` rather than `origin`.
+      const remoteName = await remoteNamedFor(
+        project.binding.canonicalRoot,
+        input.repositoryRemote,
+      );
+      if (remoteName === undefined) throw new Error("The clone has no remote for this repository.");
       const command = decodeCodeCommand({
         kind: "create-managed-code-thread",
         threadId: input.threadId,
@@ -1329,7 +1338,7 @@ export function wireRemote(deps: RemoteDependencies) {
         permissionPersistence: "current-session",
         deliveryTarget: {
           branchIntent: input.threadBranch,
-          remoteName: "origin",
+          remoteName,
           proposedBaseRepository: input.projectId,
           proposedBaseBranch: input.branch,
           outcomeKind: "local-implementation",
@@ -1337,7 +1346,7 @@ export function wireRemote(deps: RemoteDependencies) {
         },
         sourceBranch: input.branch,
         startFromOrigin: true,
-        remoteName: "origin",
+        remoteName,
       });
       // The note came through a branch others may push to: the thread starts marked.
       await deps.codeService.execute(ROUTINE_HOST_SCOPE_ID, command, undefined, {
