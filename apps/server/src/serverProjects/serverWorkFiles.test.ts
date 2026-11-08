@@ -185,6 +185,67 @@ describe("server Work file listings", () => {
     expect(result.listing.truncated).toBe(true);
   });
 
+  it("does not spend the visible file budget on hidden Work entries", async () => {
+    const f = fixture();
+    f.run.mockResolvedValueOnce({
+      status: "ran",
+      exitCode: 0,
+      truncated: false,
+      errorOutput: "",
+      output: Buffer.from(
+        "/srv/notes\0d" +
+          Array.from({ length: 1000 }, (_, i) => `f1:.cache/item-${i}\0`).join("") +
+          "f12:reports/result.md\0",
+      ),
+    });
+    const result = await f.reader.list(f.input);
+    expect(result.status).toBe("listed");
+    if (result.status !== "listed") throw Error("Expected visible Work files.");
+    expect(result.listing.entries).toEqual([
+      { kind: "file", path: "reports/result.md", byteLength: 12, origin: "untouched" },
+    ]);
+    expect(result.listing.truncated).toBe(false);
+  });
+
+  it("preserves complete names in Code and Work when another filename is not UTF-8", async () => {
+    const f = fixture();
+    const output = Buffer.concat([
+      Buffer.from("/srv/notes\0df2:.notes\0f12:normal.md\0f1:"),
+      Buffer.from([0xff]),
+      Buffer.from("\0f8:other.md\0"),
+    ]);
+    f.run.mockResolvedValue({
+      status: "ran",
+      exitCode: 0,
+      truncated: false,
+      errorOutput: "",
+      output,
+    });
+    const work = await f.reader.list(f.input);
+    expect(work.status).toBe("listed");
+    if (work.status !== "listed") throw Error("Expected complete Work names.");
+    expect(work.listing.entries.map((entry) => entry.path)).toEqual(["normal.md", "other.md"]);
+    expect(work.listing.truncated).toBe(true);
+    const code = new ServerCodeFiles({
+      connection: { run: f.run },
+      server: () => ({ alias: "fixture", user: "fixture" }),
+      root: project.folder,
+      clock: () => "2026-11-08T12:00:00.000Z",
+    });
+    const result = await code.list({
+      threadId: decodeCodeThreadId("44444444-4444-4444-8444-444444444444"),
+      checkoutId: decodeCodeCheckoutId("55555555-5555-4555-8555-555555555555"),
+    });
+    expect(result.status).toBe("listed");
+    if (result.status !== "listed") throw Error("Expected complete Code names.");
+    expect(result.listing.entries.map((entry) => entry.path)).toEqual([
+      ".notes",
+      "normal.md",
+      "other.md",
+    ]);
+    expect(result.listing.truncated).toBe(true);
+  });
+
   it("drops an incomplete last name instead of inventing a file after output truncation", async () => {
     const f = fixture();
     f.run.mockResolvedValueOnce({

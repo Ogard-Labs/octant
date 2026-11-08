@@ -95,6 +95,7 @@ export function createServerWorkFileListing(options: {
           root: project.folder,
           maxDepth: MAX_WORK_FILE_LISTING_DEPTH,
           maxEntries: MAX_WORK_FILE_LISTING_ENTRIES,
+          omitHidden: true,
         },
         { directory, signal: input.signal },
       );
@@ -110,7 +111,6 @@ export function createServerWorkFileListing(options: {
       const entries: WorkFileListingEntry[] = [];
       let truncated = listed.truncated;
       for (const entry of listed.entries) {
-        if (entry.path.split("/").some((part) => part.startsWith("."))) continue;
         try {
           const decoded = decodeWorkFileListingEntry(
             entry.kind === "directory" ? entry : { ...entry, origin: "untouched" },

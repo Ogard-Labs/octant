@@ -52,6 +52,7 @@ export async function listServerDirectory(
     readonly root: string;
     readonly maxDepth: number;
     readonly maxEntries: number;
+    readonly omitHidden?: boolean;
   },
   input: { readonly directory?: string | undefined; readonly signal?: AbortSignal | undefined },
 ): Promise<ServerDirectoryListing> {
@@ -111,18 +112,25 @@ export async function listServerDirectory(
     truncated = true;
     records = records.subarray(0, records.lastIndexOf(0) + 1);
   }
-  let text: string;
-  try {
-    text = new TextDecoder("utf-8", { fatal: true }).decode(records);
-  } catch {
-    return {
-      status: "failed",
-      category: "unavailable",
-      message: "The server returned an unreadable file listing.",
-    };
-  }
   const found: ServerDirectoryEntry[] = [];
-  for (const record of text.split("\0")) {
+  const decoder = new TextDecoder("utf-8", { fatal: true });
+  for (let offset = 0; offset < records.length;) {
+    const end = records.indexOf(0, offset);
+    if (end < 0) {
+      truncated = true;
+      break;
+    }
+    const raw = records.subarray(offset, end);
+    offset = end + 1;
+    let record: string;
+    try {
+      record = decoder.decode(raw);
+    } catch {
+      // POSIX filenames can contain non-UTF-8 bytes. Never replace those bytes
+      // with another name, or let one unsupported name hide the valid records.
+      truncated = true;
+      continue;
+    }
     if (record === "") continue;
     const kind = record[0];
     const colon = kind === "f" ? record.indexOf(":") : -1;
@@ -142,6 +150,8 @@ export async function listServerDirectory(
       truncated = true;
       continue;
     }
+    if (options.omitHidden === true && path.split("/").some((part) => part.startsWith(".")))
+      continue;
     if (posix.relative(resolved, candidate).split("/").length > options.maxDepth) {
       truncated = true;
       continue;
