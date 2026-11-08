@@ -49,6 +49,7 @@ export const HubMembershipChange = Schema.Literal(
   "hub-promoted",
   "new-hub-accepted",
   "wake-switch-changed",
+  "accept-moved-threads-changed",
   "wake-times-reported",
   "wake-times-merged",
   "wake-times-dropped",

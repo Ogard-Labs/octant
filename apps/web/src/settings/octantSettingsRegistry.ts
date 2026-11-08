@@ -1436,6 +1436,13 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
             "tailscale certificate https ts.net browser web app trusted certificate transparency hub",
         },
         {
+          id: settingId("hub-accept-moved-threads"),
+          label: "Accept moved threads",
+          scope: "host",
+          keywords:
+            "hub move thread moved threads shut down restart another computer touch id owner accept",
+        },
+        {
           id: settingId("hub-wake-service"),
           label: "Wake service",
           scope: "host",
