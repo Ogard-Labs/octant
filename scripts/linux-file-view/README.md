@@ -254,9 +254,9 @@ is replayed. Owner disconnect retires admission. The native relay retains its
 separate binary FD3 channel; neither control channel becomes command stdio.
 Healthy completion requires actual child EXIT plus payload EOF and IPC
 disconnect; a channel or kill error never counts as EXIT. Existing caller and
-cleanup deadlines remain in force. Integrated native Linux acceptance passes
-the session transport scenarios; the working host IPC check alone is not
-capsule proof.
+cleanup deadlines remain in force. An earlier integrated native Linux snapshot
+passes the session transport scenarios; the working host IPC check alone is
+not capsule proof.
 
 Preparation and execution share a caller deadline of at most the candidate's
 existing 180 seconds; normal output drains until EOF or that deadline. Input
@@ -279,9 +279,16 @@ The worker reports cleanup certainty separately from the command result.
 Even during cancellation, the session requires that validated terminal
 acknowledgement, actual worker exit, IPC disconnect and owned retirement before
 reporting confirmed cleanup. Missing acknowledgements remain uncertain, and
-late messages cannot admit a new command or release execution. Integrated native
+late messages cannot admit a new command or release execution. Earlier native
 acceptance passes all seven scenarios and the exact one-worker orphan join;
-the earlier twelve-orphan failure remains the regression baseline.
+the twelve-orphan failure remains the regression baseline.
+
+An unexpected worker exit without its terminal acknowledgement reports native
+unavailability, not caller cancellation, and cleanup stays uncertain. After
+queued messages and identity acquisitions settle, the existing retained child
+can report only its actual exit code/signal and fixed acknowledgement/caller
+state. Uncertain identity suppresses that diagnostic. No additional core target,
+process memory, command output or private path is collected.
 
 The unchanged session scenarios run after the three ordinary capsules and
 before the Bun/Node controllers, retaining the exact one-worker orphan join.
@@ -323,10 +330,13 @@ The metadata scan checks prospective names against known policy parent
 identities, including absent exact files and SSH companions, without creating
 placeholders or inventing inode metadata. It retains byte names, captured
 account exceptions, permitted unnamed sources and stable native EEXIST cases.
-Focused policy/lifecycle tests and pinned-source generation checks pass; actual
-integrated kernel compilation and creation acceptance remain pending. Internal
-or stacked creation paths without the exact prepared scope refuse; complete
-filesystem/runtime parity is not established by these audited entry points.
+Focused policy/lifecycle tests and pinned-source generation checks pass. Actual
+integrated kernel compilation, all six creation refusals, permitted controls
+and unchanged protected state pass. That run then fails session startup before
+its marker, without a worker acknowledgement; an unconfirmed core event does
+not identify the cause. The full native run remains red. Internal or stacked
+creation paths without the exact prepared scope refuse; complete filesystem/
+runtime parity is not established by these audited entry points.
 
 Dispatch `experiment=kernel-admission` to compile and boot a pinned Linux 6.18
 guest under networkless QEMU TCG in the owned ephemeral runner. The upstream

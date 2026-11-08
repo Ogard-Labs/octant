@@ -196,6 +196,9 @@ export async function prepareLinuxMediationSession(input: {
   let phase: "preparing" | "ready" | "launching" | "running" | "stopping" | "exited" = "preparing";
   let result: LinuxMediationBrokerResult | undefined;
   let workerExited = false;
+  let workerExit:
+    | { readonly code: number | null; readonly signal: NodeJS.Signals | null }
+    | undefined;
   const acquisitions = new Set<Promise<void>>();
   let ownershipUncertain = false;
   let nativeCleanup: Cleanup = "uncertain";
@@ -293,6 +296,32 @@ export async function prepareLinuxMediationSession(input: {
           : "confirmed";
       const acquired = await within(Promise.allSettled(acquisitions), 500);
       if (!acquired || ownershipUncertain) cleanup = "uncertain";
+      if (
+        terminalSettled &&
+        acquired &&
+        !ownershipUncertain &&
+        !cleanupAcknowledged &&
+        workerExit !== undefined &&
+        result?.status === "unavailable" &&
+        result.reason === "native-unavailable" &&
+        receipts.some((receipt) => receipt.pid === child.pid)
+      ) {
+        // This exact ChildProcess has an acquired identity receipt. Report its
+        // exit without treating an unacknowledged worker as caller cancellation
+        // or extending the separate core collector's allowed targets.
+        try {
+          process.stderr.write(
+            `${JSON.stringify({
+              status: "mediation-worker-exit",
+              pid: child.pid,
+              code: workerExit.code,
+              signal: workerExit.signal,
+              terminalAcknowledged: cleanupAcknowledged,
+              callerAborted: input.signal.aborted,
+            })}\n`,
+          );
+        } catch {}
+      }
       if (receipts.length === 0 && !workerExited) {
         // The retained ChildProcess is the only available launch identity here.
         // Failed receipt acquisition never licenses a guessed process-group kill.
@@ -327,7 +356,10 @@ export async function prepareLinuxMediationSession(input: {
         stderr.destroy();
       }
       phase = "exited";
-      settleExited({ result: result ?? { status: "unavailable", reason: "cancelled" }, cleanup });
+      settleExited({
+        result: result ?? { status: "unavailable", reason: "native-unavailable" },
+        cleanup,
+      });
     })();
     return finishing;
   };
@@ -354,16 +386,19 @@ export async function prepareLinuxMediationSession(input: {
     stderrEnded = true;
     naturalExit();
   });
-  child.once("exit", () => {
+  child.once("exit", (code, signal) => {
     workerExited = true;
+    workerExit = { code: code ?? null, signal: signal ?? null };
     naturalExit();
   });
   child.once("close", naturalExit);
   child.once("disconnect", () => {
     ipcDisconnected = true;
     void sequence.then(() => {
-      if (result === undefined) abort();
-      else naturalExit();
+      if (result === undefined) {
+        result = { status: "unavailable", reason: "native-unavailable" };
+        void finish();
+      } else naturalExit();
     });
   });
   child.on("error", () => {

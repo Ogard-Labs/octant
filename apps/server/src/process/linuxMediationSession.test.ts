@@ -252,6 +252,35 @@ describe("owned mediation session admission and input", () => {
       });
     },
   );
+  it("reports an unexpected worker exit as unavailable without claiming caller cancellation or confirmed cleanup", async () => {
+    const diagnostic = vi.spyOn(process.stderr, "write").mockReturnValue(true);
+    const owner = new AbortController();
+    const child = worker((done) => done(), false, "missing");
+    fixture.spawn.mockReturnValue(child);
+    try {
+      const prepared = await prepareLinuxMediationSession(input(owner.signal));
+      if (prepared.status !== "ready") throw Error("Session unavailable");
+      child.signalCode = "SIGSEGV";
+      child.emit("exit", null, "SIGSEGV");
+      child.disconnect();
+      expect(await prepared.session.exited).toEqual({
+        result: { status: "unavailable", reason: "native-unavailable" },
+        cleanup: "uncertain",
+      });
+      expect(owner.signal.aborted).toBe(false);
+      expect(diagnostic).toHaveBeenCalledOnce();
+      expect(JSON.parse(String(diagnostic.mock.calls[0]?.[0]))).toEqual({
+        status: "mediation-worker-exit",
+        pid: 1001,
+        code: null,
+        signal: "SIGSEGV",
+        terminalAcknowledged: false,
+        callerAborted: false,
+      });
+    } finally {
+      diagnostic.mockRestore();
+    }
+  });
   it("never releases execution when the owner cancels during command ownership acquisition", async () => {
     const owner = new AbortController();
     let release = () => {},
