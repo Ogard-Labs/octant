@@ -1,6 +1,7 @@
 import {
   BENCHMARK_CODE_ONLY_CHECK_KINDS,
   BENCHMARK_FAILURE_REASON_CHARS,
+  BENCHMARK_JUDGE_REASON_CHARS,
   type BenchmarkBudget,
   type BenchmarkCase,
   type BenchmarkCell,
@@ -9,6 +10,7 @@ import {
   type BenchmarkCheck,
   type BenchmarkCheckResult,
   type BenchmarkLeaderboardRow,
+  type BenchmarkOverhead,
   type BenchmarkRun,
   type BenchmarkRunSummary,
   type TurnMetricsRecord,
@@ -181,6 +183,43 @@ export function nextBenchmarkCells(
   return next;
 }
 
+/**
+ * The cells whose answer still owes a judge score: answered, in a run whose
+ * suite names a judge, with no judge result journaled yet. In plan order.
+ */
+export function benchmarkCellsOwingJudgement(
+  run: Pick<BenchmarkRun, "cells" | "judge">,
+): ReadonlyArray<BenchmarkCell> {
+  if (run.judge === undefined) return [];
+  return run.cells.filter((cell) => cell.state === "answered" && cell.judge === undefined);
+}
+
+/**
+ * The owed judgements that may start now. A judge turn counts against the same
+ * limits as a contender's cell, on the judge's own provider instance, so
+ * `running` must already include the judge turns in flight.
+ */
+export function nextBenchmarkJudgements(
+  run: Pick<BenchmarkRun, "cells" | "judge">,
+  inFlight: ReadonlySet<string>,
+  running: BenchmarkRunningCounts,
+  limits: { readonly perProvider: number; readonly perHost: number } = BENCHMARK_CONCURRENCY_LIMITS,
+): ReadonlyArray<BenchmarkCell> {
+  if (run.judge === undefined) return [];
+  const key = String(run.judge.providerInstanceId);
+  let active = running.byProvider.get(key) ?? 0;
+  let total = running.total;
+  const next: BenchmarkCell[] = [];
+  for (const cell of benchmarkCellsOwingJudgement(run)) {
+    if (inFlight.has(String(cell.cellId))) continue;
+    if (total >= limits.perHost || active >= limits.perProvider) break;
+    active += 1;
+    total += 1;
+    next.push(cell);
+  }
+  return next;
+}
+
 export type BenchmarkBudgetDecision =
   | { readonly decision: "start" }
   | { readonly decision: "stop"; readonly reason: string };
@@ -190,23 +229,29 @@ export type BenchmarkBudgetDecision =
  * that settled with usage; with none settled yet the first cells are allowed,
  * because nothing is known. The run stops when what was spent, plus that
  * estimate for every cell running and the one about to start, would pass a limit.
+ * What the judge turns cost (`overhead`) counts as spent.
  */
 export function benchmarkBudgetDecision(
   budget: BenchmarkBudget,
   spent: { readonly tokens: number; readonly costUsd: number },
   settledCount: number,
   runningCount: number,
+  overhead: { readonly tokens: number; readonly costUsd: number } = { tokens: 0, costUsd: 0 },
 ): BenchmarkBudgetDecision {
   if (settledCount <= 0) return { decision: "start" };
   const inFlight = runningCount + 1;
+  // Judging is paid for by the same budget, and every further cell brings its
+  // own judging, so the mean per cell includes it.
+  const tokens = spent.tokens + overhead.tokens;
+  const costUsd = spent.costUsd + overhead.costUsd;
   if (budget.maxTokens !== undefined) {
-    const projected = spent.tokens + (spent.tokens / settledCount) * inFlight;
+    const projected = tokens + (tokens / settledCount) * inFlight;
     if (projected > budget.maxTokens) {
       return { decision: "stop", reason: "The next cell would pass the token budget." };
     }
   }
   if (budget.maxCostUsd !== undefined) {
-    const projected = spent.costUsd + (spent.costUsd / settledCount) * inFlight;
+    const projected = costUsd + (costUsd / settledCount) * inFlight;
     if (projected > budget.maxCostUsd) {
       return { decision: "stop", reason: "The next cell would pass the cost budget." };
     }
@@ -214,11 +259,125 @@ export function benchmarkBudgetDecision(
   return { decision: "start" };
 }
 
-/** A run is finished once no cell is waiting or running. */
-export function benchmarkRunStatusAfter(run: Pick<BenchmarkRun, "cells">): "running" | "finished" {
-  return run.cells.some((cell) => cell.state === "queued" || cell.state === "running")
-    ? "running"
-    : "finished";
+/**
+ * A run is finished once no cell is waiting or running and every judgement it
+ * owes has settled.
+ */
+export function benchmarkRunStatusAfter(
+  run: Pick<BenchmarkRun, "cells" | "judge">,
+): "running" | "finished" {
+  if (run.cells.some((cell) => cell.state === "queued" || cell.state === "running")) {
+    return "running";
+  }
+  return benchmarkCellsOwingJudgement(run).length > 0 ? "running" : "finished";
+}
+
+/** A candidate answer longer than this is cut before the judge reads it. */
+export const BENCHMARK_JUDGE_ANSWER_CHARS = 50_000;
+
+/**
+ * What the judge is asked. It is built only from the rubric, the case, and the
+ * answer, so it cannot name the contender, its provider, or its model.
+ */
+export function benchmarkJudgePrompt(input: {
+  readonly rubric: string;
+  readonly casePrompt: string;
+  readonly referenceAnswer?: string | undefined;
+  readonly candidateAnswer: string;
+}): string {
+  const cut = input.candidateAnswer.length > BENCHMARK_JUDGE_ANSWER_CHARS;
+  const candidate = cut
+    ? input.candidateAnswer.slice(0, BENCHMARK_JUDGE_ANSWER_CHARS)
+    : input.candidateAnswer;
+  const parts = [
+    "You are grading one answer to a task. Judge it only against the rubric below.",
+    `Rubric:\n${input.rubric}`,
+    `Task given to the answerer:\n${input.casePrompt}`,
+  ];
+  if (input.referenceAnswer !== undefined && input.referenceAnswer !== "") {
+    parts.push(`Reference answer:\n${input.referenceAnswer}`);
+  }
+  parts.push(`Answer to grade${cut ? " (cut at 50,000 characters)" : ""}:\n${candidate}`);
+  parts.push(
+    `Reply with exactly one JSON object and nothing else: {"score": <integer from 1 to 10>, "reason": "<at most ${BENCHMARK_JUDGE_REASON_CHARS} characters>"}`,
+  );
+  return parts.join("\n\n");
+}
+
+export type BenchmarkJudgeReading =
+  | { readonly status: "scored"; readonly score: number; readonly reason: string }
+  | { readonly status: "failed"; readonly reason: string };
+
+const JUDGE_UNPARSEABLE = "The judge did not answer in the expected form";
+
+/**
+ * Reads the judge's reply strictly. The first top-level JSON object in the text
+ * is the answer, so prose around it is allowed; its score must be an integer
+ * from 1 to 10 and its reason a string, which is cut to the stored bound. Any
+ * other shape is a failed judgement, never a guessed score.
+ */
+export function parseBenchmarkJudgeReply(text: string): BenchmarkJudgeReading {
+  const failed = { status: "failed", reason: JUDGE_UNPARSEABLE } as const;
+  const json = firstJsonObject(text);
+  if (json === undefined) return failed;
+  let value: unknown;
+  try {
+    value = JSON.parse(json);
+  } catch {
+    return failed;
+  }
+  if (typeof value !== "object" || value === null || Array.isArray(value)) return failed;
+  const { score, reason } = value as { score?: unknown; reason?: unknown };
+  if (typeof score !== "number" || !Number.isInteger(score) || score < 1 || score > 10) {
+    return failed;
+  }
+  if (typeof reason !== "string") return failed;
+  return {
+    status: "scored",
+    score,
+    reason: boundedBenchmarkReason(reason, BENCHMARK_JUDGE_REASON_CHARS),
+  };
+}
+
+/** The text of the first balanced `{...}`, reading strings so braces inside them do not count. */
+function firstJsonObject(text: string): string | undefined {
+  const start = text.indexOf("{");
+  if (start < 0) return undefined;
+  let depth = 0;
+  let inString = false;
+  let escaped = false;
+  for (let index = start; index < text.length; index += 1) {
+    const char = text[index];
+    if (inString) {
+      if (escaped) escaped = false;
+      else if (char === "\\") escaped = true;
+      else if (char === '"') inString = false;
+      continue;
+    }
+    if (char === '"') inString = true;
+    else if (char === "{") depth += 1;
+    else if (char === "}") {
+      depth -= 1;
+      if (depth === 0) return text.slice(start, index + 1);
+    }
+  }
+  return undefined;
+}
+
+/**
+ * Sums the figures of the judge turns. A turn that reported no usage still
+ * counts as a turn.
+ */
+export function benchmarkOverhead(
+  judgeTurns: ReadonlyArray<BenchmarkCellMetrics>,
+): BenchmarkOverhead {
+  let tokens = 0;
+  let costUsd = 0;
+  for (const metrics of judgeTurns) {
+    tokens += metrics.totalTokens ?? 0;
+    costUsd += metrics.costUsd ?? 0;
+  }
+  return { turns: judgeTurns.length, tokens, costUsd };
 }
 
 /** Keeps a reason inside the stored bound, on one line. */

@@ -57,6 +57,7 @@ export const benchmarkIds = {
   run: "66100000-0000-4000-8000-000000000002",
   providerA: "66100000-0000-4000-8000-0000000000b1",
   providerB: "66100000-0000-4000-8000-0000000000b2",
+  judgeProvider: "66100000-0000-4000-8000-0000000000b3",
 } as const;
 
 export function sampleSuite(overrides: Partial<Record<string, unknown>> = {}): BenchmarkSuite {
@@ -92,6 +93,7 @@ export function sampleRun(
     readonly budget?: BenchmarkRun["budget"];
     readonly providers?: ReadonlyArray<string>;
     readonly suite?: BenchmarkSuite;
+    readonly judge?: { readonly providerInstanceId: string; readonly modelId: string };
   } = {},
 ): BenchmarkRun {
   const suite = options.suite ?? sampleSuite();
@@ -107,6 +109,9 @@ export function sampleRun(
     suiteRevision: suite.revision,
     suiteName: suite.name,
     cases: suite.cases,
+    ...(options.judge === undefined
+      ? {}
+      : { judge: { ...options.judge, rubric: "Prefer correct, short answers." } }),
     contenders,
     repetitions,
     budget: options.budget ?? { maxTokens: 1_000_000 },

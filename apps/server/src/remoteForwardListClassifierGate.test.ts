@@ -37,7 +37,7 @@ describe("remote forward list vs route classifier", () => {
     }
   });
 
-  it("forwards the benchmark reads to a paired device and refuses every benchmark write", () => {
+  it("forwards the benchmark reads and the stars write to a paired device and refuses every other benchmark write", () => {
     const policy = createRemoteRoutePolicy({ origin });
     const decide = (path: string) =>
       policy.inspect(
@@ -51,7 +51,7 @@ describe("remote forward list vs route classifier", () => {
           },
         }),
       ).kind;
-    for (const path of ["suites/list", "runs/list", "runs/read"]) {
+    for (const path of ["suites/list", "runs/list", "runs/read", "cells/rate"]) {
       expect(decide(`/api/benchmarks/${path}`)).toBe("allow");
     }
     for (const path of [

@@ -11,9 +11,13 @@ import {
   type BenchmarkPatternMatcher,
   benchmarkBudgetDecision,
   benchmarkCellMetrics,
+  benchmarkJudgePrompt,
   benchmarkLeaderboard,
+  benchmarkOverhead,
   benchmarkRunStatusAfter,
   nextBenchmarkCells,
+  nextBenchmarkJudgements,
+  parseBenchmarkJudgeReply,
   planBenchmarkCells,
   scoreBenchmarkChecks,
 } from "./benchmarkPolicy";
@@ -193,6 +197,123 @@ describe("benchmark budget", () => {
     expect(benchmarkBudgetDecision(budget, { tokens: 0, costUsd: 0.7 }, 3, 1).decision).toBe(
       "stop",
     );
+  });
+});
+
+describe("benchmark budget with judging", () => {
+  it("counts what the judge turns cost as spent, and the mean cell carries its judging", () => {
+    const budget = { maxTokens: 1_000 };
+    const spent = { tokens: 600, costUsd: 0 };
+    expect(benchmarkBudgetDecision(budget, spent, 4, 1).decision).toBe("start");
+    const stopped = benchmarkBudgetDecision(budget, spent, 4, 1, { tokens: 200, costUsd: 0 });
+    expect(stopped.decision).toBe("stop");
+  });
+
+  it("stops on the cost limit once overhead is counted", () => {
+    const budget = { maxCostUsd: 1 };
+    const spent = { tokens: 0, costUsd: 0.4 };
+    expect(benchmarkBudgetDecision(budget, spent, 2, 1).decision).toBe("start");
+    expect(benchmarkBudgetDecision(budget, spent, 2, 1, { tokens: 0, costUsd: 0.2 }).decision).toBe(
+      "stop",
+    );
+  });
+});
+
+describe("benchmark judge prompt", () => {
+  it("holds the rubric, the task, the reference, and the answer, and nothing that names the contender", () => {
+    const prompt = benchmarkJudgePrompt({
+      rubric: "Prefer short answers.",
+      casePrompt: "Say hello.",
+      referenceAnswer: "Hello!",
+      candidateAnswer: "Hi there",
+    });
+    for (const part of ["Prefer short answers.", "Say hello.", "Hello!", "Hi there"]) {
+      expect(prompt).toContain(part);
+    }
+    expect(prompt).toContain('{"score": <integer from 1 to 10>, "reason":');
+    expect(prompt).not.toMatch(/model-a|provider|contender/i);
+  });
+
+  it("leaves out the reference section when the case has none and cuts a very long answer", () => {
+    const prompt = benchmarkJudgePrompt({
+      rubric: "r",
+      casePrompt: "p",
+      candidateAnswer: "x".repeat(60_000),
+    });
+    expect(prompt).not.toContain("Reference answer");
+    expect(prompt).toContain("cut at 50,000 characters");
+    expect(prompt.length).toBeLessThan(51_000);
+  });
+});
+
+describe("reading a judge reply", () => {
+  it("accepts the first JSON object amid prose and braces inside strings", () => {
+    expect(
+      parseBenchmarkJudgeReply(
+        'Sure.\n```json\n{"score": 7, "reason": "Fine {mostly}"}\n```\nDone',
+      ),
+    ).toEqual({ status: "scored", score: 7, reason: "Fine {mostly}" });
+  });
+
+  it("cuts a reason to 512 characters", () => {
+    const reading = parseBenchmarkJudgeReply(`{"score": 3, "reason": "${"a".repeat(900)}"}`);
+    expect(reading.status).toBe("scored");
+    expect(reading.reason.length).toBeLessThanOrEqual(512);
+  });
+
+  it.each([
+    ["a score above ten", '{"score": 11, "reason": "x"}'],
+    ["a score of zero", '{"score": 0, "reason": "x"}'],
+    ["a fractional score", '{"score": 7.5, "reason": "x"}'],
+    ["a score written as text", '{"score": "7", "reason": "x"}'],
+    ["a missing score", '{"reason": "x"}'],
+    ["a missing reason", '{"score": 5}'],
+    ["no object at all", "I would give it a seven."],
+    ["an unterminated object", '{"score": 5, "reason": "x"'],
+    ["an array", "[1, 2]"],
+  ])("refuses %s", (_name, reply) => {
+    expect(parseBenchmarkJudgeReply(reply)).toEqual({
+      status: "failed",
+      reason: "The judge did not answer in the expected form",
+    });
+  });
+});
+
+describe("benchmark overhead and owed judgements", () => {
+  it("sums the judge turns and counts a turn that reported nothing", () => {
+    expect(
+      benchmarkOverhead([
+        { stopReason: "end-of-turn", wallMs: 1, totalTokens: 100, costUsd: 0.01 },
+        { stopReason: "end-of-turn", wallMs: 1 },
+      ]),
+    ).toEqual({ turns: 2, tokens: 100, costUsd: 0.01 });
+  });
+
+  it("keeps a run open while an answered cell still owes its judge score", () => {
+    const answered = { ...queued(1, 0), state: "answered" } as BenchmarkCell;
+    const judge = { providerInstanceId: "pj", modelId: "m", rubric: "r" } as never;
+    expect(benchmarkRunStatusAfter({ cells: [answered], judge })).toBe("running");
+    expect(
+      benchmarkRunStatusAfter({
+        cells: [{ ...answered, judge: { status: "failed", reason: "x" } }],
+        judge,
+      }),
+    ).toBe("finished");
+  });
+
+  it("starts owed judgements within the provider and host limits, skipping those in flight", () => {
+    const answered = (index: number) =>
+      ({ ...queued(index, 0), state: "answered" }) as BenchmarkCell;
+    const run = {
+      cells: [answered(1), answered(2), answered(3)],
+      judge: { providerInstanceId: "pj", modelId: "m", rubric: "r" } as never,
+    };
+    const first = String(run.cells[0]?.cellId);
+    const next = nextBenchmarkJudgements(run, new Set([first]), {
+      byProvider: new Map([["pj", 1]]),
+      total: 1,
+    });
+    expect(next.map((cell) => String(cell.cellId).slice(-1))).toEqual(["2"]);
   });
 });
 

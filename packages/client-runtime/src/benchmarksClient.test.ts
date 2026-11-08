@@ -70,4 +70,26 @@ describe("benchmarks client", () => {
       message: "Contender 1 is not an enabled provider model on this host.",
     });
   });
+
+  it("posts stars to the rate path and decodes the stored rating", async () => {
+    const ids = {
+      runId: "67000000-0000-4000-8000-0000000000a1",
+      cellId: "67000000-0000-4000-8000-0000000000a2",
+    };
+    const fetch = vi.fn(async () =>
+      Response.json({ ...ids, rating: { stars: 4, note: "Clear", ratedAt: at } }),
+    );
+    const client = createBenchmarksClient({ baseUrl, fetch, windowCapability: capability });
+
+    const rated = await client.rateCell({ ...ids, stars: 4, note: "Clear" } as never);
+
+    expect(rated.rating).toEqual({ stars: 4, note: "Clear", ratedAt: at });
+    expect(fetch).toHaveBeenCalledWith(
+      `${baseUrl}/api/benchmarks/cells/rate`,
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({ ...ids, stars: 4, note: "Clear" }),
+      }),
+    );
+  });
 });

@@ -264,7 +264,9 @@ export function classifyProductAction(request: Request): string | undefined {
     return method === "GET" || method === "HEAD" ? "settings.read-non-secret" : undefined;
   }
   if (path.startsWith("/api/benchmarks/")) {
-    // Reads of suites and runs only; every change stays with a local window.
+    // Reads of suites and runs, and a cell's stars; every other change stays
+    // with a local window.
+    if (method === "POST" && path === "/api/benchmarks/cells/rate") return "benchmark.rate-cell";
     return method === "POST" &&
       (path === "/api/benchmarks/suites/list" ||
         path === "/api/benchmarks/runs/list" ||

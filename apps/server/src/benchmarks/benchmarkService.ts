@@ -5,6 +5,8 @@ import {
   decodeBenchmarkSuite,
   decodeUtcTimestamp,
   type BenchmarkCellMetrics,
+  type BenchmarkCellRateRequest,
+  type BenchmarkRating,
   type BenchmarkRun,
   type BenchmarkRunCancelRequest,
   type BenchmarkRunPurgeRequest,
@@ -25,11 +27,12 @@ import {
   benchmarkCellCount,
   benchmarkCellMetrics,
   benchmarkLeaderboard,
+  benchmarkOverhead,
   planBenchmarkCells,
   summarizeBenchmarkRun,
 } from "@octant/domain";
 import type { BenchmarkEventStore } from "./benchmarkEventStore";
-import { benchmarkCellIdentity } from "./benchmarkRunner";
+import { benchmarkCellIdentity, benchmarkJudgeIdentity } from "./benchmarkRunner";
 import type { BenchmarkProjection } from "./benchmarkProjection";
 
 /** A refusal is a value the route answers with its own status. */
@@ -44,7 +47,7 @@ export interface BenchmarkServiceOptions {
   readonly projection: Pick<BenchmarkProjection, "suites" | "suite" | "runs" | "run">;
   readonly store: Pick<
     BenchmarkEventStore,
-    "suiteSaved" | "suiteDeleted" | "runStarted" | "runPurged"
+    "suiteSaved" | "suiteDeleted" | "runStarted" | "runPurged" | "cellRated"
   >;
   readonly turnMetrics: {
     readonly forThread: (threadId: string) => ReadonlyArray<TurnMetricsRecord>;
@@ -149,7 +152,44 @@ export class BenchmarkService {
       metricsByThread.set(cell.threadId, metrics);
       cellMetrics.push({ cellId: cell.cellId, metrics });
     }
-    return ok({ run, leaderboard: benchmarkLeaderboard(run, metricsByThread), cellMetrics });
+    // The judge's turns are the run's overhead, never a contender's figures.
+    const judgeTurns =
+      run.judge === undefined
+        ? []
+        : run.cells.flatMap((cell) => {
+            const record = this.#options.turnMetrics
+              .forThread(benchmarkJudgeIdentity(String(cell.cellId)).threadId)
+              .at(-1);
+            return record === undefined ? [] : [benchmarkCellMetrics(record)];
+          });
+    return ok({
+      run,
+      leaderboard: benchmarkLeaderboard(run, metricsByThread),
+      overhead: benchmarkOverhead(judgeTurns),
+      cellMetrics,
+    });
+  }
+
+  /** Stars for one cell; rating again replaces the earlier rating. */
+  rateCell(request: BenchmarkCellRateRequest): BenchmarkOutcome<{
+    readonly runId: BenchmarkRun["runId"];
+    readonly cellId: BenchmarkRun["cells"][number]["cellId"];
+    readonly rating: BenchmarkRating;
+  }> {
+    const run = this.#options.projection.run(String(request.runId));
+    if (run === undefined) return refused("not-found", "That run does not exist.");
+    const cell = run.cells.find((candidate) => candidate.cellId === request.cellId);
+    if (cell === undefined) return refused("not-found", "That cell is not in the run.");
+    if (cell.state !== "answered") {
+      return refused("conflict", "Only an answered cell can be rated.");
+    }
+    const rating: BenchmarkRating = {
+      stars: request.stars,
+      ...(request.note === undefined || request.note === "" ? {} : { note: request.note }),
+      ratedAt: decodeUtcTimestamp(this.#options.clock()),
+    };
+    this.#options.store.cellRated({ runId: run.runId, cellId: cell.cellId, rating });
+    return ok({ runId: run.runId, cellId: cell.cellId, rating });
   }
 
   /**
@@ -247,7 +287,12 @@ export class BenchmarkService {
     // every cell's fixed thread identity is purged. A thread that was never made
     // is "absent", which counts as done.
     for (const cell of run.cells) {
-      const threadIds = new Set([benchmarkCellIdentity(String(cell.cellId)).threadId]);
+      // The judge's thread is found by its fixed identity too; it is absent when
+      // the suite had no judge or the cell never reached it.
+      const threadIds = new Set([
+        benchmarkCellIdentity(String(cell.cellId)).threadId,
+        benchmarkJudgeIdentity(String(cell.cellId)).threadId,
+      ]);
       if (cell.threadId !== undefined) threadIds.add(cell.threadId);
       for (const threadId of threadIds) {
         if ((await this.#options.purgeThread(threadId)) === "failed") {

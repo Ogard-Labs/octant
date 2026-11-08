@@ -704,6 +704,10 @@ export const KNOWN_UNCALLED_ENDPOINTS: ReadonlyMap<string, string> = new Map([
     "Benchmark write route, served by the engine slice of docs/design/model-benchmarks.md ahead of the Benchmarks pages that call it. Remove once the Usage workspace's Benchmarks source calls it.",
   ],
   [
+    "/api/benchmarks/cells/rate",
+    "Benchmark write route, served by the judge and stars slice of docs/design/model-benchmarks.md ahead of the Benchmarks pages that call it. Remove once the Usage workspace's Benchmarks source calls it.",
+  ],
+  [
     "/api/code/language/documents",
     "Language services' document sync, served by the host since 2026-10-26 ahead of the editor that calls it (docs/design/language-services.md, delivery plan slice 3). Remove once the Code editor syncs its open documents.",
   ],

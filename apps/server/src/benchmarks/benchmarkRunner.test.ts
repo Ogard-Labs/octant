@@ -9,7 +9,7 @@ import type {
 } from "./benchmarkChatPort";
 import { BENCHMARKS_PROJECT_ID } from "./benchmarkChatPort";
 import { createWorkerPatternMatcher } from "./benchmarkPatternMatcher";
-import { BenchmarkRunner, benchmarkCellIdentity } from "./benchmarkRunner";
+import { BenchmarkRunner, benchmarkCellIdentity, benchmarkJudgeIdentity } from "./benchmarkRunner";
 import {
   BENCHMARK_TEST_NOW,
   benchmarkIds,
@@ -370,5 +370,153 @@ describe("benchmark runner", () => {
 
     expect(chat.archived).toContain(threadOf(String(run.cells[0]!.cellId)));
     expect(chat.archived).not.toContain(threadOf(String(run.cells[1]!.cellId)));
+  });
+
+  describe("judging", () => {
+    const judged = { providerInstanceId: benchmarkIds.judgeProvider, modelId: "judge-model" };
+    const judgeThread = (cellId: string) => benchmarkJudgeIdentity(cellId).threadId;
+
+    /** A two-cell run whose cells are both answered, with judge turns now in flight. */
+    async function answeredWithJudge(repetitions = 1) {
+      const ready = setup();
+      const run = sampleRun({ judge: judged, repetitions });
+      ready.store.runStarted({ run });
+      await ready.runner.tick();
+      for (const cell of run.cells.slice(0, 2)) {
+        ready.chat.finish(
+          threadOf(String(cell.cellId)),
+          `answer for ${String(cell.cellId).slice(-2)}`,
+        );
+      }
+      await ready.runner.tick();
+      return { ...ready, run };
+    }
+
+    it("starts a judge turn on the judge model for an answered cell, blind to the contender", async () => {
+      const { chat, run } = await answeredWithJudge();
+      const judgeStarts = chat.starts.filter((start) => String(start.modelId) === "judge-model");
+      expect(judgeStarts).toHaveLength(2);
+      const first = judgeStarts[0]!;
+      expect(String(first.providerInstanceId)).toBe(benchmarkIds.judgeProvider);
+      expect(first.threadId).toBe(judgeThread(String(run.cells[0]!.cellId)));
+      expect(first.submissionId).toBe(
+        benchmarkJudgeIdentity(String(run.cells[0]!.cellId)).submissionId,
+      );
+      expect(first.prompt).toContain("Prefer correct, short answers.");
+      expect(first.prompt).toContain("Say hello.");
+      expect(first.prompt).toContain(`answer for ${String(run.cells[0]!.cellId).slice(-2)}`);
+      expect(first.prompt).not.toContain("model-a");
+      expect(first.prompt).not.toContain(benchmarkIds.providerA);
+      expect(first.title).not.toContain("model-a");
+    });
+
+    it("records the judge's score and reason, then archives the judge thread", async () => {
+      const { chat, runner, projection, run } = await answeredWithJudge();
+      const cellId = String(run.cells[0]!.cellId);
+      chat.finish(judgeThread(cellId), 'Here you go: {"score": 8, "reason": "Accurate and short"}');
+
+      await runner.tick();
+
+      expect(projection.run(benchmarkIds.run)!.cells[0]!.judge).toEqual({
+        status: "scored",
+        score: 8,
+        reason: "Accurate and short",
+        judgeThreadId: judgeThread(cellId),
+      });
+      expect(chat.archived).toContain(judgeThread(cellId));
+    });
+
+    it("records a failed judgement when the reply is not in the expected form", async () => {
+      const { chat, runner, projection, run } = await answeredWithJudge();
+      chat.finish(judgeThread(String(run.cells[0]!.cellId)), "I give it a solid eight.");
+
+      await runner.tick();
+
+      expect(projection.run(benchmarkIds.run)!.cells[0]!.judge).toEqual({
+        status: "failed",
+        reason: "The judge did not answer in the expected form",
+      });
+    });
+
+    it("keeps waiting on a judge turn started before a restart instead of starting another", async () => {
+      const { chat, store, projection, metrics, clock, run } = await answeredWithJudge();
+      const startsBefore = chat.starts.length;
+      chat.finish(judgeThread(String(run.cells[0]!.cellId)), '{"score": 6, "reason": "ok"}');
+
+      const restarted = new BenchmarkRunner({
+        chat,
+        projection,
+        store,
+        turnMetrics: { forThread: (id) => metrics.get(id) ?? [] },
+        projectId: BENCHMARKS_PROJECT_ID,
+        matchPattern: matcher,
+        clock: () => clock.now,
+      });
+      await restarted.tick();
+
+      const cells = projection.run(benchmarkIds.run)!.cells;
+      expect(cells[0]?.judge).toMatchObject({ status: "scored", score: 6 });
+      expect(cells[1]?.judge).toBeUndefined();
+      expect(chat.starts).toHaveLength(startsBefore);
+    });
+
+    it("does not finish the run until every judgement it owes has settled", async () => {
+      const { chat, runner, projection, run } = await answeredWithJudge();
+      expect(projection.run(benchmarkIds.run)?.status).toBe("running");
+
+      for (const cell of run.cells) {
+        chat.finish(judgeThread(String(cell.cellId)), '{"score": 7, "reason": "fine"}');
+      }
+      await runner.tick();
+
+      expect(projection.run(benchmarkIds.run)?.status).toBe("finished");
+    });
+
+    it("counts judge turns against the provider's two places, so a queued cell waits for them", async () => {
+      const ready = setup();
+      const run = sampleRun({
+        judge: { providerInstanceId: benchmarkIds.providerA, modelId: "judge-model" },
+        repetitions: 2,
+      });
+      ready.store.runStarted({ run });
+      await ready.runner.tick();
+      for (const cell of run.cells.slice(0, 2)) {
+        ready.chat.finish(threadOf(String(cell.cellId)), "hello");
+      }
+
+      await ready.runner.tick();
+
+      const starts = ready.chat.starts.map((start) => String(start.modelId));
+      expect(starts.filter((model) => model === "judge-model")).toHaveLength(2);
+      expect(starts.filter((model) => model === "model-a")).toHaveLength(2);
+      expect(
+        ready.projection
+          .run(benchmarkIds.run)!
+          .cells.slice(2)
+          .map((cell) => cell.state),
+      ).toEqual(["queued", "queued"]);
+    });
+
+    it("starts no judge turn for a suite without a judge", async () => {
+      const { store, chat, runner, projection } = setup();
+      const run = sampleRun();
+      store.runStarted({ run });
+      await runner.tick();
+      for (const cell of run.cells) chat.finish(threadOf(String(cell.cellId)), "hello");
+      await runner.tick();
+      expect(chat.starts.filter((start) => String(start.modelId) === "judge-model")).toHaveLength(
+        0,
+      );
+      expect(projection.run(benchmarkIds.run)?.status).toBe("finished");
+    });
+
+    it("archives the judge threads of answered cells again when the host starts", async () => {
+      const { chat, runner, run } = await answeredWithJudge();
+      chat.archived.length = 0;
+      const stop = runner.start();
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      stop();
+      expect(chat.archived).toContain(judgeThread(String(run.cells[0]!.cellId)));
+    });
   });
 });

@@ -1,5 +1,6 @@
 import {
   BENCHMARK_ROUTE_PATHS,
+  BenchmarkCellRateResponse,
   BenchmarkRunCancelResponse,
   BenchmarkRunPurgeResponse,
   BenchmarkRunReadResponse,
@@ -9,6 +10,7 @@ import {
   BenchmarkSuiteSaveResponse,
   BenchmarkSuitesListResponse,
   decodeHostAnswer,
+  type BenchmarkCellRateRequest,
   type BenchmarkRunCancelRequest,
   type BenchmarkRunPurgeRequest,
   type BenchmarkRunReadRequest,
@@ -36,6 +38,8 @@ export interface BenchmarksClient {
   startRun(request: BenchmarkRunStartRequest): Promise<BenchmarkRunStartResponse>;
   cancelRun(request: BenchmarkRunCancelRequest): Promise<BenchmarkRunCancelResponse>;
   purgeRun(request: BenchmarkRunPurgeRequest): Promise<BenchmarkRunPurgeResponse>;
+  /** Stars for one answered cell; rating again replaces the earlier rating. */
+  rateCell(request: BenchmarkCellRateRequest): Promise<BenchmarkCellRateResponse>;
 }
 
 /** A refusal keeps the host's own sentence and status, so a page can show why. */
@@ -113,5 +117,7 @@ export function createBenchmarksClient(options: BenchmarksClientOptions): Benchm
       call(BENCHMARK_ROUTE_PATHS.runsCancel, request, BenchmarkRunCancelResponse),
     purgeRun: (request) =>
       call(BENCHMARK_ROUTE_PATHS.runsPurge, request, BenchmarkRunPurgeResponse),
+    rateCell: (request) =>
+      call(BENCHMARK_ROUTE_PATHS.cellsRate, request, BenchmarkCellRateResponse),
   };
 }

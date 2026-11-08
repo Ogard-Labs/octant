@@ -3,7 +3,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { createRemoteDevicePrincipal } from "../clientPrincipal";
 import { bindPrincipalRouteContext } from "../principalRouteContext";
 import { WindowAuthorityStore } from "../windowAuthorityStore";
-import { benchmarkCellIdentity } from "./benchmarkRunner";
+import { benchmarkCellIdentity, benchmarkJudgeIdentity } from "./benchmarkRunner";
 import { createBenchmarkRouteHandler } from "./benchmarkRoutes";
 import { BenchmarkService } from "./benchmarkService";
 import {
@@ -264,8 +264,10 @@ describe("benchmark routes", () => {
     );
     expect(response?.status).toBe(200);
     expect(purged).toContain("66700000-0000-4000-8000-000000000001");
-    for (const cell of run.cells)
+    for (const cell of run.cells) {
       expect(purged).toContain(benchmarkCellIdentity(String(cell.cellId)).threadId);
+      expect(purged).toContain(benchmarkJudgeIdentity(String(cell.cellId)).threadId);
+    }
     expect(projection.run(benchmarkIds.run)).toBeUndefined();
   });
 
@@ -285,5 +287,84 @@ describe("benchmark routes", () => {
     );
     expect(response?.status).toBe(502);
     expect(projection.run(benchmarkIds.run)).toBeDefined();
+  });
+
+  describe("rating a cell", () => {
+    function answeredRun(store: ReturnType<typeof setup>["store"]) {
+      const run = sampleRun();
+      store.runStarted({ run });
+      store.cellSettled({
+        runId: run.runId,
+        cellId: run.cells[0]!.cellId,
+        state: "answered",
+        checks: [],
+        settledAt: BENCHMARK_TEST_NOW as never,
+      });
+      return run;
+    }
+    const rateBody = (run: ReturnType<typeof sampleRun>, stars: number, note?: string) => ({
+      runId: run.runId,
+      cellId: run.cells[0]!.cellId,
+      stars,
+      ...(note === undefined ? {} : { note }),
+    });
+
+    it("lets a local window rate an answered cell and shows the stars on the run", async () => {
+      const { handler, store, projection } = setup();
+      const run = answeredRun(store);
+      const response = await handler(
+        post(BENCHMARK_ROUTE_PATHS.cellsRate, rateBody(run, 4, "Clear")),
+      );
+      expect(response?.status).toBe(200);
+      expect(projection.run(benchmarkIds.run)!.cells[0]!.rating).toMatchObject({
+        stars: 4,
+        note: "Clear",
+      });
+      const read = await handler(post(BENCHMARK_ROUTE_PATHS.runsRead, { runId: benchmarkIds.run }));
+      const detail = (await read!.json()) as { leaderboard: Array<{ meanStars?: number }> };
+      expect(detail.leaderboard[0]?.meanStars).toBe(4);
+    });
+
+    it("lets a paired remote device rate a cell", async () => {
+      const { handler, store, projection } = setup();
+      const run = answeredRun(store);
+      const response = await handler(
+        post(BENCHMARK_ROUTE_PATHS.cellsRate, rateBody(run, 2), { remote: true }),
+      );
+      expect(response?.status).toBe(200);
+      expect(projection.run(benchmarkIds.run)!.cells[0]!.rating?.stars).toBe(2);
+    });
+
+    it("replaces the earlier rating when the cell is rated again", async () => {
+      const { handler, store, projection } = setup();
+      const run = answeredRun(store);
+      await handler(post(BENCHMARK_ROUTE_PATHS.cellsRate, rateBody(run, 5, "Great")));
+      await handler(post(BENCHMARK_ROUTE_PATHS.cellsRate, rateBody(run, 1)));
+      const rating = projection.run(benchmarkIds.run)!.cells[0]!.rating;
+      expect(rating?.stars).toBe(1);
+      expect(rating?.note).toBeUndefined();
+    });
+
+    it("refuses stars outside one to five and a fractional count", async () => {
+      const { handler, store, projection } = setup();
+      const run = answeredRun(store);
+      for (const stars of [0, 6, 2.5]) {
+        const response = await handler(post(BENCHMARK_ROUTE_PATHS.cellsRate, rateBody(run, stars)));
+        expect(response?.status).toBe(400);
+      }
+      expect(projection.run(benchmarkIds.run)!.cells[0]!.rating).toBeUndefined();
+    });
+
+    it("refuses an anonymous request and a cell that has not been answered", async () => {
+      const { handler, store } = setup();
+      const run = answeredRun(store);
+      const anonymous = new Request(`http://127.0.0.1:3100${BENCHMARK_ROUTE_PATHS.cellsRate}`, {
+        method: "POST",
+        body: JSON.stringify(rateBody(run, 3)),
+      });
+      expect((await handler(anonymous))?.status).toBe(401);
+      const unanswered = { ...rateBody(run, 3), cellId: run.cells[1]!.cellId };
+      expect((await handler(post(BENCHMARK_ROUTE_PATHS.cellsRate, unanswered)))?.status).toBe(409);
+    });
   });
 });
