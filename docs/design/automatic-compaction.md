@@ -422,6 +422,11 @@ contextWindow }`, optional on `ProviderSessionStart` and
   lists other tools' servers (`kind: "compaction-defaults"`). Nothing is
   written.
 
+A share set in Octant overrides the runtime's own setting in the sessions
+Octant starts, whether it is earlier or later than theirs: the maintainer asked
+to override it, and Settings says so. Claude Code keeps its own point where the
+share lands at or past it, or below what its clamp allows.
+
 Failure modes: a runtime that ignores the point still meets the between-turn
 rule; files that cannot be read show the runtimes' defaults.
 

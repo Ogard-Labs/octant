@@ -25,7 +25,7 @@ export function runtimeCompactionDefaultsText(defaults: RuntimeCompactionDefault
     codex.autoCompactTokenLimit === undefined
       ? "Codex at its model's own limit"
       : `Codex at ${compactTokenCount(codex.autoCompactTokenLimit)}`;
-  return `Your own settings: ${claudeText}; ${codexText}. A share picked here applies to the sessions Octant starts and leaves those files as they are.`;
+  return `Your own settings: ${claudeText}; ${codexText}. Octant leaves those files as they are.`;
 }
 
 /** Reads the runtimes' own compaction settings once; undefined until known, or where unreadable. */

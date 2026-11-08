@@ -1955,7 +1955,7 @@ function CompletedThreadArchiveSelect(props: {
 const AUTO_COMPACT_WINDOW_CHOICES: ReadonlyArray<number> = [50, 60, 70, 75, 80, 85, 90, 95];
 
 const RUNTIME_COMPACTION_DESCRIPTION =
-  "Claude Code, Codex and the other runtimes compact by themselves. Pick a share to have Octant compact them sooner: Claude Code and Codex then compact at it inside a turn too, and the others between turns.";
+  "Claude Code, Codex and the other runtimes compact by themselves. A share picked here overrides theirs in the sessions Octant starts: Claude Code and Codex then compact at it inside a turn too, and the others between turns. Close to a full window, or on a small one, Claude Code keeps its own point.";
 
 /** How full a window may get before a compaction rule acts, plus off. */
 function AutoCompactWindowSelect(props: {
