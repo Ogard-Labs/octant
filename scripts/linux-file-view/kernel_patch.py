@@ -17,7 +17,7 @@ def include_bridge(source: str) -> str:
 
 def instrument(source: str, name: str, condition: str = "true") -> str:
     declaration = re.compile(
-        rf"(?m)^(?:static\s+)?(?:inline\s+)?(?:int|void|long|struct dentry \*|struct file \*)\s*{name}\s*\([^;{{]*?\)\s*\{{"
+        rf"(?m)^(?:(?:static\s+)?(?:inline\s+)?(?:int|void|long|struct dentry \*|struct file \*)\s*{name}\s*\([^;{{]*?\)|SYSCALL_DEFINE2\({name},[^;{{]*?\))\s*\{{"
     )
     matches = list(declaration.finditer(source))
     if len(matches) != 1:
@@ -107,6 +107,11 @@ def install_epochs(kernel: Path, native: Path) -> None:
         ],
         "fs/namespace.c": [
             "commit_tree", "do_umount", "attach_recursive_mnt", "do_move_mount",
+            # These routes change the live mount view without traversing the
+            # attachment/removal functions above. Real outside-writer cases
+            # accepted stale decisions until these entries joined the epoch.
+            "do_change_type", "do_remount", "do_reconfigure_mnt",
+            "do_mount_setattr", "pivot_root",
         ],
     }
     for relative, functions in definitions.items():

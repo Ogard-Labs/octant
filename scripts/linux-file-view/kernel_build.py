@@ -159,7 +159,7 @@ def main():
         elif line.startswith("OCTANT_OUTSIDE_EPOCH "):
             outside.append(json.loads(line.split(" ", 1)[1]))
     expected_outside = {"pivot-root", "remount", "mount-setattr", "propagation", "open-create",
-                        "tmpfile", "empty-link", "rename", "bind-mount"}
+                        "tmpfile", "empty-link", "rename", "bind-mount", "bind-remount"}
     if ("OCTANT_KERNEL_CPUS 2" not in log or len(outside) != len(expected_outside) or
             {case.get("case") for case in outside} != expected_outside or any(
                 any(case.get(field) is not True for field in

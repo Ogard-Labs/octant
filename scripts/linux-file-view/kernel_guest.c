@@ -557,7 +557,7 @@ static bool join_owned(pid_t child, bool *normal)
 #define EPOCH_FILE "/tmp/octant-epoch-content"
 static const char *epoch_cases[] = {
   "pivot-root", "remount", "mount-setattr", "propagation", "open-create",
-  "tmpfile", "empty-link", "rename", "bind-mount",
+  "tmpfile", "empty-link", "rename", "bind-mount", "bind-remount",
 };
 
 /* An unenrolled writer owns a private mount namespace. It signals completion
@@ -606,6 +606,7 @@ static void outside_mutation(unsigned operation, int command, int result)
     case 6: changed = linkat(temporary, "", AT_FDCWD, EPOCH_ROOT "/linked", AT_EMPTY_PATH); break;
     case 7: changed = rename(EPOCH_ROOT "/move", EPOCH_ROOT "/moved"); break;
     case 8: changed = mount(EPOCH_ROOT "/old", EPOCH_ROOT "/mount", NULL, MS_BIND, NULL); break;
+    case 9: changed = mount(NULL, EPOCH_ROOT, NULL, MS_REMOUNT | MS_BIND | MS_RDONLY, NULL); break;
   }
   int outcome = changed ? errno : 0;
   if (!transfer(result, &outcome, sizeof(outcome), true) || !transfer(command, &next, 1, false) || next != 'q') _exit(7);
