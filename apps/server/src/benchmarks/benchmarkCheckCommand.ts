@@ -1,5 +1,26 @@
 import { BENCHMARK_COMMAND_OUTPUT_BYTES, type BenchmarkCommandOutcome } from "@octant/domain";
+import { createNativeHarnessShell, type SandboxedProcessPort } from "../harness/nativeHarnessShell";
 import type { NativeHarnessShellPort } from "../harness/nativeHarnessTools";
+import { redactHostSecrets } from "../process/secretRedaction";
+
+/**
+ * The shell a check command runs in. It is built without the cloud
+ * credentials, the SSH agent socket and the Google CLI credentials the
+ * harness's own shells carry: a check runs code an agent wrote, and what a
+ * turn's tools reach only through approval stays out of its reach. Its home is
+ * the port's private temporary folder.
+ */
+export function createBenchmarkCheckShell(options: {
+  readonly process: SandboxedProcessPort;
+  readonly scriptDirectory: string;
+  readonly homeDirectory: string;
+}): NativeHarnessShellPort {
+  return createNativeHarnessShell({
+    process: options.process,
+    scriptDirectory: options.scriptDirectory,
+    environment: { HOME: options.homeDirectory },
+  });
+}
 
 export interface BenchmarkCheckCommandPort {
   run(input: {
@@ -29,8 +50,9 @@ export function createBenchmarkCheckCommandPort(
         timeoutMs: input.timeoutMs,
         ...(input.signal === undefined ? {} : { signal: input.signal }),
       });
-      // Only the start of the output is ever read, and the domain keeps less of it.
-      const output = Buffer.from(run.output)
+      // What is kept is redacted first, as every host-bound shell output is, then
+      // cut: only the start is ever read, and the domain keeps less of it.
+      const output = Buffer.from(redactHostSecrets(run.output))
         .subarray(0, BENCHMARK_COMMAND_OUTPUT_BYTES)
         .toString("utf8");
       switch (run.status) {

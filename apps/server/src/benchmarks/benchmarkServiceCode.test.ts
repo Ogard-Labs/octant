@@ -1,4 +1,5 @@
 import {
+  decodeBenchmarkRunId,
   decodeBenchmarkRunStartRequest,
   decodeBenchmarkSuite,
   type BenchmarkRunStartRequest,
@@ -19,7 +20,7 @@ afterEach(removeBenchmarkTestStores);
 
 const codeProjectId = "66400000-0000-4000-8000-000000000001";
 
-function suite() {
+function suite(checks: ReadonlyArray<unknown> = []) {
   return decodeBenchmarkSuite({
     suiteId: benchmarkIds.suite,
     revision: 1,
@@ -30,7 +31,7 @@ function suite() {
         kind: "code",
         title: "Fix the bug",
         prompt: "Fix it.",
-        checks: [],
+        checks,
         code: { codeProjectId, ref: "main" },
       },
     ],
@@ -91,7 +92,10 @@ function setup(
 
 const windowId = "66300000-0000-4000-8000-000000000001" as never;
 
-function request(executionLevel?: BenchmarkRunStartRequest["executionLevel"]) {
+function request(
+  executionLevel?: BenchmarkRunStartRequest["executionLevel"],
+  confirmedCommands?: true,
+) {
   return decodeBenchmarkRunStartRequest({
     runId: benchmarkIds.run,
     suiteId: benchmarkIds.suite,
@@ -99,6 +103,7 @@ function request(executionLevel?: BenchmarkRunStartRequest["executionLevel"]) {
     repetitions: 1,
     budget: { maxTokens: 1_000 },
     ...(executionLevel === undefined ? {} : { executionLevel }),
+    ...(confirmedCommands === undefined ? {} : { confirmedCommands }),
   });
 }
 
@@ -147,6 +152,23 @@ describe("starting a run with Code cases", () => {
     expect(reads).toHaveLength(1);
   });
 
+  it("refuses a suite with a check command until the person has confirmed it, and starts once they have", async () => {
+    const ctx = setup();
+    ctx.store.suiteSaved({
+      suite: decodeBenchmarkSuite({
+        ...suite([{ kind: "command-exits-zero", command: "bun test", timeoutSeconds: 60 }]),
+        revision: 2,
+      }),
+    });
+
+    const refused = await ctx.service.startRun(windowId, request());
+    expect(refused).toMatchObject({ status: "refused", reason: "invalid" });
+    expect(refused.status === "refused" && refused.message).toMatch(/runs commands on this Mac/);
+    expect(ctx.projection.runs()).toHaveLength(0);
+
+    expect((await ctx.service.startRun(windowId, request(undefined, true))).status).toBe("ok");
+  });
+
   it("refuses Code cases on a host that cannot run them", async () => {
     const { service } = setup({ supported: false });
     expect(await service.startRun(windowId, request())).toMatchObject({
@@ -182,6 +204,27 @@ describe("purging a run with Code cells", () => {
     ]);
     expect(ctx.purged).toContainEqual([threadId, "code"]);
     expect(ctx.projection.run(String(run.runId))).toBeUndefined();
+  });
+
+  it("starts and purges a run whose id was written in upper case, naming a lower-case branch", async () => {
+    const ctx = setup();
+    const upper = benchmarkIds.run.toUpperCase();
+    const started = await ctx.service.startRun(
+      windowId,
+      decodeBenchmarkRunStartRequest({ ...request(), runId: upper }),
+    );
+    if (started.status !== "ok") throw new Error("start refused");
+    expect(String(started.value.runId)).toBe(benchmarkIds.run);
+    ctx.store.runEnded({
+      runId: started.value.runId,
+      status: "finished",
+      endedAt: BENCHMARK_TEST_NOW as never,
+    });
+
+    const outcome = await ctx.service.purgeRun({ runId: decodeBenchmarkRunId(upper) });
+
+    expect(outcome.status).toBe("ok");
+    expect(ctx.removed[0]?.[1]).toMatch(/^benchmark\/[a-f0-9]{8}\/[a-f0-9]{12}$/);
   });
 
   it("counts a worktree that is already gone as done", async () => {

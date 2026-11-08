@@ -308,3 +308,27 @@
   border: 0;
   gap: var(--oct-space-1);
 }
+
+.benchmark-commands {
+  display: grid;
+  gap: var(--oct-space-2);
+}
+
+.benchmark-commands__list {
+  display: grid;
+  gap: var(--oct-space-1);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.benchmark-commands__list li {
+  display: grid;
+  gap: 2px;
+}
+
+.benchmark-commands__command {
+  font-family: var(--oct-font-mono);
+  font-size: var(--oct-text-sm);
+  overflow-wrap: anywhere;
+}

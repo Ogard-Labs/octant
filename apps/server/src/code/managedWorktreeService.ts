@@ -689,7 +689,6 @@ export class ManagedWorktreeService {
       return { status: "interrupted" };
     }
     if (receipt === undefined) return { status: "refused", reason: "unowned" };
-    if (receipt.state === "removed") return { status: "removed", receipt };
     if (
       discard !== undefined &&
       (receipt.branchIntent !== discard ||
@@ -700,6 +699,26 @@ export class ManagedWorktreeService {
           }))
     ) {
       return { status: "refused", reason: "mismatched" };
+    }
+    if (receipt.state === "removed") {
+      if (discard === undefined) return { status: "removed", receipt };
+      // The worktree is gone but its branch may remain (a delete that failed
+      // before the receipt was closed elsewhere): the same guarded delete.
+      let current: RepositoryIdentityObservation;
+      try {
+        current = await this.#repository.observe(receipt.canonicalRepositoryPath, signal);
+      } catch {
+        return { status: "interrupted", receipt };
+      }
+      if (
+        current.status !== "available" ||
+        current.repositoryId !== receipt.repositoryId ||
+        current.repositoryRoot !== receipt.canonicalRepositoryPath
+      ) {
+        return { status: "waiting", receipt };
+      }
+      const deleted = await this.#deleteDiscardBranch(receipt, current, discard, signal);
+      return deleted ?? { status: "removed", receipt };
     }
 
     const authority = await this.#observeCleanupAuthority(receipt, signal);
@@ -842,27 +861,42 @@ export class ManagedWorktreeService {
     signal: AbortSignal,
   ): Promise<ManagedWorktreeCleanupResult> {
     if (discard !== undefined) {
-      if (
-        observation.status !== "available" ||
-        observation.worktrees.some(
-          (worktree) => worktree.status === "present" && worktree.branch === branchRef(discard),
-        )
-      ) {
-        return { status: "waiting", receipt };
-      }
-      try {
-        if (await this.#git.branchExists(receipt.canonicalRepositoryPath, discard, signal)) {
-          const deleted = await this.#git.deleteBranch?.(
-            { repositoryRoot: receipt.canonicalRepositoryPath, branch: discard },
-            signal,
-          );
-          if (deleted?.status !== "deleted") return { status: "waiting", receipt };
-        }
-      } catch {
-        return { status: "interrupted", receipt };
-      }
+      const refused = await this.#deleteDiscardBranch(receipt, observation, discard, signal);
+      if (refused !== undefined) return refused;
     }
     return this.#finishRemovedReceipt(receipt);
+  }
+
+  /**
+   * Deletes the discard branch when this repository still has it and no
+   * worktree holds it. Undefined means it is gone or was deleted.
+   */
+  async #deleteDiscardBranch(
+    receipt: ManagedWorktreeReceipt,
+    observation: RepositoryIdentityObservation,
+    branch: string,
+    signal: AbortSignal,
+  ): Promise<ManagedWorktreeCleanupResult | undefined> {
+    if (
+      observation.status !== "available" ||
+      observation.worktrees.some(
+        (worktree) => worktree.status === "present" && worktree.branch === branchRef(branch),
+      )
+    ) {
+      return { status: "waiting", receipt };
+    }
+    try {
+      if (await this.#git.branchExists(receipt.canonicalRepositoryPath, branch, signal)) {
+        const deleted = await this.#git.deleteBranch?.(
+          { repositoryRoot: receipt.canonicalRepositoryPath, branch },
+          signal,
+        );
+        if (deleted?.status !== "deleted") return { status: "waiting", receipt };
+      }
+    } catch {
+      return { status: "interrupted", receipt };
+    }
+    return undefined;
   }
 
   /**

@@ -2,6 +2,7 @@ import {
   MAX_BENCHMARK_CELLS,
   decodeBenchmarkCellId,
   decodeBenchmarkRun,
+  decodeBenchmarkRunId,
   decodeBenchmarkSuite,
   decodeUtcTimestamp,
   type BenchmarkCellMetrics,
@@ -162,7 +163,7 @@ export class BenchmarkService {
   }
 
   readRun(request: BenchmarkRunReadRequest): BenchmarkOutcome<BenchmarkRunReadResponse> {
-    const run = this.#options.projection.run(String(request.runId));
+    const run = this.#options.projection.run(runKey(request.runId));
     if (run === undefined) return refused("not-found", "That run does not exist.");
     const metricsByThread = new Map<string, BenchmarkCellMetrics>();
     const cellMetrics: Array<{
@@ -201,7 +202,7 @@ export class BenchmarkService {
     readonly cellId: BenchmarkRun["cells"][number]["cellId"];
     readonly rating: BenchmarkRating;
   }> {
-    const run = this.#options.projection.run(String(request.runId));
+    const run = this.#options.projection.run(runKey(request.runId));
     if (run === undefined) return refused("not-found", "That run does not exist.");
     const cell = run.cells.find((candidate) => candidate.cellId === request.cellId);
     if (cell === undefined) return refused("not-found", "That cell is not in the run.");
@@ -242,7 +243,7 @@ export class BenchmarkService {
     request: BenchmarkRunStartRequest,
   ): Promise<BenchmarkOutcome<BenchmarkRun>> {
     const { projection, store, clock, uuid } = this.#options;
-    const existing = projection.run(String(request.runId));
+    const existing = projection.run(runKey(request.runId));
     if (existing !== undefined) {
       return existing.suiteId === request.suiteId
         ? ok(existing)
@@ -250,6 +251,19 @@ export class BenchmarkService {
     }
     const suite = projection.suite(String(request.suiteId));
     if (suite === undefined) return refused("not-found", "That suite does not exist.");
+    // A suite can come from someone else's file; its commands run on this host,
+    // so a person must have read them before the run starts.
+    if (
+      request.confirmedCommands !== true &&
+      suite.cases.some((candidate) =>
+        candidate.checks.some((check) => check.kind === "command-exits-zero"),
+      )
+    ) {
+      return refused(
+        "invalid",
+        "This suite runs commands on this Mac. Read them and confirm before starting the run.",
+      );
+    }
     const cells = benchmarkCellCount(
       suite.cases.length,
       request.contenders.length,
@@ -276,7 +290,7 @@ export class BenchmarkService {
     const project = await this.#options.ensureProject(windowId);
     if (project.status === "refused") return refused("unavailable", project.message);
     const run = decodeBenchmarkRun({
-      runId: request.runId,
+      runId: decodeBenchmarkRunId(runKey(request.runId)),
       suiteId: suite.suiteId,
       suiteRevision: suite.revision,
       suiteName: suite.name,
@@ -358,14 +372,14 @@ export class BenchmarkService {
   }
 
   async cancelRun(request: BenchmarkRunCancelRequest): Promise<BenchmarkOutcome<BenchmarkRun>> {
-    const run = await this.#options.runner.cancel(String(request.runId));
+    const run = await this.#options.runner.cancel(runKey(request.runId));
     return run === undefined ? refused("not-found", "That run does not exist.") : ok(run);
   }
 
   async purgeRun(
     request: BenchmarkRunPurgeRequest,
   ): Promise<BenchmarkOutcome<{ readonly runId: BenchmarkRun["runId"] }>> {
-    const run = this.#options.projection.run(String(request.runId));
+    const run = this.#options.projection.run(runKey(request.runId));
     if (run === undefined) return refused("not-found", "That run does not exist.");
     if (run.status === "running") {
       return refused("conflict", "Cancel the run before purging it.");
@@ -412,6 +426,15 @@ export class BenchmarkService {
     this.#options.store.runPurged({ runId: run.runId });
     return ok({ runId: run.runId });
   }
+}
+
+/**
+ * A run id is a UUID, and the contract accepts either case. The branch a Code
+ * cell works on is derived from it, so the host keeps one canonical lower-case
+ * form and every lookup folds to it.
+ */
+function runKey(runId: BenchmarkRun["runId"]): string {
+  return String(runId).toLowerCase();
 }
 
 function ok<T>(value: T): BenchmarkOutcome<T> {

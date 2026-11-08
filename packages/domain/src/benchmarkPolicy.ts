@@ -407,7 +407,8 @@ export function benchmarkCheckDescription(check: BenchmarkCheck): string {
 
 /** The branch a Code cell works on: fixed by the run and the cell, so a restart finds it again. */
 export function benchmarkCodeBranch(runId: string, cellId: string): string {
-  return `benchmark/${runId.replace(/-/g, "").slice(0, 8)}/${cellId.replace(/-/g, "").slice(0, 12)}`;
+  const hex = (id: string) => id.replace(/-/g, "").toLowerCase();
+  return `benchmark/${hex(runId).slice(0, 8)}/${hex(cellId).slice(0, 12)}`;
 }
 
 export type BenchmarkExecutionLevelDecision =

@@ -496,6 +496,11 @@ export const BenchmarkRunStartRequest = Schema.Struct({
   repetitions: Schema.Int.pipe(Schema.between(1, MAX_BENCHMARK_REPETITIONS)),
   budget: BenchmarkBudget,
   executionLevel: Schema.optional(BenchmarkExecutionLevel),
+  /**
+   * Set by a person who has read the commands a suite's checks would run on
+   * this host. A suite with a `command-exits-zero` check is refused without it.
+   */
+  confirmedCommands: Schema.optional(Schema.Literal(true)),
 }).annotations(strict);
 export type BenchmarkRunStartRequest = typeof BenchmarkRunStartRequest.Type;
 export const BenchmarkRunStartResponse = Schema.Struct({ run: BenchmarkRun }).annotations(strict);

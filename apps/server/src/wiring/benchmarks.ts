@@ -68,7 +68,7 @@ export type BenchmarksDependencies = Pick<ServerStart, "persistence"> &
     /** When the thread's oldest pending request was asked, from the journal; absent when unknown. */
     readonly pendingSince: (threadId: string) => Promise<string | undefined>;
     /** The confined, network-less shell Octant's own tools use; check commands run in it. */
-    readonly harnessOfflineShell: NativeHarnessShellPort;
+    readonly benchmarkCheckShell: NativeHarnessShellPort;
     readonly managedWorktreeService: Pick<ManagedWorktreeService, "cleanup">;
     readonly managedWorktreeReceipts: {
       readonly load: (
@@ -94,7 +94,7 @@ export function wireBenchmarks(deps: BenchmarksDependencies) {
     awaitsPerson,
     pendingSince,
     codeEvidence,
-    harnessOfflineShell,
+    benchmarkCheckShell,
     managedWorktreeReceipts,
     managedWorktreeService,
     roots,
@@ -161,8 +161,11 @@ export function wireBenchmarks(deps: BenchmarksDependencies) {
     if (checkout?.kind !== "managed-worktree") return "absent";
     const receiptId = String(checkout.ownershipReceiptId);
     const receipt = await managedWorktreeReceipts.load(receiptId);
-    if (receipt === undefined || receipt.state === "removed") return "absent";
-    if (!existsSync(receipt.canonicalWorktreePath)) return "absent";
+    if (receipt === undefined) return "absent";
+    // A receipt still "ready" whose folder is gone has nothing to clean up. One
+    // that is cleanup-pending, or already removed, may still owe its branch, so
+    // cleanup runs and finishes the delete.
+    if (receipt.state === "ready" && !existsSync(receipt.canonicalWorktreePath)) return "absent";
     // The thread must not be active for the existing cleanup to run.
     if (thread.lifecycle === "active") {
       await routeCodeService.execute(codeWindowId, {
@@ -233,7 +236,7 @@ export function wireBenchmarks(deps: BenchmarksDependencies) {
       ? {}
       : {
           code: codePort,
-          checkCommand: createBenchmarkCheckCommandPort(harnessOfflineShell),
+          checkCommand: createBenchmarkCheckCommandPort(benchmarkCheckShell),
           projectMode,
         }),
     chat,

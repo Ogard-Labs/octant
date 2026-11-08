@@ -133,13 +133,14 @@ describe("managed worktree Node ports", () => {
       const threadId = decodeCodeThreadId(`81000000-0000-4000-8000-00000000000${threadSuffix}`);
       const checkoutId = deriveManagedWorktreeCheckoutId({ repositoryId, threadId });
       let next = 0;
+      const receipts = new ManagedWorktreeReceiptStore({
+        dataDirectory: fixture.data,
+        uuid: () => `81000000-0000-4000-8000-0000000001${String(++next).padStart(2, "0")}`,
+        clock: () => "2026-07-20T22:00:00.000Z",
+      });
       const service = new ManagedWorktreeService({
         grants: new ManagedRootGrantStore(() => "81000000-0000-4000-8000-0000000000a1"),
-        receipts: new ManagedWorktreeReceiptStore({
-          dataDirectory: fixture.data,
-          uuid: () => `81000000-0000-4000-8000-0000000001${String(++next).padStart(2, "0")}`,
-          clock: () => "2026-07-20T22:00:00.000Z",
-        }),
+        receipts,
         ...ports,
         authority: {
           observeCleanupEligibility: async () => ({
@@ -171,7 +172,7 @@ describe("managed worktree Node ports", () => {
       if (created.status !== "ready") throw new Error("expected ready worktree");
       // What an agent leaves behind: an edit to a tracked file and a new one.
       await writeFile(join(created.targetPath, "untracked.txt"), "work in progress\n");
-      return { fixture, ports, service, created };
+      return { fixture, ports, service, created, receipts };
     }
 
     async function branches(repository: string): Promise<string[]> {
@@ -201,6 +202,67 @@ describe("managed worktree Node ports", () => {
 
       expect(cleaned.status).toBe("removed");
       expect(await ports.filesystem.pathExists(created.targetPath, signal)).toBe(false);
+      expect(await branches(fixture.repository)).toEqual(["refs/heads/development"]);
+    });
+
+    it("finishes the branch delete on a retry when the worktree went but the branch stayed", async () => {
+      const { fixture, service, created, receipts } = await readyWorktree(cellBranch, "3");
+      // A first purge removed the worktree and recorded cleanup-pending, then
+      // the branch delete failed.
+      await execFileAsync("git", [
+        "-C",
+        fixture.repository,
+        "worktree",
+        "remove",
+        "--force",
+        created.targetPath,
+      ]);
+      await receipts.transition(created.receipt.receiptId, "cleanup-pending");
+      expect(await branches(fixture.repository)).toContain(`refs/heads/${cellBranch}`);
+
+      const retried = await service.cleanup(
+        {
+          receiptId: created.receipt.receiptId,
+          confirmedByLocalUser: true,
+          discardChanges: { branch: cellBranch },
+        },
+        signal,
+      );
+
+      expect(retried.status).toBe("removed");
+      expect(await branches(fixture.repository)).toEqual(["refs/heads/development"]);
+    });
+
+    it("deletes the branch of a receipt that is already removed, only when asked to discard", async () => {
+      const { fixture, service, created, receipts } = await readyWorktree(cellBranch, "4");
+      await execFileAsync("git", [
+        "-C",
+        fixture.repository,
+        "worktree",
+        "remove",
+        "--force",
+        created.targetPath,
+      ]);
+      await receipts.transition(created.receipt.receiptId, "cleanup-pending");
+      await receipts.transition(created.receipt.receiptId, "removed");
+
+      // Every other caller sees a removed worktree and nothing more.
+      await service.cleanup(
+        { receiptId: created.receipt.receiptId, confirmedByLocalUser: true },
+        signal,
+      );
+      expect(await branches(fixture.repository)).toContain(`refs/heads/${cellBranch}`);
+
+      await expect(
+        service.cleanup(
+          {
+            receiptId: created.receipt.receiptId,
+            confirmedByLocalUser: true,
+            discardChanges: { branch: cellBranch },
+          },
+          signal,
+        ),
+      ).resolves.toMatchObject({ status: "removed" });
       expect(await branches(fixture.repository)).toEqual(["refs/heads/development"]);
     });
 

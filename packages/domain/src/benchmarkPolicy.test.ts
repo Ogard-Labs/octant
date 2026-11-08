@@ -615,6 +615,15 @@ describe("Code check results", () => {
     expect(benchmarkFilesChangedResult(0, 3, undefined).passed).toBe(false);
   });
 
+  it("names the same branch whatever the case of the ids", () => {
+    expect(
+      benchmarkCodeBranch(
+        "AABBCCDD-0000-4000-8000-000000000002",
+        "FF200000-0000-4000-8000-00000000AB07",
+      ),
+    ).toBe("benchmark/aabbccdd/ff2000000000");
+  });
+
   it("names a cell's branch from the run and the cell", () => {
     expect(
       benchmarkCodeBranch(

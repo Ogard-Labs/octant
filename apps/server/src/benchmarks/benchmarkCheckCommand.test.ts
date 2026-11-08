@@ -9,7 +9,11 @@ import type { NativeHarnessShellPort } from "../harness/nativeHarnessTools";
 import { RepositoryTestProcessPort } from "../code/repositoryTestProcessPort";
 import { createFakeSandboxConfinement } from "../process/fakeSandboxConfinement";
 import type { ProcessConfinementPrepareInput } from "../process/seatbeltProfile";
-import { createBenchmarkCheckCommandPort } from "./benchmarkCheckCommand";
+import { noteIssuedSecret } from "../process/secretRedaction";
+import {
+  createBenchmarkCheckCommandPort,
+  createBenchmarkCheckShell,
+} from "./benchmarkCheckCommand";
 
 const directories: string[] = [];
 afterEach(() => {
@@ -106,5 +110,70 @@ describe("benchmark check command", () => {
         timeoutMs: 1_000,
       }),
     ).toMatchObject({ status: "unavailable" });
+  });
+
+  it("starts a check command with no cloud, SSH or Google variables, and a home in the private temp folder", async () => {
+    vi.stubEnv("AWS_ACCESS_KEY_ID", "host-aws-key-id");
+    vi.stubEnv("AWS_SECRET_ACCESS_KEY", "host-aws-secret");
+    vi.stubEnv("SSH_AUTH_SOCK", "/tmp/agent.sock");
+    vi.stubEnv("GOOGLE_APPLICATION_CREDENTIALS", "/home/me/key.json");
+    const fake = createFakeSandboxConfinement();
+    directories.push(fake.root);
+    const scripts = directory();
+    const worktree = directory();
+    const child = fakeChild(4_243);
+    const spawn = vi.fn(() => child);
+    const port = new RepositoryTestProcessPort({
+      temporaryDirectory: fake.temporaryDirectory,
+      networkEgress: "none",
+      harnessShellScriptDirectory: scripts,
+      confinement: fake.confinement,
+      spawn,
+    });
+    const commands = createBenchmarkCheckCommandPort(
+      createBenchmarkCheckShell({
+        process: port,
+        scriptDirectory: scripts,
+        homeDirectory: fake.temporaryDirectory,
+      }),
+    );
+
+    const running = commands.run({ command: "env", cwd: worktree, timeoutMs: 5_000 });
+    await vi.waitFor(() => expect(spawn).toHaveBeenCalled());
+    child.close(0, null);
+    await running;
+
+    const options = (
+      spawn.mock.calls[0] as unknown as [string, string[], { env: Record<string, string> }]
+    )[2];
+    const names = Object.keys(options.env);
+    expect(names.filter((name) => /^(AWS_|GOOGLE_|CLOUDSDK_|GCLOUD_)/.test(name))).toEqual([]);
+    expect(names).not.toContain("SSH_AUTH_SOCK");
+    expect(options.env.HOME).toBe(fake.temporaryDirectory);
+    expect(options.env.TERM).toBe("dumb");
+    expect(Object.values(options.env)).not.toContain("host-aws-secret");
+  });
+
+  it("redacts a secret in the output before any of it is kept", async () => {
+    const handedOut = ["hunter2", "a", "handed", "out", "secret"].join("-");
+    const tokenShaped = `${"ghp"}_${"a".repeat(36)}`;
+    noteIssuedSecret(handedOut);
+    const shell: NativeHarnessShellPort = {
+      run: async () => ({
+        status: "ran",
+        exitCode: 1,
+        output: `token=${handedOut} and ${tokenShaped}`,
+        truncated: false,
+      }),
+    };
+    const outcome = await createBenchmarkCheckCommandPort(shell).run({
+      command: "bun test",
+      cwd: "/worktree",
+      timeoutMs: 1_000,
+    });
+    expect(outcome.status).toBe("exited");
+    const output = outcome.status === "exited" ? outcome.output : "";
+    expect(output).not.toContain(handedOut);
+    expect(output).not.toContain(tokenShaped);
   });
 });

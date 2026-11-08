@@ -537,7 +537,7 @@ export function startOctantServer(
       beginGoogleCliChange,
       recoverGoogleCliCommands,
       credentialCommandProcess,
-      harnessOfflineShell,
+      benchmarkCheckShell,
       prepareCredentialCommand,
       personMemorySweep,
       runtimeForgeChanges,
@@ -1202,7 +1202,7 @@ export function startOctantServer(
         return asked[0];
       },
       codeEvidence,
-      harnessOfflineShell,
+      benchmarkCheckShell,
       managedWorktreeReceipts,
       managedWorktreeService,
       roots,
