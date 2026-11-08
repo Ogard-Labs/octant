@@ -433,8 +433,17 @@ int main(void)
   } else {
     int result = measure();
     if (!result) result = namespace_measure();
-    if (!result) result = policy_measure(false);
-    if (!result) result = policy_measure(true);
+    if (!result) {
+      alarm(0);
+      result = policy_measure(false);
+    }
+    // Reuse the same scenario, not a broader matrix: the earlier UID-map
+    // failure was timing-sensitive. Each policy process owns its 15s bound;
+    // the independent QEMU supervisor owns a 90s maximum for the whole guest.
+    for (unsigned attempt = 0; attempt < 3 && !result; attempt++) {
+      result = policy_measure(true);
+      printf("OCTANT_BUBBLEWRAP_ATTEMPT %u result=%d\n", attempt + 1, result);
+    }
     printf("OCTANT_KERNEL_EXIT %d\n", result);
   }
   fflush(stdout);

@@ -81,10 +81,11 @@ composition rather than a reconstruction of Bubblewrap flags. Its result is
 separate from the direct native broker cases and never implies complete parity.
 The SCM controls also queue a foreign FD before enrollment and reap a same-policy
 sender before receiving its queued FD; send-time credentials must survive both
-transitions. Guest-build-only diagnostics retain at most the last 128 control
-events (operation/request/status/decision/exit, no paths or content) and flush
-only when the owned relay closes. Instrumented execution is diagnostic evidence;
-a final integration pass must run the original uninstrumented broker.
+transitions. The same actual Bubblewrap scenario runs three times to check
+the previously observed UID-map timing failure; it is not a broader acceptance
+matrix. Guest compilation uses the original uninstrumented broker. Earlier
+instrumented traces remain diagnostic evidence in the PR, not a substitute for
+this run.
 
 Dispatch `experiment=kernel-admission` to compile and boot a pinned Linux 6.18
 guest under networkless QEMU TCG in the owned ephemeral runner. The upstream
@@ -92,7 +93,7 @@ archive has a fixed SHA-256, and only the original admission files enter its
 security tree. No kernel is installed, loaded or distributed; the app's MIT
 license is unchanged. The original kernel files are `GPL-2.0 OR MIT`, with
 the syscall-note alternative for UAPI. The job has a twenty-minute bound,
-the guest a forty-five-second outer bound, and the synthetic client finite IPC
+the guest a ninety-second outer bound, and the synthetic client finite IPC
 and admission deadlines. Commands have independent timeout supervisors; retained
 process groups are stopped on interruption or owner-command failure.
 

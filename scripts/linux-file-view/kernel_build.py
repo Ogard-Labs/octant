@@ -89,8 +89,8 @@ def main():
     for source, target in ((native / "broker.c", relay),
                            (repository / "scripts/linux-file-view/kernel_policy_workload.c", workload)):
         run("gcc", "-static", "-std=c11", "-Wall", "-Wextra", "-Werror", str(source), "-o", str(target), timeout=30)
-    run("bun", str(repository / "scripts/linux-file-view/kernel_bundle.ts"), str(policy),
-        timeout=120, cwd=repository)
+    run("bun", "build", "--compile", str(repository / "scripts/linux-file-view/kernel_policy.ts"),
+        "--outfile", str(policy), timeout=120, cwd=repository)
     # Copy only this task-owned public executable's dynamic loader/libraries
     # into the disposable initramfs. Nothing is mounted from the runner home.
     library_log = root / "policy-libraries.log"
@@ -121,12 +121,12 @@ def main():
         output.truncate(256 * 1024 * 1024)
     run("mke2fs", "-q", "-F", "-t", "ext4", "-d", str(tree), str(image), timeout=30)
     with (root / "guest.log").open("wb") as output:
-        run("timeout", "--kill-after=3s", "45s", "qemu-system-x86_64", "-machine", "accel=tcg",
+        run("timeout", "--kill-after=3s", "90s", "qemu-system-x86_64", "-machine", "accel=tcg",
             "-cpu", "max", "-m", "512M", "-smp", "2", "-nic", "none", "-nographic",
             "-no-reboot", "-kernel", str(kernel / "arch/x86/boot/bzImage"),
             "-drive", f"file={image},format=raw,if=virtio",
             "-append", "console=ttyS0 root=/dev/vda rootfstype=ext4 rw init=/init panic=-1",
-            timeout=50, cwd=root, output=output)
+            timeout=95, cwd=root, output=output)
     log = (root / "guest.log").read_text(errors="replace")
     print(log[-20000:])
     if ("OCTANT_KERNEL_EXIT 0" not in log or '"status":"measured-admission-core"' not in log or
