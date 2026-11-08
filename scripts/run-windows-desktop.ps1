@@ -3,7 +3,9 @@ param([Parameter(Mandatory=$true)][string]$Launcher,
   [Parameter(Mandatory=$true)][string]$OutputDirectory)
 $ErrorActionPreference = 'Stop'
 $octantProfile = Join-Path ([Environment]::GetFolderPath('LocalApplicationData')) 'Octant/hosts/octant'
+$octantProtocol = 'HKCU:\Software\Classes\octant'
 if (Test-Path -LiteralPath $octantProfile) { throw 'Refusing a pre-existing Windows desktop profile' }
+if (Test-Path -LiteralPath $octantProtocol) { throw 'Refusing a pre-existing desktop protocol registration' }
 if (Test-Path -LiteralPath $OutputDirectory) { throw 'The owned desktop output directory already exists' }
 [void](New-Item -ItemType Directory -Path $OutputDirectory)
 $octantBun = (Get-Command bun).Source
@@ -18,6 +20,16 @@ try {
   }
 } finally {
   if (-not $octantJoined) { throw 'Refusing profile removal before owned processes joined' }
+  if (Test-Path -LiteralPath $octantProtocol) {
+    $octantExecutable = [IO.Path]::GetFullPath((Join-Path $PackageDirectory 'Octant.exe'))
+    $octantCommand = (Get-Item -LiteralPath "$octantProtocol\shell\open\command").GetValue('')
+    $octantUnquoted = $octantExecutable + ' "%1"'
+    $octantQuoted = '"' + $octantExecutable + '" "%1"'
+    $octantExpected = @($octantUnquoted, $octantQuoted)
+    if ($octantExpected -inotcontains $octantCommand) { throw 'Refusing removal of another protocol command' }
+    Remove-Item -LiteralPath $octantProtocol -Recurse -Force
+    if (Test-Path -LiteralPath $octantProtocol) { throw 'Owned protocol cleanup was not confirmed' }
+  }
   $octantScopeFile = Join-Path $OutputDirectory 'scope.json'
   if (Test-Path -LiteralPath $octantScopeFile) {
     $octantScope = (Get-Content -LiteralPath $octantScopeFile -Raw | ConvertFrom-Json).scope
@@ -41,7 +53,7 @@ try {
       }
       if (Test-Path -LiteralPath $octantPath) { throw 'Owned desktop path cleanup was not confirmed' }
     }
-    Write-Output '{"ownedDesktopJobsJoined":true,"ownedProfileAndRuntimeAbsent":true,"ownedIdentityAbsent":true}'
+    Write-Output '{"ownedDesktopJobsJoined":true,"ownedProfileAndRuntimeAbsent":true,"ownedIdentityAbsent":true,"ownedProtocolRegistrationAbsent":true}'
   } elseif (Test-Path -LiteralPath $octantProfile) {
     throw 'Owned profile cleanup could not be authenticated without its scope receipt'
   }

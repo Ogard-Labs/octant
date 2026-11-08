@@ -3,7 +3,11 @@ import { randomBytes } from "node:crypto";
 import { writeFile, mkdir } from "node:fs/promises";
 import { resolve, join } from "node:path";
 import { promisify } from "node:util";
-import { loadWindowsHostProfileNative, attachWindowsHostRuntimeOwner } from "@octant/host-runtime";
+import {
+  loadWindowsHostProfileNative,
+  attachWindowsHostRuntimeOwner,
+  KEYCHAIN_SERVICE_FAMILY_ENVIRONMENT,
+} from "@octant/host-runtime";
 import {
   resolveWindowsDesktopHost,
   attachWindowsDesktopHost,
@@ -29,6 +33,7 @@ await mkdir(output, { recursive: true });
 await writeFile(join(output, "scope.json"), JSON.stringify({ scope: host.paths.profileId }));
 const children = new Set<ChildProcess>();
 const births = new WeakMap<ChildProcess, string>();
+const diagnostics = new Map<ChildProcess, { readonly role: string; readonly read: () => string }>();
 const checks: string[] = [];
 const run = promisify(execFile);
 const begin = Date.now();
@@ -54,6 +59,7 @@ function launch(server = false, seed?: string) {
     "OCTANT_CREDENTIAL_BROKER_TOKEN",
     "OCTANT_DESKTOP_BRIDGE_SECRET",
     "OCTANT_DESKTOP_PARENT_WATCH",
+    KEYCHAIN_SERVICE_FAMILY_ENVIRONMENT,
   ])
     delete env[key];
   if (server)
@@ -62,6 +68,7 @@ function launch(server = false, seed?: string) {
       OCTANT_PACKAGED_RUNTIME: "1",
       OCTANT_HOST_SERVICE_MODE: "foreground",
       OCTANT_DESKTOP_BRIDGE_SECRET: seed,
+      [KEYCHAIN_SERVICE_FAMILY_ENVIRONMENT]: "octant",
     });
   const child = spawn(
     executable,
@@ -70,6 +77,7 @@ function launch(server = false, seed?: string) {
   );
   children.add(child);
   let diagnostic = "";
+  diagnostics.set(child, { role: server ? "server" : "desktop", read: () => diagnostic });
   child.stderr?.on("data", (bytes: Buffer) => {
     diagnostic = (diagnostic + bytes.toString()).slice(-8192);
   });
@@ -225,8 +233,29 @@ try {
   };
   await writeFile(join(output, `${phase}.json`), JSON.stringify(receipt, null, 2));
   console.log(JSON.stringify(receipt));
+} catch (error) {
+  // Startup failures can leave a modal native error window before the server
+  // publishes discovery. Observe it through the same exact PID/birth guard.
+  for (const child of children) {
+    if (diagnostics.get(child)?.role !== "desktop") continue;
+    try {
+      await window(child);
+    } catch {
+      await writeFile(
+        join(output, `${phase}-window-refused.txt`),
+        "The exact owned failure window could not be captured.",
+      );
+    }
+  }
+  throw error;
 } finally {
   // The existing suspended owned-job launcher joins every descendant after
   // this controller exits, including cancellation or an unexpected failure.
+  for (const [child, diagnostic] of diagnostics) {
+    await writeFile(
+      join(output, `${phase}-${diagnostic.role}-${child.pid}.txt`),
+      diagnostic.read().replace(/[A-Za-z0-9_-]{32,}/g, "[redacted]"),
+    );
+  }
   for (const child of children) child.kill();
 }

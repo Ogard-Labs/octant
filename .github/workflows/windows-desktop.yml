@@ -27,6 +27,14 @@ jobs:
     timeout-minutes: 40
     steps:
       - uses: actions/checkout@v4
+      - name: Validate native desktop fixture syntax
+        run: |
+          foreach ($octantScript in @('scripts/run-windows-desktop.ps1', 'scripts/windows-desktop-window.ps1')) {
+            $octantTokens = $null
+            $octantParseErrors = $null
+            [void][System.Management.Automation.Language.Parser]::ParseFile((Join-Path $pwd $octantScript), [ref]$octantTokens, [ref]$octantParseErrors)
+            if ($octantParseErrors.Count) { throw ($octantParseErrors.Message -join "`n") }
+          }
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version: 1.4.4

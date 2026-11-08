@@ -72,5 +72,5 @@ try {
       $octantBitmap.Save($CapturePath, [Drawing.Imaging.ImageFormat]::Png)
     } finally { $octantGraphics.Dispose(); $octantBitmap.Dispose() }
   }
-  [Console]::WriteLine(@{ visibleOwnedWindow=$found; birth=[OctantDesktopWindow]::Birth; closePosted=($found -and $Mode -eq 'close') } | ConvertTo-Json -Compress)
+  [Console]::WriteLine((@{ visibleOwnedWindow=$found; birth=[OctantDesktopWindow]::Birth; closePosted=($found -and $Mode -eq 'close') } | ConvertTo-Json -Compress))
 } catch { [Console]::WriteLine('{"refused":true}'); exit 1 }
