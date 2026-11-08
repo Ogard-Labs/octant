@@ -15316,6 +15316,18 @@ is no separate overflow store. The private frame is versioned; an unknown
 version or purpose is refused before any native credential operation. Existing
 provider target names are unchanged; no migration is implied.
 
+Native vault operations serialize across helper processes with one fixed
+user-SID-derived global mutex shared by all eight purposes, families and stores.
+The native token supplies the SID, never a caller or environment path. Both new
+and existing objects require that User owner and exactly User plus SYSTEM access,
+with a protected DACL. Coordination waits at most three seconds inside the
+existing five-second adapter deadline. Unsafe, blocked or abandoned coordination
+refuses as unavailable before any vault operation; no mutation is retried. Owned
+mutex handles are released on every return or by the OS on process death. This
+boundary preserves concurrent callers: native Windows Server 2025 acceptance
+observed parallel deletes reporting success while some owned entries remained
+present; ordered fixture cleanup alone did not satisfy that contract.
+
 This helper and its broker adapter do not admit a Windows host or Chat, package
 a Windows app or create a host signing identity. A missing trusted helper leaves the store unavailable. Native CI
 exercises synthetic targets on an ephemeral Windows runner; real Windows host
