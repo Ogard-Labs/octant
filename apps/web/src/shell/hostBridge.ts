@@ -261,6 +261,7 @@ export type HubAdministrationOperation =
   | "standby-order"
   | "promote"
   | "wake"
+  | "accept-moved-threads"
   | "wake-hardware-address"
   | "push"
   | "direct-push"
