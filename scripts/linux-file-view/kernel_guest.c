@@ -76,14 +76,16 @@ static bool same_policy_transfer(int inherited)
   if (!peer) { close(sockets[0]); _exit(send_descriptor(sockets[1], inherited) ? 0 : 1); }
   close(sockets[1]);
   if (peer < 0) { close(sockets[0]); return false; }
+  // Reap the sender first: the queued record must retain the actual sending
+  // credentials after that process has exited, without looking up its PID.
+  int result = 0; pid_t joined;
+  do { joined = waitpid(peer, &result, 0); } while (joined < 0 && errno == EINTR);
   bool truncated = false;
   int received = receive_descriptor(sockets[0], &truncated);
   char bytes[64];
   bool passed = received >= 0 && !truncated && pread(received, bytes, sizeof(bytes), 0) == sizeof(content) - 1;
   if (received >= 0) close(received);
   close(sockets[0]);
-  int result = 0; pid_t joined;
-  do { joined = waitpid(peer, &result, 0); } while (joined < 0 && errno == EINTR);
   return passed && joined == peer && WIFEXITED(result) && WEXITSTATUS(result) == 0;
 }
 static bool same_policy_shared_memory(void)
@@ -202,6 +204,11 @@ static int measure(void)
   int commands[2], answers[2], foreign[2];
   if (enrollment < 0 || pipe2(commands, O_CLOEXEC) || pipe2(answers, O_CLOEXEC) ||
       socketpair(AF_UNIX, SOCK_DGRAM | SOCK_CLOEXEC, 0, foreign)) { close(broker); return 6; }
+  // Queue an actual foreign record before the receiver enrolls. The later
+  // receiver context cannot retroactively turn that sender into its peer.
+  int queued = open("/tmp/ordinary", O_RDONLY | O_CLOEXEC);
+  if (queued < 0 || !send_descriptor(foreign[0], queued)) return 10;
+  close(queued);
   pid_t child = fork();
   if (child == 0) {
     struct octant_mediation_status forwarded;
@@ -229,8 +236,8 @@ static int measure(void)
   unsigned long long previous = 0;
   for (unsigned i = 0; i < sizeof(operations) && passed; i++) {
     char command = operations[i];
-    if (command == 'n' || command == 'p') {
-      int file = open(command == 'p' ? "/proc/self/mem" : "/tmp/ordinary", O_RDONLY | O_CLOEXEC);
+    if (command == 'p') {
+      int file = open("/proc/self/mem", O_RDONLY | O_CLOEXEC);
       passed = file >= 0 && send_descriptor(foreign[0], file);
       if (file >= 0) close(file);
     }
@@ -391,11 +398,11 @@ static int namespace_measure(void)
   return passed && controls && cleaned ? 0 : 29;
 }
 
-static int policy_measure(void)
+static int policy_measure(bool capsule)
 {
   pid_t child = fork();
   if (!child) {
-    char *arguments[] = {"/policy-broker", NULL};
+    char *arguments[] = {"/policy-broker", capsule ? "--bubblewrap" : NULL, NULL};
     char *environment[] = {"HOME=/tmp", "PATH=/", "LANG=C", NULL};
     execve(arguments[0], arguments, environment);
     _exit(31);
@@ -415,7 +422,8 @@ int main(void)
   } else {
     int result = measure();
     if (!result) result = namespace_measure();
-    if (!result) result = policy_measure();
+    if (!result) result = policy_measure(false);
+    if (!result) result = policy_measure(true);
     printf("OCTANT_KERNEL_EXIT %d\n", result);
   }
   fflush(stdout);

@@ -2,8 +2,10 @@
 import { mkdir, readFile, rm, stat, writeFile, link } from "node:fs/promises";
 import { setTimeout as pause } from "node:timers/promises";
 import { runLinuxMediationBroker } from "../../apps/server/src/process/linuxMediationBroker";
+import { buildBubblewrapLaunch } from "../../apps/server/src/process/linuxConfinement";
 import { secretGuardMediationPolicy } from "../../apps/server/src/process/secretGuard";
 
+const capsule = process.argv[2] === "--bubblewrap";
 const root = "/tmp/octant-policy-broker";
 const home = `${root}/home`;
 const key = `${home}/.ssh/deployment`;
@@ -13,6 +15,21 @@ let result = false;
 let running: ReturnType<typeof runLinuxMediationBroker> | undefined;
 try {
   await mkdir(`${home}/.ssh`, { recursive: true, mode: 0o700 });
+  await mkdir(`${root}/tmp`, { mode: 0o700 });
+  // The actual production builder is unchanged. Populate every protected file
+  // after it prepares startup covers, then change the companion during the run.
+  // This measures the absent-file gap rather than an already-present mask.
+  process.env.HOME = home;
+  const launch = capsule
+    ? buildBubblewrapLaunch({
+        executable: "/policy-workload",
+        args: [],
+        boundRoot: root,
+        temporaryDirectory: `${root}/tmp`,
+        networkEgress: "none",
+        ownAccountAccess: "none",
+      })
+    : { command: "/policy-workload", args: [] };
   await writeFile(key, "synthetic original-policy bytes", { mode: 0o600 });
   await link(key, `${root}/alias`);
   await writeFile(`${root}/ordinary`, "permitted before", { mode: 0o600 });
@@ -27,8 +44,8 @@ try {
   await writeFile(`${home}/.ssh/id_independent.pub`, "public independent", { mode: 0o600 });
   running = runLinuxMediationBroker({
     nativeExecutable: "/octant-mediation",
-    command: "/policy-workload",
-    args: [],
+    command: launch.command,
+    args: launch.args,
     policy: secretGuardMediationPolicy({
       platform: "linux",
       homeDirectory: home,
@@ -65,6 +82,7 @@ try {
       ended,
       productionReady: false,
       lateCompanion: ready,
+      actualBubblewrapBuilder: capsule,
     }),
   );
 } finally {

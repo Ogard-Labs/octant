@@ -77,7 +77,8 @@ def main():
                    "FUTEX", "PCI", "BLOCK", "ACPI", "EPOLL", "EVENTFD", "TIMERFD",
                    "SIGNALFD", "INOTIFY_USER", "ADVISE_SYSCALLS", "MEMFD_CREATE", "POSIX_TIMERS",
                    "FILE_LOCKING", "NET", "UNIX", "NAMESPACES", "USER_NS", "PID_NS", "UTS_NS",
-                   "IPC_NS", "NET_NS", "SECCOMP", "SECCOMP_FILTER"):
+                   "IPC_NS", "NET_NS", "SECCOMP", "SECCOMP_FILTER", "INET", "SYSVIPC",
+                   "UNIX98_PTYS", "DEVPTS_FS"):
         run("scripts/config", "--enable", symbol, cwd=kernel, timeout=10)
     run("scripts/config", "--set-str", "LSM", "octant_mediation", cwd=kernel, timeout=10)
     run("make", "olddefconfig", cwd=kernel)
@@ -98,7 +99,9 @@ def main():
     library_log = root / "policy-libraries.log"
     with library_log.open("wb") as output:
         run("ldd", str(policy), timeout=10, output=output)
-    guest_files = {"octant-mediation": relay, "policy-workload": workload, "policy-broker": policy}
+        run("ldd", "/usr/bin/bwrap", timeout=10, output=output)
+    guest_files = {"octant-mediation": relay, "policy-workload": workload,
+                   "policy-broker": policy, "usr/bin/bwrap": Path("/usr/bin/bwrap")}
     for path in re.findall(r"(?:=>\s+)?(/[^\s]+)", library_log.read_text()):
         library = Path(path)
         if not library.is_file():
@@ -131,7 +134,8 @@ def main():
     print(log[-20000:])
     if ("OCTANT_KERNEL_EXIT 0" not in log or '"status":"measured-admission-core"' not in log or
             '"status":"measured-namespace-token"' not in log or
-            '"status":"measured-original-policy-broker"' not in log):
+            '"status":"measured-original-policy-broker"' not in log or
+            '"actualBubblewrapBuilder":true' not in log):
         raise SystemExit("The guest admission core did not pass; no production proof is inferred.")
 
 

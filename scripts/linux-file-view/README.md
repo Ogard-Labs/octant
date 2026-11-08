@@ -66,6 +66,16 @@ this transport boundary. They remain distinct from the actual original-policy
 broker guest cases above and cannot substitute for them. Neither suite proves
 all namespace, filesystem, alias, syscall or runtime routes.
 
+The next guest layer executes the unchanged production `buildBubblewrapLaunch`
+output with network egress `none`, under the same native broker. It prepares the
+normal startup covers before populating the synthetic protected files, then
+publishes the companion during execution. This tests actual namespace/FD
+composition rather than a reconstruction of Bubblewrap flags. Its result is
+separate from the direct native broker cases and never implies complete parity.
+The SCM controls also queue a foreign FD before enrollment and reap a same-policy
+sender before receiving its queued FD; send-time credentials must survive both
+transitions.
+
 Dispatch `experiment=kernel-admission` to compile and boot a pinned Linux 6.18
 guest under networkless QEMU TCG in the owned ephemeral runner. The upstream
 archive has a fixed SHA-256, and only the original admission files enter its
