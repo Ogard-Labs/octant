@@ -1026,12 +1026,12 @@ and questions.
    Project rule above, and answers `ready` with a one-use receiving ticket
    bound to that move id.
 3. **Transfer.** The source sends the parts in chunks
-   (`PUT /api/hub/peer/thread-moves/:moveId/chunks/:index`) directly over the
+   (`POST /api/hub/peer/thread-moves/chunk`, naming the move, part, and chunk) directly over the
    destination's pinned listener; the hub carries nothing. Each chunk is
    checked against its digest. A cut transfer resumes from the last chunk the
    destination acknowledged, after a reconnect or a source restart, and the
    destination keeps a partial transfer for seven days.
-4. **Arrive.** `POST /api/hub/peer/thread-moves/:moveId/finish`. The
+4. **Arrive.** `POST /api/hub/peer/thread-moves/finish`. The
    destination checks the whole manifest, creates the new thread with its own
    id, journals `thread.moved-in@1` with the origin member, the origin thread
    reference, and the move id, and holds the thread as **arriving**: listed,
@@ -1041,7 +1041,7 @@ and questions.
    from their two snapshots. It answers
    `arrived` with the new thread's reference.
 5. **Commit.** The source sends
-   `POST /api/hub/peer/thread-moves/:moveId/commit`. The destination journals
+   `POST /api/hub/peer/thread-moves/commit`. The destination journals
    `thread.move-committed@1`, makes the thread active, and answers
    `committed`. The source then journals `thread.moved-out@1` and erases its
    copy.
@@ -1054,9 +1054,10 @@ reached is answered again rather than repeated.
 answers `committed`, the source erases the thread through the ordinary thread
 purge: its bulk content, projections, attachments, and child runs go, and its
 token and cost aggregates stay for host accounting, as for any purge. The
-purge tombstone keeps the move id and the destination reference, so an old
-link, a notification, or a search on the source shows "Moved to" the member
-with **Open there**. A managed worktree the thread owned is removed with its
+journaled `thread.moved-out@1` keeps the move id and the destination reference,
+so an old link, a notification, or a search on the source shows "Moved to" the
+member with **Open there**; the purge tombstone itself stays as it is for
+every purge. A managed worktree the thread owned is removed with its
 local branch only when everything in it travelled. When it holds anything that
 stayed behind (a file the Secret guard refused, or any ignored file such as a
 `.env` or a local configuration), the source keeps the worktree folder, no
@@ -2101,9 +2102,22 @@ a numbered slice. Built, with these narrower readings:
     the full-member grant for new members) and the pure policy (eligibility,
     the destination's Move in check, Prepare to shut down's starting choices
     and destination, recovery, Activate anyway, keeping a worktree that holds
-    unmoved files, and the handover branch). Nothing reaches them from the
-    product yet. A grant stored before Move in existed reads as off until the
-    server part upgrades full members.
+    unmoved files, and the handover branch). A grant stored before Move in
+    existed reads as off until a later part upgrades full members.
+
+    The second part is the move itself for Chat threads between spokes: the
+    owner route that issues the one-use ticket (own-class unlock, every
+    time), the six member routes (`/api/hub/peer/thread-moves` for the offer,
+    and `chunk`, `finish`, `commit`, `status`, and `discard` under it, each
+    `POST` with the move id in the body), the move state each host keeps so a
+    restart resumes, the freeze as a hold every Chat command checks, the
+    Chat conversation carried as real turns the way a branch carries them,
+    the erase through the ordinary purge, the journal events, and recovery at
+    startup. A two-host loopback smoke moves a thread with a real owner
+    unlock. What it does not do yet: move Work or Code threads, carry
+    attachments and other bulk parts, accept moves on the hub (which keeps no
+    peer grants and needs its own Accept moved threads setting), offer a
+    window route to start a move, or show any screen.
 
 Any slice that would deploy an Octant-operated service, create an account, or
 spend money stops for a separate maintainer action.
