@@ -59,11 +59,44 @@ try {
         $octantExpected += $octantImage + ' -- "%1"'
       }
     }
-    if ($octantExpected -inotcontains $octantCommand) {
+    $octantOwnedCommand = $octantExpected -icontains $octantCommand
+    if (-not $octantOwnedCommand) {
+      $octantTrimmedCommand = $octantCommand.Trim()
+      foreach ($octantPath in $octantPathSpellings) {
+        foreach ($octantImage in @($octantPath, '"' + $octantPath + '"')) {
+          if (-not $octantTrimmedCommand.StartsWith($octantImage, [StringComparison]::OrdinalIgnoreCase)) { continue }
+          $octantArguments = $octantTrimmedCommand.Substring($octantImage.Length)
+          if (
+            $octantArguments -match '^\s+"%1"\s*$' -or
+            $octantArguments -match '^\s+--\s+"%1"\s*$'
+          ) {
+            $octantOwnedCommand = $true
+            break
+          }
+        }
+        if ($octantOwnedCommand) { break }
+      }
+    }
+    if (-not $octantOwnedCommand) {
       $octantImageShape = 'other'
+      $octantImageAtStart = $false
+      $octantArgumentLayout = 'image-not-leading'
+      $octantTrimmedCommand = $octantCommand.Trim()
       foreach ($octantPath in $octantPathSpellings) {
         if ($octantCommand.IndexOf($octantPath, [StringComparison]::OrdinalIgnoreCase) -ge 0) {
           $octantImageShape = if ($octantPath.StartsWith('\\?\')) { 'staged-namespaced' } else { 'staged-ordinary' }
+        }
+        foreach ($octantImage in @($octantPath, '"' + $octantPath + '"')) {
+          if (-not $octantTrimmedCommand.StartsWith($octantImage, [StringComparison]::OrdinalIgnoreCase)) { continue }
+          $octantImageAtStart = $true
+          $octantArguments = $octantTrimmedCommand.Substring($octantImage.Length).Trim()
+          $octantArgumentLayout = if ($octantArguments -eq '"%1"') {
+            'url-only'
+          } elseif ($octantArguments -match '^--\s+"%1"$') {
+            'electron-url'
+          } else {
+            'extra-or-other-argument'
+          }
           break
         }
       }
@@ -72,6 +105,8 @@ try {
       Write-Output (@{
         protocolCleanup = 'refused'
         executable = $octantImageShape
+        executableAtStart = $octantImageAtStart
+        argumentLayout = $octantArgumentLayout
         argument = $octantArgumentShape
         electronSeparator = $octantSeparator
       } | ConvertTo-Json -Compress)
