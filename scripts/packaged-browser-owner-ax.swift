@@ -136,6 +136,8 @@ func ownedFixturePath() -> String? {
 }
 var fixedFolderNativeStatuses: [String: Int32] = [:]
 var fixedFolderWindowAncestryUsed = false
+var fixedFolderGeometry: [String: Any] = ["targetInsideResolvedWindow": NSNull(), "centerOnScreen": NSNull(),
+    "topPointOwnerMatched": NSNull(), "topFrameMatched": NSNull()]
 func fixedFolderFrame(_ node: AXUIElement) -> CGRect? {
     var position: CFTypeRef?, size: CFTypeRef?
     let positionStatus = AXUIElementCopyAttributeValue(node, kAXPositionAttribute as CFString, &position)
@@ -152,6 +154,8 @@ func fixedFolderFrame(_ node: AXUIElement) -> CGRect? {
     return CGRect(origin: point, size: dimensions)
 }
 func fixedFolderHit(_ target: AXUIElement, _ deadline: Date, _ admit: (AXUIElement) -> Bool, _ expectedFieldRoot: AXUIElement? = nil) -> CGPoint? {
+    fixedFolderGeometry = ["targetInsideResolvedWindow": NSNull(), "centerOnScreen": NSNull(),
+        "topPointOwnerMatched": NSNull(), "topFrameMatched": NSNull()]
     guard admit(target), Date() < deadline, ownedFixturePath() != nil, AXIsProcessTrusted(), CGPreflightPostEventAccess(),
           kernelIdentity(processId) == initialKernelIdentity,
           NSRunningApplication(processIdentifier: processId)?.bundleURL?.resolvingSymlinksInPath().standardizedFileURL.path == expectedBundle,
@@ -206,14 +210,24 @@ func fixedFolderHit(_ target: AXUIElement, _ deadline: Date, _ admit: (AXUIEleme
     guard listStatus == .success, (currentWindows as? [AXUIElement])?.contains(where: { CFEqual($0, window) }) == true,
           AXUIElementGetPid(window, &windowPid) == .success, windowPid == processId else { return nil }
     if ancestryWindow { fixedFolderWindowAncestryUsed = true }
-    guard let windowFrame = fixedFolderFrame(window), windowFrame.contains(targetFrame) else { return nil }
+    guard let windowFrame = fixedFolderFrame(window) else { return nil }
+    let targetInsideWindow = windowFrame.contains(targetFrame)
+    fixedFolderGeometry["targetInsideResolvedWindow"] = targetInsideWindow
+    guard targetInsideWindow else { return nil }
     let point = CGPoint(x: targetFrame.midX, y: targetFrame.midY)
-    guard CGDisplayBounds(CGMainDisplayID()).contains(point) else { return nil }
+    let centerOnScreen = CGDisplayBounds(CGMainDisplayID()).contains(point)
+    fixedFolderGeometry["centerOnScreen"] = centerOnScreen
+    guard centerOnScreen else { return nil }
     let top = (CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID) as? [[String: Any]] ?? []).first { row in
         guard (row[kCGWindowLayer as String] as? NSNumber)?.intValue == 0,
               ((row[kCGWindowAlpha as String] as? NSNumber)?.doubleValue ?? 0) > 0,
               let values = row[kCGWindowBounds as String] as? [String: Any], let frame = CGRect(dictionaryRepresentation: values as CFDictionary) else { return false }
         return frame.contains(point)
+    }
+    fixedFolderGeometry["topPointOwnerMatched"] = (top?[kCGWindowOwnerPID as String] as? NSNumber).map { ($0.int32Value == processId) as Any } ?? NSNull()
+    if let values = top?[kCGWindowBounds as String] as? [String: Any], let frame = CGRect(dictionaryRepresentation: values as CFDictionary) {
+        fixedFolderGeometry["topFrameMatched"] = abs(frame.minX - windowFrame.minX) <= 2 && abs(frame.minY - windowFrame.minY) <= 2 &&
+            abs(frame.width - windowFrame.width) <= 2 && abs(frame.height - windowFrame.height) <= 2
     }
     guard (top?[kCGWindowOwnerPID as String] as? NSNumber)?.int32Value == processId,
           let values = top?[kCGWindowBounds as String] as? [String: Any], let frame = CGRect(dictionaryRepresentation: values as CFDictionary),
@@ -354,6 +368,7 @@ if mode == "picker-create-owned-project" {
         down.post(tap: .cghidEventTap); up.post(tap: .cghidEventTap)
         receipt["projectCreationDispatched"] = true; receipt["status"] = "dispatched"
     }
+    receipt["geometryChecks"] = fixedFolderGeometry
     receipt["nativeStatuses"] = fixedFolderNativeStatuses
     receipt["capturedPid"] = processId
     receipt["capturedIdentityMatched"] = ownerCurrent()
@@ -871,6 +886,7 @@ if mode == "picker-metadata" || mode == "picker-location-prompt" || (fixesOwnedF
                                 down.post(tap: .cghidEventTap); up.post(tap: .cghidEventTap)
                                 fixedFolder["chooserDispatched"] = true; fixedFolder["status"] = "dispatched"
                             }
+                            fixedFolder["geometryChecks"] = fixedFolderGeometry
                             fixedFolder["owningWindowFromBoundedParentProof"] = fixedFolderWindowAncestryUsed
                             fixedFolder["nativeStatuses"] = fixedFolderNativeStatuses
                             fixedFolder["fixtureIdentityMatched"] = ownedFixturePath() == fixturePath
