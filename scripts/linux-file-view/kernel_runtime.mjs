@@ -6,6 +6,7 @@ import { setTimeout as pause } from "node:timers/promises";
 
 const [root] = process.argv.slice(2);
 assert(root === "/tmp/octant-policy-broker");
+assert(!Object.keys(process.env).some((name) => name.startsWith("BUN_JSC_")));
 const deadline = setTimeout(() => process.exit(70), 20_000);
 let phase = "initial-read";
 try {
@@ -103,6 +104,7 @@ try {
       status: "measured-kernel-runtime",
       runtime: process.versions.bun ? "bun" : "node",
       version: process.versions.bun ?? process.version,
+      jitDefaults: true,
       liveFiles: true,
       persistentWrite: true,
       heldDescriptor: true,

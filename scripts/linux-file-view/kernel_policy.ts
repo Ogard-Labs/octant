@@ -1,10 +1,87 @@
 /** Owned, networkless guest entry for the actual structured-policy broker. */
-import { mkdir, readFile, rename, rm, stat, symlink, writeFile, link } from "node:fs/promises";
+import assert from "node:assert/strict";
+import {
+  mkdir,
+  mkdtemp,
+  readFile,
+  rename,
+  rm,
+  stat,
+  symlink,
+  writeFile,
+  link,
+} from "node:fs/promises";
 import { spawnSync } from "node:child_process";
 import { setTimeout as pause } from "node:timers/promises";
 import { runLinuxMediationBroker } from "../../apps/server/src/process/linuxMediationBroker";
 import { buildBubblewrapLaunch } from "../../apps/server/src/process/linuxConfinement";
 import { secretGuardMediationPolicy } from "../../apps/server/src/process/secretGuard";
+import {
+  linuxMediationObjectKey,
+  readLinuxMediationPolicy,
+} from "../../apps/server/src/process/linuxMediationPolicy";
+
+if (process.argv[2] === "--metadata-control") {
+  const control = await mkdtemp("/tmp/octant-classifier-control-");
+  const started = performance.now();
+  const snapshots = 256;
+  let cleaned = false;
+  try {
+    assert(!Object.keys(process.env).some((name) => name.startsWith("BUN_JSC_")));
+    await mkdir(`${control}/.ssh`, { mode: 0o700 });
+    await writeFile(`${control}/.ssh/deployment`, "synthetic control", { mode: 0o600 });
+    await writeFile(`${control}/.ssh/deployment.pub`, "synthetic public control");
+    await symlink("synthetic missing target", `${control}/.ssh/id_control`);
+    const secret = linuxMediationObjectKey(
+      await stat(`${control}/.ssh/deployment`, { bigint: true }),
+    );
+    const publicKey = linuxMediationObjectKey(
+      await stat(`${control}/.ssh/deployment.pub`, { bigint: true }),
+    );
+    const policy = secretGuardMediationPolicy({
+      platform: "linux",
+      homeDirectory: control,
+      ownAccountPaths: [],
+    });
+    for (let count = 0; count < snapshots; count++) {
+      assert(performance.now() - started < 10_000, "Classifier control exceeded its finite bound");
+      const snapshot = await readLinuxMediationPolicy(policy, async () => ({
+        epoch: 1n,
+        activeMutations: 0,
+      }));
+      assert.equal(snapshot.status, "ready");
+      if (snapshot.status === "ready") {
+        assert(snapshot.protectedObjects.has(secret));
+        assert(!snapshot.protectedObjects.has(publicKey));
+      }
+    }
+  } finally {
+    await rm(control, { recursive: true, force: true });
+    try {
+      await stat(control);
+    } catch (error) {
+      cleaned =
+        typeof error === "object" && error !== null && "code" in error && error.code === "ENOENT";
+    }
+  }
+  assert(cleaned);
+  console.log(
+    JSON.stringify({
+      status: "measured-unconfined-classifier",
+      snapshots,
+      jitDefaults: true,
+      enrolled: false,
+      cleaned,
+    }),
+  );
+  process.exit(0);
+}
+
+// Only this disposable controller disables the tier that aborted before the
+// Node case. Bun reads the debugging-only option at startup; remove it before
+// any relay/command spawn so the measured runtimes retain their normal JITs.
+assert.equal(process.env.BUN_JSC_useFTLJIT, "0");
+delete process.env.BUN_JSC_useFTLJIT;
 
 const runtime =
   process.argv[2] === "--runtime-bun"

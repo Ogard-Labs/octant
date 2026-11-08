@@ -123,6 +123,21 @@ source is not an executed pass. Public runtimes and loader dependencies are
 copied only into the private 512-MiB guest image, never installed on a live host.
 No provider credentials, requests, network services or accounts are involved.
 
+An actual run reached a Bun controller abort during DFG-to-FTL tier-up before
+the Node workload started. A bounded default-JIT control now runs the same
+compiled controller's real metadata classifier without enrollment, first on the
+stock runner and then in the guest. The other guest controller processes use
+`BUN_JSC_useFTLJIT=0` only as a diagnostic isolation step. This is the unstable
+debugging option described by the pinned
+[Bun runtime source](https://github.com/oven-sh/bun/blob/bun-v1.4.4/src/jsc/lib.rs)
+and [JSC option list](https://github.com/oven-sh/WebKit/blob/32dc1b0f51d51d8e0f8cba3398db9cadfd09dc73/Source/JavaScriptCore/runtime/OptionsList.h).
+The controller deletes it before spawning the native relay. Both measured stock
+Bun/Node payloads assert that no `BUN_JSC_*` variable exists and report that check.
+No production launch, kernel hook, authority, timeout or workload executable is
+changed. If the independent default controls do not reproduce the abort, its
+underlying runtime/kernel interaction remains unknown; mitigation is not proof
+of a corrected cause or production eligibility.
+
 Metadata coverage requires the link inode as well as its followed target:
 even a dangling protected symlink has link text and metadata. The policy's
 metadata port therefore distinguishes `lstat` from `stat`, including in proposed

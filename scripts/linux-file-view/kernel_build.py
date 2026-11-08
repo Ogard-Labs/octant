@@ -97,6 +97,9 @@ def main():
         run("gcc", "-static", "-std=c11", "-Wall", "-Wextra", "-Werror", str(source), "-o", str(target), timeout=30)
     run("bun", "build", "--compile", str(repository / "scripts/linux-file-view/kernel_policy.ts"),
         "--outfile", str(policy), timeout=120, cwd=repository)
+    # Same compiled classifier, default JIT, no device/enrollment on the stock
+    # runner. Keep this independent control before any guest mitigation.
+    run(str(policy), "--metadata-control", timeout=15, cwd=root)
     # Copy only this task-owned public executable's dynamic loader/libraries
     # into the disposable initramfs. Nothing is mounted from the runner home.
     runtime_files = {}
@@ -168,6 +171,8 @@ def main():
                     ("mutationSucceeded", "epochAdvanced", "staleRefused", "freshAllowed",
                      "childrenJoined", "cleaned", "passed")) for case in outside)):
         raise SystemExit("Every outside-mutation epoch case requires actual stale/fresh/cleanup proof on two CPUs.")
+    if '"status":"measured-unconfined-classifier","snapshots":256,"jitDefaults":true,"enrolled":false,"cleaned":true' not in log:
+        raise SystemExit("The guest default-JIT classifier control requires an actual cleanup receipt.")
     capsules = [case for case in cases if case.get("actualBubblewrapBuilder") is True and
                 case.get("runtime") == "native"]
     direct = [case for case in cases if case.get("actualBubblewrapBuilder") is False]
@@ -181,6 +186,7 @@ def main():
         raise SystemExit("The independent owner must verify private xattrs and mode unchanged.")
     expected = {"bun", "node"}
     if {case.get("runtime") for case in runtime_receipts} != expected or len(runtime_receipts) != 2 or any(
+            case.get("jitDefaults") is not True for case in runtime_receipts) or any(
             case.get("actualBubblewrapBuilder") is not True for case in runtime_cases):
         raise SystemExit("Both real runtime workloads need their actual capsule receipt.")
     if len(ordered) != 1 or ordered[0].get("status") != "measured-ordered-admissions" or \

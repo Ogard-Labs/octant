@@ -728,7 +728,8 @@ static int policy_measure(const char *mode)
   pid_t child = fork();
   if (!child) {
     char *arguments[] = {"/policy-broker", (char *)mode, NULL};
-    char *environment[] = {"HOME=/tmp", "PATH=/", "LANG=C", NULL};
+    char *environment[] = {"HOME=/tmp", "PATH=/", "LANG=C", "BUN_JSC_useFTLJIT=0", NULL};
+    if (mode && !strcmp(mode, "--metadata-control")) environment[3] = NULL;
     execve(arguments[0], arguments, environment);
     _exit(31);
   }
@@ -765,7 +766,8 @@ int main(void)
   } else {
     long cpus = sysconf(_SC_NPROCESSORS_ONLN);
     printf("OCTANT_KERNEL_CPUS %ld\n", cpus);
-    int result = cpus == 2 ? measure() : 61;
+    int result = cpus == 2 ? policy_measure("--metadata-control") : 61;
+    if (!result) result = measure();
     if (!result) result = namespace_measure();
     if (!result) result = ordered_measure();
     if (!result) result = outside_epoch_measure();
