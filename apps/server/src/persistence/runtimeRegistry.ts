@@ -382,6 +382,7 @@ import { registerGoalLoopEvents } from "../goal/goalLoopEventStore";
 import { registerFollowUpSuggestionEvents } from "../followUps/threadFollowUpSuggestionStore";
 import { registerTerminalSessionEvents } from "../terminalSessions/terminalSessionImports";
 import { registerThreadMoveEvents } from "../hub/threadMoveJournal";
+import { registerMovedHistoryEvents } from "../hub/movedThreadHistory";
 import { registerNativeHarnessEvents } from "../harness/nativeHarnessEvents";
 import { registerTurnMetricsEvents } from "../metrics/turnMetricsStore";
 import { registerSideTaskEvents } from "../sideTasks/sideTaskStore";
@@ -749,6 +750,7 @@ export function createPhase1RuntimeRegistries(): Phase1RuntimeRegistries {
   registerFollowUpSuggestionEvents(events);
   registerTerminalSessionEvents(events);
   registerThreadMoveEvents(events);
+  registerMovedHistoryEvents(events);
   registerSideTaskEvents(events);
   registerShipEvents(events);
   registerThreadMessageQueueEvents(events);

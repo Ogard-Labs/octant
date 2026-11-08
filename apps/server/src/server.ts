@@ -105,7 +105,7 @@ import { wireThreadNotifications } from "./wiring/notifications";
 import { wireWorkRequests } from "./wiring/workRequests";
 import { wireRoutes } from "./wiring/routes";
 import { wireRemote } from "./wiring/remote";
-import { createThreadMoveHolds } from "./hub/chatThreadMoveHost";
+import { createThreadMoveHolds } from "./hub/threadMoveHolds";
 import { createThreadMoveStateStore, heldThreadsOf } from "./hub/threadMoveStateStore";
 import { wireReplica } from "./wiring/replica";
 
@@ -337,6 +337,7 @@ export function startOctantServer(
       peekCreateFromIssueFramed,
       siblingThreadsService,
       terminalSessionImports,
+      movedThreadHistory,
       terminalSessionRoutes,
       threadOutsideContentMarks,
       toolEgressRules,
@@ -608,6 +609,7 @@ export function startOctantServer(
       roots,
       workAttachments,
     } = yield* wireCode({
+      threadMoveHolds,
       serverConnection,
       serverProjectStore,
       codeBoardEventStore,
@@ -738,6 +740,7 @@ export function startOctantServer(
       routeCodeService,
       terminalProcessPort,
     } = yield* wireCodeRuntime({
+      threadMoveHolds,
       worktreePreparation,
       conversationInputTransfer,
       browserModelBindings,
@@ -1596,6 +1599,9 @@ export function startOctantServer(
       remoteHost,
     } = wireRemote({
       chatService,
+      liveTurns,
+      managedWorktreeReceipts,
+      movedThreadHistory,
       threadMoveHolds,
       threadMoveState,
       beginGoogleCliChange,

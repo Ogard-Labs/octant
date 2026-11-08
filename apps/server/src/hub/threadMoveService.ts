@@ -22,6 +22,7 @@ import {
   ThreadMoveId,
   decodeThreadMoveDestinationState,
   decodeThreadMoveOffer,
+  THREAD_MOVE_FAILURE_REASONS,
   type AuditActingPrincipal,
   type MovedThreadReference,
   type ThreadMoveDestinationState,
@@ -88,6 +89,7 @@ export interface ThreadMoveSourceHost {
   readonly pack: (
     thread: MovedThreadReference,
     folder: string,
+    moveId: ThreadMoveId,
   ) => Promise<
     | { readonly status: "packed"; readonly parts: ReadonlyArray<PackedPart> }
     | { readonly status: "refused"; readonly reason: ThreadMoveFailureReason }
@@ -102,7 +104,7 @@ export interface ThreadMoveSourceHost {
 /** The destination host's side: accepting a Project, opening a thread from parts, and activating it. */
 export interface ThreadMoveDestinationHost {
   /** Whether the offer's destination Project fits the thread's mode (and, for Code, its repository). */
-  readonly acceptsProject: (offer: ThreadMoveOffer) => boolean;
+  readonly acceptsProject: (offer: ThreadMoveOffer) => boolean | Promise<boolean>;
   /**
    * Opens the new thread under the id the move planned for it, held so it
    * cannot take a turn. Called again with the same id after a stop between
@@ -117,7 +119,10 @@ export interface ThreadMoveDestinationHost {
     readonly ownerMemberId: HubMemberId;
   }) => Promise<
     | { readonly status: "arrived"; readonly thread: MovedThreadReference }
-    | { readonly status: "refused"; readonly reason: "no-eligible-project" | "transfer-failed" }
+    | {
+        readonly status: "refused";
+        readonly reason: "no-eligible-project" | "transfer-failed" | "no-matching-provider";
+      }
   >;
   /** Lets the arrived thread take turns. */
   readonly activate: (thread: MovedThreadReference) => Promise<void>;
@@ -285,7 +290,7 @@ export class ThreadMoveService {
     if (!sender.moveIn || !this.#options.ownerIsCurrent(ticket.ownerMemberId)) {
       return refusedAnswer(offer.moveId, "refused");
     }
-    if (!this.#options.destination.acceptsProject(offer)) {
+    if (!(await this.#options.destination.acceptsProject(offer))) {
       return refusedAnswer(offer.moveId, "no-eligible-project");
     }
     const now = this.#timestamp();
@@ -494,7 +499,7 @@ export class ThreadMoveService {
     this.#saveSent(move);
 
     const folder = this.#options.state.partsDirectory(String(moveId));
-    const packed = await this.#options.source.pack(input.thread, folder);
+    const packed = await this.#options.source.pack(input.thread, folder, moveId);
     if (packed.status === "refused") return this.#fail(move, packed.reason);
     let offer: ThreadMoveOffer;
     try {
@@ -977,7 +982,12 @@ function destinationState(move: ReceivedMove): Record<string, unknown> {
 
 function refusedAnswer(
   moveId: ThreadMoveId | undefined,
-  reason: "refused" | "unlock-required" | "no-eligible-project" | "transfer-failed",
+  reason:
+    | "refused"
+    | "unlock-required"
+    | "no-eligible-project"
+    | "transfer-failed"
+    | "no-matching-provider",
 ): DestinationAnswer {
   // Every missing permission answers in the same words, with the same status.
   return {
@@ -990,15 +1000,7 @@ function acknowledged(moveId: ThreadMoveId, partId: string, chunks: number): Des
   return { httpStatus: 200, body: { status: "acknowledged", moveId, partId, chunks } };
 }
 
-const FAILURE_REASONS: ReadonlyArray<ThreadMoveFailureReason> = [
-  "busy",
-  "delegated",
-  "unlock-required",
-  "refused",
-  "no-eligible-project",
-  "destination-unreachable",
-  "transfer-failed",
-];
+const FAILURE_REASONS: ReadonlyArray<ThreadMoveFailureReason> = THREAD_MOVE_FAILURE_REASONS;
 
 function refusalReason(reason: unknown): ThreadMoveFailureReason {
   return FAILURE_REASONS.find((known) => known === reason) ?? "refused";

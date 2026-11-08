@@ -14,6 +14,7 @@ import {
   LOCAL_HOST_ID,
   HubMemberId,
   ThreadRetentionThreadId,
+  decodeCodeCommand,
 } from "@octant/contracts";
 import { Schema } from "effect";
 import { decodeBrowserThreadId } from "@octant/contracts/browser-automation";
@@ -82,7 +83,13 @@ import { OwnerCredentialCopyService } from "../hub/ownerCredentialCopy";
 import { createProviderCredentialCopyBroker } from "../hub/ownerCredentialBroker";
 import { createOwnerPostureHost } from "../hub/ownerPostureHost";
 import { createPeerCredentialRouteHandler } from "../hub/peerCredentialRoutes";
-import { createChatThreadMoveHost, type ThreadMoveHolds } from "../hub/chatThreadMoveHost";
+import { createChatThreadMoveHost } from "../hub/chatThreadMoveHost";
+import { createCodeThreadMoveHost } from "../hub/codeThreadMoveHost";
+import { threadMoveHostsByMode } from "../hub/threadMoveHostsByMode";
+import type { MovedThreadHistory } from "../hub/movedThreadHistory";
+import type { ManagedWorktreeReceiptStore } from "../code/managedWorktreeReceiptStore";
+import type { LiveTurnRegistry } from "../liveTurn/liveTurnRegistry";
+import type { ThreadMoveHolds } from "../hub/threadMoveHolds";
 import { createThreadMoveJournal } from "../hub/threadMoveJournal";
 import { createThreadMoveRouteHandler } from "../hub/threadMoveRoutes";
 import { ThreadMoveService } from "../hub/threadMoveService";
@@ -221,6 +228,9 @@ export type RemoteDependencies = { readonly onSecretStoreLinkChange?: () => void
   Pick<FoundationsWiring, "hostMemoryGuard" | "providerRuntimeRegistry"> &
   Pick<CodeRuntimeWiring, "codeOperationRuntime" | "codeService"> & {
     readonly chatService: ChatService;
+    readonly liveTurns: LiveTurnRegistry;
+    readonly managedWorktreeReceipts: ManagedWorktreeReceiptStore;
+    readonly movedThreadHistory: MovedThreadHistory;
     /** Threads a move holds: frozen here while leaving, or arriving and not yet committed. */
     readonly threadMoveHolds: ThreadMoveHolds;
     readonly threadMoveState: ThreadMoveStatePort;
@@ -974,10 +984,123 @@ export function wireRemote(deps: RemoteDependencies) {
     },
     holds: deps.threadMoveHolds,
   });
+  const codeThreadMoveHost = createCodeThreadMoveHost({
+    readThread: (threadId) => persistence.readCodeThread(threadId),
+    isBusy: (threadId) => deps.liveTurns.read(String(threadId)) !== undefined,
+    checkoutRoot: async (threadId) => {
+      const thread = persistence.readCodeThread(threadId);
+      if (thread === undefined) return undefined;
+      const checkout = persistence.readCodeCheckout(thread.checkoutId);
+      if (checkout?.kind === "managed-worktree") {
+        return (await deps.managedWorktreeReceipts.load(String(checkout.ownershipReceiptId)))
+          ?.canonicalWorktreePath;
+      }
+      if (checkout?.kind !== "existing-worktree") return undefined;
+      const project = persistence.readProject(thread.projectId);
+      return project?.type === "code" ? project.binding.canonicalRoot : undefined;
+    },
+    ownsManagedWorktree: (threadId) => {
+      const thread = persistence.readCodeThread(threadId);
+      return (
+        thread !== undefined &&
+        persistence.readCodeCheckout(thread.checkoutId)?.kind === "managed-worktree"
+      );
+    },
+    providerDriverKind: (providerInstanceId) =>
+      persistence
+        .readProviderInstances()
+        .find((instance) => String(instance.id) === providerInstanceId)?.driverKind,
+    transcript: async (threadId) => {
+      const exported = await deps.threadExportService.exportThread(
+        ROUTINE_HOST_SCOPE_ID,
+        "local-window",
+        { mode: "code", threadId: String(threadId) },
+      );
+      // A thread that already moved here once carries its earlier history on.
+      const earlier = deps.movedThreadHistory.history(String(threadId)) ?? [];
+      if (exported.kind !== "exported") return earlier;
+      return [
+        ...earlier,
+        ...exported.bundle.transcript.entries.map((entry) => ({
+          role: entry.role === "user" ? ("person" as const) : ("assistant" as const),
+          text: entry.text,
+          occurredAt: entry.occurredAt,
+        })),
+      ];
+    },
+    externalContentIngested: (threadId) =>
+      readThreadExternalContentTaint(persistence.connection, threadId).externalContentIngested,
+    purge: async (threadId) => {
+      await threadRetention.purge(
+        {
+          scope: { kind: "thread", mode: "code", threadId: decodeRetentionThreadId(threadId) },
+          confirm: true,
+        },
+        "local-window",
+      );
+    },
+    codeProject: (projectId) => {
+      const project = persistence
+        .readProjects()
+        .find((candidate) => String(candidate.id) === projectId);
+      if (project?.type !== "code" || project.lifecycle !== "active") return undefined;
+      return {
+        projectId,
+        canonicalRoot: project.binding.canonicalRoot,
+        repositoryId: projectId,
+        // The Project's binding as it stands now: the newest revision it records.
+        bindingRevisionId: String(
+          project.bindingHistory[project.bindingHistory.length - 1]?.revisionId,
+        ),
+      };
+    },
+    resolveProvider: (driverKind, modelId) => {
+      const enabled = persistence.readProviderInstances().filter((instance) => instance.enabled);
+      const sameKind = enabled.find((instance) => instance.driverKind === driverKind);
+      // Another kind of provider cannot be assumed to know the source's model,
+      // so a move to a computer without one is refused with its own reason.
+      return sameKind === undefined
+        ? undefined
+        : { providerInstanceId: String(sameKind.id), modelId };
+    },
+    createThread: async (input) => {
+      // Decoded by the Code service like any creation; only the files are host-resolved.
+      const command = decodeCodeCommand({
+        kind: "create-managed-code-thread",
+        threadId: input.threadId,
+        projectId: input.project.projectId,
+        bindingRevisionId: input.project.bindingRevisionId,
+        title: input.title,
+        providerInstanceId: input.provider.providerInstanceId,
+        modelId: input.provider.modelId,
+        executionPolicy: "approval-gated",
+        permissionPersistence: "current-session",
+        deliveryTarget: {
+          branchIntent: input.branchIntent,
+          remoteName: "origin",
+          proposedBaseRepository: input.project.repositoryId,
+          proposedBaseBranch: input.sourceBranch,
+          outcomeKind: "local-implementation",
+          confirmedAt: new Date().toISOString(),
+        },
+        sourceBranch: input.sourceBranch,
+        startFromOrigin: false,
+        sourceRevision: input.head,
+      });
+      await deps.codeService.execute(ROUTINE_HOST_SCOPE_ID, command, undefined, {
+        movedFiles: input.files,
+        ...(input.inheritedMark === undefined ? {} : { inheritedMark: input.inheritedMark }),
+      });
+    },
+    journalHistory: (input) => deps.movedThreadHistory.journalImported(input),
+    holds: deps.threadMoveHolds,
+  });
+  // Each mode's adapter handles its own threads; the move service sees one host.
+  const byMode = threadMoveHostsByMode({ chat: chatThreadMoveHost, code: codeThreadMoveHost });
   const threadMoves = new ThreadMoveService({
     state: deps.threadMoveState,
-    source: chatThreadMoveHost.source,
-    destination: chatThreadMoveHost.destination,
+    source: byMode.source,
+    destination: byMode.destination,
     record: createThreadMoveJournal({
       journal: persistence.journal,
       connection: persistence.connection,

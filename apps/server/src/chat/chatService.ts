@@ -3,6 +3,7 @@ import {
   type ConversationInputPolicy,
   type ConversationInputReceipt,
 } from "@octant/contracts/conversation-inputs";
+import { THREAD_MOVING_REFUSAL } from "../hub/threadMoveHolds";
 import type { ConversationInputTransfer } from "../attachments/conversationInputTransfer";
 import { conversationInputReceiptBlock } from "../attachments/conversationInputs";
 import { validateQuestionnaireAnswer } from "@octant/domain";
@@ -893,10 +894,6 @@ function threadIdNamedBy(input: unknown): string | undefined {
   const threadId = (input as { readonly threadId?: unknown }).threadId;
   return typeof threadId === "string" ? threadId : undefined;
 }
-
-/** Why a command on a thread held by a move is refused. */
-export const THREAD_MOVING_REFUSAL =
-  "This thread is moving between your computers and cannot change until the move finishes.";
 
 /** A Chat conversation carried by a move, as the destination opens it. */
 export interface MovedChatThreadImport {
