@@ -251,9 +251,25 @@ the CLI. The hub depends on that:
     stay held against rename/write until actual process exit. Reading existing
     push signing never provisions a key or fallback identity. Missing native
     storage refuses instead of using Windows mode bits as access control.
-    This internal prerequisite does not admit Windows desktop/server startup;
-    roster/TLS/other hub storage, encrypted-disk setup checks and the boot
-    service remain separate composition and acceptance work.
+    The dependent listener TLS store admits only
+    `remote/private-listener-tls-key.pem` and
+    `remote/private-listener-tls-cert.pem` through the same native profile
+    checks. The P-256 TLS key is distinct from the host signing key, capped
+    at 4 KiB, exclusively created and held against writes or replacement.
+    An existing corrupt, exposed or aliased key refuses without rotation.
+    Certificates are capped at 16 KiB. A private regular certificate may be
+    renewed using a flushed, exclusively created private staging file and a
+    native handle rename into the held remote directory; an unsafe certificate
+    entry refuses. The reopened destination must retain the staging file's
+    physical identity. Renewal and restart keep the key's SPKI pin; no private
+    bytes enter arguments, environment, journal, logs or public status.
+    Missing native TLS storage refuses instead of falling back to ordinary
+    Windows file operations. Certificate reads release their file handles so
+    renewal can replace the public certificate; the key and directory guards
+    remain held until process exit.
+    These internal prerequisites do not admit Windows desktop/server startup;
+    roster/other hub storage, encrypted-disk setup checks and the boot service
+    remain separate composition and acceptance work.
   - **The machine itself.** The hub's setup turns on starting up after a
     power failure where the platform allows it, and explains what full-disk
     encryption asks at boot. FileVault, and LUKS with a passphrase, ask for a

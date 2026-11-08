@@ -444,6 +444,7 @@ export function wireRemote(deps: RemoteDependencies) {
     },
     selfMadeCertificate: createSelfMadeListenerCertificateStore({
       dataDirectory: providerDataDirectory,
+      tlsFiles: options.listenerTlsFiles,
     }),
   });
   // The hub role and this host's hub membership. The private listener is where
