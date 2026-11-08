@@ -3,9 +3,11 @@
 #include <errno.h>
 #include <fcntl.h>
 #include <linux/fs.h>
+#include <linux/fiemap.h>
 #include <linux/magic.h>
 #include <signal.h>
 #include <stdbool.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <string.h>
 #include <sys/ioctl.h>
@@ -67,6 +69,18 @@ static bool ordinary_seeks(int file, off_t size)
     lseek(file, -7, SEEK_CUR) == 0;
 }
 
+struct extent_observation { int result; int error; unsigned int count; bool unchanged; };
+static struct extent_observation extent_count(int file)
+{
+  struct fiemap request = { .fm_length = UINT64_MAX, .fm_mapped_extents = 0x5a5a5a5a };
+  struct fiemap before = request;
+  errno = 0;
+  int result = ioctl(file, FS_IOC_FIEMAP, &request);
+  int error = result < 0 ? errno : 0;
+  return (struct extent_observation) { .result = result, .error = error,
+    .count = request.fm_mapped_extents, .unchanged = !memcmp(&before, &request, sizeof(request)) };
+}
+
 struct seek_observation { off_t result; int error; bool refused; };
 static struct seek_observation protected_seek(int file, int origin)
 {
@@ -96,6 +110,8 @@ int main(int argc, char **argv)
   if (ioctl(held, FIONREAD, &before_available) || before_available != before.identity.st_size ||
       ioctl(held, FIOQSIZE, &before_usage) || before_usage < 0) return 7;
   if (!ordinary_seeks(held, before.identity.st_size)) return 8;
+  struct extent_observation before_extents = extent_count(held);
+  if (before_extents.result || !before_extents.count) return 9;
   puts("OCTANT_FILEATTR_FILESYSTEM {\"ext4\":true,\"baselineRead\":true}");
   int saved = open(BASELINE, O_CREAT | O_EXCL | O_WRONLY | O_CLOEXEC | O_NOFOLLOW, 0600);
   if (saved < 0 || write(saved, &before, sizeof(before)) != sizeof(before) || fsync(saved)) return 4;
@@ -129,6 +145,8 @@ int main(int argc, char **argv)
   int usage_errno = usage_result < 0 ? errno : 0;
   bool available_refused = available_result == -1 && available_errno == EACCES && private_available == available_sentinel;
   bool usage_refused = usage_result == -1 && usage_errno == EACCES && private_usage == usage_sentinel;
+  struct extent_observation private_extents = extent_count(held);
+  bool extents_refused = private_extents.result == -1 && private_extents.error == EACCES && private_extents.unchanged;
   struct seek_observation seek_end = protected_seek(held, SEEK_END);
   struct seek_observation seek_data = protected_seek(held, SEEK_DATA);
   struct seek_observation seek_hole = protected_seek(held, SEEK_HOLE);
@@ -157,7 +175,12 @@ int main(int argc, char **argv)
     !ioctl(public, FIOQSIZE, &public_usage) && public_usage >= 0;
   struct stat public_identity;
   bool public_seeks = public >= 0 && !fstat(public, &public_identity) && ordinary_seeks(public, public_identity.st_size);
+  struct extent_observation public_extents = extent_count(public);
+  bool extents_allowed = public_extents.result == 0 && public_extents.count > 0;
   if (public >= 0) close(public);
+  printf("OCTANT_FIEMAP_METADATA {\"baselineAllowed\":true,\"privateRefused\":%s,\"privateResult\":%d,\"privateErrno\":%d,\"outputUnchanged\":%s,\"publicAllowed\":%s}\n",
+    extents_refused ? "true" : "false", private_extents.result, private_extents.error,
+    private_extents.unchanged ? "true" : "false", extents_allowed ? "true" : "false");
   printf("OCTANT_LLSEEK_METADATA {\"baselineAllowed\":true,\"endRefused\":%s,\"endResult\":%lld,\"endErrno\":%d,\"dataRefused\":%s,\"dataResult\":%lld,\"dataErrno\":%d,\"holeRefused\":%s,\"holeResult\":%lld,\"holeErrno\":%d,\"positionAllowed\":%s,\"publicAllowed\":%s}\n",
     seek_end.refused ? "true" : "false", (long long)seek_end.result, seek_end.error,
     seek_data.refused ? "true" : "false", (long long)seek_data.result, seek_data.error,
@@ -180,5 +203,6 @@ int main(int argc, char **argv)
     public_restored ? "true" : "false", marker ? "true" : "false");
   return private_read_refused && private_output_unchanged && private_refused && public_changed && public_restored && marker &&
     available_refused && usage_refused && public_queries && pipe_allowed && socket_allowed &&
+    extents_refused && extents_allowed &&
     seek_end.refused && seek_data.refused && seek_hole.refused && private_position && public_seeks ? 0 : 18;
 }
