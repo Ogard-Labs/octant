@@ -280,6 +280,10 @@ jobs:
       # Playwright; its launch hook timed out on ubuntu-24.04 (run
       # 42205818274). It is not part of Linux client trust, and the macOS job
       # above runs it with the rest of the desktop suite.
+      - name: Install pinned Electron for desktop imports
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: bun scripts/ensure-ci-electron.ts
       - run: bun run --cwd apps/desktop test -- --exclude=src/browserSurfaceHost.realPage.test.ts
       # Nightly's test data and Octant's credentials in one real unlocked
       # keyring: neither reads, replaces nor clears the other.
