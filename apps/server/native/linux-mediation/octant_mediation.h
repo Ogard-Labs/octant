@@ -62,6 +62,13 @@ struct octant_mediation_status {
 #define OCTANT_MEDIATION_UNLINK 5
 #define OCTANT_MEDIATION_RMDIR 6
 #define OCTANT_MEDIATION_RENAME 7
+#define OCTANT_MEDIATION_CREATE 8
+#define OCTANT_MEDIATION_LINK 9
+#define OCTANT_MEDIATION_TMPFILE 10
+
+/* Creation requests use only destination's parent/name (empty for TMPFILE).
+ * LINK additionally carries the actual held source's device/inode tuple.
+ * source, flags and reserved fields stay zero; no source pathname is needed. */
 
 /* Returns a one-use close-on-exec enrollment descriptor; no broker FD crosses. */
 #define OCTANT_MEDIATION_ENROLL_FD _IO('O', 0x71)

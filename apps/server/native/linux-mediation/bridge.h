@@ -11,11 +11,17 @@ struct cred;
 struct dentry;
 struct file;
 struct fd;
+struct inode;
 
 int octant_seek_lock(struct fd *file, bool mediated);
 
 /* Private kernel scope identity, never part of the userspace UAPI. */
 struct octant_metadata_scope {
+	u64 identity;
+	int error;
+};
+
+struct octant_creation_scope {
 	u64 identity;
 	int error;
 };
@@ -37,6 +43,11 @@ int octant_metadata_check_write(struct dentry *dentry);
 int octant_namespace_prepare(u32 operation, const struct path *source,
 	const struct qstr *name, const struct path *destination,
 	const struct qstr *new_name, u32 flags);
+struct octant_creation_scope octant_creation_begin(u32 operation, const struct path *parent,
+	const struct qstr *name, const struct path *source);
+void octant_creation_end(struct octant_creation_scope *scope);
+int octant_creation_check(u32 operation, struct inode *parent, struct dentry *name,
+	struct inode *source);
 #else
 static inline void octant_namespace_begin(void) {}
 static inline void octant_namespace_end(void) {}
@@ -58,6 +69,14 @@ static inline int octant_metadata_check_write(struct dentry *dentry) { return 0;
 static inline int octant_namespace_prepare(u32 operation, const struct path *source,
 	const struct qstr *name, const struct path *destination,
 	const struct qstr *new_name, u32 flags) { return 0; }
+static inline struct octant_creation_scope octant_creation_begin(u32 operation,
+	const struct path *parent, const struct qstr *name, const struct path *source)
+{
+	return (struct octant_creation_scope) {};
+}
+static inline void octant_creation_end(struct octant_creation_scope *scope) {}
+static inline int octant_creation_check(u32 operation, struct inode *parent,
+	struct dentry *name, struct inode *source) { return 0; }
 #endif
 
 /* The automatic end clears even an unused decision on every early return.
