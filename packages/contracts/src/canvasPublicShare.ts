@@ -32,7 +32,7 @@ export const CANVAS_PUBLIC_SHARE_REPORT_DETAIL_MAX_CHARS = 1_000;
 /** Revoked and expired links answer 410 for this long, then 404. */
 export const CANVAS_PUBLIC_SHARE_TOMBSTONE_DAYS = 90;
 
-/** 16 random bytes as URL-safe base64: 128 bits, 22 characters. */
+/** Opaque 128-bit id as 22 characters of URL-safe base64. */
 export const CanvasPublicShareId = Schema.String.pipe(
   Schema.pattern(/^[A-Za-z0-9_-]{22}$/),
   Schema.brand("CanvasPublicShareId"),

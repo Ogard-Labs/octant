@@ -1,4 +1,4 @@
-import { createHmac } from "node:crypto";
+import { createHash, createHmac } from "node:crypto";
 import {
   CANVAS_PUBLIC_SHARE_WIRE_VERSION,
   type CanvasPublicShareDocument,
@@ -118,7 +118,8 @@ type Authorized =
 /**
  * A wrong or missing secret and an id that does not exist both answer 403, so
  * the owner routes cannot be used to find out which ids are in use. A
- * tombstone holds no secret hash, so a gone link answers 410 to anyone.
+ * legacy tombstone holds no secret hash; owned-create tombstones retain the
+ * hash so only that owner receives an authenticated gone response.
  */
 function authorizeOwner(ctx: ServiceContext, id: string, request: Request): Authorized {
   const unauthorized: Authorized = {
@@ -127,6 +128,14 @@ function authorizeOwner(ctx: ServiceContext, id: string, request: Request): Auth
   };
   const lookup = ctx.store.lookup(id);
   if (lookup.status === "gone") {
+    if (lookup.tombstone.ownerSecretHash !== undefined) {
+      const secret = /^Bearer (\S+)$/.exec(request.headers.get("authorization") ?? "")?.[1];
+      if (
+        secret === undefined ||
+        !digestsMatch(hashOwnerSecret(secret), lookup.tombstone.ownerSecretHash)
+      )
+        return unauthorized;
+    }
     return {
       status: "refused",
       response: refusal("gone", "This link was revoked or has expired."),
@@ -143,6 +152,15 @@ function authorizeOwner(ctx: ServiceContext, id: string, request: Request): Auth
 
 function shareUrl(ctx: ServiceContext, id: string): string {
   return `${ctx.publicOrigin}/s/${id}`;
+}
+
+/** A missing-id cancellation may fence only the opaque id derived from this proof. */
+function ownedId(ownerSecret: string): string {
+  return createHash("sha256")
+    .update("octant-canvas-public-share-id-v1\0" + ownerSecret)
+    .digest()
+    .subarray(0, 16)
+    .toString("base64url");
 }
 
 async function createShare(
@@ -165,6 +183,8 @@ async function createShare(
     return refusal("too-large", "The Canvas is larger than this service accepts.");
   }
   const owned = parsed.value.kind === "canvas-public-share-owned-create" ? parsed.value : undefined;
+  if (owned !== undefined && ownedId(owned.ownerSecret) !== String(owned.shareId))
+    return refusal("unauthorized", "The owned id does not match its owner proof.");
   const requestDigest =
     owned === undefined
       ? undefined
@@ -341,6 +361,38 @@ export async function handleApi(
     return refusal("rate-limited", "Too many requests. Try again in a minute.");
   }
   if (request.method === "PUT") return updateShare(request, ctx, id);
+  if (request.method === "DELETE") {
+    const lookup = ctx.store.lookup(id);
+    const secret = /^Bearer ([A-Za-z0-9_-]{43})$/.exec(
+      request.headers.get("authorization") ?? "",
+    )?.[1];
+    if (
+      lookup.status === "missing" ||
+      (lookup.status === "gone" && lookup.tombstone.ownerSecretHash !== undefined)
+    ) {
+      if (
+        secret === undefined ||
+        ownedId(secret) !== id ||
+        (lookup.status === "gone" &&
+          !digestsMatch(hashOwnerSecret(secret), lookup.tombstone.ownerSecretHash ?? ""))
+      )
+        return refusal("unauthorized", "The owner secret is missing or wrong.");
+      if (lookup.status === "missing") {
+        if (!ctx.limiter.allow("create", client))
+          return refusal("rate-limited", "Too many ownership records. Try again in a minute.");
+        if (!ctx.store.cancelOwned(id, hashOwnerSecret(secret)))
+          return refusal("unavailable", "This service could not record cancellation.");
+      }
+      return jsonResponse(
+        decodeCanvasPublicShareRevoked({
+          schemaVersion: CANVAS_PUBLIC_SHARE_WIRE_VERSION,
+          kind: "canvas-public-share-revoked",
+          shareId: id,
+        }),
+        200,
+      );
+    }
+  }
   const authorized = authorizeOwner(ctx, id, request);
   if (authorized.status === "refused") return authorized.response;
   if (request.method === "DELETE") {

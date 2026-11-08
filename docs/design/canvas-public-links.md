@@ -92,8 +92,9 @@ budget, and the service refuses a larger one.
 
 ## Link terms
 
-- **Ids.** The service mints the share id from 16 random bytes (128 bits),
-  written as 22 characters of URL-safe base64. The link is
+- **Ids.** Current hosts derive a 128-bit opaque id from their random owner proof,
+  written as 22 characters of URL-safe base64. Legacy clients receive an id minted
+  by the service from 16 random bytes. The link is
   `<service>/s/<id>`.
 - **Expiry.** The default is 30 days; the person may pick 1 to 365 days, or
   no expiry, which the card offers only as an explicit choice. The service
@@ -111,16 +112,29 @@ budget, and the service refuses a larger one.
   active is an update: the card says which link, the service replaces the
   payload and expiry under the same id, and the URL does not change.
 - **Revoke.** Revoking deletes the payload at the service and leaves a
-  content-free tombstone (id and time) so the link answers 410. A tombstone is
+  content-free tombstone with id, time and, for owned-create, the owner hash, so the viewer answers 410. A tombstone is
   removed after 90 days, after which the link answers 404.
 
 ## Owner proof
 
 There are no accounts. Before a first-party create sends any document, the
-host generates a 16-byte share id and a 32-byte owner secret with its platform
+host generates a 32-byte owner secret with its platform
 CSPRNG, stores the secret in the credential broker and commits a non-secret
 publication intent naming the exact service, share id and credential reference.
-A vault or intent failure sends no document. The owned-create request uses the
+The id is the first 16 bytes of SHA-256 over UTF-8
+`octant-canvas-public-share-id-v1` followed by a NUL byte and the 43-character
+owner secret, encoded as URL-safe base64 without padding. The service verifies
+this binding before accepting owned-create. A missing-id DELETE can therefore
+cancel only the future id proven by its bearer secret, never an unrelated id.
+A same-owner cancellation writes a durable content-free tombstone holding only
+the owner hash before acknowledging success. It fences a delayed owned-create,
+which rechecks after password hashing immediately before the synchronous store
+write. The fence survives restart, makes DELETE idempotent for that owner and
+refuses a wrong proof without mutation. A new cancellation consumes the existing
+create-rate bucket as well as the owner-rate bucket. Tombstone retention remains
+90 days. A generic unauthorized or not-found response never confirms withdrawal:
+the host keeps the intent and owner proof until an acknowledged cancellation or
+gone response. A vault or intent failure sends no document. The owned-create request uses the
 explicit `canvas-public-share-owned-create` discriminator; a service which does
 not implement it refuses before publication. The host never retries using the
 legacy create shape. The reference service still accepts the legacy shape for
@@ -142,8 +156,9 @@ provider credentials means a provider purge never strands a link its owner
 can no longer revoke. Update, revoke,
 and status present it as `Authorization: Bearer`; the service compares hashes
 in constant time and answers a wrong or missing secret with 403, the same
-answer for an id that does not exist, so the secret cannot be used to probe
-ids. The host deletes the secret once the service confirms revocation or the
+answer for an id that does not exist, except a DELETE whose proof derives that
+exact missing id may create its cancellation fence. This grants no authority over
+another id. The host deletes the secret once the service confirms revocation or the
 link has expired. Expiry is settled by a host sweep that runs once the host is
 serving and hourly after that: it deletes the secret first, then journals
 `canvas.public-share-expired@1`, so a failed delete is retried on the next pass
@@ -216,9 +231,10 @@ the operator's reverse proxy.
 
 Every body is decoded strictly against the contract, an unknown field or
 future version is refused, and a refusal is `canvas-public-share-refused`
-with a code (`malformed`, `too-large`, `unauthorized`, `not-found`, `gone`,
-`rate-limited`, `unavailable`). The owner routes answer 410 for a revoked or
-expired link.
+with a code (`malformed`, `conflict`, `too-large`, `unauthorized`, `not-found`, `gone`,
+`rate-limited`, `unavailable`). Revoked or expired viewers answer 410. Owned
+DELETE repeats acknowledge cancellation with 200 only for that owner; wrong
+proofs answer 403. Other authenticated owner routes answer 410 for gone links.
 
 ### Viewer safety
 

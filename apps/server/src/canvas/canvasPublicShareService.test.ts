@@ -548,37 +548,44 @@ describe("public links", () => {
     expect(restarted.links.list(canvasId).shares[0]?.status).toBe("active");
   });
 
-  it("recovers an uncertain create after a restart without losing the owner proof", async () => {
-    const connection = openConnection();
-    const base = fakeService();
-    const secrets = memorySecrets();
-    const service = {
-      ...base,
-      port: {
-        ...base.port,
-        create: async (input: Parameters<CanvasPublicShareServicePort["create"]>[0]) => {
-          await base.port.create(input);
-          return { kind: "unreachable" as const };
+  it.each(["unreachable", "unauthorized", "not-found"] as const)(
+    "keeps an uncertain create owned after %s and recovers after restart",
+    async (failure) => {
+      const connection = openConnection();
+      const base = fakeService();
+      const secrets = memorySecrets();
+      const service = {
+        ...base,
+        port: {
+          ...base.port,
+          create: async (input: Parameters<CanvasPublicShareServicePort["create"]>[0]) => {
+            await base.port.create(input);
+            return { kind: "unreachable" as const };
+          },
         },
-      },
-    };
-    base.answerRevokeWith({ kind: "unreachable" });
-    const first = harness({ connection, service, secrets });
-    first.turnOn();
-    const outcome = await first.links.publish(await approvedInput(first));
-    expect(outcome).toMatchObject({
-      kind: "refused",
-      message: expect.stringContaining("keeps trying"),
-    });
-    expect(secrets.held.size).toBe(1);
-    expect(first.journalText().includes(base.ownerSecret)).toBe(false);
-    base.answerRevokeWith({ kind: "ok", value: { shareId: base.shareId } });
-    const restarted = harness({ connection, service: base, secrets });
-    await restarted.links.retryPendingRevocations();
-    expect(base.calls.at(-1)?.input.shareId).toBe(base.shareId);
-    expect(secrets.held.size).toBe(0);
-    expect(restarted.links.list(canvasId).shares).toEqual([]);
-  });
+      };
+      base.answerRevokeWith(
+        failure === "unreachable"
+          ? { kind: "unreachable" }
+          : { kind: "refused", code: failure, message: "Cancellation is not confirmed." },
+      );
+      const first = harness({ connection, service, secrets });
+      first.turnOn();
+      const outcome = await first.links.publish(await approvedInput(first));
+      expect(outcome).toMatchObject({
+        kind: "refused",
+        message: expect.stringContaining("keeps trying"),
+      });
+      expect(secrets.held.size).toBe(1);
+      expect(first.journalText().includes(base.ownerSecret)).toBe(false);
+      base.answerRevokeWith({ kind: "ok", value: { shareId: base.shareId } });
+      const restarted = harness({ connection, service: base, secrets });
+      await restarted.links.retryPendingRevocations();
+      expect(base.calls.at(-1)?.input.shareId).toBe(base.shareId);
+      expect(secrets.held.size).toBe(0);
+      expect(restarted.links.list(canvasId).shares).toEqual([]);
+    },
+  );
 
   it("retains ownership when the journal cannot confirm a withdrawal", async () => {
     const h = harness();
