@@ -1090,18 +1090,53 @@ provider's own session never moves.
 
 #### Prepare to shut down
 
-**Prepare to shut down** in the application menu and the menu bar lists this
-host's active threads, each with what can happen to it: move to a member
-(the one the person last moved to, or another they pick), hand over, or leave
-it here. The person chooses per thread or for all. A batch is one offer per
-destination naming every thread in it, so one unlock covers the batch it names
-and nothing else. The screen shows progress and says **Safe to shut down**
-only when every chosen thread is committed or handed over and pushed. A thread
-whose move cannot finish shows
-[This thread can't move](#a-thread-that-cannot-move) with its reason on its
-row, and a Code thread there offers **Hand over instead**. While any chosen
-thread failed, the screen says how many threads stay on this computer and lists
-them instead of saying Safe to shut down.
+Prepare to shut down moves many threads at once, for the moment the person is
+leaving. It asks before anything moves, and its defaults are chosen so that
+the usual case is one press and one unlock.
+
+- **Where it opens.** From **Prepare to Shut Down…** in the application menu
+  and the menu bar, and from the existing quit confirmation: when Quit would
+  ask about open sessions and this host is in a hub with a member that can take
+  at least one of its threads, the confirmation gains **Move threads first…**,
+  which opens Prepare to shut down instead of quitting. Cancel stays the
+  default there and Quit and stop work is unchanged. An operating-system
+  shutdown, logout, or updater restart stays immediate and offers nothing,
+  because it cannot wait for a person.
+- **Which threads.** Every thread on this host with a running turn or a
+  question waiting on the person, and every open (not completed or archived)
+  thread with a turn in the last 14 days. Older open threads fold under one
+  "Older threads" row, closed, each staying here unless the person opens it and
+  chooses otherwise. Delegated threads are listed as staying here with their
+  reason.
+- **The destination.** One **Move to** choice applies to every row set to
+  move: the member the person last moved a thread to, otherwise the hub when it
+  can take threads, otherwise the first eligible member that is online. A row
+  may name another member through its own choice.
+- **Each row's starting choice.** A thread the destination can take starts on
+  **Move**. One with a running turn or a waiting question starts on **Move
+  after this turn**; nothing is stopped unless the person picks Stop and move.
+  One the destination cannot take starts on **Leave here** with its
+  [reason](#a-thread-that-cannot-move) shown, and when it is a Code thread its
+  choice also offers **Hand over**. A handover writes a commit and may push, so
+  it is never preselected. Changing the destination re-evaluates every row that
+  still holds its starting choice and leaves the person's own choices alone.
+- **One press, one unlock per destination.** The primary action moves every
+  row set to move or hand over. A batch is one offer per destination naming
+  every thread in it, so one unlock covers the batch it names and nothing
+  else. Threads go smallest first, so most are done early, and a thread set to
+  move after its turn starts when that turn ends.
+- **Finishing.** The screen says **Safe to shut down** only when every chosen
+  thread is committed, or handed over and pushed. A thread whose move cannot
+  finish shows [This thread can't move](#a-thread-that-cannot-move) with its
+  reason and recovery on its row, and while any chosen thread failed, the
+  screen says how many threads stay on this computer and lists them instead.
+  When it was opened from the quit confirmation, it ends with Quit Octant as
+  its primary action; quitting still goes through the guarded shutdown.
+
+Rationale: a person shutting down wants their work to come with them, so
+moving is the default wherever it can succeed, and the screen asks once, not
+once per thread. Anything that writes outside the thread (a commit, a push) or
+stops work (Stop and move) stays a choice the person makes.
 
 #### Handover
 
@@ -2034,7 +2069,10 @@ a numbered slice. Built, with these narrower readings:
     cannot finish journals `thread.move-failed@1` with one listed reason,
     unfreezes the thread, and shows This thread can't move in the move sheet,
     on the thread, and in Prepare to shut down, which then never says Safe to
-    shut down; no header menu, row menu, or palette entry starts a move.
+    shut down; no header menu, row menu, or palette entry starts a move;
+    Prepare to shut down moves nothing before the person presses its primary
+    action, starts each row on the choice above, never preselects a handover
+    or Stop and move, and needs one unlock per destination for the batch.
     Verification: the closest web component tests, rendered QA of each screen
     state at a wide window and at 390px,
     contract and domain tests, server tests, and a two-host loopback smoke with

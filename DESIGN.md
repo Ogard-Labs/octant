@@ -2063,6 +2063,55 @@ this is how it looks.
   summarize switch (on), and **Commit and push** as the primary button, or
   **Commit** when there is no remote, with a sentence saying the work then
   stays on this computer.
+- **Prepare to shut down.** One dialog, 640px wide and at most 80% of the
+  window's height, with its list scrolling between a fixed head and foot. It
+  reads as a decision already made for the person, which they can glance at
+  and confirm:
+  - **Head.** The title "Prepare to shut down", one meta sentence ("Move your
+    threads to another computer before this one goes off."), and the **Move
+    to** control: a compact menu button with the destination's glyph, name,
+    and state pill, listing every member with its own pill (eligible ones
+    first, ineligible ones disabled with their reason).
+  - **Rows.** One 44px row per thread in the list's order (running and waiting
+    threads first, then newest activity): the mode glyph, the title (truncating
+    first), the Project in meta ink, the size in tabular figures, and the row's
+    choice as a trailing menu button showing its current word (Move, After this
+    turn, Hand over, Leave here). A row moving somewhere other than the head's
+    destination names that member in the button. A row that cannot move shows
+    its reason as a small neutral pill before the button. A running thread
+    carries the spinner the sidebar uses; a waiting one, the warning dot.
+    "Older threads" is one closed disclosure row with its count.
+  - **Foot.** One summary line that updates as choices change, in plain words
+    with tabular figures ("8 move to Mac mini · 1 hands over · 2 stay here ·
+    1.4 GB, about 2 min"), then the buttons: Cancel, and the primary, which
+    names the count and the unlock (**Move 9 threads with Touch ID**; **Move 9
+    threads** when more than one destination needs its own unlock, asked in
+    turn). With nothing set to move, the primary is disabled and the summary
+    says why.
+  - **While it runs.** The dialog stays and becomes the progress view: a
+    determinate bar under the head for the whole batch, and on each row a thin
+    progress line and a state word in place of its choice (Waiting, Moving with
+    its percentage, After this turn, Moved with a check, Handed over, Can't
+    move). Escape or closing hides the dialog without stopping anything; the
+    menu bar icon shows the batch's progress, and Prepare to Shut Down… brings
+    the dialog back. Each moving thread also shows the single-move frozen bar
+    in its own pane. Assistive technology hears the start, each thread that
+    finishes or fails, and the end, through one polite live region.
+  - **Done.** The head becomes a success check and **Safe to shut down**, with
+    the count moved and where. Opened from Quit, the primary is **Quit Octant**;
+    otherwise **Done**. With failures, the head instead reads how many threads
+    stay on this computer in the warning ink, failed rows rise to the top with
+    their reason and recovery buttons (Try again, Hand over for Code), and the
+    buttons are **Done** and, from Quit, **Quit anyway**.
+  - **Nothing to decide.** With no listed threads the dialog says "Nothing to
+    move" and Safe to shut down at once. On a host outside a hub it says
+    "Join a hub to move threads between your computers" with Set up. With no
+    member able to take any thread, every row reads Leave here with its reason,
+    and Code rows still offer Hand over.
+  - **Keyboard.** Focus opens on the primary button, so Return accepts the
+    defaults; Tab reaches Move to, then each row's choice, then the foot. Each
+    row's choice is named for its thread ("Choice for" and the title), and its
+    menu opens on Space or Return.
 
 Rationale: Environment already answers "where does this thread run", so the
 control that changes the answer belongs beside it, and a person looking for
@@ -2624,6 +2673,9 @@ request from the person.
   desktop-owned host and its child resources. Cancellation leaves both app and
   host running. The session count can include idle sessions kept for another turn;
   the warning names open sessions without claiming they are executing turns.
+  When this host is in a hub and another member can take one of its threads,
+  the confirmation adds **Move threads first…**, which opens Prepare to shut
+  down (above) instead of quitting; Cancel stays the default.
   Once the person confirms, quitting never waits on a person: a
   failed or stalled window-state save or host stop is logged rather than shown
   in an alert, and a fixed deadline ends the app (after force-stopping the
