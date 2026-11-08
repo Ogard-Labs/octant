@@ -150,8 +150,6 @@ jobs:
           New-Item -ItemType Directory -Path "$octantForegroundResources/native" -Force | Out-Null
           Copy-Item apps/server/dist "$octantForegroundResources/app/apps/server/dist" -Recurse
           New-Item -ItemType Junction -Path "$octantForegroundResources/app/apps/server/node_modules" -Target "$PWD/node_modules" | Out-Null
-          bun scripts/windows-host-owner/diagnose-startup.ts "$octantForegroundResources/app/apps/server/dist"
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           Copy-Item "$env:RUNNER_TEMP/owner-build/Release/octant-windows-host-owner.node" "$octantForegroundResources/native/"
           Copy-Item "$env:RUNNER_TEMP/credential-build/Release/octant-credential-helper.exe" "$octantForegroundResources/native/"
           bun build scripts/windows-host-owner/foreground.ts --target=bun --outfile "$env:RUNNER_TEMP/foreground-smoke.mjs"
@@ -227,12 +225,3 @@ jobs:
           path: ${{ runner.temp }}/owner-build/Release/octant-windows-host-owner.node
           if-no-files-found: error
           retention-days: 3
-
-      - name: Retain public generated source for owned startup diagnosis
-        if: failure()
-        uses: actions/upload-artifact@v4
-        with:
-          name: windows-foreground-diagnostic-source-${{ github.sha }}
-          path: apps/server/dist/*.mjs
-          retention-days: 1
-          if-no-files-found: ignore

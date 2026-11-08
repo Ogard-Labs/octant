@@ -1515,6 +1515,13 @@ folder that is not a repository on a `plain-folder` checkout whose head is
 reports itself unavailable there rather than inventing a revision. On, both are
 refused.
 
+The default-folder wire value preserves the host's native absolute spelling:
+POSIX paths or Windows drive-absolute paths. Drive-relative paths, UNC/device
+namespaces and NUL bytes are refused. Decoding a path does not admit filesystem
+access: the host still checks its own native absolute form, resolves the actual
+ancestors and enforces the existing inside-home rule. A Windows value received
+on another platform is not reinterpreted as a local folder.
+
 The default folder used to be `~/Documents/Octant`, and threads without a
 Project in Code had a separate `allowDefaultFolderThreads` switch beside the Git
 requirement. A stored folder is kept, so an install that stored

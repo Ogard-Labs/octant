@@ -516,7 +516,9 @@ export const DEFAULT_COMPLETED_THREAD_ARCHIVE_AFTER_DAYS: CompletedThreadArchive
  */
 export const DefaultFolder = Schema.NonEmptyTrimmedString.pipe(
   Schema.maxLength(4_096),
-  Schema.filter((value) => value.startsWith("/") && !value.includes("\0")),
+  Schema.filter(
+    (value) => !value.includes("\0") && (value.startsWith("/") || /^[A-Za-z]:\\/.test(value)),
+  ),
   Schema.brand("DefaultFolder"),
 );
 export type DefaultFolder = typeof DefaultFolder.Type;

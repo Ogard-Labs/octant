@@ -599,7 +599,7 @@ Status: Built. Since: 2026-11-01. Detail: [Architecture: Person memory](../archi
 
 A Work or Code thread started without a chosen Project lands in the mode's default Project, provisioned under the default folder on first use.
 
-- The default folder is `~/Octant` unless changed, always inside the user's home, and stored by its real path.
+- The default folder is `~/Octant` unless changed, always inside the user's home, and stored by its real path. Its wire value preserves native POSIX or Windows drive-absolute spelling; drive-relative, UNC/device and NUL values refuse. Host-native canonical and inside-home checks remain required, independent of path decoding.
 - Work always offers its default Project; Code offers one only when the Git requirement ("Code needs a Git repository") is off.
 - With the requirement off, a Code thread may start in a plain folder, and every Git-backed feature reports itself unavailable there.
 
