@@ -48,17 +48,62 @@ final class OfflineDemoTests: XCTestCase {
         tap(input)
         XCTAssertLessThanOrEqual(input.frame.maxY, keyboard.frame.minY)
         XCTAssertLessThanOrEqual(element("mobile-home-composer-submit").frame.maxY, keyboard.frame.minY)
+        let context = element("mobile-home-composer-context")
+        let project = element("mobile-home-composer-project-label")
+        let host = element("mobile-home-composer-host-label")
+        XCTAssertTrue(context.exists)
+        XCTAssertTrue(project.exists)
+        XCTAssertTrue(host.exists)
+        XCTAssertEqual(project.label, "New conversation")
+        XCTAssertEqual(host.label, "Studio Mac")
+        XCTAssertGreaterThan(project.frame.width, 0)
+        XCTAssertGreaterThan(host.frame.width, 0)
+        XCTAssertTrue(context.frame.contains(project.frame))
+        XCTAssertTrue(context.frame.contains(host.frame))
+        XCTAssertTrue(app.windows.firstMatch.frame.contains(context.frame))
+        XCTAssertFalse(project.frame.intersects(host.frame))
+        XCTAssertLessThanOrEqual(context.frame.maxY, input.frame.minY)
+        input.typeText(prompt)
+        XCTAssertLessThanOrEqual(input.frame.maxY, keyboard.frame.minY)
+        XCTAssertLessThanOrEqual(element("mobile-home-composer-submit").frame.maxY, keyboard.frame.minY)
         let composer = XCTAttachment(screenshot: app.screenshot())
-        composer.name = "Composer above the system keyboard"
+        composer.name = "Typed composer and context above the system keyboard"
         composer.lifetime = .keepAlways
         add(composer)
-        input.typeText(prompt)
         tap(element("mobile-home-composer-submit"))
         XCTAssertTrue(element("mobile-thread-screen").waitForExistence(timeout: 15))
         let reply = app.staticTexts.matching(
             NSPredicate(format: "label CONTAINS %@", "Mock reply to: " + prompt)
         ).firstMatch
         XCTAssertTrue(reply.waitForExistence(timeout: 15))
+        let transcript = element("mobile-thread-transcript")
+        let followUpComposer = element("mobile-thread-composer")
+        XCTAssertTrue(transcript.exists)
+        XCTAssertTrue(followUpComposer.exists)
+        XCTAssertGreaterThan(transcript.frame.height, 0)
+        XCTAssertLessThanOrEqual(transcript.frame.maxY, followUpComposer.frame.minY)
+        // A long paragraph may exceed the viewport. Prove its beginning and
+        // end can each be reached rather than requiring both at once.
+        for _ in 0..<8 {
+            if reply.frame.minY >= transcript.frame.minY && reply.frame.minY < transcript.frame.maxY { break }
+            XCTAssertTrue(transcript.isHittable)
+            if reply.frame.minY >= transcript.frame.maxY { transcript.swipeUp() }
+            else { transcript.swipeDown() }
+        }
+        XCTAssertGreaterThanOrEqual(reply.frame.minY, transcript.frame.minY)
+        XCTAssertLessThan(reply.frame.minY, transcript.frame.maxY)
+        let beginning = XCTAttachment(screenshot: app.screenshot())
+        beginning.name = "Native sample reply beginning"
+        beginning.lifetime = .keepAlways
+        add(beginning)
+        for _ in 0..<8 {
+            if reply.frame.maxY <= transcript.frame.maxY && reply.frame.maxY > transcript.frame.minY { break }
+            XCTAssertTrue(transcript.isHittable)
+            if reply.frame.maxY > transcript.frame.maxY { transcript.swipeUp() }
+            else { transcript.swipeDown() }
+        }
+        XCTAssertLessThanOrEqual(reply.frame.maxY, transcript.frame.maxY)
+        XCTAssertGreaterThan(reply.frame.maxY, transcript.frame.minY)
         let replied = XCTAttachment(screenshot: app.screenshot())
         replied.name = "Native sample reply"
         replied.lifetime = .keepAlways

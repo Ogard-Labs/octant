@@ -850,7 +850,11 @@ submission keep their own gates; submission remains a separate maintainer action
   Entering the demo creates a fresh in-memory scenario and appearance store.
   Its create/reply interactions use only the mock transport. The shared composer
   keeps its input and Send control above the onscreen keyboard, including with
-  larger system text. Device recording,
+  larger system text. Its Project/conversation and chosen-host context items
+  wrap within the sheet; long labels can ellipsize without losing their full
+  accessible names or limiting font scaling. A thread's transcript scrolls
+  above its sibling composer, so the beginning and end of a long reply remain
+  reachable without shrinking its text. Device recording,
   attachments, pairing, owner recovery and native settings are unavailable.
   Leave demo returns to the entry choice and discards the sample workspace;
   Connect a computer explicitly enters the normal vault and pairing flow.

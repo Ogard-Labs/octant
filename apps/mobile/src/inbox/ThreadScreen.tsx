@@ -347,6 +347,7 @@ export function ThreadScreen(props: ThreadScreenProps) {
         contentContainerStyle={styles.content}
         keyboardShouldPersistTaps="handled"
         style={styles.scroll}
+        testID="mobile-thread-transcript"
       >
         {connectionStatus.kind === "waiting-to-retry" || chat.reconnecting ? (
           <Text style={styles.connectionStatus}>{RECONNECTING_COPY}</Text>
