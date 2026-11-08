@@ -8,6 +8,45 @@ import {
 } from "../apps/desktop/src/runtimePaths";
 import { validateNodeRuntimeFuses } from "./desktop-client-runtime";
 
+export interface ElectronPackagerDownload {
+  readonly cacheRoot?: string;
+  readonly checksums: Readonly<Record<string, string>>;
+}
+
+/** Both bundles use the installed dependency's checksum table, including cache hits. */
+export function resolveElectronPackagerDownload(input: {
+  readonly electronVersion: string;
+  readonly platform: "darwin" | "linux";
+  readonly arch: "arm64" | "x64";
+  readonly installedPackage: unknown;
+  readonly checksums: unknown;
+  readonly cacheRoot?: string;
+}): ElectronPackagerDownload {
+  const record = (value: unknown): value is Readonly<Record<string, unknown>> =>
+    typeof value === "object" && value !== null && !Array.isArray(value);
+  if (!record(input.installedPackage) || input.installedPackage.version !== input.electronVersion)
+    throw Error("The installed Electron dependency does not match the packaging version.");
+  if (!record(input.checksums))
+    throw Error("The installed Electron checksum table is unavailable.");
+  const pairs: Array<readonly [string, string]> = [];
+  for (const [name, checksum] of Object.entries(input.checksums)) {
+    if (
+      !/^[a-zA-Z0-9][a-zA-Z0-9._-]*$/.test(name) ||
+      typeof checksum !== "string" ||
+      !/^[a-f0-9]{64}$/.test(checksum)
+    )
+      throw Error("The installed Electron checksum table is malformed.");
+    pairs.push([name, checksum]);
+  }
+  const checksums = Object.fromEntries(pairs);
+  if (
+    checksums[`electron-v${input.electronVersion}-${input.platform}-${input.arch}.zip`] ===
+    undefined
+  )
+    throw Error("The installed Electron checksum table does not name this packaging target.");
+  return { checksums, ...(input.cacheRoot === undefined ? {} : { cacheRoot: input.cacheRoot }) };
+}
+
 /** This component executes approved scripts, so it must not identify a desktop main. */
 export function createNodeRuntimePackagerOptions(input: {
   readonly stage: string;
@@ -15,6 +54,7 @@ export function createNodeRuntimePackagerOptions(input: {
   readonly version: string;
   readonly electronVersion: string;
   readonly electronZipDir?: string;
+  readonly download?: ElectronPackagerDownload;
 }): PackagerOptions {
   return {
     dir: input.stage,
@@ -30,6 +70,7 @@ export function createNodeRuntimePackagerOptions(input: {
     overwrite: true,
     extendInfo: { LSBackgroundOnly: true },
     ...(input.electronZipDir === undefined ? {} : { electronZipDir: input.electronZipDir }),
+    ...(input.download === undefined ? {} : { download: input.download }),
   };
 }
 
@@ -39,6 +80,7 @@ export async function packageDesktopNodeRuntime(input: {
   readonly version: string;
   readonly electronVersion: string;
   readonly electronZipDir?: string;
+  readonly download?: ElectronPackagerDownload;
 }): Promise<string> {
   const stage = join(input.temporaryRoot, "stage");
   const out = join(input.temporaryRoot, "packager");
@@ -60,6 +102,7 @@ export async function packageDesktopNodeRuntime(input: {
       version: input.version,
       electronVersion: input.electronVersion,
       ...(input.electronZipDir === undefined ? {} : { electronZipDir: input.electronZipDir }),
+      ...(input.download === undefined ? {} : { download: input.download }),
     }),
   );
   const directory = directories[0];

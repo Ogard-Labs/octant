@@ -1,7 +1,9 @@
 import { packager, type Options as PackagerOptions } from "@electron/packager";
 import {
   packageDesktopNodeRuntime,
+  resolveElectronPackagerDownload,
   validateRuntimeFrameworkIndependence,
+  type ElectronPackagerDownload,
 } from "./desktop-node-runtime";
 import {
   prepareDesktopRuntimeFuses,
@@ -27,7 +29,7 @@ import {
   stat,
   writeFile,
 } from "node:fs/promises";
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { basename, dirname, extname, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
@@ -188,6 +190,26 @@ export function resolveReleaseVersion(
 }
 
 const ELECTRON_VERSION = "43.7.11";
+function electronDownloadForTarget(
+  repositoryRoot: string,
+  target: DesktopPackageTarget,
+): ElectronPackagerDownload {
+  const installedPackage: unknown = JSON.parse(
+    readFileSync(join(repositoryRoot, "node_modules/electron/package.json"), "utf8"),
+  );
+  const checksums: unknown = JSON.parse(
+    readFileSync(join(repositoryRoot, "node_modules/electron/checksums.json"), "utf8"),
+  );
+  const cacheRoot = process.env.electron_config_cache;
+  return resolveElectronPackagerDownload({
+    electronVersion: ELECTRON_VERSION,
+    platform: target.platform,
+    arch: target.arch,
+    installedPackage,
+    checksums,
+    ...(cacheRoot === undefined ? {} : { cacheRoot }),
+  });
+}
 const STAGE_DIRECTORY = ".desktop-stage";
 const PACKAGER_DIRECTORY = ".packager";
 /** Server dependencies the server bundle leaves external; packaging copies them beside it. */
@@ -806,6 +828,7 @@ export function createPackagerOptions(
   version: string,
   target: DesktopPackageTarget = DESKTOP_PACKAGE_TARGETS["darwin-arm64"],
   identity: DesktopIdentity = desktopIdentity("stable"),
+  download?: ElectronPackagerDownload,
 ): PackagerOptions {
   resolveDesktopPackageFlavor({ OCTANT_PACKAGE_FLAVOR: identity.flavor }, version);
   return {
@@ -819,6 +842,7 @@ export function createPackagerOptions(
     ...(target.platform === "darwin" ? { ignore: /^\/apps\/server(?:\/|$)/ } : {}),
     dir,
     electronVersion: ELECTRON_VERSION,
+    ...(download === undefined ? {} : { download }),
     // macOS terminates a process that opens the microphone without this
     // string in its Info.plist; the dictation control asks for the microphone
     // only when the person presses it, and this is the sentence the system
@@ -1245,6 +1269,7 @@ async function packageDarwinDesktop(
   repositoryRoot: string,
   target: DesktopPackageTarget,
 ): Promise<string> {
+  const download = electronDownloadForTarget(repositoryRoot, target);
   const version = resolveReleaseVersion(process.env);
   const identity = desktopIdentity(resolveDesktopPackageFlavor(process.env, version));
   const outRoot = resolve(repositoryRoot, "out");
@@ -1258,7 +1283,7 @@ async function packageDarwinDesktop(
   await rm(finalApp, { recursive: true, force: true });
 
   const packagedDirectories = await packager(
-    createPackagerOptions(stageRoot, packagerRoot, version, target, identity),
+    createPackagerOptions(stageRoot, packagerRoot, version, target, identity, download),
   );
   if (packagedDirectories.length !== 1) {
     throw new Error(
@@ -1275,6 +1300,7 @@ async function packageDarwinDesktop(
     temporaryRoot: join(outRoot, ".node-runtime"),
     version,
     electronVersion: ELECTRON_VERSION,
+    download,
   });
   await stageHostPayload(stageRoot, finalApp);
   await validateBundleIdentity(join(finalApp, DESKTOP_NODE_RUNTIME_APP), {
@@ -1413,6 +1439,7 @@ async function packageLinuxDesktop(
   readonly artifactPath: string;
   readonly portableDirectoryPath: string;
 }> {
+  const download = electronDownloadForTarget(repositoryRoot, target);
   const version = resolveReleaseVersion(process.env);
   const identity = desktopIdentity(resolveDesktopPackageFlavor(process.env, version));
   const outRoot = resolve(repositoryRoot, "out");
@@ -1429,7 +1456,7 @@ async function packageLinuxDesktop(
   await rm(appImagePath, { force: true });
 
   const packagedDirectories = await packager(
-    createPackagerOptions(stageRoot, packagerRoot, version, target, identity),
+    createPackagerOptions(stageRoot, packagerRoot, version, target, identity, download),
   );
   if (packagedDirectories.length !== 1) {
     throw new Error(

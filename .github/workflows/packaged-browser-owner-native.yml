@@ -11,6 +11,8 @@ on:
       - scripts/packaged-browser-owner-provider.test.ts
       - scripts/packaged-browser-owner-electron-cache.ts
       - scripts/packaged-browser-owner-electron-cache.test.ts
+      - scripts/package-desktop.ts
+      - scripts/desktop-node-runtime.ts
 
 permissions:
   contents: read
