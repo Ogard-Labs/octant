@@ -8,6 +8,7 @@ import re
 from pathlib import Path
 import shutil
 import signal
+import struct
 import subprocess
 import sys
 import tarfile
@@ -35,6 +36,63 @@ def run(*arguments, cwd=None, timeout=900, output=None):
         raise
     if result:
         raise subprocess.CalledProcessError(result, arguments)
+
+
+def controller_image(path: Path) -> None:
+    # Attest the actual compiled executable used below, not just a matching
+    # release version. No symbol file or diagnostic payload leaves this runner.
+    identifiers, loads = [], []
+    executable_bytes = 0
+    with path.open("rb") as source:
+        length = path.stat().st_size
+        header = source.read(64)
+        if (length > 512 * 1024 * 1024 or header[:6] != b"\x7fELF\x02\x01" or len(header) != 64 or
+                struct.unpack_from("<H", header, 18)[0] != 62):
+            raise SystemExit("Controller image is not the expected bounded ELF64 file.")
+        offset = struct.unpack_from("<Q", header, 32)[0]
+        entry_size, count = struct.unpack_from("<HH", header, 54)
+        if entry_size != 56 or count > 64 or offset + count * entry_size > length:
+            raise SystemExit("Controller program-header layout is unavailable.")
+        for index in range(count):
+            source.seek(offset + index * entry_size)
+            kind, flags, start, address, _, size, memory, _ = struct.unpack("<IIQQQQQQ", source.read(56))
+            if start > length or size > length - start:
+                raise SystemExit("Controller program segment exceeds its actual file.")
+            if kind == 1 and flags & 1:
+                executable_bytes += size
+                if executable_bytes > 256 * 1024 * 1024:
+                    raise SystemExit("Controller executable segment exceeds its diagnostic bound.")
+                source.seek(start)
+                digest = hashlib.sha256()
+                remaining = size
+                while remaining:
+                    block = source.read(min(remaining, 1024 * 1024))
+                    if not block:
+                        raise SystemExit("Controller executable segment is truncated.")
+                    digest.update(block)
+                    remaining -= len(block)
+                loads.append({"address": hex(address), "fileBytes": size,
+                              "memoryBytes": memory, "sha256": digest.hexdigest()})
+            elif kind == 4:
+                if size > 65536:
+                    raise SystemExit("Controller note segment exceeds its diagnostic bound.")
+                source.seek(start)
+                notes, position = source.read(size), 0
+                while position + 12 <= len(notes):
+                    name_size, value_size, note_type = struct.unpack_from("<III", notes, position)
+                    position += 12
+                    name_end = position + name_size
+                    value_start = position + ((name_size + 3) & ~3)
+                    value_end = value_start + value_size
+                    if name_end > len(notes) or value_end > len(notes):
+                        raise SystemExit("Controller ELF note is truncated.")
+                    if notes[position:name_end].rstrip(b"\0") == b"GNU" and note_type == 3:
+                        identifiers.append(notes[value_start:value_end].hex())
+                    position = value_start + ((value_size + 3) & ~3)
+    if not identifiers or not loads:
+        raise SystemExit("Controller build identity or executable loads are unavailable.")
+    print("OCTANT_CONTROLLER_IMAGE " + json.dumps({"buildIds": identifiers,
+          "executableLoads": loads, "diagnostic": True}), flush=True)
 
 
 def main():
@@ -88,6 +146,7 @@ def main():
     run("make", "-j2", "bzImage", cwd=kernel)
     init_binary = root / "init"
     run("gcc", "-static", "-pthread", "-std=c11", "-Wall", "-Wextra", "-Werror",
+        "-DOCTANT_CONTROLLER_DIAGNOSTIC=1",
         str(repository / "scripts/linux-file-view/kernel_guest.c"), "-o", str(init_binary), timeout=30)
     relay = root / "octant-mediation"
     workload = root / "policy-workload"
@@ -97,6 +156,7 @@ def main():
         run("gcc", "-static", "-std=c11", "-Wall", "-Wextra", "-Werror", str(source), "-o", str(target), timeout=30)
     run("bun", "build", "--compile", str(repository / "scripts/linux-file-view/kernel_policy.ts"),
         "--outfile", str(policy), timeout=120, cwd=repository)
+    controller_image(policy)
     # Same compiled classifier, default JIT, no device/enrollment on the stock
     # runner. Keep this independent control before any guest mitigation.
     run(str(policy), "--metadata-control", timeout=15, cwd=root)

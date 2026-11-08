@@ -25,6 +25,11 @@
 #include <sys/sysmacros.h>
 #include <sys/wait.h>
 #include <unistd.h>
+#ifdef OCTANT_CONTROLLER_DIAGNOSTIC
+#include <stdint.h>
+#include <sys/ptrace.h>
+#include <sys/user.h>
+#endif
 #include "../../apps/server/native/linux-mediation/octant_mediation.h"
 
 static const char content[] = "synthetic-kernel-admission";
@@ -723,13 +728,128 @@ static int outside_epoch_measure(void)
   return passed ? 0 : 60;
 }
 
+#ifdef OCTANT_CONTROLLER_DIAGNOSTIC
+/* Observe only the owned, unconfined controller. Descendants and their native
+ * authority are unchanged; tracing itself can change timing/debugger detection. */
+static void controller_fault(pid_t child, int signal)
+{
+  struct user_regs_struct registers = {0};
+  siginfo_t information = {0};
+  errno = 0;
+  if (ptrace(PTRACE_GETREGS, child, NULL, &registers)) {
+    printf("OCTANT_CONTROLLER_TRACE {\"phase\":\"registers\",\"confirmed\":false,\"errno\":%d}\n", errno);
+    return;
+  }
+  errno = 0;
+  bool confirmed = ptrace(PTRACE_GETSIGINFO, child, NULL, &information) == 0;
+  int failure = confirmed ? 0 : errno;
+  bool hardware_fault = confirmed && information.si_code > 0;
+  printf("OCTANT_CONTROLLER_TRACE {\"phase\":\"fault\",\"diagnostic\":true,\"pid\":%ld,\"signal\":%d,\"confirmed\":%s,\"hardwareFault\":%s,\"errno\":%d,\"code\":%d,\"address\":\"0x%llx\",\"rip\":\"0x%llx\",\"rsp\":\"0x%llx\",\"rbp\":\"0x%llx\",\"rsi\":\"0x%llx\",\"rdx\":\"0x%llx\",\"rax\":\"0x%llx\",\"indexedStoreAddress\":\"0x%llx\"}\n",
+    (long)child, signal, confirmed ? "true" : "false", hardware_fault ? "true" : "false", failure, confirmed ? information.si_code : 0,
+    hardware_fault ? (unsigned long long)(uintptr_t)information.si_addr : 0,
+    registers.rip, registers.rsp, registers.rbp, registers.rsi, registers.rdx, registers.rax,
+    registers.rbp + (registers.rsi << 3));
+  char path[64], line[512];
+  snprintf(path, sizeof(path), "/proc/%ld/maps", (long)child);
+  FILE *maps = fopen(path, "r");
+  int maps_error = maps ? 0 : errno;
+  unsigned long long lower = 0, upper = 0;
+  unsigned consumed = 0;
+  if (maps) {
+    while (consumed < 16384) {
+      unsigned capacity = 16384 - consumed + 1;
+      if (capacity > sizeof(line)) capacity = sizeof(line);
+      if (capacity < 2 || !fgets(line, (int)capacity, maps)) break;
+      consumed += (unsigned)strlen(line);
+      if (!strchr(line, '\n')) break;
+      unsigned long long start, end, offset;
+      char permissions[5] = {0};
+      if (sscanf(line, "%llx-%llx %4s %llx", &start, &end, permissions, &offset) != 4) continue;
+      bool stack = start <= registers.rsp && registers.rsp < end && permissions[0] == 'r';
+      bool controller = strstr(line, "/policy-broker") != NULL;
+      bool instruction = start <= registers.rip && registers.rip < end;
+      if (stack) { lower = start; upper = end; }
+      if (stack || controller || instruction)
+        printf("OCTANT_CONTROLLER_MAP {\"start\":\"0x%llx\",\"end\":\"0x%llx\",\"offset\":\"0x%llx\",\"stack\":%s,\"controller\":%s,\"instruction\":%s}\n",
+          start, end, offset, stack ? "true" : "false", controller ? "true" : "false", instruction ? "true" : "false");
+    }
+    fclose(maps);
+  }
+  printf("OCTANT_CONTROLLER_TRACE {\"phase\":\"stack-map\",\"confirmed\":%s,\"errno\":%d,\"bytes\":%u}\n", lower && upper ? "true" : "false", maps_error, consumed);
+  unsigned long long frame = registers.rbp;
+  for (unsigned index = 0; index < 12 && lower && upper >= 16; index++) {
+    if (frame < lower || frame > upper - 16 || frame < registers.rsp ||
+        frame - registers.rsp > 1024 * 1024 || frame % sizeof(long)) break;
+    errno = 0;
+    long previous = ptrace(PTRACE_PEEKDATA, child, (void *)(uintptr_t)frame, NULL);
+    int previous_error = errno;
+    errno = 0;
+    long returned = ptrace(PTRACE_PEEKDATA, child, (void *)(uintptr_t)(frame + sizeof(long)), NULL);
+    if (previous_error || errno) {
+      printf("OCTANT_CONTROLLER_TRACE {\"phase\":\"frame\",\"confirmed\":false,\"errno\":%d}\n", previous_error ? previous_error : errno);
+      break;
+    }
+    printf("OCTANT_CONTROLLER_FRAME {\"index\":%u,\"frame\":\"0x%llx\",\"return\":\"0x%llx\"}\n", index, frame, (unsigned long long)(unsigned long)returned);
+    if ((unsigned long long)(unsigned long)previous <= frame) break;
+    frame = (unsigned long long)(unsigned long)previous;
+  }
+}
+
+static pid_t controller_wait(pid_t child, int *result)
+{
+  bool first = true;
+  for (unsigned stops = 0; stops < 16; stops++) {
+    pid_t joined;
+    do { joined = waitpid(child, result, 0); } while (joined < 0 && errno == EINTR);
+    if (joined != child || !WIFSTOPPED(*result)) return joined;
+    int signal = WSTOPSIG(*result);
+    bool initial_exec = first && signal == SIGTRAP;
+    if (first && ptrace(PTRACE_SETOPTIONS, child, NULL, (void *)(uintptr_t)PTRACE_O_EXITKILL)) {
+      printf("OCTANT_CONTROLLER_TRACE {\"phase\":\"exit-kill\",\"confirmed\":false,\"errno\":%d}\n", errno);
+      break;
+    }
+    first = false;
+    printf("OCTANT_CONTROLLER_STOP {\"index\":%u,\"signal\":%d,\"initialExec\":%s}\n", stops, signal, initial_exec ? "true" : "false");
+    if (signal == SIGSEGV) controller_fault(child, signal);
+    // Only the initial exec trap is synthetic. Preserve every application
+    // signal, including the fault, for the original handler and final status.
+    if (ptrace(PTRACE_CONT, child, NULL, (void *)(uintptr_t)(initial_exec ? 0 : signal))) {
+      printf("OCTANT_CONTROLLER_TRACE {\"phase\":\"continue\",\"confirmed\":false,\"errno\":%d}\n", errno);
+      break;
+    }
+  }
+  printf("OCTANT_CONTROLLER_TRACE {\"phase\":\"stopped-limit-or-error\",\"confirmed\":false}\n");
+  // This unreaped direct child remains the owned PID; never attach or stop a
+  // child workload, thread or a process discovered by name.
+  kill(child, SIGKILL);
+  for (unsigned attempt = 0; attempt < 2; attempt++) {
+    pid_t joined;
+    do { joined = waitpid(child, result, 0); } while (joined < 0 && errno == EINTR);
+    if (joined != child || !WIFSTOPPED(*result)) return joined;
+    ptrace(PTRACE_CONT, child, NULL, (void *)(uintptr_t)SIGKILL);
+  }
+  errno = EBUSY;
+  return -1;
+}
+#endif
+
 static int policy_measure(const char *mode)
 {
+  bool diagnostic = false;
+#ifdef OCTANT_CONTROLLER_DIAGNOSTIC
+  diagnostic = mode && !strcmp(mode, "--runtime-node");
+#endif
   pid_t child = fork();
   if (!child) {
     char *arguments[] = {"/policy-broker", (char *)mode, NULL};
     char *environment[] = {"HOME=/tmp", "PATH=/", "LANG=C", "BUN_JSC_useFTLJIT=0", NULL};
     if (mode && !strcmp(mode, "--metadata-control")) environment[3] = NULL;
+#ifdef OCTANT_CONTROLLER_DIAGNOSTIC
+    if (diagnostic && ptrace(PTRACE_TRACEME, 0, NULL, NULL)) {
+      dprintf(STDOUT_FILENO, "OCTANT_CONTROLLER_TRACE {\"phase\":\"trace-me\",\"confirmed\":false,\"errno\":%d}\n", errno);
+      _exit(62);
+    }
+#endif
     execve(arguments[0], arguments, environment);
     _exit(31);
   }
@@ -738,12 +858,16 @@ static int policy_measure(const char *mode)
     return 32;
   }
   int result = 0; pid_t joined;
+#ifdef OCTANT_CONTROLLER_DIAGNOSTIC
+  if (diagnostic) joined = controller_wait(child, &result);
+  else
+#endif
   do { joined = waitpid(child, &result, 0); } while (joined < 0 && errno == EINTR);
-  printf("OCTANT_POLICY_PROCESS {\"mode\":\"%s\",\"forked\":true,\"joined\":%s,\"code\":%d,\"signal\":%d,\"waitErrno\":%d}\n",
+  printf("OCTANT_POLICY_PROCESS {\"mode\":\"%s\",\"forked\":true,\"joined\":%s,\"code\":%d,\"signal\":%d,\"waitErrno\":%d,\"diagnosticObserver\":%s}\n",
     mode ? mode : "direct", joined == child ? "true" : "false",
     joined == child && WIFEXITED(result) ? WEXITSTATUS(result) : -1,
     joined == child && WIFSIGNALED(result) ? WTERMSIG(result) : 0,
-    joined < 0 ? errno : 0);
+    joined < 0 ? errno : 0, diagnostic ? "true" : "false");
   return joined == child && WIFEXITED(result) && WEXITSTATUS(result) == 0 ? 0 : 33;
 }
 
