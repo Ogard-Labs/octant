@@ -12,6 +12,9 @@ const key = `${home}/.ssh/deployment`;
 const owner = new AbortController();
 const maximum = setTimeout(() => owner.abort(), 15_000);
 let result = false;
+let cleaned = false;
+let ready = false;
+let ended: Awaited<ReturnType<typeof runLinuxMediationBroker>> | undefined;
 let running: ReturnType<typeof runLinuxMediationBroker> | undefined;
 try {
   await mkdir(`${home}/.ssh`, { recursive: true, mode: 0o700 });
@@ -54,7 +57,6 @@ try {
     signal: owner.signal,
   });
   const deadline = performance.now() + 10_000;
-  let ready = false;
   while (!owner.signal.aborted && performance.now() < deadline) {
     try {
       ready = (await stat(`${root}/stage`)).isFile();
@@ -70,27 +72,36 @@ try {
     // with respect to its synchronization condition.
     await link(`${root}/unrelated.pub`, `${key}.pub`);
   } else owner.abort();
-  const ended = await running;
+  ended = await running;
   result =
     ready &&
     ended.status === "exited" &&
     ended.code === 0 &&
     (await readFile(`${root}/ordinary`, "utf8")) === "permitted after";
-  console.log(
-    JSON.stringify({
-      status: result ? "measured-original-policy-broker" : "failed",
-      ended,
-      productionReady: false,
-      lateCompanion: ready,
-      actualBubblewrapBuilder: capsule,
-    }),
-  );
 } finally {
   clearTimeout(maximum);
   owner.abort();
   await running;
   await rm(root, { recursive: true, force: true });
+  try {
+    await stat(root);
+  } catch (error) {
+    cleaned =
+      typeof error === "object" && error !== null && "code" in error && error.code === "ENOENT";
+  }
 }
+result = result && cleaned;
+console.log(
+  JSON.stringify({
+    status: result ? "measured-original-policy-broker" : "failed",
+    ended,
+    productionReady: false,
+    lateCompanion: ready,
+    actualBubblewrapBuilder: capsule,
+    ownedCommandJoined: ended?.status === "exited",
+    cleaned,
+  }),
+);
 // A normal exit flushes the small evidence record. No private metadata or
 // protected bytes are ever sent to the command's stdout or to the journal.
 process.exitCode = result ? 0 : 1;
