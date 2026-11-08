@@ -6543,6 +6543,20 @@ _Failures._
 | The thread is deleted while compacting                                                                             | The result is discarded and the request ends `failed` (`subject-unavailable`), because an ordinary delete keeps the ledger until a purge and a request left open would read as running. Usage the provider reported is still journaled, because the request was spent; the thread's purge erases the compaction and keeps that usage.                                                                                                                                                                                                                                                                                                                                                                           |
 | The host restarts mid-compaction                                                                                   | Recorded as `failed` (`interrupted`); for a runtime the line says it may have compacted, and the next usage report settles it.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
 
+**Compacting a session by a rule.** A person can also have Octant compact a
+thread without asking each time, by a rule set in Settings (General →
+Compaction). A rule runs exactly the compaction above, through the same
+service, as the `host-policy` caller: it is admitted wherever a local window is
+and refused wherever one would be, and the person's setting stands in for the
+confirm. A refused rule journals nothing. A Code thread's session runs in the
+checkout its window resolved, so a rule compacts a Code thread only under the
+window whose turn crossed it, and never without one. The requested event and
+the receipt carry the rule's `cause`, and the timeline line reads, for example,
+"Compacted automatically · window 91% full · 41.2K freed · summary by Octant
+Harness". A rule never starts a replacement session on another provider. Which
+rules exist, their defaults, and what is built are owned by
+[Automatic compaction](design/automatic-compaction.md).
+
 ### Held standing context
 
 A provider that keeps its own conversation (`conversationOwnership: "provider"`:

@@ -1,5 +1,6 @@
 import type {
   ContextCompactionAvailability,
+  ContextCompactionCause,
   ContextEntryId,
   ProviderInstanceId,
   ProviderModelId,
@@ -400,7 +401,8 @@ export function selectSessionCompaction(
 }
 
 export interface SessionCompactionFacts {
-  readonly principal: "local-window" | "remote-device";
+  /** `host-policy` is the host acting on a rule the person set in Settings. */
+  readonly principal: "local-window" | "host-policy" | "remote-device";
   readonly modeEnabled: boolean;
   /** Who owns the conversation, and so who alone can change what it sends. */
   readonly owner: "host" | "runtime";
@@ -434,7 +436,7 @@ export function decideSessionCompaction(
   const refuse = (
     reason: Extract<ContextCompactionAvailability, { status: "refused" }>["reason"],
   ) => ({ status: "refused", reason }) as const;
-  if (facts.principal !== "local-window") return refuse("remote-client");
+  if (facts.principal === "remote-device") return refuse("remote-client");
   if (!facts.modeEnabled) return refuse("mode-disabled");
   if (facts.owner === "runtime") {
     if (facts.runtimeCompaction === "unsupported") return refuse("runtime-cannot-compact");
@@ -448,4 +450,47 @@ export function decideSessionCompaction(
   if (facts.spendCeilingReached) return refuse("spend-ceiling-reached");
   if (!facts.somethingToCompact) return refuse("nothing-to-compact");
   return { status: "available" };
+}
+
+/**
+ * How many points of the window a thread must fill beyond where a rule's last
+ * attempt left it before the rule tries again. A summary that was not smaller,
+ * a runtime that failed, or a compaction that freed little because the kept
+ * tail alone passes the share would otherwise be paid for after every turn.
+ */
+export const WINDOW_FILL_RETRY_POINTS = 5;
+
+export interface WindowFillFacts {
+  /** The person's rule for this kind of thread; `null` means never. */
+  readonly thresholdPercent: number | null;
+  /** What the window held at the thread's latest report. */
+  readonly tokens: number;
+  /** The model's window; undefined when nothing has named one. */
+  readonly contextWindow: number | undefined;
+  /**
+   * Where the thread's latest rule compaction left the window, in percent: the
+   * fill after it for one that completed, the fill it started from for one
+   * that failed. Absent when there is none, or a completed one gave no figure.
+   */
+  readonly previousAttempt?: { readonly leftPercent: number };
+}
+
+/**
+ * Whether a rule the person set should compact the thread now, and the cause
+ * the compaction records. A window nobody has named is never guessed at.
+ */
+export function decideWindowFillCompaction(
+  facts: WindowFillFacts,
+): ContextCompactionCause | undefined {
+  const { thresholdPercent, tokens, contextWindow } = facts;
+  if (thresholdPercent === null || contextWindow === undefined || contextWindow <= 0) {
+    return undefined;
+  }
+  if (tokens * 100 < thresholdPercent * contextWindow) return undefined;
+  const filledPercent = Math.min(100, Math.floor((tokens * 100) / contextWindow));
+  const previous = facts.previousAttempt;
+  if (previous !== undefined && filledPercent < previous.leftPercent + WINDOW_FILL_RETRY_POINTS) {
+    return undefined;
+  }
+  return { kind: "window-fill", filledPercent, thresholdPercent };
 }

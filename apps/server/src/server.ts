@@ -547,6 +547,7 @@ export function startOctantServer(
       sideTaskHost,
       sideTaskRoutes,
       hostShield,
+      observeTurnEnded,
       threadWork,
     } = wireHarness({
       personMemory,
@@ -1107,6 +1108,7 @@ export function startOctantServer(
         hostShield,
         liveProjectBrowsers,
         nativeHarnessHooks,
+        observeTurnEnded,
         persistence,
         projectService,
         providerRuntimeRegistry,

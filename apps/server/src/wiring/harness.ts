@@ -597,6 +597,22 @@ export function wireHarness(deps: HarnessDependencies) {
   });
   // Every provider's turn passes through these hooks; a harness turn also
   // reaches the observer and the lead fallback.
+  // Services wired after the harness (context's compaction rules) hear every
+  // settled turn here rather than through a hook of their own in each mode.
+  const turnEndedObservers = new Set<
+    (scope: Parameters<NativeHarnessTurnObserver["turnEnded"]>[0], turn: TurnEndSummary) => void
+  >();
+  const observeTurnEnded = (
+    observer: (
+      scope: Parameters<NativeHarnessTurnObserver["turnEnded"]>[0],
+      turn: TurnEndSummary,
+    ) => void,
+  ): (() => void) => {
+    turnEndedObservers.add(observer);
+    return () => {
+      turnEndedObservers.delete(observer);
+    };
+  };
   const nativeHarnessHooks = {
     answerQuestion: (threadId: string, questionId: string, answer: string) => {
       return nativeHarnessQuestions.answer(threadId, questionId, answer);
@@ -644,6 +660,13 @@ export function wireHarness(deps: HarnessDependencies) {
         turnMetrics.record(toTurnMetricsRecord(scope, turn));
       } catch {
         // A turn whose figures the journal refused still ended for the user.
+      }
+      for (const observer of turnEndedObservers) {
+        try {
+          observer(scope, turn);
+        } catch {
+          // One observer's failure must not keep the turn's end from the rest.
+        }
       }
     },
     turnCompleted: async (input: Parameters<NativeHarnessTurnObserver["turnCompleted"]>[0]) => {
@@ -978,6 +1001,7 @@ export function wireHarness(deps: HarnessDependencies) {
     serverProjectRoutes,
     serverPreviewTunnels,
     nativeHarnessHooks,
+    observeTurnEnded,
     nativeHarnessSessionRoutes,
     onHarnessPausedByPerson,
     onHarnessRecoveryLifted,

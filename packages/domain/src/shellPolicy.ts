@@ -1,4 +1,5 @@
 import {
+  DEFAULT_AUTO_COMPACT_OCTANT_WINDOW_PERCENT,
   DEFAULT_COMPLETED_THREAD_ARCHIVE_AFTER_DAYS,
   DEFAULT_OPEN_IN_APPLICATIONS,
   DEFAULT_ENVIRONMENT_PRESENTATION_BY_MODE,
@@ -171,6 +172,8 @@ export function defaultShellSettings(): ShellSettings {
     computerUse: { enabled: true, automaticUpdates: false },
     marketplaceFetchesEnabled: true,
     completedThreadArchiveAfterDays: DEFAULT_COMPLETED_THREAD_ARCHIVE_AFTER_DAYS,
+    autoCompactOctantWindowPercent: DEFAULT_AUTO_COMPACT_OCTANT_WINDOW_PERCENT,
+    autoCompactRuntimeWindowPercent: null,
     openInApplications: [...DEFAULT_OPEN_IN_APPLICATIONS],
     transcriptTextSize: "small",
     transcriptWidth: "narrow",

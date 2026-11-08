@@ -22,7 +22,7 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
       label: "General",
       scope: "app",
       keywords:
-        "general enabled modes startup default chat work updates version release threads completed put away archive snooze",
+        "general enabled modes startup default chat work updates version release threads completed put away archive snooze compact compaction context window",
       settings: [
         {
           id: settingId("enable-chat"),
@@ -56,6 +56,20 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
           scope: "host",
           keywords:
             "put away complete completed threads archive automatically days never snooze snoozed shelf sidebar",
+        },
+        {
+          id: settingId("auto-compact-octant"),
+          label: "Compact Octant threads",
+          scope: "host",
+          keywords:
+            "compact compaction auto-compact automatic context window full summary summarize octant harness chat work endpoint",
+        },
+        {
+          id: settingId("auto-compact-runtime"),
+          label: "Compact runtime threads",
+          scope: "host",
+          keywords:
+            "compact compaction auto-compact automatic context window full summary runtime claude code codex opencode pi",
         },
         {
           id: settingId("app-update-automatic-checks"),

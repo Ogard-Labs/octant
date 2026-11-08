@@ -93,6 +93,8 @@ const settings = {
   automaticUpdateChecks: true,
   marketplaceFetchesEnabled: true,
   completedThreadArchiveAfterDays: 7,
+  autoCompactOctantWindowPercent: 85,
+  autoCompactRuntimeWindowPercent: null,
   navigatorAssistant: {},
   voice: {},
   imageGeneration: { customSources: [] },

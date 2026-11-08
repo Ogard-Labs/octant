@@ -223,6 +223,21 @@ describe("SettingsView", () => {
     expect(props.onSettingsChange).toHaveBeenCalledWith({ completedThreadArchiveAfterDays: null });
   });
 
+  it("compacts Octant threads at 85% by default and leaves runtimes to themselves", async () => {
+    const user = userEvent.setup();
+    const { props } = renderSettings();
+    const octant = screen.getByRole("combobox", { name: "Compact Octant threads" });
+    const runtime = screen.getByRole("combobox", { name: "Compact runtime threads" });
+    expect(octant).toHaveTextContent("At 85% full");
+    expect(runtime).toHaveTextContent("Runtime decides");
+    await user.click(runtime);
+    await user.click(await screen.findByRole("option", { name: "At 70% full" }));
+    expect(props.onSettingsChange).toHaveBeenCalledWith({ autoCompactRuntimeWindowPercent: 70 });
+    await user.click(octant);
+    await user.click(await screen.findByRole("option", { name: "Never" }));
+    expect(props.onSettingsChange).toHaveBeenCalledWith({ autoCompactOctantWindowPercent: null });
+  });
+
   it("presents one section at a time, defaulting to General", () => {
     renderSettings();
 
@@ -2009,6 +2024,7 @@ describe("SettingsView", () => {
       "Updates",
       "Files",
       "Threads",
+      "Compaction",
     ]);
     const updates = screen.getByRole("heading", { name: "Updates" }).closest("section")!;
     updates.scrollIntoView = vi.fn();

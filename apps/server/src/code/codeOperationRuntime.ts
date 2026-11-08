@@ -925,7 +925,9 @@ export interface CodeOperationRuntime {
     /** How full its window was at the thread's latest usage report, and when. */
     readonly occupancy: (
       threadId: string,
-    ) => { readonly tokens: number; readonly observedAt: string } | undefined;
+    ) =>
+      | { readonly tokens: number; readonly observedAt: string; readonly contextWindow?: number }
+      | undefined;
     /**
      * How to open it, under the asking window's authority over the thread's
      * checkout; undefined when that window may not, or the session is gone.
@@ -4864,6 +4866,7 @@ class RuntimeTurnController implements CodeOperationTurnPort {
       providerInstanceId: active.thread.providerInstanceId,
       modelId: active.thread.modelId,
       projectId: active.thread.projectId,
+      windowId: active.windowId,
     };
     const harnessContext = this.#options.nativeHarness?.contextFor(harnessScope) ?? [];
     this.#options.nativeHarness?.turnStarted(harnessScope);

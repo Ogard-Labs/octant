@@ -798,6 +798,7 @@ export function readContextCompactions(
           status: "running",
           compactionId: requested.compactionId,
           executor: requested.executor,
+          ...(requested.cause === undefined ? {} : { cause: requested.cause }),
           requestedAt: requested.requestedAt,
         }),
       );
@@ -817,6 +818,7 @@ export function readContextCompactions(
           status: "failed",
           compactionId: failed.compactionId,
           executor: requested.executor,
+          ...(requested.cause === undefined ? {} : { cause: requested.cause }),
           reason: failed.reason,
           sessionMayHaveChanged: failed.sessionMayHaveChanged,
           failedAt: failed.failedAt,

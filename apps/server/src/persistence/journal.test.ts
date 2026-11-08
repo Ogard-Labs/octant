@@ -184,6 +184,8 @@ describe("Journal", () => {
         automaticUpdateChecks: true,
         marketplaceFetchesEnabled: true,
         completedThreadArchiveAfterDays: 7,
+        autoCompactOctantWindowPercent: 85,
+        autoCompactRuntimeWindowPercent: null,
         lastContextSurface: "project-memory",
         sidebarMaterial: "system",
         workspaceMaterial: "opaque",

@@ -2,6 +2,7 @@ import { rememberModelBinding } from "../browser/browserAppManagedTools";
 import { randomUUID } from "node:crypto";
 import { approvedWorkingFolderRoot } from "../approvedWorkingFolders";
 import {
+  decodeContextSubjectRef,
   DEFAULT_WORK_ACCESS,
   decodeChatThreadId,
   decodeCodeThreadId,
@@ -13,6 +14,7 @@ import {
 import { resolveThreadWorkingDirectory } from "../threadWorkingDirectoryAuthority";
 import { chatImageScopeAllowedForWindow } from "../image/imageScopeAuthority";
 import { SessionCompactionService } from "../context/sessionCompaction";
+import { WindowFillCompactions } from "../context/windowFillCompaction";
 import { createContextRouteHandler } from "../contextRoutes";
 import { createTaskAccessFacts } from "../context/taskAccessFacts";
 import { createTaskAccessSubjectReader } from "../context/taskAccessSubject";
@@ -44,7 +46,7 @@ export type ContextDependencies = Pick<ServerStart, "persistence"> &
     "browserCaptures" | "windowAuthorityStore" | "browserModelBindings" | "codeSessionAuthority"
   > &
   Pick<AgentRunsWiring, "capacityScheduler"> &
-  Pick<HarnessWiring, "nativeHarnessHooks" | "hostShield"> &
+  Pick<HarnessWiring, "nativeHarnessHooks" | "hostShield" | "observeTurnEnded"> &
   Pick<HarnessStateWiring, "serverProjectStore"> &
   Pick<IntegrationsWiring, "agentMessageProjection"> &
   Pick<WorkspaceWiring, "contextHarness" | "projectService" | "spendCeilingService"> &
@@ -91,6 +93,7 @@ export function wireContext(deps: ContextDependencies) {
     browserProfileService,
     nativeHarnessHooks,
     hostShield,
+    observeTurnEnded,
     persistence,
     projectService,
     providerRuntimeRegistry,
@@ -472,6 +475,27 @@ export function wireContext(deps: ContextDependencies) {
     capacity: capacityScheduler,
     spendCeiling: spendCeilingService,
     uuid: randomUUID,
+  });
+  const windowFillCompactions = new WindowFillCompactions({
+    compactions: sessionCompaction,
+    latestCompaction: (subject) => contextHarness.latestCompaction(subject),
+    rules: () => {
+      const settings = persistence.readShellSettings()?.settings ?? defaultShellSettings();
+      return {
+        octant: settings.autoCompactOctantWindowPercent,
+        runtime: settings.autoCompactRuntimeWindowPercent,
+      };
+    },
+  });
+  observeTurnEnded((scope, turn) => {
+    windowFillCompactions.turnEnded({
+      subject: decodeContextSubjectRef({
+        aggregateType: `${scope.mode}-thread`,
+        aggregateId: scope.threadId,
+      }),
+      turnKey: turn.endedAt,
+      windowId: scope.windowId,
+    });
   });
   const taskAccessFacts = createTaskAccessFacts({
     subject: createTaskAccessSubjectReader({
