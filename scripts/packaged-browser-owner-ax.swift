@@ -135,6 +135,7 @@ func ownedFixturePath() -> String? {
     return path.utf8.count < Int(PATH_MAX) ? path : nil
 }
 var fixedFolderNativeStatuses: [String: Int32] = [:]
+var fixedFolderWindowAncestryUsed = false
 func fixedFolderFrame(_ node: AXUIElement) -> CGRect? {
     var position: CFTypeRef?, size: CFTypeRef?
     let positionStatus = AXUIElementCopyAttributeValue(node, kAXPositionAttribute as CFString, &position)
@@ -150,7 +151,7 @@ func fixedFolderFrame(_ node: AXUIElement) -> CGRect? {
           dimensions.width >= 12, dimensions.height >= 12 else { return nil }
     return CGRect(origin: point, size: dimensions)
 }
-func fixedFolderHit(_ target: AXUIElement, _ deadline: Date, _ admit: (AXUIElement) -> Bool) -> CGPoint? {
+func fixedFolderHit(_ target: AXUIElement, _ deadline: Date, _ admit: (AXUIElement) -> Bool, _ expectedFieldRoot: AXUIElement? = nil) -> CGPoint? {
     guard admit(target), Date() < deadline, ownedFixturePath() != nil, AXIsProcessTrusted(), CGPreflightPostEventAccess(),
           kernelIdentity(processId) == initialKernelIdentity,
           NSRunningApplication(processIdentifier: processId)?.bundleURL?.resolvingSymlinksInPath().standardizedFileURL.path == expectedBundle,
@@ -161,11 +162,51 @@ func fixedFolderHit(_ target: AXUIElement, _ deadline: Date, _ admit: (AXUIEleme
     let windowStatus = AXUIElementCopyAttributeValue(target, kAXWindowAttribute as CFString, &windowRaw)
     fixedFolderNativeStatuses["targetPid"] = targetStatus.rawValue
     fixedFolderNativeStatuses["targetWindow"] = windowStatus.rawValue
-    guard targetStatus == .success, targetPid == processId, windowStatus == .success,
-          let windowRaw, CFGetTypeID(windowRaw) == AXUIElementGetTypeID() else { return nil }
-    let window = unsafeBitCast(windowRaw, to: AXUIElement.self)
-    guard admit(window), AXUIElementGetPid(window, &windowPid) == .success, windowPid == processId,
-          let windowFrame = fixedFolderFrame(window), windowFrame.contains(targetFrame) else { return nil }
+    guard targetStatus == .success, targetPid == processId else { return nil }
+    var resolvedWindow: AXUIElement?, ancestryWindow = false
+    if windowStatus == .success, let windowRaw, CFGetTypeID(windowRaw) == AXUIElementGetTypeID() {
+        resolvedWindow = unsafeBitCast(windowRaw, to: AXUIElement.self)
+    } else if windowStatus == .noValue, let expectedFieldRoot,
+              mode == "picker-fill-owned-location" || mode == "picker-go-owned-location" {
+        // The actual location field returned no AXWindow. Resolve only its
+        // already-proved owned root through parents, never a foreign service.
+        var fieldRole: CFTypeRef?, fieldSubrole: CFTypeRef?
+        let roleStatus = AXUIElementCopyAttributeValue(target, kAXRoleAttribute as CFString, &fieldRole)
+        let subroleStatus = AXUIElementCopyAttributeValue(target, kAXSubroleAttribute as CFString, &fieldSubrole)
+        fixedFolderNativeStatuses["windowFieldRole"] = roleStatus.rawValue
+        fixedFolderNativeStatuses["windowFieldSubrole"] = subroleStatus.rawValue
+        guard roleStatus == .success, (fieldRole as? String) == "AXTextField",
+              subroleStatus == .success || subroleStatus == .noValue || subroleStatus == .attributeUnsupported,
+              !["AXSearchField", "AXSecureTextField"].contains(fieldSubrole as? String ?? "") else { return nil }
+        var cursor = target, visited = Set<CFHashCode>()
+        for _ in 0..<40 {
+            var pid: pid_t = 0
+            guard admit(cursor), Date() < deadline, visited.insert(CFHash(cursor)).inserted else { return nil }
+            let status = AXUIElementGetPid(cursor, &pid)
+            fixedFolderNativeStatuses["windowAncestorPid"] = status.rawValue
+            guard status == .success, pid == processId else { return nil }
+            if CFEqual(cursor, expectedFieldRoot) {
+                var role: CFTypeRef?
+                let status = AXUIElementCopyAttributeValue(cursor, kAXRoleAttribute as CFString, &role)
+                fixedFolderNativeStatuses["windowAncestorRole"] = status.rawValue
+                guard status == .success, (role as? String) == "AXWindow" else { return nil }
+                resolvedWindow = cursor; ancestryWindow = true; break
+            }
+            var parent: CFTypeRef?
+            let parentStatus = AXUIElementCopyAttributeValue(cursor, kAXParentAttribute as CFString, &parent)
+            fixedFolderNativeStatuses["windowAncestorParent"] = parentStatus.rawValue
+            guard parentStatus == .success, let parent, CFGetTypeID(parent) == AXUIElementGetTypeID() else { return nil }
+            cursor = unsafeBitCast(parent, to: AXUIElement.self)
+        }
+    }
+    guard let window = resolvedWindow, admit(window), let element else { return nil }
+    var currentWindows: CFTypeRef?
+    let listStatus = AXUIElementCopyAttributeValue(element, kAXWindowsAttribute as CFString, &currentWindows)
+    fixedFolderNativeStatuses["windowLiveList"] = listStatus.rawValue
+    guard listStatus == .success, (currentWindows as? [AXUIElement])?.contains(where: { CFEqual($0, window) }) == true,
+          AXUIElementGetPid(window, &windowPid) == .success, windowPid == processId else { return nil }
+    if ancestryWindow { fixedFolderWindowAncestryUsed = true }
+    guard let windowFrame = fixedFolderFrame(window), windowFrame.contains(targetFrame) else { return nil }
     let point = CGPoint(x: targetFrame.midX, y: targetFrame.midY)
     guard CGDisplayBounds(CGMainDisplayID()).contains(point) else { return nil }
     let top = (CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID) as? [[String: Any]] ?? []).first { row in
@@ -177,8 +218,7 @@ func fixedFolderHit(_ target: AXUIElement, _ deadline: Date, _ admit: (AXUIEleme
     guard (top?[kCGWindowOwnerPID as String] as? NSNumber)?.int32Value == processId,
           let values = top?[kCGWindowBounds as String] as? [String: Any], let frame = CGRect(dictionaryRepresentation: values as CFDictionary),
           abs(frame.minX - windowFrame.minX) <= 2, abs(frame.minY - windowFrame.minY) <= 2,
-          abs(frame.width - windowFrame.width) <= 2, abs(frame.height - windowFrame.height) <= 2,
-          let element else { return nil }
+          abs(frame.width - windowFrame.width) <= 2, abs(frame.height - windowFrame.height) <= 2 else { return nil }
     var hit: AXUIElement?
     let hitStatus = AXUIElementCopyElementAtPosition(element, Float(point.x), Float(point.y), &hit)
     fixedFolderNativeStatuses["hitTest"] = hitStatus.rawValue
@@ -745,7 +785,8 @@ if mode == "picker-metadata" || mode == "picker-location-prompt" || (fixesOwnedF
                             func fieldReady(_ field: AXUIElement) -> Bool {
                                 guard ownedFixturePath() == fixturePath, associationUnchanged(),
                                       let focus = focusInSheet(), CFEqual(focus.node, field), nestedLocation(focus),
-                                      fixedFolderHit(field, deadline, admitMetadataNode) != nil,
+                                      let rootWindows = windows as? [AXUIElement], rootWindows.indices.contains(entry.windowIndex),
+                                      fixedFolderHit(field, deadline, admitMetadataNode, rootWindows[entry.windowIndex]) != nil,
                                       identitiesUnchanged(), errors == priorErrors else { return false }
                                 fixedFolder["fieldFocusIdentityGeometryHitMatched"] = true
                                 return true
@@ -830,6 +871,7 @@ if mode == "picker-metadata" || mode == "picker-location-prompt" || (fixesOwnedF
                                 down.post(tap: .cghidEventTap); up.post(tap: .cghidEventTap)
                                 fixedFolder["chooserDispatched"] = true; fixedFolder["status"] = "dispatched"
                             }
+                            fixedFolder["owningWindowFromBoundedParentProof"] = fixedFolderWindowAncestryUsed
                             fixedFolder["nativeStatuses"] = fixedFolderNativeStatuses
                             fixedFolder["fixtureIdentityMatched"] = ownedFixturePath() == fixturePath
                             fixedFolder["sharedMetadataNodes"] = queue.count + newMetadataNodes
