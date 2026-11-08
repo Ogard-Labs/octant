@@ -16,7 +16,10 @@ import { win32 } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const identityMode = process.argv[2] === "--server-identity";
-const [launcher, binding, fixture, ...runtimes] = process.argv.slice(identityMode ? 3 : 2);
+const tlsMode = process.argv[2] === "--listener-tls";
+const [launcher, binding, fixture, ...runtimes] = process.argv.slice(
+  identityMode || tlsMode ? 3 : 2,
+);
 if (process.platform !== "win32" || !launcher || !binding || !fixture || runtimes.length !== 3)
   throw new Error("Supply the owned launcher, binding, fixture and three runtimes.");
 const children = new Set<ChildProcess>();
@@ -75,6 +78,8 @@ const roots = profiles.map((profile) => win32.join(hosts, profile));
 const cleanup = new Set<string>();
 const identities = new Map<string, string>();
 const signingIdentities = new Map<string, string>();
+const tlsPins = new Map<string, string>();
+const tlsCertificates = new Map<string, string>();
 let concurrentReady = 0;
 const checks: string[] = [];
 let allJobsJoined = true;
@@ -124,6 +129,22 @@ async function run(
       return;
     }
     if (record(value) && value.ownedJobJoined === true) joined = true;
+    if (
+      tlsMode &&
+      record(value) &&
+      typeof value.profile === "string" &&
+      typeof value.tlsPin === "string" &&
+      typeof value.certificateHash === "string"
+    ) {
+      const prior = tlsPins.get(value.profile);
+      if (prior !== undefined && prior !== value.tlsPin) {
+        invalidOutput = true;
+        child.kill();
+        return;
+      }
+      tlsPins.set(value.profile, value.tlsPin);
+      tlsCertificates.set(value.profile, value.certificateHash);
+    }
     if (
       identityMode &&
       record(value) &&
@@ -228,7 +249,108 @@ async function acl(profile: string, mode: string) {
 }
 let runFailure: unknown;
 try {
-  if (identityMode) {
+  if (tlsMode) {
+    const selected = roots[0];
+    if (selected === undefined) throw Error("Missing owned TLS root.");
+    for (const profile of profiles) await probe(first, profile, "missing");
+    checks.push("read-only TLS access creates no remote directory, key or certificate");
+    await Promise.all(Array.from({ length: 8 }, () => probe(first, "octant", "concurrent")));
+    if (!tlsPins.has("octant")) throw Error("Concurrent TLS first-use had no successful winner.");
+    checks.push("concurrent TLS first-use refuses competing writes or retains one pinned key");
+    for (const runtime of runtimes)
+      for (const profile of profiles) {
+        await probe(runtime, profile);
+        await acl(profile, "tls-inspect");
+      }
+    if (tlsPins.size !== 2 || new Set(tlsPins.values()).size !== 2)
+      throw Error("TLS keys are not profile isolated.");
+    checks.push("all three runtimes preserve two isolated pins across process restarts");
+    const beforeRenewal = tlsCertificates.get("octant");
+    await probe(first, "octant", "renew");
+    if (beforeRenewal === undefined || tlsCertificates.get("octant") === beforeRenewal)
+      throw Error("The due certificate was not renewed.");
+    checks.push("certificate renewal changes the certificate while retaining the key pin");
+    const remote = win32.join(selected, "data", "remote");
+    const key = win32.join(remote, "private-listener-tls-key.pem");
+    const certificate = win32.join(remote, "private-listener-tls-cert.pem");
+    const original = await readFile(key);
+    try {
+      const wrongCurve = generateKeyPairSync("ec", { namedCurve: "P-384" }).privateKey.export({
+        format: "pem",
+        type: "pkcs8",
+      });
+      for (const invalid of [
+        Buffer.alloc(0),
+        Buffer.from("malformed-owned-tls-key"),
+        Buffer.alloc(4097, 120),
+        Buffer.from(wrongCurve),
+      ]) {
+        await writeFile(key, invalid);
+        await probe(first, "octant", "refuse");
+        if (!(await readFile(key)).equals(invalid))
+          throw Error("Invalid owned TLS key was replaced.");
+      }
+      await writeFile(key, original);
+      checks.push(
+        "empty, malformed, oversized and wrong-curve TLS keys refuse without replacement",
+      );
+      await writeFile(certificate, "malformed-owned-certificate");
+      await probe(first, "octant");
+      checks.push("a corrupt private regular certificate renews with the same pinned key");
+      for (const file of [key, certificate]) {
+        const alias = file + ".alias";
+        await link(file, alias);
+        try {
+          await probe(first, "octant", "refuse");
+        } finally {
+          await unlink(alias);
+        }
+        await rename(file, file + ".original");
+        try {
+          await mkdir(file);
+          await probe(first, "octant", "refuse");
+        } finally {
+          await rm(file, { recursive: true, force: true });
+          await rename(file + ".original", file);
+        }
+      }
+      checks.push("hardlinked or nonregular TLS keys and certificates refuse");
+      await rename(remote, remote + ".original");
+      try {
+        await symlink(remote + ".original", remote, "junction");
+        await probe(first, "octant", "refuse");
+      } finally {
+        await unlink(remote);
+        await rename(remote + ".original", remote);
+      }
+      checks.push("a reparse replacement for the TLS directory refuses");
+      await acl("octant", "tls-unsafe");
+      try {
+        await probe(first, "octant", "exposed");
+      } finally {
+        await acl("octant", "tls-restore");
+      }
+      await acl("octant", "tls-cert-unsafe");
+      try {
+        await probe(first, "octant", "refuse");
+      } finally {
+        await acl("octant", "tls-cert-restore");
+      }
+      checks.push("exposed key or certificate DACLs refuse without replacement");
+      await probe(first, "octant");
+      await acl("octant", "tls-inspect");
+      checks.push("restored original TLS storage remains usable and privately owned");
+    } finally {
+      original.fill(0);
+    }
+    console.log(
+      JSON.stringify({
+        listenerTlsLifecycleChecks: checks,
+        startupAdmitted: false,
+        workCodeEnabled: false,
+      }),
+    );
+  } else if (identityMode) {
     const selected = roots[0];
     if (selected === undefined) throw new Error("Missing owned identity root.");
     for (const profile of profiles) await probe(first, profile, "missing");

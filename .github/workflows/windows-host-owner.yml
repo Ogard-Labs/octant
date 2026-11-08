@@ -8,7 +8,9 @@ on:
       - packages/host-runtime/src/windowsHostOwner*
       - packages/host-runtime/src/windowsHostProfile*
       - packages/host-runtime/src/windowsServerIdentity*
+      - packages/host-runtime/src/windowsListenerTls*
       - apps/server/src/remote/privateListenerHostIdentity*
+      - apps/server/src/remote/selfMadeListenerCertificate*
       - packages/host-runtime/src/ownerControlProtocol.ts
       - packages/host-runtime/src/owner.ts
       - packages/host-runtime/src/ownerReceipt.ts
@@ -69,6 +71,10 @@ jobs:
         run: |
           bun build scripts/windows-host-owner/server-identity.ts --target=node --outfile "$env:RUNNER_TEMP/server-identity-smoke.mjs"
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Bundle the actual listener TLS consumer
+        run: |
+          bun build scripts/windows-host-owner/listener-tls.ts --target=node --outfile "$env:RUNNER_TEMP/listener-tls-smoke.mjs"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - name: Prove the native Bun owner and client
         run: |
           bun scripts/windows-host-owner/run.ts (Get-Command bun).Source "$env:RUNNER_TEMP/owner-smoke.mjs" "$env:RUNNER_TEMP/owner-build/Release/octant-windows-host-owner.node" "$env:RUNNER_TEMP/owner-build/Release/octant-windows-owner-reader.exe"
@@ -108,6 +114,10 @@ jobs:
       - name: Prove fixed private server identity files in all three runtimes
         run: |
           bun scripts/windows-host-owner/profile-run.ts --server-identity "$env:RUNNER_TEMP/owner-build/Release/octant-windows-owner-reader.exe" "$env:RUNNER_TEMP/owner-build/Release/octant-windows-host-owner.node" "$env:RUNNER_TEMP/server-identity-smoke.mjs" (Get-Command bun).Source (Get-Command node).Source "$pwd/node_modules/electron/dist/electron.exe"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Prove native listener TLS persistence and renewal in all three runtimes
+        run: |
+          bun scripts/windows-host-owner/profile-run.ts --listener-tls "$env:RUNNER_TEMP/owner-build/Release/octant-windows-owner-reader.exe" "$env:RUNNER_TEMP/owner-build/Release/octant-windows-host-owner.node" "$env:RUNNER_TEMP/listener-tls-smoke.mjs" (Get-Command bun).Source (Get-Command node).Source "$pwd/node_modules/electron/dist/electron.exe"
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - uses: actions/upload-artifact@v4
         with:

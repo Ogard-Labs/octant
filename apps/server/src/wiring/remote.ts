@@ -474,6 +474,7 @@ export function wireRemote(deps: RemoteDependencies) {
   };
   const listenerCertificates = createSelfMadeListenerCertificateStore({
     dataDirectory: providerDataDirectory,
+    tlsFiles: options.listenerTlsFiles,
   });
   const privateListenerController = createPrivateListenerLifecycleController({
     hostId: () => String(resolveRemoteGatewayServices().hostId),

@@ -15,6 +15,7 @@
 // the same. Callers pass on only the pin and the certificate; the key goes to
 // the TLS server in process and nowhere else.
 
+import type { WindowsListenerTlsFiles } from "@octant/host-runtime";
 import {
   createHash,
   createPrivateKey,
@@ -90,6 +91,7 @@ export interface SelfMadeListenerCertificateStore {
 export interface CreateSelfMadeListenerCertificateStoreOptions {
   readonly dataDirectory: string;
   readonly now?: () => Date;
+  readonly tlsFiles?: WindowsListenerTlsFiles | undefined;
 }
 
 /**
@@ -163,20 +165,50 @@ export function createSelfMadeListenerCertificateStore(
     ensure: (hostname) => {
       const address = listenerAddress(hostname);
       if (address === undefined) return { status: "refused", code: "invalid-tls" };
+      const files = options.tlsFiles;
+      if (
+        (files !== undefined && files.dataDirectory !== options.dataDirectory) ||
+        (process.platform === "win32" && files === undefined)
+      )
+        return { status: "refused", code: "invalid-tls" };
       let keyPem: string;
       try {
-        mkdirSync(directory, { recursive: true, mode: 0o700 });
-        // The folder may already exist from the host identity key with the
-        // process umask's mode; narrow it to the owner.
-        chmodSync(directory, 0o700);
-        const loaded = readOwnerOnlyKey(keyPath);
-        if (loaded.status === "exposed") return { status: "refused", code: "tls-key-exposed" };
-        if (loaded.status === "missing") {
-          const generated = generateKeyPairSync("ec", { namedCurve: "P-256" });
-          keyPem = String(generated.privateKey.export({ format: "pem", type: "pkcs8" }));
-          writeOwnerOnly(keyPath, keyPem);
+        if (files !== undefined) {
+          let loaded = files.read("key");
+          if (loaded.status === "missing") {
+            const generated = generateKeyPairSync("ec", { namedCurve: "P-256" });
+            const candidate = Buffer.from(
+              generated.privateKey.export({ format: "pem", type: "pkcs8" }),
+            );
+            try {
+              loaded = files.createKey(candidate);
+            } finally {
+              candidate.fill(0);
+            }
+          }
+          if (loaded.status === "exposed") return { status: "refused", code: "tls-key-exposed" };
+          if (loaded.status !== "ready") return { status: "refused", code: "invalid-tls" };
+          try {
+            if (loaded.bytes.length === 0 || loaded.bytes.length > 4096)
+              return { status: "refused", code: "invalid-tls" };
+            keyPem = loaded.bytes.toString("utf8");
+          } finally {
+            loaded.bytes.fill(0);
+          }
         } else {
-          keyPem = loaded.pem;
+          mkdirSync(directory, { recursive: true, mode: 0o700 });
+          // The folder may already exist from the host identity key with the
+          // process umask's mode; narrow it to the owner.
+          chmodSync(directory, 0o700);
+          const loaded = readOwnerOnlyKey(keyPath);
+          if (loaded.status === "exposed") return { status: "refused", code: "tls-key-exposed" };
+          if (loaded.status === "missing") {
+            const generated = generateKeyPairSync("ec", { namedCurve: "P-256" });
+            keyPem = String(generated.privateKey.export({ format: "pem", type: "pkcs8" }));
+            writeOwnerOnly(keyPath, keyPem);
+          } else {
+            keyPem = loaded.pem;
+          }
         }
       } catch {
         return { status: "refused", code: "invalid-tls" };
@@ -197,7 +229,22 @@ export function createSelfMadeListenerCertificateStore(
       const publicKey = createPublicKey(keyPem);
 
       const at = now();
-      let certificate = readUsableCertificate(certificatePath, publicKey, address, at);
+      let certificate: string | undefined;
+      if (files === undefined)
+        certificate = readUsableCertificate(certificatePath, publicKey, address, at);
+      else {
+        const loaded = files.read("certificate");
+        if (loaded.status !== "ready" && loaded.status !== "missing")
+          return { status: "refused", code: "invalid-tls" };
+        if (loaded.status === "ready") {
+          try {
+            if (loaded.bytes.length > 16384) return { status: "refused", code: "invalid-tls" };
+            certificate = usableCertificate(loaded.bytes.toString("utf8"), publicKey, address, at);
+          } finally {
+            loaded.bytes.fill(0);
+          }
+        }
+      }
       if (certificate === undefined) {
         try {
           // Whole seconds: X.509 times carry no fractions, and a start later
@@ -212,7 +259,28 @@ export function createSelfMadeListenerCertificateStore(
               notAfter: new Date(notBefore.getTime() + VALIDITY_MS),
             }),
           );
-          writeOwnerOnly(certificatePath, certificate);
+          if (files === undefined) writeOwnerOnly(certificatePath, certificate);
+          else {
+            const candidate = Buffer.from(certificate);
+            try {
+              const saved = files.replaceCertificate(candidate);
+              if (saved.status !== "ready") return { status: "refused", code: "invalid-tls" };
+              try {
+                const admitted = usableCertificate(
+                  saved.bytes.toString("utf8"),
+                  publicKey,
+                  address,
+                  at,
+                );
+                if (admitted === undefined) return { status: "refused", code: "invalid-tls" };
+                certificate = admitted;
+              } finally {
+                saved.bytes.fill(0);
+              }
+            } finally {
+              candidate.fill(0);
+            }
+          }
         } catch {
           return { status: "refused", code: "invalid-tls" };
         }
@@ -224,6 +292,7 @@ export function createSelfMadeListenerCertificateStore(
       };
     },
     transition: () => {
+      if (options.tlsFiles !== undefined) return undefined;
       try {
         const stage = readStage();
         if (stage === undefined || Date.parse(stage.transition.expiresAt) <= now().getTime())
@@ -237,6 +306,11 @@ export function createSelfMadeListenerCertificateStore(
       }
     },
     prepareTransition: (input) => {
+      // A transition stages the next key as an ordinary owner-only file and
+      // replaces the key file in place. Native listener storage keeps its key
+      // behind its own protected records, which hold no staged key, so it
+      // refuses rather than writing private key material outside them.
+      if (options.tlsFiles !== undefined) return { status: "refused", code: "invalid-transition" };
       try {
         const origin = new URL(input.origin);
         if (origin.protocol !== "https:" || origin.origin !== input.origin)
@@ -289,6 +363,7 @@ export function createSelfMadeListenerCertificateStore(
       }
     },
     activateTransition: (newPin) => {
+      if (options.tlsFiles !== undefined) return { status: "refused", code: "invalid-transition" };
       try {
         const stage = readStage();
         if (stage === undefined || stage.transition.newPin !== newPin)
@@ -311,6 +386,7 @@ export function createSelfMadeListenerCertificateStore(
       }
     },
     cancelTransition: () => {
+      if (options.tlsFiles !== undefined) return true;
       try {
         const stage = readStage();
         if (stage === undefined) return true;
@@ -399,7 +475,6 @@ function readUsableCertificate(
   at: Date,
 ): string | undefined {
   let pem: string;
-  let certificate: X509Certificate;
   try {
     const descriptor = openRegularFile(path);
     try {
@@ -407,6 +482,20 @@ function readUsableCertificate(
     } finally {
       closeSync(descriptor);
     }
+  } catch {
+    return undefined;
+  }
+  return usableCertificate(pem, publicKey, address, at);
+}
+
+function usableCertificate(
+  pem: string,
+  publicKey: ReturnType<typeof createPublicKey>,
+  address: string,
+  at: Date,
+): string | undefined {
+  let certificate: X509Certificate;
+  try {
     certificate = new X509Certificate(pem);
   } catch {
     return undefined;

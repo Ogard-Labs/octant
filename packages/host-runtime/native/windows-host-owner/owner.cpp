@@ -442,9 +442,59 @@ napi_value open_profile(napi_env env, napi_callback_info info) {
   return result;
 }
 
-// These two records belong to server/member P256 identity, not the profile
-// control UUID or the login-bound desktop HMAC key. No caller supplies a path.
-napi_value identity_file(napi_env env, napi_callback_info info) {
+struct CertificateStage {
+  Handle file;
+  bool committed = false;
+  ~CertificateStage() {
+    if (!committed && file) {
+      FILE_DISPOSITION_INFO discard{TRUE};
+      SetFileInformationByHandle(file.value, FileDispositionInfo, &discard, sizeof(discard));
+    }
+  }
+};
+bool replace_listener_certificate(const Root& root, HANDLE directory, const std::wstring& path,
+    const Bytes& candidate, FILE_ID_INFO& created_identity) {
+  // The existing certificate must be a private regular record, even when its
+  // public X.509 contents need renewal. Never follow an alias during recovery.
+  Handle prior(CreateFileW(path.c_str(), GENERIC_READ | READ_CONTROL,
+    FILE_SHARE_READ | FILE_SHARE_DELETE, nullptr, OPEN_EXISTING, FILE_FLAG_OPEN_REPARSE_POINT, nullptr));
+  if (!prior && GetLastError() != ERROR_FILE_NOT_FOUND) return false;
+  if (prior) {
+    BY_HANDLE_FILE_INFORMATION metadata{}; LARGE_INTEGER size{};
+    if (!private_acl(prior.value, root) || !GetFileInformationByHandle(prior.value, &metadata) ||
+        metadata.nNumberOfLinks != 1 || (metadata.dwFileAttributes & (FILE_ATTRIBUTE_DIRECTORY | FILE_ATTRIBUTE_REPARSE_POINT)) != 0 ||
+        !GetFileSizeEx(prior.value, &size) || size.QuadPart < 0 || size.QuadPart > 16384) return false;
+  }
+  ULONGLONG nonce = 0;
+  if (BCryptGenRandom(nullptr, reinterpret_cast<PUCHAR>(&nonce), static_cast<ULONG>(sizeof(nonce)), BCRYPT_USE_SYSTEM_PREFERRED_RNG) < 0) return false;
+  const std::wstring staging = path + L"." + std::to_wstring(nonce) + L".tmp";
+  SECURITY_ATTRIBUTES attributes{sizeof(SECURITY_ATTRIBUTES), root.security, FALSE};
+  CertificateStage stage;
+  stage.file = Handle(CreateFileW(staging.c_str(), GENERIC_READ | GENERIC_WRITE | DELETE | READ_CONTROL,
+    0, &attributes, CREATE_NEW, FILE_FLAG_WRITE_THROUGH | FILE_FLAG_OPEN_REPARSE_POINT, nullptr));
+  if (!stage.file) return false;
+  DWORD wrote = 0;
+  if (!private_acl(stage.file.value, root) ||
+      !WriteFile(stage.file.value, candidate.data(), static_cast<DWORD>(candidate.size()), &wrote, nullptr) ||
+      wrote != candidate.size() || !FlushFileBuffers(stage.file.value) ||
+      !GetFileInformationByHandleEx(stage.file.value, FileIdInfo, &created_identity, sizeof(created_identity))) return false;
+  const std::wstring name = L"private-listener-tls-cert.pem";
+  std::vector<unsigned char> rename_bytes(sizeof(FILE_RENAME_INFO) + name.size() * sizeof(wchar_t));
+  const auto rename = reinterpret_cast<FILE_RENAME_INFO*>(rename_bytes.data());
+  rename->ReplaceIfExists = TRUE;
+  rename->RootDirectory = directory;
+  rename->FileNameLength = static_cast<DWORD>(name.size() * sizeof(wchar_t));
+  std::memcpy(rename->FileName, name.data(), rename->FileNameLength);
+  if (!SetFileInformationByHandle(stage.file.value, FileRenameInfo, rename, static_cast<DWORD>(rename_bytes.size()))) return false;
+  // Once renamed, failure must never delete the complete destination. A later
+  // ensure validates it again and keeps the immutable key and its pin.
+  stage.committed = true;
+  return FlushFileBuffers(stage.file.value) != FALSE;
+}
+
+// Separate closed entry points share profile admission. A JavaScript caller
+// cannot turn identityFile into a writer for TLS or another private purpose.
+napi_value private_listener_file(napi_env env, napi_callback_info info, bool tls) {
   Guard guard; size_t count = 5; napi_value arguments[5];
   napi_get_cb_info(env, info, &count, arguments, nullptr, nullptr);
   if (count != 5 || !per_user_creation_context()) return object(env, "refused");
@@ -454,8 +504,9 @@ napi_value identity_file(napi_env env, napi_callback_info info) {
   const std::string purpose = string_arg(env, arguments[3]);
   const auto found = profiles.find(name);
   if (found == profiles.end() || found->second->scope != scope ||
-      (purpose != "host-id" && purpose != "host-key")) return object(env, "refused");
-  const DWORD maximum = purpose == "host-id" ? 37 : 4096;
+      (tls ? (purpose != "key" && purpose != "certificate") : (purpose != "host-id" && purpose != "host-key"))) return object(env, "refused");
+  const bool certificate = tls && purpose == "certificate";
+  const DWORD maximum = purpose == "host-id" ? 37 : certificate ? 16384 : 4096;
   napi_valuetype candidate_type;
   if (napi_typeof(env, arguments[4], &candidate_type) != napi_ok) return object(env, "refused");
   const bool create = candidate_type != napi_null;
@@ -495,8 +546,14 @@ napi_value identity_file(napi_env env, napi_callback_info info) {
   Handle remote = open_directory(remote_path);
   if (!remote) return object(env, "refused");
   if (!private_acl(remote.value, *root, directory_inheritance)) return object(env, "refused");
-  const std::wstring path = remote_path + (purpose == "host-id" ? L"\\private-listener-host-id" : L"\\private-listener-host-key.pem");
+  const std::wstring path = remote_path + (tls
+    ? (certificate ? L"\\private-listener-tls-cert.pem" : L"\\private-listener-tls-key.pem")
+    : (purpose == "host-id" ? L"\\private-listener-host-id" : L"\\private-listener-host-key.pem"));
   FILE_ID_INFO created_identity{}; bool wrote_identity = false;
+  if (certificate && create) {
+    if (!replace_listener_certificate(*root, remote.value, path, candidate, created_identity)) return object(env, "refused");
+    wrote_identity = true;
+  }
   Handle file(CreateFileW(path.c_str(), GENERIC_READ | READ_CONTROL, FILE_SHARE_READ,
     nullptr, OPEN_EXISTING, FILE_FLAG_OPEN_REPARSE_POINT, nullptr));
   if (!file) {
@@ -520,9 +577,11 @@ napi_value identity_file(napi_env env, napi_callback_info info) {
       nullptr, OPEN_EXISTING, FILE_FLAG_OPEN_REPARSE_POINT, nullptr));
   }
   BY_HANDLE_FILE_INFORMATION metadata{}; LARGE_INTEGER size{};
-  if (!file || !private_acl(file.value, *root) || !GetFileInformationByHandle(file.value, &metadata) ||
+  if (!file) return object(env, "refused");
+  if (!private_acl(file.value, *root)) return object(env, tls && !certificate ? "exposed" : "refused");
+  if (!GetFileInformationByHandle(file.value, &metadata) ||
       metadata.nNumberOfLinks != 1 || (metadata.dwFileAttributes & (FILE_ATTRIBUTE_DIRECTORY | FILE_ATTRIBUTE_REPARSE_POINT)) != 0 ||
-      !GetFileSizeEx(file.value, &size) || size.QuadPart <= 0 || size.QuadPart > maximum) return object(env, "refused");
+      !GetFileSizeEx(file.value, &size) || size.QuadPart < 0 || (!certificate && size.QuadPart == 0) || size.QuadPart > maximum) return object(env, "refused");
   FILE_ID_INFO observed_identity{};
   if (!GetFileInformationByHandleEx(file.value, FileIdInfo, &observed_identity, sizeof(observed_identity)) ||
       (wrote_identity && (created_identity.VolumeSerialNumber != observed_identity.VolumeSerialNumber ||
@@ -531,12 +590,14 @@ napi_value identity_file(napi_env env, napi_callback_info info) {
   if (!ReadFile(file.value, bytes.data(), static_cast<DWORD>(bytes.size()), &got, nullptr) || got != bytes.size()) return object(env, "refused");
   napi_value result = object(env, "ready");
   put(env, result, "dataDirectory", expected_data); buffer(env, result, "bytes", bytes);
-  auto& retained = found->second->identity_guards[purpose];
+  auto& retained = found->second->identity_guards[tls ? "tls-" + purpose : purpose];
   retained.clear();
   retained.push_back(std::move(remote));
-  retained.push_back(std::move(file));
+  if (!certificate) retained.push_back(std::move(file));
   return result;
 }
+napi_value identity_file(napi_env env, napi_callback_info info) { return private_listener_file(env, info, false); }
+napi_value listener_tls_file(napi_env env, napi_callback_info info) { return private_listener_file(env, info, true); }
 
 void record_fields(napi_env env, napi_value result, const Record& record) {
   number(env, result, "pid", record.identity.pid); put(env, result, "processStart", birth(record.identity.born));
@@ -746,6 +807,7 @@ NAPI_MODULE_INIT() {
   const napi_property_descriptor methods[] = {
     {"openProfile", nullptr, open_profile, nullptr, nullptr, nullptr, napi_default, nullptr},
     {"identityFile", nullptr, identity_file, nullptr, nullptr, nullptr, napi_default, nullptr},
+    {"listenerTlsFile", nullptr, listener_tls_file, nullptr, nullptr, nullptr, napi_default, nullptr},
     {"prepare", nullptr, prepare, nullptr, nullptr, nullptr, napi_default, nullptr},
     {"claim", nullptr, claim, nullptr, nullptr, nullptr, napi_default, nullptr},
     {"lookup", nullptr, lookup, nullptr, nullptr, nullptr, napi_default, nullptr},

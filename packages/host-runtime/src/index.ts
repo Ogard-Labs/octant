@@ -293,6 +293,13 @@ export {
 } from "./githubActionsSource";
 
 export {
+  createWindowsListenerTlsFiles,
+  type WindowsListenerTlsFiles,
+  type WindowsListenerTlsNative,
+  type ListenerTlsFile,
+  type ListenerTlsFileRead,
+} from "./windowsListenerTls";
+export {
   createWindowsServerIdentityFiles,
   type WindowsServerIdentityFiles,
   type WindowsServerIdentityNative,
