@@ -54,6 +54,27 @@ def main():
     destination.mkdir()
     for name in ("mediation.c", "octant_mediation.h", "bridge.h"):
         shutil.copyfile(native / name, destination / name)
+    # Observe only an already-selected exceptional outcome in this owned copy.
+    # The original kernel source and return values remain unchanged. This
+    # diagnostic kernel must not substitute for the final uninstrumented run.
+    mediation = destination / "mediation.c"
+    source = mediation.read_text()
+    changes = {
+        "#include <linux/anon_inodes.h>": "#include <linux/anon_inodes.h>\n#include <linux/sched/signal.h>",
+        "static atomic_t contexts = ATOMIC_INIT(0);": "static atomic_t contexts = ATOMIC_INIT(0);\nstatic atomic_t octant_guest_losses = ATOMIC_INIT(0);",
+        "struct path source_pin = {}, destination_pin = {};": "struct path source_pin = {}, destination_pin = {};\n\tbool octant_guest_loss;",
+        "result = waited <= 0 || context->dead || !broker_alive(context) ? -EACCES : pending->decision;":
+            "result = waited <= 0 || context->dead || !broker_alive(context) ? -EACCES : pending->decision;\n\toctant_guest_loss = waited <= 0 || context->dead || !broker_alive(context);",
+        "\tif (source_pin.dentry)":
+            '\tif (octant_guest_loss && atomic_inc_return(&octant_guest_losses) <= 16)\n'
+            '\t\tpr_info("OCTANT_GUEST_ADMISSION_LOSS op=%u waited=%ld result=%d dead=%d owner=%d signal=%d\\n", request->operation, waited, result, context->dead, broker_alive(context), signal_pending(current));\n'
+            '\tif (source_pin.dentry)',
+    }
+    for anchor, replacement in changes.items():
+        if source.count(anchor) != 1:
+            raise SystemExit("Pinned guest exception diagnostic anchor differs.")
+        source = source.replace(anchor, replacement, 1)
+    mediation.write_text(source)
     install_epochs(kernel, native)
     (destination / "Makefile").write_text("obj-y += mediation.o\n")
     with (kernel / "security/Makefile").open("a") as output:
@@ -89,8 +110,8 @@ def main():
     for source, target in ((native / "broker.c", relay),
                            (repository / "scripts/linux-file-view/kernel_policy_workload.c", workload)):
         run("gcc", "-static", "-std=c11", "-Wall", "-Wextra", "-Werror", str(source), "-o", str(target), timeout=30)
-    run("bun", "build", "--compile", str(repository / "scripts/linux-file-view/kernel_policy.ts"),
-        "--outfile", str(policy), timeout=120, cwd=repository)
+    run("bun", str(repository / "scripts/linux-file-view/kernel_bundle.ts"), str(policy),
+        timeout=120, cwd=repository)
     # Copy only this task-owned public executable's dynamic loader/libraries
     # into the disposable initramfs. Nothing is mounted from the runner home.
     library_log = root / "policy-libraries.log"
