@@ -1,3 +1,5 @@
+import { homedir } from "node:os";
+import { hostDefaultFolder, judgeDefaultFolder } from "../../apps/server/src/defaultFolder";
 import { spawn } from "node:child_process";
 import { randomBytes } from "node:crypto";
 import { win32 } from "node:path";
@@ -72,13 +74,35 @@ function check(value: boolean, name: string) {
   checks.push(name);
 }
 try {
+  check(
+    judgeDefaultFolder(hostDefaultFolder(homedir(), {}), homedir()).status === "accepted",
+    "the actual Windows default folder passes native canonical inside-home admission",
+  );
+  check(
+    judgeDefaultFolder(
+      hostDefaultFolder(homedir(), {
+        OCTANT_DEFAULT_FOLDER: process.env.SystemRoot ?? "C:\\Windows",
+      }),
+      homedir(),
+    ).status === "refused",
+    "the Windows default folder keeps an outside-home path refused",
+  );
   const deadline = performance.now() + 22000;
   let receipt = await startup.readHostInfo();
   while (receipt === undefined && performance.now() < deadline && !joined) {
     await new Promise<void>((resolve) => setTimeout(resolve, 50));
     receipt = await startup.readHostInfo();
   }
-  if (receipt === undefined) throw Error(`Foreground startup was not ready. ${output} ${errors}`);
+  if (receipt === undefined) {
+    const records = `${output}\n${errors}`
+      .split("\n")
+      .filter(
+        (line) =>
+          line.startsWith('{"product":"Octant","status":"failed"') ||
+          line.startsWith('{"ownedFixtureStartupCause":'),
+      );
+    throw Error(`Foreground startup was not ready. ${records.join(" ")}`);
+  }
   check(
     receipt.hostId === resolved.paths.profileId,
     "the actual foreground entry publishes the native profile identity",
