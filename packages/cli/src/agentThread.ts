@@ -611,6 +611,8 @@ export async function createAgentThread(
       readonly threadId: string;
       readonly mode: OctantMode;
       readonly projectName?: string;
+      /** `--access full-access` saved Full access on the Code Project, for every new thread there. */
+      readonly projectRemembersFullAccess?: true;
     }
 > {
   const projects = await session.send({ path: "/api/projects/bootstrap", method: "GET" });
@@ -810,6 +812,7 @@ export async function createAgentThread(
   // access <name> full-access`; anywhere else it starts approval-gated, and
   // the host refuses a remembered request the Project no longer backs.
   let remembered = project.type === "code" && project.codeAccessPersistence === "project-default";
+  let rememberedNow = false;
   const requested = input.access === undefined ? undefined : threadAccessOf(input.access);
   if (requested?.executionPolicy === "full-access" && !remembered) {
     // An explicit --access full-access remembers Full access for the Project
@@ -836,6 +839,7 @@ export async function createAgentThread(
       };
     }
     remembered = true;
+    rememberedNow = true;
   }
   const now = new Date().toISOString();
   const threadId = randomUUID();
@@ -894,7 +898,13 @@ export async function createAgentThread(
   });
   return threadOpened.kind === "refused"
     ? threadOpened
-    : { kind: "created", threadId, mode: "code", projectName: project.name };
+    : {
+        kind: "created",
+        threadId,
+        mode: "code",
+        projectName: project.name,
+        ...(rememberedNow ? { projectRemembersFullAccess: true as const } : {}),
+      };
 }
 
 /**

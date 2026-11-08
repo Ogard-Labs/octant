@@ -1077,6 +1077,13 @@ async function resolveThread(input: RunAgentCliCommandInput): Promise<string | u
         : `New ${created.mode === "code" ? "Code" : "Work"} thread in ${created.projectName ?? "the Project"}.\n`,
     );
   }
+  if (created.projectRemembersFullAccess === true) {
+    // The flag saved Full access on the Project, not only on this thread, so
+    // say so where the person can see it and undo it.
+    input.stderr.write(
+      `Project ${created.projectName ?? ""} now remembers Full access: new Code threads there start at Full access. Undo with: octant project access ${JSON.stringify(created.projectName ?? "")} approval-gated\n`,
+    );
+  }
   return created.threadId;
 }
 

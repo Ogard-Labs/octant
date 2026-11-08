@@ -10806,7 +10806,12 @@ access` agree); a thread's own change is journaled as
   `full-access` is remembered for the Code Project through the same
   `change-code-project-access` command `octant project access` sends, so it
   works the same on a host with no desktop window; a Work thread takes the
-  level through `change-work-thread-access` (no Plan overlay).
+  level through `change-work-thread-access` (no Plan overlay). Because the
+  flag saves Full access on the Project rather than only on the new thread,
+  the terminal says so and prints the `octant project access <name>
+approval-gated` command that undoes it. The terminal shows no one-time
+  Full access warning: typing the flag is the explicit choice the warning
+  asks for in a window.
   `octant settings access <mode> [--work]` sets the global default new
   threads start at, Code unless `--work`, through `update-code-settings` /
   `update-work-settings`. A Work thread

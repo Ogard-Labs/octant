@@ -313,6 +313,7 @@ describe("starting a Code thread from the terminal", () => {
       executionPolicy: "full-access",
       permissionPersistence: "project-default",
     });
+    expect(result).toMatchObject({ projectRemembersFullAccess: true });
   });
 
   it("starts a narrower asked-for mode without touching the Project's remembered access", async () => {
