@@ -732,9 +732,17 @@ static int policy_measure(const char *mode)
     execve(arguments[0], arguments, environment);
     _exit(31);
   }
-  if (child < 0) return 32;
-  int result; pid_t joined;
+  if (child < 0) {
+    printf("OCTANT_POLICY_PROCESS {\"mode\":\"%s\",\"forked\":false,\"errno\":%d}\n", mode ? mode : "direct", errno);
+    return 32;
+  }
+  int result = 0; pid_t joined;
   do { joined = waitpid(child, &result, 0); } while (joined < 0 && errno == EINTR);
+  printf("OCTANT_POLICY_PROCESS {\"mode\":\"%s\",\"forked\":true,\"joined\":%s,\"code\":%d,\"signal\":%d,\"waitErrno\":%d}\n",
+    mode ? mode : "direct", joined == child ? "true" : "false",
+    joined == child && WIFEXITED(result) ? WEXITSTATUS(result) : -1,
+    joined == child && WIFSIGNALED(result) ? WTERMSIG(result) : 0,
+    joined < 0 ? errno : 0);
   return joined == child && WIFEXITED(result) && WEXITSTATUS(result) == 0 ? 0 : 33;
 }
 
