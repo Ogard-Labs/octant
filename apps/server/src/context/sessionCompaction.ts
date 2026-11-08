@@ -25,7 +25,7 @@ import {
   type ProviderModelOptionValues,
   type WindowId,
 } from "@octant/contracts";
-import { isProviderAllowedByProjectPolicy } from "@octant/domain";
+import { isProviderAllowedByProjectPolicy, resolveModelContextWindow } from "@octant/domain";
 import { unsupportedModelOptionValues } from "@octant/domain/chat-policy";
 import {
   decideSessionCompaction,
@@ -466,10 +466,15 @@ export class SessionCompactionService {
     // compaction is not taken for what the window holds now.
     const tokens = this.#occupancy(threads, subject)?.tokens;
     if (tokens === undefined) return undefined;
+    // A runtime's report, else the plan's, else the model's own window as
+    // the request-fitting rules settle it: Octant Harness reports none for a
+    // Code thread, and plans none for it either.
+    const model = this.#options.providerFacts(thread.providerInstanceId, thread.modelId)?.model;
     const contextWindow =
       report?.contextWindow ??
       planned?.latestUsage?.contextWindow ??
-      planned?.next.plan.inspection?.modelLimits.contextWindow;
+      planned?.next.plan.inspection?.modelLimits.contextWindow ??
+      (model === undefined ? undefined : resolveModelContextWindow(model)?.contextWindow);
     // A Code thread on an instance whose driver keeps no conversation of its
     // own runs on Octant Harness, which Octant keeps as it keeps a plan.
     const keeper =
