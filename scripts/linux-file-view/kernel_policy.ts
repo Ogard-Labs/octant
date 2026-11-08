@@ -89,6 +89,16 @@ try {
   clearTimeout(maximum);
   owner.abort();
   await running;
+  if (capsule) {
+    try {
+      const trace = await readFile("/tmp/octant-broker-frames.trace", "utf8");
+      console.log("OCTANT_GUEST_BROKER_TRACE_BEGIN");
+      console.log(trace.slice(0, 32_768));
+      console.log("OCTANT_GUEST_BROKER_TRACE_END");
+    } finally {
+      await rm("/tmp/octant-broker-frames.trace", { force: true });
+    }
+  }
   await rm(root, { recursive: true, force: true });
 }
 // A normal exit flushes the small evidence record. No private metadata or

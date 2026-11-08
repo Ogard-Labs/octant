@@ -92,8 +92,8 @@ def main():
     for source, target in ((native / "broker.c", relay),
                            (repository / "scripts/linux-file-view/kernel_policy_workload.c", workload)):
         run("gcc", "-static", "-std=c11", "-Wall", "-Wextra", "-Werror", str(source), "-o", str(target), timeout=30)
-    run("bun", "build", "--compile", str(repository / "scripts/linux-file-view/kernel_policy.ts"),
-        "--outfile", str(policy), timeout=120, cwd=repository)
+    run("bun", str(repository / "scripts/linux-file-view/kernel_bundle.ts"), str(policy),
+        timeout=120, cwd=repository)
     # Copy only this task-owned public executable's dynamic loader/libraries
     # into the disposable initramfs. Nothing is mounted from the runner home.
     library_log = root / "policy-libraries.log"
