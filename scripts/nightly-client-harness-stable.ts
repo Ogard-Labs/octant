@@ -264,7 +264,7 @@ async function main(): Promise<void> {
 
   let lastCount = 0;
   const lifetime = createDesktopClientLifetime({
-    currentNightlyWindows: () => leases?.activeWindowCount() ?? 0,
+    currentNightlyWindows: () => leases?.lifetimeWindowCount() ?? 0,
     // The synthetic Stable has no local windows to close.
     closeLocalWindows: async () => "closed",
     quitHost: async (stillRequested) => {
@@ -284,7 +284,7 @@ async function main(): Promise<void> {
             instanceId,
             desktopBridgeSecret: bridgeSecret,
           },
-    onActiveWindowCountChanged: (count) => {
+    onClientLifetimeCountChanged: (count) => {
       lastCount = count;
       emit("leases", { count });
       lifetime.nightlyWindowsChanged();
