@@ -165,6 +165,34 @@ describe("owned mediation session admission and input", () => {
       await prepared.session.close();
     }
   });
+  it("refuses input above the undrained byte limit and admits it again after a write drains", async () => {
+    const callbacks: Array<(error?: Error | null) => void> = [];
+    fixture.spawn.mockReturnValue(worker((done) => callbacks.push(done)));
+    const prepared = await prepareLinuxMediationSession(input(new AbortController().signal));
+    if (prepared.status !== "ready") throw new Error("Session unavailable");
+    try {
+      expect(await prepared.session.launch()).toEqual({ status: "released" });
+      const writes = Array.from({ length: 4 }, () =>
+        prepared.session.writeInput(Buffer.alloc(65_536)),
+      );
+      expect(writes.map((write) => write.status)).toEqual([
+        "accepted",
+        "accepted",
+        "accepted",
+        "accepted",
+      ]);
+      expect(prepared.session.writeInput(Buffer.alloc(65_536))).toEqual({ status: "refused" });
+      const complete = callbacks.shift();
+      const first = writes[0];
+      if (complete === undefined || first?.status !== "accepted")
+        throw new Error("Accepted write callback unavailable");
+      complete();
+      expect(await first.drained).toEqual({ status: "drained" });
+      expect(prepared.session.writeInput(Buffer.alloc(65_536)).status).toBe("accepted");
+    } finally {
+      await prepared.session.close();
+    }
+  });
   it("reports an accepted pipe failure as uncertain and never advises replay", async () => {
     fixture.spawn.mockReturnValue(worker((done) => done(new Error("synthetic pipe loss"))));
     const prepared = await prepareLinuxMediationSession(input(new AbortController().signal));
