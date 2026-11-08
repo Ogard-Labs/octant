@@ -880,10 +880,26 @@ end run`;
             await wait("work-mode-entry", (s) => s.includes(" | Work |"));
             await native("reveal", "Work");
             await native("click", "Work");
-            await wait("work-add-folder", (s) => s.includes("Add folder"));
-            await native("reveal", "Add folder");
-            await native("click", "Add folder");
-            await wait("project-choose-folder", (s) => s.includes("Choose a folder"));
+            await wait("folder-thread-kind", (s) => s.includes("AXCheckBox | In a folder |"));
+            await native("reveal", "In a folder");
+            await native("click", "In a folder");
+            await wait(
+              "folder-draft-ready",
+              (s) => s.includes("Project: Choose a Project"),
+              12_000,
+              500,
+            );
+            // Work's compact sidebar deliberately has no Add folder button.
+            // Its normal welcome screen offers the same Project root chooser.
+            await native("reveal", "Home");
+            await native("click", "Home");
+            await wait("work-folder-welcome", (s) => s.includes("Choose a folder…"));
+            await native("reveal", "Choose a folder…");
+            await native("click", "Choose a folder…");
+            await wait(
+              "project-choose-folder",
+              (s) => s.includes("Project name") && s.includes("Choose a folder"),
+            );
             await native("reveal", "Choose a folder");
             if (ownerBirth === undefined)
               throw Error("No original process birth for picker discovery.");

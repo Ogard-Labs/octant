@@ -404,7 +404,7 @@ if mode == "click" || mode == "reveal" || fillsFixtureField {
         action["availableActions"] = availableActions.prefix(32).map { String($0.prefix(256)) }
         action["actionNamesTruncated"] = actionNamesTruncated
         if targetIdentityRead == .success, targetPid == processId {
-            if mode == "reveal", ["Data & storage", preferenceTitle, "Octant Harness", "Add endpoint", "OpenAI-compatible", "OpenAI-compatible Any service that speaks the OpenAI API: a gateway, a router, or a local server.", "Advanced", "It takes no key", "It takes no key Only for a server on this computer, such as one at 127.0.0.1.", "Check and add", "Continue and verify tools (1 request)", "Back to app", "Work", "Add folder", "Choose a folder"].contains(requestedTitle),
+            if mode == "reveal", ["Data & storage", preferenceTitle, "Octant Harness", "Add endpoint", "OpenAI-compatible", "OpenAI-compatible Any service that speaks the OpenAI API: a gateway, a router, or a local server.", "Advanced", "It takes no key", "It takes no key Only for a server on this computer, such as one at 127.0.0.1.", "Check and add", "Continue and verify tools (1 request)", "Back to app", "Work", "In a folder", "Home", "Choose a folder…", "Choose a folder"].contains(requestedTitle),
                enabledRead == .success, binary(enabledValue) == true,
                namesRead == .success, !actionNamesTruncated,
                availableActions.contains("AXScrollToVisible"), live?.isActive == true,
