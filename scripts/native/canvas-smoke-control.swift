@@ -64,7 +64,7 @@ let expected = CommandLine.arguments[4]
 guard let application = NSRunningApplication(processIdentifier: pid), !application.isTerminated else {
     refuse("The owned application is no longer running.")
 }
-if mode == "click" || mode == "settings" {
+if mode == "click" || mode == "fill" || mode == "enter" || mode == "settings" {
     guard CGPreflightPostEventAccess() else { refuse("Native event delivery is unavailable; no permission was requested.") }
     _ = application.activate(options: [.activateIgnoringOtherApps])
 }
@@ -88,7 +88,7 @@ let targets = (request.results ?? []).compactMap { result -> TextTarget? in
         y: Double(owned.bounds.minY + (1 - result.boundingBox.midY) * owned.bounds.height))
 }
 var clicked = false
-if mode == "click" {
+if mode == "click" || mode == "fill" {
     guard !expected.isEmpty else { refuse("Supply a nonempty observed text target.") }
     let matches = (request.results ?? []).flatMap { result -> [TextTarget] in
         guard let value = result.topCandidates(1).first else { return [] }
@@ -124,6 +124,35 @@ if mode == "click" {
     usleep(50_000)
     up.post(tap: .cghidEventTap)
     clicked = true
+    if mode == "fill" {
+        guard CommandLine.arguments.count == 6 else { refuse("Supply the fixture field value.") }
+        let value = CommandLine.arguments[5]
+        guard !value.isEmpty, value.utf16.count <= 2048 else { refuse("The fixture field value is empty or too long.") }
+        guard let selectDown = CGEvent(keyboardEventSource: nil, virtualKey: 0, keyDown: true),
+              let selectUp = CGEvent(keyboardEventSource: nil, virtualKey: 0, keyDown: false),
+              let textDown = CGEvent(keyboardEventSource: nil, virtualKey: 0, keyDown: true),
+              let textUp = CGEvent(keyboardEventSource: nil, virtualKey: 0, keyDown: false) else { refuse("Native text input is unavailable.") }
+        selectDown.flags = .maskCommand
+        selectUp.flags = .maskCommand
+        selectDown.postToPid(pid)
+        selectUp.postToPid(pid)
+        let units = Array(value.utf16)
+        units.withUnsafeBufferPointer { buffer in
+            guard let base = buffer.baseAddress else { refuse("The fixture field value is empty.") }
+            textDown.keyboardSetUnicodeString(stringLength: units.count, unicodeString: base)
+            textUp.keyboardSetUnicodeString(stringLength: units.count, unicodeString: base)
+        }
+        textDown.postToPid(pid)
+        textUp.postToPid(pid)
+    }
+} else if mode == "enter" {
+    guard targets.contains(where: { $0.text.localizedCaseInsensitiveContains(expected) }) else {
+        refuse("The expected keyboard context is absent from the current owned image.")
+    }
+    guard let down = CGEvent(keyboardEventSource: nil, virtualKey: 36, keyDown: true),
+          let up = CGEvent(keyboardEventSource: nil, virtualKey: 36, keyDown: false) else { refuse("Native keyboard input is unavailable.") }
+    down.postToPid(pid)
+    up.postToPid(pid)
 } else if mode == "settings" {
     guard let down = CGEvent(keyboardEventSource: nil, virtualKey: 43, keyDown: true),
           let up = CGEvent(keyboardEventSource: nil, virtualKey: 43, keyDown: false) else { refuse("Native keyboard events are unavailable.") }

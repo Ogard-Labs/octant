@@ -207,19 +207,44 @@ const timer = setInterval(() => {
       process.env,
       8000,
     );
-    await observeUntil("fixture-thread", (snapshot) => hasText(snapshot, "Weekly signups brief"));
+    await observeUntil(
+      "fixture-canvas",
+      (snapshot) =>
+        hasText(snapshot, "Worth watching") &&
+        hasText(snapshot, "Signups grew for the third week running."),
+    );
+    await runBoundedCommand(
+      nativeControllerPath,
+      ["settings", String(ownPid), join(artifacts, "canvas-before-settings.png"), "Settings"],
+      process.env,
+      8000,
+    );
+    await observeUntil("canvas-settings", (snapshot) => hasText(snapshot, "Search settings"));
     await runBoundedCommand(
       nativeControllerPath,
       [
-        "click",
+        "fill",
         String(ownPid),
-        join(artifacts, "fixture-thread-target.png"),
-        "Weekly signups brief",
+        join(artifacts, "service-search-target.png"),
+        "Search settings",
+        "Service address",
       ],
       process.env,
       8000,
     );
-    await observeUntil("fixture-canvas", (snapshot) => hasText(snapshot, "Signups this week"));
+    await observeUntil("service-search", (snapshot) => hasText(snapshot, "in Permissions"));
+    await runBoundedCommand(
+      nativeControllerPath,
+      ["enter", String(ownPid), join(artifacts, "service-search-result.png"), "Service address"],
+      process.env,
+      8000,
+    );
+    await observeUntil(
+      "public-link-settings",
+      (snapshot) =>
+        hasText(snapshot, "Service address") &&
+        hasText(snapshot, "Where public links are published"),
+    );
     if (controller.signal.aborted) throw Error("Native window observation was interrupted.");
     verified = true;
   } finally {
@@ -298,6 +323,7 @@ const timer = setInterval(() => {
         nativeSetupSkip: true,
         nativeSettings: true,
         seededCanvasRendered: true,
+        publicLinkSettingsObserved: true,
         productionDebuggingUnchanged: true,
         cleanup: "verified",
         publishAcceptance: "not-run",
