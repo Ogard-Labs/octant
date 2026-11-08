@@ -72,6 +72,7 @@ describe("handing a Code thread over through its branch", () => {
         checkoutRoot: laptop,
         branch: "feature/dark-mode",
         defaultBranch: "main",
+        remote: "origin",
       }),
     ).toEqual({ status: "pushed", remote: "origin" });
     expect(git(origin, "rev-parse", "feature/dark-mode")).toBe(committed.commit);
@@ -98,6 +99,7 @@ describe("handing a Code thread over through its branch", () => {
           checkoutRoot: laptop,
           branch: "octant/handover/fix-the-thing-77777777",
           defaultBranch: "main",
+          remote: "origin",
         })
       ).status,
     ).toBe("pushed");
@@ -108,13 +110,19 @@ describe("handing a Code thread over through its branch", () => {
     const { laptop } = repository({ withRemote: false });
     writeFileSync(join(laptop, "app.ts"), "export const version = 2;\n");
     expect(
-      await pushHandover({ checkoutRoot: laptop, branch: "main", defaultBranch: "main" }),
+      await pushHandover({
+        checkoutRoot: laptop,
+        branch: "main",
+        defaultBranch: "main",
+        remote: "origin",
+      }),
     ).toEqual({ status: "not-pushed", shortfall: "push-failed" });
     expect(
       await pushHandover({
         checkoutRoot: laptop,
         branch: "octant/handover/x",
         defaultBranch: "main",
+        remote: undefined,
       }),
     ).toEqual({ status: "not-pushed", shortfall: "no-remote" });
   });

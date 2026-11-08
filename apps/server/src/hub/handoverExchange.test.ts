@@ -76,6 +76,7 @@ function world(overrides: Partial<HandoverExchangeOptions> = {}) {
       driverKind === "claude" ? { providerInstanceId: "provider-b", modelId } : undefined,
     readNote: async ({ handoverId }) =>
       `Hand over: Fix the flaky test\n\nOctant-Handover: ${handoverId}`,
+    branchTaken: async () => false,
     createThread: async (input) => {
       created.push(String(input.threadId));
     },
@@ -108,6 +109,28 @@ function world(overrides: Partial<HandoverExchangeOptions> = {}) {
 }
 
 describe("continuing a handover on another computer", () => {
+  it("starts the thread on a suffixed branch when the destination already has one of that name", async () => {
+    const opened: Array<{ readonly branch: string; readonly threadBranch: string }> = [];
+    const { desktop, signed } = world({
+      branchTaken: async ({ branch }) => branch === "feature/flaky",
+      createThread: async (input) => {
+        opened.push({ branch: input.branch, threadBranch: input.threadBranch });
+      },
+    });
+    await desktop.receiveNotice(signed(notice));
+
+    expect(
+      await desktop.continueHandover({
+        handoverId: HANDOVER as never,
+        projectId: PROJECT as never,
+      }),
+    ).toEqual({ status: "continued", thread: { mode: "code", threadId: NEW_THREAD } });
+    // It still starts from the fetched handover branch.
+    expect(opened).toEqual([
+      { branch: "feature/flaky", threadBranch: "feature/flaky-handover-88888888" },
+    ]);
+  });
+
   it("lists a noticed handover with its Projects, continues it, and the source erases its copy", async () => {
     const { desktop, desktopState, laptopState, erased, created, notes, signed } = world();
     expect((await desktop.receiveNotice(signed(notice))).httpStatus).toBe(200);

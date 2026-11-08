@@ -100,17 +100,16 @@ export class ThreadHandovers {
     // The freeze is recorded before anything is written.
     this.#options.record.handoverStarted({ handoverId, thread, branch: planned.branch });
     this.#options.source.freeze(thread);
+    // A branch that already holds the work and has nothing left to commit
+    // still gets a commit carrying the note: the destination reads the note
+    // only from a tip whose trailer names this handover.
     const committed = await commitHandover({
       checkoutRoot: planned.root,
       branch: planned.branch,
       message: planned.note(String(handoverId)),
+      noteWhenUnchanged: planned.branch === planned.checkout.branch,
     });
-    // Nothing left to commit on a branch that already holds the work is still
-    // a handover: the branch is pushed as it is.
-    if (
-      committed.status === "refused" &&
-      !(committed.reason === "nothing-to-commit" && planned.branch === planned.checkout.branch)
-    ) {
+    if (committed.status === "refused") {
       this.#options.source.unfreeze(thread);
       return {
         status: "refused",
@@ -121,6 +120,7 @@ export class ThreadHandovers {
       checkoutRoot: planned.root,
       branch: planned.branch,
       defaultBranch: planned.checkout.defaultBranch,
+      remote: planned.remote,
     });
     if (pushed.status === "pushed" && destinationMemberId !== undefined) {
       const provider = this.#options.code.provider(thread.threadId);

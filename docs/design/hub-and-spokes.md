@@ -2262,9 +2262,13 @@ a numbered slice. Built, with these narrower readings:
     a new `octant/handover/…` branch for the default branch or a detached
     head. The commit takes every change Git does not ignore except files
     the Secret guard refuses, and its message is the note with the
-    `Octant-Handover` and `Octant-Origin` trailers. The branch is then
-    pushed to the remote it tracks, never forced and never to the default
-    branch. The note comes from the thread's title, its latest instruction
+    `Octant-Handover` and `Octant-Origin` trailers; a branch that already
+    holds the work and has nothing left to commit still gets a commit
+    carrying the note, because the destination reads the note only from a
+    tip naming this handover. The branch is then pushed to the remote the
+    preview named (the one the checkout's branch tracks, or `origin`),
+    never worked out again for a new handover branch, never forced, and
+    never to the default branch. The note comes from the thread's title, its latest instruction
     and answer, the changed files, and what stays behind. It is redacted,
     names no folder on this computer, and is at most 32 KiB. The thread
     stays frozen, marked Handed over with the branch and whether it was
@@ -2282,9 +2286,11 @@ a numbered slice. Built, with these narrower readings:
     picks the one Code Project bound to the same repository (or offers the
     ones that are). It fetches the branch with the destination's own Git
     identity, reads the note only from a tip whose `Octant-Handover`
-    trailer names this handover, and opens a managed Code thread on the
-    branch, on the destination's own provider of that kind with the same
-    model. The thread starts marked under the source label
+    trailer names this handover, and opens a managed Code thread started
+    from that branch, on the destination's own provider of that kind with
+    the same model. When the clone already has a local branch of that
+    name, the thread's own branch takes a `-handover-` suffix, as a moved
+    thread's does. The thread starts marked under the source label
     `handover-note`, and its first turn reads the note framed as outside
     content. The destination then reports
     (`POST /api/hub/peer/handovers/continued`, the handover and the new

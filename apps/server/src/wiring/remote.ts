@@ -100,6 +100,7 @@ import { ThreadHandovers } from "../hub/threadHandovers";
 import { HandoverExchange } from "../hub/handoverExchange";
 import { createHandoverRouteHandler } from "../hub/handoverRoutes";
 import { readHandoverNote } from "../hub/codeThreadHandoverGit";
+import { branchExists } from "../hub/codeThreadMoveGit";
 import { createThreadMoveSenders } from "../hub/threadMoveSenders";
 import { createThreadMoveTicketClient } from "../hub/threadMoveTicketClient";
 import { hostThreads, ThreadMovesFromWindow } from "../hub/threadMovesFromWindow";
@@ -1305,6 +1306,10 @@ export function wireRemote(deps: RemoteDependencies) {
         handoverId,
       });
     },
+    branchTaken: async ({ projectId, branch }) => {
+      const project = persistence.readProjects().find((entry) => String(entry.id) === projectId);
+      return project?.type === "code" && branchExists(project.binding.canonicalRoot, branch);
+    },
     createThread: async (input) => {
       const project = persistence
         .readProjects()
@@ -1323,7 +1328,7 @@ export function wireRemote(deps: RemoteDependencies) {
         executionPolicy: "approval-gated",
         permissionPersistence: "current-session",
         deliveryTarget: {
-          branchIntent: input.branch,
+          branchIntent: input.threadBranch,
           remoteName: "origin",
           proposedBaseRepository: input.projectId,
           proposedBaseBranch: input.branch,

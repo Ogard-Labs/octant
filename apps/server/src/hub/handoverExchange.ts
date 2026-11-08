@@ -66,12 +66,23 @@ export interface HandoverExchangeOptions {
     readonly branch: string;
     readonly handoverId: string;
   }) => Promise<string | undefined>;
-  /** Opens a managed Code thread on the fetched branch, marked as having read outside content. */
+  /** Whether the Project's clone already has a local branch of this name. */
+  readonly branchTaken: (input: {
+    readonly projectId: string;
+    readonly branch: string;
+  }) => Promise<boolean>;
+  /**
+   * Opens a managed Code thread on its own branch, started from the fetched
+   * handover branch, marked as having read outside content.
+   */
   readonly createThread: (input: {
     readonly threadId: CodeThreadId;
     readonly projectId: string;
     readonly title: string;
+    /** The fetched handover branch the thread starts from. */
     readonly branch: string;
+    /** The thread's own branch: the handover's name, or a suffixed one when that name is taken. */
+    readonly threadBranch: string;
     readonly provider: { readonly providerInstanceId: string; readonly modelId: string };
     readonly handoverId: string;
   }) => Promise<void>;
@@ -185,12 +196,21 @@ export class HandoverExchange {
       .catch(() => undefined);
     if (note === undefined) return { status: "refused", reason: "transfer-failed" };
     const threadId = decodeCodeThreadId((this.#options.uuid ?? randomUUID)());
+    // A managed thread refuses a branch name its clone already has, even one
+    // at the same tip, so a taken name gets a suffix, as a moved thread's does.
+    const taken = await this.#options
+      .branchTaken({ projectId: String(request.projectId), branch: notice.branch })
+      .catch(() => false);
+    const threadBranch = taken
+      ? `${notice.branch}-handover-${String(threadId).slice(0, 8)}`
+      : notice.branch;
     try {
       await this.#options.createThread({
         threadId,
         projectId: String(request.projectId),
         title: notice.title,
         branch: notice.branch,
+        threadBranch,
         provider,
         handoverId: String(notice.handoverId),
       });

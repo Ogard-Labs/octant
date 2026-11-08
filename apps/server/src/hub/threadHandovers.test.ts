@@ -122,6 +122,46 @@ describe("handing over a Code thread that cannot move", () => {
   });
 });
 
+describe("where a handover's work goes", () => {
+  it("pushes to the remote the preview named, even when the new branch would fall back to another", async () => {
+    const { origin, laptop, handovers } = world();
+    // The checkout's branch tracks its own remote; origin is another repository.
+    const upstream = join(laptop, "..", "upstream.git");
+    git(join(laptop, ".."), "init", "-q", "--bare", "-b", "main", upstream);
+    git(laptop, "remote", "add", "upstream", upstream);
+    git(laptop, "push", "-q", "upstream", "main");
+    git(laptop, "config", "branch.main.remote", "upstream");
+    writeFileSync(join(laptop, "app.ts"), "export const version = 2;\n");
+
+    expect(await handovers.preview(THREAD)).toMatchObject({ remote: "upstream" });
+    expect(await handovers.handOver(THREAD)).toMatchObject({ pushed: true });
+
+    const branch = "octant/handover/fix-the-flaky-test-77777777";
+    expect(git(upstream, "log", "-1", "--format=%B", branch)).toContain(
+      `Octant-Handover: ${HANDOVER}`,
+    );
+    expect(() => git(origin, "rev-parse", "--verify", "-q", branch)).toThrow();
+  });
+
+  it("gives a clean branch that already holds the work a commit carrying this handover's note", async () => {
+    const { origin, laptop, handovers } = world();
+    git(laptop, "checkout", "-q", "-b", "feature/flaky");
+    writeFileSync(join(laptop, "app.ts"), "export const version = 2;\n");
+    git(laptop, "commit", "-q", "-am", "make it deterministic");
+    git(laptop, "push", "-q", "-u", "origin", "feature/flaky");
+
+    expect(await handovers.handOver(THREAD)).toMatchObject({
+      status: "handed-over",
+      branch: "feature/flaky",
+      pushed: true,
+    });
+    expect(git(origin, "log", "-1", "--format=%B", "feature/flaky")).toContain(
+      `Octant-Handover: ${HANDOVER}`,
+    );
+    expect(git(origin, "show", "feature/flaky:app.ts")).toBe("export const version = 2;");
+  });
+});
+
 describe("the handover note", () => {
   const checkout = {
     head: "a".repeat(40),

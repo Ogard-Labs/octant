@@ -110,6 +110,12 @@ export async function commitHandover(input: {
   readonly checkoutRoot: string;
   readonly branch: string;
   readonly message: string;
+  /**
+   * With nothing left to commit, still write a commit carrying the message,
+   * so the branch tip holds this handover's note and trailer for the
+   * destination to read. Only a branch that already holds the work asks this.
+   */
+  readonly noteWhenUnchanged?: boolean;
 }): Promise<HandoverCommitOutcome> {
   const root = input.checkoutRoot;
   const scratch = await mkdtemp(join(tmpdir(), "octant-handover-index-"));
@@ -132,7 +138,10 @@ export async function commitHandover(input: {
     }
     for (const path of refusedFiles) await git(root, ["reset", "-q", head, "--", path], env);
     const tree = await git(root, ["write-tree"], env);
-    if (tree === (await git(root, ["rev-parse", `${head}^{tree}`]))) {
+    if (
+      input.noteWhenUnchanged !== true &&
+      tree === (await git(root, ["rev-parse", `${head}^{tree}`]))
+    ) {
       return { status: "refused", reason: "nothing-to-commit" };
     }
     const made = await commitWithMessage(root, tree, head, input.message);
@@ -173,19 +182,23 @@ export type HandoverPushOutcome =
   | { readonly status: "not-pushed"; readonly shortfall: "push-failed" | "no-remote" };
 
 /**
- * Pushes the handover branch to the remote it tracks, or `origin`. Never
- * forced and never to the default branch: a branch the remote moved past is
- * refused by Git, and the commit then stays on this computer.
+ * Pushes the handover branch to the remote the person saw in the preview.
+ * Never forced and never to the default branch: a branch the remote moved
+ * past is refused by Git, and the commit then stays on this computer. The
+ * remote is passed in, never worked out again here, because a new handover
+ * branch tracks nothing and would fall back to `origin`, which can be
+ * another repository than the one the preview named.
  */
 export async function pushHandover(input: {
   readonly checkoutRoot: string;
   readonly branch: string;
   readonly defaultBranch: string;
+  readonly remote: string | undefined;
 }): Promise<HandoverPushOutcome> {
   const root = input.checkoutRoot;
   if (input.branch === input.defaultBranch)
     return { status: "not-pushed", shortfall: "push-failed" };
-  const remote = await pushRemote(root, input.branch);
+  const { remote } = input;
   if (remote === undefined) return { status: "not-pushed", shortfall: "no-remote" };
   try {
     await git(root, ["push", remote, `refs/heads/${input.branch}:refs/heads/${input.branch}`]);
