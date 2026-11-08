@@ -13,7 +13,11 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { Schema } from "effect";
-import { decodeCanvasId, decodeCanvasVersionId } from "@octant/contracts/canvas";
+import {
+  decodeCanvasBlockId,
+  decodeCanvasId,
+  decodeCanvasVersionId,
+} from "@octant/contracts/canvas";
 import { decodeUtcTimestamp } from "@octant/contracts/events";
 import { ExtensionActivationScope, ExtensionSource } from "@octant/contracts/extensions";
 import {
@@ -141,8 +145,11 @@ export const canvasExport = createPageHostExportTarget({
         sourceRef: "installed-example-fixture",
       }),
       format: "directory",
-      archiveBytes: module.size,
-      entries: loaded.entries,
+      archiveBytes: loaded.archiveBytes,
+      entries: loaded.entries.map((entry) => {
+        if (entry.kind === "other") throw Error("The fixture contains an unsupported file kind.");
+        return { ...entry, kind: entry.kind };
+      }),
       appVersion: "0.1.0",
       platform: process.platform,
     });
@@ -182,7 +189,7 @@ export const canvasExport = createPageHostExportTarget({
       title: "Installed native export",
       blocks: [
         {
-          blockId: "heading",
+          blockId: decodeCanvasBlockId(randomUUID()),
           schemaVersion: 1,
           kind: "heading",
           level: 1,
