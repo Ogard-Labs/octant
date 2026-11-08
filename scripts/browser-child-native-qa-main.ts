@@ -352,6 +352,7 @@ async function main() {
       inputJson: JSON.stringify({
         operation: "navigate",
         url: origin,
+        include: ["text"],
         profile: `account:${String(childProfile.profileId)}`,
       }),
     };
@@ -388,6 +389,10 @@ async function main() {
     if (allowed.kind !== "browser-session-granted") throw Error("The reviewed permission refused.");
     check(creates === before, "grant alone starts no child execution");
     const answer = await tools.execute(call);
+    await writeFile(
+      join(output, "first-child-answer.json"),
+      JSON.stringify({ answer, creates, nativeActions }),
+    );
     check(
       answer.isError !== true &&
         JSON.stringify(answer).includes("child-fixture") &&
