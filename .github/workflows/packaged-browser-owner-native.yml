@@ -9,6 +9,8 @@ on:
       - scripts/packaged-browser-owner-ax.swift
       - scripts/packaged-browser-owner-provider.ts
       - scripts/packaged-browser-owner-provider.test.ts
+      - scripts/packaged-browser-owner-electron-cache.ts
+      - scripts/packaged-browser-owner-electron-cache.test.ts
 
 permissions:
   contents: read
@@ -34,15 +36,30 @@ jobs:
         with:
           bun-version: 1.4.4
       - run: bun install --frozen-lockfile
+      - name: Seed only the pinned Electron archive from its official asset API
+        timeout-minutes: 4
+        env:
+          electron_config_cache: ${{ runner.temp }}/browser-owner-electron-cache
+        run: bun scripts/packaged-browser-owner-electron-cache.ts
       - run: node node_modules/electron/install.js
+        env:
+          electron_config_cache: ${{ runner.temp }}/browser-owner-electron-cache
       - name: Package source without signing or publication
         timeout-minutes: 25
+        env:
+          electron_config_cache: ${{ runner.temp }}/browser-owner-electron-cache
         run: bun run package:desktop
       - name: Bind only the owned fixture folder through normal Work Project UI
         timeout-minutes: 5
         env:
           OCTANT_QA_OUTPUT: ${{ runner.temp }}/packaged-browser-owner-native
         run: bun scripts/smoke-packaged-browser-owner-native.ts --project-picker-discovery
+      - name: Remove the owned Electron fixture cache
+        if: always()
+        timeout-minutes: 1
+        env:
+          electron_config_cache: ${{ runner.temp }}/browser-owner-electron-cache
+        run: bun scripts/packaged-browser-owner-electron-cache.ts --cleanup
       - uses: actions/upload-artifact@v4
         if: always()
         with:
