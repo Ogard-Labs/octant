@@ -519,6 +519,7 @@ describe("native harness composition", () => {
         "todo-write",
         "context-remaining",
         "second-opinion",
+        "diagnostics",
       ]);
     });
 
@@ -570,7 +571,18 @@ describe("native harness composition", () => {
       expect({ chat, work, code }).toEqual({
         chat: lead,
         work: ["read", "grep", "glob", "bash", "edit", "write", ...web, ...lead, "goal-check"],
-        code: ["read", "grep", "glob", "bash", "edit", "write", ...web, ...lead, "goal-check"],
+        code: [
+          "read",
+          "grep",
+          "glob",
+          "bash",
+          "edit",
+          "write",
+          ...web,
+          ...lead,
+          "goal-check",
+          "diagnostics",
+        ],
       });
     });
 
@@ -598,7 +610,7 @@ describe("native harness composition", () => {
         const lead = ["todo-write", "context-remaining", "second-opinion", "ask-user", "goal"];
         expect(code).toEqual(
           writes
-            ? [...readOnly, "bash", "edit", "write", ...web, ...lead, "goal-check"]
+            ? [...readOnly, "bash", "edit", "write", ...web, ...lead, "goal-check", "diagnostics"]
             : [...readOnly, ...web, ...lead],
         );
       },
@@ -616,7 +628,7 @@ describe("native harness composition", () => {
           windowId: "window-1",
         })!,
       );
-      for (const refused of ["bash", "edit", "write", "goal-check"]) {
+      for (const refused of ["bash", "edit", "write", "goal-check", "diagnostics"]) {
         expect(code).not.toContain(refused);
       }
       expect(code).toContain("read");

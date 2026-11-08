@@ -77,6 +77,7 @@ export const NATIVE_HARNESS_TOOL_NAMES = [
   "ask-user",
   "goal",
   "goal-check",
+  "diagnostics",
 ] as const;
 export const NativeHarnessToolName = Schema.Literal(...NATIVE_HARNESS_TOOL_NAMES);
 export type NativeHarnessToolName = typeof NativeHarnessToolName.Type;
@@ -333,6 +334,24 @@ export const NativeHarnessGoalCheckArguments = Schema.Struct({
 }).annotations(strict);
 export type NativeHarnessGoalCheckArguments = typeof NativeHarnessGoalCheckArguments.Type;
 
+export const MAX_NATIVE_HARNESS_DIAGNOSTICS_FILES = 50;
+
+/**
+ * Runs the checkout's typecheck, lint, or both and returns the problems they
+ * print. Without `command` the commands come from the checkout's own scripts;
+ * `files` narrows the returned problems, not what the command checks.
+ */
+export const NativeHarnessDiagnosticsArguments = Schema.Struct({
+  which: Schema.optional(Schema.Literal("typecheck", "lint", "both")),
+  command: Schema.optional(
+    Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(MAX_NATIVE_HARNESS_COMMAND_LENGTH)),
+  ),
+  files: Schema.optional(
+    Schema.Array(ToolPath).pipe(Schema.maxItems(MAX_NATIVE_HARNESS_DIAGNOSTICS_FILES)),
+  ),
+}).annotations(strict);
+export type NativeHarnessDiagnosticsArguments = typeof NativeHarnessDiagnosticsArguments.Type;
+
 const toolArgumentDecoders: Readonly<Record<NativeHarnessToolName, (value: unknown) => unknown>> = {
   read: Schema.decodeUnknownSync(NativeHarnessReadArguments),
   grep: Schema.decodeUnknownSync(NativeHarnessGrepArguments),
@@ -349,6 +368,7 @@ const toolArgumentDecoders: Readonly<Record<NativeHarnessToolName, (value: unkno
   "ask-user": Schema.decodeUnknownSync(NativeHarnessAskUserArguments),
   goal: Schema.decodeUnknownSync(NativeHarnessGoalArguments),
   "goal-check": Schema.decodeUnknownSync(NativeHarnessGoalCheckArguments),
+  diagnostics: Schema.decodeUnknownSync(NativeHarnessDiagnosticsArguments),
 };
 
 /** Throws on a malformed argument object; the catalog's argument-schema step relies on it. */
@@ -613,6 +633,23 @@ export const NATIVE_HARNESS_TOOL_DEFINITIONS: ReadonlyArray<ProviderToolDefiniti
       type: "object",
       properties: { criterionId: { type: "string", description: "c1, c2, ..." } },
       required: ["criterionId"],
+    },
+  },
+  {
+    name: "diagnostics",
+    description:
+      "Run the checkout's typecheck, lint, or both (which, both when omitted) and get the problems back as file, line, column, severity and message, capped. Without command it runs the typecheck and lint (or check) scripts in package.json with the package manager its lockfile names; when there are none it refuses, so pass the command to run. Each command is approved like bash. files narrows the returned problems, not what is checked. A non-zero exit with no problems read is not clean: read outputTail.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        which: { type: "string", enum: ["typecheck", "lint", "both"] },
+        command: { type: "string", maxLength: MAX_NATIVE_HARNESS_COMMAND_LENGTH },
+        files: {
+          type: "array",
+          items: pathProperty,
+          maxItems: MAX_NATIVE_HARNESS_DIAGNOSTICS_FILES,
+        },
+      },
     },
   },
 ];

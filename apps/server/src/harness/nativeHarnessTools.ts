@@ -12,6 +12,7 @@ import {
   type NativeHarnessAskUserArguments,
   type NativeHarnessBashArguments,
   type NativeHarnessContextRemaining,
+  type NativeHarnessDiagnosticsArguments,
   type NativeHarnessEditArguments,
   type NativeHarnessGlobArguments,
   type NativeHarnessGoalArguments,
@@ -35,6 +36,7 @@ import {
 import { planRefusesApprovalClass } from "@octant/domain/tool-call-policy";
 import { Schema } from "effect";
 import { admitNativeHarnessTool } from "./nativeHarnessToolAdmission";
+import { runNativeHarnessDiagnostics } from "./nativeHarnessDiagnostics";
 import type { AppManagedToolSet } from "../providers/appManagedToolSet";
 import type { ToolCallAuthorityService } from "../toolCallAuthorityService";
 import type { ToolEgressCallConfirmation } from "./nativeHarnessEgressRules";
@@ -295,6 +297,19 @@ export function createNativeHarnessTools(
     } catch {
       return refused("invalid-tool-input", `The ${name} arguments do not match the tool's schema.`);
     }
+    if (name === "diagnostics") {
+      try {
+        return withSteering(
+          await runNativeHarnessDiagnostics(
+            args as NativeHarnessDiagnosticsArguments,
+            options,
+            signal,
+          ),
+        );
+      } catch {
+        return { ...refused("tool-execution-failed"), refused: false };
+      }
+    }
     // The command a person approves is fixed here, before any wait, and is
     // the only one the check may run.
     const approvedCheck =
@@ -332,6 +347,14 @@ export function createNativeHarnessTools(
       // left for the command is let go here rather than when a shell starts.
       options.ports.callEnded?.(String(request.actionId));
     }
+    return withSteering(outcome);
+  }
+
+  function withSteering(outcome: {
+    readonly result: unknown;
+    readonly isError?: boolean;
+    readonly refused?: boolean;
+  }): { readonly result: unknown; readonly isError?: boolean; readonly refused?: boolean } {
     const notes = options.ports.steering?.() ?? [];
     if (notes.length === 0 || typeof outcome.result !== "object" || outcome.result === null) {
       return outcome;
@@ -384,6 +407,8 @@ function isOffered(
       return (
         ports.goal !== undefined && ports.shell !== undefined && ports.filesystem !== undefined
       );
+    case "diagnostics":
+      return ports.shell !== undefined && ports.filesystem !== undefined;
   }
 }
 
@@ -543,6 +568,10 @@ async function execute(
     case "goal-check":
       // Runs through `checkGoalCriterion` with the command fixed before
       // approval; reaching here would mean a check with nothing approved.
+      return refused("tool-unavailable");
+    case "diagnostics":
+      // Runs through `runNativeHarnessDiagnostics`, which authorizes each
+      // command as a `bash` call; reaching here would skip that.
       return refused("tool-unavailable");
   }
 }

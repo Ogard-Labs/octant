@@ -42,6 +42,8 @@ export function nativeHarnessInstructions(mode: OctantMode): ReadonlyArray<Provi
  * for the first time cannot infer from a parameter list.
  */
 const OCTANT_TOOL_PURPOSE: Readonly<Record<string, string>> = {
+  diagnostics:
+    "run the checkout's typecheck and lint and get the problems back as a short list of file, line, and message; use it after edits instead of reading raw command output",
   octant_agents: "start, watch, and stop helper agents that work beside you",
   octant_ask_thread: "ask a Chat thread the user mentioned something and wait for its reply",
   octant_android:

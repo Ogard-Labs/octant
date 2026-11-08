@@ -1283,6 +1283,7 @@ Status: Built. Since: —. Detail: [Architecture: Native harness](../architectur
 Every harness tool call is authorized under the thread's current authority before any port runs, and outside content taints the thread.
 
 - The offered tools follow the mode. A call is judged by the narrower of the thread's stored posture and the running turn's posture, so a turn narrowed to Plan refuses writes and commands.
+- A tool that runs commands for the lead, such as Code's typecheck-and-lint `diagnostics`, authorizes and runs each command as a shell call, so it is never looser than the shell.
 - A direct-endpoint request goes only to the configured base URL and follows no redirect. Web fetches refuse private destinations and carry no credential.
 - Only harness results that bring in outside content taint the thread. On a tainted thread, shell, edit, write, check and web-fetch need a single-use confirmation, and remembered approvals stop covering them.
 - A tainted thread's search query is refused when it looks like it carries data, before any request leaves; it is a guard the person lowers with the outside-content gate, so at Full access in Work and Code the refusal does not apply.

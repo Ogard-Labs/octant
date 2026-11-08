@@ -34,6 +34,7 @@ describe("native harness instructions", () => {
   });
 
   it.each([
+    "diagnostics",
     "octant_past_threads",
     "octant_side_chat_list_files",
     "octant_side_chat_read_file",
