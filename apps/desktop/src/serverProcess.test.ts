@@ -1099,6 +1099,20 @@ describe("shutdownManagedServer", () => {
     expect(waitForExit).toHaveBeenCalledOnce();
   });
 
+  it("accepts a held child that exits while its native stop request is pending", async () => {
+    const child = { exitCode: null as number | null, signalCode: null, kill: vi.fn() };
+    const waitForExit = vi.fn(async () => true);
+    await shutdownManagedServer(child, {
+      requestStop: async () => {
+        child.exitCode = 0;
+        return false;
+      },
+      waitForExit,
+    });
+    expect(child.kill).not.toHaveBeenCalled();
+    expect(waitForExit).not.toHaveBeenCalled();
+  });
+
   it("requests graceful termination and does not force-kill an exited child", async () => {
     const child = {
       exitCode: null as number | null,
