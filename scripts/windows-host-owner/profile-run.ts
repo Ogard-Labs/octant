@@ -23,8 +23,14 @@ const rosterMode = process.argv[2] === "--roster-key";
 const [launcher, binding, fixture, ...runtimes] = process.argv.slice(
   identityMode || tlsMode || rosterMode || authorityMode || sqliteMode ? 3 : 2,
 );
-if (process.platform !== "win32" || !launcher || !binding || !fixture || runtimes.length !== 3)
-  throw new Error("Supply the owned launcher, binding, fixture and three runtimes.");
+if (
+  process.platform !== "win32" ||
+  !launcher ||
+  !binding ||
+  !fixture ||
+  runtimes.length !== (sqliteMode ? 1 : 3)
+)
+  throw new Error("Supply the owned launcher, binding, fixture and required runtimes.");
 const children = new Set<ChildProcess>();
 const queryExecutable = win32.join(
   process.env.SystemRoot ?? "C:\\Windows",

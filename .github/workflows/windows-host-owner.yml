@@ -141,6 +141,10 @@ jobs:
         run: |
           bun scripts/windows-host-owner/run.ts (Get-Command node).Source "$env:RUNNER_TEMP/owner-smoke.mjs" "$env:RUNNER_TEMP/owner-build/Release/octant-windows-host-owner.node" "$env:RUNNER_TEMP/owner-build/Release/octant-windows-owner-reader.exe"
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Measure guarded SQLite WAL lifecycle in Bun without admitting startup
+        run: |
+          bun scripts/windows-host-owner/profile-run.ts --sqlite-store "$env:RUNNER_TEMP/owner-build/Release/octant-windows-owner-reader.exe" "$env:RUNNER_TEMP/owner-build/Release/octant-windows-host-owner.node" "$env:RUNNER_TEMP/sqlite-store-smoke.mjs" (Get-Command bun).Source
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - run: node node_modules/electron/install.js
       - name: Prove the shipped Electron runtime without a window
         env:
@@ -184,10 +188,6 @@ jobs:
       - name: Prove private authority-state commits in all three runtimes
         run: |
           bun scripts/windows-host-owner/profile-run.ts --authority-state "$env:RUNNER_TEMP/owner-build/Release/octant-windows-owner-reader.exe" "$env:RUNNER_TEMP/owner-build/Release/octant-windows-host-owner.node" "$env:RUNNER_TEMP/authority-state-smoke.mjs" (Get-Command bun).Source (Get-Command node).Source "$pwd/node_modules/electron/dist/electron.exe"
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-      - name: Measure guarded SQLite WAL lifecycle in Bun without admitting startup
-        run: |
-          bun scripts/windows-host-owner/profile-run.ts --sqlite-store "$env:RUNNER_TEMP/owner-build/Release/octant-windows-owner-reader.exe" "$env:RUNNER_TEMP/owner-build/Release/octant-windows-host-owner.node" "$env:RUNNER_TEMP/sqlite-store-smoke.mjs" (Get-Command bun).Source (Get-Command node).Source "$pwd/node_modules/electron/dist/electron.exe"
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - uses: actions/upload-artifact@v4
         with:
