@@ -82,9 +82,11 @@ try {
       $octantImageAtStart = $false
       $octantArgumentLayout = 'image-not-leading'
       $octantArgumentTokenShapes = @()
+      $octantArgumentPathShapes = @()
       $octantTrimmedCommand = $octantCommand.Trim()
       $octantPackageAppRoot = [IO.Path]::GetFullPath((Join-Path $PackageDirectory 'resources/app'))
       $octantPackageAppEntry = [IO.Path]::GetFullPath((Join-Path $octantPackageAppRoot 'apps/desktop/dist/entry.mjs'))
+      $octantPackageRoot = [IO.Path]::GetFullPath($PackageDirectory).TrimEnd([char]92, [char]47) + [IO.Path]::DirectorySeparatorChar
       foreach ($octantPath in $octantPathSpellings) {
         if ($octantCommand.IndexOf($octantPath, [StringComparison]::OrdinalIgnoreCase) -ge 0) {
           $octantImageShape = if ($octantPath.StartsWith('\\?\')) { 'staged-namespaced' } else { 'staged-ordinary' }
@@ -114,6 +116,16 @@ try {
             } elseif ($octantUnquotedToken -match '^--[A-Za-z0-9][A-Za-z0-9_-]*(?:=.*)?$') {
               'option'
             } elseif ($octantUnquotedToken -match '^[A-Za-z]:\\' -or $octantUnquotedToken.StartsWith('\\?\')) {
+              $octantCandidatePath = $octantUnquotedToken
+              if ($octantCandidatePath.StartsWith('\\?\')) { $octantCandidatePath = $octantCandidatePath.Substring(4) }
+              $octantCandidatePath = [IO.Path]::GetFullPath($octantCandidatePath)
+              if ($octantCandidatePath.StartsWith($octantPackageRoot, [StringComparison]::OrdinalIgnoreCase)) {
+                if ($octantArgumentPathShapes.Count -lt 8) {
+                  $octantArgumentPathShapes += [IO.Path]::GetRelativePath($octantPackageRoot, $octantCandidatePath)
+                }
+              } elseif ($octantArgumentPathShapes.Count -lt 8) {
+                $octantArgumentPathShapes += 'outside-staged-package'
+              }
               'path-argument'
             } elseif ($octantToken.StartsWith('"') -and $octantToken.EndsWith('"')) {
               'quoted-argument'
@@ -133,6 +145,7 @@ try {
         executableAtStart = $octantImageAtStart
         argumentLayout = $octantArgumentLayout
         argumentTokenShapes = $octantArgumentTokenShapes
+        argumentPathShapes = $octantArgumentPathShapes
         argument = $octantArgumentShape
         electronSeparator = $octantSeparator
       } | ConvertTo-Json -Compress)
