@@ -637,6 +637,110 @@ cleanup:
   return passed ? 0 : 62;
 }
 
+/* The second reader receives its allow before waiting on the shared position.
+ * A later epoch must still invalidate it after that wait, without another IPC. */
+static int seek_epoch_measure(void)
+{
+  const char *path = "/tmp/octant-seek-epoch";
+  const char *marker = "/tmp/octant-seek-epoch-marker";
+  int file = -1, brokers[2] = {-1, -1}, enrollments[2] = {-1, -1};
+  int results[2][2] = {{-1, -1}, {-1, -1}};
+  pid_t children[2] = {-1, -1};
+  struct octant_mediation_request requests[2] = {{0}, {0}};
+  bool received[2] = {false, false}, identified[2] = {false, false};
+  bool replied[2] = {false, false}, joined[2] = {false, false}, normal[2] = {false, false};
+  struct stat identity = {0};
+  bool created = false, marker_created = false, waiting = false, advanced = false;
+  bool read_allowed = false, seek_refused = false, position_unchanged = false;
+  file = open(path, O_CREAT | O_EXCL | O_RDWR | O_CLOEXEC, 0600);
+  created = file >= 0;
+  if (file < 0 || write(file, content, sizeof(content) - 1) != sizeof(content) - 1 ||
+      fstat(file, &identity) || lseek(file, 0, SEEK_SET)) goto cleanup;
+  for (unsigned i = 0; i < 2; i++) {
+    brokers[i] = open("/dev/octant_mediation", O_RDWR | O_CLOEXEC | O_NONBLOCK);
+    if (brokers[i] < 0) goto cleanup;
+    enrollments[i] = ioctl(brokers[i], OCTANT_MEDIATION_ENROLL_FD, 0);
+    if (enrollments[i] < 0 || pipe2(results[i], O_CLOEXEC)) goto cleanup;
+  }
+  for (unsigned i = 0; i < 2; i++) {
+    children[i] = fork();
+    if (!children[i]) {
+      for (unsigned j = 0; j < 2; j++) {
+        close(brokers[j]); close(results[j][0]);
+        if (j != i) { close(enrollments[j]); close(results[j][1]); }
+      }
+      if (prctl(PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0) || ioctl(enrollments[i], OCTANT_MEDIATION_ENROLL, 0)) _exit(1);
+      close(enrollments[i]);
+      char byte;
+      errno = 0;
+      long long result = i == 0 ? read(file, &byte, 1) : lseek(file, 0, SEEK_END);
+      int error = result < 0 ? errno : 0;
+      bool sent = transfer(results[i][1], &result, sizeof(result), true) &&
+        transfer(results[i][1], &error, sizeof(error), true);
+      _exit(sent ? 0 : 2);
+    }
+    close_owned(&enrollments[i]); close_owned(&results[i][1]);
+    if (children[i] < 0) goto cleanup;
+    received[i] = transfer(brokers[i], &requests[i], sizeof(requests[i]), false);
+    identified[i] = received[i] && requests[i].request_id > 0 && requests[i].operation == OCTANT_MEDIATION_READ &&
+      requests[i].inode == (unsigned long long)identity.st_ino &&
+      requests[i].device_major == major(identity.st_dev) && requests[i].device_minor == minor(identity.st_dev);
+    if (!identified[i]) goto cleanup;
+  }
+  struct octant_mediation_answer answer = {.request_id = requests[1].request_id,
+    .namespace_epoch = requests[1].namespace_epoch, .allow = 1};
+  replied[1] = write(brokers[1], &answer, sizeof(answer)) == sizeof(answer);
+  if (!replied[1]) goto cleanup;
+  struct pollfd ready = {.fd = results[1][0], .events = POLLIN};
+  waiting = poll(&ready, 1, 100) == 0;
+  if (!waiting) goto cleanup;
+  int changed = open(marker, O_CREAT | O_EXCL | O_WRONLY | O_CLOEXEC, 0600);
+  marker_created = changed >= 0;
+  close_owned(&changed);
+  struct octant_mediation_status after = {0};
+  advanced = marker_created && !ioctl(brokers[0], OCTANT_MEDIATION_STATUS, &after) &&
+    !after.active_mutations && after.namespace_epoch > requests[1].namespace_epoch;
+  if (!advanced) goto cleanup;
+  answer = (struct octant_mediation_answer) {.request_id = requests[0].request_id,
+    .namespace_epoch = after.namespace_epoch, .allow = 1};
+  replied[0] = write(brokers[0], &answer, sizeof(answer)) == sizeof(answer);
+  if (!replied[0]) goto cleanup;
+  for (unsigned i = 0; i < 2; i++) {
+    long long result = -2;
+    int error = 0;
+    bool reported = transfer(results[i][0], &result, sizeof(result), false) &&
+      transfer(results[i][0], &error, sizeof(error), false);
+    if (i == 0) read_allowed = reported && result == 1 && error == 0;
+    else seek_refused = reported && result == -1 && error == EACCES;
+  }
+cleanup:
+  // Answer or retire both contexts even if an earlier ordering assertion failed.
+  for (unsigned i = 0; i < 2; i++) {
+    if (received[i] && !replied[i] && brokers[i] >= 0) {
+      struct octant_mediation_answer refused = {.request_id = requests[i].request_id,
+        .namespace_epoch = requests[i].namespace_epoch, .allow = 0};
+      replied[i] = write(brokers[i], &refused, sizeof(refused)) == sizeof(refused);
+    }
+    close_owned(&brokers[i]); close_owned(&enrollments[i]);
+  }
+  for (unsigned i = 0; i < 2; i++) {
+    if (children[i] > 0) joined[i] = join_owned(children[i], &normal[i]);
+    close_owned(&results[i][0]); close_owned(&results[i][1]);
+  }
+  if (file >= 0) position_unchanged = lseek(file, 0, SEEK_CUR) == 1;
+  close_owned(&file);
+  bool file_removed = !created || !unlink(path);
+  bool marker_removed = !marker_created || !unlink(marker);
+  bool cleaned = file_removed && marker_removed;
+  bool passed = identified[0] && identified[1] && replied[0] && replied[1] && waiting && advanced &&
+    read_allowed && seek_refused && position_unchanged && joined[0] && joined[1] && normal[0] && normal[1] && cleaned;
+  printf("OCTANT_SEEK_EPOCH {\"bothRepliesReleased\":%s,\"positionWait\":%s,\"epochAdvanced\":%s,\"readerAllowed\":%s,\"staleSeekRefused\":%s,\"positionUnchanged\":%s,\"childrenJoined\":%s,\"cleaned\":%s}\n",
+    replied[0] && replied[1] ? "true" : "false", waiting ? "true" : "false", advanced ? "true" : "false",
+    read_allowed ? "true" : "false", seek_refused ? "true" : "false", position_unchanged ? "true" : "false",
+    joined[0] && joined[1] ? "true" : "false", cleaned ? "true" : "false");
+  return passed ? 0 : 63;
+}
+
 #define EPOCH_ROOT "/tmp/octant-epoch-mount"
 #define EPOCH_FILE "/tmp/octant-epoch-content"
 static const char *epoch_cases[] = {
@@ -967,6 +1071,7 @@ int main(void)
     int result = cpus == 2 ? policy_measure("--metadata-control") : 61;
     if (!result) result = measure();
     if (!result) result = seek_position_measure();
+    if (!result) result = seek_epoch_measure();
     if (!result) result = namespace_measure();
     if (!result) result = ordered_measure();
     if (!result) result = outside_epoch_measure();
