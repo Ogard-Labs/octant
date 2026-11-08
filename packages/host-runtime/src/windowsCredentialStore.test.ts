@@ -78,13 +78,15 @@ describe("Windows provider credentials", () => {
       await store.delete(providerInstanceId);
       expect(calls.map((call) => Buffer.from(call.input)[83])).toEqual([purpose, purpose, purpose]);
     }
-    expect(() =>
-      makeWindowsCredentialStore({
-        helperPath,
-        storeScope,
-        ...JSON.parse('{"namespace":"other"}'),
-      }),
-    ).toThrow(CredentialStoreFailure);
+    for (const namespace of ["other", null, 0, {}]) {
+      expect(() =>
+        makeWindowsCredentialStore({
+          helperPath,
+          storeScope,
+          ...JSON.parse(JSON.stringify({ namespace })),
+        }),
+      ).toThrow(CredentialStoreFailure);
+    }
   });
 
   it("accepts the exact native byte cap and refuses overflow before invoking the helper", async () => {

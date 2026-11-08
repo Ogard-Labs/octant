@@ -56,7 +56,9 @@ export function makeWindowsCredentialStore(
   options: MakeWindowsCredentialStoreOptions,
 ): CredentialStore {
   const timeoutMs = options.timeoutMs ?? 5_000;
-  const purpose = NAMESPACES.indexOf(options.namespace ?? "provider");
+  const purpose = NAMESPACES.indexOf(
+    options.namespace === undefined ? "provider" : options.namespace,
+  );
   if (
     purpose < 0 ||
     !/^[a-z]:[\\/]/i.test(options.helperPath) ||
