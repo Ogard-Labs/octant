@@ -11,6 +11,7 @@ import type { ChatClient } from "@octant/client-runtime";
 import { OctantButton } from "../../ui/base/OctantButton";
 import { OctantSelectField } from "../../ui/base/OctantSelect";
 import { SurfaceSection } from "../../surface/SurfaceHeader";
+import { turnReplyText } from "../../chat/chatReply";
 import { CellState, cellElapsedMs, cellTokens } from "./BenchmarkLiveGrid";
 import {
   CHECK_KIND_WORDS,
@@ -19,7 +20,6 @@ import {
   formatSpeed,
   formatTokens,
   formatUsd,
-  replyOfTurn,
   type ContenderNames,
 } from "./benchmarkPresentation";
 
@@ -263,7 +263,7 @@ function useCellAnswers(
       Promise.resolve()
         .then(() => chatClient.thread(decodeChatThreadId(String(cell.threadId))))
         .then(
-          (view): Answer => ({ status: "ready", text: replyOfTurn(view, String(cell.turnId)) }),
+          (view): Answer => ({ status: "ready", text: turnReplyText(view, String(cell.turnId)) }),
           (): Answer => ({ status: "failure" }),
         )
         .then((answer) => {

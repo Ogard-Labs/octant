@@ -125,6 +125,8 @@ export function BenchmarksWorkspace(props: BenchmarksWorkspaceProps) {
   const [selectedCaseId, setSelectedCaseId] = useState<string | undefined>(undefined);
   const [report, setReport] = useState<TurnDiagnosticsReport | undefined>(undefined);
   const [notice, setNotice] = useState<string | undefined>(undefined);
+  // Why the run in view could not be read; a later successful read clears it.
+  const [readNotice, setReadNotice] = useState<string | undefined>(undefined);
   const [importOpen, setImportOpen] = useState(false);
   const [pasted, setPasted] = useState("");
   const [importError, setImportError] = useState<string | undefined>(undefined);
@@ -145,6 +147,12 @@ export function BenchmarksWorkspace(props: BenchmarksWorkspaceProps) {
     [props.providers, props.providerSnapshot],
   );
   const models = useMemo(() => modelChoices(props.providerSnapshot), [props.providerSnapshot]);
+  // Contenders of a suite with Code cases must be able to run in Code, so they
+  // come from the Code picker policy rather than the Chat one.
+  const codeModels = useMemo(
+    () => modelChoices(props.providerSnapshot, "code"),
+    [props.providerSnapshot],
+  );
 
   const reload = useCallback(async () => {
     try {
@@ -194,10 +202,11 @@ export function BenchmarksWorkspace(props: BenchmarksWorkspaceProps) {
         const read = await client.readRun({ runId: decodeBenchmarkRunId(runId) });
         if (!mounted.current || token !== readToken.current) return;
         setRunRead(read);
+        setReadNotice(undefined);
         if (read.run.status !== "running") void reload();
       } catch (error) {
         if (mounted.current && token === readToken.current) {
-          setNotice(refusalSentence(error, "The run could not be read."));
+          setReadNotice(refusalSentence(error, "The run could not be read."));
         }
       }
     },
@@ -216,8 +225,19 @@ export function BenchmarksWorkspace(props: BenchmarksWorkspaceProps) {
   const runStatus = runRead?.run.status;
   useEffect(() => {
     if (selectedRunId === undefined || runStatus !== "running") return;
-    const timer = setInterval(() => void readRun(selectedRunId), pollMs);
-    return () => clearInterval(timer);
+    // Each read is scheduled after the last one settles, so a slow host never
+    // gets overlapping reads of the same run.
+    let stopped = false;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const next = async () => {
+      await readRun(selectedRunId);
+      if (!stopped) timer = setTimeout(() => void next(), pollMs);
+    };
+    timer = setTimeout(() => void next(), pollMs);
+    return () => {
+      stopped = true;
+      clearTimeout(timer);
+    };
   }, [selectedRunId, runStatus, pollMs, readRun]);
 
   const suites = load.status === "ready" ? load.suites : [];
@@ -354,6 +374,11 @@ export function BenchmarksWorkspace(props: BenchmarksWorkspaceProps) {
         />
       )}
 
+      {readNotice === undefined ? null : (
+        <p aria-live="polite" className="usage-workspace__status" role="status">
+          {readNotice}
+        </p>
+      )}
       {notice === undefined ? null : (
         <p aria-live="polite" className="usage-workspace__status" role="status">
           {notice}
@@ -541,7 +566,11 @@ export function BenchmarksWorkspace(props: BenchmarksWorkspaceProps) {
       {editing !== undefined || selectedSuite === undefined ? null : (
         <>
           <BenchmarkRunBuilder
-            models={models}
+            models={
+              selectedSuite.cases.some((candidate) => candidate.kind === "code")
+                ? codeModels
+                : models
+            }
             names={names}
             onStart={startRun}
             report={report}
@@ -622,6 +651,7 @@ export function BenchmarksWorkspace(props: BenchmarksWorkspaceProps) {
             selectedCaseId={selectedCaseId}
           />
           <BenchmarkLeaderboard
+            key={String(runRead.run.runId)}
             metricsByCell={metricsByCell}
             names={names}
             onSelectCase={setSelectedCaseId}

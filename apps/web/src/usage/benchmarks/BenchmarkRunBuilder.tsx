@@ -180,7 +180,7 @@ export function BenchmarkRunBuilder(props: BenchmarkRunBuilderProps) {
             aria-label="Token budget"
             inputMode="numeric"
             onChange={(event) => setMaxTokens(event.currentTarget.value)}
-            placeholder="No limit"
+            placeholder="Set this or the other"
             value={maxTokens}
           />
         </label>
@@ -190,7 +190,7 @@ export function BenchmarkRunBuilder(props: BenchmarkRunBuilderProps) {
             aria-label="Cost budget in US dollars"
             inputMode="decimal"
             onChange={(event) => setMaxCost(event.currentTarget.value)}
-            placeholder="No limit"
+            placeholder="Set this or the other"
             value={maxCost}
           />
         </label>
@@ -211,7 +211,7 @@ export function BenchmarkRunBuilder(props: BenchmarkRunBuilderProps) {
         {contenders.length === 0
           ? "Choose contenders to see an estimate."
           : estimate.usd === undefined
-            ? "No estimate yet. Models are priced from their earlier turns, and these have none."
+            ? "No estimate yet. Models are priced from their earlier turns, and none of these can be priced yet."
             : `Estimated cost ${formatUsd(estimate.usd)} for ${estimate.cells.toLocaleString("en")} cells${
                 estimate.unpriced.length === 0
                   ? "."

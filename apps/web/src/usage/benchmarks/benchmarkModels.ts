@@ -1,4 +1,4 @@
-import type { ProviderInstance } from "@octant/contracts";
+import type { OctantMode, ProviderInstance } from "@octant/contracts";
 import type { ProviderRegistrySnapshot } from "@octant/contracts/providers";
 import { buildModelPickerGroups } from "@octant/domain";
 import { contenderKey, type ContenderNames } from "./benchmarkPresentation";
@@ -19,6 +19,7 @@ export interface ModelChoice {
  */
 export function modelChoices(
   snapshot: ProviderRegistrySnapshot | undefined,
+  mode: OctantMode = "chat",
 ): ReadonlyArray<ModelChoice> {
   if (snapshot === undefined) return [];
   const groups = buildModelPickerGroups({
@@ -26,7 +27,7 @@ export function modelChoices(
     observedByInstance: new Map(snapshot.observedStates.map((state) => [state.instanceId, state])),
     providerOrder: snapshot.defaults.providerOrder,
     hiddenModels: snapshot.defaults.hiddenModels,
-    mode: "chat",
+    mode,
   });
   const choices: ModelChoice[] = [];
   const seen = new Set<string>();

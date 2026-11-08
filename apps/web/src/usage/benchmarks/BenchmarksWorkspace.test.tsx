@@ -298,34 +298,23 @@ describe("importing and exporting a suite as JSON", () => {
 });
 
 describe("the run builder", () => {
-  it("estimates the cost from each model's earlier turns and starts with the chosen contenders", async () => {
+  it("says there is no estimate when a model's earlier cost cannot be averaged honestly, and starts with the chosen contenders", async () => {
     const actor = user();
     const client = makeClient();
     mount(client, { diagnosticsClient: { diagnostics: vi.fn(async () => pricedReport()) } });
 
     await openSuite(actor);
     const contenders = await screen.findByRole("group", { name: "Contenders" });
-    // No history for this model, so nothing can price the run yet.
-    await actor.click(
-      within(contenders).getByRole("checkbox", { name: "Provider A · Deep model" }),
-    );
-    expect(await screen.findByText(/No estimate yet/)).toBeInTheDocument();
-
     await actor.click(
       within(contenders).getByRole("checkbox", { name: "Provider A · Fast model" }),
     );
     await actor.click(screen.getByRole("button", { name: "Increase Repetitions" }));
-    expect(
-      await screen.findByText(
-        /Estimated cost \$0\.4000 for 8 cells, not counting Provider A · Deep model/,
-      ),
-    ).toBeInTheDocument();
+    // The report sums cost over turns that reported usage but does not count
+    // them, so a mean would be understated and none is shown.
+    expect(await screen.findByText(/No estimate yet/)).toBeInTheDocument();
+    expect(screen.queryByText(/Estimated cost/)).toBeNull();
 
-    await actor.click(
-      within(contenders).getByRole("checkbox", { name: "Provider A · Deep model" }),
-    );
     await actor.type(screen.getByRole("textbox", { name: "Cost budget in US dollars" }), "1");
-    expect(await screen.findByText(/Estimated cost \$0\.4000 for 4 cells\./)).toBeInTheDocument();
     await actor.click(screen.getByRole("button", { name: "Start run" }));
 
     await waitFor(() => expect(client.startRun).toHaveBeenCalledTimes(1));
@@ -387,6 +376,41 @@ describe("the live grid", () => {
     const settledReads = readRun.mock.calls.length;
     await new Promise((resolve) => setTimeout(resolve, 150));
     expect(readRun.mock.calls.length).toBe(settledReads);
+  });
+
+  it("never has two reads of the run in flight, even when a read outlives the interval", async () => {
+    const actor = user();
+    let inFlight = 0;
+    let peak = 0;
+    let reads = 0;
+    const readRun = vi.fn(async () => {
+      inFlight += 1;
+      peak = Math.max(peak, inFlight);
+      reads += 1;
+      await new Promise((resolve) => setTimeout(resolve, 70));
+      inFlight -= 1;
+      return readResponse("running");
+    });
+    mount(makeClient({ readRun }));
+
+    await openRun(actor);
+    await waitFor(() => expect(reads).toBeGreaterThanOrEqual(4), { timeout: 3_000 });
+    expect(peak).toBe(1);
+  });
+
+  it("clears a failed read's notice when a later poll succeeds", async () => {
+    const actor = user();
+    let reads = 0;
+    const readRun = vi.fn(async () => {
+      reads += 1;
+      if (reads === 2) throw new BenchmarksClientError("The host is busy.");
+      return readResponse("running");
+    });
+    mount(makeClient({ readRun }));
+
+    await openRun(actor);
+    expect(await screen.findByText("The host is busy.")).toBeInTheDocument();
+    await waitFor(() => expect(screen.queryByText("The host is busy.")).toBeNull());
   });
 
   it("stops polling when the view goes away", async () => {
@@ -489,10 +513,15 @@ describe("case compare", () => {
       turns: [
         {
           id: turnId,
-          attempts: [{ outcome: "completed", responseRefs: [{ contentId: `content-${turnId}` }] }],
+          attempts: [
+            {
+              outcome: "completed",
+              responseRefs: [{ contentId: `content-${turnId}`, digest: "sha256:x" }],
+            },
+          ],
         },
       ],
-      contents: [{ contentId: `content-${turnId}`, role: "assistant", body }],
+      contents: [{ contentId: `content-${turnId}`, role: "assistant", body, digest: "sha256:x" }],
     };
   }
 
@@ -526,6 +555,24 @@ describe("case compare", () => {
 
     await actor.click(within(fast).getByRole("button", { name: "Open thread" }));
     expect(onOpenSubject).toHaveBeenCalledWith("chat-thread", THREAD_FAST);
+  });
+
+  it("shows an answer without the provider's citation markers", async () => {
+    const actor = user();
+    const thread = vi.fn(
+      async () =>
+        view("Oslo.\uE200cite\uE202turn0view0\uE201 It is the capital.", TURN_FAST) as never,
+    );
+    mount(makeClient(), { chatClient: { thread } });
+
+    await openRun(actor);
+
+    const fast = await screen.findByRole("region", {
+      name: "Answers from Provider A · Fast model",
+    });
+    const answer = await within(fast).findByLabelText("Answer");
+    expect(answer).toHaveTextContent("Oslo. It is the capital.");
+    expect(answer.textContent).not.toContain("view0");
   });
 
   it("switches to another case without copying any answer into the run", async () => {

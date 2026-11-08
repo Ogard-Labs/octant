@@ -11,7 +11,7 @@ import {
   type BenchmarkRunStatus,
   type BenchmarkSuite,
   type BenchmarkSuiteSaveRequest,
-  type ChatThreadView,
+  type TurnDiagnosticsModelRow,
   type TurnDiagnosticsReport,
 } from "@octant/contracts";
 import {
@@ -314,9 +314,20 @@ export interface CostEstimate {
 
 /**
  * Cells times each contender's mean cost per turn, read from the diagnostics
- * report's model rows. A contender no turn has priced is left out and named,
+ * report's model rows. A contender that cannot be priced is left out and named,
  * so the figure is never a quiet undercount.
  */
+/**
+ * How many of a model row's turns its cost sum covers. The row sums cost only
+ * over turns that reported usage but keeps no count of them, and dividing by
+ * every turn would understate the mean, so there is no honest divisor yet and
+ * every contender reads as having no history. Return the count here once the
+ * report carries one.
+ */
+function turnsThatReportedCost(_row: TurnDiagnosticsModelRow): number | undefined {
+  return undefined;
+}
+
 export function estimateRunCost(input: {
   readonly report: TurnDiagnosticsReport | undefined;
   readonly contenders: ReadonlyArray<ContenderRef>;
@@ -332,37 +343,18 @@ export function estimateRunCost(input: {
         String(candidate.providerInstanceId) === String(contender.providerInstanceId) &&
         String(candidate.modelId) === String(contender.modelId),
     );
-    if (row === undefined || row.costUsd === undefined || row.turns === 0) {
+    const priced = row === undefined ? undefined : turnsThatReportedCost(row);
+    if (row === undefined || row.costUsd === undefined || priced === undefined) {
       unpriced.push(contender);
       continue;
     }
-    usd = (usd ?? 0) + (row.costUsd / row.turns) * perContender;
+    usd = (usd ?? 0) + (row.costUsd / priced) * perContender;
   }
   return { cells: perContender * input.contenders.length, usd, unpriced };
 }
 
 export function cellCountWithinLimit(cells: number): boolean {
   return cells <= MAX_BENCHMARK_CELLS;
-}
-
-// ── Answers ────────────────────────────────────────────────────────────────
-
-/**
- * A turn's reply, read from its thread's content: the completed attempts'
- * assistant text, joined. The run keeps no copy, so this is the only source.
- */
-export function replyOfTurn(view: ChatThreadView, turnId: string): string | undefined {
-  const turn = view.turns.find((candidate) => String(candidate.id) === turnId);
-  if (turn === undefined) return undefined;
-  const contents = new Map(view.contents.map((content) => [String(content.contentId), content]));
-  const reply = turn.attempts
-    .filter((attempt) => attempt.outcome === "completed")
-    .flatMap((attempt) => attempt.responseRefs)
-    .map((reference) => contents.get(String(reference.contentId)))
-    .flatMap((content) => (content?.role === "assistant" ? [content.body] : []))
-    .join("")
-    .trim();
-  return reply.length === 0 ? undefined : reply;
 }
 
 // ── Suite drafts ───────────────────────────────────────────────────────────
@@ -575,18 +567,20 @@ function checkToRaw(
     case "contains":
     case "not-contains":
       if (check.text.trim() === "") return { message: `${where} needs the text to look for.` };
-      return { raw: { kind: check.kind, text: check.text, caseSensitive: check.caseSensitive } };
+      return {
+        raw: { kind: check.kind, text: check.text.trim(), caseSensitive: check.caseSensitive },
+      };
     case "equals":
       if (check.text.trim() === "") return { message: `${where} needs the text to compare to.` };
-      return { raw: { kind: "equals", text: check.text, trim: check.trim } };
+      return { raw: { kind: "equals", text: check.text.trim(), trim: check.trim } };
     case "matches": {
       if (check.pattern.trim() === "") return { message: `${where} needs a pattern.` };
       try {
-        new RegExp(check.pattern, check.flags);
+        new RegExp(check.pattern.trim(), check.flags);
       } catch {
         return { message: `${where} has a pattern that is not a valid regular expression.` };
       }
-      return { raw: { kind: "matches", pattern: check.pattern, flags: check.flags } };
+      return { raw: { kind: "matches", pattern: check.pattern.trim(), flags: check.flags } };
     }
     case "valid-json":
       return { raw: { kind: "valid-json" } };
@@ -596,7 +590,7 @@ function checkToRaw(
       if (seconds === undefined || seconds < 1 || seconds > 600) {
         return { message: `${where} needs a time limit between 1 and 600 seconds.` };
       }
-      return { raw: { kind: check.kind, command: check.command, timeoutSeconds: seconds } };
+      return { raw: { kind: check.kind, command: check.command.trim(), timeoutSeconds: seconds } };
     }
     case "max-files-changed": {
       const count = wholeNumber(check.count);
@@ -641,7 +635,7 @@ export function draftToSaveRequest(draft: SuiteDraft): DraftResult {
       caseId: candidate.caseId,
       kind: candidate.kind,
       title: candidate.title.trim(),
-      prompt: candidate.prompt,
+      prompt: candidate.prompt.trim(),
       checks,
       ...(candidate.referenceAnswer.trim() === ""
         ? {}
