@@ -113,6 +113,7 @@ describe("native harness diagnostics", () => {
         code: "TS2322",
       },
       {
+        package: "@octant/server",
         file: "src/b.ts",
         line: 10,
         column: 2,
@@ -204,6 +205,58 @@ describe("native harness diagnostics", () => {
     expect(outcome.result).toMatchObject({ error: "no-diagnostics-command" });
     expect((outcome.result as { message: string }).message).toContain("Pass the command");
     expect(ran).toEqual([]);
+  });
+
+  it("does not count its own look at package.json as the model's read before an edit", async () => {
+    const { tools, call } = await fixture({
+      files: { "package.json": scripts({ lint: "eslint ." }) },
+    });
+    await call({ which: "lint" });
+    const edit = await tools.execute({
+      name: "edit",
+      inputJson: JSON.stringify({ path: "package.json", oldText: "eslint .", newText: "x" }),
+    });
+    expect(edit.result).toMatchObject({ error: "not-read-first" });
+  });
+
+  it("keeps a whole path that contains spaces, after a runner prefix too", () => {
+    const root = "/repo/my project";
+    const output = [
+      "/repo/my project/src/a.ts(3,7): error TS2322: Bad type.",
+      "web:typecheck: src/my file.ts:4:2 - error TS2304: Cannot find name 'x'.",
+      "src/other dir/b.ts:5:1: Missing semicolon. [Error/semi]",
+      "src/other dir/c.ts:1:7 lint/style/useConst  FIXABLE  ━━━━",
+      "  ✖ Use const.",
+    ].join("\n");
+    expect(
+      parseDiagnostics(output, root).map(({ file, line, package: name }) => ({
+        file,
+        line,
+        package: name,
+      })),
+    ).toEqual([
+      { file: "src/a.ts", line: 3, package: undefined },
+      { file: "src/my file.ts", line: 4, package: "web" },
+      { file: "src/other dir/b.ts", line: 5, package: undefined },
+      { file: "src/other dir/c.ts", line: 1, package: undefined },
+    ]);
+  });
+
+  it("keeps the same problem from two packages apart and still filters them by file", async () => {
+    const line = "src/index.ts(3,7): error TS2322: Bad type.";
+    const output = [
+      `@octant/contracts:typecheck: ${line}`,
+      `@octant/domain:typecheck: ${line}`,
+      `@octant/domain:typecheck: ${line}`,
+    ].join("\n");
+    expect(parseDiagnostics(output, "/repo")).toEqual([
+      expect.objectContaining({ file: "src/index.ts", package: "@octant/contracts" }),
+      expect.objectContaining({ file: "src/index.ts", package: "@octant/domain" }),
+    ]);
+    const { call } = await fixture({ output: () => ({ exitCode: 2, output }) });
+    expect(
+      (await call({ command: "turbo run typecheck", files: ["src/index.ts"] })).result,
+    ).toMatchObject({ totalProblems: 2 });
   });
 
   it("runs an explicit command instead of looking for scripts", async () => {

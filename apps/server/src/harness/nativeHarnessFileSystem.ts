@@ -184,6 +184,11 @@ export class NativeHarnessFileSystem {
     readonly path: string;
     readonly offset?: number | undefined;
     readonly limit?: number | undefined;
+    /**
+     * Whether this read lets a later edit of the file through. A read Octant
+     * makes for itself, not one the model asked for, passes false.
+     */
+    readonly marksRead?: boolean;
   }): Promise<NativeHarnessReadResult> {
     const resolved = await this.#contained(input.path);
     if (resolved === undefined) return { kind: "refused", reason: "path-escapes-root" };
@@ -217,7 +222,7 @@ export class NativeHarnessFileSystem {
     if (!info.isFile()) return { kind: "refused", reason: "not-a-file" };
     if (info.size > this.#maxFileBytes) return { kind: "refused", reason: "file-too-large" };
     const content = await readFile(resolved, "utf8");
-    this.#readMarks.set(resolved, info.mtime.toISOString());
+    if (input.marksRead !== false) this.#readMarks.set(resolved, info.mtime.toISOString());
     return readSlice(display, content, input);
   }
 

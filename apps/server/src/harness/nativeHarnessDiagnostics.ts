@@ -15,6 +15,8 @@ const MAX_OUTPUT_TAIL_BYTES = 4 * 1024;
 export type DiagnosticsCheck = "typecheck" | "lint" | "check" | "both";
 
 export interface NativeHarnessDiagnostic {
+  /** The workspace package a runner said the problem came from; `file` is relative to it. */
+  readonly package?: string;
   readonly file: string;
   readonly line: number;
   readonly column: number;
@@ -58,7 +60,9 @@ export async function discoverDiagnosticsCommands(
   filesystem: Pick<NativeHarnessFileSystemPort, "read">,
   which: "typecheck" | "lint" | "both",
 ): Promise<Discovery> {
-  const manifest = await filesystem.read({ path: "package.json" });
+  // Discovery's own look is not the model's read: it must not let an edit
+  // change package.json the model never read.
+  const manifest = await filesystem.read({ path: "package.json", marksRead: false });
   if (manifest.kind !== "file" || manifest.bounds.truncated) return { status: "none" };
   let scripts: Readonly<Record<string, unknown>>;
   try {
@@ -103,22 +107,30 @@ export async function discoverDiagnosticsCommands(
 
 // Color codes a tool prints even without a terminal would hide every location.
 const ANSI = new RegExp(`${String.fromCharCode(27)}\\[[0-9;]*m`, "g");
-const TSC = /(?:^|\s)([^\s()]+)\((\d+),(\d+)\): (error|warning|message) (TS\d+): (.+)$/;
-const TSC_PRETTY = /(?:^|\s)([^\s:]+):(\d+):(\d+) - (error|warning|message)(?: (TS\d+))?: (.+)$/;
-const UNIX = /(?:^|\s)([^\s:]+):(\d+):(\d+): (.+)$/;
+// A workspace runner names the package a line came from before the line
+// itself: turbo as `package:task: `, pnpm's recursive runs as `dir script: `.
+// The task must start with a letter, so `file:3:7: message` is never a prefix.
+const TURBO_PREFIX = /^([^\s:]+):([A-Za-z][\w:-]*):(?: (.*))?$/;
+const PNPM_PREFIX = /^([^\s:]+) ([A-Za-z][\w:-]*): (.*)$/;
+// Paths are matched from the start of the line, so one that holds spaces
+// stays whole.
+const TSC = /^\s*(.+?)\((\d+),(\d+)\): (error|warning|message) (TS\d+): (.+)$/;
+const TSC_PRETTY = /^\s*(.+?):(\d+):(\d+) - (error|warning|message)(?: (TS\d+))?: (.+)$/;
+const UNIX = /^\s*(.+?):(\d+):(\d+): (.+)$/;
 const UNIX_SEVERITY = /^(error|warning|warn|info|note)\b:?\s*(.+)$/i;
 const UNIX_TRAILER = /\s*\[(?:(error|warning|info)\/)?([^\]\s]+)\]$/i;
-const BIOME_HEADER = /(?:^|\s)([^\s:]+):(\d+):(\d+) ([a-z]+\/\S+)/;
+const BIOME_HEADER = /^\s*(.+?):(\d+):(\d+) ([a-z]+\/\S+)/;
 const BIOME_MESSAGE = /^\s*([✖×!⚠ℹ])\s+(.+)$/;
-const STYLISH_FILE = /^(\/\S+|[^\s:]+\.[A-Za-z0-9]+)$/;
+const STYLISH_FILE = /^(\/.*\.[A-Za-z0-9]+|[^\s:]+\.[A-Za-z0-9]+)$/;
 const STYLISH_ROW = /^\s+(\d+):(\d+)\s+(error|warning)\s+(.+?)(?:\s{2,}(\S+))?$/;
 
 /**
  * Problems read from a typecheck or lint command's output. It recognizes
  * tsc's two formats, the `file:line:col: message` lines the unix and gnu
  * reporters print (ESLint, oxlint), Biome's diagnostic headers, and ESLint's
- * default per-file listing. A line it does not recognize is skipped, never
- * guessed at; the caller keeps the raw output for that case.
+ * default per-file listing, each with or without a workspace runner's
+ * package prefix. A line it does not recognize is skipped, never guessed at;
+ * the caller keeps the raw output for that case.
  */
 export function parseDiagnostics(
   output: string,
@@ -126,20 +138,30 @@ export function parseDiagnostics(
 ): ReadonlyArray<NativeHarnessDiagnostic> {
   const problems: NativeHarnessDiagnostic[] = [];
   const seen = new Set<string>();
+  // Two packages can report the same package-relative file and line; each
+  // is its own problem.
   const add = (problem: NativeHarnessDiagnostic) => {
-    const key = `${problem.file}:${problem.line}:${problem.column}:${problem.message}`;
+    const key = JSON.stringify([
+      problem.package ?? "",
+      problem.file,
+      problem.line,
+      problem.column,
+      problem.message,
+    ]);
     if (seen.has(key)) return;
     seen.add(key);
     problems.push(problem);
   };
-  const at = (file: string, line: string, column: string) => ({
+  const at = (pkg: string | undefined, file: string, line: string, column: string) => ({
+    ...(pkg === undefined ? {} : { package: pkg }),
     file: relativeTo(root, file),
     line: Number(line),
     column: Number(column),
   });
-  let stylishFile: string | undefined;
+  let stylish: { readonly pkg: string | undefined; readonly file: string } | undefined;
   let biome:
     | {
+        readonly pkg: string | undefined;
         readonly file: string;
         readonly line: string;
         readonly column: string;
@@ -149,7 +171,7 @@ export function parseDiagnostics(
   const flushBiome = () => {
     if (biome === undefined) return;
     add({
-      ...at(biome.file, biome.line, biome.column),
+      ...at(biome.pkg, biome.file, biome.line, biome.column),
       severity: "error",
       message: biome.code,
       code: biome.code,
@@ -157,13 +179,13 @@ export function parseDiagnostics(
     biome = undefined;
   };
   for (const raw of output.replace(ANSI, "").split(/\r?\n/)) {
-    const line = raw.trimEnd();
+    const { pkg, line } = withoutRunnerPrefix(raw.trimEnd());
     if (biome !== undefined) {
       const message = BIOME_MESSAGE.exec(line);
       if (message !== null) {
         const [, mark = "", text = ""] = message;
         add({
-          ...at(biome.file, biome.line, biome.column),
+          ...at(biome.pkg, biome.file, biome.line, biome.column),
           severity: mark === "ℹ" ? "info" : mark === "!" || mark === "⚠" ? "warning" : "error",
           message: clip(text),
           code: biome.code,
@@ -177,7 +199,7 @@ export function parseDiagnostics(
       flushBiome();
       const [, file = "", row = "", column = "", severity = "", code, message = ""] = tsc;
       add({
-        ...at(file, row, column),
+        ...at(pkg, file, row, column),
         severity: severity === "message" ? "info" : severity === "warning" ? "warning" : "error",
         message: clip(message),
         ...(code === undefined ? {} : { code }),
@@ -203,7 +225,7 @@ export function parseDiagnostics(
         message = leading[2] ?? message;
       }
       add({
-        ...at(file, row, column),
+        ...at(pkg, file, row, column),
         severity,
         message: clip(message),
         ...(code === undefined ? {} : { code }),
@@ -214,14 +236,14 @@ export function parseDiagnostics(
     if (header !== null && isPath(header[1])) {
       flushBiome();
       const [, file = "", row = "", column = "", code = ""] = header;
-      biome = { file, line: row, column, code };
+      biome = { pkg, file, line: row, column, code };
       continue;
     }
     const row = STYLISH_ROW.exec(line);
-    if (row !== null && stylishFile !== undefined) {
+    if (row !== null && stylish !== undefined) {
       const [, lineNumber = "", column = "", severity = "", message = "", code] = row;
       add({
-        ...at(stylishFile, lineNumber, column),
+        ...at(stylish.pkg, stylish.file, lineNumber, column),
         severity: severity === "warning" ? "warning" : "error",
         message: clip(message),
         ...(code === undefined ? {} : { code }),
@@ -229,10 +251,20 @@ export function parseDiagnostics(
       continue;
     }
     const file = STYLISH_FILE.exec(line);
-    if (file !== null && isPath(file[1])) stylishFile = file[1];
+    if (file !== null && isPath(file[1])) stylish = { pkg, file: file[1] };
   }
   flushBiome();
   return problems;
+}
+
+function withoutRunnerPrefix(line: string): {
+  readonly pkg: string | undefined;
+  readonly line: string;
+} {
+  const prefixed = TURBO_PREFIX.exec(line) ?? PNPM_PREFIX.exec(line);
+  return prefixed === null
+    ? { pkg: undefined, line }
+    : { pkg: prefixed[1], line: prefixed[3] ?? "" };
 }
 
 /** Whether a problem's file is one of the files the call asked about, or inside a folder it named. */
