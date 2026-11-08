@@ -174,7 +174,9 @@ int wmain(int argc, wchar_t** argv) {
   std::wstring ordinary(local); CoTaskMemFree(local);
   if (ordinary.empty() || ordinary.size() > 32000) return refuse("fixture-known-folder");
   if (ordinary.compare(0, 4, L"\\\\?\\") == 0) ordinary.erase(0, 4);
-  fixture.root = L"\\\\?\\" + ordinary + L"\\octant-artifact-qa-" + std::to_wstring(GetCurrentProcessId()) + L"-" + std::to_wstring(GetTickCount64());
+  GUID nonce{}; wchar_t label[39]{};
+  if (FAILED(CoCreateGuid(&nonce)) || StringFromGUID2(nonce, label, 39) != 39) return refuse("fixture-identity");
+  fixture.root = L"\\\\?\\" + ordinary + L"\\octant-artifact-qa-" + label;
   SECURITY_ATTRIBUTES attributes{sizeof(SECURITY_ATTRIBUTES), fixture.safe, FALSE};
   if (!CreateDirectoryW(fixture.root.c_str(), &attributes)) return refuse("new-fixture-root");
   fixture.created = true;
