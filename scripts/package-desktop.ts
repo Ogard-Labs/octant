@@ -50,6 +50,7 @@ import { buildBrowserTextInput } from "./build-browser-text-input";
 import { buildDesktopPeerStatus } from "./build-desktop-peer-status";
 import { buildDesktopPeerLinux } from "./build-desktop-peer-linux";
 import { buildKeychainHelper } from "./build-keychain-helper";
+import { buildWindowsNativeArtifacts } from "./build-windows-native-artifacts";
 import { prepareComputerUseDriver } from "./prepare-computer-use-driver";
 import { prepareManagedTools } from "./prepare-managed-tools";
 import {
@@ -1309,6 +1310,8 @@ async function packageWindowsDesktop(
   await rm(packageDirectory, { recursive: true, force: true });
   await rename(directory, packageDirectory);
   await rm(packagerRoot, { recursive: true, force: true });
+  const nativeDirectory = join(packageDirectory, "resources", "native");
+  await buildWindowsNativeArtifacts(nativeDirectory);
   const payload = join(packageDirectory, "resources", "app");
   validatePackagedPayload(await collectPayloadEntries(payload), target, identity);
   await access(join(payload, "LICENSE"));

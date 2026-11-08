@@ -14511,6 +14511,13 @@ every non-macOS platform, so a Windows feed builds on it and is not trusted
 before the path has been exercised on a real image. Windows x64 QA packaging uses a matching native build host and emits a portable
 ZIP through `OCTANT_PACKAGE_TARGET=win32-x64`. The hosted Windows job rebuilds
 native dependencies and verifies them inside the packaged Electron runtime.
+The archive builds the existing native Windows owner and credential helper
+from source and includes only `resources/native/octant-windows-host-owner.node`
+and `resources/native/octant-credential-helper.exe`. The build uses the locked
+node-gyp dependency to verify the official Node-API SDK before CMake compilation;
+QA readers and build directories never enter the archive. Packaged Electron
+loads the native owner without acquiring a profile, and the credential fixture
+uses only owned synthetic entries and verifies their removal.
 This unsigned QA archive is not an installer, a usable Windows release, or an
 enabled signed-update channel; native host admission and credentials remain
 separate prerequisites. Windows Work and Code stay

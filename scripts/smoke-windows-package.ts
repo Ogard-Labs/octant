@@ -4,6 +4,7 @@ import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { desktopIdentity, resolveDesktopPackageFlavor } from "@octant/host-runtime";
 import { resolveReleaseVersion } from "./package-desktop";
+import { validateWindowsNativeArtifacts } from "./build-windows-native-artifacts";
 
 if (process.platform !== "win32" || process.arch !== "x64") {
   throw new Error("Windows package acceptance requires a native Windows x64 runner.");
@@ -18,6 +19,8 @@ await access(archive);
 const header = await readFile(executable);
 if (header.subarray(0, 2).toString() !== "MZ") throw new Error("Package executable is not PE.");
 const payload = join(directory, "resources", "app");
+const nativeDirectory = join(directory, "resources", "native");
+await validateWindowsNativeArtifacts(nativeDirectory);
 const licence = await readFile(join(payload, "LICENSE"), "utf8");
 if (!licence.includes("MIT License") || !licence.includes("Ogard Labs")) {
   throw new Error("Windows package is missing the software licence.");
@@ -31,6 +34,8 @@ const probe = `
   if (database.prepare('select 1 as value').get().value !== 1) process.exit(1);
   database.close();
   load('node-pty');
+  const owner = require(${JSON.stringify(join(nativeDirectory, "octant-windows-host-owner.node"))});
+  if (owner.apiVersion !== 1 || typeof owner.openProfile !== 'function' || typeof owner.prepare !== 'function') process.exit(1);
   console.log('octant-windows-package-native-imports-ok');
 `;
 await new Promise<void>((resolveProbe, reject) => {

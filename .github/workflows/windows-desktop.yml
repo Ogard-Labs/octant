@@ -34,13 +34,18 @@ jobs:
         with:
           node-version: 26
       - run: bun install --frozen-lockfile
-      - run: node node_modules/electron/install.js
+      - name: Prepare the pinned Electron runtime
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: node scripts/ensure-ci-electron.ts
       - name: Build the portable QA archive
         env:
           OCTANT_PACKAGE_TARGET: win32-x64
         run: bun run package:desktop
       - name: Load the packaged native runtime
         run: bun scripts/smoke-windows-package.ts
+      - name: Exercise the packaged private credential helper with owned synthetic entries
+        run: bun scripts/smoke-windows-credentials.ts "$pwd/out/Octant-win32-x64/resources/native/octant-credential-helper.exe"
       - uses: actions/upload-artifact@v4
         with:
           name: octant-windows-x64-qa

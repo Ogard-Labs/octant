@@ -310,7 +310,10 @@ Status: Partly built. Since: —. Detail: [Architecture: Current Release Boundar
 ### Native Windows QA packaging
 
 A matching Windows x64 host may build a portable desktop QA archive and check
-its native dependencies inside packaged Electron. This does not enable native
+its native dependencies inside packaged Electron. The archive includes the
+source-built private native owner and credential helper at fixed resource paths;
+QA-only readers are excluded. Packaging does not acquire a native profile.
+This does not enable native
 host admission, credentials, Work/Code, an installer, or a signed-update channel.
 
 Status: Partly built. Since: —. Detail: [Architecture: Current Release Boundary](../architecture.md#current-release-boundary).
