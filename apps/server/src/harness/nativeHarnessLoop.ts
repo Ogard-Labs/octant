@@ -20,7 +20,11 @@ import {
   type ProviderTurnInput,
   type UtcTimestamp,
 } from "@octant/contracts";
-import type { ProviderConnection, ProviderSessionCompaction } from "@octant/provider-sdk/driver";
+import type {
+  ProviderCompactionPoint,
+  ProviderConnection,
+  ProviderSessionCompaction,
+} from "@octant/provider-sdk/driver";
 import { estimateTurnCostUsd } from "@octant/domain/turn-metrics-display";
 import { renderProviderTurnPrompt } from "@octant/provider-sdk/chat-conformance";
 import { Effect, Option, PubSub, Schema, Stream, type Scope } from "effect";
@@ -233,6 +237,8 @@ interface SessionState {
   selfCorrections: number;
   /** Whether this turn sent a request to summarize earlier turns; what it cost is in `usage`. */
   compactedThisTurn: boolean;
+  /** The person's compaction point for this session; earlier turns are summarized once a step passes it. */
+  compactionPoint: ProviderCompactionPoint | undefined;
   /** What the latest request put in the window: its input, cached input included. */
   contextTokens: number | undefined;
   /** Everything this turn's requests have cost so far; a figure no request reported stays absent. */
@@ -353,6 +359,7 @@ export function createNativeHarnessConnection(
       readonly tools?: ReadonlyArray<ProviderToolDefinition> | undefined;
       readonly compaction?: NativeHarnessTranscriptCompaction | undefined;
       readonly journalOffset?: number;
+      readonly compactionPoint?: ProviderCompactionPoint | undefined;
     }): SessionState => ({
       sessionId: input.sessionId,
       transcriptId: input.transcriptId,
@@ -379,6 +386,7 @@ export function createNativeHarnessConnection(
       steps: 0,
       selfCorrections: 0,
       compactedThisTurn: false,
+      compactionPoint: input.compactionPoint,
       contextTokens: undefined,
       usage: { inputTokens: 0, outputTokens: 0, costUsd: 0 },
       latestReportedUsage: undefined,
@@ -544,10 +552,11 @@ export function createNativeHarnessConnection(
         current = refit;
       }
       // Summarizing earlier turns is tried at most once per request, before
-      // anything is cut: when fitting already left whole exchanges out, and
-      // when the endpoint refuses the request as too large.
+      // anything is cut: when fitting already left whole exchanges out, when
+      // the request passes the compaction point the person set, and when the
+      // endpoint refuses the request as too large.
       let compactionTried = false;
-      if (leftOutHistory(current)) {
+      if (leftOutHistory(current) || passesCompactionPoint(state.compactionPoint, current)) {
         compactionTried = true;
         current = (await compactToFit(state, signal)) ?? current;
       }
@@ -1152,6 +1161,7 @@ export function createNativeHarnessConnection(
               endpoint,
               messages: [],
               tools: input.tools,
+              ...(input.singleUse === true ? {} : { compactionPoint: input.compactionPoint }),
             });
             admit(state);
             return input.singleUse === true
@@ -1215,6 +1225,7 @@ export function createNativeHarnessConnection(
               tools: input.tools,
               compaction: compacted.compaction,
               journalOffset: compacted.journalOffset,
+              compactionPoint: input.compactionPoint,
             });
             admit(state);
             return { sessionId: input.sessionId, resumeCursor: cursorFor(state) };
@@ -1786,6 +1797,18 @@ function sanitizeFailure(error: unknown): ProviderFailure {
 
 function failure(category: ProviderFailure["category"], message: string): ProviderFailure {
   return { category, message };
+}
+
+/**
+ * Whether a step's request passes the person's compaction point, estimated as
+ * the endpoints estimate fit: four characters of the request to a token.
+ */
+export function passesCompactionPoint(
+  point: ProviderCompactionPoint | undefined,
+  request: NativeHarnessRequest,
+): boolean {
+  if (point === undefined) return false;
+  return Math.ceil(JSON.stringify(request).length / 4) >= point.tokens;
 }
 
 /** How much of the window one request filled: its input, cached reads and writes included. */

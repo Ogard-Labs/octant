@@ -235,3 +235,38 @@ describe("servers and plugins other agent tools know on this computer", () => {
     expect(found.server("claude-00000000000000000000000000000000")).toBeUndefined();
   });
 });
+
+describe("what the person's own runtime files say about compacting", () => {
+  it("reads Claude Code's switch and window and Codex's limit, without writing either", async () => {
+    const found = discovery(
+      {
+        [`${HOME}/.claude.json`]: JSON.stringify({ autoCompactEnabled: true }),
+        [`${HOME}/.claude/settings.json`]: JSON.stringify({ autoCompactWindow: 180_000 }),
+        [`${HOME}/.codex/config.toml`]: "model_auto_compact_token_limit = 150000",
+      },
+      { toml: { model_auto_compact_token_limit: 150_000 } },
+    );
+    expect(await found.compactionDefaults()).toEqual({
+      claude: { autoCompact: true, autoCompactWindow: 180_000 },
+      codex: { autoCompactTokenLimit: 150_000 },
+    });
+  });
+
+  it("reads Claude Code's auto-compact as off from its global switch or its settings' environment", async () => {
+    const off = discovery({
+      [`${HOME}/.claude.json`]: JSON.stringify({ autoCompactEnabled: false }),
+    });
+    const env = discovery({
+      [`${HOME}/.claude/settings.json`]: JSON.stringify({ env: { DISABLE_AUTO_COMPACT: "1" } }),
+    });
+    expect((await off.compactionDefaults()).claude.autoCompact).toBe(false);
+    expect((await env.compactionDefaults()).claude.autoCompact).toBe(false);
+  });
+
+  it("reads the runtimes' own defaults where no file says anything", async () => {
+    expect(await discovery({}).compactionDefaults()).toEqual({
+      claude: { autoCompact: true },
+      codex: {},
+    });
+  });
+});

@@ -70,6 +70,18 @@ export interface ProviderAcquireInput {
   };
 }
 
+/**
+ * Where the person asked a session to compact itself: once its context window
+ * holds `tokens` of the model's `contextWindow`. A driver that reports the
+ * `compactionPoint` capability hands it to its runtime for this session only
+ * (never to the person's own configuration files); any other driver ignores
+ * it, and the host's between-turn rule still applies.
+ */
+export interface ProviderCompactionPoint {
+  readonly tokens: number;
+  readonly contextWindow: number;
+}
+
 export interface ProviderSessionStart {
   readonly sessionId: ProviderSessionId;
   readonly modelId: ProviderModelId;
@@ -121,6 +133,8 @@ export interface ProviderSessionStart {
    * absent keeps all of them off.
    */
   readonly nativeSetup?: ProviderNativeSetup;
+  /** The person's compaction point for this session; absent leaves the runtime its own. */
+  readonly compactionPoint?: ProviderCompactionPoint;
 }
 
 export interface ProviderSessionHandle {
@@ -158,6 +172,8 @@ export interface ProviderSessionResume {
   readonly nativeArtifacts?: boolean;
   /** As on {@link ProviderSessionStart}; a resume states it again for the session it resumes. */
   readonly nativeSetup?: ProviderNativeSetup;
+  /** As on {@link ProviderSessionStart}; restated on every resume. */
+  readonly compactionPoint?: ProviderCompactionPoint;
 }
 
 export interface ProviderSessionCompactionRequest {

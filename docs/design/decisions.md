@@ -44,7 +44,7 @@ The former decision archive is history in `docs/legacy/` and has no authority.
 | [Transcript records](#transcript-records)                                             | 1         | 1       | 0            | 0                   |
 | [Persistence](#persistence)                                                           | 10        | 9       | 1            | 0                   |
 | [Providers](#providers)                                                               | 6         | 6       | 0            | 0                   |
-| [Context and usage](#context-and-usage)                                               | 9         | 7       | 2            | 0                   |
+| [Context and usage](#context-and-usage)                                               | 9         | 8       | 1            | 0                   |
 | [Native harness](#native-harness)                                                     | 6         | 6       | 0            | 0                   |
 | [Extensions](#extensions)                                                             | 8         | 8       | 0            | 0                   |
 | [Authority and approvals](#authority-and-approvals)                                   | 7         | 7       | 0            | 0                   |
@@ -67,7 +67,7 @@ The former decision archive is history in `docs/legacy/` and has no authority.
 | [Code tooling](#code-tooling)                                                         | 2         | 1       | 1            | 0                   |
 | [Disposable desktops](#disposable-desktops)                                           | 4         | 3       | 1            | 0                   |
 | [Bots](#bots)                                                                         | 1         | 0       | 0            | 1                   |
-| **All areas**                                                                         | **229**   | **192** | **33**       | **4**               |
+| **All areas**                                                                         | **229**   | **193** | **32**       | **4**               |
 
 ## Principles and hard lines
 
@@ -1220,9 +1220,10 @@ Octant compacts a thread on its own only by a rule the person set in Settings: t
 - Every rule-started compaction records its cause, and the timeline says which rule ran and how full the window was.
 - A rule never switches a thread to another provider; the person picks the next model.
 - The limit rule (off by default) compacts a thread once per account-limit period and first writes a summary with the thread's own provider that a switch to another provider leads with. The thread then says it is ready to move, with **Switch model**.
-- Built: the window-fill rule, the idle rule, and the limit rule with its handover summary. Not built yet: handing the share to runtimes and to Octant Harness inside a turn.
+- The shares also reach inside a turn: Claude Code and Codex get them as a per-session setting (never in the person's files), and Octant Harness summarizes earlier turns once a step passes its share. Settings shows each runtime's own setting beside Octant's.
+- Built: every rule above. Not verified yet: each on a live runtime.
 
-Status: Partly built. Since: 2026-11-07. Detail: [Automatic compaction](automatic-compaction.md).
+Status: Built. Since: 2026-11-07. Detail: [Automatic compaction](automatic-compaction.md).
 
 ### Held standing context and resume
 
