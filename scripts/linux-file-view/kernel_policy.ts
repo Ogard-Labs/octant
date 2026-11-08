@@ -97,7 +97,8 @@ try {
     ready &&
     ended.status === "exited" &&
     ended.code === 0 &&
-    (await readFile(`${root}/ordinary`, "utf8")) === "permitted after";
+    (await readFile(`${root}/ordinary`, "utf8")) === "permitted after" &&
+    (await readFile(key, "utf8")) === "synthetic original-policy bytes";
 } finally {
   clearTimeout(maximum);
   owner.abort();
