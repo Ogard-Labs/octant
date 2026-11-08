@@ -309,7 +309,7 @@ if mode == "picker-metadata" || mode == "picker-location-prompt" {
                             let candidate = unsafeBitCast(value, to: AXUIElement.self)
                             return admitMetadataNode(candidate) ? candidate : nil
                         }
-                        func focusInSheet() -> (node: AXUIElement, role: String, subrole: String)? {
+                        func focusInSheet() -> (node: AXUIElement, role: String, subrole: String, ancestors: [AXUIElement])? {
                             let errorsAtEntry = errors
                             guard identitiesUnchanged(), let element else { return nil }
                             var raw: CFTypeRef?
@@ -318,6 +318,7 @@ if mode == "picker-metadata" || mode == "picker-location-prompt" {
                                 errors += 1; recordPickerError("picker-focus", status); return nil
                             }
                             var cursor = focused, reached = false, ancestry = Set<CFHashCode>()
+                            var ancestors: [AXUIElement] = []
                             let ancestorAllowance = max(0, 40 - (rows[sheetRow]["depth"] as? Int ?? 40))
                             for _ in 0..<ancestorAllowance {
                                 guard Date() < deadline, ancestry.insert(CFHash(cursor)).inserted else { return nil }
@@ -327,6 +328,7 @@ if mode == "picker-metadata" || mode == "picker-location-prompt" {
                                     if pidStatus != .success { errors += 1; recordPickerError("focus-ancestor-pid", pidStatus) }
                                     return nil
                                 }
+                                ancestors.append(cursor)
                                 if CFEqual(cursor, sheet) { reached = true; break }
                                 var parent: CFTypeRef?
                                 let parentStatus = AXUIElementCopyAttributeValue(cursor, kAXParentAttribute as CFString, &parent)
@@ -340,7 +342,7 @@ if mode == "picker-metadata" || mode == "picker-location-prompt" {
                             let subrole = roleOnly(focused, kAXSubroleAttribute as CFString)
                             guard !role.isEmpty, role != "AXSecureTextField", subrole != "AXSecureTextField",
                                   errors == errorsAtEntry else { return nil }
-                            return (focused, role, subrole)
+                            return (focused, role, subrole, ancestors)
                         }
                         func fixedLabel(_ candidate: AXUIElement, _ attribute: CFString, _ expected: String) -> Bool {
                             // Called only for a direct owned-sheet button or the
@@ -426,12 +428,36 @@ if mode == "picker-metadata" || mode == "picker-location-prompt" {
                             down.post(tap: .cghidEventTap); up.post(tap: .cghidEventTap)
                             promptDispatched = true
                             locationPrompt["status"] = "dispatched-observation-unconfirmed"
+                            var firstChangedChainRecorded = false
                             while Date() < deadline, errors == priorErrors, identitiesUnchanged() {
                                 let observedFocus = focusInSheet()
                                 locationPrompt["focusedRole"] = observedFocus?.role ?? ""
                                 locationPrompt["focusedSubrole"] = observedFocus?.subrole ?? ""
                                 if let focused = observedFocus, focused.role == "AXTextField", focused.subrole != "AXSearchField",
                                    !CFEqual(focused.node, beforeFocus.node) {
+                                    if !firstChangedChainRecorded {
+                                        firstChangedChainRecorded = true
+                                        var chainRows: [[String: Any]] = [], complete = true
+                                        // Reuse only the nodes of the just-verified
+                                        // owned-PID focus walk; never read labels.
+                                        for (distance, ancestor) in focused.ancestors.enumerated() {
+                                            guard Date() < deadline, admitMetadataNode(ancestor) else { complete = false; break }
+                                            var ancestorPid: pid_t = 0
+                                            let status = AXUIElementGetPid(ancestor, &ancestorPid)
+                                            guard status == .success, ancestorPid == processId else {
+                                                if status != .success { errors += 1; recordPickerError("prompt-chain-pid", status) }
+                                                complete = false; break
+                                            }
+                                            let role = roleOnly(ancestor, kAXRoleAttribute as CFString)
+                                            let subrole = roleOnly(ancestor, kAXSubroleAttribute as CFString)
+                                            guard !role.isEmpty, errors == priorErrors, identitiesUnchanged() else { complete = false; break }
+                                            chainRows.append(["distanceFromFocusedField": distance, "role": role, "subrole": subrole])
+                                            if role == "AXSecureTextField" || subrole == "AXSecureTextField" { complete = false; break }
+                                        }
+                                        locationPrompt["firstChangedFocusParentChain"] = chainRows
+                                        locationPrompt["firstChangedFocusParentChainComplete"] = complete
+                                        if !complete { break }
+                                    }
                                     var parentRaw: CFTypeRef?
                                     let parentStatus = AXUIElementCopyAttributeValue(focused.node, kAXParentAttribute as CFString, &parentRaw)
                                     locationPrompt["focusedParentStatus"] = parentStatus.rawValue
@@ -446,9 +472,24 @@ if mode == "picker-metadata" || mode == "picker-location-prompt" {
                                         locationPrompt["status"] = "refused-prompt-parent-identity"
                                         break
                                     }
-                                    if parentStatus == .success, let parent, !CFEqual(parent, sheet),
-                                       roleOnly(parent, kAXRoleAttribute as CFString) == "AXSheet",
-                                       fixedLabel(parent, kAXTitleAttribute as CFString, "Go to the folder:") || fixedLabel(parent, kAXTitleAttribute as CFString, "Go to Folder"),
+                                    var parentRole = "", parentSubrole = ""
+                                    var longFixedTitle: Bool?, shortFixedTitle: Bool?
+                                    if parentStatus == .success, let parent {
+                                        parentRole = roleOnly(parent, kAXRoleAttribute as CFString)
+                                        parentSubrole = roleOnly(parent, kAXSubroleAttribute as CFString)
+                                        if !CFEqual(parent, sheet), parentRole == "AXSheet" {
+                                            longFixedTitle = fixedLabel(parent, kAXTitleAttribute as CFString, "Go to the folder:")
+                                            if longFixedTitle == false {
+                                                shortFixedTitle = fixedLabel(parent, kAXTitleAttribute as CFString, "Go to Folder")
+                                            }
+                                        }
+                                    }
+                                    locationPrompt["focusedParentRole"] = parentRole
+                                    locationPrompt["focusedParentSubrole"] = parentSubrole
+                                    locationPrompt["fixedLongPromptTitleMatched"] = longFixedTitle.map { $0 as Any } ?? NSNull()
+                                    locationPrompt["fixedShortPromptTitleMatched"] = shortFixedTitle.map { $0 as Any } ?? NSNull()
+                                    if parentStatus == .success, let parent, !CFEqual(parent, sheet), parentRole == "AXSheet",
+                                       longFixedTitle == true || shortFixedTitle == true,
                                        associationUnchanged(), errors == priorErrors {
                                         locationPrompt["status"] = "observed"
                                         locationPrompt["focusedRole"] = focused.role
