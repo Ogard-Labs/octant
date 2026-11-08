@@ -1,4 +1,4 @@
-import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
+import { lstat, mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { win32 } from "node:path";
 import { randomUUID } from "node:crypto";
 import {
@@ -76,13 +76,54 @@ try {
       (await readFile(file, "utf8")) === paths.profileId,
       "ordinary persistent writes retain the profile identity across runtimes",
     );
-    for (const directory of [paths.rootDirectory, paths.dataDirectory]) {
+    for (const [kind, directory] of [
+      ["profile", paths.rootDirectory],
+      ["data", paths.dataDirectory],
+    ] as const) {
+      const before = await lstat(directory);
       let refused = false;
       try {
         await rename(directory, directory + ".moved");
       } catch {
         refused = true;
       }
+      let sourcePresent = false;
+      let destinationPresent = false;
+      let samePhysicalDirectory = false;
+      try {
+        sourcePresent = (await lstat(directory)).isDirectory();
+      } catch (error) {
+        if (
+          typeof error !== "object" ||
+          error === null ||
+          !("code" in error) ||
+          error.code !== "ENOENT"
+        )
+          throw error;
+      }
+      try {
+        const after = await lstat(directory + ".moved");
+        destinationPresent = after.isDirectory();
+        samePhysicalDirectory =
+          before.ino !== 0 && before.dev === after.dev && before.ino === after.ino;
+      } catch (error) {
+        if (
+          typeof error !== "object" ||
+          error === null ||
+          !("code" in error) ||
+          error.code !== "ENOENT"
+        )
+          throw error;
+      }
+      console.log(
+        JSON.stringify({
+          heldDirectoryKind: kind,
+          renameRejected: refused,
+          sourcePresent,
+          destinationPresent,
+          samePhysicalDirectory,
+        }),
+      );
       check(refused, "held persistent directory identity cannot be renamed");
     }
     let mutationRefused = false;
