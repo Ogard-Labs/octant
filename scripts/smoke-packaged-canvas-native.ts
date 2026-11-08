@@ -301,7 +301,7 @@ async function main(): Promise<void> {
     const executable = join(bundle, "Contents/MacOS/Octant");
     const env = {
       ...sanitizedPackagedEnvironment(
-        { HOME: join(root, "home"), TMPDIR: join(root, "tmp") },
+        { HOME: process.env.HOME, TMPDIR: join(root, "tmp") },
         join(root, "data"),
       ),
       OCTANT_SERVER_PORT: String(port),
@@ -406,7 +406,7 @@ async function main(): Promise<void> {
       [];
     for (const [name, probeEnvironment] of [
       ["runner-home", process.env],
-      ["fixture-home", { ...process.env, HOME: env.HOME }],
+      ["fixture-home", { ...process.env, HOME: join(root, "home") }],
     ] as const) {
       const probeRef = randomUUID();
       const probeStore = makeKeychainCredentialStore(
@@ -464,12 +464,14 @@ async function main(): Promise<void> {
             .split("\n")
             .filter((line) => /^(CodeDirectory|Signature=|TeamIdentifier=)/.test(line)),
           exactProbeReferencesRemoved: true,
+          appHomeMode:
+            "ephemeral hosted runner HOME for normal OS Keychain; explicit fresh app data and tmp directories",
         },
         null,
         2,
       ),
     );
-    if (keychainProbeResults.some((result) => result.status === "failed"))
+    if (keychainProbeResults[0]?.status !== "set-and-has-passed")
       throw Error(
         "Packaged Keychain synthetic environment probe failed; see sanitized fixture evidence.",
       );
