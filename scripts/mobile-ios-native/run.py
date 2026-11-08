@@ -31,20 +31,24 @@ def group_exists(group):
 
 
 def stop_owned_group(child):
+    def current_group_exists():
+        # An unreaped owned zombie can make killpg(..., 0) return EPERM on macOS.
+        child.poll()
+        return group_exists(child.pid)
+
     # A joined leader is not evidence that its detached command group is gone.
     for action, bound in ((signal.SIGTERM, 3), (signal.SIGKILL, 3)):
-        if not group_exists(child.pid):
+        if not current_group_exists():
             break
         try:
             os.killpg(child.pid, action)
         except ProcessLookupError:
             pass
         deadline = time.monotonic() + bound
-        while group_exists(child.pid) and time.monotonic() < deadline:
-            child.poll()
+        while current_group_exists() and time.monotonic() < deadline:
             time.sleep(0.05)
     child.wait(timeout=3)
-    if group_exists(child.pid):
+    if current_group_exists():
         raise RuntimeError("Owned command descendants remain after bounded cleanup.")
 
 
