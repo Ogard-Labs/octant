@@ -11,6 +11,7 @@ import {
   type BenchmarkPatternMatcher,
   benchmarkBudgetDecision,
   benchmarkCellMetrics,
+  benchmarkHistory,
   benchmarkJudgePrompt,
   benchmarkLeaderboard,
   benchmarkOverhead,
@@ -445,5 +446,52 @@ describe("benchmark cell metrics", () => {
       toolCalls: 2,
       toolFailures: 1,
     });
+  });
+});
+
+describe("benchmark history", () => {
+  const runAt = (id: string, startedAt: string, passed: boolean): BenchmarkRun =>
+    ({
+      runId: id,
+      suiteRevision: 1,
+      status: "finished",
+      startedAt,
+      contenders: [{ providerInstanceId: "p1", modelId: "m" }],
+      cells: [
+        {
+          ...queued(1, 0),
+          state: "answered",
+          checks: [{ index: 0, passed }],
+          judge: { status: "scored", score: 9, reason: "ok", judgeThreadId: "j" },
+        },
+      ],
+    }) as unknown as BenchmarkRun;
+
+  it("lists runs newest first with one figures row per contender", () => {
+    const history = benchmarkHistory(
+      [
+        runAt("old", "2026-11-01T00:00:00.000Z", false),
+        runAt("new", "2026-11-05T00:00:00.000Z", true),
+      ],
+      () => new Map(),
+    );
+    expect(history.map((run) => run.runId)).toEqual(["new", "old"]);
+    expect(history[0]?.rows[0]).toMatchObject({
+      contender: { modelId: "m" },
+      checkPassRate: 1,
+      meanJudgeScore: 9,
+    });
+    expect(history[1]?.rows[0]?.checkPassRate).toBe(0);
+  });
+
+  it("keeps only the newest fifty runs", () => {
+    const runs = Array.from({ length: 55 }, (_, index) =>
+      runAt(
+        `r${index}`,
+        `2026-10-${String((index % 28) + 1).padStart(2, "0")}T00:00:00.000Z`,
+        true,
+      ),
+    );
+    expect(benchmarkHistory(runs, () => new Map())).toHaveLength(50);
   });
 });

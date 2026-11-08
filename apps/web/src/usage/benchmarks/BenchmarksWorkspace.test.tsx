@@ -28,6 +28,26 @@ import {
   summary,
 } from "./benchmarksFixtures";
 
+function historyRun(runId: string, startedAt: string, passRate: number) {
+  return {
+    runId,
+    startedAt,
+    status: "finished" as const,
+    suiteRevision: 1,
+    rows: [
+      {
+        contender: { providerInstanceId: PROVIDER, modelId: "model-a" },
+        cells: 2,
+        answered: 2,
+        checkPassRate: passRate,
+        meanJudgeScore: 8,
+        totalTokens: 100,
+        failedCount: 0,
+      },
+    ],
+  } as never;
+}
+
 function makeClient(overrides: Partial<BenchmarksClient> = {}) {
   const base = {
     listSuites: vi.fn(async () => ({ suites: [suite()] })),
@@ -58,6 +78,18 @@ function makeClient(overrides: Partial<BenchmarksClient> = {}) {
         },
       }),
     ),
+    history: vi.fn(async () => ({
+      suiteId: suite().suiteId,
+      runs: [
+        historyRun("77000000-0000-4000-8000-0000000000c2", "2026-11-07T12:00:00.000Z", 0.9),
+        historyRun("77000000-0000-4000-8000-0000000000c1", "2026-11-05T12:00:00.000Z", 0.5),
+      ],
+    })),
+    exportRun: vi.fn(async (request: Parameters<BenchmarksClient["exportRun"]>[0]) => ({
+      fileName: `benchmark-smoke.${request.format}`,
+      contentType: request.format === "csv" ? "text/csv" : "application/json",
+      content: request.format === "csv" ? "Case\r\n" : "{}",
+    })),
   } satisfies BenchmarksClient;
   // Overrides replace calls the test asserts on; the mock handles stay typed.
   return { ...base, ...overrides } as typeof base;
@@ -810,5 +842,58 @@ describe("judge results and overhead", () => {
       within(grid).getByText("Judge did not score: The judge answered out of range."),
     ).toBeInTheDocument();
     expect(within(grid).getByText("Judge 9 of 10")).toBeInTheDocument();
+  });
+});
+
+describe("history and export", () => {
+  it("shows the selected suite across its runs as lines and a table", async () => {
+    const actor = user();
+    const client = makeClient();
+    mount(client);
+
+    await actor.click(await screen.findByRole("button", { name: "Capital cities" }));
+
+    const table = await screen.findByRole("table", { name: "Runs by contender" });
+    expect(client.history).toHaveBeenCalledWith({ suiteId: SUITE_ID });
+    expect(within(table).getAllByRole("row")).toHaveLength(3);
+    expect(within(table).getByText("90%")).toBeInTheDocument();
+    expect(within(table).getByText("50%")).toBeInTheDocument();
+    expect(screen.getByText("Check pass rate by run")).toBeInTheDocument();
+    expect(screen.getByText("Mean judge score by run")).toBeInTheDocument();
+  });
+
+  it("saves a run as CSV and as JSON through the same save path as a suite", async () => {
+    const actor = user();
+    const saveFile = vi.fn();
+    const client = makeClient();
+    mount(client, { saveFile });
+    await actor.click(await screen.findByRole("button", { name: "Capital cities" }));
+
+    await actor.click(
+      (await screen.findAllByRole("button", { name: /Export the run from .* as CSV/ }))[0]!,
+    );
+    await waitFor(() => expect(saveFile).toHaveBeenCalledWith("benchmark-smoke.csv", "Case\r\n"));
+    expect(client.exportRun).toHaveBeenLastCalledWith({ runId: RUN_ID, format: "csv" });
+
+    await actor.click(
+      screen.getAllByRole("button", { name: /Export the run from .* as JSON/ })[0]!,
+    );
+    await waitFor(() => expect(saveFile).toHaveBeenCalledWith("benchmark-smoke.json", "{}"));
+    expect(client.exportRun).toHaveBeenLastCalledWith({ runId: RUN_ID, format: "json" });
+  });
+
+  it("says why an export failed", async () => {
+    const actor = user();
+    const client = makeClient({
+      exportRun: vi.fn(async () => {
+        throw new BenchmarksClientError("That run does not exist.", 404);
+      }),
+    });
+    mount(client, { saveFile: vi.fn() });
+    await actor.click(await screen.findByRole("button", { name: "Capital cities" }));
+    await actor.click(
+      (await screen.findAllByRole("button", { name: /Export the run from .* as JSON/ }))[0]!,
+    );
+    expect(await screen.findByText("That run does not exist.")).toBeVisible();
   });
 });

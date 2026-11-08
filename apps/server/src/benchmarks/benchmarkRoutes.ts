@@ -1,6 +1,8 @@
 import {
   BENCHMARK_ROUTE_PATHS,
   decodeBenchmarkCellRateRequest,
+  decodeBenchmarkHistoryRequest,
+  decodeBenchmarkRunExportRequest,
   decodeBenchmarkRunCancelRequest,
   decodeBenchmarkRunPurgeRequest,
   decodeBenchmarkRunReadRequest,
@@ -14,6 +16,7 @@ import {
 import { authenticateRoutePrincipal } from "../principalRouteContext";
 import { isAllowedRendererOrigin, isLoopbackHostname } from "../shellRoutes";
 import { WindowAuthorityError, type WindowAuthorityStore } from "../windowAuthorityStore";
+import type { BenchmarkReports } from "./benchmarkReports";
 import type { BenchmarkOutcome, BenchmarkService } from "./benchmarkService";
 
 const METHODS = "POST, OPTIONS";
@@ -25,6 +28,8 @@ const READ_PATHS: ReadonlySet<string> = new Set([
   BENCHMARK_ROUTE_PATHS.suitesList,
   BENCHMARK_ROUTE_PATHS.runsList,
   BENCHMARK_ROUTE_PATHS.runsRead,
+  BENCHMARK_ROUTE_PATHS.suitesHistory,
+  BENCHMARK_ROUTE_PATHS.runsExport,
   // Stars are a small non-secret write any principal that may read may make.
   BENCHMARK_ROUTE_PATHS.cellsRate,
 ]);
@@ -51,6 +56,8 @@ export interface BenchmarkRouteDependencies {
     | "purgeRun"
     | "rateCell"
   >;
+  /** History and export reads; a host without them answers those two paths as unavailable. */
+  readonly reports?: Pick<BenchmarkReports, "history" | "exportRun">;
   readonly now?: () => number;
 }
 
@@ -116,6 +123,7 @@ export function createBenchmarkRouteHandler(
         body,
         windowId,
         dependencies.service,
+        dependencies.reports,
         origin,
         allowedOrigin,
       );
@@ -130,6 +138,7 @@ async function dispatch(
   body: unknown,
   windowId: WindowId,
   service: BenchmarkRouteDependencies["service"],
+  reports: BenchmarkRouteDependencies["reports"],
   origin: string | null,
   allowedOrigin: string | null | undefined,
 ): Promise<Response> {
@@ -172,6 +181,22 @@ async function dispatch(
     case BENCHMARK_ROUTE_PATHS.runsRead: {
       const request = parse(decodeBenchmarkRunReadRequest);
       return request === undefined ? invalid() : answer(service.readRun(request), (value) => value);
+    }
+    case BENCHMARK_ROUTE_PATHS.suitesHistory: {
+      if (reports === undefined)
+        return failure("Benchmarks are unavailable.", 503, origin, allowedOrigin);
+      const request = parse(decodeBenchmarkHistoryRequest);
+      return request === undefined
+        ? invalid()
+        : json(reports.history(request), origin, allowedOrigin);
+    }
+    case BENCHMARK_ROUTE_PATHS.runsExport: {
+      if (reports === undefined)
+        return failure("Benchmarks are unavailable.", 503, origin, allowedOrigin);
+      const request = parse(decodeBenchmarkRunExportRequest);
+      return request === undefined
+        ? invalid()
+        : answer(reports.exportRun(request), (value) => value);
     }
     case BENCHMARK_ROUTE_PATHS.runsStart: {
       const request = parse(decodeBenchmarkRunStartRequest);

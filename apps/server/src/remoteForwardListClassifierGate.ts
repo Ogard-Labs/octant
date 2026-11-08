@@ -80,6 +80,8 @@ const PRODUCT_PROBES = [
   { path: "/api/benchmarks/suites/list", method: "POST" },
   { path: "/api/benchmarks/runs/list", method: "POST" },
   { path: "/api/benchmarks/runs/read", method: "POST" },
+  { path: "/api/benchmarks/suites/history", method: "POST" },
+  { path: "/api/benchmarks/runs/export", method: "POST" },
   { path: "/api/benchmarks/cells/rate", method: "POST" },
   { path: "/api/usage/dashboard", method: "POST" },
   { path: "/api/usage/query", method: "POST" },

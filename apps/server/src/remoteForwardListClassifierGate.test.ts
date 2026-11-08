@@ -51,7 +51,14 @@ describe("remote forward list vs route classifier", () => {
           },
         }),
       ).kind;
-    for (const path of ["suites/list", "runs/list", "runs/read", "cells/rate"]) {
+    for (const path of [
+      "suites/list",
+      "runs/list",
+      "runs/read",
+      "suites/history",
+      "runs/export",
+      "cells/rate",
+    ]) {
       expect(decide(`/api/benchmarks/${path}`)).toBe("allow");
     }
     for (const path of [

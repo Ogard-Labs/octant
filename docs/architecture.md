@@ -6081,6 +6081,25 @@ because it is a note on an answer already on screen that spends nothing and
 changes no thread. An anonymous request is refused with 401. The leaderboard's
 mean stars reads these ratings.
 
+**History and export.** `POST /api/benchmarks/suites/history` takes `{suiteId}` and
+returns that suite's runs, newest first and at most 50. Each run carries its
+id, start, status, suite revision and one row per contender: check pass rate, mean
+judge score, mean stars, typical first token and speed, total tokens, total cost
+and failures. `benchmarkHistory` computes each row with the same
+`benchmarkLeaderboard` function the run read uses, over the same turn-metrics
+join, so a run's row here equals its leaderboard row. `POST
+/api/benchmarks/runs/export` takes `{runId, format: "json" | "csv"}` and returns
+`{fileName, contentType, content}` for the client to save. The JSON holds the
+run (cases snapshot, contenders, budget, status), every cell with its state,
+check results, judge result, rating and turn figures, plus the leaderboard and
+overhead. The CSV has one row per cell, quoted as RFC 4180, and a field that
+begins with `=`, `+`, `-`, `@`, a tab or a carriage return gets a leading
+apostrophe so a spreadsheet reads it as text. **An export never carries answer
+text**: answers stay in the cell threads, and the JSON says so in an `answers`
+note. Both routes have the reads' authority, a local window and a paired remote
+device, and are on the remote forward list as non-secret reads. They live in
+`BenchmarkReports`, beside the service.
+
 The routes are all `POST` JSON. `/api/benchmarks/suites/list`,
 `/runs/list` and `/runs/read` (a run with its leaderboard, the judge overhead and
 each cell's figures joined from turn metrics) answer a local window and a remote device

@@ -4,6 +4,7 @@ import {
   decodeChatThreadId,
   decodeUtcTimestamp,
   type ChatThreadId,
+  type ProviderInstanceId,
   type WindowId,
 } from "@octant/contracts";
 import { keepBenchmarksOutOfPersonMemory } from "../benchmarks/benchmarkMemory";
@@ -15,6 +16,7 @@ import {
 } from "../benchmarks/benchmarkChatPort";
 import { createWorkerPatternMatcher } from "../benchmarks/benchmarkPatternMatcher";
 import { createBenchmarkRouteHandler } from "../benchmarks/benchmarkRoutes";
+import { BenchmarkReports } from "../benchmarks/benchmarkReports";
 import { BenchmarkRunner } from "../benchmarks/benchmarkRunner";
 import { BenchmarkService } from "../benchmarks/benchmarkService";
 import { extractReply } from "../chat/threadDialogueService";
@@ -124,12 +126,21 @@ export function wireBenchmarks(deps: BenchmarksDependencies) {
     clock: () => decodeUtcTimestamp(clock()),
     uuid: randomUUID,
   });
+  const reports = new BenchmarkReports({
+    projection,
+    turnMetrics,
+    readRun: (request) => service.readRun(request),
+    providerLabel: (providerInstanceId) =>
+      persistence.readProviderInstance(providerInstanceId as ProviderInstanceId)?.displayName ??
+      providerInstanceId,
+  });
   const benchmarkRoutes = createBenchmarkRouteHandler({
     windowAuthorityStore,
     ...(deps.allowedRendererHttpOrigin === undefined
       ? {}
       : { allowedRendererHttpOrigin: deps.allowedRendererHttpOrigin }),
     service,
+    reports,
   });
   return { benchmarkRoutes, benchmarkRunner };
 }

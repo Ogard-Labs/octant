@@ -145,4 +145,4 @@ A **Benchmarks** source joins Diagnostics in the Usage source switch:
    compare.
 4. Judge scoring and stars. (in progress)
 5. Code cases: pinned worktrees, check commands, approval handling.
-6. History across runs and export.
+6. History across runs and export. (in progress)

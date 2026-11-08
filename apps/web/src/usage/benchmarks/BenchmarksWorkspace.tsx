@@ -1,8 +1,11 @@
-import { Download, Pencil, Plus, RefreshCw, Trash2, Upload } from "lucide-react";
+import { Download, FileSpreadsheet, Pencil, Plus, RefreshCw, Trash2, Upload } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import {
   decodeBenchmarkCellId,
   decodeBenchmarkRunId,
+  decodeBenchmarkSuiteId,
+  type BenchmarkHistoryResponse,
+  type BenchmarkRunExportRequest,
   type BenchmarkRunReadResponse,
   type BenchmarkRunStartRequest,
   type BenchmarkRunSummary,
@@ -24,6 +27,7 @@ import { OctantConfirmDialog } from "../../ui/base/OctantConfirmDialog";
 import { OctantTextarea } from "../../ui/base/OctantTextarea";
 import { Surface, SurfaceEmpty, SurfaceHeader, SurfaceSection } from "../../surface/SurfaceHeader";
 import { BenchmarkCaseCompare } from "./BenchmarkCaseCompare";
+import { BenchmarkHistory } from "./BenchmarkHistory";
 import { BenchmarkLeaderboard } from "./BenchmarkLeaderboard";
 import { BenchmarkLiveGrid } from "./BenchmarkLiveGrid";
 import { BenchmarkRunBuilder } from "./BenchmarkRunBuilder";
@@ -80,7 +84,8 @@ type Pending =
   | { readonly kind: "purge-run"; readonly run: BenchmarkRunSummary };
 
 function downloadText(fileName: string, text: string): void {
-  const url = URL.createObjectURL(new Blob([text], { type: "application/json" }));
+  const type = fileName.endsWith(".csv") ? "text/csv" : "application/json";
+  const url = URL.createObjectURL(new Blob([text], { type }));
   const anchor = document.createElement("a");
   anchor.href = url;
   anchor.download = fileName;
@@ -132,6 +137,7 @@ export function BenchmarksWorkspace(props: BenchmarksWorkspaceProps) {
   const [pasted, setPasted] = useState("");
   const [importError, setImportError] = useState<string | undefined>(undefined);
   const [pending, setPending] = useState<Pending | undefined>(undefined);
+  const [history, setHistory] = useState<BenchmarkHistoryResponse | undefined>(undefined);
   const [working, setWorking] = useState(false);
   const [cancelling, setCancelling] = useState(false);
 
@@ -247,6 +253,29 @@ export function BenchmarksWorkspace(props: BenchmarksWorkspaceProps) {
   const suiteRuns = runs.filter((run) => String(run.suiteId) === selectedSuiteId);
   const knownSuites = new Set(suites.map((suite) => String(suite.suiteId)));
   const orphanRuns = runs.filter((run) => !knownSuites.has(String(run.suiteId)));
+  // The suite's history is read when it is chosen and again when its runs change.
+  const historySignature = suiteRuns
+    .map((run) => `${String(run.runId)}:${run.status}:${run.settledCount}`)
+    .join("|");
+  useEffect(() => {
+    if (selectedSuiteId === undefined) {
+      setHistory(undefined);
+      return;
+    }
+    let current = true;
+    client.history({ suiteId: decodeBenchmarkSuiteId(selectedSuiteId) }).then(
+      (read) => {
+        if (current) setHistory(read);
+      },
+      () => {
+        if (current) setHistory(undefined);
+      },
+    );
+    return () => {
+      current = false;
+    };
+  }, [client, selectedSuiteId, historySignature]);
+
   const metricsByCell = useMemo(
     () =>
       new Map((runRead?.cellMetrics ?? []).map((entry) => [String(entry.cellId), entry.metrics])),
@@ -293,6 +322,24 @@ export function BenchmarksWorkspace(props: BenchmarksWorkspaceProps) {
                 {run.settledCount} of {run.cellCount}
               </td>
               <td className="benchmark-actions">
+                <OctantButton
+                  aria-label={`Export the run from ${formatWhen(run.startedAt)} as JSON`}
+                  onClick={() => void exportRun(run.runId, "json")}
+                  size="icon"
+                  type="button"
+                  variant="ghost"
+                >
+                  <Download aria-hidden="true" size={14} />
+                </OctantButton>
+                <OctantButton
+                  aria-label={`Export the run from ${formatWhen(run.startedAt)} as CSV`}
+                  onClick={() => void exportRun(run.runId, "csv")}
+                  size="icon"
+                  type="button"
+                  variant="ghost"
+                >
+                  <FileSpreadsheet aria-hidden="true" size={14} />
+                </OctantButton>
                 <OctantButton
                   aria-label={`Purge the run from ${formatWhen(run.startedAt)}`}
                   disabled={run.status === "running"}
@@ -416,6 +463,15 @@ export function BenchmarksWorkspace(props: BenchmarksWorkspaceProps) {
     setImportOpen(false);
     setPasted("");
     setEditing(result.draft);
+  };
+
+  const exportRun = async (runId: BenchmarkRunExportRequest["runId"], format: "json" | "csv") => {
+    try {
+      const file = await client.exportRun({ runId, format });
+      (props.saveFile ?? downloadText)(file.fileName, file.content);
+    } catch (error) {
+      if (mounted.current) setNotice(refusalSentence(error, "The run could not be exported."));
+    }
   };
 
   const exportSuite = (suite: BenchmarkSuite) =>
@@ -665,6 +721,9 @@ export function BenchmarksWorkspace(props: BenchmarksWorkspaceProps) {
               runsTable(suiteRuns, "Runs of this suite")
             )}
           </SurfaceSection>
+          {history === undefined || history.runs.length === 0 ? null : (
+            <BenchmarkHistory names={names} runs={history.runs} />
+          )}
         </>
       )}
 
