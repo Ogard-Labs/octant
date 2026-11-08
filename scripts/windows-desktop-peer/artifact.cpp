@@ -1,6 +1,7 @@
 #include <windows.h>
 #include <aclapi.h>
 #include <sddl.h>
+#include <shlobj.h>
 #include <atomic>
 #include <cstddef>
 #include <cstdio>
@@ -163,11 +164,17 @@ int wmain(int argc, wchar_t** argv) {
   LocalFree(sid);
   if (!ConvertStringSecurityDescriptorToSecurityDescriptorW(safe.c_str(), SDDL_REVISION_1, &fixture.safe, nullptr) ||
       !ConvertStringSecurityDescriptorToSecurityDescriptorW(unsafe.c_str(), SDDL_REVISION_1, &fixture.unsafe, nullptr)) return refuse("fixture-acls");
-  std::vector<wchar_t> temporary(32768); const DWORD length = GetTempPathW(static_cast<DWORD>(temporary.size()), temporary.data());
-  if (length == 0 || length >= temporary.size()) return refuse("fixture-temporary-root");
-  std::wstring ordinary(temporary.data(), length);
+  // Hosted runners can redirect TEMP onto a drive whose root owner is outside
+  // the product floor. Use the same native known folder as the owned profile.
+  PWSTR local = nullptr;
+  if (FAILED(SHGetKnownFolderPath(FOLDERID_LocalAppData, KF_FLAG_DEFAULT, nullptr, &local)) || !local) {
+    if (local) CoTaskMemFree(local);
+    return refuse("fixture-known-folder");
+  }
+  std::wstring ordinary(local); CoTaskMemFree(local);
+  if (ordinary.empty() || ordinary.size() > 32000) return refuse("fixture-known-folder");
   if (ordinary.compare(0, 4, L"\\\\?\\") == 0) ordinary.erase(0, 4);
-  fixture.root = L"\\\\?\\" + ordinary + L"octant-artifact-qa-" + std::to_wstring(GetCurrentProcessId()) + L"-" + std::to_wstring(GetTickCount64());
+  fixture.root = L"\\\\?\\" + ordinary + L"\\octant-artifact-qa-" + std::to_wstring(GetCurrentProcessId()) + L"-" + std::to_wstring(GetTickCount64());
   SECURITY_ATTRIBUTES attributes{sizeof(SECURITY_ATTRIBUTES), fixture.safe, FALSE};
   if (!CreateDirectoryW(fixture.root.c_str(), &attributes)) return refuse("new-fixture-root");
   fixture.created = true;
