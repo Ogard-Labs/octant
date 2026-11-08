@@ -75,11 +75,19 @@ describe("host health points", () => {
     );
 
     expect(points.samples).toHaveLength(1);
-    expect(points.processStarts).toEqual([
-      "2026-11-07T09:00:00.000Z",
-      "2026-11-07T10:09:00.000Z",
-      "2026-11-07T10:19:00.000Z",
-    ]);
+    expect(points.restarts).toEqual(["2026-11-07T10:09:00.000Z", "2026-11-07T10:19:00.000Z"]);
+  });
+
+  it("counts a restart inside the range when the process before it was last seen before the range", () => {
+    const replaced = [sample(5, { processStartedAt: "2026-11-07T10:04:00.000Z" })];
+
+    expect(
+      hostHealthPoints(replaced, "minute", "2026-11-07T08:00:00.000Z" as never).restarts,
+    ).toEqual(["2026-11-07T10:04:00.000Z"]);
+    expect(hostHealthPoints(replaced, "minute").restarts).toEqual([]);
+    expect(
+      hostHealthPoints([sample(1)], "minute", "2026-11-07T09:00:00.000Z" as never).restarts,
+    ).toEqual([]);
   });
 
   it("switches to hours on its own when the minutes would not fit in one read", () => {

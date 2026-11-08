@@ -91,6 +91,7 @@ interface ToolAccumulator {
 
 interface BucketAccumulator {
   turns: number;
+  finished: number;
   failed: number;
   cancelled: number;
   toolCalls: number;
@@ -128,6 +129,7 @@ export function buildTurnDiagnosticsReport(
   let toolCalls = 0;
   let toolFailures = 0;
   let unfinishedToolCalls = 0;
+  let toolTalliesTruncatedTurns = 0;
   let approvalRequests = 0;
   let inputRequests = 0;
   let rateLimitWarnings = 0;
@@ -185,6 +187,9 @@ export function buildTurnDiagnosticsReport(
     const bucket = buckets.get(bucketKey) ?? newBucket();
     buckets.set(bucketKey, bucket);
     bucket.turns += 1;
+    if (record.stopReason === "end-of-turn" || record.stopReason === "max-tokens") {
+      bucket.finished += 1;
+    }
     if (record.stopReason === "failed") bucket.failed += 1;
     if (record.stopReason === "cancelled") bucket.cancelled += 1;
     if (ttft !== undefined) bucket.ttft.push(ttft);
@@ -218,6 +223,7 @@ export function buildTurnDiagnosticsReport(
           waitMs: total.waitMs + tally.waitMs,
         });
       }
+      if (diagnostics.toolsTruncated === true) toolTalliesTruncatedTurns += 1;
       for (const tally of diagnostics.tools ?? []) {
         unfinishedToolCalls += tally.unfinished;
         const tool = tools.get(tally.toolName) ?? newTool();
@@ -305,6 +311,7 @@ export function buildTurnDiagnosticsReport(
       return {
         key,
         turns: bucket.turns,
+        finished: bucket.finished,
         failed: bucket.failed,
         cancelled: bucket.cancelled,
         toolCalls: bucket.toolCalls,
@@ -329,6 +336,7 @@ export function buildTurnDiagnosticsReport(
       toolCalls,
       toolFailures,
       unfinishedToolCalls,
+      toolTalliesTruncatedTurns,
       retries,
       approvalRequests,
       inputRequests,
@@ -601,6 +609,7 @@ function newTool(): ToolAccumulator {
 function newBucket(): BucketAccumulator {
   return {
     turns: 0,
+    finished: 0,
     failed: 0,
     cancelled: 0,
     toolCalls: 0,

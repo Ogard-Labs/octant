@@ -141,6 +141,21 @@ describe("turn diagnostics", () => {
     expect(message.startsWith("Process exited")).toBe(true);
   });
 
+  it("keeps a provider's tool label free of URL credentials, query strings, paths, and secrets", () => {
+    const diagnostics = diagnose([
+      start(0, "a", "Fetch https://user:pw@host.example/x?token=abc123#frag"),
+      start(1, "b", "Read /Users/henrik/Dev/secret-project/file.ts"),
+      start(3, "d", "Open /srv/app/data/notes.txt"),
+      start(2, "c", "Login with the password is hunter2"),
+    ]);
+    const names = diagnostics.tools?.map((tally) => tally.toolName) ?? [];
+    expect(names).toContain("Fetch https://host.example/x");
+    expect(names).toContain("Read [redacted-sensitive-root]");
+    expect(names).toContain("Open [redacted-path]");
+    expect(names).toContain("[redacted]");
+    expect(names.join(" ")).not.toMatch(/pw|abc123|henrik|hunter2/);
+  });
+
   it("counts tools and calls named like built-in object members", () => {
     const diagnostics = diagnose([
       start(1, "constructor", "constructor"),

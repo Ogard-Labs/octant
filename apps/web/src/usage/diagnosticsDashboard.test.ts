@@ -114,6 +114,25 @@ describe("the Diagnostics dashboard", () => {
     expect(value("First token, typical")).toBe(0.04);
   });
 
+  it("counts only end-of-turn and max-tokens turns as finished in the chart and sparkline, and shows the rest apart", () => {
+    const at = (minute: number, stopReason: string) => turn(minute, { stopReason });
+    const report = buildTurnDiagnosticsReport(
+      [at(0, "end-of-turn"), at(1, "max-tokens"), at(2, "waiting")],
+      { ...options, bucket: "day" },
+    );
+
+    const dashboard = diagnosticsDashboard(report, undefined, undefined);
+    const chartSeries = dashboard.turnsOverTime?.series ?? [];
+    const total = (id: string) =>
+      chartSeries
+        .find((entry) => entry.seriesId === id)
+        ?.points.reduce((sum, point) => sum + point.y, 0);
+
+    expect(total("finished")).toBe(2);
+    expect(total("other")).toBe(1);
+    expect(dashboard.kpis.find((block) => block.label === "Finished")?.value).toBeCloseTo(0.667, 2);
+  });
+
   it("keeps the year on day labels when the trend crosses a year, so the chart is not refused", () => {
     const day = (iso: string) => turn(0, { startedAt: iso, endedAt: iso });
     const report = buildTurnDiagnosticsReport(
