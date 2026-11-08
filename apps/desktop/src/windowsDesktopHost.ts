@@ -68,3 +68,21 @@ export async function attachWindowsDesktopHost(
     throw new Error("Octant's native Windows host discovery changed or is unavailable.");
   return attached;
 }
+
+/** Never stop a winning replacement or a host this desktop only borrowed. */
+export async function requestWindowsDesktopHostStop(
+  host: WindowsDesktopHost,
+  instanceId: string,
+): Promise<boolean> {
+  const found = await attachWindowsHostRuntimeOwner({
+    native: host.native,
+    scope: host.paths.profileId,
+    hostId: host.paths.profileId,
+    wireVersion: "1",
+  });
+  return (
+    found.status === "attached" &&
+    found.attachment.owner.instanceId === instanceId &&
+    (await found.attachment.requestStop())
+  );
+}

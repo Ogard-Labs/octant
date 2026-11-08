@@ -9,7 +9,11 @@ import {
   type WindowsHostProfileNative,
 } from "@octant/host-runtime";
 import { probeHostInfoReceipt } from "./serverProcess";
-import { attachWindowsDesktopHost, type WindowsDesktopHost } from "./windowsDesktopHost";
+import {
+  attachWindowsDesktopHost,
+  requestWindowsDesktopHostStop,
+  type WindowsDesktopHost,
+} from "./windowsDesktopHost";
 
 vi.mock("@octant/host-runtime", async (original) => ({
   ...(await original<typeof import("@octant/host-runtime")>()),
@@ -156,4 +160,25 @@ it("waits for its authenticated starting child without requiring unpublished dis
   ).rejects.toThrow("discovery changed");
   vi.mocked(attachWindowsHostRuntimeOwner).mockResolvedValue({ status: "refused" });
   await expect(attachWindowsDesktopHost(host, instanceId)).rejects.toThrow("authenticate");
+});
+
+it("stops only its authenticated exact owned launch and never another profile owner generation", async () => {
+  attached();
+  const host = fixture();
+  await expect(requestWindowsDesktopHostStop(host, instanceId)).resolves.toBe(true);
+  const found = await attachWindowsHostRuntimeOwner({
+    native,
+    scope: profileId,
+    hostId: profileId,
+    wireVersion: "1",
+  });
+  if (found.status !== "attached") throw Error("Expected native owner fixture.");
+  expect(found.attachment.requestStop).toHaveBeenCalledOnce();
+  vi.mocked(found.attachment.requestStop).mockClear();
+  await expect(
+    requestWindowsDesktopHostStop(host, "33333333-3333-4333-8333-333333333333"),
+  ).resolves.toBe(false);
+  expect(found.attachment.requestStop).not.toHaveBeenCalled();
+  vi.mocked(attachWindowsHostRuntimeOwner).mockResolvedValue({ status: "refused" });
+  await expect(requestWindowsDesktopHostStop(host, instanceId)).resolves.toBe(false);
 });

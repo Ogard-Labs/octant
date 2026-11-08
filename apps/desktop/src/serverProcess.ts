@@ -564,6 +564,8 @@ export function createSingleFlight<T>(operation: () => Promise<T>): () => Promis
 }
 
 interface ShutdownManagedServerOptions {
+  /** Windows native control can drain normally; SIGTERM there force-terminates. */
+  readonly requestStop?: () => Promise<boolean>;
   readonly gracePeriodMs?: number;
   readonly forceKillWaitMs?: number;
   readonly waitForExit?: (child: ManagedChildProcess, timeoutMs: number) => Promise<boolean>;
@@ -576,7 +578,7 @@ export async function shutdownManagedServer(
   if (hasExited(child)) return;
   const gracePeriodMs = options.gracePeriodMs ?? 5_000;
   const forceKillWaitMs = options.forceKillWaitMs ?? 1_000;
-  deliverSignal(child, "SIGTERM", "sigterm");
+  if (!(await options.requestStop?.())) deliverSignal(child, "SIGTERM", "sigterm");
   const exited = await (options.waitForExit ?? waitForChildExit)(child, gracePeriodMs);
   if (exited || hasExited(child)) return;
   deliverSignal(child, "SIGKILL", "sigkill");

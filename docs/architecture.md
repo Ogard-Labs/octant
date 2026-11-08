@@ -14647,7 +14647,11 @@ POSIX data/log override and starts no generic linked-state credential broker.
 Missing native code or closed storage ports stay unavailable. This composition
 requires a native packaged startup, second-attachment and owned-stop smoke;
 normal Nightly native window registration, service integration and effective
-Work/Code confinement remain distinct requirements.
+Work/Code confinement remain distinct requirements. Normal owned shutdown authenticates the native
+owner and matches the exact launch instance before requesting its graceful
+control stop, then awaits the held child with bounded force escalation.
+Windows SIGTERM alone force-terminates a Node child and cannot prove projection
+cleanup; borrowed or replacement owners never receive this stop request.
 
 The Windows credential building block uses an Octant native helper
 with `CredWriteW`, `CredReadW` and `CredDeleteW`, never a secret in `cmdkey`

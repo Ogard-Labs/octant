@@ -1075,6 +1075,17 @@ describe("createStderrTail", () => {
 });
 
 describe("shutdownManagedServer", () => {
+  it.each([true, false])(
+    "requests native graceful shutdown before choosing a signal fallback (%s)",
+    async (accepted) => {
+      const child = { exitCode: null, signalCode: null, kill: vi.fn() };
+      const requestStop = vi.fn(async () => accepted);
+      await shutdownManagedServer(child, { requestStop, waitForExit: async () => true });
+      expect(requestStop).toHaveBeenCalledOnce();
+      expect(child.kill.mock.calls).toEqual(accepted ? [] : [["SIGTERM"]]);
+    },
+  );
+
   it("requests graceful termination and does not force-kill an exited child", async () => {
     const child = {
       exitCode: null as number | null,

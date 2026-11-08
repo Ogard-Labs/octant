@@ -1,6 +1,10 @@
 import { createDesktopBrowserCredentialFill } from "./desktopBrowserCredentialFill";
 import { createDesktopClientLifetime } from "./desktopClientLifetime";
-import { attachWindowsDesktopHost, resolveWindowsDesktopHost } from "./windowsDesktopHost";
+import {
+  attachWindowsDesktopHost,
+  resolveWindowsDesktopHost,
+  requestWindowsDesktopHostStop,
+} from "./windowsDesktopHost";
 import { resolvePackagedDesktopLaunch } from "./desktopLaunch";
 import { createOffscreenBrowserSurface } from "./offscreenBrowserSurface";
 import { ownNightlyWindowLeases } from "./nightlyBrowserLease";
@@ -1791,10 +1795,18 @@ async function startDesktopOwnedHost(): Promise<LocalHostDescriptor> {
   // before spawning the managed server, which must bind that same port.
   await portReservation.close();
   const serverStderr = createStderrTail();
-  const launch = createDesktopHostLaunch({ shutdownServer: shutdownManagedServer });
+  const instanceId = randomUUID();
+  const launch = createDesktopHostLaunch({
+    shutdownServer:
+      desktopWindowsHost === undefined
+        ? shutdownManagedServer
+        : (child) =>
+            shutdownManagedServer(child, {
+              requestStop: () => requestWindowsDesktopHostStop(desktopWindowsHost, instanceId),
+            }),
+  });
   desktopHostLaunch = launch;
   try {
-    const instanceId = randomUUID();
     // Files held for the agent are cleared when the app starts; if the folder
     // cannot be made private, downloads simply stay blocked.
     const browserDownloadRoot = await prepareBrowserDownloadHoldRoot("desktop").catch(
