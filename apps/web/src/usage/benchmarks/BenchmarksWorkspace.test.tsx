@@ -425,7 +425,7 @@ describe("the run builder", () => {
     await actor.click(start);
 
     await waitFor(() => expect(client.startRun).toHaveBeenCalledTimes(1));
-    expect(client.startRun.mock.calls[0]?.[0]).toMatchObject({ confirmedCommands: true });
+    expect(client.startRun.mock.calls[0]?.[0]).toMatchObject({ confirmedSuiteRevision: 2 });
   });
 
   it("asks for no confirmation when a suite runs no commands", async () => {
@@ -440,7 +440,7 @@ describe("the run builder", () => {
     await actor.type(screen.getByRole("textbox", { name: "Cost budget in US dollars" }), "1");
     await actor.click(screen.getByRole("button", { name: "Start run" }));
     await waitFor(() => expect(client.startRun).toHaveBeenCalledTimes(1));
-    expect(client.startRun.mock.calls[0]?.[0]).not.toHaveProperty("confirmedCommands");
+    expect(client.startRun.mock.calls[0]?.[0]).not.toHaveProperty("confirmedSuiteRevision");
   });
 
   it("holds Start back until a contender and a budget are chosen", async () => {

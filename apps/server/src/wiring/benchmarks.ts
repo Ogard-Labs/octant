@@ -22,7 +22,6 @@ import {
   BENCHMARKS_PROJECT_NAME,
   createBenchmarkChatPort,
 } from "../benchmarks/benchmarkChatPort";
-import { createBenchmarkCheckCommandPort } from "../benchmarks/benchmarkCheckCommand";
 import {
   createBenchmarkCodePort,
   type BenchmarkCodeRouteService,
@@ -35,7 +34,7 @@ import { BenchmarkRunner } from "../benchmarks/benchmarkRunner";
 import { BenchmarkService } from "../benchmarks/benchmarkService";
 import { extractReply } from "../chat/threadDialogueService";
 import type { CodeRouteService } from "../codeRoutes";
-import type { NativeHarnessShellPort } from "../harness/nativeHarnessTools";
+import type { BenchmarkCheckCommandPort } from "../benchmarks/benchmarkCheckCommand";
 import type { ManagedWorktreeService } from "../code/managedWorktreeService";
 import { ROUTINE_HOST_SCOPE_ID } from "../routineHostScope";
 import { OCTANT_LOCAL_ACTOR_ID } from "../shellService";
@@ -66,11 +65,16 @@ export type BenchmarksDependencies = Pick<ServerStart, "persistence"> &
       readonly put: (text: string) => import("@octant/contracts").CodeEvidenceReference;
     };
     /** Whether a Code thread's running turn waits on an approval or a question. */
+    /** Whether a window can reach a Code Project; the one check the window-bound Code commands make. */
+    readonly canAccessCodeProject: (
+      windowId: WindowId,
+      projectId: ProjectId,
+    ) => Promise<boolean> | boolean;
     readonly awaitsPerson: (threadId: string) => boolean;
     /** When the thread's oldest pending request was asked, from the journal; absent when unknown. */
     readonly pendingSince: (threadId: string) => Promise<string | undefined>;
-    /** The confined, network-less shell Octant's own tools use; check commands run in it. */
-    readonly benchmarkCheckShell: NativeHarnessShellPort;
+    /** The confined, network-less launcher check commands run through, with a private folder per cell. */
+    readonly benchmarkCheckCommands: BenchmarkCheckCommandPort;
     readonly managedWorktreeService: Pick<ManagedWorktreeService, "cleanup">;
     readonly managedWorktreeReceipts: {
       readonly load: (
@@ -94,9 +98,10 @@ export type BenchmarksDependencies = Pick<ServerStart, "persistence"> &
 export function wireBenchmarks(deps: BenchmarksDependencies) {
   const {
     awaitsPerson,
+    canAccessCodeProject,
     pendingSince,
     codeEvidence,
-    benchmarkCheckShell,
+    benchmarkCheckCommands,
     managedWorktreeReceipts,
     managedWorktreeService,
     roots,
@@ -238,7 +243,7 @@ export function wireBenchmarks(deps: BenchmarksDependencies) {
       ? {}
       : {
           code: codePort,
-          checkCommand: createBenchmarkCheckCommandPort(benchmarkCheckShell),
+          checkCommand: benchmarkCheckCommands,
           projectMode,
         }),
     chat,
@@ -294,6 +299,7 @@ export function wireBenchmarks(deps: BenchmarksDependencies) {
       : {
           codeCases: {
             projectMode,
+            canAccess: async (windowId, projectId) => canAccessCodeProject(windowId, projectId),
             checkRef: (projectId, ref) => codePort.checkRef(projectId, ref),
             removeWorktree: (threadId, branch) => codePort.removeWorktree(threadId, branch),
           },

@@ -130,7 +130,8 @@ export function BenchmarkRunBuilder(props: BenchmarkRunBuilderProps) {
           ...(costBudget === undefined ? {} : { maxCostUsd: costBudget }),
         },
         ...(hasCode ? { executionLevel: level } : {}),
-        ...(commands.length > 0 ? { confirmedCommands: true } : {}),
+        // The revision whose commands are on screen, so an edit made since needs a new look.
+        ...(commands.length > 0 ? { confirmedSuiteRevision: props.suite.revision } : {}),
       });
     } catch (error) {
       setMessage(`The run does not fit the benchmark format: ${decodeFailure(error)}`);

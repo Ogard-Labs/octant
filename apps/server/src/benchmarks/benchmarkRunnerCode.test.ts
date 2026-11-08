@@ -8,7 +8,7 @@ import type { BenchmarkCommandOutcome } from "@octant/domain";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { BenchmarkChatPort, BenchmarkTurnInput } from "./benchmarkChatPort";
 import { BENCHMARKS_PROJECT_ID } from "./benchmarkChatPort";
-import type { BenchmarkCheckCommandPort } from "./benchmarkCheckCommand";
+import type { BenchmarkCheckCommandPort, BenchmarkCheckSession } from "./benchmarkCheckCommand";
 import type {
   BenchmarkCodePort,
   BenchmarkCodeResult,
@@ -94,10 +94,28 @@ class FakeCode implements BenchmarkCodePort {
 class FakeCommand implements BenchmarkCheckCommandPort {
   readonly runs: Array<{ command: string; cwd: string; timeoutMs: number }> = [];
   readonly signals: AbortSignal[] = [];
+  opened = 0;
+  closed = 0;
+  swept = 0;
   outcome: BenchmarkCommandOutcome = { status: "exited", exitCode: 0, output: "" };
   /** A command that runs until it is aborted, as a hung test would. */
   hang = false;
-  async run(input: {
+
+  async open(): Promise<BenchmarkCheckSession> {
+    this.opened += 1;
+    return {
+      run: (input) => this.#run(input),
+      close: async () => {
+        this.closed += 1;
+      },
+    };
+  }
+
+  async sweep() {
+    this.swept += 1;
+  }
+
+  async #run(input: {
     command: string;
     cwd: string;
     timeoutMs: number;
@@ -354,6 +372,23 @@ describe("benchmark Code cells", () => {
     expect(code.archived).toHaveLength(1);
   });
 
+  it("opens one private folder for a cell's whole check sequence and removes it after", async () => {
+    const { runner, code, command } = setup({
+      checks: [
+        { kind: "command-exits-zero", command: "bun run lint", timeoutSeconds: 60 },
+        { kind: "command-exits-zero", command: "bun test", timeoutSeconds: 60 },
+      ],
+    });
+    await runner.tick();
+    code.turn = { ...code.turn, state: "completed" };
+
+    await settle(runner);
+
+    expect(command.runs.map((run) => run.command)).toEqual(["bun run lint", "bun test"]);
+    expect(command.opened).toBe(1);
+    expect(command.closed).toBe(1);
+  });
+
   it("gives a command at most ten minutes whatever the case allows", async () => {
     const { runner, code, command } = setup({
       checks: [{ kind: "command-exits-zero", command: "bun test", timeoutSeconds: 600 }],
@@ -463,6 +498,10 @@ describe("benchmark Code cells", () => {
     await new Promise((resolve) => setTimeout(resolve, 30));
     expect(command.runs.map((run) => run.command)).toEqual(["bun test one"]);
     expect(cell().state).toBe("running");
+    // The private folder of the interrupted sequence is removed, and the host
+    // start swept any left by a crash.
+    expect(command.closed).toBe(1);
+    expect(command.swept).toBe(1);
   });
 
   it("interrupts a Code turn and stops its checks when the run is cancelled", async () => {

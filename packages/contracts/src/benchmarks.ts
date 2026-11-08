@@ -550,10 +550,11 @@ export const BenchmarkRunStartRequest = Schema.Struct({
   budget: BenchmarkBudget,
   executionLevel: Schema.optional(BenchmarkExecutionLevel),
   /**
-   * Set by a person who has read the commands a suite's checks would run on
-   * this host. A suite with a `command-exits-zero` check is refused without it.
+   * The suite revision whose check commands a person read before starting. A
+   * suite with a `command-exits-zero` check is refused unless this equals the
+   * suite's current revision, so an edit after reading needs a new confirmation.
    */
-  confirmedCommands: Schema.optional(Schema.Literal(true)),
+  confirmedSuiteRevision: Schema.optional(PositiveInt),
 }).annotations(strict);
 export type BenchmarkRunStartRequest = typeof BenchmarkRunStartRequest.Type;
 export const BenchmarkRunStartResponse = Schema.Struct({ run: BenchmarkRun }).annotations(strict);

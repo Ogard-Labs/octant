@@ -54,6 +54,7 @@ function setup(
       | "absent"
       | { readonly status: "refused"; readonly message: string };
     readonly supported?: boolean;
+    readonly canAccess?: (projectId: string) => boolean;
   } = {},
 ) {
   const opened = openBenchmarkTestStore();
@@ -77,6 +78,8 @@ function setup(
       : {
           codeCases: {
             projectMode: () => ("mode" in options ? options.mode : "ask-first"),
+            canAccess: async (_windowId: unknown, projectId: string) =>
+              options.canAccess?.(projectId) ?? true,
             checkRef: async (projectId: string, ref: string) => {
               reads.push([projectId, ref]);
               return options.ref ?? { status: "ok", commit: "a".repeat(40) };
@@ -97,7 +100,7 @@ const windowId = "66300000-0000-4000-8000-000000000001" as never;
 
 function request(
   executionLevel?: BenchmarkRunStartRequest["executionLevel"],
-  confirmedCommands?: true,
+  confirmedSuiteRevision?: number,
 ) {
   return decodeBenchmarkRunStartRequest({
     runId: benchmarkIds.run,
@@ -106,7 +109,7 @@ function request(
     repetitions: 1,
     budget: { maxTokens: 1_000 },
     ...(executionLevel === undefined ? {} : { executionLevel }),
-    ...(confirmedCommands === undefined ? {} : { confirmedCommands }),
+    ...(confirmedSuiteRevision === undefined ? {} : { confirmedSuiteRevision }),
   });
 }
 
@@ -169,7 +172,40 @@ describe("starting a run with Code cases", () => {
     expect(refused.status === "refused" && refused.message).toMatch(/runs commands on this Mac/);
     expect(ctx.projection.runs()).toHaveLength(0);
 
-    expect((await ctx.service.startRun(windowId, request(undefined, true))).status).toBe("ok");
+    expect((await ctx.service.startRun(windowId, request(undefined, 2))).status).toBe("ok");
+  });
+
+  it("refuses a confirmation given for another revision of the suite than the one now saved", async () => {
+    const ctx = setup();
+    ctx.store.suiteSaved({
+      suite: decodeBenchmarkSuite({
+        ...suite([{ kind: "command-exits-zero", command: "bun test", timeoutSeconds: 60 }]),
+        revision: 3,
+      }),
+    });
+
+    const stale = await ctx.service.startRun(windowId, request(undefined, 2));
+
+    expect(stale).toMatchObject({ status: "refused", reason: "invalid" });
+    expect(stale.status === "refused" && stale.message).toMatch(
+      /changed after its commands were read/,
+    );
+    expect(ctx.projection.runs()).toHaveLength(0);
+    expect((await ctx.service.startRun(windowId, request(undefined, 3))).status).toBe("ok");
+  });
+
+  it("refuses a run whose Code Project the starting window cannot reach", async () => {
+    const reachable = "66400000-0000-4000-8000-0000000000aa";
+    const ctx = setup({ canAccess: (projectId) => projectId === reachable });
+
+    const outcome = await ctx.service.startRun(windowId, request());
+
+    expect(outcome).toMatchObject({ status: "refused", reason: "invalid" });
+    expect(outcome.status === "refused" && outcome.message).toContain(
+      "cannot use the Code Project",
+    );
+    expect(ctx.projection.runs()).toHaveLength(0);
+    expect((await setup().service.startRun(windowId, request())).status).toBe("ok");
   });
 
   it("refuses Code cases on a host that cannot run them", async () => {

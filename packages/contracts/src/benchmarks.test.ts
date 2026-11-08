@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   MAX_BENCHMARK_CELLS,
   decodeBenchmarkRun,
+  decodeBenchmarkRunStartRequest,
   decodeBenchmarkSuite,
   decodeBenchmarkSuiteSaveRequest,
 } from "./benchmarks";
@@ -136,6 +137,30 @@ describe("benchmark contracts", () => {
           ? { ...codeRun, cases: [promptCase, codeCase], cells: [cell(1, id(10)), cell(2, id(11))] }
           : codeRun;
       expect(() => decodeBenchmarkRun({ ...source, codeCommits })).toThrow();
+    });
+  });
+
+  describe("the start request's command confirmation", () => {
+    const start = {
+      runId: id(2),
+      suiteId: id(1),
+      contenders: [contender],
+      repetitions: 1,
+      budget: { maxTokens: 10_000 },
+    } as const;
+
+    it("carries the suite revision the person read, and stays optional", () => {
+      expect(decodeBenchmarkRunStartRequest(start).confirmedSuiteRevision).toBeUndefined();
+      expect(
+        decodeBenchmarkRunStartRequest({ ...start, confirmedSuiteRevision: 3 })
+          .confirmedSuiteRevision,
+      ).toBe(3);
+    });
+
+    it.each([0, -1, 1.5, "2", true])("refuses %s as a revision", (value) => {
+      expect(() =>
+        decodeBenchmarkRunStartRequest({ ...start, confirmedSuiteRevision: value }),
+      ).toThrow();
     });
   });
 });

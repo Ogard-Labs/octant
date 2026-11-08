@@ -35,7 +35,7 @@ import {
 } from "@octant/domain";
 import { deterministicUuid } from "../deterministicUuid";
 import { CAPACITY_UNAVAILABLE_FAILURE_CODE, type BenchmarkChatPort } from "./benchmarkChatPort";
-import type { BenchmarkCheckCommandPort } from "./benchmarkCheckCommand";
+import type { BenchmarkCheckCommandPort, BenchmarkCheckSession } from "./benchmarkCheckCommand";
 import type { BenchmarkCodePort, BenchmarkCodeResult } from "./benchmarkCodePort";
 import type { BenchmarkEventStore } from "./benchmarkEventStore";
 import type { BenchmarkProjection } from "./benchmarkProjection";
@@ -168,7 +168,13 @@ export class BenchmarkRunner {
     this.#stopped = false;
     const timer = setInterval(() => void this.tick(), this.#options.tickMs ?? BENCHMARK_TICK_MS);
     timer.unref();
-    void this.#exclusive(() => this.#archiveSettled()).catch(() => undefined);
+    void this.#exclusive(async () => {
+      // No check is running when the host starts, so any private folder a crash
+      // left behind is stale.
+      const checks = this.#options.checkCommand;
+      if (checks?.sweep !== undefined) await checks.sweep().catch(() => undefined);
+      await this.#archiveSettled();
+    }).catch(() => undefined);
     void this.tick();
     return async () => {
       this.#stopped = true;
@@ -880,50 +886,70 @@ export class BenchmarkRunner {
         this.#options.matchPattern,
       )),
     ];
-    for (const [index, check] of benchmarkCase.checks.entries()) {
-      if (!isBenchmarkCodeOnlyCheck(check)) continue;
-      if (check.kind === "max-files-changed") {
-        results.push(benchmarkFilesChangedResult(index, check.count, result.diff?.total));
-        continue;
-      }
-      if (check.kind !== "command-exits-zero") continue;
-      // Once stopped or cancelled, no further command of the sequence starts.
-      if (signal.aborted) {
+    // One private folder serves the whole sequence and is removed after it,
+    // however it ends: finished, aborted by a stop or a cancel, or failed.
+    let session: BenchmarkCheckSession | undefined;
+    try {
+      for (const [index, check] of benchmarkCase.checks.entries()) {
+        if (!isBenchmarkCodeOnlyCheck(check)) continue;
+        if (check.kind === "max-files-changed") {
+          results.push(benchmarkFilesChangedResult(index, check.count, result.diff?.total));
+          continue;
+        }
+        if (check.kind !== "command-exits-zero") continue;
+        // Once stopped or cancelled, no further command of the sequence starts.
+        if (signal.aborted) {
+          results.push(
+            benchmarkCommandResult(index, {
+              status: "unavailable",
+              message: "The check was cancelled.",
+            }),
+          );
+          continue;
+        }
+        const root =
+          code === undefined || cell.threadId === undefined
+            ? undefined
+            : await code.worktreeRoot(cell.threadId);
+        if (checkCommand === undefined || root === undefined) {
+          results.push(
+            benchmarkCommandResult(index, {
+              status: "unavailable",
+              message:
+                checkCommand === undefined
+                  ? "Check commands cannot run on this host."
+                  : "The cell's worktree is not available.",
+            }),
+          );
+          continue;
+        }
+        if (session === undefined) {
+          try {
+            session = await checkCommand.open();
+          } catch {
+            results.push(
+              benchmarkCommandResult(index, {
+                status: "unavailable",
+                message: "The check's private folder could not be made.",
+              }),
+            );
+            continue;
+          }
+        }
         results.push(
-          benchmarkCommandResult(index, {
-            status: "unavailable",
-            message: "The check was cancelled.",
-          }),
+          benchmarkCommandResult(
+            index,
+            await session.run({
+              command: check.command,
+              cwd: root,
+              timeoutMs: Math.min(check.timeoutSeconds, BENCHMARK_COMMAND_MAX_SECONDS) * 1_000,
+              signal,
+            }),
+          ),
         );
-        continue;
       }
-      const root =
-        code === undefined || cell.threadId === undefined
-          ? undefined
-          : await code.worktreeRoot(cell.threadId);
-      if (checkCommand === undefined || root === undefined) {
-        results.push(
-          benchmarkCommandResult(index, {
-            status: "unavailable",
-            message:
-              checkCommand === undefined
-                ? "Check commands cannot run on this host."
-                : "The cell's worktree is not available.",
-          }),
-        );
-        continue;
-      }
-      results.push(
-        benchmarkCommandResult(
-          index,
-          await checkCommand.run({
-            command: check.command,
-            cwd: root,
-            timeoutMs: Math.min(check.timeoutSeconds, BENCHMARK_COMMAND_MAX_SECONDS) * 1_000,
-            signal,
-          }),
-        ),
-      );
+    } finally {
+      await session?.close().catch(() => undefined);
     }
     return results.sort((a, b) => a.index - b.index);
   }

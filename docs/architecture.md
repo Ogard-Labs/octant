@@ -6052,7 +6052,12 @@ lower of it and the level the Project's new threads start at
 Plan Project asks first. Full access is never reached by a pick: a run that asks
 for it where the Project does not already hold it is refused whole at start, with
 a sentence, before any cell runs. Start also refuses a Code Project that is
-missing, archived or not a Code Project, and a ref that does not resolve. The
+missing, archived or not a Code Project, a Project the starting window cannot
+reach (Code cells then act under the host's own scope, so reach is checked once,
+at start), and a ref that does not resolve. A suite with a `command-exits-zero`
+check is refused unless the request's `confirmedSuiteRevision` equals the suite's
+current revision, which the run builder sends only after the person ticked that
+they read the listed commands, so an edit after reading needs a new look. The
 thread is created at the clamped level and the turn is started at the same
 policy, which the host can only narrow.
 
@@ -6073,18 +6078,33 @@ whole count. The turn's record holds at most 32 paths, so a larger change names
 32 and counts all. Checks run after the turn completes, in the background so a
 slow command does not hold other cells: answer-text checks on the reply,
 `max-files-changed` on the count (a turn whose files were not observed fails it),
-and each `command-exits-zero` in the cell's worktree through the **offline
-harness shell**, the Seatbelt-confined, owned-process-group launch behind Octant's
-own shell tool with network `none`, bound to the worktree and a private temporary
-folder. It is used at every level, Full access included, which is stricter than
-the turn. The limit is `min(timeoutSeconds, 600)`; a timeout ends the command's
-whole process group. Only the first 4 KB of output is read and 200 characters of
-it are kept, as the detail of a failure. A command that cannot be launched fails
-its check; it is never run unconfined.
+and each `command-exits-zero` in the cell's worktree through the existing
+Seatbelt-confined, owned-process-group launch behind Octant's own shell tool, on
+a port of its own: network `none`, bound to the worktree, and `setsid()` refused
+so a descendant stays in the group a timeout, a cancel or a shutdown ends. It is
+used at every level, Full access included, which is stricter than the turn. The
+shell carries no cloud, SSH-agent or Google credentials. Each cell's check
+sequence gets a fresh private folder under a benchmark-only root in the host data
+directory, as its writable temporary root and its `HOME` (with `TMPDIR`, `TEMP`
+and `TMP` pointing into it), so one cell cannot leave a `.npmrc` or similar for
+another cell's or run's checks; the folder is removed after the sequence, also on
+abort, and every folder a crash left is swept at host start. The limit is
+`min(timeoutSeconds, 600)`; a timeout, a cancel and a stop each end the command's
+whole process group, and stopping the runner aborts running checks and waits up to
+five seconds for them. Only the first 4 KB of output is read, redacted as host
+shell output is, and 200 characters of it are kept as the detail of a failure. A
+command that cannot be launched fails its check; it is never run unconfined.
+Residual on macOS: `posix_spawn` with `POSIX_SPAWN_SETSID` is a separate system
+call that still starts a new session, so a descendant started that way outlives
+the group's end. It keeps the launch's confinement (the cell's worktree and its
+private folder writable, no network, no home), as the language services design
+records for servers and adapters.
 
 _Judge._ For a Code cell `benchmarkJudgePrompt` gets the case prompt, the
 reference if any, the diff summary and the check results instead of an answer. It
-stays blind.
+stays blind. The answer, the file paths and the check details are quoted as
+fenced data, the fence longer than any backtick run inside, with a line telling
+the judge to ignore instructions in them.
 
 _Purge._ Purging a run removes each Code cell's managed worktree through
 `ManagedWorktreeService.cleanup` (the thread is archived first, as that service
