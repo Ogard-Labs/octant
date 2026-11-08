@@ -226,6 +226,14 @@ if (mode === "refused") {
           /(?:error: |Error: )(Owned peer proof failed: [A-Za-z0-9 /'-]{1,200})/,
         );
         if (failure) records.push({ fixtureFailure: failure[1] });
+        const nativeFailure = errorTail.match(
+          /Owned peer launch refused at ([a-z-]{1,64}) \(([0-9]{1,10})\)\./,
+        );
+        if (nativeFailure)
+          records.push({
+            nativeFailureStage: nativeFailure[1],
+            win32Error: Number(nativeFailure[2]),
+          });
       });
       child.stdin.on("error", (error: unknown) => {
         if (!record(error) || error.code !== "EPIPE") stdinFault = true;
@@ -395,10 +403,32 @@ if (mode === "refused") {
           String(process.pid),
         ]);
         denied.child.stdin.end();
+        const exitCode = await denied.exit;
+        const principalRefused = denied.records.some(
+          (value) => value.nativePrincipalRefused === true,
+        );
+        const jobJoined = denied.records.some((value) => value.ownedPeerJobJoined === true);
+        if (exitCode !== 0 || !principalRefused || !jobJoined)
+          console.log(
+            JSON.stringify({
+              copiedTokenFailure: boundary,
+              exitCode,
+              principalRefused,
+              jobJoined,
+              failures: denied.records
+                .filter(
+                  (value) =>
+                    value.nativeFailureStage !== undefined || value.fixtureFailure !== undefined,
+                )
+                .map(({ nativeFailureStage, win32Error, fixtureFailure }) => ({
+                  nativeFailureStage,
+                  win32Error,
+                  fixtureFailure,
+                })),
+            }),
+          );
         check(
-          (await denied.exit) === 0 &&
-            denied.records.some((value) => value.nativePrincipalRefused === true) &&
-            denied.records.some((value) => value.ownedPeerJobJoined === true),
+          exitCode === 0 && principalRefused && jobJoined,
           "an actual copied child token is refused and its entire owned job joins",
         );
         if (boundary === "--low-integrity")
