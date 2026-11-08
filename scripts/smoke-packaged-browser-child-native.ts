@@ -255,9 +255,6 @@ const timer=setInterval(()=>{if(alive(owner)&&alive(group)&&alive(-group)&&Date.
     secret = undefined;
     if (localProvider.evidence().probes !== 1)
       throw Error("The real provider driver did not verify its tool capability.");
-    await act("click", "Work");
-    await observe("owned Project", (s) => hasText(s, "Owned Browser fixture"));
-    await act("click", "Owned Browser fixture");
     await observe("owned parent", (s) => hasText(s, CHILD_FIXTURE_PARENT_TASK));
     await act("click", CHILD_FIXTURE_PARENT_TASK);
     await observe("parent composer", (s) => hasText(s, "Reply"));
