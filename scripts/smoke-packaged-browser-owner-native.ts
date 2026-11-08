@@ -807,6 +807,7 @@ end run`;
             .flatMap((row) => row.split(" | ").slice(1, 3))
             .find((label) => label === noKeyLabel || label === "It takes no key");
           if (noKey === undefined) throw Error("Observed no-key choice has no exact source label.");
+          await native("reveal", noKey);
           await native("click", noKey);
           await native("reveal", "Check and add");
           await native("click", "Check and add");
