@@ -971,8 +971,11 @@ Hub › Moved threads), and each change is journaled. The hub checks a move's
 sender against the identity key that member joined with, takes moves only
 from a spoke or a standby (never a guest), and still requires the fresh
 own-class unlock from an owner device on the hub's own owner list. Off, it
-answers every move with the same `refused` as a spoke without Move in. The
-hub moves no thread away: no spoke grants it Move in.
+answers every move with the same `refused` as a spoke without Move in. A
+host whose hub role is on judges a move only as the hub, as its owner routes
+do: a spoke that turned its hub role on keeps its old link, and the peer grants
+from that link never let a move past Accept moved threads. The hub moves no
+thread away: no spoke grants it Move in.
 
 On a Mac source, the window asks its own host for the destination's owner
 challenge, which the source fetches signed with its member identity and which
