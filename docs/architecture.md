@@ -14575,6 +14575,13 @@ only private regular certificates through a flushed native staging handle and
 atomic rename into the held remote directory. The reopened file identity is
 checked before use. Renewal and restart preserve the SPKI pin; unsafe keys or
 certificate entries refuse without ordinary-file fallback or silent key rotation.
+The dependent roster signer admits only its fixed `hub/roster-signing-key.pem`
+through a separate closed native operation on the same profile boundary.
+Exclusive creation preserves the existing P-256 key across restart or competing
+first-use. Unsafe, malformed and wrong-curve keys refuse without replacement or
+permission repair. Public SPKI and SHA-256/P1363 signatures retain their format;
+private transfer buffers are erased after import. Windows without this internal
+storage dependency refuses before ordinary-file access.
 This is not Windows startup, encryption-warning, service or confinement admission.
 
 **Updates** (`apps/desktop/src/appUpdateService.ts`, `appUpdateFeed.ts`,

@@ -501,24 +501,28 @@ bool replace_listener_certificate(const Root& root, const std::wstring& path,
 
 // Separate closed entry points share profile admission. A JavaScript caller
 // cannot turn identityFile into a writer for TLS or another private purpose.
-napi_value private_listener_file(napi_env env, napi_callback_info info, bool tls) {
-  Guard guard; size_t count = 5; napi_value arguments[5];
+enum class ProfileFileFamily { ServerIdentity, ListenerTls, RosterKey };
+napi_value private_profile_file(napi_env env, napi_callback_info info, ProfileFileFamily family) {
+  const bool tls = family == ProfileFileFamily::ListenerTls;
+  const bool roster = family == ProfileFileFamily::RosterKey;
+  const size_t expected_count = roster ? 4 : 5;
+  Guard guard; size_t count = expected_count; napi_value arguments[5];
   napi_get_cb_info(env, info, &count, arguments, nullptr, nullptr);
-  if (count != 5 || !per_user_creation_context()) return object(env, "refused");
+  if (count != expected_count || !per_user_creation_context()) return object(env, "refused");
   const std::string name = string_arg(env, arguments[0]);
   const std::string scope = string_arg(env, arguments[1]);
   const std::string expected_data = string_arg(env, arguments[2]);
-  const std::string purpose = string_arg(env, arguments[3]);
+  const std::string purpose = roster ? "roster-key" : string_arg(env, arguments[3]);
   const auto found = profiles.find(name);
   if (found == profiles.end() || found->second->scope != scope ||
-      (tls ? (purpose != "key" && purpose != "certificate") : (purpose != "host-id" && purpose != "host-key"))) return object(env, "refused");
+      (!roster && (tls ? (purpose != "key" && purpose != "certificate") : (purpose != "host-id" && purpose != "host-key")))) return object(env, "refused");
   const bool certificate = tls && purpose == "certificate";
   const DWORD maximum = purpose == "host-id" ? 37 : certificate ? 16384 : 4096;
   napi_valuetype candidate_type;
-  if (napi_typeof(env, arguments[4], &candidate_type) != napi_ok) return object(env, "refused");
+  if (napi_typeof(env, arguments[roster ? 3 : 4], &candidate_type) != napi_ok) return object(env, "refused");
   const bool create = candidate_type != napi_null;
   Bytes candidate;
-  if (create && (!byte_arg(env, arguments[4], candidate, maximum) || candidate.empty())) return object(env, "refused");
+  if (create && (!byte_arg(env, arguments[roster ? 3 : 4], candidate, maximum) || candidate.empty())) return object(env, "refused");
   // Reopen/revalidate the native known-folder path and current ACLs on every
   // operation. Cached JavaScript path facts are not filesystem admission.
   auto root = private_root({L"hosts", std::wstring(name.begin(), name.end())}, false, true);
@@ -543,7 +547,7 @@ napi_value private_listener_file(napi_env env, napi_callback_info info, bool tls
   for (size_t i = 0; i < directories.size(); ++i)
     if (std::memcmp(encoded.data() + 9 + i * 24, &directories[i].VolumeSerialNumber, 8) != 0 ||
         std::memcmp(encoded.data() + 17 + i * 24, directories[i].FileId.Identifier, 16) != 0) return object(env, "refused");
-  const std::wstring remote_path = root->path + L"\\data\\remote";
+  const std::wstring remote_path = root->path + L"\\data\\" + (roster ? L"hub" : L"remote");
   SECURITY_ATTRIBUTES directory_attributes{sizeof(SECURITY_ATTRIBUTES), root->directory_security, FALSE};
   if (create && !CreateDirectoryW(remote_path.c_str(), &directory_attributes) && GetLastError() != ERROR_ALREADY_EXISTS) return object(env, "refused");
   if (!create && GetFileAttributesW(remote_path.c_str()) == INVALID_FILE_ATTRIBUTES) {
@@ -553,7 +557,7 @@ napi_value private_listener_file(napi_env env, napi_callback_info info, bool tls
   Handle remote = open_directory(remote_path);
   if (!remote) return object(env, "refused");
   if (!private_acl(remote.value, *root, directory_inheritance)) return object(env, "refused");
-  const std::wstring path = remote_path + (tls
+  const std::wstring path = remote_path + (roster ? L"\\roster-signing-key.pem" : tls
     ? (certificate ? L"\\private-listener-tls-cert.pem" : L"\\private-listener-tls-key.pem")
     : (purpose == "host-id" ? L"\\private-listener-host-id" : L"\\private-listener-host-key.pem"));
   FILE_ID_INFO created_identity{}; bool wrote_identity = false;
@@ -585,7 +589,7 @@ napi_value private_listener_file(napi_env env, napi_callback_info info, bool tls
   }
   BY_HANDLE_FILE_INFORMATION metadata{}; LARGE_INTEGER size{};
   if (!file) return object(env, "refused");
-  if (!private_acl(file.value, *root)) return object(env, tls && !certificate ? "exposed" : "refused");
+  if (!private_acl(file.value, *root)) return object(env, (tls || roster) && !certificate ? "exposed" : "refused");
   if (!GetFileInformationByHandle(file.value, &metadata) ||
       metadata.nNumberOfLinks != 1 || (metadata.dwFileAttributes & (FILE_ATTRIBUTE_DIRECTORY | FILE_ATTRIBUTE_REPARSE_POINT)) != 0 ||
       !GetFileSizeEx(file.value, &size) || size.QuadPart < 0 || (!certificate && size.QuadPart == 0) || size.QuadPart > maximum) return object(env, "refused");
@@ -603,8 +607,10 @@ napi_value private_listener_file(napi_env env, napi_callback_info info, bool tls
   if (!certificate) retained.push_back(std::move(file));
   return result;
 }
-napi_value identity_file(napi_env env, napi_callback_info info) { return private_listener_file(env, info, false); }
-napi_value listener_tls_file(napi_env env, napi_callback_info info) { return private_listener_file(env, info, true); }
+napi_value identity_file(napi_env env, napi_callback_info info) { return private_profile_file(env, info, ProfileFileFamily::ServerIdentity); }
+napi_value listener_tls_file(napi_env env, napi_callback_info info) { return private_profile_file(env, info, ProfileFileFamily::ListenerTls); }
+
+napi_value roster_signing_key_file(napi_env env, napi_callback_info info) { return private_profile_file(env, info, ProfileFileFamily::RosterKey); }
 
 void record_fields(napi_env env, napi_value result, const Record& record) {
   number(env, result, "pid", record.identity.pid); put(env, result, "processStart", birth(record.identity.born));
@@ -810,6 +816,7 @@ NAPI_MODULE_INIT() {
     {"openProfile", nullptr, open_profile, nullptr, nullptr, nullptr, napi_default, nullptr},
     {"identityFile", nullptr, identity_file, nullptr, nullptr, nullptr, napi_default, nullptr},
     {"listenerTlsFile", nullptr, listener_tls_file, nullptr, nullptr, nullptr, napi_default, nullptr},
+    {"rosterSigningKeyFile", nullptr, roster_signing_key_file, nullptr, nullptr, nullptr, napi_default, nullptr},
     {"prepare", nullptr, prepare, nullptr, nullptr, nullptr, napi_default, nullptr},
     {"claim", nullptr, claim, nullptr, nullptr, nullptr, napi_default, nullptr},
     {"lookup", nullptr, lookup, nullptr, nullptr, nullptr, napi_default, nullptr},

@@ -3,7 +3,7 @@ param(
   [ValidateSet('octant', 'nightly-test-data')]
   [string]$Profile,
   [Parameter(Mandatory = $true)]
-  [ValidateSet('inspect', 'unsafe', 'restore', 'prepare-data', 'identity-inspect', 'identity-unsafe', 'identity-restore', 'tls-inspect', 'tls-unsafe', 'tls-restore', 'tls-cert-unsafe', 'tls-cert-restore')]
+  [ValidateSet('inspect', 'unsafe', 'restore', 'prepare-data', 'identity-inspect', 'identity-unsafe', 'identity-restore', 'tls-inspect', 'tls-unsafe', 'tls-restore', 'tls-cert-unsafe', 'tls-cert-restore', 'roster-inspect', 'roster-unsafe', 'roster-restore')]
   [string]$Mode
 )
 $ErrorActionPreference = 'Stop'
@@ -13,11 +13,12 @@ if (-not $octantNode.PSIsContainer -or ($octantNode.Attributes -band [IO.FileAtt
 $octantUser = [Security.Principal.WindowsIdentity]::GetCurrent().User
 $octantAcl = [Security.AccessControl.DirectorySecurity]::new($octantRoot, [Security.AccessControl.AccessControlSections]::Access -bor [Security.AccessControl.AccessControlSections]::Owner)
 if ($octantAcl.GetOwner([Security.Principal.SecurityIdentifier]).Value -ne $octantUser.Value) { throw 'Profile fixture has another owner' }
-if ($Mode.StartsWith('identity-') -or $Mode.StartsWith('tls-')) {
-  $octantFiles = if ($Mode.StartsWith('tls-')) { @('private-listener-tls-key.pem', 'private-listener-tls-cert.pem') } else { @('private-listener-host-id', 'private-listener-host-key.pem') }
-  $octantMutatedFile = if ($Mode.StartsWith('tls-cert-')) { 'private-listener-tls-cert.pem' } elseif ($Mode.StartsWith('tls-')) { 'private-listener-tls-key.pem' } else { 'private-listener-host-key.pem' }
+if ($Mode.StartsWith('identity-') -or $Mode.StartsWith('tls-') -or $Mode.StartsWith('roster-')) {
+  $octantFiles = if ($Mode.StartsWith('roster-')) { @('roster-signing-key.pem') } elseif ($Mode.StartsWith('tls-')) { @('private-listener-tls-key.pem', 'private-listener-tls-cert.pem') } else { @('private-listener-host-id', 'private-listener-host-key.pem') }
+  $octantMutatedFile = if ($Mode.StartsWith('roster-')) { 'roster-signing-key.pem' } elseif ($Mode.StartsWith('tls-cert-')) { 'private-listener-tls-cert.pem' } elseif ($Mode.StartsWith('tls-')) { 'private-listener-tls-key.pem' } else { 'private-listener-host-key.pem' }
+  $octantSubdir = if ($Mode.StartsWith('roster-')) { 'hub' } else { 'remote' }
   foreach ($octantFile in $octantFiles) {
-    $octantFilePath = Join-Path $octantRoot "data\remote\$octantFile"
+    $octantFilePath = Join-Path $octantRoot "data\$octantSubdir\$octantFile"
     $octantFileEntry = Get-Item -LiteralPath $octantFilePath -Force
     if ($octantFileEntry.PSIsContainer -or ($octantFileEntry.Attributes -band [IO.FileAttributes]::ReparsePoint)) { throw 'Unsafe owned identity fixture file' }
     $octantFileAccess = [Security.AccessControl.FileSecurity]::new($octantFilePath, [Security.AccessControl.AccessControlSections]::Access -bor [Security.AccessControl.AccessControlSections]::Owner)

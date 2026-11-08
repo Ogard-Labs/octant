@@ -500,7 +500,7 @@ export function wireRemote(deps: RemoteDependencies) {
   };
   const hubService = new HubService({
     state: hubStateStore,
-    rosterKey: createRosterSigningKeyStore(providerDataDirectory),
+    rosterKey: createRosterSigningKeyStore(providerDataDirectory, options.rosterSigningKeyFile),
     identity: resolveHubIdentity,
     listener: () => privateListenerController.status(),
     pairing: hubPairing,
