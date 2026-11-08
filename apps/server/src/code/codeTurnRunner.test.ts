@@ -2088,6 +2088,7 @@ describe("CodeTurnRunner", () => {
           toolMs: 0,
           modelCalls: 1,
         },
+        diagnostics: { toolCalls: 0, toolFailures: 0 },
       });
       expect(ended).toEqual([completed[0]?.turn]);
     });
@@ -2156,6 +2157,11 @@ describe("CodeTurnRunner", () => {
           startedAt: at(0),
           endedAt: at(1_000),
           metrics: { precision: "unavailable", wallMs: 1_000 },
+          diagnostics: {
+            toolCalls: 0,
+            toolFailures: 0,
+            failure: { category: "provider-failed", message: "Provider stopped." },
+          },
         },
       ]);
     });

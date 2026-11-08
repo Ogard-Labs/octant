@@ -20,6 +20,7 @@ import {
   type NativeHarnessGrepArguments,
   type NativeHarnessJournalLookupArguments,
   type NativeHarnessReadArguments,
+  type NativeHarnessReplacement,
   type NativeHarnessSecondOpinionArguments,
   type NativeHarnessSkillArguments,
   type NativeHarnessTodoItem,
@@ -40,7 +41,10 @@ import { admitNativeHarnessTool } from "./nativeHarnessToolAdmission";
 import type { AppManagedToolSet } from "../providers/appManagedToolSet";
 import type { ToolCallAuthorityService } from "../toolCallAuthorityService";
 import type { ToolEgressCallConfirmation } from "./nativeHarnessEgressRules";
-import type { NativeHarnessFileSystemPort } from "./nativeHarnessFileSystem";
+import type {
+  NativeHarnessEditFilesResult,
+  NativeHarnessFileSystemPort,
+} from "./nativeHarnessFileSystem";
 import type { NativeHarnessJournalLookup } from "./nativeHarnessJournalLookup";
 import { nativeHarnessGoalSummary, type NativeHarnessGoalPort } from "./nativeHarnessGoal";
 
@@ -446,6 +450,10 @@ async function execute(
     }
     case "edit": {
       const input = args as NativeHarnessEditArguments;
+      if ("edits" in input) {
+        if (ports.filesystem === undefined) return refused("tool-unavailable");
+        return editedFiles(input.edits, await ports.filesystem.editFiles(input.edits));
+      }
       const outcome = await ports.filesystem!.edit(input);
       return outcome.kind === "refused" ? refused(outcome.reason, outcome.message) : ok(outcome);
     }
@@ -595,6 +603,38 @@ async function execute(
   }
 }
 
+/** Says which replacement stopped the call and that nothing changed, so the model can fix that one and retry. */
+function editedFiles(
+  edits: ReadonlyArray<NativeHarnessReplacement>,
+  outcome: NativeHarnessEditFilesResult,
+): { readonly result: unknown; readonly isError: boolean; readonly refused?: boolean } {
+  if (outcome.kind === "edited") return ok(outcome);
+  if (outcome.kind === "refused") {
+    const path = edits[outcome.edit]?.path ?? "";
+    return {
+      result: {
+        error: outcome.reason,
+        edit: outcome.edit,
+        message: `edits[${outcome.edit}] (${path}) was refused: ${outcome.message ?? outcome.reason}. No file was changed.`,
+      },
+      isError: true,
+      refused: true,
+    };
+  }
+  return {
+    result: {
+      error: "write-failed",
+      path: outcome.path,
+      ...(outcome.unrestored.length === 0 ? {} : { unrestored: outcome.unrestored }),
+      message:
+        outcome.unrestored.length === 0
+          ? `Writing ${outcome.path} failed after every replacement was checked. The files this call had written were put back as you read them, so no file was changed.`
+          : `Writing ${outcome.path} failed after every replacement was checked, and ${outcome.unrestored.join(", ")} could not be put back as you read them. Read those files again before editing them.`,
+    },
+    isError: true,
+  };
+}
+
 /**
  * One page of a skill's instructions. A cut is never silent: the result says
  * how many characters were left out and the offset that continues.
@@ -730,19 +770,26 @@ function detailFor(
     text.length > MAX_NATIVE_HARNESS_TOOL_DETAIL
       ? `${text.slice(0, MAX_NATIVE_HARNESS_TOOL_DETAIL - 2)}…`
       : text;
-  if (name === "edit" && typeof args.oldText === "string" && typeof args.newText === "string") {
-    const path = typeof args.path === "string" ? args.path : "file";
-    const removed = args.oldText.split("\n").map((line) => `-${line}`);
-    const added = args.newText.split("\n").map((line) => `+${line}`);
-    return bound(
-      [
+  if (name === "edit") {
+    const replacements = Array.isArray(args.edits)
+      ? (args.edits as ReadonlyArray<unknown>)
+      : [args];
+    const hunks = replacements.flatMap((replacement) => {
+      if (typeof replacement !== "object" || replacement === null) return [];
+      const edit = replacement as Record<string, unknown>;
+      if (typeof edit.oldText !== "string" || typeof edit.newText !== "string") return [];
+      const path = typeof edit.path === "string" ? edit.path : "file";
+      const removed = edit.oldText.split("\n").map((line) => `-${line}`);
+      const added = edit.newText.split("\n").map((line) => `+${line}`);
+      return [
         `--- a/${path}`,
         `+++ b/${path}`,
         `@@ -1,${removed.length} +1,${added.length} @@`,
         ...removed,
         ...added,
-      ].join("\n"),
-    );
+      ];
+    });
+    if (hunks.length > 0) return bound(hunks.join("\n"));
   }
   if (name === "write" && typeof args.content === "string") {
     const path = typeof args.path === "string" ? args.path : "file";
@@ -780,19 +827,36 @@ function intentFor(name: NativeHarnessToolName, args: unknown): string {
   if (name === "skill") {
     return typeof record.name === "string" ? `skill: ${record.name}`.slice(0, 2_048) : name;
   }
+  // Every file a call changes is named, so one approval shows them all.
+  const editedPaths = Array.isArray(record.edits)
+    ? [
+        ...new Set(
+          record.edits.flatMap((edit: unknown) =>
+            typeof edit === "object" && edit !== null && "path" in edit
+              ? typeof edit.path === "string"
+                ? [edit.path]
+                : []
+              : [],
+          ),
+        ),
+      ]
+    : [];
   const detail =
-    typeof record.path === "string"
-      ? record.path
-      : typeof record.command === "string"
-        ? record.command
-        : typeof record.url === "string"
-          ? record.url
-          : typeof record.query === "string"
-            ? record.query
-            : typeof record.pattern === "string"
-              ? record.pattern
-              : "";
-  const text = detail.length === 0 ? name : `${name}: ${detail}`;
+    editedPaths.length > 0
+      ? editedPaths.join(", ")
+      : typeof record.path === "string"
+        ? record.path
+        : typeof record.command === "string"
+          ? record.command
+          : typeof record.url === "string"
+            ? record.url
+            : typeof record.query === "string"
+              ? record.query
+              : typeof record.pattern === "string"
+                ? record.pattern
+                : "";
+  const label = editedPaths.length > 1 ? `${name} (${editedPaths.length} files)` : name;
+  const text = detail.length === 0 ? name : `${label}: ${detail}`;
   return text.length > 2_048 ? text.slice(0, 2_048) : text;
 }
 

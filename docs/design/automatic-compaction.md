@@ -1,6 +1,6 @@
 # Automatic compaction
 
-Status: Building (slice 3 of 4)
+Status: Building (slice 4 of 4; live-runtime checks open)
 Size: Full — crosses contracts, the context service, every runtime adapter,
 Settings and the provider-switch handoff.
 Owner: maintainers · Started: 2026-11-07 · Approved: 2026-11-07, maintainer (Q-1 and Q-2 answered)
@@ -29,23 +29,23 @@ DESIGN.md owns the Settings controls.
 
 ### Requirements
 
-| ID    | Requirement                                                                                                                                                                              | Priority    | Acceptance criterion                                                                                                                                                                                         | Sources |
-| ----- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------- |
-| FR-1  | A person can turn each automatic trigger on or off and set its number in Settings.                                                                                                       | Must        | Given Settings → General → Compaction, when the person picks "At 80% full", then the host's settings read back 80 and the next qualifying thread compacts at 80%.                                            | S1      |
-| FR-2  | **Window fill trigger.** When a thread's last usage report shows the window at or above the set share, Octant compacts it before the next turn.                                          | Must        | Given the trigger at 70% and a Code turn on Octant Harness that ends at 72%, when the turn settles, then one compaction with reason `window-fill` is journaled and the next turn is built from its summary.  | S1, S3  |
-| FR-3  | Where a runtime takes a compaction point (Claude Code, Codex), Octant hands it the set share, so the runtime also compacts at that point inside a long turn.                             | Should      | Given the trigger at 70%, when a Claude Code session opens, then its reported `autoCompactThreshold` is 70% of its window (± 1%).                                                                            | S1, S4  |
-| FR-4  | Octant Harness compacts inside a turn, between model steps, when the next request would pass the set share, instead of trimming history.                                                 | Should      | Given the trigger at 70% and a harness turn whose next step would be at 75%, then the step is sent after a compaction, and no `OMITTED_HISTORY_NOTE` appears in that request.                                | S1, S3  |
-| FR-5  | **Idle trigger.** A thread with no turn for the set time is compacted once, if its window holds at least a minimum.                                                                      | Must        | Given the trigger at 30 minutes and a thread whose last turn ended 31 minutes ago holding 60K tokens, then one compaction with reason `idle` runs; a second sweep 10 minutes later runs none.                | S1      |
-| FR-6  | **Limit trigger.** When the thread's provider reports an account window at or above the set share, the thread is compacted after its turn settles.                                       | Must        | Given the trigger at 90% and a Claude Code turn after which the 5-hour window reads 91%, then one compaction with reason `limit-near` runs for that thread, and none for its next turn below a new crossing. | S1, S5  |
-| FR-7  | After a limit-triggered compaction, the thread holds a portable handover summary that a provider switch or fork to another provider uses as its first block.                             | Must? (Q-2) | Given FR-6 fired on a Claude Code thread, when the person switches the thread to Codex, then the handoff's first block is that summary and its raw selection covers only turns after it.                     | S1, S6  |
-| FR-8  | After a limit-triggered compaction the person is told, with a direct way to pick another model or provider.                                                                              | Should      | Given FR-6 fired, then the thread shows "Claude Code is at 91% of its 5-hour limit. This thread is compacted and ready to move." with **Switch model**.                                                      | S1      |
-| FR-9  | Every automatic compaction says why it ran, on the timeline divider and the compaction receipt.                                                                                          | Must        | The divider reads "Compacted automatically · window 72% full" (or "· idle 31 min", "· 5-hour limit 91%").                                                                                                    | S1      |
-| FR-10 | An automatic compaction passes every refusal a requested one passes, and is skipped silently when refused, leaving no trace.                                                             | Must        | Given a turn running, a spend ceiling reached, or a disabled mode, then no compaction runs and nothing is journaled.                                                                                         | S2      |
-| NFR-1 | Automatic compaction never runs on a thread more than once per trigger crossing, and at most one runs per provider instance at a time.                                                   | Must        | A replayed journal and a restarted host do not start a second compaction for a crossing already handled.                                                                                                     | S2      |
-| NFR-2 | The idle sweep costs no provider call when nothing qualifies.                                                                                                                            | Must        | A sweep over 500 idle threads with nothing qualifying makes zero provider requests and finishes in under 50 ms.                                                                                              | S7      |
-| CON-1 | Automatic compaction replaces the confirm dialog with the person's setting; it never starts a new provider session seeded with Octant's summary on its own.                              | Must        | —                                                                                                                                                                                                            | S8      |
-| CON-2 | New runtime behavior reaches the system through `@octant/provider-sdk` capabilities, not adapter-specific branches in the context service.                                               | Must        | —                                                                                                                                                                                                            | AGENTS  |
-| ASM-1 | Claude Code accepts a compaction point through its environment, and Codex through `model_auto_compact_token_limit` in thread config. To be read at pinned releases before FR-3 is built. | —           | —                                                                                                                                                                                                            | S4      |
+| ID    | Requirement                                                                                                                                                                                               | Priority    | Acceptance criterion                                                                                                                                                                                         | Sources |
+| ----- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------- |
+| FR-1  | A person can turn each automatic trigger on or off and set its number in Settings.                                                                                                                        | Must        | Given Settings → General → Compaction, when the person picks "At 80% full", then the host's settings read back 80 and the next qualifying thread compacts at 80%.                                            | S1      |
+| FR-2  | **Window fill trigger.** When a thread's last usage report shows the window at or above the set share, Octant compacts it before the next turn.                                                           | Must        | Given the trigger at 70% and a Code turn on Octant Harness that ends at 72%, when the turn settles, then one compaction with reason `window-fill` is journaled and the next turn is built from its summary.  | S1, S3  |
+| FR-3  | Where a runtime takes a compaction point (Claude Code, Codex), Octant hands it the set share, so the runtime also compacts at that point inside a long turn.                                              | Should      | Given the trigger at 70%, when a Claude Code session opens, then its reported `autoCompactThreshold` is 70% of its window (± 1%).                                                                            | S1, S4  |
+| FR-4  | Octant Harness compacts inside a turn, between model steps, when the next request would pass the set share, instead of trimming history.                                                                  | Should      | Given the trigger at 70% and a harness turn whose next step would be at 75%, then the step is sent after a compaction, and no `OMITTED_HISTORY_NOTE` appears in that request.                                | S1, S3  |
+| FR-5  | **Idle trigger.** A thread with no turn for the set time is compacted once, if its window holds at least a minimum.                                                                                       | Must        | Given the trigger at 30 minutes and a thread whose last turn ended 31 minutes ago holding 60K tokens, then one compaction with reason `idle` runs; a second sweep 10 minutes later runs none.                | S1      |
+| FR-6  | **Limit trigger.** When the thread's provider reports an account window at or above the set share, the thread is compacted after its turn settles.                                                        | Must        | Given the trigger at 90% and a Claude Code turn after which the 5-hour window reads 91%, then one compaction with reason `limit-near` runs for that thread, and none for its next turn below a new crossing. | S1, S5  |
+| FR-7  | After a limit-triggered compaction, the thread holds a portable handover summary that a provider switch or fork to another provider uses as its first block.                                              | Must? (Q-2) | Given FR-6 fired on a Claude Code thread, when the person switches the thread to Codex, then the handoff's first block is that summary and its raw selection covers only turns after it.                     | S1, S6  |
+| FR-8  | After a limit-triggered compaction the person is told, with a direct way to pick another model or provider.                                                                                               | Should      | Given FR-6 fired, then the thread shows "Claude Code is at 91% of its 5-hour limit. This thread is compacted and ready to move." with **Switch model**.                                                      | S1      |
+| FR-9  | Every automatic compaction says why it ran, on the timeline divider and the compaction receipt.                                                                                                           | Must        | The divider reads "Compacted automatically · window 72% full" (or "· idle 31 min", "· 5-hour limit 91%").                                                                                                    | S1      |
+| FR-10 | An automatic compaction passes every refusal a requested one passes, and is skipped silently when refused, leaving no trace.                                                                              | Must        | Given a turn running, a spend ceiling reached, or a disabled mode, then no compaction runs and nothing is journaled.                                                                                         | S2      |
+| NFR-1 | Automatic compaction never runs on a thread more than once per trigger crossing, and at most one runs per provider instance at a time.                                                                    | Must        | A replayed journal and a restarted host do not start a second compaction for a crossing already handled.                                                                                                     | S2      |
+| NFR-2 | The idle sweep costs no provider call when nothing qualifies.                                                                                                                                             | Must        | A sweep over 500 idle threads with nothing qualifying makes zero provider requests and finishes in under 50 ms.                                                                                              | S7      |
+| CON-1 | Automatic compaction replaces the confirm dialog with the person's setting; it never starts a new provider session seeded with Octant's summary on its own.                                               | Must        | —                                                                                                                                                                                                            | S8      |
+| CON-2 | New runtime behavior reaches the system through `@octant/provider-sdk` capabilities, not adapter-specific branches in the context service.                                                                | Must        | —                                                                                                                                                                                                            | AGENTS  |
+| ASM-1 | Read 2026-11-08: Claude Code 2.1.287 (agent SDK 0.3.211) takes an `autoCompactWindow` setting (its SDK's settings schema), and Codex 0.166.0 takes `model_auto_compact_token_limit` in a thread's config. | —           | —                                                                                                                                                                                                            | S4      |
 
 ### Traceability
 
@@ -226,7 +226,7 @@ Choice: (b). It adds no new authority path; the window that just ran a turn on
 the checkout is the one that compacts it. Consequences: the idle rule (slice 2)
 needs a window that can still open the thread, or it skips Code threads.
 
-### D-5: The handover summary covers Chat and Work; Code waits (Accepted, 2026-11-07)
+### D-5: The handover summary covers Chat and Work; Code waits (Superseded by D-6)
 
 Context: the host holds the whole conversation of a Chat or Work thread
 (`sessionCompactionConversation`), so it can ask the thread's own provider for a
@@ -239,6 +239,18 @@ limit rule, its notice and **Switch model** reach every mode now, and a Code
 reader is its own change. Consequences: FR-7 holds for Chat and Work only; a
 Code thread is still compacted and told it is ready to move.
 
+### D-6: Code threads get the handover summary too (Accepted, 2026-11-08)
+
+Context: the maintainer asked for every part not yet built, D-5's Code gap
+included. The host can read a Code thread's public conversation from its
+operation journal and evidence store, the same sources its export and its
+switch handoff read. Options: (a) leave Code on the raw selection; (b) read
+the whole conversation (prompts and finished replies, rewound turns left out)
+for the summary, run the summary in a private host folder rather than the
+checkout, and lead a Code provider switch with it. Choice: (b). Consequences:
+FR-7 holds in every mode; a fork's first turn still hands over as before,
+since its handoff carries the source's turns, which the summary never read.
+
 ## 6. Build plan
 
 | Slice | What it delivers                                                                                                                           | Requirement IDs                       | Status  |
@@ -246,7 +258,7 @@ Code thread is still compacted and told it is ready to move.
 | 1     | Rules in settings + pure decision; `host-policy` caller; window-fill trigger between turns on every runtime; reason on receipt and divider | FR-1 (fill), FR-2, FR-9, FR-10, NFR-1 | Built   |
 | 2     | Idle sweep                                                                                                                                 | FR-1 (idle), FR-5, NFR-2              | Built   |
 | 3     | Limit trigger, notice, handover summary read by switch and fork                                                                            | FR-1 (limit), FR-6, FR-7, FR-8        | Planned |
-| 4     | Runtime compaction point (Claude Code, Codex) and in-turn harness compaction                                                               | FR-3, FR-4                            | Planned |
+| 4     | Runtime compaction point (Claude Code, Codex) and in-turn harness compaction                                                               | FR-3, FR-4                            | Built   |
 
 ## 7. Open questions
 
@@ -351,7 +363,7 @@ spell waits for the thread's next turn.
   window-fill rule, so a limit that stays high never stands in for it.
   `windowFill` also returns the thread's provider instance.
 - **Handover** (`sessionCompaction.ts` `#writeHandover`): for a `limit-near`
-  compaction of a runtime-kept Chat or Work thread, the host first asks the
+  compaction of a runtime-kept thread (Code since D-6), the host first asks the
   thread's own provider, tool-free, for a summary of the conversation it holds
   (newest first, at most 400,000 characters), then asks the runtime to compact.
   The text is stored in the summary content store, committed with the receipt,
@@ -361,7 +373,7 @@ spell waits for the thread's next turn.
   reads is fixed when the rule asks, and the spend ceiling reserves for it (its
   input plus 3,000 tokens of answer) beside the compaction, so a ceiling with
   room for only one refuses the rule.
-- **Switch** (`withHandoverSummary`): a Chat or Work provider switch reads
+- **Switch** (`withHandoverSummary`): a provider switch in any mode (not a Code fork) reads
   `ContextHarnessService.handoverSummary` (the latest compaction, if the limit
   rule made it, and only while the last message it read is still in the
   thread, so a rewind past it never brings removed turns back) and leads the handoff with it in up to three 4,000-character
@@ -378,32 +390,81 @@ spell waits for the thread's next turn.
 Failure modes: a reading with no account windows never acts; a ledger that
 cannot be read hands a switch the raw selection, as before.
 
+### Slice 4: the point inside a turn
+
+- **Seam** (`@octant/provider-sdk`): `ProviderCompactionPoint { tokens,
+contextWindow }`, optional on `ProviderSessionStart` and
+  `ProviderSessionResume`; capability `compactionPoint` (Claude Code, Codex,
+  and the Octant Harness endpoints report it).
+- **Handing it over** (`compactionPointDriver.ts`): the host wraps every driver
+  it builds so each start and resume carries the point, from the share for the
+  driver's keeper (`autoCompactOctantWindowPercent` for Octant Harness,
+  `autoCompactRuntimeWindowPercent` for runtimes) and the model's window, read
+  at that moment: the window the request-fitting rules settle on
+  (`resolveModelContextWindow`: an override, a learned window, the catalogue's,
+  a reviewed profile), else the window the runtime itself last reported with
+  its usage for that model on that instance (kept in host memory). A
+  one-request session gets none, nor a model whose window nothing names yet,
+  so a runtime whose catalogue names no window gets the point from its second
+  session on.
+- **Claude Code** (`claudeAutoCompactWindow`): it compacts at its
+  auto-compact window less a fixed 33,000-token reserve (measured live 2026-11-08), the window being the
+  smaller of the model's and the `autoCompactWindow` setting (clamped to
+  100,000 to 1,000,000). The query gets `autoCompactWindow = tokens + 33,000`
+  as a flag setting, so the person's settings files are untouched. A point at or
+  past Claude Code's own, or one the clamp refuses, leaves its own point. The
+  runtime's test-only percentage variable is not used.
+- **Codex**: `model_auto_compact_token_limit = tokens` in the thread's own
+  config on start and on every resume (Codex re-reads config only as restated).
+- **Octant Harness** (`passesCompactionPoint`): before a step is sent, a
+  request whose estimate (four characters a token, as the endpoints estimate
+  fit) passes the point summarizes the earlier turns first, as a request that
+  would otherwise be trimmed does. Once per turn, as before.
+- **Settings**: under **Compact runtime threads**, the runtimes' own settings
+  read from `~/.claude.json`, `~/.claude/settings.json` and
+  `~/.codex/config.toml` (Claude Code's switch, its `DISABLE_AUTO_COMPACT`, its
+  window; Codex's limit), through the existing local-window-only route that
+  lists other tools' servers (`kind: "compaction-defaults"`). Nothing is
+  written.
+
+A share set in Octant overrides the runtime's own setting in the sessions
+Octant starts, whether it is earlier or later than theirs: the maintainer asked
+to override it, and Settings says so. Claude Code keeps its own point where the
+share lands at or past it, or below what its clamp allows.
+
+Failure modes: a runtime that ignores the point still meets the between-turn
+rule; files that cannot be read show the runtimes' defaults.
+
 ## 9. Verification
 
-| Acceptance criterion                                           | Test                                                                                                                                           | Result | Change      |
-| -------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------- | ------ | ----------- |
-| FR-1 (fill): Settings writes both shares                       | `SettingsView.test.tsx` "compacts Octant threads at 85% by default and leaves runtimes…"                                                       | Pass   | This change |
-| FR-1 (fill): rendered on an isolated host                      | Playwright on a scratch host: defaults shown, 70% survives a reload, no clipping at 1280 and 390 wide, no console errors                       | Pass   | This change |
-| FR-2: compacts past the share, under the turn                  | `windowFillCompaction.test.ts` (7 tests); `contextCompaction.test.ts` window-fill tests                                                        | Pass   | This change |
-| FR-2: host compaction records cause and requester              | `sessionCompaction.test.ts` "records a compaction a rule the person set started…"                                                              | Pass   | This change |
-| FR-9: timeline names the rule and the fill                     | `CompactionDivider.test.tsx` "says which rule compacted the thread…"                                                                           | Pass   | This change |
-| FR-10: refused rule leaves nothing behind                      | `windowFillCompaction.test.ts` "stops after any other refusal…"; `sessionCompaction.test.ts` "refuses a rule on a Code thread with no window…" | Pass   | This change |
-| NFR-1: no repeat after a compaction that freed little          | `windowFillCompaction.test.ts` "does not compact again after a rule's compaction that freed too little"                                        | Pass   | This change |
-| NFR-1: one compaction per turn end                             | `windowFillCompaction.test.ts` "gives the same turn's end announced twice the same compaction id"                                              | Pass   | This change |
-| FR-1 (idle): Settings writes the minutes, off by default       | `SettingsView.test.tsx` "leaves quiet threads alone by default…"                                                                               | Pass   | This change |
-| FR-5: one compaction per quiet spell, above the minimum        | `idleCompaction.test.ts` (8 tests); `contextCompaction.test.ts` "compacting a quiet thread"                                                    | Pass   | This change |
-| FR-5: Code only under an open window                           | `sessionCompaction.test.ts` "refuses a rule on a Code thread with no open window…"                                                             | Pass   | This change |
-| FR-9 (idle): timeline says how long it was quiet               | `CompactionDivider.test.tsx` "says how long the thread was quiet…"                                                                             | Pass   | This change |
-| NFR-2: a pass with nothing due reads nothing                   | `idleCompaction.test.ts` "reads nothing and asks no provider…" (500 threads, under 50 ms, zero reads)                                          | Pass   | This change |
-| FR-1 (limit): Settings writes the share, off by default        | `SettingsView.test.tsx` "leaves the limit rule off by default…"                                                                                | Pass   | This change |
-| FR-1 (idle, limit): all four rows rendered on an isolated host | Playwright on a scratch host: defaults shown, 30 minutes and 90% survive a reload, no clipping at 1280 and 390 wide, no console errors         | Pass   | This change |
-| FR-6: once per limit period, ahead of window fill              | `turnEndCompaction.test.ts` limit tests; `contextCompaction.test.ts` "compacting when an account limit gets close"                             | Pass   | This change |
-| FR-7: handover written first, stored with the receipt          | `sessionCompaction.test.ts` "writes a handover summary with the thread's own provider…", "writes no handover summary…"                         | Pass   | This change |
-| FR-7: a switch leads with the handover                         | `conversationHandoff.test.ts` "handing a thread to another provider after the limit rule"                                                      | Pass   | This change |
-| FR-8: notice, and Switch model opens the picker                | `ComposerModelPicker.test.tsx` "opens from the limit notice under a compaction…"                                                               | Pass   | This change |
-| FR-7 for Code threads                                          | Not built (D-5)                                                                                                                                | Open   | —           |
-| FR-6 to FR-8 on a real runtime                                 | Not run: needs a live provider near its account limit                                                                                          | Open   | —           |
-| FR-2 on a real runtime                                         | Not run: needs a live Octant Harness endpoint turn past 85%                                                                                    | Open   | —           |
+| Acceptance criterion                                                               | Test                                                                                                                                                                                                   | Result | Change      |
+| ---------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------ | ----------- |
+| FR-1 (fill): Settings writes both shares                                           | `SettingsView.test.tsx` "compacts Octant threads at 85% by default and leaves runtimes…"                                                                                                               | Pass   | This change |
+| FR-1 (fill): rendered on an isolated host                                          | Playwright on a scratch host: defaults shown, 70% survives a reload, no clipping at 1280 and 390 wide, no console errors                                                                               | Pass   | This change |
+| FR-2: compacts past the share, under the turn                                      | `windowFillCompaction.test.ts` (7 tests); `contextCompaction.test.ts` window-fill tests                                                                                                                | Pass   | This change |
+| FR-2: host compaction records cause and requester                                  | `sessionCompaction.test.ts` "records a compaction a rule the person set started…"                                                                                                                      | Pass   | This change |
+| FR-9: timeline names the rule and the fill                                         | `CompactionDivider.test.tsx` "says which rule compacted the thread…"                                                                                                                                   | Pass   | This change |
+| FR-10: refused rule leaves nothing behind                                          | `windowFillCompaction.test.ts` "stops after any other refusal…"; `sessionCompaction.test.ts` "refuses a rule on a Code thread with no window…"                                                         | Pass   | This change |
+| NFR-1: no repeat after a compaction that freed little                              | `windowFillCompaction.test.ts` "does not compact again after a rule's compaction that freed too little"                                                                                                | Pass   | This change |
+| NFR-1: one compaction per turn end                                                 | `windowFillCompaction.test.ts` "gives the same turn's end announced twice the same compaction id"                                                                                                      | Pass   | This change |
+| FR-1 (idle): Settings writes the minutes, off by default                           | `SettingsView.test.tsx` "leaves quiet threads alone by default…"                                                                                                                                       | Pass   | This change |
+| FR-5: one compaction per quiet spell, above the minimum                            | `idleCompaction.test.ts` (8 tests); `contextCompaction.test.ts` "compacting a quiet thread"                                                                                                            | Pass   | This change |
+| FR-5: Code only under an open window                                               | `sessionCompaction.test.ts` "refuses a rule on a Code thread with no open window…"                                                                                                                     | Pass   | This change |
+| FR-9 (idle): timeline says how long it was quiet                                   | `CompactionDivider.test.tsx` "says how long the thread was quiet…"                                                                                                                                     | Pass   | This change |
+| NFR-2: a pass with nothing due reads nothing                                       | `idleCompaction.test.ts` "reads nothing and asks no provider…" (500 threads, under 50 ms, zero reads)                                                                                                  | Pass   | This change |
+| FR-1 (limit): Settings writes the share, off by default                            | `SettingsView.test.tsx` "leaves the limit rule off by default…"                                                                                                                                        | Pass   | This change |
+| FR-1 (idle, limit): all four rows rendered on an isolated host                     | Playwright on a scratch host: defaults shown, 30 minutes and 90% survive a reload, no clipping at 1280 and 390 wide, no console errors                                                                 | Pass   | This change |
+| FR-6: once per limit period, ahead of window fill                                  | `turnEndCompaction.test.ts` limit tests; `contextCompaction.test.ts` "compacting when an account limit gets close"                                                                                     | Pass   | This change |
+| FR-7: handover written first, stored with the receipt                              | `sessionCompaction.test.ts` "writes a handover summary with the thread's own provider…", "writes no handover summary…"                                                                                 | Pass   | This change |
+| FR-7: a switch leads with the handover                                             | `conversationHandoff.test.ts` "handing a thread to another provider after the limit rule"                                                                                                              | Pass   | This change |
+| FR-8: notice, and Switch model opens the picker                                    | `ComposerModelPicker.test.tsx` "opens from the limit notice under a compaction…"                                                                                                                       | Pass   | This change |
+| FR-7 for Code threads                                                              | `codeSessionConversation.test.ts`; `sessionCompaction.test.ts` "writes a handover summary for a Code thread…"; `codeOperationRuntime.test.ts` "leads a provider switch with the limit rule's summary…" | Pass   | This change |
+| FR-6 to FR-8 on a real runtime                                                     | Not run: needs a live provider near its account limit                                                                                                                                                  | Open   | —           |
+| FR-3: a session carries the point; Claude Code gets its window, Codex its limit    | `compactionPointDriver.test.ts` (3); `codexDriver.test.ts` "hands the person's compaction point to the thread's own config…"                                                                           | Pass   | This change |
+| FR-3: Settings shows each runtime's own setting, read and not written              | `agentToolingDiscovery.test.ts` "what the person's own runtime files say about compacting" (3); `runtimeCompactionDefaults.test.ts` (2)                                                                | Pass   | This change |
+| FR-4: Octant Harness summarizes earlier turns once a step passes the point         | `nativeHarnessLoop.test.ts` "summarizes earlier turns inside a turn once its request passes the person's point"                                                                                        | Pass   | This change |
+| FR-3: reported `autoCompactThreshold` near the share on a live Claude Code session | Not run: needs a live Claude Code session                                                                                                                                                              | Open   | —           |
+| FR-2 on a real runtime                                                             | Not run: needs a live Octant Harness endpoint turn past 85%                                                                                                                                            | Open   | —           |
 
 ## 10. Codebase deltas and change log
 
@@ -434,7 +495,8 @@ cannot be read hands a switch the raw selection, as before.
   switch keeps the newest verbatim messages instead, and drops only the oldest
   when the summary needs room: the next model benefits from the exact last
   words, and the overlap is bounded by the handoff's own block limit.
-- FR-7 covers Chat and Work only (D-5).
+- FR-7 covered Chat and Work only (D-5) until D-6 added Code. A Code fork's
+  first turn still hands over without the summary.
 - Slice 1's `WindowFillCompactions` became `TurnEndCompactions`, since it now
   judges the limit rule too.
 - Review found that a limit period already answered still claimed every later
@@ -445,6 +507,13 @@ cannot be read hands a switch the raw selection, as before.
   summary over, with the turns the rewind removed, and that the spend ceiling
   reserved for the compaction alone. Both are fixed as Slice 3 says.
 
+- FR-4 said the harness compacts instead of trimming inside a turn. It
+  summarizes the turns before the running one, as its existing in-loop
+  compaction does; a single turn that alone passes the point still meets the
+  trim ladder.
+- FR-3's acceptance names a reported `autoCompactThreshold`; the live check is
+  open.
+
 ### Change log
 
 - 2026-11-07: First draft from the maintainer request and the current code.
@@ -452,3 +521,15 @@ cannot be read hands a switch the raw selection, as before.
   built with its detailed design and verification.
 - 2026-11-07: Slice 2 (idle rule) built.
 - 2026-11-07: Slice 3 (limit rule, handover summary, notice) built; D-5 added.
+- 2026-11-08: Code handover summary built; D-6 supersedes D-5.
+- 2026-11-08: The one-request scratch folder (`hand-off-scratch/<thread>`), used by
+  the Code handover summary and Work's thread hand-off, was never removed, and
+  no thread purge reached it. Each request now removes it when it ends.
+- 2026-11-08: Slice 4 (runtime compaction point, harness in-turn compaction,
+  runtimes' own settings in Settings) built.
+- 2026-11-08: Review of the Code handover: a conversation read that failed
+  (the event store's scan bound on a long thread) threw out the whole limit
+  compaction, a thread past 4,000 turns read its oldest part, identical texts
+  shared one source, and every switch read the whole thread. Now a failed read
+  costs only the handover, a thread too long reads nothing, each source names
+  its turn, and the conversation is read only once a limit summary is found.

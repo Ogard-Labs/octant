@@ -923,12 +923,12 @@ describe("compacting a session a runtime keeps", () => {
     expect(world.runtime.handoverPrompts).toHaveLength(1);
     expect(world.runtime.handoverPrompts[0]).toContain("User: ");
     expect(world.runtime.compactions).toEqual([String(compactionId)]);
-    expect(world.harness.handoverSummary(subject, conversation)).toEqual({
+    expect(world.harness.handoverSummary(subject, () => conversation)).toEqual({
       content: "Rotate the signing key before the release.",
       completedAt: String(record.receipt.completedAt),
     });
     // Rewound past the last message it read, the summary covers dropped turns.
-    expect(world.harness.handoverSummary(subject, conversation.slice(0, -1))).toBeUndefined();
+    expect(world.harness.handoverSummary(subject, () => conversation.slice(0, -1))).toBeUndefined();
     // What the summary spent is part of what the compaction spent.
     expect(record.receipt.usage).toMatchObject({ inputTokens: 80, outputTokens: 30 });
     world.close();
@@ -943,7 +943,7 @@ describe("compacting a session a runtime keeps", () => {
     world.service.start(command(), "local-window", windowId);
     await world.service.settled();
     expect(world.runtime.handoverPrompts).toHaveLength(0);
-    expect(world.harness.handoverSummary(subject, conversation)).toBeUndefined();
+    expect(world.harness.handoverSummary(subject, () => conversation)).toBeUndefined();
     world.close();
   });
 
@@ -1408,6 +1408,49 @@ describe("compacting a session a runtime keeps", () => {
           tokensFreed: { kind: "measured", tokens: 0 },
         },
       });
+      world.close();
+    });
+
+    it("writes a handover summary for a Code thread the limit rule compacts", async () => {
+      const world = createRuntimeWorld(
+        { answer: { kind: "compacted" }, handover: "Finish the index next." },
+        "code-thread",
+      );
+      world.state.thread = { mode: "code", projectId, providerInstanceId, modelId };
+      world.service.start(command(codeSubject), "host-policy", windowId, {
+        kind: "limit-near",
+        window: "seven_day",
+        usedPercent: 92,
+        thresholdPercent: 90,
+      });
+      await world.service.settled();
+      expect(world.runtime.handoverPrompts).toHaveLength(1);
+      // The summary's scratch folder is gone once its request ended.
+      expect(world.released).toEqual([String(codeSubject.aggregateId)]);
+      expect(world.harness.handoverSummary(codeSubject, () => conversation)).toMatchObject({
+        content: "Finish the index next.",
+      });
+      world.close();
+    });
+
+    it("still compacts a Code thread whose conversation cannot be read for a handover", async () => {
+      const world = createRuntimeWorld(
+        { answer: { kind: "compacted" }, handover: "Unused." },
+        "code-thread",
+        () => {
+          throw new Error("The store refuses a scan this long.");
+        },
+      );
+      world.state.thread = { mode: "code", projectId, providerInstanceId, modelId };
+      world.service.start(command(codeSubject), "host-policy", windowId, {
+        kind: "limit-near",
+        window: "seven_day",
+        usedPercent: 92,
+        thresholdPercent: 90,
+      });
+      await world.service.settled();
+      expect(world.runtime.handoverPrompts).toHaveLength(0);
+      expect(world.harness.latestCompaction(codeSubject)?.status).toBe("completed");
       world.close();
     });
 
@@ -2155,6 +2198,7 @@ function codexInstance() {
 function createRuntimeWorld(
   runtimeOptions: FakeRuntimeOptions = {},
   kind: "chat-thread" | "code-thread" = "chat-thread",
+  readConversation: () => ReadonlyArray<SessionConversationMessage> = () => conversation,
 ) {
   const fixture = createFixture();
   const runtime = fakeRuntime(runtimeOptions);
@@ -2168,6 +2212,7 @@ function createRuntimeWorld(
     // Reported before anything in these tests compacts the session.
     occupancy: { tokens: 1_200, observedAt: "2026-07-18T20:00:00.000Z" },
   };
+  const released: Array<string> = [];
   const opened: Array<WindowId | undefined> = [];
   const announced: Array<{ readonly threadId: string; readonly compaction: unknown }> = [];
   const capacity = makeProviderCapacityScheduler({
@@ -2193,9 +2238,11 @@ function createRuntimeWorld(
         settled: (threadId: string, compaction: unknown) => {
           announced.push({ threadId, compaction });
         },
-        ...(kind === "chat-thread"
-          ? { conversation: () => conversation, scratchRoot: async () => "/tmp/octant-scratch" }
-          : {}),
+        conversation: readConversation,
+        scratchRoot: async () => "/tmp/octant-scratch",
+        releaseScratchRoot: async (threadId: string) => {
+          released.push(threadId);
+        },
         runtimeSessions: {
           exists: () => state.hasSession,
           ...(kind === "code-thread" ? { occupancy: () => state.occupancy } : {}),
@@ -2227,6 +2274,7 @@ function createRuntimeWorld(
     harness: fixture.harness,
     runtime,
     state,
+    released,
     opened,
     announced,
     capacity,

@@ -1,4 +1,4 @@
-import { mkdtemp, realpath, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, realpath, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
@@ -138,6 +138,7 @@ describe("native harness tools", () => {
     for (const [name, input] of [
       ["write", { path: "b.ts", content: "x" }],
       ["edit", { path: "a.ts", oldText: "hello", newText: "bye" }],
+      ["edit", { edits: [{ path: "a.ts", oldText: "hello", newText: "bye" }] }],
       ["bash", { command: "echo hi" }],
     ] as const) {
       const outcome = await call(tools, name, input);
@@ -343,6 +344,52 @@ describe("native harness tools", () => {
     const denied = await call(gated.tools, "write", { path: "c.ts", content: "x" });
     expect(denied.result).toMatchObject({ error: "approval-denied" });
     expect(decisions).toEqual(["write:project-file-writes", "write:project-file-writes"]);
+  });
+
+  it("asks once for an edit of several files, naming each, and applies them all", async () => {
+    const summaries: string[] = [];
+    const { root, tools } = await fixture(
+      { executionPolicy: "approval-gated", approvalSatisfied: false },
+      {
+        approvals: async (input) => {
+          summaries.push(`${input.approvalClass} ${input.summary}`);
+          return "approved";
+        },
+      },
+    );
+    await writeFile(join(root, "b.ts"), "world\n");
+    await call(tools, "read", { path: "a.ts" });
+    await call(tools, "read", { path: "b.ts" });
+    const edited = await call(tools, "edit", {
+      edits: [
+        { path: "a.ts", oldText: "hello", newText: "hi" },
+        { path: "b.ts", oldText: "world", newText: "there" },
+      ],
+    });
+    expect(edited).toMatchObject({ isError: false, result: { kind: "edited" } });
+    expect(summaries).toEqual(["project-file-writes edit (2 files): a.ts, b.ts"]);
+    expect(await readFile(join(root, "a.ts"), "utf8")).toBe("hi\n");
+    expect(await readFile(join(root, "b.ts"), "utf8")).toBe("there\n");
+  });
+
+  it("tells the model which replacement stopped an edit and that no file changed", async () => {
+    const { root, tools } = await fixture();
+    await call(tools, "read", { path: "a.ts" });
+    const refusedEdit = await call(tools, "edit", {
+      edits: [
+        { path: "a.ts", oldText: "hello", newText: "hi" },
+        { path: "a.ts", oldText: "missing", newText: "x" },
+      ],
+    });
+    expect(refusedEdit).toEqual({
+      isError: true,
+      result: {
+        error: "old-text-not-found",
+        edit: 1,
+        message: "edits[1] (a.ts) was refused: old-text-not-found. No file was changed.",
+      },
+    });
+    expect(await readFile(join(root, "a.ts"), "utf8")).toBe("hello\n");
   });
 
   it("hands a queued note to the lead inside the next tool result", async () => {
