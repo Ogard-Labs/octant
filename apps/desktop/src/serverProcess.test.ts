@@ -280,6 +280,26 @@ describe("resolveStableHostAttachment", () => {
       }),
     ).resolves.toBeUndefined();
   });
+
+  it("awaits native bridge reads and refuses a changed asynchronous secret generation", async () => {
+    const probe = { url: receipt.url, instanceId: receipt.instanceId };
+    const readBridgeSecret = vi.fn().mockResolvedValue("native-secret");
+    await expect(
+      resolveStableHostAttachment({
+        readReceipt: async () => receipt,
+        readBridgeSecret,
+        probeReceipt: async () => probe,
+      }),
+    ).resolves.toEqual({ probe, bridgeSecret: "native-secret" });
+    expect(readBridgeSecret).toHaveBeenCalledTimes(2);
+    await expect(
+      resolveStableHostAttachment({
+        readReceipt: async () => receipt,
+        readBridgeSecret: vi.fn().mockResolvedValueOnce("first").mockResolvedValueOnce("second"),
+        probeReceipt: async () => probe,
+      }),
+    ).resolves.toBeUndefined();
+  });
 });
 
 describe("serverSpawnSpec", () => {
@@ -301,6 +321,8 @@ describe("serverSpawnSpec", () => {
         OCTANT_SIMULATOR_DEVICE_BROKER_TOKEN: "inherited-token",
         OCTANT_SERVE_AVD_BROKER_URL: "http://127.0.0.1:49997/v1/managed-device/serve-avd",
         OCTANT_SERVE_AVD_BROKER_TOKEN: "inherited-token",
+        OCTANT_CREDENTIAL_BROKER_URL: "http://127.0.0.1:49996/v1/credentials",
+        OCTANT_CREDENTIAL_BROKER_TOKEN: "inherited-token",
       },
     });
     expect(spec.env.OCTANT_SIMULATOR_DEVICE_BROKER_URL).toBeUndefined();

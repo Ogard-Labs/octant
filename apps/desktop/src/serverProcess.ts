@@ -105,6 +105,8 @@ export function serverSpawnSpec(options: ServerSpawnSpecOptions) {
   delete inherited.OCTANT_SIMULATOR_DEVICE_BROKER_TOKEN;
   delete inherited.OCTANT_SERVE_AVD_BROKER_URL;
   delete inherited.OCTANT_SERVE_AVD_BROKER_TOKEN;
+  delete inherited.OCTANT_CREDENTIAL_BROKER_URL;
+  delete inherited.OCTANT_CREDENTIAL_BROKER_TOKEN;
   delete inherited.OCTANT_TERMINAL_LAUNCHER_DIRECTORY;
   const env = {
     ...inherited,
@@ -377,17 +379,17 @@ export async function probeHostInfoReceipt(options: {
 
 export async function resolveStableHostAttachment(options: {
   readonly readReceipt: () => Promise<HostInfoReceipt | undefined>;
-  readonly readBridgeSecret: () => string | undefined;
+  readonly readBridgeSecret: () => string | undefined | Promise<string | undefined>;
   readonly probeReceipt: (receipt: HostInfoReceipt) => Promise<LocalHostProbe | undefined>;
 }): Promise<{ readonly probe: LocalHostProbe; readonly bridgeSecret: string } | undefined> {
   const receiptBefore = await options.readReceipt();
   if (receiptBefore === undefined) return undefined;
-  const secretBefore = options.readBridgeSecret();
+  const secretBefore = await options.readBridgeSecret();
   if (secretBefore === undefined || secretBefore === "") return undefined;
   const probe = await options.probeReceipt(receiptBefore);
   if (probe === undefined || probe.instanceId !== receiptBefore.instanceId) return undefined;
   const receiptAfter = await options.readReceipt();
-  const secretAfter = options.readBridgeSecret();
+  const secretAfter = await options.readBridgeSecret();
   if (
     receiptAfter === undefined ||
     !sameHostInfoGeneration(receiptBefore, receiptAfter) ||

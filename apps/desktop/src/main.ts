@@ -1,5 +1,6 @@
 import { createDesktopBrowserCredentialFill } from "./desktopBrowserCredentialFill";
 import { createDesktopClientLifetime } from "./desktopClientLifetime";
+import { attachWindowsDesktopHost, resolveWindowsDesktopHost } from "./windowsDesktopHost";
 import { resolvePackagedDesktopLaunch } from "./desktopLaunch";
 import { createOffscreenBrowserSurface } from "./offscreenBrowserSurface";
 import { ownNightlyWindowLeases } from "./nightlyBrowserLease";
@@ -84,6 +85,8 @@ import {
   desktopIdentityForPackage,
   desktopWindowStorageDirectory,
   deriveHostRuntimeHostId,
+  loadWindowsHostProfileNative,
+  KEYCHAIN_SERVICE_FAMILY_ENVIRONMENT,
   isLinkedSecretMaterial,
   linkedSecretStoresStatePath,
   makeLinkedSecretStores,
@@ -286,6 +289,7 @@ import {
   resolveDesktopHostRuntimePaths,
   resolveDesktopNativeHelperPath,
   WINDOWS_CREDENTIAL_HELPER_FILENAME,
+  WINDOWS_HOST_OWNER_FILENAME,
   resolveManagedToolsDirectory,
   resolveTerminalLauncherDirectory,
   type DesktopNativeHelperPathOptions,
@@ -1182,8 +1186,15 @@ export function resolveDesktopDataDirectory(
     .dataDirectory;
 }
 
-async function writeBridgeSecretFile(paths: HostRuntimePaths, secret: string): Promise<void> {
-  await writeBridgeSecretProjection(paths, secret);
+async function writeDesktopBridgeProjection(): Promise<void> {
+  if (desktopWindowsHost !== undefined) {
+    // The native child owner publishes this projection from its launch seed.
+    // Desktop main authenticates it but has no file-mutation authority.
+    if ((await desktopWindowsHost.startup.readBridgeSecret()) !== desktopBridgeSecret)
+      throw new Error("Octant's native Windows child did not publish its bridge projection.");
+    return;
+  }
+  await writeBridgeSecretProjection(desktopPosixHostPaths(), desktopBridgeSecret);
 }
 
 const BRIDGE_SECRET_PATTERN = /^[A-Za-z0-9_-]{43}$/;
@@ -1228,15 +1239,39 @@ if (resolvedHostStartup.kind === "refused") throw new Error(resolvedHostStartup.
 const desktopHostStartup = resolvedHostStartup;
 const desktopMayStartHost =
   applicationIdentity.mayStartHost || desktopHostRole.kind === "test-host";
-const desktopHostRuntimePaths = resolveDesktopHostRuntimePaths(
-  desktopHostStartup.configuredDataDirectory,
-  app.getPath("appData"),
-  process.platform,
-  desktopHostStartup.logsDirectory === undefined
-    ? process.env
-    : { ...process.env, OCTANT_LOGS_DIR: desktopHostStartup.logsDirectory },
-);
-const desktopDataDirectory = desktopHostRuntimePaths.dataDirectory;
+const desktopWindowsHost = (() => {
+  if (process.platform !== "win32") return undefined;
+  const native = loadWindowsHostProfileNative(
+    resolveDesktopNativeHelperPath(
+      {
+        packaged: app.isPackaged,
+        resourcesPath: process.resourcesPath,
+        moduleUrl: import.meta.url,
+      },
+      WINDOWS_HOST_OWNER_FILENAME,
+    ),
+  );
+  if (native === undefined) throw new Error("Octant's native Windows host binding is unavailable.");
+  return resolveWindowsDesktopHost({ native, profile: "octant", env: process.env });
+})();
+const desktopHostRuntimePaths =
+  desktopWindowsHost === undefined
+    ? resolveDesktopHostRuntimePaths(
+        desktopHostStartup.configuredDataDirectory,
+        app.getPath("appData"),
+        process.platform,
+        desktopHostStartup.logsDirectory === undefined
+          ? process.env
+          : { ...process.env, OCTANT_LOGS_DIR: desktopHostStartup.logsDirectory },
+      )
+    : undefined;
+function desktopPosixHostPaths(): HostRuntimePaths {
+  if (desktopHostRuntimePaths === undefined)
+    throw new Error("POSIX host paths are unavailable for the native Windows profile.");
+  return desktopHostRuntimePaths;
+}
+const desktopDataDirectory =
+  desktopWindowsHost?.paths.dataDirectory ?? desktopPosixHostPaths().dataDirectory;
 const desktopKeychainServiceFamily = desktopHostStartup.keychainServiceFamily;
 // The relaunch quits through the same interactive path as Quit in the menu, so
 // running work is confirmed first and a cancelled confirmation cancels it.
@@ -1270,7 +1305,8 @@ const nightlyWindowIdentity =
         applicationData: "test-data" as const,
       }
     : {};
-const desktopHostId = deriveHostRuntimeHostId(desktopDataDirectory);
+const desktopHostId =
+  desktopWindowsHost?.paths.profileId ?? deriveHostRuntimeHostId(desktopDataDirectory);
 app.setPath(
   "userData",
   desktopWindowStorageDirectory(applicationIdentity, desktopDataDirectory, app.getPath("appData")),
@@ -1292,7 +1328,9 @@ let appUpdateService: ReturnType<typeof createAppUpdateService> | undefined;
 let nightlyInstallerInstance: ReturnType<typeof createNightlyInstaller> | undefined;
 let credentialBackendPromise: Promise<DesktopCredentialBackend> | undefined;
 let desktopBridgeSecret =
-  readStoredDesktopBridgeSecret(desktopDataDirectory) ?? generateProjectBridgeToken(randomBytes);
+  (desktopWindowsHost === undefined
+    ? readStoredDesktopBridgeSecret(desktopDataDirectory)
+    : undefined) ?? generateProjectBridgeToken(randomBytes);
 /** Stable's brokered host calls carry the bridge secret it holds now. */
 const desktopBrokerHeaders = (): Readonly<Record<string, string>> => ({
   "x-octant-desktop-secret": desktopBridgeSecret,
@@ -1614,6 +1652,9 @@ function lazyCredentialStore(): CredentialStore {
 }
 
 async function startDesktopCredentialBroker(): Promise<CredentialBroker | undefined> {
+  // Windows credentials belong to the actual child owner. The generic
+  // desktop broker would create unaudited linked-store JSON on this path.
+  if (desktopWindowsHost !== undefined) return undefined;
   if (credentialBroker !== undefined) return credentialBroker;
   const backend = await getCredentialBackend();
   if (backend.store === undefined) return undefined;
@@ -1637,15 +1678,16 @@ async function startDesktopCredentialBroker(): Promise<CredentialBroker | undefi
 }
 
 async function resolveExistingHostAttachment() {
+  if (desktopWindowsHost !== undefined) return await attachWindowsDesktopHost(desktopWindowsHost);
   return await resolveStableHostAttachment({
-    readReceipt: () => readHostInfoReceipt(desktopHostRuntimePaths),
+    readReceipt: () => readHostInfoReceipt(desktopPosixHostPaths()),
     readBridgeSecret: () => readStoredDesktopBridgeSecret(desktopDataDirectory),
     probeReceipt: (receipt) =>
       probeHostInfoReceipt({
         receipt,
         expectedHostId: desktopHostId,
         expectedWireVersion: "1",
-        expectedControlEndpoint: desktopHostRuntimePaths.socketPath,
+        expectedControlEndpoint: desktopPosixHostPaths().socketPath,
       }),
   });
 }
@@ -1730,9 +1772,10 @@ async function startDesktopOwnedHost(): Promise<LocalHostDescriptor> {
     };
   }
   await assertAutomaticHostStartupEnabled(
-    new ServicePolicyStore({ path: desktopHostRuntimePaths.servicePolicyPath }),
+    desktopWindowsHost?.startup.servicePolicy ??
+      new ServicePolicyStore({ path: desktopPosixHostPaths().servicePolicyPath }),
   );
-  await prepareHostRuntimePaths(desktopHostRuntimePaths);
+  if (desktopWindowsHost === undefined) await prepareHostRuntimePaths(desktopPosixHostPaths());
   const root = repositoryRoot();
   const portReservation = await reserveLoopbackPort(
     resolveConfiguredServerPort(process.env, desktopHostStartup.serverPort),
@@ -1916,8 +1959,9 @@ async function startDesktopOwnedHost(): Promise<LocalHostDescriptor> {
           }),
           env: {
             ...process.env,
-            OCTANT_DATA_DIR: desktopDataDirectory,
-            ...desktopHostStartup.hostEnvironment,
+            ...(desktopWindowsHost === undefined
+              ? { OCTANT_DATA_DIR: desktopDataDirectory, ...desktopHostStartup.hostEnvironment }
+              : { [KEYCHAIN_SERVICE_FAMILY_ENVIRONMENT]: desktopKeychainServiceFamily }),
           },
         });
         return spawn(spec.command, spec.args, {
@@ -2145,7 +2189,7 @@ async function createWindow(stillRequested: () => boolean): Promise<void> {
   serverInstanceId = host.instanceId;
   await refreshHostActivity();
   if (host.ownership === "desktop-owned") {
-    await writeBridgeSecretFile(desktopHostRuntimePaths, desktopBridgeSecret);
+    await writeDesktopBridgeProjection();
   }
   ensureHostTray();
 
@@ -2947,7 +2991,7 @@ async function startHostFromMenu(): Promise<void> {
   activeServerUrl = host.url;
   serverInstanceId = host.instanceId;
   if (host.ownership === "desktop-owned") {
-    await writeBridgeSecretFile(desktopHostRuntimePaths, desktopBridgeSecret);
+    await writeDesktopBridgeProjection();
   }
   ensureHostTray();
   await refreshHostActivity();
@@ -2968,7 +3012,7 @@ async function restartHostFromMenu(): Promise<void> {
   const host = admission.host;
   activeServerUrl = host.url;
   serverInstanceId = host.instanceId;
-  await writeBridgeSecretFile(desktopHostRuntimePaths, desktopBridgeSecret);
+  await writeDesktopBridgeProjection();
   ensureHostTray();
   await refreshHostActivity();
 }
@@ -4621,9 +4665,9 @@ function acceptCodeDeepLink(value: string): void {
  */
 async function prepareLinuxPeerEndpoint(): Promise<void> {
   try {
-    await prepareHostRuntimePaths(desktopHostRuntimePaths);
+    await prepareHostRuntimePaths(desktopPosixHostPaths());
     await writeLinuxLauncherRecord({
-      recordPath: desktopHostRuntimePaths.launcherRecordPath,
+      recordPath: desktopPosixHostPaths().launcherRecordPath,
       appImage: process.env.APPIMAGE,
     });
   } catch (error) {
@@ -4675,8 +4719,8 @@ function startDesktopInstance(): void {
           ...(linux
             ? {
                 linux: {
-                  windowsSocketPath: desktopHostRuntimePaths.windowsSocketPath,
-                  launcherRecordPath: desktopHostRuntimePaths.launcherRecordPath,
+                  windowsSocketPath: desktopPosixHostPaths().windowsSocketPath,
+                  launcherRecordPath: desktopPosixHostPaths().launcherRecordPath,
                   version: app.getVersion(),
                 },
               }

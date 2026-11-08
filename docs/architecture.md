@@ -14627,6 +14627,21 @@ desktop/Nightly bootstrap and service/encryption integration retain separate gat
 The owning rules and local-owner trust limits are in
 [foreground storage and lifecycle](design/hub-and-spokes.md#the-hub-is-a-server-first).
 
+Packaged stable Windows desktop resolves that native profile without claiming
+the child server's owner. Its physical profile UUID supplies the runtime host
+identity and credential scope. Only positive native absence permits launching
+the normal server entry; unsafe or unknown discovery refuses. An attachment
+must match the authenticated native owner's instance and pipe endpoint, retain
+one host-info/bridge-secret generation around the health probe, and leave the
+separately managed host running when the desktop closes. Desktop main reads
+native policy but never writes native boot projections: its actual child owner
+publishes and clears those from the existing private launch seed. It passes no
+POSIX data/log override and starts no generic linked-state credential broker.
+Missing native code or closed storage ports stay unavailable. This composition
+requires a native packaged startup, second-attachment and owned-stop smoke;
+normal Nightly native window registration, service integration and effective
+Work/Code confinement remain distinct requirements.
+
 The Windows credential building block uses an Octant native helper
 with `CredWriteW`, `CredReadW` and `CredDeleteW`, never a secret in `cmdkey`
 arguments or a PowerShell script. A generic credential's protected blob holds
