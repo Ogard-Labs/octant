@@ -69,7 +69,7 @@ async function main(): Promise<void> {
   const interrupted = () => controller.abort();
   process.once("SIGTERM", interrupted);
   process.once("SIGINT", interrupted);
-  const timer = setTimeout(interrupted, 90_000);
+  const timer = setTimeout(interrupted, 150_000);
   let verified = false;
   let cleanupVerified = false;
   let pid: number | undefined;
@@ -135,7 +135,7 @@ async function main(): Promise<void> {
         String.raw`
 const owner = Number(process.env.OCTANT_SMOKE_OWNER_PID);
 const group = Number(process.env.OCTANT_SMOKE_APP_PID);
-const deadline = Date.now() + 120000;
+const deadline = Date.now() + 180000;
 if (!Number.isSafeInteger(owner) || owner < 2 || !Number.isSafeInteger(group) || group < 2) process.exit(1);
 const alive = pid => { try { process.kill(pid, 0); return true; } catch (error) { return error?.code !== "ESRCH"; } };
 const signal = value => { try { process.kill(-group, value); } catch {} };
@@ -330,6 +330,47 @@ const timer = setInterval(() => {
     );
     if ((await readdir(join(root, "share", "shares"))).length !== 0)
       throw Error("Configuring the service unexpectedly published content.");
+    await runBoundedCommand(
+      nativeControllerPath,
+      ["click", String(ownPid), join(artifacts, "configured-back-to-app.png"), "Back to app"],
+      process.env,
+      8000,
+    );
+    await observeUntil("configured-canvas", (snapshot) => hasText(snapshot, "Worth watching"));
+    await runBoundedCommand(
+      nativeControllerPath,
+      ["scroll-top", String(ownPid), join(artifacts, "canvas-scroll-target.png"), "Worth watching"],
+      process.env,
+      8000,
+    );
+    await observeUntil("canvas-start", (snapshot) => hasText(snapshot, "Signups this week"));
+    await runBoundedCommand(
+      nativeControllerPath,
+      [
+        "focus-before-text",
+        String(ownPid),
+        join(artifacts, "canvas-open-focus-target.png"),
+        "Signups this week",
+      ],
+      process.env,
+      8000,
+    );
+    await observeUntil("canvas-open-control", (snapshot) => hasText(snapshot, "Open in sidebar"));
+    await runBoundedCommand(
+      nativeControllerPath,
+      [
+        "enter",
+        String(ownPid),
+        join(artifacts, "canvas-open-sidebar-target.png"),
+        "Open in sidebar",
+      ],
+      process.env,
+      8000,
+    );
+    await observeUntil(
+      "canvas-sidebar",
+      (snapshot) => hasText(snapshot, "v1") && hasText(snapshot, "Signups this week"),
+    );
     if (controller.signal.aborted) throw Error("Native window observation was interrupted.");
     verified = true;
   } finally {
@@ -427,6 +468,7 @@ const timer = setInterval(() => {
         publicLinkSettingsObserved: true,
         nativeServiceConfiguration: "journal-confirmed",
         configurationPublishedNothing: true,
+        nativeCanvasSidebar: true,
         productionDebuggingUnchanged: true,
         cleanup: "verified",
         publishAcceptance: "not-run",

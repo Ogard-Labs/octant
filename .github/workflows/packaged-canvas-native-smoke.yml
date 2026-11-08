@@ -40,7 +40,7 @@ jobs:
         timeout-minutes: 25
         run: bun run package:desktop
       - name: Observe the real packaged primary window
-        timeout-minutes: 3
+        timeout-minutes: 4
         env:
           OCTANT_QA_OUTPUT: ${{ runner.temp }}/packaged-canvas-native
           OCTANT_QA_NATIVE_CONTROLLER: ${{ runner.temp }}/octant-canvas-native-control
