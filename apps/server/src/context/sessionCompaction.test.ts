@@ -1425,6 +1425,8 @@ describe("compacting a session a runtime keeps", () => {
       });
       await world.service.settled();
       expect(world.runtime.handoverPrompts).toHaveLength(1);
+      // The summary's scratch folder is gone once its request ended.
+      expect(world.released).toEqual([String(codeSubject.aggregateId)]);
       expect(world.harness.handoverSummary(codeSubject, () => conversation)).toMatchObject({
         content: "Finish the index next.",
       });
@@ -2210,6 +2212,7 @@ function createRuntimeWorld(
     // Reported before anything in these tests compacts the session.
     occupancy: { tokens: 1_200, observedAt: "2026-07-18T20:00:00.000Z" },
   };
+  const released: Array<string> = [];
   const opened: Array<WindowId | undefined> = [];
   const announced: Array<{ readonly threadId: string; readonly compaction: unknown }> = [];
   const capacity = makeProviderCapacityScheduler({
@@ -2237,6 +2240,9 @@ function createRuntimeWorld(
         },
         conversation: readConversation,
         scratchRoot: async () => "/tmp/octant-scratch",
+        releaseScratchRoot: async (threadId: string) => {
+          released.push(threadId);
+        },
         runtimeSessions: {
           exists: () => state.hasSession,
           ...(kind === "code-thread" ? { occupancy: () => state.occupancy } : {}),
@@ -2268,6 +2274,7 @@ function createRuntimeWorld(
     harness: fixture.harness,
     runtime,
     state,
+    released,
     opened,
     announced,
     capacity,

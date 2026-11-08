@@ -169,6 +169,12 @@ export interface SessionCompactionThreads {
   /** The thread's own scratch folder, where its provider sessions start. */
   readonly scratchRoot?: (threadId: string) => Promise<string>;
   /**
+   * Removes a scratch folder made for one request only, once that request
+   * ended, so nothing of the thread outlives it there. Absent where the
+   * folder is the thread's own and its purge removes it.
+   */
+  readonly releaseScratchRoot?: (threadId: string) => Promise<void>;
+  /**
    * Carries a compaction that ended onto the thread's live stream. Absent
    * where that stream already reads the journaled outcome itself.
    */
@@ -782,6 +788,8 @@ export class SessionCompactionService {
       return content.length === 0 ? undefined : { content, throughSource: basis.throughSource };
     } catch {
       return undefined;
+    } finally {
+      await threads.releaseScratchRoot?.(threadId).catch(() => undefined);
     }
   }
 

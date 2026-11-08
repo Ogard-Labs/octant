@@ -522,6 +522,9 @@ rule; files that cannot be read show the runtimes' defaults.
 - 2026-11-07: Slice 2 (idle rule) built.
 - 2026-11-07: Slice 3 (limit rule, handover summary, notice) built; D-5 added.
 - 2026-11-08: Code handover summary built; D-6 supersedes D-5.
+- 2026-11-08: The one-request scratch folder (`hand-off-scratch/<thread>`), used by
+  the Code handover summary and Work's thread hand-off, was never removed, and
+  no thread purge reached it. Each request now removes it when it ends.
 - 2026-11-08: Slice 4 (runtime compaction point, harness in-turn compaction,
   runtimes' own settings in Settings) built.
 - 2026-11-08: Review of the Code handover: a conversation read that failed
