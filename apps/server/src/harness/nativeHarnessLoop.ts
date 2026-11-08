@@ -233,6 +233,8 @@ interface SessionState {
   selfCorrections: number;
   /** Whether this turn sent a request to summarize earlier turns; what it cost is in `usage`. */
   compactedThisTurn: boolean;
+  /** What the latest request put in the window: its input, cached input included. */
+  contextTokens: number | undefined;
   /** Everything this turn's requests have cost so far; a figure no request reported stays absent. */
   usage: NativeHarnessUsage;
   latestReportedUsage: NativeHarnessUsage | undefined;
@@ -377,6 +379,7 @@ export function createNativeHarnessConnection(
       steps: 0,
       selfCorrections: 0,
       compactedThisTurn: false,
+      contextTokens: undefined,
       usage: { inputTokens: 0, outputTokens: 0, costUsd: 0 },
       latestReportedUsage: undefined,
       estimatedCostUsd: 0,
@@ -504,6 +507,7 @@ export function createNativeHarnessConnection(
         onEvent: (event: NativeHarnessStreamEvent) => {
           if (event.kind === "retrying") state.pricingBoundariesKnown = false;
           if (event.kind === "usage") {
+            state.contextTokens = requestContextTokens(event);
             state.latestReportedUsage = addNativeHarnessUsage(state.usage, event);
             state.requestEstimateUsd = state.pricingBoundariesKnown
               ? (estimateTurnCostUsd(String(leadTarget(state).modelId), event) ?? null)
@@ -514,6 +518,7 @@ export function createNativeHarnessConnection(
             event.kind === "usage"
               ? {
                   ...event,
+                  contextTokens: requestContextTokens(event),
                   ...(state.requestStartedAt === undefined
                     ? {}
                     : { requestStartedAt: state.requestStartedAt }),
@@ -724,6 +729,7 @@ export function createNativeHarnessConnection(
 
     /** Adds one settled request of this turn to the turn's usage and estimated cost. */
     const chargeRequest = (state: SessionState, usage: NativeHarnessUsage | undefined) => {
+      if (usage !== undefined) state.contextTokens = requestContextTokens(usage);
       const requestCost =
         usage === undefined || !state.pricingBoundariesKnown
           ? undefined
@@ -850,7 +856,14 @@ export function createNativeHarnessConnection(
         (state.steps > 1 || state.compactedThisTurn) &&
         (state.usage.inputTokens > 0 || state.usage.outputTokens > 0)
       ) {
-        emit(state, { kind: "usage", ...state.usage, estimatedCostUsd: state.estimatedCostUsd });
+        emit(state, {
+          kind: "usage",
+          ...state.usage,
+          estimatedCostUsd: state.estimatedCostUsd,
+          // The turn's total is what it cost; what the window holds is the
+          // last request's input, which a rule reads to judge the fill.
+          ...(state.contextTokens === undefined ? {} : { contextTokens: state.contextTokens }),
+        });
       }
       state.acceptingSteering = false;
       emit(state, {
@@ -1773,4 +1786,13 @@ function sanitizeFailure(error: unknown): ProviderFailure {
 
 function failure(category: ProviderFailure["category"], message: string): ProviderFailure {
   return { category, message };
+}
+
+/** How much of the window one request filled: its input, cached reads and writes included. */
+function requestContextTokens(usage: {
+  readonly inputTokens: number;
+  readonly cacheReadInputTokens?: number | undefined;
+  readonly cacheWriteInputTokens?: number | undefined;
+}): number {
+  return usage.inputTokens + (usage.cacheReadInputTokens ?? 0) + (usage.cacheWriteInputTokens ?? 0);
 }

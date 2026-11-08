@@ -11,6 +11,7 @@ import {
   decodeModelContextLimits,
   decodeProviderInstance,
   decodeProviderInstanceId,
+  decodeProviderModel,
   decodeProviderModelId,
   decodeProviderServiceLimits,
   decodeProviderSessionId,
@@ -20,6 +21,7 @@ import {
   type WindowId,
   type ProjectProviderPolicy,
   type ProviderInstance,
+  type ProviderModel,
 } from "@octant/contracts";
 import type {
   ProviderAcquireInput,
@@ -141,6 +143,18 @@ describe("compacting a session on request", () => {
     // and the session it starts names none.
     expect(world.provider.sentTools).toEqual([]);
     expect(world.provider.started).not.toHaveProperty("tools");
+    world.close();
+  });
+
+  it("reads a fresh plan, not the last compaction's figure, once a turn replanned after it", async () => {
+    const world = createWorld();
+    planSession(world);
+    world.service.start(command(), "local-window");
+    await world.service.settled();
+    planSession(world);
+    expect(world.service.windowFill(subject)?.tokens).toBe(
+      world.harness.inspect(subject).next.plan.plannedInputTokens,
+    );
     world.close();
   });
 
@@ -1321,6 +1335,26 @@ describe("compacting a session a runtime keeps", () => {
       world.close();
     });
 
+    it("reads a Code thread's window from its model when no report names one", () => {
+      const world = createRuntimeWorld({ answer: { kind: "compacted" } }, "code-thread");
+      world.state.thread = { mode: "code", projectId, providerInstanceId, modelId };
+      world.state.model = decodeProviderModel({
+        id: String(modelId),
+        displayName: "Model",
+        source: "manual",
+        verification: "unverified",
+        reasoning: "supported",
+        inputModalities: ["text"],
+        options: [],
+        contextLimit: 200_000,
+      });
+      expect(world.service.windowFill(codeSubject)).toMatchObject({
+        tokens: 1_200,
+        contextWindow: 200_000,
+      });
+      world.close();
+    });
+
     it("calls an older usage report only an upper bound once a compaction left no figure", async () => {
       const world = createRuntimeWorld({ answer: { kind: "compacted" } }, "code-thread");
       world.state.thread = { mode: "code", projectId, providerInstanceId, modelId };
@@ -2022,6 +2056,7 @@ interface RuntimeWorldState {
   support: "supported" | "unsupported" | "unavailable" | undefined;
   hasSession: boolean;
   occupancy: { readonly tokens: number; readonly observedAt: string } | undefined;
+  model?: ProviderModel;
 }
 
 type RuntimeWorld = ReturnType<typeof createRuntimeWorld>;
@@ -2095,7 +2130,10 @@ function createRuntimeWorld(
     modeEnabled: () => state.modeEnabled,
     conversationOwner: () => "runtime",
     runtimeCompaction: () => state.support,
-    providerFacts: () => ({ provider: codexInstance() }),
+    providerFacts: () => ({
+      provider: codexInstance(),
+      ...(state.model === undefined ? {} : { model: state.model }),
+    }),
     availableDriver: () => (state.providerAvailable ? runtime.driver : undefined),
     capacity,
     spendCeiling: spend,
