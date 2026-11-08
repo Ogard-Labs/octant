@@ -300,6 +300,13 @@ the CLI. The hub depends on that:
     The physical hub directory stays held for the process lifetime. Store calls
     remain synchronous inside the single owner process; services retain their
     existing reload and cancellation-generation fences across asynchronous work.
+    Foreground startup admission also requires the actual SQLite runtime to keep
+    the main store, WAL and any rollback/shared-memory leaves inside that same
+    private profile without pathname races. A surrounding path check is not proof
+    of the handle SQLite actually opened. Existing owner-routed administration,
+    foreign read-only database consumers, checkpoints, migration snapshots,
+    restore and crash recovery must retain their behavior. Native experiments
+    may measure a single-owner WAL lifecycle; they do not admit startup.
     Hosted native QA keeps the pinned runtime versions. When GitHub release
     delivery fails, the same Bun version may come from its official npm Windows
     artifact, verified against a pinned SHA-512 before extracting its sole regular

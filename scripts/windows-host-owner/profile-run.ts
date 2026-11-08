@@ -17,10 +17,11 @@ import { fileURLToPath } from "node:url";
 
 const identityMode = process.argv[2] === "--server-identity";
 const tlsMode = process.argv[2] === "--listener-tls";
+const sqliteMode = process.argv[2] === "--sqlite-store";
 const authorityMode = process.argv[2] === "--authority-state";
 const rosterMode = process.argv[2] === "--roster-key";
 const [launcher, binding, fixture, ...runtimes] = process.argv.slice(
-  identityMode || tlsMode || rosterMode || authorityMode ? 3 : 2,
+  identityMode || tlsMode || rosterMode || authorityMode || sqliteMode ? 3 : 2,
 );
 if (process.platform !== "win32" || !launcher || !binding || !fixture || runtimes.length !== 3)
   throw new Error("Supply the owned launcher, binding, fixture and three runtimes.");
@@ -267,7 +268,18 @@ async function acl(profile: string, mode: string) {
 }
 let runFailure: unknown;
 try {
-  if (authorityMode) {
+  if (sqliteMode) {
+    for (const profile of profiles) await probe(first, profile);
+    console.log(
+      JSON.stringify({
+        sqlitePrototypeLifecycleChecks: [
+          "both isolated native profiles commit, checkpoint, reopen and retain foreign read-only consumers",
+        ],
+        startupAdmitted: false,
+        workCodeEnabled: false,
+      }),
+    );
+  } else if (authorityMode) {
     for (const profile of profiles) await probe(first, profile, "missing");
     checks.push("missing reads create nothing and prepare-only processes cannot write");
     for (const runtime of runtimes) await probe(runtime, "octant", "environment-loss");

@@ -129,6 +129,10 @@ jobs:
         run: |
           bun build scripts/windows-host-owner/authority-state.ts --target=node --outfile "$env:RUNNER_TEMP/authority-state-smoke.mjs"
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Bundle the guarded SQLite prototype
+        run: |
+          bun build scripts/windows-host-owner/sqlite-store.ts --target=bun --outfile "$env:RUNNER_TEMP/sqlite-store-smoke.mjs"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - name: Prove the native Bun owner and client
         run: |
           bun scripts/windows-host-owner/run.ts (Get-Command bun).Source "$env:RUNNER_TEMP/owner-smoke.mjs" "$env:RUNNER_TEMP/owner-build/Release/octant-windows-host-owner.node" "$env:RUNNER_TEMP/owner-build/Release/octant-windows-owner-reader.exe"
@@ -180,6 +184,10 @@ jobs:
       - name: Prove private authority-state commits in all three runtimes
         run: |
           bun scripts/windows-host-owner/profile-run.ts --authority-state "$env:RUNNER_TEMP/owner-build/Release/octant-windows-owner-reader.exe" "$env:RUNNER_TEMP/owner-build/Release/octant-windows-host-owner.node" "$env:RUNNER_TEMP/authority-state-smoke.mjs" (Get-Command bun).Source (Get-Command node).Source "$pwd/node_modules/electron/dist/electron.exe"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Measure guarded SQLite WAL lifecycle in Bun without admitting startup
+        run: |
+          bun scripts/windows-host-owner/profile-run.ts --sqlite-store "$env:RUNNER_TEMP/owner-build/Release/octant-windows-owner-reader.exe" "$env:RUNNER_TEMP/owner-build/Release/octant-windows-host-owner.node" "$env:RUNNER_TEMP/sqlite-store-smoke.mjs" (Get-Command bun).Source (Get-Command node).Source "$pwd/node_modules/electron/dist/electron.exe"
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - uses: actions/upload-artifact@v4
         with:

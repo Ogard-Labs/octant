@@ -320,3 +320,10 @@ export {
   type WindowsAuthorityStateFiles,
   type WindowsAuthorityStateNative,
 } from "./windowsAuthorityState";
+
+export {
+  createWindowsSqliteStores,
+  type WindowsSqliteStoreNative,
+  type WindowsSqliteStores,
+  type WindowsSqliteStoreAdmission,
+} from "./windowsSqliteStore";

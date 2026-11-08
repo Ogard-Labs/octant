@@ -5,6 +5,7 @@
 #include <bcrypt.h>
 #include <delayimp.h>
 #include <node_api.h>
+#include <sqlite3ext.h>
 #include <algorithm>
 #include <array>
 #include <cstring>
@@ -501,13 +502,14 @@ bool replace_listener_certificate(const Root& root, const std::wstring& path,
   return FlushFileBuffers(stage.file.value) != FALSE;
 }
 
+enum class ProfileDirectoryKind { Data, Hub, Remote };
 struct ProfileDirectory {
   std::unique_ptr<Root> root;
   Handle data, directory;
   std::wstring path;
 };
 std::unique_ptr<ProfileDirectory> profile_directory(const std::string& name, const std::string& scope,
-    const std::string& expected_data, bool hub, bool create, bool& missing_directory) {
+    const std::string& expected_data, ProfileDirectoryKind kind, bool create, bool& missing_directory) {
   const auto found = profiles.find(name);
   if (found == profiles.end() || found->second->scope != scope || !per_user_creation_context()) return nullptr;
   // Reopen/revalidate the native known-folder path and current ACLs on every
@@ -534,7 +536,7 @@ std::unique_ptr<ProfileDirectory> profile_directory(const std::string& name, con
   for (size_t i = 0; i < directories.size(); ++i)
     if (std::memcmp(encoded.data() + 9 + i * 24, &directories[i].VolumeSerialNumber, 8) != 0 ||
         std::memcmp(encoded.data() + 17 + i * 24, directories[i].FileId.Identifier, 16) != 0) return nullptr;
-  const std::wstring remote_path = root->path + L"\\data\\" + (hub ? L"hub" : L"remote");
+  const std::wstring remote_path = root->path + L"\\data" + (kind == ProfileDirectoryKind::Data ? L"" : kind == ProfileDirectoryKind::Hub ? L"\\hub" : L"\\remote");
   SECURITY_ATTRIBUTES directory_attributes{sizeof(SECURITY_ATTRIBUTES), root->directory_security, FALSE};
   if (create && !CreateDirectoryW(remote_path.c_str(), &directory_attributes) && GetLastError() != ERROR_ALREADY_EXISTS) return nullptr;
   if (!create && GetFileAttributesW(remote_path.c_str()) == INVALID_FILE_ATTRIBUTES) {
@@ -575,7 +577,7 @@ napi_value private_profile_file(napi_env env, napi_callback_info info, ProfileFi
   Bytes candidate;
   if (create && (!byte_arg(env, arguments[roster ? 3 : 4], candidate, maximum) || candidate.empty())) return object(env, "refused");
   bool missing_directory = false;
-  auto admission = profile_directory(name, scope, expected_data, roster, create, missing_directory);
+  auto admission = profile_directory(name, scope, expected_data, roster ? ProfileDirectoryKind::Hub : ProfileDirectoryKind::Remote, create, missing_directory);
   if (!admission) return object(env, missing_directory ? "missing" : "refused");
   auto& root = admission->root;
   auto& remote = admission->directory;
@@ -690,7 +692,7 @@ bool authority_regular(HANDLE file, const Root& root, ULONGLONG* length = nullpt
 }
 bool authority_revalidate(const AuthoritySession& session) {
   bool missing = false;
-  auto current = profile_directory(session.profile, session.scope, session.expected_data, true, false, missing);
+  auto current = profile_directory(session.profile, session.scope, session.expected_data, ProfileDirectoryKind::Hub, false, missing);
   return current && same_file(current->directory.value, session.admission->directory.value) &&
     same_file(current->data.value, session.admission->data.value) &&
     authority_regular(session.file.value, *current->root, nullptr, !session.writing);
@@ -712,7 +714,7 @@ napi_value begin_authority_state(napi_env env, napi_callback_info info) {
   for (const auto& entry : authority_sessions)
     if (writing && entry.second->env == env && entry.second->profile == name && entry.second->purpose == purpose && entry.second->writing) return object(env, "refused");
   bool missing = false;
-  auto admission = profile_directory(name, scope, expected_data, true, writing, missing);
+  auto admission = profile_directory(name, scope, expected_data, ProfileDirectoryKind::Hub, writing, missing);
   if (!admission) return object(env, missing && !writing ? "missing" : "refused");
   const std::wstring path = admission->path + leaf;
   Handle existing(CreateFileW(path.c_str(), GENERIC_READ | READ_CONTROL, FILE_SHARE_READ | FILE_SHARE_DELETE,
@@ -811,6 +813,106 @@ napi_value close_authority_state(napi_env env, napi_callback_info info) {
     authority_sessions.erase(id);
   }
   return object(env, "closed");
+}
+
+// SQLite keeps its ordinary Win32 VFS. Native guards pin its closed file
+// family before the runtime opens it; the SQLite entry point verifies the
+// actual main handle and selects the single-owner WAL lifecycle.
+struct SqliteAdmission {
+  napi_env env = nullptr;
+  DWORD thread = 0;
+  std::string profile, scope, expected_data, kind;
+  std::unique_ptr<ProfileDirectory> directory;
+  std::array<Handle, 3> files;
+  Handle old_shm;
+};
+std::map<std::string, std::unique_ptr<SqliteAdmission>> sqlite_admissions;
+bool sqlite_regular(HANDLE file, const Root& root) {
+  BY_HANDLE_FILE_INFORMATION metadata{};
+  return (private_acl(file, root) || private_acl(file, root, INHERITED_ACE, false)) &&
+    GetFileInformationByHandle(file, &metadata) && metadata.nNumberOfLinks == 1 &&
+    (metadata.dwFileAttributes & (FILE_ATTRIBUTE_DIRECTORY | FILE_ATTRIBUTE_REPARSE_POINT)) == 0;
+}
+Handle sqlite_leaf(const Root& root, const std::wstring& path, bool create, bool& missing) {
+  Handle file(CreateFileW(path.c_str(), GENERIC_READ | READ_CONTROL, FILE_SHARE_READ | FILE_SHARE_WRITE,
+    nullptr, OPEN_EXISTING, FILE_FLAG_OPEN_REPARSE_POINT, nullptr));
+  if (!file && GetLastError() == ERROR_FILE_NOT_FOUND) {
+    if (!create) { missing = true; return Handle(); }
+    SECURITY_ATTRIBUTES attributes{sizeof(SECURITY_ATTRIBUTES), root.security, FALSE};
+    file = Handle(CreateFileW(path.c_str(), GENERIC_READ | GENERIC_WRITE | READ_CONTROL,
+      FILE_SHARE_READ | FILE_SHARE_WRITE, &attributes, CREATE_NEW,
+      FILE_FLAG_OPEN_REPARSE_POINT | FILE_FLAG_WRITE_THROUGH, nullptr));
+    if (!file || !FlushFileBuffers(file.value)) return Handle();
+  }
+  return file && sqlite_regular(file.value, root) ? std::move(file) : Handle();
+}
+napi_value open_sqlite_store(napi_env env, napi_callback_info info) {
+  Guard guard; size_t count = 4; napi_value arguments[4]; napi_get_cb_info(env, info, &count, arguments, nullptr, nullptr);
+  if (count != 4) return object(env, "refused");
+  const std::string profile = string_arg(env, arguments[0]), scope = string_arg(env, arguments[1]);
+  const std::string expected_data = string_arg(env, arguments[2]), kind = string_arg(env, arguments[3]);
+  if ((kind != "main" && kind != "usage-cache") || !authority_writer(env, scope)) return object(env, "refused");
+  bool missing = false;
+  auto directory = profile_directory(profile, scope, expected_data, ProfileDirectoryKind::Data, false, missing);
+  if (!directory) return object(env, "refused");
+  const std::wstring path = directory->path + (kind == "main" ? L"\\octant.sqlite3" : L"\\local-usage-cache.sqlite3");
+  const std::string key = scope + ":" + kind;
+  const auto existing = sqlite_admissions.find(key);
+  if (existing == sqlite_admissions.end()) {
+    auto admission = std::make_unique<SqliteAdmission>();
+    admission->env = env; admission->thread = GetCurrentThreadId(); admission->profile = profile;
+    admission->scope = scope; admission->expected_data = expected_data; admission->kind = kind;
+    admission->directory = std::move(directory);
+    const std::array<std::wstring, 3> names{path, path + L"-wal", path + L"-journal"};
+    for (size_t i = 0; i < names.size(); ++i) {
+      admission->files[i] = sqlite_leaf(*admission->directory->root, names[i], true, missing);
+      if (!admission->files[i]) return object(env, "refused");
+    }
+    admission->old_shm = sqlite_leaf(*admission->directory->root, path + L"-shm", false, missing);
+    if (!admission->old_shm && !missing) return object(env, "refused");
+    sqlite_admissions.emplace(key, std::move(admission));
+  } else {
+    const auto& admission = *existing->second;
+    if (admission.env != env || admission.thread != GetCurrentThreadId() || admission.profile != profile ||
+        !same_file(admission.directory->directory.value, directory->directory.value)) return object(env, "refused");
+    for (const auto& file : admission.files)
+      if (!sqlite_regular(file.value, *directory->root)) return object(env, "refused");
+  }
+  HMODULE module = nullptr;
+  std::array<wchar_t, 32768> module_path{};
+  if (!GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
+      reinterpret_cast<LPCWSTR>(&module_identity), &module)) return object(env, "refused");
+  const DWORD length = GetModuleFileNameW(module, module_path.data(), static_cast<DWORD>(module_path.size()));
+  if (length == 0 || length >= module_path.size()) return object(env, "refused");
+  napi_value result = object(env, "ready"); put(env, result, "dataDirectory", expected_data);
+  put(env, result, "databasePath", expected_data + (kind == "main" ? "\\octant.sqlite3" : "\\local-usage-cache.sqlite3"));
+  put(env, result, "extensionPath", utf8(std::wstring(module_path.data(), length))); return result;
+}
+int initialize_sqlite_store(sqlite3* database, const sqlite3_api_routines* api) {
+  Guard guard;
+  if (!owner || !owner->pipe || !owner->record) return SQLITE_AUTH;
+  const auto& scope = owner->scope;
+  HANDLE actual = INVALID_HANDLE_VALUE;
+  if (api->file_control(database, "main", SQLITE_FCNTL_WIN32_GET_HANDLE, &actual) != SQLITE_OK) return SQLITE_AUTH;
+  SqliteAdmission* selected = nullptr;
+  for (const auto& entry : sqlite_admissions) {
+    auto& admission = *entry.second;
+    if (admission.scope == scope && admission.env == owner->env && admission.thread == GetCurrentThreadId() &&
+        same_file(admission.files[0].value, actual)) { selected = &admission; break; }
+  }
+  if (!selected || !authority_writer(selected->env, scope)) return SQLITE_AUTH;
+  bool missing = false;
+  auto directory = profile_directory(selected->profile, scope, selected->expected_data, ProfileDirectoryKind::Data, false, missing);
+  if (!directory || !same_file(directory->directory.value, selected->directory->directory.value)) return SQLITE_AUTH;
+  for (const auto& file : selected->files) if (!sqlite_regular(file.value, *directory->root)) return SQLITE_AUTH;
+  // This pragma does not read schema. It precedes the first WAL access so
+  // SQLite uses a heap wal-index instead of opening a mutable SHM pathname.
+  if (api->exec(database, "PRAGMA locking_mode=EXCLUSIVE", nullptr, nullptr, nullptr) != SQLITE_OK) return SQLITE_ERROR;
+  int persist = 1;
+  if (api->file_control(database, "main", SQLITE_FCNTL_PERSIST_WAL, &persist) != SQLITE_OK) return SQLITE_ERROR;
+  persist = -1;
+  if (api->file_control(database, "main", SQLITE_FCNTL_PERSIST_WAL, &persist) != SQLITE_OK || persist != 1) return SQLITE_ERROR;
+  return SQLITE_OK;
 }
 
 void record_fields(napi_env env, napi_value result, const Record& record) {
@@ -1012,6 +1114,16 @@ napi_value close_request(napi_env env, napi_callback_info info) {
 }
 } // namespace
 
+// SQLite supplies its own public extension ABI. No CRT descriptor or SQLite
+// implementation layout is shared across the runtime and this binding.
+extern "C" __declspec(dllexport) int sqlite3_extension_init(sqlite3* database, char** error,
+    const sqlite3_api_routines* api) {
+  if (!database || !api) return SQLITE_ERROR;
+  const int result = initialize_sqlite_store(database, api);
+  if (result != SQLITE_OK && error) *error = api->mprintf("The private Windows database admission is unavailable or unsafe.");
+  return result;
+}
+
 NAPI_MODULE_INIT() {
   napi_add_env_cleanup_hook(env, cleanup_env, env);
   const napi_property_descriptor methods[] = {
@@ -1019,6 +1131,7 @@ NAPI_MODULE_INIT() {
     {"identityFile", nullptr, identity_file, nullptr, nullptr, nullptr, napi_default, nullptr},
     {"listenerTlsFile", nullptr, listener_tls_file, nullptr, nullptr, nullptr, napi_default, nullptr},
     {"rosterSigningKeyFile", nullptr, roster_signing_key_file, nullptr, nullptr, nullptr, napi_default, nullptr},
+    {"openSqliteStore", nullptr, open_sqlite_store, nullptr, nullptr, nullptr, napi_default, nullptr},
     {"beginAuthorityState", nullptr, begin_authority_state, nullptr, nullptr, nullptr, napi_default, nullptr},
     {"readAuthorityState", nullptr, read_authority_state, nullptr, nullptr, nullptr, napi_default, nullptr},
     {"writeAuthorityState", nullptr, write_authority_state, nullptr, nullptr, nullptr, napi_default, nullptr},
