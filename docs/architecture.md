@@ -13563,6 +13563,16 @@ cards; general Azure CLI credentials remain unavailable by design.
   Every return clears unused state, and fork, clone and exec inherit none.
   An unprepared internal path refuses until its compatibility is proved; a
   callback never waits for broker metadata while holding an inode lock.
+  The disposable candidate covers ordinary mode, owner, timestamp and truncate
+  requests at their four pinned entries: preparation precedes the inode lock,
+  and the final write comparison immediately precedes `notify_change`.
+  Delegation retries end the consumed scope before waiting and prepare a fresh
+  attempt. Early refusal retains mount-write and automatic-scope cleanup.
+  This is not a global `inode_setattr` guard. Internal privilege clearing during
+  writes, filesystem ioctl and stacked-filesystem mutation routes remain
+  unfinished and must be proved before any production coverage is enabled;
+  the candidate's production coverage remains zero. A global callback without
+  their pre-lock lifetimes would break permitted writes or wait under locks.
   _Rationale._ Otherwise deleting a readable `name.pub` marker could make its
   still-existing custom-named private key readable. Retaining all former secret
   inodes forever would instead reject legitimate host changes and require

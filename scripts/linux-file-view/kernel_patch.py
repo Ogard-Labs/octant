@@ -108,6 +108,71 @@ def metadata_entry(source: str, name: str, dentry: str, operation: str) -> str:
     return source[:at] + f"\n\toctant_metadata_scope({dentry}, OCTANT_MEDIATION_{operation});\n" + source[at:]
 
 
+def metadata_write_entry(source: str, name: str, changes: dict[str, str]) -> str:
+    definition = re.compile(rf"(?m)^int {name}\([^;{{]*?\)\s*\{{")
+    matches = list(definition.finditer(source))
+    if len(matches) != 1:
+        raise ValueError(f"Expected one pinned mutation entry {name}")
+    start = matches[0].end()
+    end = source.index("\n}", start)
+    body = source[start:end]
+    for anchor, replacement in changes.items():
+        if body.count(anchor) != 1:
+            raise ValueError(f"Pinned mutation anchor differs in {name}")
+        body = body.replace(anchor, replacement, 1)
+    return source[:start] + body + source[end:]
+
+
+def install_metadata_writes(kernel: Path) -> None:
+    # A delegation can consume its first decision and then retry after waiting.
+    # End before that wait and prepare each fresh attempt before taking locks.
+    declaration = ("\n\tstruct octant_metadata_scope octant_metadata_admission\n"
+                   "\t\t__attribute__((cleanup(octant_metadata_end))) = {};\n")
+    prepare = ("\toctant_metadata_admission = octant_metadata_begin(path->dentry, OCTANT_MEDIATION_WRITE);\n"
+               "\terror = octant_metadata_admission.error;\n")
+    unlock = "\tinode_unlock(inode);"
+    end_attempt = unlock + "\n\toctant_metadata_end(&octant_metadata_admission);"
+    path = kernel / "fs/open.c"
+    source = path.read_text()
+    if "octant_metadata_" in source:
+        raise ValueError("Ordinary mutation preparation already exists")
+    validation = "\tif (length < 0)\n\t\treturn -EINVAL;"
+    notify = "\tret = notify_change(idmap, dentry, &newattrs, NULL);"
+    source = metadata_write_entry(source, "do_truncate", {
+        validation: validation + "\n\toctant_metadata_scope(dentry, OCTANT_MEDIATION_WRITE);",
+        notify: "\tret = octant_metadata_check_write(dentry);\n\tif (!ret)\n\t" + notify,
+    })
+    notify = "\terror = notify_change(mnt_idmap(path->mnt), path->dentry,\n\t\t\t      &newattrs, &delegated_inode);"
+    source = metadata_write_entry(source, "chmod_common", {
+        "\n\tstruct inode *inode": declaration + "\tstruct inode *inode",
+        "retry_deleg:\n": "retry_deleg:\n" + prepare + "\tif (error)\n\t\tgoto out_mnt_unlock;\n",
+        notify: "\terror = octant_metadata_check_write(path->dentry);\n\tif (!error)\n\t" + notify,
+        unlock: end_attempt,
+    })
+    lock = "\terror = inode_lock_killable(inode);"
+    notify = "\tif (!error)\n\t\terror = notify_change(idmap, path->dentry, &newattrs,"
+    source = metadata_write_entry(source, "chown_common", {
+        "\n\tstruct mnt_idmap *idmap;": declaration + "\tstruct mnt_idmap *idmap;",
+        lock: prepare + "\tif (error)\n\t\treturn error;\n" + lock,
+        notify: "\tif (!error)\n\t\terror = octant_metadata_check_write(path->dentry);\n" + notify,
+        unlock: end_attempt,
+    })
+    path.write_text(include_bridge(source))
+    path = kernel / "fs/utimes.c"
+    source = path.read_text()
+    if "octant_metadata_" in source:
+        raise ValueError("Timestamp preparation already exists")
+    notify = "\terror = notify_change(mnt_idmap(path->mnt), path->dentry, &newattrs,\n\t\t\t      &delegated_inode);"
+    source = metadata_write_entry(source, "vfs_utimes", {
+        "\n\tint error;": declaration + "\tint error;",
+        "retry_deleg:\n": "retry_deleg:\n" + prepare + "\tif (error)\n\t\tgoto out_mnt_unlock;\n",
+        notify: "\terror = octant_metadata_check_write(path->dentry);\n\tif (!error)\n\t" + notify,
+        unlock: end_attempt,
+        "\tmnt_drop_write(path->mnt);": "out_mnt_unlock:\n\tmnt_drop_write(path->mnt);",
+    })
+    path.write_text(include_bridge(source))
+
+
 def install_metadata(kernel: Path) -> None:
     # Scope the decision to this one actual syscall's pinned native object.
     # Read/write ACL dispatchers are included before any inode lock. Final
@@ -216,3 +281,4 @@ def install_epochs(kernel: Path, native: Path) -> None:
     aio.write_text(include_bridge(source))
     install_scm(kernel)
     install_metadata(kernel)
+    install_metadata_writes(kernel)

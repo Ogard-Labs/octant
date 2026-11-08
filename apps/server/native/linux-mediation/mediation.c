@@ -364,7 +364,7 @@ void octant_metadata_end(struct octant_metadata_scope *scope)
 		clear_metadata(metadata);
 }
 
-/* These final LSM checks can run with an inode lock held. They consume only
+/* These final checks can run with an inode lock held. They consume only
  * this task's paired preflight; they never ask the broker or inspect paths. */
 static int check_metadata(struct dentry *dentry, u32 operation)
 {
@@ -390,6 +390,14 @@ static int check_metadata(struct dentry *dentry, u32 operation)
 	spin_unlock(&namespace_lock);
 	spin_unlock_irqrestore(&context->lock, flags);
 	return valid ? 0 : -EACCES;
+}
+
+/* The four audited ordinary mutation entries call this with the actual inode
+ * locked, immediately before notify_change. Internal write side effects and
+ * filesystem ioctls are separate, unfinished routes, not a global setattr hook. */
+int octant_metadata_check_write(struct dentry *dentry)
+{
+	return check_metadata(dentry, OCTANT_MEDIATION_WRITE);
 }
 
 static int octant_metadata_task_alloc(struct task_struct *task, u64 clone_flags)

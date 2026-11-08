@@ -166,8 +166,21 @@ owner and timestamp state. Before publishing the companion, the workload saves
 its synthetic inode's metadata after the initial admitted read and xattr seed.
 The independent owner compares identity, mode, uid/gid, atime/mtime/ctime and
 private xattrs after the command exits, including a failing command. This source
-is a RED measurement against unchanged guards until actual native evidence and
-the pre-lock/final-check correction exist; it enables no production capability.
+establishes a RED measurement against the preceding unchanged guards; the new
+pre-lock/final-check correction still requires actual native proof. It enables
+no production capability.
+
+That correction prepares at the pinned ordinary `do_truncate`, `chmod_common`,
+`chown_common` and `vfs_utimes` entries, before inode locks. A kernel-private,
+comparison-only final write check runs immediately before `notify_change`.
+The three delegation loops end before waiting and prepare a fresh decision for
+each retry; automatic cleanup handles early exits, and mount-write cleanup stays
+balanced. There is no new global `inode_setattr` hook or extra ACL consumption.
+Write-induced privilege clearing may already hold inode locks; its pre-lock
+lifetime, filesystem ioctls and stacked mutation routes remain unfinished. A
+global guard without those lifetimes would break legitimate public writes or
+cause blocking under locks. Existing public ACL/truncate and real runtime proof
+must still pass, and production coverage remains zero.
 
 Dispatch `experiment=kernel-admission` to compile and boot a pinned Linux 6.18
 guest under networkless QEMU TCG in the owned ephemeral runner. The upstream

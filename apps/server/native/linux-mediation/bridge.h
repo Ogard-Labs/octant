@@ -26,6 +26,7 @@ bool octant_mediation_restricted(void);
 int octant_mediation_receive_scm(const struct cred *sender);
 struct octant_metadata_scope octant_metadata_begin(struct dentry *dentry, u32 operation);
 void octant_metadata_end(struct octant_metadata_scope *scope);
+int octant_metadata_check_write(struct dentry *dentry);
 int octant_namespace_prepare(u32 operation, const struct path *source,
 	const struct qstr *name, const struct path *destination,
 	const struct qstr *new_name, u32 flags);
@@ -40,6 +41,7 @@ static inline struct octant_metadata_scope octant_metadata_begin(struct dentry *
 	return (struct octant_metadata_scope) {};
 }
 static inline void octant_metadata_end(struct octant_metadata_scope *scope) {}
+static inline int octant_metadata_check_write(struct dentry *dentry) { return 0; }
 static inline int octant_namespace_prepare(u32 operation, const struct path *source,
 	const struct qstr *name, const struct path *destination,
 	const struct qstr *new_name, u32 flags) { return 0; }
