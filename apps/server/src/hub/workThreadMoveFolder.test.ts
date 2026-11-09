@@ -95,6 +95,24 @@ describe("reading a Work folder's files for a move", () => {
     expect(readFileSync(partPath, "utf8")).not.toContain(OUTSIDE);
   });
 
+  it("never packs a file listed through a folder swapped for a link during the walk", async () => {
+    const { parent, folder, partPath } = folderBesideAnOutsideDocument();
+    const captured = await captureWorkFolderForMove({
+      folder,
+      workingDirectory: report,
+      partId: "work-files",
+      partPath,
+      beforeListing: async (path) => {
+        if (path !== "notes") return;
+        rmSync(join(folder, "notes"), { recursive: true });
+        symlinkSync(join(parent, "outside"), join(folder, "notes"));
+      },
+    });
+    expect(captured.index.files.map((file) => file.path)).toEqual(["agenda.md"]);
+    expect(captured.left).toEqual(["notes"]);
+    expect(readFileSync(partPath, "utf8")).not.toContain(OUTSIDE);
+  });
+
   it("never packs a file reached through a folder swapped for a link after the walk", async () => {
     const { parent, folder, partPath } = folderBesideAnOutsideDocument();
     const captured = await captureWorkFolderForMove({

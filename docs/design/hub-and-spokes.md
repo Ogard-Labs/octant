@@ -1358,7 +1358,10 @@ for Move after this turn.
     folder, a path a working directory could not name, and a file the Secret
     guard refuses stay behind. The source walks the folder without following
     a link, so nothing outside it is read, and a folder that is itself a link
-    is not carried. A move carries at most 10,000 files and empty folders from
+    is not carried. A folder inside must still be a real folder at its own
+    path both before and after it is listed, so one swapped for a link
+    during the walk stays behind, and each file is read only through a
+    handle whose device, inode, and real path match what the walk found. A move carries at most 10,000 files and empty folders from
     one folder, and at most 10,000 folders around them (each carried entry
     takes the permission bits of every folder it sits in, and a deep tree
     names more folders than files), the bounds the moved transcript holds its

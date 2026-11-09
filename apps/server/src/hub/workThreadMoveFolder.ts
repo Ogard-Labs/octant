@@ -282,7 +282,11 @@ interface WalkedFolder {
  * link. The folder itself must be a real folder at exactly that path, or the
  * walk throws: a link anywhere in it would put the files elsewhere.
  */
-async function walkWorkFolder(folder: string): Promise<WalkedFolder> {
+async function walkWorkFolder(
+  folder: string,
+  /** Called before each folder inside is listed; tests use it to swap the folder for a link. */
+  beforeListing?: (path: string) => Promise<void>,
+): Promise<WalkedFolder> {
   const top = await lstat(folder);
   if (!top.isDirectory() || (await realpath(folder)) !== folder) {
     throw new Error("The Work folder is not a plain folder at its own path.");
@@ -298,7 +302,19 @@ async function walkWorkFolder(folder: string): Promise<WalkedFolder> {
   while (level.length > 0) {
     const entries: Array<{ path: string; kind: "file" | "folder" | "other" }> = [];
     for (const parent of level) {
+      if (parent !== "") await beforeListing?.(parent);
+      // A folder swapped for a link after its check would list what the link
+      // points at, outside the folder; one that is no longer itself is left,
+      // checked both before and after it is listed.
+      if (parent !== "" && !(await folderIsItself(join(folder, parent)))) {
+        left.push(parent);
+        continue;
+      }
       const children = await readdir(join(folder, parent), { withFileTypes: true });
+      if (parent !== "" && !(await folderIsItself(join(folder, parent)))) {
+        left.push(parent);
+        continue;
+      }
       if (children.length === 0 && parent !== "") {
         if (isMovedWorkPath(parent)) emptyFolders.push(parent);
         else left.push(parent);
@@ -427,8 +443,10 @@ export async function captureWorkFolderForMove(input: {
    * still swap it for a link. Tests use it to do so.
    */
   readonly beforeReading?: (path: string) => Promise<void>;
+  /** Called before each folder inside is listed, the walk's own such moment. */
+  readonly beforeListing?: (path: string) => Promise<void>;
 }): Promise<CapturedWorkFolder> {
-  const walked = await walkWorkFolder(input.folder);
+  const walked = await walkWorkFolder(input.folder, input.beforeListing);
   const files: Array<MovedWorkFolder["files"][number]> = [];
   const left = [...walked.left];
   const workingDirectory = Schema.decodeSync(MovedWorkPath)(input.workingDirectory);
@@ -537,8 +555,9 @@ function carriedFolderModes(
  * by path would then read whatever the link points at, outside the folder.
  * The file is opened without following a link in its last step, and the open
  * handle must be a plain file with the device and inode the walk recorded,
- * which a swapped folder on the way also fails. Every read is then made
- * through that handle, never by path.
+ * which a swapped folder on the way also fails, and the file must still be
+ * at exactly its own path, links resolved. Every read is then made through
+ * that handle, never by path.
  */
 async function openWalkedFile(
   path: string,
@@ -560,7 +579,11 @@ async function openWalkedFile(
     found === undefined ||
     !found.isFile() ||
     found.dev !== walked.dev ||
-    found.ino !== walked.ino
+    found.ino !== walked.ino ||
+    // A folder on the way that was a link while the walk listed it gave the
+    // walk an outside file's identity, which the handle then matches; the
+    // file must also be at exactly its own path inside the folder.
+    (await realpath(path).catch(() => "")) !== path
   ) {
     await handle.close();
     return { status: "refused" };
