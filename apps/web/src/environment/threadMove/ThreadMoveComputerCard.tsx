@@ -145,6 +145,7 @@ function MovableComputerCard(props: ThreadMoveComputerCardProps & { client: Thre
                   other move. */}
               {status?.sending !== undefined ||
               status?.waiting !== undefined ||
+              status?.waitingForPhone !== undefined ||
               status?.arriving !== undefined ||
               status?.handedOver !== undefined ? null : (
                 <DestinationPicker
@@ -313,6 +314,9 @@ function computerPill(status: ThreadMoveThreadStatus | undefined): {
       tone: "outline",
     };
   }
+  if (status?.waitingForPhone !== undefined) {
+    return { label: "Waiting for your phone", tone: "outline" };
+  }
   if (status?.arriving !== undefined) return { label: "Arriving", tone: "outline" };
   if (status?.handedOver !== undefined) return { label: "Handed over", tone: "outline" };
   if (status?.failure !== undefined) return { label: "Can't move", tone: "warning" };
@@ -330,7 +334,7 @@ const FAILURE_SENTENCES: Readonly<Record<ThreadMoveFailureReason, string>> = {
   busy: "A turn is running or the thread is waiting on you. Try again when it finishes.",
   delegated: "Another computer delegated this thread here, so it stays with that delegation.",
   "unlock-required":
-    "The move wasn't unlocked, or this Mac isn't an owner on that computer. Mark it as an owner there in Settings › Remote access › Hub.",
+    "The move wasn't unlocked or confirmed in time, or the device that unlocked it isn't an owner on that computer. Mark it as an owner there in Settings › Remote access › Hub.",
   refused: "That computer doesn't accept moved threads from this one.",
   "no-eligible-project": "That computer has no Project this thread can move into.",
   "destination-unreachable": "That computer couldn't be reached.",
@@ -456,6 +460,24 @@ function MoveProgress(props: {
   const [working, setWorking] = useState(false);
   const sending = props.status?.sending;
   const waiting = props.status?.waiting;
+  const waitingForPhone = props.status?.waitingForPhone;
+  if (waitingForPhone !== undefined) {
+    return (
+      <div className="environment-move__progress">
+        <p className="environment-move__sentence">
+          Confirm on your phone to move this thread to {waitingForPhone.destinationName}. Open
+          Octant there; it waits until {formatTime(waitingForPhone.expiresAt)}.
+        </p>
+        <OctantButton
+          onClick={() => void props.client.stopWaiting(props.thread).finally(props.onChanged)}
+          size="sm"
+          variant="outline"
+        >
+          Don't move
+        </OctantButton>
+      </div>
+    );
+  }
   if (waiting !== undefined) {
     return (
       <div className="environment-move__progress">
@@ -625,6 +647,32 @@ function ThreadMoveSheet(props: {
   const sizes = useMoveSizes(props.client, String(member.memberId), props.thread);
   const size = typeof sizes === "string" ? undefined : sizes.rows[0]?.size;
 
+  // A phone on the destination's owner list unlocks there itself; this
+  // computer only holds the move until the phone hands it the ticket.
+  const confirmOnPhone = async () => {
+    setWorking(true);
+    setProblem(undefined);
+    try {
+      const asked = await props.client.askPhone({
+        thread: props.thread,
+        destinationMemberId: member.memberId,
+        ...(props.projectId === undefined
+          ? {}
+          : { destinationProjectId: decodeProjectId(props.projectId) }),
+        timing: props.busy ? whenBusy : "now",
+      });
+      if (asked.status === "refused") {
+        setProblem(FAILURE_SENTENCES[asked.reason]);
+        return;
+      }
+      props.onStarted();
+    } catch {
+      setProblem("This computer could not ask your phone.");
+    } finally {
+      setWorking(false);
+    }
+  };
+
   const moveWithUnlock = async () => {
     if (props.unlock === undefined) return;
     setWorking(true);
@@ -775,11 +823,11 @@ function ThreadMoveSheet(props: {
           {problem}
         </OctantAlert>
       )}
-      {props.unlock === undefined ? (
-        <p className="thread-move-sheet__consequence">
-          A move is unlocked with Touch ID in the Octant app on this Mac.
-        </p>
-      ) : null}
+      <p className="thread-move-sheet__consequence">
+        {props.unlock === undefined
+          ? `This window has no Touch ID key, so a phone that is an owner on ${member.name} confirms the move.`
+          : `Or confirm on a phone that is an owner on ${member.name}.`}
+      </p>
       <footer className="thread-move-sheet__foot">
         {props.onHandOver === undefined ? null : (
           <OctantButton
@@ -793,17 +841,28 @@ function ThreadMoveSheet(props: {
         <OctantButton onClick={props.onClose} variant="ghost">
           Cancel
         </OctantButton>
-        <OctantButton
-          disabled={props.unlock === undefined || working}
-          onClick={() => void moveWithUnlock()}
-          ref={primary}
-        >
-          {stopsFirst
-            ? "Stop and move with Touch ID"
-            : props.busy
-              ? "Move after this turn with Touch ID"
-              : "Move with Touch ID"}
-        </OctantButton>
+        {props.unlock === undefined ? (
+          <OctantButton disabled={working} onClick={() => void confirmOnPhone()} ref={primary}>
+            Confirm on your phone
+          </OctantButton>
+        ) : (
+          <>
+            <OctantButton
+              disabled={working}
+              onClick={() => void confirmOnPhone()}
+              variant="outline"
+            >
+              Confirm on your phone
+            </OctantButton>
+            <OctantButton disabled={working} onClick={() => void moveWithUnlock()} ref={primary}>
+              {stopsFirst
+                ? "Stop and move with Touch ID"
+                : props.busy
+                  ? "Move after this turn with Touch ID"
+                  : "Move with Touch ID"}
+            </OctantButton>
+          </>
+        )}
       </footer>
     </OctantDialog>
   );
@@ -996,7 +1055,7 @@ function challengeProblem(
   memberName: string,
 ): string {
   if (kind === "unlock-required") {
-    return `This Mac isn't an owner on ${memberName}. Mark it as an owner there in Settings › Remote access › Hub, then try again.`;
+    return `This Mac isn't an owner on ${memberName}. Mark it as an owner there in Settings › Remote access › Hub, then try again, or confirm on a phone that is an owner there.`;
   }
   if (kind === "destination-unreachable") return `${memberName} couldn't be reached.`;
   return `${memberName} doesn't accept moved threads from this computer.`;
@@ -1033,6 +1092,10 @@ function useLiveAnnouncement(status: ThreadMoveThreadStatus | undefined): string
     }
   }, [status]);
   return said;
+}
+
+function formatTime(at: number): string {
+  return new Date(at).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
 }
 
 /**

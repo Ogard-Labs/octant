@@ -2,6 +2,7 @@ import {
   decodeWorkRequestId,
   decodeWorkRequestRecordInput,
   type WorkThreadId,
+  type Questionnaire,
   type ProjectId,
   type ProviderInstanceId,
   type ProviderRuntimeEvent,
@@ -272,6 +273,9 @@ export class WorkRequestRuntime {
                 kind: "user-input",
                 prompt: sanitizeRequestText(event.prompt, "Input requested"),
                 options: optionValues!.labels,
+                ...(event.questionnaire === undefined
+                  ? {}
+                  : { questionnaire: sanitizedQuestionnaire(event.questionnaire) }),
               },
       });
       const result: WorkRequestServiceResult = this.#requests.record(record);
@@ -423,4 +427,29 @@ function requestRuntimeFailure(message: string): ProviderFailure {
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : "Work request lifecycle update failed.";
+}
+
+function sanitizedQuestionnaire(questionnaire: Questionnaire): Questionnaire {
+  return {
+    ...(questionnaire.allowComment === undefined
+      ? {}
+      : { allowComment: questionnaire.allowComment }),
+    questions: questionnaire.questions.map((question) => ({
+      ...question,
+      prompt: sanitizeRequestText(question.prompt, "Input requested").slice(0, 1_024).trim(),
+      options: question.options.map((option, index) => ({
+        ...option,
+        label: `Option ${index + 1}: ${sanitizeRequestText(option.label, "Choice")}`
+          .slice(0, 256)
+          .trim(),
+        ...(option.description === undefined
+          ? {}
+          : {
+              description: sanitizeRequestText(option.description, "Choice description")
+                .slice(0, 512)
+                .trim(),
+            }),
+      })),
+    })),
+  };
 }

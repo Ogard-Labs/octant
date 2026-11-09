@@ -229,6 +229,8 @@ export interface AcpProviderProfile {
   /** Chat sessions run in the managed home unless the agent needs a real Project root. */
   readonly chatSessionRoot: "managed-home" | "project-root";
   readonly userQuestions: "supported" | "unsupported";
+  /** Exact native versions accepted by signed-in session-form verification. */
+  readonly elicitationVersions?: ReadonlyArray<string>;
   /** ACP method used to reattach to a prior session. */
   readonly resumeMethod: "session/load" | "session/resume";
   /** Whether `session/close` is issued when a session ends. */

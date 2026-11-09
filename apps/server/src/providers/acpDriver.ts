@@ -23,6 +23,11 @@ import {
   type ProviderApprovalCall,
 } from "@octant/contracts";
 import type { ProviderConnection, ProviderDriver } from "@octant/provider-sdk/driver";
+import {
+  normalizeAcpElicitation,
+  answerAcpElicitation,
+  type AcpElicitation,
+} from "./acpElicitation";
 import { outputStopReason } from "./outputStopReason";
 import {
   beginAcpUsageTurn,
@@ -187,6 +192,7 @@ interface SessionState {
   readonly removeRequest: () => void;
   readonly approvals: Map<string, PendingApproval>;
   readonly questions: Map<string, PendingQuestion>;
+  readonly forms: Map<string, { readonly id: string | number; readonly form: AcpElicitation }>;
   readonly toolNames: Set<string>;
   readonly pendingToolAnswers: Map<string, PendingToolAnswer>;
   readonly appManagedTools: ProviderCapabilitySupport;
@@ -232,7 +238,12 @@ function baseCapabilities(
     resume: "supported",
     interruption: "supported",
     approvals: "supported",
-    userQuestions: profile.userQuestions,
+    userQuestions:
+      profile.kind !== "mistral-vibe" || profile.elicitationVersions === undefined
+        ? profile.userQuestions
+        : version === "3.0.3" && profile.elicitationVersions.includes(version)
+          ? "supported"
+          : "unavailable",
     reasoning: "unavailable",
     usage:
       version !== undefined && profile.usageVersions?.includes(version) === true
@@ -877,6 +888,7 @@ function makeConnection(
       cancelPendingTools(state);
       state.approvals.clear();
       state.questions.clear();
+      await cancelForms(state);
       state.toolNames.clear();
       state.managedTools = undefined;
       await state.runtime.close();
@@ -956,7 +968,10 @@ function makeConnection(
 
     const handleClientCapabilityRequest = async (
       state: SessionState,
-      requestMessage: Exclude<AcpServerRequestMessage, AcpServerRequest>,
+      requestMessage: Exclude<
+        AcpServerRequestMessage,
+        AcpServerRequest | { readonly method: "elicitation/create" }
+      >,
     ): Promise<void> => {
       if (requestMessage.params.sessionId !== state.sourceSessionId) {
         await state.client.reject(requestMessage.id, -32602, "Invalid params");
@@ -1067,11 +1082,71 @@ function makeConnection(
         ? `${name} runs shell commands without asking first, so they cannot be asked per command; use Full access to let it run them.`
         : undefined;
 
+    const cancelForms = async (state: SessionState) => {
+      const pending = [...state.forms.values()];
+      state.forms.clear();
+      await Promise.all(
+        pending.map(({ id }) =>
+          state.client.respond(id, { action: "cancel" }).catch(() => undefined),
+        ),
+      );
+    };
     const handleRequest = (state: SessionState, requestMessage: AcpServerRequestMessage) => {
       if (state.compacting) {
         void state.client
           .reject(requestMessage.id, -32601, "Context compaction offers no client tools.")
           .catch(() => undefined);
+        return;
+      }
+      if (requestMessage.method === "elicitation/create") {
+        const enabled =
+          profile.kind === "mistral-vibe" &&
+          state.runtime.version === "3.0.3" &&
+          profile.elicitationVersions?.includes(state.runtime.version) === true;
+        const form = normalizeAcpElicitation(
+          requestMessage.params.message,
+          requestMessage.params.requestedSchema,
+        );
+        if (
+          !enabled ||
+          state.closed ||
+          state.context.terminal ||
+          !state.promptActive ||
+          requestMessage.params.sessionId !== state.sourceSessionId ||
+          form === undefined ||
+          state.forms.size !== 0
+        ) {
+          for (const [key, pending] of state.forms) {
+            if (pending.id === requestMessage.id) {
+              state.forms.delete(key);
+              state.context.terminal = true;
+              offer(
+                eventFor(state, factories.clock, {
+                  kind: "failed",
+                  failure: failure(
+                    "protocol",
+                    "The provider repeated a pending questionnaire callback.",
+                  ),
+                }),
+              );
+            }
+          }
+          void state.client
+            .reject(requestMessage.id, -32602, "Session form is unavailable or invalid")
+            .catch(() => undefined);
+          return;
+        }
+        const requestId = factories.makeRequestId();
+        state.forms.set(requestId, { id: requestMessage.id, form });
+        offer(
+          eventFor(state, factories.clock, {
+            kind: "user-input-request",
+            requestId,
+            prompt: form.prompt,
+            options: [],
+            questionnaire: form.questionnaire,
+          }),
+        );
         return;
       }
       if (requestMessage.method !== "session/request_permission") {
@@ -1171,6 +1246,7 @@ function makeConnection(
         removeRequest,
         approvals: new Map(),
         questions: new Map(),
+        forms: new Map(),
         toolNames: new Set(input.tools.map((tool) => tool.name)),
         pendingToolAnswers: new Map(),
         appManagedTools,
@@ -1939,6 +2015,7 @@ function makeConnection(
                   .prompt(state.sourceSessionId, prompt)
                   .then((result) => {
                     state.promptActive = false;
+                    void cancelForms(state);
                     if (result.stopReason === "cancelled") cancelPendingTools(state);
                     if (state.closed || state.context.terminal) return;
                     if (state.runtime.usage !== undefined) {
@@ -1987,6 +2064,7 @@ function makeConnection(
                   })
                   .catch((error: unknown) => {
                     state.promptActive = false;
+                    void cancelForms(state);
                     if (state.closed || state.context.terminal) return;
                     state.context.terminal = true;
                     offer(
@@ -2004,9 +2082,10 @@ function makeConnection(
       interrupt: (sessionId) =>
         stateFor(sessionId).pipe(
           Effect.flatMap((state) =>
-            request(() =>
-              state.client.notify("session/cancel", { sessionId: state.sourceSessionId }),
-            ),
+            request(async () => {
+              await cancelForms(state);
+              await state.client.notify("session/cancel", { sessionId: state.sourceSessionId });
+            }),
           ),
         ),
       stop: (sessionId) =>
@@ -2088,6 +2167,37 @@ function makeConnection(
       answerUserInput: (input) =>
         stateFor(input.sessionId).pipe(
           Effect.flatMap((state) => {
+            const form = state.forms.get(input.requestId);
+            if (form !== undefined) {
+              if (state.closed || state.context.terminal || !state.promptActive) {
+                return Effect.fail(failure("protocol", `${name} question is no longer pending.`));
+              }
+              const answer = answerAcpElicitation(form.form, input.answer);
+              if (answer.status === "invalid")
+                return Effect.fail(failure("protocol", "The questionnaire answer is invalid."));
+              state.forms.delete(input.requestId);
+              return request(async () => {
+                try {
+                  await state.client.respond(form.id, {
+                    action: "accept",
+                    content: answer.content,
+                  });
+                } catch (error) {
+                  state.completed = false;
+                  state.context.terminal = true;
+                  offer(
+                    eventFor(state, factories.clock, {
+                      kind: "failed",
+                      failure: failure(
+                        "protocol",
+                        "The questionnaire answer could not be delivered; its callback cannot be replayed.",
+                      ),
+                    }),
+                  );
+                  throw error;
+                }
+              });
+            }
             if (profile.userQuestions === "unsupported") {
               return Effect.fail(
                 failure(
