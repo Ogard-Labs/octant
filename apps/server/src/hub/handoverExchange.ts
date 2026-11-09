@@ -9,6 +9,7 @@
 import { randomUUID } from "node:crypto";
 import {
   CodeThreadId,
+  HandoverId,
   HubMemberId,
   ThreadMoveId,
   UtcTimestamp,
@@ -32,7 +33,11 @@ import type {
   DestinationAnswer,
 } from "./threadMoveService";
 import { HandoverClaims } from "./threadHandovers";
-import { THREAD_MOVE_DEPARTURES_KEPT, type ThreadMoveStatePort } from "./threadMoveStateStore";
+import {
+  CONTINUED_HANDOVERS_KEPT,
+  THREAD_MOVE_DEPARTURES_KEPT,
+  type ThreadMoveStatePort,
+} from "./threadMoveStateStore";
 
 export const HANDOVER_ROUTES = {
   notice: "/api/hub/peer/handovers",
@@ -41,6 +46,7 @@ export const HANDOVER_ROUTES = {
 
 const decodeCodeThreadId = Schema.decodeUnknownSync(CodeThreadId);
 const decodeMoveId = Schema.decodeUnknownSync(ThreadMoveId);
+const decodeHandoverId = Schema.decodeUnknownSync(HandoverId);
 const decodeMemberId = Schema.decodeUnknownSync(HubMemberId);
 const decodeTimestamp = Schema.decodeUnknownSync(UtcTimestamp);
 
@@ -105,6 +111,45 @@ export interface HandoverExchangeOptions {
   readonly uuid?: () => string;
   /** Shared with the handovers this host starts, so Take back here cannot race an erase. */
   readonly claims?: HandoverClaims;
+  /**
+   * Handovers on branches this host's Code Projects have already fetched,
+   * with no notice. Absent, only notices are offered.
+   */
+  readonly findHandovers?: () => Promise<ReadonlyArray<FoundHandoverBranch>>;
+  /**
+   * The provider a found handover continues on, which no notice named: this
+   * host's own default model. Absent or unset, a found handover is refused.
+   */
+  readonly defaultProvider?: () =>
+    | { readonly providerInstanceId: string; readonly modelId: string }
+    | undefined;
+  /** The one member with this name, or nothing when none or several have it. */
+  readonly memberNamed?: (name: string) => string | undefined;
+  /** This host's own name, so it never offers back its own handovers. */
+  readonly selfName?: () => string;
+}
+
+/** A handover found on a fetched branch; its fields are claims from the branch, never verified. */
+export interface FoundHandoverBranch {
+  readonly handoverId: string;
+  readonly title: string;
+  readonly originName: string;
+  readonly repositoryRemote: string;
+  readonly branch: string;
+  readonly committedAt: string;
+}
+
+/** A handover offered here, from a member's notice or found on a fetched branch. */
+interface OfferedHandover {
+  readonly handoverId: HandoverNotice["handoverId"];
+  readonly title: string;
+  readonly repositoryRemote: string;
+  readonly branch: string;
+  /** Who the continued report goes to; absent when no single member is known. */
+  readonly sourceMemberId: HubMemberId | undefined;
+  readonly provider: () =>
+    | { readonly providerInstanceId: string; readonly modelId: string }
+    | undefined;
 }
 
 export class HandoverExchange {
@@ -155,30 +200,101 @@ export class HandoverExchange {
   async list(): Promise<HandoverListing> {
     const received = this.#options.state.load().receivedHandovers ?? [];
     const projects = this.#options.codeProjects();
-    const handovers = await Promise.all(
-      received.map(async (entry) => {
-        const fitting: ThreadMoveProjectChoice[] = [];
-        for (const project of projects) {
-          const fits = await this.#options.acceptsProject({
-            mode: "code",
-            destinationProjectId: String(project.projectId),
-            repositoryRemotes: [entry.notice.repositoryRemote],
-          });
-          if (fits) fitting.push(project);
-        }
+    const fittingFor = async (repositoryRemote: string) => {
+      const fitting: ThreadMoveProjectChoice[] = [];
+      for (const project of projects) {
+        const fits = await this.#options.acceptsProject({
+          mode: "code",
+          destinationProjectId: String(project.projectId),
+          repositoryRemotes: [repositoryRemote],
+        });
+        if (fits) fitting.push(project);
+      }
+      return fitting;
+    };
+    const noticed = await Promise.all(
+      received.map(async (entry) => ({
+        handoverId: entry.notice.handoverId,
+        title: entry.notice.title,
+        branch: entry.notice.branch,
+        repositoryRemote: entry.notice.repositoryRemote,
+        originMemberId: entry.senderMemberId,
+        originName: this.#options.memberName(String(entry.senderMemberId)),
+        projects: await fittingFor(entry.notice.repositoryRemote),
+        receivedAt: entry.receivedAt,
+      })),
+    );
+    const found = await Promise.all(
+      (await this.#found()).map(async (entry) => {
+        const origin = this.#options.memberNamed?.(entry.originName);
         return {
-          handoverId: entry.notice.handoverId,
-          title: entry.notice.title,
-          branch: entry.notice.branch,
-          repositoryRemote: entry.notice.repositoryRemote,
-          originMemberId: entry.senderMemberId,
-          originName: this.#options.memberName(String(entry.senderMemberId)),
-          projects: fitting,
-          receivedAt: entry.receivedAt,
+          handoverId: decodeHandoverId(entry.handoverId),
+          title: entry.title,
+          branch: entry.branch,
+          repositoryRemote: entry.repositoryRemote,
+          ...(origin === undefined ? {} : { originMemberId: decodeMemberId(origin) }),
+          originName: entry.originName,
+          projects: await fittingFor(entry.repositoryRemote),
+          receivedAt: decodeTimestamp(new Date(entry.committedAt).toISOString()),
         };
       }),
     );
-    return { status: "listed", handovers };
+    return { status: "listed", handovers: [...noticed, ...found].slice(0, 256) };
+  }
+
+  /**
+   * Handovers on fetched branches worth offering: not one a notice already
+   * lists, not one this host made, and not one already continued here, whose
+   * branch tip still names it. A branch found twice is offered once.
+   */
+  async #found(): Promise<ReadonlyArray<FoundHandoverBranch>> {
+    if (this.#options.findHandovers === undefined) return [];
+    const state = this.#options.state.load();
+    const excluded = new Set<string>([
+      ...(state.receivedHandovers ?? []).map((entry) => String(entry.notice.handoverId)),
+      ...(state.handovers ?? []).map((entry) => String(entry.handoverId)),
+      ...(state.continuedHandoverIds ?? []).map(String),
+    ]);
+    const self = this.#options.selfName?.();
+    const offered: FoundHandoverBranch[] = [];
+    for (const entry of await this.#options.findHandovers().catch(() => [])) {
+      if (excluded.has(entry.handoverId) || entry.originName === self) continue;
+      excluded.add(entry.handoverId);
+      offered.push(entry);
+    }
+    return offered;
+  }
+
+  /** The handover a Continue names, from its notice or else a fetched branch. */
+  async #offered(handoverId: string): Promise<OfferedHandover | undefined> {
+    const received = (this.#options.state.load().receivedHandovers ?? []).find(
+      (entry) => String(entry.notice.handoverId) === handoverId,
+    );
+    if (received !== undefined) {
+      const { notice } = received;
+      return {
+        handoverId: notice.handoverId,
+        title: notice.title,
+        repositoryRemote: notice.repositoryRemote,
+        branch: notice.branch,
+        sourceMemberId: received.senderMemberId,
+        provider: () =>
+          notice.providerDriverKind === undefined || notice.modelId === undefined
+            ? undefined
+            : this.#options.resolveProvider(notice.providerDriverKind, notice.modelId),
+      };
+    }
+    const found = (await this.#found()).find((entry) => entry.handoverId === handoverId);
+    if (found === undefined) return undefined;
+    const origin = this.#options.memberNamed?.(found.originName);
+    return {
+      handoverId: decodeHandoverId(found.handoverId),
+      title: found.title,
+      repositoryRemote: found.repositoryRemote,
+      branch: found.branch,
+      sourceMemberId: origin === undefined ? undefined : decodeMemberId(origin),
+      provider: () => this.#options.defaultProvider?.(),
+    };
   }
 
   /**
@@ -203,21 +319,15 @@ export class HandoverExchange {
   }
 
   async #continue(request: HandoverContinueRequest): Promise<HandoverContinueOutcome> {
-    const received = (this.#options.state.load().receivedHandovers ?? []).find(
-      (entry) => String(entry.notice.handoverId) === String(request.handoverId),
-    );
-    if (received === undefined) return { status: "refused", reason: "refused" };
-    const { notice } = received;
+    const notice = await this.#offered(String(request.handoverId));
+    if (notice === undefined) return { status: "refused", reason: "refused" };
     const fits = await this.#options.acceptsProject({
       mode: "code",
       destinationProjectId: String(request.projectId),
       repositoryRemotes: [notice.repositoryRemote],
     });
     if (!fits) return { status: "refused", reason: "no-eligible-project" };
-    const provider =
-      notice.providerDriverKind === undefined || notice.modelId === undefined
-        ? undefined
-        : this.#options.resolveProvider(notice.providerDriverKind, notice.modelId);
+    const provider = notice.provider();
     if (provider === undefined) return { status: "refused", reason: "no-matching-provider" };
     const verified = await this.#options
       .readNote({
@@ -258,21 +368,35 @@ export class HandoverExchange {
       note: verified.note,
     });
     const thread: MovedThreadReference = { mode: "code", threadId: String(threadId) };
-    // The notice goes and the report to the source is kept in one write, so
-    // the source learns of the continuation even if it is offline now.
+    // The notice goes, the handover is remembered as continued (its branch
+    // tip still names it), and the report to the source is kept, all in one
+    // write, so the source learns of it even if it is offline now. With no
+    // single member known as its source there is no one to tell; Take back
+    // here stays open there.
     const state = this.#options.state.load();
+    const source = notice.sourceMemberId;
     this.#options.state.save({
       ...state,
       receivedHandovers: (state.receivedHandovers ?? []).filter(
         (entry) => String(entry.notice.handoverId) !== String(notice.handoverId),
       ),
+      continuedHandoverIds: [
+        ...(state.continuedHandoverIds ?? []).filter(
+          (entry) => String(entry) !== String(notice.handoverId),
+        ),
+        notice.handoverId,
+      ].slice(-CONTINUED_HANDOVERS_KEPT),
       pendingContinuedReports: [
         ...(state.pendingContinuedReports ?? []),
-        {
-          sourceMemberId: received.senderMemberId,
-          report: { handoverId: notice.handoverId, thread },
-          continuedAt: decodeTimestamp(this.#options.clock()),
-        },
+        ...(source === undefined
+          ? []
+          : [
+              {
+                sourceMemberId: source,
+                report: { handoverId: notice.handoverId, thread, commit: verified.commit },
+                continuedAt: decodeTimestamp(this.#options.clock()),
+              },
+            ]),
       ],
     });
     void this.deliverPendingReports();
@@ -358,6 +482,13 @@ export class HandoverExchange {
       (entry) => String(entry.handoverId) === String(claimed.handoverId),
     );
     if (handover === undefined) return { httpStatus: 200, body: { status: "unknown" } };
+    // Anyone who can push to the repository can write a branch whose tip
+    // claims this handover's id; only a continuation of the commit this host
+    // made erases the thread. Another one answers as if the handover were
+    // unknown here, so the destination stops asking and this copy stays held.
+    if (handover.commit !== undefined && report.commit !== handover.commit) {
+      return { httpStatus: 200, body: { status: "unknown" } };
+    }
     const moveId = decodeMoveId(String(handover.handoverId));
     const erased = await this.#options.source.erase({ thread: handover.thread, moveId });
     this.#options.source.unfreeze(handover.thread);

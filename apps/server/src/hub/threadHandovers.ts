@@ -214,6 +214,7 @@ export class ThreadHandovers {
       pushed: pushed.status === "pushed",
       ...(pushed.status === "pushed" ? {} : { shortfall: pushed.shortfall }),
       refusedFiles: committed.status === "committed" ? committed.refusedFiles : [],
+      ...(committed.status === "committed" ? { commit: committed.commit } : {}),
       handedOverAt,
     };
     this.#saveHandover(record);

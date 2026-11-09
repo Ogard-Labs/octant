@@ -1246,7 +1246,18 @@ branch with the destination's own Git identity, creates a Code thread in a
 Project bound to that repository on a managed worktree at that branch, and gives
 the first turn the note as a labeled text handoff. A branch whose tip carries
 an `Octant-Handover` trailer is listed after the destination's next fetch even
-without a notice. A note read from a branch came through a remote others may be
+without a notice: the destination reads the remote-tracking branches its Code
+Projects' clones already have and fetches nothing to look. A found branch names
+no provider, so it continues on the destination's own default model (the one
+delegated Work runs on) and is refused as `no-matching-provider` without one.
+Its continued report goes to the one member whose name its `Octant-Origin`
+trailer gives; with none or several, no report goes and Take back here stays
+open on the source. A found handover the destination made itself, already
+lists from a notice, or already continued is not offered; a continued
+handover's id is kept, because its branch tip still names it. The source
+erases only for a report naming the commit it made, since anyone who can push
+to the repository can write a branch claiming a handover's id. A note read
+from a branch came through a remote others may be
 able to push to, so it is framed as outside content and marks the thread with
 `thread.external-content-ingested@1` under the source label `handover-note`.
 
@@ -2316,8 +2327,11 @@ a numbered slice. Built, with these narrower readings:
     "Moved to" for old links. The destination keeps the continued report and
     sends it again at startup and every minute until the source answers that
     it erased its copy or no longer holds the handover, so a source that was
-    offline still lets its frozen copy go. What it does not do yet: a branch
-    found by fetching without a notice, and the agent's own summary turn.
+    offline still lets its frozen copy go. A branch found by fetching
+    without a notice is offered too, after the clone's next fetch, as the
+    handover rules above describe; the continued report names the commit
+    continued, and the source erases only for its own. What it does not do
+    yet: the agent's own summary turn.
 
 Any slice that would deploy an Octant-operated service, create an account, or
 spend money stops for a separate maintainer action.

@@ -11,6 +11,7 @@ import { join } from "node:path";
 import {
   HandedOverThread,
   HandoverContinuedReport,
+  HandoverId,
   HandoverNotice,
   HubMemberId,
   MovedThreadReference,
@@ -105,6 +106,12 @@ export const PendingContinuedReport = Schema.Struct({
 }).annotations(strict);
 export type PendingContinuedReport = typeof PendingContinuedReport.Type;
 
+/**
+ * How many continued handovers a host remembers. A continued branch's tip
+ * still names its handover, so without this it would be listed again.
+ */
+export const CONTINUED_HANDOVERS_KEPT = 500;
+
 /** How many departures a host keeps for "Moved to" tombstones; the oldest go first. */
 export const THREAD_MOVE_DEPARTURES_KEPT = 500;
 
@@ -120,6 +127,8 @@ export const ThreadMoveState = Schema.Struct({
   receivedHandovers: Schema.optional(Schema.Array(ReceivedHandover)),
   /** Continued reports the source has not acknowledged yet. */
   pendingContinuedReports: Schema.optional(Schema.Array(PendingContinuedReport)),
+  /** Handovers continued here, so a branch found later is not offered again. */
+  continuedHandoverIds: Schema.optional(Schema.Array(HandoverId)),
 }).annotations(strict);
 export type ThreadMoveState = typeof ThreadMoveState.Type;
 
