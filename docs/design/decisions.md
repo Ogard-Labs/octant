@@ -1929,6 +1929,7 @@ Status: Partly built. Since: —. Detail: [Architecture: Security and authority,
 Pairing is rate-limited and cleans up after itself.
 
 - Hello and claim share ten requests per source per minute and sixty per host; a waiting window's status polls draw on a bucket of their own, so a flood from other addresses cannot starve it.
+- A paired browser that is rate limited on reload is told to wait and resumes after the host's `Retry-After`; it is never shown as a failed pairing and keeps its device key.
 - An approved device that never signs in is revoked as `pairing-abandoned` after its ticket would have expired (or 30 seconds after approval), and a device that has signed in is never removed this way.
 
 Status: Built. Since: —. Detail: [Architecture: Security and authority, Pairing budgets](../architecture.md#security-and-authority).

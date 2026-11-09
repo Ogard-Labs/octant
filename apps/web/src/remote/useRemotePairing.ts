@@ -116,12 +116,25 @@ export function useRemotePairing(options: UseRemotePairingOptions): UseRemotePai
   const resumeStartedRef = useRef(false);
   const resumeFlowRef = useRef(false);
 
+  const resumeRetryRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+
   const stopPolling = useCallback(() => {
     if (pollingRef.current !== undefined) {
       clearInterval(pollingRef.current);
       pollingRef.current = undefined;
     }
   }, []);
+
+  // Not part of stopPolling: that runs on every render's effect cleanup while
+  // the pairing client is rebuilt each render, which would cancel the retry.
+  const cancelResumeRetry = useCallback(() => {
+    if (resumeRetryRef.current !== undefined) {
+      clearTimeout(resumeRetryRef.current);
+      resumeRetryRef.current = undefined;
+    }
+  }, []);
+
+  useEffect(() => cancelResumeRetry, [cancelResumeRetry]);
 
   const setFailed = useCallback(
     (category: FailedCategory, message: string) => {
@@ -173,6 +186,27 @@ export function useRemotePairing(options: UseRemotePairingOptions): UseRemotePai
     }
   }, [options.ticket, clearAndSetTicket]);
 
+  // A host that rate limited a resume has not rejected this device, so the
+  // person is told to wait, not that pairing failed, and the resume runs again
+  // once the host's named wait has passed.
+  const showResumeUnavailable = useCallback(
+    (state: { readonly reason: string; readonly retryAfterMs?: number }) => {
+      if (state.retryAfterMs === undefined) {
+        setFailed("unavailable", state.reason);
+        return;
+      }
+      setFailed("rate-limited", state.reason);
+      cancelResumeRetry();
+      resumeRetryRef.current = setTimeout(() => {
+        resumeRetryRef.current = undefined;
+        if (!isMountedRef.current) return;
+        setScreen({ kind: "resuming" });
+        sessionClient.resume(options.baseUrl);
+      }, state.retryAfterMs);
+    },
+    [cancelResumeRetry, options.baseUrl, sessionClient, setFailed],
+  );
+
   useEffect(() => {
     if (options.ticket !== undefined || ticketRef.current !== undefined) return;
     resumeFlowRef.current = true;
@@ -190,7 +224,7 @@ export function useRemotePairing(options: UseRemotePairingOptions): UseRemotePai
       } else if (state.kind === "incompatible") {
         setFailed("incompatible", state.reason);
       } else if (state.kind === "unavailable") {
-        setFailed("unavailable", state.reason);
+        showResumeUnavailable(state);
       }
     });
     // StrictMode runs effect setup, cleanup, and setup again. Subscribe on
@@ -211,12 +245,12 @@ export function useRemotePairing(options: UseRemotePairingOptions): UseRemotePai
         } else if (current.kind === "incompatible") {
           setFailed("incompatible", current.reason);
         } else if (current.kind === "unavailable") {
-          setFailed("unavailable", current.reason);
+          showResumeUnavailable(current);
         }
       }
     }
     return unsubscribe;
-  }, [options.baseUrl, options.ticket, sessionClient, setFailed]);
+  }, [options.baseUrl, options.ticket, sessionClient, setFailed, showResumeUnavailable]);
 
   useEffect(() => {
     if (screen.kind === "requesting-hello") {
@@ -350,6 +384,7 @@ export function useRemotePairing(options: UseRemotePairingOptions): UseRemotePai
   );
 
   const retry = useCallback(() => {
+    cancelResumeRetry();
     const claim = lastClaimRef.current;
     if (claim !== undefined) {
       setScreen({ kind: "waiting", claim });
@@ -366,10 +401,11 @@ export function useRemotePairing(options: UseRemotePairingOptions): UseRemotePai
       return;
     }
     setScreen({ kind: "requesting-hello" });
-  }, [options.baseUrl, sessionClient]);
+  }, [cancelResumeRetry, options.baseUrl, sessionClient]);
 
   const reset = useCallback(() => {
     stopPolling();
+    cancelResumeRetry();
     const claim = lastClaimRef.current;
     if (claim !== undefined) {
       void client.removeDeviceKey(claim.deviceKeyId);
@@ -378,7 +414,7 @@ export function useRemotePairing(options: UseRemotePairingOptions): UseRemotePai
     ticketRef.current = undefined;
     setTypedCode("");
     setScreen({ kind: "entry" });
-  }, [client, stopPolling]);
+  }, [cancelResumeRetry, client, stopPolling]);
 
   return {
     screen,
