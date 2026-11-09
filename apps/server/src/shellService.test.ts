@@ -54,6 +54,62 @@ describe("ShellService", () => {
     expect(service.hasLiveWindow(ids.window)).toBe(false);
   });
 
+  it("opens a moved thread's old link as its tombstone pane after its record was erased, and refuses any other missing thread", () => {
+    const departed = decodeChatThreadId("00000000-0000-4000-8000-000000000230");
+    const missing = decodeChatThreadId("00000000-0000-4000-8000-000000000231");
+    const chatLayout = defaultWindowWorkspace(ids.window).layouts.chat;
+    if (chatLayout.kind !== "pane") throw new Error("expected pane");
+    const open = (threadId: typeof departed) => ({
+      kind: "apply-workspace-operation" as const,
+      windowId: ids.window,
+      expectedVersion: 0,
+      operation: {
+        kind: "open-surface" as const,
+        mode: "chat" as const,
+        paneId: chatLayout.paneId,
+        surface: {
+          kind: "chat-thread" as const,
+          id: "00000000-0000-4000-8000-000000000232" as never,
+          threadId,
+          mode: "chat" as const,
+          title: "Plan the trip",
+        },
+      },
+    });
+    const departedThread = vi.fn(
+      (thread: { readonly mode: string; readonly threadId: string }) =>
+        thread.mode === "chat" && thread.threadId === String(departed),
+    );
+
+    const refused = persistenceStub();
+    const refusing = new ShellService({
+      persistence: refused.persistence,
+      uuid: uuidSequence(),
+      clock: () => now,
+      departedThread,
+    });
+    refusing.bootstrap(ids.window);
+    expect(() => refusing.execute(open(missing))).toThrowError(
+      expect.objectContaining({ failure: expect.objectContaining({ category: "cross-context" }) }),
+    );
+    expect(refused.append).not.toHaveBeenCalled();
+
+    const accepted = persistenceStub();
+    const service = new ShellService({
+      persistence: accepted.persistence,
+      uuid: uuidSequence(),
+      clock: () => now,
+      departedThread,
+    });
+    service.bootstrap(ids.window);
+    const result = service.execute(open(departed));
+    expect(result).toMatchObject({ kind: "workspace-replaced" });
+    // The tombstone binds no Project: the window keeps the context it read.
+    expect(result.kind === "workspace-replaced" && result.workspace.contextByMode.chat).toEqual(
+      defaultWindowWorkspace(ids.window).contextByMode.chat,
+    );
+  });
+
   it("requires an active matching Project before appending a Project surface", () => {
     const workspace = defaultWindowWorkspace(ids.window);
     const codeLayout = workspace.layouts.code;

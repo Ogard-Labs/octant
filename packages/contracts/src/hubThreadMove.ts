@@ -228,6 +228,7 @@ export const THREAD_MOVE_EVENT_NAMES = {
   movedOut: "thread.moved-out@1",
   moveFailed: "thread.move-failed@1",
   handoverStarted: "thread.handover-started@1",
+  keptWorktreeRemoved: "thread.moved-out-worktree-removed@1",
 } as const;
 
 /** The source froze the thread; nothing left the source before this was recorded. */
@@ -293,6 +294,15 @@ export const ThreadHandoverStarted = Schema.Struct({
   startedAt: UtcTimestamp,
 }).annotations(strict);
 export type ThreadHandoverStarted = typeof ThreadHandoverStarted.Type;
+
+/** A person removed the worktree a moved-out thread left beside the managed folder. */
+export const ThreadMovedOutWorktreeRemoved = Schema.Struct({
+  moveId: ThreadMoveId,
+  thread: MovedThreadReference,
+  worktree: bounded(4_096),
+  removedAt: UtcTimestamp,
+}).annotations(strict);
+export type ThreadMovedOutWorktreeRemoved = typeof ThreadMovedOutWorktreeRemoved.Type;
 
 /**
  * A moved Work or Code thread's earlier conversation, kept on the thread it
@@ -492,6 +502,16 @@ export const HandedOverThread = Schema.Struct({
 }).annotations(strict);
 export type HandedOverThread = typeof HandedOverThread.Type;
 
+/** How many of the files a kept worktree held a departure names. */
+export const KEPT_FILES_LISTED = 200;
+
+/**
+ * A path inside a kept worktree, as Git lists it. A file name may begin or end
+ * with a space, so it is not trimmed: one such name refused here would make the
+ * whole move state unreadable.
+ */
+const KeptFilePath = Schema.String.pipe(Schema.minLength(1), Schema.maxLength(4_096));
+
 /** A thread that moved away from this host, for its "Moved to" tombstone. */
 export const ThreadMoveDeparture = Schema.Struct({
   moveId: ThreadMoveId,
@@ -500,6 +520,14 @@ export const ThreadMoveDeparture = Schema.Struct({
   destinationThread: MovedThreadReference,
   /** A worktree moved out of the managed folder because it held what the move did not carry. */
   keptWorktree: Schema.optional(bounded(4_096)),
+  /**
+   * What the kept worktree held that the move did not carry, relative to it:
+   * the first `KEPT_FILES_LISTED`, with `keptFileCount` counting them all.
+   */
+  keptFiles: Schema.optional(Schema.Array(KeptFilePath).pipe(Schema.maxItems(KEPT_FILES_LISTED))),
+  keptFileCount: Schema.optional(NonNegativeInt),
+  /** A person removed the kept worktree, so nothing of it is left on this computer. */
+  keptWorktreeRemovedAt: Schema.optional(UtcTimestamp),
   /** The Project's own checkout kept the thread's changes too. */
   changesRemainInCheckout: Schema.Boolean,
   movedAt: UtcTimestamp,
@@ -818,6 +846,20 @@ export const HandoverContinueOutcome = Schema.Union(
 );
 export type HandoverContinueOutcome = typeof HandoverContinueOutcome.Type;
 
+/**
+ * Removing the worktree a moved-out thread left behind. `not-kept-worktree`
+ * answers a move that kept no worktree here; `remove-failed` a folder that is
+ * no longer a linked worktree of its repository, which is left as it is.
+ */
+export const KeptWorktreeRemoveOutcome = Schema.Union(
+  Schema.Struct({ status: Schema.Literal("removed") }),
+  Schema.Struct({
+    status: Schema.Literal("refused"),
+    kind: Schema.Literal("not-kept-worktree", "remove-failed"),
+  }),
+);
+export type KeptWorktreeRemoveOutcome = typeof KeptWorktreeRemoveOutcome.Type;
+
 export const decodeOwnerThreadMoveTicketRequest = Schema.decodeUnknownSync(
   OwnerThreadMoveTicketRequest,
 );
@@ -851,5 +893,6 @@ export const decodeHandoverContinuedReport = Schema.decodeUnknownSync(HandoverCo
 export const decodeHandoverListing = Schema.decodeUnknownSync(HandoverListing);
 export const decodeHandoverContinueRequest = Schema.decodeUnknownSync(HandoverContinueRequest);
 export const decodeHandoverContinueOutcome = Schema.decodeUnknownSync(HandoverContinueOutcome);
+export const decodeKeptWorktreeRemoveOutcome = Schema.decodeUnknownSync(KeptWorktreeRemoveOutcome);
 export const decodeThreadMoveSizesRequest = Schema.decodeUnknownSync(ThreadMoveSizesRequest);
 export const decodeThreadMoveSizes = Schema.decodeUnknownSync(ThreadMoveSizes);
