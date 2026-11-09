@@ -1342,7 +1342,6 @@ export function wireRemote(deps: RemoteDependencies) {
       );
       return named.length === 1 ? String(named[0]?.memberId) : undefined;
     },
-    selfName: () => resolveHubIdentity().displayName,
     state: deps.threadMoveState,
     authenticate: threadMoveSenders.authenticate,
     send: (targetMemberId, path, body) => threadMoves.sendSigned(targetMemberId, path, body),

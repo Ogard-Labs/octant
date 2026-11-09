@@ -34,9 +34,9 @@ import type {
 } from "./threadMoveService";
 import { HandoverClaims } from "./threadHandovers";
 import {
-  CONTINUED_HANDOVERS_KEPT,
   THREAD_MOVE_DEPARTURES_KEPT,
   type ThreadMoveStatePort,
+  withSettledHandover,
 } from "./threadMoveStateStore";
 
 export const HANDOVER_ROUTES = {
@@ -125,8 +125,6 @@ export interface HandoverExchangeOptions {
     | undefined;
   /** The one member with this name, or nothing when none or several have it. */
   readonly memberNamed?: (name: string) => string | undefined;
-  /** This host's own name, so it never offers back its own handovers. */
-  readonly selfName?: () => string;
 }
 
 /** A handover found on a fetched branch; its fields are claims from the branch, never verified. */
@@ -253,12 +251,11 @@ export class HandoverExchange {
     const excluded = new Set<string>([
       ...(state.receivedHandovers ?? []).map((entry) => String(entry.notice.handoverId)),
       ...(state.handovers ?? []).map((entry) => String(entry.handoverId)),
-      ...(state.continuedHandoverIds ?? []).map(String),
+      ...(state.settledHandoverIds ?? []).map(String),
     ]);
-    const self = this.#options.selfName?.();
     const offered: FoundHandoverBranch[] = [];
     for (const entry of await this.#options.findHandovers().catch(() => [])) {
-      if (excluded.has(entry.handoverId) || entry.originName === self) continue;
+      if (excluded.has(entry.handoverId)) continue;
       excluded.add(entry.handoverId);
       offered.push(entry);
     }
@@ -376,16 +373,10 @@ export class HandoverExchange {
     const state = this.#options.state.load();
     const source = notice.sourceMemberId;
     this.#options.state.save({
-      ...state,
+      ...withSettledHandover(state, notice.handoverId),
       receivedHandovers: (state.receivedHandovers ?? []).filter(
         (entry) => String(entry.notice.handoverId) !== String(notice.handoverId),
       ),
-      continuedHandoverIds: [
-        ...(state.continuedHandoverIds ?? []).filter(
-          (entry) => String(entry) !== String(notice.handoverId),
-        ),
-        notice.handoverId,
-      ].slice(-CONTINUED_HANDOVERS_KEPT),
       pendingContinuedReports: [
         ...(state.pendingContinuedReports ?? []),
         ...(source === undefined
@@ -492,7 +483,9 @@ export class HandoverExchange {
     const moveId = decodeMoveId(String(handover.handoverId));
     const erased = await this.#options.source.erase({ thread: handover.thread, moveId });
     this.#options.source.unfreeze(handover.thread);
-    const after = this.#options.state.load();
+    // Its branch stays on the remote and still names it; remembered as
+    // settled, it is never offered back to the host that made it.
+    const after = withSettledHandover(this.#options.state.load(), handover.handoverId);
     this.#options.state.save({
       ...after,
       handovers: (after.handovers ?? []).filter(

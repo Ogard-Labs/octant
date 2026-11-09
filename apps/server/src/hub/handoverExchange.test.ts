@@ -327,24 +327,29 @@ describe("a handover found on a fetched branch, with no notice", () => {
     branch: "octant/handover/fix-the-flaky-test-77777777",
     committedAt: "2026-11-08T12:00:00+00:00",
   };
-  const finding = (overrides: Partial<HandoverExchangeOptions> = {}) => {
+  const finding = (
+    overrides: Partial<HandoverExchangeOptions> = {},
+    laptopOverrides: Partial<HandoverExchangeOptions> = {},
+  ) => {
     const reported: unknown[] = [];
     const holder: { source?: HandoverExchange } = {};
-    const made = world({
-      findHandovers: async () => [found],
-      defaultProvider: () => ({ providerInstanceId: "provider-default", modelId: "model-d" }),
-      memberNamed: (name) => (name === "Laptop" ? LAPTOP : undefined),
-      selfName: () => "Desktop",
-      send: async (target, path, body) => {
-        reported.push({ target, path, body });
-        if (holder.source === undefined || path !== HANDOVER_ROUTES.continued) {
-          return { status: "unreachable" };
-        }
-        const answer = await holder.source.receiveContinued(made.signed(body));
-        return { status: "answered", body: answer.body };
+    const made = world(
+      {
+        findHandovers: async () => [found],
+        defaultProvider: () => ({ providerInstanceId: "provider-default", modelId: "model-d" }),
+        memberNamed: (name) => (name === "Laptop" ? LAPTOP : undefined),
+        send: async (target, path, body) => {
+          reported.push({ target, path, body });
+          if (holder.source === undefined || path !== HANDOVER_ROUTES.continued) {
+            return { status: "unreachable" };
+          }
+          const answer = await holder.source.receiveContinued(made.signed(body));
+          return { status: "answered", body: answer.body };
+        },
+        ...overrides,
       },
-      ...overrides,
-    });
+      laptopOverrides,
+    );
     holder.source = made.laptop;
     // The source made the handover at this commit.
     const record = made.laptopState.load().handovers?.[0];
@@ -394,13 +399,23 @@ describe("a handover found on a fetched branch, with no notice", () => {
     expect(erased).toEqual([THREAD.threadId]);
     expect(laptopState.load().handovers).toEqual([]);
     // Its branch still names it, but it is never offered here again.
-    expect(desktopState.load().continuedHandoverIds).toEqual([HANDOVER]);
+    expect(desktopState.load().settledHandoverIds).toEqual([HANDOVER]);
     expect((await desktop.list()).handovers).toEqual([]);
   });
 
-  it("never offers back this host's own handovers, or one a notice already lists", async () => {
-    const own = finding({ selfName: () => "Laptop" });
-    expect((await own.desktop.list()).handovers).toEqual([]);
+  it("never offers back this host's own handovers, before or after they settle, or one a notice already lists", async () => {
+    // The computer that made it fetches its own branch too; its id, not its
+    // name, tells it apart, so another computer with the same name still sees it.
+    const own = finding({}, { findHandovers: async () => [found] });
+    expect((await own.laptop.list()).handovers).toEqual([]);
+    expect((await own.desktop.list()).handovers).toHaveLength(1);
+    await own.desktop.continueHandover({
+      handoverId: HANDOVER as never,
+      projectId: PROJECT as never,
+    });
+    await own.desktop.deliverPendingReports();
+    expect(own.laptopState.load().handovers).toEqual([]);
+    expect((await own.laptop.list()).handovers).toEqual([]);
 
     const noticed = finding();
     await noticed.desktop.receiveNotice(noticed.signed(notice));
