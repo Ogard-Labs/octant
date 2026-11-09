@@ -170,7 +170,8 @@ function fakeClient(
       return { status: "started" };
     },
     handoverPreview: async () => ({ status: "refused", reason: "refused" }),
-    handOver: async (thread, notify) => {
+    handOver: async () => ({ status: "refused", reason: "refused" }),
+    shutdownHandOver: async (thread, notify) => {
       if (input.handOverThrows === true) throw new Error("This computer could not answer.");
       handedOver.push({ thread, ...(notify === undefined ? {} : { notify }) });
       return {

@@ -290,6 +290,7 @@ export type HubAdministrationOperation =
   | "shutdown-listing"
   | "shutdown-challenge"
   | "shutdown-start"
+  | "shutdown-handover"
   | "handover-preview"
   | "handover"
   | "handover-take-back"

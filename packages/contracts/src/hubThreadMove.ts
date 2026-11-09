@@ -680,6 +680,18 @@ export const HandoverRequest = Schema.Struct({
 }).annotations(strict);
 export type HandoverRequest = typeof HandoverRequest.Type;
 
+/**
+ * Prepare to shut down's Hand over for one row. It acts for the whole host,
+ * as the batch does, so it names the head's destination: the source hands
+ * over only a Code thread that destination cannot take. It never asks for
+ * the agent's summary turn, because the batch has no switch to ask with.
+ */
+export const ShutdownHandoverRequest = Schema.Struct({
+  thread: MovedThreadReference,
+  destinationMemberId: HubMemberId,
+}).annotations(strict);
+export type ShutdownHandoverRequest = typeof ShutdownHandoverRequest.Type;
+
 /** What a handover would do, before anything is frozen or written. */
 export const HandoverPreview = Schema.Struct({
   status: Schema.Literal("preview"),
@@ -800,6 +812,7 @@ export const decodeShutdownChallengeRequest = Schema.decodeUnknownSync(ShutdownC
 export const decodeShutdownStartRequest = Schema.decodeUnknownSync(ShutdownStartRequest);
 export const decodeShutdownStartOutcome = Schema.decodeUnknownSync(ShutdownStartOutcome);
 export const decodeHandoverRequest = Schema.decodeUnknownSync(HandoverRequest);
+export const decodeShutdownHandoverRequest = Schema.decodeUnknownSync(ShutdownHandoverRequest);
 export const decodeHandoverOutcome = Schema.decodeUnknownSync(HandoverOutcome);
 export const decodeHandoverControlRequest = Schema.decodeUnknownSync(HandoverControlRequest);
 export const decodeHandoverContinuedReport = Schema.decodeUnknownSync(HandoverContinuedReport);

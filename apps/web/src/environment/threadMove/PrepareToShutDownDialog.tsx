@@ -208,15 +208,23 @@ export function PrepareToShutDownDialog(props: PrepareToShutDownDialogProps) {
   const staying = rows.length - moving.length - handingOver.length;
   const overflow = moving.length - batchCount;
 
-  const handOverAll = async (handRows: ReadonlyArray<ShutdownThreadRow>, notify?: string) => {
+  const handOverAll = async (
+    handRows: ReadonlyArray<ShutdownThreadRow>,
+    notify: string | undefined,
+  ) => {
     // One after another: each commits and pushes on this computer's own disk
     // and network. One that is refused or whose request fails stays here, says
     // so on its row and in the alert, and the rest still go.
     for (const row of handRows) {
       let end: HandoverEnd = "refused";
       try {
-        const outcome = await props.client.handOver(row.thread, notify);
-        if (outcome.status === "handed-over") end = outcome.pushed ? "pushed" : "not-pushed";
+        // The host-wide shutdown route, as the batch's moves are: this window
+        // need not show the thread, and the host hands over only a Code
+        // thread the head's destination cannot take.
+        if (notify !== undefined) {
+          const outcome = await props.client.shutdownHandOver(row.thread, notify);
+          if (outcome.status === "handed-over") end = outcome.pushed ? "pushed" : "not-pushed";
+        }
       } catch {
         end = "refused";
       }

@@ -8,11 +8,13 @@
 // once and the move runs on; the window reads its progress from the status.
 
 import type {
+  HandoverRefusal,
   HubMemberId,
   MovedThreadReference,
   ProjectId,
   RosterMember,
   ShutdownChallengeRequest,
+  ShutdownHandoverRequest,
   ShutdownListing,
   ShutdownPlacement,
   ShutdownStartOutcome,
@@ -390,6 +392,38 @@ export class ThreadMovesFromWindow {
       rows,
       ...(lastDeparture === undefined ? {} : { lastMovedTo: lastDeparture.destinationMemberId }),
     };
+  }
+
+  /**
+   * Whether Prepare to shut down may hand this thread over, or why not. Like
+   * the listing, it acts for the whole host, so it offers exactly what the
+   * listing offers Hand over for: a Code thread here, not delegated to this
+   * host, not waiting to move, that the head's destination cannot take. A
+   * thread that can move moves with its history, which a handover would
+   * leave behind. The handover itself still refuses a held or frozen thread.
+   */
+  async shutdownHandoverRefusal(
+    request: ShutdownHandoverRequest,
+  ): Promise<HandoverRefusal | undefined> {
+    const { thread } = request;
+    if (thread.mode !== "code") return "refused";
+    const member = this.#candidates().find(
+      (candidate) => String(candidate.memberId) === String(request.destinationMemberId),
+    );
+    if (member === undefined) return "refused";
+    if (this.#waiting.has(key(thread))) return "busy";
+    const reading = await this.#options.source.read(thread);
+    if (reading.status === "missing") return "refused";
+    if (reading.delegated) return "delegated";
+    const answer = await this.#options.moves.askProjects(String(member.memberId), {
+      mode: "code",
+      repositoryRemotes: reading.repositoryRemotes,
+    });
+    const takes =
+      answer !== "unreachable" &&
+      answer !== "refused" &&
+      (answer.projects.length > 0 || answer.noProjectAllowed);
+    return takes ? "refused" : undefined;
   }
 
   /** The destination's challenge for one batch: one unlock covers exactly these threads. */

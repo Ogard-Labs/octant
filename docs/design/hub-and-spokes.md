@@ -1225,7 +1225,16 @@ the usual case is one press and one unlock.
   destination so it shows under its Handovers; one that is refused or whose
   request fails stays here, named on its row and in the screen's alert. A row
   set to move or hand over that did not is never counted toward Safe to shut
-  down.
+  down. Like the listing and the batch, a row's handover acts for the whole
+  host, so it reaches a Code thread in any Project, open in this window or
+  not; the window route for one thread's handover still acts only on a
+  thread that window shows. The source hands over that way only what the
+  listing offers Hand over for: a Code thread on this host, not delegated to
+  it and not waiting to move, that the head's destination cannot take. The
+  handover itself is the same as from the move sheet, so it still refuses a
+  held or frozen thread. It never runs the agent's summary turn, since the
+  dialog has no switch to ask for one, and no tool, agent, or routine
+  reaches it.
 - **Progress in the menu bar.** While the batch runs, the menu bar shows how
   many of its threads have ended out of how many (`3/9` beside the glyph,
   after only the host's own `!`) and a **Moving threads** line in its menu,
@@ -2417,9 +2426,10 @@ a numbered slice. Built, with these narrower readings:
     Code thread that cannot move to the head's destination, never
     preselected; a row can name **Move to** another member that can take it;
     the press asks each destination's challenge and Touch ID in turn and goes
-    on past one that is declined; rows set to hand over go through the
-    existing handover route after the unlocks, telling the head's
-    destination, and count as done only when pushed. The dialog reports its
+    on past one that is declined; rows set to hand over go, after the
+    unlocks, through a host-wide `shutdown/handover` window route that
+    hands over only a Code thread the head's destination cannot take,
+    telling that destination, and count as done only when pushed. The dialog reports its
     batch's progress to the desktop, which shows it beside the menu bar glyph
     and as a Moving threads line, and the menu bar offers Prepare to Shut
     Down… while the window last saw this host in a hub with another member or

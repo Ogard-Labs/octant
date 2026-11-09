@@ -45,6 +45,11 @@ export interface ThreadMoveClient {
     threads: ReadonlyArray<MovedThreadReference>,
   ) => Promise<ThreadMoveChallengeOutcome>;
   readonly shutdownStart: (request: ShutdownStartRequest) => Promise<ShutdownStartOutcome>;
+  /** Hand over for one Prepare to shut down row, naming the head's destination. */
+  readonly shutdownHandOver: (
+    thread: MovedThreadReference,
+    destinationMemberId: string,
+  ) => Promise<HandoverOutcome>;
   /** A Code thread that cannot move: what a handover would do, doing it, and taking it back. */
   readonly handoverPreview: (thread: MovedThreadReference) => Promise<HandoverOutcome>;
   readonly handOver: (
@@ -120,6 +125,8 @@ export function threadMoveClientOf(hub: HubAdministrationBridge): ThreadMoveClie
       ),
     shutdownStart: async (request) =>
       decodeShutdownStartOutcome(await call("shutdown-start", request)),
+    shutdownHandOver: async (thread, destinationMemberId) =>
+      decodeHandoverOutcome(await call("shutdown-handover", { thread, destinationMemberId })),
     handoverPreview: async (thread) =>
       decodeHandoverOutcome(await call("handover-preview", { thread })),
     handOver: async (thread, destinationMemberId, choices) =>
