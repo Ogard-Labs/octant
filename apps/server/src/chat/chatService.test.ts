@@ -264,6 +264,7 @@ function openFixture(options?: {
   }>;
   readonly chatEnabled?: { current: boolean };
   readonly hiddenThreadIds?: () => ReadonlySet<string>;
+  readonly moveHold?: (threadId: string) => boolean;
   readonly liveTurns?: import("../liveTurn/liveTurnRegistry").LiveTurnRegistry;
   readonly awaitsHarnessApproval?: (threadId: string) => boolean;
   readonly resolveSideChatReturns?: import("./sideChatReturn").SideChatReturnResolver;
@@ -741,6 +742,7 @@ function openFixture(options?: {
       ? {}
       : { contextMaintenanceShutdownTimeoutMs: options.contextMaintenanceShutdownTimeoutMs }),
     ...(options?.hiddenThreadIds === undefined ? {} : { hiddenThreadIds: options.hiddenThreadIds }),
+    ...(options?.moveHold === undefined ? {} : { moveHold: options.moveHold }),
     ...(options?.resolveSideChatReturns === undefined
       ? {}
       : { resolveSideChatReturns: options.resolveSideChatReturns }),
@@ -9137,6 +9139,133 @@ describe("ChatService", () => {
           turnId: second.id,
         }),
       ).rejects.toMatchObject({ failure: { category: "invalid" } });
+    });
+
+    it("opens a thread moved from another computer with its conversation, held until the move commits", async () => {
+      const held = new Set<string>();
+      const { service } = openFixture({ moveHold: (threadId) => held.has(threadId) });
+      const imported = await service.importMovedThread({
+        moveId: "99999999-9999-4999-8999-999999999999",
+        threadId: "dddddddd-0000-4000-8000-000000000000" as never,
+        title: "Plan the trip",
+        externalContentIngested: false,
+        turns: [
+          {
+            userText: "Where should we go?",
+            createdAt: "2026-11-08T10:00:00.000Z" as never,
+            attempts: [
+              {
+                // The source computer's provider instance, which this host does not have.
+                providerInstanceId: "aaaaaaaa-0000-4000-8000-000000000000" as never,
+                providerSessionId: "bbbbbbbb-0000-4000-8000-000000000000" as never,
+                contextManifestId: "cccccccc-0000-4000-8000-000000000000" as never,
+                modelId: "model-a" as never,
+                responses: ["Lisbon in spring."],
+                createdAt: "2026-11-08T10:00:01.000Z" as never,
+                updatedAt: "2026-11-08T10:00:02.000Z" as never,
+              },
+            ],
+          },
+        ],
+      });
+      held.add(String(imported.id));
+
+      const view = service.read(imported.id);
+      expect(view.thread.title).toBe("Plan the trip");
+      expect(view.turns).toHaveLength(1);
+      const body = (contentId: string) =>
+        view.contents.find((content) => String(content.contentId) === contentId)?.body;
+      expect(body(String(view.turns[0]!.userMessageRef.contentId))).toBe("Where should we go?");
+      expect(body(String(view.turns[0]!.attempts[0]!.responseRefs[0]!.contentId))).toBe(
+        "Lisbon in spring.",
+      );
+
+      // While the move holds it, the arriving thread takes no command.
+      await expect(
+        service.execute({
+          kind: "send-chat-turn",
+          threadId: imported.id,
+          expectedVersion: view.thread.version,
+          prompt: "And in summer?",
+        }),
+      ).rejects.toMatchObject({ failure: { category: "unavailable" } });
+      // A work item would be purged with the source unmoved, so it is refused too.
+      await expect(
+        service.execute({
+          kind: "add-chat-work-item",
+          threadId: imported.id,
+          expectedVersion: 0,
+          itemId: "eeeeeeee-0000-4000-8000-000000000000",
+          title: "Book flights",
+          status: "pending",
+          position: 0,
+          origin: "user",
+        }),
+      ).rejects.toMatchObject({ failure: { category: "unavailable" } });
+
+      held.delete(String(imported.id));
+      const next = await service.execute({
+        kind: "send-chat-turn",
+        threadId: imported.id,
+        expectedVersion: service.read(imported.id).thread.version,
+        prompt: "And in summer?",
+      });
+      expect(next.kind).toBe("turn-created");
+      expect(service.read(imported.id).turns).toHaveLength(2);
+    });
+
+    it("opens a moved thread with the attachments its turns carried and the ones not yet sent, readable here", async () => {
+      const { service } = openFixture();
+      const bytes = (text: string) => new TextEncoder().encode(text);
+      const imported = await service.importMovedThread({
+        moveId: "99999999-9999-4999-8999-999999999999",
+        threadId: "dddddddd-0000-4000-8000-000000000001" as never,
+        title: "Read the itinerary",
+        externalContentIngested: false,
+        turns: [
+          {
+            userText: "What does this say?",
+            createdAt: "2026-11-08T10:00:00.000Z" as never,
+            attachments: [
+              {
+                attachmentId: "dddddddd-0000-4000-8000-000000000002" as never,
+                displayName: "itinerary.txt",
+                mediaType: "text/plain",
+                bytes: bytes("Lisbon, then Porto."),
+              },
+            ],
+            attempts: [],
+          },
+        ],
+        unsentAttachments: [
+          {
+            attachmentId: "dddddddd-0000-4000-8000-000000000003" as never,
+            displayName: "draft.txt",
+            mediaType: "text/plain",
+            bytes: bytes("Not sent yet."),
+          },
+        ],
+      });
+
+      const view = service.read(imported.id);
+      expect(view.turns[0]?.attachmentIds.map(String)).toEqual([
+        "dddddddd-0000-4000-8000-000000000002",
+      ]);
+      expect(
+        view.attachments.map((attachment) => [
+          attachment.displayName,
+          attachment.turnId === undefined ? "unsent" : "sent",
+          attachment.status,
+        ]),
+      ).toEqual([
+        ["itinerary.txt", "sent", "finalized"],
+        ["draft.txt", "unsent", "finalized"],
+      ]);
+      const read = await service.readAttachment(
+        imported.id,
+        "dddddddd-0000-4000-8000-000000000002" as never,
+      );
+      expect(new TextDecoder().decode(read)).toBe("Lisbon, then Porto.");
     });
 
     it("branches a thread that carries the conversation and inherits scope from the server", async () => {

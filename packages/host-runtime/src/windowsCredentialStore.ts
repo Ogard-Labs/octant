@@ -1,129 +1,175 @@
 import { spawn } from "node:child_process";
+import { win32 } from "node:path";
 import { CredentialStoreFailure, type CredentialStore } from "./credentialStore";
+import type { KeychainServiceFamily } from "./desktopIdentity";
 
-/**
- * Windows keeps provider credentials in Credential Manager as "generic"
- * credentials — the same shape Git Credential Manager uses — so a credential
- * Octant stores is one the platform protects and the person can see and remove
- * from their own account settings.
- *
- * `cmdkey` handles store, list and delete. It cannot read a secret back, and no
- * other Windows CLI can either, so `resolve` calls the Win32 CredRead API
- * through PowerShell. Both executables are named by absolute path so a PATH
- * entry cannot redirect either one.
- */
-export const CMDKEY_PATH = "C:\\Windows\\System32\\cmdkey.exe";
-export const POWERSHELL_PATH = "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe";
-const DEFAULT_TIMEOUT_MS = 5_000;
-const MAX_OUTPUT_BYTES = 16 * 1_024;
+/** Win32's one atomic generic credential blob is limited to 5 * 512 bytes. */
+export const WINDOWS_CREDENTIAL_MAX_BYTES = 2_560;
+const NAMESPACES = [
+  "provider",
+  "replica-device-key",
+  "replica-store-credential",
+  "canvas-public-share-secret",
+  "mcp-server-credential",
+  "desktop-provider-credential",
+  "push-platform-credential",
+  "ssh-key",
+] as const;
+export type WindowsCredentialNamespace = (typeof NAMESPACES)[number];
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
-const TARGET_PREFIX = "Octant provider credential ";
-
-/**
- * Reads one generic credential and writes its secret to stdout as UTF-16,
- * which is how Credential Manager stores the blob. `CRED_TYPE_GENERIC` is 1.
- * Exits 3 when the target is absent so the caller can tell "missing" from
- * "the read failed".
- */
-const READ_CREDENTIAL_SCRIPT = [
-  "$ErrorActionPreference='Stop'",
-  'Add-Type -TypeDefinition \'using System;using System.Runtime.InteropServices;public class OctantCred{[StructLayout(LayoutKind.Sequential,CharSet=CharSet.Unicode)]public struct CRED{public uint Flags;public uint Type;public string TargetName;public string Comment;public long LastWritten;public uint CredentialBlobSize;public IntPtr CredentialBlob;public uint Persist;public uint AttributeCount;public IntPtr Attributes;public string TargetAlias;public string UserName;}[DllImport("advapi32.dll",CharSet=CharSet.Unicode,SetLastError=true)]public static extern bool CredRead(string target,uint type,uint flags,out IntPtr credential);[DllImport("advapi32.dll")]public static extern void CredFree(IntPtr buffer);}\'',
-  "$p=[IntPtr]::Zero",
-  "if(-not [OctantCred]::CredRead($env:OCTANT_CRED_TARGET,1,0,[ref]$p)){exit 3}",
-  "$c=[Runtime.InteropServices.Marshal]::PtrToStructure($p,[type][OctantCred+CRED])",
-  "$b=New-Object byte[] $c.CredentialBlobSize",
-  "[Runtime.InteropServices.Marshal]::Copy($c.CredentialBlob,$b,0,$c.CredentialBlobSize)",
-  "[OctantCred]::CredFree($p)",
-  "[Console]::Out.Write([Text.Encoding]::Unicode.GetString($b))",
-].join("; ");
+const MAGIC = "OCCR";
+const RESPONSE_HEADER_BYTES = 9;
 
 export interface WindowsCommandSpec {
   readonly command: string;
   readonly args: readonly string[];
-  readonly environment?: NodeJS.ProcessEnv;
+  readonly environment: Readonly<Record<string, string>>;
+  readonly input: Uint8Array;
 }
-
 export interface WindowsCommandResult {
   readonly exitCode: number | null;
-  readonly stdout: string;
-  readonly stderr: string;
+  readonly stdout: Uint8Array;
 }
-
 export interface WindowsCommandLimits {
-  readonly maxBytes: number;
   readonly timeoutMs: number;
+  readonly maxBytes: number;
 }
-
 export type WindowsCommandExecutor = (
   spec: WindowsCommandSpec,
   limits: WindowsCommandLimits,
 ) => Promise<WindowsCommandResult>;
-
 export interface MakeWindowsCredentialStoreOptions {
-  readonly execute?: WindowsCommandExecutor;
+  readonly helperPath: string;
+  readonly storeScope: string;
+  readonly serviceFamily?: KeychainServiceFamily;
+  readonly namespace?: WindowsCredentialNamespace;
   readonly timeoutMs?: number;
+  readonly execute?: WindowsCommandExecutor;
 }
 
+/**
+ * Only the credential broker receives this store. The native helper owns one
+ * closed purpose namespace; it never accepts a target name or enumerates keys.
+ * No unscoped legacy target is read, migrated or removed implicitly.
+ */
 export function makeWindowsCredentialStore(
-  options: MakeWindowsCredentialStoreOptions = {},
+  options: MakeWindowsCredentialStoreOptions,
 ): CredentialStore {
+  const timeoutMs = options.timeoutMs ?? 5_000;
+  const purpose = NAMESPACES.indexOf(
+    options.namespace === undefined ? "provider" : options.namespace,
+  );
+  if (
+    purpose < 0 ||
+    !/^(?:\\\\\?\\)?[a-z]:\\/i.test(options.helperPath) ||
+    options.helperPath.includes("\0") ||
+    win32.basename(options.helperPath) !== "octant-credential-helper.exe" ||
+    win32.normalize(options.helperPath) !== options.helperPath ||
+    !UUID_PATTERN.test(options.storeScope) ||
+    (options.serviceFamily !== undefined &&
+      options.serviceFamily !== "octant" &&
+      options.serviceFamily !== "octant-nightly-test-data") ||
+    !Number.isSafeInteger(timeoutMs) ||
+    timeoutMs < 1 ||
+    timeoutMs > 30_000
+  )
+    throw new CredentialStoreFailure("invalid");
   const execute = options.execute ?? executeWindowsCommand;
-  const limits = {
-    maxBytes: MAX_OUTPUT_BYTES,
-    timeoutMs: options.timeoutMs ?? DEFAULT_TIMEOUT_MS,
-  };
-  if (limits.timeoutMs <= 0) throw new CredentialStoreFailure("invalid");
-
-  const targetFor = (providerInstanceId: string): string => {
-    if (!UUID_PATTERN.test(providerInstanceId)) throw new CredentialStoreFailure("invalid");
-    return `${TARGET_PREFIX}${providerInstanceId}`;
-  };
-
-  const run = async (spec: WindowsCommandSpec): Promise<WindowsCommandResult> => {
+  const request = async (operation: number, ref: string, credential?: string): Promise<Buffer> => {
+    if (!UUID_PATTERN.test(ref)) throw new CredentialStoreFailure("invalid");
+    const value = Buffer.from(credential ?? "", "utf8");
+    if (
+      operation === 1 &&
+      (value.length === 0 ||
+        value.length > WINDOWS_CREDENTIAL_MAX_BYTES ||
+        value.toString("utf8") !== credential)
+    ) {
+      value.fill(0);
+      throw new CredentialStoreFailure("invalid");
+    }
+    const input = Buffer.alloc(84 + value.length);
+    input.write(MAGIC, 0, "ascii");
+    input[4] = 2;
+    input[5] = operation;
+    input[6] = options.serviceFamily === "octant-nightly-test-data" ? 1 : 0;
+    input.write(options.storeScope, 7, "ascii");
+    input.write(ref, 43, "ascii");
+    input.writeUInt32LE(value.length, 79);
+    input[83] = purpose;
+    value.copy(input, 84);
+    value.fill(0);
+    let output: Buffer | undefined;
     try {
-      return await execute(spec, limits);
-    } catch {
+      const result = await execute(
+        { command: options.helperPath, args: [], environment: {}, input },
+        {
+          timeoutMs,
+          maxBytes: RESPONSE_HEADER_BYTES + WINDOWS_CREDENTIAL_MAX_BYTES,
+        },
+      );
+      output = Buffer.from(
+        result.stdout.buffer,
+        result.stdout.byteOffset,
+        result.stdout.byteLength,
+      );
+      if (
+        result.exitCode !== 0 ||
+        output.length < RESPONSE_HEADER_BYTES ||
+        output.length > RESPONSE_HEADER_BYTES + WINDOWS_CREDENTIAL_MAX_BYTES ||
+        !output.subarray(0, 4).equals(Buffer.from(MAGIC, "ascii")) ||
+        output.readUInt32LE(5) !== output.length - RESPONSE_HEADER_BYTES
+      )
+        throw new CredentialStoreFailure("failed");
+      const status = output[4];
+      if (status !== 0) {
+        if (output.length !== RESPONSE_HEADER_BYTES) throw new CredentialStoreFailure("failed");
+        throw new CredentialStoreFailure(
+          status === 1
+            ? "missing"
+            : status === 2
+              ? "invalid"
+              : status === 3
+                ? "unavailable"
+                : "failed",
+        );
+      }
+      if (operation !== 3 && output.length !== RESPONSE_HEADER_BYTES)
+        throw new CredentialStoreFailure("failed");
+      return Buffer.from(output.subarray(RESPONSE_HEADER_BYTES));
+    } catch (error) {
+      if (error instanceof CredentialStoreFailure) throw error;
       throw new CredentialStoreFailure("unavailable");
+    } finally {
+      input.fill(0);
+      output?.fill(0);
     }
   };
-
   return {
-    set: async (providerInstanceId, credential) => {
-      if (credential.length === 0) throw new CredentialStoreFailure("invalid");
-      const target = targetFor(providerInstanceId);
-      // cmdkey takes the secret as an argument; it has no stdin form. The
-      // process is short-lived, owned by this host, and never logged.
-      const result = await run({
-        command: CMDKEY_PATH,
-        args: [`/generic:${target}`, "/user:octant", `/pass:${credential}`],
-      });
-      if (result.exitCode !== 0) throw new CredentialStoreFailure("failed");
+    set: async (ref, credential) => {
+      await request(1, ref, credential);
     },
-    has: async (providerInstanceId) => {
-      const target = targetFor(providerInstanceId);
-      const result = await run({ command: CMDKEY_PATH, args: [`/list:${target}`] });
-      if (result.exitCode !== 0) return false;
-      return result.stdout.includes(target);
+    has: async (ref) => {
+      try {
+        await request(2, ref);
+        return true;
+      } catch (error) {
+        if (error instanceof CredentialStoreFailure && error.category === "missing") return false;
+        throw error;
+      }
     },
-    resolve: async (providerInstanceId) => {
-      const target = targetFor(providerInstanceId);
-      const result = await run({
-        command: POWERSHELL_PATH,
-        args: ["-NoProfile", "-NonInteractive", "-Command", READ_CREDENTIAL_SCRIPT],
-        // The target travels in the environment rather than the command line
-        // so a credential id never appears in a process listing.
-        environment: { ...process.env, OCTANT_CRED_TARGET: target },
-      });
-      if (result.exitCode === 3) throw new CredentialStoreFailure("missing");
-      if (result.exitCode !== 0) throw new CredentialStoreFailure("failed");
-      const credential = result.stdout;
-      if (credential.length === 0) throw new CredentialStoreFailure("missing");
-      return credential;
+    resolve: async (ref) => {
+      const value = await request(3, ref);
+      try {
+        const decoded = value.toString("utf8");
+        if (value.length === 0 || !Buffer.from(decoded, "utf8").equals(value))
+          throw new CredentialStoreFailure("failed");
+        return decoded;
+      } finally {
+        value.fill(0);
+      }
     },
-    delete: async (providerInstanceId) => {
-      const target = targetFor(providerInstanceId);
-      const result = await run({ command: CMDKEY_PATH, args: [`/delete:${target}`] });
-      if (result.exitCode !== 0) throw new CredentialStoreFailure("failed");
+    delete: async (ref) => {
+      await request(4, ref);
     },
   };
 }
@@ -134,30 +180,43 @@ async function executeWindowsCommand(
 ): Promise<WindowsCommandResult> {
   return await new Promise((resolve, reject) => {
     const child = spawn(spec.command, [...spec.args], {
-      ...(spec.environment === undefined ? {} : { env: spec.environment }),
-      stdio: ["ignore", "pipe", "pipe"],
+      env: spec.environment,
+      cwd: win32.dirname(spec.command),
+      stdio: ["pipe", "pipe", "ignore"],
       shell: false,
       windowsHide: true,
     });
-    let stdout = "";
-    let stderr = "";
-    const timer = setTimeout(() => {
+    const chunks: Buffer[] = [];
+    let bytes = 0;
+    let failure: CredentialStoreFailure | undefined;
+    const stop = (cause?: "timed-out") => {
+      failure ??= new CredentialStoreFailure("unavailable", cause);
+      child.stdin.destroy();
       child.kill();
-      reject(new Error("Windows credential command timed out"));
-    }, limits.timeoutMs);
+    };
+    const timer = setTimeout(() => stop("timed-out"), limits.timeoutMs);
     child.stdout.on("data", (chunk: Buffer) => {
-      if (Buffer.byteLength(stdout, "utf8") <= limits.maxBytes) stdout += chunk.toString("utf8");
+      bytes += chunk.length;
+      if (bytes > limits.maxBytes) {
+        chunk.fill(0);
+        stop();
+      } else chunks.push(chunk);
     });
-    child.stderr.on("data", (chunk: Buffer) => {
-      if (Buffer.byteLength(stderr, "utf8") <= limits.maxBytes) stderr += chunk.toString("utf8");
+    child.stdin.on("error", () => stop());
+    child.once("error", () => {
+      failure ??= new CredentialStoreFailure("unavailable", "no-tool");
     });
-    child.once("error", (error) => {
-      clearTimeout(timer);
-      reject(error);
-    });
+    // close joins the process AND its pipes; rejecting at the timeout alone
+    // would leave an owned credential process running after the broker returns.
     child.once("close", (code) => {
       clearTimeout(timer);
-      resolve({ exitCode: code, stdout, stderr });
+      const stdout = Buffer.concat(chunks);
+      for (const chunk of chunks) chunk.fill(0);
+      if (failure !== undefined) {
+        stdout.fill(0);
+        reject(failure);
+      } else resolve({ exitCode: code, stdout });
     });
+    child.stdin.end(spec.input);
   });
 }

@@ -186,7 +186,9 @@ class FakeQuery implements ClaudeQueryPort {
       compactAnnounced,
       account,
       ...(models.length === 0 ? {} : { models }),
-      ...(autoCompactThreshold === undefined ? {} : { autoCompactThreshold }),
+      ...(autoCompactThreshold === undefined
+        ? {}
+        : { autoCompactThreshold, contextWindow: 200_000 }),
     };
     this.sessionId = announcesSession ? Effect.succeed(sdkSessionId) : Effect.never;
     this.messages =
@@ -700,6 +702,62 @@ describe("Claude execution policy", () => {
     await acquired.close();
   });
 
+  it.each(["code", "work"] as const)(
+    "keeps Full access commands sandboxed and file tools inside the Project in %s",
+    async (mode) => {
+      const f = harness();
+      const acquired = await acquire(f.driver, mode);
+      try {
+        await Effect.runPromise(
+          acquired.connection.start({
+            sessionId,
+            modelId,
+            executionPolicy: "full-access",
+            fullAccessSandbox: true,
+          }),
+        );
+        const open = f.opens[0]!;
+        expect(open.sandbox).toMatchObject({
+          enabled: true,
+          failIfUnavailable: true,
+          allowUnsandboxedCommands: false,
+          filesystem: { denyRead: ["/"], allowRead: [projectRoot], allowWrite: [projectRoot] },
+        });
+        const tool = (
+          toolName: string,
+          input: Readonly<Record<string, unknown>>,
+          toolUseId: string,
+        ) =>
+          open.preToolUse({
+            sessionId: "sdk-session-1",
+            projectRoot,
+            toolName,
+            input,
+            toolUseId,
+            signal: new AbortController().signal,
+          });
+        await expect(tool("Bash", { command: "git status" }, "bash")).resolves.toEqual({
+          behavior: "allow",
+        });
+        await expect(
+          tool(
+            "Edit",
+            { file_path: `${projectRoot}/file.ts`, old_string: "old", new_string: "new" },
+            "edit",
+          ),
+        ).resolves.toEqual({ behavior: "allow" });
+        await expect(
+          tool("Write", { file_path: "/outside/project/file.ts", content: "no" }, "outside-write"),
+        ).resolves.toMatchObject({ behavior: "deny" });
+        await expect(
+          tool("Read", { file_path: "/outside/project/file.ts" }, "outside-read"),
+        ).resolves.toMatchObject({ behavior: "deny" });
+      } finally {
+        await acquired.close();
+      }
+    },
+  );
+
   it("configures the strict exact-root sandbox only for approval-gated sessions", async () => {
     for (const executionPolicy of ["full-access", "approval-gated", "plan"] as const) {
       const f = harness();
@@ -756,32 +814,43 @@ describe("Claude execution policy", () => {
         };
       },
     };
-    for (const executionPolicy of [
-      "approval-gated",
-      "auto-accept-edits",
-      "plan",
-      "full-access",
+    for (const [executionPolicy, fullAccessSandbox] of [
+      ["approval-gated", false],
+      ["auto-accept-edits", false],
+      ["plan", false],
+      ["full-access", false],
+      ["full-access", true],
     ] as const) {
       const f = harness("subscription", "current-session", { runtimeNetwork });
       const acquired = await acquire(f.driver);
       await Effect.runPromise(
-        acquired.connection.start({ sessionId, modelId, executionPolicy, autoApprove: true }),
+        acquired.connection.start({
+          sessionId,
+          modelId,
+          executionPolicy,
+          fullAccessSandbox,
+          autoApprove: true,
+        }),
       );
       expect(f.opens[0]?.sandbox?.network).toEqual(
-        executionPolicy === "approval-gated" || executionPolicy === "auto-accept-edits"
+        executionPolicy === "approval-gated" ||
+          executionPolicy === "auto-accept-edits" ||
+          fullAccessSandbox
           ? { httpProxyPort: ports["claude-sandbox"] }
           : undefined,
       );
       expect(f.opens[0]?.network?.endpoint).toEqual(
-        executionPolicy === "full-access" ? undefined : { kind: "loopback", port: ports.claude },
+        executionPolicy === "full-access" && !fullAccessSandbox
+          ? undefined
+          : { kind: "loopback", port: ports.claude },
       );
       await Effect.runPromise(acquired.connection.stop(sessionId));
       await acquired.close();
     }
     const own = { runtime: "claude", autoReview: true, sessionId: String(sessionId) };
     const sandbox = { runtime: "claude-sandbox", autoReview: true, sessionId: String(sessionId) };
-    expect(started).toEqual([own, sandbox, own, sandbox, own]);
-    expect(released).toBe(5);
+    expect(started).toEqual([own, sandbox, own, sandbox, own, own, sandbox]);
+    expect(released).toBe(7);
   });
 
   it("grants a Project's extra folder what the root gets, in its sandbox and its tool gate", async () => {
@@ -1506,59 +1575,72 @@ describe("Claude execution policy", () => {
     await acquired.close();
   });
 
-  it("asks again for the same call after a one-call answer, even when the person reuses approvals for the session", async () => {
-    const f = harness("subscription", "current-session");
-    const acquired = await acquire(f.driver);
-    await Effect.runPromise(
-      acquired.connection.start({ sessionId, modelId, executionPolicy: "approval-gated" }),
-    );
-    const open = f.opens[0]!;
-    const signal = new AbortController().signal;
-    const input = { file_path: `${projectRoot}/src/app.ts`, old_string: "a", new_string: "b" };
-    const nextApproval = () =>
-      Effect.runPromise(
-        Stream.runHead(
-          Stream.unwrapScoped(acquired.connection.subscribe).pipe(
-            Stream.filter(
-              (event) => event.sessionId === sessionId && event.kind === "approval-request",
+  it.each(["Edit", "Bash"] as const)(
+    "asks again for the same %s call after a one-call owner answer",
+    async (toolName) => {
+      const f = harness("subscription", "current-session");
+      const acquired = await acquire(f.driver);
+      await Effect.runPromise(
+        acquired.connection.start({ sessionId, modelId, executionPolicy: "approval-gated" }),
+      );
+      const open = f.opens[0]!;
+      const signal = new AbortController().signal;
+      const input =
+        toolName === "Bash"
+          ? { command: "printf fixture", timeout: 1000 }
+          : { file_path: `${projectRoot}/src/app.ts`, old_string: "a", new_string: "b" };
+      const nextApproval = () =>
+        Effect.runPromise(
+          Stream.runHead(
+            Stream.unwrapScoped(acquired.connection.subscribe).pipe(
+              Stream.filter(
+                (event) => event.sessionId === sessionId && event.kind === "approval-request",
+              ),
             ),
           ),
-        ),
-      );
-    const ask = async (toolUseId: string) => {
-      const approval = nextApproval();
-      await Promise.resolve();
-      await open.preToolUse({
-        sessionId: "sdk-session-1",
-        projectRoot,
-        toolName: "Edit",
-        input,
-        toolUseId,
-        signal,
+        );
+      const ask = async (toolUseId: string) => {
+        const approval = nextApproval();
+        await Promise.resolve();
+        await open.preToolUse({
+          sessionId: "sdk-session-1",
+          projectRoot,
+          toolName,
+          input,
+          toolUseId,
+          signal,
+        });
+        const callback = open.canUseTool({ toolName, input, toolUseId, signal });
+        const first = await Promise.race([
+          approval.then((result) => ({ kind: "event" as const, result })),
+          callback.then((decision) => ({ kind: "decision" as const, decision })),
+        ]);
+        return { first, callback };
+      };
+      const firstCall = await ask("edit-once");
+      expect(firstCall.first.kind).toBe("event");
+      const call = acquired.connection.approvalCall?.({ sessionId, requestId: "request-1" });
+      expect(call?.ownerAction).toMatchObject({
+        kind: toolName === "Bash" ? "shell" : "file-edit",
+        tool: toolName,
+        input: JSON.stringify(input),
+        workingDirectory: projectRoot,
       });
-      const callback = open.canUseTool({ toolName: "Edit", input, toolUseId, signal });
-      const first = await Promise.race([
-        approval.then((result) => ({ kind: "event" as const, result })),
-        callback.then((decision) => ({ kind: "decision" as const, decision })),
-      ]);
-      return { first, callback };
-    };
-    const firstCall = await ask("edit-once");
-    expect(firstCall.first.kind).toBe("event");
-    await Effect.runPromise(
-      acquired.connection.answerApproval({
-        sessionId,
-        requestId: "request-1",
-        approved: true,
-        scope: "once",
-      }),
-    );
-    await expect(firstCall.callback).resolves.toEqual({ behavior: "allow" });
-    // The same call again is asked again: a one-call answer is never reused.
-    const secondCall = await ask("edit-again");
-    expect(secondCall.first.kind).toBe("event");
-    await acquired.close();
-  });
+      await Effect.runPromise(
+        acquired.connection.answerApproval({
+          sessionId,
+          requestId: "request-1",
+          approved: true,
+          scope: "once",
+        }),
+      );
+      await expect(firstCall.callback).resolves.toEqual({ behavior: "allow" });
+      // The same call again is asked again: a one-call answer is never reused.
+      const secondCall = await ask("edit-again");
+      expect(secondCall.first.kind).toBe("event");
+      await acquired.close();
+    },
+  );
 
   it.each(["current-session", "project-default"] as const)(
     "correlates approval answers atomically and degrades %s reuse to the active session",
@@ -2667,7 +2749,7 @@ describe("Claude execution policy", () => {
     await acquired.close();
   });
 
-  it("reports the runtime's compaction point and the window's fill with each turn's usage", async () => {
+  it("reports the runtime's compaction point, its window, and the window's fill with each turn's usage", async () => {
     const f = harness("subscription", "current-session", { autoCompactThreshold: 167_000 });
     const acquired = await acquire(f.driver);
     await Effect.runPromise(
@@ -2713,13 +2795,15 @@ describe("Claude execution policy", () => {
 
     expect(
       usage.map((event) =>
-        event.kind === "usage" ? [event.contextTokens, event.autoCompactThreshold] : [],
+        event.kind === "usage"
+          ? [event.contextTokens, event.autoCompactThreshold, event.contextWindow]
+          : [],
       ),
     ).toEqual([
-      [14_000, 167_000],
-      [14_000, 167_000],
-      [20_000, 167_000],
-      [20_000, 167_000],
+      [14_000, 167_000, 200_000],
+      [14_000, 167_000, 200_000],
+      [20_000, 167_000, 200_000],
+      [20_000, 167_000, 200_000],
     ]);
     await Effect.runPromise(Fiber.interrupt(subscription));
     await acquired.close();
@@ -5465,6 +5549,44 @@ describe("Claude exact resume", () => {
     await acquired.close();
     expect(f.queries).toHaveLength(2);
     expect(f.queries.every((query) => query.close.mock.calls.length === 1)).toBe(true);
+  });
+
+  it("resumes Full access with the requested sandbox and drops it only on the next launch", async () => {
+    const f = harness();
+    const acquired = await acquire(f.driver);
+    try {
+      const started = await Effect.runPromise(
+        acquired.connection.start({
+          sessionId,
+          modelId,
+          executionPolicy: "full-access",
+          fullAccessSandbox: true,
+        }),
+      );
+      if (started.resumeCursor === undefined) throw new Error("Missing resume cursor");
+      await Effect.runPromise(acquired.connection.stop(sessionId));
+      await Effect.runPromise(
+        acquired.connection.resume({
+          sessionId,
+          resumeCursor: started.resumeCursor,
+          executionPolicy: "full-access",
+          fullAccessSandbox: true,
+        }),
+      );
+      expect(f.opens[1]?.sandbox?.enabled).toBe(true);
+      await Effect.runPromise(acquired.connection.stop(sessionId));
+      await Effect.runPromise(
+        acquired.connection.resume({
+          sessionId,
+          resumeCursor: started.resumeCursor,
+          executionPolicy: "full-access",
+          fullAccessSandbox: false,
+        }),
+      );
+      expect(f.opens[2]?.sandbox).toBeUndefined();
+    } finally {
+      await acquired.close();
+    }
   });
 
   it("resumes after driver recreation using injected identity, exact SDK root, and explicit ID", async () => {

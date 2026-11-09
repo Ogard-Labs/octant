@@ -52,6 +52,11 @@ export const ProviderSwitchConversationHandoff = Schema.Struct({
   externalContentIngested: Schema.Boolean,
   nativeSessionTransferred: Schema.Literal(false),
   hiddenReasoningTransferred: Schema.Literal(false),
+  /**
+   * Present when the handoff led with the summary the limit rule wrote with
+   * the earlier provider before it compacted the thread.
+   */
+  handoverSummary: Schema.optional(Schema.Literal(true)),
   inputReceipt: Schema.optional(ConversationInputReceipt),
 }).annotations(strict);
 export type ProviderSwitchConversationHandoff = typeof ProviderSwitchConversationHandoff.Type;

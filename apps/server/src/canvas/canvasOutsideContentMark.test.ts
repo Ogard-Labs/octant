@@ -358,6 +358,23 @@ function replicaAuthor(sequence: number): string {
   return `00000000-0000-4000-8000-${sequence.toString(16).padStart(12, "0")}`;
 }
 
+describe("a Canvas carried in with a moved thread", () => {
+  it("marks every agent that reads it when it held outside content where it came from", () => {
+    const first = host(openDatabase());
+    const carried = canvasVersion(1);
+    first.canvases.appendCreate({
+      canvasId,
+      version: carried,
+      occurredAt: now as never,
+      movedWithOutsideContent: true,
+    });
+
+    expect(first.writers()).toEqual([`moved-canvas:${String(carried.versionId)}`]);
+    expect(first.read(writerThreadId)).toEqual({ status: "marked" });
+    expect(first.read(readerThreadId)).toEqual({ status: "marked" });
+  });
+});
+
 describe("a Canvas's recorded writers", () => {
   it("are read past one journal page, so the next record names the aggregate's real head", () => {
     const recorded = Array.from({ length: 1_001 }, (_, index) => ({

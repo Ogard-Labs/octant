@@ -5,7 +5,17 @@ import type {
   ServerProjectsView,
 } from "@octant/contracts/server-projects";
 import type { ShieldServer } from "@octant/contracts/shield-servers";
-import { render, screen, within } from "@testing-library/react";
+import {
+  decodeAggregateVersion,
+  decodeProjectId,
+  decodeProjectActionId,
+  decodeProjectTerminalResult,
+  type ProjectId,
+} from "@octant/contracts";
+import { ServerProject as ServerProjectSchema } from "@octant/contracts/server-projects";
+import { Schema } from "effect";
+import type { ProjectTerminalClient } from "@octant/client-runtime/project-terminal-client";
+import { render, screen, within, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import { ServerAccessSettings, ServerProjectsSettings } from "./ServerProjectsSettings";
@@ -25,14 +35,25 @@ const SITE: ServerProject = {
   folder: "/srv/website",
   boundAt: "2026-11-01T12:00:00.000Z" as ServerProject["boundAt"],
 };
+const TEST_ACTION = {
+  id: decodeProjectActionId("93000000-0000-4000-8000-000000000001"),
+  name: "Test",
+  command: "bun run test",
+  directory: ".",
+};
 
 function setup(options: {
   readonly initial?: ServerProjectsView;
+  readonly read?: () => ServerProjectsView;
   readonly servers?: ReadonlyArray<ShieldServer>;
   readonly answer?: (command: ServerProjectsCommand) => ServerProjectsCommandResult;
+  readonly terminalClient?: ProjectTerminalClient;
+  readonly codeProjectId?: ProjectId;
+  readonly workProjectId?: ProjectId;
+  readonly onOpenServerProject?: (project: ServerProject) => void;
 }) {
   const initial = options.initial ?? { projects: [SITE] };
-  const read = vi.fn(async () => initial);
+  const read = vi.fn(async () => options.read?.() ?? initial);
   const command = vi.fn(
     async (sent: ServerProjectsCommand): Promise<ServerProjectsCommandResult> =>
       options.answer?.(sent) ?? { kind: "server-projects-updated", view: initial },
@@ -44,11 +65,254 @@ function setup(options: {
     })),
   };
   const user = userEvent.setup();
-  render(<ServerProjectsSettings client={{ read, command }} servers={servers} />);
+  render(
+    <ServerProjectsSettings
+      client={{ read, command }}
+      servers={servers}
+      {...(options.terminalClient === undefined ? {} : { terminalClient: options.terminalClient })}
+      {...(options.codeProjectId === undefined ? {} : { codeProjectId: options.codeProjectId })}
+      {...(options.workProjectId === undefined ? {} : { workProjectId: options.workProjectId })}
+      {...(options.onOpenServerProject === undefined
+        ? {}
+        : { onOpenServerProject: options.onOpenServerProject })}
+    />,
+  );
   return { command, user };
 }
 
 describe("ServerProjectsSettings", () => {
+  it.each([
+    { enabled: false, bound: true },
+    { enabled: true, bound: false },
+    { enabled: true, bound: true },
+  ])(
+    "shows a Work terminal only for the current bound Project with tools enabled (%j)",
+    async ({ enabled, bound }) => {
+      const work = Schema.decodeUnknownSync(ServerProjectSchema)({
+        ...SITE,
+        mode: "work",
+        developerTools: {
+          enabled,
+          changedAt: SITE.boundAt,
+          changedBy: { kind: "local-user", actorId: "11111111-1111-4111-8111-111111111111" },
+        },
+      });
+      const execute = vi.fn(async () => {
+        throw Error("No launch without a person action");
+      });
+      setup({
+        initial: { projects: [work] },
+        ...(bound ? { workProjectId: work.id } : {}),
+        terminalClient: { execute },
+      });
+      await screen.findByText("Website");
+      expect(screen.queryByRole("button", { name: "Open terminal" }) !== null).toBe(
+        enabled && bound,
+      );
+      expect(execute).not.toHaveBeenCalled();
+    },
+  );
+  it.each([undefined, decodeProjectId("11111111-1111-4111-8111-222222222222")])(
+    "offers an explicit Project open before requesting actions outside the window binding",
+    async (codeProjectId) => {
+      const execute = vi.fn(async () => {
+        throw Error("This window cannot read that Project's action files.");
+      });
+      const onOpenServerProject = vi.fn();
+      const { user } = setup({
+        initial: {
+          projects: [
+            {
+              ...SITE,
+              actions: [TEST_ACTION],
+            },
+          ],
+        },
+        terminalClient: { execute },
+        ...(codeProjectId === undefined ? {} : { codeProjectId }),
+        onOpenServerProject,
+      });
+      await screen.findByRole("button", { name: "Actions" });
+      expect(screen.queryByRole("button", { name: "Run Test" })).toBeNull();
+      await user.click(screen.getByRole("button", { name: "Actions" }));
+      expect(screen.getByRole("textbox", { name: "Action command" })).toHaveValue("bun run test");
+      expect(execute).not.toHaveBeenCalled();
+      await user.click(screen.getByRole("button", { name: "Open Website" }));
+      expect(onOpenServerProject).toHaveBeenCalledWith(expect.objectContaining({ id: SITE.id }));
+      expect(execute).not.toHaveBeenCalled();
+    },
+  );
+  it("requests review without starting an action in the window's bound Project", async () => {
+    const execute = vi.fn(async () =>
+      decodeProjectTerminalResult({
+        kind: "project-action-preview",
+        projectId: SITE.id,
+        projectVersion: 0,
+        action: {
+          actionId: TEST_ACTION.id,
+          name: TEST_ACTION.name,
+          folder: SITE.folder,
+          branch: "main",
+        },
+      }),
+    );
+    const { user } = setup({
+      initial: { projects: [{ ...SITE, actions: [TEST_ACTION] }] },
+      codeProjectId: SITE.id,
+      terminalClient: { execute },
+    });
+    await user.click(await screen.findByRole("button", { name: "Run Test" }));
+    expect(await screen.findByRole("button", { name: "Run action" })).toBeEnabled();
+    expect(execute).toHaveBeenCalledExactlyOnceWith({
+      kind: "preview-action",
+      projectId: SITE.id,
+      actionId: TEST_ACTION.id,
+    });
+  });
+  it("uses the Work binding rather than the Code binding for Work action reads and review", async () => {
+    const project = Schema.decodeUnknownSync(ServerProjectSchema)({
+      ...SITE,
+      mode: "work",
+      actions: [TEST_ACTION],
+      developerTools: {
+        enabled: true,
+        changedBy: { kind: "local-user", actorId: "22222222-2222-4222-8222-222222222222" },
+        changedAt: "2026-11-07T10:00:00.000Z",
+      },
+    });
+    const execute = vi.fn(async () =>
+      decodeProjectTerminalResult({
+        kind: "project-action-preview",
+        projectId: SITE.id,
+        projectVersion: 0,
+        action: {
+          actionId: TEST_ACTION.id,
+          name: TEST_ACTION.name,
+          folder: SITE.folder,
+          branch: "main",
+        },
+      }),
+    );
+    const { user } = setup({
+      initial: { projects: [project] },
+      codeProjectId: decodeProjectId("11111111-1111-4111-8111-222222222222"),
+      workProjectId: SITE.id,
+      terminalClient: { execute },
+    });
+    await user.click(await screen.findByRole("button", { name: "Run Test" }));
+    expect(await screen.findByRole("button", { name: "Run action" })).toBeEnabled();
+    expect(execute).toHaveBeenCalledExactlyOnceWith({
+      kind: "preview-action",
+      projectId: SITE.id,
+      actionId: TEST_ACTION.id,
+    });
+  });
+  it("shows a binding refusal after the Project whose action editor was open is removed", async () => {
+    const { user } = setup({
+      answer: (command) =>
+        command.kind === "remove-server-project"
+          ? { kind: "server-projects-updated", view: { projects: [] } }
+          : {
+              kind: "server-projects-refused",
+              reason: "folder-not-found",
+              message: "That folder is missing on the server.",
+            },
+    });
+    await user.click(await screen.findByRole("button", { name: "Actions" }));
+    await user.click(screen.getByRole("button", { name: "Remove Website" }));
+    expect(await screen.findByText("No folders on a server are bound.")).toBeVisible();
+    const form = screen.getByRole("form", { name: "Bind a folder on a server" });
+    await user.type(within(form).getByLabelText("Project name"), "Replacement");
+    await user.type(within(form).getByLabelText("Folder on the server"), "/srv/missing");
+    await user.click(within(form).getByRole("button", { name: "Bind folder" }));
+    expect(await screen.findByText("That folder is missing on the server.")).toBeVisible();
+  });
+  it("reveals a server Work Project's saved actions only after its presentation switch is chosen", async () => {
+    const project = { ...SITE, mode: "work" as const };
+    const { user, command } = setup({
+      initial: { projects: [project] },
+      answer: (sent) => ({
+        kind: "server-projects-updated",
+        view: {
+          projects: [
+            Schema.decodeUnknownSync(ServerProjectSchema)({
+              ...project,
+              developerTools: {
+                enabled: sent.kind === "set-server-work-developer-tools" && sent.enabled,
+                changedBy: { kind: "local-user", actorId: "22222222-2222-4222-8222-222222222222" },
+                changedAt: "2026-11-07T10:00:00.000Z",
+              },
+            }),
+          ],
+        },
+      }),
+    });
+    const toggle = await screen.findByRole("switch", { name: "Show developer tools for Website" });
+    expect(toggle).not.toBeChecked();
+    expect(screen.queryByRole("button", { name: "Actions" })).toBeNull();
+    await user.click(toggle);
+    expect(command).toHaveBeenCalledExactlyOnceWith({
+      kind: "set-server-work-developer-tools",
+      projectId: SITE.id,
+      enabled: true,
+    });
+    expect(await screen.findByRole("button", { name: "Actions" })).toBeVisible();
+    expect(screen.getByText(/Show saved actions and your Project terminal/)).toBeVisible();
+  });
+  it("retains a refused action draft until the person reloads the current saved list", async () => {
+    let current: ServerProjectsView = { projects: [SITE] };
+    const { user } = setup({
+      read: () => current,
+      answer: () => {
+        current = {
+          projects: [{ ...SITE, actionsVersion: decodeAggregateVersion(1), actions: [] }],
+        };
+        return {
+          kind: "server-projects-refused",
+          reason: "actions-changed",
+          message: "Review the current actions.",
+        };
+      },
+    });
+    await user.click(await screen.findByRole("button", { name: "Actions" }));
+    await user.click(screen.getByRole("button", { name: "Add action" }));
+    await user.type(screen.getByRole("textbox", { name: "Action name" }), "Test");
+    await user.type(screen.getByRole("textbox", { name: "Action command" }), "npm test");
+    await user.click(screen.getByRole("button", { name: "Save actions" }));
+    expect(await screen.findByText("Review the current actions.")).toBeVisible();
+    expect(screen.getByRole("textbox", { name: "Action command" })).toHaveValue("npm test");
+    await user.click(screen.getByRole("button", { name: "Reload current actions" }));
+    await waitFor(() =>
+      expect(screen.queryByRole("textbox", { name: "Action command" })).toBeNull(),
+    );
+  });
+  it("saves only explicitly accepted remote suggestions at the reviewed action version", async () => {
+    const execute = vi.fn(async () => ({
+      kind: "project-action-suggestions" as const,
+      projectId: SITE.id,
+      suggestions: [
+        { name: "Test", command: "bun run test", directory: ".", source: "package.json" as const },
+      ],
+    }));
+    const { user, command } = setup({ terminalClient: { execute }, codeProjectId: SITE.id });
+    await user.click(await screen.findByRole("button", { name: "Actions" }));
+    const suggestion = await screen.findByRole("button", { name: /bun run test/ });
+    expect(command).not.toHaveBeenCalled();
+    await user.click(suggestion);
+    expect(command).not.toHaveBeenCalled();
+    expect(screen.queryByRole("checkbox")).toBeNull();
+    await user.click(screen.getByRole("button", { name: "Save actions" }));
+    expect(command).toHaveBeenCalledWith({
+      kind: "set-server-project-actions",
+      projectId: SITE.id,
+      expectedVersion: 0,
+      actions: [{ id: expect.any(String), name: "Test", command: "bun run test", directory: "." }],
+    });
+    expect(execute).toHaveBeenCalledWith(
+      { kind: "suggest-actions", projectId: SITE.id },
+      expect.any(AbortSignal),
+    );
+  });
   it("lists each server Project with the server and folder it is on", async () => {
     setup({});
 

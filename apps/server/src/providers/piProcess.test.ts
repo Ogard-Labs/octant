@@ -317,6 +317,44 @@ describe("Pi process boundary", () => {
     expect(await profileFor("chat")).not.toContain(notes);
   });
 
+  it("wraps a Full access launch that keeps the sandbox, with no approvals, and leaves open Full access unwrapped", async () => {
+    const f = fixture();
+    const confinement = makePiConfinementLive({
+      platform: "darwin",
+      sandboxPath: f.sandbox,
+      credentialPath: f.auth,
+      modelsPath: f.models,
+      temporaryDirectory: f.base,
+    });
+    const launchFor = (fullAccessSandbox: boolean) =>
+      Effect.runPromise(
+        confinement.prepare({
+          binaryPath: f.binary,
+          root: f.root,
+          piHome: f.home,
+          sessionDirectory: join(f.home, "sessions"),
+          sessionId: fullAccessSandbox ? "sandboxed-1" : "open-1",
+          mode: "code",
+          executionPolicy: "full-access",
+          ...(fullAccessSandbox ? { fullAccessSandbox: true } : {}),
+          environment: sanitizePiEnvironment({ PATH: "/usr/bin" }, f.home),
+        }),
+      );
+    const open = await launchFor(false);
+    expect(open.command).toBe(f.binary);
+
+    const sandboxed = await launchFor(true);
+    expect(sandboxed.command).toBe(f.sandbox);
+    const profile = sandboxed.args[1] ?? "";
+    expect(profile).toContain(`(allow file-write* (subpath "${f.root}"))`);
+    expect(profile).toContain("(allow process-exec)");
+    // Nothing prompts: Pi's approvals stay off, as at open Full access.
+    expect(sandboxed.environment.OCTANT_PI_APPROVALS).toBe("disabled");
+    expect(sandboxed.args).toEqual(
+      expect.arrayContaining(["--tools", "bash,edit,write,read,grep,find,ls"]),
+    );
+  });
+
   it("writes isolated configuration, links provider-owned auth, and loads only the Octant bridge", async () => {
     const f = fixture();
     const confinement = makePiConfinementLive({

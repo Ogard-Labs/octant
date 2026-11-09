@@ -19,13 +19,15 @@ site's cookies, and the `chrome.tabs` support for popups and the
 ## Profiles
 
 A profile is the store a page keeps cookies, local storage, IndexedDB, cache,
-and service workers in. There are three kinds:
+and service workers in. The initial three choices keep their behavior, with
+additional named account profiles on the same host:
 
-| Profile  | Lives                                 | Shared by                                  | Survives a restart |
-| -------- | ------------------------------------- | ------------------------------------------ | ------------------ |
-| Private  | In memory, one per browsing context   | That page and the tabs it opens            | No                 |
-| Project  | On disk, one per Work or Code Project | Every page of that Project, in any thread  | Yes                |
-| Personal | On disk, one per host                 | Every page that chooses it, in any Project | Yes                |
+| Profile       | Lives                                           | Shared by                                                        | Survives a restart |
+| ------------- | ----------------------------------------------- | ---------------------------------------------------------------- | ------------------ |
+| Private       | In memory, one per browsing context             | That page and the tabs it opens                                  | No                 |
+| Project       | On disk, one per Work or Code Project           | Every page of that Project, in any thread                        | Yes                |
+| Personal      | On disk, one per host                           | Every page that chooses it, in any Project                       | Yes                |
+| Named account | On disk, one per host-assigned account identity | Every page that explicitly chooses that account, across Projects | Yes                |
 
 - Private is the initial default. A person can choose a different default for
   their Project pages or explicitly for a Work or Code task, as described below.
@@ -38,7 +40,7 @@ and service workers in. There are three kinds:
   in place. The `existing-profile` profile mode in the Browser contract is
   retired: the schema no longer decodes it, so no caller can ask for it. The one
   way another browser's sign-ins reach Octant is the person's explicit
-  [cookie import](#cookie-import) into a Project or Personal profile. An
+  [cookie import](#cookie-import) into a stored profile. An
   extension from another browser reaches Octant only as a copy, through
   [Importing from another browser](#importing-from-another-browser).
 - Chat has no Browser, so it has no profile. A Chat Project has no Project
@@ -48,12 +50,44 @@ and service workers in. There are three kinds:
   Octant keeps credential references rather than a password vault. Fill and
   submit are separate approvals, and neither proves authentication.
 
+### Named account profiles
+
+A person at a local window creates an account profile in Settings → Data &
+privacy → Browser profiles and gives it a label (1–80 characters, at most 64
+per host). The native owner assigns an immutable opaque identity and a separate
+persistent partition; labels are display text, never filesystem paths or grants.
+The native registry lives beside the host's profile stores, outside the journal
+and artifact replica. Profile stores and this registry are not exported or synced.
+A host with no native owner or no registered identity refuses, rather than opening
+another store or falling back to Private.
+
+A person explicitly selects an account in the existing page or task profile
+control. It behaves like Personal for local-person eligibility and reuse across
+Projects, while its origin approvals, model binding, extensions, cookies and data
+remain separate from Personal and every other account. A name or selected profile
+never grants Project access, site access, credential use or delegated authority.
+The site prompt resolves the label from the native host and identifies the account;
+a missing registry entry cannot mint a profile or an approval. A newly created
+profile opens no page and changes no default. Fork/import rules for task defaults
+remain unchanged. The shared Browser tool schema advertises `account:<id>`
+alongside Private, Project and Personal, including on terminal MCP endpoints;
+the selector itself grants no profile or site authority. The agent may select a
+named account explicitly or through its selected task default; both paths retain
+the same profile and site checks. Existing Private, Project and Personal
+arguments retain their behavior.
+
+Sign out and Clear cookies retain the account's identity and label while removing
+the confirmed data scope. Existing cookie import and extension enablement are
+explicit local actions per account; no Personal grants or enabled extensions carry
+across. Multiple account creations serialize their atomic registry replacements.
+Missing or invalid native metadata refuses creation/use without removing stores.
+
 ### Choosing a profile
 
 - The profile is fixed per page. A new page uses its applicable default, initially
   Private. The person changes
   it from the profile control at the left of the Browser toolbar's address field
-  (Private, Project, Personal). Changing it opens the same address in the chosen
+  (Private, Project, Personal and the named accounts on this host). Changing it opens the same address in the chosen
   profile as a new browsing context; the old context closes, and nothing it held
   (cookies, approvals, an agent's binding) carries over. The host turns "Project"
   into the thread's or window's own Project, so a caller cannot name another
@@ -172,7 +206,7 @@ fill is implied. See [the credential boundary](../architecture.md#linked-secret-
 ## Cookie import
 
 A person can bring the sign-ins they already have in another browser on this Mac
-into one Project or Personal profile, so they do not sign in again.
+into one stored profile, so they do not sign in again.
 
 - **Only on the person's pick.** Settings › Data & storage › Browser profiles has
   "Import cookies…" on each stored profile. The dialog lists the browsers
@@ -242,7 +276,7 @@ into one Project or Personal profile, so they do not sign in again.
 
 ## The agent on a signed-in page
 
-A Project or Personal page is treated as signed in, whether or not it is. The
+A Project, Personal or named account page is treated as signed in, whether or not it is. The
 host cannot tell, and a page in a shared profile may hold a sign-in another
 thread made.
 
@@ -266,11 +300,11 @@ thread made.
   including a valid remembered pair; its pending identity alone grants nothing.
 - **Fixed readers protect credential fields.** Fixed actions never type into
   or return password/one-time-code values, and a screenshot of a frame that
-  holds one is withheld. Explicit Full-access page scripts have ordinary
-  DOM/account authority and can read populated or reflected values; see
-  [bounded page scripts](browser-agent-tool.md#bounded-page-scripts). Private
-  storage does not prove a page is signed out, so unknown session eligibility
-  refuses scripts below Full access.
+  holds one is withheld. Explicit page scripts have ordinary DOM/account
+  authority; see [bounded page scripts](browser-agent-tool.md#bounded-page-scripts).
+  Below Full access, a local Code task needs exact-source one-use permission
+  naming that account authority, plus native credential/coverage checks. Private
+  describes storage lifetime and never proves that a page is signed out.
 - **Plan mode** admits on every profile only the reads of the page already
   open and stopping the thread's own Browser, and refuses every other
   operation ([Browser for agents: Plan mode](browser-agent-tool.md#plan-mode));
@@ -283,16 +317,25 @@ thread made.
   the phone that started the turn neither sees nor answers a profile approval,
   and a window that can see the thread does. An approval for a page outside a
   profile is answered as every Browser approval is.
-- **Unattended turns.** A routine's turn and a subagent's turn are refused on
-  profile pages (`profile-needs-a-person`). A subagent's own Browser is Private.
+- **Unattended turns.** A routine or managed child uses a stored profile only with
+  the explicit [delegated session permission](#delegated-sessions) below; it
+  never inherits another caller's page, sign-in permission or authority.
+  A routine's default or explicit Private navigation keeps the ordinary
+  remembered-origin approval path; account delegation does not replace it.
+  Explicitly selecting a stored profile stops the earlier Private context.
+  A refused or expired stored permission never falls back to Private. Returning
+  to Private requires an explicit profile choice and closes the stored context
+  before navigation; concurrent calls refuse until cleanup finishes, and an
+  earlier context's pending observation is withheld.
 - **Terminal Browser grant.** A CLI in a thread terminal may drive the thread's
-  Private pages only; a profile page refuses it (`profile-needs-a-person`).
+  Private pages by default. A stored profile needs its own explicit delegated
+  session permission, bound to that exact live terminal grant.
 - **Taint.** What the agent reads on a profile page taints the thread as any
   Browser observation does.
 - **Captures.** A screenshot the agent or person keeps from a profile page is
   kept by the thread under the usual
   [Browser captures](browser-captures.md) rules, and its record names the
-  profile (Project or Personal). A capture of a Private page names none.
+  profile (Project, Personal or named account). A capture of a Private page names none.
 
 The agent's activity on a profile page is visible: while the agent drives one,
 the Browser toolbar's driver indicator ("Agent active · Personal") and the
@@ -301,6 +344,161 @@ control shows the page's profile at all times. The person can take the page
 from the agent with **Take over**
 ([Person and agent together](browser-agent-tool.md#person-and-agent-together));
 a paired device cannot, signed in or not.
+
+## Delegated sessions
+
+A local person may review and grant a same-Project managed child, named
+routine or running terminal grant permission to use an existing sign-in. Settings › Data & storage › Browser session permissions
+lists eligible callers and current permissions. The person explicitly chooses
+the caller, stored profile and exact HTTPS origins (including any non-default port).
+Child and terminal permissions last 15 minutes, one hour or eight hours; a
+terminal permission always ends with its exact terminal grant. Routine permissions
+default to seven days, with an explicit duration capped at 30 days; Settings
+offers seven and 30 days. Every review shows the absolute expiry. A second review shows the
+host-derived caller, account label, model, host and expiry before Grant. The
+review is bound to that local window and expires after two minutes. Profile
+choice, a remembered origin, parentage and an unlocked vault grant nothing.
+
+The permission binds one execution host, run/generation, model/provider,
+Project/workspace authority, profile and origin set. Another Project's profile,
+HTTP, URL paths, credentials and query values refuse. Queued and waiting
+children may be reviewed without starting or resuming them; only a currently
+active child with its own tool authority can execute. Work retains its
+ambient `network: false`: the explicit site-limited host Browser permission
+allows only this Browser context, without granting network access to the
+child process or other tools. Completed, failed or cancelled
+children, Chat children, provider-native children and unavailable or unverified
+workspaces are not eligible.
+For Code routines, the reviewed source checkout remains part of the definition
+identity. A new-thread run executes in its own managed checkout. A same-thread
+follow-up instead uses the reviewed origin thread and its exact bound checkout.
+The host proves that checkout belongs to the exact run thread and repository, and checks
+its current Project binding, provider and model before granting Browser access.
+Browser operations carry that execution checkout's authority; a missing,
+unavailable or unrelated checkout refuses rather than borrowing the reviewed
+source checkout's authority.
+
+A routine permission binds its definition revision, execution profile/model,
+Project binding and effective authority. Only enabled local Work/Code routines
+with current Project/provider/profile receipts and managed-tool support are
+offered. A run must carry the dispatcher's exact run reference, current thread,
+matching definition and authority snapshots, and no cancellation or terminal
+state. The run owns an independent context, separate from earlier runs and
+ordinary turns in the same thread. Reading its page taints the actual run's
+thread. A changed definition, model, task posture, authority, Project binding,
+profile or provider refuses further effects and observations. Run end closes
+that run's context without revoking the permission for future unchanged runs.
+Granting starts no run. No eligible native owner means unavailable on every
+platform; there is no profile copy or headless fallback.
+
+A terminal permission is separate from the local person's transport switch. It
+binds one running terminal grant, Code task/model/authority, stored profile and
+exact HTTPS sites. Review identifies the terminal session, not only the task.
+Its stored-profile context belongs to the terminal grant; it never borrows the
+managed turn's profile page. Closing the terminal, switching its transport off,
+ending its task, revoking its window or stopping the host ends that permission
+and closes its context. A replacement terminal never inherits it. Changed task
+model, posture, binding or tool constraints invalidates the old permission.
+A stale profile read refuses; it never falls back to the task's Private page.
+Returning to Private requires an explicit navigate with that profile. Concurrent
+calls during profile cleanup refuse busy until the earlier context closes.
+Observations taint the actual Code task. Credentials, scripts and file transfers
+remain separately refused, and no account authority enters the terminal's
+ambient filesystem or network permissions.
+
+Only children admitted to this execution host with current managed-tool support
+are offered; a permission never redirects a remote child to the local account.
+
+Each child owns an independent Browser context and checks its current permission
+before creation, before each queued effect and before returning an observation.
+The child's managed-tool schema accepts an explicitly granted Project, Personal
+or named-account profile. A missing-profile refusal lists only that child's
+current granted profile choices, sites and expiry so it can retry explicitly.
+Permission never chooses an account or navigates automatically. The context
+uses the execution host's single native profile store. By default it needs a
+real local owner window able to open the Project, preferring the review window;
+closing that window closes its child contexts. A new context may use another
+eligible local window without changing the permission's execution-host or child
+identity. The explicit background-owner option below admits a separate native
+execution principal instead. No owner means unavailable; no headless copy or
+parent page is substituted.
+
+### Background native ownership
+
+Settings > Data & storage > **Keep Browser available without windows** is a
+local-person host preference, off by default. Enabling it starts no task and
+upgrades no existing permission. A subsequent local session review states
+whether the permission can continue when windows close. Review and confirmation
+bind the native owner's exact generation; a changed generation requires a fresh
+review. A renderer can select neither the generation nor an execution lease.
+
+Managed children and dispatcher-proven local Work/Code routine runs may use that
+reviewed generation. The server binds every native lease to the current grant,
+execution/task, Project, model/provider, authority revision, stored profile,
+exact HTTPS sites and grant expiry. It checks the current run and grant before
+each queued effect and before returning observations; the native host checks its
+own generation, lease cancellation and expiry at input/observation boundaries.
+An unavailable owner refuses with no headless fallback or window impersonation.
+The real review window ID is retained only as private provenance and a tool
+service routing key; it grants no native or human authority after closing.
+
+The same desktop process and profile partition own these pages, through hidden
+native views rather than another engine or copied cookies. Closing the last
+renderer closes ordinary window contexts and retains only opted-in execution
+ownership. Reopening a window does not replay a task, recover a grant or adopt a
+background page. These execution pages admit no renderer attach, human handoff,
+file transfers, sign-in, credential fill or page scripts. A workload explicitly
+requesting sign-in receives `browser-needs-login` and needs a local person on
+the execution host; authentication is never inferred from cookies or page contents.
+Terminal profile grants remain window-bound.
+
+Cancellation/run end, grant revocation/expiry, changed task/model/authority,
+profile clear and switch-off end the affected leases. Turning the preference off
+invalidates background-bound permissions. A backend or broker restart rotates
+the native generation and restores no workload authority, even if the same
+profile store survives; a confirmed replacement generation invalidates old
+permissions. Explicit accepted Quit closes all execution views and prevents
+re-enabling that stopped native owner. Native admission retires synchronously
+before the accepted quit awaits window-state flushing; later host shutdown joins
+the same bounded cleanup. Lost replies, late creates and failed
+cleanup retain their own reservations until cleanup is confirmed; they never
+close a foreign context or report uncertain cleanup as complete. An already
+dispatched external action may have happened and is never automatically replayed.
+
+The native owner admits at most 64 live or uncertain execution reservations.
+Create settles within ten seconds, individual cleanup is bounded to two seconds,
+and the broker sweeps expired leases every second. Grant expiry has a 30-day
+ceiling; normal active-page idle limits remain independent. Transport fixtures
+exercise the production broker/runtime with synthetic native views. Actual
+packaged last-window-close/reopen, host restart and explicit-Quit acceptance
+still require the separately approved native test Space; fixture passes do not
+claim that evidence.
+
+If permission, caller or owner ends during an operation, the result withholds
+both new and cached observations. An already dispatched site action may have
+happened, so its effect is reported as unknown and is never automatically
+retried. Stopping the child closes its own context without returning page data.
+
+Expiry or explicit Revoke closes the permission's contexts immediately; changed
+caller, authority, model or workspace refuses and invalidates it. Profile clear
+invalidates its reviews and permissions. A child end, cancellation or failure
+closes only that child's contexts, with bounded cleanup and an honest interrupted
+outcome if cleanup cannot be confirmed. The shared native engine and other
+threads stay owned by the host. A host restart restores no session permission, including routine permissions.
+The person must review again; the displayed duration is an upper bound within
+the current host lifetime. Replaying audit history cannot safely distinguish
+a committed grant from a later revocation whose durable write failed, so it
+never revives account authority.
+Journal records retain permission and revocation metadata, never cookies or
+credential values, and cannot reactivate a permission on replay.
+
+Credential fill/submit, sign-in, page scripts, uploads and download saves retain
+their separate gates. A delegated session permission authorizes none of them. A named routine may
+separately receive an explicit [fixed-content upload manifest](browser-agent-tool.md#recurring-upload-manifests);
+account permission alone still authorizes no file transfer. Plan
+still refuses new pages and effects; credential-field, origin, stale-ref,
+concurrency and account-store protections still apply. The child must explicitly
+retry or resume after a person grants permission; granting alone starts nothing.
 
 ## Extensions
 

@@ -16,6 +16,11 @@ import { ProjectService } from "../projectService";
 import { BindingReceiptStore } from "../bindingReceiptStore";
 import { CodeService } from "../code/codeService";
 import { CodeContentStore } from "../code/codeContentStore";
+import { WorkThreadService } from "../work/workThreadService";
+import {
+  WorkThreadProjection,
+  hydrateWorkThreadProjectionFromJournal,
+} from "../work/workThreadProjection";
 import { createOwnerPostureHost } from "./ownerPostureHost";
 import {
   AppendEventsRequest,
@@ -23,6 +28,7 @@ import {
   decodeProject,
   decodeCodeCheckoutIdentity,
   decodeOwnerPosture,
+  decodeWorkThread,
   ReplayCursor,
 } from "@octant/contracts";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -115,11 +121,17 @@ const changes = (host: HubTestHost, change: string) =>
   host.records.filter((record) => record.change === change);
 
 /** A hub, two spokes, and a phone the hub and both spokes list as an owner. */
-async function startWorld() {
+async function startWorld(approvals?: import("./ownerApprovalHost").OwnerApprovalHost) {
   const network = new HubTestNetwork();
   const [hub, a, b, phone] = [
     await startHubTestHost({ name: "Mac mini", address: "100.101.102.103", network, cleanups }),
-    await startHubTestHost({ name: "Laptop A", address: "100.101.102.104", network, cleanups }),
+    await startHubTestHost({
+      name: "Laptop A",
+      address: "100.101.102.104",
+      network,
+      cleanups,
+      ...(approvals === undefined ? {} : { ownerApprovals: approvals }),
+    }),
     await startHubTestHost({ name: "Desktop B", address: "100.101.102.105", network, cleanups }),
     await startHubTestHost({ name: "Phone", address: "100.101.102.106", network, cleanups }),
   ];
@@ -155,6 +167,93 @@ async function startWorld() {
   };
   return { network, hub, a, b, phone, authenticator, unlock, asPhone, openSession };
 }
+
+describe("fresh exact owner approval answers", () => {
+  it("requires a separate fresh unlock for private reads and every answer, refusing sessions, replay, changed body and another owner", async () => {
+    const list = vi.fn(() => ({ targets: [], unavailable: 1 }));
+    const answer = vi.fn(
+      async (
+        _request: import("@octant/contracts/owner-approvals").OwnerApprovalAnswer,
+        _authority: {
+          readonly principal: import("@octant/contracts").AuditActingPrincipal;
+          readonly current: () => boolean;
+        },
+      ) => ({ status: "delivered" as const }),
+    );
+    const { a, b, phone, asPhone, unlock, openSession } = await startWorld({ list, answer });
+    const session = await openSession(a);
+    for (const route of [HUB_OWNER_ROUTES.approvalRead, HUB_OWNER_ROUTES.approvalAnswer]) {
+      expect((await asPhone(a, route, {}, { session })).status).toBe(403);
+      expect((await asPhone(a, route, {})).status).toBe(403);
+    }
+    expect(list).not.toHaveBeenCalled();
+    expect(answer).not.toHaveBeenCalled();
+    const read = await asPhone(a, HUB_OWNER_ROUTES.approvalRead, {}, { unlock });
+    expect(read.status).toBe(200);
+    expect(list).toHaveBeenCalledOnce();
+    const body = {
+      ownerMemberId: phone.hostId,
+      hostMemberId: a.hostId,
+      mode: "code",
+      threadId: "00000000-0000-4000-8000-000000000921",
+      projectId: "00000000-0000-4000-8000-000000000922",
+      requestId: "00000000-0000-4000-8000-000000000923",
+      targetVersion: "a".repeat(64),
+      actionDigest: "b".repeat(64),
+      approved: true,
+    };
+    expect(
+      (
+        await asPhone(a, HUB_OWNER_ROUTES.approvalAnswer, body, {
+          unlock: {
+            ...unlock,
+            ...(read.proofHeader === undefined ? {} : { reuse: read.proofHeader }),
+          },
+        })
+      ).status,
+    ).toBe(403);
+    const sent = await asPhone(a, HUB_OWNER_ROUTES.approvalAnswer, body, { unlock });
+    expect(sent.status).toBe(200);
+    expect(answer).toHaveBeenCalledOnce();
+    expect(answer.mock.calls[0]?.[1].principal).toMatchObject({ kind: "owner-unlock" });
+    expect(
+      (
+        await asPhone(a, HUB_OWNER_ROUTES.approvalAnswer, body, {
+          unlock: {
+            ...unlock,
+            ...(sent.proofHeader === undefined ? {} : { reuse: sent.proofHeader }),
+          },
+        })
+      ).status,
+    ).toBe(403);
+    expect(
+      (
+        await asPhone(
+          a,
+          HUB_OWNER_ROUTES.approvalAnswer,
+          { ...body, approved: false },
+          {
+            unlock: {
+              ...unlock,
+              boundTo: { route: HUB_OWNER_ROUTES.approvalAnswer, body: JSON.stringify(body) },
+            },
+          },
+        )
+      ).status,
+    ).toBe(403);
+    expect(
+      (
+        await asPhone(b, HUB_OWNER_ROUTES.approvalAnswer, body, {
+          unlock: {
+            ...unlock,
+            ...(sent.proofHeader === undefined ? {} : { reuse: sent.proofHeader }),
+          },
+        })
+      ).status,
+    ).toBe(403);
+    expect(answer).toHaveBeenCalledOnce();
+  });
+});
 
 describe("one unlock covering five minutes of administration", () => {
   it("covers several administration changes with a single unlock", async () => {
@@ -797,6 +896,7 @@ describe("owner posture routes with the production Code and Project services", (
                 },
               ],
             });
+            if (project.type !== "code") throw new Error("Expected Code Project fixture");
             const checkout = decodeCodeCheckoutIdentity({
               id: checkoutId,
               repositoryId,
@@ -863,6 +963,39 @@ describe("owner posture routes with the production Code and Project services", (
               kind: "thread-created",
               thread,
             });
+            const workProject = decodeProject({
+              id: "50000000-0000-4000-8000-000000000004",
+              type: "work",
+              name: "Owner work",
+              lifecycle: "active",
+              pinned: false,
+              rank: "0/1",
+              version: 1,
+              createdAt: timestamp,
+              updatedAt: timestamp,
+              binding: project.binding,
+              bindingHistory: project.bindingHistory,
+            });
+            const workThread = decodeWorkThread({
+              id: "50000000-0000-4000-8000-000000000005",
+              projectId: workProject.id,
+              bindingRevisionId: revision,
+              title: "Owner Work task",
+              lifecycle: "active",
+              providerInstanceId: id,
+              modelId: "fixture",
+              access: "ask-first",
+              version: 1,
+              createdAt: timestamp,
+              updatedAt: timestamp,
+            });
+            seed("project", String(workProject.id), "project.created@1", { project: workProject });
+            seed("work-thread", String(workThread.id), "work.thread-created@1", {
+              kind: "thread-created",
+              thread: workThread,
+            });
+            const workProjection = new WorkThreadProjection();
+            workProjection.apply({ kind: "thread-created", thread: workThread });
             const unavailable = async (): Promise<never> => {
               throw new Error("A posture change must not use a window or a file port.");
             };
@@ -886,6 +1019,16 @@ describe("owner posture routes with the production Code and Project services", (
               uuid: randomUUID,
               clock: () => new Date().toISOString(),
             });
+            const work = new WorkThreadService({
+              persistence,
+              projects: { bootstrap: unavailable },
+              projection: workProjection,
+              turnProjection: { listForThread: () => [] },
+              uuid: randomUUID,
+              clock: () => new Date().toISOString(),
+              workingDirectories: { resolve: unavailable },
+              onWorkingDirectoryChanged: unavailable,
+            });
             const host = createOwnerPostureHost({
               readCodeThread: persistence.readCodeThread,
               readCodeThreads: persistence.readCodeThreads,
@@ -894,6 +1037,11 @@ describe("owner posture routes with the production Code and Project services", (
               readCheckout: persistence.readCodeCheckout,
               code,
               projects,
+              work: {
+                readThreads: () => workProjection.list(),
+                readThread: (id) => workProjection.read(id),
+                changeAccess: (input) => work.changeOwnerAccess(input),
+              },
             });
             vi.spyOn(a.postures, "read").mockImplementation(host.read);
             if (host.list === undefined) throw new Error("Missing production target listing");
@@ -905,6 +1053,7 @@ describe("owner posture routes with the production Code and Project services", (
               targets: expect.arrayContaining([
                 expect.objectContaining({ title: "Owner task" }),
                 expect.objectContaining({ title: "Owner repository" }),
+                expect.objectContaining({ title: "Owner Work task" }),
               ]),
             });
             vi.spyOn(a.postures, "change").mockImplementation(host.change);
@@ -1013,10 +1162,74 @@ describe("owner posture routes with the production Code and Project services", (
             ).toEqual({ status: "refused", kind: "posture-stale" });
             const beforeVersion = decodeOwnerPosture(reading.posture).version;
             expect(after.posture.version).not.toBe(beforeVersion);
+            const workReading = await host.read({ kind: "work-thread", threadId: workThread.id });
+            if (workReading.status !== "read") throw new Error("Missing Work reading");
+            const workRequest = {
+              subject: workReading.posture.subject,
+              expectedVersion: workReading.posture.version,
+              posture: "full-access",
+            };
+            expect(
+              (await asPhone(a, HUB_OWNER_ROUTES.postureChange, workRequest, { session })).json,
+            ).toEqual({ status: "refused", kind: "own-unlock-required" });
+            const workChanged = await asPhone(a, HUB_OWNER_ROUTES.postureChange, workRequest, {
+              unlock,
+            });
+            expect(workChanged.status).toBe(200);
+            expect(workProjection.read(workThread.id)?.access).toBe("full-access");
+            expect(
+              (await asPhone(a, HUB_OWNER_ROUTES.postureChange, workRequest, { unlock })).json,
+            ).toEqual({ status: "refused", kind: "posture-stale" });
+            if (workChanged.proofHeader === undefined) throw new Error("Missing Work proof");
+            expect(
+              (
+                await asPhone(a, HUB_OWNER_ROUTES.postureChange, workRequest, {
+                  unlock: { ...unlock, reuse: workChanged.proofHeader },
+                })
+              ).status,
+            ).not.toBe(200);
+            const restoredWork = new WorkThreadProjection();
+            hydrateWorkThreadProjectionFromJournal({
+              replay: ({ afterSequence, limit }) =>
+                persistence.journal.replay(
+                  Schema.decodeUnknownSync(ReplayCursor)({ afterSequence, limit }),
+                ),
+              projection: restoredWork,
+            });
+            expect(restoredWork.read(workThread.id)).toMatchObject({
+              access: "full-access",
+              version: 2,
+            });
+            const beforeWorkProjectChange = await host.read({
+              kind: "work-thread",
+              threadId: workThread.id,
+            });
+            if (beforeWorkProjectChange.status !== "read") throw new Error("Missing Work target");
+            seed(
+              "project",
+              String(workProject.id),
+              "project.renamed@1",
+              { project: { ...workProject, name: "Changed Work target", version: 2 } },
+              1,
+            );
+            expect(
+              (
+                await asPhone(
+                  a,
+                  HUB_OWNER_ROUTES.postureChange,
+                  {
+                    ...workRequest,
+                    expectedVersion: beforeWorkProjectChange.posture.version,
+                    posture: "auto",
+                  },
+                  { unlock },
+                )
+              ).json,
+            ).toEqual({ status: "refused", kind: "posture-stale" });
             const ownerEvents = persistence.journal
               .replay(Schema.decodeUnknownSync(ReplayCursor)({ afterSequence: 0, limit: 100 }))
               .filter((event) => event.actor.kind === "owner-unlock");
-            expect(ownerEvents).toHaveLength(4);
+            expect(ownerEvents).toHaveLength(6);
             expect(
               ownerEvents.every(
                 (event) =>

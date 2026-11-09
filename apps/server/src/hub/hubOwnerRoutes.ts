@@ -1,3 +1,5 @@
+import { decodeOwnerApprovalAnswer } from "@octant/contracts/owner-approvals";
+import type { OwnerApprovalHost } from "./ownerApprovalHost";
 // What an owner device asks of a host with a window's powers: the
 // administration the loopback channel gives a window (hub grant, leave, Confirm
 // new members, owner changes, and on the hub the hub role, join codes and
@@ -31,6 +33,8 @@ import {
   decodeOwnerChallengeRequest,
   decodeOwnerCredentialCopyRequest,
   decodeOwnerCredentialReceiveRequest,
+  decodeOwnerThreadMoveConfirmRequest,
+  decodeOwnerThreadMoveTicketRequest,
   decodeOwnerJoinCodeRequest,
   decodeOwnerMemberRequest,
   decodeOwnerPostureChangeRequest,
@@ -63,6 +67,8 @@ import type { SignInService } from "./signInService";
 import type { SpokeLinkService } from "./spokeLinkService";
 import type { SpokeProvisionService } from "./spokeProvisionService";
 import type { SpokeSignInService } from "./spokeSignInService";
+import type { ThreadMoveService } from "./threadMoveService";
+import type { ThreadMovesFromWindow } from "./threadMovesFromWindow";
 
 export const HUB_OWNER_ROUTE_PREFIX = "/api/hub/owner";
 
@@ -93,9 +99,16 @@ export const HUB_OWNER_ROUTES = {
   signInAccept: `${HUB_OWNER_ROUTE_PREFIX}/sign-in/accept`,
   signInDecline: `${HUB_OWNER_ROUTE_PREFIX}/sign-in/decline`,
   signInCheck: `${HUB_OWNER_ROUTE_PREFIX}/sign-in/check`,
+  approvalRead: `${HUB_OWNER_ROUTE_PREFIX}/approvals/read`,
+  approvalAnswer: `${HUB_OWNER_ROUTE_PREFIX}/approvals/answer`,
   browserTargets: `${HUB_OWNER_ROUTE_PREFIX}/browser/targets`,
   browserTakeOver: `${HUB_OWNER_ROUTE_PREFIX}/browser/take-over`,
   browserControl: `${HUB_OWNER_ROUTE_PREFIX}/browser/control`,
+  threadMoveTicket: `${HUB_OWNER_ROUTE_PREFIX}/thread-moves/ticket`,
+  // On the source: the moves a window holds for an owner phone, and the phone
+  // handing over the ticket the destination issued it.
+  threadMoveConfirmations: `${HUB_OWNER_ROUTE_PREFIX}/thread-moves/confirmations`,
+  threadMoveConfirm: `${HUB_OWNER_ROUTE_PREFIX}/thread-moves/confirm`,
 } as const;
 
 type OwnerRoute = (typeof HUB_OWNER_ROUTES)[keyof typeof HUB_OWNER_ROUTES];
@@ -106,6 +119,7 @@ const READ_ROUTES: ReadonlySet<string> = new Set([
   HUB_OWNER_ROUTES.alerts,
   HUB_OWNER_ROUTES.heldMembers,
   HUB_OWNER_ROUTES.signInRequests,
+  HUB_OWNER_ROUTES.threadMoveConfirmations,
 ]);
 
 /** The routes an unlock can be asked for: every one that changes something. */
@@ -127,12 +141,15 @@ const HUB_ONLY: ReadonlySet<string> = new Set([
 ]);
 const EITHER: ReadonlySet<string> = new Set([
   HUB_OWNER_ROUTES.challenge,
+  HUB_OWNER_ROUTES.approvalRead,
+  HUB_OWNER_ROUTES.approvalAnswer,
   HUB_OWNER_ROUTES.session,
   HUB_OWNER_ROUTES.ownersAdd,
   HUB_OWNER_ROUTES.ownersRemove,
   HUB_OWNER_ROUTES.browserTargets,
   HUB_OWNER_ROUTES.browserTakeOver,
   HUB_OWNER_ROUTES.browserControl,
+  HUB_OWNER_ROUTES.threadMoveTicket,
   ...CODE_OWNER_UNLOCKED_MERGE_PATHS,
 ]);
 
@@ -150,6 +167,8 @@ const MERGE_ROUTES: ReadonlySet<string> = new Set(CODE_OWNER_UNLOCKED_MERGE_PATH
  * decided by the posture asked for; an owner join code by its body.
  */
 const OWN_UNLOCK_ROUTES: ReadonlySet<string> = new Set([
+  HUB_OWNER_ROUTES.approvalRead,
+  HUB_OWNER_ROUTES.approvalAnswer,
   HUB_OWNER_ROUTES.session,
   HUB_OWNER_ROUTES.ownersAdd,
   HUB_OWNER_ROUTES.ownersRemove,
@@ -158,6 +177,8 @@ const OWN_UNLOCK_ROUTES: ReadonlySet<string> = new Set([
   HUB_OWNER_ROUTES.credentialReceive,
   HUB_OWNER_ROUTES.credentialCopy,
   HUB_OWNER_ROUTES.browserTakeOver,
+  // A move erases the thread on the source, so it never rides an open session.
+  HUB_OWNER_ROUTES.threadMoveTicket,
 ]);
 
 /** Which unlock this action asks for. A body that does not decode asks for the strictest. */
@@ -190,12 +211,16 @@ const MAX_BODY_BYTES = 16 * 1_024;
 const NO_STORE = { "cache-control": "no-store" } as const;
 
 export interface HubOwnerRouteOptions {
+  readonly approvals?: OwnerApprovalHost;
   readonly browser?: OwnerBrowserControlService;
   readonly hub: HubService;
   readonly spoke: SpokeLinkService;
   readonly unlock: OwnerUnlockService;
   readonly postures: OwnerPostureHost;
   readonly credentials: OwnerCredentialCopyService;
+  readonly threadMoves: ThreadMoveService;
+  /** The moves a window on this host holds until an owner phone confirms them. */
+  readonly phoneMoves: Pick<ThreadMovesFromWindow, "phoneConfirmations" | "confirmOnPhone">;
   readonly provision: SpokeProvisionService;
   readonly signIn: SignInService;
   readonly spokeSignIn: SpokeSignInService;
@@ -383,6 +408,59 @@ export function createHubOwnerRouteHandler(
       memberId: senderMember.memberId,
     };
 
+    if (route === HUB_OWNER_ROUTES.approvalRead || route === HUB_OWNER_ROUTES.approvalAnswer) {
+      if (options.approvals === undefined || unlockResult?.status !== "fresh")
+        return refused(403, "unlock-required");
+      const stamp = ownerListStamp(scope);
+      const deadline = (options.now ?? Date.now)() + 60_000;
+      const current = () => {
+        const latest = scopeFor(route, body);
+        return (
+          !request.signal.aborted &&
+          (options.now ?? Date.now)() <= deadline &&
+          !("kind" in latest) &&
+          ownerListStamp(latest) === stamp &&
+          !latest.inactiveDeviceMemberIds.includes(senderId) &&
+          authorizeOwnerRequest({
+            host: latest.host,
+            grant: latest.grant,
+            owners: ownerEntries(latest.owners),
+            roster: latest.roster,
+            memberId: senderMember.memberId,
+            identityKeyFingerprint: publicKeyFingerprint(presentedKey),
+            unlock: "not-needed",
+            unlockClass: "own",
+          }).status === "allowed"
+        );
+      };
+      try {
+        if (!current()) return refused(403, "refused");
+        if (route === HUB_OWNER_ROUTES.approvalRead) {
+          const value: unknown = JSON.parse(body);
+          if (
+            typeof value !== "object" ||
+            value === null ||
+            Array.isArray(value) ||
+            Object.keys(value).length !== 0
+          )
+            return refused(400, "invalid");
+          return Response.json(options.approvals.list(senderMember.memberId), {
+            headers: NO_STORE,
+          });
+        }
+        const result = await options.approvals.answer(decodeOwnerApprovalAnswer(JSON.parse(body)), {
+          principal,
+          current,
+        });
+        return Response.json(result, {
+          status: result.status === "refused" ? 409 : 200,
+          headers: NO_STORE,
+        });
+      } catch {
+        return refused(400, "invalid");
+      }
+    }
+
     if (
       route === HUB_OWNER_ROUTES.browserTargets ||
       route === HUB_OWNER_ROUTES.browserTakeOver ||
@@ -470,6 +548,8 @@ export function createHubOwnerRouteHandler(
       if (body.trim() !== "") throw new Error("invalid");
     };
     switch (route) {
+      case HUB_OWNER_ROUTES.approvalRead:
+      case HUB_OWNER_ROUTES.approvalAnswer:
       case HUB_OWNER_ROUTES.browserTargets:
       case HUB_OWNER_ROUTES.browserTakeOver:
       case HUB_OWNER_ROUTES.browserControl:
@@ -606,6 +686,31 @@ export function createHubOwnerRouteHandler(
             ownerMemberId: String(input.senderMemberId),
             sourceMemberId: String(asked.sourceMemberId),
             targetCredentialName: asked.targetCredentialName,
+            principal,
+          }),
+        );
+      }
+      case HUB_OWNER_ROUTES.threadMoveTicket: {
+        const asked = decodeOwnerThreadMoveTicketRequest(json());
+        return outcome(
+          options.threadMoves.issueTicket({
+            ownerMemberId: String(input.senderMemberId),
+            sourceMemberId: String(asked.sourceMemberId),
+            ...(asked.threads === undefined ? {} : { threads: asked.threads }),
+          }),
+        );
+      }
+      case HUB_OWNER_ROUTES.threadMoveConfirmations:
+        return Response.json(options.phoneMoves.phoneConfirmations(), { headers: NO_STORE });
+      case HUB_OWNER_ROUTES.threadMoveConfirm: {
+        // An administration-class unlock here says the person holding this
+        // phone is present on the source; the move itself was authorized on
+        // the destination, whose ticket needed its own fresh unlock there.
+        const confirmed = decodeOwnerThreadMoveConfirmRequest(json());
+        return outcome(
+          options.phoneMoves.confirmOnPhone({
+            confirmationId: confirmed.confirmationId,
+            ticketId: confirmed.ticketId,
             principal,
           }),
         );

@@ -1,4 +1,6 @@
+import { OwnerApprovalAction } from "./providerApprovalAction";
 import { Schema } from "effect";
+import { Questionnaire } from "./questionnaire";
 import { AggregateVersion, CorrelationId, UtcTimestamp } from "./events";
 import {
   ExtensionComponentId,
@@ -1549,6 +1551,12 @@ export const ProviderCapabilities = Schema.Struct({
       code: ProviderCapabilitySupport,
     }).annotations(strict),
   ),
+  /**
+   * Whether the runtime takes the person's compaction point for a session it
+   * opens, so it also compacts at that share inside a long turn. Absent or
+   * unsupported: only the host's between-turn rule applies.
+   */
+  compactionPoint: Schema.optional(ProviderCapabilitySupport),
   citations: ProviderCapabilitySupport,
   harnessAutoReview: ProviderCapabilitySupport,
   /**
@@ -1672,10 +1680,13 @@ export const ProviderTurnInput = Schema.Struct({
 }).annotations(strict);
 export type ProviderTurnInput = typeof ProviderTurnInput.Type;
 
+/** The longest base64 payload one tool image may carry. */
+export const MAX_PROVIDER_TOOL_IMAGE_BASE64_LENGTH = 2_097_152;
+
 export const ProviderToolImage = Schema.Struct({
-  mimeType: Schema.Literal("image/png", "image/jpeg"),
+  mimeType: Schema.Literal("image/png", "image/jpeg", "image/gif", "image/webp"),
   data: Schema.NonEmptyTrimmedString.pipe(
-    Schema.maxLength(2_097_152),
+    Schema.maxLength(MAX_PROVIDER_TOOL_IMAGE_BASE64_LENGTH),
     Schema.pattern(/^[A-Za-z0-9+/]+={0,2}$/),
   ),
 }).annotations(strict);
@@ -2661,10 +2672,13 @@ export const MAX_PROVIDER_APPROVAL_CALL_INPUT_LENGTH = 8_192;
  * its tool, the argument fields a reviewer judges as bounded JSON with
  * credentials redacted, and where it runs. It never carries the call's output.
  * A driver hands it to the host through `ProviderConnection.approvalCall` for
- * an automatic reviewer only: it is never put on an event, journaled, or
- * shown.
+ * an automatic reviewer. Judged input is never put on an event or journaled.
+ * Optional ownerAction is a separate complete file-operation consent body,
+ * shown only through fresh owner authorization and never journaled.
  */
 export const ProviderApprovalCall = Schema.Struct({
+  /** Complete, unredacted file-operation consent facts, absent when unavailable. Never journal. */
+  ownerAction: Schema.optional(OwnerApprovalAction),
   tool: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(255)),
   input: Schema.optional(
     Schema.String.pipe(Schema.maxLength(MAX_PROVIDER_APPROVAL_CALL_INPUT_LENGTH)),
@@ -2978,6 +2992,7 @@ export const ProviderRuntimeEvent = Schema.Union(
   Schema.Struct({
     ...ProviderRuntimeEventFields,
     kind: Schema.Literal("user-input-request"),
+    questionnaire: Schema.optional(Questionnaire),
     requestId: Schema.NonEmptyTrimmedString,
     prompt: Schema.NonEmptyTrimmedString,
     options: Schema.Array(ProviderQuestionOption),

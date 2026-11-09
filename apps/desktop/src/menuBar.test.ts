@@ -3,6 +3,7 @@ import type { FleetActivity, FleetActivityThread } from "@octant/contracts/fleet
 import {
   buildMenuBarItems,
   decodeMenuBarOpenThread,
+  decodeMenuBarShutdownProgress,
   formatRedactedHostDiagnostics,
   MenuBarFleet,
   menuBarTitle,
@@ -189,6 +190,50 @@ describe("macOS menu-bar host controls", () => {
     fleet.observe(activity([needsYou("a", "One"), needsYou("b", "Two"), working("c", "Three")]));
     expect(menuBarTitle(snapshot, fleet.threads())).toBe("2");
     expect(menuBarTitle({ ...snapshot, attentionRequired: true }, fleet.threads())).toBe("!");
+  });
+
+  it("offers Prepare to Shut Down… in a hub and shows a running batch's progress beside the glyph", () => {
+    const snapshot = {
+      state: "running" as const,
+      ownership: "desktop-owned" as const,
+      activeAgentCount: 0,
+      attentionRequired: false,
+    };
+    const labels = (shutdown: Parameters<typeof buildMenuBarItems>[2]) =>
+      buildMenuBarItems(snapshot, [], shutdown)
+        .map((item) => item.label)
+        .filter(Boolean);
+
+    // Outside a hub there is nowhere to move to, so the menu bar stays as it was.
+    expect(labels({ offered: false })).not.toContain("Prepare to Shut Down…");
+    expect(labels({ offered: true })).toEqual([
+      "Open Octant",
+      "New task…",
+      "Prepare to Shut Down…",
+      "Local host",
+      "Quit Octant",
+    ]);
+    expect(labels({ offered: true, progress: { ended: 3, total: 9 } })).toEqual([
+      "Open Octant",
+      "New task…",
+      "Moving threads · 3 of 9",
+      "Prepare to Shut Down…",
+      "Local host",
+      "Quit Octant",
+    ]);
+    expect(menuBarTitle(snapshot, [], { ended: 3, total: 9 })).toBe("3/9");
+    // The host needing attention still comes first.
+    expect(menuBarTitle({ ...snapshot, attentionRequired: true }, [], { ended: 3, total: 9 })).toBe(
+      "!",
+    );
+  });
+
+  it("accepts only a well-formed batch progress report from a window", () => {
+    expect(decodeMenuBarShutdownProgress(null)).toBeUndefined();
+    expect(decodeMenuBarShutdownProgress({ ended: 2, total: 5 })).toEqual({ ended: 2, total: 5 });
+    expect(() => decodeMenuBarShutdownProgress({ ended: 6, total: 5 })).toThrow();
+    expect(() => decodeMenuBarShutdownProgress({ ended: 1.5, total: 5 })).toThrow();
+    expect(() => decodeMenuBarShutdownProgress({ ended: 1, total: 5, label: "x" })).toThrow();
   });
 
   it("accepts only a well-formed open-thread report from a window", () => {

@@ -1,6 +1,8 @@
 import type { ThemeTypography } from "@octant/contracts/theme";
 import type { UsageQueryFilter } from "@octant/contracts/usage-rpc";
 import type { BrowserAutomationClient } from "@octant/client-runtime/browser-automation-client";
+import type { ProjectTerminalClient } from "@octant/client-runtime/project-terminal-client";
+import type { ServerProject } from "@octant/contracts/server-projects";
 import { memo, Suspense, useMemo } from "react";
 import type { ChatController } from "../chat/useChatController";
 import type { CodeController } from "../code/useCodeController";
@@ -19,13 +21,20 @@ import type { useWorkSettings } from "../work/useWorkSettings";
 import type { useWorkThreadNavigation } from "../work/useWorkThreadNavigation";
 import type { createLaunchedShellClients } from "./createLaunchedShellClients";
 import type { ShellActions } from "./shellActions";
+import { openUsageSubject as openUsageSubjectThread } from "./usageSubjectOpener";
 
 type HostFederationLifecycle = NonNullable<
   ReturnType<typeof useHostFederationLifecycle>
 >["lifecycle"];
 
 export interface SettingsContainerProps {
-  readonly actions: Pick<ShellActions, "setUsageOpen">;
+  readonly projectTerminalClient?: ProjectTerminalClient;
+  readonly projectActionStoragePrefix?: string;
+  readonly onOpenServerProject?: (project: ServerProject) => void;
+  readonly actions: Pick<
+    ShellActions,
+    "openChatThread" | "setUsageOpen" | "selectChatThread" | "selectWorkThread" | "selectCodeThread"
+  >;
   readonly allProjects: ReturnType<typeof useProjectController>["allProjects"];
   readonly availableFonts?: ReadonlyArray<string>;
   readonly backgroundImageLibrary: ReturnType<typeof useBackgroundImageLibrary>;
@@ -114,6 +123,8 @@ export const SettingsContainer = memo(function SettingsContainer(props: Settings
     serverProjectsClient,
     usageClient,
     usageDashboardClient,
+    benchmarksClient,
+    chatClient,
   } = props.clients;
   const selectLocalPluginFolder = props.hostBridge?.selectLocalPluginFolder;
   const selectSkillFolder = props.hostBridge?.selectSkillFolder;
@@ -137,6 +148,13 @@ export const SettingsContainer = memo(function SettingsContainer(props: Settings
   const chatThreads = chatController.bootstrap?.threads;
   const workThreads = workNavigation.bootstrap?.threads;
   const codeThreads = codeController.bootstrap?.threads;
+  const codeProjects = useMemo(
+    () =>
+      allProjects
+        .filter((project) => project.type === "code")
+        .map((project) => ({ id: String(project.id), name: project.name })),
+    [allProjects],
+  );
   const usageNames = useMemo(() => {
     const names = new Map<string, string>();
     for (const instance of providerController.instances)
@@ -147,6 +165,39 @@ export const SettingsContainer = memo(function SettingsContainer(props: Settings
     for (const thread of codeThreads ?? []) names.set(`code-thread/${thread.id}`, thread.title);
     return names;
   }, [allProjects, chatThreads, codeThreads, providerController.instances, workThreads]);
+
+  // Only threads can be opened from Usage; any other subject stays put.
+  const openUsageSubject = (subjectType: string, subjectId: string) => {
+    const leaveUsage = () => {
+      actions.setUsageOpen(false);
+      if (props.surface === "settings") controller.closeSettings();
+    };
+    openUsageSubjectThread(subjectType, subjectId, {
+      selectChatThread: (id) => {
+        leaveUsage();
+        actions.selectChatThread(id);
+      },
+      selectWorkThread: (id) => {
+        leaveUsage();
+        actions.selectWorkThread(id);
+      },
+      selectCodeThread: (id) => {
+        leaveUsage();
+        actions.selectCodeThread(id);
+      },
+      openChatThread: (id, title, projectId) => {
+        leaveUsage();
+        return actions.openChatThread(id, title, projectId);
+      },
+      listedChatThreadIds: new Set(chatController.navigation.map((row) => String(row.threadId))),
+      chatThreadRow: (id) => {
+        const thread = chatThreads?.find((candidate) => String(candidate.id) === id);
+        return thread === undefined
+          ? undefined
+          : { title: thread.title, projectId: thread.projectId };
+      },
+    });
+  };
 
   const usageSurface = (
     <Suspense
@@ -167,8 +218,14 @@ export const SettingsContainer = memo(function SettingsContainer(props: Settings
           : { providerLimitsClient: providerUsageLimitsClient })}
         isNarrow={isNarrow}
         onBack={() => actions.setUsageOpen(false)}
+        onOpenSubject={openUsageSubject}
         {...(pendingUsageFilter === undefined ? {} : { initialFilter: pendingUsageFilter })}
         usageQuery={usageClient}
+        diagnosticsClient={usageClient}
+        benchmarksClient={benchmarksClient}
+        chatClient={chatClient}
+        providerSnapshot={providerController.snapshot}
+        codeProjects={codeProjects}
       />
     </Suspense>
   );
@@ -231,6 +288,17 @@ export const SettingsContainer = memo(function SettingsContainer(props: Settings
       {...(shieldServersClient === undefined ? {} : { shieldServersClient })}
       {...(providerToolingClient === undefined ? {} : { providerToolingClient })}
       {...(serverProjectsClient === undefined ? {} : { serverProjectsClient })}
+      codeProjectId={controller.workspace?.contextByMode.code.projectId ?? undefined}
+      workProjectId={controller.workspace?.contextByMode.work.projectId ?? undefined}
+      {...(props.onOpenServerProject === undefined
+        ? {}
+        : { onOpenServerProject: props.onOpenServerProject })}
+      {...(props.projectTerminalClient === undefined
+        ? {}
+        : { projectTerminalClient: props.projectTerminalClient })}
+      {...(props.projectActionStoragePrefix === undefined
+        ? {}
+        : { projectActionStoragePrefix: props.projectActionStoragePrefix })}
       {...(replicaMembershipClient === undefined ? {} : { replicaMembershipClient })}
       replicaSyncStatusClient={replicaSyncStatusClient}
       folderBrowseClient={folderBrowseClient}
@@ -243,6 +311,10 @@ export const SettingsContainer = memo(function SettingsContainer(props: Settings
       githubClient={githubClient}
       integrationClient={linearClient}
       usageClient={usageClient}
+      benchmarksClient={benchmarksClient}
+      chatClient={chatClient}
+      codeProjects={codeProjects}
+      onOpenUsageSubject={openUsageSubject}
       {...(providerUsageLimitsClient === undefined ? {} : { providerUsageLimitsClient })}
       {...(localUsageHistoryClient === undefined ? {} : { localUsageHistoryClient })}
       backgroundImageLibrary={backgroundImageLibrary}

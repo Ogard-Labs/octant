@@ -393,6 +393,18 @@ export interface OctantHostBridge {
   readonly subscribeCodeDeepLinks: (listener: (target: unknown) => void) => () => void;
   readonly subscribeOpenSettings: (listener: () => void) => () => void;
   readonly subscribeQuitShortcutHint: (listener: () => void) => () => void;
+  /** Prepare to Shut Down… from the menu, or Move threads first… from the quit confirmation. */
+  readonly subscribePrepareToShutDown?: (
+    listener: (request: { readonly fromQuit: boolean }) => void,
+  ) => () => void;
+  /** Whether this host is in a hub with another member, so Quit offers Move threads first…. */
+  readonly reportShutdownMovesOffered?: (offered: boolean) => void;
+  /** How far a running Prepare to shut down batch has come, for the menu bar; `undefined` when none runs. */
+  readonly reportShutdownProgress?: (
+    progress: { readonly ended: number; readonly total: number } | undefined,
+  ) => void;
+  /** Quits through the guarded shutdown, which may still ask about running work. */
+  readonly requestQuit?: () => void;
   readonly subscribeStartNewAgent: (listener: () => void) => () => void;
   /**
    * Set only in an Octant Nightly client window, whose bridge omits the
@@ -1157,6 +1169,37 @@ export function createHostBridge(
             ipc.on(IPC_CHANNELS.remoteServerPageSign, receive);
             return () => ipc.removeListener(IPC_CHANNELS.remoteServerPageSign, receive);
           },
+          subscribePrepareToShutDown: (
+            listener: (request: { readonly fromQuit: boolean }) => void,
+          ) => {
+            const receive: MaterialListener = (_event, value) =>
+              listener({
+                fromQuit:
+                  typeof value === "object" &&
+                  value !== null &&
+                  Reflect.get(value, "fromQuit") === true,
+              });
+            ipc.on(IPC_CHANNELS.prepareToShutDown, receive);
+            return () => ipc.removeListener(IPC_CHANNELS.prepareToShutDown, receive);
+          },
+          reportShutdownMovesOffered: (offered: boolean) => {
+            void ipc
+              .invoke(IPC_CHANNELS.shutdownMovesOffered, offered === true)
+              .catch(() => undefined);
+          },
+          reportShutdownProgress: (
+            progress: { readonly ended: number; readonly total: number } | undefined,
+          ) => {
+            void ipc
+              .invoke(
+                IPC_CHANNELS.shutdownProgress,
+                progress === undefined ? null : { ended: progress.ended, total: progress.total },
+              )
+              .catch(() => undefined);
+          },
+          requestQuit: () => {
+            void ipc.invoke(IPC_CHANNELS.requestQuit).catch(() => undefined);
+          },
           hubAdministrationRequest: async (operation: string, body?: unknown) => {
             // Main refuses an unknown operation; the preload stays free of the
             // operation table because its body decoders pull in npm modules a
@@ -1176,6 +1219,21 @@ export function createHostBridge(
               throw new Error("Octant hub controls are unavailable.");
             }
             return { status: answer.status, body: answer.body };
+          },
+          // Open there on a moved thread's tombstone: the window names only the
+          // thread; main reads where it went from the host and opens that
+          // member's own page in the default browser.
+          openMovedThreadThere: async (thread: {
+            readonly mode: string;
+            readonly threadId: string;
+          }) => {
+            const answer = (await ipc.invoke(IPC_CHANNELS.threadMoveOpenThere, {
+              mode: thread.mode,
+              threadId: thread.threadId,
+            })) as { readonly status?: unknown } | null;
+            return answer?.status === "opened"
+              ? ({ status: "opened" } as const)
+              : ({ status: "refused" } as const);
           },
           // A Mac owner device's unlock key. The bridge can make the key (its public
           // half comes back), sign one owner unlock challenge, and forget the key.
@@ -1358,6 +1416,11 @@ export const OCTANT_ONLY_BRIDGE_MEMBERS: ReadonlySet<string> = new Set([
   "forgetRemoteServerPages",
   "subscribeRemoteServerPageSigning",
   "hubAdministrationRequest",
+  "openMovedThreadThere",
+  "subscribePrepareToShutDown",
+  "reportShutdownMovesOffered",
+  "reportShutdownProgress",
+  "requestQuit",
   "ownerUnlockMakeKey",
   "ownerUnlockSign",
   "ownerUnlockForgetKey",

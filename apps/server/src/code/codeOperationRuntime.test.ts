@@ -1,4 +1,7 @@
+import { HubMemberId } from "@octant/contracts";
+import { providerApprovalCall } from "../providers/providerApprovalCall";
 import { ConversationInputTransfer } from "../attachments/conversationInputTransfer";
+import { applyProtectedFilesChoice, currentProtectedFilesChoice } from "../process/secretGuard";
 import { createExistingWorktreeCodeFileRootAuthority } from "../wiring/code";
 import { withCodeOperationRuntime } from "../wiring/codeRuntime";
 import { createCodeRouteHandler } from "../codeRoutes";
@@ -171,6 +174,27 @@ afterEach(() => {
 });
 
 describe("CodeOperationRuntime", () => {
+  it("refuses a Windows operation before a terminal or provider can start", async () => {
+    const fixture = runtimeFixture({});
+    vi.stubGlobal("process", Object.create(process, { platform: { value: "win32" } }));
+    try {
+      await expect(
+        fixture.runtime.execute(windowId, {
+          kind: "start-terminal",
+          threadId,
+          checkoutId,
+          operationId: operationId(1),
+          terminalId: operationId(2),
+          columns: 100,
+          rows: 30,
+          credentialRefs: [],
+        }),
+      ).rejects.toMatchObject({ failure: { category: "unavailable" } });
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
   it("prepares and confirms native approval only for the authoritative active scope", async () => {
     const fixture = runtimeFixture({ approvalValidator: false });
     const request = {
@@ -1467,6 +1491,129 @@ describe("CodeOperationRuntime", () => {
       expect(fixture.runtime.turnInProgress?.(String(threadId))).toBe(false);
     } finally {
       fixture.close();
+    }
+  });
+
+  it("reads a supplementary checkpoint only from the bound idle session and refuses stale access or a competing turn", async () => {
+    const root = realpathSync(mkdtempSync(join(tmpdir(), "octant-file-review-")));
+    writeFileSync(join(root, "sample.txt"), "fixture");
+    writeFileSync(join(root, ".env"), "private");
+    const protectedFiles = currentProtectedFilesChoice();
+    applyProtectedFilesChoice({
+      ...protectedFiles,
+      added: [...protectedFiles.added, join(root, ".env")],
+    });
+    const queue = Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>());
+    const connection = providerConnection(queue);
+    const saved = {
+      driverKind: "codex" as const,
+      value: "host-recorded",
+      binding: {
+        instanceId: thread().providerInstanceId,
+        sessionId,
+        projectRoot: root,
+        mode: "code" as const,
+        modelId: thread().modelId,
+      },
+    };
+    vi.mocked(connection.start).mockImplementation((input) =>
+      Effect.succeed({ sessionId: input.sessionId, resumeCursor: saved }),
+    );
+    let allowed = true;
+    let finish: (() => void) | undefined;
+    const read = vi.fn(() =>
+      Effect.succeed({
+        status: "ready",
+        file: { path: "sample.txt", checkpoint: "", scopes: [], anchors: [] },
+      } as const),
+    );
+    const driver = {
+      ...providerDriver(connection),
+      kind: "codex" as const,
+      fileReviewReads: true as const,
+      acquire: () => Effect.succeed({ ...connection, readFileReview: read }),
+    };
+    const fixture = runtimeFixture({
+      provider: driver,
+      checkoutRoot: root,
+      projectAccess: () => allowed,
+    });
+    const reader = fixture.runtime.readProviderFileReview;
+    if (reader === undefined) throw new Error("Code file reader missing");
+    const request = {
+      kind: "file" as const,
+      threadId,
+      checkoutId,
+      path: decodeCodeRelativePath("sample.txt"),
+    };
+    try {
+      expect(await reader(windowId, request, () => true)).toEqual({
+        status: "refused",
+        reason: "no-session",
+      });
+      await fixture.runtime.execute(windowId, {
+        kind: "start-provider-turn",
+        operationId: operationId(31),
+        threadId,
+        checkoutId,
+        sessionId,
+        prompt: fixture.prompt,
+      });
+      await vi.waitFor(() => expect(connection.send).toHaveBeenCalledOnce());
+      expect(await reader(windowId, request, () => true)).toEqual({
+        status: "refused",
+        reason: "turn-running",
+      });
+      await Effect.runPromise(Queue.offer(queue, providerEvent({ kind: "completed" })));
+      await vi.waitFor(() =>
+        expect(fixture.runtime.turnInProgress?.(String(threadId))).toBe(false),
+      );
+      expect(await reader(windowId, request, () => true)).toMatchObject({
+        status: "ready",
+        file: { path: "sample.txt", checkpoint: "" },
+      });
+      expect(read).toHaveBeenCalledOnce();
+      expect(connection.resume).toHaveBeenCalledWith(
+        expect.objectContaining({ sessionId, resumeCursor: saved, tools: [] }),
+      );
+      expect(
+        await reader(windowId, { ...request, path: decodeCodeRelativePath(".env") }, () => true),
+      ).toEqual({ status: "refused", reason: "path-refused" });
+      expect(read).toHaveBeenCalledOnce();
+      read.mockImplementation(() =>
+        Effect.promise(
+          () =>
+            new Promise((resolve) => {
+              finish = () =>
+                resolve({
+                  status: "ready",
+                  file: { path: "sample.txt", checkpoint: "", scopes: [], anchors: [] },
+                } as const);
+            }),
+        ),
+      );
+      const pending = reader(windowId, request, () => true);
+      await vi.waitFor(() => expect(read).toHaveBeenCalledTimes(2));
+      await expect(
+        fixture.runtime.execute(windowId, {
+          kind: "start-provider-turn",
+          operationId: operationId(32),
+          threadId,
+          checkoutId,
+          sessionId,
+          prompt: fixture.prompt,
+        }),
+      ).rejects.toMatchObject({ failure: { category: "waiting" } });
+      allowed = false;
+      finish?.();
+      expect(await pending).toEqual({ status: "refused", reason: "stale" });
+      expect(connection.start).toHaveBeenCalledOnce();
+      expect(connection.send).toHaveBeenCalledOnce();
+    } finally {
+      finish?.();
+      fixture.close();
+      applyProtectedFilesChoice(protectedFiles);
+      rmSync(root, { recursive: true, force: true });
     }
   });
 
@@ -3187,6 +3334,100 @@ describe("CodeOperationRuntime", () => {
     }
   });
 
+  it.each(["Write", "Bash"] as const)(
+    "answers a complete live owner %s approval once and refuses a revoked admission before delivery",
+    async (tool) => {
+      const queue = Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>());
+      const connection = {
+        ...providerConnection(queue),
+        approvalCall: vi.fn(() =>
+          providerApprovalCall({
+            tool,
+            arguments:
+              tool === "Write"
+                ? { file_path: "/fixture/file.txt", content: "entire owner-consented content" }
+                : { command: "printf entire-owner-consented-command" },
+            workingDirectory: "/fixture",
+            ownerShell: tool === "Bash",
+          }),
+        ),
+      };
+      const fixture = runtimeFixture({
+        provider: providerDriver(connection),
+        approvalValidator: false,
+      });
+      try {
+        await fixture.runtime.execute(windowId, {
+          kind: "start-provider-turn",
+          operationId: operationId(10),
+          threadId,
+          checkoutId,
+          sessionId,
+          prompt: fixture.prompt,
+        });
+        await Effect.runPromise(
+          Queue.offer(
+            queue,
+            providerEvent({
+              kind: "approval-request",
+              requestId: "owner-file-callback",
+              action: tool,
+              description: "Write file",
+            }),
+          ),
+        );
+        await vi.waitFor(() => expect(fixture.runtime.ownerApprovals?.()).toHaveLength(1));
+        const pending = fixture.runtime.ownerApprovals?.()[0];
+        if (pending === undefined) throw new Error("Owner file approval was not offered.");
+        expect(pending.action?.input).toContain(
+          tool === "Write" ? "entire owner-consented content" : "entire-owner-consented-command",
+        );
+        expect(
+          await pending.answer(true, () => false, {
+            kind: "owner-unlock",
+            memberId: HubMemberId.make(String(windowId)),
+          }),
+        ).toBe(false);
+        expect(connection.answerApproval).not.toHaveBeenCalled();
+        let admissions = 0;
+        await expect(
+          pending.answer(true, () => ++admissions < 3, {
+            kind: "owner-unlock",
+            memberId: HubMemberId.make(String(windowId)),
+          }),
+        ).rejects.toThrow("target changed before delivery");
+        expect(connection.answerApproval).not.toHaveBeenCalled();
+        expect(
+          await pending.answer(true, pending.current, {
+            kind: "owner-unlock",
+            memberId: HubMemberId.make(String(windowId)),
+          }),
+        ).toBe(true);
+        expect(connection.answerApproval).toHaveBeenCalledWith({
+          sessionId,
+          requestId: "owner-file-callback",
+          approved: true,
+          scope: "once",
+        });
+        expect(fixture.runtime.ownerApprovals?.()).toHaveLength(0);
+        expect(
+          (await fixture.runtime.subscribe(windowId, threadId, operationId(10), 0, 50)).map(
+            (frame) => frame.event,
+          ),
+        ).toContainEqual(
+          expect.objectContaining({
+            kind: "owner-approval-settled",
+            outcome: "approved",
+            actingPrincipal: { kind: "owner-unlock", memberId: String(windowId) },
+          }),
+        );
+      } finally {
+        await fixture.runtime.close();
+        fixture.close();
+      }
+    },
+  );
+
   it("runs a provider turn asynchronously and owns exact input, approval, and cancellation", async () => {
     const queue = Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>());
     const connection = providerConnection(queue);
@@ -3552,6 +3793,27 @@ describe("CodeOperationRuntime", () => {
     expect(threadWithActiveTurnPosture(plan, activeTurns)).toEqual(
       fixture.runtime.threadWithActiveTurnPosture?.(plan),
     );
+    // A turn that started sandboxed keeps the sandbox when it is turned off
+    // mid-turn; the change takes effect from the next turn.
+    const started = activeTurns.get(String(threadId));
+    if (started !== undefined) {
+      activeTurns.set(String(threadId), {
+        ...started,
+        thread: decodeCodeThread({
+          ...started.thread,
+          executionPolicy: "full-access",
+          permissionPersistence: "project-default",
+          fullAccessSandbox: true,
+        }),
+      });
+      const openNow = decodeCodeThread({
+        ...thread(),
+        executionPolicy: "full-access",
+        permissionPersistence: "project-default",
+      });
+      expect(threadWithActiveTurnPosture(openNow, activeTurns).fullAccessSandbox).toBe(true);
+      activeTurns.set(String(threadId), started);
+    }
     await fixture.runtime.execute(windowId, {
       kind: "cancel-provider-turn",
       operationId: operationId(906),
@@ -3559,6 +3821,87 @@ describe("CodeOperationRuntime", () => {
       checkoutId,
     });
     await vi.waitFor(() => expect(activeTurns.has(String(threadId))).toBe(false));
+    fixture.close();
+  });
+
+  it("journals the provider questionnaire and refuses invalid choices without consuming its request", async () => {
+    const queue = Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>());
+    const connection = providerConnection(queue);
+    const fixture = runtimeFixture({ provider: providerDriver(connection) });
+    const operation = operationId(910);
+    await fixture.runtime.execute(windowId, {
+      kind: "start-provider-turn",
+      operationId: operation,
+      threadId,
+      checkoutId,
+      sessionId,
+      prompt: fixture.prompt,
+    });
+    await vi.waitFor(() => expect(connection.send).toHaveBeenCalledOnce());
+    const questionnaire = {
+      allowComment: false,
+      questions: [
+        {
+          id: "q0",
+          prompt: "Formats?",
+          selection: "multiple" as const,
+          options: [
+            { id: "pdf", label: "PDF" },
+            { id: "text", label: "Text" },
+          ],
+        },
+      ],
+    };
+    await Effect.runPromise(
+      Queue.offer(
+        queue,
+        providerEvent({
+          kind: "user-input-request",
+          requestId: "native-form",
+          prompt: "Choose",
+          options: [],
+          questionnaire,
+        }),
+      ),
+    );
+    await vi.waitFor(async () => {
+      const frames = await fixture.runtime.subscribe(windowId, threadId, operation, 0, 20);
+      expect(frames.find((frame) => frame.event.kind === "input-requested")?.event).toMatchObject({
+        questionnaire,
+      });
+    });
+    const command = {
+      kind: "answer-provider-input" as const,
+      threadId,
+      checkoutId,
+      requestId: "native-form",
+    };
+    expect(
+      await fixture.runtime.execute(windowId, {
+        ...command,
+        operationId: operationId(911),
+        response: fixture.response,
+      }),
+    ).toMatchObject({ kind: "provider-turn-state", failure: { category: "invalid" } });
+    expect(connection.answerUserInput).not.toHaveBeenCalled();
+    expect(fixture.runtime.turnAwaitsPerson?.(String(threadId))).toBe(true);
+    const response = JSON.stringify({
+      version: 1,
+      answers: [{ questionId: "q0", selectedOptionIds: ["pdf", "text"] }],
+    });
+    fixture.evidenceValues.set(fixture.response.contentId, response);
+    await fixture.runtime.execute(windowId, {
+      ...command,
+      operationId: operationId(912),
+      response: fixture.response,
+    });
+    expect(connection.answerUserInput).toHaveBeenCalledWith({
+      sessionId,
+      requestId: "native-form",
+      answer: response,
+    });
+    expect(fixture.runtime.turnAwaitsPerson?.(String(threadId))).toBe(false);
+    await fixture.runtime.close();
     fixture.close();
   });
 
@@ -6416,6 +6759,43 @@ describe("provider switch handoff", () => {
     }
   });
 
+  it("leads a provider switch with the limit rule's summary, and says so on the journal", async () => {
+    const drivers = twoHarnesses();
+    const fixture = runtimeFixture({
+      resolveProviderDriver: drivers.resolveProviderDriver,
+      handoverSummary: () => ({
+        content: "The migration is half done; finish the index next.",
+        completedAt: "2026-11-08T10:00:00.000Z",
+      }),
+    });
+    fixture.setThread(onProvider(providerInstance, "model-a"));
+    try {
+      await finishFirstTurn(fixture, drivers, providerInstance);
+      fixture.setThread(onProvider(harnessInstance, "harness-model", 2));
+      await sendAfterSwitch(fixture);
+      const next = drivers.connection(harnessInstance);
+      await vi.waitFor(() => expect(next.send).toHaveBeenCalledOnce());
+      const context = vi.mocked(next.send).mock.calls[0]?.[0].context ?? [];
+      expect(context.map((block) => block.kind)).toEqual([
+        "conversation-summary",
+        "conversation-summary",
+        "user-message",
+        "assistant-message",
+      ]);
+      expect(context[1]?.text).toContain("finish the index next");
+      const frames = await fixture.runtime.subscribe(windowId, threadId, operationId(85), 0, 50);
+      expect(
+        frames.find((frame) => frame.event.kind === "context-handoff-attached")?.event,
+      ).toMatchObject({ reason: "provider-switch", messages: 2, handoverSummary: true });
+      expect(fixture.conversation().turns.at(-1)?.handoff).toMatchObject({
+        handoverSummary: true,
+      });
+    } finally {
+      await fixture.runtime.close();
+      fixture.close();
+    }
+  });
+
   it.each([
     {
       direction: "from a provider's session to the Octant Harness",
@@ -8149,6 +8529,7 @@ function runtimeFixture(options: {
   holdsServerThread?: Parameters<typeof createCodeOperationRuntime>[0]["holdsServerThread"];
   canvas?: Parameters<typeof createCodeOperationRuntime>[0]["canvas"];
   carryAgentMessages?: Parameters<typeof createCodeOperationRuntime>[0]["carryAgentMessages"];
+  projectMemoryEntries?: Parameters<typeof createCodeOperationRuntime>[0]["projectMemoryEntries"];
   confirmAgentMessagesDelivered?: Parameters<
     typeof createCodeOperationRuntime
   >[0]["confirmAgentMessagesDelivered"];
@@ -8249,6 +8630,8 @@ function runtimeFixture(options: {
   providerSwitchContext?:
     | Parameters<typeof createCodeOperationRuntime>[0]["providerSwitchContext"]
     | "none";
+  /** The limit rule's summary a provider switch leads with, when one waits. */
+  handoverSummary?: Parameters<typeof createCodeOperationRuntime>[0]["handoverSummary"];
   /** Whether the selector reports the thread as having taken in outside content. */
   externalContentIngested?: boolean;
   /** Reopen another fixture's journal and content, the way a restarted host does. */
@@ -8530,6 +8913,9 @@ function runtimeFixture(options: {
     ...(options.carryAgentMessages === undefined
       ? {}
       : { carryAgentMessages: options.carryAgentMessages }),
+    ...(options.projectMemoryEntries === undefined
+      ? {}
+      : { projectMemoryEntries: options.projectMemoryEntries }),
     ...(options.confirmAgentMessagesDelivered === undefined
       ? {}
       : { confirmAgentMessagesDelivered: options.confirmAgentMessagesDelivered }),
@@ -8562,6 +8948,7 @@ function runtimeFixture(options: {
     ...(options.providerSwitchContext === "none"
       ? {}
       : { providerSwitchContext: options.providerSwitchContext ?? selectConversation }),
+    ...(options.handoverSummary === undefined ? {} : { handoverSummary: options.handoverSummary }),
     ...(options.forkContext === "none"
       ? {}
       : { forkContext: options.forkContext ?? selectForkConversation }),
@@ -10139,6 +10526,37 @@ it("records an agent message delivered once the provider accepted the turn that 
   await vi.waitFor(() => expect(lost.fixture.runtimeWorks().at(-1)?.state).toBe("failed"));
   expect(lost.confirmAgentMessagesDelivered).not.toHaveBeenCalled();
   lost.fixture.close();
+});
+
+it("carries the Project's active memory in a Code turn's context, as a Chat turn does", async () => {
+  const queue = Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>());
+  const connection = providerConnection(queue);
+  const projectMemoryEntries = vi.fn(() => ["Releases ship from main only."]);
+  const fixture = runtimeFixture({ provider: providerDriver(connection), projectMemoryEntries });
+  try {
+    await expect(
+      fixture.runtime.execute(windowId, {
+        kind: "start-provider-turn",
+        operationId: operationId(87),
+        threadId,
+        checkoutId,
+        sessionId,
+        prompt: fixture.prompt,
+      }),
+    ).resolves.toMatchObject({ state: "running" });
+    await vi.waitFor(() => expect(connection.send).toHaveBeenCalledOnce());
+    expect(connection.send).toHaveBeenCalledWith(
+      expect.objectContaining({
+        context: expect.arrayContaining([
+          { kind: "project-memory", text: "Releases ship from main only." },
+        ]),
+      }),
+    );
+    expect(projectMemoryEntries).toHaveBeenCalledWith(expect.objectContaining({ id: threadId }));
+  } finally {
+    await fixture.runtime.close();
+    fixture.close();
+  }
 });
 
 it("binds the Computer tool to the thread's running desktop when the send names none", async () => {

@@ -1,3 +1,4 @@
+import { BrowserAgentAvailability } from "./taskAccess";
 import { personDecides } from "./hostAnswer";
 import { Schema } from "effect";
 import {
@@ -8,6 +9,7 @@ import {
   BrowserContextRecord,
   BrowserObservation,
   BrowserThreadId,
+  BrowserDownloadSource,
   MAX_BROWSER_THREAD_CONTEXTS,
 } from "./browserAutomation";
 import { StoredBrowserProfile } from "./browserProfiles";
@@ -59,6 +61,7 @@ export const BrowserToolApproval = Schema.Struct({
    * and a grant covers that (origin, profile) pair and nothing wider.
    */
   profile: Schema.optional(StoredBrowserProfile),
+  profileLabel: Schema.optional(Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(256))),
   /**
    * How many browser extensions are on in that profile, when any are. They can
    * read and change what the agent reads there, so the prompt says so.
@@ -74,6 +77,7 @@ export const BrowserToolApproval = Schema.Struct({
       name: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(256)),
       sizeBytes: Schema.Int.pipe(Schema.nonNegative()),
       mediaType: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(128)),
+      source: Schema.optional(BrowserDownloadSource),
     }).annotations(strict),
   ),
   /**
@@ -100,6 +104,10 @@ export const BrowserToolApproval = Schema.Struct({
     Schema.Struct({
       reason: Schema.optional(Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(300))),
     }).annotations(strict),
+  ),
+  /** One exact-source script; never a remembered origin permission. */
+  script: Schema.optional(
+    Schema.Struct({ source: Schema.String.pipe(Schema.maxLength(8192)) }).annotations(strict),
   ),
   requestedAt: UtcTimestamp,
 }).annotations({ ...strict, ...personDecides });
@@ -179,6 +187,7 @@ export const BrowserContextObservation = Schema.Struct({
 export type BrowserContextObservation = typeof BrowserContextObservation.Type;
 
 export const BrowserAutomationSnapshot = Schema.Struct({
+  agentAvailability: Schema.optional(BrowserAgentAvailability),
   status: BrowserWorkspaceStatus,
   threadId: BrowserThreadId,
   context: Schema.optional(BrowserContextRecord),

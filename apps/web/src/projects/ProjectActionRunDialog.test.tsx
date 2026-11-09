@@ -18,6 +18,60 @@ const preview = decodeProjectTerminalResult({
 });
 beforeEach(() => sessionStorage.clear());
 describe("a saved action beside its task", () => {
+  it("reviews the exact server and unconstrained SSH authority and echoes placement without retrying transport loss", async () => {
+    const server = {
+      serverId: "5e7e0000-0000-4000-8000-000000000001",
+      alias: "web-1",
+      user: "deploy",
+      profile: "operate",
+      confinement: "none",
+      taskExecutionPolicy: "approval-gated",
+      placementRevision: `sha256:${"a".repeat(64)}`,
+    };
+    const remote = decodeProjectTerminalResult({
+      ...preview,
+      action: { ...("action" in preview ? preview.action : {}), server },
+    });
+    const execute = vi.fn(async (command: { kind: string; terminalId?: string }) =>
+      command.kind === "preview-action"
+        ? remote
+        : decodeProjectTerminalResult({
+            kind: "project-terminal",
+            terminal: {
+              projectId,
+              terminalId: command.terminalId,
+              state: "interrupted",
+              posture: "full-access",
+              uncertainty: "server-transport-lost",
+              action: "action" in remote ? remote.action : undefined,
+            },
+          }),
+    );
+    const user = userEvent.setup();
+    render(
+      <ProjectActionRunDialog
+        client={{ execute }}
+        target={target}
+        storageKey="remote-action"
+        open
+        onClose={() => {}}
+      />,
+    );
+    expect(await screen.findByText("deploy@web-1")).toBeVisible();
+    expect(screen.getByText(/No OS confinement on the server/)).toBeVisible();
+    expect(screen.getByText(/Task policy approval-gated/)).toBeVisible();
+    expect(execute.mock.calls.filter(([c]) => c.kind === "start-action")).toHaveLength(0);
+    await user.click(screen.getByRole("button", { name: "Run action" }));
+    expect(await screen.findByText(/Server connection lost/)).toBeVisible();
+    expect(execute).toHaveBeenCalledWith(
+      expect.objectContaining({
+        kind: "start-action",
+        placementRevision: server.placementRevision,
+        projectVersion: 1,
+      }),
+    );
+    expect(execute.mock.calls.filter(([c]) => c.kind === "start-action")).toHaveLength(1);
+  });
   it("shows the checkout before launch and never retries a lost launch reply", async () => {
     const execute = vi.fn(async (command: { kind: string }) => {
       if (command.kind === "preview-action") return preview;

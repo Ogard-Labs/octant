@@ -184,6 +184,10 @@ describe("Journal", () => {
         automaticUpdateChecks: true,
         marketplaceFetchesEnabled: true,
         completedThreadArchiveAfterDays: 7,
+        autoCompactOctantWindowPercent: 85,
+        autoCompactRuntimeWindowPercent: null,
+        autoCompactIdleMinutes: null,
+        autoCompactLimitPercent: null,
         lastContextSurface: "project-memory",
         sidebarMaterial: "system",
         workspaceMaterial: "opaque",
@@ -236,6 +240,7 @@ describe("Journal", () => {
         sidebarSearchPresentation: "icon",
         sidebarCollapsedPresentation: "rail",
         agentBrowserDownloads: false,
+        persistentBrowserOwner: false,
       },
     } as const;
 

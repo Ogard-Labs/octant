@@ -1,4 +1,6 @@
 import { readFile } from "node:fs/promises";
+import { Schema } from "effect";
+import { ListenerKeyTransition } from "@octant/contracts";
 import {
   buildPairingCode,
   classifyRemoteListenerAddress,
@@ -36,7 +38,12 @@ export type RemoteAccessCliCommand =
       /** Absent: the host serves the certificate it makes itself. */
       readonly pasted?: { readonly certificatePath: string; readonly privateKeyPath: string };
     }
-  | { readonly action: "listener-disable" };
+  | { readonly action: "listener-disable" }
+  | {
+      readonly action: "listener-transition";
+      readonly operation: "prepare" | "activate" | "cancel";
+      readonly newPin?: string;
+    };
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
@@ -90,6 +97,21 @@ export function resolveListenerCliCommand(
 ): RemoteAccessCliCommand | undefined {
   const [action, ...rest] = positional;
   if (rest.length !== 0) return undefined;
+  if (action === "prepare-key" || action === "cancel-key") {
+    return Object.keys(flags).length === 0
+      ? {
+          action: "listener-transition",
+          operation: action === "prepare-key" ? "prepare" : "cancel",
+        }
+      : undefined;
+  }
+  if (action === "activate-key") {
+    return Object.keys(flags).length === 1 &&
+      typeof flags.pin === "string" &&
+      /^sha256-[A-Za-z0-9_-]{43}$/.test(flags.pin)
+      ? { action: "listener-transition", operation: "activate", newPin: flags.pin }
+      : undefined;
+  }
   if (action === undefined || action === "status" || action === "disable") {
     if (Object.keys(flags).length !== 0) return undefined;
     return action === "disable" ? { action: "listener-disable" } : { action: "listener-status" };
@@ -134,7 +156,8 @@ export async function runRemoteAccessCliCommand(
   if (
     command.action === "listener-status" ||
     command.action === "listener-enable" ||
-    command.action === "listener-disable"
+    command.action === "listener-disable" ||
+    command.action === "listener-transition"
   ) {
     return await runListenerCommand(input, command);
   }
@@ -509,7 +532,13 @@ async function runListenerCommand(
   input: RunRemoteAccessCliCommandInput,
   command: Extract<
     RemoteAccessCliCommand,
-    { readonly action: "listener-status" | "listener-enable" | "listener-disable" }
+    {
+      readonly action:
+        | "listener-status"
+        | "listener-enable"
+        | "listener-disable"
+        | "listener-transition";
+    }
   >,
 ): Promise<number> {
   let response: LocalControlResponse;
@@ -548,6 +577,15 @@ async function runListenerCommand(
         ...pems,
       },
     });
+  } else if (command.action === "listener-transition") {
+    response = await input.session.send({
+      path: "/api/desktop/private-listener/key-transition",
+      method: "POST",
+      body: {
+        action: command.operation,
+        ...(command.newPin === undefined ? {} : { newPin: command.newPin }),
+      },
+    });
   } else if (command.action === "listener-disable") {
     response = await input.session.send({
       path: "/api/desktop/private-listener/disable",
@@ -580,6 +618,17 @@ async function runListenerCommand(
     input.stdout.write(`Certificate source ${status.certificateSource}\n`);
   }
   if (status.tlsPin !== null) input.stdout.write(`Key pin ${status.tlsPin}\n`);
+  if (status.keyTransition !== undefined) {
+    const transition = status.keyTransition;
+    input.stdout.write(
+      `Listener key transition ${transition.oldPin} → ${transition.newPin}\nSeven-day window ${transition.preparedAt} to ${transition.expiresAt}\n`,
+    );
+    input.stdout.write(
+      status.tlsPin === transition.oldPin
+        ? `Reconnect each paired app before activation so it records the signed transition. Activate explicitly with octant listener activate-key --pin ${transition.newPin}\n`
+        : "The new key is active. Apps that missed the signed window must be explicitly re-paired; unknown pins are never accepted.\n",
+    );
+  }
   if (status.errorCode !== undefined) input.stdout.write(`Error ${status.errorCode}\n`);
   return 0;
 }
@@ -671,6 +720,7 @@ interface ListenerStatusOutput {
   readonly certificateSource: string | null;
   readonly tlsPin: string | null;
   readonly errorCode?: string;
+  readonly keyTransition?: ListenerKeyTransition;
 }
 
 function listenerStatusOf(body: unknown): ListenerStatusOutput | undefined {
@@ -683,6 +733,15 @@ function listenerStatusOf(body: unknown): ListenerStatusOutput | undefined {
   const certificateSource = fieldOf(status, "certificateSource") ?? null;
   const tlsPin = fieldOf(status, "tlsPin") ?? null;
   const errorCode = fieldOf(status, "errorCode");
+  const rawTransition = fieldOf(status, "keyTransition");
+  let keyTransition: ListenerKeyTransition | undefined;
+  if (rawTransition !== undefined) {
+    try {
+      keyTransition = Schema.decodeUnknownSync(ListenerKeyTransition)(rawTransition);
+    } catch {
+      return undefined;
+    }
+  }
   if (
     typeof state !== "string" ||
     !nullableString(origin) ||
@@ -700,6 +759,7 @@ function listenerStatusOf(body: unknown): ListenerStatusOutput | undefined {
     certificateFingerprint,
     certificateSource,
     tlsPin,
+    ...(keyTransition === undefined ? {} : { keyTransition }),
     ...(typeof errorCode === "string" ? { errorCode } : {}),
   };
 }

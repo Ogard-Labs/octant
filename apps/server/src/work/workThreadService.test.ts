@@ -2,6 +2,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Journal } from "../persistence/journal";
+import { Schema } from "effect";
 import { applyMigrations, MIGRATIONS } from "../persistence/migrations";
 import { openSqlite } from "../persistence/sqlitePort";
 import { createPhase1RuntimeRegistries } from "../persistence/runtimeRegistry";
@@ -32,6 +33,7 @@ import {
   decodeWorkTurnRequestId,
   decodeWorkTurnId,
   WORK_TURN_CAPABILITIES,
+  ReplayCursor,
   type EventEnvelope,
   type Project,
   type WorkThreadId,
@@ -51,6 +53,113 @@ import {
 } from "./workThreadService";
 
 const now = "2026-07-26T21:00:00.000Z" as UtcTimestamp;
+
+describe("owner Work access recovery", () => {
+  it("replays an owner's chosen level and its lowered-guardrail attribution from SQLite", () => {
+    const directory = mkdtempSync(join(tmpdir(), "octant-owner-work-"));
+    const connection = openSqlite(join(directory, "events.sqlite3"));
+    try {
+      applyMigrations(connection, MIGRATIONS, () => now);
+      const registries = createPhase1RuntimeRegistries();
+      const journal = new Journal({
+        connection,
+        registry: registries.events,
+        projections: registries.projections,
+        clock: () => now,
+      });
+      journal.append({
+        aggregate: { aggregateType: "work-thread", aggregateId: ids.thread },
+        expectedVersion: 0,
+        events: [
+          {
+            eventId: ids.project,
+            eventName: "work.thread-created@1",
+            eventVersion: 1,
+            correlationId: ids.project,
+            actor: { kind: "system", actorId: ids.project },
+            occurredAt: now,
+            payload: { kind: "thread-created", thread: thread() },
+          },
+        ],
+      });
+      let sequence = 100;
+      const fixture = serviceFixture({
+        uuid: () => `72000000-0000-4000-8000-${String(sequence++).padStart(12, "0")}`,
+      });
+      fixture.persistence.journal.append.mockImplementation((input) => {
+        journal.append(input);
+      });
+      fixture.persistence.journal.transaction.mockImplementation((body) =>
+        journal.transaction(body),
+      );
+      const ownerMemberId = "72000000-0000-4000-8000-000000000099";
+      fixture.service.changeOwnerAccess({
+        threadId: ids.thread,
+        expectedVersion: 1,
+        access: "full-access",
+        ownerMemberId,
+        freshFull: true,
+      });
+      const recovered = new WorkThreadProjection();
+      hydrateWorkThreadProjectionFromJournal({
+        replay: ({ afterSequence, limit }) =>
+          journal.replay(Schema.decodeUnknownSync(ReplayCursor)({ afterSequence, limit })),
+        projection: recovered,
+      });
+      expect(recovered.read(ids.thread)).toMatchObject({ access: "full-access", version: 2 });
+      const ownerEvents = journal
+        .replay(Schema.decodeUnknownSync(ReplayCursor)({ afterSequence: 0, limit: 100 }))
+        .filter((event) => event.actor.kind === "owner-unlock");
+      expect(ownerEvents).toHaveLength(2);
+      expect(
+        ownerEvents.every(
+          (event) => event.actor.kind === "owner-unlock" && event.actor.memberId === ownerMemberId,
+        ),
+      ).toBe(true);
+    } finally {
+      connection.close();
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+  it("journals the owner principal and refuses stale, unavailable or non-fresh Full access without a window", () => {
+    const fixture = serviceFixture();
+    const input = {
+      threadId: ids.thread,
+      expectedVersion: 1,
+      access: "full-access" as const,
+      ownerMemberId: "72000000-0000-4000-8000-000000000099",
+      freshFull: false,
+    };
+    expect(() => fixture.service.changeOwnerAccess(input)).toThrow(/fresh owner unlock/);
+    expect(fixture.persistence.journal.append).not.toHaveBeenCalled();
+    expect(fixture.service.changeOwnerAccess({ ...input, freshFull: true })).toMatchObject({
+      access: "full-access",
+      version: 2,
+    });
+    expect(fixture.persistence.journal.append).toHaveBeenCalledWith(
+      expect.objectContaining({
+        events: [
+          expect.objectContaining({
+            actor: {
+              kind: "owner-unlock",
+              actorId: input.ownerMemberId,
+              memberId: input.ownerMemberId,
+            },
+          }),
+        ],
+      }),
+    );
+    expect(fixture.projects.bootstrap).not.toHaveBeenCalled();
+    expect(() => fixture.service.changeOwnerAccess({ ...input, freshFull: true })).toThrow(
+      /changed/,
+    );
+    const unavailable = serviceFixture({ project: { ...workProject(), lifecycle: "archived" } });
+    expect(() => unavailable.service.changeOwnerAccess({ ...input, freshFull: true })).toThrow(
+      /unavailable/,
+    );
+    expect(unavailable.persistence.journal.append).not.toHaveBeenCalled();
+  });
+});
 const ids = {
   window: decodeWindowId("72000000-0000-4000-8000-000000000001"),
   project: decodeProjectId("72000000-0000-4000-8000-000000000002"),
@@ -220,6 +329,35 @@ describe("WorkThreadService", () => {
     const fixture = serviceFixture({ threads: [deleted] });
 
     await expect(fixture.service.read(ids.window, ids.thread)).resolves.toBeUndefined();
+  });
+
+  it("opens a moved-in thread it already holds, and refuses other commands on a held thread", async () => {
+    const fixture = serviceFixture({
+      threads: [],
+      moveHold: (threadId) => threadId === ids.thread,
+    });
+    await expect(
+      fixture.service.execute(ids.window, {
+        kind: "create-work-thread",
+        threadId: ids.thread,
+        projectId: ids.project,
+        title: "Draft brief",
+        providerInstanceId: ids.provider,
+        modelId: "model-a",
+        hostId: "local",
+        bindingRevisionId: ids.binding,
+      }),
+    ).resolves.toEqual({ kind: "thread-created", thread: thread() });
+
+    const held = serviceFixture({ moveHold: () => true });
+    await expect(
+      held.service.execute(ids.window, {
+        kind: "rename-work-thread",
+        threadId: ids.thread,
+        expectedVersion: 1,
+        title: "Renamed while moving",
+      }),
+    ).rejects.toMatchObject({ failure: { category: "unavailable" } });
   });
 
   it("creates a thread for the active Work Project with a local-user event", async () => {
@@ -468,6 +606,54 @@ describe("WorkThreadService", () => {
       kind: "thread-created",
       thread: { access: "auto-accept-edits" },
     });
+  });
+
+  it("starts a new Full access thread with the sandbox its Project or Settings choose, and keeps the Settings choice through a save that does not mention it", async () => {
+    const fixture = serviceFixture({ threads: [] });
+    await fixture.service.execute(ids.window, {
+      kind: "update-work-settings",
+      expectedVersion: 0,
+      defaultAccess: "full-access",
+      defaultFullAccessSandbox: true,
+    });
+    // A later save that does not mention the sandbox keeps it.
+    await expect(
+      fixture.service.execute(ids.window, {
+        kind: "update-work-settings",
+        expectedVersion: 1,
+        defaultAccess: "full-access",
+      }),
+    ).resolves.toMatchObject({ settings: { defaultFullAccessSandbox: true } });
+    const create = {
+      kind: "create-work-thread" as const,
+      projectId: ids.project,
+      title: "Draft brief",
+      providerInstanceId: ids.provider,
+      modelId: "model-a" as never,
+      hostId: "local" as const,
+      bindingRevisionId: ids.binding,
+    };
+    await expect(
+      fixture.service.execute(ids.window, { ...create, threadId: ids.thread }),
+    ).resolves.toMatchObject({
+      thread: { access: "full-access", fullAccessSandbox: true },
+    });
+
+    // A Project that turned the sandbox off wins over Settings.
+    const projectOff = serviceFixture({
+      threads: [],
+      project: {
+        ...workProject(),
+        defaultPermissionMode: "full-access",
+        defaultFullAccessSandbox: false,
+      } as Project,
+    });
+    const created = await projectOff.service.execute(ids.window, {
+      ...create,
+      threadId: ids.thread,
+    });
+    expect(created).toMatchObject({ thread: { access: "full-access" } });
+    expect("thread" in created ? created.thread.fullAccessSandbox : "missing").toBeUndefined();
   });
 
   it("starts a new thread at its Work Project's own mode, over Work's default in Settings", async () => {
@@ -1304,6 +1490,48 @@ describe("WorkThreadService", () => {
     ).rejects.toMatchObject({ failure: { category: "invalid" } });
   });
 
+  it("keeps the sandbox a Work thread asked for at Full access, and drops it at any other level", async () => {
+    const raised = serviceFixture({ threads: [thread()] });
+    const sandboxed = await raised.service.execute(ids.window, {
+      kind: "change-work-thread-access",
+      threadId: ids.thread,
+      expectedVersion: 1,
+      access: "full-access",
+      fullAccessSandbox: true,
+    });
+    expect(sandboxed).toMatchObject({
+      kind: "thread-updated",
+      thread: { access: "full-access", fullAccessSandbox: true },
+    });
+
+    // A level change that does not mention the sandbox keeps it at Full access.
+    const kept = serviceFixture({
+      threads: [thread({ access: "full-access", fullAccessSandbox: true })],
+    });
+    await expect(
+      kept.service.execute(ids.window, {
+        kind: "change-work-thread-access",
+        threadId: ids.thread,
+        expectedVersion: 1,
+        access: "full-access",
+      }),
+    ).resolves.toMatchObject({ thread: { fullAccessSandbox: true } });
+
+    // Lowered below Full access, the choice is dropped, not carried to a later raise.
+    const lowered = serviceFixture({
+      threads: [thread({ access: "full-access", fullAccessSandbox: true })],
+    });
+    const result = await lowered.service.execute(ids.window, {
+      kind: "change-work-thread-access",
+      threadId: ids.thread,
+      expectedVersion: 1,
+      access: "auto",
+      fullAccessSandbox: true,
+    });
+    expect(result).toMatchObject({ thread: { access: "auto" } });
+    expect("thread" in result ? result.thread.fullAccessSandbox : "missing").toBeUndefined();
+  });
+
   it("updates thread metadata with optimistic versions and maps concurrency conflicts", async () => {
     const current = thread();
     const fixture = serviceFixture({ threads: [current] });
@@ -1768,6 +1996,7 @@ it("validates the target before journaling an unavailable provider", async () =>
 
 function serviceFixture(
   options: {
+    readonly moveHold?: (threadId: string) => boolean;
     readonly threads?: ReadonlyArray<ReturnType<typeof thread>>;
     readonly accessibleProjects?: ReadonlyArray<{
       id: string;
@@ -1864,6 +2093,7 @@ function serviceFixture(
   };
   const onWorkingDirectoryChanged = vi.fn(async () => undefined);
   const service = new WorkThreadService({
+    ...(options.moveHold === undefined ? {} : { moveHold: options.moveHold }),
     persistence: persistence as never,
     projects: projects as never,
     projection,
@@ -2572,8 +2802,8 @@ describe("forking a Work thread from one of its turns", () => {
   const first = decodeWorkTurnRequestId("72000000-0000-4000-8000-000000000041");
   const second = decodeWorkTurnRequestId("72000000-0000-4000-8000-000000000042");
 
-  /** A source thread with two finished turns, in a real turn projection. */
-  function sourceTurns() {
+  /** A source thread with two turns, in a real turn projection; the second may still run. */
+  function sourceTurns(options: { readonly secondRunning?: boolean } = {}) {
     const turns = new WorkTurnProjection();
     for (const [requestId, turn, prompt, response] of [
       [first, "72000000-0000-4000-8000-000000000051", "Draft the brief", "Here is a draft"],
@@ -2618,7 +2848,7 @@ describe("forking a Work thread from one of its turns", () => {
         requestId,
         threadId: ids.thread,
         turnId: decodeWorkTurnId(turn),
-        status: "completed",
+        status: requestId === second && options.secondRunning === true ? "running" : "completed",
         response,
         updatedAt: now,
       });
@@ -2626,8 +2856,14 @@ describe("forking a Work thread from one of its turns", () => {
     return turns;
   }
 
-  function forkFixture(options: { readonly marked?: boolean } = {}) {
-    const turns = sourceTurns();
+  function forkFixture(
+    options: {
+      readonly marked?: boolean;
+      readonly secondRunning?: boolean;
+      readonly windowReachesProject?: boolean;
+    } = {},
+  ) {
+    const turns = sourceTurns(options);
     let next = 100;
     const record = vi.fn<
       NonNullable<WorkThreadServiceDependencies["recordExternalContentIngestion"]>
@@ -2641,6 +2877,7 @@ describe("forking a Work thread from one of its turns", () => {
       isMarked: () => options.marked === true,
       recordExternalContentIngestion: record,
       uuid: () => `72000000-0000-4000-8000-${String((next += 1)).padStart(12, "0")}`,
+      ...(options.windowReachesProject === false ? { accessibleProjects: [] } : {}),
     });
     return { ...fixture, turns, record };
   }
@@ -2710,6 +2947,26 @@ describe("forking a Work thread from one of its turns", () => {
       fixture.persistence.journal.append.mock.invocationCallOrder[0] ?? 0,
     );
     expect(fixture.turns.listForThread(forkId)).toHaveLength(2);
+  });
+
+  it("refuses a fork through a turn that is still running, creating nothing", async () => {
+    const fixture = forkFixture({ secondRunning: true });
+
+    await expect(fixture.service.execute(ids.window, forkThrough(second))).rejects.toMatchObject({
+      failure: { category: "stale" },
+    });
+    expect(fixture.persistence.journal.append).not.toHaveBeenCalled();
+    expect(fixture.projection.read(forkId)).toBeUndefined();
+  });
+
+  it("refuses a fork for a window that cannot reach the source's Project, creating nothing", async () => {
+    const fixture = forkFixture({ windowReachesProject: false });
+
+    await expect(fixture.service.execute(ids.window, forkThrough(first))).rejects.toMatchObject({
+      failure: { category: "unauthorized" },
+    });
+    expect(fixture.persistence.journal.append).not.toHaveBeenCalled();
+    expect(fixture.projection.read(forkId)).toBeUndefined();
   });
 
   it("refuses a fork through a turn that is no longer in the thread, creating nothing", async () => {

@@ -1,3 +1,4 @@
+import type { OwnerApprovalAnswer } from "@octant/contracts/owner-approvals";
 // An owner device acting on a host. It reaches the host's private listener with
 // the same signed member request a guest uses, adds the identity key the host
 // recorded for it, and for every change asks the host for a challenge bound to
@@ -26,12 +27,16 @@ import {
   decodeNewMemberConfirmation,
   decodeOwnerAdministrationSession,
   decodeOwnerChallenge,
+  decodeThreadMovePhoneConfirmations,
   type HeldMember,
   type NewMemberAlert,
   type NewMemberConfirmation,
   type OwnerChallenge,
   type OwnerPostureChangeRequest,
   type OwnerPostureSubject,
+  type OwnerThreadMoveConfirmRequest,
+  type OwnerThreadMoveTicketRequest,
+  type ThreadMovePhoneConfirmation,
 } from "@octant/contracts";
 import { newMemberConfirmationSigningPayload, ownerUnlockSigningPayload } from "@octant/domain";
 import type { PinnedListenerTransportPort } from "./appPairingCode";
@@ -60,9 +65,14 @@ const OWNER_ROUTES = {
   credentialCopy: "/api/hub/owner/credentials/copy",
   provisionApply: "/api/hub/owner/provision/apply",
   provisionDismiss: "/api/hub/owner/provision/dismiss",
+  approvalRead: "/api/hub/owner/approvals/read",
+  approvalAnswer: "/api/hub/owner/approvals/answer",
   browserTargets: "/api/hub/owner/browser/targets",
   browserTakeOver: "/api/hub/owner/browser/take-over",
   browserControl: "/api/hub/owner/browser/control",
+  threadMoveTicket: "/api/hub/owner/thread-moves/ticket",
+  threadMoveConfirmations: "/api/hub/owner/thread-moves/confirmations",
+  threadMoveConfirm: "/api/hub/owner/thread-moves/confirm",
 } as const;
 
 /** The identity key an owner device joined with, which the host's owner list records. */
@@ -176,6 +186,10 @@ export interface OwnerClient {
  * handed these.
  */
 export interface OwnerAdministrationClient {
+  /** Fresh unlock for private complete file facts; never covered by an administration session. */
+  readonly readApprovals?: () => Promise<OwnerActionResult>;
+  /** A second fresh unlock, signed for this exact one-use answer. */
+  readonly answerApproval?: (request: OwnerApprovalAnswer) => Promise<OwnerActionResult>;
   /**
    * One unlock that covers five minutes of administration screens on this host
    * (decision H17). The session is kept in memory only; Full access, merge, a
@@ -214,6 +228,31 @@ export interface OwnerAdministrationClient {
   readonly unlockMerge: (path: string, body: string) => Promise<OwnerUnlockProofResult>;
 }
 
+export type OwnerMoveConfirmationsResult =
+  | {
+      readonly status: "read";
+      readonly confirmations: ReadonlyArray<ThreadMovePhoneConfirmation>;
+    }
+  | { readonly status: "refused"; readonly kind: string }
+  | { readonly status: "unreachable" };
+
+/**
+ * An owner phone's two halves of confirming a move a window holds: the
+ * destination's ticket, and handing it to the source. See
+ * `confirmThreadMoveOnPhone`.
+ */
+export interface OwnerThreadMoveClient {
+  /** The moves this computer holds for an owner phone. A read; it asks for no unlock. */
+  readonly moveConfirmations: () => Promise<OwnerMoveConfirmationsResult>;
+  /**
+   * On the destination: a ticket letting the source move exactly these
+   * threads here. Its own fresh unlock every time; a session never covers it.
+   */
+  readonly issueMoveTicket: (request: OwnerThreadMoveTicketRequest) => Promise<OwnerActionResult>;
+  /** On the source: hands over the destination's ticket. Covered by a session, else one unlock. */
+  readonly confirmMove: (request: OwnerThreadMoveConfirmRequest) => Promise<OwnerActionResult>;
+}
+
 /** An unlock signed for one action that another request will carry, or why there is none. */
 export type OwnerUnlockProofResult =
   | { readonly status: "signed"; readonly proof: string }
@@ -245,7 +284,7 @@ const stringField = (value: unknown, key: string): string | undefined => {
 
 export function createOwnerClient(
   options: OwnerClientOptions,
-): OwnerClient & OwnerAdministrationClient & OwnerBrowserClient {
+): OwnerClient & OwnerAdministrationClient & OwnerBrowserClient & OwnerThreadMoveClient {
   const { target, identity, unlock } = options;
   const now = options.now ?? Date.now;
 
@@ -508,6 +547,27 @@ export function createOwnerClient(
       if (!answer.ok) return refusal(answer);
       return { status: "read", alerts: readAlerts((answer.json as { alerts?: unknown })?.alerts) };
     },
+    async moveConfirmations() {
+      const answer = await send({
+        method: "GET",
+        path: OWNER_ROUTES.threadMoveConfirmations,
+        body: "",
+      });
+      if (answer === undefined) return { status: "unreachable" };
+      if (!answer.ok) return refusal(answer);
+      try {
+        return {
+          status: "read",
+          confirmations: decodeThreadMovePhoneConfirmations(answer.json).confirmations,
+        };
+      } catch {
+        return { status: "refused", kind: "invalid-answer" };
+      }
+    },
+    issueMoveTicket: (request) =>
+      unlocked((signer) => act(OWNER_ROUTES.threadMoveTicket, JSON.stringify(request), signer)),
+    confirmMove: (request) =>
+      administration(OWNER_ROUTES.threadMoveConfirm, JSON.stringify(request)),
     async heldMembers() {
       const answer = await send({ method: "GET", path: OWNER_ROUTES.heldMembers, body: "" });
       if (answer === undefined) return { status: "unreachable" };
@@ -541,6 +601,9 @@ export function createOwnerClient(
       session = undefined;
     },
     hasSession: sessionLive,
+    readApprovals: () => unlocked((signer) => act(OWNER_ROUTES.approvalRead, "{}", signer)),
+    answerApproval: (request) =>
+      unlocked((signer) => act(OWNER_ROUTES.approvalAnswer, JSON.stringify(request), signer)),
     listPostures: () => administration(OWNER_ROUTES.postureRead, "{}"),
     readPosture: (subject) => administration(OWNER_ROUTES.postureRead, JSON.stringify({ subject })),
     changePosture: (request) => {
@@ -726,6 +789,8 @@ const REFUSAL_COPY: Readonly<Record<string, string>> = {
   "owners-not-honored": "This computer does not let owner devices act. Its person can change that.",
   "hub-principal": "The hub cannot act as an owner.",
   "no-such-alert": "That alert is already gone.",
+  "no-such-confirmation":
+    "That move is no longer waiting: it ran out, was cancelled, or was already confirmed.",
   "not-awaiting-confirmation": "That member is not waiting for confirmation here.",
   "confirmation-invalid": "That confirmation did not check out, so the member stays as it was.",
   "confirmed-by-mismatch": "The confirmation was signed for a different owner.",
@@ -733,9 +798,9 @@ const REFUSAL_COPY: Readonly<Record<string, string>> = {
   "hub-revoked": "The hub removed this computer.",
   "too-many-challenges": "This computer is busy with other unlocks. Try again in a moment.",
   "posture-stale":
-    "The Code target changed. Refresh its level, then unlock again to apply your choice.",
-  unsupported: "This Code target does not support that change on this host.",
-  "not-found": "That Code thread or Project is no longer active. Refresh the list.",
+    "The task or Project changed. Refresh its level, then unlock again to apply your choice.",
+  unsupported: "This target does not support that change on this host.",
+  "not-found": "That task or Project is no longer active. Refresh the list.",
   "device-revoked": "This computer revoked this device.",
   stale: "This phone's clock is too far from the computer's. Check the time.",
   replayed: "That request was already seen. Try again.",

@@ -297,6 +297,28 @@ describe("RemoteSessionBridge", () => {
     await expect(pairingStore.get(deviceKeyId)).resolves.toBeDefined();
   });
 
+  it("reports a rate limited hello as a wait, not a rejection, and keeps the pairing", async () => {
+    const server = createFakeRemoteServer({});
+    const pairingStore = createInMemoryDeviceKeyStore();
+    const { deviceKeyId, deviceId } = await registerWebCryptoDevice(server, pairingStore);
+    await pairingStore.updateMetadata(deviceKeyId, {
+      deviceId,
+      credentialGeneration: 1,
+      hostKeyFingerprint: HOST_KEY_FINGERPRINT,
+      listenerTrust: PLATFORM_LISTENER_TRUST,
+    });
+    const bridge = createRemoteSessionBridge({
+      fetch: async () => new Response(null, { status: 429, headers: { "retry-after": "42" } }),
+      deviceKeyStore: pairingStore,
+    });
+
+    bridge.resume(ORIGIN);
+
+    await waitUntil(() => bridge.getState().kind === "unavailable");
+    expect(bridge.getState()).toMatchObject({ kind: "unavailable", retryAfterMs: 42_000 });
+    await expect(pairingStore.get(deviceKeyId)).resolves.toBeDefined();
+  });
+
   it.each([
     ["as that host sent it", "host-changed", (hello: Record<string, unknown>) => hello],
     [

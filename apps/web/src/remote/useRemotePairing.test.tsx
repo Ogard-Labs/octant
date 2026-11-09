@@ -110,6 +110,28 @@ describe("useRemotePairing resume", () => {
     expect(result.current.screen.kind).toBe("entry");
   });
 
+  it("tells a paired browser the host is busy and resumes on its own after the named wait", async () => {
+    const server = createFakeRemoteServer({});
+    const store = createInMemoryDeviceKeyStore();
+    await seedApprovedDevice(server, store);
+    let helloAnswers = 0;
+    const busyOnce: typeof fetch = async (input, init) => {
+      if (String(input).includes("/api/remote/hello") && helloAnswers++ === 0) {
+        return new Response(null, { status: 429, headers: { "retry-after": "1" } });
+      }
+      return server.fetch(input, init);
+    };
+    const bridge = createRemoteSessionBridge({ fetch: busyOnce, deviceKeyStore: store });
+
+    const { result } = renderHook(() =>
+      useRemotePairing({ baseUrl: ORIGIN, client: createIdleClient(), sessionClient: bridge }),
+    );
+
+    await waitFor(() => expect(result.current.screen.kind).toBe("failed"));
+    expect(result.current.screen).toMatchObject({ category: "rate-limited" });
+    await waitFor(() => expect(result.current.screen.kind).toBe("resumed"), { timeout: 4000 });
+  });
+
   it.each([
     ["revoked", { credentialFailure: "revoked" as const }],
     ["expired", { credentialFailure: "expired" as const }],

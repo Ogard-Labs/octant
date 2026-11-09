@@ -13,6 +13,7 @@ export {
   CANVAS_PUBLIC_SHARE_TOMBSTONE_DAYS,
   CANVAS_PUBLIC_SHARE_WIRE_VERSION,
   decodeCanvasPublicShareCreateRequest,
+  decodeCanvasPublicShareIncomingCreateRequest,
   decodeCanvasPublicShareCreated,
   decodeCanvasPublicShareDocument,
   decodeCanvasPublicShareReport,

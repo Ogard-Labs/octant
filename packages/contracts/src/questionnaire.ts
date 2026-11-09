@@ -39,6 +39,8 @@ const Question = Schema.Struct({
   );
 
 export const Questionnaire = Schema.Struct({
+  /** Absent preserves the app-owned form's existing optional comment. */
+  allowComment: Schema.optional(Schema.Boolean),
   questions: Schema.Array(Question).pipe(Schema.minItems(1), Schema.maxItems(4)),
 })
   .annotations(strict)

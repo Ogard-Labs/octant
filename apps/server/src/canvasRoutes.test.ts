@@ -55,10 +55,16 @@ import {
   CANVAS_VERSION_APPENDED,
 } from "./canvas/canvasEventStore";
 import {
+  CanvasPublicShareService,
+  registerCanvasPublicShareEvents,
+} from "./canvas/canvasPublicShareService";
+import {
   createCanvasRouteHandler,
   resolveCanvasActiveContext,
   type CanvasActiveContext,
+  type CanvasRouteDependencies,
 } from "./canvasRoutes";
+import { createThreadReadAuthority, type ThreadReadAuthority } from "./threadReadAuthority";
 import { WindowAuthorityStore } from "./windowAuthorityStore";
 import { createRemoteDevicePrincipal } from "./clientPrincipal";
 import { bindPrincipalRouteContext } from "./principalRouteContext";
@@ -100,6 +106,9 @@ function createRevisionRoute(
     >[0]["findPublishedSnapshot"];
     /** Blocks the seeded Canvas holds after its heading and diagram. */
     readonly extraBlocks?: ReadonlyArray<unknown>;
+    /** Each reader's active Project and mode; every reader shares the window's by default. */
+    readonly activeContextResolver?: CanvasRouteDependencies["activeContextResolver"];
+    readonly threadReadAuthority?: ThreadReadAuthority;
   } = {},
 ) {
   const canvasProjectId = options.threadOwned === true ? null : projectId;
@@ -161,7 +170,7 @@ function createRevisionRoute(
     registerCanvasExportFolderEvents(
       registerCanvasCommentEvents(
         registerCanvasShareEvents(
-          new EventRegistry()
+          registerCanvasPublicShareEvents(new EventRegistry())
             .register(CANVAS_CREATED, 1, CanvasCreated)
             .register(CANVAS_VERSION_APPENDED, 1, CanvasVersionAppended)
             .register(CANVAS_REFRESH_RECEIPT_RECORDED, 1, CanvasRefreshReceiptRecorded)
@@ -255,6 +264,18 @@ function createRevisionRoute(
       ? {}
       : { findPublishedSnapshot: options.findPublishedSnapshot }),
     canvasShareService,
+    canvasPublicShareService: new CanvasPublicShareService({
+      journal,
+      service: {
+        create: async () => ({ kind: "unreachable" }),
+        update: async () => ({ kind: "unreachable" }),
+        revoke: async () => ({ kind: "unreachable" }),
+      },
+      secrets: undefined,
+      uuid: () => `efefefef-efef-4fef-8fef-${(counter += 1).toString(16).padStart(12, "0")}`,
+      clock: () => later as never,
+      actor,
+    }),
     canvasExportFolderService,
     resolveFolderCandidate: async (_windowId, input) => {
       const { candidateId } = readFolderCandidate(input);
@@ -285,10 +306,15 @@ function createRevisionRoute(
         memory: [],
       }),
     },
-    activeContextResolver: async () => ({
-      mode: options.activeMode ?? "chat",
-      projectId: options.threadOwned === true ? null : projectId,
-    }),
+    activeContextResolver:
+      options.activeContextResolver ??
+      (async () => ({
+        mode: options.activeMode ?? "chat",
+        projectId: options.threadOwned === true ? null : projectId,
+      })),
+    ...(options.threadReadAuthority === undefined
+      ? {}
+      : { threadReadAuthority: options.threadReadAuthority }),
     now: () => 1,
   });
   return route;
@@ -2034,6 +2060,236 @@ describe("canvas routes", () => {
     const overview = decodeCanvasShareOverview(JSON.parse(await audited!.text()));
     expect(overview.accessLog).toHaveLength(1);
     expect(overview.accessLog[0]?.principalId).toBe(remoteDeviceId);
+  });
+});
+
+describe("paired device Canvas reads", () => {
+  // A paired browser's window has no active Project, and no route lets it set
+  // one; a real pairing found its thread's cards empty for that reason.
+  const pairedReaderContexts: CanvasRouteDependencies["activeContextResolver"] = async (readerId) =>
+    String(readerId) === String(windowId) ? { mode: "chat", projectId } : undefined;
+
+  /** The device may open the seeded Chat thread, filed in `filedIn`, and no other. */
+  function threadReads(filedIn: typeof projectId | null = projectId): ThreadReadAuthority {
+    return createThreadReadAuthority({
+      chat: (id) => {
+        if (String(id) !== threadId) throw new Error("Chat thread was not found.");
+        return filedIn === null ? {} : { projectId: filedIn };
+      },
+      work: async () => undefined,
+      code: async () => undefined,
+    });
+  }
+
+  function paired(path: string, init: { method?: string; body?: unknown } = {}): Request {
+    const request = new Request(`http://127.0.0.1/api/canvas/${path}`, {
+      method: init.method ?? "GET",
+      headers: {
+        "content-type": "application/json",
+        "x-octant-window-capability": windowCapability,
+      },
+      ...(init.body === undefined ? {} : { body: JSON.stringify(init.body) }),
+    });
+    bindPrincipalRouteContext(request, {
+      principal: createRemoteDevicePrincipal({
+        hostId: "local" as never,
+        deviceId: remoteDeviceId as never,
+        credentialGeneration: 1,
+        origin: "https://octant.invalid",
+        protocolVersion: 1,
+        capabilityDigest: "b".repeat(64),
+        sessionId: "17171717-1717-4171-8171-171717171717" as never,
+      }),
+      scopeId: remoteDeviceId as never,
+    });
+    return request;
+  }
+
+  async function cardsFor(
+    route: ReturnType<typeof createRevisionRoute>,
+    query: string,
+  ): Promise<ReadonlyArray<string>> {
+    const response = await route(paired(`thread-reference-cards?${query}`));
+    expect(response?.status).toBe(200);
+    return decodeCanvasThreadReferenceCardsOutcome(JSON.parse(await response!.text())).cards.map(
+      (card) => String(card.canvasId),
+    );
+  }
+
+  const ownQuery = `mode=chat&threadId=${threadId}&projectId=${String(projectId)}`;
+  const htmlFile = {
+    method: "POST",
+    body: {
+      schemaVersion: 1,
+      kind: "canvas-html-file",
+      canvasId: String(canvasId),
+      versionId: "22222222-2222-4222-8222-222222222222",
+    },
+  };
+
+  it("serves a paired device with no active Project the cards, Canvas, history, and public links of a thread it can open", async () => {
+    const route = createRevisionRoute(undefined, {
+      activeContextResolver: pairedReaderContexts,
+      threadReadAuthority: threadReads(),
+    });
+
+    expect(await cardsFor(route, ownQuery)).toEqual([String(canvasId)]);
+
+    const read = JSON.parse(
+      await (await route(paired(`get?canvasId=${String(canvasId)}`)))!.text(),
+    );
+    expect(read.kind).toBe("ready");
+    expect(read.version.definition.title).toBe("Quarterly summary");
+
+    const history = decodeCanvasHistoryOutcome(
+      JSON.parse(await (await route(paired(`history?canvasId=${String(canvasId)}`)))!.text()),
+    );
+    expect(history.kind).toBe("ready");
+
+    const links = await route(paired(`public-shares?canvasId=${String(canvasId)}`));
+    expect(links?.status).toBe(200);
+    expect(JSON.parse(await links!.text())).toMatchObject({
+      kind: "canvas-public-share-list",
+      canvasId: String(canvasId),
+    });
+
+    const file = JSON.parse(await (await route(paired("html-file", htmlFile)))!.text());
+    expect(file).toMatchObject({ kind: "ready", fileName: "Quarterly summary.html" });
+  });
+
+  it("serves a paired device nothing of a thread it cannot open, and never says whether a Canvas exists", async () => {
+    const route = createRevisionRoute(undefined, {
+      activeContextResolver: pairedReaderContexts,
+      threadReadAuthority: createThreadReadAuthority({
+        chat: () => {
+          throw new Error("Chat thread was not found.");
+        },
+        work: async () => undefined,
+        code: async () => undefined,
+      }),
+    });
+
+    expect(await cardsFor(route, ownQuery)).toEqual([]);
+    const read = JSON.parse(
+      await (await route(paired(`get?canvasId=${String(canvasId)}`)))!.text(),
+    );
+    expect(read).toEqual({ kind: "unauthorized", canvasId: String(canvasId) });
+    const history = JSON.parse(
+      await (await route(paired(`history?canvasId=${String(canvasId)}`)))!.text(),
+    );
+    expect(history).toEqual({ kind: "unauthorized", canvasId: String(canvasId) });
+    const links = await route(paired(`public-shares?canvasId=${String(canvasId)}`));
+    expect(links?.status).toBe(403);
+    const file = JSON.parse(await (await route(paired("html-file", htmlFile)))!.text());
+    expect(file).toMatchObject({ kind: "refused" });
+
+    const missing = "12121212-1212-4212-8212-121212121212";
+    const readable = createRevisionRoute(undefined, {
+      activeContextResolver: pairedReaderContexts,
+      threadReadAuthority: threadReads(),
+    });
+    expect(JSON.parse(await (await readable(paired(`get?canvasId=${missing}`)))!.text())).toEqual({
+      kind: "unauthorized",
+      canvasId: missing,
+    });
+    expect((await readable(paired(`public-shares?canvasId=${missing}`)))?.status).toBe(403);
+  });
+
+  it("refuses a paired device cards asked under another Project or mode, and a Canvas its thread has left", async () => {
+    const route = createRevisionRoute(undefined, {
+      activeContextResolver: pairedReaderContexts,
+      threadReadAuthority: threadReads(),
+    });
+    expect(
+      await cardsFor(route, `mode=chat&threadId=${threadId}&projectId=${String(otherProjectId)}`),
+    ).toEqual([]);
+    expect(
+      await cardsFor(route, `mode=work&threadId=${threadId}&projectId=${String(projectId)}`),
+    ).toEqual([]);
+    expect(await cardsFor(route, `mode=chat&threadId=${threadId}&projectId=null`)).toEqual([]);
+
+    const moved = createRevisionRoute(undefined, {
+      activeContextResolver: pairedReaderContexts,
+      threadReadAuthority: threadReads(otherProjectId),
+    });
+    expect(await cardsFor(moved, ownQuery)).toEqual([]);
+    expect(
+      JSON.parse(await (await moved(paired(`get?canvasId=${String(canvasId)}`)))!.text()),
+    ).toEqual({ kind: "unauthorized", canvasId: String(canvasId) });
+  });
+
+  it("keeps revising, commenting, sharing, and managing public links refused to a paired device that can read the Canvas", async () => {
+    const route = createRevisionRoute(undefined, {
+      activeContextResolver: pairedReaderContexts,
+      threadReadAuthority: threadReads(),
+    });
+
+    const revised = decodeCanvasReviseResult(
+      JSON.parse(
+        await (await route(paired("revise", { method: "POST", body: reviseBody() })))!.text(),
+      ),
+    );
+    expect(revised).toMatchObject({ kind: "denied", denialCode: "unauthorized" });
+
+    const shared = decodeCanvasShareResult(
+      JSON.parse(
+        await (await route(paired("share", { method: "POST", body: shareBody() })))!.text(),
+      ),
+    );
+    expect(shared).toMatchObject({ kind: "denied", denialCode: "unauthorized" });
+    expect((await route(paired(`share?canvasId=${String(canvasId)}`)))?.status).toBe(403);
+
+    const revoked = JSON.parse(
+      await (await route(
+        paired("public-share-revoke", {
+          method: "POST",
+          body: {
+            schemaVersion: 1,
+            kind: "canvas-public-share-revoke",
+            canvasId: String(canvasId),
+            publicShareId: "AbCdEfGhIjKlMnOpQrSt_-",
+          },
+        }),
+      ))!.text(),
+    );
+    expect(revoked).toMatchObject({ kind: "refused", code: "unauthorized" });
+
+    const settings = JSON.parse(
+      await (await route(
+        paired("public-link-settings", {
+          method: "POST",
+          body: { enabled: true, serviceUrl: "https://canvas.example", expectedVersion: 0 },
+        }),
+      ))!.text(),
+    );
+    expect(settings).toMatchObject({
+      kind: "canvas-public-link-settings-refused",
+      reason: "unauthorized",
+    });
+  });
+
+  it("keeps a window on this host to its active Project even for a thread it could open", async () => {
+    const route = createRevisionRoute(undefined, {
+      activeContextResolver: async () => ({ mode: "chat", projectId: otherProjectId }),
+      threadReadAuthority: threadReads(),
+    });
+    const cards = await route(
+      new Request(`http://127.0.0.1/api/canvas/thread-reference-cards?${ownQuery}`, {
+        headers: { "x-octant-window-capability": windowCapability },
+      }),
+    );
+    expect(decodeCanvasThreadReferenceCardsOutcome(JSON.parse(await cards!.text())).cards).toEqual(
+      [],
+    );
+    const read = await route(
+      new Request(`http://127.0.0.1/api/canvas/get?canvasId=${String(canvasId)}`, {
+        headers: { "x-octant-window-capability": windowCapability },
+      }),
+    );
+    expect(JSON.parse(await read!.text())).toEqual({
+      kind: "unauthorized",
+      canvasId: String(canvasId),
+    });
   });
 });
 

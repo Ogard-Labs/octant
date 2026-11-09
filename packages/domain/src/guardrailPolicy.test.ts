@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   AUTO_UNSUPPORTED_REASON,
+  defaultFullAccessSandboxFor,
   defaultPermissionModeFor,
   defaultWorkPermissionModeFor,
   guardrailLowered,
@@ -9,6 +10,7 @@ import {
   outsideContentRecordedOnly,
   permissionModeOf,
   permissionModeOfWorkAccess,
+  refusesFullAccessSandbox,
   clampWorkAccess,
   chosenAutoReviewer,
   resolveAutoReviewer,
@@ -89,6 +91,72 @@ describe("guardrail levels", () => {
       reason: AUTO_UNSUPPORTED_REASON,
       fallback: { level: "guarded", mode: "ask-first", approver: "person", sandbox: "octant" },
     });
+  });
+
+  it("keeps Octant's confinement and proxied egress at Full access when the thread opted into the sandbox", () => {
+    for (const capabilities of [claudeOrCodex, wrappedRuntime]) {
+      expect(
+        resolveGuardrail({
+          access: { executionPolicy: "full-access", fullAccessSandbox: true },
+          capabilities,
+        }),
+      ).toMatchObject({
+        status: "supported",
+        level: "full-access",
+        sandbox: capabilities.providerSandbox ? "both" : "octant",
+        approver: "none",
+        egress: "provider-endpoints-only",
+        outsideContent: "recorded",
+      });
+    }
+    // Absent flag: unchanged, fully open.
+    expect(
+      resolveGuardrail({
+        access: { executionPolicy: "full-access" },
+        capabilities: claudeOrCodex,
+      }),
+    ).toMatchObject({ sandbox: "none", egress: "unrestricted" });
+  });
+
+  it("keeps the sandbox at Full access on Codex, Claude, Pi, OpenCode, ACP agents and the Octant Harness, and refuses it elsewhere or on an unknown runtime", () => {
+    const sandboxed = { executionPolicy: "full-access", fullAccessSandbox: true } as const;
+    expect(refusesFullAccessSandbox({ access: sandboxed, driverKind: "codex" })).toBe(false);
+    expect(refusesFullAccessSandbox({ access: sandboxed, driverKind: "claude" })).toBe(false);
+    expect(refusesFullAccessSandbox({ access: sandboxed, driverKind: "pi" })).toBe(false);
+    expect(refusesFullAccessSandbox({ access: sandboxed, driverKind: "opencode" })).toBe(false);
+    expect(refusesFullAccessSandbox({ access: sandboxed, driverKind: "mistral-vibe" })).toBe(false);
+    expect(refusesFullAccessSandbox({ access: sandboxed, driverKind: "openai-compatible" })).toBe(
+      false,
+    );
+    for (const driverKind of ["oh-my-pi", undefined] as const) {
+      expect(refusesFullAccessSandbox({ access: sandboxed, driverKind })).toBe(true);
+    }
+    // Without the choice, or below Full access, nothing refuses.
+    expect(
+      refusesFullAccessSandbox({
+        access: { executionPolicy: "full-access" },
+        driverKind: "claude",
+      }),
+    ).toBe(false);
+    expect(
+      refusesFullAccessSandbox({
+        access: { executionPolicy: "approval-gated", fullAccessSandbox: true },
+        driverKind: "claude",
+      }),
+    ).toBe(false);
+  });
+
+  it("takes a new Full access thread's sandbox from its Project, else Settings, else off", () => {
+    expect(defaultFullAccessSandboxFor({})).toBe(false);
+    expect(defaultFullAccessSandboxFor({ settings: { defaultFullAccessSandbox: true } })).toBe(
+      true,
+    );
+    expect(
+      defaultFullAccessSandboxFor({
+        project: { defaultFullAccessSandbox: false },
+        settings: { defaultFullAccessSandbox: true },
+      }),
+    ).toBe(false);
   });
 
   it("runs Full access with no sandbox for every runtime, wrapped or not", () => {

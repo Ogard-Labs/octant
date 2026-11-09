@@ -1,5 +1,6 @@
 import { Schema } from "effect";
 import { CanvasExportContribution } from "./canvasExportContribution";
+import { CodeToolContribution } from "./codeToolContribution";
 import { AggregateVersion, UtcTimestamp } from "./events";
 import { HostId } from "./host";
 import { OctantMode } from "./modes";
@@ -278,6 +279,7 @@ export const ExtensionCapability = Schema.Literal(
 export type ExtensionCapability = typeof ExtensionCapability.Type;
 
 export const ExtensionComponentKind = Schema.Literal(
+  "code-tool",
   "skill-instructions",
   "mcp-server",
   "mcp-tool",
@@ -537,6 +539,8 @@ export const ExtensionComponent = Schema.Struct({
   debugAdapter: Schema.optional(ExtensionDebugAdapterDeclaration),
   /** Present exactly for a Canvas export target. */
   canvasExport: Schema.optional(ExtensionCanvasExportDeclaration),
+  /** A data-only Code capability, with no executable module. */
+  codeTool: Schema.optional(CodeToolContribution),
 }).annotations(strict);
 export type ExtensionComponent = typeof ExtensionComponent.Type;
 
@@ -737,6 +741,13 @@ export const ExtensionPackageManifest = Schema.Struct({
           return false;
         }
         if ((component.kind === "canvas-export-target") !== (component.canvasExport !== undefined))
+          return false;
+        if ((component.kind === "code-tool") !== (component.codeTool !== undefined)) return false;
+        if (
+          component.kind === "code-tool" &&
+          (component.declaredCapabilities.length !== 1 ||
+            component.declaredCapabilities[0] !== "credentials")
+        )
           return false;
         if (mcpChild !== (component.parentComponentId !== undefined)) return false;
         if (!mcpChild) return true;

@@ -1,4 +1,9 @@
 import {
+  decodePersistentBrowserOwnerStatus,
+  decodePersistentBrowserContextCreated,
+  type PersistentBrowserLeaseId,
+} from "@octant/contracts/persistent-browser-owner";
+import {
   decodeOwnerBrowserNativeResult,
   type OwnerBrowserNativeCommand,
 } from "@octant/contracts/owner-browser";
@@ -22,7 +27,10 @@ import type {
   BrowserThreadId,
 } from "@octant/contracts/browser-automation";
 import type { WindowId } from "@octant/contracts/shell";
-import { decodeStoredBrowserProfile } from "@octant/contracts/browser-profiles";
+import {
+  decodeBrowserAccountProfileCreateResult,
+  decodeStoredBrowserProfile,
+} from "@octant/contracts/browser-profiles";
 import {
   BrowserNavigationBlockedError,
   BrowserRecordingUnavailableError,
@@ -31,6 +39,7 @@ import {
   type BrowserProfileStorePort,
   type BrowserRuntimeObservation,
   type BrowserRuntimePort,
+  type PersistentBrowserOwnerPort,
   type BrowserRuntimeAction,
   type BrowserTargetInspection,
 } from "./browserRuntimePort";
@@ -68,6 +77,95 @@ export class DesktopBrowserRuntime implements BrowserRuntimePort {
   readonly #fetch: (input: string | URL | Request, init?: RequestInit) => Promise<Response>;
   readonly #eventPollIntervalMs: number;
   readonly #extensionsFor: DesktopBrowserRuntimeOptions["extensionsFor"];
+  readonly #executionLeases = new Map<
+    PersistentBrowserLeaseId,
+    {
+      readonly contextId: BrowserContextId;
+      readonly signal: AbortSignal;
+      readonly abort: () => void;
+    }
+  >();
+  readonly persistentOwner: PersistentBrowserOwnerPort = {
+    status: async (signal) => {
+      try {
+        return decodePersistentBrowserOwnerStatus(
+          await this.#request(
+            "/v1/persistent-owner/status",
+            {},
+            signal ?? AbortSignal.timeout(2000),
+          ),
+        );
+      } catch {
+        return { status: "unavailable" };
+      }
+    },
+    configure: async (enabled, signal) => {
+      try {
+        return decodePersistentBrowserOwnerStatus(
+          await this.#request(
+            "/v1/persistent-owner/configure",
+            { enabled },
+            signal ?? AbortSignal.timeout(3000),
+          ),
+        );
+      } catch {
+        return { status: "unavailable" };
+      }
+    },
+    createContext: async (contextId, policy, signal, binding) => {
+      if (signal.aborted) return { status: "unavailable" };
+      const stored = storedBrowserProfile(policy.profile);
+      if (stored !== undefined && this.#extensionsFor !== undefined)
+        await this.profiles
+          .syncExtensions(stored, this.#extensionsFor(stored))
+          .catch(() => undefined);
+      try {
+        const result = decodePersistentBrowserContextCreated(
+          await this.#request(
+            "/v1/persistent-owner/create",
+            { contextId, policy, binding },
+            AbortSignal.any([signal, AbortSignal.timeout(12000)]),
+          ),
+        );
+        if (result.status !== "created") return result;
+        const abort = () => {
+          void this.persistentOwner.release(result.leaseId);
+        };
+        this.#executionLeases.set(result.leaseId, { contextId, signal, abort });
+        signal.addEventListener("abort", abort, { once: true });
+        if (signal.aborted) {
+          await this.persistentOwner.release(result.leaseId);
+          return { status: "unavailable" };
+        }
+        return result;
+      } catch {
+        // A response lost after native creation is still our exact pending
+        // execution, never a window context to close by guessed identity.
+        await this.#request(
+          "/v1/persistent-owner/release-context",
+          { contextId, binding },
+          AbortSignal.timeout(3000),
+        ).catch(() => undefined);
+        return { status: "unavailable" };
+      }
+    },
+    release: async (leaseId) => {
+      try {
+        const answer = await this.#request<{ readonly status?: unknown }>(
+          "/v1/persistent-owner/release",
+          { leaseId },
+          AbortSignal.timeout(3000),
+        );
+        if (answer.status !== "closed") return "unconfirmed";
+        const owned = this.#executionLeases.get(leaseId);
+        owned?.signal.removeEventListener("abort", owned.abort);
+        this.#executionLeases.delete(leaseId);
+        return "closed";
+      } catch {
+        return "unconfirmed";
+      }
+    },
+  };
   readonly #exitListeners = new Set<(contextIds?: ReadonlyArray<BrowserContextId>) => void>();
   #eventPoll: ReturnType<typeof setInterval> | undefined;
   readonly #personInputListeners = new Set<(contextId: BrowserContextId) => void>();
@@ -108,8 +206,15 @@ export class DesktopBrowserRuntime implements BrowserRuntimePort {
   }
 
   readonly profiles: BrowserProfileStorePort = {
-    list: async () => {
-      const payload = await this.#request<unknown>("/v1/profiles/list", {});
+    createAccount: async (label) =>
+      decodeBrowserAccountProfileCreateResult(
+        await this.#request("/v1/profiles/create-account", { label }),
+      ),
+    list: async (includeSizes) => {
+      const payload = await this.#request<unknown>(
+        "/v1/profiles/list",
+        includeSizes === undefined ? {} : { includeSizes },
+      );
       if (
         typeof payload !== "object" ||
         payload === null ||
@@ -120,10 +225,20 @@ export class DesktopBrowserRuntime implements BrowserRuntimePort {
       }
       return payload.profiles.flatMap((entry: unknown) => {
         try {
-          const row = entry as { profile: unknown; sizeBytes: unknown };
+          const row = entry as { profile: unknown; sizeBytes: unknown; label?: unknown };
           const profile = decodeStoredBrowserProfile(row.profile);
           return typeof row.sizeBytes === "number" && Number.isInteger(row.sizeBytes)
-            ? [{ profile, sizeBytes: Math.max(0, row.sizeBytes) }]
+            ? [
+                {
+                  profile,
+                  sizeBytes: Math.max(0, row.sizeBytes),
+                  ...(typeof row.label === "string" &&
+                  row.label.length <= 80 &&
+                  row.label.trim().length > 0
+                    ? { label: row.label }
+                    : {}),
+                },
+              ]
             : [];
         } catch {
           return [];
@@ -329,11 +444,22 @@ export class DesktopBrowserRuntime implements BrowserRuntimePort {
   }
 
   async closeContext(contextId: BrowserContextId): Promise<void> {
+    const lease = [...this.#executionLeases].find(
+      ([, owned]) => String(owned.contextId) === String(contextId),
+    );
+    if (lease !== undefined) {
+      if ((await this.persistentOwner.release(lease[0])) !== "closed")
+        throw new DesktopBrowserOwnerUnavailable();
+      return;
+    }
     await this.#request("/v1/contexts/close", { contextId });
   }
 
   async closeAll(): Promise<void> {
     await this.#request("/v1/contexts/close-all", {});
+    for (const owned of this.#executionLeases.values())
+      owned.signal.removeEventListener("abort", owned.abort);
+    this.#executionLeases.clear();
   }
 
   onProcessExit(listener: (contextIds?: ReadonlyArray<BrowserContextId>) => void): () => void {
@@ -402,6 +528,11 @@ export class DesktopBrowserRuntime implements BrowserRuntimePort {
           /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value),
       );
       if (contextIds.length === 0) return;
+      for (const [leaseId, held] of this.#executionLeases)
+        if (contextIds.includes(held.contextId)) {
+          held.signal.removeEventListener("abort", held.abort);
+          this.#executionLeases.delete(leaseId);
+        }
       for (const listener of this.#exitListeners) listener(contextIds);
     } catch {
       // The broker may be stopping. Ordinary availability checks own recovery.

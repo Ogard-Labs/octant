@@ -1,11 +1,19 @@
-import { createHash, createPublicKey, verify as cryptoVerify } from "node:crypto";
+import {
+  createHash,
+  createPublicKey,
+  generateKeyPairSync,
+  verify as cryptoVerify,
+} from "node:crypto";
 import { existsSync, mkdtempSync, readFileSync, rmSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 import { applyMigrations, MIGRATIONS } from "../persistence/migrations";
 import { openSqlite, type SqliteConnection } from "../persistence/sqlitePort";
-import { resolvePrivateListenerHostIdentity } from "./privateListenerHostIdentity";
+import {
+  existingPrivateListenerSigning,
+  resolvePrivateListenerHostIdentity,
+} from "./privateListenerHostIdentity";
 
 const directories: string[] = [];
 
@@ -125,5 +133,120 @@ describe("private listener host identity", () => {
 
     expect(identity.hostId).toBe(projectedHostId);
     expect(identity.displayName).toBe("Studio Mac");
+  });
+});
+
+describe("private listener identity storage admission", () => {
+  it("uses the admitted private files without creating a second filesystem identity", () => {
+    const directory = makeDirectory();
+    const generated = generateKeyPairSync("ec", { namedCurve: "P-256" });
+    const key = Buffer.from(generated.privateKey.export({ format: "pem", type: "pkcs8" }));
+    const fallback = "22222222-2222-4222-8222-222222222222";
+    const identityFiles = {
+      dataDirectory: directory,
+      read: (purpose: string) => ({
+        status: "ready" as const,
+        bytes: Buffer.from(purpose === "host-id" ? `${fallback}\n` : key),
+      }),
+      create: () => ({ status: "refused" as const }),
+    };
+    const identity = resolvePrivateListenerHostIdentity({
+      connection: freshConnection(directory),
+      dataDirectory: directory,
+      identityFiles,
+    });
+    expect(identity.hostId).toBe(fallback);
+    expect(identity.signing.hostPublicKey).toBe(
+      generated.publicKey.export({ format: "der", type: "spki" }).toString("base64url"),
+    );
+    expect(existsSync(join(directory, "remote"))).toBe(false);
+    expect(
+      cryptoVerify(
+        "sha256",
+        Buffer.from("fixture"),
+        { key: generated.publicKey, dsaEncoding: "ieee-p1363" },
+        Buffer.from(identity.signing.signHostPayload("fixture"), "base64url"),
+      ),
+    ).toBe(true);
+  });
+
+  it("refuses unsafe private storage without falling back to an ordinary file", () => {
+    const directory = makeDirectory();
+    const identityFiles = {
+      dataDirectory: directory,
+      read: () => ({ status: "refused" as const }),
+      create: () => ({ status: "refused" as const }),
+    };
+    expect(() =>
+      resolvePrivateListenerHostIdentity({
+        connection: freshConnection(directory),
+        dataDirectory: directory,
+        identityFiles,
+      }),
+    ).toThrow("private identity");
+    expect(existsSync(join(directory, "remote"))).toBe(false);
+  });
+
+  it("keeps the journaled identity authoritative without reading the fallback UUID", () => {
+    const directory = makeDirectory();
+    const connection = freshConnection(directory);
+    const projected = "33333333-3333-4333-8333-333333333333";
+    connection
+      .prepare(
+        "INSERT INTO host_identity_projection (identity_key, host_id, display_name, key_fingerprint, key_generation, created_at, rotated_at) VALUES ('host', ?, ?, ?, 1, ?, NULL)",
+      )
+      .run(projected, "Projected host", "b".repeat(64), new Date().toISOString());
+    const generated = generateKeyPairSync("ec", { namedCurve: "P-256" });
+    const key = Buffer.from(generated.privateKey.export({ format: "pem", type: "pkcs8" }));
+    const purposes: string[] = [];
+    const identityFiles = {
+      dataDirectory: directory,
+      read: (purpose: string) => {
+        purposes.push(purpose);
+        return { status: "ready" as const, bytes: Buffer.from(key) };
+      },
+      create: () => ({ status: "refused" as const }),
+    };
+    const result = resolvePrivateListenerHostIdentity({
+      connection,
+      dataDirectory: directory,
+      identityFiles,
+    });
+    expect(result.hostId).toBe(projected);
+    expect(result.displayName).toBe("Projected host");
+    expect(purposes).toEqual(["host-key"]);
+  });
+
+  it("refuses a different data root before touching private storage", () => {
+    const directory = makeDirectory();
+    let reads = 0;
+    const identityFiles = {
+      dataDirectory: directory + "-other",
+      read: () => {
+        reads++;
+        return { status: "missing" as const };
+      },
+      create: () => ({ status: "refused" as const }),
+    };
+    expect(() => existingPrivateListenerSigning(directory, identityFiles)).toThrow(
+      "private identity",
+    );
+    expect(reads).toBe(0);
+  });
+
+  it("does not provision a missing key while reading existing push signing", () => {
+    const directory = makeDirectory();
+    let creates = 0;
+    const identityFiles = {
+      dataDirectory: directory,
+      read: () => ({ status: "missing" as const }),
+      create: () => {
+        creates++;
+        return { status: "refused" as const };
+      },
+    };
+    expect(existingPrivateListenerSigning(directory, identityFiles)).toBeUndefined();
+    expect(creates).toBe(0);
+    expect(existsSync(join(directory, "remote"))).toBe(false);
   });
 });

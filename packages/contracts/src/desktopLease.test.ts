@@ -324,4 +324,31 @@ describe("desktop lease contract", () => {
     });
     expect(() => decodeDesktopPaneAnswer({ status: "refused", reason: "stream-lost" })).toThrow();
   });
+  it("accepts only a named lease and bounded preview port, never caller-chosen authority or targets", () => {
+    const review = { kind: "preview-review", threadId, leaseId, port: 5173 };
+    expect(decodeDesktopPaneRequest(review)).toEqual(review);
+    for (const invalid of [
+      { ...review, port: 80 },
+      { ...review, port: 65536 },
+      { ...review, endpointUrl: "http://127.0.0.1:5173/" },
+      { ...review, actor: { kind: "local-user", actorId: threadId } },
+    ])
+      expect(() => decodeDesktopPaneRequest(invalid)).toThrow();
+    const grant = {
+      grantId: credentialRef,
+      port: 5173,
+      expiresAt: "2026-11-07T13:00:00.000Z",
+      guestUrl: "http://127.0.0.1:5173/",
+    };
+    expect(decodeDesktopPaneAnswer({ status: "preview-ready", grant })).toMatchObject({ grant });
+    expect(() =>
+      decodeDesktopPaneAnswer({
+        status: "preview-ready",
+        grant: { ...grant, guestUrl: "https://public.example/" },
+      }),
+    ).toThrow();
+    expect(() =>
+      decodeDesktopPaneAnswer({ status: "preview-ready", grant: { ...grant, nonce: "private" } }),
+    ).toThrow();
+  });
 });

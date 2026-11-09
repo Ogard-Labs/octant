@@ -2004,6 +2004,17 @@ describe("ChatTurnRunner", () => {
             sessionId,
             requestId: "q1",
             prompt: "Proceed?",
+            questionnaire: {
+              allowComment: false,
+              questions: [
+                {
+                  id: "q0",
+                  prompt: "Proceed?",
+                  selection: "single",
+                  options: [{ id: "yes", label: "Yes" }],
+                },
+              ],
+            },
             options: [{ label: "Yes" }, { label: "No" }],
           } as never);
         }),
@@ -2077,7 +2088,10 @@ describe("ChatTurnRunner", () => {
                     runner.deliverQuestionAnswer({
                       attemptId: String(attemptId),
                       requestId: "q1",
-                      answer: "Yes",
+                      answer: JSON.stringify({
+                        version: 1,
+                        answers: [{ questionId: "q0", selectedOptionIds: ["yes"] }],
+                      }),
                     }),
                   );
                   if (delivered !== undefined) return delivered;
@@ -2086,11 +2100,18 @@ describe("ChatTurnRunner", () => {
               }),
             ),
           );
+          expect(
+            updates.find((entry) => entry.pendingQuestion?.requestId === "q1")?.pendingQuestion
+              ?.questionnaire,
+          ).toMatchObject({ allowComment: false, questions: [{ id: "q0" }] });
           expect(answeredAttempt.outcome).toBe("streaming");
           expect(answeredAttempt.pendingQuestion).toBeUndefined();
           expect(answeredAttempt.answeredQuestions?.[0]).toMatchObject({
             requestId: "q1",
-            answer: "Yes",
+            answer: JSON.stringify({
+              version: 1,
+              answers: [{ questionId: "q0", selectedOptionIds: ["yes"] }],
+            }),
           });
           yield* Fiber.join(fiber);
           // The park was journaled before the answer moved the turn on.
@@ -2105,12 +2126,24 @@ describe("ChatTurnRunner", () => {
     );
 
     expect(completed).toBe(true);
-    expect(answered).toEqual([{ sessionId, requestId: "q1", answer: "Yes" }]);
+    expect(answered).toEqual([
+      {
+        sessionId,
+        requestId: "q1",
+        answer: JSON.stringify({
+          version: 1,
+          answers: [{ questionId: "q0", selectedOptionIds: ["yes"] }],
+        }),
+      },
+    ]);
     expect(updates.at(-1)?.outcome).toBe("completed");
     // The answered exchange stays on the attempt the transcript renders.
     expect(updates.at(-1)?.answeredQuestions?.[0]).toMatchObject({
       prompt: "Proceed?",
-      answer: "Yes",
+      answer: JSON.stringify({
+        version: 1,
+        answers: [{ questionId: "q0", selectedOptionIds: ["yes"] }],
+      }),
     });
   });
 
@@ -2963,6 +2996,7 @@ describe("ChatTurnRunner", () => {
           toolMs: 0,
           modelCalls: 1,
         },
+        diagnostics: { toolCalls: 0, toolFailures: 0 },
       });
       expect(ended).toEqual(completed);
     });

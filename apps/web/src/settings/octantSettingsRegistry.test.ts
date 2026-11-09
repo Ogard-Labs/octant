@@ -7,6 +7,25 @@ import { listAvailableSections, resolveDeepLink, searchSettings } from "./regist
 const capabilities = { nativeBoundsAvailable: true, sidebarVibrancySupported: true };
 
 describe("octantSettingsRegistry", () => {
+  it.each(["changed identity", "read-only check"])(
+    "finds the read-only remote setup journey for %s",
+    (query) => {
+      expect(
+        searchSettings(
+          listAvailableSections(octantSettingsRegistry, capabilities),
+          capabilities,
+          query,
+        ),
+      ).toContainEqual(
+        expect.objectContaining({
+          kind: "setting",
+          sectionId: "remote-access",
+          settingId: "remote-setup-checks",
+          scope: "host",
+        }),
+      );
+    },
+  );
   it.each([
     ["gcloud", "secret-store-google-cli"],
     ["service account email", "secret-store-google-cli-email"],
@@ -121,6 +140,7 @@ describe("octantSettingsRegistry", () => {
       "safe-networks",
       "shield-servers-list",
       "shield-servers-add",
+      "server-projects",
     ]);
     expect(section("secret-stores")?.label).toBe("Secret stores");
     expect(section("secret-stores")?.scope).toBe("host");
@@ -139,7 +159,12 @@ describe("octantSettingsRegistry", () => {
     expect(section("data")?.scope).toBe("host");
     expect(ids("data")).toEqual([
       "data-map",
+      "browser-accounts",
       "browser-profiles",
+      "browser-upload-permissions",
+      "browser-download-permissions",
+      "browser-session-permissions",
+      "persistent-browser-owner",
       "browser-flows",
       "browser-extensions",
       "thread-retention",
@@ -154,6 +179,7 @@ describe("octantSettingsRegistry", () => {
     expect(work?.settings.map((setting) => setting.id)).toEqual([
       "work-default-model",
       "work-default-access",
+      "work-full-access-sandbox",
     ]);
   });
 
@@ -219,6 +245,7 @@ describe("octantSettingsRegistry", () => {
     expect(providers?.settings.map((setting) => setting.id)).toEqual([
       "automatic-model-judge",
       "automatic-model-memory",
+      "automatic-model-decision-review",
       "opencode-managed-update",
       "provider-display-name",
       "provider-binary-path",
@@ -240,6 +267,7 @@ describe("octantSettingsRegistry", () => {
       "project-view-switcher",
       "code-default-access",
       "code-auto-reviewer",
+      "code-full-access-sandbox",
       "code-editor-executable",
       "code-editor-arguments",
       "open-in-applications",

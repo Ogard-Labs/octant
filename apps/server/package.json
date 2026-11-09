@@ -4,6 +4,7 @@
   "type": "module",
   "scripts": {
     "build": "tsdown",
+    "browser:uploads:smoke": "bun src/browser/browserUploadFiles.smoke.ts",
     "browser:smoke": "bun src/browser/browserRuntime.smoke.ts",
     "desktop:cloud:smoke": "bun src/computerUse/cloudDesktop.smoke.ts",
     "canvas:browser:smoke": "bun src/canvas/canvasRendererBrowser.smoke.ts",

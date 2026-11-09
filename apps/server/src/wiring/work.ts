@@ -1,7 +1,10 @@
+import { decodeBrowserThreadId } from "@octant/contracts";
+import { browserToolTransport } from "@octant/domain";
 import { threadWorkingDirectoryCurrent } from "../threadWorkingDirectoryAuthority";
+import type { ThreadMoveHolds } from "../hub/threadMoveHolds";
 import { decodeComputerUseOwner } from "@octant/contracts/computer-use-plugin";
 import { randomUUID } from "node:crypto";
-import { mkdirSync } from "node:fs";
+import { mkdirSync, rmSync } from "node:fs";
 import { lstat } from "node:fs/promises";
 import { join } from "node:path";
 import {
@@ -10,6 +13,7 @@ import {
   decodeCodeOperationId,
   decodeCodeThreadId,
   decodeContextSubjectRef,
+  decodeImageGenerationScopeId,
   decodeProviderSessionId,
   decodeThreadMessageQueueScope,
   decodeWindowId,
@@ -17,11 +21,14 @@ import {
   decodeWorkTurnId,
   decodeWorkTurnRequestId,
   LOCAL_HOST_ID,
+  type OctantMode,
   type ProjectId,
+  type WindowId,
   type WorkThreadId,
   type WorkStatusDatedItem,
 } from "@octant/contracts";
 import { Effect } from "effect";
+import { codeThreadTurns } from "../code/codeForkPoint";
 import { SERVER_RUNTIME_NOT_HARNESS } from "../serverProjects/serverProjectThreads";
 import {
   bindServerWorkTurn,
@@ -63,9 +70,14 @@ import {
 } from "../threadExportRoutes";
 import { ThreadExportService } from "../threadExportService";
 import { makeThreadHandOffCompletion } from "../threadHandOffCompletion";
-import { ThreadHandOffService } from "../threadHandOffService";
+import { ThreadHandOffService, type ThreadHandOffProviderPort } from "../threadHandOffService";
 import { createBrowserAppManagedTools } from "../browser/browserAppManagedTools";
 import { readThreadExternalContentTaint } from "../context/externalContentTaintProjection";
+import {
+  continueInThread,
+  forkThroughOfferingTurn,
+  offeringTurnStanding,
+} from "../sideTasks/sideTaskThreads";
 import { createSideTaskTools } from "../sideTasks/sideTaskTools";
 import { createWorkThreadMentionDirectory } from "../chat/threadMentionService";
 import { createThreadsTools } from "../siblingThreads/siblingThreadTools";
@@ -87,7 +99,10 @@ import {
   type WorkBoardRuntimeActivity,
 } from "../work/workThreadBoardService";
 import { createCanvasAgentTools } from "../canvas/canvasAgentTools";
+import { saveGeneratedImageUnder } from "../image/generatedImageSave";
+import { createThreadImageAgentTools } from "../image/imageAgentTools";
 import { combineAppManagedToolSets } from "../providers/appManagedToolSet";
+import { withRoutineBrowserProfiles } from "../browser/browserRoutineSessions";
 import { makeConfiguredProviderDriver, type ProvidersWiring } from "./providers";
 import { MAX_JSON_REQUEST_BODY_SIZE, type ServerStart } from "./serverShape";
 import type { AuthorityWiring } from "./authority";
@@ -114,6 +129,7 @@ export type WorkDependencies = Pick<ServerStart, "persistence"> &
     | "browserCaptures"
     | "browserModelBindings"
     | "codeSessionAuthority"
+    | "imageGenerationOffers"
     | "liveTurns"
     | "onWindowRevoked"
     | "routineProposalService"
@@ -154,6 +170,7 @@ export type WorkDependencies = Pick<ServerStart, "persistence"> &
     | "authorizeWorkThreadForWindow"
     | "contextHarness"
     | "goalService"
+    | "projectMemoryAccess"
     | "projectService"
     | "workProjectStatusFiles"
     | "workProjectStatusReader"
@@ -178,6 +195,7 @@ export type WorkDependencies = Pick<ServerStart, "persistence"> &
   > &
   Pick<
     BrowserWiring,
+    | "routineBrowserTools"
     | "browserAutomationService"
     | "browserFlows"
     | "browserToolApprovalService"
@@ -193,7 +211,7 @@ export type WorkDependencies = Pick<ServerStart, "persistence"> &
     | "nativeHarnessHooks"
     | "onHarnessPausedByPerson"
     | "shieldServerStore"
-    | "sideTaskFirstMessage"
+    | "sideTaskHost"
   > &
   Pick<ChatWiring, "chatService" | "guardChatAttachmentPurge" | "threadMentionService"> &
   Pick<CanvasWiring, "canvasAgentToolPort" | "canvasService" | "resolveCanvasWorkspace"> &
@@ -201,11 +219,15 @@ export type WorkDependencies = Pick<ServerStart, "persistence"> &
     FoundationsWiring,
     | "conversationInputTransfer"
     | "browserAuthority"
+    | "codeBoardEventStore"
     | "providerRuntimeRegistry"
     | "workArtifactProjection"
     | "workThreadProjection"
     | "workTurnProjection"
-  >;
+  > & {
+    /** Threads a move holds: frozen here while leaving, or arriving and not yet committed. */
+    readonly threadMoveHolds: ThreadMoveHolds;
+  };
 
 export function wireWork(deps: WorkDependencies) {
   const {
@@ -215,6 +237,7 @@ export function wireWork(deps: WorkDependencies) {
     authorizeWorkThreadForWindow,
     automationEventStore,
     browserAuthority,
+    routineBrowserTools,
     browserAutomationService,
     browserCaptures,
     browserModelBindings,
@@ -227,6 +250,7 @@ export function wireWork(deps: WorkDependencies) {
     chatService,
     guardChatAttachmentPurge,
     codeAttachments,
+    codeBoardEventStore,
     codeService,
     codeSessionAuthority,
     codeWorkingDirectoryProbePath,
@@ -240,6 +264,7 @@ export function wireWork(deps: WorkDependencies) {
     restartContinuation,
     githubIssueContextService,
     goalService,
+    imageGenerationOffers,
     imageJobService,
     linearIssueContextService,
     liveTurns,
@@ -267,7 +292,7 @@ export function wireWork(deps: WorkDependencies) {
     runningWorkTurns,
     runtimeOutsideContentMarks,
     runtimeForgeChanges,
-    sideTaskFirstMessage,
+    sideTaskHost,
     routineProposalService,
     sideTasks,
     siblingThreadsService,
@@ -287,6 +312,7 @@ export function wireWork(deps: WorkDependencies) {
     workThreadProjection,
     workTurnProjection,
     personMemoryAccess,
+    projectMemoryAccess,
   } = deps;
   return Effect.gen(function* () {
     const workTurnUsageStore = new WorkTurnUsageStore();
@@ -333,6 +359,7 @@ export function wireWork(deps: WorkDependencies) {
       });
     };
     const workThreadService = new WorkThreadService({
+      moveHold: (threadId) => deps.threadMoveHolds.isHeld({ mode: "work", threadId }),
       persistence,
       recordExternalContentIngestion: (input) => externalContentIngestionStore.record(input),
       projects: projectService,
@@ -384,6 +411,7 @@ export function wireWork(deps: WorkDependencies) {
       projectLabel: (projectId) => persistence.readProject(projectId as ProjectId)?.name,
     });
     const workTurnService = new WorkTurnService({
+      moveHold: (threadId) => deps.threadMoveHolds.isHeld({ mode: "work", threadId }),
       conversationInputTransfer,
       liveTurns,
       personMemoryBlock: ({ thread, windowId }) =>
@@ -435,12 +463,24 @@ export function wireWork(deps: WorkDependencies) {
       resolveAppManagedTools: (input) => {
         const observed = providerRuntimeRegistry.observedState(input.thread.providerInstanceId);
         const browserSupported =
-          observed?.capabilities.appManagedTools === "supported" ||
-          observed?.verifiedToolModelIds?.some(
-            (candidate) => String(candidate) === String(input.thread.modelId),
-          ) === true;
+          browserToolTransport(observed, String(input.thread.modelId)) === true;
         const native = nativeHarnessComposition?.forWork(input);
-        const browser = !browserSupported
+        const routineBrowser =
+          input.routineRun === undefined
+            ? undefined
+            : routineBrowserTools({
+                routineRun: input.routineRun,
+                threadId: decodeBrowserThreadId(String(input.thread.id)),
+                currentAuthority: () =>
+                  browserAuthority.resolve(decodeBrowserThreadId(String(input.thread.id)), "work"),
+                currentModelId: () => {
+                  const current = workThreadProjection.read(input.thread.id);
+                  return current === undefined || current.access !== input.thread.access
+                    ? undefined
+                    : String(current.modelId);
+                },
+              });
+        const privateBrowser = !browserSupported
           ? undefined
           : createBrowserAppManagedTools({
               windowId: input.windowId,
@@ -474,6 +514,15 @@ export function wireWork(deps: WorkDependencies) {
               uploadRoot: () => input.projectRoot,
               uuid: randomUUID,
             });
+        const browser =
+          routineBrowser === undefined
+            ? privateBrowser
+            : privateBrowser === undefined
+              ? routineBrowser
+              : withRoutineBrowserProfiles({
+                  privateTools: privateBrowser,
+                  profileTools: routineBrowser,
+                });
         const sideTaskTools = !browserSupported
           ? undefined
           : createSideTaskTools({
@@ -481,6 +530,7 @@ export function wireWork(deps: WorkDependencies) {
               threadId: String(input.thread.id),
               mode: "work",
               projectId: input.thread.projectId,
+              turnId: String(input.turnId),
               suggestedBy: input.thread,
               uuid: randomUUID,
               clock: () => new Date().toISOString(),
@@ -556,6 +606,42 @@ export function wireWork(deps: WorkDependencies) {
               },
               port: canvasAgentToolPort,
             });
+        // A routine's turn has nobody at a window to answer the card.
+        const imageTools =
+          !browserSupported || isRoutineHostScope(input.windowId)
+            ? undefined
+            : createThreadImageAgentTools({
+                windowId: input.windowId,
+                threadKind: "work-thread",
+                scopeId: decodeImageGenerationScopeId(String(input.thread.id)),
+                offers: imageGenerationOffers,
+                jobs: imageJobService,
+                listInstances: () => persistence.readProviderInstances(),
+                readImageGenerationCustomSources: () =>
+                  (persistence.readShellSettings()?.settings ?? defaultShellSettings())
+                    .imageGeneration.customSources,
+                readsImages: () =>
+                  providerRuntimeRegistry
+                    .observedState(input.thread.providerInstanceId)
+                    ?.models.find(
+                      (candidate) => String(candidate.id) === String(input.thread.modelId),
+                    )
+                    ?.inputModalities.includes("image") === true,
+                // A file edit at the turn's level: Ask first and Auto ask the
+                // person, Accept edits and Full access write at once.
+                save: {
+                  posture: () => {
+                    const access = runningWorkTurns.get(String(input.thread.id))?.access;
+                    const level =
+                      access === undefined
+                        ? "approval-gated"
+                        : workThreadAccessOf(access).executionPolicy;
+                    return level === "approval-gated" ? "ask" : "allow";
+                  },
+                  write: (relativePath, bytes) =>
+                    saveGeneratedImageUnder({ root: input.projectRoot, relativePath, bytes }),
+                },
+              });
         const computerOwner = decodeComputerUseOwner({
           windowId: input.windowId,
           threadId: input.thread.id,
@@ -574,8 +660,19 @@ export function wireWork(deps: WorkDependencies) {
               createdAt: input.thread.createdAt,
               windowId: input.windowId,
             });
+        // Work has no Plan posture, so nothing refuses its writes but the
+        // person's answer.
+        const projectMemoryTools = !browserSupported
+          ? undefined
+          : projectMemoryAccess.toolsFor({
+              windowId: input.windowId,
+              mode: "work",
+              threadId: String(input.thread.id),
+              projectId: String(input.thread.projectId),
+            });
         if (
           pastThreads === undefined &&
+          projectMemoryTools === undefined &&
           native === undefined &&
           browser === undefined &&
           sideTaskTools === undefined &&
@@ -583,7 +680,8 @@ export function wireWork(deps: WorkDependencies) {
           routineTools === undefined &&
           agentsTools === undefined &&
           computer === undefined &&
-          canvasTools === undefined
+          canvasTools === undefined &&
+          imageTools === undefined
         )
           return undefined;
         return combineAppManagedToolSets(
@@ -595,7 +693,9 @@ export function wireWork(deps: WorkDependencies) {
           routineTools,
           agentsTools,
           canvasTools,
+          imageTools,
           pastThreads,
+          projectMemoryTools,
         );
       },
       nativeHarness: nativeHarnessHooks,
@@ -861,35 +961,44 @@ export function wireWork(deps: WorkDependencies) {
       service: threadExportService,
       windowAuthorityStore,
     });
+    // One bounded, tool-free request to a thread's own provider, shared with
+    // the agent's summary turn in a handover note.
+    const threadHandOffProvider: ThreadHandOffProviderPort = {
+      readiness: (providerInstanceId) => {
+        const instance = persistence.readProviderInstance(providerInstanceId);
+        if (instance === undefined || !instance.enabled) return undefined;
+        return providerRuntimeRegistry.observedState(providerInstanceId)?.readiness;
+      },
+      complete: makeThreadHandOffCompletion({
+        resolveDriver: (providerInstanceId) => {
+          const instance = persistence.readProviderInstance(providerInstanceId);
+          if (instance === undefined || !instance.enabled) return undefined;
+          try {
+            return makeConfiguredProviderDriver(instance, configuredDriverOptions);
+          } catch {
+            return undefined;
+          }
+        },
+        scratchRoot: (threadId) => {
+          const root = join(persistence.dataDirectory, "hand-off-scratch", threadId);
+          mkdirSync(root, { recursive: true, mode: 0o700 });
+          return root;
+        },
+        releaseScratchRoot: (threadId) => {
+          rmSync(join(persistence.dataDirectory, "hand-off-scratch", threadId), {
+            recursive: true,
+            force: true,
+          });
+        },
+        uuid: randomUUID,
+      }),
+    };
     // Hand-off starts from the export cut and keeps its document as a Canvas
     // of the thread, resolved from the thread the way an authoring agent's
     // Canvas is — never from whichever Project the window happens to show.
     const threadHandOffService = new ThreadHandOffService({
       exports: threadExportService,
-      provider: {
-        readiness: (providerInstanceId) => {
-          const instance = persistence.readProviderInstance(providerInstanceId);
-          if (instance === undefined || !instance.enabled) return undefined;
-          return providerRuntimeRegistry.observedState(providerInstanceId)?.readiness;
-        },
-        complete: makeThreadHandOffCompletion({
-          resolveDriver: (providerInstanceId) => {
-            const instance = persistence.readProviderInstance(providerInstanceId);
-            if (instance === undefined || !instance.enabled) return undefined;
-            try {
-              return makeConfiguredProviderDriver(instance, configuredDriverOptions);
-            } catch {
-              return undefined;
-            }
-          },
-          scratchRoot: (threadId) => {
-            const root = join(persistence.dataDirectory, "hand-off-scratch", threadId);
-            mkdirSync(root, { recursive: true, mode: 0o700 });
-            return root;
-          },
-          uuid: randomUUID,
-        }),
-      },
+      provider: threadHandOffProvider,
       documents: {
         save: async ({ windowId, mode, threadId, projectId, title, blocks }) => {
           const bootstrap = await projectService.bootstrap(windowId);
@@ -1117,10 +1226,34 @@ export function wireWork(deps: WorkDependencies) {
       threads: workThreadService,
       workflows: workflowService,
     });
-    sideTaskFirstMessage.current = async ({ windowId, mode, threadId, prompt }) => {
+    // A side task's prompt as a thread's next message, through the mode's
+    // ordinary turn command on the confirming window: the first message of a
+    // thread a start created, or the next turn of the thread that offered it.
+    // A Chat command is checked against the thread's journal head version.
+    // The projection row's own version lags it once a turn has run, so a
+    // "do it here" built from that row was refused as stale on a thread with
+    // a reply; the service's read stamps the head version, as the queue does.
+    const readChatThreadHead = (threadId: string) => {
+      try {
+        return chatService.read(decodeChatThreadId(threadId)).thread;
+      } catch {
+        return undefined;
+      }
+    };
+    const sendSideTaskTurn = async ({
+      windowId,
+      mode,
+      threadId,
+      prompt,
+    }: {
+      readonly windowId: string;
+      readonly mode: OctantMode;
+      readonly threadId: string;
+      readonly prompt: string;
+    }): Promise<boolean> => {
       const window = decodeWindowId(windowId);
       if (mode === "chat") {
-        const thread = persistence.readChatThread(threadId as never);
+        const thread = readChatThreadHead(threadId);
         if (thread === undefined) return false;
         // A Chat send settles when the reply ends; the side task is started
         // the moment the message is in, so the new thread opens right away.
@@ -1150,11 +1283,16 @@ export function wireWork(deps: WorkDependencies) {
           threadId: thread.id,
           turnId: decodeWorkTurnId(randomUUID()),
           prompt,
+          // The thread's own folder, as the composer and the message queue send
+          // it: a fork and a thread with turns may work below the root.
           authority: {
             hostId: LOCAL_HOST_ID,
             projectId: thread.projectId,
             bindingRevisionId: thread.bindingRevisionId,
-            workingDirectory: ".",
+            workingDirectory: thread.workingDirectory ?? ".",
+            ...(thread.workingFolderId === undefined
+              ? {}
+              : { workingFolderId: thread.workingFolderId }),
             confinementPosture: "project-root-confined",
             providerInstanceId: thread.providerInstanceId,
             modelId: thread.modelId,
@@ -1283,6 +1421,35 @@ export function wireWork(deps: WorkDependencies) {
       }),
     });
     yield* Effect.promise(() => threadMessageQueue.recover());
+    const sideTaskForkPorts = {
+      chatTurns: (threadId: string) =>
+        persistence.readChatThreadView(decodeChatThreadId(threadId))?.turns,
+      workTurns: (threadId: string) =>
+        workTurnProjection.listForThread(decodeWorkThreadId(threadId)),
+      codeTurns: (threadId: string) =>
+        codeThreadTurns(
+          (page) => codeBoardEventStore.conversation(page),
+          decodeCodeThreadId(threadId),
+        ),
+      chat: {
+        readThread: readChatThreadHead,
+        execute: (command: unknown, context: { readonly windowId: WindowId }) =>
+          chatService.execute(command, context),
+      },
+      work: workThreadServiceWithWorkflows,
+      code: codeService,
+      uuid: randomUUID,
+    };
+    sideTaskHost.current = {
+      fork: (input) => forkThroughOfferingTurn(sideTaskForkPorts, input),
+      offeringTurn: (input) => offeringTurnStanding(sideTaskForkPorts, input),
+      sendTurn: sendSideTaskTurn,
+      continueHere: (input) =>
+        continueInThread(
+          { queue: threadMessageQueue, sendTurn: sendSideTaskTurn, uuid: randomUUID },
+          input,
+        ),
+    };
     restartContinuation.current = async ({ threadId, windowId, mode }) => {
       if (mode === "chat") chatService.settleCutOffTurns(decodeChatThreadId(threadId));
       const recoveryIdentity = nativeHarnessSessions.recoveryIdentity(threadId);
@@ -1349,6 +1516,7 @@ export function wireWork(deps: WorkDependencies) {
       goalLoopService,
       threadExportRoutes,
       threadExportService,
+      threadHandOffProvider,
       threadHandOffRoutes,
       threadMessageQueue,
       threadMessageQueueRoutes,

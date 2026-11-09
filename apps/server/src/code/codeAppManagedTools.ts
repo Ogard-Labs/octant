@@ -1,5 +1,6 @@
+import { browserAgentAvailability, browserProfileFromChoice } from "@octant/domain";
 import { browserProfileKey, storedBrowserProfile } from "@octant/domain";
-import type { StoredBrowserProfile } from "@octant/contracts";
+import type { StoredBrowserProfile, BrowserDownloadSource } from "@octant/contracts";
 import type {
   BrowserAppManagedToolsOptions,
   BrowserModelBinding,
@@ -56,7 +57,11 @@ import type {
   ToolApprovalId,
   WindowId,
 } from "@octant/contracts";
-import { MAX_BROWSER_TABS_PER_CONTEXT, sameToolActionAuthority } from "@octant/contracts";
+import {
+  MAX_BROWSER_TABS_PER_CONTEXT,
+  MAX_CODE_OPERATION_SUMMARY_BYTES,
+  sameToolActionAuthority,
+} from "@octant/contracts";
 import {
   decodeAppleSimulatorId,
   decodeAndroidEmulatorId,
@@ -90,6 +95,7 @@ import { withToolFamilyHelp, type AppManagedToolSet } from "../providers/appMana
 import { taintAppManagedToolResults } from "../providers/appManagedToolTaint";
 import { pullRequestChangeNeedsPerActApproval } from "@octant/domain/code-pull-request-action-policy";
 import { isRoutineHostScope } from "../routineHostScope";
+import { withRoutineBrowserProfiles } from "../browser/browserRoutineSessions";
 import type { CodeOperationTerminalSnapshot } from "./codeOperationService";
 import type { PullRequestWatchAnswer, PullRequestWatchOutcome } from "./pullRequestWatchPort";
 
@@ -499,6 +505,7 @@ export interface CodeAppManagedToolsOptions {
       },
     ) => Promise<CodeOperationTerminalSnapshot>;
   };
+  readonly delegatedBrowserTools?: AppManagedToolSet;
   readonly browser?: {
     readonly runScript?: (input: BrowserPageScriptInput) => Promise<BrowserPageScriptReceipt>;
     readonly resolveAuthority: (
@@ -540,8 +547,14 @@ export interface CodeAppManagedToolsOptions {
       readonly threadId: BrowserThreadId;
       readonly downloadId: string;
       readonly workspaceRoot: string | undefined;
+      readonly signal?: AbortSignal;
       readonly ask: (
-        facts: { readonly name: string; readonly sizeBytes: number; readonly mediaType: string },
+        facts: {
+          readonly name: string;
+          readonly sizeBytes: number;
+          readonly mediaType: string;
+          readonly source?: BrowserDownloadSource;
+        },
         origin: string,
       ) => Promise<"approved" | "denied" | "cancelled" | "expired">;
     }) => Promise<
@@ -620,16 +633,47 @@ export interface CodeAppManagedToolsOptions {
 
 export function createCodeAppManagedTools(options: CodeAppManagedToolsOptions): AppManagedToolSet {
   const allowlist = options.thread.toolConstraints ?? [];
+  const routineBrowser =
+    options.delegatedBrowserTools === undefined
+      ? undefined
+      : options.browser === undefined
+        ? options.delegatedBrowserTools
+        : withRoutineBrowserProfiles({
+            privateTools: {
+              definitions: [BROWSER_TOOL_DEFINITION],
+              execute: ({ inputJson, signal }) =>
+                browserTool(
+                  options,
+                  parseBrowserToolInput(inputJson, { allowProfile: true }),
+                  signal,
+                ),
+            },
+            profileTools: options.delegatedBrowserTools,
+          });
   const tools: AppManagedToolSet = {
     definitions: [
       // A family whose capability this host did not lend is omitted, not
       // advertised only to be refused on every call.
-      ...(options.browser === undefined ? [] : [BROWSER_TOOL_DEFINITION]),
+      ...(browserAgentAvailability({
+        toolTransport: true,
+        hostLendsBrowser: options.browser !== undefined || routineBrowser !== undefined,
+        toolConstraints: allowlist,
+        readOnly: options.thread.executionPolicy === "plan",
+      }).status === "available"
+        ? (routineBrowser?.definitions ?? [BROWSER_TOOL_DEFINITION])
+        : []),
       terminalDefinition,
       ...(options.apple === undefined ? [] : [appleDefinition]),
       ...(options.android === undefined ? [] : [androidDefinition]),
       ...(options.pullRequestApproval === undefined ? [] : [pullRequestDefinition]),
     ].filter((definition) => isToolAllowedByAllowlist(allowlist, definition.name)),
+    ...(routineBrowser?.close === undefined
+      ? {}
+      : {
+          close: async () => {
+            await routineBrowser.close?.();
+          },
+        }),
     execute: async ({ name, inputJson, signal }) => {
       if (signal?.aborted) return failure("tool-interrupted");
       const stalenessFailure = currentThreadIdentityFailure(options);
@@ -637,6 +681,21 @@ export function createCodeAppManagedTools(options: CodeAppManagedToolsOptions): 
       const profileFailure = profileToolConstraintFailure(options.thread, name);
       if (profileFailure !== undefined) {
         return failure("profile-tool-refused", profileFailure);
+      }
+      if (name === CODE_BROWSER_TOOL_NAME && routineBrowser !== undefined) {
+        const operation = parseBrowserToolInput(inputJson, {
+          allowProfile: true,
+          allowUploadPermission: true,
+          allowDownloadPermission: true,
+        });
+        if (operation === undefined) return failure("invalid-browser-input");
+        const refused = browserAuthorityFailure(options, operation.operation);
+        if (refused !== undefined) return failure(refused);
+        return routineBrowser.execute({
+          name,
+          inputJson,
+          ...(signal === undefined ? {} : { signal }),
+        });
       }
       if (name === CODE_BROWSER_TOOL_NAME && options.browser !== undefined) {
         return browserTool(
@@ -1293,7 +1352,7 @@ async function browserToolOne(
     return heldForPersonAnswer(snapshot.waitingForPerson);
   }
   if (input.operation === "run-script") {
-    const refusal = currentAuthorityFailure(options);
+    const refusal = currentThreadIdentityFailure(options);
     if (refusal !== undefined) return failure(refusal);
     if (
       options.browserSignIn === undefined ||
@@ -1305,10 +1364,71 @@ async function browserToolOne(
       return failure("script-needs-the-app-browser");
     const run = options.browser.runScript;
     if (run === undefined) return failure("script-unavailable");
-    const callerIsCurrent = () =>
-      currentThreadIdentityFailure(options) === undefined &&
-      currentPosture(options) === "full-access" &&
-      options.browserSignIn?.refusal(options.windowId) === undefined;
+    const posture = currentPosture(options);
+    const expectedUrl = snapshot.observation?.url;
+    const profile = storedBrowserProfile(context.policy.profile);
+    const profileKey = JSON.stringify(context.policy.profile ?? null);
+    const scriptBindingIsCurrent = () => {
+      const binding = options.browserProfiles?.readBinding(String(context.contextId));
+      if (binding !== undefined)
+        return (
+          binding.approval !== "pending" &&
+          binding.modelId === String(options.thread.modelId) &&
+          sameToolActionAuthority(binding.authority, authority)
+        );
+      return (
+        profile === undefined &&
+        options.browserApproval?.isApproved(String(context.contextId)) === true
+      );
+    };
+    const callerIsCurrent = () => {
+      const latest = options.browser?.inspectThread(options.windowId, threadId);
+      return (
+        currentThreadIdentityFailure(options) === undefined &&
+        currentPosture(options) === posture &&
+        (posture === "full-access" || scriptBindingIsCurrent()) &&
+        options.browserSignIn?.refusal(options.windowId) === undefined &&
+        String(latest?.context?.contextId) === String(context.contextId) &&
+        JSON.stringify(latest?.context?.policy.profile ?? null) === profileKey &&
+        latest?.waitingForPerson === undefined
+      );
+    };
+    let scriptPermissionIsCurrent: (() => boolean) | undefined;
+    if (posture !== "full-access") {
+      const approvals = options.browserProfiles?.approvals;
+      const origin = expectedUrl === undefined ? undefined : allowedOrigin(expectedUrl);
+      if (posture === "plan") return failure("plan-mode-read-only");
+      if (
+        approvals === undefined ||
+        origin === undefined ||
+        !origin.startsWith("https://") ||
+        approvals.isUnattendedScope?.(options.windowId) === true ||
+        approvals.isPairedDevice?.(options.windowId) === true
+      )
+        return failure("script-needs-a-local-person");
+      if (!scriptBindingIsCurrent()) return failure("browser-approval-required");
+      const decision = await approvals.request({
+        windowId: options.windowId,
+        threadId: String(threadId),
+        authority,
+        origin,
+        ...(profile === undefined ? {} : { profile }),
+        script: { source: input.source },
+        ...(signal === undefined ? {} : { signal }),
+      });
+      if (decision !== "approved") return failure(`browser-approval-${decision}`);
+      const reviewed = options.browser.inspectThread(options.windowId, threadId).observation;
+      if (
+        !callerIsCurrent() ||
+        signal?.aborted ||
+        reviewed?.url !== expectedUrl ||
+        reviewed?.revision !== input.expectedObservationRevision
+      )
+        return failure("browser-authority-stale");
+      // The service checks the exact observation before dispatch, then deliberately
+      // invalidates it after an effect; result publication still checks authority.
+      scriptPermissionIsCurrent = callerIsCurrent;
+    }
     const receipt = await run({
       windowId: options.windowId,
       threadId,
@@ -1317,6 +1437,7 @@ async function browserToolOne(
       expectedObservationRevision: input.expectedObservationRevision,
       turnExecutionPolicy: currentPosture(options),
       callerIsCurrent,
+      ...(scriptPermissionIsCurrent === undefined ? {} : { scriptPermissionIsCurrent }),
       ...(signal === undefined ? {} : { signal }),
     });
     return browserPageScriptToolResult(
@@ -1334,7 +1455,7 @@ async function browserToolOne(
     ) {
       return failure("browser-navigation-required");
     }
-    if (context.policy.profile?.kind === "project" || context.policy.profile?.kind === "personal") {
+    if (storedBrowserProfile(context.policy.profile) !== undefined) {
       const callerRefusal = options.browserSignIn?.refusal(options.windowId);
       if (options.browserSignIn === undefined || callerRefusal !== undefined) {
         return failure(
@@ -1374,12 +1495,10 @@ async function browserToolOne(
       ? (input.profile ??
         options.readThread(options.windowId, options.thread.id)?.browserTaskProfile)
       : undefined;
-  const requested: StoredBrowserProfile | undefined =
-    choice === "personal"
-      ? { kind: "personal" }
-      : choice === "project" && authority.projectId !== undefined
-        ? { kind: "project", projectId: authority.projectId }
-        : undefined;
+  const requested =
+    choice === undefined
+      ? undefined
+      : storedBrowserProfile(browserProfileFromChoice(choice, authority.projectId));
   if (choice === "project" && requested === undefined) return failure("profile-unavailable");
   if (
     existing !== undefined &&
@@ -1535,8 +1654,15 @@ async function browserToolOne(
       threadId,
       downloadId: input.downloadId,
       workspaceRoot: download.root,
-      ask: (facts, pageOrigin) =>
-        download.request(browserDownloadQuestion(pageOrigin, facts), signal),
+      ...(signal === undefined ? {} : { signal }),
+      ask: (facts, pageOrigin) => {
+        const question = browserDownloadQuestion(pageOrigin, facts);
+        // Code journals bounded approval summaries. Refuse before that layer
+        // could truncate the source chain and hide its final origin.
+        return Buffer.byteLength(question, "utf8") > MAX_CODE_OPERATION_SUMMARY_BYTES
+          ? Promise.resolve("cancelled" as const)
+          : download.request(question, signal);
+      },
     });
     return saved.status === "saved" ? browserDownloadSavedResult(saved) : failure(saved.error);
   }

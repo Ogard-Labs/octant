@@ -1,4 +1,5 @@
-import { afterEach, describe, expect, setDefaultTimeout, test } from "bun:test";
+import { createHash } from "node:crypto";
+import { afterEach, describe, expect, setDefaultTimeout, spyOn, test } from "bun:test";
 
 // Password and owner-secret hashing is intentionally slow, and the password
 // tests pay several of those hashes each; slow CI runners pass bun's 5 s
@@ -130,6 +131,184 @@ describe("share service", () => {
     expect(created.ownerSecret).toMatch(/^[A-Za-z0-9_-]{43}$/);
     expect(created.url).toBe(`${service?.publicUrl}/s/${created.shareId}`);
     expect(created.expiresAt).toBe(new Date(START + 30 * DAY_MS).toISOString());
+  });
+
+  test("durably cancels its exact owned id before a slow create completes and refuses replay", async () => {
+    start();
+    const ownerSecret = "k".repeat(43);
+    const shareId = createHash("sha256")
+      .update("octant-canvas-public-share-id-v1\0" + ownerSecret)
+      .digest()
+      .subarray(0, 16)
+      .toString("base64url");
+    const body = {
+      ...createBody(undefined, { password: "fixture-password" }),
+      kind: "canvas-public-share-owned-create",
+      shareId,
+      ownerSecret,
+    };
+    let enter = () => {},
+      release = () => {};
+    const entered = new Promise<void>((resolve) => {
+      enter = resolve;
+    });
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const hashing = spyOn(Bun.password, "hash").mockImplementation(async () => {
+      enter();
+      await gate;
+      return "fixture-hash";
+    });
+    let creating: Promise<Response> | undefined;
+    try {
+      creating = fetch(`${service?.publicUrl}/api/v1/shares`, {
+        method: "POST",
+        body: JSON.stringify(body),
+      });
+      await entered;
+      const wrong = await fetch(`${service?.publicUrl}/api/v1/shares/${shareId}`, {
+        method: "DELETE",
+        headers: owner("z".repeat(43)),
+      });
+      expect(wrong.status).toBe(403);
+      expect(readdirSync(join(dataDir, "tombstones"))).toHaveLength(0);
+      const unrelated = await fetch(`${service?.publicUrl}/api/v1/shares/${"Z".repeat(22)}`, {
+        method: "DELETE",
+        headers: owner(ownerSecret),
+      });
+      expect(unrelated.status).toBe(403);
+      expect(readdirSync(join(dataDir, "tombstones"))).toHaveLength(0);
+      const cancelled = await fetch(`${service?.publicUrl}/api/v1/shares/${shareId}`, {
+        method: "DELETE",
+        headers: owner(ownerSecret),
+      });
+      release();
+      const created = await creating;
+      const viewed = await fetch(`${service?.publicUrl}/s/${shareId}`);
+      expect({
+        cancelled: cancelled.status,
+        created: created.status,
+        viewed: viewed.status,
+      }).toEqual({ cancelled: 200, created: 410, viewed: 410 });
+      const persisted = readFileSync(join(dataDir, "tombstones", `${shareId}.json`), "utf8");
+      expect(persisted).not.toContain(ownerSecret);
+      const config = readShareConfig({
+        OCTANT_SHARE_DATA_DIR: dataDir,
+        OCTANT_SHARE_HOST: "127.0.0.1",
+        OCTANT_SHARE_PORT: "0",
+        OCTANT_SHARE_USERCONTENT_PORT: "0",
+      });
+      if (config.status !== "ok") throw new Error("Fixture configuration refused.");
+      service?.stop();
+      service = startShareService(config.config, { clock: () => now });
+      const replay = await fetch(`${service.publicUrl}/api/v1/shares`, {
+        method: "POST",
+        body: JSON.stringify(body),
+      });
+      expect(replay.status).toBe(410);
+      expect(
+        (
+          await fetch(`${service.publicUrl}/api/v1/shares/${shareId}`, {
+            method: "DELETE",
+            headers: owner(ownerSecret),
+          })
+        ).status,
+      ).toBe(200);
+      expect(
+        (
+          await fetch(`${service.publicUrl}/api/v1/shares/${shareId}`, {
+            method: "DELETE",
+            headers: owner("z".repeat(43)),
+          })
+        ).status,
+      ).toBe(403);
+      expect(readdirSync(join(dataDir, "shares"))).toHaveLength(0);
+    } finally {
+      release();
+      try {
+        await creating;
+      } finally {
+        hashing.mockRestore();
+      }
+    }
+  });
+
+  test("replays an owned create without changing its receipt, payload or protected terms", async () => {
+    start();
+    const body = {
+      ...createBody(undefined, { password: "correct horse" }),
+      kind: "canvas-public-share-owned-create",
+      shareId: createHash("sha256")
+        .update("octant-canvas-public-share-id-v1\0" + "k".repeat(43))
+        .digest()
+        .subarray(0, 16)
+        .toString("base64url"),
+      ownerSecret: "k".repeat(43),
+    };
+    const [first, concurrent] = await Promise.all([create(body), create(body)]);
+    expect(concurrent).toEqual(first);
+    const path = join(dataDir, "shares", `${first.shareId}.json`);
+    const stored = readFileSync(path, "utf8");
+    expect(stored.includes(body.ownerSecret)).toBe(false);
+    expect(stored.includes("correct horse")).toBe(false);
+    now += DAY_MS;
+    expect(await create(body)).toEqual(first);
+    expect(readFileSync(path, "utf8")).toBe(stored);
+    expect(readdirSync(join(dataDir, "shares"))).toHaveLength(1);
+    const changed = await fetch(`${service?.publicUrl}/api/v1/shares/${first.shareId}`, {
+      method: "PUT",
+      headers: owner(body.ownerSecret),
+      body: JSON.stringify({
+        schemaVersion: 1,
+        kind: "canvas-public-share-update",
+        document: documentWith([heading], "Updated snapshot"),
+        expiry: { kind: "never" },
+      }),
+    });
+    expect(changed.status).toBe(200);
+    const updated = readFileSync(path, "utf8");
+    expect(await create(body)).toEqual(first);
+    expect(readFileSync(path, "utf8")).toBe(updated);
+  });
+
+  test("refuses owned-create conflicts after checking the owner without mutating the link", async () => {
+    start();
+    const body = {
+      ...createBody(),
+      kind: "canvas-public-share-owned-create",
+      shareId: createHash("sha256")
+        .update("octant-canvas-public-share-id-v1\0" + "m".repeat(43))
+        .digest()
+        .subarray(0, 16)
+        .toString("base64url"),
+      ownerSecret: "m".repeat(43),
+    };
+    const created = await create(body);
+    const path = join(dataDir, "shares", `${created.shareId}.json`);
+    const stored = readFileSync(path, "utf8");
+    for (const change of [
+      { document: documentWith([heading], "Changed") },
+      { expiry: { kind: "never" } },
+      { password: "different password" },
+    ]) {
+      const response = await fetch(`${service?.publicUrl}/api/v1/shares`, {
+        method: "POST",
+        body: JSON.stringify({ ...body, ...change }),
+      });
+      expect(response.status).toBe(409);
+      expect(readFileSync(path, "utf8")).toBe(stored);
+    }
+    const wrongOwner = await fetch(`${service?.publicUrl}/api/v1/shares`, {
+      method: "POST",
+      body: JSON.stringify({
+        ...body,
+        ownerSecret: "n".repeat(43),
+        document: documentWith([heading], "Changed"),
+      }),
+    });
+    expect(wrongOwner.status).toBe(403);
+    expect(readFileSync(path, "utf8")).toBe(stored);
   });
 
   test("stores only a hash of the owner secret", async () => {
@@ -532,6 +711,21 @@ describe("share service", () => {
     }
     expect(statuses.filter((status) => status === 201)).toHaveLength(10);
     expect(statuses[10]).toBe(429);
+    const secret = "v".repeat(43);
+    const id = createHash("sha256")
+      .update("octant-canvas-public-share-id-v1\0" + secret)
+      .digest()
+      .subarray(0, 16)
+      .toString("base64url");
+    expect(
+      (
+        await fetch(`${service?.publicUrl}/api/v1/shares/${id}`, {
+          method: "DELETE",
+          headers: owner(secret),
+        })
+      ).status,
+    ).toBe(429);
+    expect(readdirSync(join(dataDir, "tombstones"))).toHaveLength(0);
     now += 61_000;
     const later = await fetch(`${service?.publicUrl}/api/v1/shares`, {
       method: "POST",

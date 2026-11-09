@@ -1,3 +1,15 @@
+import {
+  decodeBrowserDownloadPermissionsCommand,
+  decodeBrowserDownloadPermissionsResult,
+} from "@octant/contracts/browser-download-permissions";
+import type { BrowserDownloadPermissions } from "./browser/browserDownloadPermissions";
+import {
+  decodeBrowserUploadPermissionsCommand,
+  decodeBrowserUploadPermissionsResult,
+} from "@octant/contracts/browser-upload-permissions";
+import type { BrowserUploadPermissions } from "./browser/browserUploadPermissions";
+import { browserProfileFromChoice } from "@octant/domain";
+import type { BrowserAgentAvailability } from "@octant/contracts";
 import { randomUUID } from "node:crypto";
 import { sameToolActionAuthority, type ToolActionAuthority } from "@octant/contracts";
 import {
@@ -26,7 +38,6 @@ import {
   decodeBrowserAutomationFailure,
   type BrowserAutomationFailure,
   type BrowserThreadId,
-  type BrowserProfile,
 } from "@octant/contracts/browser-automation";
 import {
   decodeBrowserCaptureImage,
@@ -54,6 +65,7 @@ import type { ProjectBrowserService } from "./browser/projectBrowserService";
 import type { BrowserProfileService } from "./browser/browserProfileService";
 import type { BrowserExtensionService } from "./browser/browserExtensionService";
 import type { BrowserFlowService } from "./browser/browserFlows";
+import type { BrowserFlowRuns } from "./browser/browserFlowRuns";
 import {
   decodeBrowserFlowsCommand,
   decodeBrowserFlowsResult,
@@ -76,6 +88,11 @@ import {
 import type { BrowserCredentialUseService } from "./browser/browserCredentialUseService";
 import type { WindowId } from "@octant/contracts/shell";
 import type { WindowAuthorityStore } from "./windowAuthorityStore";
+import {
+  decodeBrowserSessionGrantsCommand,
+  decodeBrowserSessionGrantsResult,
+} from "@octant/contracts/browser-session-grants";
+import type { BrowserSessionGrants } from "./browser/browserSessionGrants";
 
 const PREFIX = "/api/browser/";
 const METHODS = "POST, OPTIONS";
@@ -83,6 +100,13 @@ const HEADERS = "content-type, x-octant-window-capability";
 const BROWSER_MODES = ["chat", "work", "code"] as const;
 
 export interface BrowserAutomationRouteDependencies {
+  readonly downloadPermissions?: Pick<BrowserDownloadPermissions, "execute">;
+  readonly uploadPermissions?: Pick<BrowserUploadPermissions, "execute">;
+  readonly sessionGrants?: Pick<BrowserSessionGrants, "execute">;
+  readonly agentAvailability?: (
+    windowId: WindowId,
+    threadId: BrowserThreadId,
+  ) => BrowserAgentAvailability;
   readonly credentialUse?: Pick<BrowserCredentialUseService, "execute">;
   readonly service: Pick<
     BrowserAutomationService,
@@ -147,6 +171,7 @@ export interface BrowserAutomationRouteDependencies {
   readonly profiles?: Pick<BrowserProfileService, "execute">;
   /** The Projects' saved Browser flows, listed and deleted by the person; absent on a host without them. */
   readonly flows?: Pick<BrowserFlowService, "summaries" | "delete">;
+  readonly flowRuns?: BrowserFlowRuns;
   readonly windowAuthorityStore: WindowAuthorityStore;
   readonly maxRequestBodySize: number;
 }
@@ -154,6 +179,12 @@ export interface BrowserAutomationRouteDependencies {
 export function createBrowserAutomationRouteHandler(
   dependencies: BrowserAutomationRouteDependencies,
 ): (request: Request) => Promise<Response | undefined> {
+  const withAvailability = (windowId: WindowId, snapshot: BrowserAutomationSnapshot) => ({
+    ...snapshot,
+    agentAvailability: dependencies.agentAvailability?.(windowId, snapshot.threadId) ?? {
+      status: "unknown" as const,
+    },
+  });
   const notThisWindowsThread = (origin: string | null): Response =>
     failure(
       { category: "unauthorized", message: "Browser thread is not owned by this window." },
@@ -284,12 +315,7 @@ export function createBrowserAutomationRouteHandler(
             409,
             origin,
           );
-        const profile: BrowserProfile | undefined =
-          selection.profile === "project"
-            ? authority.projectId === undefined
-              ? undefined
-              : { kind: "project", projectId: authority.projectId }
-            : { kind: selection.profile };
+        const profile = browserProfileFromChoice(selection.profile, authority.projectId);
         if (profile === undefined)
           return failure(
             { category: "unavailable", message: "This task has no Project Browser profile." },
@@ -488,6 +514,31 @@ export function createBrowserAutomationRouteHandler(
             origin,
           );
         }
+        if (command.kind !== "delete") {
+          const runs = dependencies.flowRuns;
+          if (runs === undefined)
+            return failure(
+              { category: "unavailable", message: "Reviewed Browser flow runs are unavailable." },
+              503,
+              origin,
+            );
+          const result =
+            command.kind === "run-tasks"
+              ? runs.tasks(windowId, command.projectId)
+              : command.kind === "review-run"
+                ? runs.review(windowId, command.projectId, command.name, {
+                    threadId: command.threadId,
+                    mode: command.mode,
+                  })
+                : command.kind === "start-run"
+                  ? await runs.start(windowId, command.runId, command.values)
+                  : command.kind === "resume-run"
+                    ? await runs.resume(windowId, command.runId)
+                    : command.kind === "cancel-run"
+                      ? runs.cancel(windowId, command.runId)
+                      : runs.inspect(windowId, command.runId);
+          return success(decodeBrowserFlowsResult(result), origin);
+        }
         return success(
           decodeBrowserFlowsResult(
             dependencies.flows.delete(command.projectId, command.name)
@@ -497,6 +548,84 @@ export function createBrowserAutomationRouteHandler(
                   reason: "not-found",
                   message: "That flow no longer exists.",
                 },
+          ),
+          origin,
+        );
+      }
+      if (url.pathname === "/api/browser/download-permissions") {
+        if (callerKind !== "local-window")
+          return success(
+            decodeBrowserDownloadPermissionsResult({
+              kind: "download-permission-refused",
+              reason: "not-local",
+              message: "Download manifests are reviewed only on the execution host.",
+            }),
+            origin,
+          );
+        if (dependencies.downloadPermissions === undefined)
+          return failure(
+            { category: "unavailable", message: "Recurring download permissions are unavailable." },
+            503,
+            origin,
+          );
+        return success(
+          decodeBrowserDownloadPermissionsResult(
+            await dependencies.downloadPermissions.execute(
+              windowId,
+              decodeBrowserDownloadPermissionsCommand(decoded.value),
+            ),
+          ),
+          origin,
+        );
+      }
+      if (url.pathname === "/api/browser/upload-permissions") {
+        if (callerKind !== "local-window")
+          return success(
+            decodeBrowserUploadPermissionsResult({
+              kind: "upload-permission-refused",
+              reason: "not-local",
+              message: "Upload manifests are reviewed only on the execution host.",
+            }),
+            origin,
+          );
+        if (dependencies.uploadPermissions === undefined)
+          return failure(
+            { category: "unavailable", message: "Recurring upload permissions are unavailable." },
+            503,
+            origin,
+          );
+        return success(
+          decodeBrowserUploadPermissionsResult(
+            await dependencies.uploadPermissions.execute(
+              windowId,
+              decodeBrowserUploadPermissionsCommand(decoded.value),
+            ),
+          ),
+          origin,
+        );
+      }
+      if (url.pathname === "/api/browser/session-grants") {
+        if (callerKind !== "local-window")
+          return success(
+            decodeBrowserSessionGrantsResult({
+              kind: "browser-session-refused",
+              reason: "not-local",
+              message: "Session permissions are reviewed only on the execution host.",
+            }),
+            origin,
+          );
+        if (dependencies.sessionGrants === undefined)
+          return failure(
+            { category: "unavailable", message: "Browser session permissions are unavailable." },
+            503,
+            origin,
+          );
+        return success(
+          decodeBrowserSessionGrantsResult(
+            await dependencies.sessionGrants.execute(
+              windowId,
+              decodeBrowserSessionGrantsCommand(decoded.value),
+            ),
           ),
           origin,
         );
@@ -585,14 +714,17 @@ export function createBrowserAutomationRouteHandler(
         return success(
           shown(
             decodeBrowserAutomationSnapshot(
-              dependencies.service.peekContext === undefined
-                ? dependencies.service.inspect(windowId, input.threadId, input.contextId)
-                : await dependencies.service.peekContext(
-                    windowId,
-                    input.threadId,
-                    input.contextId,
-                    request.signal,
-                  ),
+              withAvailability(
+                windowId,
+                dependencies.service.peekContext === undefined
+                  ? dependencies.service.inspect(windowId, input.threadId, input.contextId)
+                  : await dependencies.service.peekContext(
+                      windowId,
+                      input.threadId,
+                      input.contextId,
+                      request.signal,
+                    ),
+              ),
             ),
           ),
           origin,
@@ -617,7 +749,10 @@ export function createBrowserAutomationRouteHandler(
           dependencies.service.peekThread === undefined || input.freshPicture === false
             ? dependencies.service.inspectThread(windowId, input.threadId)
             : await dependencies.service.peekThread(windowId, input.threadId, request.signal);
-        return success(shown(decodeBrowserAutomationSnapshot(snapshot)), origin);
+        return success(
+          shown(decodeBrowserAutomationSnapshot(withAvailability(windowId, snapshot))),
+          origin,
+        );
       }
       if (url.pathname === "/api/browser/captures") {
         const input = decodeBrowserCapturesCommand(decoded.value);

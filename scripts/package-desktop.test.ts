@@ -39,6 +39,7 @@ import {
   PACKAGED_RUNTIME_IMPORTS,
   REQUIRED_PACKAGED_FILES,
   REQUIRED_STAGED_PACKAGED_FILES,
+  REQUIRED_WINDOWS_PTY_FILES,
   REQUIRED_DARWIN_HELPER_FILES,
   REQUIRED_DARWIN_MANAGED_TOOL_FILES,
   REQUIRED_DARWIN_TERMINAL_LAUNCHER_FILES,
@@ -275,6 +276,40 @@ describe("desktop packaging boundary", () => {
       ),
     ).toThrow(/OCTANT_PACKAGE_TARGET/);
   });
+
+  it("admits native Windows QA packaging and refuses cross-host rebuilding", () => {
+    const target = resolveDesktopPackageTarget({}, { platform: "win32", arch: "x64" });
+    expect(target).toEqual({ id: "win32-x64", platform: "win32", arch: "x64" });
+    expect(() =>
+      resolveDesktopPackageTarget(
+        { OCTANT_PACKAGE_TARGET: target.id },
+        { platform: "linux", arch: "x64" },
+      ),
+    ).toThrow(/matching host/);
+    expect(nativePayloadsToStrip(target.platform)).toEqual([]);
+    expect(createPackagerOptions("/tmp/stage", "/tmp/out", "0.1.0", target)).toMatchObject({
+      win32metadata: { CompanyName: "Ogard Labs" },
+    });
+  });
+
+  it.each(["0.1.0-preview.20261108.1", "0.1.0-candidate.20261108.2"])(
+    "keeps full runtime identity while supplying numeric Windows PE version metadata (%s)",
+    (version) => {
+      const identity = desktopIdentity(version.includes("-preview.") ? "nightly" : "stable");
+      const options = createPackagerOptions(
+        "/tmp/stage",
+        "/tmp/out",
+        version,
+        DESKTOP_PACKAGE_TARGETS["win32-x64"],
+        identity,
+      );
+      expect(options.appVersion).toBe("0.1.0");
+      expect(createDesktopRuntimeManifest(version, identity)).toMatchObject({
+        version,
+        octantDesktopFlavor: identity.flavor,
+      });
+    },
+  );
 
   it("packages Nightly under its own bundle, executable and link scheme and stamps its flavor", () => {
     const identity = desktopIdentity("nightly");
@@ -566,6 +601,34 @@ describe("desktop packaging boundary", () => {
       validatePackagedPayload(linuxPayload, DESKTOP_PACKAGE_TARGETS["linux-x64"]),
     ).not.toThrow();
     expect(() => validatePackagedPayload(linuxPayload)).toThrow(/spawn-helper/);
+  });
+
+  it("refuses a Windows package missing its PTY backend or native language server", () => {
+    const target = resolveDesktopPackageTarget({}, { platform: "win32", arch: "x64" });
+    const paths = [
+      ...REQUIRED_STAGED_PACKAGED_FILES,
+      ...REQUIRED_WINDOWS_PTY_FILES,
+      ...bundledLanguageServerPaths(target, "apps/server/node_modules"),
+      "apps/web/dist/assets/MonacoEditorPane-a.js",
+      "apps/web/dist/assets/editor.api-b.js",
+      "apps/web/dist/assets/editor.worker-c.js",
+      "apps/web/dist/assets/xtermRuntime-d.js",
+      "apps/web/dist/assets/xtermRuntime-e.css",
+    ];
+    const payload = paths.map((path) => ({ path, content: "Octant" }));
+    expect(() => validatePackagedPayload(payload, target)).not.toThrow();
+    expect(() =>
+      validatePackagedPayload(
+        payload.filter((entry) => !entry.path.endsWith("/conpty.node")),
+        target,
+      ),
+    ).toThrow(/conpty.node/);
+    expect(() =>
+      validatePackagedPayload(
+        payload.filter((entry) => !entry.path.endsWith("/tsc.exe")),
+        target,
+      ),
+    ).toThrow(/tsc.exe/);
   });
 
   it("refuses Stable icons as substitutes for the Nightly package assets", () => {

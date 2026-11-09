@@ -2863,6 +2863,67 @@ describe("Code project pull-request detail routes", () => {
 });
 
 describe("Git history routes", () => {
+  it("authenticates and strictly decodes provider file reads without client session authority", async () => {
+    const readProviderFileReview = vi.fn(async () => ({ status: "refused", reason: "no-session" }));
+    const route = routeFixture({ readProviderFileReview });
+    const input = { kind: "file", threadId, checkoutId, path: "sample.txt" };
+    const post = (body: unknown) =>
+      request("/api/code/provider-file-review", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(body),
+      });
+    expect(
+      (
+        await route(
+          new Request("http://127.0.0.1/api/code/provider-file-review", {
+            method: "POST",
+            body: JSON.stringify(input),
+          }),
+        )
+      )?.status,
+    ).toBe(401);
+    expect((await route(post({ ...input, sessionId: "native-session" })))?.status).toBe(400);
+    expect(readProviderFileReview).not.toHaveBeenCalled();
+    const answer = await route(post(input));
+    expect(answer?.status).toBe(200);
+    expect(await answer?.json()).toEqual({ status: "refused", reason: "no-session" });
+    expect(readProviderFileReview).toHaveBeenCalledWith(
+      windowId,
+      input,
+      expect.any(Function),
+      expect.any(AbortSignal),
+    );
+  });
+  it("withholds provider file content after its window capability is revoked", async () => {
+    const store = new WindowAuthorityStore();
+    store.register({ windowId, capability, now: 0 });
+    const readProviderFileReview = vi.fn(async () => {
+      store.revoke(windowId);
+      return {
+        status: "ready",
+        file: { path: "sample.txt", checkpoint: "private", scopes: [], anchors: [] },
+      };
+    });
+    const route = routeFixture(
+      { readProviderFileReview },
+      undefined,
+      undefined,
+      [],
+      undefined,
+      undefined,
+      { store, now: () => 1 },
+    );
+    const answer = await route(
+      request("/api/code/provider-file-review", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ kind: "file", threadId, checkoutId, path: "sample.txt" }),
+      }),
+    );
+    expect(answer?.status).toBe(401);
+    expect(await answer?.text()).not.toContain("private");
+  });
   it("passes only the authenticated identity and decoded query to Git history", async () => {
     const readGitHistory = vi.fn(async () => ({ status: "unavailable", message: "No Git" }));
     const route = routeFixture({ readGitHistory });

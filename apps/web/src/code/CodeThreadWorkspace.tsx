@@ -1,3 +1,7 @@
+import {
+  ProjectMemoryProposalPrompt,
+  type ProjectMemoryProposalClient,
+} from "../projects/ProjectMemoryProposalPrompt";
 import { ProviderCloudSessions } from "./ProviderCloudSessions";
 import { useDroppedFolderMentions } from "../composer/useDroppedFolderMentions";
 import { ToolCatalogContinuation } from "../providers/ToolCatalogContinuation";
@@ -38,11 +42,12 @@ import { ComposerVoiceButton } from "../voice/ComposerVoiceButton";
 import { appendTranscript } from "../voice/appendTranscript";
 import type { BrowserAutomationClient } from "@octant/client-runtime/browser-automation-client";
 import type { ImageGenerationClient } from "@octant/client-runtime/image-generation-client";
-import type { ImageGenerationProfileView } from "@octant/contracts";
+import type { ImageArtifactRecord, ImageGenerationProfileView, ImageJob } from "@octant/contracts";
 import { decodeBrowserThreadId, decodeImageGenerationScopeId } from "@octant/contracts";
 import { BrowserCaptureList } from "../browser/BrowserCaptureList";
-import { GeneratedImageList } from "../image/GeneratedImageList";
+import { GeneratedImageJobs, useGeneratedImageJobs } from "../image/GeneratedImageList";
 import { ImageGenerationAction } from "../image/ImageGenerationAction";
+import { ImageGenerationOfferPrompt } from "../image/ImageGenerationOfferPrompt";
 import { useThreadMessageQueue } from "../messageQueue/useThreadMessageQueue";
 import { ThreadMessageQueue } from "../messageQueue/ThreadMessageQueue";
 import type { ThreadMessageQueueClient } from "../messageQueue/threadMessageQueueClient";
@@ -82,7 +87,7 @@ import {
   threadMayChooseArtifacts,
 } from "../canvas/ThreadArtifactsChoice";
 import { publishedSnapshotRunRuntimeFor } from "../canvas/blocks/designRunningFrame";
-import { placeThreadCanvases, threadTurnSpans } from "../canvas/threadCanvasPlacement";
+import { placeByTurn, placeThreadCanvases, threadTurnSpans } from "../canvas/threadCanvasPlacement";
 import { useThreadCanvasCards } from "../canvas/useThreadCanvasCards";
 import type { HostId } from "@octant/contracts/host";
 import type { AutomationClient, CodeClient, ThreadMentionClient } from "@octant/client-runtime";
@@ -116,6 +121,7 @@ import {
   turnWorkedFor,
   type TurnHeaderOutcome,
 } from "../transcript/TurnHeader";
+import { SideTaskInline } from "../followUps/SideTaskCards";
 import { ProviderQuestionCard } from "../transcript/ProviderQuestionCard";
 import { ProviderApprovalPrompt } from "../transcript/ProviderApprovalPrompt";
 import { ExtensionToolApprovalPrompt } from "../extensions/ExtensionToolApprovalPrompt";
@@ -143,7 +149,7 @@ import { useScaffoldCatalog } from "../scaffolds/useScaffoldCatalog";
 import { WorkspacePresetPicker } from "../workspacePresets/WorkspacePresetPicker";
 import { useWorkspacePresets } from "../workspacePresets/useWorkspacePresets";
 import { PathMentionTypeahead, useCodePathMentions } from "./CodePathMentionPicker";
-import { PermissionModePicker } from "./PermissionModePicker";
+import { PermissionModePicker, threadKeepsFullAccessSandbox } from "./PermissionModePicker";
 import { ThreadGuardrailLevel } from "./GuardrailLevelIndicator";
 import { ThreadNativeSetupControl } from "../providers/ThreadNativeSetupControl";
 import type { CodeFileListingClient } from "@octant/client-runtime";
@@ -209,6 +215,8 @@ export interface CodeThreadWorkspaceProps {
   readonly onOpenCanvas?: (card: CanvasThreadReferenceCard) => void;
   /** Opens the dock's Canvas tool on this Canvas; a Canvas drawn in the thread offers it. */
   readonly onOpenCanvasInSidebar?: (card: CanvasThreadReferenceCard) => void;
+  /** The remote reader opens the same Canvas without a local sidebar. */
+  readonly canvasOpenLabel?: string;
   /** The Canvas cards the host lists for this thread, each time they are read. */
   readonly onCanvasReferencesObserved?: (
     threadId: string,
@@ -269,6 +277,7 @@ export interface CodeThreadWorkspaceProps {
   readonly messageQueueClient?: ThreadMessageQueueClient;
   readonly extensionClient?: ExtensionClient;
   readonly automationClient?: AutomationClient;
+  readonly memoryProposalClient?: ProjectMemoryProposalClient;
 }
 
 /**
@@ -632,6 +641,14 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
         }),
   });
 
+  // The transcript draws each image after the reply that made it; the list
+  // below the transcript shows the rest.
+  const threadImages = useGeneratedImageJobs({
+    client: view === undefined ? undefined : props.imageGenerationClient,
+    threadKind: "code-thread",
+    scopeId: decodeImageGenerationScopeId(String(props.threadId)),
+  });
+
   function syncMentions(value: string, caret: number | null) {
     slash.sync(value, caret);
     atMenu.sync(value, caret);
@@ -798,6 +815,14 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
     }
   };
   const messages = props.controller.conversation;
+  const loadedOperationIds = new Set(
+    messages.flatMap((message) =>
+      message.role === "assistant" && message.operationId !== undefined
+        ? [String(message.operationId)]
+        : [],
+    ),
+  );
+  const lastReply = messages.findLast((message) => message.role === "assistant");
   // The host only binds a thread to its provider once a provider session
   // exists, and a completed reply is the renderer's proof of one. A thread
   // whose first turn failed before the provider started has nothing to carry
@@ -856,6 +881,38 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
     ),
     threadCanvases.cards,
   );
+  const imagePlacement = placeByTurn(
+    threadTurnSpans(
+      messages,
+      (message) => message.id,
+      (message) => (message.role === "user" ? message.at : undefined),
+    ),
+    threadImages.jobs,
+    (job) => String(job.createdAt),
+    (job) => String(job.id),
+  );
+  const imageClient = props.imageGenerationClient;
+  const imageProfiles = props.imageGenerationProfiles;
+  const saveGeneratedImage = (job: ImageJob, artifact: ImageArtifactRecord) => {
+    setImageSaveMessage(undefined);
+    const startedOn = String(props.threadId);
+    const report = (message: string) => {
+      if (imageSaveThreadKey.current === startedOn) setImageSaveMessage(message);
+    };
+    void props.imageGenerationClient
+      ?.save({
+        jobId: job.id,
+        attachmentId: artifact.attachmentId,
+        relativePath: `generated/${String(artifact.attachmentId).slice(0, 8)}.png`,
+      })
+      .then((result) => {
+        if (result === undefined) return;
+        report(result.status === "saved" ? `Saved ${result.relativePath}.` : result.reason);
+      })
+      .catch(() => {
+        report("The image could not be saved.");
+      });
+  };
   // Offered once: an answer either way is the thread's journaled choice.
   const artifactsOfferRow = threadArtifactsOfferRow({
     choosable: artifactsChoosable,
@@ -1328,6 +1385,23 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
     }
   }
 
+  async function changeFullAccessSandbox(sandboxed: boolean) {
+    props.controller.setAccessNotice(undefined);
+    setAccessChanging(true);
+    try {
+      await props.controller.execute({
+        kind: "change-code-thread-access",
+        threadId: thread.id,
+        expectedVersion: thread.version,
+        executionPolicy: "full-access",
+        permissionPersistence: thread.permissionPersistence,
+        fullAccessSandbox: sandboxed,
+      });
+    } finally {
+      setAccessChanging(false);
+    }
+  }
+
   async function changeProvider(selection: {
     readonly providerInstanceId: typeof thread.providerInstanceId;
     readonly modelId: typeof thread.modelId;
@@ -1623,16 +1697,36 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
                   )}
                 </>
               }
-              {...(canvasClient === undefined
+              {...(canvasClient === undefined &&
+              (imageClient === undefined || imageProfiles === undefined)
                 ? {}
                 : {
                     afterItem: (message: (typeof messages)[number]) => (
                       <>
-                        <ThreadCanvases
-                          cards={canvasPlacement.byRow.get(message.id)}
-                          client={canvasClient}
-                          {...(openInSidebar === undefined ? {} : { onOpen: openInSidebar })}
-                        />
+                        {canvasClient === undefined ? null : (
+                          <ThreadCanvases
+                            cards={canvasPlacement.byRow.get(message.id)}
+                            client={canvasClient}
+                            {...(openInSidebar === undefined ? {} : { onOpen: openInSidebar })}
+                            {...(props.canvasOpenLabel === undefined
+                              ? {}
+                              : { openLabel: props.canvasOpenLabel })}
+                          />
+                        )}
+                        {imageClient === undefined || imageProfiles === undefined ? null : (
+                          <GeneratedImageJobs
+                            canSaveToProject
+                            client={imageClient}
+                            jobs={imagePlacement.byRow.get(message.id) ?? []}
+                            label="Images from this turn"
+                            onAttach={(file) => attachments.attach([file])}
+                            onEnqueued={threadImages.refresh}
+                            onSaveToProject={saveGeneratedImage}
+                            profiles={imageProfiles}
+                            scopeId={decodeImageGenerationScopeId(String(props.threadId))}
+                            threadKind="code-thread"
+                          />
+                        )}
                         {message.id === artifactsOfferRow ? (
                           <ThreadArtifactsOffer
                             onChoose={(choice) => void changeDocumentDelivery(choice)}
@@ -2066,6 +2160,20 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
                         ) : null}
                       </TurnActionMenu>
                     </article>
+                    {message.role === "assistant" && message.operationId !== undefined ? (
+                      <SideTaskInline
+                        last={message === lastReply}
+                        loadedTurnIds={loadedOperationIds}
+                        // The host refuses a fork through an operation that is still
+                        // incomplete or waiting, whichever reply it is.
+                        running={
+                          message.status === undefined ||
+                          message.status === "incomplete" ||
+                          message.status === "waiting"
+                        }
+                        turnId={String(message.operationId)}
+                      />
+                    ) : null}
                   </div>
                 );
               }}
@@ -2114,32 +2222,13 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
         {!displayReady ||
         props.imageGenerationClient === undefined ||
         props.imageGenerationProfiles === undefined ? null : (
-          <GeneratedImageList
+          <GeneratedImageJobs
             canSaveToProject
             client={props.imageGenerationClient}
+            jobs={threadImages.jobs.filter((job) => !imagePlacement.placed.has(String(job.id)))}
             onAttach={(file) => attachments.attach([file])}
-            onSaveToProject={(job, artifact) => {
-              setImageSaveMessage(undefined);
-              const startedOn = String(props.threadId);
-              const report = (message: string) => {
-                if (imageSaveThreadKey.current === startedOn) setImageSaveMessage(message);
-              };
-              void props.imageGenerationClient
-                ?.save({
-                  jobId: job.id,
-                  attachmentId: artifact.attachmentId,
-                  relativePath: `generated/${String(artifact.attachmentId).slice(0, 8)}.png`,
-                })
-                .then((result) => {
-                  if (result === undefined) return;
-                  report(
-                    result.status === "saved" ? `Saved ${result.relativePath}.` : result.reason,
-                  );
-                })
-                .catch(() => {
-                  report("The image could not be saved.");
-                });
-            }}
+            onEnqueued={threadImages.refresh}
+            onSaveToProject={saveGeneratedImage}
             profiles={props.imageGenerationProfiles}
             scopeId={decodeImageGenerationScopeId(String(thread.id))}
             threadKind="code-thread"
@@ -2224,6 +2313,20 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
           className="thread-column"
           client={props.automationClient}
           threadId={String(props.threadId)}
+          turnActive={busy}
+        />
+        <ProjectMemoryProposalPrompt
+          className="thread-column"
+          client={props.memoryProposalClient}
+          threadId={String(props.threadId)}
+          turnActive={busy}
+        />
+        <ImageGenerationOfferPrompt
+          className="thread-column"
+          client={props.imageGenerationClient}
+          profiles={props.imageGenerationProfiles ?? []}
+          scopeId={decodeImageGenerationScopeId(String(props.threadId))}
+          threadKind="code-thread"
           turnActive={busy}
         />
         {folderDrops.notice}
@@ -2550,6 +2653,12 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
                   {...(profileName === undefined ? {} : { profileName })}
                   warningScope={{ projectId: String(thread.projectId) }}
                   value={permissionModeOf(thread)}
+                  fullAccessSandbox={thread.fullAccessSandbox === true}
+                  fullAccessSandboxSupported={threadKeepsFullAccessSandbox(
+                    providerGroups,
+                    thread.providerInstanceId,
+                  )}
+                  onFullAccessSandboxChange={(sandboxed) => void changeFullAccessSandbox(sandboxed)}
                 />
               </>
             ),
@@ -2560,6 +2669,7 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
             trailing: (
               <>
                 <ComposerModelPicker
+                  threadId={String(thread.id)}
                   ariaLabel="Provider and model"
                   disabled={busy}
                   groups={threadModelGroups}

@@ -67,8 +67,23 @@ function nearestRank(samples: ReadonlyArray<number>, percentile: number): number
   return sorted[rank - 1] ?? 0;
 }
 
+/** Observations kept per measurement between two host-health samples. */
+const WINDOW_SAMPLE_LIMIT = 1_024;
+
+export interface LatencyWindow {
+  readonly key: ObservedLatency;
+  readonly count: number;
+  readonly p50Ms: number;
+  readonly p95Ms: number;
+  readonly maxMs: number;
+}
+
 export class LatencyStatsProjection {
   readonly #readings = new Map<ObservedLatency, LatencyReading>();
+  readonly #window = new Map<
+    ObservedLatency,
+    { count: number; maxMs: number; samples: number[] }
+  >();
 
   slowThresholdMs(measurement: ObservedLatency): number | undefined {
     return MEASUREMENTS.find((entry) => entry.key === measurement)?.slowThresholdMs;
@@ -81,6 +96,11 @@ export class LatencyStatsProjection {
     reading.maxMs = Math.max(reading.maxMs, duration);
     const threshold = MEASUREMENTS.find((entry) => entry.key === measurement)?.slowThresholdMs;
     if (threshold !== undefined && duration >= threshold) reading.slowCount += 1;
+    const window = this.#window.get(measurement) ?? { count: 0, maxMs: 0, samples: [] };
+    window.count += 1;
+    window.maxMs = Math.max(window.maxMs, duration);
+    if (window.samples.length < WINDOW_SAMPLE_LIMIT) window.samples.push(duration);
+    this.#window.set(measurement, window);
     if (reading.samples.length < SAMPLE_LIMIT) {
       reading.samples.push(duration);
     } else {
@@ -113,6 +133,29 @@ export class LatencyStatsProjection {
         ];
       }),
     };
+  }
+
+  /**
+   * What each measurement saw since the previous call, then starts a new
+   * window. Percentiles cover the first observations of a busy window; count
+   * and max cover all of them.
+   */
+  takeWindow(): ReadonlyArray<LatencyWindow> {
+    const windows = MEASUREMENTS.flatMap((entry) => {
+      const window = this.#window.get(entry.key);
+      if (window === undefined || window.count === 0) return [];
+      return [
+        {
+          key: entry.key,
+          count: window.count,
+          p50Ms: nearestRank(window.samples, 0.5),
+          p95Ms: nearestRank(window.samples, 0.95),
+          maxMs: window.maxMs,
+        },
+      ];
+    });
+    this.#window.clear();
+    return windows;
   }
 
   #reading(measurement: ObservedLatency): LatencyReading {

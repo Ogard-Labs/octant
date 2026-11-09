@@ -194,10 +194,12 @@ async function startPageFixture(): Promise<{
 <body><input id="field" autocomplete="off"><select id="choice"><option>First</option><option>Second</option><option>Third</option></select>
 <script>
 let presses = 0;
+let releases = 0;
 let keys = 0;
 const arrows = [];
-const report = () => { const state = "field=" + document.getElementById("field").value + ";choice=" + document.getElementById("choice").value + ";presses=" + presses + ";keys=" + keys + ";arrows=" + arrows.join(","); document.title = state; fetch("/report?" + encodeURIComponent(state)).catch(() => {}); };
+const report = () => { const state = "field=" + document.getElementById("field").value + ";choice=" + document.getElementById("choice").value + ";presses=" + presses + ";keys=" + keys + ";arrows=" + arrows.join(",") + ";releases=" + releases; document.title = state; fetch("/report?" + encodeURIComponent(state)).catch(() => {}); };
 addEventListener("mousedown", () => { presses++; report(); }, true);
+addEventListener("mouseup", () => { releases++; report(); }, true);
 addEventListener("keydown", (event) => { keys++; if (event.key.startsWith("Arrow")) arrows.push("down:" + event.key); report(); }, true);
 addEventListener("keyup", (event) => { if (event.key.startsWith("Arrow")) arrows.push("up:" + event.key); report(); }, true);
 document.getElementById("field").addEventListener("input", report);
@@ -1066,8 +1068,24 @@ try {
         );
         const menuMark = nightly.events.mark();
         await nextFrame();
-        await click(120, 120);
+        // Nightly releases held page buttons before AppKit opens a menu.
+        // Wait for that real transition: a later physical release is a
+        // duplicate, correctly refused rather than delivered to the page twice.
+        await input({ type: "mouseDown", x: 120, y: 120, button: "left", clickCount: 1 });
         const menu = await nightly.events.next((event) => event.event === "menu", menuMark, 15_000);
+        await waitFor("The popup's page-button release", 15_000, () =>
+          pageFixture.reports.some((report) => report.endsWith(";releases=2")) ? true : undefined,
+        );
+        const lateRelease = record(
+          await present({
+            kind: "input",
+            presentationId,
+            frameSequence: sequence,
+            input: { type: "mouseUp", x: 120, y: 120, button: "left", clickCount: 1 },
+          }),
+        );
+        if (lateRelease.status !== "refused")
+          throw new Error("The popup's already-consumed button release reached the page twice.");
         if (!JSON.stringify(menu.labels).includes("Third"))
           throw new Error(`The select menu offered ${JSON.stringify(menu.labels)}.`);
         await waitFor("The chosen option in the page", 15_000, () =>

@@ -106,6 +106,7 @@ function createCapturingServe(): {
 }
 
 interface SetupOptions {
+  readonly listenerKeyTransition?: RemoteGatewayOptions["listenerKeyTransition"];
   readonly config?: RemoteGatewayConfig;
   readonly productDispatch?: RemoteGatewayOptions["productDispatch"];
   readonly webAssets?: RemoteGatewayOptions["webAssets"];
@@ -177,6 +178,9 @@ function setup(options: SetupOptions = {}) {
     serverBuildVersion: "0.1.0",
     signing,
     webAssets,
+    ...(options.listenerKeyTransition === undefined
+      ? {}
+      : { listenerKeyTransition: options.listenerKeyTransition }),
     ...(options.productDispatch === undefined ? {} : { productDispatch: options.productDispatch }),
     ...(options.designPage === undefined ? {} : { designPage: options.designPage }),
     serve: options.serve ?? defaultServe,
@@ -811,6 +815,25 @@ describe("RemoteGateway — C1: no-bypass import surface", () => {
 });
 
 describe("RemoteGateway — protocol hello route", () => {
+  it("withdraws a prepared listener transition through the authoritative hello rather than proxied product headers", async () => {
+    const { serve, getFetch } = createCapturingServe();
+    const { gateway } = setup({ serve, listenerKeyTransition: () => undefined });
+    await gateway.start();
+    const fetch = getFetch();
+    if (fetch === undefined) throw new Error("expected gateway fetch");
+    const hello = await fetch(
+      new Request(`${ORIGIN}/api/remote/hello`, { headers: { host: "192.168.1.20:9443" } }),
+      lanFacts,
+    );
+    expect(hello.status).toBe(200);
+    expect(hello.headers.get("x-octant-listener-transition")).toBe("none");
+    const assets = await fetch(
+      new Request(`${ORIGIN}/`, { headers: { host: "192.168.1.20:9443" } }),
+      lanFacts,
+    );
+    expect(assets.headers.has("x-octant-listener-transition")).toBe(false);
+    await gateway.stop();
+  });
   it("serves signed host hello on GET /api/remote/hello", async () => {
     const { serve, getFetch } = createCapturingServe();
     const { gateway } = setup({ serve });

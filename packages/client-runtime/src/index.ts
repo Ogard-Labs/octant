@@ -77,6 +77,7 @@ export * from "./ownerBrowser";
 export * from "./ownerMergeUnlock";
 export * from "./desktopOwnerUnlock";
 export * from "./ownerAlerts";
+export * from "./ownerThreadMove";
 export { base64UrlEncode } from "./hubLinkSigning";
 export * from "./remoteListenerTrust";
 export * from "./pinnedListenerExchange";
@@ -90,6 +91,7 @@ export * from "./fileMentionClient";
 export * from "./projectBrowserClient";
 export * from "./projectTerminalClient";
 export * from "./usageClient";
+export * from "./benchmarksClient";
 export * from "./usageDashboardClient";
 export * from "./spendCeilingClient";
 export * from "./protectedFilesClient";
@@ -117,3 +119,5 @@ export { createGitHistoryClient, type GitHistoryClient } from "./gitHistoryClien
 
 export * from "./ownerPosture";
 export { createBrowserPresentationClient } from "./browserPresentationClient";
+
+export * from "./ownerApprovals";

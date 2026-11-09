@@ -1,3 +1,4 @@
+import type { BrowserDownloadSource } from "@octant/contracts";
 import {
   decodeBrowserToolApproval,
   type BrowserToolApproval,
@@ -54,6 +55,7 @@ interface BrowserToolApprovalServiceOptions {
   readonly isLocalWindow?: (windowId: WindowId) => boolean;
   /** How many extensions are enabled in a profile, to name in its prompt. */
   readonly extensionsEnabledIn?: (profile: StoredBrowserProfile) => number;
+  readonly profileLabel?: (profile: StoredBrowserProfile) => Promise<string | undefined>;
   /**
    * The waiting set changed: a prompt became listable or left the list for
    * a decision, a cancel, an expiry, a close, or a revocation. Wired only at
@@ -90,7 +92,7 @@ export class BrowserToolApprovalService {
     this.#ttlMs = Math.max(1_000, Math.min(options.ttlMs ?? DEFAULT_TTL_MS, MAX_TTL_MS));
   }
 
-  request(input: {
+  async request(input: {
     readonly windowId: WindowId;
     readonly threadId: string;
     readonly authority: ToolActionAuthority;
@@ -104,13 +106,28 @@ export class BrowserToolApprovalService {
       readonly name: string;
       readonly sizeBytes: number;
       readonly mediaType: string;
+      readonly source?: BrowserDownloadSource;
     };
     /** The agent asks the person to sign in here; see the contract. */
     readonly signIn?: { readonly reason?: string };
+    readonly script?: { readonly source: string };
     readonly signal?: AbortSignal;
   }): Promise<"approved" | "denied" | "cancelled" | "expired"> {
     if (input.signal?.aborted) return Promise.resolve("cancelled");
     if (this.#pending.size >= MAX_PENDING_APPROVALS) return Promise.resolve("denied");
+    let profileLabel: string | undefined;
+    if (input.profile?.kind === "account") {
+      profileLabel = await this.#options.profileLabel?.(input.profile).catch(() => undefined);
+      if (input.signal?.aborted) return "cancelled";
+      if (
+        profileLabel === undefined ||
+        profileLabel.trim().length === 0 ||
+        profileLabel.length > 256 ||
+        this.#pending.size >= MAX_PENDING_APPROVALS ||
+        !this.#options.authorityIsCurrent(input.threadId, input.authority, input.windowId)
+      )
+        return "denied";
+    }
     const approvalId = decodeToolApprovalId(this.#options.uuid());
     const extensionCount =
       input.profile === undefined
@@ -122,6 +139,7 @@ export class BrowserToolApprovalService {
       mode: input.authority.mode,
       origin: input.origin,
       ...(input.profile === undefined ? {} : { profile: input.profile }),
+      ...(profileLabel === undefined ? {} : { profileLabel }),
       ...(extensionCount > 0 ? { extensionCount } : {}),
       ...(input.upload === undefined
         ? {}
@@ -140,6 +158,7 @@ export class BrowserToolApprovalService {
               name: input.download.name.slice(0, 256),
               sizeBytes: input.download.sizeBytes,
               mediaType: input.download.mediaType.slice(0, 128),
+              ...(input.download.source === undefined ? {} : { source: input.download.source }),
             },
           }),
       ...(input.signIn === undefined
@@ -150,6 +169,7 @@ export class BrowserToolApprovalService {
                 ? {}
                 : { reason: input.signIn.reason.trim().slice(0, 300) },
           }),
+      ...(input.script === undefined ? {} : { script: input.script }),
       requestedAt: new Date(this.#options.now()).toISOString(),
     });
     return new Promise((resolve) => {
@@ -213,7 +233,8 @@ export class BrowserToolApprovalService {
       decision.remember === true &&
       pending.view.upload === undefined &&
       pending.view.download === undefined &&
-      pending.view.signIn === undefined
+      pending.view.signIn === undefined &&
+      pending.view.script === undefined
     ) {
       // The answering window journals the grant: for a routine it is the
       // person who saw the prompt, not the host scope that raised it.
@@ -232,7 +253,7 @@ export class BrowserToolApprovalService {
     // A signed-in page acts as the person's account, so a paired device neither
     // sees nor answers its approval, and an approval a paired device's turn raised
     // waits for a window of this computer, like a routine's.
-    const signedIn = pending.view.profile !== undefined;
+    const signedIn = pending.view.profile !== undefined || pending.view.script !== undefined;
     if (signedIn && this.#isPairedDevice(windowId)) return false;
     if (pending.windowId === windowId) return true;
     const isHostScope = this.#options.isHostScope;

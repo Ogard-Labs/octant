@@ -263,6 +263,19 @@ export function classifyProductAction(request: Request): string | undefined {
     // mutation stays local-window and is refused by the route for remote.
     return method === "GET" || method === "HEAD" ? "settings.read-non-secret" : undefined;
   }
+  if (path.startsWith("/api/benchmarks/")) {
+    // Reads of suites and runs, and a cell's stars; every other change stays
+    // with a local window.
+    if (method === "POST" && path === "/api/benchmarks/cells/rate") return "benchmark.rate-cell";
+    return method === "POST" &&
+      (path === "/api/benchmarks/suites/list" ||
+        path === "/api/benchmarks/runs/list" ||
+        path === "/api/benchmarks/runs/read" ||
+        path === "/api/benchmarks/suites/history" ||
+        path === "/api/benchmarks/runs/export")
+      ? "settings.read-non-secret"
+      : undefined;
+  }
   if (path.startsWith("/api/usage/")) {
     // Every Usage read is POST by construction — the routes answer 405 to any
     // other method — so admitting only GET/HEAD left the whole surface
@@ -274,6 +287,8 @@ export function classifyProductAction(request: Request): string | undefined {
       method === "POST" &&
       (path === "/api/usage/dashboard" ||
         path === "/api/usage/query" ||
+        path === "/api/usage/diagnostics" ||
+        path === "/api/usage/host-health" ||
         path === "/api/usage/export")
     ) {
       return "settings.read-non-secret";

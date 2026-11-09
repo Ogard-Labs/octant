@@ -1,9 +1,11 @@
+import type { Questionnaire } from "@octant/contracts";
 import { isAbsolute } from "node:path";
 import {
   decodeCodeRelativePath,
   type CodeThread,
   type PermissionPersistence,
   type ProviderContextBreakdown,
+  type ProviderDriverKind,
   type ProviderFailure,
   type ProviderInstanceId,
   type ProviderNativeSetup,
@@ -16,7 +18,11 @@ import {
   type UsageCost,
 } from "@octant/contracts";
 import { ledgerUsageCost, observeTurnMetrics, startTurnMetrics } from "@octant/domain";
-import { outsideContentRecordedOnly } from "@octant/domain/guardrail-policy";
+import {
+  FULL_ACCESS_SANDBOX_UNSUPPORTED,
+  outsideContentRecordedOnly,
+  refusesFullAccessSandbox,
+} from "@octant/domain/guardrail-policy";
 import type { RuntimeForgeChangeObserver } from "../shield/runtimeForgeChanges";
 import { Effect, Fiber, Scope, Stream } from "effect";
 import type {
@@ -132,6 +138,7 @@ export interface CodeTurnEvent {
   readonly requestId?: string;
   /** The labels a provider question offers; absent on every other category. */
   readonly options?: ReadonlyArray<string>;
+  readonly questionnaire?: Questionnaire;
   /** The ids a restated plan still lists, in order; only on `task-list`. */
   readonly taskIds?: ReadonlyArray<string>;
   readonly toolCallId?: string;
@@ -181,6 +188,8 @@ export interface CodeTurnRunnerInput {
   readonly resumeCursor?: ProviderResumeCursor;
   readonly onSessionReady?: (handle: ProviderSessionHandle) => Effect.Effect<void, CodeTurnFailure>;
   readonly provider: CodeProviderPort;
+  /** The thread's runtime, for the sandbox-at-Full-access refusal; absent refuses a sandboxed thread. */
+  readonly providerDriverKind?: ProviderDriverKind;
   readonly context?: Parameters<ProviderConnection["send"]>[0]["context"];
   readonly attachments?: Parameters<ProviderConnection["send"]>[0]["attachments"];
   readonly appManagedTools?: AppManagedToolSet;
@@ -356,6 +365,16 @@ export class CodeTurnRunner {
       ) {
         return yield* fail("failed", "Code turn authority is invalid.");
       }
+      // A thread that asked for the sandbox at Full access never runs open on a
+      // runtime that cannot keep it.
+      if (
+        refusesFullAccessSandbox({
+          access: input.thread,
+          driverKind: input.providerDriverKind,
+        })
+      ) {
+        return yield* fail("failed", FULL_ACCESS_SANDBOX_UNSUPPORTED);
+      }
       const outsideContentMarks = input.outsideContentMarks ?? NO_RUNTIME_OUTSIDE_CONTENT_MARKS;
       // An earlier turn's read that could not be marked is still in the
       // session this turn would resume.
@@ -393,6 +412,7 @@ export class CodeTurnRunner {
           : { modelOptionValues: input.thread.modelOptionValues }),
         executionPolicy: input.thread.executionPolicy,
         ...(input.harnessAutoReviewEnabled === true ? { autoApprove: true } : {}),
+        ...(input.thread.fullAccessSandbox === true ? { fullAccessSandbox: true } : {}),
         ...(input.nativeSetup === undefined ? {} : { nativeSetup: input.nativeSetup }),
         // The driver still offers its artifact tool only where it would name
         // it for this mode and posture.
@@ -960,6 +980,7 @@ function normalizeProviderEvent(
         requestId: text(event.requestId),
         text: text(event.prompt),
         options: event.options.map((option) => text(option.label)),
+        ...(event.questionnaire === undefined ? {} : { questionnaire: event.questionnaire }),
       });
     case "tool-request":
       return Effect.succeed({

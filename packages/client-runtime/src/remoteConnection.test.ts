@@ -415,6 +415,10 @@ function createFakeServer(config: FakeServerConfig): FakeServer {
       if (canonical !== proof.canonicalPathQuery) {
         return Response.json({ category: "unauthorized" }, { status: 401 });
       }
+      // The real gateway also requires the request itself in that form.
+      if (`${url.pathname}${url.search}` !== canonical) {
+        return Response.json({ category: "invalid" }, { status: 400 });
+      }
       const payload = buildRemoteRequestProofPayload({ sessionId, proof });
       if (!verifyIeeeP1363(device.publicKey, payload, proof.signature)) {
         return Response.json({ category: "unauthorized" }, { status: 401 });
@@ -594,6 +598,23 @@ describe("RemoteConnection state machine", () => {
     });
 
     await expect(connection.connect()).rejects.toBeInstanceOf(RemoteConnectionError);
+    expect(connection.state()).toBe("unavailable");
+  });
+
+  it("reports a rate limited hello as unavailable with the host's wait", async () => {
+    const { store } = createTestDeviceKeyStore();
+    const connection = createRemoteConnection({
+      origin: ORIGIN,
+      webBuildVersion: WEB_BUILD_VERSION,
+      fetch: async () => new Response(null, { status: 429, headers: { "retry-after": "30" } }),
+      deviceKey: store,
+      pairing: { ticketId: TICKET_ID, ticketProof: TICKET_PROOF, deviceLabel: DEVICE_LABEL },
+    });
+
+    await expect(connection.connect()).rejects.toMatchObject({
+      category: "unavailable",
+      retryAfterMs: 30_000,
+    });
     expect(connection.state()).toBe("unavailable");
   });
 
@@ -1003,6 +1024,27 @@ describe("RemoteConnection device-key possession", () => {
       body: JSON.stringify({ kind: "send-turn", text: "hello" }),
     };
     const response = await connection.authenticatedFetch(request);
+    expect(response.ok).toBe(true);
+    expect(server.productProofVerified()).toBe(true);
+  });
+
+  it("sends a product read with an unordered query in the canonical form it signed", async () => {
+    const server = createFakeServer({});
+    const { store } = createTestDeviceKeyStore();
+    const connection = createRemoteConnection({
+      origin: ORIGIN,
+      webBuildVersion: WEB_BUILD_VERSION,
+      fetch: server.fetch,
+      deviceKey: store,
+      pairing: { ticketId: TICKET_ID, ticketProof: TICKET_PROOF, deviceLabel: DEVICE_LABEL },
+    });
+    await connection.connect();
+
+    const response = await connection.authenticatedFetch({
+      method: "GET",
+      path: "/api/chat/threads",
+      query: "?mode=chat&threadId=thread-1&projectId=project-1",
+    });
     expect(response.ok).toBe(true);
     expect(server.productProofVerified()).toBe(true);
   });

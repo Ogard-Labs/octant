@@ -12,6 +12,7 @@ import {
   type ProviderFailure,
   type ToolEgressDecisionEntry,
   type ToolEgressLaunch,
+  type ToolEgressRefusalReason,
 } from "@octant/contracts";
 import {
   MAX_SAFE_NETWORK_REFUSALS,
@@ -74,7 +75,12 @@ const decodeTimestamp = Schema.decodeUnknownSync(UtcTimestamp);
 
 const REPLAY_BATCH = 500;
 /** Refusals a person can act on by trusting a place. Token, limit, and audit refusals name no place. */
-const TRUSTABLE_REFUSALS = new Set(["no-rule", "expired", "ip-literal", "private-destination"]);
+const TRUSTABLE_REFUSALS: ReadonlySet<ToolEgressRefusalReason> = new Set([
+  "no-rule",
+  "expired",
+  "ip-literal",
+  "private-destination",
+]);
 
 export interface ProviderRuntimeNetworkStartInput {
   readonly runtime: RuntimeNetworkRuntime;
@@ -273,8 +279,10 @@ export class ProviderRuntimeNetwork implements ProviderRuntimeNetworkPort {
   }
 
   async start(input: ProviderRuntimeNetworkStartInput): Promise<ProviderRuntimeNetworkStart> {
-    // Network limits ship off: a launch reads the switch once, so a change
-    // applies from the next launch and never moves a running runtime.
+    // A launch reads the switch once, so a change applies from the next
+    // launch and never moves a running runtime. Limits apply only where the
+    // runtime is sandboxed: a Full access thread that keeps the sandbox asks
+    // with the guarded posture its wall has, and open Full access stays open.
     if (
       input.executionPolicy === "full-access" ||
       !this.#options.enforced ||
@@ -394,6 +402,10 @@ export class ProviderRuntimeNetwork implements ProviderRuntimeNetworkPort {
       ...(this.#options.connect === undefined ? {} : { connect: this.#options.connect }),
       ...(this.#options.limits === undefined ? {} : { limits: this.#options.limits }),
       authentication: input.authentication ?? "launch-token",
+      refusalHint: {
+        reasons: TRUSTABLE_REFUSALS,
+        text: "Octant's Network limits refused this host. To allow it, choose Trust beside it under Recently refused in Settings › Access › Safe networks, then start the turn again.",
+      },
       decision: {
         kind: "provider-runtime",
         decide: (destination) =>

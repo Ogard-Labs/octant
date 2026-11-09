@@ -19,7 +19,8 @@
     "./outside-provider-driver": "./src/outsideProviderDriver.ts",
     "./credential-request": "./src/credentialRequest.ts",
     "./canvas-export-package": "./src/canvasExportPackage.ts",
-    "./canvas-export-worker": "./src/canvasExportWorker.ts"
+    "./canvas-export-worker": "./src/canvasExportWorker.ts",
+    "./code-tools": "./src/codeTools.ts"
   },
   "scripts": {
     "build": "tsdown src/index.ts --format esm --dts",

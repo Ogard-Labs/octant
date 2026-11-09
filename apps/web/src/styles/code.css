@@ -118,7 +118,7 @@
   color: var(--oct-muted);
 }
 
-.code-terminal-pane > [aria-label="Repository terminal"] {
+.code-terminal-pane > :is([aria-label="Repository terminal"], [aria-label="Project terminal"]) {
   min-height: 0;
   flex: 1;
   padding: var(--oct-space-2) var(--oct-space-4) var(--oct-space-3);
@@ -155,7 +155,10 @@
    dock on an OLED preset. */
 html:not([data-octant-reduced-transparency="true"])
   .shell--material-translucent
-  :is(.code-terminal-pane > [aria-label="Repository terminal"], .terminal-leave-hint) {
+  :is(
+    .code-terminal-pane > :is([aria-label="Repository terminal"], [aria-label="Project terminal"]),
+    .terminal-leave-hint
+  ) {
   background: color-mix(in srgb, var(--octant-workspace), var(--octant-text-primary) 12%);
 }
 
@@ -539,6 +542,39 @@ html:not([data-octant-reduced-transparency="true"])
   flex-direction: column;
   overflow: hidden;
   background: var(--oct-bg);
+}
+
+.code-provider-file-review {
+  flex: 0 1 45%;
+  min-height: 0;
+  overflow: auto;
+  padding: var(--oct-space-3);
+  border-block: 1px solid var(--oct-border);
+}
+.code-provider-file-review > header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--oct-space-2);
+}
+.code-provider-file-review h2 {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  font-size: var(--oct-text-sm);
+}
+.code-provider-file-review pre {
+  overflow: auto;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.code-provider-file-review__comparison {
+  height: 220px;
+  min-height: 0;
+}
+.code-provider-file-review__anchors {
+  color: var(--oct-fg-2);
+  overflow-wrap: anywhere;
 }
 
 .code-editor-pane__toolbar,

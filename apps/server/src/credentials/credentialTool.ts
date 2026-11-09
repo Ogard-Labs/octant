@@ -1,7 +1,9 @@
-import {
-  OCTANT_CREDENTIAL_TOOL,
-  type CredentialToolOperation,
-} from "@octant/contracts/credential-request";
+import { OCTANT_CREDENTIAL_TOOL } from "@octant/contracts/credential-request";
+import { createCredentialCodeTool } from "@octant/plugin-host/code-tools";
+import type {
+  CodeToolOperationEntry,
+  CodeToolSavedCommandEntry,
+} from "@octant/plugin-api/code-tools";
 import { withToolFamilyHelp, type AppManagedToolSet } from "../providers/appManagedToolSet";
 
 type ToolResult = { readonly result: unknown; readonly isError: boolean };
@@ -34,82 +36,66 @@ const CREDENTIAL_TOOL_HELP = [
  * operation whose side was not offered when the turn began stays refused for
  * the whole turn, so the schema the provider saw is exactly what it can call.
  */
-export function createCredentialTool<Registered, Saved>(sides: {
+export function createCredentialTool<
+  Registered extends CodeToolOperationEntry,
+  Saved extends CodeToolSavedCommandEntry,
+>(sides: {
   readonly registered: CredentialToolSource<Registered>;
   readonly saved: CredentialToolSource<Saved>;
 }): AppManagedToolSet {
   const registered = sides.registered.offered ? sides.registered : undefined;
   const saved = sides.saved.offered ? sides.saved : undefined;
-  const operations: ReadonlyArray<CredentialToolOperation> = [
-    "help",
-    "list",
-    ...(registered === undefined ? [] : ["request" as const]),
-    ...(saved === undefined ? [] : ["run-saved" as const]),
-  ];
-  const refused: ToolResult = { result: { status: "refused" }, isError: true };
-  const invalid: ToolResult = { result: { status: "invalid" }, isError: true };
-  return withToolFamilyHelp(
-    {
-      definitions:
-        registered === undefined && saved === undefined
-          ? []
-          : [
-              {
-                ...OCTANT_CREDENTIAL_TOOL,
-                inputSchema: {
-                  ...OCTANT_CREDENTIAL_TOOL.inputSchema,
-                  properties: {
-                    ...OCTANT_CREDENTIAL_TOOL.inputSchema.properties,
-                    operation: { type: "string", enum: operations },
-                  },
-                },
-              },
-            ],
+  const set = createCredentialCodeTool({
+    name: OCTANT_CREDENTIAL_TOOL.name,
+    description: OCTANT_CREDENTIAL_TOOL.description,
+    port: {
+      operations: () => registered?.list()?.map(({ id, label, reason }) => ({ id, label, reason })),
+      savedCommands: () => saved?.list()?.map(({ id, label }) => ({ id, label })),
+      request: async (id, signal) =>
+        registered === undefined
+          ? { result: { status: "refused" }, isError: true }
+          : registered.use(id, signal),
+      runSaved: async (id, signal) =>
+        saved === undefined
+          ? { result: { status: "refused" }, isError: true }
+          : saved.use(id, signal),
       close: async () => {
         await Promise.all([sides.registered.close(), sides.saved.close()]);
       },
-      execute: async ({ name, inputJson, signal }) => {
-        if (
-          name !== OCTANT_CREDENTIAL_TOOL.name ||
-          (registered === undefined && saved === undefined)
-        )
-          return refused;
-        if (inputJson.length > 1024) return invalid;
-        let input: unknown;
-        try {
-          input = JSON.parse(inputJson);
-        } catch {
-          return invalid;
-        }
-        if (
-          typeof input !== "object" ||
-          input === null ||
-          !("operation" in input) ||
-          Object.keys(input).some((key) => key !== "operation" && key !== "id")
-        )
-          return invalid;
-        const id = "id" in input ? input.id : undefined;
-        if (id !== undefined && typeof id !== "string") return invalid;
-        switch (input.operation) {
-          case "list": {
-            if (id !== undefined) return invalid;
-            const registeredEntries = registered?.list();
-            const savedEntries = saved?.list();
-            if (registeredEntries === undefined && savedEntries === undefined) return refused;
-            return {
-              result: { operations: registeredEntries ?? [], savedCommands: savedEntries ?? [] },
-              isError: false,
-            };
-          }
-          case "request":
-            return registered === undefined ? refused : registered.use(id, signal);
-          case "run-saved":
-            return saved === undefined ? refused : saved.use(id, signal);
-          default:
-            return invalid;
-        }
+    },
+  });
+  return withToolFamilyHelp(
+    {
+      ...set,
+      execute: async (call) => {
+        const reply = await set.execute(call);
+        if (reply.isError === true || !requestsList(call.inputJson)) return reply;
+        // Core already shows task-owned command presentation facts. Keep those
+        // here; the installed-plugin capability exposes only id and label.
+        const registeredEntries = registered?.list();
+        const savedEntries = saved?.list();
+        if (registeredEntries === undefined && savedEntries === undefined)
+          return { result: { status: "refused" }, isError: true };
+        return {
+          result: { operations: registeredEntries ?? [], savedCommands: savedEntries ?? [] },
+          isError: false,
+        };
       },
     },
     { [OCTANT_CREDENTIAL_TOOL.name]: CREDENTIAL_TOOL_HELP },
   );
+}
+
+function requestsList(inputJson: string): boolean {
+  try {
+    const input: unknown = JSON.parse(inputJson);
+    return (
+      typeof input === "object" &&
+      input !== null &&
+      "operation" in input &&
+      input.operation === "list"
+    );
+  } catch {
+    return false;
+  }
 }

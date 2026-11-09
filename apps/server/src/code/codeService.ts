@@ -1,7 +1,12 @@
 import { decodeThreadWorkingDirectory } from "@octant/contracts";
+import { THREAD_MOVING_REFUSAL } from "../hub/threadMoveHolds";
 import type { ConversationInputPolicy } from "@octant/contracts/conversation-inputs";
 import { projectExtraFolderRoots, unsupportedModelOptionValues } from "@octant/domain";
-import { guardrailLowered, permissionModeOf } from "@octant/domain/guardrail-policy";
+import {
+  defaultFullAccessSandboxFor,
+  guardrailLowered,
+  permissionModeOf,
+} from "@octant/domain/guardrail-policy";
 import {
   decodeGuardrailLevelLowered,
   GUARDRAIL_LEVEL_LOWERED,
@@ -643,6 +648,12 @@ export interface CodeServiceExecutionContext {
   readonly inheritedMark?: InheritedExternalContentMark;
   /** Host observer, called before the first worktree or thread-creation mutation. */
   readonly onCreationBoundary?: () => void;
+  /**
+   * The files a thread moved here from another computer starts from: the
+   * index and working-tree snapshots its move carried, already fetched into
+   * this clone. Host-resolved only, like a fork's files; no command carries it.
+   */
+  readonly movedFiles?: CodeForkFiles;
 }
 
 export interface CodeServiceOptions {
@@ -778,6 +789,8 @@ export interface CodeServiceOptions {
   }) => Promise<void>;
   readonly waitForThreadChange?: (signal: AbortSignal) => Promise<void>;
   readonly issueContext?: GithubIssueContextPort;
+  /** Whether a move holds a thread; a held thread takes no command. */
+  readonly moveHold?: (threadId: string) => boolean;
   readonly linearIssueContext?: LinearIssueContextPort;
   readonly terminalSessions?: TerminalSessionImportPort;
   /**
@@ -841,8 +854,11 @@ function withoutPinned(thread: CodeThread): Omit<CodeThread, "pinned"> {
 }
 
 /** Drop the flag rather than storing `false`, so a pre-flag journal and an opt-out replay the same. */
-function withoutAutoApprove(thread: CodeThread): Omit<CodeThread, "autoApprove"> {
-  const { autoApprove: _autoApprove, ...rest } = thread;
+/** A thread without the two choices a mode change states afresh. */
+function withoutAccessChoices(
+  thread: CodeThread,
+): Omit<CodeThread, "autoApprove" | "fullAccessSandbox"> {
+  const { autoApprove: _autoApprove, fullAccessSandbox: _fullAccessSandbox, ...rest } = thread;
   return rest;
 }
 
@@ -973,6 +989,7 @@ export class CodeService {
   readonly #liveTurns: LiveTurnRegistry | undefined;
   readonly #awaitsHarnessApproval: ((threadId: string) => boolean) | undefined;
   readonly #issueContext?: GithubIssueContextPort;
+  readonly #moveHold?: (threadId: string) => boolean;
   readonly #terminalSessions: TerminalSessionImportPort | undefined;
   readonly #linearIssueContext?: LinearIssueContextPort;
   /**
@@ -1027,6 +1044,9 @@ export class CodeService {
     this.#awaitsHarnessApproval = options.awaitsHarnessApproval;
     if (options.issueContext !== undefined) {
       this.#issueContext = options.issueContext;
+    }
+    if (options.moveHold !== undefined) {
+      this.#moveHold = options.moveHold;
     }
     this.#terminalSessions = options.terminalSessions;
     if (options.linearIssueContext !== undefined) {
@@ -1352,15 +1372,27 @@ export class CodeService {
     executionContext?: CodeServiceExecutionContext,
   ): Promise<CodeCommandResult> {
     try {
+      if (process.platform === "win32")
+        throw this.#failure("unavailable", "Code execution requires Windows host confinement.");
       let command;
       try {
         command = decodeCodeCommand(input);
       } catch {
         throw this.#failure("invalid", "Code command is invalid.");
       }
+      // A creation names a thread that does not exist yet, except the move's own
+      // arrival, which opens the planned thread it already holds.
+      if (
+        "threadId" in command &&
+        command.kind !== "create-managed-code-thread" &&
+        this.#moveHold?.(String(command.threadId)) === true
+      ) {
+        throw this.#failure("conflict", THREAD_MOVING_REFUSAL);
+      }
       // A fork is a managed creation whose start the host resolves itself, so
       // it runs every gate that creation runs, plus laying the files down.
-      let sourceFiles: CodeForkFiles | undefined;
+      let sourceFiles: CodeForkFiles | undefined =
+        command.kind === "create-managed-code-thread" ? executionContext?.movedFiles : undefined;
       if (command.kind === "fork-code-thread") {
         const fork = await this.#forkCreation(authenticatedWindowId, command);
         command = fork.command;
@@ -1504,37 +1536,39 @@ export class CodeService {
         });
         const timestamp = decodeTimestamp(this.#clock());
         const thread = this.#withGuardrailStamp(
-          decodeCodeThread({
-            id: command.threadId,
-            projectId: command.projectId,
-            bindingRevisionId: command.bindingRevisionId,
-            repositoryId: preparation.repositoryId,
-            checkoutId: preparation.checkoutId,
-            ...(command.workingFolderId === undefined
-              ? {}
-              : { workingFolderId: command.workingFolderId }),
-            ...(command.workingDirectory === undefined
-              ? {}
-              : { workingDirectory: command.workingDirectory }),
-            title: command.title,
-            lifecycle: "active",
-            providerInstanceId: command.providerInstanceId,
-            modelId: command.modelId,
-            ...(command.modelOptionValues === undefined
-              ? {}
-              : { modelOptionValues: command.modelOptionValues }),
-            executionPolicy: managedAuthority.executionPolicy,
-            permissionPersistence: managedAuthority.permissionPersistence,
-            ...(command.autoApprove === true ? { autoApprove: true } : {}),
-            deliveryTarget: command.deliveryTarget,
-            ...(command.forkedFrom === undefined ? {} : { forkedFrom: command.forkedFrom }),
-            ...(command.profileId === undefined ? {} : { profileId: command.profileId }),
-            ...profileToolSnapshot(managedAuthority),
-            ...profileContextSnapshot(managedAuthority),
-            version: 1,
-            createdAt: timestamp,
-            updatedAt: timestamp,
-          }),
+          this.#withDefaultFullAccessSandbox(
+            decodeCodeThread({
+              id: command.threadId,
+              projectId: command.projectId,
+              bindingRevisionId: command.bindingRevisionId,
+              repositoryId: preparation.repositoryId,
+              checkoutId: preparation.checkoutId,
+              ...(command.workingFolderId === undefined
+                ? {}
+                : { workingFolderId: command.workingFolderId }),
+              ...(command.workingDirectory === undefined
+                ? {}
+                : { workingDirectory: command.workingDirectory }),
+              title: command.title,
+              lifecycle: "active",
+              providerInstanceId: command.providerInstanceId,
+              modelId: command.modelId,
+              ...(command.modelOptionValues === undefined
+                ? {}
+                : { modelOptionValues: command.modelOptionValues }),
+              executionPolicy: managedAuthority.executionPolicy,
+              permissionPersistence: managedAuthority.permissionPersistence,
+              ...(command.autoApprove === true ? { autoApprove: true } : {}),
+              deliveryTarget: command.deliveryTarget,
+              ...(command.forkedFrom === undefined ? {} : { forkedFrom: command.forkedFrom }),
+              ...(command.profileId === undefined ? {} : { profileId: command.profileId }),
+              ...profileToolSnapshot(managedAuthority),
+              ...profileContextSnapshot(managedAuthority),
+              version: 1,
+              createdAt: timestamp,
+              updatedAt: timestamp,
+            }),
+          ),
         );
         // Commit creates the worktree (the only mutation) and confirms the HEAD.
         executionContext?.onCreationBoundary?.();
@@ -1791,6 +1825,10 @@ export class CodeService {
                   command.bundledLanguageServer ?? current.bundledLanguageServer,
               }),
           // A change that leaves these out keeps what the person chose before.
+          // Absent keeps the stored choice, as for the reviewer below.
+          ...((command.defaultFullAccessSandbox ?? current.defaultFullAccessSandbox) === true
+            ? { defaultFullAccessSandbox: true }
+            : {}),
           ...((command.defaultAutoApprove ?? current.defaultAutoApprove) === true
             ? { defaultAutoApprove: true }
             : {}),
@@ -1902,7 +1940,9 @@ export class CodeService {
           requestedPermissionPersistence: command.thread.permissionPersistence,
         });
         const thread = this.#withGuardrailStamp(
-          this.#threadWithProfiledAuthority(command.thread, profiled),
+          this.#withDefaultFullAccessSandbox(
+            this.#threadWithProfiledAuthority(command.thread, profiled),
+          ),
         );
         if (
           this.#isProviderModelAllowed?.({
@@ -2287,7 +2327,7 @@ export class CodeService {
                       }
                     : command.kind === "change-code-thread-access"
                       ? {
-                          ...withoutAutoApprove(current),
+                          ...withoutAccessChoices(current),
                           executionPolicy: command.executionPolicy,
                           permissionPersistence: command.permissionPersistence,
                           // Store `true` when enabled; drop the field when disabled so
@@ -2296,6 +2336,11 @@ export class CodeService {
                           ...(command.autoApprove === true ||
                           (command.autoApprove === undefined && current.autoApprove === true)
                             ? { autoApprove: true }
+                            : {}),
+                          // Kept from the command, else from the thread; the
+                          // guardrail stamp drops it below Full access.
+                          ...((command.fullAccessSandbox ?? current.fullAccessSandbox) === true
+                            ? { fullAccessSandbox: true }
                             : {}),
                           version: command.expectedVersion + 1,
                           updatedAt,
@@ -3921,12 +3966,35 @@ export class CodeService {
    * the thread (session-only Full access is gone) and drops the reviewer,
    * which has nothing left to answer.
    */
+  /**
+   * A new thread at Full access whose request did not say whether to keep the
+   * sandbox takes its Project's choice, else Settings'. An explicit choice in
+   * the request, on or off, always wins.
+   */
+  #withDefaultFullAccessSandbox(thread: CodeThread): CodeThread {
+    if (thread.executionPolicy !== "full-access" || thread.fullAccessSandbox !== undefined) {
+      return thread;
+    }
+    const project = this.#persistence.readProject?.(thread.projectId);
+    const sandboxed = defaultFullAccessSandboxFor({
+      project: project?.type === "code" ? project : undefined,
+      settings: this.#persistence.readCodeSettings()?.settings,
+    });
+    return sandboxed ? decodeCodeThread({ ...thread, fullAccessSandbox: true }) : thread;
+  }
+
   #withGuardrailStamp(thread: CodeThread): CodeThread {
-    const { autoApprove, ...rest } = thread;
+    const { autoApprove, fullAccessSandbox, ...rest } = thread;
     if (rest.executionPolicy !== "full-access") {
+      // The sandbox flag only means something at Full access; at any other
+      // level it is dropped rather than journaled.
       return decodeCodeThread({ ...rest, ...(autoApprove === true ? { autoApprove } : {}) });
     }
-    return decodeCodeThread({ ...rest, permissionPersistence: "project-default" });
+    return decodeCodeThread({
+      ...rest,
+      permissionPersistence: "project-default",
+      ...(fullAccessSandbox === true ? { fullAccessSandbox: true } : {}),
+    });
   }
 
   /**

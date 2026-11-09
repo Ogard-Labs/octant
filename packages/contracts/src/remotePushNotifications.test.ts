@@ -2,6 +2,8 @@ import { describe, expect, it } from "vitest";
 import {
   decodeRemotePushDeliveryRecordedV1,
   decodeRemotePushEnvelopeV1,
+  decodeRemotePushMoveWaitingDeliveryRecordedV1,
+  decodeRemotePushMoveWaitingPayloadV1,
   decodeRemotePushNotificationPayloadV1,
   decodeRemotePushRegistrationClearedV1,
   decodeRemotePushRegistrationRecordedV1,
@@ -159,5 +161,42 @@ describe("remotePushNotifications", () => {
         failureCategory: "Provider said: /Users/example/secret",
       }),
     ).toThrow();
+  });
+
+  it("seals a held move as that a move waits and where, with no room for a thread", () => {
+    const payload = {
+      kind: "move-waiting",
+      hostId,
+      title: "A move is waiting for your phone",
+      body: "To Studio Mac",
+    };
+    expect(decodeRemotePushMoveWaitingPayloadV1(payload)).toEqual(payload);
+    for (const leak of [
+      { threadId: "00000000-0000-4000-8000-000000000001" },
+      { mode: "code" },
+      { threads: ["Ship it"] },
+    ]) {
+      expect(() => decodeRemotePushMoveWaitingPayloadV1({ ...payload, ...leak })).toThrow();
+    }
+    expect(() => decodeRemotePushMoveWaitingPayloadV1({ ...payload, kind: "waiting" })).toThrow();
+  });
+
+  it("journals a held-move receipt that names neither a thread nor the wait", () => {
+    const receipt = {
+      hostId,
+      deviceId: "22222222-2222-4222-8222-222222222222",
+      outcome: "delivered",
+      recordedAt: "2026-11-09T12:00:00.000Z",
+    };
+    expect(decodeRemotePushMoveWaitingDeliveryRecordedV1(receipt)).toEqual(receipt);
+    for (const leak of [
+      { threadId: "00000000-0000-4000-8000-000000000001" },
+      { confirmationId: "33333333-3333-4333-8333-333333333333" },
+      { title: "A move is waiting for your phone" },
+    ]) {
+      expect(() =>
+        decodeRemotePushMoveWaitingDeliveryRecordedV1({ ...receipt, ...leak }),
+      ).toThrow();
+    }
   });
 });

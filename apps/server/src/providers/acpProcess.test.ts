@@ -501,6 +501,54 @@ describe("ACP process lifecycle", () => {
     expect(spawnRecord(target.root)).toBeUndefined();
   });
 
+  it("cancels a receipt-held initialization and removes every owned child before returning", async () => {
+    const target = fixture(kilo);
+    let release: (() => void) | undefined;
+    const ownershipReady = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    let callbacks = 0;
+    const controller = new AbortController();
+    const pending = Effect.runPromise(
+      Effect.scoped(
+        port({ startupTimeoutMs: 5_000 }).start({
+          profile: kilo,
+          binaryPath: target.binaryPath,
+          root: target.root,
+          managedHome: target.root,
+          mode: "code",
+          executionPolicy: "plan",
+          onProcessStarted: async () => {
+            callbacks += 1;
+            if (callbacks === 2) await ownershipReady;
+            return { ready: Promise.resolve(), remove: async () => undefined };
+          },
+        }),
+      ),
+      { signal: controller.signal },
+    );
+    void pending.catch(() => undefined);
+    try {
+      await vi.waitFor(() => expect(spawnRecord(target.root)).toBeDefined(), { timeout: 5_000 });
+      expect(records(target.root).some((record) => record.kind === "message")).toBe(false);
+      controller.abort();
+      await expect(pending).rejects.toThrow();
+      const owned = records(target.root)
+        .filter((record) => record.kind === "pid")
+        .map((record) => Number(record.pid));
+      expect(owned.length).toBeGreaterThan(0);
+      expect(owned.map((pid) => isRunning(pid))).toEqual(owned.map(() => false));
+      release?.();
+      await Promise.resolve();
+      await Promise.resolve();
+      expect(records(target.root).some((record) => record.kind === "message")).toBe(false);
+    } finally {
+      controller.abort();
+      release?.();
+      await pending.catch(() => undefined);
+    }
+  });
+
   it("persists process ownership before ACP initialization", async () => {
     const target = fixture(kilo);
     let releaseOwnership!: () => void;
@@ -1348,6 +1396,42 @@ describe("Kimi Code host-profile extension surfaces", () => {
       expect(launch.environment.KIMI_CODE_HOME).toBe(canonicalHostPath);
     },
   );
+
+  it("wraps a Full access launch that keeps the sandbox, denying the host profile's extensions, and leaves open Full access unwrapped", async () => {
+    const target = fixture(kimi);
+    const managedHome = join(target.canonicalRoot, "managed-kimi");
+    const hostHome = realpathSync(mkdtempSync(join(tmpdir(), "octant-acp-host-")));
+    directories.push(hostHome);
+    const hostAuthenticationPath = join(hostHome, ".kimi-code");
+    mkdirSync(join(hostAuthenticationPath, "skills"), { recursive: true });
+    const canonicalHostPath = realpathSync(hostAuthenticationPath);
+    const confinement = makeAcpConfinementLive({
+      platform: "darwin",
+      sandboxPath: target.sandboxPath,
+      temporaryDirectory: join(target.canonicalRoot, "tmp"),
+      hostAuthenticationPath: canonicalHostPath,
+    });
+    const request = {
+      profile: kimi,
+      binaryPath: target.binaryPath,
+      root: target.canonicalRoot,
+      managedHome,
+      mode: "code",
+      executionPolicy: "full-access",
+      environment: {},
+    } as const;
+    const open = await Effect.runPromise(confinement.prepare(request));
+    expect(open.command).toBe(target.binaryPath);
+
+    const sandboxed = await Effect.runPromise(
+      confinement.prepare({ ...request, fullAccessSandbox: true }),
+    );
+    expect(sandboxed.command).toBe(target.sandboxPath);
+    const profile = sandboxed.args[1] ?? "";
+    expect(profile).toContain(`(allow file-write* (subpath "${target.canonicalRoot}"))`);
+    expect(profile).toContain("(allow process-exec)");
+    expect(profile).toContain(join(canonicalHostPath, "skills"));
+  });
 
   it("starts Linux Full access unwrapped on a setuid Bubblewrap, while approval-gated still starts", async () => {
     const target = fixture(kimi);

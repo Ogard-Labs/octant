@@ -83,6 +83,33 @@ Greet the user and offer help.
 
 describe("Agent Plugins 1.0.0 client conformance", () => {
   describe("plugin loader", () => {
+    it("loads declarative Code tools without a skill, server or executable module", () => {
+      const loaded = loadAgentPluginFromEntries(
+        minimalPlugin({
+          skill: false,
+          mcp: false,
+          manifest: {
+            extensions: {
+              octant: {
+                codeTools: [
+                  {
+                    id: "account-check",
+                    label: "Check account",
+                    description: "Request a person-approved account check.",
+                    operationIds: ["linear-account-check"],
+                    savedCommandIds: [],
+                  },
+                ],
+              },
+            },
+          },
+        }),
+      );
+      expect(loaded).toMatchObject({
+        codeTools: [{ id: "account-check", operationIds: ["linear-account-check"] }],
+      });
+      expect(loaded.diagnostics.some((entry) => entry.code === "component-missing")).toBe(false);
+    });
     it("loads a plugin from a directory entry set and validates plugin.json", () => {
       const loaded = loadAgentPluginFromEntries(minimalPlugin());
       expect(loaded.manifest.name).toBe("hello-plugin");

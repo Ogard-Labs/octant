@@ -1,6 +1,7 @@
 import { Schema } from "effect";
 import { describe, expect, it } from "vitest";
 import {
+  DefaultFolder,
   MAX_SIDEBAR_WIDTH,
   MAX_SPLIT_RATIO,
   MIN_SIDEBAR_WIDTH,
@@ -93,6 +94,10 @@ const settings = {
   automaticUpdateChecks: true,
   marketplaceFetchesEnabled: true,
   completedThreadArchiveAfterDays: 7,
+  autoCompactOctantWindowPercent: 85,
+  autoCompactRuntimeWindowPercent: null,
+  autoCompactIdleMinutes: null,
+  autoCompactLimitPercent: null,
   navigatorAssistant: {},
   voice: {},
   imageGeneration: { customSources: [] },
@@ -102,6 +107,7 @@ const settings = {
   rememberedBrowserOrigins: [],
   rememberedBrowserProfileSites: [],
   agentBrowserDownloads: false,
+  persistentBrowserOwner: false,
   userProfile: { accent: "indigo", avatar: { kind: "initials" } },
 } as const;
 
@@ -164,6 +170,26 @@ const presentationState = {
   byTab: [{ tabId: ids.codeTabA, presentation: "hidden" }],
   byMode: { chat: "hidden", work: "floating", code: "floating" },
 } as const;
+
+describe("default folder paths", () => {
+  it("preserves native absolute local paths from both Windows and POSIX hosts", () => {
+    const decode = Schema.decodeUnknownSync(DefaultFolder);
+    for (const path of ["/home/ada/Octant", String.raw`C:\Users\Ada\Octant`])
+      expect(decode(path)).toBe(path);
+  });
+
+  it("refuses relative drives, network/device namespaces and embedded NUL", () => {
+    const decode = Schema.decodeUnknownSync(DefaultFolder);
+    for (const path of [
+      "C:relative",
+      String.raw`\relative`,
+      String.raw`\\server\share`,
+      String.raw`\\.\pipe\host`,
+      String.raw`C:\Users\Ada` + "\0private",
+    ])
+      expect(() => decode(path)).toThrow();
+  });
+});
 
 describe("shell bootstrap contracts", () => {
   it("defaults transcript text to the compact reading size", () => {

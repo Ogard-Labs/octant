@@ -1,6 +1,10 @@
 import { spawn } from "node:child_process";
 import { isAbsolute } from "node:path";
 import {
+  isWindowsHostIdentityHelperPath,
+  makeWindowsHostSigningExecutor,
+} from "./windowsHostIdentity";
+import {
   KEYCHAIN_STORE_SCOPE_PATTERN,
   keychainHelperArguments,
   type KeychainServiceFamily,
@@ -154,6 +158,8 @@ export function decodeHostSigningResponse(value: unknown): HostSigningResponse {
 }
 
 export interface MakeHostIdentitySigningServiceOptions {
+  /** Only the explicit Windows native backend changes the default helper. */
+  readonly platform?: "win32";
   readonly execute?: KeychainHelperExecutor;
   /** Opaque host-derived identity for the selected local data store. */
   readonly storeScope: string;
@@ -169,20 +175,25 @@ export interface MakeHostIdentitySigningServiceOptions {
 
 /**
  * Desktop-owned host-identity signing broker. Private key material stays in the
- * native Keychain helper; JS only receives fingerprints and signatures.
+ * native OS helper; JS only receives fingerprints and signatures.
  */
 export function makeHostIdentitySigningService(
   helperPath: string,
   options: MakeHostIdentitySigningServiceOptions,
 ): HostIdentitySigningService {
-  const execute = options.execute ?? executeHostSigningHelper;
+  const windows = options.platform === "win32";
+  const execute =
+    options.execute ??
+    (windows ? makeWindowsHostSigningExecutor(options.serviceFamily) : executeHostSigningHelper);
   const limits = {
     maxBytes: HOST_IDENTITY_HELPER_MAX_BYTES,
-    timeoutMs: options.timeoutMs ?? DEFAULT_TIMEOUT_MS,
+    timeoutMs: options.timeoutMs ?? (windows ? 5000 : DEFAULT_TIMEOUT_MS),
   };
 
   if (
-    !isAbsolute(helperPath) ||
+    (options.platform !== undefined && !windows) ||
+    !(windows ? isWindowsHostIdentityHelperPath(helperPath) : isAbsolute(helperPath)) ||
+    (windows && (!Number.isSafeInteger(limits.timeoutMs) || limits.timeoutMs > 30000)) ||
     limits.timeoutMs <= 0 ||
     !KEYCHAIN_STORE_SCOPE_PATTERN.test(options.storeScope)
   ) {

@@ -19,7 +19,8 @@
     "./computer-use": "./src/computerUsePlugin.ts",
     "./browser-use": "./src/browserUsePlugin.ts",
     "./replica-store": "./src/replicaStoreActivation.ts",
-    "./first-party-plugins": "./src/firstPartyPlugins.ts"
+    "./first-party-plugins": "./src/firstPartyPlugins.ts",
+    "./code-tools": "./src/codeTools.ts"
   },
   "scripts": {
     "build": "tsdown src/index.ts --format esm --dts",

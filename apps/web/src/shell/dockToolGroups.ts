@@ -20,7 +20,7 @@ const TOOL_GROUPS: ReadonlyArray<{
   {
     label: "Workspace",
     columns: "fit",
-    ids: ["files", "terminal", "browser", "tests", "debug", "pull-requests"],
+    ids: ["files", "terminal", "browser", "tests", "debug", "vitals", "pull-requests"],
   },
   { label: "Devices", columns: "fit", ids: ["ios-simulator", "android-emulator", "desktop"] },
 ];

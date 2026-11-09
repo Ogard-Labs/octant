@@ -144,6 +144,10 @@ export interface AcpSessionMetaReasoning {
 export interface AcpProviderProfile {
   /** Exact releases whose cumulative usage/context update semantics were verified. */
   readonly usageVersions?: ReadonlyArray<string>;
+  /** Exact releases whose signed-in supplementary read and cold-resume semantics passed. */
+  readonly fileReviewVersions?: ReadonlyArray<string>;
+  /** Exact releases whose signed-in nonempty compaction and resume semantics passed. */
+  readonly compactionVersions?: ReadonlyArray<string>;
   /** Exact releases whose native session lifecycle has passed warm-reuse evidence. */
   readonly retainedSessionVersions?: ReadonlyArray<string>;
   /** Verified HTTP MCP implementations that omit, rather than deny, negotiation. */
@@ -225,6 +229,8 @@ export interface AcpProviderProfile {
   /** Chat sessions run in the managed home unless the agent needs a real Project root. */
   readonly chatSessionRoot: "managed-home" | "project-root";
   readonly userQuestions: "supported" | "unsupported";
+  /** Exact native versions accepted by signed-in session-form verification. */
+  readonly elicitationVersions?: ReadonlyArray<string>;
   /** ACP method used to reattach to a prior session. */
   readonly resumeMethod: "session/load" | "session/resume";
   /** Whether `session/close` is issued when a session ends. */

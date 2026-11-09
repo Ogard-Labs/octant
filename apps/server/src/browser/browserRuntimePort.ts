@@ -1,4 +1,11 @@
 import type {
+  PersistentBrowserLeaseBinding,
+  PersistentBrowserOwnerStatus,
+  PersistentBrowserContextCreated,
+  PersistentBrowserLeaseId,
+} from "@octant/contracts/persistent-browser-owner";
+import type { BrowserAccountProfileCreateResult } from "@octant/contracts/browser-profiles";
+import type {
   OwnerBrowserNativeCommand,
   OwnerBrowserNativeResult,
 } from "@octant/contracts/owner-browser";
@@ -208,8 +215,13 @@ export class BrowserProfileUnavailableError extends Error {
 
 /** The stores behind the Project and Personal profiles, kept by the desktop app. */
 export interface BrowserProfileStorePort {
-  readonly list: () => Promise<
-    ReadonlyArray<{ readonly profile: StoredBrowserProfile; readonly sizeBytes: number }>
+  readonly createAccount?: (label: string) => Promise<BrowserAccountProfileCreateResult>;
+  readonly list: (includeSizes?: boolean) => Promise<
+    ReadonlyArray<{
+      readonly profile: StoredBrowserProfile;
+      readonly sizeBytes: number;
+      readonly label?: string;
+    }>
   >;
   readonly clear: (profile: StoredBrowserProfile, scope: BrowserProfileClearScope) => Promise<void>;
   /**
@@ -286,7 +298,24 @@ export type BrowserRuntimeAction = Pick<BrowserActionRequest, "kind"> &
     };
   };
 
+export interface PersistentBrowserOwnerPort {
+  readonly status: (signal?: AbortSignal) => Promise<PersistentBrowserOwnerStatus>;
+  /** Called only from the authoritative local-person setting, never a tool or renderer owner input. */
+  readonly configure: (
+    enabled: boolean,
+    signal?: AbortSignal,
+  ) => Promise<PersistentBrowserOwnerStatus>;
+  readonly createContext: (
+    contextId: BrowserContextId,
+    policy: BrowserContextPolicy,
+    signal: AbortSignal,
+    binding: PersistentBrowserLeaseBinding,
+  ) => Promise<PersistentBrowserContextCreated>;
+  readonly release: (leaseId: PersistentBrowserLeaseId) => Promise<"closed" | "unconfirmed">;
+}
+
 export interface BrowserRuntimePort {
+  readonly persistentOwner?: PersistentBrowserOwnerPort | undefined;
   readonly ownerControl?: (
     command: OwnerBrowserNativeCommand,
     signal: AbortSignal,

@@ -7,6 +7,8 @@ import type {
   AutomationRunId,
   AutomationRunLifecycle,
   AutomationThreadId,
+  RemotePushMoveWaitingKind,
+  RemotePushMoveWaitingPayloadV1,
   RemotePushNotificationKind,
   RemotePushNotificationPayloadV1,
   RemotePushPreferencesV1,
@@ -127,6 +129,25 @@ export function buildRedactedPushNotification(
 }
 
 /**
+ * Build the display text a phone shows for a thread move a window holds for an
+ * owner phone: that a move waits and the destination's name. No thread title
+ * is an input, whatever the phone's thread-names setting, because a move can
+ * hold several threads and the phone's own list shows them once it opens.
+ */
+export function buildRedactedMoveWaitingPushNotification(input: {
+  readonly hostId: string;
+  /** The destination member's name as this host's roster gives it. */
+  readonly destinationName: string;
+}): RemotePushMoveWaitingPayloadV1 {
+  return {
+    kind: "move-waiting",
+    hostId: input.hostId as RemotePushMoveWaitingPayloadV1["hostId"],
+    title: "A move is waiting for your phone",
+    body: clamp(`To ${shownName(input.destinationName) ?? "another computer"}`, MAX_BODY),
+  };
+}
+
+/**
  * Build the display text a phone shows for an Automation run, under the same
  * rule as ordinary threads: the automation's name stands where a thread title
  * would and is shown only when the phone opted in. Includes Automation Center
@@ -239,8 +260,12 @@ export function admitRemotePushByRate(input: {
 }
 
 /** What waits on the person goes at high urgency; the rest at normal. */
-export function remotePushUrgency(kind: RemotePushNotificationKind): "high" | "normal" {
-  return kind === "approval-needed" || kind === "waiting" ? "high" : "normal";
+export function remotePushUrgency(
+  kind: RemotePushNotificationKind | RemotePushMoveWaitingKind,
+): "high" | "normal" {
+  return kind === "approval-needed" || kind === "waiting" || kind === "move-waiting"
+    ? "high"
+    : "normal";
 }
 
 /**

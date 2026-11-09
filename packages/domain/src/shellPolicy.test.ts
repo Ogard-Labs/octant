@@ -209,6 +209,10 @@ describe("shell settings policy", () => {
       marketplaceFetchesEnabled: true,
       // A completed thread rests a week before the host archives it.
       completedThreadArchiveAfterDays: 7,
+      autoCompactOctantWindowPercent: 85,
+      autoCompactRuntimeWindowPercent: null,
+      autoCompactIdleMinutes: null,
+      autoCompactLimitPercent: null,
       // Navigator starts honestly unconfigured: no default model, no reviewer.
       navigatorAssistant: {},
       // Voice starts unconfigured: no transcription or synthesis endpoint.
@@ -226,6 +230,7 @@ describe("shell settings policy", () => {
       rememberedBrowserOrigins: [],
       rememberedBrowserProfileSites: [],
       agentBrowserDownloads: false,
+      persistentBrowserOwner: false,
     });
     expect(replaceShellSettings(current, replacement)).toEqual({
       ...replacement,
@@ -237,6 +242,7 @@ describe("shell settings policy", () => {
       rememberedBrowserOrigins: [],
       rememberedBrowserProfileSites: [],
       agentBrowserDownloads: false,
+      persistentBrowserOwner: false,
     });
     expect(current.chatEnabled).toBe(true);
     expect(replaceShellSettings(current, { ...replacement, sidebarWidth: 1 }).sidebarWidth).toBe(
@@ -1137,6 +1143,66 @@ describe("workspace context resolution", () => {
     );
     expect(resolved.contextByMode.code.projectId).toBe(ids.project);
     expect(resolved.contextByMode.code.boundRoot).toBe("/home/repo");
+  });
+
+  it("opens a moved thread's erased pane as its tombstone without binding a Project, and still refuses any other missing thread", () => {
+    const base = defaultWindowWorkspace(ids.window);
+    const anchored: WindowWorkspace = {
+      ...base,
+      contextByMode: {
+        chat: base.contextByMode.chat,
+        work: base.contextByMode.work,
+        code: { host, mode: "code", projectId: otherProject, boundRoot: "/home/other" },
+      },
+    };
+    const departedId = decodeCodeThreadId("00000000-0000-4000-8000-000000000601");
+    const missingId = decodeCodeThreadId("00000000-0000-4000-8000-000000000602");
+    const surface = (threadId: typeof departedId) =>
+      decodeWorkspaceTab({
+        kind: "code-overview",
+        id: ids.tabA,
+        threadId,
+        mode: "code",
+        title: "Moved thread",
+      });
+    const terminal = decodeWorkspaceTab({
+      kind: "code-terminal",
+      id: ids.tabA,
+      threadId: departedId,
+      mode: "code",
+      title: "Terminal",
+    });
+    const resolves = {
+      // Both records are gone; only one moved away.
+      tabContext: () => undefined,
+      departedThread: (tab: WorkspaceTab) =>
+        "threadId" in tab && String(tab.threadId) === String(departedId),
+    };
+    const paneId = codePane(base).paneId;
+
+    for (const kind of ["open-surface", "switch-project-surface"] as const) {
+      const operation =
+        kind === "open-surface"
+          ? { kind, mode: "code" as const, paneId, surface: surface(departedId) }
+          : { kind, mode: "code" as const, surface: surface(departedId) };
+      const resolved = resolveWorkspaceContext(anchored, operation, resolves);
+      expect(resolved.contextByMode.code, kind).toEqual(anchored.contextByMode.code);
+    }
+    expect(() =>
+      resolveWorkspaceContext(
+        anchored,
+        { kind: "open-surface", mode: "code", paneId, surface: surface(missingId) },
+        resolves,
+      ),
+    ).toThrow(WorkspaceContextRejected);
+    // Only the thread's own pane opens as a tombstone, never its other surfaces.
+    expect(() =>
+      resolveWorkspaceContext(
+        anchored,
+        { kind: "open-surface", mode: "code", paneId, surface: terminal },
+        resolves,
+      ),
+    ).toThrow(WorkspaceContextRejected);
   });
 
   it("rejects opening a Project surface into a context bound to a different Project", () => {
