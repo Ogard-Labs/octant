@@ -1,5 +1,6 @@
 import { ComposerFollowUpSuggestions } from "../followUps/FollowUpSuggestionChips";
 import { useComposerNotice } from "./ComposerNotice";
+import { useFrozenBar } from "./frozenBarScope";
 import { ComposerSubagents } from "./ComposerSubagents";
 import { ComposerOutsideContentNotice } from "./OutsideContentNotice";
 import { useId, type ReactNode } from "react";
@@ -156,7 +157,18 @@ export interface ThreadComposerProps {
   readonly threadDropKey?: string;
 }
 
+/**
+ * A thread's composer, or the frozen bar in its place while a move holds the
+ * thread. The host refuses every command on a held thread anyway; the bar
+ * says what holds it instead of offering a send that would be refused.
+ */
 export function ThreadComposer(props: ThreadComposerProps) {
+  const frozenBar = useFrozenBar();
+  if (props.presentation === "follow-up" && frozenBar !== undefined) return <>{frozenBar}</>;
+  return <ComposerSurface {...props} />;
+}
+
+function ComposerSurface(props: ThreadComposerProps) {
   const notice = useComposerNotice();
   // The host refuses a turn while the session compacts, so send waits too, and
   // says why under the row.

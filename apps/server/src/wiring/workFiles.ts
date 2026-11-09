@@ -23,9 +23,9 @@ import { WorkResearchEventStore } from "../work/workResearchEventStore";
 import type { WorkThreadProjection } from "../work/workThreadProjection";
 import { WorkResearchProjection } from "../work/workResearchProjection";
 import { createWorkResearchSourcePort } from "../work/workResearchSourcePort";
+import { saveGeneratedImageUnder } from "../image/generatedImageSave";
 import { createImageRouteHandler } from "../image/imageRoutes";
 import { createSpeechRouteHandler } from "../speech/speechRoutes";
-import { writeConfinedWorkFile } from "../work/workConfinedWrite";
 import {
   createPreviewRouteHandler,
   resolvePreviewActiveContext,
@@ -36,7 +36,6 @@ import { PreviewService } from "../preview/previewService";
 import { derivePreviewHostId } from "../preview/previewHostIdentity";
 import { OCTANT_LOCAL_ACTOR_ID } from "../shellService";
 import {
-  canonicalizeWorkRelativePath,
   classifyFileMentionExtraFolderPath,
   defaultShellSettings,
   projectExtraFolderRoots,
@@ -52,7 +51,7 @@ import type { WorkWiring } from "./work";
 import type { ContextWiring } from "./context";
 
 export type WorkFilesDependencies = Pick<ServerStart, "options" | "persistence"> &
-  Pick<AuthorityWiring, "windowAuthorityStore"> &
+  Pick<AuthorityWiring, "imageGenerationOffers" | "windowAuthorityStore"> &
   Pick<WorkspaceWiring, "projectService" | "shellService"> &
   Pick<ProvidersWiring, "credentialResolver" | "imageJobService" | "providerDataDirectory"> &
   Pick<CodeRuntimeWiring, "routeCodeService"> &
@@ -64,6 +63,7 @@ export type WorkFilesDependencies = Pick<ServerStart, "options" | "persistence">
 export function wireWorkFiles(deps: WorkFilesDependencies) {
   const {
     credentialResolver,
+    imageGenerationOffers,
     imageJobService,
     options,
     persistence,
@@ -160,6 +160,7 @@ export function wireWorkFiles(deps: WorkFilesDependencies) {
   });
   const imageRoutes = createImageRouteHandler({
     jobs: imageJobService,
+    offers: imageGenerationOffers,
     listInstances: () => persistence.readProviderInstances(),
     readImageGenerationSettings: () =>
       (persistence.readShellSettings()?.settings ?? defaultShellSettings()).imageGeneration,
@@ -178,7 +179,7 @@ export function wireWorkFiles(deps: WorkFilesDependencies) {
         } satisfies ImageGenerationSaveResult;
       }
       try {
-        let canonicalRoot: string | undefined;
+        let canonicalRoot: string;
         if (input.threadKind === "work-thread") {
           const bootstrap = await workThreadService.bootstrap(input.windowId);
           const thread = bootstrap.threads.find(
@@ -193,87 +194,25 @@ export function wireWorkFiles(deps: WorkFilesDependencies) {
             } satisfies ImageGenerationSaveResult;
           }
           canonicalRoot = project.binding.canonicalRoot;
-          const relativePath = canonicalizeWorkRelativePath(input.relativePath);
-          const resolution = await workResolutionService.resolveForCreate({
-            binding: {
-              canonicalRoot,
-              knownCanonicalRoot: canonicalRoot,
-              availability: "available",
-              bindingSuperseded: false,
-            },
-            relativePath,
-          });
-          if (resolution.status !== "resolved-for-create") {
+        } else {
+          const view = await routeCodeService.read(
+            input.windowId,
+            decodeCodeThreadId(String(input.scopeId)),
+          );
+          const project = persistence.readProject(view.thread.projectId);
+          if (project === undefined || project.type !== "code" || project.lifecycle !== "active") {
             return {
               status: "refused",
-              reason: "The save path is outside the Project.",
+              reason: "The Code Project is unavailable.",
             } satisfies ImageGenerationSaveResult;
           }
-          const written = await writeConfinedWorkFile({
-            filesystem: liveWorkFilesystem,
-            canonicalPath: resolution.absolutePath,
-            allowCreate: true,
-            parent: {
-              absolutePath: resolution.parentAbsolute,
-              identity: resolution.parentIdentity,
-              remaining: resolution.remaining,
-            },
-            bytes: input.bytes,
-          });
-          if (!written) {
-            return {
-              status: "failed",
-              reason: "The image could not be saved.",
-            } satisfies ImageGenerationSaveResult;
-          }
-          return { status: "saved", relativePath: resolution.relativePath };
+          canonicalRoot = project.binding.canonicalRoot;
         }
-        const view = await routeCodeService.read(
-          input.windowId,
-          decodeCodeThreadId(String(input.scopeId)),
-        );
-        const project = persistence.readProject(view.thread.projectId);
-        if (project === undefined || project.type !== "code" || project.lifecycle !== "active") {
-          return {
-            status: "refused",
-            reason: "The Code Project is unavailable.",
-          } satisfies ImageGenerationSaveResult;
-        }
-        canonicalRoot = project.binding.canonicalRoot;
-        const relativePath = canonicalizeWorkRelativePath(input.relativePath);
-        const resolution = await workResolutionService.resolveForCreate({
-          binding: {
-            canonicalRoot,
-            knownCanonicalRoot: canonicalRoot,
-            availability: "available",
-            bindingSuperseded: false,
-          },
-          relativePath,
-        });
-        if (resolution.status !== "resolved-for-create") {
-          return {
-            status: "refused",
-            reason: "The save path is outside the Project.",
-          } satisfies ImageGenerationSaveResult;
-        }
-        const written = await writeConfinedWorkFile({
-          filesystem: liveWorkFilesystem,
-          canonicalPath: resolution.absolutePath,
-          allowCreate: true,
-          parent: {
-            absolutePath: resolution.parentAbsolute,
-            identity: resolution.parentIdentity,
-            remaining: resolution.remaining,
-          },
+        return await saveGeneratedImageUnder({
+          root: canonicalRoot,
+          relativePath: input.relativePath,
           bytes: input.bytes,
         });
-        if (!written) {
-          return {
-            status: "failed",
-            reason: "The image could not be saved.",
-          } satisfies ImageGenerationSaveResult;
-        }
-        return { status: "saved", relativePath: resolution.relativePath };
       } catch {
         return {
           status: "failed",

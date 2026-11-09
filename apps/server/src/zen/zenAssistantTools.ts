@@ -38,6 +38,8 @@ export interface ZenAssistantToolsDependencies {
     | "previewRecipe"
   >;
   readonly zenLayout: ZenLayoutReadPort;
+  /** False when the bundled Zen plugin is switched off; the thread then gets no Zen tool. */
+  readonly isEffective?: () => boolean;
 }
 
 const isOperation = Schema.is(ZenAssistantOperation);
@@ -46,6 +48,7 @@ export class ZenAssistantTools {
   constructor(readonly dependencies: ZenAssistantToolsDependencies) {}
 
   forThread(windowId: WindowId, thread: ChatThread): AppManagedToolSet | undefined {
+    if (this.dependencies.isEffective?.() === false) return undefined;
     if (!this.dependencies.zenService.isAssistantThread(windowId, thread.id)) return undefined;
     return withToolFamilyHelp(
       {

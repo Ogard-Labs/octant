@@ -280,6 +280,31 @@ describe("live child execution authority", () => {
     }
   });
 
+  it("gives a helper of a sandboxed Full access parent Accept edits, so it stays inside the sandbox", () => {
+    const sandboxedParent = {
+      ...codeThread(),
+      executionPolicy: "full-access" as const,
+      permissionPersistence: "project-default" as const,
+      fullAccessSandbox: true,
+    };
+    const grant = scheduledAgentRunLiveAuthority({
+      persistence: { readCodeThread: () => sandboxedParent } as never,
+      run: { parentThreadId: parentId(ids.code), routingReceipt: { mode: "code" } } as never,
+    });
+    expect(grant?.executionPolicy).toBe("auto-accept-edits");
+    const openParent = {
+      ...codeThread(),
+      executionPolicy: "full-access" as const,
+      permissionPersistence: "current-session" as const,
+    };
+    expect(
+      scheduledAgentRunLiveAuthority({
+        persistence: { readCodeThread: () => openParent } as never,
+        run: { parentThreadId: parentId(ids.code), routingReceipt: { mode: "code" } } as never,
+      })?.executionPolicy,
+    ).toBe("full-access");
+  });
+
   it("uses only the admitted window's session grant without requiring a visible parent tab", () => {
     const authority = new CodeSessionAuthorityStore();
     const otherWindow = decodeWindowId("00000000-0000-4000-8000-00000000a002");

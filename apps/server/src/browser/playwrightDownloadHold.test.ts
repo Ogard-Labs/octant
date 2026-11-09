@@ -9,7 +9,33 @@ import {
 } from "./playwrightDownloadHold";
 
 const folders: string[] = [];
+const delayed = vi.hoisted(() => ({ path: "", stage: "", entered: false, release: () => {} }));
+vi.mock("node:fs/promises", async (importOriginal) => {
+  const fs = await importOriginal<typeof import("node:fs/promises")>();
+  const pause = async (path: unknown, stage: string) => {
+    if (path !== delayed.path || delayed.stage !== stage || delayed.entered) return;
+    delayed.entered = true;
+    await new Promise<void>((resolve) => {
+      delayed.release = resolve;
+    });
+  };
+  return {
+    ...fs,
+    stat: async (...args: Parameters<typeof fs.stat>) => {
+      const result = await fs.stat(...args);
+      await pause(args[0], "stat");
+      return result;
+    },
+    open: async (...args: Parameters<typeof fs.open>) => {
+      const result = await fs.open(...args);
+      await pause(args[0], "head");
+      return result;
+    },
+  };
+});
 afterEach(async () => {
+  delayed.release();
+  Object.assign(delayed, { path: "", stage: "", entered: false, release: () => {} });
   for (const folder of folders.splice(0)) await rm(folder, { recursive: true, force: true });
 });
 
@@ -46,6 +72,45 @@ async function fakeDownload(
 }
 
 describe("PlaywrightDownloadHold", () => {
+  it.each(["stat", "head"])(
+    "refuses cancellation that arrives while the completed file waits for %s",
+    async (stage) => {
+      const folder = await mkdtemp(join(tmpdir(), "hold-unit-inspection-race-"));
+      folders.push(folder);
+      const path = join(folder, "finished.txt");
+      await writeFile(path, "small final file");
+      const watch = new DownloadFolderWatch(folder);
+      watch.finished(path);
+      const hold = new PlaywrightDownloadHold(watch);
+      const download = {
+        suggestedFilename: () => "report.txt",
+        path: async () => path,
+        cancel: vi.fn(async () => {}),
+        delete: vi.fn(async () => {}),
+      };
+      Object.assign(delayed, { path, stage });
+      hold.begin();
+      hold.onDownload(download);
+      try {
+        await vi.waitFor(() => expect(delayed.entered).toBe(true));
+        await writeFile(
+          join(folder, "unattributed.crdownload"),
+          new Uint8Array(25 * 1024 * 1024 + 1),
+        );
+        await vi.waitFor(() => expect(download.cancel).toHaveBeenCalled());
+        delayed.release();
+        await hold.finish();
+        expect(hold.takeReports()).toEqual([
+          { state: "refused", name: "report.txt", reason: "too-large" },
+        ]);
+        expect(hold.claim("d1")).toBeUndefined();
+        expect(download.delete).toHaveBeenCalledOnce();
+      } finally {
+        delayed.release();
+        await hold.dispose();
+      }
+    },
+  );
   it("cancels a download the page starts when no agent action is running", async () => {
     const hold = new PlaywrightDownloadHold();
     const download = await fakeDownload("a.txt", "hello");
@@ -135,6 +200,72 @@ describe("PlaywrightDownloadHold", () => {
     expect(hold.takeReports()).toEqual([
       { state: "refused", name: "stream.bin", reason: "too-large" },
     ]);
+  });
+
+  it("cancels ambiguous concurrent downloads when an unattributed file exceeds the cap", async () => {
+    const folder = await mkdtemp(join(tmpdir(), "hold-unit-concurrent-"));
+    folders.push(folder);
+    const watch = new DownloadFolderWatch(folder);
+    const first = new PlaywrightDownloadHold(watch);
+    const second = new PlaywrightDownloadHold(watch);
+    first.begin();
+    second.begin();
+    const big = await fakeDownload("big.bin", "", { never: true });
+    const small = await fakeDownload("small.txt", "", { never: true });
+    first.onDownload(big);
+    second.onDownload(small);
+    await writeFile(join(folder, "first.crdownload"), new Uint8Array(25 * 1024 * 1024 + 1));
+    await writeFile(join(folder, "second.crdownload"), "still arriving");
+    try {
+      await vi.waitFor(() => {
+        expect(big.cancelled()).toBe(true);
+        expect(small.cancelled()).toBe(true);
+      });
+      await Promise.all([first.finish(), second.finish()]);
+      expect(first.takeReports()).toEqual([
+        { state: "refused", name: "big.bin", reason: "too-large" },
+      ]);
+      expect(second.takeReports()).toEqual([
+        { state: "refused", name: "small.txt", reason: "too-large" },
+      ]);
+    } finally {
+      await Promise.all([first.dispose(), second.dispose()]);
+    }
+  });
+
+  it("never holds a file whose completion races a size cancellation", async () => {
+    const folder = await mkdtemp(join(tmpdir(), "hold-unit-late-completion-"));
+    folders.push(folder);
+    const path = join(folder, "finished.txt");
+    await writeFile(path, "small final file");
+    await writeFile(join(folder, "large.crdownload"), new Uint8Array(25 * 1024 * 1024 + 1));
+    const watch = new DownloadFolderWatch(folder);
+    watch.finished(path);
+    const hold = new PlaywrightDownloadHold(watch);
+    let finish = (_path: string) => {};
+    const completion = new Promise<string>((resolve) => {
+      finish = resolve;
+    });
+    const download = {
+      suggestedFilename: () => "report.txt",
+      path: () => completion,
+      cancel: vi.fn(async () => {
+        finish(path);
+      }),
+      delete: vi.fn(async () => {}),
+    };
+    hold.begin();
+    hold.onDownload(download);
+    try {
+      await hold.finish();
+      expect(hold.takeReports()).toEqual([
+        { state: "refused", name: "report.txt", reason: "too-large" },
+      ]);
+      expect(hold.claim("d1")).toBeUndefined();
+      expect(download.delete).toHaveBeenCalledOnce();
+    } finally {
+      await hold.dispose();
+    }
   });
 
   it("stops accepting downloads once it starts waiting, so none slips past the bounded wait", async () => {

@@ -38,6 +38,11 @@ An answer goes through the mode's own command with the handle the host listed:
 | Decision option (Code)    | `start-provider-turn`, with the words kept as prompt evidence                                |
 | Decision option (Work)    | `start-work-thread-turn`, with the thread's current authority                                |
 
+A decision's prompt is the option's words alone, or the words, a blank line, and
+the person's note (at most 2,000 characters) when one was added; the host treats
+it as any next turn. A decision can also be deferred through the same attention
+preference a question uses.
+
 A waiting subagent's request has no row here: it is listed with no answer
 handle, and its **Review request** action opens the parent thread's Agents tab,
 where the child's own approval or question controls answer through the

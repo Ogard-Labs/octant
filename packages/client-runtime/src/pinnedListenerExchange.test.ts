@@ -190,8 +190,68 @@ describe("a listener fetch over the phone's pinned exchange", () => {
       })(`${ORIGIN}/`),
     );
 
-    expect(live.sent).toHaveLength(1);
+    expect(live.sent.filter((request) => request.request.byteLength > 0)).toHaveLength(1);
     await expect(refused).resolves.toBe("pin-mismatch");
+  });
+
+  it("holds all HTTP bytes until staged promotion is saved and then pins only the proved key", async () => {
+    const host = listener({ served: OTHER_PIN });
+    let release: () => void = () => undefined;
+    const saved = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const now = Date.now();
+    const onTrust = vi.fn(async () => saved);
+    const fetch = createExchangeListenerFetch({
+      origin: ORIGIN,
+      trust: {
+        ...PINNED,
+        staged: {
+          trust: { kind: "pinned", pin: OTHER_PIN },
+          until: new Date(now + 60_000).toISOString(),
+        },
+      },
+      port: host.port,
+      now: () => now,
+      onTrust,
+    });
+    const response = fetch(`${ORIGIN}/api/remote/auth/session`, {
+      method: "POST",
+      body: "fixture-proof",
+    });
+    await vi.waitFor(() => expect(onTrust).toHaveBeenCalledOnce());
+    expect(host.sent.every((request) => request.request.byteLength === 0)).toBe(true);
+    expect(host.closed).toHaveBeenCalledOnce();
+    release();
+    await (await response).text();
+    const requests = host.sent.filter((request) => request.request.byteLength > 0);
+    expect(requests).toHaveLength(1);
+    expect(requests[0]?.pins).toEqual([OTHER_PIN]);
+  });
+
+  it("refuses a key changed between promotion preflight and the actual request without sending HTTP", async () => {
+    const probe = listener({ served: OTHER_PIN });
+    const changed = listener({ served: PIN });
+    let opened = 0;
+    const fetch = createExchangeListenerFetch({
+      origin: ORIGIN,
+      trust: {
+        ...PINNED,
+        staged: {
+          trust: { kind: "pinned", pin: OTHER_PIN },
+          until: new Date(Date.now() + 60_000).toISOString(),
+        },
+      },
+      port: {
+        ...probe.port,
+        open: (request) => (++opened === 1 ? probe.port : changed.port).open(request),
+      },
+    });
+    await expect(
+      fetch(`${ORIGIN}/api/remote/auth/session`, { method: "POST", body: "fixture-proof" }),
+    ).rejects.toMatchObject({ reason: "pin-mismatch" });
+    expect(probe.sent.every((request) => request.request.byteLength === 0)).toBe(true);
+    expect(changed.sent).toEqual([]);
   });
 
   it("refuses a URL on another origin", async () => {

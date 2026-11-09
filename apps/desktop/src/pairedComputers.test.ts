@@ -30,6 +30,32 @@ let directory: string;
 let listenerCert: string;
 let otherCert: string;
 
+it("keeps prepared and promoted listener trust across restart and never restores a forgotten computer", () => {
+  const path = join(directory, "transition-computers.json");
+  const pins = new PairedComputerPins(path);
+  const previous = { current: { kind: "pinned", pin: "sha256-old" } } as const;
+  const staged = {
+    ...previous,
+    staged: { trust: { kind: "pinned", pin: "sha256-new" }, until: "2026-11-14T10:00:00.000Z" },
+  } as const;
+  pins.record({
+    origin: ORIGIN,
+    displayName: "Remote",
+    pin: previous.current.pin,
+    hostId: HOST_ID,
+  });
+  pins.rememberTrust(ORIGIN, previous, staged);
+  const reopened = new PairedComputerPins(path);
+  expect(reopened.trustFor(ORIGIN, false)).toEqual(staged);
+  expect(reopened.hostIdFor(ORIGIN)).toBe(HOST_ID);
+  const promoted = { current: staged.staged.trust };
+  reopened.rememberTrust(ORIGIN, staged, promoted);
+  expect(new PairedComputerPins(path).trustFor(ORIGIN, false)).toEqual(promoted);
+  reopened.forget(ORIGIN);
+  expect(() => reopened.rememberTrust(ORIGIN, staged, promoted)).toThrow("pairing changed");
+  expect(new PairedComputerPins(path).pinFor(ORIGIN)).toBeUndefined();
+});
+
 function selfSignedCertificate(name: string): string {
   const key = join(directory, `${name}.key`);
   const cert = join(directory, `${name}.crt`);

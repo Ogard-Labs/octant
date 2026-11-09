@@ -70,6 +70,18 @@ export interface ProviderAcquireInput {
   };
 }
 
+/**
+ * Where the person asked a session to compact itself: once its context window
+ * holds `tokens` of the model's `contextWindow`. A driver that reports the
+ * `compactionPoint` capability hands it to its runtime for this session only
+ * (never to the person's own configuration files); any other driver ignores
+ * it, and the host's between-turn rule still applies.
+ */
+export interface ProviderCompactionPoint {
+  readonly tokens: number;
+  readonly contextWindow: number;
+}
+
 export interface ProviderSessionStart {
   readonly sessionId: ProviderSessionId;
   readonly modelId: ProviderModelId;
@@ -81,6 +93,15 @@ export interface ProviderSessionStart {
    * inert; absent means the driver falls back to its default permission mode.
    */
   readonly autoApprove?: boolean;
+  /**
+   * The thread opted into the sandbox at Full access: with `executionPolicy`
+   * `full-access` and this set, the session runs with no approval prompts but
+   * inside the confinement the guarded levels have. A driver either keeps
+   * that confinement or refuses the session; it never runs such a session
+   * open. The host already refuses before start for runtimes it knows cannot
+   * keep it. Absent means Full access runs open, as it always did.
+   */
+  readonly fullAccessSandbox?: boolean;
   /**
    * User-chosen values for options the model declares (`ProviderModel.options`),
    * keyed by option id. Drivers apply the ids they understand and ignore the
@@ -112,6 +133,8 @@ export interface ProviderSessionStart {
    * absent keeps all of them off.
    */
   readonly nativeSetup?: ProviderNativeSetup;
+  /** The person's compaction point for this session; absent leaves the runtime its own. */
+  readonly compactionPoint?: ProviderCompactionPoint;
 }
 
 export interface ProviderSessionHandle {
@@ -130,6 +153,8 @@ export interface ProviderSessionResume {
   readonly resumeCursor: ProviderResumeCursor;
   readonly executionPolicy: ProviderExecutionPolicy;
   readonly autoApprove?: boolean;
+  /** Same meaning as in {@link ProviderSessionStart.fullAccessSandbox}. */
+  readonly fullAccessSandbox?: boolean;
   /**
    * The thread's current model. A driver that reports `modelSwitch` as
    * supported runs the resumed session on it; any other driver keeps the model
@@ -147,6 +172,8 @@ export interface ProviderSessionResume {
   readonly nativeArtifacts?: boolean;
   /** As on {@link ProviderSessionStart}; a resume states it again for the session it resumes. */
   readonly nativeSetup?: ProviderNativeSetup;
+  /** As on {@link ProviderSessionStart}; restated on every resume. */
+  readonly compactionPoint?: ProviderCompactionPoint;
 }
 
 export interface ProviderSessionCompactionRequest {

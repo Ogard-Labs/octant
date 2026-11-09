@@ -9,6 +9,39 @@ const assetId = "00000000-0000-4000-8000-000000000122";
 const capability = `${"A".repeat(42)}A`;
 const zenSpaceId = "00000000-0000-4000-8000-000000000123" as never;
 
+describe("Zen background routes with the Zen plugin off", () => {
+  it("refuses uploads and reads with a typed plugin-disabled result and stages nothing", async () => {
+    const authority = new WindowAuthorityStore();
+    authority.register({ windowId, capability, now: 0 });
+    const stage = vi.fn();
+    const reconcile = vi.fn();
+    const handler = createZenBackgroundRouteHandler({
+      store: { stage, reconcile } as never,
+      zenService: {} as never,
+      windowAuthorityStore: authority,
+      liveAssets: () => new Map(),
+      now: () => 0,
+      isEffective: () => false,
+    });
+    for (const request of [
+      new Request("http://127.0.0.1/api/zen/backgrounds", {
+        method: "POST",
+        headers: { "x-octant-window-capability": capability, "content-type": "image/png" },
+        body: new Uint8Array([1]),
+      }),
+      new Request("http://127.0.0.1/api/zen/backgrounds/abc", {
+        headers: { "x-octant-window-capability": capability },
+      }),
+    ]) {
+      const response = await handler(request);
+      expect(response?.status).toBe(403);
+      expect(await response?.json()).toMatchObject({ category: "plugin-disabled" });
+    }
+    expect(stage).not.toHaveBeenCalled();
+    expect(reconcile).not.toHaveBeenCalled();
+  });
+});
+
 describe("Zen background routes", () => {
   it("streams an exact-limit upload but cancels an under-declared overflow before staging", async () => {
     let cancelled = false;

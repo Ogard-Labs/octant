@@ -4,6 +4,8 @@ import {
   decodeDesktopPaneRequest,
   decodeEventActor,
   decodeProjectId,
+  decodeDesktopLeaseId,
+  type DesktopLeaseId,
   type DesktopPaneAnswer,
   type DesktopPaneRequest,
   type EventActor,
@@ -13,6 +15,7 @@ import type { DesktopRecipeKeyView } from "./computerUse/desktopRecipeKeys";
 import type { ClientPrincipal } from "./clientPrincipal";
 import { leasableProvidersOf } from "./computerUse/computerUseDestination";
 import type { DesktopLeaseCaller, DesktopLeaseService } from "./computerUse/desktopLeaseService";
+import type { DesktopPreviewRequest, DesktopPreviewAnswer } from "@octant/contracts";
 import { authenticateRoutePrincipal } from "./principalRouteContext";
 import { isAllowedRendererOrigin, isLoopbackHostname } from "./shellRoutes";
 import { WindowAuthorityError, type WindowAuthorityStore } from "./windowAuthorityStore";
@@ -23,6 +26,10 @@ const PANE_PATH = "/api/code/desktops";
 const FRAME_PATH = "/api/code/desktops/frame";
 
 export interface DesktopPaneRouteDependencies {
+  readonly previews?: (
+    caller: DesktopLeaseCaller & { readonly leaseId: DesktopLeaseId },
+    request: DesktopPreviewRequest,
+  ) => Promise<DesktopPreviewAnswer>;
   readonly windowAuthorityStore: WindowAuthorityStore;
   readonly service: Pick<
     DesktopLeaseService,
@@ -137,7 +144,26 @@ export function createDesktopPaneRouteHandler(dependencies: DesktopPaneRouteDepe
         };
         return encoded({ status: "recipe-key", ...view }, origin);
       }
-      return encoded(await answer(dependencies.service, paneRequest, actor, scopeId), origin);
+      switch (paneRequest.kind) {
+        case "preview-read":
+        case "preview-review":
+        case "preview-grant":
+        case "preview-revoke":
+          return encoded(
+            actor.kind !== "local-user" || dependencies.previews === undefined
+              ? { status: "preview-refused", reason: "not-permitted" }
+              : await dependencies.previews(
+                  {
+                    ...callerFor(paneRequest.threadId, actor, scopeId),
+                    leaseId: decodeDesktopLeaseId(paneRequest.leaseId),
+                  },
+                  paneRequest,
+                ),
+            origin,
+          );
+        default:
+          return encoded(await answer(dependencies.service, paneRequest, actor, scopeId), origin);
+      }
     } catch {
       return failure("Desktop request is invalid.", 400, origin);
     }
@@ -146,7 +172,7 @@ export function createDesktopPaneRouteHandler(dependencies: DesktopPaneRouteDepe
 
 async function answer(
   service: DesktopPaneRouteDependencies["service"],
-  request: Exclude<DesktopPaneRequest, { readonly kind: "recipe-key" }>,
+  request: Exclude<DesktopPaneRequest, { readonly kind: "recipe-key" } | DesktopPreviewRequest>,
   actor: EventActor,
   scopeId: string,
 ): Promise<DesktopPaneAnswer> {

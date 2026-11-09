@@ -27,6 +27,7 @@ const ROUTES = {
   enable: "/api/desktop/private-listener/enable",
   disable: "/api/desktop/private-listener/disable",
   restart: "/api/desktop/private-listener/restart",
+  transition: "/api/desktop/private-listener/key-transition",
 } as const;
 
 type RouteValue = (typeof ROUTES)[keyof typeof ROUTES];
@@ -119,6 +120,21 @@ export function createPrivateListenerAdministrationRouteHandler(
       if (decoded.kind !== "ok") {
         return failure("invalid", decoded.kind === "too-large" ? 413 : 400);
       }
+      if (route === ROUTES.transition) {
+        const value = decoded.value;
+        if (typeof value !== "object" || value === null || !("action" in value))
+          return failure("invalid", 400);
+        if (value.action === "prepare" || value.action === "cancel") {
+          requireExactKeys(value, ["action"]);
+          return transitionResponse(await control.transitionKey({ action: value.action }));
+        }
+        if (value.action !== "activate" || !("newPin" in value) || typeof value.newPin !== "string")
+          return failure("invalid", 400);
+        requireExactKeys(value, ["action", "newPin"]);
+        return transitionResponse(
+          await control.transitionKey({ action: "activate", newPin: value.newPin }),
+        );
+      }
       const config = decodeListenerConfig(decoded.value);
       const status =
         route === ROUTES.enable ? await control.enable(config) : await control.restart(config);
@@ -166,6 +182,22 @@ function statusResponse(status: PrivateListenerHostStatus): Response {
   return Response.json({ status: projectStatus(status) });
 }
 
+function transitionResponse(
+  result: Awaited<ReturnType<PrivateListenerLifecycleController["transitionKey"]>>,
+): Response {
+  return "status" in result
+    ? Response.json(
+        {
+          category: "unavailable",
+          errorCode: result.code,
+          message:
+            "Listener key activation is unavailable while this computer is an enabled hub or joined spoke. Disable the hub role and leave the hub before activation, then explicitly rejoin with the new key. Signed roster pins are never changed automatically.",
+        },
+        { status: 503 },
+      )
+    : statusResponse(result);
+}
+
 function projectStatus(status: PrivateListenerHostStatus): PrivateListenerHostStatus {
   return Object.freeze({
     enabled: status.enabled,
@@ -178,6 +210,7 @@ function projectStatus(status: PrivateListenerHostStatus): PrivateListenerHostSt
     certificateReady: status.certificateReady,
     certificateSource: status.certificateSource,
     tlsPin: status.tlsPin,
+    ...(status.keyTransition === undefined ? {} : { keyTransition: status.keyTransition }),
     ...(status.errorCode === undefined ? {} : { errorCode: status.errorCode }),
   });
 }

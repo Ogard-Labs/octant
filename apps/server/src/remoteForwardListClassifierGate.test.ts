@@ -37,6 +37,41 @@ describe("remote forward list vs route classifier", () => {
     }
   });
 
+  it("forwards the benchmark reads and the stars write to a paired device and refuses every other benchmark write", () => {
+    const policy = createRemoteRoutePolicy({ origin });
+    const decide = (path: string) =>
+      policy.inspect(
+        new Request(`${origin}${path}`, {
+          method: "POST",
+          headers: {
+            host: "octant.example:8443",
+            origin,
+            "sec-fetch-site": "same-origin",
+            "content-type": "application/json",
+          },
+        }),
+      ).kind;
+    for (const path of [
+      "suites/list",
+      "runs/list",
+      "runs/read",
+      "suites/history",
+      "runs/export",
+      "cells/rate",
+    ]) {
+      expect(decide(`/api/benchmarks/${path}`)).toBe("allow");
+    }
+    for (const path of [
+      "suites/save",
+      "suites/delete",
+      "runs/start",
+      "runs/cancel",
+      "runs/purge",
+    ]) {
+      expect(decide(`/api/benchmarks/${path}`)).toBe("reject");
+    }
+  });
+
   it("forwards the Work transcript window read as an overview read", () => {
     const policy = createRemoteRoutePolicy({ origin });
     const request = new Request(

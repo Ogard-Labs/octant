@@ -1764,6 +1764,20 @@ describe("WorkTurnRuntime", () => {
             toolMs: 5_000,
             modelCalls: 1,
           },
+          diagnostics: {
+            toolCalls: 1,
+            toolFailures: 0,
+            tools: [
+              {
+                toolName: "read",
+                calls: 1,
+                failed: 0,
+                unfinished: 0,
+                totalMs: 5_000,
+                maxMs: 5_000,
+              },
+            ],
+          },
         },
       ]);
     });
@@ -1863,6 +1877,7 @@ describe("WorkTurnRuntime", () => {
           startedAt: at(0),
           endedAt: at(1),
           metrics: { precision: "unavailable", wallMs: 1_000 },
+          diagnostics: { toolCalls: 0, toolFailures: 0 },
         },
       ]);
     });

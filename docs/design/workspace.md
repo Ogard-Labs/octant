@@ -93,9 +93,11 @@ states that unsent drafts and local view state stay on their source screen,
 while host-held inputs, task state and pending feedback stay with the task. A
 paired browser can copy its already authenticated origin's task link. A missing
 browser-verifiable listener offers the existing paired app's task selection
-instead; opening the flow never pairs a device or enables a listener. Moving
-execution to another host remains subject to the existing supported host paths
-and is not implied by changing screens.
+instead; opening the flow never pairs a device or enables a listener. Changing
+screens never moves execution. Moving a thread to another of the person's
+computers is its own owner-signed act, started from the thread's Environment
+tool (its Computer card), under
+[Hub and spokes: moving a thread](hub-and-spokes.md#moving-a-thread-to-another-member).
 
 ## Navigation and Projects
 
@@ -335,20 +337,21 @@ means the host's. The choice is independent of the durable resume opt-in —
 hiding authorizes no provider turn, and a dispatched recovery lifts only the
 snooze the host set, never one the person set.
 
-### Deferring a pending question
+### Deferring a pending question or decision
 
 Home, Inbox and Review let a person defer an answerable Chat, Work or Code
-question using the existing future-time presets. The condensed row stays in
+question, or a Work or Code decision, using the existing future-time presets. The condensed row stays in
 the attention list and its count, after active requests, with **Bring back now**
 and a link to the thread. The shell clock restores its answers when the time
 arrives. Thread visibility, the original questionnaire and draft answers do not
 change. Deferring never answers a question, grants approval or resumes a turn.
 
 The local host rechecks window access and the current pending request before
-journaling an opaque request key and wake time. The key binds the exact request,
+journaling an opaque request key and wake time. The key of a question binds the exact request,
 choices and authority context; a changed, answered or cancelled request does
-not transfer its deferral to another question. Preferences replay after restart
-and invalidate navigation reads in other windows. Execution approvals, decisions
+not transfer its deferral to another question. The key of a decision names the
+turn that asked it, so a later turn's decision starts undeferred. Preferences replay after restart
+and invalidate navigation reads in other windows. Execution approvals
 and find-only lead/subagent questions cannot be deferred. Find-only questions
 need a stable answer identity before this control can apply to them.
 
@@ -1185,7 +1188,14 @@ states. Project memory lives on every mode's Project Overview. Navigator is one 
 as an app-wide popover from the bottom-left profile and Settings control, and
 opening it never changes the active Project or thread. Zen is a separate
 presentation aggregate inside the same window, not a split-tree tab and not a
-fourth authority mode. Zen's Add terminal offers the window's Code Project as
+fourth authority mode. Zen is a bundled plugin that is on by default. While it
+is off, the Zen keyboard chord does nothing, the profile menu has no Zen row,
+the command palette has no Zen entry, no Pin in Zen or Add to Zen action is
+offered, the recovery banner is hidden, and a Zen that was open closes back to
+the workspace; the host refuses the Zen routes and the assistant gets no Zen
+tool. Turning it off deletes no layout, background, focus zone, or event, and
+app backgrounds keep working because the built-in background catalog is shared
+with them. Zen's Add terminal offers the window's Code Project as
 "This Project" ahead of the Code threads that can open one; choosing it starts
 a Project terminal and pins a card that names the Project and the terminal,
 never a thread. The card is a window onto the shell and grants nothing: a card

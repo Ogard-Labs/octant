@@ -29,6 +29,10 @@ interface SharedRead {
 }
 
 const COORDINATED_POST_READ_PATHS = new Set([
+  "/api/benchmarks/runs/list",
+  "/api/benchmarks/runs/read",
+  "/api/benchmarks/suites/history",
+  "/api/benchmarks/suites/list",
   "/api/code/board",
   "/api/code/evidence/batch",
   "/api/code/project-pull-requests",
@@ -36,6 +40,8 @@ const COORDINATED_POST_READ_PATHS = new Set([
   "/api/code/terminals/inspect",
   "/api/context/inspect",
   "/api/usage/dashboard",
+  "/api/usage/diagnostics",
+  "/api/usage/host-health",
   "/api/usage/query",
   "/api/work/board",
 ]);

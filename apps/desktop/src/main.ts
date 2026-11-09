@@ -264,7 +264,11 @@ import {
 } from "./menuBar";
 import { createMenuBarFleetReader } from "./menuBarFleetRead";
 import { createHostTrayImage, shouldPresentHostTray } from "./menuBarIcon";
-import { buildQuitConfirmation, evaluateQuitRequest } from "./quitGuard";
+import {
+  MOVE_THREADS_FIRST_RESPONSE,
+  buildQuitConfirmation,
+  evaluateQuitRequest,
+} from "./quitGuard";
 import {
   WINDOW_CLOSE_GRACE_MS,
   armQuitDeadline,
@@ -567,6 +571,30 @@ export function installHubAdministrationIpcHandlers(options: {
           : "Octant hub controls are unavailable.",
       );
     }
+  });
+}
+
+/**
+ * Prepare to shut down's two requests from an owned window: whether this host
+ * can offer Move threads first… at Quit, and Quit Octant at the end of the
+ * dialog, which goes through the same guarded quit as the menu's.
+ */
+export function installShutdownIpcHandlers(options: {
+  readonly handle: (
+    channel: string,
+    handler: (event: unknown, ...args: readonly unknown[]) => unknown,
+  ) => void;
+  readonly resolveOwnedWindow: (event: unknown) => void;
+  readonly onMovesOffered: (offered: boolean) => void;
+  readonly onRequestQuit: () => void;
+}): void {
+  options.handle(IPC_CHANNELS.shutdownMovesOffered, (event, offered) => {
+    options.resolveOwnedWindow(event);
+    options.onMovesOffered(offered === true);
+  });
+  options.handle(IPC_CHANNELS.requestQuit, (event) => {
+    options.resolveOwnedWindow(event);
+    options.onRequestQuit();
   });
 }
 
@@ -3169,6 +3197,14 @@ function installIpcHandlers(): void {
     resolveOwnedWindow: (event) => void ownedWindowContext(event as IpcMainInvokeEvent),
     service: getOwnerUnlockKeyService,
   });
+  installShutdownIpcHandlers({
+    handle: (channel, handler) => ipcMain.handle(channel, handler),
+    resolveOwnedWindow: (event) => void ownedWindowContext(event as IpcMainInvokeEvent),
+    onMovesOffered: (offered) => {
+      shutdownMovesOffered = offered;
+    },
+    onRequestQuit: requestInteractiveQuit,
+  });
   installHubAdministrationIpcHandlers({
     handle: (channel, handler) => ipcMain.handle(channel, handler),
     runtimeFor: (event) => {
@@ -4085,10 +4121,9 @@ function remoteServerPages(): RemoteServerPages {
     pageStorage: remoteServerPageStorage,
     showInOctantBrowser: showRemoteServerPage,
     openExternal: (url) => shell.openExternal(url),
-    pairedTrust: (listenerOrigin) => {
-      const pin = pairedComputerPins().pinFor(listenerOrigin);
-      return pin === undefined ? undefined : { current: { kind: "pinned", pin } };
-    },
+    pairedTrust: (listenerOrigin) => pairedComputerPins().trustFor(listenerOrigin, false),
+    rememberTrust: (origin, previous, next) =>
+      pairedComputerPins().rememberTrust(origin, previous, next),
   });
   return remoteServerPagesInstance;
 }
@@ -4357,7 +4392,8 @@ async function shutdownSecondaryProjectWindows(): Promise<void> {
 async function confirmQuitWithActiveWork(
   snapshot: ReturnType<typeof hostLifecycle.snapshot>,
 ): Promise<boolean> {
-  const copy = buildQuitConfirmation(snapshot);
+  const offerMove = shutdownMovesOffered;
+  const copy = buildQuitConfirmation(snapshot, { offerMove });
   const options = {
     type: "warning" as const,
     ...copy,
@@ -4367,7 +4403,28 @@ async function confirmQuitWithActiveWork(
     mainWindow === undefined
       ? await dialog.showMessageBox(options)
       : await dialog.showMessageBox(mainWindow, options);
+  // Move threads first… opens Prepare to shut down instead of quitting; it
+  // ends with Quit Octant, which comes back through this same confirmation.
+  if (offerMove && result.response === MOVE_THREADS_FIRST_RESPONSE) {
+    openPrepareToShutDown({ fromQuit: true });
+    return false;
+  }
   return result.response === 1;
+}
+
+/**
+ * Whether the trusted window last reported this host in a hub with another
+ * member. Only then does the quit confirmation offer Move threads first….
+ */
+let shutdownMovesOffered = false;
+
+/** Opens Prepare to shut down in the focused Octant window, or the main one. */
+function openPrepareToShutDown(request: { readonly fromQuit: boolean }): void {
+  const focused = BrowserWindow.getFocusedWindow();
+  const window =
+    focused !== null && trustedRendererWebContentsIds.has(focused) ? focused : mainWindow;
+  if (window === undefined || window.isDestroyed()) return;
+  window.webContents.send(IPC_CHANNELS.prepareToShutDown, request);
 }
 
 function logQuitProblem(message: string): void {
@@ -4604,6 +4661,7 @@ function installApplicationMenu(): void {
           if (window === undefined || window.isDestroyed()) return;
           window.webContents.send(IPC_CHANNELS.openSettings);
         },
+        onPrepareToShutDown: () => openPrepareToShutDown({ fromQuit: false }),
       }),
     ),
   );

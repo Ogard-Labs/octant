@@ -1,3 +1,5 @@
+import { createHandoversCard } from "../home/HandoversCard";
+import type { ThreadMoveClient } from "../environment/threadMove/threadMoveClient";
 import type { AgentRunClient } from "@octant/client-runtime/agent-run-client";
 import type { BrowserAutomationClient } from "@octant/client-runtime/browser-automation-client";
 import type { ChatClient } from "@octant/client-runtime/chat-client";
@@ -31,7 +33,6 @@ import { createWorkingNowCard, type WorkingNowCardSource } from "../home/Working
 import type { WorkingNowThread } from "../home/workingNow";
 import type { useHostFederationLifecycle } from "../host/useHostFederationLifecycle";
 import type { ThreadProviderIdentity } from "../shell/navigationModel";
-import { FIRST_PARTY_PLUGINS_EFFECTIVE } from "../shell/contributionRegistry";
 import type { DraftThreadWorkspaceProps } from "../shell/DraftThreadWorkspace";
 import type { useShellController } from "../shell/useShellController";
 import type { createLaunchedShellClients } from "./createLaunchedShellClients";
@@ -44,6 +45,8 @@ type LaunchedShellClients = ReturnType<typeof createLaunchedShellClients>;
 export interface HomeStartInput {
   readonly routineClient?: import("@octant/client-runtime").AutomationClient;
   readonly onOpenRoutine?: (automationId: string) => void;
+  /** The move routes, for Handovers; absent outside a local desktop window. */
+  readonly threadMoveClient?: ThreadMoveClient;
   readonly actions: Pick<
     ShellActions,
     | "closeWorkspaceReaders"
@@ -80,6 +83,8 @@ export interface HomeStartInput {
   /** The sum of every mode's navigation revision: when a turn starts or ends. */
   readonly feedRevision: number;
   readonly githubPullRequestCapability: PullRequestCardCapability;
+  /** Whether the person has the bundled GitHub plugin switched on. */
+  readonly githubPluginEffective: boolean;
   /**
    * The paired computers as the federation lifecycle last listed them, read by
    * the shell on each lifecycle change so the Computers card re-derives then
@@ -147,6 +152,7 @@ function buildHomeStart(input: HomeStartInput): DraftThreadWorkspaceProps["homeS
     codeThreads,
     feedRevision,
     githubPullRequestCapability,
+    githubPluginEffective,
     computerSnapshots,
     hostFederationTransports,
     hostResourceClient,
@@ -295,7 +301,7 @@ function buildHomeStart(input: HomeStartInput): DraftThreadWorkspaceProps["homeS
     createPullRequestsCard({
       available: pullRequestCardAvailable({
         mode: activeMode,
-        pluginEffective: FIRST_PARTY_PLUGINS_EFFECTIVE.get("github-integration") === true,
+        pluginEffective: githubPluginEffective,
         capability: githubPullRequestCapability,
       }),
       viewerLogin: githubPullRequestCapability.login ?? "",
@@ -320,7 +326,7 @@ function buildHomeStart(input: HomeStartInput): DraftThreadWorkspaceProps["homeS
       ...(input.onOpenRoutine === undefined ? {} : { onOpenRoutine: input.onOpenRoutine }),
       available: pullRequestCardAvailable({
         mode: activeMode,
-        pluginEffective: FIRST_PARTY_PLUGINS_EFFECTIVE.get("github-integration") === true,
+        pluginEffective: githubPluginEffective,
         capability: githubPullRequestCapability,
       }),
       viewerLogin: githubPullRequestCapability.login ?? "",
@@ -340,6 +346,13 @@ function buildHomeStart(input: HomeStartInput): DraftThreadWorkspaceProps["homeS
         actions.setPendingDraftBranch(fix.branch);
         actions.setDraftProjectSelection((current) => ({ ...current, code: fix.projectId }));
         void actions.openDraftThread("code", fix.projectId);
+      },
+    }),
+    createHandoversCard({
+      client: input.threadMoveClient,
+      onOpenThread: (threadId) => {
+        actions.closeWorkspaceReaders();
+        actions.selectCodeThread(threadId);
       },
     }),
     createComputersCard({

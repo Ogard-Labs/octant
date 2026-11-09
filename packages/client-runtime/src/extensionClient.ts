@@ -15,9 +15,12 @@ import {
   type ExtensionToolGrantRequest,
   type UserAddedMcpServerRequest,
   DiscoveredAgentToolingListing,
+  RuntimeCompactionDefaults,
   type DiscoveredAgentToolingRequest,
   McpServerSignInView,
   type McpServerSignInRequest,
+  McpServerConnectionListing,
+  McpServerReconnectResult,
   ExtensionProjectPinListing,
   type ExtensionProjectPinRequest,
 } from "@octant/contracts/extension-rpc";
@@ -56,10 +59,22 @@ export interface ExtensionClient {
   listDiscoveredTooling(): Promise<DiscoveredAgentToolingListing>;
   /** Adds a found server, or imports a found plugin for preview, by its listed id. */
   applyDiscoveredTooling(
-    request: Exclude<DiscoveredAgentToolingRequest, { readonly kind: "list" }>,
+    request: Exclude<
+      DiscoveredAgentToolingRequest,
+      { readonly kind: "list" } | { readonly kind: "compaction-defaults" }
+    >,
   ): Promise<ExtensionCommandResult>;
+  /** What the person's own Claude Code and Codex files say about compacting; read, never written. */
+  runtimeCompactionDefaults(): Promise<RuntimeCompactionDefaults>;
   /** Sign-in state and actions for a hosted server a person added. */
   mcpServerSignIn(request: McpServerSignInRequest): Promise<McpServerSignInView>;
+  /** How each installed MCP server is connecting, from what the host retained. */
+  mcpServerConnections(): Promise<McpServerConnectionListing>;
+  /** Drops a server's connection and failure so the next task connects fresh; a local window only. */
+  reconnectMcpServer(target: {
+    readonly extensionId: string;
+    readonly componentId: string;
+  }): Promise<McpServerReconnectResult>;
   /** The plugins pinned to Projects; `set` changes one pin and answers with the whole list. */
   projectPins(request: ExtensionProjectPinRequest): Promise<ExtensionProjectPinListing>;
 }
@@ -253,6 +268,30 @@ export function createExtensionClient(options: ExtensionClientOptions): Extensio
         decodeHostAnswer(ExtensionProjectPinListing),
       );
     },
+    mcpServerConnections() {
+      return request(
+        fetch,
+        new URL("/api/extensions/connections", options.baseUrl).toString(),
+        {
+          method: "POST",
+          headers: { ...headers, "content-type": "application/json" },
+          body: JSON.stringify({ kind: "list" }),
+        },
+        decodeHostAnswer(McpServerConnectionListing),
+      );
+    },
+    reconnectMcpServer(target) {
+      return request(
+        fetch,
+        new URL("/api/extensions/connections", options.baseUrl).toString(),
+        {
+          method: "POST",
+          headers: { ...headers, "content-type": "application/json" },
+          body: JSON.stringify({ kind: "reconnect", ...target }),
+        },
+        decodeHostAnswer(McpServerReconnectResult),
+      );
+    },
     async mcpServerSignIn(signIn) {
       const controller = new AbortController();
       let timer: ReturnType<typeof setTimeout> | undefined;
@@ -295,6 +334,18 @@ export function createExtensionClient(options: ExtensionClientOptions): Extensio
           body: JSON.stringify({ kind: "list" }),
         },
         decodeHostAnswer(DiscoveredAgentToolingListing),
+      );
+    },
+    runtimeCompactionDefaults() {
+      return request(
+        fetch,
+        new URL("/api/extensions/discovered", options.baseUrl).toString(),
+        {
+          method: "POST",
+          headers: { ...headers, "content-type": "application/json" },
+          body: JSON.stringify({ kind: "compaction-defaults" }),
+        },
+        decodeHostAnswer(RuntimeCompactionDefaults),
       );
     },
     applyDiscoveredTooling(discovered) {

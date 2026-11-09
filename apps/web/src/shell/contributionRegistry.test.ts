@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { FIRST_PARTY_PLUGIN_CATALOG } from "./firstPartyPluginCatalog";
+import {
+  FIRST_PARTY_PLUGIN_CATALOG,
+  FIRST_PARTY_PLUGINS_EFFECTIVE,
+} from "./firstPartyPluginCatalog";
 import {
   isAppearancePresetAvailable,
   isPreviewViewerAvailable,
@@ -31,8 +34,20 @@ describe("first-party plugin catalog", () => {
       "azure-arm",
       "appearance",
       "preview-viewers",
+      "zen",
     ]);
     expect(FIRST_PARTY_PLUGIN_CATALOG.every((plugin) => plugin.manifestVersion === 1)).toBe(true);
+  });
+});
+
+describe("first-party Zen plugin", () => {
+  it("is a bundled ui-surface allowed in every mode and effective by default", () => {
+    const zen = FIRST_PARTY_PLUGIN_CATALOG.find((plugin) => plugin.slug === "zen");
+    expect(zen?.compatibility.modes).toEqual(["chat", "work", "code"]);
+    expect(zen?.components.map((component) => [String(component.id), component.kind])).toEqual([
+      ["zen", "ui-surface"],
+    ]);
+    expect(FIRST_PARTY_PLUGINS_EFFECTIVE.get("zen")).toBe(true);
   });
 });
 

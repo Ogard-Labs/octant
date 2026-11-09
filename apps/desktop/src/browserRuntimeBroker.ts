@@ -14,7 +14,6 @@ import {
 import { decodeHumanBrowserRequest } from "@octant/contracts/browser-presentation";
 import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
-import type { AddressInfo } from "node:net";
 import type { BrowserContextPolicy, BrowserProfileClearScope } from "@octant/contracts";
 import {
   BROWSER_RESIZE_BOUNDS,
@@ -106,38 +105,39 @@ export async function startBrowserRuntimeBroker(
       },
     );
   });
-  // Every acquired subscription and HTTP listener has the same owner even
-  // when startup or one part of shutdown fails. Preserve all cleanup errors.
-  const cleanup = async (): Promise<ReadonlyArray<unknown>> => {
-    const errors: unknown[] = [];
-    for (const release of [removeGoneListener, removePersonInputListener]) {
-      try {
-        release();
-      } catch (error) {
-        errors.push(error);
-      }
-    }
-    try {
-      await host.closeAll();
-    } catch (error) {
-      errors.push(error);
-    }
-    if (server.listening) {
-      const closed = new Promise<void>((resolve, reject) => {
-        server.close((error) => (error === undefined ? resolve() : reject(error)));
-      });
-      try {
-        server.closeAllConnections();
-      } catch (error) {
-        errors.push(error);
+  let closing: Promise<void> | undefined;
+  const close = () => {
+    closing ??= Promise.resolve().then(async () => {
+      const failures: Array<unknown> = [];
+      for (const unsubscribe of [removeGoneListener, removePersonInputListener]) {
+        try {
+          unsubscribe();
+        } catch (error) {
+          failures.push(error);
+        }
       }
       try {
-        await closed;
+        await host.closeAll();
       } catch (error) {
-        errors.push(error);
+        failures.push(error);
       }
-    }
-    return errors;
+      try {
+        await new Promise<void>((resolve, reject) => {
+          if (!server.listening) {
+            server.closeAllConnections();
+            resolve();
+            return;
+          }
+          server.close((error) => (error === undefined ? resolve() : reject(error)));
+          server.closeAllConnections();
+        });
+      } catch (error) {
+        failures.push(error);
+      }
+      if (failures.length > 0)
+        throw new AggregateError(failures, "Octant Browser runtime broker cleanup failed.");
+    });
+    return closing;
   };
   try {
     await new Promise<void>((resolve, reject) => {
@@ -147,25 +147,25 @@ export async function startBrowserRuntimeBroker(
         resolve();
       });
     });
-    const address = server.address() as AddressInfo | null;
-    if (address === null) throw new Error("Octant Browser runtime broker is unavailable.");
+    const address = server.address();
+    if (address === null || typeof address === "string")
+      throw new Error("Octant Browser runtime broker is unavailable.");
     brokerUrl = `http://127.0.0.1:${address.port}/`;
   } catch (error) {
-    const failures = await cleanup();
-    if (failures.length > 0)
-      throw new AggregateError([error, ...failures], "Browser broker startup and cleanup failed.");
+    try {
+      await close();
+    } catch (cleanup) {
+      throw new AggregateError(
+        [error, cleanup],
+        "Octant Browser runtime broker startup and cleanup failed.",
+      );
+    }
     throw error;
   }
-  let closing: Promise<void> | undefined;
   return Object.freeze({
     url: brokerUrl,
     token,
-    close: () => {
-      closing ??= cleanup().then((errors) => {
-        if (errors.length > 0) throw new AggregateError(errors, "Browser broker cleanup failed.");
-      });
-      return closing;
-    },
+    close,
     fetchForTest: (request: Request, peerAddress = "127.0.0.1") =>
       handleBrokerRequest(request, peerAddress, token, host, events, profiles),
   });

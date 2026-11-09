@@ -6,8 +6,10 @@ import type {
 } from "@octant/contracts";
 import {
   observeTurnMetrics,
+  FULL_ACCESS_SANDBOX_UNSUPPORTED,
   markThreadToolStepOutsideContent,
   outsideContentRecordedOnly,
+  refusesFullAccessSandbox,
   recordThreadShieldReview,
   recordThreadToolStep,
   startTurnMetrics,
@@ -105,6 +107,8 @@ export interface WorkTurnRuntimePort {
     readonly modelOptionValues?: ProviderModelOptionValues;
     /** The thread's access; absent reads as ask-first, which Work always was. */
     readonly access?: WorkAccess;
+    /** The thread's opt-in sandbox at Full access; dropped unless access is Full access. */
+    readonly fullAccessSandbox?: boolean;
     /** The thread chose the runtime's own artifact tool and this turn offers it. */
     readonly nativeArtifacts?: boolean;
     /** What the session may load of the provider's own setup; absent keeps it all off. */
@@ -336,6 +340,22 @@ export class WorkTurnRuntime implements WorkTurnRuntimePort {
           if (shieldReviews.get(threadKey) === showShieldReview) shieldReviews.delete(threadKey);
         }),
       );
+      // A thread that asked for the sandbox at Full access never runs open on a
+      // runtime that cannot keep it.
+      if (
+        refusesFullAccessSandbox({
+          access: {
+            ...workThreadAccessOf(input.access ?? DEFAULT_WORK_ACCESS),
+            fullAccessSandbox: input.fullAccessSandbox,
+          },
+          driverKind: input.driver.kind,
+        })
+      ) {
+        return yield* Effect.fail<ProviderFailure>({
+          category: "unsupported",
+          message: FULL_ACCESS_SANDBOX_UNSUPPORTED,
+        });
+      }
       const connection = yield* input.driver.acquire({
         instanceId: input.command.authority.providerInstanceId,
         projectRoot: input.projectRoot,
@@ -367,6 +387,7 @@ export class WorkTurnRuntime implements WorkTurnRuntimePort {
         // still checks the root before it allows an edit, and one without a
         // reviewer of its own keeps asking at Auto.
         ...workThreadAccessOf(input.access ?? DEFAULT_WORK_ACCESS),
+        ...(input.fullAccessSandbox === true ? { fullAccessSandbox: true } : {}),
         tools: input.appManagedTools?.definitions ?? [],
         ...(input.nativeArtifacts === true ? { nativeArtifacts: true } : {}),
         ...(input.nativeSetup === undefined ? {} : { nativeSetup: input.nativeSetup }),

@@ -44,6 +44,14 @@ describe("parsePdf", () => {
     expect(parsed?.pages[1]).toContain("Page two body");
   });
 
+  it("reports a page whose text it cut at the page text limit", () => {
+    const bytes = buildPdfFixture([["a".repeat(100)], ["short"]]);
+    const parsed = parsePdf(bytes, { maxPages: 100, maxPageTextBytes: 40 });
+    expect(parsed?.pages[0]).toHaveLength(40);
+    expect(parsed?.truncated).toBe(true);
+    expect(parsePdf(bytes, { maxPages: 100, maxPageTextBytes: 4096 })?.truncated).toBe(false);
+  });
+
   it("returns undefined for a non-PDF input", () => {
     const parsed = parsePdf(Buffer.from("not a pdf"), {
       maxPages: 100,

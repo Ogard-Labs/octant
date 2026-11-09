@@ -1,5 +1,6 @@
 import type {
   ActiveMemoryEntry,
+  AgentAuthoredMemoryProvenance,
   MemoryEntry,
   MemoryEntryId,
   MemoryKind,
@@ -263,7 +264,13 @@ function MemoryRow(props: {
         <time dateTime={entry.updatedAt}>{formatTimestamp(entry.updatedAt)}</time>
       </div>
       <p className="memory-row__content">{entry.content}</p>
-      <p className="memory-row__source">Original author: {formatActor(entry.author)}</p>
+      {entry.provenance.kind === "agent-authored" ? (
+        <p className="memory-row__source">
+          {agentProvenanceLabel(entry.provenance)}. Approved by {formatActor(entry.author)}
+        </p>
+      ) : (
+        <p className="memory-row__source">Original author: {formatActor(entry.author)}</p>
+      )}
       {entry.provenance.kind === "transferred" ? (
         <details className="memory-row__audit">
           <summary>Transfer provenance</summary>
@@ -342,6 +349,17 @@ function statusLabel(status: MemoryEntry["status"]): string {
 
 function formatTimestamp(value: string): string {
   return memoryTimestampFormatter.format(new Date(value));
+}
+
+const MODE_LABEL = { chat: "Chat", work: "Work", code: "Code" } as const;
+
+/**
+ * Where an agent-written entry came from. A purged thread leaves only its
+ * mode, so the label never names a thread that no longer exists.
+ */
+function agentProvenanceLabel(provenance: AgentAuthoredMemoryProvenance): string {
+  const where = `Written by an agent in a ${MODE_LABEL[provenance.mode]} thread`;
+  return provenance.threadId === undefined ? where : `${where} · ${provenance.threadId}`;
 }
 
 function formatActor(actor: {

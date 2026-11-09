@@ -1,5 +1,6 @@
 import type { PreparedProductFeedbackTurn } from "../browser/productFeedbackTurnPort";
 import type { ConversationInputReceipt } from "@octant/contracts/conversation-inputs";
+import { THREAD_MOVING_REFUSAL } from "../hub/threadMoveHolds";
 import type { ConversationInputTransfer } from "../attachments/conversationInputTransfer";
 import { conversationInputReceiptBlock } from "../attachments/conversationInputs";
 import { SIDE_CHAT_RETURN_UNAVAILABLE, type SideChatReturnResolver } from "../chat/sideChatReturn";
@@ -21,6 +22,7 @@ import type { AgentRunParentContextSelection } from "../agentRun/agentRunParentC
 import {
   conversationHandoffRefusalMessage,
   providerSwitchHandoffRecord,
+  withHandoverSummary,
   restartHandoffRecord,
   selectionBelongsToThread,
   type ConversationHandoffRefusal,
@@ -76,6 +78,7 @@ import {
   type HarnessRetryNotice,
   type Project,
   type ProjectId,
+  type ProjectMemoryView,
   type ProviderAttachmentInput,
   type ProviderContextBlock,
   type ProviderResumeCursor,
@@ -95,7 +98,7 @@ import type {
   NativeHarnessTurnAdmission,
   NativeHarnessTurnScope,
 } from "../harness/nativeHarnessTurnObserver";
-import type { TurnEndSummary } from "../metrics/turnEnd";
+import { withPromptDigest, type TurnEndSummary } from "../metrics/turnEnd";
 import type { LiveTurnRegistry } from "../liveTurn/liveTurnRegistry";
 import {
   accumulateTurnUsage,
@@ -267,6 +270,8 @@ export interface ServerWorkTurns {
 }
 
 export interface WorkTurnServiceDependencies {
+  /** Whether a move holds a thread; a held thread starts no turn. */
+  readonly moveHold?: (threadId: string) => boolean;
   readonly resolveSideChatReturns?: SideChatReturnResolver;
   readonly resolveSelectedExtensions?: SelectedExtensionResolver;
   /** The plugins pinned to a Project, offered on every turn there without a per-send selection. */
@@ -274,6 +279,8 @@ export interface WorkTurnServiceDependencies {
   readonly persistence: {
     readonly status: () => { readonly state: string; readonly integrity: string };
     readonly readProject: (projectId: ProjectId) => Project | undefined;
+    /** The Project's memory, whose active entries every turn in it carries. */
+    readonly readProjectMemory?: (projectId: ProjectId) => ProjectMemoryView;
     readonly readProviderInstance: (
       instanceId: WorkThread["providerInstanceId"],
     ) => ProviderInstance | undefined;
@@ -384,6 +391,8 @@ export interface WorkTurnServiceDependencies {
     /** The Project's extra folders, which file tools treat as the root. */
     readonly extraFolders?: ReadonlyArray<string>;
     readonly windowId: WindowId;
+    /** The turn the tools serve. */
+    readonly turnId: StartWorkThreadTurnCommand["turnId"];
     /** The routine run this turn was started for, from the dispatcher only. */
     readonly routineRun?: AutomationRunReference;
   }) => AppManagedToolSet | undefined;
@@ -430,6 +439,8 @@ export interface WorkTurnServiceDependencies {
     readonly turnStarted: (scope: NativeHarnessTurnScope) => void;
     /** Every turn's end, whatever its outcome, with what the turn cost and how it ran. */
     readonly turnEnded?: (scope: NativeHarnessTurnScope, turn?: TurnEndSummary) => void;
+    /** The host's keyed prompt digest; absent when the host has no key. */
+    readonly promptDigest?: (text: string) => string;
     readonly turnCompleted: (
       input: NativeHarnessTurnScope & {
         readonly text: string;
@@ -516,7 +527,12 @@ export interface WorkTurnServiceDependencies {
 /** The access each running Work turn holds, by thread, as the turn service records it. */
 export type RunningWorkTurnAccess = Map<
   string,
-  { readonly requestId: string; readonly access: WorkAccess }
+  {
+    readonly requestId: string;
+    readonly access: WorkAccess;
+    /** The sandbox choice the turn started with; a later change waits for the next turn. */
+    readonly fullAccessSandbox?: boolean;
+  }
 >;
 
 export class WorkTurnService {
@@ -581,7 +597,10 @@ export class WorkTurnService {
   readonly #liveTasks = new Map<string, ThreadTaskProgressList>();
   readonly #liveToolSteps = new Map<string, ThreadToolSteps>();
 
+  readonly #moveHold: ((threadId: string) => boolean) | undefined;
+
   constructor(dependencies: WorkTurnServiceDependencies) {
+    this.#moveHold = dependencies.moveHold;
     this.#runningAccess = dependencies.runningAccess ?? new Map();
     this.#contextHarness = dependencies.contextHarness;
     this.#resolveSelectedExtensions = dependencies.resolveSelectedExtensions;
@@ -681,11 +700,15 @@ export class WorkTurnService {
         selection,
         record: restartHandoffRecord(selection, reason === "branch" ? "fork" : "rewind"),
       };
-    return {
-      blocks: selection.blocks,
+    const switched = withHandoverSummary(
       selection,
+      this.#handoverSummary("work-thread", thread.id),
+    );
+    return {
+      blocks: switched.blocks,
+      selection: switched,
       record: providerSwitchHandoffRecord(
-        selection,
+        switched,
         // A handoff that never completed is made again from the provider the
         // conversation came from, not the one that may not have received it.
         previous.handoff?.reason === "provider-switch" && previous.status !== "completed"
@@ -699,6 +722,22 @@ export class WorkTurnService {
             },
       ),
     };
+  }
+
+  /** The limit rule's summary for the thread, if one is waiting for a move. */
+  #handoverSummary(
+    aggregateType: "work-thread",
+    threadId: WorkThreadId,
+  ): { readonly content: string; readonly completedAt: string } | undefined {
+    try {
+      return this.#contextHarness?.handoverSummary(
+        decodeContextSubjectRef({ aggregateType, aggregateId: String(threadId) }),
+        () => this.sessionCompactionConversation(threadId),
+      );
+    } catch {
+      // A ledger that cannot be read hands over the raw selection, as before.
+      return undefined;
+    }
   }
 
   #agentResultDelivery(command: StartWorkThreadTurnCommand): WorkTurnLookupResult | undefined {
@@ -840,6 +879,9 @@ export class WorkTurnService {
       externalData === undefined ? undefined : workExternalInputReceipt(externalData);
     if (options?.admissionCurrent?.() === false) {
       throw this.#failure("unauthorized", "Work turn admission is no longer current.");
+    }
+    if (this.#moveHold?.(String(command.threadId)) === true) {
+      throw this.#failure("stale", THREAD_MOVING_REFUSAL);
     }
     const thread = await this.#threads.read(authenticatedWindowId, command.threadId);
     // The level this turn runs at, fixed at admission: the thread's own,
@@ -1078,6 +1120,7 @@ export class WorkTurnService {
               projectRoot,
               ...(extraFolders.length === 0 ? {} : { extraFolders }),
               windowId: authenticatedWindowId,
+              turnId: command.turnId,
               ...(options?.routineRun === undefined ? {} : { routineRun: options.routineRun }),
             });
     const preparedTools =
@@ -1366,6 +1409,9 @@ export class WorkTurnService {
               ? undefined
               : this.#personMemoryBlock?.({ thread, windowId: authenticatedWindowId }),
           ),
+          ...(project === undefined
+            ? []
+            : projectMemoryContributions(this.#persistence.readProjectMemory?.(project.id))),
           ...(project === undefined ? [] : extraFolderContributions(project)),
           ...(project === undefined
             ? []
@@ -1474,6 +1520,13 @@ export class WorkTurnService {
       // Preparation awaits filesystem and provider context; recheck the journal before admission.
       const afterPreparation = this.#agentResultDelivery(command);
       if (afterPreparation !== undefined) return afterPreparation;
+
+      // A move may have frozen the thread while its context was prepared; the
+      // turn is refused here, before anything is accepted, so no message
+      // lands outside the conversation the move carries.
+      if (this.#moveHold?.(String(command.threadId)) === true) {
+        throw this.#failure("stale", THREAD_MOVING_REFUSAL);
+      }
 
       // Context and attachment reads can outlive the host's queue admission.
       if (markedWhilePreparing || options?.admissionCurrent?.() === false) {
@@ -1592,6 +1645,7 @@ export class WorkTurnService {
         command,
         ...(thread === undefined ? {} : { thread }),
         ...(thread === undefined ? {} : { access: turnAccess }),
+        ...(thread?.fullAccessSandbox === true ? { fullAccessSandbox: true } : {}),
         windowId: authenticatedWindowId,
         providerSessionId,
         ...(resumeCursor === undefined ? {} : { resumeCursor }),
@@ -1659,6 +1713,10 @@ export class WorkTurnService {
     }
     const journaled = this.#projection.rewind(String(command.rewindId));
     if (journaled !== undefined) return this.#rewindResult(command, journaled.removedRequestIds);
+    // A rewind changes the conversation a move is carrying.
+    if (this.#moveHold?.(String(command.threadId)) === true) {
+      throw this.#failure("stale", THREAD_MOVING_REFUSAL);
+    }
     if (this.#startingTurns.has(String(command.threadId)) || this.isTurnActive(command.threadId)) {
       throw this.#failure("stale", WORK_REWIND_WHILE_TURN_RUNS);
     }
@@ -1994,6 +2052,8 @@ export class WorkTurnService {
     readonly thread?: WorkThread;
     /** The thread's access, narrowed to ask-first when its caller held it. */
     readonly access?: WorkAccess;
+    /** The thread's sandbox choice at Full access when the turn starts. */
+    readonly fullAccessSandbox?: boolean;
     readonly windowId: WindowId;
     readonly providerSessionId: ProviderSessionId;
     readonly resumeCursor?: ProviderResumeCursor;
@@ -2158,6 +2218,7 @@ export class WorkTurnService {
         this.#runningAccess.set(String(input.command.threadId), {
           requestId: String(input.command.requestId),
           access: input.access,
+          ...(input.fullAccessSandbox === true ? { fullAccessSandbox: true } : {}),
         });
       }
       const outcome = await this.#turnRuntime.run({
@@ -2181,6 +2242,7 @@ export class WorkTurnService {
                 ),
             }),
         ...(input.access === undefined ? {} : { access: input.access }),
+        ...(input.fullAccessSandbox === true ? { fullAccessSandbox: true } : {}),
         ...(artifactToolName === undefined ? {} : { nativeArtifacts: true }),
         ...nativeSetupOption(
           sessionNativeSetup(this.#persistence, {
@@ -2280,7 +2342,18 @@ export class WorkTurnService {
           ? {}
           : { onRequestSettled: this.#onRequestSettled }),
         onTurnEnded: (ended) => {
-          endedTurn = ended;
+          endedTurn = withPromptDigest(
+            ended,
+            this.#nativeHarness?.promptDigest,
+            input.command.prompt,
+            {
+              // A subagent result delivery is the host's text, never a task a person set.
+              firstTurn:
+                input.command.delivery === undefined &&
+                String(this.#projection.listForThread(input.command.threadId)[0]?.requestId) ===
+                  String(input.command.requestId),
+            },
+          );
         },
         ...(this.#liveTurns === undefined
           ? {}
@@ -3246,6 +3319,23 @@ function withoutPublishedSnapshots(toolSteps: ThreadToolSteps): ThreadToolSteps 
       return { ...step, published: page };
     }),
   };
+}
+
+/**
+ * The Project's active memory, one entry each, as a Chat turn in the Project
+ * carries it: after person memory and before the Project's own files.
+ */
+function projectMemoryContributions(
+  memory: ProjectMemoryView | undefined,
+): ReadonlyArray<WorkTurnContextContribution> {
+  return (memory?.active ?? []).map((entry) => ({
+    text: entry.content,
+    sourceKind: "memory",
+    referenceId: String(entry.id),
+    category: "project-memory",
+    posture: "compressible",
+    block: { kind: "project-memory", text: entry.content },
+  }));
 }
 
 /** What Octant remembers about the person, placed after instructions and before the Project's own context. */

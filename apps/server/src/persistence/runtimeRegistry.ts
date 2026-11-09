@@ -1,4 +1,7 @@
-import { PendingQuestionDeferral } from "@octant/contracts/pending-requests";
+import {
+  DecisionReviewRecorded,
+  PendingQuestionDeferral,
+} from "@octant/contracts/pending-requests";
 import {
   CHILD_WORKTREE_SOURCE_UPDATED,
   ChildWorktreeSourceUpdated,
@@ -169,6 +172,8 @@ import {
   ExtensionToolGrantRevoked,
   EXTENSION_PROJECT_PIN_EVENT_NAMES,
   ExtensionProjectPinChanged,
+  BUNDLED_PLUGIN_SWITCH_EVENT_NAMES,
+  BundledPluginSwitched,
   ProductFeedbackCaptured,
   ProductFeedbackDelivered,
   ProductFeedbackUpdated,
@@ -327,6 +332,7 @@ import { ThemeProjection } from "./themeProjection";
 import { ExtensionProjection, EXTENSION_LIFECYCLE_EVENT } from "./extensionProjection";
 import { ExtensionToolGrantProjection } from "./extensionToolGrantProjection";
 import { ExtensionProjectPinProjection } from "./extensionProjectPinProjection";
+import { BundledPluginSwitchProjection } from "./bundledPluginSwitchProjection";
 import { ThreadNativeSetupProjection } from "./threadNativeSetupProjection";
 import {
   THREAD_NATIVE_SETUP_EVENT_NAMES,
@@ -380,6 +386,8 @@ import { registerArtifactMirrorEvents } from "../canvas/artifactMirrorEventStore
 import { registerGoalLoopEvents } from "../goal/goalLoopEventStore";
 import { registerFollowUpSuggestionEvents } from "../followUps/threadFollowUpSuggestionStore";
 import { registerTerminalSessionEvents } from "../terminalSessions/terminalSessionImports";
+import { registerThreadMoveEvents } from "../hub/threadMoveJournal";
+import { registerMovedHistoryEvents } from "../hub/movedThreadHistory";
 import { registerNativeHarnessEvents } from "../harness/nativeHarnessEvents";
 import { registerTurnMetricsEvents } from "../metrics/turnMetricsStore";
 import { registerSideTaskEvents } from "../sideTasks/sideTaskStore";
@@ -401,6 +409,8 @@ import {
   GithubCloneProjection,
 } from "./githubCloneProjection";
 import { ImageJobProjection } from "../image/imageJobProjection";
+import { registerBenchmarkEvents } from "../benchmarks/benchmarkEventStore";
+import { BenchmarkProjection } from "../benchmarks/benchmarkProjection";
 import {
   DesktopLeaseProjection,
   registerDesktopLeaseEvents,
@@ -422,6 +432,7 @@ export interface Phase1RuntimeRegistries {
   readonly automationProjection: AutomationProjection;
   readonly githubCloneProjection: GithubCloneProjection;
   readonly imageJobProjection: ImageJobProjection;
+  readonly benchmarkProjection: BenchmarkProjection;
   readonly desktopLeaseProjection: DesktopLeaseProjection;
   readonly replicaMembershipProjection: ReplicaMembershipProjection;
   readonly replicaArtifactProjection: ReplicaArtifactProjection;
@@ -499,6 +510,7 @@ export function createPhase1RuntimeRegistries(): Phase1RuntimeRegistries {
     .register("host-oauth.recorded@1", 1, HostOAuthJournalRecord)
     .register("provider-key.recorded@1", 1, ProviderKeyJournalRecord)
     .register("pending-question.deferred@1", 1, PendingQuestionDeferral)
+    .register("decision-review.recorded@1", 1, DecisionReviewRecorded)
     .register("secret-store.recorded@1", 1, SecretStoreJournalRecord)
     .register("ollama.history-recorded@1", 1, OllamaHistoryRecorded)
     .register("claude.resume-identity-recorded@1", 1, ClaudeResumeIdentityRecorded)
@@ -667,6 +679,7 @@ export function createPhase1RuntimeRegistries(): Phase1RuntimeRegistries {
     .register(EXTENSION_TOOL_GRANT_EVENT_NAMES.recorded, 1, ExtensionToolGrantRecorded)
     .register(EXTENSION_TOOL_GRANT_EVENT_NAMES.revoked, 1, ExtensionToolGrantRevoked)
     .register(EXTENSION_PROJECT_PIN_EVENT_NAMES.changed, 1, ExtensionProjectPinChanged)
+    .register(BUNDLED_PLUGIN_SWITCH_EVENT_NAMES.switched, 1, BundledPluginSwitched)
     .register(THREAD_NATIVE_SETUP_EVENT_NAMES.changed, 1, ThreadNativeSetupChanged)
     .register(REMOTE_ACCESS_EVENT_NAMES.hostIdentityInitialized, 1, HostIdentityInitializedV1)
     .register(REMOTE_ACCESS_EVENT_NAMES.deviceRegistered, 1, DeviceRegisteredV1)
@@ -746,6 +759,8 @@ export function createPhase1RuntimeRegistries(): Phase1RuntimeRegistries {
   registerTurnMetricsEvents(events);
   registerFollowUpSuggestionEvents(events);
   registerTerminalSessionEvents(events);
+  registerThreadMoveEvents(events);
+  registerMovedHistoryEvents(events);
   registerSideTaskEvents(events);
   registerShipEvents(events);
   registerThreadMessageQueueEvents(events);
@@ -753,6 +768,7 @@ export function createPhase1RuntimeRegistries(): Phase1RuntimeRegistries {
   registerReplicaMembershipEvents(events);
   registerReplicaStoreSettingsEvents(events);
   registerDesktopLeaseEvents(events);
+  registerBenchmarkEvents(events);
 
   const hostIdentityMigrations = createRuntimeHostIdentityMigrationRegistry(events);
   const agentRunProjection = new AgentRunProjection();
@@ -760,6 +776,7 @@ export function createPhase1RuntimeRegistries(): Phase1RuntimeRegistries {
   const automationProjection = new AutomationProjection();
   const githubCloneProjection = new GithubCloneProjection();
   const imageJobProjection = new ImageJobProjection();
+  const benchmarkProjection = new BenchmarkProjection();
   const desktopLeaseProjection = new DesktopLeaseProjection();
   const replicaMembershipProjection = new ReplicaMembershipProjection();
   const replicaArtifactProjection = new ReplicaArtifactProjection();
@@ -772,6 +789,7 @@ export function createPhase1RuntimeRegistries(): Phase1RuntimeRegistries {
     automationProjection,
     githubCloneProjection,
     imageJobProjection,
+    benchmarkProjection,
     desktopLeaseProjection,
     replicaMembershipProjection,
     replicaArtifactProjection,
@@ -791,6 +809,7 @@ export function createPhase1RuntimeRegistries(): Phase1RuntimeRegistries {
       .register(automationProjection)
       .register(githubCloneProjection)
       .register(imageJobProjection)
+      .register(benchmarkProjection)
       .register(desktopLeaseProjection)
       .register(new ZenProjection())
       .register(new AgentProfileProjection())
@@ -799,6 +818,7 @@ export function createPhase1RuntimeRegistries(): Phase1RuntimeRegistries {
       .register(new ExtensionProjection())
       .register(new ExtensionToolGrantProjection())
       .register(new ExtensionProjectPinProjection())
+      .register(new BundledPluginSwitchProjection())
       .register(new ThreadNativeSetupProjection())
       .register(new RemoteAccessProjection())
       .register(new ThreadCheckpointProjection())

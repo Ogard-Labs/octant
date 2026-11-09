@@ -2072,6 +2072,34 @@ html[data-octant-native-host="true"]
     padding-top: var(--oct-title-rail-h);
   }
 
+  /* The panel's scroller clips the start-screen ground to the sheet's exposed
+     corners; otherwise its opaque picture squares off the sheet underneath. */
+  .shell-frame:not(.shell--wide-context-open)
+    .workspace-pane:is([data-surface-kind="welcome"], [data-surface-kind="draft-thread"]):not(
+      :has(> .workspace-pane__header)
+    )
+    > .workspace-pane__panel {
+    border-top-right-radius: var(--oct-radius-md);
+  }
+
+  .shell--sidebar-collapsed.shell-frame
+    .workspace-pane:is([data-surface-kind="welcome"], [data-surface-kind="draft-thread"]):not(
+      :has(> .workspace-pane__header)
+    )
+    > .workspace-pane__panel {
+    border-top-left-radius: var(--oct-radius-md);
+  }
+
+  /* A start screen has no pane heading to hold the title band open. Without
+     that space its ground paints over the frame from the window's top edge.
+     Tabs can still supply a header, so reserve the band only when none exists. */
+  .shell-frame
+    .workspace-pane:is([data-surface-kind="welcome"], [data-surface-kind="draft-thread"]):not(
+      :has(> .workspace-pane__header)
+    ) {
+    padding-top: var(--oct-title-rail-h);
+  }
+
   /* The page scrolls under the title band, which belongs to the window frame.
      With the header pinned below that band, a row scrolled past the header
      came out again above it, over the window controls. */

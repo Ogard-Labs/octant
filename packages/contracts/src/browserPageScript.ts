@@ -11,6 +11,7 @@ export const BrowserPageScriptRefusalReason = Schema.Literal(
   "stale",
   "held",
   "unavailable",
+  "credential-or-frame-protected",
 );
 export type BrowserPageScriptRefusalReason = typeof BrowserPageScriptRefusalReason.Type;
 
@@ -47,12 +48,14 @@ export const BrowserPageScriptNativeCommand = Schema.Union(
     owner,
     source: Schema.String.pipe(Schema.maxLength(8192)),
     expectedUrl: Schema.String.pipe(Schema.maxLength(4096)),
+    requiresClearPage: Schema.optional(Schema.Boolean),
   }).annotations(strict),
   Schema.Struct({
     operation: Schema.Literal("execute", "cancel"),
     contextId: BrowserContextId,
     owner,
     planId: PlanId,
+    requiresClearPage: Schema.optional(Schema.Boolean),
   }).annotations(strict),
 );
 export type BrowserPageScriptNativeCommand = typeof BrowserPageScriptNativeCommand.Type;

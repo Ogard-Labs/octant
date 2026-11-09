@@ -8,12 +8,14 @@ import { ProviderGlyph } from "../providers/ProviderGlyph";
 import { modeIcons } from "../shell/ModeSwitcher";
 import type { ThreadProviderIdentity } from "../shell/navigationModel";
 import { OctantButton } from "../ui/base/OctantButton";
+import { OctantTextarea } from "../ui/base/OctantTextarea";
 import {
   childRequestHeadline,
   isChildPendingRequest,
   isFindOnlyPendingRequest,
   isLeadApprovalPendingRequest,
   isLeadQuestionPendingRequest,
+  MAX_DECISION_NOTE_LENGTH,
   pendingRequestChoices,
   type PendingRequestAnswerResult,
   type PendingRequestResponse,
@@ -52,6 +54,13 @@ export interface PendingRequestRowProps {
   readonly onOpenThread: (request: PendingRequest) => void;
 }
 
+/** Why no second opinion came, in words a tooltip can carry. */
+const NO_REVIEW_REASON = {
+  failed: "The reviewer's answer could not be read",
+  withheld: "The reviewer read outside content, so its answer was not used",
+  "not-allowed": "This Project doesn't allow the chosen provider",
+} as const;
+
 /**
  * One approval, question, or decision waiting on the person: who is waiting
  * and for how long, what it asked, and the answers that fit, in the order the
@@ -75,6 +84,13 @@ export function PendingRequestRow(props: PendingRequestRowProps) {
   const [presetId, setPresetId] = useState<string>();
   const presets = resolveSnoozePresets(new Date(props.now));
   const selectedPreset = presets.find((preset) => preset.id === presetId);
+  const [noteOpen, setNoteOpen] = useState(false);
+  const [note, setNote] = useState("");
+  const noteToggle = useRef<HTMLButtonElement>(null);
+  const noteField = useRef<HTMLTextAreaElement>(null);
+  useEffect(() => {
+    if (noteOpen) noteField.current?.focus();
+  }, [noteOpen]);
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState<string | undefined>(undefined);
   const mounted = useRef(true);
@@ -104,10 +120,22 @@ export function PendingRequestRow(props: PendingRequestRowProps) {
   function pickByNumber(event: KeyboardEvent<HTMLDivElement>) {
     if (event.metaKey || event.ctrlKey || event.altKey || event.shiftKey) return;
     if (!/^[1-9]$/.test(event.key)) return;
+    // Digits typed into the note are text, not a pick.
+    if (event.target instanceof HTMLTextAreaElement) return;
     const choice = choices[Number(event.key) - 1];
     if (choice === undefined) return;
     event.preventDefault();
-    void answer({ kind: "choice", label: choice.label });
+    pick(choice.label);
+  }
+
+  function pick(label: string) {
+    // A closed note is kept for when it reopens, but only text the person can
+    // see goes with their choice.
+    void answer(
+      !noteOpen || note.trim().length === 0
+        ? { kind: "choice", label }
+        : { kind: "choice", label, note },
+    );
   }
 
   async function defer(until: string | null) {
@@ -118,7 +146,7 @@ export function PendingRequestRow(props: PendingRequestRowProps) {
       if (await props.onDefer(request, until)) {
         if (mounted.current) setPresetId(undefined);
       } else
-        setNotice("This question changed or is no longer available. Refresh before trying again.");
+        setNotice(`This ${noun} changed or is no longer available. Refresh before trying again.`);
     } catch {
       setNotice("The attention change could not be confirmed. Refresh before trying again.");
     } finally {
@@ -127,7 +155,13 @@ export function PendingRequestRow(props: PendingRequestRowProps) {
   }
 
   const embedded = props.embedded === true;
+  const decision = request.kind === "decision" ? request : undefined;
+  const noun = decision === undefined ? "question" : "decision";
   const ModeIcon = modeIcons[request.mode];
+  const review = decision?.review;
+  const reviewed = review?.status === "reviewed" ? review : undefined;
+  const recommendedLabel = decision?.options.find((option) => option.recommended)?.label;
+  const differs = reviewed !== undefined && reviewed.backs !== recommendedLabel;
   const child = isChildPendingRequest(request) ? request : undefined;
   const lead = isLeadApprovalPendingRequest(request) ? request : undefined;
   return (
@@ -173,6 +207,12 @@ export function PendingRequestRow(props: PendingRequestRowProps) {
             </OctantButton>
           </>
         )}
+        {decision?.urgent === true ? (
+          <span className="oct-meta pending-request__urgent">Urgent</span>
+        ) : null}
+        {differs ? (
+          <span className="oct-meta pending-request__differs">Second opinion differs</span>
+        ) : null}
         <span className="oct-meta pending-request__wait">
           <CirclePause aria-hidden="true" size={12} strokeWidth={1.8} />
           {`Waiting ${elapsedLabel(request.requestedAt, props.now)}`}
@@ -197,14 +237,19 @@ export function PendingRequestRow(props: PendingRequestRowProps) {
           {request.text}
         </p>
       )}
+      {deferred || decision?.why === undefined ? null : (
+        <p className="oct-meta pending-request__why" title={decision.why}>
+          {decision.why}
+        </p>
+      )}
       {deferred ? (
         <p className="oct-meta" role="status">
-          Deferred until {new Date(request.deferredUntil ?? "").toLocaleString()}. The question
+          Deferred until {new Date(request.deferredUntil ?? "").toLocaleString()}. The {noun}{" "}
           remains unanswered.
         </p>
       ) : null}
       {open &&
-      request.kind === "question" &&
+      (request.kind === "question" || request.kind === "decision") &&
       request.deferralKey !== undefined &&
       props.onDefer !== undefined ? (
         <div className="pending-request__actions">
@@ -215,7 +260,7 @@ export function PendingRequestRow(props: PendingRequestRowProps) {
           ) : (
             <>
               <OctantSelectField
-                aria-label="Defer question until"
+                aria-label={`Defer ${noun} until`}
                 value={selectedPreset?.id ?? ""}
                 disabled={busy}
                 placeholder="Remind me…"
@@ -237,7 +282,7 @@ export function PendingRequestRow(props: PendingRequestRowProps) {
                   else void defer(preset.until);
                 }}
               >
-                Defer question
+                {`Defer ${noun}`}
               </OctantButton>
             </>
           )}
@@ -276,26 +321,84 @@ export function PendingRequestRow(props: PendingRequestRowProps) {
             </>
           ) : (
             <>
-              {choices.map((choice, index) => (
+              {choices.map((choice, index) => {
+                // The models that back an option sit inside its button, so
+                // each backer reads as part of the option it backs.
+                const askedBy =
+                  decision !== undefined && choice.recommended === true
+                    ? decision.askedBy
+                    : undefined;
+                const backedBy =
+                  reviewed !== undefined && reviewed.backs === choice.label ? reviewed : undefined;
+                return (
+                  <OctantButton
+                    className="pending-request__choice"
+                    disabled={busy}
+                    key={choice.label}
+                    onClick={() => pick(choice.label)}
+                    size="sm"
+                    title={choice.description ?? choice.label}
+                    type="button"
+                    variant="outline"
+                  >
+                    <span aria-hidden="true" className="pending-request__number">
+                      {String(index + 1)}
+                    </span>
+                    <span className="pending-request__choice-body">
+                      <span className="pending-request__choice-line">
+                        <span className="pending-request__choice-label">{choice.label}</span>
+                        {choice.recommended === true ? (
+                          <span className="oct-meta pending-request__recommended">Recommended</span>
+                        ) : null}
+                      </span>
+                      {choice.detail === undefined ? null : (
+                        <span className="oct-meta pending-request__choice-detail">
+                          {choice.detail}
+                        </span>
+                      )}
+                      {askedBy === undefined ? null : (
+                        <span className="oct-meta pending-request__model-line">
+                          <ProviderGlyph
+                            className="pending-request__model-mark"
+                            displayName={props.provider?.displayName ?? String(askedBy.modelId)}
+                            driverKind={props.provider?.driverKind ?? ""}
+                            size={12}
+                          />
+                          <span className="pending-request__model-text">
+                            {`${String(askedBy.modelId)} · asking thread`}
+                          </span>
+                        </span>
+                      )}
+                      {backedBy === undefined ? null : (
+                        <span className="oct-meta pending-request__model-line">
+                          <ProviderGlyph
+                            className="pending-request__model-mark"
+                            displayName={backedBy.providerName ?? String(backedBy.modelId)}
+                            driverKind={backedBy.driverKind ?? ""}
+                            size={12}
+                          />
+                          <span className="pending-request__model-text">
+                            {`${String(backedBy.modelId)} · Second opinion: ${backedBy.reason}`}
+                          </span>
+                        </span>
+                      )}
+                    </span>
+                  </OctantButton>
+                );
+              })}
+              {decision === undefined || embedded ? null : (
                 <OctantButton
-                  className="pending-request__choice"
+                  aria-expanded={noteOpen}
                   disabled={busy}
-                  key={choice.label}
-                  onClick={() => void answer({ kind: "choice", label: choice.label })}
+                  onClick={() => setNoteOpen((current) => !current)}
+                  ref={noteToggle}
                   size="sm"
-                  title={choice.description ?? choice.label}
                   type="button"
-                  variant="outline"
+                  variant="ghost"
                 >
-                  <span aria-hidden="true" className="pending-request__number">
-                    {String(index + 1)}
-                  </span>
-                  <span className="pending-request__choice-label">{choice.label}</span>
-                  {choice.recommended === true ? (
-                    <span className="oct-meta pending-request__recommended">Recommended</span>
-                  ) : null}
+                  Add note
                 </OctantButton>
-              ))}
+              )}
               <OctantButton
                 disabled={busy}
                 onClick={() => props.onOpenThread(request)}
@@ -308,6 +411,34 @@ export function PendingRequestRow(props: PendingRequestRowProps) {
             </>
           )}
         </div>
+      ) : null}
+      {open && !deferred && review !== undefined && review.status !== "reviewed" ? (
+        <p
+          className="oct-meta pending-request__review-note"
+          title={review.status === "pending" ? undefined : NO_REVIEW_REASON[review.status]}
+        >
+          {review.status === "pending" ? "Getting a second opinion…" : "No second opinion"}
+        </p>
+      ) : null}
+      {open && !deferred && !embedded && decision !== undefined && noteOpen ? (
+        <OctantTextarea
+          aria-label="Note sent with your choice"
+          className="pending-request__note"
+          disabled={busy}
+          maxLength={MAX_DECISION_NOTE_LENGTH}
+          onChange={(event) => setNote(event.target.value)}
+          ref={noteField}
+          onKeyDown={(event) => {
+            if (event.key !== "Escape") return;
+            event.preventDefault();
+            event.stopPropagation();
+            setNoteOpen(false);
+            noteToggle.current?.focus();
+          }}
+          placeholder="Add a note for the agent"
+          rows={2}
+          value={note}
+        />
       ) : null}
       {notice === undefined ? null : (
         <p className="oct-meta pending-request__notice" role="status">

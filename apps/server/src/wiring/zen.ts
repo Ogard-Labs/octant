@@ -13,6 +13,7 @@ import { LOCAL_HOST_ID } from "@octant/contracts";
 import { defaultShellSettings } from "@octant/domain";
 import { ZenThreadCatalog } from "../zen/zenThreadCatalog";
 import { localHostDisplayName } from "../localHostDisplayName";
+import { isFirstPartyIntegrationEffective } from "../github/githubIntegrationEffective";
 import { ZenAssistantTools } from "../zen/zenAssistantTools";
 import { zenLayoutOf } from "../zen/zenLayoutReadPort";
 import { MAX_JSON_REQUEST_BODY_SIZE, type ServerStart } from "./serverShape";
@@ -26,8 +27,10 @@ import type { CodeRuntimeWiring } from "./codeRuntime";
 import type { CodeToolingWiring } from "./codeTooling";
 import type { ChatWiring } from "./chat";
 import type { WorkWiring } from "./work";
+import type { IntegrationsWiring } from "./integrations";
 
 export type ZenDependencies = Pick<ServerStart, "persistence"> &
+  Pick<IntegrationsWiring, "githubExtensionSnapshot"> &
   Pick<AuthorityWiring, "windowAuthorityStore"> &
   Pick<UsageWiring, "zenEventStore"> &
   Pick<WorkspaceWiring, "projectService" | "shellService"> &
@@ -56,7 +59,18 @@ export function wireZen(deps: ZenDependencies) {
     workThreadProjection,
     workTurnService,
     zenEventStore,
+    githubExtensionSnapshot,
   } = deps;
+
+  // Bundled Zen is on by default: a missing extension-store row keeps today's
+  // routes and tools. The snapshot is read on every request, the same reader
+  // the GitHub and Linear gates use, so the person's switch takes effect at
+  // once. Switching Zen off never deletes layouts, backgrounds, focus zones
+  // or events; it only refuses the routes and withholds the tool.
+  const zenIsEffective = () =>
+    isFirstPartyIntegrationEffective(githubExtensionSnapshot.read(), "zen", {
+      missingRow: "effective",
+    });
 
   const zenThreadCatalog = new ZenThreadCatalog({
     localHostId: LOCAL_HOST_ID,
@@ -189,9 +203,14 @@ export function wireZen(deps: ZenDependencies) {
   const zenAssistantTools = new ZenAssistantTools({
     zenService,
     zenLayout: { layout: (windowId) => zenLayoutOf(zenService.bootstrap(windowId).space) },
+    isEffective: zenIsEffective,
   });
   contributeChatTools((windowId, thread) => zenAssistantTools.forThread(windowId, thread));
-  const zenRoutes = createZenRouteHandler({ zenService, windowAuthorityStore });
+  const zenRoutes = createZenRouteHandler({
+    zenService,
+    windowAuthorityStore,
+    isEffective: zenIsEffective,
+  });
   // Navigator is the production consumer of the `navigatorAssistant`
   // settings section: the conversation runs on the configured default model
   // through the ordinary Chat commands below, and reports itself
@@ -272,6 +291,7 @@ export function wireZen(deps: ZenDependencies) {
     store: new ZenBackgroundStore({ dataDirectory: providerDataDirectory }),
     zenService,
     windowAuthorityStore,
+    isEffective: zenIsEffective,
     liveAssets: () =>
       new Map(
         persistence.readZenSpaces().flatMap((space) => {

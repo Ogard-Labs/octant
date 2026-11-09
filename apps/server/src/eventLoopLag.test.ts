@@ -4,6 +4,7 @@ import {
   eventLoopLagThresholdFromEnvironment,
   readEventLoopLagCounters,
   startEventLoopLagDetector,
+  takeEventLoopLagWindow,
 } from "./eventLoopLag";
 
 function harness(thresholdMs: number) {
@@ -47,6 +48,18 @@ describe("event loop lag detector", () => {
     const after = readEventLoopLagCounters();
     expect(after.count).toBe(before.count + 1);
     expect(after.worstMs).toBeGreaterThanOrEqual(300);
+  });
+
+  it("hands each host-health window only the stalls since the last one, keeping the lifetime tally", () => {
+    takeEventLoopLagWindow();
+    const before = readEventLoopLagCounters();
+    const h = harness(100);
+    h.fire(405);
+
+    expect(takeEventLoopLagWindow()).toEqual({ count: 1, worstMs: 355 });
+    expect(takeEventLoopLagWindow()).toEqual({ count: 0, worstMs: 0 });
+    expect(readEventLoopLagCounters().count).toBe(before.count + 1);
+    h.stop();
   });
 
   it("does not keep the process alive", () => {

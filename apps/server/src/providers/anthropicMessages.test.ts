@@ -660,6 +660,37 @@ describe("buildAnthropicMessagesBody cache layout", () => {
     expect(markedMessageIndexes(grown)).toEqual([2]);
   });
 
+  it("keeps a readable entry before a note that rides one request only", () => {
+    const stable = [
+      { role: "user" as const, text: "first question" },
+      { role: "assistant" as const, text: "first answer" },
+      { role: "user" as const, text: "second question" },
+    ];
+    const noted = buildAnthropicMessagesBody({
+      modelId: "fixture-model",
+      prompt: "",
+      system: "stable instructions",
+      history: [...stable, { role: "user", text: "[Note from Octant: 40% full]" }],
+    });
+    const next = buildAnthropicMessagesBody({
+      modelId: "fixture-model",
+      prompt: "",
+      system: "stable instructions",
+      history: [...stable, { role: "assistant", text: "second answer" }],
+    });
+
+    // The note's entry is never read again; the one before it is.
+    expect(markedMessageIndexes(noted)).toEqual([2, 3]);
+    expect(countCacheBreakpoints(noted)).toBe(3);
+    // A marker is not part of the cached content, so the next request's first
+    // three messages are the entry the noted request wrote at its message 2.
+    const content = (body: Record<string, unknown>) =>
+      JSON.stringify(Array.isArray(body.messages) ? body.messages.slice(0, 3) : [])
+        .replaceAll(',"cache_control":{"type":"ephemeral"}', "")
+        .replace(/\[\{"type":"text","text":("[^"]*")\}\]/g, "$1");
+    expect(content(next)).toBe(content(noted));
+  });
+
   it("leaves the new prompt outside the cached prefix", () => {
     const body = buildAnthropicMessagesBody({
       modelId: "fixture-model",

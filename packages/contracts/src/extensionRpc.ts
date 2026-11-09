@@ -361,6 +361,75 @@ export type McpServerSignInView = typeof McpServerSignInView.Type;
 export const decodeMcpServerSignInView = Schema.decodeUnknownSync(McpServerSignInView);
 
 /**
+ * How each installed MCP server is connecting, as the host last saw it. The
+ * listing is built from retained facts only: the package's switches, the
+ * stored sign-in record, and what the last connection attempt reported.
+ * Reading it never connects, signs in, or asks a server for its tools.
+ */
+export const McpServerConnectionState = Schema.Literal(
+  /** A session is open now. */
+  "connected",
+  /** A task is opening a session now. */
+  "connecting",
+  /** Nothing is wrong; the next task that uses it connects. */
+  "ready",
+  /** The sign-in is missing, expired, or revoked. */
+  "needs-sign-in",
+  /** The last connection attempt failed or the transport closed. */
+  "failed",
+  /** The package or this server is switched off. */
+  "off",
+  /** The host will not run it, for a reason the row names. */
+  "blocked",
+);
+export type McpServerConnectionState = typeof McpServerConnectionState.Type;
+export const McpServerConnection = Schema.Struct({
+  extensionId: ToolExtensionId,
+  packageId: ExtensionPackageId,
+  componentId: ExtensionComponentId,
+  /** The package's name, then the server's own name inside it. */
+  packageName: boundedText(256),
+  serverName: boundedText(256),
+  transport: Schema.Literal("stdio", "streamable-http", "unknown"),
+  state: McpServerConnectionState,
+  /** One plain sentence on why the server is not connected; absent when nothing is wrong. */
+  reason: Schema.optional(boundedText(512)),
+  /** When the host last saw a connection open or fail. */
+  checkedAt: Schema.optional(UtcTimestamp),
+}).annotations(strict);
+export type McpServerConnection = typeof McpServerConnection.Type;
+export const McpServerConnectionListing = Schema.Struct({
+  servers: Schema.Array(McpServerConnection).pipe(Schema.maxItems(512)),
+}).annotations(strict);
+export type McpServerConnectionListing = typeof McpServerConnectionListing.Type;
+export const decodeMcpServerConnectionListing = Schema.decodeUnknownSync(
+  McpServerConnectionListing,
+);
+/**
+ * Reading the listing, or asking the host to drop a server's connection and
+ * its failure so the next task connects fresh. Reconnect is a person's act
+ * in a local window; it never replays a call that failed.
+ */
+export const McpServerConnectionRequest = Schema.Union(
+  Schema.Struct({ kind: Schema.Literal("list") }).annotations(strict),
+  Schema.Struct({ kind: Schema.Literal("reconnect"), ...signInTarget }).annotations(strict),
+);
+export type McpServerConnectionRequest = typeof McpServerConnectionRequest.Type;
+export const decodeMcpServerConnectionRequest = Schema.decodeUnknownSync(
+  McpServerConnectionRequest,
+);
+export const McpServerReconnectResult = Schema.Union(
+  Schema.Struct({ kind: Schema.Literal("reconnecting") }).annotations(strict),
+  Schema.Struct({
+    kind: Schema.Literal("refused"),
+    reason: Schema.Literal("not-found", "local-host-required"),
+    message: boundedText(512),
+  }).annotations(strict),
+);
+export type McpServerReconnectResult = typeof McpServerReconnectResult.Type;
+export const decodeMcpServerReconnectResult = Schema.decodeUnknownSync(McpServerReconnectResult);
+
+/**
  * Plugins pinned to Projects: a pin offers the plugin on every Work or Code
  * turn in that Project without a per-send selection. The listing names the
  * Projects a local window may pin to, so Settings can show a switch per
@@ -399,8 +468,27 @@ export const decodeExtensionProjectPinRequest = Schema.decodeUnknownSync(
   ExtensionProjectPinRequest,
 );
 
+/**
+ * What the person's own Claude Code and Codex files say about compacting, read
+ * from those files and never written: whether Claude Code compacts by itself
+ * and the window it was given, and the token limit Codex was given. A value
+ * the file does not set is absent, which means the runtime's own default.
+ */
+export const RuntimeCompactionDefaults = Schema.Struct({
+  claude: Schema.Struct({
+    /** `false` when `autoCompactEnabled` is off, or `DISABLE_AUTO_COMPACT` is set in its settings. */
+    autoCompact: Schema.Boolean,
+    autoCompactWindow: Schema.optional(Schema.Int.pipe(Schema.positive())),
+  }).annotations(strict),
+  codex: Schema.Struct({
+    autoCompactTokenLimit: Schema.optional(Schema.Int.pipe(Schema.positive())),
+  }).annotations(strict),
+}).annotations(strict);
+export type RuntimeCompactionDefaults = typeof RuntimeCompactionDefaults.Type;
+
 export const DiscoveredAgentToolingRequest = Schema.Union(
   Schema.Struct({ kind: Schema.Literal("list") }).annotations(strict),
+  Schema.Struct({ kind: Schema.Literal("compaction-defaults") }).annotations(strict),
   Schema.Struct({ kind: Schema.Literal("add-server"), id: discoveredId }).annotations(strict),
   Schema.Struct({ kind: Schema.Literal("import-plugin"), id: discoveredId }).annotations(strict),
 );

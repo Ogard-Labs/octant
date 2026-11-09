@@ -307,6 +307,9 @@ interface OwnedRuntimeContext {
   recording?: PlaywrightRecording | undefined;
 }
 
+/** How long starting a recording waits for the page's first frame. */
+const FIRST_FRAME_WAIT_MS = 2_000;
+
 /**
  * One recording: the page's own screencast on a protocol session of its own,
  * the frames it kept, and the timer that stops it at the duration bound.
@@ -871,6 +874,10 @@ export class PlaywrightBrowserRuntime implements BrowserRuntimePort {
     let tail: Promise<void> = Promise.resolve();
     let receiving = true;
     let ended: RecordingEnd | undefined;
+    let firstFrameLooked = (): void => undefined;
+    const firstFrame = new Promise<void>((resolve) => {
+      firstFrameLooked = resolve;
+    });
     const endCollection = (atMs: number, reason?: "tab-changed"): RecordingEnd => {
       ended ??= {
         atMs,
@@ -910,6 +917,7 @@ export class PlaywrightBrowserRuntime implements BrowserRuntimePort {
         } catch {
           frames.leaveOut();
         } finally {
+          firstFrameLooked();
           // Acknowledged after it was looked at: the page sends the next
           // frame only then, so a busy page cannot queue frames without bound.
           await session
@@ -935,6 +943,8 @@ export class PlaywrightBrowserRuntime implements BrowserRuntimePort {
       void session.send("Page.stopScreencast").catch(() => undefined);
     }, MAX_BROWSER_RECORDING_MS);
     timer.unref?.();
+    // Registered before the wait below, so a tab change, a drop, or a closing
+    // context during it ends the screencast like any other recording.
     owned.recording = {
       page,
       ended: () => ended,
@@ -945,8 +955,28 @@ export class PlaywrightBrowserRuntime implements BrowserRuntimePort {
       settled: () => tail,
       stopReceiving: () => {
         receiving = false;
+        // A recording that is ending has no first frame to wait for.
+        firstFrameLooked();
       },
     };
+    // A page that does not repaint sends one frame at the start, and looking
+    // at it takes a credential check. Starting returns once it was looked at,
+    // so a click in the first step cannot move the page on before the
+    // recording holds the page it started on (a slow runner lost that frame
+    // and kept an empty recording). A page that sends none does not hold the
+    // call beyond the bound.
+    let boundTimer: ReturnType<typeof setTimeout> | undefined;
+    try {
+      await Promise.race([
+        firstFrame,
+        new Promise((resolve) => {
+          boundTimer = setTimeout(resolve, FIRST_FRAME_WAIT_MS);
+          boundTimer.unref?.();
+        }),
+      ]);
+    } finally {
+      clearTimeout(boundTimer);
+    }
   }
 
   /** End the context's recording and build its animation; nothing running is empty. */

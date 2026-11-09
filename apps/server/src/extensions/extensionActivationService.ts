@@ -16,6 +16,7 @@ import {
   isExtensionComponentModeSafe,
   resolveExtensionActivation,
 } from "@octant/plugin-host/activation";
+import { switchableFirstPartyPlugin } from "@octant/plugin-host/first-party-plugins";
 
 export interface ExtensionActivationPolicyPort {
   resolve(input: {
@@ -87,7 +88,7 @@ export class ExtensionActivationService {
     query: ExtensionEffectiveStateQuery,
   ): ExtensionEffectiveSnapshot {
     const catalogStatus = this.#catalogStatus();
-    const evaluated = snapshot.packages.map((packageState) => {
+    const evaluated = snapshot.packages.filter(isScopeActivated).map((packageState) => {
       const environmentCompatible = this.#compatibility(packageState);
       return {
         packageState,
@@ -159,6 +160,19 @@ export class ExtensionActivationService {
       collisions: snapshot.collisions,
     });
   }
+}
+
+/**
+ * A plugin built into Octant is a host feature with one switch, read by the
+ * host itself; it is never addressed with `@`, selected for a turn, pinned,
+ * or given tools, so a scope's effective state leaves it out. Its switch
+ * therefore does not move the catalog epoch.
+ */
+function isScopeActivated(packageState: ExtensionPackageState): boolean {
+  return !(
+    packageState.source.kind === "bundled" &&
+    switchableFirstPartyPlugin(String(packageState.extensionId)) !== undefined
+  );
 }
 
 function withoutSettingsFacts(

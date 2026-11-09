@@ -205,9 +205,21 @@ true`,
     expect(run.status).toBe("cancelled");
     await expectGone(Number(run.output.trim()));
   });
+
+  it("says a command's output was cut when it printed more than the shell keeps", async () => {
+    const { shell, checkout } = harnessShell("none", 64);
+    const long = await shell.run({
+      command: "/usr/bin/yes | /usr/bin/head -c 1000",
+      cwd: checkout,
+      timeoutMs: 10_000,
+    });
+    expect(long).toMatchObject({ status: "ran", exitCode: 0, truncated: true });
+    const short = await shell.run({ command: "echo ok", cwd: checkout, timeoutMs: 10_000 });
+    expect(short).toMatchObject({ status: "ran", exitCode: 0, truncated: false });
+  });
 });
 
-function harnessShell(networkEgress: "allow" | "none") {
+function harnessShell(networkEgress: "allow" | "none", maxOutputBytes?: number) {
   const root = realpathSync(mkdtempSync(join(tmpdir(), "octant-harness-shell-")));
   directories.push(root);
   const checkout = join(root, "checkout");
@@ -221,6 +233,7 @@ function harnessShell(networkEgress: "allow" | "none") {
     temporaryDirectory: work,
     networkEgress,
     harnessShellScriptDirectory: scripts,
+    ...(maxOutputBytes === undefined ? {} : { maxOutputBytes }),
   });
   return { shell: createNativeHarnessShell({ process, scriptDirectory: scripts }), checkout };
 }

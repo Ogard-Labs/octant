@@ -43,9 +43,11 @@ import {
   type UsageResumeRecord,
   type WindowId,
 } from "@octant/contracts";
+import { THREAD_MOVING_REFUSAL } from "../hub/threadMoveHolds";
 import { Schema } from "effect";
 import { unsupportedModelOptionValues } from "@octant/domain/chat-policy";
 import {
+  defaultFullAccessSandboxFor,
   guardrailLowered,
   permissionModeOf,
   workAccessOfPermissionMode,
@@ -139,6 +141,8 @@ const SERVER_THREAD_STAYS_IN_FOLDER =
   "A thread in a Project on a server works in that Project's folder there, so it cannot move to another folder or Project.";
 
 export interface WorkThreadServiceDependencies {
+  /** Whether a move holds a thread; a held thread takes no command. */
+  readonly moveHold?: (threadId: string) => boolean;
   readonly persistence: {
     readonly status: () => {
       readonly state: string;
@@ -287,12 +291,14 @@ export class WorkThreadService {
   readonly #observeRuntime?: WorkThreadServiceDependencies["observeRuntime"];
   readonly #projectDueReminder?: WorkThreadServiceDependencies["projectDueReminder"];
   readonly #issueContext?: GithubIssueContextPort;
+  readonly #moveHold: ((threadId: string) => boolean) | undefined;
   readonly #terminalSessions: TerminalSessionImportPort | undefined;
   readonly #linearIssueContext?: LinearIssueContextPort;
   readonly #recordExternalContentIngestion: RecordExternalContentIngestion | undefined;
   readonly #serverProjects: ServerWorkProjectThreads | undefined;
 
   constructor(dependencies: WorkThreadServiceDependencies) {
+    this.#moveHold = dependencies.moveHold;
     this.#persistence = dependencies.persistence;
     this.#projects = dependencies.projects;
     this.#projection = dependencies.projection;
@@ -428,6 +434,15 @@ export class WorkThreadService {
     this.#assertReady();
     try {
       const command = decodeWorkThreadCommand(input);
+      // A creation names a thread that does not exist yet, except the move's own
+      // arrival, which opens the planned thread it already holds.
+      if (
+        "threadId" in command &&
+        command.kind !== "create-work-thread" &&
+        this.#moveHold?.(String(command.threadId)) === true
+      ) {
+        throw this.#failure("unavailable", THREAD_MOVING_REFUSAL);
+      }
       if (command.kind === "update-work-settings") {
         const current = this.#currentSettings();
         if (current.version !== command.expectedVersion) {
@@ -441,6 +456,11 @@ export class WorkThreadService {
                 defaultModelId: command.defaultModelId,
               }),
           defaultAccess: command.defaultAccess,
+          // Absent keeps the stored choice, so a save from a client that does
+          // not show the switch never turns it off.
+          ...((command.defaultFullAccessSandbox ?? current.defaultFullAccessSandbox) === true
+            ? { defaultFullAccessSandbox: true }
+            : {}),
           version: command.expectedVersion + 1,
           updatedAt: decodeTimestamp(this.#clock()),
         });
@@ -597,6 +617,16 @@ export class WorkThreadService {
               ? undefined
               : workAccessOfPermissionMode(project.defaultPermissionMode)) ??
             this.#currentSettings().defaultAccess,
+          // The opt-in sandbox only rides along when the resolved access is
+          // Full access: the request's choice, else the Project's, else Settings'.
+          ...(((project.defaultPermissionMode === undefined
+            ? undefined
+            : workAccessOfPermissionMode(project.defaultPermissionMode)) ??
+            this.#currentSettings().defaultAccess) === "full-access" &&
+          (command.fullAccessSandbox ??
+            defaultFullAccessSandboxFor({ project, settings: this.#currentSettings() }))
+            ? { fullAccessSandbox: true }
+            : {}),
           version: 1,
           createdAt: decodeTimestamp(this.#clock()),
           updatedAt: decodeTimestamp(this.#clock()),
@@ -881,9 +911,17 @@ export class WorkThreadService {
         // The level takes effect when the next turn starts: a turn fixes its
         // level at admission and journals it, so a running turn keeps the one
         // it started with.
+        // The sandbox choice only means something at Full access: kept from the
+        // command, else from the thread, and dropped at any other level so a
+        // later raise to Full access never inherits a stale choice.
+        const { fullAccessSandbox: currentSandbox, ...unsandboxed } = current;
+        const sandboxed =
+          command.access === "full-access" &&
+          (command.fullAccessSandbox ?? currentSandbox) === true;
         const updated = decodeWorkThread({
-          ...current,
+          ...unsandboxed,
           access: command.access,
+          ...(sandboxed ? { fullAccessSandbox: true } : {}),
           version: command.expectedVersion + 1,
           updatedAt: decodeTimestamp(this.#clock()),
         });
@@ -1256,6 +1294,11 @@ export class WorkThreadService {
       bindingRevisionId,
       workingDirectory: ".",
       access: this.#currentSettings().defaultAccess,
+      ...(this.#currentSettings().defaultAccess === "full-access" &&
+      (command.fullAccessSandbox ??
+        defaultFullAccessSandboxFor({ settings: this.#currentSettings() }))
+        ? { fullAccessSandbox: true }
+        : {}),
       version: 1,
       createdAt: decodeTimestamp(this.#clock()),
       updatedAt: decodeTimestamp(this.#clock()),

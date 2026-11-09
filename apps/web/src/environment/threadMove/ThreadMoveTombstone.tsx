@@ -1,0 +1,189 @@
+import type { ThreadMoveThreadStatus } from "@octant/contracts";
+import { ArrowRight, Laptop } from "lucide-react";
+import { useId, useRef, useState } from "react";
+import { OctantAlert } from "../../ui/base/OctantAlert";
+import { OctantButton } from "../../ui/base/OctantButton";
+import { OctantConfirmDialog } from "../../ui/base/OctantConfirmDialog";
+import { EnvironmentTile } from "../EnvironmentGroup";
+import type { ThreadMoveClient } from "./threadMoveClient";
+
+type Departed = NonNullable<ThreadMoveThreadStatus["departed"]>;
+
+/**
+ * The link to the thread on the computer it moved to, in the form an Octant
+ * phone opens: a hub member is named by its host id.
+ */
+export function movedThreadLink(departed: Departed): string {
+  const { destinationMemberId, destinationThread } = departed;
+  return `octant://hosts/${String(destinationMemberId)}/threads/${destinationThread.mode}/${destinationThread.threadId}`;
+}
+
+/**
+ * What a moved thread's pane shows on the computer it left, opened from an
+ * old link, a notification, or a search: where it went, Open there, and the
+ * worktree that stayed when it held files the move did not carry. The
+ * thread itself was erased here through the ordinary purge. Canonical:
+ * DESIGN.md "Moved" and docs/design/hub-and-spokes.md "Erase on the source".
+ */
+export function ThreadMoveTombstone(props: {
+  readonly departed: Departed;
+  /** This computer's name, as the window lists it. */
+  readonly hostName: string;
+  readonly client: ThreadMoveClient;
+  readonly onChanged: () => void;
+  readonly writeClipboard?: (text: string) => Promise<void>;
+}) {
+  const { departed } = props;
+  const titleId = useId();
+  const [copied, setCopied] = useState<"copied" | "failed" | undefined>(undefined);
+  const time = new Date(departed.movedAt).toLocaleString([], {
+    dateStyle: "medium",
+    timeStyle: "short",
+  });
+
+  const openThere = () => {
+    const write = props.writeClipboard ?? ((text: string) => navigator.clipboard.writeText(text));
+    write(movedThreadLink(departed)).then(
+      () => setCopied("copied"),
+      () => setCopied("failed"),
+    );
+  };
+
+  return (
+    <section aria-labelledby={titleId} className="thread-move-tombstone">
+      <div className="thread-move-tombstone__card">
+        <p className="thread-move-tombstone__route">
+          <span className="thread-move-tombstone__host">
+            <EnvironmentTile icon={Laptop} />
+            {props.hostName}
+          </span>
+          <ArrowRight aria-label="to" size={14} strokeWidth={1.8} />
+          <span className="thread-move-tombstone__host">
+            <EnvironmentTile icon={Laptop} />
+            {departed.destinationName}
+          </span>
+        </p>
+        {departed.keptWorktree === undefined ? null : (
+          <KeptWorktree
+            client={props.client}
+            departed={departed}
+            folder={departed.keptWorktree}
+            onChanged={props.onChanged}
+          />
+        )}
+        <h2 className="thread-move-tombstone__title" id={titleId}>
+          Moved to {departed.destinationName}
+        </h2>
+        <p className="thread-move-tombstone__meta">
+          {time}
+          {departed.changesRemainInCheckout
+            ? ". Its changes also remain in this Project's checkout."
+            : ""}
+        </p>
+        <div className="thread-move-tombstone__actions">
+          <OctantButton onClick={openThere}>Open there</OctantButton>
+          <p aria-live="polite" className="thread-move-tombstone__meta">
+            {copied === "copied"
+              ? `Link copied. Open it on ${departed.destinationName} or your phone.`
+              : copied === "failed"
+                ? "The link couldn't be copied."
+                : ""}
+          </p>
+        </div>
+      </div>
+    </section>
+  );
+}
+
+/**
+ * The one row a kept worktree adds: the files that stayed with it, and
+ * Remove worktree, which asks once. Only a person reaches it; the host
+ * removes only the folder this move recorded.
+ */
+function KeptWorktree(props: {
+  readonly departed: Departed;
+  readonly folder: string;
+  readonly client: ThreadMoveClient;
+  readonly onChanged: () => void;
+}) {
+  const { departed } = props;
+  const [asking, setAsking] = useState(false);
+  const [removing, setRemoving] = useState(false);
+  const [failed, setFailed] = useState(false);
+  const trigger = useRef<HTMLButtonElement>(null);
+  if (departed.keptWorktreeRemovedAt !== undefined) {
+    return (
+      <p className="thread-move-tombstone__kept">
+        The worktree that stayed on this computer was removed.
+      </p>
+    );
+  }
+  const files = departed.keptFiles ?? [];
+  const count = departed.keptFileCount ?? files.length;
+  const more = count - files.length;
+
+  const remove = () => {
+    setRemoving(true);
+    setFailed(false);
+    props.client
+      .removeKeptWorktree(String(departed.moveId))
+      .then(
+        (outcome) => setFailed(outcome.status !== "removed"),
+        () => setFailed(true),
+      )
+      .finally(() => {
+        setRemoving(false);
+        setAsking(false);
+        props.onChanged();
+      });
+  };
+
+  return (
+    <div className="thread-move-tombstone__kept">
+      <p>
+        The worktree stayed on this computer at{" "}
+        <code className="thread-move-tombstone__mono">{props.folder}</code>
+        {count === 0 ? "." : ", with what the move didn't carry:"}
+      </p>
+      {files.length === 0 ? null : (
+        <ul aria-label="Files that stayed" className="thread-move-tombstone__files">
+          {files.map((file) => (
+            <li className="thread-move-tombstone__mono" key={file}>
+              {file}
+            </li>
+          ))}
+        </ul>
+      )}
+      {more > 0 ? <p>and {String(more)} more</p> : null}
+      {failed ? (
+        <OctantAlert title="The worktree couldn't be removed" tone="warning">
+          It is still at that folder, with everything in it.
+        </OctantAlert>
+      ) : null}
+      <OctantButton
+        className="thread-move-tombstone__remove"
+        disabled={removing}
+        onClick={() => setAsking(true)}
+        ref={trigger}
+        size="sm"
+        variant="ghost"
+      >
+        Remove worktree
+      </OctantButton>
+      {asking ? (
+        <OctantConfirmDialog
+          confirmLabel="Remove worktree"
+          destructive
+          onCancel={() => setAsking(false)}
+          onConfirm={remove}
+          pending={removing}
+          restoreFocus={trigger}
+          title="Remove this worktree?"
+        >
+          This removes the folder and everything in it from this computer, including the files the
+          move didn't carry. They have no other copy. The branch and its remote stay as they are.
+        </OctantConfirmDialog>
+      ) : null}
+    </div>
+  );
+}

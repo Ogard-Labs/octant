@@ -100,6 +100,7 @@ export interface BrowserAppManagedToolsOptions {
       readonly threadId: BrowserThreadId;
       readonly downloadId: string;
       readonly workspaceRoot: string | undefined;
+      readonly signal?: AbortSignal;
       readonly ask: (
         facts: { readonly name: string; readonly sizeBytes: number; readonly mediaType: string },
         origin: string,
@@ -422,6 +423,7 @@ export function createBrowserAppManagedTools(
         threadId: options.threadId,
         downloadId: input.downloadId,
         workspaceRoot: options.uploadRoot?.(),
+        ...(signal === undefined ? {} : { signal }),
         ask: (facts, pageOrigin) =>
           approvals.request({
             windowId: options.windowId,

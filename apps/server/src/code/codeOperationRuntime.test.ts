@@ -3563,6 +3563,27 @@ describe("CodeOperationRuntime", () => {
     expect(threadWithActiveTurnPosture(plan, activeTurns)).toEqual(
       fixture.runtime.threadWithActiveTurnPosture?.(plan),
     );
+    // A turn that started sandboxed keeps the sandbox when it is turned off
+    // mid-turn; the change takes effect from the next turn.
+    const started = activeTurns.get(String(threadId));
+    if (started !== undefined) {
+      activeTurns.set(String(threadId), {
+        ...started,
+        thread: decodeCodeThread({
+          ...started.thread,
+          executionPolicy: "full-access",
+          permissionPersistence: "project-default",
+          fullAccessSandbox: true,
+        }),
+      });
+      const openNow = decodeCodeThread({
+        ...thread(),
+        executionPolicy: "full-access",
+        permissionPersistence: "project-default",
+      });
+      expect(threadWithActiveTurnPosture(openNow, activeTurns).fullAccessSandbox).toBe(true);
+      activeTurns.set(String(threadId), started);
+    }
     await fixture.runtime.execute(windowId, {
       kind: "cancel-provider-turn",
       operationId: operationId(906),
@@ -6821,6 +6842,43 @@ describe("provider switch handoff", () => {
     }
   });
 
+  it("leads a provider switch with the limit rule's summary, and says so on the journal", async () => {
+    const drivers = twoHarnesses();
+    const fixture = runtimeFixture({
+      resolveProviderDriver: drivers.resolveProviderDriver,
+      handoverSummary: () => ({
+        content: "The migration is half done; finish the index next.",
+        completedAt: "2026-11-08T10:00:00.000Z",
+      }),
+    });
+    fixture.setThread(onProvider(providerInstance, "model-a"));
+    try {
+      await finishFirstTurn(fixture, drivers, providerInstance);
+      fixture.setThread(onProvider(harnessInstance, "harness-model", 2));
+      await sendAfterSwitch(fixture);
+      const next = drivers.connection(harnessInstance);
+      await vi.waitFor(() => expect(next.send).toHaveBeenCalledOnce());
+      const context = vi.mocked(next.send).mock.calls[0]?.[0].context ?? [];
+      expect(context.map((block) => block.kind)).toEqual([
+        "conversation-summary",
+        "conversation-summary",
+        "user-message",
+        "assistant-message",
+      ]);
+      expect(context[1]?.text).toContain("finish the index next");
+      const frames = await fixture.runtime.subscribe(windowId, threadId, operationId(85), 0, 50);
+      expect(
+        frames.find((frame) => frame.event.kind === "context-handoff-attached")?.event,
+      ).toMatchObject({ reason: "provider-switch", messages: 2, handoverSummary: true });
+      expect(fixture.conversation().turns.at(-1)?.handoff).toMatchObject({
+        handoverSummary: true,
+      });
+    } finally {
+      await fixture.runtime.close();
+      fixture.close();
+    }
+  });
+
   it.each([
     {
       direction: "from a provider's session to the Octant Harness",
@@ -8556,6 +8614,7 @@ function runtimeFixture(options: {
   holdsServerThread?: Parameters<typeof createCodeOperationRuntime>[0]["holdsServerThread"];
   canvas?: Parameters<typeof createCodeOperationRuntime>[0]["canvas"];
   carryAgentMessages?: Parameters<typeof createCodeOperationRuntime>[0]["carryAgentMessages"];
+  projectMemoryEntries?: Parameters<typeof createCodeOperationRuntime>[0]["projectMemoryEntries"];
   confirmAgentMessagesDelivered?: Parameters<
     typeof createCodeOperationRuntime
   >[0]["confirmAgentMessagesDelivered"];
@@ -8656,6 +8715,8 @@ function runtimeFixture(options: {
   providerSwitchContext?:
     | Parameters<typeof createCodeOperationRuntime>[0]["providerSwitchContext"]
     | "none";
+  /** The limit rule's summary a provider switch leads with, when one waits. */
+  handoverSummary?: Parameters<typeof createCodeOperationRuntime>[0]["handoverSummary"];
   /** Whether the selector reports the thread as having taken in outside content. */
   externalContentIngested?: boolean;
   /** Reopen another fixture's journal and content, the way a restarted host does. */
@@ -8944,6 +9005,9 @@ function runtimeFixture(options: {
     ...(options.carryAgentMessages === undefined
       ? {}
       : { carryAgentMessages: options.carryAgentMessages }),
+    ...(options.projectMemoryEntries === undefined
+      ? {}
+      : { projectMemoryEntries: options.projectMemoryEntries }),
     ...(options.confirmAgentMessagesDelivered === undefined
       ? {}
       : { confirmAgentMessagesDelivered: options.confirmAgentMessagesDelivered }),
@@ -8976,6 +9040,7 @@ function runtimeFixture(options: {
     ...(options.providerSwitchContext === "none"
       ? {}
       : { providerSwitchContext: options.providerSwitchContext ?? selectConversation }),
+    ...(options.handoverSummary === undefined ? {} : { handoverSummary: options.handoverSummary }),
     ...(options.forkContext === "none"
       ? {}
       : { forkContext: options.forkContext ?? selectForkConversation }),
@@ -10556,6 +10621,37 @@ it("records an agent message delivered once the provider accepted the turn that 
   await vi.waitFor(() => expect(lost.fixture.runtimeWorks().at(-1)?.state).toBe("failed"));
   expect(lost.confirmAgentMessagesDelivered).not.toHaveBeenCalled();
   lost.fixture.close();
+});
+
+it("carries the Project's active memory in a Code turn's context, as a Chat turn does", async () => {
+  const queue = Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>());
+  const connection = providerConnection(queue);
+  const projectMemoryEntries = vi.fn(() => ["Releases ship from main only."]);
+  const fixture = runtimeFixture({ provider: providerDriver(connection), projectMemoryEntries });
+  try {
+    await expect(
+      fixture.runtime.execute(windowId, {
+        kind: "start-provider-turn",
+        operationId: operationId(87),
+        threadId,
+        checkoutId,
+        sessionId,
+        prompt: fixture.prompt,
+      }),
+    ).resolves.toMatchObject({ state: "running" });
+    await vi.waitFor(() => expect(connection.send).toHaveBeenCalledOnce());
+    expect(connection.send).toHaveBeenCalledWith(
+      expect.objectContaining({
+        context: expect.arrayContaining([
+          { kind: "project-memory", text: "Releases ship from main only." },
+        ]),
+      }),
+    );
+    expect(projectMemoryEntries).toHaveBeenCalledWith(expect.objectContaining({ id: threadId }));
+  } finally {
+    await fixture.runtime.close();
+    fixture.close();
+  }
 });
 
 it("binds the Computer tool to the thread's running desktop when the send names none", async () => {

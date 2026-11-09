@@ -305,10 +305,12 @@ show them. Every path is a Simple Icons path (CC0 1.0), and the page it came
 from is recorded beside it. Marks: Linear, Notion, Stripe, Sentry, Supabase,
 Vercel, GitHub, Figma, Asana, Todoist, Cloudflare (also used for Cloudflare
 docs), Neon, PostHog, Netlify, Prisma, Railway, Webflow, Cloudinary, Convex,
-PayPal, Square, Zapier, Intercom, Mercado Pago and Hugging Face.
+PayPal, Square, Zapier, Intercom, Mercado Pago, Hugging Face, Dropbox, Box,
+GitLab, ClickUp, Miro, Calendly and Buildkite.
 
 Left out, because no mark with a clear source and licence was found: Canva,
-Context7, DeepWiki, Microsoft Learn and Doop. They keep a lettered tile.
+Context7, DeepWiki, Microsoft Learn, Doop, monday.com, Pipedrive, Klaviyo and
+Amplitude. They keep a lettered tile.
 
 The marks remain trademarks of their owners and only identify the service a
 connector reaches.

@@ -8,6 +8,9 @@ authorization rules for contributors live in
 [AGENTS.md](../../AGENTS.md#mission-and-precedence); product rules live in the
 specifications below.
 
+Documentation builds and maintainer-owned VPS publication are specified in
+[Documentation build and VPS handoff](../docs-deployment.md).
+
 ## Sources of truth
 
 | Area                       | Owner                                                                                                       | Read when                                                                                                                                                                                                                     |
@@ -22,10 +25,12 @@ specifications below.
 | Canvas public links        | [Canvas public links](canvas-public-links.md)                                                               | Changing public share links, their approval card, payload, terms, host records, or the share service                                                                                                                          |
 | Artifact replica sync      | [Artifact replica sync](artifact-replica-sync.md)                                                           | Changing replica entries, stores, membership, publish, pull, restore, the synced library, or store selection                                                                                                                  |
 | Provider settings          | [Providers and model endpoints](model-endpoints.md)                                                         | Changing Provider catalog or the Octant Harness model endpoint rows, detail pages, or Add endpoint                                                                                                                            |
+| Automatic compaction       | [Automatic compaction](automatic-compaction.md)                                                             | Changing when Octant compacts a thread by itself, the compaction rules in Settings, or the handover summary a rule writes                                                                                                     |
 | Provider runtimes          | [Provider runtimes](provider-runtimes.md)                                                                   | Changing a runtime's version-specific routes, an ACP agent profile or registry coverage, the local-server adapter, or a sign-in dialect                                                                                       |
 | Enterprise identity        | [Enterprise provider identity](enterprise-provider-identity.md)                                             | Changing directory sign-in or cloud-IAM signing for a model endpoint, its broker operations, binding, or threat controls                                                                                                      |
 | Outside drivers            | [Outside provider drivers](outside-provider-drivers.md)                                                     | Changing how a provider-driver package from outside Octant is identified, admitted, confined, credentialed, verified, or updated                                                                                              |
 | Device workbench           | [Device workbench](device-workbench.md)                                                                     | Changing Simulator or emulator panes, capture, input delivery, keyboard layouts, or managed device tools                                                                                                                      |
+| Bots                       | [Bots](bots.md)                                                                                             | Changing bots, Navigator as the lead bot, the bot rail and list, bot routines, bot desktops, or the logins a bot may use                                                                                                      |
 | Disposable desktops        | [Disposable desktops](disposable-desktops.md)                                                               | Changing thread-leased Linux desktops, their providers, lease teardown, artifact transfer, or the Desktop pane                                                                                                                |
 | Browser for agents         | [Browser for agents](browser-agent-tool.md)                                                                 | Changing what the agent's Browser tool does on a page: its operations, results, snapshot and refs, waits, steps, flows, uploads and downloads, device emulation, sign-in handoff, take over, diagnostics, or per-thread pages |
 | Browser captures           | [Browser captures](browser-captures.md)                                                                     | Changing which Browser screenshots and recordings a thread keeps, their retention, the capture routes, the Browser captures strip, the step record, or the Browser proof a pull request can include                           |
@@ -34,6 +39,7 @@ specifications below.
 | Terminal Browser grant     | [Terminal Browser grant](terminal-browser-grant.md)                                                         | Changing how a CLI typed into a Code thread terminal reaches that thread's Browser, or the grant's lifecycle and refusals                                                                                                     |
 | Tainted search queries     | [Search queries on a tainted thread](search-query-taint.md)                                                 | Changing which `web-search` queries the native harness refuses on a tainted thread                                                                                                                                            |
 | Language services          | [Language services](language-services.md)                                                                   | Changing Code editor diagnostics or definitions, language-server or debug-adapter processes, their confinement, or their activation                                                                                           |
+| Model benchmarks           | [Model benchmarks](model-benchmarks.md)                                                                     | Changing the prompt digest and Same prompt comparison in Diagnostics, benchmark suites, runs, scoring, or the Benchmarks pages                                                                                                |
 | Mobile maturity            | [Mobile maturity](mobile-maturity.md)                                                                       | Changing Android builds, phone push notifications, phone capture or voice input, or public mobile store distribution                                                                                                          |
 | Hosted relay               | [Hosted relay](hosted-relay.md)                                                                             | Changing how a paired app reaches its host through a relay, relay grants and routes, the relay service, or what the relay can learn                                                                                           |
 | Hub and spokes             | [Hub and spokes](hub-and-spokes.md)                                                                         | Changing how hosts enroll with a hub, hub or peer grants, spoke-to-spoke delegation, or the hub's wake and push services                                                                                                      |
@@ -72,7 +78,10 @@ available behavior, while Linear tracks delivery progress.
    add an entry for a new decision, change the rule or requirements for a changed
    one, move its status when a slice lands, and remove an entry the change
    retires.
-5. Verify the changed behavior with focused tests, boundary checks, or rendered
+5. Update affected user-guide pages in a companion PR in
+   [octant-site](https://github.com/Ogard-Labs/octant-site/tree/main/docs). Link
+   both PRs in their descriptions, or explain why a guide update is unnecessary.
+6. Verify the changed behavior with focused tests, boundary checks, or rendered
    inspection as appropriate. Cite the evidence and any remaining gaps in the PR.
 
 Ask about a consequential ambiguity or an action outside the authorized scope.

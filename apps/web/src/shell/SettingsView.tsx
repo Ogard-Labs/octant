@@ -9,6 +9,8 @@ import {
   type ReactNode,
   type RefObject,
 } from "react";
+import type { BenchmarksClient, ChatClient } from "@octant/client-runtime";
+import type { ProviderRegistrySnapshot } from "@octant/contracts/providers";
 import { settleSettingsRail } from "./settingsRailScroll";
 import type { SkillRootStatus } from "@octant/contracts/extension-rpc";
 import { useDebouncedValue } from "../lib/useDebouncedValue";
@@ -50,11 +52,11 @@ import { DefaultFolderSettings } from "../settings/DefaultFolderSettings";
 import { OctantSwitch } from "../ui/base/OctantSwitch";
 import { OctantToggleGroup, OctantToggleGroupItem } from "../ui/base/OctantToggleGroup";
 import {
-  FIRST_PARTY_PLUGINS_EFFECTIVE,
   isSettingsSectionAvailable,
   resolveSettingsSectionContribution,
   type FirstPartyPluginComponentId,
 } from "./contributionRegistry";
+import { useFirstPartyPluginsEffective } from "./firstPartyPluginsEffective";
 import { SettingsNavigation, type SettingsNavigationItem } from "./SettingsNavigation";
 import { useSettingsSaved, type SettingsWriteResult } from "./useSettingsSaved";
 import { SidebarDestinationSettings } from "./SidebarDestinationSettings";
@@ -76,6 +78,9 @@ import type { CodeController } from "../code/useCodeController";
 import { CodeSettingsView } from "../code/CodeSettingsView";
 import { UsageDashboard } from "../usage/UsageDashboard";
 import { ProviderUsageHistoryWorkspace } from "../usage/ProviderUsageHistoryWorkspace";
+import { TurnDiagnosticsWorkspace } from "../usage/TurnDiagnosticsWorkspace";
+import { BenchmarksWorkspace } from "../usage/benchmarks/BenchmarksWorkspace";
+import type { ProviderInstance } from "@octant/contracts";
 import type { LocalUsageHistoryClient } from "@octant/client-runtime/provider-usage-history-client";
 import type { CanvasClient } from "@octant/client-runtime/canvas-client";
 import type { UsageClient } from "@octant/client-runtime/usage-client";
@@ -85,6 +90,10 @@ import { SupportBundleControl } from "../support/SupportBundleControl";
 import { JournalGrowthTable } from "../support/JournalGrowthTable";
 import type { DiagnosticsExportClient } from "@octant/client-runtime/diagnostics-export-client";
 import type { ExtensionClient } from "@octant/client-runtime/extension-client";
+import {
+  runtimeCompactionDefaultsText,
+  useRuntimeCompactionDefaults,
+} from "../settings/runtimeCompactionDefaults";
 import type { HostControlClient } from "@octant/client-runtime/host-control-client";
 import type { PersonMemoryClient } from "@octant/client-runtime/person-memory-client";
 import type { ProtectedFilesClient } from "@octant/client-runtime/protected-files-client";
@@ -116,6 +125,7 @@ import type { ProviderToolingClient } from "@octant/client-runtime/provider-tool
 import type { ShieldServersClient } from "@octant/client-runtime/shield-servers-client";
 import type { ServerProjectsClient } from "@octant/client-runtime/server-projects-client";
 import { ServerAccessSettings } from "../settings/ServerProjectsSettings";
+import { RemoteSetupGuide } from "../settings/RemoteSetupGuide";
 import type { ReplicaSyncStatusClient } from "@octant/client-runtime/replica-sync-status-client";
 import { AutomationNotificationSettings } from "../host/AutomationNotificationSettings";
 import { PhoneNotificationSettings } from "../host/PhoneNotificationSettings";
@@ -229,8 +239,13 @@ export interface SettingsViewProps {
   readonly providerController?: ProviderController;
   readonly discoveryController?: DiscoveryController;
   readonly usageClient?: UsageClient;
+  readonly benchmarksClient?: BenchmarksClient;
+  readonly chatClient?: Pick<ChatClient, "thread">;
+  readonly codeProjects?: ReadonlyArray<{ readonly id: string; readonly name: string }>;
   readonly providerUsageLimitsClient?: ProviderUsageLimitsClient;
   readonly localUsageHistoryClient?: LocalUsageHistoryClient;
+  /** Leaves Settings for a thread a Usage or Diagnostics row names. */
+  readonly onOpenUsageSubject?: (subjectType: string, subjectId: string) => void;
   readonly diagnosticsExportClient?: DiagnosticsExportClient;
   readonly hostControlClient?: HostControlClient;
   /** Settings › Data & privacy › Browser profiles; absent where the host keeps none. */
@@ -401,7 +416,8 @@ export function SettingsView(props: SettingsViewProps) {
     nativeBoundsAvailable: props.nativeBoundsAvailable,
     sidebarVibrancySupported: props.sidebarVibrancySupported,
   };
-  const effectivePlugins = props.effectivePlugins ?? FIRST_PARTY_PLUGINS_EFFECTIVE;
+  const hostEffectivePlugins = useFirstPartyPluginsEffective();
+  const effectivePlugins = props.effectivePlugins ?? hostEffectivePlugins;
   const availableSections = listAvailableSections(octantSettingsRegistry, capabilities).filter(
     (section) => isSettingsSectionAvailable(section.id, effectivePlugins),
   );
@@ -1249,10 +1265,22 @@ function ActiveSectionContent({
       return props.usageClient !== undefined ? (
         <UsageSettingsSection
           client={props.usageClient}
+          {...(props.benchmarksClient === undefined
+            ? {}
+            : { benchmarksClient: props.benchmarksClient })}
+          {...(props.chatClient === undefined ? {} : { chatClient: props.chatClient })}
+          {...(props.codeProjects === undefined ? {} : { codeProjects: props.codeProjects })}
+          {...(props.providerController?.snapshot === undefined
+            ? {}
+            : { providerSnapshot: props.providerController.snapshot })}
           {...(props.isNarrow === undefined ? {} : { isNarrow: props.isNarrow })}
           {...(props.localUsageHistoryClient === undefined
             ? {}
             : { historyClient: props.localUsageHistoryClient })}
+          providers={props.providerController?.instances ?? []}
+          {...(props.onOpenUsageSubject === undefined
+            ? {}
+            : { onOpenSubject: props.onOpenUsageSubject })}
           {...(props.providerUsageLimitsClient === undefined
             ? {}
             : {
@@ -1276,22 +1304,46 @@ function ActiveSectionContent({
           </section>
         );
       const administration = remoteAccessAdministrationOf(props.hostBridge);
-      return administration !== undefined ? (
-        <RemoteAccessSettingsSection
-          bridge={administration}
-          hub={hubAdministrationOf(props.hostBridge)}
-          ownerUnlock={ownerUnlockOf(props.hostBridge)}
-          pairedComputers={pairedComputersOf(props.hostBridge)}
+      const setupGuide = (
+        <RemoteSetupGuide
+          canConfigureHost={administration !== undefined}
+          onContinue={(intent) =>
+            onApplyDeepLink(
+              intent === "control-host"
+                ? { section: "remote-access", setting: settingId("remote-listener") }
+                : {
+                    section: "access",
+                    setting: settingId(
+                      intent === "server-folder" ? "server-projects" : "shield-servers-add",
+                    ),
+                  },
+            )
+          }
         />
+      );
+      return administration !== undefined ? (
+        <div className="settings-section-stack">
+          {setupGuide}
+          <RemoteAccessSettingsSection
+            bridge={administration}
+            focusedSetting={focusedSetting}
+            hub={hubAdministrationOf(props.hostBridge)}
+            ownerUnlock={ownerUnlockOf(props.hostBridge)}
+            pairedComputers={pairedComputersOf(props.hostBridge)}
+          />
+        </div>
       ) : (
-        <section aria-label="Remote access" id="settings-remote-access">
-          <p>
-            Enabling the remote listener and pairing devices happen on the host machine, in the
-            Octant desktop app or with the <code>octant pair</code> and <code>octant auth</code>{" "}
-            commands.
-          </p>
-          <BrowserHubSection hubAdministration={hubAdministrationOf(props.hostBridge)} />
-        </section>
+        <div className="settings-section-stack">
+          {setupGuide}
+          <section aria-label="Remote access" id="settings-remote-access">
+            <p>
+              Enabling the remote listener and pairing devices happen on the host machine, in the
+              Octant desktop app or with the <code>octant pair</code> and <code>octant auth</code>{" "}
+              commands.
+            </p>
+            <BrowserHubSection hubAdministration={hubAdministrationOf(props.hostBridge)} />
+          </section>
+        </div>
       );
     }
     case "host": {
@@ -1922,6 +1974,101 @@ function CompletedThreadArchiveSelect(props: {
   );
 }
 
+const AUTO_COMPACT_WINDOW_CHOICES: ReadonlyArray<number> = [50, 60, 70, 75, 80, 85, 90, 95];
+
+const RUNTIME_COMPACTION_DESCRIPTION =
+  "Claude Code, Codex and the other runtimes compact by themselves. A share picked here overrides theirs in the sessions Octant starts: Claude Code and Codex then compact at it inside a turn too, and the others between turns. Close to a full window, or on a small one, Claude Code keeps its own point.";
+
+/** How full a window may get before a compaction rule acts, plus off. */
+function AutoCompactWindowSelect(props: {
+  readonly id: string;
+  readonly label: string;
+  readonly offLabel: string;
+  readonly percent: number | null;
+  readonly onChange: (percent: number | null) => void;
+}) {
+  const choices =
+    props.percent === null || AUTO_COMPACT_WINDOW_CHOICES.includes(props.percent)
+      ? AUTO_COMPACT_WINDOW_CHOICES
+      : [...AUTO_COMPACT_WINDOW_CHOICES, props.percent].sort((left, right) => left - right);
+  return (
+    <OctantSelectField
+      aria-label={props.label}
+      id={props.id}
+      onValueChange={(value) => props.onChange(value === "off" ? null : Number(value))}
+      options={[
+        { id: "off", label: props.offLabel },
+        ...choices.map((percent) => ({
+          id: String(percent),
+          label: `At ${String(percent)}% full`,
+        })),
+      ]}
+      value={props.percent === null ? "off" : String(props.percent)}
+    />
+  );
+}
+
+const AUTO_COMPACT_IDLE_CHOICES: ReadonlyArray<number> = [15, 30, 60, 120, 240];
+
+function idleChoiceLabel(minutes: number): string {
+  return minutes < 60
+    ? `After ${String(minutes)} minutes`
+    : minutes === 60
+      ? "After 1 hour"
+      : `After ${String(minutes / 60)} hours`;
+}
+
+/** How long a thread may sit with no turn before the idle rule compacts it, plus off. */
+function AutoCompactIdleSelect(props: {
+  readonly minutes: number | null;
+  readonly onChange: (minutes: number | null) => void;
+}) {
+  const choices =
+    props.minutes === null || AUTO_COMPACT_IDLE_CHOICES.includes(props.minutes)
+      ? AUTO_COMPACT_IDLE_CHOICES
+      : [...AUTO_COMPACT_IDLE_CHOICES, props.minutes].sort((left, right) => left - right);
+  return (
+    <OctantSelectField
+      aria-label="Compact quiet threads"
+      id="auto-compact-idle"
+      onValueChange={(value) => props.onChange(value === "off" ? null : Number(value))}
+      options={[
+        { id: "off", label: "Never" },
+        ...choices.map((minutes) => ({ id: String(minutes), label: idleChoiceLabel(minutes) })),
+      ]}
+      value={props.minutes === null ? "off" : String(props.minutes)}
+    />
+  );
+}
+
+const AUTO_COMPACT_LIMIT_CHOICES: ReadonlyArray<number> = [75, 80, 85, 90, 95];
+
+/** How used a provider's account limit may get before the limit rule acts, plus off. */
+function AutoCompactLimitSelect(props: {
+  readonly percent: number | null;
+  readonly onChange: (percent: number | null) => void;
+}) {
+  const choices =
+    props.percent === null || AUTO_COMPACT_LIMIT_CHOICES.includes(props.percent)
+      ? AUTO_COMPACT_LIMIT_CHOICES
+      : [...AUTO_COMPACT_LIMIT_CHOICES, props.percent].sort((left, right) => left - right);
+  return (
+    <OctantSelectField
+      aria-label="Compact near a usage limit"
+      id="auto-compact-limit"
+      onValueChange={(value) => props.onChange(value === "off" ? null : Number(value))}
+      options={[
+        { id: "off", label: "Never" },
+        ...choices.map((percent) => ({
+          id: String(percent),
+          label: `At ${String(percent)}% used`,
+        })),
+      ]}
+      value={props.percent === null ? "off" : String(props.percent)}
+    />
+  );
+}
+
 function ProfileSection({ focusedSetting, props }: SectionProps) {
   return (
     <section aria-label="Profile" className="settings-section-stack" id="settings-profile">
@@ -1946,6 +2093,7 @@ function ProfileSection({ focusedSetting, props }: SectionProps) {
 }
 
 function GeneralSection({ focusedSetting, props }: SectionProps) {
+  const runtimeDefaults = useRuntimeCompactionDefaults(props.extensionClient);
   return (
     <section aria-label="General" className="settings-section-stack" id="settings-general">
       <SettingsSection title="Available modes">
@@ -2034,6 +2182,72 @@ function GeneralSection({ focusedSetting, props }: SectionProps) {
               onChange={(afterDays) =>
                 props.onSettingsChange({ completedThreadArchiveAfterDays: afterDays })
               }
+            />
+          </SettingRow>
+        </div>
+      </SettingsSection>
+      <SettingsSection title="Compaction">
+        <div className="setgroup">
+          <SettingRow
+            description="When a thread Octant keeps (Octant Harness, and Chat or Work on a model endpoint) fills this much of its window, Octant compacts it before the next turn, and Octant Harness inside a long turn too. The thread keeps every message."
+            focused={focusedSetting === settingId("auto-compact-octant")}
+            label="Compact Octant threads"
+            scope="host"
+            settingId="auto-compact-octant"
+          >
+            <AutoCompactWindowSelect
+              id="auto-compact-octant"
+              label="Compact Octant threads"
+              offLabel="Never"
+              onChange={(percent) =>
+                props.onSettingsChange({ autoCompactOctantWindowPercent: percent })
+              }
+              percent={props.settings.autoCompactOctantWindowPercent}
+            />
+          </SettingRow>
+          <SettingRow
+            description={
+              runtimeDefaults === undefined
+                ? RUNTIME_COMPACTION_DESCRIPTION
+                : `${RUNTIME_COMPACTION_DESCRIPTION} ${runtimeCompactionDefaultsText(runtimeDefaults)}`
+            }
+            focused={focusedSetting === settingId("auto-compact-runtime")}
+            label="Compact runtime threads"
+            scope="host"
+            settingId="auto-compact-runtime"
+          >
+            <AutoCompactWindowSelect
+              id="auto-compact-runtime"
+              label="Compact runtime threads"
+              offLabel="Runtime decides"
+              onChange={(percent) =>
+                props.onSettingsChange({ autoCompactRuntimeWindowPercent: percent })
+              }
+              percent={props.settings.autoCompactRuntimeWindowPercent}
+            />
+          </SettingRow>
+          <SettingRow
+            description="When no turn has run on a thread for this long, Octant compacts it once, so the reply you come back to starts from a summary. Threads holding little are left alone."
+            focused={focusedSetting === settingId("auto-compact-idle")}
+            label="Compact quiet threads"
+            scope="host"
+            settingId="auto-compact-idle"
+          >
+            <AutoCompactIdleSelect
+              minutes={props.settings.autoCompactIdleMinutes}
+              onChange={(minutes) => props.onSettingsChange({ autoCompactIdleMinutes: minutes })}
+            />
+          </SettingRow>
+          <SettingRow
+            description="When a turn leaves a provider's 5-hour or weekly limit this used, Octant compacts the thread and writes a summary another provider can pick up, so you can switch before the limit stops you."
+            focused={focusedSetting === settingId("auto-compact-limit")}
+            label="Compact near a usage limit"
+            scope="host"
+            settingId="auto-compact-limit"
+          >
+            <AutoCompactLimitSelect
+              onChange={(percent) => props.onSettingsChange({ autoCompactLimitPercent: percent })}
+              percent={props.settings.autoCompactLimitPercent}
             />
           </SettingRow>
         </div>
@@ -2699,30 +2913,65 @@ interface MaintenanceSectionProps extends SectionProps {
  */
 function UsageSettingsSection(props: {
   readonly client: UsageClient;
+  readonly benchmarksClient?: BenchmarksClient;
+  readonly chatClient?: Pick<ChatClient, "thread">;
+  readonly codeProjects?: ReadonlyArray<{ readonly id: string; readonly name: string }>;
+  readonly providerSnapshot?: ProviderRegistrySnapshot | undefined;
   readonly historyClient?: LocalUsageHistoryClient;
   readonly isNarrow?: boolean;
   readonly limits?: ReactNode;
+  readonly providers?: ReadonlyArray<ProviderInstance>;
+  readonly onOpenSubject?: (subjectType: string, subjectId: string) => void;
 }) {
-  const [source, setSource] = useState<"provider" | "octant">(
+  const [source, setSource] = useState<"provider" | "octant" | "diagnostics" | "benchmarks">(
     props.historyClient === undefined ? "octant" : "provider",
   );
-  const sourceControl =
-    props.historyClient === undefined ? undefined : (
-      <OctantToggleGroup<"provider" | "octant">
-        aria-label="Usage source"
-        value={[source]}
-        onValueChange={(values) => {
-          const next = values[0];
-          if (next !== undefined) setSource(next);
-        }}
-      >
+  // Diagnostics reads the same host as Octant records, so it is always offered.
+  const sourceControl = (
+    <OctantToggleGroup<"provider" | "octant" | "diagnostics" | "benchmarks">
+      aria-label="Usage source"
+      className="usage-source"
+      value={[source]}
+      onValueChange={(values) => {
+        const next = values[0];
+        if (next !== undefined) setSource(next);
+      }}
+    >
+      {props.historyClient === undefined ? null : (
         <OctantToggleGroupItem value="provider">Provider history</OctantToggleGroupItem>
-        <OctantToggleGroupItem value="octant">Octant records</OctantToggleGroupItem>
-      </OctantToggleGroup>
-    );
+      )}
+      <OctantToggleGroupItem value="octant">Octant records</OctantToggleGroupItem>
+      <OctantToggleGroupItem value="diagnostics">Diagnostics</OctantToggleGroupItem>
+      {props.benchmarksClient === undefined ? null : (
+        <OctantToggleGroupItem value="benchmarks">Benchmarks</OctantToggleGroupItem>
+      )}
+    </OctantToggleGroup>
+  );
   return (
     <div className="settings-usage-stack" id="settings-usage">
-      {source === "provider" && props.historyClient !== undefined ? (
+      {source === "diagnostics" ? (
+        <TurnDiagnosticsWorkspace
+          client={props.client}
+          embedded
+          sourceControl={sourceControl}
+          {...(props.providers === undefined ? {} : { providers: props.providers })}
+          {...(props.onOpenSubject === undefined ? {} : { onOpenSubject: props.onOpenSubject })}
+        />
+      ) : source === "benchmarks" && props.benchmarksClient !== undefined ? (
+        <BenchmarksWorkspace
+          client={props.benchmarksClient}
+          diagnosticsClient={props.client}
+          embedded
+          sourceControl={sourceControl}
+          {...(props.chatClient === undefined ? {} : { chatClient: props.chatClient })}
+          {...(props.codeProjects === undefined ? {} : { codeProjects: props.codeProjects })}
+          {...(props.providers === undefined ? {} : { providers: props.providers })}
+          {...(props.providerSnapshot === undefined
+            ? {}
+            : { providerSnapshot: props.providerSnapshot })}
+          {...(props.onOpenSubject === undefined ? {} : { onOpenSubject: props.onOpenSubject })}
+        />
+      ) : source === "provider" && props.historyClient !== undefined ? (
         <ProviderUsageHistoryWorkspace
           client={props.historyClient}
           embedded

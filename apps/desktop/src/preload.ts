@@ -399,6 +399,14 @@ export interface OctantHostBridge {
   readonly subscribeCodeDeepLinks: (listener: (target: unknown) => void) => () => void;
   readonly subscribeOpenSettings: (listener: () => void) => () => void;
   readonly subscribeQuitShortcutHint: (listener: () => void) => () => void;
+  /** Prepare to Shut Down… from the menu, or Move threads first… from the quit confirmation. */
+  readonly subscribePrepareToShutDown?: (
+    listener: (request: { readonly fromQuit: boolean }) => void,
+  ) => () => void;
+  /** Whether this host is in a hub with another member, so Quit offers Move threads first…. */
+  readonly reportShutdownMovesOffered?: (offered: boolean) => void;
+  /** Quits through the guarded shutdown, which may still ask about running work. */
+  readonly requestQuit?: () => void;
   readonly subscribeStartNewAgent: (listener: () => void) => () => void;
   /**
    * Set only in an Octant Nightly client window, whose bridge omits the
@@ -1178,6 +1186,27 @@ export function createHostBridge(
             ipc.on(IPC_CHANNELS.remoteServerPageSign, receive);
             return () => ipc.removeListener(IPC_CHANNELS.remoteServerPageSign, receive);
           },
+          subscribePrepareToShutDown: (
+            listener: (request: { readonly fromQuit: boolean }) => void,
+          ) => {
+            const receive: MaterialListener = (_event, value) =>
+              listener({
+                fromQuit:
+                  typeof value === "object" &&
+                  value !== null &&
+                  Reflect.get(value, "fromQuit") === true,
+              });
+            ipc.on(IPC_CHANNELS.prepareToShutDown, receive);
+            return () => ipc.removeListener(IPC_CHANNELS.prepareToShutDown, receive);
+          },
+          reportShutdownMovesOffered: (offered: boolean) => {
+            void ipc
+              .invoke(IPC_CHANNELS.shutdownMovesOffered, offered === true)
+              .catch(() => undefined);
+          },
+          requestQuit: () => {
+            void ipc.invoke(IPC_CHANNELS.requestQuit).catch(() => undefined);
+          },
           hubAdministrationRequest: async (operation: string, body?: unknown) => {
             // Main refuses an unknown operation; the preload stays free of the
             // operation table because its body decoders pull in npm modules a
@@ -1379,6 +1408,9 @@ export const OCTANT_ONLY_BRIDGE_MEMBERS: ReadonlySet<string> = new Set([
   "forgetRemoteServerPages",
   "subscribeRemoteServerPageSigning",
   "hubAdministrationRequest",
+  "subscribePrepareToShutDown",
+  "reportShutdownMovesOffered",
+  "requestQuit",
   "ownerUnlockMakeKey",
   "ownerUnlockSign",
   "ownerUnlockForgetKey",
