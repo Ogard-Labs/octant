@@ -1084,6 +1084,10 @@ export function createBrowserSurfaceHost(options: BrowserSurfaceHostOptions) {
     }
     owned.shellWindow = undefined;
     void owned.downloads.dispose();
+    // The server forgets its lease mapping when it learns the context is gone,
+    // so the native reservation must end here or it outlives the page until
+    // grant expiry and refuses a replacement for the same execution.
+    persistentOwner.contextEnded(contextId);
     for (const listener of goneListeners) {
       try {
         listener(contextId);

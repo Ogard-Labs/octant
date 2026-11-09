@@ -3340,4 +3340,67 @@ describe("the native execution owner boundary", () => {
     expect(views[1]?.webContents.close).toHaveBeenCalled();
     await host.closeAll();
   });
+
+  it("releases an execution's native reservation when its last page crashes", async () => {
+    const views: BrowserSurfaceViewPort[] = [];
+    const host = createBrowserSurfaceHost({
+      createView: () => {
+        const native = view();
+        views.push(native);
+        return native;
+      },
+    });
+    const gone = vi.fn();
+    host.onContextGone(gone);
+    const policy = decodeBrowserContextPolicy({
+      profileMode: "isolated",
+      profile: { kind: "personal" },
+      allowedOrigins: ["https://example.com"],
+      credentialFieldProtection: true,
+      maxConcurrentTabs: 1,
+      sessionTimeoutMs: 60000,
+    });
+    const ready = await host.persistentOwner.configure(true);
+    if (ready.status !== "ready") throw Error("owner missing");
+    const executionId = decodeBrowserContextId("60000000-0000-4000-8000-000000000003");
+    const binding = decodePersistentBrowserLeaseBinding({
+      ownerId: ready.ownerId,
+      grantId: contextId,
+      executionId,
+      threadId,
+      mode: "work",
+      projectId: contextId,
+      providerId: "provider",
+      modelId: "model",
+      authorityRevision: "revision",
+      profile: { kind: "personal" },
+      origins: policy.allowedOrigins,
+      expiresAt: new Date(Date.now() + 60000).toISOString(),
+    });
+    expect(
+      await host.persistentOwner.createContext(
+        executionId,
+        policy,
+        new AbortController().signal,
+        binding,
+      ),
+    ).toMatchObject({ status: "created" });
+    const crashed = vi
+      .mocked(views[0]?.webContents.on)
+      ?.mock.calls.find(([event]) => event === "render-process-gone")?.[1];
+
+    crashed?.();
+
+    expect(gone).toHaveBeenCalledWith(executionId);
+    expect(host.persistentOwner.reserves(String(executionId))).toBe(false);
+    expect(
+      await host.persistentOwner.createContext(
+        executionId,
+        policy,
+        new AbortController().signal,
+        binding,
+      ),
+    ).toMatchObject({ status: "created" });
+    await host.closeAll();
+  });
 });
