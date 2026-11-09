@@ -7,6 +7,7 @@ import { HubOfferId, HubOfferKind, HubProvisionMode, HubProvisionReason } from "
 import { HubSignInKind, HubSignInOutcome, HubSignInReason } from "./hubSignIn";
 import { HUB_WAKE_MAX_SPOKES, HubWakeSpokeTimes } from "./hubWake";
 import { ProviderExecutionPolicy } from "./providers";
+import { WorkAccess } from "./workThreads";
 
 const strict = { parseOptions: { onExcessProperty: "error" as const } };
 const digest = Schema.String.pipe(Schema.pattern(/^[0-9a-f]{64}$/));
@@ -49,6 +50,7 @@ export const HubMembershipChange = Schema.Literal(
   "hub-promoted",
   "new-hub-accepted",
   "wake-switch-changed",
+  "accept-moved-threads-changed",
   "wake-times-reported",
   "wake-times-merged",
   "wake-times-dropped",
@@ -151,7 +153,7 @@ export const HubMembershipChangedPayload = Schema.Struct({
    * sign-in copy: the name of the sign-in, never its value, and why one was
    * refused.
    */
-  posture: Schema.optional(ProviderExecutionPolicy),
+  posture: Schema.optional(Schema.Union(ProviderExecutionPolicy, WorkAccess)),
   credentialName: Schema.optional(bounded(128)),
   credentialReason: Schema.optional(bounded(64)),
 }).annotations(strict);

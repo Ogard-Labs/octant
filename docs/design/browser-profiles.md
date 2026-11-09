@@ -300,11 +300,11 @@ thread made.
   including a valid remembered pair; its pending identity alone grants nothing.
 - **Fixed readers protect credential fields.** Fixed actions never type into
   or return password/one-time-code values, and a screenshot of a frame that
-  holds one is withheld. Explicit Full-access page scripts have ordinary
-  DOM/account authority and can read populated or reflected values; see
-  [bounded page scripts](browser-agent-tool.md#bounded-page-scripts). Private
-  storage does not prove a page is signed out, so unknown session eligibility
-  refuses scripts below Full access.
+  holds one is withheld. Explicit page scripts have ordinary DOM/account
+  authority; see [bounded page scripts](browser-agent-tool.md#bounded-page-scripts).
+  Below Full access, a local Code task needs exact-source one-use permission
+  naming that account authority, plus native credential/coverage checks. Private
+  describes storage lifetime and never proves that a page is signed out.
 - **Plan mode** admits on every profile only the reads of the page already
   open and stopping the thread's own Browser, and refuses every other
   operation ([Browser for agents: Plan mode](browser-agent-tool.md#plan-mode));
@@ -320,8 +320,16 @@ thread made.
 - **Unattended turns.** A routine or managed child uses a stored profile only with
   the explicit [delegated session permission](#delegated-sessions) below; it
   never inherits another caller's page, sign-in permission or authority.
+  A routine's default or explicit Private navigation keeps the ordinary
+  remembered-origin approval path; account delegation does not replace it.
+  Explicitly selecting a stored profile stops the earlier Private context.
+  A refused or expired stored permission never falls back to Private. Returning
+  to Private requires an explicit profile choice and closes the stored context
+  before navigation; concurrent calls refuse until cleanup finishes, and an
+  earlier context's pending observation is withheld.
 - **Terminal Browser grant.** A CLI in a thread terminal may drive the thread's
-  Private pages only; a profile page refuses it (`profile-needs-a-person`).
+  Private pages by default. A stored profile needs its own explicit delegated
+  session permission, bound to that exact live terminal grant.
 - **Taint.** What the agent reads on a profile page taints the thread as any
   Browser observation does.
 - **Captures.** A screenshot the agent or person keeps from a profile page is
@@ -339,11 +347,12 @@ a paired device cannot, signed in or not.
 
 ## Delegated sessions
 
-A local person may review and grant a same-Project managed child or named
-routine permission to use an existing sign-in. Settings › Data & storage › Browser session permissions
+A local person may review and grant a same-Project managed child, named
+routine or running terminal grant permission to use an existing sign-in. Settings › Data & storage › Browser session permissions
 lists eligible callers and current permissions. The person explicitly chooses
 the caller, stored profile and exact HTTPS origins (including any non-default port).
-Child permissions last 15 minutes, one hour or eight hours. Routine permissions
+Child and terminal permissions last 15 minutes, one hour or eight hours; a
+terminal permission always ends with its exact terminal grant. Routine permissions
 default to seven days, with an explicit duration capped at 30 days; Settings
 offers seven and 30 days. Every review shows the absolute expiry. A second review shows the
 host-derived caller, account label, model, host and expiry before Grant. The
@@ -359,8 +368,7 @@ ambient `network: false`: the explicit site-limited host Browser permission
 allows only this Browser context, without granting network access to the
 child process or other tools. Completed, failed or cancelled
 children, Chat children, provider-native children and unavailable or unverified
-workspaces are not eligible. Terminal-session caller grants are not yet
-available; their existing refusal remains.
+workspaces are not eligible.
 For Code routines, the reviewed source checkout remains part of the definition
 identity. A new-thread run executes in its own managed checkout. A same-thread
 follow-up instead uses the reviewed origin thread and its exact bound checkout.
@@ -382,6 +390,21 @@ profile or provider refuses further effects and observations. Run end closes
 that run's context without revoking the permission for future unchanged runs.
 Granting starts no run. No eligible native owner means unavailable on every
 platform; there is no profile copy or headless fallback.
+
+A terminal permission is separate from the local person's transport switch. It
+binds one running terminal grant, Code task/model/authority, stored profile and
+exact HTTPS sites. Review identifies the terminal session, not only the task.
+Its stored-profile context belongs to the terminal grant; it never borrows the
+managed turn's profile page. Closing the terminal, switching its transport off,
+ending its task, revoking its window or stopping the host ends that permission
+and closes its context. A replacement terminal never inherits it. Changed task
+model, posture, binding or tool constraints invalidates the old permission.
+A stale profile read refuses; it never falls back to the task's Private page.
+Returning to Private requires an explicit navigate with that profile. Concurrent
+calls during profile cleanup refuse busy until the earlier context closes.
+Observations taint the actual Code task. Credentials, scripts and file transfers
+remain separately refused, and no account authority enters the terminal's
+ambient filesystem or network permissions.
 
 Only children admitted to this execution host with current managed-tool support
 are offered; a permission never redirects a remote child to the local account.
@@ -470,7 +493,9 @@ Journal records retain permission and revocation metadata, never cookies or
 credential values, and cannot reactivate a permission on replay.
 
 Credential fill/submit, sign-in, page scripts, uploads and download saves retain
-their separate gates. A delegated session permission authorizes none of them. Plan
+their separate gates. A delegated session permission authorizes none of them. A named routine may
+separately receive an explicit [fixed-content upload manifest](browser-agent-tool.md#recurring-upload-manifests);
+account permission alone still authorizes no file transfer. Plan
 still refuses new pages and effects; credential-field, origin, stale-ref,
 concurrency and account-store protections still apply. The child must explicitly
 retry or resume after a person grants permission; granting alone starts nothing.

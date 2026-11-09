@@ -1,0 +1,53 @@
+name: Windows native confinement feasibility
+
+on:
+  pull_request:
+    paths:
+      - .github/workflows/windows-confinement.yml
+      - scripts/windows-confinement/**
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: windows-confinement-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  native:
+    name: Measure native Windows confinement
+    runs-on: windows-2025
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Compile with the native Windows SDK
+        shell: pwsh
+        run: |
+          cmake -S scripts/windows-confinement -B "$env:RUNNER_TEMP/confinement-build" -A x64
+          if ($LASTEXITCODE -ne 0) { throw 'Native configuration failed' }
+          cmake --build "$env:RUNNER_TEMP/confinement-build" --config Release
+          if ($LASTEXITCODE -ne 0) { throw 'Native compilation failed' }
+      - name: Measure AppContainer and Job behavior
+        shell: pwsh
+        run: |
+          & "$env:RUNNER_TEMP/confinement-build/Release/octant-windows-confinement.exe" "$env:RUNNER_TEMP/windows-confinement.json"
+          if ($LASTEXITCODE -ne 0) { throw 'Probe setup, execution or owned cleanup failed' }
+      - name: Record the measured verdict
+        if: always()
+        shell: pwsh
+        run: |
+          $path = "$env:RUNNER_TEMP/windows-confinement.json"
+          if (!(Test-Path $path)) { throw 'No native evidence was produced' }
+          $result = Get-Content -Raw $path | ConvertFrom-Json
+          "## Native Windows feasibility`n`nProduction ready: **NO**. This fixture enables no product capability.`n`nStatus: $($result.status)`n" | Add-Content $env:GITHUB_STEP_SUMMARY
+          foreach ($measurement in $result.measurements) {
+            "- $($measurement.name): passed=$($measurement.passed), observed=$($measurement.observed), expected=$($measurement.expected)" | Add-Content $env:GITHUB_STEP_SUMMARY
+          }
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: windows-confinement-feasibility
+          path: ${{ runner.temp }}/windows-confinement.json
+          if-no-files-found: error
+          retention-days: 7

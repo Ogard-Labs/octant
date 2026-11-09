@@ -17,7 +17,7 @@ import { fileURLToPath } from "node:url";
 
 import type { ProviderFailure } from "@octant/contracts";
 import { Effect, Either, Exit, Fiber, Scope } from "effect";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 
 import {
   codexAccountProcessEnvironment,
@@ -803,6 +803,74 @@ describe("Codex launch confinement", () => {
       platform: process.platform,
     });
     expect(prepared.status === "prepared" ? prepared.launch.command : undefined).toBe("/bin/sh");
+  });
+
+  it("refuses Windows Full access before an unconfined process can be prepared", () => {
+    const prepare = vi.fn(() => {
+      throw Error("No process may be prepared.");
+    });
+    const result = prepareCodexLaunch({
+      binaryPath: "C:\\fixture\\provider.exe",
+      args: [],
+      authority: {
+        kind: "thread",
+        root: "C:\\fixture",
+        mode: "code",
+        executionPolicy: "full-access",
+      },
+      environment: {},
+      confinement: { prepare },
+      platform: "win32",
+    });
+    expect(result.status).toBe("refused");
+    expect(prepare).not.toHaveBeenCalled();
+  });
+
+  it("launches a sandboxed Full access thread inside the profile, writable root and the same egress a guarded thread gets", () => {
+    let seen: Parameters<ProcessConfinementPort["prepare"]>[0] | undefined;
+    const prepared = prepareCodexLaunch({
+      binaryPath: "/bin/sh",
+      args: ["-c", "true"],
+      authority: {
+        kind: "thread",
+        root: tmpdir(),
+        mode: "code",
+        executionPolicy: "full-access",
+        fullAccessSandbox: true,
+      },
+      environment: { HOME: homedir() },
+      confinement: {
+        prepare: (input) => {
+          seen = input;
+          return { command: input.executable, args: input.args };
+        },
+      },
+      platform: "darwin",
+    });
+    expect(prepared.status).toBe("prepared");
+    expect(seen?.writeBoundRoot).toBe(true);
+    let guarded: Parameters<ProcessConfinementPort["prepare"]>[0] | undefined;
+    const guardedLaunch = prepareCodexLaunch({
+      binaryPath: "/bin/sh",
+      args: ["-c", "true"],
+      authority: {
+        kind: "thread",
+        root: tmpdir(),
+        mode: "code",
+        executionPolicy: "approval-gated",
+      },
+      environment: { HOME: homedir() },
+      confinement: {
+        prepare: (input) => {
+          guarded = input;
+          return { command: input.executable, args: input.args };
+        },
+      },
+      platform: "darwin",
+    });
+    expect(seen?.networkEgress).toEqual(guarded?.networkEgress);
+    if (prepared.status === "prepared") prepared.launch.release();
+    if (guardedLaunch.status === "prepared") guardedLaunch.launch.release();
   });
 
   it.each(["approval-gated", "auto-accept-edits", "full-access"] as const)(

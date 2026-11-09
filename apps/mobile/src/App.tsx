@@ -1,5 +1,16 @@
+import { createInMemoryExpoSecureStringStorage } from "@octant/client-runtime";
+import { createAppearanceStore } from "./appearance/AppearanceStore";
+import { MobileEntryGate } from "./demo/MobileEntryGate";
 import { useEffect, useMemo, useState } from "react";
-import { ActivityIndicator, Appearance, StatusBar, StyleSheet, Text, View } from "react-native";
+import {
+  ActivityIndicator,
+  Appearance,
+  Pressable,
+  StatusBar,
+  StyleSheet,
+  Text,
+  View,
+} from "react-native";
 import Constants from "expo-constants";
 import { SafeAreaProvider, SafeAreaView } from "react-native-safe-area-context";
 import type { MobileInboxRow } from "@octant/client-runtime";
@@ -8,6 +19,7 @@ import { AppearanceProvider, useAppearance } from "./appearance/AppearanceContex
 import type { MobileRouteId } from "./copy";
 import { resolveMobileMockScenario, type MobileMockScenario } from "./dev/mobileMockScenarioId";
 import { MobileDeepLinkCapture } from "./navigation/mobileDeepLinkCapture";
+import type { MobileMovesDeepLinkTarget } from "./notifications/deepLinks";
 import { RootNavigator } from "./navigation/RootNavigator";
 import { createInitialNavigationState, selectMobileRoute } from "./navigation/navigationState";
 import { AppVaultGate } from "./security/AppVaultGate";
@@ -18,8 +30,10 @@ import { useDistilledFonts } from "./theme/useDistilledFonts";
 
 function AppShell(props: {
   readonly mockScenario?: MobileMockScenario | undefined;
+  readonly onLeaveDemo?: () => void;
   readonly onDeepLinkConsumed: () => void;
   readonly pendingDeepLinkRow?: MobileInboxRow | undefined;
+  readonly pendingMovesLink?: MobileMovesDeepLinkTarget | undefined;
 }) {
   const appearance = useAppearance();
   const { colors, scheme } = useTheme();
@@ -43,6 +57,7 @@ function AppShell(props: {
           paddingHorizontal: 12,
           paddingVertical: 5,
         },
+        demoExit: { minHeight: 44, justifyContent: "center", paddingHorizontal: 12 },
         mockBannerText: {
           color: colors.textSecondary,
           fontSize: 12,
@@ -66,7 +81,21 @@ function AppShell(props: {
       >
         {props.mockScenario !== undefined ? (
           <View accessibilityRole="text" style={styles.mockBanner} testID="mobile-mock-banner">
-            <Text style={styles.mockBannerText}>Mock data · {props.mockScenario.label}</Text>
+            <Text style={styles.mockBannerText}>
+              {props.onLeaveDemo === undefined
+                ? `Mock data · ${props.mockScenario.label}`
+                : "Offline demo · sample data"}
+            </Text>
+            {props.onLeaveDemo === undefined ? null : (
+              <Pressable
+                accessibilityRole="button"
+                style={styles.demoExit}
+                onPress={props.onLeaveDemo}
+                testID="mobile-demo-leave"
+              >
+                <Text style={styles.mockBannerText}>Leave demo</Text>
+              </Pressable>
+            )}
           </View>
         ) : null}
         <RootNavigator
@@ -76,6 +105,9 @@ function AppShell(props: {
           {...(props.pendingDeepLinkRow === undefined
             ? {}
             : { pendingDeepLinkRow: props.pendingDeepLinkRow })}
+          {...(props.pendingMovesLink === undefined
+            ? {}
+            : { pendingMovesLink: props.pendingMovesLink })}
         />
       </ScreenCanvas>
     </SafeAreaView>
@@ -89,13 +121,19 @@ export default function App() {
     const isDevelopment = typeof __DEV__ !== "undefined" && __DEV__;
     const id = resolveMobileMockScenario(configured, isDevelopment);
     if (id === undefined || !isDevelopment) return undefined;
-    // Guarded require keeps the scenario fixtures out of production bundles.
+    // Development configuration never enables a production scenario. The public
+    // offline demo loads the same fixtures only after an explicit entry choice.
     const dev: typeof import("./dev/mobileMockScenario") = require("./dev/mobileMockScenario");
     return dev.createMobileMockScenario(id);
   }, []);
   // Fonts load before the theme provider mounts, so follow the system setting
   // to avoid a light flash on dark phones.
   const bootColors = colorsForScheme(resolveThemeScheme("system", Appearance.getColorScheme()));
+  const demoAppearance = useMemo(
+    () => createAppearanceStore(createInMemoryExpoSecureStringStorage()),
+    [],
+  );
+  const [offlineScenario, setOfflineScenario] = useState<MobileMockScenario | undefined>();
   const authenticator = useMemo(() => createExpoBiometricAuthenticator(), []);
   // The Android module starts with the secure window set; this applies the
   // session's choice again at launch, so a module that loaded after its
@@ -113,27 +151,49 @@ export default function App() {
     );
   }
 
+  const live = (
+    <AppearanceProvider>
+      <MobileDeepLinkCapture>
+        {(pendingDeepLinkRow, onDeepLinkConsumed, pendingMovesLink) => (
+          <AppVaultGate authenticator={authenticator}>
+            <MobileSessionProvider>
+              <AppShell
+                onDeepLinkConsumed={onDeepLinkConsumed}
+                {...(pendingDeepLinkRow === undefined ? {} : { pendingDeepLinkRow })}
+                {...(pendingMovesLink === undefined ? {} : { pendingMovesLink })}
+              />
+            </MobileSessionProvider>
+          </AppVaultGate>
+        )}
+      </MobileDeepLinkCapture>
+    </AppearanceProvider>
+  );
+  if (mockScenario !== undefined)
+    return (
+      <SafeAreaProvider>
+        <AppearanceProvider>
+          <MobileSessionProvider mockScenario={mockScenario}>
+            <AppShell mockScenario={mockScenario} onDeepLinkConsumed={() => undefined} />
+          </MobileSessionProvider>
+        </AppearanceProvider>
+      </SafeAreaProvider>
+    );
   return (
     <SafeAreaProvider>
-      <AppearanceProvider>
-        <MobileDeepLinkCapture>
-          {(pendingDeepLinkRow, onDeepLinkConsumed) => {
-            const shell = (
-              <MobileSessionProvider {...(mockScenario === undefined ? {} : { mockScenario })}>
-                <AppShell
-                  {...(mockScenario === undefined ? {} : { mockScenario })}
-                  onDeepLinkConsumed={onDeepLinkConsumed}
-                  {...(pendingDeepLinkRow === undefined ? {} : { pendingDeepLinkRow })}
-                />
-              </MobileSessionProvider>
-            );
-            return mockScenario === undefined ? (
-              <AppVaultGate authenticator={authenticator}>{shell}</AppVaultGate>
-            ) : (
-              shell
-            );
-          }}
-        </MobileDeepLinkCapture>
+      <AppearanceProvider store={demoAppearance}>
+        <MobileEntryGate
+          live={live}
+          demo={(leave) => (
+            <OfflineDemo
+              scenario={offlineScenario}
+              onLeave={() => {
+                setOfflineScenario(undefined);
+                leave();
+              }}
+              onReady={setOfflineScenario}
+            />
+          )}
+        />
       </AppearanceProvider>
     </SafeAreaProvider>
   );
@@ -146,3 +206,25 @@ const bootStyles = StyleSheet.create({
     justifyContent: "center",
   },
 });
+
+function OfflineDemo(props: {
+  readonly scenario: MobileMockScenario | undefined;
+  readonly onReady: (scenario: MobileMockScenario) => void;
+  readonly onLeave: () => void;
+}) {
+  useEffect(() => {
+    if (props.scenario !== undefined) return;
+    const fixtures: typeof import("./demo/offlineMobileDemo") = require("./demo/offlineMobileDemo");
+    props.onReady(fixtures.createOfflineMobileDemo());
+  }, [props.scenario, props.onReady]);
+  if (props.scenario === undefined) return null;
+  return (
+    <MobileSessionProvider mockScenario={props.scenario}>
+      <AppShell
+        mockScenario={props.scenario}
+        onLeaveDemo={props.onLeave}
+        onDeepLinkConsumed={() => undefined}
+      />
+    </MobileSessionProvider>
+  );
+}

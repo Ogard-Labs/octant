@@ -824,8 +824,9 @@ async function joinGuest(
   network: HubTestNetwork,
   spoke: HubTestHost,
   label: string,
+  ownerUnlockPublicKey?: string,
 ) {
-  const minted = hub.hub.mintJoinCode({ owner: false });
+  const minted = hub.hub.mintJoinCode({ owner: ownerUnlockPublicKey !== undefined });
   if (minted.status !== "minted") throw new Error(minted.status);
   const started = await joinHubAsGuest({
     code: minted.code,
@@ -833,6 +834,7 @@ async function joinGuest(
     transport: guestTransport(network),
     webBuildVersion: "test",
     deviceKeyStore: createInMemoryDeviceKeyStore(),
+    ...(ownerUnlockPublicKey === undefined ? {} : { ownerUnlockPublicKey }),
   });
   if (started.status !== "awaiting-approval") throw new Error(JSON.stringify(started));
   const pending = hub.administration
@@ -1069,6 +1071,41 @@ describe("Confirm new members on a spoke", () => {
     const guest = await joinGuest(hub, network, spoke, "Pocket");
 
     expect((await guest.knock()).status).toBe("admitted");
+  });
+});
+
+describe("which phones a spoke tells about a move held for an owner", () => {
+  it("names only the paired devices of guests on the spoke's owner list", async () => {
+    const { network, hub, spoke } = await startOwnerWorld();
+    const pocketKey = softwareAuthenticator();
+    const pocket = await joinGuest(hub, network, spoke, "Pocket", pocketKey.publicKey);
+    const other = await joinGuest(hub, network, spoke, "Other");
+    const pocketDevice = await pocket.knock();
+    const otherDevice = await other.knock();
+    if (pocketDevice.status !== "admitted" || otherDevice.status !== "admitted") {
+      throw new Error(JSON.stringify({ pocketDevice, otherDevice }));
+    }
+    // Admitted is not owner: nobody is told until the spoke's person lists the phone.
+    expect(spoke.spoke.ownerDeviceIds()).toEqual([]);
+
+    const listed = pocket.record.roster.roster.members.find(
+      (member) => String(member.memberId) === pocket.memberId,
+    );
+    if (listed === undefined) throw new Error("The roster does not list the guest.");
+    expect(
+      spoke.spoke.addOwners(
+        [
+          {
+            memberId: decodeMemberId(pocket.memberId),
+            identityKeyFingerprint: listed.identityKeyFingerprint,
+            unlockKeyFingerprint: pocketKey.fingerprint,
+          },
+        ],
+        window,
+      ).status,
+    ).toBe("changed");
+
+    expect(spoke.spoke.ownerDeviceIds()).toEqual([pocketDevice.deviceId]);
   });
 });
 

@@ -1,9 +1,12 @@
 import { openSqlite } from "./sqlitePort";
 
 /** Rebuildable accounting cache, separate from the authoritative event journal. */
-export function createLocalUsageHistoryCheckpointStore(path: string) {
+export function createLocalUsageHistoryCheckpointStore(
+  path: string,
+  openConnection: typeof openSqlite = openSqlite,
+) {
   function withDatabase<T>(run: (connection: ReturnType<typeof openSqlite>) => T): T {
-    const connection = openSqlite(path);
+    const connection = openConnection(path);
     try {
       connection.exec(
         "CREATE TABLE IF NOT EXISTS usage_checkpoints (source TEXT PRIMARY KEY, snapshot TEXT NOT NULL)",

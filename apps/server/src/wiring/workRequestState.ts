@@ -73,8 +73,14 @@ export function wireWorkRequestState(deps: WorkRequestStateDependencies) {
   const runningWorkTurns: RunningWorkTurnAccess = new Map();
   const runningWorkTurnAccess = (threadId: string): WorkAccess | undefined =>
     runningWorkTurns.get(threadId)?.access;
+  /** The sandbox choice a running Work turn started with; undefined when none runs. */
+  const runningWorkTurnSandbox = (threadId: string): boolean | undefined => {
+    const running = runningWorkTurns.get(threadId);
+    return running === undefined ? undefined : running.fullAccessSandbox === true;
+  };
   return {
     runningWorkTurnAccess,
+    runningWorkTurnSandbox,
     runningWorkTurns,
     workRequestRuntime,
     workRequestService,

@@ -19,7 +19,18 @@ import {
   decodeProjectId,
   decodeWindowId,
 } from "@octant/contracts";
-import { Effect } from "effect";
+import { Effect, Schema } from "effect";
+import {
+  AggregateId,
+  CorrelationId,
+  EventId,
+  EventName,
+  decodeAggregateVersion,
+  decodeUtcTimestamp,
+  decodeLocalServerRequestId,
+} from "@octant/contracts";
+import { createDesktopPreviewService } from "../computerUse/desktopPreviewService";
+import type { ComputerUseWiring } from "./computerUse";
 import type { LanguageServerHostPlatform } from "@octant/domain";
 import {
   BUNDLED_TYPESCRIPT_LANGUAGE_SERVER,
@@ -79,7 +90,10 @@ import { stableCodeFileId, type CodeWiring } from "./code";
 import { withProjectExtraFolders } from "../code/codeProjectFolderRoot";
 import type { CodeRuntimeWiring } from "./codeRuntime";
 import type { HarnessStateWiring } from "./harnessState";
-import { serverCodeCheckout } from "../serverProjects/serverProjectThreads";
+import { serverCodeCheckout, serverThreadOf } from "../serverProjects/serverProjectThreads";
+import { createServerProjectActions } from "../serverProjects/serverProjectActions";
+import { createServerWorkActionTask } from "../serverProjects/serverWorkProjectActions";
+import { serverWorkBindingRevisionId } from "../serverProjects/serverWorkThreads";
 import { serverTerminalLogin } from "../serverProjects/serverTerminal";
 import {
   decodeServerProjectRemovedPayload,
@@ -91,7 +105,11 @@ import type { ProvidersWiring } from "./providers";
 import { windowCanAccessWorkProject } from "../windowCodeProjectAccess";
 
 export type CodeToolingDependencies = Pick<ServerStart, "options" | "persistence" | "version"> &
-  Pick<AuthorityWiring, "agentRunPersistence" | "codeSessionAuthority" | "windowAuthorityStore"> &
+  Pick<ComputerUseWiring, "desktopLeases" | "installDesktopPreviewRequest"> &
+  Pick<
+    AuthorityWiring,
+    "agentRunPersistence" | "codeSessionAuthority" | "windowAuthorityStore" | "onWindowRevoked"
+  > &
   Pick<AgentRunsWiring, "managedWorktreeReceipts"> &
   Pick<WorkspaceWiring, "projectRootPort" | "projectService"> &
   Pick<
@@ -133,6 +151,7 @@ export function wireCodeTooling(deps: CodeToolingDependencies) {
     extensionLifecycleService,
     extensionPackageStore,
     managedWorktreeReceipts,
+    onWindowRevoked,
     options,
     persistence,
     projectRootPort,
@@ -169,21 +188,91 @@ export function wireCodeTooling(deps: CodeToolingDependencies) {
     // It shares the Code runtime's terminals, so one receipt store, reconcile,
     // and shutdown cover it; the journal records its start and end.
     const sharedTerminals = codeOperationRuntime?.terminals;
+    const serverActions = createServerProjectActions({
+      store: serverProjectStore,
+      connection: serverConnection,
+      workTask: createServerWorkActionTask({
+        store: serverProjectStore,
+        readThread: (id) => workThreadProjection.read(id),
+        workspace: (id) => persistence.readWindowWorkspace(id)?.workspace,
+        isWindowLive: (id) =>
+          windowAuthorityStore.listWindowIds().some((live) => String(live) === String(id)),
+        workEnabled: () =>
+          enabledModes(
+            persistence.readShellSettings()?.settings ?? defaultShellSettings(),
+          ).includes("work"),
+      }),
+      task: async (windowId, projectId, requested) => {
+        const view = await routeCodeService.read(windowId, requested.threadId);
+        if (
+          view === undefined ||
+          view.thread.lifecycle !== "active" ||
+          String(view.thread.projectId) !== String(projectId) ||
+          String(view.checkout.id) !== String(requested.checkoutId) ||
+          view.checkout.kind !== "remote-root" ||
+          view.checkout.availability !== "available"
+        )
+          return undefined;
+        const place = serverThreadOf(serverProjectStore, view.thread);
+        if (place === undefined) return undefined;
+        const authorityOf = (thread: typeof view.thread) =>
+          JSON.stringify({
+            executionPolicy: thread.executionPolicy,
+            permissionPersistence: thread.permissionPersistence,
+            provider: thread.providerInstanceId,
+            model: thread.modelId,
+            toolConstraints: thread.toolConstraints,
+          });
+        const authorityRevision = authorityOf(view.thread);
+        return {
+          threadId: view.thread.id,
+          checkoutId: view.checkout.id,
+          root: place.folder,
+          executionPolicy: view.thread.executionPolicy,
+          authorityRevision,
+          current: () => {
+            const fresh = persistence.readCodeThread(view.thread.id);
+            const checkout = persistence.readCodeCheckout(view.checkout.id);
+            const placed =
+              fresh === undefined ? undefined : serverThreadOf(serverProjectStore, fresh);
+            return (
+              fresh !== undefined &&
+              fresh.lifecycle === "active" &&
+              checkout?.kind === "remote-root" &&
+              checkout.availability === "available" &&
+              placed?.folder === place.folder &&
+              String(fresh.checkoutId) === String(view.checkout.id) &&
+              canAccessCodeProject(windowId, projectId) &&
+              authorityOf(codeSessionAuthority.effectiveThread(windowId, fresh)) ===
+                authorityRevision
+            );
+          },
+        };
+      },
+    });
     const projectTerminals =
       sharedTerminals === undefined
         ? undefined
         : new ProjectTerminalService({
+            ...serverActions,
             terminals: sharedTerminals,
             worktreePreparation,
             childWorktreeSources,
             readProject: persistence.readProject,
             canAccessProject: (scopeId, projectId) => {
               const project = persistence.readProject(projectId);
-              if (project?.type !== "work") return canAccessCodeProject(scopeId, projectId);
+              if (
+                project?.type !== "work" &&
+                serverProjectStore.workProject(String(projectId)) === undefined
+              )
+                return canAccessCodeProject(scopeId, projectId);
               // A Work window reaches the Work Project its own persisted
               // workspace binds, while it is live, as a Code window does.
               return (
-                project.lifecycle === "active" &&
+                (project === undefined || project.lifecycle === "active") &&
+                enabledModes(
+                  persistence.readShellSettings()?.settings ?? defaultShellSettings(),
+                ).includes("work") &&
                 windowAuthorityStore.listWindowIds().some((id) => String(id) === String(scopeId)) &&
                 windowCanAccessWorkProject({
                   workspace: persistence.readWindowWorkspace(scopeId)?.workspace,
@@ -385,12 +474,17 @@ export function wireCodeTooling(deps: CodeToolingDependencies) {
             },
             suggestActions: suggestProjectActions,
             serverProject: (projectId) => {
-              const project = serverProjectStore.codeProject(String(projectId));
+              const project = serverProjectStore.project(String(projectId));
               if (project === undefined) return undefined;
               return {
-                bindingRevisionId: serverCodeCheckout(project).bindingRevisionId,
+                ...(project.mode === "work" ? { actionsOnly: true as const } : {}),
+                bindingRevisionId:
+                  project.mode === "work"
+                    ? serverWorkBindingRevisionId(project)
+                    : serverCodeCheckout(project).bindingRevisionId,
                 // Read at each start, so a server removed from the registry refuses.
                 login: () => {
+                  if (project.mode === "work") return undefined;
                   const address = serverProjectStore.addressOf(String(projectId));
                   return address.kind === "address"
                     ? serverTerminalLogin(serverConnection, address.server, address.folder)
@@ -405,10 +499,21 @@ export function wireCodeTooling(deps: CodeToolingDependencies) {
             clock: () => new Date().toISOString(),
           });
     projectTerminals?.reconcile();
+    // Closing a window revokes its in-memory authority without a journal
+    // commit. Retire its saved actions at that boundary, before another call.
+    onWindowRevoked(() => void projectTerminals?.settleActionAuthorities());
     const unsubscribeProjectTerminalAuthority = persistence.journal.subscribeCommitted((append) => {
       if (projectTerminals === undefined) return;
       for (const event of append.events) {
-        if (event.aggregateType === "code-thread" || event.aggregateType === "code-checkout")
+        if (event.aggregateType === "server-projects" || event.aggregateType === "shield-servers")
+          void projectTerminals.settleActionAuthorities();
+        if (
+          event.aggregateType === "code-thread" ||
+          event.aggregateType === "code-checkout" ||
+          event.aggregateType === "work-thread" ||
+          event.aggregateType === "shell-settings" ||
+          event.aggregateType === "window-workspace"
+        )
           void projectTerminals.settleActionAuthorities();
         if (
           event.aggregateType === "project" &&
@@ -698,7 +803,10 @@ export function wireCodeTooling(deps: CodeToolingDependencies) {
       }),
       // A server Octant stopped ends every grant to it at once; a grant
       // never forwards to whatever takes the port next.
-      onStopped: (stopped) => remoteServerGrants.closeServer(stopped),
+      onStopped: (stopped) => {
+        remoteServerGrants.closeServer(stopped);
+        void desktopPreviews.serverStopped(stopped);
+      },
     });
     const localServerRoutes = createLocalServerRouteHandler({
       service: localServerService,
@@ -731,6 +839,86 @@ export function wireCodeTooling(deps: CodeToolingDependencies) {
       uuid: randomUUID,
       clock: () => new Date().toISOString(),
     });
+    const desktopPreviews = createDesktopPreviewService({
+      lease: deps.desktopLeases.previewTarget,
+      revision: (caller) => {
+        const thread = persistence.readCodeThread(decodeCodeThreadId(caller.owner.threadId));
+        return thread === undefined
+          ? undefined
+          : JSON.stringify([
+              thread.projectId,
+              thread.checkoutId,
+              thread.bindingRevisionId,
+              thread.lifecycle,
+              thread.executionPolicy,
+            ]);
+      },
+      observe: async (caller, port) => {
+        const threadId = decodeCodeThreadId(caller.owner.threadId);
+        const thread = persistence.readCodeThread(threadId);
+        if (thread === undefined || caller.scopeId === undefined) return { status: "not-listed" };
+        const windowId = decodeWindowId(caller.scopeId);
+        const listed = await localServerService.execute(
+          windowId,
+          {
+            kind: "list-local-servers",
+            requestId: decodeLocalServerRequestId(randomUUID()),
+            threadId,
+            projectId: thread.projectId,
+          },
+          { actor: "local-user" },
+        );
+        if (listed.kind !== "local-servers-listed") return { status: "not-listed" };
+        const matches = listed.snapshot.currentCheckout.filter((row) => row.port === port);
+        const row = matches[0];
+        if (matches.length !== 1 || row === undefined) return { status: "not-listed" };
+        return localServerService.observeGrantTarget(
+          windowId,
+          {
+            surface: "local-servers",
+            threadId,
+            projectId: thread.projectId,
+            listenerId: row.listenerId,
+          },
+          { actor: "local-user" },
+        );
+      },
+      audit: (kind, payload, caller) => {
+        persistence.journal.append({
+          aggregate: {
+            aggregateType: "desktop-preview",
+            aggregateId: Schema.decodeUnknownSync(AggregateId)(payload.grantId),
+          },
+          expectedVersion: decodeAggregateVersion(kind === "granted" ? 0 : 1),
+          events: [
+            {
+              eventId: Schema.decodeUnknownSync(EventId)(randomUUID()),
+              eventName: Schema.decodeUnknownSync(EventName)(`desktop.preview-${kind}@1`),
+              eventVersion: 1,
+              correlationId: Schema.decodeUnknownSync(CorrelationId)(randomUUID()),
+              actor: caller.actor,
+              occurredAt: decodeUtcTimestamp(new Date().toISOString()),
+              payload,
+            },
+          ],
+        });
+      },
+    });
+    deps.installDesktopPreviewRequest(desktopPreviews.request);
+    const previewSweep = setInterval(() => {
+      void desktopPreviews.sweep();
+    }, 250);
+    previewSweep.unref();
+    const stopPreviewCommits = persistence.journal.subscribeCommitted(() => {
+      void desktopPreviews.sweep();
+    });
+    yield* Effect.addFinalizer(() =>
+      Effect.promise(async () => {
+        clearInterval(previewSweep);
+        stopPreviewCommits();
+        await desktopPreviews.close();
+      }),
+    );
     try {
       remoteServerGrants.reconcile();
     } catch {

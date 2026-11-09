@@ -15,11 +15,14 @@
 // the same. Callers pass on only the pin and the certificate; the key goes to
 // the TLS server in process and nowhere else.
 
+import type { WindowsListenerTlsFiles } from "@octant/host-runtime";
 import {
   createHash,
   createPrivateKey,
   createPublicKey,
   generateKeyPairSync,
+  sign,
+  verify,
   X509Certificate,
 } from "node:crypto";
 import {
@@ -37,6 +40,9 @@ import {
 } from "node:fs";
 import { isIP } from "node:net";
 import { dirname, join } from "node:path";
+import { Schema } from "effect";
+import { ListenerKeyTransition, StableHostId } from "@octant/contracts";
+import { LISTENER_KEY_TRANSITION_WINDOW_MS, listenerKeyTransitionPayload } from "@octant/domain";
 import type { PrivateListenerTls } from "../privateListener";
 import {
   certificatePem,
@@ -47,6 +53,7 @@ import {
 const REMOTE_SUBDIR = "remote";
 export const SELF_MADE_LISTENER_KEY_FILE = "private-listener-tls-key.pem";
 export const SELF_MADE_LISTENER_CERTIFICATE_FILE = "private-listener-tls-cert.pem";
+export const LISTENER_KEY_TRANSITION_FILE = "private-listener-key-transition.json";
 const DAY_MS = 24 * 60 * 60 * 1_000;
 const VALIDITY_MS = 365 * DAY_MS;
 const RENEW_BEFORE_END_MS = 30 * DAY_MS;
@@ -66,11 +73,25 @@ export type SelfMadeListenerCertificate =
 export interface SelfMadeListenerCertificateStore {
   /** Loads or makes the key, renews the certificate when due, and returns both with the pin. */
   readonly ensure: (hostname: string) => SelfMadeListenerCertificate;
+  readonly transition: () => ListenerKeyTransition | undefined;
+  readonly prepareTransition: (input: {
+    readonly hostId: string;
+    readonly origin: string;
+  }) =>
+    | { readonly status: "prepared"; readonly transition: ListenerKeyTransition }
+    | { readonly status: "refused"; readonly code: "invalid-transition" };
+  readonly activateTransition: (
+    newPin: string,
+  ) =>
+    | { readonly status: "activated" }
+    | { readonly status: "refused"; readonly code: "invalid-transition" };
+  readonly cancelTransition: () => boolean;
 }
 
 export interface CreateSelfMadeListenerCertificateStoreOptions {
   readonly dataDirectory: string;
   readonly now?: () => Date;
+  readonly tlsFiles?: WindowsListenerTlsFiles | undefined;
 }
 
 /**
@@ -92,25 +113,102 @@ export function createSelfMadeListenerCertificateStore(
   const keyPath = join(directory, SELF_MADE_LISTENER_KEY_FILE);
   const certificatePath = join(directory, SELF_MADE_LISTENER_CERTIFICATE_FILE);
   const now = options.now ?? (() => new Date());
+  const transitionPath = join(directory, LISTENER_KEY_TRANSITION_FILE);
+  const decodeStage = Schema.decodeUnknownSync(
+    Schema.Struct({
+      transition: ListenerKeyTransition,
+      newKeyPem: Schema.NonEmptyString,
+    }).annotations({ parseOptions: { onExcessProperty: "error" } }),
+  );
+  const keyPin = (pem: string): string =>
+    `sha256-${createHash("sha256")
+      .update(createPublicKey(pem).export({ format: "der", type: "spki" }))
+      .digest("base64url")}`;
+  const currentPin = (): string => {
+    const current = readOwnerOnlyKey(keyPath);
+    if (current.status !== "loaded") throw new Error("Listener key unavailable.");
+    return keyPin(current.pem);
+  };
+  const readStage = (): ReturnType<typeof decodeStage> | undefined => {
+    const loaded = readOwnerOnlyKey(transitionPath);
+    if (loaded.status === "missing") return undefined;
+    if (loaded.status === "exposed") throw new Error("Listener transition exposed.");
+    const value: unknown = JSON.parse(loaded.pem);
+    if (value === null) return undefined;
+    const stage = decodeStage(value);
+    const t = stage.transition;
+    const oldKey = createPublicKey({
+      key: Buffer.from(t.oldPublicKey, "base64url"),
+      type: "spki",
+      format: "der",
+    });
+    const newKey = createPrivateKey(stage.newKeyPem);
+    if (
+      newKey.asymmetricKeyType !== "ec" ||
+      newKey.asymmetricKeyDetails?.namedCurve !== "prime256v1" ||
+      keyPin(stage.newKeyPem) !== t.newPin ||
+      keyPin(String(oldKey.export({ type: "spki", format: "pem" }))) !== t.oldPin ||
+      Date.parse(t.expiresAt) - Date.parse(t.preparedAt) !== LISTENER_KEY_TRANSITION_WINDOW_MS ||
+      !verify(
+        "sha256",
+        Buffer.from(listenerKeyTransitionPayload(t)),
+        { key: oldKey, dsaEncoding: "ieee-p1363" },
+        Buffer.from(t.signature, "base64url"),
+      )
+    ) {
+      throw new Error("Invalid listener transition.");
+    }
+    return stage;
+  };
 
-  return {
+  const store: SelfMadeListenerCertificateStore = {
     ensure: (hostname) => {
       const address = listenerAddress(hostname);
       if (address === undefined) return { status: "refused", code: "invalid-tls" };
+      const files = options.tlsFiles;
+      if (
+        (files !== undefined && files.dataDirectory !== options.dataDirectory) ||
+        (process.platform === "win32" && files === undefined)
+      )
+        return { status: "refused", code: "invalid-tls" };
       let keyPem: string;
       try {
-        mkdirSync(directory, { recursive: true, mode: 0o700 });
-        // The folder may already exist from the host identity key with the
-        // process umask's mode; narrow it to the owner.
-        chmodSync(directory, 0o700);
-        const loaded = readOwnerOnlyKey(keyPath);
-        if (loaded.status === "exposed") return { status: "refused", code: "tls-key-exposed" };
-        if (loaded.status === "missing") {
-          const generated = generateKeyPairSync("ec", { namedCurve: "P-256" });
-          keyPem = String(generated.privateKey.export({ format: "pem", type: "pkcs8" }));
-          writeOwnerOnly(keyPath, keyPem);
+        if (files !== undefined) {
+          let loaded = files.read("key");
+          if (loaded.status === "missing") {
+            const generated = generateKeyPairSync("ec", { namedCurve: "P-256" });
+            const candidate = Buffer.from(
+              generated.privateKey.export({ format: "pem", type: "pkcs8" }),
+            );
+            try {
+              loaded = files.createKey(candidate);
+            } finally {
+              candidate.fill(0);
+            }
+          }
+          if (loaded.status === "exposed") return { status: "refused", code: "tls-key-exposed" };
+          if (loaded.status !== "ready") return { status: "refused", code: "invalid-tls" };
+          try {
+            if (loaded.bytes.length === 0 || loaded.bytes.length > 4096)
+              return { status: "refused", code: "invalid-tls" };
+            keyPem = loaded.bytes.toString("utf8");
+          } finally {
+            loaded.bytes.fill(0);
+          }
         } else {
-          keyPem = loaded.pem;
+          mkdirSync(directory, { recursive: true, mode: 0o700 });
+          // The folder may already exist from the host identity key with the
+          // process umask's mode; narrow it to the owner.
+          chmodSync(directory, 0o700);
+          const loaded = readOwnerOnlyKey(keyPath);
+          if (loaded.status === "exposed") return { status: "refused", code: "tls-key-exposed" };
+          if (loaded.status === "missing") {
+            const generated = generateKeyPairSync("ec", { namedCurve: "P-256" });
+            keyPem = String(generated.privateKey.export({ format: "pem", type: "pkcs8" }));
+            writeOwnerOnly(keyPath, keyPem);
+          } else {
+            keyPem = loaded.pem;
+          }
         }
       } catch {
         return { status: "refused", code: "invalid-tls" };
@@ -131,7 +229,24 @@ export function createSelfMadeListenerCertificateStore(
       const publicKey = createPublicKey(keyPem);
 
       const at = now();
-      let certificate = readUsableCertificate(certificatePath, publicKey, address, at);
+      let certificate: string | undefined;
+      let firstUse = false;
+      if (files === undefined)
+        certificate = readUsableCertificate(certificatePath, publicKey, address, at);
+      else {
+        const loaded = files.read("certificate");
+        if (loaded.status !== "ready" && loaded.status !== "missing")
+          return { status: "refused", code: "invalid-tls" };
+        firstUse = loaded.status === "missing";
+        if (loaded.status === "ready") {
+          try {
+            if (loaded.bytes.length > 16384) return { status: "refused", code: "invalid-tls" };
+            certificate = usableCertificate(loaded.bytes.toString("utf8"), publicKey, address, at);
+          } finally {
+            loaded.bytes.fill(0);
+          }
+        }
+      }
       if (certificate === undefined) {
         try {
           // Whole seconds: X.509 times carry no fractions, and a start later
@@ -146,7 +261,33 @@ export function createSelfMadeListenerCertificateStore(
               notAfter: new Date(notBefore.getTime() + VALIDITY_MS),
             }),
           );
-          writeOwnerOnly(certificatePath, certificate);
+          if (files === undefined) writeOwnerOnly(certificatePath, certificate);
+          else {
+            const candidate = Buffer.from(certificate);
+            try {
+              // A concurrent first use may have written its certificate since
+              // the read; creating adopts that winner rather than replacing a
+              // certificate another ensure already returned.
+              const saved = firstUse
+                ? files.createCertificate(candidate)
+                : files.replaceCertificate(candidate);
+              if (saved.status !== "ready") return { status: "refused", code: "invalid-tls" };
+              try {
+                const admitted = usableCertificate(
+                  saved.bytes.toString("utf8"),
+                  publicKey,
+                  address,
+                  at,
+                );
+                if (admitted === undefined) return { status: "refused", code: "invalid-tls" };
+                certificate = admitted;
+              } finally {
+                saved.bytes.fill(0);
+              }
+            } finally {
+              candidate.fill(0);
+            }
+          }
         } catch {
           return { status: "refused", code: "invalid-tls" };
         }
@@ -157,7 +298,114 @@ export function createSelfMadeListenerCertificateStore(
         tlsPin: listenerTlsPin(certificate),
       };
     },
+    transition: () => {
+      if (options.tlsFiles !== undefined) return undefined;
+      try {
+        const stage = readStage();
+        if (stage === undefined || Date.parse(stage.transition.expiresAt) <= now().getTime())
+          return undefined;
+        const pin = currentPin();
+        return pin === stage.transition.oldPin || pin === stage.transition.newPin
+          ? stage.transition
+          : undefined;
+      } catch {
+        return undefined;
+      }
+    },
+    prepareTransition: (input) => {
+      // A transition stages the next key as an ordinary owner-only file and
+      // replaces the key file in place. Native listener storage keeps its key
+      // behind its own protected records, which hold no staged key, so it
+      // refuses rather than writing private key material outside them.
+      if (options.tlsFiles !== undefined) return { status: "refused", code: "invalid-transition" };
+      try {
+        const origin = new URL(input.origin);
+        if (origin.protocol !== "https:" || origin.origin !== input.origin)
+          throw new Error("Invalid origin.");
+        const hostId = Schema.decodeUnknownSync(StableHostId)(input.hostId);
+        const serving = store.ensure(origin.hostname);
+        if (serving.status !== "ready") throw new Error("Listener key unavailable.");
+        const previous = readStage();
+        const at = now();
+        if (previous !== undefined && Date.parse(previous.transition.expiresAt) > at.getTime()) {
+          const t = previous.transition;
+          if (
+            t.oldPin !== serving.tlsPin ||
+            t.origin !== input.origin ||
+            String(t.hostId) !== String(hostId)
+          )
+            throw new Error("A transition is already active.");
+          return { status: "prepared", transition: t };
+        }
+        const generated = generateKeyPairSync("ec", { namedCurve: "P-256" });
+        const unsigned = Schema.decodeUnknownSync(ListenerKeyTransition.omit("signature"))({
+          version: 1 as const,
+          hostId,
+          origin: input.origin,
+          oldPin: serving.tlsPin,
+          newPin: keyPin(String(generated.publicKey.export({ type: "spki", format: "pem" }))),
+          oldPublicKey: createPublicKey(String(serving.tls.key))
+            .export({ type: "spki", format: "der" })
+            .toString("base64url"),
+          preparedAt: at.toISOString(),
+          expiresAt: new Date(at.getTime() + LISTENER_KEY_TRANSITION_WINDOW_MS).toISOString(),
+        });
+        const transition = Schema.decodeUnknownSync(ListenerKeyTransition)({
+          ...unsigned,
+          signature: sign("sha256", Buffer.from(listenerKeyTransitionPayload(unsigned)), {
+            key: String(serving.tls.key),
+            dsaEncoding: "ieee-p1363",
+          }).toString("base64url"),
+        });
+        writeOwnerOnly(
+          transitionPath,
+          JSON.stringify({
+            transition,
+            newKeyPem: String(generated.privateKey.export({ type: "pkcs8", format: "pem" })),
+          }),
+        );
+        return { status: "prepared", transition };
+      } catch {
+        return { status: "refused", code: "invalid-transition" };
+      }
+    },
+    activateTransition: (newPin) => {
+      if (options.tlsFiles !== undefined) return { status: "refused", code: "invalid-transition" };
+      try {
+        const stage = readStage();
+        if (stage === undefined || stage.transition.newPin !== newPin)
+          throw new Error("Transition changed.");
+        const pin = currentPin();
+        if (pin === newPin) return { status: "activated" };
+        const t = stage.transition;
+        if (
+          pin !== t.oldPin ||
+          Date.parse(t.preparedAt) > now().getTime() ||
+          Date.parse(t.expiresAt) <= now().getTime()
+        )
+          throw new Error("Transition expired.");
+        // The signed stage is durable first. If power fails after replacing the
+        // key, ensure renews the old certificate for this same new key.
+        writeOwnerOnly(keyPath, stage.newKeyPem);
+        return { status: "activated" };
+      } catch {
+        return { status: "refused", code: "invalid-transition" };
+      }
+    },
+    cancelTransition: () => {
+      if (options.tlsFiles !== undefined) return true;
+      try {
+        const stage = readStage();
+        if (stage === undefined) return true;
+        if (currentPin() !== stage.transition.oldPin) return false;
+        writeOwnerOnly(transitionPath, "null");
+        return true;
+      } catch {
+        return false;
+      }
+    },
   };
+  return store;
 }
 
 type LoadedKey =
@@ -234,7 +482,6 @@ function readUsableCertificate(
   at: Date,
 ): string | undefined {
   let pem: string;
-  let certificate: X509Certificate;
   try {
     const descriptor = openRegularFile(path);
     try {
@@ -242,6 +489,20 @@ function readUsableCertificate(
     } finally {
       closeSync(descriptor);
     }
+  } catch {
+    return undefined;
+  }
+  return usableCertificate(pem, publicKey, address, at);
+}
+
+function usableCertificate(
+  pem: string,
+  publicKey: ReturnType<typeof createPublicKey>,
+  address: string,
+  at: Date,
+): string | undefined {
+  let certificate: X509Certificate;
+  try {
     certificate = new X509Certificate(pem);
   } catch {
     return undefined;

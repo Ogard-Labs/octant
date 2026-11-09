@@ -1,6 +1,11 @@
 import { storedBrowserProfileOfPartitionFolder } from "@octant/domain";
 import { createDesktopBrowserCredentialFill } from "./desktopBrowserCredentialFill";
 import { createDesktopClientLifetime } from "./desktopClientLifetime";
+import {
+  attachWindowsDesktopHost,
+  resolveWindowsDesktopHost,
+  requestWindowsDesktopHostStop,
+} from "./windowsDesktopHost";
 import { resolvePackagedDesktopLaunch } from "./desktopLaunch";
 import { createOffscreenBrowserSurface } from "./offscreenBrowserSurface";
 import { ownNightlyWindowLeases } from "./nightlyBrowserLease";
@@ -85,6 +90,8 @@ import {
   desktopIdentityForPackage,
   desktopWindowStorageDirectory,
   deriveHostRuntimeHostId,
+  loadWindowsHostProfileNative,
+  KEYCHAIN_SERVICE_FAMILY_ENVIRONMENT,
   isLinkedSecretMaterial,
   linkedSecretStoresStatePath,
   makeLinkedSecretStores,
@@ -259,13 +266,20 @@ import {
   buildMenuBarItems,
   formatRedactedHostDiagnostics,
   decodeMenuBarOpenThread,
+  decodeMenuBarShutdownProgress,
   MenuBarFleet,
   menuBarTitle,
   type MenuBarOpenThread,
+  type MenuBarShutdownProgress,
 } from "./menuBar";
 import { createMenuBarFleetReader } from "./menuBarFleetRead";
 import { createHostTrayImage, shouldPresentHostTray } from "./menuBarIcon";
-import { buildQuitConfirmation, evaluateQuitRequest } from "./quitGuard";
+import { ShutdownBatchOwner } from "./shutdownBatchOwner";
+import {
+  MOVE_THREADS_FIRST_RESPONSE,
+  buildQuitConfirmation,
+  evaluateQuitRequest,
+} from "./quitGuard";
 import {
   WINDOW_CLOSE_GRACE_MS,
   armQuitDeadline,
@@ -286,6 +300,8 @@ import {
   KEYCHAIN_HELPER_FILENAME,
   resolveDesktopHostRuntimePaths,
   resolveDesktopNativeHelperPath,
+  WINDOWS_CREDENTIAL_HELPER_FILENAME,
+  WINDOWS_HOST_OWNER_FILENAME,
   resolveManagedToolsDirectory,
   resolveTerminalLauncherDirectory,
   type DesktopNativeHelperPathOptions,
@@ -316,6 +332,7 @@ import {
   sendHubAdministrationOperation,
   type HubAdministrationControlRuntime,
 } from "./hubAdministrationControls";
+import { openMovedThreadThere } from "./threadMoveOpenThere";
 import {
   installPairedComputerIpcHandlers,
   type PageStoragePort,
@@ -551,7 +568,24 @@ export function installHubAdministrationIpcHandlers(options: {
     handler: (event: unknown, ...args: readonly unknown[]) => unknown,
   ) => void;
   readonly runtimeFor: (event: unknown) => HubAdministrationControlRuntime;
+  /** Hands a validated page to the person's default browser. */
+  readonly openExternal: (url: string) => Promise<void>;
 }): void {
+  // Open there on a moved thread's tombstone. The window names the thread and
+  // nothing else; the page comes from the host's own answer for it.
+  options.handle(IPC_CHANNELS.threadMoveOpenThere, async (event, thread) => {
+    let runtime: HubAdministrationControlRuntime;
+    try {
+      runtime = options.runtimeFor(event);
+    } catch {
+      throw new Error("Octant rejected an unauthorized hub request.");
+    }
+    try {
+      return await openMovedThreadThere({ runtime, thread, openExternal: options.openExternal });
+    } catch {
+      throw new Error("Octant hub controls are unavailable.");
+    }
+  });
   options.handle(IPC_CHANNELS.hubAdministrationRequest, async (event, operation, body) => {
     let runtime: HubAdministrationControlRuntime;
     try {
@@ -568,6 +602,37 @@ export function installHubAdministrationIpcHandlers(options: {
           : "Octant hub controls are unavailable.",
       );
     }
+  });
+}
+
+/**
+ * Prepare to shut down's requests from an owned window: whether this host can
+ * offer Move threads first… at Quit, how far a running batch has come for the
+ * menu bar, and Quit Octant at the end of the dialog, which goes through the
+ * same guarded quit as the menu's.
+ */
+export function installShutdownIpcHandlers(options: {
+  readonly handle: (
+    channel: string,
+    handler: (event: unknown, ...args: readonly unknown[]) => unknown,
+  ) => void;
+  readonly resolveOwnedWindow: (event: unknown) => void;
+  /** The id of the owned window that sent a request. */
+  readonly senderWindowId: (event: unknown) => number;
+  readonly onMovesOffered: (offered: boolean) => void;
+  readonly onProgress: (windowId: number, progress: MenuBarShutdownProgress | undefined) => void;
+  readonly onRequestQuit: () => void;
+}): void {
+  options.handle(IPC_CHANNELS.shutdownMovesOffered, (event, offered) => {
+    options.resolveOwnedWindow(event);
+    options.onMovesOffered(offered === true);
+  });
+  options.handle(IPC_CHANNELS.shutdownProgress, (event, progress) => {
+    options.onProgress(options.senderWindowId(event), decodeMenuBarShutdownProgress(progress));
+  });
+  options.handle(IPC_CHANNELS.requestQuit, (event) => {
+    options.resolveOwnedWindow(event);
+    options.onRequestQuit();
   });
 }
 
@@ -1182,8 +1247,15 @@ export function resolveDesktopDataDirectory(
     .dataDirectory;
 }
 
-async function writeBridgeSecretFile(paths: HostRuntimePaths, secret: string): Promise<void> {
-  await writeBridgeSecretProjection(paths, secret);
+async function writeDesktopBridgeProjection(): Promise<void> {
+  if (desktopWindowsHost !== undefined) {
+    // The native child owner publishes this projection from its launch seed.
+    // Desktop main authenticates it but has no file-mutation authority.
+    if ((await desktopWindowsHost.startup.readBridgeSecret()) !== desktopBridgeSecret)
+      throw new Error("Octant's native Windows child did not publish its bridge projection.");
+    return;
+  }
+  await writeBridgeSecretProjection(desktopPosixHostPaths(), desktopBridgeSecret);
 }
 
 const BRIDGE_SECRET_PATTERN = /^[A-Za-z0-9_-]{43}$/;
@@ -1228,15 +1300,39 @@ if (resolvedHostStartup.kind === "refused") throw new Error(resolvedHostStartup.
 const desktopHostStartup = resolvedHostStartup;
 const desktopMayStartHost =
   applicationIdentity.mayStartHost || desktopHostRole.kind === "test-host";
-const desktopHostRuntimePaths = resolveDesktopHostRuntimePaths(
-  desktopHostStartup.configuredDataDirectory,
-  app.getPath("appData"),
-  process.platform,
-  desktopHostStartup.logsDirectory === undefined
-    ? process.env
-    : { ...process.env, OCTANT_LOGS_DIR: desktopHostStartup.logsDirectory },
-);
-const desktopDataDirectory = desktopHostRuntimePaths.dataDirectory;
+const desktopWindowsHost = (() => {
+  if (process.platform !== "win32") return undefined;
+  const native = loadWindowsHostProfileNative(
+    resolveDesktopNativeHelperPath(
+      {
+        packaged: app.isPackaged,
+        resourcesPath: process.resourcesPath,
+        moduleUrl: import.meta.url,
+      },
+      WINDOWS_HOST_OWNER_FILENAME,
+    ),
+  );
+  if (native === undefined) throw new Error("Octant's native Windows host binding is unavailable.");
+  return resolveWindowsDesktopHost({ native, profile: "octant", env: process.env });
+})();
+const desktopHostRuntimePaths =
+  desktopWindowsHost === undefined
+    ? resolveDesktopHostRuntimePaths(
+        desktopHostStartup.configuredDataDirectory,
+        app.getPath("appData"),
+        process.platform,
+        desktopHostStartup.logsDirectory === undefined
+          ? process.env
+          : { ...process.env, OCTANT_LOGS_DIR: desktopHostStartup.logsDirectory },
+      )
+    : undefined;
+function desktopPosixHostPaths(): HostRuntimePaths {
+  if (desktopHostRuntimePaths === undefined)
+    throw new Error("POSIX host paths are unavailable for the native Windows profile.");
+  return desktopHostRuntimePaths;
+}
+const desktopDataDirectory =
+  desktopWindowsHost?.paths.dataDirectory ?? desktopPosixHostPaths().dataDirectory;
 const desktopKeychainServiceFamily = desktopHostStartup.keychainServiceFamily;
 // The relaunch quits through the same interactive path as Quit in the menu, so
 // running work is confirmed first and a cancelled confirmation cancels it.
@@ -1270,7 +1366,8 @@ const nightlyWindowIdentity =
         applicationData: "test-data" as const,
       }
     : {};
-const desktopHostId = deriveHostRuntimeHostId(desktopDataDirectory);
+const desktopHostId =
+  desktopWindowsHost?.paths.profileId ?? deriveHostRuntimeHostId(desktopDataDirectory);
 app.setPath(
   "userData",
   desktopWindowStorageDirectory(applicationIdentity, desktopDataDirectory, app.getPath("appData")),
@@ -1294,7 +1391,9 @@ let appUpdateService: ReturnType<typeof createAppUpdateService> | undefined;
 let nightlyInstallerInstance: ReturnType<typeof createNightlyInstaller> | undefined;
 let credentialBackendPromise: Promise<DesktopCredentialBackend> | undefined;
 let desktopBridgeSecret =
-  readStoredDesktopBridgeSecret(desktopDataDirectory) ?? generateProjectBridgeToken(randomBytes);
+  (desktopWindowsHost === undefined
+    ? readStoredDesktopBridgeSecret(desktopDataDirectory)
+    : undefined) ?? generateProjectBridgeToken(randomBytes);
 /** Stable's brokered host calls carry the bridge secret it holds now. */
 const desktopBrokerHeaders = (): Readonly<Record<string, string>> => ({
   "x-octant-desktop-secret": desktopBridgeSecret,
@@ -1563,6 +1662,18 @@ function getCredentialBackend(): Promise<DesktopCredentialBackend> {
       resourcesPath: process.resourcesPath,
       moduleUrl: import.meta.url,
     }),
+    ...(process.platform === "win32"
+      ? {
+          windowsCredentialHelperPath: resolveDesktopNativeHelperPath(
+            {
+              packaged: app.isPackaged,
+              resourcesPath: process.resourcesPath,
+              moduleUrl: import.meta.url,
+            },
+            WINDOWS_CREDENTIAL_HELPER_FILENAME,
+          ),
+        }
+      : {}),
     storeScope: desktopHostId,
     serviceFamily: desktopKeychainServiceFamily,
   }).then((backend) => {
@@ -1605,6 +1716,9 @@ function lazyCredentialStore(): CredentialStore {
 }
 
 async function startDesktopCredentialBroker(): Promise<CredentialBroker | undefined> {
+  // Windows credentials belong to the actual child owner. The generic
+  // desktop broker would create unaudited linked-store JSON on this path.
+  if (desktopWindowsHost !== undefined) return undefined;
   if (credentialBroker !== undefined) return credentialBroker;
   const backend = await getCredentialBackend();
   if (backend.store === undefined) return undefined;
@@ -1627,16 +1741,18 @@ async function startDesktopCredentialBroker(): Promise<CredentialBroker | undefi
   );
 }
 
-async function resolveExistingHostAttachment() {
+async function resolveExistingHostAttachment(startingChild?: ChildProcess) {
+  if (desktopWindowsHost !== undefined)
+    return await attachWindowsDesktopHost(desktopWindowsHost, startingChild);
   return await resolveStableHostAttachment({
-    readReceipt: () => readHostInfoReceipt(desktopHostRuntimePaths),
+    readReceipt: () => readHostInfoReceipt(desktopPosixHostPaths()),
     readBridgeSecret: () => readStoredDesktopBridgeSecret(desktopDataDirectory),
     probeReceipt: (receipt) =>
       probeHostInfoReceipt({
         receipt,
         expectedHostId: desktopHostId,
         expectedWireVersion: "1",
-        expectedControlEndpoint: desktopHostRuntimePaths.socketPath,
+        expectedControlEndpoint: desktopPosixHostPaths().socketPath,
       }),
   });
 }
@@ -1721,9 +1837,10 @@ async function startDesktopOwnedHost(): Promise<LocalHostDescriptor> {
     };
   }
   await assertAutomaticHostStartupEnabled(
-    new ServicePolicyStore({ path: desktopHostRuntimePaths.servicePolicyPath }),
+    desktopWindowsHost?.startup.servicePolicy ??
+      new ServicePolicyStore({ path: desktopPosixHostPaths().servicePolicyPath }),
   );
-  await prepareHostRuntimePaths(desktopHostRuntimePaths);
+  if (desktopWindowsHost === undefined) await prepareHostRuntimePaths(desktopPosixHostPaths());
   const root = repositoryRoot();
   const portReservation = await reserveLoopbackPort(
     resolveConfiguredServerPort(process.env, desktopHostStartup.serverPort),
@@ -1738,10 +1855,18 @@ async function startDesktopOwnedHost(): Promise<LocalHostDescriptor> {
   // before spawning the managed server, which must bind that same port.
   await portReservation.close();
   const serverStderr = createStderrTail();
-  const launch = createDesktopHostLaunch({ shutdownServer: shutdownManagedServer });
+  const instanceId = randomUUID();
+  const launch = createDesktopHostLaunch({
+    shutdownServer:
+      desktopWindowsHost === undefined
+        ? shutdownManagedServer
+        : (child) =>
+            shutdownManagedServer(child, {
+              requestStop: () => requestWindowsDesktopHostStop(desktopWindowsHost, instanceId),
+            }),
+  });
   desktopHostLaunch = launch;
   try {
-    const instanceId = randomUUID();
     // Files held for the agent are cleared when the app starts; if the folder
     // cannot be made private, downloads simply stay blocked.
     const browserDownloadRoot = await prepareBrowserDownloadHoldRoot("desktop").catch(
@@ -1915,8 +2040,9 @@ async function startDesktopOwnedHost(): Promise<LocalHostDescriptor> {
           }),
           env: {
             ...process.env,
-            OCTANT_DATA_DIR: desktopDataDirectory,
-            ...desktopHostStartup.hostEnvironment,
+            ...(desktopWindowsHost === undefined
+              ? { OCTANT_DATA_DIR: desktopDataDirectory, ...desktopHostStartup.hostEnvironment }
+              : { [KEYCHAIN_SERVICE_FAMILY_ENVIRONMENT]: desktopKeychainServiceFamily }),
           },
         });
         return spawn(spec.command, spec.args, {
@@ -1950,7 +2076,7 @@ async function startDesktopOwnedHost(): Promise<LocalHostDescriptor> {
             },
           }),
       resolveAttachedHost: async () => {
-        return (await resolveExistingHostAttachment())?.probe;
+        return (await resolveExistingHostAttachment(child))?.probe;
       },
     });
     if (attached !== undefined) {
@@ -2144,7 +2270,7 @@ async function createWindow(stillRequested: () => boolean): Promise<void> {
   serverInstanceId = host.instanceId;
   await refreshHostActivity();
   if (host.ownership === "desktop-owned") {
-    await writeBridgeSecretFile(desktopHostRuntimePaths, desktopBridgeSecret);
+    await writeDesktopBridgeProjection();
   }
   ensureHostTray();
 
@@ -2789,7 +2915,11 @@ function updateHostTray(): void {
   if (hostTray === undefined) return;
   const snapshot = hostLifecycle.snapshot();
   const fleet = snapshot.state === "stopped" ? [] : menuBarFleet.threads();
-  const items = buildMenuBarItems(snapshot, fleet);
+  const shutdownProgress = shutdownBatch.progress();
+  const items = buildMenuBarItems(snapshot, fleet, {
+    offered: shutdownMovesOffered,
+    ...(shutdownProgress === undefined ? {} : { progress: shutdownProgress }),
+  });
   const toTemplate = (item: (typeof items)[number]): MenuItemConstructorOptions => {
     if (item.id === "separator") return { type: "separator" };
     const thread = item.thread;
@@ -2818,7 +2948,7 @@ function updateHostTray(): void {
   const template = items.map(toTemplate);
   hostTray.setContextMenu(Menu.buildFromTemplate(template));
   hostTray.setToolTip(`Octant — ${hostStatusLabel()}`);
-  hostTray.setTitle?.(menuBarTitle(snapshot, fleet));
+  hostTray.setTitle?.(menuBarTitle(snapshot, fleet, shutdownProgress));
 }
 
 function ensureHostTray(): void {
@@ -2946,7 +3076,7 @@ async function startHostFromMenu(): Promise<void> {
   activeServerUrl = host.url;
   serverInstanceId = host.instanceId;
   if (host.ownership === "desktop-owned") {
-    await writeBridgeSecretFile(desktopHostRuntimePaths, desktopBridgeSecret);
+    await writeDesktopBridgeProjection();
   }
   ensureHostTray();
   await refreshHostActivity();
@@ -2967,7 +3097,7 @@ async function restartHostFromMenu(): Promise<void> {
   const host = admission.host;
   activeServerUrl = host.url;
   serverInstanceId = host.instanceId;
-  await writeBridgeSecretFile(desktopHostRuntimePaths, desktopBridgeSecret);
+  await writeDesktopBridgeProjection();
   ensureHostTray();
   await refreshHostActivity();
 }
@@ -3001,6 +3131,19 @@ async function runMenuBarAction(
         title: "Octant host diagnostics",
         message: formatRedactedHostDiagnostics(hostLifecycle.snapshot()),
       });
+    } else if (action === "prepare-to-shut-down") {
+      // Brings back a hidden dialog's running batch in its own window, or
+      // opens a new one in the main window when no batch runs.
+      const owner = shutdownBatchWindow();
+      if (owner === undefined) {
+        await ensureMenuWindow();
+        mainWindow?.show();
+        mainWindow?.focus();
+      } else {
+        owner.show();
+        owner.focus();
+      }
+      openPrepareToShutDown({ fromQuit: false });
     } else if (action === "fully-quit") {
       requestInteractiveQuit();
     }
@@ -3066,12 +3209,16 @@ function getOwnerUnlockKeyService(): OwnerUnlockKeyService | undefined {
 
 function getHostIdentitySigningService(): HostIdentitySigningService {
   hostIdentitySigningService ??= makeHostIdentitySigningService(
-    resolveKeychainHelperPath({
-      packaged: app.isPackaged,
-      resourcesPath: process.resourcesPath,
-      moduleUrl: import.meta.url,
-    }),
+    resolveDesktopNativeHelperPath(
+      {
+        packaged: app.isPackaged,
+        resourcesPath: process.resourcesPath,
+        moduleUrl: import.meta.url,
+      },
+      process.platform === "win32" ? WINDOWS_CREDENTIAL_HELPER_FILENAME : KEYCHAIN_HELPER_FILENAME,
+    ),
     {
+      ...(process.platform === "win32" ? { platform: "win32" as const } : {}),
       storeScope: desktopHostId,
       serviceFamily: desktopKeychainServiceFamily,
       expectedLegacyFingerprint: readPersistedHostIdentityFingerprint,
@@ -3181,6 +3328,28 @@ function installIpcHandlers(): void {
     resolveOwnedWindow: (event) => void ownedWindowContext(event as IpcMainInvokeEvent),
     service: getOwnerUnlockKeyService,
   });
+  installShutdownIpcHandlers({
+    handle: (channel, handler) => ipcMain.handle(channel, handler),
+    resolveOwnedWindow: (event) => void ownedWindowContext(event as IpcMainInvokeEvent),
+    senderWindowId: (event) => ownedWindowContext(event as IpcMainInvokeEvent).window.id,
+    onMovesOffered: (offered) => {
+      if (shutdownMovesOffered === offered) return;
+      shutdownMovesOffered = offered;
+      updateHostTray();
+    },
+    onProgress: (windowId, progress) => {
+      const owned = shutdownBatch.windowToOpen() !== undefined;
+      if (!shutdownBatch.report(windowId, progress)) return;
+      // The window that starts owning a batch lets go of it when it closes.
+      if (!owned && shutdownBatch.windowToOpen() === windowId) {
+        BrowserWindow.fromId(windowId)?.once("closed", () => {
+          if (shutdownBatch.windowClosed(windowId)) updateHostTray();
+        });
+      }
+      updateHostTray();
+    },
+    onRequestQuit: requestInteractiveQuit,
+  });
   installHubAdministrationIpcHandlers({
     handle: (channel, handler) => ipcMain.handle(channel, handler),
     runtimeFor: (event) => {
@@ -3195,6 +3364,7 @@ function installIpcHandlers(): void {
         fetch: globalThis.fetch,
       };
     },
+    openExternal: (url) => shell.openExternal(url),
   });
   installHostIdentityIpcHandlers({
     handle: (channel, handler) => ipcMain.handle(channel, handler),
@@ -4075,10 +4245,9 @@ function remoteServerPages(): RemoteServerPages {
     pageStorage: remoteServerPageStorage,
     showInOctantBrowser: showRemoteServerPage,
     openExternal: (url) => shell.openExternal(url),
-    pairedTrust: (listenerOrigin) => {
-      const pin = pairedComputerPins().pinFor(listenerOrigin);
-      return pin === undefined ? undefined : { current: { kind: "pinned", pin } };
-    },
+    pairedTrust: (listenerOrigin) => pairedComputerPins().trustFor(listenerOrigin, false),
+    rememberTrust: (origin, previous, next) =>
+      pairedComputerPins().rememberTrust(origin, previous, next),
   });
   return remoteServerPagesInstance;
 }
@@ -4347,7 +4516,8 @@ async function shutdownSecondaryProjectWindows(): Promise<void> {
 async function confirmQuitWithActiveWork(
   snapshot: ReturnType<typeof hostLifecycle.snapshot>,
 ): Promise<boolean> {
-  const copy = buildQuitConfirmation(snapshot);
+  const offerMove = shutdownMovesOffered;
+  const copy = buildQuitConfirmation(snapshot, { offerMove });
   const options = {
     type: "warning" as const,
     ...copy,
@@ -4357,7 +4527,43 @@ async function confirmQuitWithActiveWork(
     mainWindow === undefined
       ? await dialog.showMessageBox(options)
       : await dialog.showMessageBox(mainWindow, options);
+  // Move threads first… opens Prepare to shut down instead of quitting; it
+  // ends with Quit Octant, which comes back through this same confirmation.
+  if (offerMove && result.response === MOVE_THREADS_FIRST_RESPONSE) {
+    openPrepareToShutDown({ fromQuit: true });
+    return false;
+  }
   return result.response === 1;
+}
+
+/**
+ * Whether the trusted window last reported this host in a hub with another
+ * member. Only then does the quit confirmation offer Move threads first….
+ */
+let shutdownMovesOffered = false;
+
+/** The running Prepare to shut down batch, the window whose dialog runs it, and its progress. */
+const shutdownBatch = new ShutdownBatchOwner();
+
+/** The window whose dialog runs the batch, while that window is still open. */
+function shutdownBatchWindow(): BrowserWindow | undefined {
+  const windowId = shutdownBatch.windowToOpen();
+  const window = windowId === undefined ? null : BrowserWindow.fromId(windowId);
+  return window === null || window.isDestroyed() ? undefined : window;
+}
+
+/**
+ * Opens Prepare to shut down in the window whose dialog runs the batch, so a
+ * hidden running batch comes back rather than a fresh dialog in another
+ * window; with no batch running, in the focused Octant window or the main one.
+ */
+function openPrepareToShutDown(request: { readonly fromQuit: boolean }): void {
+  const focused = BrowserWindow.getFocusedWindow();
+  const window =
+    shutdownBatchWindow() ??
+    (focused !== null && trustedRendererWebContentsIds.has(focused) ? focused : mainWindow);
+  if (window === undefined || window.isDestroyed()) return;
+  window.webContents.send(IPC_CHANNELS.prepareToShutDown, request);
 }
 
 function logQuitProblem(message: string): void {
@@ -4386,13 +4592,13 @@ function forceExitAfterStalledQuit(): () => void {
 let desktopPeerStatusOwner: ReturnType<typeof ownDesktopPeerStatus> | undefined;
 let nightlyWindowLeases: ReturnType<typeof ownNightlyWindowLeases> | undefined;
 const desktopClientLifetime = createDesktopClientLifetime({
-  currentNightlyWindows: () => nightlyWindowLeases?.activeWindowCount() ?? 0,
+  currentNightlyWindows: () => nightlyWindowLeases?.lifetimeWindowCount() ?? 0,
   closeLocalWindows: closeLocalWindowsForRetainedHost,
   quitHost: quitHostAfterLastClient,
 });
 
 async function quitHostAfterLastClient(
-  stillRequested: () => boolean = () => (nightlyWindowLeases?.activeWindowCount() ?? 0) === 0,
+  stillRequested: () => boolean = () => (nightlyWindowLeases?.lifetimeWindowCount() ?? 0) === 0,
 ): Promise<"accepted" | "cancelled"> {
   if (quitPrepared) return "accepted";
   if (preparingQuit) return "cancelled";
@@ -4606,6 +4812,7 @@ function installApplicationMenu(): void {
           if (window === undefined || window.isDestroyed()) return;
           window.webContents.send(IPC_CHANNELS.openSettings);
         },
+        onPrepareToShutDown: () => openPrepareToShutDown({ fromQuit: false }),
       }),
     ),
   );
@@ -4628,9 +4835,9 @@ function acceptCodeDeepLink(value: string): void {
  */
 async function prepareLinuxPeerEndpoint(): Promise<void> {
   try {
-    await prepareHostRuntimePaths(desktopHostRuntimePaths);
+    await prepareHostRuntimePaths(desktopPosixHostPaths());
     await writeLinuxLauncherRecord({
-      recordPath: desktopHostRuntimePaths.launcherRecordPath,
+      recordPath: desktopPosixHostPaths().launcherRecordPath,
       appImage: process.env.APPIMAGE,
     });
   } catch (error) {
@@ -4652,7 +4859,9 @@ function startDesktopInstance(): void {
   });
   const hostOnly = (args: ReadonlyArray<string>) =>
     app.isPackaged &&
-    (process.platform === "darwin" || process.platform === "linux") &&
+    (process.platform === "darwin" ||
+      process.platform === "linux" ||
+      process.platform === "win32") &&
     resolvePackagedDesktopLaunch(applicationIdentity, args).kind === "host-only";
   app.on("second-instance", (_event, commandLine) => {
     // A concurrent Nightly launch joins this owner without opening its shell.
@@ -4679,11 +4888,19 @@ function startDesktopInstance(): void {
           packaged: app.isPackaged,
           platform: process.platform,
           resourcesPath: process.resourcesPath,
+          ...(desktopWindowsHost === undefined
+            ? {}
+            : {
+                windows: {
+                  profileId: desktopWindowsHost.paths.profileId,
+                  version: app.getVersion(),
+                },
+              }),
           ...(linux
             ? {
                 linux: {
-                  windowsSocketPath: desktopHostRuntimePaths.windowsSocketPath,
-                  launcherRecordPath: desktopHostRuntimePaths.launcherRecordPath,
+                  windowsSocketPath: desktopPosixHostPaths().windowsSocketPath,
+                  launcherRecordPath: desktopPosixHostPaths().launcherRecordPath,
                   version: app.getVersion(),
                 },
               }
@@ -4703,7 +4920,7 @@ function startDesktopInstance(): void {
                       instanceId: serverInstanceId,
                       desktopBridgeSecret,
                     },
-              onActiveWindowCountChanged: () => desktopClientLifetime.nightlyWindowsChanged(),
+              onClientLifetimeCountChanged: () => desktopClientLifetime.nightlyWindowsChanged(),
               closeOwnerContexts: async (windowId) => {
                 await browserSurfaceHost?.closeOwnerContexts(windowId);
               },

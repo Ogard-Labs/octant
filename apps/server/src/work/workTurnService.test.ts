@@ -1,4 +1,5 @@
 import { ConversationInputTransfer } from "../attachments/conversationInputTransfer";
+import { OCTANT_LOCAL_ACTOR_ID } from "../shellService";
 import { randomUUID } from "node:crypto";
 import { approvedWorkingFolderChoices } from "../approvedWorkingFolders";
 import { workExternalInputReceipt } from "./workExternalInput";
@@ -24,6 +25,7 @@ import {
   decodeProjectExtraFolder,
   decodeContextCompactionId,
   decodeContextSubjectRef,
+  decodeProjectMemoryView,
   decodeProviderRuntimeEvent,
   decodeNativeHarnessSlotCandidate,
   EventActor,
@@ -124,6 +126,25 @@ const ids = {
 } as const;
 
 describe("WorkTurnService", () => {
+  it.each(["ask-first", "auto-accept-edits", "auto", "full-access"] as const)(
+    "refuses a Windows Work turn at %s before acquiring a provider or appending the journal",
+    async (threadAccess) => {
+      const fixture = serviceFixture({ threadAccess });
+      vi.stubGlobal("process", Object.create(process, { platform: { value: "win32" } }));
+      try {
+        await expect(
+          fixture.service.startFirstTurn(ids.window, startCommand()),
+        ).rejects.toMatchObject({
+          failure: { category: "unavailable" },
+        });
+        expect(fixture.acquireInputs).toHaveLength(0);
+        expect(fixture.persistence.journal.append).not.toHaveBeenCalled();
+      } finally {
+        vi.unstubAllGlobals();
+      }
+    },
+  );
+
   it("launches in the selected approved folder and refuses revocation without falling back", async () => {
     const base = workProject();
     const project = workProject({
@@ -964,6 +985,32 @@ describe("WorkTurnService", () => {
       expect(fixture.service.runningTurnAccess(String(ids.thread))).toBeUndefined();
       expect(runningAccess.has(String(ids.thread))).toBe(false);
     }
+  });
+
+  it("starts a sandboxed Full access turn with the sandbox, and records it for the turn's commands", async () => {
+    const release = deferred<void>();
+    const seen: Array<unknown> = [];
+    const runningAccess: RunningWorkTurnAccess = new Map();
+    const fixture = serviceFixture({
+      threadAccess: "full-access",
+      fullAccessSandbox: true,
+      runningAccess,
+      turnRuntime: {
+        run: async (input) => {
+          seen.push(
+            input.fullAccessSandbox,
+            runningAccess.get(String(ids.thread))?.fullAccessSandbox,
+          );
+          await release.promise;
+          return { kind: "completed", response: "Done" };
+        },
+      },
+    });
+    await fixture.service.startFirstTurn(ids.window, startCommand());
+    await vi.waitFor(() => expect(seen).toHaveLength(2));
+    release.resolve();
+    await fixture.waitForIdle();
+    expect(seen).toEqual([true, true]);
   });
 
   it("offers the runtime's artifact tool only to a thread that chose it, and keeps Canvas for the rest", async () => {
@@ -1987,6 +2034,50 @@ describe("WorkTurnService", () => {
     expect(turnEnded).toHaveBeenCalledWith(expect.objectContaining({ mode: "work" }), summary);
   });
 
+  it("digests the prompt of a thread's first turn and not its follow-ups", async () => {
+    const summary: TurnEndSummary = {
+      stopReason: "end-of-turn",
+      startedAt: "2026-07-29T12:00:00.000Z",
+      endedAt: "2026-07-29T12:00:10.000Z",
+      metrics: { precision: "unavailable", wallMs: 10_000 },
+    };
+    const run = vi.fn<WorkTurnRuntimePort["run"]>(async (input) => {
+      input.onTurnEnded?.(summary);
+      return { kind: "completed", response: "Provider reply" };
+    });
+    const turnEnded = vi.fn();
+    const fixture = serviceFixture({
+      turnRuntime: { run },
+      nativeHarness: {
+        contextFor: () => [],
+        turnStarted: vi.fn(),
+        turnCompleted: vi.fn(async () => undefined),
+        turnEnded,
+        promptDigest: (text) => `digest:${text}`,
+      },
+    });
+    const runTurn = async (n: number, prompt: string) => {
+      const suffix = n.toString(16).padStart(12, "0");
+      const requestId = decodeWorkTurnRequestId(`aaaaaaaa-aaaa-4aaa-8aaa-${suffix}`);
+      await fixture.service.startFirstTurn(ids.window, {
+        ...startCommand(),
+        requestId,
+        turnId: decodeWorkTurnId(`bbbbbbbb-bbbb-4bbb-8bbb-${suffix}`),
+        prompt,
+      });
+      await fixture.waitForIdle(requestId);
+    };
+
+    await runTurn(1, "Summarize the brief");
+    await runTurn(2, "continue");
+
+    await vi.waitFor(() => expect(turnEnded).toHaveBeenCalledTimes(2));
+    expect(turnEnded.mock.calls[0]?.[1]).toMatchObject({
+      promptDigest: "digest:Summarize the brief",
+    });
+    expect(turnEnded.mock.calls[1]?.[1]).toEqual(summary);
+  });
+
   it.each(["provider", "completion"] as const)(
     "keeps cancellation and usage when it wins during %s settlement",
     async (stage) => {
@@ -2466,6 +2557,57 @@ describe("WorkTurnService", () => {
     await fixture.waitForIdle();
     expect(JSON.stringify(contexts.flat())).not.toContain("octant_browser");
   });
+  it("carries the Project's active memory in a Work turn's context, as a Chat turn does", async () => {
+    const contexts: Array<ReadonlyArray<ProviderContextBlock>> = [];
+    const entry = (id: string, content: string) => ({
+      id,
+      projectId: ids.project,
+      kind: "decision",
+      content,
+      provenance: { kind: "user-authored" },
+      author: { kind: "local-user", actorId: OCTANT_LOCAL_ACTOR_ID },
+      version: 1,
+      createdAt: "2026-07-14T10:00:00.000Z",
+      updatedAt: "2026-07-14T10:00:00.000Z",
+    });
+    const memory = decodeProjectMemoryView({
+      projectId: ids.project,
+      active: [
+        {
+          ...entry("00000000-0000-4000-8000-000000000a01", "Invoices go out on the 1st."),
+          status: "active",
+        },
+      ],
+      history: [
+        {
+          ...entry("00000000-0000-4000-8000-000000000a02", "Invoices go out on the 15th."),
+          status: "superseded",
+          supersededBy: "00000000-0000-4000-8000-000000000a01",
+        },
+      ],
+    });
+    const readProjectMemory = vi.fn(() => memory);
+    const fixture = serviceFixture({
+      readProjectMemory,
+      turnRuntime: {
+        run: async (input) => {
+          contexts.push(input.context ?? []);
+          return { kind: "completed", response: "Provider reply" };
+        },
+      },
+    });
+
+    expect((await fixture.service.startFirstTurn(ids.window, startCommand())).kind).toBe(
+      "accepted",
+    );
+    await fixture.waitForIdle();
+
+    const sent = contexts.flat();
+    expect(sent).toContainEqual({ kind: "project-memory", text: "Invoices go out on the 1st." });
+    expect(JSON.stringify(sent)).not.toContain("on the 15th");
+    expect(readProjectMemory).toHaveBeenCalledWith(ids.project);
+  });
+
   it("opens every task with the Project's status, and takes stock when the status is stale unless the request is unrelated", async () => {
     const contexts: Array<ReadonlyArray<ProviderContextBlock>> = [];
     const disk = new Map<string, string>([
@@ -4181,6 +4323,44 @@ describe("WorkTurnService", () => {
         .flatMap(([request]) => request.events)
         .map((event: { readonly payload: unknown }) => event.payload);
 
+    it("refuses a turn whose thread a move froze while the turn was still being prepared", async () => {
+      // Clear when the turn is admitted, held by the time its context is ready.
+      let reads = 0;
+      const run = vi.fn();
+      const fixture = serviceFixture({
+        moveHold: () => {
+          reads += 1;
+          return reads > 1;
+        },
+        turnRuntime: { run },
+      });
+
+      await expect(
+        fixture.service.startFirstTurn(ids.window, startCommand()),
+      ).rejects.toMatchObject({ message: expect.stringContaining("moving") });
+      expect(run).not.toHaveBeenCalled();
+      expect((await fixture.service.transcript(ids.window, ids.thread)).turns).toEqual([]);
+    });
+
+    it("refuses to rewind a thread a move holds, so the conversation it carries stays whole", async () => {
+      let moving = false;
+      const fixture = serviceFixture({ moveHold: () => moving });
+      await fixture.service.startFirstTurn(ids.window, startCommand());
+      await fixture.waitForIdle();
+      await fixture.service.startFirstTurn(ids.window, secondCommand());
+      await fixture.waitForIdle(secondRequest);
+      moving = true;
+
+      await expect(
+        fixture.service.rewindThread(ids.window, rewindFrom(secondRequest)),
+      ).rejects.toMatchObject({ message: expect.stringContaining("moving") });
+      expect(
+        (await fixture.service.transcript(ids.window, ids.thread)).turns.map(
+          (turn) => turn.requestId,
+        ),
+      ).toEqual([ids.request, secondRequest]);
+    });
+
     it("removes the turns, returns the removed prompt, and hands only the kept turns to a fresh session", async () => {
       const { fixture, run } = await twoTurns(true);
 
@@ -5178,7 +5358,9 @@ function serviceFixture(
     readonly projectStatusFiles?: WorkProjectStatusFiles;
     readonly turnFileObserver?: WorkTurnServiceDependencies["turnFileObserver"];
     readonly readProviderModel?: WorkTurnServiceDependencies["persistence"]["readProviderModel"];
+    readonly readProjectMemory?: WorkTurnServiceDependencies["persistence"]["readProjectMemory"];
     readonly threadAccess?: WorkAccess;
+    readonly fullAccessSandbox?: boolean;
     readonly documentDelivery?: "canvas" | "native-artifacts";
     readonly onTurnRequested?: WorkTurnServiceDependencies["onTurnRequested"];
     readonly onTurnCancelled?: WorkTurnServiceDependencies["onTurnCancelled"];
@@ -5193,6 +5375,8 @@ function serviceFixture(
     /** Whether the thread had taken in outside content when a handoff is read. */
     readonly externalContentIngested?: boolean;
     readonly serverProjects?: WorkTurnServiceDependencies["serverProjects"];
+    /** Read on every admission and rewind, so a test can freeze the thread for a move. */
+    readonly moveHold?: (threadId: string) => boolean;
   } = {},
 ) {
   const projection = new WorkTurnProjection();
@@ -5249,6 +5433,9 @@ function serviceFixture(
   const persistence = {
     status: () => ({ state: "current", integrity: "ok" }),
     readProject: vi.fn(() => options.project ?? workProject()),
+    ...(options.readProjectMemory === undefined
+      ? {}
+      : { readProjectMemory: options.readProjectMemory }),
     ...(options.readProviderModel === undefined
       ? {}
       : { readProviderModel: options.readProviderModel }),
@@ -5304,6 +5491,7 @@ function serviceFixture(
         bindingRevisionId: ids.binding,
         workingDirectory: ".",
         ...(options.threadAccess === undefined ? {} : { access: options.threadAccess }),
+        ...(options.fullAccessSandbox === true ? { fullAccessSandbox: true } : {}),
         ...(options.completionConfirmed?.() === true ? { completionConfirmed: true } : {}),
         ...(options.documentDelivery === undefined
           ? {}
@@ -5386,6 +5574,7 @@ function serviceFixture(
       ? {}
       : { turnFileObserver: options.turnFileObserver }),
     ...(options.onTurnRequested === undefined ? {} : { onTurnRequested: options.onTurnRequested }),
+    ...(options.moveHold === undefined ? {} : { moveHold: options.moveHold }),
     ...(options.onTurnCancelled === undefined ? {} : { onTurnCancelled: options.onTurnCancelled }),
     ...(options.agentRuns === undefined ? {} : { agentRuns: options.agentRuns }),
     ...(options.runningAccess === undefined ? {} : { runningAccess: options.runningAccess }),

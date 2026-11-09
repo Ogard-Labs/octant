@@ -42,10 +42,13 @@ import {
   USAGE_RESUME_SCHEDULED,
   type UsageResumeRecord,
   type WindowId,
+  type EventActor,
 } from "@octant/contracts";
+import { THREAD_MOVING_REFUSAL } from "../hub/threadMoveHolds";
 import { Schema } from "effect";
 import { unsupportedModelOptionValues } from "@octant/domain/chat-policy";
 import {
+  defaultFullAccessSandboxFor,
   guardrailLowered,
   permissionModeOf,
   workAccessOfPermissionMode,
@@ -139,6 +142,8 @@ const SERVER_THREAD_STAYS_IN_FOLDER =
   "A thread in a Project on a server works in that Project's folder there, so it cannot move to another folder or Project.";
 
 export interface WorkThreadServiceDependencies {
+  /** Whether a move holds a thread; a held thread takes no command. */
+  readonly moveHold?: (threadId: string) => boolean;
   readonly persistence: {
     readonly status: () => {
       readonly state: string;
@@ -160,10 +165,7 @@ export interface WorkThreadServiceDependencies {
           readonly eventName: string;
           readonly eventVersion: 1;
           readonly correlationId: string;
-          readonly actor: {
-            readonly kind: "local-user" | "system";
-            readonly actorId: string;
-          };
+          readonly actor: EventActor;
           readonly occurredAt: string;
           readonly payload: unknown;
         }>;
@@ -287,12 +289,14 @@ export class WorkThreadService {
   readonly #observeRuntime?: WorkThreadServiceDependencies["observeRuntime"];
   readonly #projectDueReminder?: WorkThreadServiceDependencies["projectDueReminder"];
   readonly #issueContext?: GithubIssueContextPort;
+  readonly #moveHold: ((threadId: string) => boolean) | undefined;
   readonly #terminalSessions: TerminalSessionImportPort | undefined;
   readonly #linearIssueContext?: LinearIssueContextPort;
   readonly #recordExternalContentIngestion: RecordExternalContentIngestion | undefined;
   readonly #serverProjects: ServerWorkProjectThreads | undefined;
 
   constructor(dependencies: WorkThreadServiceDependencies) {
+    this.#moveHold = dependencies.moveHold;
     this.#persistence = dependencies.persistence;
     this.#projects = dependencies.projects;
     this.#projection = dependencies.projection;
@@ -319,6 +323,70 @@ export class WorkThreadService {
     if (dependencies.linearIssueContext !== undefined) {
       this.#linearIssueContext = dependencies.linearIssueContext;
     }
+  }
+
+  /** Called only after the owner route verifies its host/target-bound unlock. */
+  changeOwnerAccess(input: {
+    readonly threadId: WorkThreadId;
+    readonly expectedVersion: number;
+    readonly access: WorkAccess;
+    readonly ownerMemberId: string;
+    readonly freshFull: boolean;
+  }): WorkThread {
+    this.#assertReady();
+    const current = this.#projection.read(input.threadId);
+    if (current === undefined) throw this.#failure("invalid", "Work thread was not found.");
+    if (current.version !== input.expectedVersion)
+      throw this.#failure("stale", "Work state changed; reload and unlock again.");
+    if (input.access === "full-access" && !input.freshFull)
+      throw this.#failure(
+        "unauthorized",
+        "Full access needs a fresh owner unlock for this change.",
+      );
+    const project = this.#persistence.readProject(current.projectId);
+    if (
+      project?.type !== "work" ||
+      project.lifecycle !== "active" ||
+      current.lifecycle !== "active"
+    )
+      throw this.#failure("unauthorized", "The Work thread or Project is unavailable.");
+    if (
+      current.bindingRevisionId !== undefined &&
+      String(current.bindingRevisionId) !== String(project.bindingHistory.at(-1)?.revisionId)
+    )
+      throw this.#failure("stale", "Work Project binding changed; reload and unlock again.");
+    const updated = decodeWorkThread({
+      ...current,
+      access: input.access,
+      version: current.version + 1,
+      updatedAt: decodeTimestamp(this.#clock()),
+    });
+    const actor: EventActor = {
+      kind: "owner-unlock",
+      actorId: decodeActorId(input.ownerMemberId),
+      memberId: input.ownerMemberId,
+    };
+    this.#inUnit(() => {
+      this.#append(
+        current.id,
+        current.version,
+        "work.thread-updated@1",
+        { kind: "thread-updated", thread: updated },
+        actor,
+      );
+      this.#journalLowering(
+        {
+          scope: "thread",
+          from: workModeOfAccess(current.access),
+          to: workModeOfAccess(updated.access),
+          projectId: current.projectId,
+          threadId: String(current.id),
+        },
+        actor,
+      );
+    });
+    this.#projection.apply({ kind: "thread-updated", thread: updated });
+    return updated;
   }
 
   async bootstrap(authenticatedWindowId: WindowId): Promise<WorkThreadBootstrap> {
@@ -428,6 +496,15 @@ export class WorkThreadService {
     this.#assertReady();
     try {
       const command = decodeWorkThreadCommand(input);
+      // A creation names a thread that does not exist yet, except the move's own
+      // arrival, which opens the planned thread it already holds.
+      if (
+        "threadId" in command &&
+        command.kind !== "create-work-thread" &&
+        this.#moveHold?.(String(command.threadId)) === true
+      ) {
+        throw this.#failure("unavailable", THREAD_MOVING_REFUSAL);
+      }
       if (command.kind === "update-work-settings") {
         const current = this.#currentSettings();
         if (current.version !== command.expectedVersion) {
@@ -441,6 +518,11 @@ export class WorkThreadService {
                 defaultModelId: command.defaultModelId,
               }),
           defaultAccess: command.defaultAccess,
+          // Absent keeps the stored choice, so a save from a client that does
+          // not show the switch never turns it off.
+          ...((command.defaultFullAccessSandbox ?? current.defaultFullAccessSandbox) === true
+            ? { defaultFullAccessSandbox: true }
+            : {}),
           version: command.expectedVersion + 1,
           updatedAt: decodeTimestamp(this.#clock()),
         });
@@ -597,6 +679,16 @@ export class WorkThreadService {
               ? undefined
               : workAccessOfPermissionMode(project.defaultPermissionMode)) ??
             this.#currentSettings().defaultAccess,
+          // The opt-in sandbox only rides along when the resolved access is
+          // Full access: the request's choice, else the Project's, else Settings'.
+          ...(((project.defaultPermissionMode === undefined
+            ? undefined
+            : workAccessOfPermissionMode(project.defaultPermissionMode)) ??
+            this.#currentSettings().defaultAccess) === "full-access" &&
+          (command.fullAccessSandbox ??
+            defaultFullAccessSandboxFor({ project, settings: this.#currentSettings() }))
+            ? { fullAccessSandbox: true }
+            : {}),
           version: 1,
           createdAt: decodeTimestamp(this.#clock()),
           updatedAt: decodeTimestamp(this.#clock()),
@@ -881,9 +973,17 @@ export class WorkThreadService {
         // The level takes effect when the next turn starts: a turn fixes its
         // level at admission and journals it, so a running turn keeps the one
         // it started with.
+        // The sandbox choice only means something at Full access: kept from the
+        // command, else from the thread, and dropped at any other level so a
+        // later raise to Full access never inherits a stale choice.
+        const { fullAccessSandbox: currentSandbox, ...unsandboxed } = current;
+        const sandboxed =
+          command.access === "full-access" &&
+          (command.fullAccessSandbox ?? currentSandbox) === true;
         const updated = decodeWorkThread({
-          ...current,
+          ...unsandboxed,
           access: command.access,
+          ...(sandboxed ? { fullAccessSandbox: true } : {}),
           version: command.expectedVersion + 1,
           updatedAt: decodeTimestamp(this.#clock()),
         });
@@ -1256,6 +1356,11 @@ export class WorkThreadService {
       bindingRevisionId,
       workingDirectory: ".",
       access: this.#currentSettings().defaultAccess,
+      ...(this.#currentSettings().defaultAccess === "full-access" &&
+      (command.fullAccessSandbox ??
+        defaultFullAccessSandboxFor({ settings: this.#currentSettings() }))
+        ? { fullAccessSandbox: true }
+        : {}),
       version: 1,
       createdAt: decodeTimestamp(this.#clock()),
       updatedAt: decodeTimestamp(this.#clock()),
@@ -1753,13 +1858,16 @@ export class WorkThreadService {
    * thread or settings version waits on it. A change that does not lower the
    * guardrail records nothing.
    */
-  #journalLowering(change: {
-    readonly scope: "global" | "project" | "thread";
-    readonly from: PermissionMode;
-    readonly to: PermissionMode;
-    readonly projectId?: ProjectId;
-    readonly threadId?: string;
-  }): void {
+  #journalLowering(
+    change: {
+      readonly scope: "global" | "project" | "thread";
+      readonly from: PermissionMode;
+      readonly to: PermissionMode;
+      readonly projectId?: ProjectId;
+      readonly threadId?: string;
+    },
+    actor: EventActor = { kind: "local-user", actorId: decodeActorId(OCTANT_LOCAL_ACTOR_ID) },
+  ): void {
     if (!guardrailLowered(change.from, change.to)) return;
     this.#persistence.journal.append({
       aggregate: { aggregateType: "guardrail-change", aggregateId: this.#uuid() },
@@ -1770,7 +1878,7 @@ export class WorkThreadService {
           eventName: GUARDRAIL_LEVEL_LOWERED,
           eventVersion: 1,
           correlationId: decodeCorrelationId(this.#uuid()),
-          actor: { kind: "local-user", actorId: decodeActorId(OCTANT_LOCAL_ACTOR_ID) },
+          actor,
           occurredAt: decodeTimestamp(this.#clock()),
           payload: decodeGuardrailLevelLowered({ surface: "work", ...change }),
         },
@@ -1788,7 +1896,7 @@ export class WorkThreadService {
     payload: unknown,
     // Everything a person asks for is theirs; only the host's own timer
     // writes as the system, so a journal reader can tell the two apart.
-    actorKind: "local-user" | "system" = "local-user",
+    actorKind: "local-user" | "system" | EventActor = "local-user",
   ): void {
     this.#persistence.journal.append({
       aggregate: {
@@ -1803,9 +1911,11 @@ export class WorkThreadService {
           eventVersion: 1,
           correlationId: decodeCorrelationId(this.#uuid()),
           actor:
-            actorKind === "system"
-              ? { kind: "system", actorId: decodeActorId(OCTANT_LOCAL_ACTOR_ID) }
-              : { kind: "local-user", actorId: decodeActorId(OCTANT_LOCAL_ACTOR_ID) },
+            typeof actorKind === "object"
+              ? actorKind
+              : actorKind === "system"
+                ? { kind: "system", actorId: decodeActorId(OCTANT_LOCAL_ACTOR_ID) }
+                : { kind: "local-user", actorId: decodeActorId(OCTANT_LOCAL_ACTOR_ID) },
           occurredAt: decodeTimestamp(this.#clock()),
           payload,
         },

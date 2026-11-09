@@ -98,6 +98,46 @@ export function buildThreadHandOffPrompt(bundle: ThreadExportBundle): string {
   return lines.join("\n");
 }
 
+export const HANDOVER_SUMMARY_SECTIONS = ["Where the work stands", "What comes next"] as const;
+
+/**
+ * The instruction for the agent's own summary turn in a handover note: where
+ * the work stands and what comes next, over the same bounded cut a hand-off
+ * reads. The note already lists the changed files and what stayed behind, so
+ * the answer is asked to stay short and not repeat them; it is clipped,
+ * redacted, and stripped of local paths after it returns.
+ */
+export function buildHandoverSummaryPrompt(bundle: ThreadExportBundle): string {
+  const lines: string[] = [
+    "This thread is being handed over through its Git branch to continue on another computer, without you.",
+    "Write a short summary for whoever continues it: where the work stands and what comes next.",
+    "Use only what the transcript below says; do not invent detail, and say plainly when something is unknown.",
+    // Third-level headings: the note files the answer under its own `##` heading.
+    "Answer in plain Markdown with exactly these `###` section headings, in this order:",
+    ...HANDOVER_SUMMARY_SECTIONS.map((section) => `### ${section}`),
+    "Stay under 300 words. Do not list changed files, name folders on this computer, or add a preamble or closing remarks.",
+    "",
+    `Thread: ${bundle.octant.title} (${bundle.octant.mode} mode)`,
+  ];
+  if (bundle.evidence.completion !== undefined) {
+    lines.push(
+      `Delivery: ${bundle.evidence.completion.deliveryTarget} — ${bundle.evidence.completion.satisfactionEvidence}`,
+    );
+  }
+  lines.push("", "--- transcript ---");
+  const { entries, dropped } = boundedTranscript(bundle);
+  if (dropped > 0) {
+    lines.push(
+      `[${String(dropped)} earlier entries omitted for length; the most recent are below]`,
+    );
+  }
+  for (const entry of entries) {
+    const status = entry.status === "completed" ? "" : ` (${entry.status})`;
+    lines.push("", `${entry.role}${status}:`, entry.text);
+  }
+  return lines.join("\n");
+}
+
 function boundedTranscript(bundle: ThreadExportBundle): {
   readonly entries: ReadonlyArray<{ role: string; status: string; text: string }>;
   readonly dropped: number;

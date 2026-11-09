@@ -212,6 +212,7 @@ export function CodeProjectPlanner(
             aria-label="Planner thread"
             value={selected === undefined ? "" : String(selected.id)}
             options={threads.map((thread) => ({ id: String(thread.id), label: thread.title }))}
+            placeholder={threads.length === 0 ? "No Code threads yet" : "Choose a thread"}
             onValueChange={choose}
             disabled={disabled}
           />

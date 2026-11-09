@@ -13,6 +13,11 @@ import { OctantMode } from "./modes";
 import { ProjectId } from "./projects";
 import { CanvasId } from "./canvas";
 import {
+  AutoCompactIdleMinutes,
+  AutoCompactLimitPercent,
+  AutoCompactWindowPercent,
+} from "./context";
+import {
   PreviewDisplayName,
   PreviewHostId,
   PreviewOpaqueRef,
@@ -509,6 +514,7 @@ export const CompletedThreadArchiveAfterDays = Schema.Int.pipe(
 );
 export type CompletedThreadArchiveAfterDays = typeof CompletedThreadArchiveAfterDays.Type;
 export const DEFAULT_COMPLETED_THREAD_ARCHIVE_AFTER_DAYS: CompletedThreadArchiveAfterDays = 7;
+export const DEFAULT_AUTO_COMPACT_OCTANT_WINDOW_PERCENT: AutoCompactWindowPercent = 85;
 
 /**
  * An absolute folder path as the host canonicalized it. Same shape the
@@ -516,7 +522,9 @@ export const DEFAULT_COMPLETED_THREAD_ARCHIVE_AFTER_DAYS: CompletedThreadArchive
  */
 export const DefaultFolder = Schema.NonEmptyTrimmedString.pipe(
   Schema.maxLength(4_096),
-  Schema.filter((value) => value.startsWith("/") && !value.includes("\0")),
+  Schema.filter(
+    (value) => !value.includes("\0") && (value.startsWith("/") || /^[A-Za-z]:\\/.test(value)),
+  ),
   Schema.brand("DefaultFolder"),
 );
 export type DefaultFolder = typeof DefaultFolder.Type;
@@ -674,6 +682,41 @@ export const ShellSettings = Schema.Struct({
     Schema.NullOr(CompletedThreadArchiveAfterDays),
     { default: () => DEFAULT_COMPLETED_THREAD_ARCHIVE_AFTER_DAYS },
   ),
+  /**
+   * Compact a thread once its window is this full, for threads Octant keeps
+   * the conversation of: Octant Harness, and Chat and Work on a direct
+   * endpoint. Near a full window these otherwise only drop older exchanges
+   * from what they send. `null` means never.
+   */
+  autoCompactOctantWindowPercent: Schema.optionalWith(Schema.NullOr(AutoCompactWindowPercent), {
+    default: () => DEFAULT_AUTO_COMPACT_OCTANT_WINDOW_PERCENT,
+  }),
+  /**
+   * The same rule for threads a runtime keeps (Claude Code, Codex, and the
+   * others), which compact by themselves at their own point. `null` leaves
+   * that to the runtime.
+   */
+  autoCompactRuntimeWindowPercent: Schema.optionalWith(Schema.NullOr(AutoCompactWindowPercent), {
+    default: () => null,
+  }),
+  /**
+   * Compact a thread once no turn has run on it for this many minutes, so the
+   * next turn starts from a summary rather than re-reading a window whose
+   * provider cache has long expired. `null`, the default, means never: a
+   * compaction of a thread nobody returns to is pure cost.
+   */
+  autoCompactIdleMinutes: Schema.optionalWith(Schema.NullOr(AutoCompactIdleMinutes), {
+    default: () => null,
+  }),
+  /**
+   * Compact a thread, and write a summary another provider can carry, once a
+   * turn leaves its provider's account window (a 5-hour or weekly limit) at
+   * least this used. `null`, the default, means never: the summary spends a
+   * little of the limit that is running out.
+   */
+  autoCompactLimitPercent: Schema.optionalWith(Schema.NullOr(AutoCompactLimitPercent), {
+    default: () => null,
+  }),
   /**
    * The release ring to follow, once someone has chosen one.
    *

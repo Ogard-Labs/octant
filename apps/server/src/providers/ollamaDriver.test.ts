@@ -258,7 +258,12 @@ describe("Ollama provider driver", () => {
       expect((await events).at(-1)?.kind).toBe("completed");
     }
     const userMessages = (index: number) =>
-      requestBodies[index]?.messages.filter((message) => message.role === "user");
+      requestBodies[index]?.messages.filter(
+        (message) =>
+          message.role === "user" &&
+          // The harness's window note rides each request; this checks the turns.
+          !String(message.content).startsWith("[Note from Octant, not the user:"),
+      );
     expect(userMessages(0)).toEqual([{ role: "user", content: "describe", images: ["AQID"] }]);
     expect(userMessages(1)).toEqual([
       { role: "user", content: "describe" },

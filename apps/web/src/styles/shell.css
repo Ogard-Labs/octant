@@ -2072,6 +2072,34 @@ html[data-octant-native-host="true"]
     padding-top: var(--oct-title-rail-h);
   }
 
+  /* The panel's scroller clips the start-screen ground to the sheet's exposed
+     corners; otherwise its opaque picture squares off the sheet underneath. */
+  .shell-frame:not(.shell--wide-context-open)
+    .workspace-pane:is([data-surface-kind="welcome"], [data-surface-kind="draft-thread"]):not(
+      :has(> .workspace-pane__header)
+    )
+    > .workspace-pane__panel {
+    border-top-right-radius: var(--oct-radius-md);
+  }
+
+  .shell--sidebar-collapsed.shell-frame
+    .workspace-pane:is([data-surface-kind="welcome"], [data-surface-kind="draft-thread"]):not(
+      :has(> .workspace-pane__header)
+    )
+    > .workspace-pane__panel {
+    border-top-left-radius: var(--oct-radius-md);
+  }
+
+  /* A start screen has no pane heading to hold the title band open. Without
+     that space its ground paints over the frame from the window's top edge.
+     Tabs can still supply a header, so reserve the band only when none exists. */
+  .shell-frame
+    .workspace-pane:is([data-surface-kind="welcome"], [data-surface-kind="draft-thread"]):not(
+      :has(> .workspace-pane__header)
+    ) {
+    padding-top: var(--oct-title-rail-h);
+  }
+
   /* The page scrolls under the title band, which belongs to the window frame.
      With the header pinned below that band, a row scrolled past the header
      came out again above it, over the window controls. */
@@ -4325,4 +4353,30 @@ html:not([data-octant-reduced-transparency="true"], [data-octant-increased-contr
   font-size: var(--oct-text-base);
   font-weight: 600;
   letter-spacing: var(--oct-tracking-tight);
+}
+
+.browser-workspace__agent-availability,
+.browser-workspace__agent-availability > span {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--oct-space-1);
+  color: var(--oct-muted);
+  font-size: var(--oct-text-xs);
+}
+.browser-workspace__agent-availability {
+  min-width: 0;
+  max-width: 30%;
+}
+.browser-workspace__agent-availability > button {
+  min-width: 0;
+}
+.browser-workspace__availability-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+@media (max-width: 720px) {
+  .browser-workspace__availability-label {
+    display: none;
+  }
 }

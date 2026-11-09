@@ -1,4 +1,15 @@
-import { PendingQuestionDeferral } from "@octant/contracts/pending-requests";
+import {
+  BROWSER_DOWNLOAD_PERMISSION_EVENT,
+  BrowserDownloadPermissionChanged,
+} from "@octant/contracts/browser-download-permissions";
+import {
+  BROWSER_UPLOAD_PERMISSION_EVENT,
+  BrowserUploadPermissionChanged,
+} from "@octant/contracts/browser-upload-permissions";
+import {
+  DecisionReviewRecorded,
+  PendingQuestionDeferral,
+} from "@octant/contracts/pending-requests";
 import {
   BROWSER_SESSION_EVENT_NAMES,
   BrowserSessionGranted,
@@ -191,10 +202,12 @@ import {
   HubDelegationRecordedPayload,
   HubMembershipChangedPayload,
   REMOTE_PUSH_DELIVERY_EVENT_NAMES,
+  REMOTE_PUSH_MOVE_WAITING_DELIVERY_EVENT_NAMES,
   REMOTE_PUSH_REGISTRATION_EVENT_NAMES,
   REMOTE_SERVER_GRANT_CLOSED,
   REMOTE_SERVER_GRANT_OPENED,
   RemotePushDeliveryRecordedV1,
+  RemotePushMoveWaitingDeliveryRecordedV1,
   RemotePushRegistrationClearedV1,
   RemotePushRegistrationRecordedV1,
   RemoteServerGrantClosedPayload,
@@ -226,6 +239,7 @@ import {
   BROWSER_DOWNLOAD_EVENT_NAMES,
   BrowserDownloadRefused,
   BrowserDownloadSaved,
+  BrowserDownloadSelectedSaved,
   BROWSER_FLOW_EVENT_NAMES,
   BrowserFlowDeleted,
   BrowserFlowSaved,
@@ -274,6 +288,8 @@ import {
   ServerProjectBoundPayload,
   ServerProjectRemovedPayload,
   ServerProjectRenamedPayload,
+  ServerProjectActionsReplacedPayload,
+  ServerWorkDeveloperToolsChangedPayload,
 } from "@octant/contracts/server-projects";
 import {
   RUNTIME_NETWORK_EVENT_NAMES,
@@ -388,6 +404,8 @@ import { registerArtifactMirrorEvents } from "../canvas/artifactMirrorEventStore
 import { registerGoalLoopEvents } from "../goal/goalLoopEventStore";
 import { registerFollowUpSuggestionEvents } from "../followUps/threadFollowUpSuggestionStore";
 import { registerTerminalSessionEvents } from "../terminalSessions/terminalSessionImports";
+import { registerThreadMoveEvents } from "../hub/threadMoveJournal";
+import { registerMovedHistoryEvents } from "../hub/movedThreadHistory";
 import { registerNativeHarnessEvents } from "../harness/nativeHarnessEvents";
 import { registerTurnMetricsEvents } from "../metrics/turnMetricsStore";
 import { registerSideTaskEvents } from "../sideTasks/sideTaskStore";
@@ -409,6 +427,8 @@ import {
   GithubCloneProjection,
 } from "./githubCloneProjection";
 import { ImageJobProjection } from "../image/imageJobProjection";
+import { registerBenchmarkEvents } from "../benchmarks/benchmarkEventStore";
+import { BenchmarkProjection } from "../benchmarks/benchmarkProjection";
 import {
   DesktopLeaseProjection,
   registerDesktopLeaseEvents,
@@ -430,6 +450,7 @@ export interface Phase1RuntimeRegistries {
   readonly automationProjection: AutomationProjection;
   readonly githubCloneProjection: GithubCloneProjection;
   readonly imageJobProjection: ImageJobProjection;
+  readonly benchmarkProjection: BenchmarkProjection;
   readonly desktopLeaseProjection: DesktopLeaseProjection;
   readonly replicaMembershipProjection: ReplicaMembershipProjection;
   readonly replicaArtifactProjection: ReplicaArtifactProjection;
@@ -507,6 +528,7 @@ export function createPhase1RuntimeRegistries(): Phase1RuntimeRegistries {
     .register("host-oauth.recorded@1", 1, HostOAuthJournalRecord)
     .register("provider-key.recorded@1", 1, ProviderKeyJournalRecord)
     .register("pending-question.deferred@1", 1, PendingQuestionDeferral)
+    .register("decision-review.recorded@1", 1, DecisionReviewRecorded)
     .register("secret-store.recorded@1", 1, SecretStoreJournalRecord)
     .register("ollama.history-recorded@1", 1, OllamaHistoryRecorded)
     .register("claude.resume-identity-recorded@1", 1, ClaudeResumeIdentityRecorded)
@@ -604,6 +626,12 @@ export function createPhase1RuntimeRegistries(): Phase1RuntimeRegistries {
     .register(SERVER_PROJECTS_EVENT_NAMES.bound, 1, ServerProjectBoundPayload)
     .register(SERVER_PROJECTS_EVENT_NAMES.renamed, 1, ServerProjectRenamedPayload)
     .register(SERVER_PROJECTS_EVENT_NAMES.removed, 1, ServerProjectRemovedPayload)
+    .register(SERVER_PROJECTS_EVENT_NAMES.actionsReplaced, 1, ServerProjectActionsReplacedPayload)
+    .register(
+      SERVER_PROJECTS_EVENT_NAMES.developerToolsChanged,
+      1,
+      ServerWorkDeveloperToolsChangedPayload,
+    )
     .register(SHIELD_TAG_EVENT_NAMES.recorded, 1, ShieldTagRecordedPayload)
     .register(SHIELD_FORGE_CHANGE_EVENT_NAMES.observed, 1, ShieldForgeChangeObservedPayload)
     .register(SAFE_NETWORKS_EVENT_NAMES.limitsSet, 1, SafeNetworksLimitsSetPayload)
@@ -689,6 +717,11 @@ export function createPhase1RuntimeRegistries(): Phase1RuntimeRegistries {
     .register(REMOTE_PUSH_REGISTRATION_EVENT_NAMES.recorded, 1, RemotePushRegistrationRecordedV1)
     .register(REMOTE_PUSH_REGISTRATION_EVENT_NAMES.cleared, 1, RemotePushRegistrationClearedV1)
     .register(REMOTE_PUSH_DELIVERY_EVENT_NAMES.recorded, 1, RemotePushDeliveryRecordedV1)
+    .register(
+      REMOTE_PUSH_MOVE_WAITING_DELIVERY_EVENT_NAMES.recorded,
+      1,
+      RemotePushMoveWaitingDeliveryRecordedV1,
+    )
     .register(PRODUCT_FEEDBACK_CAPTURED, 1, ProductFeedbackCaptured)
     .register(PRODUCT_FEEDBACK_DISCARDED, 1, ProductFeedbackDiscarded)
     .register(PRODUCT_FEEDBACK_DELIVERED, 1, ProductFeedbackDelivered)
@@ -720,7 +753,10 @@ export function createPhase1RuntimeRegistries(): Phase1RuntimeRegistries {
     .register(IMAGE_JOB_STATUS_CHANGED, 1, ImageJobStatusChanged)
     .register(BROWSER_CAPTURE_KEPT, 1, BrowserCaptureKept)
     .register(BROWSER_DOWNLOAD_EVENT_NAMES.saved, 1, BrowserDownloadSaved)
+    .register(BROWSER_DOWNLOAD_EVENT_NAMES.selectedSaved, 1, BrowserDownloadSelectedSaved)
     .register(BROWSER_DOWNLOAD_EVENT_NAMES.refused, 1, BrowserDownloadRefused)
+    .register(BROWSER_UPLOAD_PERMISSION_EVENT, 1, BrowserUploadPermissionChanged)
+    .register(BROWSER_DOWNLOAD_PERMISSION_EVENT, 1, BrowserDownloadPermissionChanged)
     .register(BROWSER_SESSION_EVENT_NAMES.granted, 1, BrowserSessionGranted)
     .register(BROWSER_SESSION_EVENT_NAMES.revoked, 1, BrowserSessionRevoked)
     .register(BROWSER_SESSION_EVENT_NAMES.expired, 1, BrowserSessionExpired)
@@ -758,6 +794,8 @@ export function createPhase1RuntimeRegistries(): Phase1RuntimeRegistries {
   registerTurnMetricsEvents(events);
   registerFollowUpSuggestionEvents(events);
   registerTerminalSessionEvents(events);
+  registerThreadMoveEvents(events);
+  registerMovedHistoryEvents(events);
   registerSideTaskEvents(events);
   registerShipEvents(events);
   registerThreadMessageQueueEvents(events);
@@ -765,6 +803,7 @@ export function createPhase1RuntimeRegistries(): Phase1RuntimeRegistries {
   registerReplicaMembershipEvents(events);
   registerReplicaStoreSettingsEvents(events);
   registerDesktopLeaseEvents(events);
+  registerBenchmarkEvents(events);
 
   const hostIdentityMigrations = createRuntimeHostIdentityMigrationRegistry(events);
   const agentRunProjection = new AgentRunProjection();
@@ -772,6 +811,7 @@ export function createPhase1RuntimeRegistries(): Phase1RuntimeRegistries {
   const automationProjection = new AutomationProjection();
   const githubCloneProjection = new GithubCloneProjection();
   const imageJobProjection = new ImageJobProjection();
+  const benchmarkProjection = new BenchmarkProjection();
   const desktopLeaseProjection = new DesktopLeaseProjection();
   const replicaMembershipProjection = new ReplicaMembershipProjection();
   const replicaArtifactProjection = new ReplicaArtifactProjection();
@@ -784,6 +824,7 @@ export function createPhase1RuntimeRegistries(): Phase1RuntimeRegistries {
     automationProjection,
     githubCloneProjection,
     imageJobProjection,
+    benchmarkProjection,
     desktopLeaseProjection,
     replicaMembershipProjection,
     replicaArtifactProjection,
@@ -803,6 +844,7 @@ export function createPhase1RuntimeRegistries(): Phase1RuntimeRegistries {
       .register(automationProjection)
       .register(githubCloneProjection)
       .register(imageJobProjection)
+      .register(benchmarkProjection)
       .register(desktopLeaseProjection)
       .register(new ZenProjection())
       .register(new AgentProfileProjection())

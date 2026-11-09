@@ -1,5 +1,13 @@
+import type { BrowserDownloadPermissions } from "./browserDownloadPermissions";
+import type {
+  BrowserDownloadDestination,
+  BrowserDownloadFacts,
+  BrowserDownloadSaveDecision,
+} from "./browserDownloadSave";
+import type { BrowserDownloadDestinationReceipt } from "@octant/contracts/browser-download";
+import type { BrowserUploadPermissions } from "./browserUploadPermissions";
 import type { BrowserProfileChoice } from "@octant/contracts/project-browser";
-import { browserProfileFromChoice } from "@octant/domain";
+import { browserAgentAvailability, browserProfileFromChoice } from "@octant/domain";
 import { browserSignInOriginRefusal } from "./browserRecoveryMessages";
 import { browserToolImage } from "./browserToolImage";
 import { admitBrowserUpload } from "./browserUploadFiles";
@@ -23,6 +31,7 @@ import {
 } from "./browserToolOperations";
 import { BROWSER_TOOL_DEFINITION, BROWSER_TOOL_HELP } from "./browserToolDefinition";
 import type {
+  BrowserDownloadSource,
   BrowserActionRequest,
   BrowserAutomationSnapshot,
   BrowserContextPolicy,
@@ -34,7 +43,7 @@ import type {
   WindowId,
 } from "@octant/contracts";
 import { MAX_BROWSER_TABS_PER_CONTEXT, sameToolActionAuthority } from "@octant/contracts";
-import { browserProfileKey, isToolAllowedByAllowlist, storedBrowserProfile } from "@octant/domain";
+import { browserProfileKey, storedBrowserProfile } from "@octant/domain";
 import { withToolFamilyHelp, type AppManagedToolSet } from "../providers/appManagedToolSet";
 import {
   browserFlowAgentActor,
@@ -89,6 +98,8 @@ export interface BrowserAppManagedToolsOptions {
       /** On a `record-stop`: end the recording and keep nothing; see the service. */
       readonly discardRecording?: true;
       readonly uploadFiles?: ReadonlyArray<string>;
+      readonly uploadSignal?: AbortSignal;
+      readonly uploadIsCurrent?: () => boolean;
       readonly releaseUpload?: () => Promise<void>;
       readonly refuseStaleRevision?: boolean;
       readonly holdDownloads?: boolean;
@@ -101,14 +112,27 @@ export interface BrowserAppManagedToolsOptions {
       readonly windowId: WindowId;
       readonly threadId: BrowserThreadId;
       readonly downloadId: string;
+      readonly destination?: BrowserDownloadDestination;
+      readonly permissionSignal?: AbortSignal;
+      readonly finalAdmission?: (
+        facts: BrowserDownloadFacts,
+        origin: string,
+      ) => BrowserDownloadSaveDecision;
       readonly workspaceRoot: string | undefined;
+      readonly signal?: AbortSignal;
       readonly ask: (
-        facts: { readonly name: string; readonly sizeBytes: number; readonly mediaType: string },
+        facts: {
+          readonly name: string;
+          readonly sizeBytes: number;
+          readonly mediaType: string;
+          readonly source?: BrowserDownloadSource;
+        },
         origin: string,
       ) => Promise<"approved" | "denied" | "cancelled" | "expired">;
     }) => Promise<
       | {
           readonly status: "saved";
+          readonly destination?: BrowserDownloadDestinationReceipt;
           readonly path: string;
           readonly sizeBytes: number;
           readonly mediaType: string;
@@ -152,6 +176,16 @@ export interface BrowserAppManagedToolsOptions {
    * folder. Absent, both are refused.
    */
   readonly uploadRoot?: () => string | undefined;
+  readonly downloadPermission?: (input: {
+    readonly permissionId: string;
+    readonly profile: StoredBrowserProfile;
+  }) => ReturnType<BrowserDownloadPermissions["prepare"]>;
+  readonly uploadPermission?: (input: {
+    readonly permissionId: string;
+    readonly profile: StoredBrowserProfile;
+    readonly origin: string;
+    readonly files: ReadonlyArray<string>;
+  }) => ReturnType<BrowserUploadPermissions["prepare"]>;
   readonly uuid: () => string;
 }
 
@@ -174,9 +208,17 @@ export function createBrowserAppManagedTools(
   options: BrowserAppManagedToolsOptions,
 ): AppManagedToolSet {
   const initialAuthority = options.resolveAuthority(options.threadId, options.mode);
-  const definitions = isToolAllowedByAllowlist(options.toolConstraints ?? [], BROWSER_TOOL_NAME)
-    ? [BROWSER_TOOL_DEFINITION]
-    : [];
+  const definitions =
+    browserAgentAvailability({
+      toolTransport: true,
+      hostLendsBrowser: true,
+      ...(options.toolConstraints === undefined
+        ? {}
+        : { toolConstraints: options.toolConstraints }),
+      readOnly: options.executionPolicy === "plan",
+    }).status === "available"
+      ? [BROWSER_TOOL_DEFINITION]
+      : [];
   // One operation, admitted on its own: a batch runs each step through here.
   const runOne = async (
     input: Exclude<BrowserToolInput, { readonly operation: "steps" }>,
@@ -427,24 +469,49 @@ export function createBrowserAppManagedTools(
         return failure("download-needs-this-computer");
       }
       const approvals = options.approvals;
-      if (approvals === undefined) return failure("browser-approval-required");
+      const permission =
+        input.downloadPermissionId === undefined || profile === undefined
+          ? undefined
+          : await options.downloadPermission?.({
+              permissionId: input.downloadPermissionId,
+              profile,
+            });
+      if (input.downloadPermissionId !== undefined && permission === undefined)
+        return failure("download-permission-unavailable");
+      if (permission === undefined && approvals === undefined)
+        return failure("browser-approval-required");
       if (options.browser.saveDownload === undefined) return failure("download-unavailable");
       if (signal?.aborted) return failure("tool-interrupted");
       const saved = await options.browser.saveDownload({
         windowId: options.windowId,
         threadId: options.threadId,
         downloadId: input.downloadId,
-        workspaceRoot: options.uploadRoot?.(),
-        ask: (facts, pageOrigin) =>
-          approvals.request({
-            windowId: options.windowId,
-            threadId: String(options.threadId),
-            authority,
-            origin: pageOrigin,
-            ...(profile === undefined ? {} : { profile }),
-            download: facts,
-            ...(signal === undefined ? {} : { signal }),
-          }),
+        workspaceRoot: permission === undefined ? options.uploadRoot?.() : undefined,
+        ...(permission === undefined
+          ? signal === undefined
+            ? {}
+            : { signal }
+          : {
+              signal:
+                signal === undefined
+                  ? permission.signal
+                  : AbortSignal.any([signal, permission.signal]),
+              permissionSignal: permission.signal,
+              destination: permission.destination,
+              finalAdmission: permission.reserve,
+            }),
+        ask: async (facts, pageOrigin) =>
+          permission === undefined
+            ? (approvals?.request({
+                windowId: options.windowId,
+                threadId: String(options.threadId),
+                authority,
+                origin: pageOrigin,
+                ...(profile === undefined ? {} : { profile }),
+                download: facts,
+                ...(signal === undefined ? {} : { signal }),
+              }) ?? "denied")
+            : permission.inspect(facts, pageOrigin),
       });
       return saved.status === "saved" ? browserDownloadSavedResult(saved) : failure(saved.error);
     }
@@ -453,15 +520,31 @@ export function createBrowserAppManagedTools(
     if (signal?.aborted) return failure("tool-interrupted");
     let uploadFiles: ReadonlyArray<string> | undefined;
     let releaseUpload: (() => Promise<void>) | undefined;
+    let uploadSignal: AbortSignal | undefined;
+    let uploadIsCurrent: (() => boolean) | undefined;
     if (input.operation === "upload") {
       // A CLI in a terminal is not the person who would be asked.
       if (options.profileCaller === "terminal-grant") return failure("upload-needs-a-person");
       const approvals = options.approvals;
       if (approvals === undefined) return failure("browser-approval-required");
+      const permission =
+        input.uploadPermissionId === undefined || profile === undefined
+          ? undefined
+          : options.uploadPermission?.({
+              permissionId: input.uploadPermissionId,
+              profile,
+              origin,
+              files: input.files,
+            });
+      if (input.uploadPermissionId !== undefined && permission === undefined)
+        return failure("upload-permission-required");
+      uploadSignal = permission?.signal;
+      uploadIsCurrent = permission?.isCurrent;
       const admitted = await admitBrowserUpload({
-        workspaceRoot: options.uploadRoot?.(),
+        workspaceRoot: permission?.workspaceRoot ?? options.uploadRoot?.(),
         files: input.files,
         ask: (files) =>
+          permission?.approve(files) ??
           approvals.request({
             windowId: options.windowId,
             threadId: String(options.threadId),
@@ -517,10 +600,12 @@ export function createBrowserAppManagedTools(
       // save into, where the question about saving one can be answered.
       ...(options.profileCaller === "terminal-grant" ||
       options.approvals?.isPairedDevice?.(options.windowId) === true ||
-      options.uploadRoot?.() === undefined
+      (options.uploadRoot?.() === undefined && options.downloadPermission === undefined)
         ? {}
         : { holdDownloads: true }),
       ...(uploadFiles === undefined ? {} : { uploadFiles }),
+      ...(uploadSignal === undefined ? {} : { uploadSignal }),
+      ...(uploadIsCurrent === undefined ? {} : { uploadIsCurrent }),
       ...(releaseUpload === undefined ? {} : { releaseUpload }),
     });
     if (signal?.aborted) return failure("tool-interrupted");
@@ -599,7 +684,11 @@ export function createBrowserAppManagedTools(
         return failure("tool-unavailable");
       }
       if (signal?.aborted) return failure("tool-interrupted");
-      const input = parseBrowserToolInput(inputJson, { allowProfile: true });
+      const input = parseBrowserToolInput(inputJson, {
+        allowProfile: true,
+        allowUploadPermission: options.uploadPermission !== undefined,
+        allowDownloadPermission: options.downloadPermission !== undefined,
+      });
       if (input === undefined) return failure("invalid-browser-input");
       // The stop runs without the turn's signal, so a turn that ends mid-call
       // still ends its recording and keeps what was recorded. It runs in Plan

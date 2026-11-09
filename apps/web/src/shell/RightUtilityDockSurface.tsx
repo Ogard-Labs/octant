@@ -37,6 +37,7 @@ export interface RightUtilityDockSurfaceProps {
   readonly androidEmulator?: ReactNode;
   readonly desktop?: ReactNode;
   readonly debug?: ReactNode;
+  readonly vitals?: ReactNode;
   readonly launchableSurfaces: ReadonlyArray<RightUtilityDockSurfaceDescriptor>;
   readonly launchableReferences?: ReadonlyArray<DockUtilityLauncherReference>;
   readonly onClose?: () => void;
@@ -114,6 +115,7 @@ export function RightUtilityDockSurface(props: RightUtilityDockSurfaceProps) {
     "android-emulator": props.androidEmulator,
     desktop: props.desktop,
     debug: props.debug,
+    vitals: props.vitals,
     plan: props.plan,
     "side-chat": props.sideChat,
     terminal: props.terminal,

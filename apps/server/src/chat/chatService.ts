@@ -3,6 +3,7 @@ import {
   type ConversationInputPolicy,
   type ConversationInputReceipt,
 } from "@octant/contracts/conversation-inputs";
+import { THREAD_MOVING_REFUSAL } from "../hub/threadMoveHolds";
 import type { ConversationInputTransfer } from "../attachments/conversationInputTransfer";
 import { conversationInputReceiptBlock } from "../attachments/conversationInputs";
 import { validateQuestionnaireAnswer } from "@octant/domain";
@@ -62,6 +63,7 @@ import {
   decodeChatThread,
   decodeChatTurn,
   type ChatAttachment,
+  type ChatAttachmentMediaType,
   type ChatAttempt,
   type ChatAttemptHandoff,
   type ChatAttemptOutcome,
@@ -203,6 +205,7 @@ import {
   restartHandoffRecord,
   conversationHandoffRefusalMessage,
   providerSwitchHandoffRecord,
+  withHandoverSummary,
   selectionBelongsToThread,
   type ConversationHandoffRefusal,
 } from "../agentRun/conversationHandoff";
@@ -267,7 +270,7 @@ import type {
   NativeHarnessTurnAdmission,
   NativeHarnessTurnScope,
 } from "../harness/nativeHarnessTurnObserver";
-import type { TurnEndSummary } from "../metrics/turnEnd";
+import { withPromptDigest, type TurnEndSummary } from "../metrics/turnEnd";
 import type { LiveTurnRegistry } from "../liveTurn/liveTurnRegistry";
 import type { ResearchRouteDecision, ResearchRouter } from "./research/researchRouter";
 import { SearxngEndpointRejected, validateSearxngEndpoint } from "./research/searxngEndpoint";
@@ -733,6 +736,8 @@ export interface ChatServiceOptions {
     readonly turnStarted: (scope: NativeHarnessTurnScope) => void;
     /** Every turn's end, whatever its outcome, with what the turn cost and how it ran. */
     readonly turnEnded?: (scope: NativeHarnessTurnScope, turn?: TurnEndSummary) => void;
+    /** The host's keyed prompt digest; absent when the host has no key. */
+    readonly promptDigest?: (text: string) => string;
     readonly turnCompleted: (
       input: NativeHarnessTurnScope & {
         readonly text: string;
@@ -800,6 +805,12 @@ export interface ChatServiceOptions {
    */
   readonly issueContext?: GithubIssueContextPort;
   readonly linearIssueContext?: LinearIssueContextPort;
+  /**
+   * Whether a thread is held by a move: frozen on the computer it is leaving,
+   * or arriving on this one and not yet committed. A held thread takes no
+   * command, so at most one copy of it can change at a time.
+   */
+  readonly moveHold?: (threadId: string) => boolean;
   readonly gatherMultiModelRuntimeFacts?: (input: {
     readonly pool: MultiModelPool;
     readonly mode: OctantMode;
@@ -881,6 +892,51 @@ interface ProviderRuntimeRegistryLike {
   ) => ProviderObservedState | undefined;
 }
 
+/** The thread a command names, read before it is decoded so every dispatch path can check it. */
+function threadIdNamedBy(input: unknown): string | undefined {
+  if (typeof input !== "object" || input === null || !("threadId" in input)) return undefined;
+  const threadId = (input as { readonly threadId?: unknown }).threadId;
+  return typeof threadId === "string" ? threadId : undefined;
+}
+
+/**
+ * An attachment carried by a move, under the id the destination gave it. An
+ * original input a turn admitted from another thread arrives as one of these
+ * too: that thread stays on the other computer, so the moved turn owns it.
+ */
+export interface MovedChatAttachment {
+  readonly attachmentId: ChatAttachmentId;
+  readonly displayName: string;
+  readonly mediaType: ChatAttachmentMediaType;
+  readonly bytes: Uint8Array;
+}
+
+/** A Chat conversation carried by a move, as the destination opens it. */
+export interface MovedChatThreadImport {
+  readonly moveId: string;
+  /** The id the move planned for the thread before it existed. */
+  readonly threadId: ChatThreadId;
+  readonly title: string;
+  readonly projectId?: ChatThread["projectId"];
+  readonly externalContentIngested: boolean;
+  readonly turns: ReadonlyArray<{
+    readonly userText: string;
+    readonly createdAt: ChatTurn["createdAt"];
+    readonly attachments?: ReadonlyArray<MovedChatAttachment>;
+    readonly attempts: ReadonlyArray<{
+      readonly providerInstanceId: ChatAttempt["providerInstanceId"];
+      readonly providerSessionId: ChatAttempt["providerSessionId"];
+      readonly modelId: ChatAttempt["modelId"];
+      readonly contextManifestId: ChatAttempt["contextManifestId"];
+      readonly responses: ReadonlyArray<string>;
+      readonly createdAt: ChatAttempt["createdAt"];
+      readonly updatedAt: ChatAttempt["updatedAt"];
+    }>;
+  }>;
+  /** Attachments the person had added to the thread and not sent yet. */
+  readonly unsentAttachments?: ReadonlyArray<MovedChatAttachment>;
+}
+
 export class ChatServiceError extends Error {
   override readonly name = "ChatServiceError";
 
@@ -913,10 +969,15 @@ export function readChatThreadView(
   };
 }
 
-function assertReadableChatThread(
+/**
+ * The Chat thread read rule every Open of a Chat thread applies, exported so
+ * a reader that serves something a thread owns asks this same rule rather
+ * than a copy of it. Returns the thread it admitted.
+ */
+export function assertReadableChatThread(
   persistence: Pick<PersistenceService, "readChatThread">,
   threadId: ChatThreadId,
-): void {
+): NonNullable<ReturnType<PersistenceService["readChatThread"]>> {
   const thread = persistence.readChatThread(threadId);
   if (thread === undefined || thread.lifecycle === "deleted") {
     throw new ChatServiceError({
@@ -930,6 +991,7 @@ function assertReadableChatThread(
       message: "Chat thread is being deleted.",
     });
   }
+  return thread;
 }
 
 function withChatThreadHeadVersion(
@@ -1044,6 +1106,7 @@ export class ChatService {
   >();
   readonly #resolveThreadMentionContext?: ChatServiceOptions["resolveThreadMentionContext"];
   readonly #issueContext?: GithubIssueContextPort;
+  readonly #moveHold?: (threadId: string) => boolean;
   readonly #linearIssueContext?: LinearIssueContextPort;
   readonly #reviewedModelManifest?: ReviewedModelManifest;
   readonly #agentRuns?: ChatServiceOptions["agentRuns"];
@@ -1121,6 +1184,9 @@ export class ChatService {
     }
     if (options.linearIssueContext !== undefined) {
       this.#linearIssueContext = options.linearIssueContext;
+    }
+    if (options.moveHold !== undefined) {
+      this.#moveHold = options.moveHold;
     }
     this.#turnRunner = new ChatTurnRunner({
       capacityScheduler: options.capacityScheduler,
@@ -1566,6 +1632,12 @@ export class ChatService {
   ): Promise<ChatCommandResult | ThreadWorkCommandResult> {
     try {
       this.#assertChatEnabled();
+      // Checked before either dispatch path, so a work item or follow-up on a
+      // thread a move holds is refused too; the source would purge it unmoved.
+      const named = threadIdNamedBy(input);
+      if (named !== undefined && this.#moveHold?.(named) === true) {
+        throw new ChatServiceError({ category: "unavailable", message: THREAD_MOVING_REFUSAL });
+      }
       if (this.#isThreadWorkCommand(input)) {
         return await this.#threadWork.execute(input);
       }
@@ -3219,6 +3291,155 @@ export class ChatService {
   }
 
   /**
+   * Opens a thread moved here from another of the person's computers, with
+   * the conversation it carried as real turns, the way a branch carries its
+   * source's. The attempts keep the source's provider identifiers, so the next
+   * turn here sees another provider and hands the conversation over in the
+   * ordinary disclosed way; the provider's own session never moves. The
+   * caller holds the thread until the source commits the move.
+   */
+  async importMovedThread(input: MovedChatThreadImport): Promise<ChatThread> {
+    this.#assertReady();
+    if (input.projectId !== undefined) this.#assertActiveChatProject(input.projectId);
+    const threadId = input.threadId;
+    this.#assertThreadIdFree(threadId);
+    const settings = this.#requireChatSettings();
+    const timestamp = decodeTimestamp(this.#clock());
+    const copiedContent: PreparedChatContent[] = [];
+    const turns: ChatTurn[] = [];
+    const carried: Array<{
+      readonly turnId?: ChatTurn["id"];
+      readonly moved: MovedChatAttachment;
+    }> = (input.unsentAttachments ?? []).map((moved) => ({ moved }));
+    for (const moved of input.turns) {
+      const turnId = this.#uuid() as ChatTurn["id"];
+      for (const attachment of moved.attachments ?? []) carried.push({ turnId, moved: attachment });
+      const userMessage = this.#prepareContent(threadId, "user", moved.userText);
+      copiedContent.push(userMessage);
+      const attempts = moved.attempts.map((attempt) => {
+        const responses = attempt.responses.map((text) =>
+          this.#prepareContent(threadId, "assistant", text),
+        );
+        copiedContent.push(...responses);
+        return decodeChatAttempt({
+          id: this.#uuid(),
+          turnId,
+          threadId,
+          providerInstanceId: attempt.providerInstanceId,
+          // The source attempt's real identifiers, kept so the copy points at
+          // what actually happened, as a branch keeps them.
+          providerSessionId: attempt.providerSessionId,
+          modelId: attempt.modelId,
+          contextManifestId: attempt.contextManifestId,
+          outcome: "completed",
+          responseRefs: responses.map((content) => content.reference),
+          citationIds: [],
+          createdAt: attempt.createdAt,
+          updatedAt: attempt.updatedAt,
+        });
+      });
+      turns.push(
+        decodeChatTurn({
+          id: turnId,
+          threadId,
+          sequence: turns.length + 1,
+          userMessageRef: userMessage.reference,
+          attachmentIds: (moved.attachments ?? []).map((attachment) => attachment.attachmentId),
+          attempts,
+          createdAt: moved.createdAt,
+        }),
+      );
+    }
+    // The bytes are finalized before the thread is journaled, and removed if
+    // it is not, so no attachment exists here without the thread naming it.
+    const attachments: ChatAttachment[] = [];
+    try {
+      for (const { turnId, moved } of carried) {
+        const finalized = await this.#attachmentStore.finalize(
+          await this.#attachmentStore.stage({
+            chatThreadId: threadId,
+            chatAttachmentId: moved.attachmentId,
+            displayName: moved.displayName,
+            bytes: moved.bytes,
+          }),
+        );
+        attachments.push(
+          decodeChatAttachment({
+            id: finalized.chatAttachmentId,
+            threadId,
+            ...(turnId === undefined ? {} : { turnId }),
+            displayName: finalized.displayName,
+            mediaType: moved.mediaType,
+            byteLength: finalized.size,
+            digest: finalized.hash,
+            status: "finalized",
+            createdAt: timestamp,
+          }),
+        );
+      }
+    } catch (error) {
+      await this.#attachmentStore.purgeThread(threadId).catch(() => undefined);
+      throw error;
+    }
+    const created = createChatThread({
+      id: threadId,
+      title: input.title,
+      ...(input.projectId === undefined ? {} : { projectId: input.projectId }),
+      providerInstanceId: settings.defaultProviderInstanceId,
+      modelId: settings.defaultModelId,
+      researchEnabled: settings.defaultResearchEnabled,
+      researchRouting: settings.defaultResearchRouting,
+      personalityInstructions: settings.defaultPersonalityInstructions,
+      createdAt: timestamp,
+    });
+    const settled = decodeChatThread({
+      ...created,
+      version: (turns.length + attachments.length + 2) as AggregateVersion,
+      updatedAt: timestamp,
+    });
+    // What the thread read on its source is in its context from the first
+    // turn here, so a marked source makes a marked thread, as a branch does.
+    const inheritedMark: InheritedExternalContentMark | undefined = input.externalContentIngested
+      ? { sourceLabel: "moved-thread", contentReference: `moved-thread-${input.moveId}` }
+      : undefined;
+    try {
+      await this.#scratchStore.acquire(threadId);
+      this.#journalNewThread(threadId, inheritedMark, () =>
+        this.#persistence.journal.append(
+          {
+            aggregate: { aggregateType: "chat-thread", aggregateId: threadId },
+            expectedVersion: 0,
+            events: [
+              this.#pending("chat.thread-created@1", { kind: "thread-created", thread: created }),
+              ...turns.map((turn) =>
+                this.#pending("chat.turn-created@1", { kind: "turn-created", turn }),
+              ),
+              ...attachments.map((attachment) =>
+                this.#pending("chat.attachment-updated@1", {
+                  kind: "attachment-updated",
+                  attachment,
+                }),
+              ),
+              this.#pending("chat.thread-updated@1", { kind: "thread-updated", thread: settled }),
+            ],
+          },
+          {
+            beforeEvents: (connection) => {
+              for (const content of copiedContent) this.#writePreparedContent(connection, content);
+            },
+          },
+        ),
+      );
+    } catch (error) {
+      if (attachments.length > 0) {
+        await this.#attachmentStore.purgeThread(threadId).catch(() => undefined);
+      }
+      throw error;
+    }
+    return settled;
+  }
+
+  /**
    * Journals a new thread, after the outside-content mark it inherits when it
    * is made from a marked thread, in one journal unit with it
    * (`journalWithInheritedMark`). A mark that cannot be journaled refuses the
@@ -3303,16 +3524,37 @@ export class ChatService {
       projectId: thread.projectId === undefined ? undefined : String(thread.projectId),
     });
     if (owned !== "ok") return refuse(owned);
+    if (reason === "provider-switch" && source.from !== undefined) {
+      const switched = withHandoverSummary(selection, this.#handoverSummary(thread.id));
+      return {
+        blocks: switched.blocks,
+        selection: switched,
+        record: providerSwitchHandoffRecord(switched, source.from),
+      };
+    }
     return {
       blocks: selection.blocks,
       selection,
       record:
         reason === "rewind"
           ? restartHandoffRecord(selection, "rewind")
-          : reason === "branch" || source.from === undefined
-            ? branchHandoffRecord(selection)
-            : providerSwitchHandoffRecord(selection, source.from),
+          : branchHandoffRecord(selection),
     };
+  }
+
+  /** The limit rule's summary for the thread, if one is waiting for a move. */
+  #handoverSummary(
+    threadId: ChatThreadId,
+  ): { readonly content: string; readonly completedAt: string } | undefined {
+    try {
+      return this.#contextHarness.handoverSummary(
+        decodeContextSubjectRef({ aggregateType: "chat-thread", aggregateId: String(threadId) }),
+        () => this.sessionCompactionConversation(threadId),
+      );
+    } catch {
+      // A ledger that cannot be read hands over the raw selection, as before.
+      return undefined;
+    }
   }
 
   async #retryTurn(
@@ -6143,7 +6385,13 @@ export class ChatService {
                 ...input.prepared.context.providerContext,
               ],
               onTurnEnded: (ended) => {
-                endedTurn = ended;
+                endedTurn = withPromptDigest(
+                  ended,
+                  this.#nativeHarness?.promptDigest,
+                  input.prompt,
+                  // A branch carries earlier turns, so its own first turn is not sequence 1.
+                  { firstTurn: input.turn.sequence === 1 },
+                );
               },
               ...(this.#liveTurns === undefined
                 ? {}

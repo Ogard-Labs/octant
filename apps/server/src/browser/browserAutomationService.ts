@@ -1,3 +1,8 @@
+import type {
+  BrowserDownloadDestination,
+  BrowserDownloadSaveDecision,
+} from "./browserDownloadSave";
+import type { BrowserDownloadDestinationReceipt } from "@octant/contracts/browser-download";
 import {
   decodeOwnerBrowserTarget,
   type OwnerBrowserControlId,
@@ -133,6 +138,8 @@ export interface BrowserPageScriptInput {
   readonly turnExecutionPolicy: ProviderExecutionPolicy;
   /** A server-owned turn/model binding check; it may only narrow persisted authority. */
   readonly callerIsCurrent: () => boolean;
+  /** One server-owned exact-source permission, rechecked through native preparation. */
+  readonly scriptPermissionIsCurrent?: () => boolean;
   readonly signal?: AbortSignal;
 }
 
@@ -293,7 +300,7 @@ interface OwnedContext {
    * The server saves only one of these, by the id the runtime gave, and holds
    * the same bound the runtime does (the oldest goes first).
    */
-  readonly heldDownloads: Map<string, BrowserDownloadFacts>;
+  readonly heldDownloads: Map<string, BrowserDownloadFacts & { readonly origin: string }>;
 }
 
 const hostPolicy: BrowserContextPolicy = {
@@ -372,6 +379,12 @@ const staleRefFailure: BrowserAutomationFailure = {
     "That ref is not on the page's latest snapshot, or the page changed since. Take a new snapshot and use its refs.",
 };
 
+/** Host-only custody for one reviewed fixed replay. Never accepted from a wire command. */
+export interface BrowserFlowCustody {
+  readonly permits: (requiresApprovedPage?: boolean) => boolean;
+  readonly release: () => void;
+}
+
 export class BrowserAutomationService {
   readonly #executionOwner: BrowserAutomationServiceOptions["executionOwner"];
   readonly #sharedRuntime: boolean;
@@ -393,6 +406,7 @@ export class BrowserAutomationService {
   readonly #schedule: (delayMs: number, callback: () => void) => () => void;
   readonly #contexts = new Map<BrowserContextId, OwnedContext>();
   readonly #taskProfileSwitches = new Set<string>();
+  readonly #flowRuns = new Map<string, BrowserFlowCustody>();
   readonly #ownerControllers = new Map<
     BrowserContextId,
     {
@@ -410,6 +424,8 @@ export class BrowserAutomationService {
     }
   >();
   /** Each context's staged upload copies, deleted when the context closes. */
+  readonly #uploadAdmissions = new Map<BrowserContextId, Set<() => boolean>>();
+  readonly #downloadPermissions = new Map<BrowserContextId, Map<AbortSignal, () => void>>();
   readonly #stagedUploads = new Map<BrowserContextId, Array<() => Promise<void>>>();
   readonly #removeProcessExitListener: (() => void) | undefined;
   readonly #removePersonInputListener: (() => void) | undefined;
@@ -458,13 +474,59 @@ export class BrowserAutomationService {
         }
         owned.evidence.splice(0);
         owned.record = stoppedRecord(owned.record, this.#clock(), "error", "failed");
+        this.#releaseDownloadPermissions(contextId);
         this.#releaseUploads(contextId);
       }
     });
   }
 
+  claimFlowRun(input: {
+    readonly windowId: WindowId;
+    readonly threadId: BrowserThreadId;
+    readonly mode: "work" | "code";
+    readonly current: (requiresApprovedPage?: boolean) => boolean;
+  }): BrowserFlowCustody | undefined {
+    const key = String(input.threadId);
+    if (
+      this.#flowRuns.has(key) ||
+      this.#isUnattendedScope(input.windowId) ||
+      !this.#authority.canAccessWindow(input.windowId, input.threadId, input.mode) ||
+      !input.current()
+    )
+      return undefined;
+    for (const owned of this.#contexts.values()) {
+      if (
+        String(owned.threadId) === key &&
+        (owned.agentActions > 0 ||
+          owned.record.state === "creating" ||
+          owned.credentialFill !== undefined)
+      )
+        return undefined;
+    }
+    const custody: BrowserFlowCustody = {
+      permits: input.current,
+      release: () => {
+        if (this.#flowRuns.get(key) === custody) this.#flowRuns.delete(key);
+      },
+    };
+    this.#flowRuns.set(key, custody);
+    return custody;
+  }
+
+  #flowRunAllows(
+    threadId: BrowserThreadId,
+    custody?: BrowserFlowCustody,
+    requiresApprovedPage = false,
+  ): boolean {
+    const owner = this.#flowRuns.get(String(threadId));
+    return owner === undefined
+      ? custody === undefined
+      : owner === custody && owner.permits(requiresApprovedPage);
+  }
+
   async create(input: {
     readonly windowId: WindowId;
+    readonly flowRun?: BrowserFlowCustody;
     readonly threadId: BrowserThreadId;
     readonly action: ToolActionRequest;
     readonly policy: BrowserContextPolicy;
@@ -477,6 +539,15 @@ export class BrowserAutomationService {
      */
     readonly profileCaller?: Extract<BrowserProfileCaller, "remote-device" | "terminal-grant">;
   }): Promise<BrowserAutomationSnapshot> {
+    if (!this.#flowRunAllows(input.threadId, input.flowRun))
+      return failedSnapshot(
+        input.threadId,
+        {
+          category: "unavailable",
+          message: "A reviewed flow owns this task's Browser, or its authority changed.",
+        },
+        "failed",
+      );
     const dedicated = input.dedicated === true;
     const current = this.#current(input.windowId, input.threadId);
     if (
@@ -498,6 +569,12 @@ export class BrowserAutomationService {
     }
     const profileDenial = await this.#authorizeProfile(input);
     if (profileDenial !== undefined) return failedSnapshot(input.threadId, profileDenial, "failed");
+    if (!this.#flowRunAllows(input.threadId, input.flowRun))
+      return failedSnapshot(
+        input.threadId,
+        { category: "stale", message: "Browser flow custody changed before opening the page." },
+        "failed",
+      );
     // A dedicated Open never reconciles against the thread's shared context: it
     // must neither inherit that context's origin nor stop it to take the slot.
     if (!dedicated && current !== undefined) {
@@ -587,6 +664,15 @@ export class BrowserAutomationService {
         }
         if (!this.#authorityIsActive(owned)) {
           this.#revokeAuthority(owned);
+          return;
+        }
+        if (!this.#flowRunAllows(input.threadId, input.flowRun)) {
+          owned.record = stoppedRecord(owned.record, this.#clock(), "authority-revoked", "failed");
+          owned.status = "failed";
+          owned.failure = {
+            category: "stale",
+            message: "Browser flow custody changed before dispatch.",
+          };
           return;
         }
         const refreshedDenial = this.#authorizeCreate(input.action, input.policy, input.threadId);
@@ -905,6 +991,7 @@ export class BrowserAutomationService {
       )
         return refused("stale");
       if (
+        !this.#flowRunAllows(owned.threadId) ||
         owned.waitingForPerson !== undefined ||
         owned.credentialFill !== undefined ||
         epoch !== owned.credentialEpoch
@@ -922,6 +1009,7 @@ export class BrowserAutomationService {
           thread: policy,
         }),
         caller: this.#isUnattendedScope(input.windowId) ? "unattended" : "person",
+        scopedPermission: input.scriptPermissionIsCurrent?.() === true,
       });
       if (decision.status === "refused") return refused(decision.reason);
       const call = this.#toolCalls.authorize({
@@ -955,6 +1043,7 @@ export class BrowserAutomationService {
             owner,
             source: input.source,
             expectedUrl,
+            ...(input.scriptPermissionIsCurrent === undefined ? {} : { requiresClearPage: true }),
           },
           signal,
         );
@@ -971,7 +1060,13 @@ export class BrowserAutomationService {
         dispatched = true;
         needsObservation = true;
         const result = await native(
-          { operation: "execute", contextId: input.contextId, owner, planId: prepared.planId },
+          {
+            operation: "execute",
+            contextId: input.contextId,
+            owner,
+            planId: prepared.planId,
+            ...(input.scriptPermissionIsCurrent === undefined ? {} : { requiresClearPage: true }),
+          },
           signal,
         );
         if (result.status !== "prepared" && result.effect === "none") needsObservation = false;
@@ -1012,6 +1107,7 @@ export class BrowserAutomationService {
 
   async act(input: {
     readonly windowId: WindowId;
+    readonly flowRun?: BrowserFlowCustody;
     /**
      * The thread the caller drives for. Two threads of one Project hold the
      * same authority, so the request's authority alone cannot tell their pages
@@ -1041,6 +1137,9 @@ export class BrowserAutomationService {
      * approved. Nothing else supplies a path to a runtime.
      */
     readonly uploadFiles?: ReadonlyArray<string>;
+    /** Host-issued transfer revocation; wire commands cannot supply it. */
+    readonly uploadSignal?: AbortSignal;
+    readonly uploadIsCurrent?: () => boolean;
     /**
      * Deletes the copies `uploadFiles` names. The service owns it from here:
      * a page reads an attached file when its form is sent, often in a later
@@ -1086,11 +1185,47 @@ export class BrowserAutomationService {
         "failed",
       );
     }
+    let releaseUpload = input.releaseUpload;
+    if (
+      input.request.kind === "upload" &&
+      input.uploadFiles !== undefined &&
+      input.releaseUpload !== undefined &&
+      input.uploadSignal !== undefined &&
+      input.uploadIsCurrent !== undefined
+    ) {
+      const signal = input.uploadSignal;
+      const current = input.uploadIsCurrent;
+      const admissions =
+        this.#uploadAdmissions.get(owned.record.contextId) ?? new Set<() => boolean>();
+      admissions.add(current);
+      this.#uploadAdmissions.set(owned.record.contextId, admissions);
+      const revoked = () => this.#revokeAuthority(owned);
+      signal.addEventListener("abort", revoked, { once: true });
+      const release = releaseUpload;
+      releaseUpload = async () => {
+        signal.removeEventListener("abort", revoked);
+        admissions.delete(current);
+        if (admissions.size === 0) this.#uploadAdmissions.delete(owned.record.contextId);
+        await release?.();
+      };
+      if (signal.aborted || !current()) revoked();
+    }
     const credentialEpoch = owned.credentialEpoch;
     const byAgent = (input.activityBy ?? input.capturedBy) === "agent";
     if (byAgent) owned.agentActions += 1;
     try {
       const answered = await this.#queueAction(owned, async () => {
+        if (byAgent && !this.#flowRunAllows(owned.threadId, input.flowRun, true)) {
+          await input.releaseUpload?.();
+          return this.#failure(
+            owned,
+            {
+              category: "unavailable",
+              message: "A reviewed flow owns this task's Browser, or its authority changed.",
+            },
+            owned.status,
+          );
+        }
         // Read before the action: it may replace the snapshot the ref names.
         const element = this.#elementOf(owned, input.request);
         const before = {
@@ -1122,7 +1257,7 @@ export class BrowserAutomationService {
         owned.agentActions -= 1;
         owned.agentActedAt = this.#now();
       }
-      if (input.releaseUpload !== undefined) this.#keepUpload(owned, input.releaseUpload);
+      if (releaseUpload !== undefined) this.#keepUpload(owned, releaseUpload);
     }
   }
 
@@ -1156,6 +1291,7 @@ export class BrowserAutomationService {
     owned: OwnedContext,
     input: {
       readonly windowId: WindowId;
+      readonly flowRun?: BrowserFlowCustody;
       readonly request: BrowserActionRequest;
       readonly capturedBy?: BrowserCaptureTaker;
       readonly activityBy?: BrowserCaptureTaker;
@@ -1335,6 +1471,15 @@ export class BrowserAutomationService {
         );
       }
     }
+    if (activityBy === "agent" && !this.#flowRunAllows(owned.threadId, input.flowRun, true))
+      return this.#failure(
+        owned,
+        {
+          category: "stale",
+          message: "Browser flow authority changed before dispatch; this call did not run.",
+        },
+        owned.status,
+      );
     const meaningful = activityBy !== undefined || PERSON_PAGE_ACTIONS.has(input.request.kind);
     if (meaningful && !this.#renewActivity(owned, activityBy !== "agent")) return snapshot(owned);
     try {
@@ -1375,6 +1520,16 @@ export class BrowserAutomationService {
       );
       if (effect.kind === "interrupted") return this.#interruptedAction(owned);
       const observed = effect.value;
+      if (activityBy === "agent" && !this.#flowRunAllows(owned.threadId, input.flowRun, true))
+        return this.#failure(
+          owned,
+          {
+            category: "stale",
+            message:
+              "Browser flow authority changed after dispatch; its observation was withheld and the operation may have acted.",
+          },
+          owned.status,
+        );
       if (owned.record.state === "active" && this.#expired(owned)) {
         await this.#expireContext(owned);
         return snapshot(owned);
@@ -1830,9 +1985,11 @@ export class BrowserAutomationService {
     for (const report of kept) {
       if (report.state === "held") {
         owned.heldDownloads.set(report.downloadId, {
+          origin: this.#downloadContext(owned).origin,
           name: report.name,
           sizeBytes: report.sizeBytes,
           mediaType: report.mediaType,
+          ...(report.source === undefined ? {} : { source: report.source }),
         });
         while (owned.heldDownloads.size > MAX_BROWSER_HELD_DOWNLOADS) {
           const oldest = owned.heldDownloads.keys().next().value;
@@ -1889,6 +2046,13 @@ export class BrowserAutomationService {
     readonly threadId: BrowserThreadId;
     readonly downloadId: string;
     readonly workspaceRoot: string | undefined;
+    readonly signal?: AbortSignal;
+    readonly destination?: BrowserDownloadDestination;
+    readonly permissionSignal?: AbortSignal;
+    readonly finalAdmission?: (
+      facts: BrowserDownloadFacts,
+      origin: string,
+    ) => BrowserDownloadSaveDecision;
     readonly ask: (
       facts: BrowserDownloadFacts,
       origin: string,
@@ -1897,6 +2061,7 @@ export class BrowserAutomationService {
     | {
         readonly status: "saved";
         readonly path: string;
+        readonly destination?: BrowserDownloadDestinationReceipt;
         readonly sizeBytes: number;
         readonly mediaType: string;
       }
@@ -1912,24 +2077,58 @@ export class BrowserAutomationService {
     ) {
       return { status: "refused", error: "download-not-found" };
     }
+    // Consume the held id before any await: retries and concurrent callers
+    // cannot dispatch the same held download twice under one finite grant.
+    owned.heldDownloads.delete(input.downloadId);
     const contextId = owned.record.contextId;
+    if (input.permissionSignal !== undefined) {
+      const watched =
+        this.#downloadPermissions.get(contextId) ?? new Map<AbortSignal, () => void>();
+      if (!watched.has(input.permissionSignal)) {
+        const permissionSignal = input.permissionSignal;
+        const revoked = () => {
+          owned.abort.abort();
+          void this.#destroy(owned, "authority-revoked", "interrupted");
+        };
+        watched.set(permissionSignal, () => permissionSignal.removeEventListener("abort", revoked));
+        permissionSignal.addEventListener("abort", revoked, { once: true });
+        this.#downloadPermissions.set(contextId, watched);
+        if (permissionSignal.aborted) revoked();
+      }
+    }
     const downloadId = input.downloadId;
     const claim = this.#runtime.claimDownload.bind(this.#runtime);
-    const context = this.#downloadContext(owned);
+    const context = { ...this.#downloadContext(owned), origin: held.origin };
+    const signal =
+      input.signal === undefined
+        ? owned.abort.signal
+        : AbortSignal.any([owned.abort.signal, input.signal]);
+    const current = () =>
+      !signal.aborted &&
+      owned.record.state === "active" &&
+      this.#current(input.windowId, input.threadId) === owned &&
+      this.#authorityIsActive(owned);
     const outcome = await saveBrowserDownload({
       workspaceRoot: input.workspaceRoot,
       name: held.name,
+      signal,
+      ...(input.destination === undefined ? {} : { destination: input.destination }),
+      finalAdmission: (facts) =>
+        current()
+          ? (input.finalAdmission?.(
+              { ...facts, ...(held.source === undefined ? {} : { source: held.source }) },
+              context.origin,
+            ) ?? "approved")
+          : "cancelled",
       claim: () => claim(contextId, downloadId),
       ask: async (facts) => {
-        const answer = await input.ask(facts, context.origin);
+        const answer = await input.ask(
+          { ...facts, ...(held.source === undefined ? {} : { source: held.source }) },
+          context.origin,
+        );
         // A question can wait minutes: the page and the thread's authority
         // must still be there when it is answered.
-        if (
-          answer === "approved" &&
-          (owned.record.state !== "active" ||
-            owned.abort.signal.aborted ||
-            !this.#authorityIsActive(owned))
-        ) {
+        if (answer === "approved" && !current()) {
           return "cancelled";
         }
         return answer;
@@ -1948,6 +2147,7 @@ export class BrowserAutomationService {
           sizeBytes: outcome.sizeBytes,
           mediaType: outcome.mediaType,
           sha256: outcome.sha256,
+          ...(outcome.destination === undefined ? {} : { destination: outcome.destination }),
         });
       } else if (outcome.reason !== undefined) {
         this.#downloads?.refused(context, {
@@ -1968,6 +2168,7 @@ export class BrowserAutomationService {
       ? {
           status: "saved",
           path: outcome.path,
+          ...(outcome.destination === undefined ? {} : { destination: outcome.destination }),
           sizeBytes: outcome.sizeBytes,
           mediaType: outcome.mediaType,
         }
@@ -2633,9 +2834,12 @@ export class BrowserAutomationService {
   }
 
   async close(): Promise<void> {
+    this.#flowRuns.clear();
     this.#expiredContexts.clear();
     this.#removeProcessExitListener?.();
     this.#removePersonInputListener?.();
+    for (const contextId of this.#downloadPermissions.keys())
+      this.#releaseDownloadPermissions(contextId);
     for (const contextId of this.#stagedUploads.keys()) this.#releaseUploads(contextId);
     for (const owned of this.#contexts.values()) {
       this.#reclaimOwnerController(owned.record.contextId);
@@ -3236,6 +3440,10 @@ export class BrowserAutomationService {
   }
 
   #authorityIsActive(owned: OwnedContext): boolean {
+    if (
+      [...(this.#uploadAdmissions.get(owned.record.contextId) ?? [])].some((current) => !current())
+    )
+      return false;
     if (this.#executionOwner !== undefined && !this.#executionOwner.isCurrent()) return false;
     const profile = storedBrowserProfile(owned.record.policy.profile);
     if (
@@ -3318,7 +3526,14 @@ export class BrowserAutomationService {
     }
   }
 
+  #releaseDownloadPermissions(contextId: BrowserContextId): void {
+    const watched = this.#downloadPermissions.get(contextId);
+    this.#downloadPermissions.delete(contextId);
+    for (const release of watched?.values() ?? []) release();
+  }
+
   async #safeClose(contextId: BrowserContextId): Promise<void> {
+    this.#releaseDownloadPermissions(contextId);
     this.#reclaimOwnerController(contextId);
     this.#releaseUploads(contextId);
     try {

@@ -1,4 +1,5 @@
 import { eligibleTerminalSessionFolders } from "../terminalSessions/terminalSessionScopes";
+import { MovedThreadHistory } from "../hub/movedThreadHistory";
 import { randomUUID } from "node:crypto";
 import { homedir } from "node:os";
 import { join } from "node:path";
@@ -157,6 +158,7 @@ export function wireIntegrations(deps: IntegrationsDependencies) {
               typeof resolveDefaultThreadEgressPolicy
             >[0]["executionPolicy"],
             mode: "work" | "code",
+            fullAccessSandbox?: boolean,
           ) => {
             const instance = persistence.readProviderInstance(providerInstanceId);
             return (
@@ -164,7 +166,7 @@ export function wireIntegrations(deps: IntegrationsDependencies) {
               instance !== undefined &&
               isNativeHarnessDriverKind(instance.driverKind) &&
               materializeHarnessToolNetwork(
-                resolveDefaultThreadEgressPolicy({ mode, executionPolicy }),
+                resolveDefaultThreadEgressPolicy({ mode, executionPolicy, fullAccessSandbox }),
               ) === "proxied"
             );
           };
@@ -178,6 +180,7 @@ export function wireIntegrations(deps: IntegrationsDependencies) {
                 thread.providerInstanceId,
                 thread.executionPolicy,
                 "code",
+                thread.fullAccessSandbox,
               ),
             };
           }
@@ -191,6 +194,7 @@ export function wireIntegrations(deps: IntegrationsDependencies) {
               work.providerInstanceId,
               workThreadAccessOf(work.access).executionPolicy,
               "work",
+              work.fullAccessSandbox,
             ),
           };
         } catch {
@@ -438,6 +442,14 @@ export function wireIntegrations(deps: IntegrationsDependencies) {
       uuid: randomUUID,
       actor: { kind: "local-user", actorId: OCTANT_LOCAL_ACTOR_ID },
     });
+    // A Work or Code thread moved here from another of the person's computers
+    // keeps its earlier conversation; its first turn here carries it.
+    const movedThreadHistory = new MovedThreadHistory({
+      journal: persistence.journal,
+      clock: () => new Date().toISOString(),
+      uuid: randomUUID,
+      actor: { kind: "system", actorId: OCTANT_LOCAL_ACTOR_ID },
+    });
     const terminalSessionRoutes = createTerminalSessionRouteHandler({
       windowAuthorityStore,
       imports: terminalSessionImports,
@@ -451,11 +463,13 @@ export function wireIntegrations(deps: IntegrationsDependencies) {
     const peekCreateFromIssueFramed = (threadId: string) =>
       githubIssueContextService.peekFramedForFirstTurn(threadId) ??
       linearIssueContextService.peekFramedForFirstTurn(threadId) ??
-      terminalSessionImports.peekFramedForFirstTurn(threadId);
+      terminalSessionImports.peekFramedForFirstTurn(threadId) ??
+      movedThreadHistory.peekFramedForFirstTurn(threadId);
     const consumeCreateFromIssueFramed = (threadId: string) => {
       githubIssueContextService.consumeFramedForFirstTurn(threadId);
       linearIssueContextService.consumeFramedForFirstTurn(threadId);
       terminalSessionImports.consumeFramedForFirstTurn(threadId);
+      movedThreadHistory.consumeFramedForFirstTurn(threadId);
     };
     const integrationRoutes = createIntegrationRouteHandler({
       windowAuthorityStore,
@@ -496,6 +510,7 @@ export function wireIntegrations(deps: IntegrationsDependencies) {
       peekCreateFromIssueFramed,
       siblingThreadsService,
       terminalSessionImports,
+      movedThreadHistory,
       terminalSessionRoutes,
       threadOutsideContentMarks,
       toolEgressRules,

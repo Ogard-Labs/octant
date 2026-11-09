@@ -1,3 +1,4 @@
+import type { BrowserDownloadSource } from "@octant/contracts";
 import {
   decodeBrowserToolApproval,
   type BrowserToolApproval,
@@ -105,9 +106,11 @@ export class BrowserToolApprovalService {
       readonly name: string;
       readonly sizeBytes: number;
       readonly mediaType: string;
+      readonly source?: BrowserDownloadSource;
     };
     /** The agent asks the person to sign in here; see the contract. */
     readonly signIn?: { readonly reason?: string };
+    readonly script?: { readonly source: string };
     readonly signal?: AbortSignal;
   }): Promise<"approved" | "denied" | "cancelled" | "expired"> {
     if (input.signal?.aborted) return Promise.resolve("cancelled");
@@ -155,6 +158,7 @@ export class BrowserToolApprovalService {
               name: input.download.name.slice(0, 256),
               sizeBytes: input.download.sizeBytes,
               mediaType: input.download.mediaType.slice(0, 128),
+              ...(input.download.source === undefined ? {} : { source: input.download.source }),
             },
           }),
       ...(input.signIn === undefined
@@ -165,6 +169,7 @@ export class BrowserToolApprovalService {
                 ? {}
                 : { reason: input.signIn.reason.trim().slice(0, 300) },
           }),
+      ...(input.script === undefined ? {} : { script: input.script }),
       requestedAt: new Date(this.#options.now()).toISOString(),
     });
     return new Promise((resolve) => {
@@ -228,7 +233,8 @@ export class BrowserToolApprovalService {
       decision.remember === true &&
       pending.view.upload === undefined &&
       pending.view.download === undefined &&
-      pending.view.signIn === undefined
+      pending.view.signIn === undefined &&
+      pending.view.script === undefined
     ) {
       // The answering window journals the grant: for a routine it is the
       // person who saw the prompt, not the host scope that raised it.
@@ -247,7 +253,7 @@ export class BrowserToolApprovalService {
     // A signed-in page acts as the person's account, so a paired device neither
     // sees nor answers its approval, and an approval a paired device's turn raised
     // waits for a window of this computer, like a routine's.
-    const signedIn = pending.view.profile !== undefined;
+    const signedIn = pending.view.profile !== undefined || pending.view.script !== undefined;
     if (signedIn && this.#isPairedDevice(windowId)) return false;
     if (pending.windowId === windowId) return true;
     const isHostScope = this.#options.isHostScope;

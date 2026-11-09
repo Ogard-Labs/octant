@@ -1,12 +1,21 @@
+import type { WindowsSqliteStoreAdmission } from "@octant/host-runtime";
 import { Database } from "bun:sqlite";
 import { chmodSync } from "node:fs";
 import type { ReadOnlySqliteConnection, SqliteConnection, SqliteStatement } from "./sqlitePort.ts";
 
-export function openBunSqlite(path: string): SqliteConnection {
+export function openBunSqlite(
+  path: string,
+  admission?: Extract<WindowsSqliteStoreAdmission, { readonly status: "ready" }>,
+): SqliteConnection {
   const database = new Database(path);
 
   try {
-    chmodSync(path, 0o600);
+    if (admission !== undefined) {
+      if (admission.databasePath !== path || admission.initialize(database).status !== "ready")
+        throw new Error("The SQLite native admission was refused.");
+    } else {
+      chmodSync(path, 0o600);
+    }
     database.exec(`
       PRAGMA journal_mode = WAL;
       PRAGMA foreign_keys = ON;
@@ -15,10 +24,11 @@ export function openBunSqlite(path: string): SqliteConnection {
       PRAGMA busy_timeout = 5000;
     `);
   } catch (error) {
-    database.close();
+    database.close(true);
     throw error;
   }
 
+  let closed = false;
   return {
     exec: (sql) => database.exec(sql),
     prepare: (sql) => {
@@ -41,7 +51,12 @@ export function openBunSqlite(path: string): SqliteConnection {
       return rows;
     },
     transaction: (body) => database.transaction(body),
-    close: () => database.close(),
+    close: () => {
+      if (closed) return;
+      database.close(true);
+      closed = true;
+      admission?.close();
+    },
   };
 }
 
@@ -49,6 +64,6 @@ export function openBunSqliteReadOnly(path: string): ReadOnlySqliteConnection {
   const database = new Database(path, { readonly: true });
   return {
     all: (sql) => database.query(sql).all(),
-    close: () => database.close(),
+    close: () => database.close(true),
   };
 }

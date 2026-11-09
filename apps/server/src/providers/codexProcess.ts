@@ -77,6 +77,11 @@ export type CodexLaunchAuthority =
       readonly mode: "chat" | "work" | "code";
       readonly executionPolicy: ProviderExecutionPolicy;
       /**
+       * Opt-in sandbox at Full access: the launch stays under Octant's
+       * deny-default profile and proxied egress instead of running unwrapped.
+       */
+      readonly fullAccessSandbox?: boolean;
+      /**
        * The person let Codex run its own subagents. Their requests reach the
        * parent's approval path on their own thread ids, at every level.
        */
@@ -706,7 +711,16 @@ export function prepareCodexLaunch(input: {
   | { readonly status: "prepared"; readonly launch: CodexLaunch }
   | { readonly status: "refused"; readonly failure: ProviderFailure } {
   const { authority } = input;
-  if (authority.kind === "thread" && authority.executionPolicy === "full-access") {
+  if (input.platform === "win32")
+    return {
+      status: "refused",
+      failure: failure("incompatible", "Provider processes require Windows host confinement."),
+    };
+  if (
+    authority.kind === "thread" &&
+    authority.executionPolicy === "full-access" &&
+    authority.fullAccessSandbox !== true
+  ) {
     return {
       status: "prepared",
       launch: {
@@ -750,7 +764,11 @@ export function prepareCodexLaunch(input: {
       input.network === undefined
         ? materializeOsNetworkEgress(
             authority.kind === "thread"
-              ? resolveProviderRuntimeEgressPolicy({ mode, executionPolicy })
+              ? resolveProviderRuntimeEgressPolicy({
+                  mode,
+                  executionPolicy,
+                  fullAccessSandbox: authority.fullAccessSandbox,
+                })
               : resolveProbeEgressPolicy(),
           )
         : ({ kind: "proxied", endpoint: input.network.endpoint } as const);

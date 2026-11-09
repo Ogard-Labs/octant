@@ -24,9 +24,16 @@ function columnLetter(index: number): string {
 /**
  * Build a valid minimal single-worksheet XLSX container from a grid of
  * cell values. Mirrors the Work encoder's structure so the preview
- * workbook parser can round-trip representative fixtures.
+ * workbook parser can round-trip representative fixtures. With
+ * `sharedStrings`, each distinct value is stored once in the shared-string
+ * table and cells refer to it, as Excel writes them.
  */
-export function buildXlsxFixture(rows: ReadonlyArray<ReadonlyArray<string>>): Uint8Array {
+export function buildXlsxFixture(
+  rows: ReadonlyArray<ReadonlyArray<string>>,
+  options: { readonly sharedStrings?: boolean } = {},
+): Uint8Array {
+  const shared: string[] = [];
+  const sharedIndex = new Map<string, number>();
   let body = "";
   for (let rowIndex = 0; rowIndex < rows.length; rowIndex += 1) {
     const cells = rows[rowIndex];
@@ -35,8 +42,18 @@ export function buildXlsxFixture(rows: ReadonlyArray<ReadonlyArray<string>>): Ui
     body += `<row r="${rowNumber}">`;
     for (let colIndex = 0; colIndex < cells.length; colIndex += 1) {
       const ref = `${columnLetter(colIndex)}${rowNumber}`;
-      const escaped = escapeXml(cells[colIndex] ?? "");
-      body += `<c r="${ref}" t="inlineStr"><is><t>${escaped}</t></is></c>`;
+      const value = cells[colIndex] ?? "";
+      if (options.sharedStrings === true) {
+        let index = sharedIndex.get(value);
+        if (index === undefined) {
+          index = shared.length;
+          shared.push(value);
+          sharedIndex.set(value, index);
+        }
+        body += `<c r="${ref}" t="s"><v>${index}</v></c>`;
+      } else {
+        body += `<c r="${ref}" t="inlineStr"><is><t>${escapeXml(value)}</t></is></c>`;
+      }
     }
     body += "</row>";
   }
@@ -70,6 +87,18 @@ export function buildXlsxFixture(rows: ReadonlyArray<ReadonlyArray<string>>): Ui
       ),
     },
     { name: "xl/worksheets/sheet1.xml", data: textEncoder.encode(worksheetXml) },
+    ...(options.sharedStrings === true
+      ? [
+          {
+            name: "xl/sharedStrings.xml",
+            data: textEncoder.encode(
+              '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><sst xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">' +
+                shared.map((value) => `<si><t>${escapeXml(value)}</t></si>`).join("") +
+                "</sst>",
+            ),
+          },
+        ]
+      : []),
   ]);
 }
 

@@ -1,7 +1,10 @@
 import type { BrowserProfileChoice } from "@octant/contracts/project-browser";
+import { decodeBrowserThreadId } from "@octant/contracts";
+import { browserAgentAvailability } from "@octant/domain";
 import type { BrowserModelBinding } from "../browser/browserAppManagedTools";
 import type {
   BrowserAutomationSnapshot,
+  BrowserDownloadSource,
   CodeOperationCommand,
   CodeOperationResult,
   CodeProjectPullRequestSwitchTarget,
@@ -561,6 +564,112 @@ describe("Code app-managed tools", () => {
     });
     expect(JSON.stringify(result)).not.toContain("late-private-result");
     runScript.mockClear();
+    expect((await tools.execute(input)).isError).toBe(true);
+    expect(runScript).not.toHaveBeenCalled();
+  });
+
+  it("asks once for the exact source below Full access and invalidates it when the task changes", async () => {
+    let current = thread({ executionPolicy: "approval-gated" });
+    const initial = current;
+    let bound = true;
+    let reviewedRevision = 3;
+    let afterAnswer = () => {};
+    const snapshot = browserSnapshot(browserAuthority());
+    if (snapshot.context === undefined) throw new Error("expected Browser context");
+    const active = {
+      ...snapshot,
+      observation: { url: "https://example.com/", revision: 3, stale: false } as never,
+      context: { ...snapshot.context, presentation: "native-live" as const },
+    };
+    const runScript = vi.fn(
+      async (
+        _input: import("../browser/browserAutomationService").BrowserPageScriptInput,
+      ): Promise<import("@octant/contracts/browser-page-script").BrowserPageScriptReceipt> => {
+        reviewedRevision++;
+        return { status: "completed", effect: "possible", valueJson: "42" };
+      },
+    );
+    const tools = createCodeAppManagedTools({
+      windowId,
+      thread: initial,
+      readThread: () => current,
+      uuid: uuidFactory(),
+      executeOperation: vi.fn(),
+      terminal: { read: vi.fn() },
+      browser: {
+        resolveAuthority: () => browserAuthority(),
+        inspectThread: () => ({
+          ...active,
+          observation: {
+            url: "https://example.com/",
+            revision: reviewedRevision,
+            stale: reviewedRevision !== 3,
+          } as never,
+        }),
+        create: vi.fn(),
+        act: vi.fn(),
+        releaseThread: vi.fn(),
+        runScript,
+      },
+      browserSignIn: { refusal: () => undefined, request: vi.fn() },
+      browserProfiles: {
+        approvals: {
+          request: vi.fn(async (request) => {
+            expect(request.origin).toBe("https://example.com");
+            expect(request.script?.source).toBe("42");
+            afterAnswer();
+            return "approved" as const;
+          }),
+        },
+        readBinding: () =>
+          bound ? { modelId: String(initial.modelId), authority: browserAuthority() } : undefined,
+        rememberBinding: vi.fn(),
+        forgetBinding: vi.fn(),
+      },
+    });
+    const input = {
+      name: CODE_BROWSER_TOOL_NAME,
+      inputJson: JSON.stringify({
+        operation: "run-script",
+        source: "42",
+        expectedObservationRevision: 3,
+      }),
+    };
+    expect(await tools.execute(input)).toMatchObject({
+      isError: false,
+      result: { script: { status: "completed", valueJson: "42" } },
+    });
+    expect(reviewedRevision).toBe(4);
+    reviewedRevision = 3;
+    runScript.mockResolvedValue({
+      status: "completed",
+      effect: "possible",
+      valueJson: JSON.stringify("\u0000".repeat(4000)),
+    });
+    expect(runScript.mock.calls[0]?.[0].scriptPermissionIsCurrent?.()).toBe(true);
+    const bounded = await tools.execute(input);
+    expect(bounded).toMatchObject({
+      isError: false,
+      result: { script: { status: "truncated", effect: "possible" } },
+    });
+    expect(Buffer.byteLength(JSON.stringify(bounded.result))).toBeLessThanOrEqual(24576);
+    runScript.mockImplementation(async () => {
+      current = thread({ executionPolicy: "plan" });
+      return { status: "completed", effect: "possible", valueJson: '"late-private-result"' };
+    });
+    const result = await tools.execute(input);
+    expect(result).toMatchObject({
+      isError: true,
+      result: { script: { status: "refused", effect: "possible" } },
+    });
+    expect(JSON.stringify(result)).not.toContain("late-private-result");
+    runScript.mockClear();
+    expect((await tools.execute(input)).isError).toBe(true);
+    expect(runScript).not.toHaveBeenCalled();
+    current = initial;
+    afterAnswer = () => {
+      bound = false;
+    };
     expect((await tools.execute(input)).isError).toBe(true);
     expect(runScript).not.toHaveBeenCalled();
   });
@@ -1422,6 +1531,7 @@ describe("Code app-managed tools", () => {
   describe("saving a download", () => {
     function downloadTools(options: {
       readonly executionPolicy?: "plan";
+      readonly source?: BrowserDownloadSource;
       readonly refusal?: string;
       readonly request?: ReturnType<typeof vi.fn>;
     }) {
@@ -1435,10 +1545,17 @@ describe("Code app-managed tools", () => {
             origin: string,
           ) => Promise<unknown>;
         }) => {
-          await input.ask(
-            { name: "report.pdf", sizeBytes: 1_258_291, mediaType: "application/pdf" },
+          const answer = await input.ask(
+            {
+              name: "report.pdf",
+              sizeBytes: 1_258_291,
+              mediaType: "application/pdf",
+              ...(options.source === undefined ? {} : { source: options.source }),
+            },
             "https://example.com",
           );
+          if (answer !== "approved")
+            return { status: "refused" as const, error: "browser-download-cancelled" };
           return {
             status: "saved" as const,
             path: "downloads/report.pdf",
@@ -1491,9 +1608,34 @@ describe("Code app-managed tools", () => {
         expect.objectContaining({ workspaceRoot: "/checkout", downloadId: "d1" }),
       );
       expect(request).toHaveBeenCalledWith(
-        "Let the agent save report.pdf (1.2 MB, PDF) from https://example.com into this thread's workspace?",
+        "Let the agent save report.pdf (1.2 MB, PDF) into this thread's workspace? Page: https://example.com. Download source: unverified.",
         undefined,
       );
+    });
+
+    it("refuses a source chain that cannot be reviewed in full without asking or saving", async () => {
+      const origins = Array.from(
+        { length: 16 },
+        (_, index) => `https://${"a".repeat(63)}.${"b".repeat(60)}${index}.example`,
+      );
+      const { tools, request } = downloadTools({ source: { kind: "https-origin-chain", origins } });
+      expect(await save(tools)).toEqual({
+        result: { error: "browser-download-cancelled" },
+        isError: true,
+      });
+      expect(request).not.toHaveBeenCalled();
+    });
+
+    it("keeps the Code turn cancellation signal through download preparation and approval", async () => {
+      const { tools, saveDownload, request } = downloadTools({});
+      const abort = new AbortController();
+      await tools.execute({
+        name: CODE_BROWSER_TOOL_NAME,
+        inputJson: JSON.stringify({ operation: "download-save", downloadId: "d1" }),
+        signal: abort.signal,
+      });
+      expect(saveDownload).toHaveBeenCalledWith(expect.objectContaining({ signal: abort.signal }));
+      expect(request).toHaveBeenCalledWith(expect.any(String), abort.signal);
     });
 
     it("refuses on a paired device's turn and in Plan mode, asking no one", async () => {
@@ -3186,8 +3328,14 @@ describe("Code tool families", () => {
       terminal: { read: vi.fn() },
     });
 
-    expect(tools.definitions.map((definition) => definition.name)).not.toContain(
-      CODE_BROWSER_TOOL_NAME,
+    const reported = browserAgentAvailability({
+      toolTransport: true,
+      hostLendsBrowser: false,
+      readOnly: false,
+    });
+    expect(reported).toEqual({ status: "omitted", reason: "host-lends-no-browser" });
+    expect(tools.definitions.some((definition) => definition.name === CODE_BROWSER_TOOL_NAME)).toBe(
+      reported.status === "available",
     );
     const outcome = await tools.execute({
       name: CODE_BROWSER_TOOL_NAME,
@@ -3510,7 +3658,10 @@ describe("watching the thread's own pull request as an agent tool", () => {
       },
     );
     const unwatch = vi.fn(
-      async (): Promise<PullRequestWatchOutcome> => ({ status: "unwatched", target }),
+      async (): Promise<PullRequestWatchOutcome> => ({
+        status: "unwatched",
+        target,
+      }),
     );
     const executeOperation = vi.fn();
     const tools = createCodeAppManagedTools({
@@ -3716,3 +3867,148 @@ it("retains task staleness and Plan refusals when a routine has its own Browser 
   await tools.close?.();
   expect(close).toHaveBeenCalledOnce();
 });
+
+it("forwards an explicit reviewed download manifest through the Code routine boundary", async () => {
+  const execute = vi.fn(async () => ({ result: { status: "saved" } }));
+  const initial = thread({ executionPolicy: "approval-gated" });
+  let current: CodeThread | undefined = initial;
+  const ready: BrowserAutomationSnapshot = {
+    status: "ready",
+    threadId: decodeBrowserThreadId(threadId),
+    evidence: [],
+  };
+  const tools = createCodeAppManagedTools({
+    windowId: ROUTINE_HOST_SCOPE_ID,
+    thread: initial,
+    readThread: () => current,
+    uuid: uuidFactory(),
+    executeOperation: async () => {
+      throw Error("No terminal operation expected");
+    },
+    terminal: {
+      read: async () => {
+        throw Error("No terminal read expected");
+      },
+    },
+    browser: {
+      resolveAuthority: () => browserAuthority(),
+      inspectThread: () => ready,
+      create: async () => ready,
+      act: async () => ready,
+      releaseThread: async () => ready,
+    },
+    delegatedBrowserTools: {
+      definitions: [
+        { name: CODE_BROWSER_TOOL_NAME, description: "Browser", inputSchema: { type: "object" } },
+      ],
+      execute,
+    },
+  });
+  const inputJson = JSON.stringify({
+    operation: "download-save",
+    downloadId: "d1",
+    downloadPermissionId: "90000000-0000-4000-8000-000000000001",
+  });
+  await tools.execute({
+    name: CODE_BROWSER_TOOL_NAME,
+    inputJson: JSON.stringify({
+      operation: "navigate",
+      url: "https://example.com",
+      profile: "personal",
+    }),
+  });
+  expect(await tools.execute({ name: CODE_BROWSER_TOOL_NAME, inputJson })).toEqual({
+    result: { status: "saved" },
+  });
+  expect(execute).toHaveBeenCalledWith({ name: CODE_BROWSER_TOOL_NAME, inputJson });
+  current = undefined;
+  expect(await tools.execute({ name: CODE_BROWSER_TOOL_NAME, inputJson })).toMatchObject({
+    isError: true,
+    result: { error: "tool-authority-stale" },
+  });
+  current = { ...initial, executionPolicy: "plan" };
+  expect(await tools.execute({ name: CODE_BROWSER_TOOL_NAME, inputJson })).toMatchObject({
+    isError: true,
+    result: { error: "plan-mode-read-only" },
+  });
+  expect(execute).toHaveBeenCalledTimes(2);
+});
+
+it.each([undefined, "private"] as const)(
+  "keeps routine navigation with profile %s on its ordinary remembered-origin path",
+  async (profile) => {
+    let remembered = false;
+    const current = thread({ executionPolicy: "approval-gated" });
+    const ready: BrowserAutomationSnapshot = {
+      status: "ready",
+      threadId: decodeBrowserThreadId(threadId),
+      evidence: [],
+    };
+    let snapshot = ready;
+    const create = vi.fn(async () => {
+      snapshot = browserSnapshot(browserAuthority());
+      return snapshot;
+    });
+    const request = vi.fn(async () => "denied" as const);
+    const delegated = vi.fn(async () => ({
+      result: { error: "browser-session-permission-required" },
+      isError: true,
+    }));
+    const tools = createCodeAppManagedTools({
+      windowId: ROUTINE_HOST_SCOPE_ID,
+      thread: current,
+      readThread: () => current,
+      uuid: uuidFactory(),
+      executeOperation: async () => {
+        throw Error("No terminal operation expected");
+      },
+      terminal: {
+        read: async () => {
+          throw Error("No terminal read expected");
+        },
+      },
+      browserApproval: {
+        isApproved: () => remembered,
+        isOriginRemembered: () => remembered,
+        request,
+        remember: () => {},
+        forget: () => {},
+      },
+      browser: {
+        resolveAuthority: () => browserAuthority(),
+        inspectThread: () => snapshot,
+        create,
+        act: async () => snapshot,
+        releaseThread: async () => {
+          snapshot = ready;
+          return snapshot;
+        },
+      },
+      delegatedBrowserTools: {
+        definitions: [
+          { name: CODE_BROWSER_TOOL_NAME, description: "Browser", inputSchema: { type: "object" } },
+        ],
+        execute: delegated,
+      },
+    });
+    const call = {
+      name: CODE_BROWSER_TOOL_NAME,
+      inputJson: JSON.stringify({
+        operation: "navigate",
+        url: "https://example.com/report",
+        ...(profile === undefined ? {} : { profile }),
+      }),
+    };
+    expect(await tools.execute(call)).toMatchObject({
+      isError: true,
+      result: { error: "browser-approval-denied" },
+    });
+    expect(create).not.toHaveBeenCalled();
+    expect(request).toHaveBeenCalledOnce();
+    remembered = true;
+    expect(await tools.execute(call)).toMatchObject({ isError: false });
+    expect(create).toHaveBeenCalledOnce();
+    expect(delegated).not.toHaveBeenCalled();
+    expect(request).toHaveBeenCalledOnce();
+  },
+);

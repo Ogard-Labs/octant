@@ -21,6 +21,7 @@
 @import "./styles/device.css";
 @import "./styles/desktop.css";
 @import "./styles/debug.css";
+@import "./styles/vitals.css";
 @import "./styles/preview.css";
 @import "./styles/zen.css";
 @import "./styles/canvas.css";

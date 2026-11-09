@@ -8,6 +8,10 @@
 // rate limit, and only for a device that still stands, wants that kind, and
 // could read the thread.
 //
+// A thread move a window holds here for an owner phone is told the same way,
+// once per wait and only to phones on this host's owner list: that a move
+// waits and the destination's name, nothing about its threads.
+//
 // What reaches the transport is the sealed envelope alone: the display text
 // is built by the domain redaction policy and sealed to the phone's key. The
 // journal gets one receipt per notification (kind, device, thread, outcome,
@@ -18,13 +22,17 @@ import { createHash } from "node:crypto";
 import { Option, Schema } from "effect";
 import {
   decodeRemotePushDeliveryRecordedV1,
+  decodeRemotePushMoveWaitingDeliveryRecordedV1,
   REMOTE_PUSH_DELIVERY_EVENT_NAMES,
+  REMOTE_PUSH_MOVE_WAITING_DELIVERY_EVENT_NAMES,
   type OctantMode,
   type RemotePushDeliveryOutcome,
+  type RemotePushMoveWaitingKind,
   type RemotePushNotificationKind,
 } from "@octant/contracts";
 import {
   admitRemotePushByRate,
+  buildRedactedMoveWaitingPushNotification,
   buildRedactedPushNotification,
   remotePushDedupeKey,
   remotePushPreferenceAllows,
@@ -64,6 +72,41 @@ interface ThreadNotificationFact {
   readonly threadId: string;
   readonly kind: RemotePushNotificationKind;
   readonly runId: string;
+}
+
+/** A move a window holds here until an owner phone confirms it. */
+export interface MoveWaitingFact {
+  /** The wait's own id: one notification per wait, never one per thread it holds. */
+  readonly waitId: string;
+  readonly destinationName: string;
+  /**
+   * Whether a paired device belongs to an owner on this host's current owner
+   * list, which alone can confirm a move held here. A phone paired only for
+   * threads hears nothing about moves. Asked per device at send time, so an
+   * owner removed while earlier sends yielded is not told.
+   */
+  readonly confirmsMoves: (deviceId: string) => boolean;
+}
+
+interface DeliveryResult {
+  readonly outcome: RemotePushDeliveryOutcome;
+  readonly failureCategory?: string;
+}
+
+/** One notification for one device, whatever it is about. */
+interface Delivery {
+  readonly destination: PushTokenRecord;
+  readonly receiptId: string;
+  readonly kind: RemotePushNotificationKind | RemotePushMoveWaitingKind;
+  readonly collapseOn: string;
+  readonly content: unknown;
+  /** The receipt the journal keeps for this delivery; never its text. */
+  readonly receipt: (result: DeliveryResult, recordedAt: string) => ReceiptEvent;
+}
+
+interface ReceiptEvent {
+  readonly eventName: string;
+  readonly payload: unknown;
 }
 
 interface CommittedFact {
@@ -245,6 +288,47 @@ export class ThreadNotificationDeliveryService {
     }
   }
 
+  /**
+   * A window held a move here for an owner phone. Called once per wait, a
+   * batch included; a second call for the same wait sends nothing more.
+   */
+  notifyMoveWaiting(wait: MoveWaitingFact): void {
+    this.#queue = this.#queue
+      .then(() => this.#notifyMoveWaiting(wait))
+      .catch(() => this.#report("A held-move notification stopped on an unexpected error."));
+  }
+
+  async #notifyMoveWaiting(wait: MoveWaitingFact): Promise<void> {
+    if (this.#transport.providerDelivery() !== "available") return;
+    for (const listed of this.#registrations.listDestinations()) {
+      const destination = this.#current(listed);
+      if (destination === undefined) continue;
+      if (!wait.confirmsMoves(destination.deviceId)) continue;
+      // Confirming a move is the person approving it, so the phone's Approval
+      // needed setting governs it.
+      if (!destination.preferences.approvalNeeded) continue;
+      await this.#deliver({
+        destination,
+        receiptId: receiptAggregateId(destination, `move-waiting:${wait.waitId}`),
+        kind: "move-waiting",
+        collapseOn: `move-waiting:${wait.waitId}`,
+        content: buildRedactedMoveWaitingPushNotification({
+          hostId: destination.hostId,
+          destinationName: wait.destinationName,
+        }),
+        receipt: (result, recordedAt) => ({
+          eventName: REMOTE_PUSH_MOVE_WAITING_DELIVERY_EVENT_NAMES.recorded,
+          payload: decodeRemotePushMoveWaitingDeliveryRecordedV1({
+            hostId: destination.hostId,
+            deviceId: destination.deviceId,
+            ...result,
+            recordedAt,
+          }),
+        }),
+      });
+    }
+  }
+
   async #notify(observed: ThreadNotificationFact): Promise<void> {
     // With the Notifications setting off, nothing is sealed, sent, or journaled.
     if (this.#transport.providerDelivery() !== "available") return;
@@ -260,18 +344,54 @@ export class ThreadNotificationDeliveryService {
     thread: { readonly mode: OctantMode; readonly title: string },
     listed: PushTokenRecord,
   ): Promise<void> {
-    // Read now, after earlier sends yielded: a revoke or sign-out that landed
-    // since leaves no registration or no standing, and nothing between this
-    // check and the send below yields.
+    const destination = this.#current(listed);
+    if (destination === undefined) return;
+    if (!remotePushPreferenceAllows(destination.preferences, observed.kind)) return;
+    await this.#deliver({
+      destination,
+      receiptId: receiptAggregateId(destination, remotePushDedupeKey(observed)),
+      kind: observed.kind,
+      collapseOn: observed.threadId,
+      content: buildRedactedPushNotification({
+        kind: observed.kind,
+        hostId: destination.hostId,
+        threadId: observed.threadId,
+        mode: thread.mode,
+        computerLabel: this.#computerLabel(),
+        threadTitle: thread.title,
+        threadTitles: destination.preferences.threadTitles,
+      }),
+      receipt: (result, recordedAt) => ({
+        eventName: REMOTE_PUSH_DELIVERY_EVENT_NAMES.recorded,
+        payload: decodeRemotePushDeliveryRecordedV1({
+          hostId: destination.hostId,
+          deviceId: destination.deviceId,
+          threadId: observed.threadId,
+          kind: observed.kind,
+          ...result,
+          recordedAt,
+        }),
+      }),
+    });
+  }
+
+  /**
+   * The destination as it stands now, after earlier sends yielded: a revoke or
+   * sign-out that landed since leaves no registration or no standing, and
+   * nothing between this check and the send in `#deliver` yields.
+   */
+  #current(listed: PushTokenRecord): PushTokenRecord | undefined {
     const destination = this.#registrations.get({
       hostId: listed.hostId,
       deviceId: listed.deviceId,
     });
-    if (destination === undefined) return;
-    if (!this.#hasStanding(destination.hostId, destination.deviceId)) return;
-    if (!remotePushPreferenceAllows(destination.preferences, observed.kind)) return;
+    if (destination === undefined) return undefined;
+    if (!this.#hasStanding(destination.hostId, destination.deviceId)) return undefined;
+    return destination;
+  }
 
-    const receiptId = receiptAggregateId(destination, remotePushDedupeKey(observed));
+  async #deliver(delivery: Delivery): Promise<void> {
+    const { destination, receiptId } = delivery;
     if (this.#receipted(receiptId)) return;
 
     const recordedAt = this.#clock();
@@ -282,7 +402,7 @@ export class ThreadNotificationDeliveryService {
     });
     this.#recentSends.set(deviceKey, rate.recent);
     if (rate.kind === "rate-limited") {
-      this.#receipt(receiptId, destination, observed, { outcome: "rate-limited" });
+      this.#receipt(delivery, { outcome: "rate-limited" });
       return;
     }
 
@@ -291,20 +411,12 @@ export class ThreadNotificationDeliveryService {
       deviceId: destination.deviceId,
       notificationPublicKey: destination.notificationPublicKey,
       collapseKey: destination.collapseKey,
-      threadId: observed.threadId,
-      kind: observed.kind,
-      content: buildRedactedPushNotification({
-        kind: observed.kind,
-        hostId: destination.hostId,
-        threadId: observed.threadId,
-        mode: thread.mode,
-        computerLabel: this.#computerLabel(),
-        threadTitle: thread.title,
-        threadTitles: destination.preferences.threadTitles,
-      }),
+      threadId: delivery.collapseOn,
+      kind: delivery.kind,
+      content: delivery.content,
     });
     if (sealed.status === "refused") {
-      this.#receipt(receiptId, destination, observed, {
+      this.#receipt(delivery, {
         outcome: "failed",
         failureCategory: `sealing-${sealed.reason}`,
       });
@@ -327,14 +439,14 @@ export class ThreadNotificationDeliveryService {
     }
     switch (result.kind) {
       case "delivered":
-        this.#receipt(receiptId, destination, observed, { outcome: "delivered" });
+        this.#receipt(delivery, { outcome: "delivered" });
         return;
       case "destination-gone":
         this.#clearGone(destination);
-        this.#receipt(receiptId, destination, observed, { outcome: "destination-gone" });
+        this.#receipt(delivery, { outcome: "destination-gone" });
         return;
       case "failed":
-        this.#receipt(receiptId, destination, observed, {
+        this.#receipt(delivery, {
           outcome: "failed",
           failureCategory: FAILURE_CATEGORY.test(result.category)
             ? result.category
@@ -355,37 +467,19 @@ export class ThreadNotificationDeliveryService {
     );
   }
 
-  #receipt(
-    receiptId: string,
-    destination: PushTokenRecord,
-    observed: ThreadNotificationFact,
-    result: {
-      readonly outcome: RemotePushDeliveryOutcome;
-      readonly failureCategory?: string;
-    },
-  ): void {
+  #receipt(delivery: Delivery, result: DeliveryResult): void {
     const occurredAt = this.#clock();
     try {
-      const payload = decodeRemotePushDeliveryRecordedV1({
-        hostId: destination.hostId,
-        deviceId: destination.deviceId,
-        threadId: observed.threadId,
-        kind: observed.kind,
-        outcome: result.outcome,
-        ...(result.failureCategory === undefined
-          ? {}
-          : { failureCategory: result.failureCategory }),
-        recordedAt: occurredAt,
-      });
+      const { eventName, payload } = delivery.receipt(result, occurredAt);
       const eventId = this.#uuid();
       this.#journal.append({
-        aggregate: { aggregateType: PUSH_DELIVERY_AGGREGATE, aggregateId: receiptId },
+        aggregate: { aggregateType: PUSH_DELIVERY_AGGREGATE, aggregateId: delivery.receiptId },
         // The first receipt for this notification wins; a second is refused.
         expectedVersion: 0,
         events: [
           {
             eventId,
-            eventName: REMOTE_PUSH_DELIVERY_EVENT_NAMES.recorded,
+            eventName,
             eventVersion: 1,
             correlationId: eventId,
             actor: { kind: "system", actorId: this.#hostActorId },

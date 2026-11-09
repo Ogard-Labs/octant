@@ -21,6 +21,7 @@ import { createPinnedHubTransport } from "./pinnedHubTransport";
 import { REMOTE_HUB_LINK_ROUTE_IDS, createRemoteRoutePolicy } from "../remoteRoutePolicy";
 import { HUB_LINK_ROUTES } from "./hubLinkRoutes";
 import { PEER_CREDENTIAL_ROUTE } from "./ownerCredentialCopy";
+import { THREAD_MOVE_ROUTES } from "./threadMoveService";
 import { PEER_DELEGATION_ROUTES } from "./peerDelegationRoutes";
 
 const cleanups: Array<() => Promise<void> | void> = [];
@@ -423,6 +424,12 @@ describe("the hub-link routes the private listener serves", () => {
       [REMOTE_HUB_LINK_ROUTE_IDS.delegationStatus, "POST", PEER_DELEGATION_ROUTES.status],
       [REMOTE_HUB_LINK_ROUTE_IDS.delegationCancel, "POST", PEER_DELEGATION_ROUTES.cancel],
       [REMOTE_HUB_LINK_ROUTE_IDS.credentialTransfer, "POST", PEER_CREDENTIAL_ROUTE],
+      [REMOTE_HUB_LINK_ROUTE_IDS.threadMoveOffer, "POST", THREAD_MOVE_ROUTES.offer],
+      [REMOTE_HUB_LINK_ROUTE_IDS.threadMoveChunk, "POST", THREAD_MOVE_ROUTES.chunk],
+      [REMOTE_HUB_LINK_ROUTE_IDS.threadMoveFinish, "POST", THREAD_MOVE_ROUTES.finish],
+      [REMOTE_HUB_LINK_ROUTE_IDS.threadMoveCommit, "POST", THREAD_MOVE_ROUTES.commit],
+      [REMOTE_HUB_LINK_ROUTE_IDS.threadMoveStatus, "POST", THREAD_MOVE_ROUTES.status],
+      [REMOTE_HUB_LINK_ROUTE_IDS.threadMoveDiscard, "POST", THREAD_MOVE_ROUTES.discard],
     ] as const) {
       const decision = policy.inspect(
         new Request(`https://100.101.102.103:8443${path}`, {

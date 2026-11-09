@@ -1,3 +1,5 @@
+import type { WindowsAuthorityStateFile } from "@octant/host-runtime";
+import { nativeAuthorityState } from "./nativeAuthorityState";
 // What a host remembers about hub membership: the hub's roster and members
 // when it acts as hub, and the hub link, grant, and roster when it is a
 // spoke. The journal records every change with its principal; this file holds
@@ -260,6 +262,8 @@ export const HubSideState = Schema.Struct({
   joinTickets: Schema.Array(HubJoinTicketRecord),
   /** The hub's own owner list. A roster's owner mark never adds to it. */
   owners: Schema.optional(Schema.Array(HostOwnerRecord)),
+  /** Accept moved threads, which is on unless a window on the hub turned it off. */
+  acceptMovedThreads: Schema.optional(Schema.Literal(false)),
   /**
    * The members this hub removed, with the roster sequence of each removal. A
    * standby that stood in hands back its changes against a base sequence, and
@@ -456,7 +460,18 @@ export interface HubStatePort {
   readonly save: (state: HubState) => void;
 }
 
-export function createHubStateStore(dataDirectory: string): HubStatePort {
+export function createHubStateStore(
+  dataDirectory: string,
+  nativeFile?: WindowsAuthorityStateFile,
+): HubStatePort {
+  const native = nativeAuthorityState(
+    dataDirectory,
+    nativeFile,
+    (value) => decodeState(withoutFeedsMissingTheirApp(value)),
+    Schema.encodeSync(HubState),
+    () => ({}),
+  );
+  if (native !== undefined) return native;
   const directory = join(dataDirectory, SUBDIR);
   const path = join(directory, FILE);
   return {

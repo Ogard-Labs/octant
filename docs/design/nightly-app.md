@@ -1247,6 +1247,68 @@ process exit and full-payload renderer/native acceptance still need their
 evidence. The retained-client policy has separate focused and synthetic evidence;
 full signed lifecycle acceptance remains unrun and stays with the maintainer checks.
 
+## Windows client trust
+
+The Windows port uses the same local-user trust floor as Linux, with a native
+named pipe in the selected native private profile's scope. The native binding
+derives its endpoint from the current user's SID, logon/session and canonical
+profile UUID; JavaScript supplies neither a pipe path nor a peer identity.
+Remote pipe clients refuse. Both directions retain the kernel-reported peer
+process and creation time and check its user, logon and session. Tokens carrying restricting SIDs, AppContainer peers and subjects below medium
+integrity refuse. Each connection adds a fresh native nonce to
+its kernel-principal key. Process exit retires that incarnation's connections;
+closing one connection revokes only its leases, so delayed EOF cannot revoke a
+replacement connection. A reused PID never inherits them.
+
+The existing fixed status/window frames, bounded operations and peer count,
+15-second leases and server-owned window/native-main authority apply unchanged.
+Discovery returns only protocol and version. Ordinary Nightly never claims the
+host profile, imports the host-owning main or receives the host's administrative
+bridge secret. The native profile UUID selects scope; an executable path,
+command line, caller-provided PID or JavaScript token does not identify a peer.
+The fixed packaged launch roles and Chromium renderer sandbox remain required.
+
+This authenticates a local user and process incarnation, not signed application
+code. Unconfined code running as that same user in the same logon/session can
+pass. Admission binds a connection; it does not claim Linux's per-message
+sender-credential semantics. Trusted unconfined same-user code can relay requests
+or deliberately pass transport handles. Normal native connections are
+non-inheritable, and JavaScript receives no transport handle. Current Windows
+desktop supports Node-mode workers, so its executable does not attest a GUI-only
+principal. Stronger signed-code admission would require a
+separate worker identity and sealed desktop entry; it is not implied by this
+kernel boundary. Native and packaged positive/negative lifecycle evidence must
+pass before the Windows client port is considered usable. Windows test-data
+hosts, installation/update integration and Work/Code confinement retain their
+separate gates.
+
+### Starting a closed Octant on Windows
+
+The actual desktop-mode host owner records its current native `Octant.exe`
+image and physical file/volume identity in one fixed private profile record.
+A foreground Bun or Node process does not select a replacement executable.
+Publication is best effort: inability to record this discovery fact does not
+stop an otherwise valid host. A private host-log entry retains only the fixed
+result/reason and bounded elapsed-time/entry-count measurements.
+
+Nightly requests launch through the native profile port without claiming its
+host owner. Native code reads that fixed record, validates the physical
+no-reparse image, ancestors and resource tree against untrusted other-user write
+access and the recorded identity, and holds the image and physical directories
+through `CreateProcessW` with only
+`--octant-host-only`, no inherited handles and a minimal native environment.
+JavaScript supplies no executable path, record bytes or environment authority;
+no shell is involved. Validation runs outside the Electron event loop, with a
+finite deadline and cancellation checked before both creation and resume. An
+expired or cancelled suspended child is terminated and joined before refusal.
+
+A started process grants no client authority: fresh kernel-authenticated status
+still precedes the separate window registration. The existing 30-second first
+window grace bounds a host-only launch that gains no client, and normal client
+retention controls shutdown afterward. Missing or unsafe records refuse; the
+person can open Stable and retry. Actual package scan cost and refusal reason
+must be measured before changing the fixed launch-validation budget.
+
 ## Linux client trust
 
 Linux has no code signature or kernel audit token to admit a Nightly main by.

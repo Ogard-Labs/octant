@@ -13,6 +13,7 @@ import type {
   WorkRequestFrame,
   WorkTurnUpdated,
 } from "@octant/contracts";
+import { decodeRemotePushEnvelopeV1, REMOTE_PUSH_PLACEHOLDER_ALERT } from "@octant/contracts";
 import { REMOTE_PUSH_RATE_LIMIT } from "@octant/domain/push-notification-policy";
 import type { PushDeliverySendResult } from "../automation/pushDeliveryTransport";
 import { createRecordingPushDeliveryTransport } from "../automation/pushDeliveryTransport.test-support";
@@ -128,6 +129,14 @@ function host(overrides: Partial<ThreadNotificationDeliveryOptions> = {}) {
         )
         .all() as ReadonlyArray<{ readonly payload_json: string }>
     ).map((row) => JSON.parse(row.payload_json) as Record<string, unknown>);
+  const moveReceipts = () =>
+    (
+      connection
+        .prepare(
+          "SELECT payload_json FROM event_journal WHERE event_name = 'remote.push-move-waiting-delivery-recorded@1' ORDER BY global_sequence",
+        )
+        .all() as ReadonlyArray<{ readonly payload_json: string }>
+    ).map((row) => JSON.parse(row.payload_json) as Record<string, unknown>);
   const open = (
     envelope: RemotePushEnvelopeV1 | undefined,
     deviceId: typeof phone | typeof tablet,
@@ -148,6 +157,7 @@ function host(overrides: Partial<ThreadNotificationDeliveryOptions> = {}) {
     registrations,
     register,
     receipts,
+    moveReceipts,
     service,
     transport: options.transport === transport ? transport : undefined,
     keys,
@@ -278,11 +288,21 @@ describe("ordinary-thread notifications", () => {
         platform: "ios",
         token: `apns-token-${phone}`,
       });
-      const wire = JSON.stringify(send.envelope);
+      const envelope = send.envelope;
+      if (envelope === undefined) throw new Error("expected a sealed envelope");
+      // The envelope holds exactly the placeholder alert, an urgency, and two
+      // opaque base64url parts. Only the plaintext parts are scanned for thread
+      // content: random ciphertext can spell a word such as "Acme" by chance,
+      // which once failed this test in CI. What the sealed parts hold is
+      // checked by opening them above, and by the wrong key failing below.
+      expect(decodeRemotePushEnvelopeV1(envelope)).toEqual(envelope);
+      const { collapseId: _collapseId, sealed: _sealed, ...plaintext } = envelope;
+      expect(plaintext.alert).toEqual(REMOTE_PUSH_PLACEHOLDER_ALERT);
+      const wire = JSON.stringify(plaintext);
       for (const revealing of [hostId, chatThread, workThread, codeThread, "Acme", "Studio"]) {
         expect(wire).not.toContain(revealing);
       }
-      expect(() => open(send.envelope, tablet)).toThrow();
+      expect(() => open(envelope, tablet)).toThrow();
     }
 
     expect(receipts()).toEqual([
@@ -545,5 +565,60 @@ describe("ordinary-thread notifications", () => {
       titles[codeThread] = "Fix the release build";
       for (const spy of consoleSpies) spy.mockRestore();
     }
+  });
+});
+
+describe("held-move notifications", () => {
+  const waitId = "66666666-6666-4666-8666-666666666666";
+  // The phone is on this host's owner list; the tablet is paired but is not.
+  const wait = {
+    waitId,
+    destinationName: "Office iMac",
+    confirmsMoves: (deviceId: string) => deviceId === phone,
+  };
+
+  it("tells each owner phone once that a move waits, naming only the destination", async () => {
+    const { register, service, transport, open, moveReceipts, receipts } = host();
+    register(phone, { ...allKinds, threadTitles: true });
+    register(tablet);
+    service.notifyMoveWaiting(wait);
+    service.notifyMoveWaiting(wait);
+    await vi.waitFor(() => expect(moveReceipts()).toHaveLength(1));
+    await new Promise((resolve) => setTimeout(resolve, 20));
+
+    expect(transport?.sent.map((send) => send.destination.deviceId)).toEqual([phone]);
+    const envelope = transport?.sent[0]?.envelope;
+    expect(envelope?.urgency).toBe("high");
+    expect(envelope?.alert).toEqual(REMOTE_PUSH_PLACEHOLDER_ALERT);
+    // Thread names are on for this phone, and still no thread is named.
+    expect(open(envelope, phone)).toEqual({
+      kind: "move-waiting",
+      hostId,
+      title: "A move is waiting for your phone",
+      body: "To Office iMac",
+    });
+    expect(moveReceipts()).toEqual([
+      { hostId, deviceId: phone, outcome: "delivered", recordedAt: now },
+    ]);
+    expect(receipts()).toEqual([]);
+  });
+
+  it("sends nothing and fails nothing while delivery is unavailable, or to a phone that turned approvals off", async () => {
+    const off = createRecordingPushDeliveryTransport({ providerDelivery: "unavailable" });
+    const onError = vi.fn();
+    const unavailable = host({ transport: off, onError });
+    unavailable.register(phone);
+    expect(() => unavailable.service.notifyMoveWaiting(wait)).not.toThrow();
+
+    const quiet = host();
+    quiet.register(phone, { ...allKinds, approvalNeeded: false });
+    quiet.service.notifyMoveWaiting(wait);
+
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(off.sent).toHaveLength(0);
+    expect(onError).not.toHaveBeenCalled();
+    expect(unavailable.moveReceipts()).toEqual([]);
+    expect(quiet.transport?.sent).toHaveLength(0);
+    expect(quiet.moveReceipts()).toEqual([]);
   });
 });

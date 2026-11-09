@@ -34,6 +34,7 @@ function decoded<A>(decode: (value: unknown) => A, value: string): A | undefined
  * Ordinary-thread notifications for paired phones. The service follows the
  * journal as it commits and shares the Automation path's registrations and
  * transport, so the Notifications setting and a device's standing govern both.
+ * The remote wiring also tells owner phones through it when a move waits.
  */
 export function wireThreadNotifications(deps: ThreadNotificationDependencies) {
   const {
@@ -90,5 +91,6 @@ export function wireThreadNotifications(deps: ThreadNotificationDependencies) {
       threadNotifications.onCommittedAppend(append),
     );
     yield* Effect.addFinalizer(() => Effect.sync(() => unsubscribe()));
+    return { threadNotifications };
   });
 }

@@ -102,7 +102,8 @@ export interface CanvasClient {
    * without the route omits it and such a page says it cannot run here.
    */
   runPublishedSnapshot?(input: PublishedSnapshotRunRequest): Promise<CanvasDesignRunStart>;
-  revise(request: CanvasReviseRequest): Promise<CanvasReviseResult>;
+  /** A read-only transport omits editing and creation rather than offering refused controls. */
+  revise?(request: CanvasReviseRequest): Promise<CanvasReviseResult>;
   /**
    * Journal a user's node positions as a new immutable version of a board.
    * Optional like the other board-era methods: a transport whose host serves
@@ -180,7 +181,7 @@ export interface CanvasClient {
    * the browser's candidate id and never a path of its own.
    */
   browseFolders?(request: FolderBrowseRequest): Promise<FolderBrowseResult>;
-  create(request: CanvasCreateRequest): Promise<CanvasCreateResult>;
+  create?(request: CanvasCreateRequest): Promise<CanvasCreateResult>;
   /**
    * A new Canvas from an HTML page the person chose or pasted. A host without
    * the route omits it, and no import is offered.
@@ -208,7 +209,9 @@ export class CanvasClientFailure extends Error {
   }
 }
 
-export function createCanvasClient(options: CanvasClientOptions): CanvasClient {
+export function createCanvasClient(
+  options: CanvasClientOptions,
+): CanvasClient & Required<Pick<CanvasClient, "create" | "revise">> {
   const headers = { "x-octant-window-capability": options.windowCapability };
   return {
     inventory(projectId, query) {

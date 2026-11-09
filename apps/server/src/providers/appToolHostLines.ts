@@ -36,6 +36,10 @@ const ROUTING_LINES: ReadonlyArray<AppToolHostLine> = [
     text: "Read the repository's issues, pull requests, and projects with octant_github, which uses the person's connected account, rather than gh or the GitHub API.",
   },
   {
+    tool: "octant_create_image",
+    text: "Call octant_create_image when the person asks for a picture (photo, illustration, rendered scene) instead of drawing it as SVG or HTML; they pick the model and confirm first. Keep SVG for logos, icons, and diagrams.",
+  },
+  {
     tool: "octant_agents",
     text: "Delegate with octant_agents when part of the task should run on another provider or model, or where the person can watch it; each child appears in Octant's Agents surface.",
   },

@@ -3,7 +3,7 @@ import { join } from "node:path";
 import type { ProjectActionSuggestion } from "@octant/contracts";
 
 /** A manifest larger than this was not written by hand; reading it costs memory for nothing. */
-const MAX_SOURCE_BYTES = 1_048_576;
+export const MAX_ACTION_SOURCE_BYTES = 1_048_576;
 const MAX_FROM_EACH_SOURCE = 12;
 
 /** Install and publish hooks run by the package manager itself, never by a person's click. */
@@ -45,6 +45,16 @@ export async function suggestProjectActions(
     readSource(join(root, "Makefile")),
     packageManager(root),
   ]);
+  return projectActionSuggestionsFromSources({ manifest, makefile, manager });
+}
+
+/** The same bounded source parsing for a folder read on this host or its server. */
+export function projectActionSuggestionsFromSources(input: {
+  readonly manifest?: string | undefined;
+  readonly makefile?: string | undefined;
+  readonly manager: string;
+}): ReadonlyArray<ProjectActionSuggestion> {
+  const { manifest, makefile, manager } = input;
   return [
     ...(manifest === undefined ? [] : scriptSuggestions(manifest, manager)),
     ...(makefile === undefined ? [] : targetSuggestions(makefile)),
@@ -118,7 +128,7 @@ async function packageManager(root: string): Promise<string> {
 async function readSource(path: string): Promise<string | undefined> {
   try {
     const details = await lstat(path);
-    if (!details.isFile() || details.size > MAX_SOURCE_BYTES) return undefined;
+    if (!details.isFile() || details.size > MAX_ACTION_SOURCE_BYTES) return undefined;
     const handle = await open(path, "r");
     try {
       return await handle.readFile("utf8");

@@ -15,7 +15,6 @@ import {
 import { decodeHumanBrowserRequest } from "@octant/contracts/browser-presentation";
 import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
-import type { AddressInfo } from "node:net";
 import type { BrowserContextPolicy, BrowserProfileClearScope } from "@octant/contracts";
 import {
   BROWSER_RESIZE_BOUNDS,
@@ -117,38 +116,73 @@ export async function startBrowserRuntimeBroker(
       },
     );
   });
-  await new Promise<void>((resolve, reject) => {
-    server.once("error", reject);
-    server.listen(0, "127.0.0.1", () => {
-      server.off("error", reject);
-      resolve();
-    });
-  });
-  const address = server.address() as AddressInfo | null;
-  if (address === null) throw new Error("Octant Browser runtime broker is unavailable.");
-  brokerUrl = `http://127.0.0.1:${address.port}/`;
-  const sweep = setInterval(() => {
-    void host.persistentOwner?.sweep();
-  }, 1000);
-  sweep.unref();
   let closing: Promise<void> | undefined;
-  return Object.freeze({
-    url: brokerUrl,
-    token,
-    close: () => {
-      closing ??= (async () => {
-        clearInterval(sweep);
-        removeGoneListener();
-        removePersonInputListener();
+  let sweep: ReturnType<typeof setInterval> | undefined;
+  const close = () => {
+    closing ??= Promise.resolve().then(async () => {
+      const failures: Array<unknown> = [];
+      if (sweep !== undefined) clearInterval(sweep);
+      for (const unsubscribe of [removeGoneListener, removePersonInputListener]) {
+        try {
+          unsubscribe();
+        } catch (error) {
+          failures.push(error);
+        }
+      }
+      try {
         await host.closeAll();
+      } catch (error) {
+        failures.push(error);
+      }
+      try {
         await new Promise<void>((resolve, reject) => {
-          if (!server.listening) return resolve();
+          if (!server.listening) {
+            server.closeAllConnections();
+            resolve();
+            return;
+          }
           server.close((error) => (error === undefined ? resolve() : reject(error)));
           server.closeAllConnections();
         });
-      })();
-      return closing;
-    },
+      } catch (error) {
+        failures.push(error);
+      }
+      if (failures.length > 0)
+        throw new AggregateError(failures, "Octant Browser runtime broker cleanup failed.");
+    });
+    return closing;
+  };
+  try {
+    await new Promise<void>((resolve, reject) => {
+      server.once("error", reject);
+      server.listen(0, "127.0.0.1", () => {
+        server.off("error", reject);
+        resolve();
+      });
+    });
+    const address = server.address();
+    if (address === null || typeof address === "string")
+      throw new Error("Octant Browser runtime broker is unavailable.");
+    brokerUrl = `http://127.0.0.1:${address.port}/`;
+    sweep = setInterval(() => {
+      void host.persistentOwner?.sweep();
+    }, 1000);
+    sweep.unref();
+  } catch (error) {
+    try {
+      await close();
+    } catch (cleanup) {
+      throw new AggregateError(
+        [error, cleanup],
+        "Octant Browser runtime broker startup and cleanup failed.",
+      );
+    }
+    throw error;
+  }
+  return Object.freeze({
+    url: brokerUrl,
+    token,
+    close,
     fetchForTest: (request: Request, peerAddress = "127.0.0.1") =>
       handleBrokerRequest(request, peerAddress, token, host, events, profiles),
   });

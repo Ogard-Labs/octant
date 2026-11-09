@@ -155,6 +155,57 @@ describe("native harness endpoint port", () => {
     ]);
   });
 
+  it("tells the lead how full a named window is when no compaction point is set", async () => {
+    const { driver, requests } = portDriver([{ text: "Hello.", toolCalls: [] }]);
+    const runtimeRegistry = new ProviderRuntimeRegistry();
+    runtimeRegistry.setObservedState({
+      instanceId,
+      readiness: "ready",
+      processState: "stopped",
+      models: [
+        {
+          id: modelId,
+          displayName: "Port model",
+          source: "manual",
+          verification: "unverified",
+          reasoning: "unavailable",
+          inputModalities: ["text"],
+          options: [],
+          contextLimit: 200_000,
+        },
+      ],
+      capabilities: honestDirectEndpointCapabilities,
+      observedAt: "2026-10-26T09:00:00.000Z",
+    });
+    const transcripts = new MemoryNativeHarnessTranscriptStore();
+    const composed = runOnNativeHarness(
+      driver,
+      host(transcripts, new NativeHarnessEndpointRegistry(), runtimeRegistry),
+    );
+
+    await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const connection = yield* composed.acquire({ instanceId, projectRoot, mode: "chat" });
+          // The window-fill rule is off: the session carries no compaction point.
+          yield* connection.start({ sessionId, modelId, executionPolicy: "plan" });
+          return yield* runTurn(connection, []);
+        }),
+      ),
+    );
+
+    expect(requests[0]?.history.at(-1)).toEqual({
+      role: "user",
+      text: expect.stringMatching(
+        /^\[Note from Octant, not the user: this request fills about \d+% of the model's 200K-token window\. Octant summarizes earlier turns only when a request no longer fits\.\]$/,
+      ),
+    });
+    expect(transcripts.load(sessionId)?.messages.map((message) => message.role)).toEqual([
+      "user",
+      "assistant",
+    ]);
+  });
+
   it("announces only the host's own retries, never a retry notice the driver streams itself", async () => {
     const { driver } = portDriver([{ text: "Hello.", toolCalls: [] }], {
       emits: [

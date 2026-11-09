@@ -9,6 +9,7 @@ import type {
 } from "@octant/contracts/app-updates";
 import type { DesktopOwnerUnlockPort } from "@octant/client-runtime";
 import type { NativeMenuRequest, NativeMenuOutcome } from "@octant/contracts/shell";
+import type { MovedThreadReference } from "@octant/contracts";
 
 export type { AppUpdateState };
 
@@ -261,6 +262,7 @@ export type HubAdministrationOperation =
   | "standby-order"
   | "promote"
   | "wake"
+  | "accept-moved-threads"
   | "wake-hardware-address"
   | "push"
   | "direct-push"
@@ -276,7 +278,30 @@ export type HubAdministrationOperation =
   | "sign-in-ask"
   | "sign-in-accept"
   | "sign-in-decline"
-  | "sign-in-check";
+  | "sign-in-check"
+  | "thread-move-destinations"
+  | "thread-move-challenge"
+  | "thread-move-start"
+  | "thread-move-phone-ask"
+  | "thread-move-status"
+  | "thread-move-stop-waiting"
+  | "thread-move-cancel"
+  | "thread-move-take-back"
+  | "thread-move-activate"
+  | "thread-move-dismiss"
+  | "thread-move-remove-kept-worktree"
+  | "thread-move-sizes"
+  | "shutdown-listing"
+  | "shutdown-challenge"
+  | "shutdown-start"
+  | "shutdown-phone-ask"
+  | "shutdown-handover"
+  | "shutdown-sizes"
+  | "handover-preview"
+  | "handover"
+  | "handover-take-back"
+  | "handovers-list"
+  | "handovers-continue";
 
 /**
  * The loopback hub administration, which only a local window reaches. Absent
@@ -287,6 +312,15 @@ export interface HubAdministrationBridge {
     operation: HubAdministrationOperation,
     body?: unknown,
   ) => Promise<{ readonly status: number; readonly body: unknown }>;
+  /**
+   * Open there on a moved thread's tombstone: the desktop opens the thread on
+   * the destination's own web app in the default browser, from where this
+   * host says it went. The window names only the thread. Absent on a desktop
+   * app that predates it.
+   */
+  readonly openMovedThreadThere?: (
+    thread: MovedThreadReference,
+  ) => Promise<{ readonly status: "opened" | "refused" }>;
 }
 
 /** The hub administration when this window is a local desktop window, else nothing. */
@@ -294,7 +328,12 @@ export function hubAdministrationOf(
   bridge: OctantHostBridge | undefined,
 ): HubAdministrationBridge | undefined {
   const request = bridge?.hubAdministrationRequest;
-  return request === undefined ? undefined : { hubAdministrationRequest: request };
+  if (request === undefined) return undefined;
+  const openThere = bridge?.openMovedThreadThere;
+  return {
+    hubAdministrationRequest: request,
+    ...(openThere === undefined ? {} : { openMovedThreadThere: openThere }),
+  };
 }
 
 /**
@@ -594,6 +633,24 @@ export interface OctantHostBridge
   ) => () => void;
   readonly subscribeCodeDeepLinks?: (listener: (target: CodeDeepLink) => void) => () => void;
   readonly subscribeOpenSettings?: (listener: () => void) => () => void;
+  /**
+   * Prepare to Shut Down… from the application menu, or Move threads first…
+   * from the quit confirmation (`fromQuit`). Absent outside the desktop app.
+   */
+  readonly subscribePrepareToShutDown?: (
+    listener: (request: { readonly fromQuit: boolean }) => void,
+  ) => () => void;
+  /** Quits through the desktop's guarded shutdown, which may still ask first. */
+  readonly requestQuit?: () => void;
+  /** Tells the desktop whether Quit may offer Move threads first…. */
+  readonly reportShutdownMovesOffered?: (offered: boolean) => void;
+  /**
+   * Tells the desktop how far a running Prepare to shut down batch has come,
+   * so the menu bar shows it while the dialog is hidden; `undefined` when none runs.
+   */
+  readonly reportShutdownProgress?: (
+    progress: { readonly ended: number; readonly total: number } | undefined,
+  ) => void;
   /** The first ⌘Q press: the window shows "press again to quit". */
   readonly subscribeQuitShortcutHint?: (listener: () => void) => () => void;
   readonly subscribeStartNewAgent?: (listener: () => void) => () => void;

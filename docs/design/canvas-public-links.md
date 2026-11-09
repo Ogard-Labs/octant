@@ -48,6 +48,31 @@ moved into this repository for one-command deploys (see
   the export approval card in a local window. A paired device may see the
   links and copy one, but prepare, approve, update, and revoke are refused for
   it, as minting an authenticated share already is.
+  Paired Chat, Work and Code threads use the same Canvas reader and link list
+  as the host. Opening a Canvas exposes its existing public links and Copy link
+  through the authenticated device session and current Canvas read grant. Its
+  client omits creation, editing, export and owner-management methods; their
+  controls are absent. Changing thread, mode or host client closes the reader.
+- A paired device's Canvas read grant is **thread read authority**: the host
+  serves a thread's Canvas cards, and a Canvas's content, history, design
+  images, HTML file, running-design page and public-link list, when the
+  device may open the thread the Canvas
+  belongs to, by the same check that thread's own routes run (Chat's thread
+  read rule, Work's and Code's thread reads). The thread must still be filed
+  in the Project and mode the request names or the Canvas carries; a Canvas a
+  Chat thread owned before it was filed stays the thread's. A refusal reads as
+  an empty card list or `unauthorized`, the same for a Canvas that does not
+  exist, so a device learns nothing about Canvases it cannot read. A window on
+  this host keeps its active-Project rule. Every Canvas write, share, export,
+  public-link change and Settings change keeps the window rule and stays
+  refused to a paired device.
+  _Rationale:_ a paired device's window has no active Project, and the shell
+  route that sets one is local-only, so the window rule left every paired
+  thread with no Canvas cards (seen on a real pairing in November 2026).
+  Letting a device switch the host's Project was rejected: it is a remote
+  workspace mutation that would widen a read into control of the host's
+  shell, and the device already holds the narrower grant that matters, the
+  threads it can open.
 - No agent tool reaches the export flow or the service, and none is added:
   the Canvas agent tools create, revise, and preview, and the host's own
   service port is reached only from the export destination and the revoke
@@ -92,8 +117,9 @@ budget, and the service refuses a larger one.
 
 ## Link terms
 
-- **Ids.** The service mints the share id from 16 random bytes (128 bits),
-  written as 22 characters of URL-safe base64. The link is
+- **Ids.** Current hosts derive a 128-bit opaque id from their random owner proof,
+  written as 22 characters of URL-safe base64. Legacy clients receive an id minted
+  by the service from 16 random bytes. The link is
   `<service>/s/<id>`.
 - **Expiry.** The default is 30 days; the person may pick 1 to 365 days, or
   no expiry, which the card offers only as an explicit choice. The service
@@ -111,14 +137,43 @@ budget, and the service refuses a larger one.
   active is an update: the card says which link, the service replaces the
   payload and expiry under the same id, and the URL does not change.
 - **Revoke.** Revoking deletes the payload at the service and leaves a
-  content-free tombstone (id and time) so the link answers 410. A tombstone is
+  content-free tombstone with id, time and, for owned-create, the owner hash, so the viewer answers 410. A tombstone is
   removed after 90 days, after which the link answers 404.
 
 ## Owner proof
 
-There are no accounts. At create the service returns a per-share owner secret
-(32 random bytes, URL-safe base64) and stores only its SHA-256. The host keeps
-the secret in the credential broker's own namespace for it
+There are no accounts. Before a first-party create sends any document, the
+host generates a 32-byte owner secret with its platform
+CSPRNG, stores the secret in the credential broker and commits a non-secret
+publication intent naming the exact service, share id and credential reference.
+The id is the first 16 bytes of SHA-256 over UTF-8
+`octant-canvas-public-share-id-v1` followed by a NUL byte and the 43-character
+owner secret, encoded as URL-safe base64 without padding. The service verifies
+this binding before accepting owned-create. A missing-id DELETE can therefore
+cancel only the future id proven by its bearer secret, never an unrelated id.
+A same-owner cancellation writes a durable content-free tombstone holding only
+the owner hash before acknowledging success. It fences a delayed owned-create,
+which rechecks after password hashing immediately before the synchronous store
+write. The fence survives restart, makes DELETE idempotent for that owner and
+refuses a wrong proof without mutation. A new cancellation consumes the existing
+create-rate bucket as well as the owner-rate bucket. Tombstone retention remains
+90 days. A generic unauthorized or not-found response never confirms withdrawal:
+the host keeps the intent and owner proof until an acknowledged cancellation or
+gone response. A vault or intent failure sends no document. The owned-create request uses the
+explicit `canvas-public-share-owned-create` discriminator; a service which does
+not implement it refuses before publication. The host never retries using the
+legacy create shape. The reference service still accepts the legacy shape for
+older hosts, but current hosts require owned-create support.
+
+The service stores only the owner's SHA-256 and an owner-keyed HMAC of the
+approved document and link terms. The keyed digest does not provide a cheap
+standalone password test. An identical owned-create retry returns the same
+original receipt without replacing content, expiry or password; it authenticates
+the owner before comparing terms. A different request under that id is refused
+with a conflict and changes nothing. An incorrect owner is refused as on the
+other owner routes. Concurrent identical requests have the same result.
+
+The host keeps the secret in the credential broker's own namespace for it
 (`/v1/canvas-public-share-secrets/*`; a Keychain service and a Secret Service
 attribute of its own) under a random credential reference, never in the
 journal, a projection, a response to a window, or a log. Keeping it apart from
@@ -126,21 +181,30 @@ provider credentials means a provider purge never strands a link its owner
 can no longer revoke. Update, revoke,
 and status present it as `Authorization: Bearer`; the service compares hashes
 in constant time and answers a wrong or missing secret with 403, the same
-answer for an id that does not exist, so the secret cannot be used to probe
-ids. The host deletes the secret once the service confirms revocation or the
+answer for an id that does not exist, except a DELETE whose proof derives that
+exact missing id may create its cancellation fence. This grants no authority over
+another id. The host deletes the secret once the service confirms revocation or the
 link has expired. Expiry is settled by a host sweep that runs once the host is
 serving and hourly after that: it deletes the secret first, then journals
 `canvas.public-share-expired@1`, so a failed delete is retried on the next pass
 and a settled link is not visited again.
 
-A link the service created but the journal could not record (a full disk
-refuses the append) would be live, unlisted, and unrevocable, so the host
-withdraws it at once with the secret it still holds and then deletes the
-secret. If the service cannot be reached the revoke is owed and retried like
-any other; when the journal refuses that too, it is owed in memory until the
-host stops. Publishes, updates, revokes, and expiry for one Canvas run one at
-a time on the host, so two approved publishes cannot both create a link; the
-journal's version check is the backstop.
+The publication intent is `canvas.public-share-publication-pending@1` in the
+same link-owned aggregate as pending revocations. It contains no document,
+password, owner secret or Canvas identity. While its create is in flight,
+listing retries cannot withdraw it. A durable published record resolves that
+publication intent only; it never resolves a later real revocation. The
+aggregate's version remains the fence for that later revocation.
+
+If a create's answer is uncertain, or the published record cannot be committed,
+the host retains the already-stored secret and durable intent and withdraws the
+known id. Restart and listing retries recover it even if no published record
+exists. Withdrawal is reported as complete only for a matching confirmed
+receipt or a response establishing that the intended link is gone. Until then
+the host reports that it keeps trying. Publishes, updates, revokes and expiry
+for one Canvas run one at a time; settings are rechecked after awaited vault
+persistence and before the document is sent, and a changed setting after a
+create triggers withdrawal instead of a successful publication.
 
 ## The host's record
 
@@ -192,9 +256,10 @@ the operator's reverse proxy.
 
 Every body is decoded strictly against the contract, an unknown field or
 future version is refused, and a refusal is `canvas-public-share-refused`
-with a code (`malformed`, `too-large`, `unauthorized`, `not-found`, `gone`,
-`rate-limited`, `unavailable`). The owner routes answer 410 for a revoked or
-expired link.
+with a code (`malformed`, `conflict`, `too-large`, `unauthorized`, `not-found`, `gone`,
+`rate-limited`, `unavailable`). Revoked or expired viewers answer 410. Owned
+DELETE repeats acknowledge cancellation with 200 only for that owner; wrong
+proofs answer 403. Other authenticated owner routes answer 410 for gone links.
 
 ### Viewer safety
 

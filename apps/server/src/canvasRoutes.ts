@@ -99,6 +99,7 @@ import type { ClientPrincipal } from "./clientPrincipal";
 import { authenticateRouteWindowId, readPrincipalRouteContext } from "./principalRouteContext";
 import { isLoopbackHostname } from "./shellRoutes";
 import type { ProjectService } from "./projectService";
+import type { ThreadReadAuthority } from "./threadReadAuthority";
 import { WindowAuthorityError, type WindowAuthorityStore } from "./windowAuthorityStore";
 
 const METHODS = "GET, POST, OPTIONS";
@@ -170,6 +171,12 @@ export interface CanvasRouteDependencies {
   readonly activeContextResolver: (
     windowId: WindowId,
   ) => CanvasActiveContext | undefined | Promise<CanvasActiveContext | undefined>;
+  /**
+   * Whether a caller may open a thread. A paired device reads a Canvas under
+   * this rule, through the thread the Canvas belongs to: it has no active
+   * Project and no way to set one. Absent, a paired device reads no Canvas.
+   */
+  readonly threadReadAuthority?: ThreadReadAuthority;
   readonly now?: () => number;
 }
 
@@ -343,7 +350,7 @@ export function createCanvasRouteHandler(dependencies: CanvasRouteDependencies) 
         }
         const outcome = await resolveCanvasGet(
           dependencies,
-          authenticatedWindowId,
+          canvasReaderFor(principal, authenticatedWindowId),
           canvasId,
           versionId,
         );
@@ -368,9 +375,9 @@ export function createCanvasRouteHandler(dependencies: CanvasRouteDependencies) 
         } catch {
           return failureResponse("Canvas design assets request is invalid.", 400, origin);
         }
-        const outcome = await resolveDesignAssetsForWindow(
+        const outcome = await resolveDesignAssetsForReader(
           dependencies,
-          authenticatedWindowId,
+          canvasReaderFor(principal, authenticatedWindowId),
           parsed,
         );
         return jsonResponse(decodeCanvasDesignAssetsOutcome(outcome), 200, origin);
@@ -385,7 +392,11 @@ export function createCanvasRouteHandler(dependencies: CanvasRouteDependencies) 
         } catch {
           return failureResponse("Canvas design run request is invalid.", 400, origin);
         }
-        const outcome = await issueDesignRun(dependencies, authenticatedWindowId, parsed);
+        const outcome = await issueDesignRun(
+          dependencies,
+          canvasReaderFor(principal, authenticatedWindowId),
+          parsed,
+        );
         return jsonResponse(decodeCanvasDesignRunOutcome(outcome), 200, origin);
       }
 
@@ -416,9 +427,9 @@ export function createCanvasRouteHandler(dependencies: CanvasRouteDependencies) 
         } catch {
           return failureResponse("Canvas ID is invalid.", 400, origin);
         }
-        const context = await resolveAuthorizedContext(
+        const context = await resolveReadContext(
           dependencies,
-          authenticatedWindowId,
+          canvasReaderFor(principal, authenticatedWindowId),
           canvasId,
         );
         if (context.kind === "unauthorized") {
@@ -1177,7 +1188,11 @@ export function createCanvasRouteHandler(dependencies: CanvasRouteDependencies) 
         }
         return jsonResponse(
           decodeCanvasHtmlFileResult(
-            await renderCanvasHtmlFileForWindow(dependencies, authenticatedWindowId, parsed),
+            await renderCanvasHtmlFileForReader(
+              dependencies,
+              canvasReaderFor(principal, authenticatedWindowId),
+              parsed,
+            ),
           ),
           200,
           origin,
@@ -1363,9 +1378,9 @@ export function createCanvasRouteHandler(dependencies: CanvasRouteDependencies) 
           } catch {
             return failureResponse("Canvas ID is invalid.", 400, origin);
           }
-          const context = await resolveAuthorizedContext(
+          const context = await resolveReadContext(
             dependencies,
-            authenticatedWindowId,
+            canvasReaderFor(principal, authenticatedWindowId),
             canvasId,
           );
           if (context.kind !== "ok") {
@@ -1597,7 +1612,7 @@ export function createCanvasRouteHandler(dependencies: CanvasRouteDependencies) 
         }
         const cards = await resolveThreadReferenceCards(
           dependencies,
-          authenticatedWindowId,
+          canvasReaderFor(principal, authenticatedWindowId),
           mode,
           threadId,
           projectId,
@@ -1707,11 +1722,21 @@ async function resolveCreateContext(
 
 async function resolveThreadReferenceCards(
   dependencies: CanvasRouteDependencies,
-  windowId: WindowId,
+  reader: CanvasReader,
   mode: CanvasActiveContext["mode"],
   threadId: string,
   projectId: ProjectId | null,
 ) {
+  if (reader.kind === "paired-device") {
+    return resolvePairedThreadReferenceCards(
+      dependencies,
+      reader.scopeId,
+      mode,
+      threadId,
+      projectId,
+    );
+  }
+  const { windowId } = reader;
   // A Chat thread in no Project lists the Canvases it owns itself; they are
   // read wherever the thread is, so a window in Chat is all it takes.
   if (projectId === null) {
@@ -1793,6 +1818,114 @@ async function resolveAuthorizedContext(
   };
 }
 
+/**
+ * Who reads a Canvas, and under which rule. A window on this host reads under
+ * its active Project and mode. A paired device has neither (the shell route
+ * that sets them is local-only), so it reads under thread read authority: a
+ * Canvas whose thread it may open. That reach is read-only; every route that
+ * changes, publishes, exports, or shares a Canvas keeps the window rule.
+ */
+type CanvasReader =
+  | { readonly kind: "window"; readonly windowId: WindowId }
+  | { readonly kind: "paired-device"; readonly scopeId: WindowId };
+
+function canvasReaderFor(principal: ClientPrincipal, windowId: WindowId): CanvasReader {
+  return principal.kind === "remote-device"
+    ? { kind: "paired-device", scopeId: windowId }
+    : { kind: "window", windowId };
+}
+
+function resolveReadContext(
+  dependencies: CanvasRouteDependencies,
+  reader: CanvasReader,
+  canvasId: CanvasId,
+): Promise<AuthorizedCanvasContext> {
+  return reader.kind === "window"
+    ? resolveAuthorizedContext(dependencies, reader.windowId, canvasId)
+    : resolvePairedReadContext(dependencies, reader.scopeId, canvasId);
+}
+
+/**
+ * A paired device reads a Canvas when it may open the thread the Canvas
+ * belongs to, and that thread is still filed in the Canvas's Project. A
+ * missing Canvas answers exactly as one the device may not read, so a refusal
+ * never tells the device which Canvases exist.
+ */
+async function resolvePairedReadContext(
+  dependencies: CanvasRouteDependencies,
+  scopeId: WindowId,
+  canvasId: CanvasId,
+): Promise<AuthorizedCanvasContext> {
+  const threadReadAuthority = dependencies.threadReadAuthority;
+  const entry = dependencies.canvasProjection.getById(canvasId);
+  if (threadReadAuthority === undefined || entry === undefined) return { kind: "unauthorized" };
+  const provenance = entry.currentVersion.definition.provenance;
+  const thread = await threadReadAuthority(scopeId, {
+    mode: provenance.mode,
+    threadId: String(provenance.threadId),
+  });
+  if (thread.kind !== "readable") return { kind: "unauthorized" };
+  // The Canvas service still applies its own check to the context it is
+  // handed; this one is the Canvas's own scope, admitted by its thread.
+  const activeContext: CanvasActiveContext = {
+    mode: provenance.mode,
+    projectId: provenance.projectId,
+  };
+  // A Chat thread's own Canvas, from before the thread was filed anywhere,
+  // stays the thread's wherever it is filed now.
+  if (provenance.projectId === null) return { kind: "ok", activeContext, project: undefined };
+  if (thread.projectId === null || String(thread.projectId) !== String(provenance.projectId)) {
+    return { kind: "unauthorized" };
+  }
+  const project = await activeProjectOfMode(
+    dependencies,
+    scopeId,
+    provenance.projectId,
+    provenance.mode,
+  );
+  if (project === undefined) return { kind: "unauthorized" };
+  return { kind: "ok", activeContext, project };
+}
+
+async function resolvePairedThreadReferenceCards(
+  dependencies: CanvasRouteDependencies,
+  scopeId: WindowId,
+  mode: CanvasActiveContext["mode"],
+  threadId: string,
+  projectId: ProjectId | null,
+) {
+  const threadReadAuthority = dependencies.threadReadAuthority;
+  if (threadReadAuthority === undefined) return [];
+  const thread = await threadReadAuthority(scopeId, { mode, threadId });
+  if (thread.kind !== "readable") return [];
+  if (thread.projectId === null) {
+    if (projectId !== null) return [];
+    return dependencies.canvasService.threadReferenceCards({ mode, threadId, projectId: null });
+  }
+  if (projectId === null || String(thread.projectId) !== String(projectId)) return [];
+  const project = await activeProjectOfMode(dependencies, scopeId, projectId, mode);
+  if (project === undefined) return [];
+  return dependencies.canvasService.threadReferenceCards({
+    mode,
+    threadId,
+    projectId: String(projectId),
+  });
+}
+
+async function activeProjectOfMode(
+  dependencies: CanvasRouteDependencies,
+  scopeId: WindowId,
+  projectId: ProjectId,
+  mode: CanvasActiveContext["mode"],
+) {
+  const bootstrap = await dependencies.projects.bootstrap(scopeId);
+  const project = bootstrap.active.find((candidate) => String(candidate.id) === String(projectId));
+  if (project === undefined || project.lifecycle !== "active" || project.type !== mode) {
+    return undefined;
+  }
+  return { id: String(project.id), type: project.type, lifecycle: project.lifecycle };
+}
+
 function inventoryEntriesForProject(
   projection: CanvasProjection,
   projectId: ProjectId,
@@ -1809,11 +1942,11 @@ function inventoryEntriesForProject(
 
 async function resolveCanvasGet(
   dependencies: CanvasRouteDependencies,
-  windowId: WindowId,
+  reader: CanvasReader,
   canvasId: ReturnType<typeof decodeCanvasId>,
   versionId?: ReturnType<typeof decodeCanvasVersionId>,
 ): Promise<CanvasGetOutcome> {
-  const context = await resolveAuthorizedContext(dependencies, windowId, canvasId);
+  const context = await resolveReadContext(dependencies, reader, canvasId);
   if (context.kind === "unauthorized") {
     return { kind: "unauthorized", canvasId };
   }
@@ -1839,16 +1972,16 @@ async function resolveCanvasGet(
  * thread. Nothing is cached, so a paired device or a window asks through the
  * same checks every time it draws the design.
  */
-async function resolveDesignAssetsForWindow(
+async function resolveDesignAssetsForReader(
   dependencies: CanvasRouteDependencies,
-  windowId: WindowId,
+  reader: CanvasReader,
   input: {
     readonly canvasId: CanvasId;
     readonly versionId: ReturnType<typeof decodeCanvasVersionId>;
     readonly blockId: ReturnType<typeof decodeCanvasBlockId>;
   },
 ): Promise<CanvasDesignAssetsOutcome> {
-  const read = await resolveCanvasGet(dependencies, windowId, input.canvasId, input.versionId);
+  const read = await resolveCanvasGet(dependencies, reader, input.canvasId, input.versionId);
   if (read.kind === "unauthorized") return { kind: "unauthorized", canvasId: input.canvasId };
   if (read.kind !== "ready") {
     return {
@@ -1894,12 +2027,12 @@ async function resolveDesignAssetsForWindow(
  * they do when the reader draws the design. Nothing is sent anywhere and
  * nothing is journaled; the file goes back to the window that asked.
  */
-async function renderCanvasHtmlFileForWindow(
+async function renderCanvasHtmlFileForReader(
   dependencies: CanvasRouteDependencies,
-  windowId: WindowId,
+  reader: CanvasReader,
   input: CanvasHtmlFileRequest,
 ): Promise<CanvasHtmlFileResult> {
-  const read = await resolveCanvasGet(dependencies, windowId, input.canvasId, input.versionId);
+  const read = await resolveCanvasGet(dependencies, reader, input.canvasId, input.versionId);
   if (read.kind === "unauthorized") {
     return {
       kind: "refused",
@@ -1983,7 +2116,7 @@ async function renderCanvasHtmlFileForWindow(
  */
 async function issueDesignRun(
   dependencies: CanvasRouteDependencies,
-  windowId: WindowId,
+  reader: CanvasReader,
   input: CanvasDesignRunRequest,
 ): Promise<CanvasDesignRunOutcome> {
   const unavailable = (reason: string): CanvasDesignRunOutcome => ({
@@ -1993,7 +2126,7 @@ async function issueDesignRun(
   });
   const tickets = dependencies.designRunTickets;
   if (tickets === undefined) return unavailable("This host does not run prototypes.");
-  const read = await resolveCanvasGet(dependencies, windowId, input.canvasId, input.versionId);
+  const read = await resolveCanvasGet(dependencies, reader, input.canvasId, input.versionId);
   if (read.kind === "unauthorized") return { kind: "unauthorized", canvasId: input.canvasId };
   if (read.kind !== "ready")
     return unavailable("Canvas is unavailable. Reopen it from the Project.");

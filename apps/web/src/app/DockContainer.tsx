@@ -1,3 +1,4 @@
+import { requestThreadControl } from "../composer/threadControlNavigation";
 import type { CodeReviewFileRequest } from "../code/codeReviewNavigation";
 import type { ChatThreadId } from "@octant/contracts/chat";
 import {
@@ -308,6 +309,18 @@ export const DockContainer = memo(function DockContainer(props: DockContainerPro
     return (
       <ThreadUtilityDockContent
         key={`${dockThreadKey}:${utilityTab?.id ?? surface}`}
+        onAgentBrowserRecovery={(reason) => {
+          if (reason === "host-lends-no-browser") {
+            void actions.openSettings();
+            return;
+          }
+          requestThreadControl(
+            dockThread.threadId,
+            reason === "no-tool-transport" ? "provider" : "access",
+          );
+          if (dockThread.mode === "work") actions.selectWorkThread(dockThread.threadId);
+          else if (dockThread.mode === "code") actions.selectCodeThread(dockThread.threadId);
+        }}
         agentRunClient={agentRunClient}
         agentRunSettingsClient={agentRunSettingsClient}
         onReviewAgentChanges={(request) => {
@@ -609,6 +622,7 @@ export const DockContainer = memo(function DockContainer(props: DockContainerPro
         }
         desktop={threadUtility("desktop")}
         debug={threadUtility("debug")}
+        vitals={threadUtility("vitals")}
         launchableSurfaces={launchableDockSurfaces}
         launchableReferences={launchableDockReferences}
         onClose={actions.closeDock}

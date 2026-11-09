@@ -11,6 +11,7 @@ import { hostHealthTone } from "../hosts/hostHealthTone";
 import { GuestHubPanel, GuestHubRefusals } from "../hosts/GuestHubPanel";
 import { createExpoPhoneUnlockKey } from "../hosts/expoOwnerUnlockPorts";
 import { OwnerAlertsPanel } from "../hosts/OwnerAlertsPanel";
+import { OwnerMovesPanel } from "../hosts/OwnerMovesPanel";
 import type { GuestSpokeRefusal } from "../hosts/hubGuestFlow";
 import { PairingPanel } from "../hosts/PairingPanel";
 import { RemoveHostPanel } from "../hosts/RemoveHostPanel";
@@ -31,12 +32,15 @@ import { useTheme } from "../../design-system";
 import { IconButton } from "../ui/IconButton";
 import { useMobileHardwareBack } from "./useMobileHardwareBack";
 import { mobileThreadReturnRouteForDeepLink } from "./navigationState";
-import { deepLinkRefusal } from "./deepLinkNavigation";
+import { deepLinkRefusal, movesLinkOpening } from "./deepLinkNavigation";
+import type { MobileMovesDeepLinkTarget } from "../notifications/deepLinks";
 
 export interface RootNavigatorProps {
   readonly activeRoute: MobileRouteId;
   readonly onSelectRoute: (route: MobileRouteId) => void;
   readonly pendingDeepLinkRow?: MobileInboxRow | undefined;
+  /** A tapped notification that a move waits for this phone. */
+  readonly pendingMovesLink?: MobileMovesDeepLinkTarget | undefined;
   readonly onDeepLinkConsumed?: (() => void) | undefined;
 }
 
@@ -64,6 +68,7 @@ function HostsBody(props: {
     placementHostId,
     setPlacementHostId,
   } = useMobileSession();
+  const offlineDemo = environment.kind === "mock" && environment.offlineDemo;
   const [notAccepted, setNotAccepted] = useState<ReadonlyArray<GuestSpokeRefusal>>([]);
   useEffect(() => {
     // The computers on a joined hub that refused this phone are listed beside the hosts.
@@ -233,7 +238,7 @@ function HostsBody(props: {
             <View style={styles.mockNotice} testID="mobile-hosts-mock-notice">
               <Text style={styles.mockTitle}>Pair a computer</Text>
               <Text selectable style={styles.sectionBody}>
-                Pairing is off in mock mode. Use the live app to pair a computer.
+                Pairing is off in this sample workspace. Leave it to connect a computer.
               </Text>
             </View>
           ) : (
@@ -266,7 +271,7 @@ function HostsBody(props: {
           <>
             {environment.kind === "mock" ? (
               <View style={styles.mockNotice} testID="mobile-hosts-mock-notice">
-                <Text style={styles.mockTitle}>Mock workspace</Text>
+                <Text style={styles.mockTitle}>Sample workspace</Text>
                 <Text selectable style={styles.sectionBody}>
                   {environment.label}. Hosts, credentials, and actions stay in memory and never
                   connect to a real listener.
@@ -293,7 +298,14 @@ function HostsBody(props: {
               </Text>
             ) : null}
             <GuestHubRefusals refused={notAccepted} />
-            {unlockKey === undefined ? null : (
+            {offlineDemo || unlockKey === undefined ? null : (
+              <OwnerMovesPanel
+                deviceKeyStore={deviceKeyStore}
+                guestHubStore={guestHubStore}
+                unlockKey={unlockKey}
+              />
+            )}
+            {offlineDemo || unlockKey === undefined ? null : (
               <OwnerAlertsPanel
                 deviceKeyStore={deviceKeyStore}
                 guestHubStore={guestHubStore}
@@ -395,19 +407,23 @@ function HostsBody(props: {
               })
             )}
             <Text style={styles.sectionBody}>{MOBILE_COPY.placementHint}</Text>
-            <AppearanceBackgroundPanel />
-            <PrivacySecurityPanel
-              hostHealth={
-                placementHostId !== undefined
-                  ? (healthByHostId.get(placementHostId)?.kind ?? "idle")
-                  : hosts[0] !== undefined
-                    ? (healthByHostId.get(hosts[0].hostId)?.kind ?? "idle")
-                    : "idle"
-              }
-              integrity={deviceIntegrity}
-              keyStorage={mobileKeyStorageProtection}
-              screenshotPrivacy={mobileScreenshotPrivacy}
-            />
+            {!offlineDemo ? (
+              <>
+                <AppearanceBackgroundPanel />
+                <PrivacySecurityPanel
+                  hostHealth={
+                    placementHostId !== undefined
+                      ? (healthByHostId.get(placementHostId)?.kind ?? "idle")
+                      : hosts[0] !== undefined
+                        ? (healthByHostId.get(hosts[0].hostId)?.kind ?? "idle")
+                        : "idle"
+                  }
+                  integrity={deviceIntegrity}
+                  keyStorage={mobileKeyStorageProtection}
+                  screenshotPrivacy={mobileScreenshotPrivacy}
+                />
+              </>
+            ) : null}
           </>
         )}
       </ScrollView>
@@ -429,9 +445,17 @@ export function RootNavigator(props: RootNavigatorProps) {
   const [hostEntryMode, setHostEntryMode] = useState<"manage" | "add" | "scan">("manage");
   const [agentListView, setAgentListView] = useState<AgentListView>("all");
   const [deepLinkNotice, setDeepLinkNotice] = useState<string | undefined>();
-  const { setInboxHostFilter, hosts, hostsLoaded, hostsError, transportForHost, transports } =
-    useMobileSession();
+  const {
+    environment,
+    setInboxHostFilter,
+    hosts,
+    hostsLoaded,
+    hostsError,
+    transportForHost,
+    transports,
+  } = useMobileSession();
   usePhoneNotificationRotation({
+    enabled: environment.kind === "live",
     book: mobilePushRegistrationBook(),
     permission: mobileNotificationPort,
     transportForHost,
@@ -474,6 +498,29 @@ export function RootNavigator(props: RootNavigatorProps) {
     props.onDeepLinkConsumed,
     props.onSelectRoute,
     setInboxHostFilter,
+    hosts,
+    hostsLoaded,
+    hostsError,
+  ]);
+
+  useEffect(() => {
+    if (props.pendingMovesLink === undefined) return;
+    // As for a thread link, the paired list must be read before a computer
+    // can be called unpaired.
+    if (!hostsLoaded) return;
+    const opening = movesLinkOpening(
+      props.pendingMovesLink,
+      hosts.map((host) => host.hostId),
+      hostsError !== undefined,
+    );
+    setDeepLinkNotice(opening.notice);
+    setHostEntryMode(opening.entryMode);
+    props.onSelectRoute(opening.route);
+    props.onDeepLinkConsumed?.();
+  }, [
+    props.pendingMovesLink,
+    props.onDeepLinkConsumed,
+    props.onSelectRoute,
     hosts,
     hostsLoaded,
     hostsError,

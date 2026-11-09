@@ -13,6 +13,95 @@ import {
 } from "@octant/contracts";
 import { deriveManagedWorktreeCheckoutId } from "../code/managedCodeThreadCreation";
 import type { CurrentBrowserSessionTarget } from "./browserSessionGrants";
+import { withToolFamilyHelp, type AppManagedToolSet } from "../providers/appManagedToolSet";
+import { BROWSER_TOOL_DEFINITION, BROWSER_TOOL_HELP } from "./browserToolDefinition";
+import { parseBrowserToolInput } from "./browserToolOperations";
+
+/** Account delegation supplements the ordinary Private path rather than replacing it. */
+export function withRoutineBrowserProfiles(input: {
+  readonly privateTools: AppManagedToolSet;
+  readonly profileTools: AppManagedToolSet;
+}): AppManagedToolSet {
+  let mode: "private" | "stored" = "private";
+  let switching = false;
+  let generation = 0;
+  let closing: Promise<void> | undefined;
+  const selected = () => (mode === "private" ? input.privateTools : input.profileTools);
+  const refused = (error: string) => ({ result: { error }, isError: true });
+  return withToolFamilyHelp(
+    {
+      definitions: input.profileTools.definitions.map((definition) => {
+        if (definition.name !== BROWSER_TOOL_DEFINITION.name) return definition;
+        const properties = definition.inputSchema.properties;
+        return {
+          ...definition,
+          description:
+            "Use this routine's Private Browser page with its ordinary site approval, or explicitly select a granted stored profile. Account permission grants no file transfer. Stop the current page before changing profiles.",
+          inputSchema: {
+            ...definition.inputSchema,
+            properties: {
+              ...(typeof properties === "object" &&
+              properties !== null &&
+              !Array.isArray(properties)
+                ? properties
+                : {}),
+              profile: BROWSER_TOOL_DEFINITION.inputSchema.properties.profile,
+            },
+          },
+        };
+      }),
+      close: () => {
+        closing ??= Promise.all([input.privateTools.close?.(), input.profileTools.close?.()]).then(
+          () => undefined,
+        );
+        return closing;
+      },
+      execute: async (call) => {
+        if (call.name !== BROWSER_TOOL_DEFINITION.name) return refused("tool-unavailable");
+        if (closing !== undefined || call.signal?.aborted) return refused("tool-interrupted");
+        if (switching) return refused("browser-busy");
+        const operation = parseBrowserToolInput(call.inputJson, {
+          allowProfile: true,
+          allowUploadPermission: true,
+          allowDownloadPermission: true,
+        });
+        if (operation === undefined) return refused("invalid-browser-input");
+        const next =
+          operation.operation === "navigate" && operation.profile !== undefined
+            ? operation.profile === "private"
+              ? "private"
+              : "stored"
+            : mode;
+        if (next !== mode) {
+          switching = true;
+          generation += 1;
+          try {
+            const stopped = await selected().execute({
+              ...call,
+              inputJson: JSON.stringify({ operation: "stop" }),
+            });
+            if (stopped.isError === true) return stopped;
+            mode = next;
+          } finally {
+            switching = false;
+          }
+          if (closing !== undefined || call.signal?.aborted) return refused("tool-interrupted");
+        }
+        // A refused or expired stored-profile call keeps this path selected.
+        // Falling back would return a different page under unrelated approval.
+        const started = generation;
+        const answer = await selected().execute(call);
+        if (closing !== undefined || call.signal?.aborted || started !== generation)
+          return {
+            result: { error: "browser-context-changed", effect: "unknown" },
+            isError: true,
+          };
+        return answer;
+      },
+    },
+    BROWSER_TOOL_HELP,
+  );
+}
 
 /** The reviewed recipient is a definition, never whichever thread last ran it. */
 export function currentRoutineBrowserTarget(input: {

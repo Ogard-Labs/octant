@@ -93,9 +93,11 @@ states that unsent drafts and local view state stay on their source screen,
 while host-held inputs, task state and pending feedback stay with the task. A
 paired browser can copy its already authenticated origin's task link. A missing
 browser-verifiable listener offers the existing paired app's task selection
-instead; opening the flow never pairs a device or enables a listener. Moving
-execution to another host remains subject to the existing supported host paths
-and is not implied by changing screens.
+instead; opening the flow never pairs a device or enables a listener. Changing
+screens never moves execution. Moving a thread to another of the person's
+computers is its own owner-signed act, started from the thread's Environment
+tool (its Computer card), under
+[Hub and spokes: moving a thread](hub-and-spokes.md#moving-a-thread-to-another-member).
 
 ## Navigation and Projects
 
@@ -158,7 +160,11 @@ Project terminal), off by default, set only by a person. Its row says it
 changes what the Project shows, not what its threads may do: a Work thread
 has the same shell, Git, and tools as a Code thread at the same level either
 way ([Modes](../architecture.md#modes-chat-work-and-code)). Built today it
-shows the Project terminal and Project actions. Code Projects have no such row, since Code always shows them. Over an application ground the cards keep the
+shows the Project terminal and Project actions. On a server Work Project its
+existing Settings → Access → Servers row instead offers the same default-off
+presentation choice for saved actions only; no general server Work terminal or
+tools pane is enabled ([Server Projects](server-projects.md#threads)).
+Code Projects have no such row, since Code always shows them. Over an application ground the cards keep the
 opaque card step even under Glass, and the header's text takes the start
 screen's page-colour glow: set straight on the ground, the overview's rows
 read through the ground's letters (October 2026).
@@ -335,20 +341,21 @@ means the host's. The choice is independent of the durable resume opt-in —
 hiding authorizes no provider turn, and a dispatched recovery lifts only the
 snooze the host set, never one the person set.
 
-### Deferring a pending question
+### Deferring a pending question or decision
 
 Home, Inbox and Review let a person defer an answerable Chat, Work or Code
-question using the existing future-time presets. The condensed row stays in
+question, or a Work or Code decision, using the existing future-time presets. The condensed row stays in
 the attention list and its count, after active requests, with **Bring back now**
 and a link to the thread. The shell clock restores its answers when the time
 arrives. Thread visibility, the original questionnaire and draft answers do not
 change. Deferring never answers a question, grants approval or resumes a turn.
 
 The local host rechecks window access and the current pending request before
-journaling an opaque request key and wake time. The key binds the exact request,
+journaling an opaque request key and wake time. The key of a question binds the exact request,
 choices and authority context; a changed, answered or cancelled request does
-not transfer its deferral to another question. Preferences replay after restart
-and invalidate navigation reads in other windows. Execution approvals, decisions
+not transfer its deferral to another question. The key of a decision names the
+turn that asked it, so a later turn's decision starts undeferred. Preferences replay after restart
+and invalidate navigation reads in other windows. Execution approvals
 and find-only lead/subagent questions cannot be deferred. Find-only questions
 need a stable answer identity before this control can apply to them.
 
@@ -684,8 +691,25 @@ its title band offers the common tools, Add tool lists the rest, and an open
 dock shows a tool strip. Direct tools are Side Chat, Browser, Files,
 Document, Canvas, artifact-gated Plan, conditional Delivery, Review, Terminal,
 Tests, Run and debug ([language services](language-services.md#debugger-panel-rules)),
-iOS Simulator, Android emulator, and Desktop, as mode and capability allow. Chat
-admits only the [Agents dock](#subagents) and has no bottom panel. Side
+iOS Simulator, Android emulator, Desktop, and Vitals, as mode and capability allow. Chat
+admits only the [Agents dock](#subagents) and has no bottom panel. **Vitals**
+(Work and Code) shows the load on the host the dock is connected to, local or
+remote, from the host-resources read: a CPU history line with the core count,
+memory used and total, network in and out, disk throughput, disk space, GPU
+utilisation, and **Energy**. Each reading is drawn only when that host reports
+it; a host with no battery says "No battery", and a figure the host cannot read
+is left out rather than drawn as zero. The tool keeps the last five minutes of
+samples in the window (nothing is stored), reads about every five seconds only
+while it is mounted and the window is visible, never overlaps reads, abandons one
+after five seconds, and on a failed read drops its figures and history instead
+of showing old ones as current. A window without authority to read the host is
+told so. For a thread in a server Project the tool shows the
+load on that server, read over the Project's SSH connection by
+`GET /api/server-projects/resources` (a local window only; Linux servers only,
+and it says so for any other, and stops asking). The tool reads no
+host until the server Project catalog has answered, so it never shows this
+computer's load under a server thread's name, and a new target starts a new
+history. Side
 Chat is a Chat conversation about the pane's thread: it reads that thread's
 conversation, current state, files, and subagent results, and changes none of
 them ([authority](../architecture.md#security-and-authority)). Its notice says
@@ -767,7 +791,23 @@ chrome. It holds a skeleton at the page's aspect ratio until the
 first frame and never prints status prose. It reads the same host snapshot the
 Browser pane reads, asks for a fresh picture only while it is on screen, pauses
 with the window, and backs off while the page does not change. Computer Use keeps
-its separate card. **Browser start.** A Browser with no page opens on an empty
+its separate card.
+
+**Browser availability.** While no agent drives the page, the thread's pane and
+Project dock show a server-reported availability fact: available (read-only in
+Plan), omitted with its specific tool-transport, task-constraint or host-capability
+reason and an existing recovery action, or Unknown when disconnected/unreported.
+The same policy composes the Browser tool; the renderer never infers permission.
+At 720px and below the status keeps its accessible name and recovery action as
+an icon. Site approvals, Take over, Hand back and the active-agent indicator
+retain their existing behavior. This fact is a reading, never a grant. The provider remedy opens the owning
+thread's existing provider/model picker. A constraints remedy opens that task's
+access report; saved profile constraints cannot be removed by raising its access
+level, so the report directs the person to start a task with a permitting profile.
+A host-capability omission names the missing host capability and links to the
+existing host Settings. Neither recovery grants access by navigation.
+
+**Browser start.** A Browser with no page opens on an empty
 address bar, never a placeholder site. In a Code thread it lists the servers the
 host reports as openable for the thread's Project, this checkout's first and
 then leftovers from elsewhere, leaving out any the host could not reach, the
@@ -1260,7 +1300,9 @@ in Chat, Work, and Code. A questionnaire belongs in its originating thread,
 with one compact card containing up to four questions. It creates no Canvas.
 Each question offers one choice or several choices, optional descriptions,
 and an optional written alternative. Recommendations are labelled and never
-preselected. A person can add a comment alongside their choices.
+preselected. A person can add a comment alongside their choices by default.
+A provider-native form can explicitly omit this field when its protocol cannot
+return a comment; the host refuses a supplied comment for that exact ask.
 
 Choosing an option only edits the draft. **Send answers** submits the complete
 set once; the host validates question and option identities, required answers,

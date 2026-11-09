@@ -1,4 +1,5 @@
 import type { BrowserProfileChoice } from "@octant/contracts/project-browser";
+import { browserAgentAvailability } from "@octant/domain";
 import { describe, expect, it, vi } from "vitest";
 import {
   decodeToolActionAuthority,
@@ -30,6 +31,38 @@ function snapshot(overrides: Partial<BrowserAutomationSnapshot> = {}): BrowserAu
 }
 
 describe("createBrowserAppManagedTools", () => {
+  it.each([[], ["octant_browser"], ["octant_terminal"]])(
+    "offers Browser exactly when its reported constraints admit it: %j",
+    (...toolConstraints) => {
+      const tools = createBrowserAppManagedTools({
+        windowId,
+        threadId,
+        mode: "work",
+        modelId,
+        resolveModelId: () => modelId,
+        modelBindings: new Map(),
+        executionPolicy: "approval-gated",
+        toolConstraints,
+        resolveAuthority: () => authority,
+        browser: {
+          inspectThread: () => snapshot(),
+          create: vi.fn(),
+          act: vi.fn(),
+          releaseThread: vi.fn(),
+        },
+        uuid: () => "80000000-0000-4000-8000-000000000001",
+      });
+      const reported = browserAgentAvailability({
+        toolTransport: true,
+        hostLendsBrowser: true,
+        toolConstraints,
+        readOnly: false,
+      });
+      expect(tools.definitions.some((definition) => definition.name === "octant_browser")).toBe(
+        reported.status === "available",
+      );
+    },
+  );
   it("offers Chat browser on demand and keeps approval separate from filesystem tools", async () => {
     const create = vi.fn(async () =>
       snapshot({
@@ -535,6 +568,57 @@ describe("browser diagnostics reach the provider-facing result", () => {
       uuid: () => "80000000-0000-4000-8000-000000000001",
     });
   }
+
+  it("keeps the Work turn cancellation signal through the download port", async () => {
+    const workAuthority = decodeToolActionAuthority({
+      ...authority,
+      mode: "work",
+      projectId: "80000000-0000-4000-8000-000000000022",
+    });
+    const context = { ...activeContext(), authority: workAuthority };
+    const running = snapshot({ status: "running", context });
+    const saveDownload = vi.fn(async () => ({
+      status: "saved" as const,
+      path: "downloads/report.txt",
+      sizeBytes: 4,
+      mediaType: "text/plain",
+    }));
+    const tools = createBrowserAppManagedTools({
+      windowId,
+      threadId,
+      mode: "work",
+      modelId,
+      resolveModelId: () => modelId,
+      modelBindings: new Map([[String(context.contextId), { modelId, authority: workAuthority }]]),
+      executionPolicy: "approval-gated",
+      resolveAuthority: () => workAuthority,
+      uploadRoot: () => "/workspace",
+      browser: {
+        inspectThread: () => running,
+        create: vi.fn(async () => running),
+        act: vi.fn(async () => running),
+        releaseThread: vi.fn(async () => running),
+        saveDownload,
+      },
+      approvals: { request: vi.fn(async () => "approved" as const) } as never,
+      uuid: () => "80000000-0000-4000-8000-000000000001",
+    });
+    const abort = new AbortController();
+    expect(
+      await tools.execute({
+        name: "octant_browser",
+        inputJson: JSON.stringify({ operation: "download-save", downloadId: "d1" }),
+        signal: abort.signal,
+      }),
+    ).toMatchObject({ isError: false });
+    expect(saveDownload).toHaveBeenCalledWith(
+      expect.objectContaining({
+        signal: abort.signal,
+        workspaceRoot: "/workspace",
+        downloadId: "d1",
+      }),
+    );
+  });
 
   it("refuses every call while the person has the page, but still lets stop release it", async () => {
     const act = vi.fn(async () => snapshot());

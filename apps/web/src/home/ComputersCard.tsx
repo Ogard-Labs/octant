@@ -27,6 +27,7 @@ const RESOURCE_READ_TIMEOUT_MS = 5_000;
 export type HostResourceRead =
   | { readonly status: "ready"; readonly snapshot: HostResourceSnapshot }
   | { readonly status: "refused" }
+  | { readonly status: "unsupported" }
   | { readonly status: "unavailable" };
 
 export interface ComputersCardSource {

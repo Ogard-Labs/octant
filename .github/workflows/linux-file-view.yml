@@ -1,0 +1,240 @@
+name: Linux mediated file-view feasibility
+
+on:
+  pull_request:
+    paths:
+      - .github/workflows/linux-file-view.yml
+      - scripts/linux-file-view/**
+      - apps/server/native/linux-mediation/**
+  workflow_dispatch:
+    inputs:
+      experiment:
+        description: Bounded native experiment
+        type: choice
+        default: file-view
+        options:
+          - file-view
+          - syscall-admission
+          - async-compatibility
+          - concurrent-admission
+          - pre-access
+          - kernel-admission
+
+permissions:
+  contents: read
+
+concurrency:
+  group: linux-file-view-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  kernel-admission:
+    name: Compile and boot owned kernel admission core
+    if: github.event_name != 'workflow_dispatch' || inputs.experiment == 'kernel-admission'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.4
+      - run: bun install --frozen-lockfile
+      - name: Prepare build tooling only in the disposable runner
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends build-essential flex bison libssl-dev libelf-dev bc qemu-system-x86 bubblewrap e2fsprogs
+      - name: Build and boot the pinned networkless guest, never install its kernel
+        run: python3 scripts/linux-file-view/kernel_build.py
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: linux-kernel-admission-core
+          include-hidden-files: true
+          path: |
+            ${{ runner.temp }}/octant-kernel-guest/guest.log
+            ${{ runner.temp }}/octant-kernel-guest/linux-6.18/.config
+          if-no-files-found: error
+          retention-days: 7
+  pre-access:
+    name: Measure stock pre-access admissions and group loss
+    if: github.event_name != 'workflow_dispatch' || inputs.experiment == 'pre-access'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 2
+    steps:
+      - uses: actions/checkout@v4
+      - name: Compile the bounded original stock-kernel check
+        run: |
+          gcc -std=c11 -Wall -Wextra -Werror scripts/linux-file-view/pre_access.c -o "$RUNNER_TEMP/octant-pre-access"
+      - name: Measure current stock read and mapping admission without changing the kernel
+        run: |
+          sudo timeout --kill-after=3s 25s "$RUNNER_TEMP/octant-pre-access" > "$RUNNER_TEMP/pre-access.json"
+          cat "$RUNNER_TEMP/pre-access.json"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: linux-stock-pre-access
+          path: ${{ runner.temp }}/pre-access.json
+          if-no-files-found: error
+          retention-days: 7
+  native:
+    if: github.event_name != 'workflow_dispatch' || inputs.experiment == 'file-view'
+    name: Measure native file-view behavior
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Read kernel policy prerequisites without changing boot settings
+        run: |
+          sudo python3 scripts/linux-file-view/kernel_prerequisites.py "$RUNNER_TEMP/kernel-policy-prerequisites.json"
+      - name: Prepare the owned disposable runner
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends build-essential pkg-config libfuse3-dev fuse3 bubblewrap
+          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+          test -c /dev/fuse
+          test -r /dev/fuse -a -w /dev/fuse
+      - name: Compile the bounded fixture
+        run: |
+          gcc -std=c11 -D_FILE_OFFSET_BITS=64 -Wall -Wextra -Werror \
+            $(pkg-config fuse3 --cflags) scripts/linux-file-view/fixture.c \
+            -o "$RUNNER_TEMP/octant-file-view" $(pkg-config fuse3 --libs) -lrt
+      - name: Measure the actual mounted view inside Bubblewrap
+        run: |
+          python3 scripts/linux-file-view/probe.py \
+            "$RUNNER_TEMP/octant-file-view" "$RUNNER_TEMP/file-view-evidence.json"
+      - name: Record the measured verdict
+        if: always()
+        run: |
+          python3 - <<'PY'
+          import json,os
+          from pathlib import Path
+          path=Path(os.environ['RUNNER_TEMP'])/'file-view-evidence.json'
+          if not path.exists():raise SystemExit('No native evidence: prerequisites or compilation failed')
+          result=json.loads(path.read_text())
+          failed=[x['name'] for x in result['measurements'] if not x['passed']]
+          with open(os.environ['GITHUB_STEP_SUMMARY'],'a') as output:
+              output.write('## Native feasibility measurements\n\n')
+              output.write('Production ready: **NO**. This is an isolated fixture, not a shipped boundary.\n\n')
+              output.write('Status: '+result['status']+'\n\n')
+              for name in failed:output.write('- Failed contract measurement: '+name+'\n')
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: linux-file-view-feasibility
+          path: |
+            ${{ runner.temp }}/file-view-evidence.json
+            ${{ runner.temp }}/kernel-policy-prerequisites.json
+          if-no-files-found: error
+          retention-days: 7
+
+  syscall-admission:
+    name: Measure syscall-entry admission counterexample
+    if: github.event_name != 'workflow_dispatch' || inputs.experiment == 'syscall-admission'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 2
+    steps:
+      - uses: actions/checkout@v4
+      - name: Compile the original bounded syscall fixture
+        run: |
+          gcc -std=c11 -Wall -Wextra -Werror \
+            scripts/linux-file-view/syscall_admission.c \
+            -o "$RUNNER_TEMP/octant-syscall-admission"
+      - name: Measure held-inode access without a read syscall
+        run: |
+          timeout --kill-after=3s 20s "$RUNNER_TEMP/octant-syscall-admission" \
+            > "$RUNNER_TEMP/syscall-admission.json"
+          cat "$RUNNER_TEMP/syscall-admission.json"
+      - name: State the experiment's limited conclusion
+        if: always()
+        run: |
+          python3 - <<'PY'
+          import json,os
+          from pathlib import Path
+          path=Path(os.environ['RUNNER_TEMP'])/'syscall-admission.json'
+          if not path.exists():raise SystemExit('No native syscall-admission evidence')
+          result=json.loads(path.read_text())
+          with open(os.environ['GITHUB_STEP_SUMMARY'],'a') as output:
+              output.write('## Syscall-entry admission counterexample\n\n')
+              output.write('Production ready: **NO**. No production mediator is implemented.\n\n')
+              output.write('Native result: '+result['status']+'\n\n')
+              output.write('An SQPOLL bypass disproves syscall-entry-only mediation with unrestricted rings; it does not disprove a broker/emulator or establish compatibility of denying rings.\n')
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: linux-syscall-admission
+          path: ${{ runner.temp }}/syscall-admission.json
+          if-no-files-found: error
+          retention-days: 7
+
+  async-compatibility:
+    name: Measure runtime compatibility with refused asynchronous I/O
+    if: github.event_name != 'workflow_dispatch' || inputs.experiment == 'async-compatibility'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.4
+      - name: Prepare standard tooling and pinned provider executables
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends bubblewrap
+          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+          npm install --prefix "$RUNNER_TEMP/octant-provider-startup" --ignore-scripts --no-audit --no-fund \
+            @anthropic-ai/claude-agent-sdk-linux-x64@0.3.211 @openai/codex@0.164.0
+      - name: Compile the process-owned inherited refusal fixture
+        run: |
+          gcc -std=c11 -Wall -Wextra -Werror scripts/linux-file-view/async_refusal.c \
+            -o "$RUNNER_TEMP/octant-async-refusal"
+          gcc -std=c11 -Wall -Wextra -Werror scripts/linux-file-view/syscall_admission.c \
+            -o "$RUNNER_TEMP/octant-owned-inode-admission"
+      - name: Measure only deterministic files and no-auth startup
+        run: |
+          timeout --kill-after=3s 100s python3 scripts/linux-file-view/async_compatibility.py \
+            "$RUNNER_TEMP/octant-async-refusal" "$(command -v bun)" \
+            "$RUNNER_TEMP/octant-provider-startup" "$RUNNER_TEMP/async-compatibility.json"
+      - name: Measure one owned stopped client's inode admission
+        run: |
+          timeout --kill-after=3s 20s "$RUNNER_TEMP/octant-async-refusal" ENOSYS \
+            "$RUNNER_TEMP/octant-owned-inode-admission" --native-admission \
+            > "$RUNNER_TEMP/owned-inode-admission.json"
+          cat "$RUNNER_TEMP/owned-inode-admission.json"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: linux-async-refusal-compatibility
+          path: |
+            ${{ runner.temp }}/async-compatibility.json
+            ${{ runner.temp }}/owned-inode-admission.json
+          if-no-files-found: error
+          retention-days: 7
+
+  concurrent-admission:
+    name: Measure owned concurrent descriptor admission
+    if: github.event_name != 'workflow_dispatch' || inputs.experiment == 'concurrent-admission'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 2
+    steps:
+      - uses: actions/checkout@v4
+      - name: Compile the original bounded scheduling fixture
+        run: |
+          gcc -std=c11 -Wall -Wextra -Werror -pthread scripts/linux-file-view/concurrent_admission.c \
+            -o "$RUNNER_TEMP/octant-concurrent-admission"
+          gcc -std=c11 -Wall -Wextra -Werror scripts/linux-file-view/async_refusal.c \
+            -o "$RUNNER_TEMP/octant-concurrent-async-refusal"
+      - name: Measure FD swaps, owned lifecycle and tracer-death cleanup
+        run: |
+          timeout --kill-after=3s 35s "$RUNNER_TEMP/octant-concurrent-async-refusal" ENOSYS \
+            "$RUNNER_TEMP/octant-concurrent-admission" \
+            > "$RUNNER_TEMP/concurrent-admission.json"
+          cat "$RUNNER_TEMP/concurrent-admission.json"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: linux-concurrent-admission
+          path: ${{ runner.temp }}/concurrent-admission.json
+          if-no-files-found: error
+          retention-days: 7

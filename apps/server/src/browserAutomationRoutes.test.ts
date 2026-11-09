@@ -1,3 +1,5 @@
+import { BrowserFlowRuns } from "./browser/browserFlowRuns";
+import { decodeBrowserFlow, decodeBrowserThreadId } from "@octant/contracts";
 import type { BrowserAutomationSnapshot, ToolActionAuthority, WindowId } from "@octant/contracts";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { createBrowserAutomationRouteHandler } from "./browserAutomationRoutes";
@@ -79,6 +81,44 @@ describe("browser automation routes", () => {
       windowAuthorityStore: store,
       maxRequestBodySize: 64_000,
     });
+  });
+
+  it("reads Browser admission only after the window can inspect its thread", async () => {
+    const availability = vi.fn(() => ({
+      status: "omitted" as const,
+      reason: "no-tool-transport" as const,
+    }));
+    let admitted = true;
+    const read = createBrowserAutomationRouteHandler({
+      service: {
+        create: async () => snapshot,
+        act: async () => snapshot,
+        cancel: async () => snapshot,
+        stop: async () => snapshot,
+        inspect: () => snapshot,
+        inspectThread: () => snapshot,
+        releaseThread: async () => snapshot,
+      },
+      agentAvailability: availability,
+      authority: { canAccessWindow: () => admitted, resolve: () => authority },
+      windowAuthorityStore: store,
+      maxRequestBodySize: 64_000,
+    });
+    const request = () =>
+      new Request("http://127.0.0.1/api/browser/contexts/current", {
+        method: "POST",
+        headers: { "x-octant-window-capability": capability },
+        body: JSON.stringify({ threadId }),
+      });
+    const response = await read(request());
+    expect(response?.status).toBe(200);
+    expect(await response?.json()).toMatchObject({
+      agentAvailability: { status: "omitted", reason: "no-tool-transport" },
+    });
+    expect(availability).toHaveBeenCalledTimes(1);
+    admitted = false;
+    expect((await read(request()))?.status).toBe(403);
+    expect(availability).toHaveBeenCalledTimes(1);
   });
 
   describe("task default profile transaction", () => {
@@ -1152,6 +1192,76 @@ describe("browser automation routes", () => {
       expect(sessionGrants.execute).toHaveBeenCalledOnce();
     });
 
+    it("admits only authenticated local upload-manifest commands and strictly decodes their scope", async () => {
+      const uploadPermissions = {
+        execute: vi.fn(async () => ({ kind: "upload-permissions" as const, permissions: [] })),
+      };
+      const route = createBrowserAutomationRouteHandler({
+        service: service as never,
+        authority: { canAccessWindow: () => true, resolve: () => authority },
+        uploadPermissions,
+        windowAuthorityStore: store,
+        maxRequestBodySize: 64_000,
+      });
+      expect(await (await route(post("upload-permissions", { kind: "list" })))?.json()).toEqual({
+        kind: "upload-permissions",
+        permissions: [],
+      });
+      expect(uploadPermissions.execute).toHaveBeenCalledOnce();
+      expect(
+        await (await route(post("upload-permissions", { kind: "list" }, true)))?.json(),
+      ).toMatchObject({ reason: "not-local" });
+      expect(
+        (await route(post("upload-permissions", { kind: "list", target: "injected" })))?.status,
+      ).toBe(400);
+      expect(
+        (
+          await route(
+            new Request("http://127.0.0.1/api/browser/upload-permissions", {
+              method: "POST",
+              body: JSON.stringify({ kind: "list" }),
+            }),
+          )
+        )?.status,
+      ).toBe(401);
+      expect(uploadPermissions.execute).toHaveBeenCalledOnce();
+    });
+
+    it("admits only authenticated local download-manifest commands and strictly decodes their scope", async () => {
+      const downloadPermissions = {
+        execute: vi.fn(async () => ({ kind: "download-permissions" as const, permissions: [] })),
+      };
+      const route = createBrowserAutomationRouteHandler({
+        service: service as never,
+        authority: { canAccessWindow: () => true, resolve: () => authority },
+        downloadPermissions,
+        windowAuthorityStore: store,
+        maxRequestBodySize: 64_000,
+      });
+      expect(await (await route(post("download-permissions", { kind: "list" })))?.json()).toEqual({
+        kind: "download-permissions",
+        permissions: [],
+      });
+      expect(downloadPermissions.execute).toHaveBeenCalledOnce();
+      expect(
+        await (await route(post("download-permissions", { kind: "list" }, true)))?.json(),
+      ).toMatchObject({ reason: "not-local" });
+      expect(
+        (await route(post("download-permissions", { kind: "list", target: "injected" })))?.status,
+      ).toBe(400);
+      expect(
+        (
+          await route(
+            new Request("http://127.0.0.1/api/browser/download-permissions", {
+              method: "POST",
+              body: JSON.stringify({ kind: "list" }),
+            }),
+          )
+        )?.status,
+      ).toBe(401);
+      expect(downloadPermissions.execute).toHaveBeenCalledOnce();
+    });
+
     it("lists and deletes saved flows for a local window and refuses a paired device", async () => {
       const flowProject = "40000000-0000-4000-8000-000000000001";
       const flows = {
@@ -1189,6 +1299,88 @@ describe("browser automation routes", () => {
       });
       expect(flows.delete).not.toHaveBeenCalled();
       expect((await handler(post("flows", { kind: "list" })))?.status).toBe(503);
+    });
+
+    it("binds reviewed flow effects to the authenticated local window and refuses remote or unreviewed starts", async () => {
+      const flowProject = authority.projectId;
+      if (flowProject === undefined) throw Error("Project fixture missing");
+      const task = {
+        threadId: decodeBrowserThreadId(threadId),
+        mode: "work" as const,
+        title: "Check",
+        modelId: "synthetic" as never,
+        accessLabel: "Ask first",
+        profileLabel: "Private",
+      };
+      const flow = decodeBrowserFlow({
+        name: "Check",
+        savedAt: new Date().toISOString(),
+        steps: [
+          {
+            operation: "navigate",
+            input: { operation: "navigate", url: "https://example.com/" },
+            expect: { path: "/" },
+          },
+        ],
+      });
+      const execute = vi.fn(async () => ({
+        isError: false,
+        result: { page: { url: "https://example.com/" } },
+      }));
+      const runs = new BrowserFlowRuns({
+        readFlow: () => flow,
+        tasks: () => [task],
+        bindTask: () => ({
+          fingerprint: "current",
+          refs: () => [],
+          execute,
+          claim: () => ({ release: () => undefined }),
+        }),
+        uuid: () => contextId,
+        now: Date.now,
+      });
+      const handler = createBrowserAutomationRouteHandler({
+        service: service as never,
+        authority: { canAccessWindow: () => true, resolve: () => authority },
+        flows: { summaries: () => [], delete: () => false },
+        flowRuns: runs,
+        windowAuthorityStore: store,
+        maxRequestBodySize: 64_000,
+      });
+      try {
+        const review = {
+          kind: "review-run",
+          projectId: flowProject,
+          threadId,
+          mode: "work",
+          name: "Check",
+        };
+        expect(await (await handler(post("flows", review, true)))?.json()).toMatchObject({
+          reason: "not-local",
+        });
+        expect(
+          await (
+            await handler(post("flows", { kind: "start-run", runId: contextId, values: [] }))
+          )?.json(),
+        ).toMatchObject({ reason: "not-found" });
+        expect((await handler(post("flows", { ...review, authority })))?.status).toBe(400);
+        expect(execute).not.toHaveBeenCalled();
+        expect(await (await handler(post("flows", review)))?.json()).toMatchObject({
+          kind: "browser-flow-run",
+          run: { state: "review" },
+        });
+        expect(execute).not.toHaveBeenCalled();
+        expect(
+          await (
+            await handler(post("flows", { kind: "start-run", runId: contextId, values: [] }, true))
+          )?.json(),
+        ).toMatchObject({ reason: "not-local" });
+        expect(execute).not.toHaveBeenCalled();
+        await handler(post("flows", { kind: "start-run", runId: contextId, values: [] }));
+        await vi.waitFor(() => expect(execute).toHaveBeenCalledOnce());
+      } finally {
+        runs.close();
+      }
     });
 
     it("carries an extensions command with the window and the caller the host proved", async () => {

@@ -1,4 +1,5 @@
 import { defaultShellSettings } from "@octant/domain/shell-policy";
+import { buildTurnDiagnosticsReport } from "@octant/domain";
 import { decodeChatBootstrap } from "@octant/contracts/chat";
 import { DEFAULT_THEME_SETTINGS } from "@octant/contracts/theme";
 import type { ProviderInstance, SettingsDeepLink } from "@octant/contracts";
@@ -230,6 +231,41 @@ describe("SettingsView", () => {
     await user.click(select);
     await user.click(await screen.findByRole("option", { name: "Never" }));
     expect(props.onSettingsChange).toHaveBeenCalledWith({ completedThreadArchiveAfterDays: null });
+  });
+
+  it("compacts Octant threads at 85% by default and leaves runtimes to themselves", async () => {
+    const user = userEvent.setup();
+    const { props } = renderSettings();
+    const octant = screen.getByRole("combobox", { name: "Compact Octant threads" });
+    const runtime = screen.getByRole("combobox", { name: "Compact runtime threads" });
+    expect(octant).toHaveTextContent("At 85% full");
+    expect(runtime).toHaveTextContent("Runtime decides");
+    await user.click(runtime);
+    await user.click(await screen.findByRole("option", { name: "At 70% full" }));
+    expect(props.onSettingsChange).toHaveBeenCalledWith({ autoCompactRuntimeWindowPercent: 70 });
+    await user.click(octant);
+    await user.click(await screen.findByRole("option", { name: "Never" }));
+    expect(props.onSettingsChange).toHaveBeenCalledWith({ autoCompactOctantWindowPercent: null });
+  });
+
+  it("leaves quiet threads alone by default and compacts them after the time the person picks", async () => {
+    const user = userEvent.setup();
+    const { props } = renderSettings();
+    const idle = screen.getByRole("combobox", { name: "Compact quiet threads" });
+    expect(idle).toHaveTextContent("Never");
+    await user.click(idle);
+    await user.click(await screen.findByRole("option", { name: "After 30 minutes" }));
+    expect(props.onSettingsChange).toHaveBeenCalledWith({ autoCompactIdleMinutes: 30 });
+  });
+
+  it("leaves the limit rule off by default and turns it on at the share the person picks", async () => {
+    const user = userEvent.setup();
+    const { props } = renderSettings();
+    const limit = screen.getByRole("combobox", { name: "Compact near a usage limit" });
+    expect(limit).toHaveTextContent("Never");
+    await user.click(limit);
+    await user.click(await screen.findByRole("option", { name: "At 90% used" }));
+    expect(props.onSettingsChange).toHaveBeenCalledWith({ autoCompactLimitPercent: 90 });
   });
 
   it("presents one section at a time, defaulting to General", () => {
@@ -480,6 +516,36 @@ describe("SettingsView", () => {
     expect(screen.queryByRole("button", { name: "Create pairing code" })).toBeNull();
     expect(screen.queryByRole("button", { name: "Create pairing link" })).toBeNull();
     expect(screen.queryByRole("img", { name: "Pairing code QR" })).toBeNull();
+  });
+
+  it("takes the remote server-folder journey to the existing binding form without sending a command", async () => {
+    const user = userEvent.setup();
+    const command = vi.fn();
+    renderSettings({
+      initialDeepLink: { section: "remote-access" },
+      serverProjectsClient: { read: async () => ({ projects: [] }), command } as never,
+      shieldServersClient: {
+        read: async () => ({
+          servers: [
+            {
+              serverId: "10000000-0000-4000-8000-000000000001",
+              alias: "web-1",
+              user: "deploy",
+              profile: "read-only",
+              deployCommands: [],
+            },
+          ],
+          sshAgent: "available",
+        }),
+        command,
+      } as never,
+    });
+    await user.click(screen.getByRole("button", { name: "Work in a server folder" }));
+    await user.click(screen.getByRole("button", { name: "Continue to server Projects" }));
+
+    const form = await screen.findByRole("form", { name: "Bind a folder on a server" });
+    await waitFor(() => expect(within(form).getByLabelText("Project name")).toHaveFocus());
+    expect(command).not.toHaveBeenCalled();
   });
 
   it("takes the Add a model endpoint button on a harness slot to the add-endpoint row", async () => {
@@ -1421,6 +1487,59 @@ describe("SettingsView", () => {
     expect(screen.getAllByRole("heading", { name: "Usage" })).toHaveLength(1);
   });
 
+  it("offers Diagnostics in Usage and leaves Settings for the thread of a failed turn", async () => {
+    const threadId = "66000000-0000-4000-8000-0000000000d1";
+    const report = buildTurnDiagnosticsReport(
+      [
+        {
+          threadId,
+          mode: "work",
+          providerInstanceId: "66000000-0000-4000-8000-000000000001",
+          modelId: "model-a",
+          stopReason: "failed",
+          metrics: { precision: "unavailable", wallMs: 1_000 },
+          diagnostics: {
+            toolCalls: 0,
+            toolFailures: 0,
+            failure: { category: "provider-failed", message: "Provider stopped." },
+          },
+          startedAt: "2026-11-07T10:00:00.000Z",
+          endedAt: "2026-11-07T10:00:01.000Z",
+        } as never,
+      ],
+      { generatedAt: "2026-11-07T12:00:00.000Z", bucket: "day", timeZone: "UTC" },
+    );
+    const usageClient = {
+      query: vi.fn(async () => {
+        throw new Error("ledger unavailable in this test");
+      }),
+      diagnostics: vi.fn(async () => report),
+      export: vi.fn(),
+      reset: vi.fn(),
+      retain: vi.fn(),
+    };
+    const onOpenUsageSubject = vi.fn();
+    renderSettings({ usageClient: usageClient as never, onOpenUsageSubject });
+    fireEvent.click(
+      within(screen.getByRole("navigation", { name: "Settings sections" })).getByRole("button", {
+        name: "Usage",
+      }),
+    );
+
+    fireEvent.click(
+      within(screen.getByRole("group", { name: "Usage source" })).getByRole("button", {
+        name: "Diagnostics",
+      }),
+    );
+
+    const turns = await screen.findByRole("table", { name: "Turns to investigate" });
+    expect(within(turns).getByText(/Provider stopped\./)).toBeVisible();
+    // Embedded, it adds no second page title to Settings.
+    expect(screen.queryByRole("heading", { name: "Diagnostics" })).toBeNull();
+    fireEvent.click(within(turns).getByRole("button", { name: /Open the thread/ }));
+    expect(onOpenUsageSubject).toHaveBeenCalledWith("work-thread", threadId);
+  });
+
   it("forwards isNarrow to the Usage dashboard activity table", async () => {
     const usageClient = {
       query: vi.fn(async () => ({
@@ -1655,6 +1774,7 @@ describe("SettingsView", () => {
       extensionClient: {
         snapshot: async () => snapshot(),
         listDiscoveredTooling: async () => ({ servers: [], plugins: [], notes: [] }),
+        runtimeCompactionDefaults: async () => ({ claude: { autoCompact: true }, codex: {} }),
         execute,
         effectiveState: async () => ({
           sequence: 1,
@@ -1725,6 +1845,7 @@ describe("SettingsView", () => {
       importLocalPluginReceipt: vi.fn(),
       addUserMcpServer: vi.fn() as never,
       listDiscoveredTooling: vi.fn(async () => ({ servers: [], plugins: [], notes: [] })),
+      runtimeCompactionDefaults: async () => ({ claude: { autoCompact: true }, codex: {} }),
       mcpServerSignIn: vi.fn() as never,
       projectPins: vi.fn() as never,
       applyDiscoveredTooling: vi.fn() as never,
@@ -1797,6 +1918,7 @@ describe("SettingsView", () => {
   it("lists remembered tool approvals beside remembered websites, with the Project's name", async () => {
     const projectId = "44000000-0000-4000-8000-0000000000a1";
     const extensionClient = {
+      runtimeCompactionDefaults: async () => ({ claude: { autoCompact: true }, codex: {} }),
       toolGrantsAvailable: true,
       snapshot: vi.fn(async () => ({ packages: [] })),
       listToolGrants: vi.fn(async () => [
@@ -1828,6 +1950,7 @@ describe("SettingsView", () => {
 
   it("leaves remembered tool approvals out for a client that is not a local window", () => {
     const extensionClient = {
+      runtimeCompactionDefaults: async () => ({ claude: { autoCompact: true }, codex: {} }),
       toolGrantsAvailable: false,
       snapshot: vi.fn(async () => ({ packages: [] })),
       listToolGrants: vi.fn(),
@@ -1988,6 +2111,7 @@ describe("SettingsView", () => {
       "Updates",
       "Files",
       "Threads",
+      "Compaction",
     ]);
     const updates = screen.getByRole("heading", { name: "Updates" }).closest("section")!;
     updates.scrollIntoView = vi.fn();

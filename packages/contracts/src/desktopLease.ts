@@ -1,5 +1,6 @@
 import { Schema } from "effect";
 import { EventActor, UtcTimestamp } from "./events";
+import { DesktopPreviewRequest, DesktopPreviewAnswer } from "./desktopPreview";
 
 /**
  * Thread-leased disposable desktops: the recipe a Project owns, the lease a
@@ -651,6 +652,7 @@ const paneView = { ...paneLease, viewId: DesktopViewId };
  * sent it, never from the body.
  */
 export const DesktopPaneRequest = Schema.Union(
+  DesktopPreviewRequest,
   Schema.Struct({ kind: Schema.Literal("overview"), ...paneThread }).annotations(strict),
   Schema.Struct({
     kind: Schema.Literal("acquire"),
@@ -740,6 +742,7 @@ const leaseAnswer = <S extends string>(status: S) =>
   Schema.Struct({ status: Schema.Literal(status), lease: DesktopLease }).annotations(strict);
 
 export const DesktopPaneAnswer = Schema.Union(
+  DesktopPreviewAnswer,
   Schema.Struct({
     status: Schema.Literal("overview"),
     /** The thread's leases that may still hold a desktop, then its most recent ended one. */

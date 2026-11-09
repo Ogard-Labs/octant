@@ -47,6 +47,7 @@ import { PairingCodeQr } from "./PairingCodeQr";
  */
 export interface RemoteAccessSettingsSectionProps {
   readonly bridge: RemoteAccessAdministrationBridge;
+  readonly focusedSetting?: string | undefined;
   /** Pairing this desktop app with another computer; absent outside the desktop app. */
   readonly pairedComputers?: PairedComputersBridge | undefined;
   /** The hub role and hub membership; absent unless this is a local window. */
@@ -102,6 +103,7 @@ function pairingLink(origin: string, ticket: RemoteMintedPairingTicket): string 
 
 export function RemoteAccessSettingsSection({
   bridge,
+  focusedSetting,
   pairedComputers,
   hub,
   ownerUnlock,
@@ -451,6 +453,7 @@ export function RemoteAccessSettingsSection({
         ) : null}
         <div className="setgroup">
           <SettingRow
+            focused={focusedSetting === "remote-listener"}
             description="The address paired devices reach. Loopback and public addresses are refused; use a private LAN or Tailscale address with a certificate browsers trust."
             label={status?.enabled === true ? "Move the listener" : "Enable the listener"}
             scope="host"

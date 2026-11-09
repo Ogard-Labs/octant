@@ -19,7 +19,10 @@ import {
 } from "node:fs";
 import { openAppPairingCode } from "@octant/client-runtime/app-pairing-code";
 import { createListenerFetch } from "@octant/client-runtime/remote-listener-tls-node";
-import type { ListenerOriginTrust } from "@octant/client-runtime/remote-listener-trust";
+import {
+  decodeListenerOriginTrust,
+  type ListenerOriginTrust,
+} from "@octant/client-runtime/remote-listener-trust";
 import { classifyRemoteListenerAddress } from "@octant/domain";
 import { requestPairedComputer } from "./pairedComputerRequests";
 
@@ -32,6 +35,8 @@ interface PinRecord {
   readonly origin: string;
   readonly displayName: string;
   readonly pin: string;
+  readonly listenerTrust?: ListenerOriginTrust;
+  readonly hostId?: string;
 }
 
 /** The single-use ticket a pairing code carried, for the window that claims it. */
@@ -126,6 +131,41 @@ export class PairedComputerPins {
     return this.#records.find((record) => record.origin === origin)?.pin;
   }
 
+  hostIdFor(origin: string): string | undefined {
+    return this.#records.find((record) => record.origin === origin)?.hostId;
+  }
+
+  trustFor(origin: string, pairing: boolean): ListenerOriginTrust | undefined {
+    const record = this.#records.find((item) => item.origin === origin);
+    if (record !== undefined)
+      return record.listenerTrust ?? { current: { kind: "pinned", pin: record.pin } };
+    const pin = this.reachPinFor(origin, pairing);
+    return pin === undefined ? undefined : { current: { kind: "pinned", pin } };
+  }
+
+  /** Only the main-process pinned transport calls this; no renderer-supplied pin reaches it. */
+  rememberTrust(origin: string, previous: ListenerOriginTrust, next: ListenerOriginTrust): void {
+    const record = this.#records.find((item) => item.origin === origin);
+    if (
+      record !== undefined &&
+      JSON.stringify(this.trustFor(origin, false)) === JSON.stringify(next)
+    )
+      return;
+    if (
+      record === undefined ||
+      JSON.stringify(this.trustFor(origin, false)) !== JSON.stringify(previous) ||
+      next.current.kind !== "pinned"
+    ) {
+      throw new Error("The computer's pairing changed.");
+    }
+    const pin = next.current.pin;
+    const records = this.#records.map((item) =>
+      item === record ? { ...item, pin, listenerTrust: next } : item,
+    );
+    writePinRecords(this.#path, records);
+    this.#records = records;
+  }
+
   /**
    * Records an origin's pin. Only a private LAN or Tailscale name or address
    * can be pinned, so a compromised renderer cannot make main trust a public
@@ -137,7 +177,12 @@ export class PairedComputerPins {
     }
     const next = [
       ...this.#records.filter((record) => record.origin !== input.origin),
-      { origin: input.origin, displayName: input.displayName, pin: input.pin },
+      {
+        origin: input.origin,
+        displayName: input.displayName,
+        pin: input.pin,
+        ...(input.hostId === undefined ? {} : { hostId: input.hostId }),
+      },
     ];
     writePinRecords(this.#path, next);
     this.#records = next;
@@ -271,7 +316,11 @@ export async function pairFromPairingCode(input: {
     };
   }
   try {
-    input.pins.stage({ ...computer, pin: opened.listenerTrust.pin });
+    input.pins.stage({
+      ...computer,
+      pin: opened.listenerTrust.pin,
+      hostId: String(opened.hostHello.hostId),
+    });
   } catch {
     return {
       status: "refused",
@@ -345,14 +394,28 @@ function readPinRecords(path: string): ReadonlyArray<PinRecord> {
   const records: PinRecord[] = [];
   for (const entry of computers) {
     if (typeof entry !== "object" || entry === null) continue;
-    const { origin, displayName, pin } = entry as Record<string, unknown>;
+    const { origin, displayName, pin, listenerTrust, hostId } = entry as Record<string, unknown>;
     if (
       typeof origin === "string" &&
       typeof displayName === "string" &&
       typeof pin === "string" &&
       isPrivateListenerOrigin(origin)
     ) {
-      records.push({ origin, displayName, pin });
+      const trust =
+        listenerTrust === undefined ? undefined : decodeListenerOriginTrust(listenerTrust);
+      if (hostId !== undefined && typeof hostId !== "string") continue;
+      if (
+        listenerTrust !== undefined &&
+        (trust === undefined || trust.current.kind !== "pinned" || trust.current.pin !== pin)
+      )
+        continue;
+      records.push({
+        origin,
+        displayName,
+        pin,
+        ...(trust === undefined ? {} : { listenerTrust: trust }),
+        ...(hostId === undefined ? {} : { hostId }),
+      });
     }
   }
   return records;
