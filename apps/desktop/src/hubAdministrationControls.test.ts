@@ -336,6 +336,22 @@ describe("hub administration controls", () => {
     expect(calls).toHaveLength(4);
   });
 
+  it("forwards Remove worktree naming only the move, never a folder", async () => {
+    const { calls, runtime: controls } = runtime(() => Response.json({ status: "removed" }));
+    const moveId = "66666666-6666-4666-8666-666666666666";
+
+    await sendHubAdministrationOperation(controls, "thread-move-remove-kept-worktree", { moveId });
+    expect(calls.map((call) => call.url)).toEqual([
+      "http://127.0.0.1:4317/api/desktop/hub/thread-moves/remove-kept-worktree",
+    ]);
+    for (const body of [{ moveId, folder: "/" }, { folder: "/" }, { moveId: "not-a-move" }]) {
+      expect(
+        await sendHubAdministrationOperation(controls, "thread-move-remove-kept-worktree", body),
+      ).toMatchObject({ status: 400 });
+    }
+    expect(calls).toHaveLength(1);
+  });
+
   it("sends the wake switch and the hardware address only with their decoded bodies", async () => {
     const { calls, runtime: controls } = runtime(() => Response.json({ status: "changed" }));
 

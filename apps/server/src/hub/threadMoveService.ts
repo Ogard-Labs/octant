@@ -19,6 +19,7 @@ import { appendFile, open, rm, stat } from "node:fs/promises";
 import { join } from "node:path";
 import {
   HubMemberId,
+  KEPT_FILES_LISTED,
   ThreadMoveId,
   decodeThreadMoveDestinationState,
   decodeThreadMoveOffer,
@@ -139,8 +140,29 @@ export interface ErasedThread {
   readonly worktreeKept: boolean;
   /** The worktree moved out of the managed folder, because it held what the move did not carry. */
   readonly keptWorktree?: string;
+  /** What the kept worktree holds that the move did not carry, relative to it. */
+  readonly keptFiles?: ReadonlyArray<string>;
   /** The thread worked in the Project's own checkout, which keeps its changes. */
   readonly changesRemainInCheckout?: boolean;
+}
+
+/**
+ * The tombstone's record of a kept worktree: its folder and the files it
+ * holds, the first `KEPT_FILES_LISTED` by name and the rest counted. A path
+ * the departure cannot hold (empty, or longer than 4,096 characters) is
+ * counted and not named.
+ */
+export function keptWorktreeOfDeparture(
+  erased: ErasedThread,
+): Pick<ThreadMoveDeparture, "keptWorktree" | "keptFiles" | "keptFileCount"> {
+  if (erased.keptWorktree === undefined) return {};
+  const files = erased.keptFiles ?? [];
+  const nameable = files.filter((path) => path.length > 0 && path.length <= 4_096);
+  return {
+    keptWorktree: erased.keptWorktree,
+    keptFiles: nameable.slice(0, KEPT_FILES_LISTED),
+    keptFileCount: files.length,
+  };
 }
 
 /** Where an offer would put the thread on the destination. */
@@ -963,7 +985,7 @@ export class ThreadMoveService {
       thread: move.thread,
       destinationMemberId: move.targetMemberId,
       destinationThread: destination,
-      ...(erased.keptWorktree === undefined ? {} : { keptWorktree: erased.keptWorktree }),
+      ...keptWorktreeOfDeparture(erased),
       changesRemainInCheckout: erased.changesRemainInCheckout === true,
       movedAt: this.#timestamp(),
     };

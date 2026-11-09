@@ -27,6 +27,7 @@ import {
 } from "@octant/contracts";
 import { isLoopbackHostname } from "../shellRoutes";
 import { WindowAuthorityError, type WindowAuthorityStore } from "../windowAuthorityStore";
+import type { KeptWorktreeRemoval } from "./keptWorktreeRemoval";
 import type { ThreadMoveStatePort } from "./threadMoveStateStore";
 import type { HandoverExchange } from "./handoverExchange";
 import type { ThreadHandovers } from "./threadHandovers";
@@ -47,6 +48,8 @@ export const THREAD_MOVE_ADMINISTRATION_ROUTES = {
   takeBack: "/api/desktop/hub/thread-moves/take-back",
   activate: "/api/desktop/hub/thread-moves/activate",
   dismiss: "/api/desktop/hub/thread-moves/dismiss",
+  // Remove worktree on a moved thread's tombstone: a person's act, never an agent's.
+  removeKeptWorktree: "/api/desktop/hub/thread-moves/remove-kept-worktree",
   // Read-only sizes and an estimate, before the person decides.
   sizes: "/api/desktop/hub/thread-moves/sizes",
   // Prepare to shut down acts for the whole host, as its menu entry does.
@@ -74,6 +77,16 @@ export interface ThreadMoveAdministrationRouteOptions {
   readonly handovers: Pick<ThreadHandovers, "preview" | "handOver" | "takeBack">;
   readonly exchange: Pick<HandoverExchange, "list" | "continueHandover">;
   readonly state: ThreadMoveStatePort;
+  readonly keptWorktrees: Pick<KeptWorktreeRemoval, "remove">;
+  /**
+   * Whether the window shows a thread that moved away and was erased here.
+   * Its record is gone, so the Project check `authorizeThread` makes cannot
+   * pass; the window must still have the thread's pane open on this host.
+   */
+  readonly authorizeDepartedThread: (input: {
+    readonly thread: MovedThreadReference;
+    readonly windowId: string;
+  }) => boolean;
   /** Whether the window currently holds the thread on its Project. */
   readonly authorizeThread: (input: {
     readonly thread: MovedThreadReference;
@@ -229,6 +242,21 @@ export function createThreadMoveAdministrationRouteHandler(
           const { thread } = decodeThreadMoveThreadRequest(value);
           if (!holds(thread)) return unavailable();
           return outcome(options.moves.dismiss(thread));
+        }
+        case THREAD_MOVE_ADMINISTRATION_ROUTES.removeKeptWorktree: {
+          // The request names a move, never a folder: only the exact folder
+          // this host recorded for that departure can be removed.
+          const moveId = String(decodeThreadMoveControlRequest(value).moveId);
+          const departure = (options.state.load().departures ?? []).findLast(
+            (entry) => String(entry.moveId) === moveId,
+          );
+          if (
+            departure === undefined ||
+            !options.authorizeDepartedThread({ thread: departure.thread, windowId })
+          ) {
+            return unavailable();
+          }
+          return outcome(await options.keptWorktrees.remove(moveId));
         }
         case THREAD_MOVE_ADMINISTRATION_ROUTES.cancel:
         case THREAD_MOVE_ADMINISTRATION_ROUTES.takeBack:

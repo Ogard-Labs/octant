@@ -26,6 +26,7 @@ import {
   branchExists,
   captureCheckoutForMove,
   checkoutStillMatchesMove,
+  filesTheMoveLeft,
   forgetMoveSnapshot,
   measureCheckoutForMove,
   receiveCheckoutFromMove,
@@ -219,6 +220,7 @@ export function createCodeThreadMoveHost(options: CodeThreadMoveHostOptions): {
       const root = await options.checkoutRoot(code.id);
       let worktreeKept = false;
       let keptWorktree: string | undefined;
+      let keptFilesInWorktree: ReadonlyArray<string> = [];
       let changesRemainInCheckout = false;
       if (root !== undefined) {
         const check = await checkoutStillMatchesMove({
@@ -229,8 +231,14 @@ export function createCodeThreadMoveHost(options: CodeThreadMoveHostOptions): {
           refusedFiles: check.matches ? 0 : 1,
           ignoredFiles: check.ignoredFiles,
         });
+        const managed = options.ownsManagedWorktree(code.id);
+        // Named on the tombstone, so read while the snapshot ref still exists.
+        const keptFiles =
+          managed && !removable
+            ? await filesTheMoveLeft({ checkoutRoot: root, moveId: String(moveId) }).catch(() => [])
+            : [];
         await forgetMoveSnapshot(root, String(moveId));
-        if (!options.ownsManagedWorktree(code.id)) {
+        if (!managed) {
           // The Project's own checkout is the person's folder; Octant never
           // resets it, so the thread's changes remain there.
           changesRemainInCheckout = true;
@@ -240,12 +248,13 @@ export function createCodeThreadMoveHost(options: CodeThreadMoveHostOptions): {
           keptWorktree = `${root}-moved-out-${String(moveId).slice(0, 8)}`;
           await relocateWorktree({ worktreeRoot: root, target: keptWorktree });
           worktreeKept = true;
+          keptFilesInWorktree = keptFiles;
         }
       }
       await options.purge(code.id);
       return {
         worktreeKept,
-        ...(keptWorktree === undefined ? {} : { keptWorktree }),
+        ...(keptWorktree === undefined ? {} : { keptWorktree, keptFiles: keptFilesInWorktree }),
         ...(changesRemainInCheckout ? { changesRemainInCheckout } : {}),
       };
     },

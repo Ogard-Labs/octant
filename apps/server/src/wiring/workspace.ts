@@ -49,6 +49,7 @@ import type { ComputerUseWiring } from "./computerUse";
 
 import type { HarnessStateWiring } from "./harnessState";
 import { serverProjectOf } from "../serverProjects/serverProjectThreads";
+import type { ThreadMoveStatePort } from "../hub/threadMoveStateStore";
 export type WorkspaceDependencies = Pick<ServerStart, "options" | "persistence"> &
   Pick<
     AuthorityWiring,
@@ -62,7 +63,10 @@ export type WorkspaceDependencies = Pick<ServerStart, "options" | "persistence">
   Pick<IntegrationsWiring, "githubCapabilityService" | "githubIntegrationIsEffective"> &
   Pick<FoundationsWiring, "providerRuntimeRegistry" | "workThreadProjection"> &
   Pick<ComputerUseWiring, "desktopRecipeKeys" | "offeredDesktopProviders"> &
-  Pick<HarnessStateWiring, "serverProjectStore">;
+  Pick<HarnessStateWiring, "serverProjectStore"> & {
+    /** The moves this host keeps, whose departures open a moved thread's tombstone. */
+    readonly threadMoveState: ThreadMoveStatePort;
+  };
 
 export function wireWorkspace(deps: WorkspaceDependencies) {
   const {
@@ -170,6 +174,10 @@ export function wireWorkspace(deps: WorkspaceDependencies) {
       },
       uuid: randomUUID,
       clock: () => new Date().toISOString(),
+      departedThread: (thread) =>
+        (deps.threadMoveState.load().departures ?? []).some(
+          (entry) => entry.thread.mode === thread.mode && entry.thread.threadId === thread.threadId,
+        ),
     });
     onWindowRevoked((windowId) => shellService.revokeWindow(windowId));
     const allowedRendererHttpOrigin = options.allowedRendererHttpOrigin;

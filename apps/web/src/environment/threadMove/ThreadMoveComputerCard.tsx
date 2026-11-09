@@ -317,7 +317,7 @@ function computerPill(status: ThreadMoveThreadStatus | undefined): {
   return { label: "This computer", tone: "secondary" };
 }
 
-function percent(sending: NonNullable<ThreadMoveThreadStatus["sending"]>): number {
+export function percent(sending: NonNullable<ThreadMoveThreadStatus["sending"]>): number {
   if (sending.state === "arrived" || sending.state === "committed") return 100;
   if (sending.bytesTotal === 0) return 0;
   return Math.min(99, Math.floor((sending.bytesSent / sending.bytesTotal) * 100));
