@@ -1762,6 +1762,7 @@ export function startOctantServer(
       threadMoveHolds,
       threadMoveState,
       beginGoogleCliChange,
+      workThreadService,
       onSecretStoreLinkChange: () => commands.linkChanged(),
       browserAutomationService,
       codeService,
