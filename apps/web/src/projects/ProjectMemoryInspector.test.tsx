@@ -131,6 +131,39 @@ function renderInspector(
 }
 
 describe("ProjectMemoryInspector", () => {
+  it("marks an entry an agent wrote with its thread and the person who approved it", () => {
+    renderInspector({
+      memory: {
+        projectId: sourceProjectId,
+        active: [
+          entry(decisionId, "decision", "Releases ship from main only.", {
+            provenance: {
+              kind: "agent-authored",
+              mode: "code",
+              threadId: "00000000-0000-4000-8000-000000000930",
+            },
+          }),
+          entry(factId, "fact", "Its thread was purged.", {
+            provenance: { kind: "agent-authored", mode: "work" },
+          }),
+        ],
+        history: [],
+      },
+    });
+
+    expect(
+      screen.getByText(
+        "Written by an agent in a Code thread · 00000000-0000-4000-8000-000000000930. Approved by Local user · 00000000-0000-4000-8000-000000000919",
+      ),
+    ).toBeVisible();
+    expect(
+      screen.getByText(
+        "Written by an agent in a Work thread. Approved by Local user · 00000000-0000-4000-8000-000000000919",
+      ),
+    ).toBeVisible();
+    expect(screen.queryByText(/Original author/)).not.toBeInTheDocument();
+  });
+
   it("embeds in Project Overview without a close control of its own", () => {
     renderInspector({ embedded: true });
 

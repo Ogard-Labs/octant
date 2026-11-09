@@ -1,4 +1,5 @@
 import { WorkspaceViewStateContext, useWorkspaceViewStore } from "./workspaceViewState";
+import type { ProjectMemoryProposalClient } from "../projects/ProjectMemoryProposalPrompt";
 import { workspaceContentStorageKey } from "./workspaceContentPersistence";
 import { ContinuityScreenContext } from "../continuity/ContinueElsewhere";
 import type { CodeReviewFileRequest } from "../code/codeReviewNavigation";
@@ -24,6 +25,7 @@ import { decodeContextSubjectRef } from "@octant/contracts";
 import type { ContextClient } from "@octant/client-runtime/context-client";
 import {
   FollowUpSuggestionContext,
+  PaneSideTasks,
   type ComposerOffers,
 } from "../followUps/FollowUpSuggestionChips";
 import type {
@@ -72,7 +74,9 @@ import { ProjectOverview } from "../projects/ProjectOverview";
 import type { ProjectChange } from "../projects/useProjectController";
 import { providerGroupsForProject } from "../projects/ProjectProviderPolicySection";
 import { pickerHasReadyInstance } from "../providers/ComposerModelPicker";
-import type { OctantHostBridge } from "./hostBridge";
+import { hubAdministrationOf, ownerUnlockOf, type OctantHostBridge } from "./hostBridge";
+import type { ThreadMoveEnvironment } from "../environment/threadMove/ThreadMoveComputerCard";
+import { threadMoveClientForBridge } from "../environment/threadMove/threadMoveClient";
 import type { ProviderController } from "../providers/useProviderController";
 import { ShellState } from "./ShellState";
 import { TabActivationProvider, type TabActivationRegistry } from "./TabActivation";
@@ -451,6 +455,7 @@ export interface WorkspaceViewProps {
   readonly onProjectPermissionModeChange?: (
     projectId: ProjectId,
     permissionMode: import("@octant/contracts/providers").PermissionMode | undefined,
+    fullAccessSandbox?: boolean | "settings" | "keep",
   ) => Promise<boolean>;
   readonly onProjectAutoReviewerChange?: (
     projectId: ProjectId,
@@ -847,41 +852,43 @@ export function WorkspaceView(props: WorkspaceViewProps) {
               {...(props.focusedPaneId === undefined ? {} : { focusedPaneId: props.focusedPaneId })}
               renderSurface={(surface, paneId) => (
                 <FollowUpSuggestionContext value={followUpOffersFor(surface)}>
-                  <ComposerSubagentsContext value={subagentsTrayFor(surface, props)}>
-                    <ComposerNoticeProvider
-                      value={paneId === activePaneId && inlineNotice ? contextNotice : null}
-                    >
-                      <ComposerContextMeterGate
-                        enabled={
-                          paneId === props.workspace.activePaneIds[props.mode] &&
-                          offersThreadComposer(surface)
-                        }
+                  <PaneSideTasks>
+                    <ComposerSubagentsContext value={subagentsTrayFor(surface, props)}>
+                      <ComposerNoticeProvider
+                        value={paneId === activePaneId && inlineNotice ? contextNotice : null}
                       >
-                        <SurfaceLinkActionsProvider
-                          {...(props.hostBridge === undefined
-                            ? {}
-                            : { hostBridge: props.hostBridge })}
-                          {...(props.onOpenLink === undefined
-                            ? {}
-                            : { onOpenLink: props.onOpenLink })}
-                          paneId={paneId}
-                          surface={surface}
+                        <ComposerContextMeterGate
+                          enabled={
+                            paneId === props.workspace.activePaneIds[props.mode] &&
+                            offersThreadComposer(surface)
+                          }
                         >
-                          <TaskAccessContext value={taskAccessFor(surface, props)}>
-                            <OutsideContentContext
-                              value={outsideContentFor(surface, props.contextClient)}
-                            >
-                              {onWelcomeGround(
-                                surface,
-                                props.welcomeBackdrop,
-                                renderTab(surface, props, paneId, canvasContext, newTaskDrafts),
-                              )}
-                            </OutsideContentContext>
-                          </TaskAccessContext>
-                        </SurfaceLinkActionsProvider>
-                      </ComposerContextMeterGate>
-                    </ComposerNoticeProvider>
-                  </ComposerSubagentsContext>
+                          <SurfaceLinkActionsProvider
+                            {...(props.hostBridge === undefined
+                              ? {}
+                              : { hostBridge: props.hostBridge })}
+                            {...(props.onOpenLink === undefined
+                              ? {}
+                              : { onOpenLink: props.onOpenLink })}
+                            paneId={paneId}
+                            surface={surface}
+                          >
+                            <TaskAccessContext value={taskAccessFor(surface, props)}>
+                              <OutsideContentContext
+                                value={outsideContentFor(surface, props.contextClient)}
+                              >
+                                {onWelcomeGround(
+                                  surface,
+                                  props.welcomeBackdrop,
+                                  renderTab(surface, props, paneId, canvasContext, newTaskDrafts),
+                                )}
+                              </OutsideContentContext>
+                            </TaskAccessContext>
+                          </SurfaceLinkActionsProvider>
+                        </ComposerContextMeterGate>
+                      </ComposerNoticeProvider>
+                    </ComposerSubagentsContext>
+                  </PaneSideTasks>
                 </FollowUpSuggestionContext>
               )}
               {...(props.liveThreadTitles === undefined
@@ -1285,6 +1292,9 @@ function renderCodeTab(
           ? {}
           : { appleToolchainClient: props.appleToolchainClient })}
         {...(props.extensionClient === undefined ? {} : { extensionClient: props.extensionClient })}
+        {...(props.projectClient === undefined
+          ? {}
+          : { memoryProposalClient: props.projectClient })}
         {...(props.automationClient === undefined
           ? {}
           : { automationClient: props.automationClient })}
@@ -1404,6 +1414,7 @@ function renderCodeTab(
         >
           <CodeThreadEnvironment
             active={paneIsActive(props, paneId)}
+            threadMove={threadMoveEnvironmentFor(props, "code")}
             observe={codeController.conversationHistory === "loaded"}
             checkoutAvailability={checkoutAvailability}
             {...(props.environmentDockOpen === undefined
@@ -1785,6 +1796,10 @@ function renderNonCodeTab(
   if (tab.kind === "chat-thread") {
     return (
       <ChatThreadWorkspace
+        {...(props.projectClient === undefined
+          ? {}
+          : { memoryProposalClient: props.projectClient })}
+        threadMove={threadMoveEnvironmentFor(props, "chat")}
         {...(props.onCreateProject === undefined ? {} : { onCreateProject: props.onCreateProject })}
         chatClient={props.chatClient}
         chatReadCursorStore={props.chatReadCursorStore}
@@ -1879,6 +1894,7 @@ function renderNonCodeTab(
         {({ displayReady, onDisplayReadyChange }) => (
           <WorkThreadEnvironment
             active={paneIsActive(props, paneId)}
+            threadMove={threadMoveEnvironmentFor(props, "work")}
             {...(props.environmentDockOpen === undefined
               ? {}
               : { environmentOpen: props.environmentDockOpen })}
@@ -1980,6 +1996,9 @@ function renderNonCodeTab(
                 {...(props.automationClient === undefined
                   ? {}
                   : { automationClient: props.automationClient })}
+                {...(props.projectClient === undefined
+                  ? {}
+                  : { memoryProposalClient: props.projectClient })}
                 {...(props.onOpenCanvasReference === undefined
                   ? {}
                   : { onOpenCanvas: props.onOpenCanvasReference })}
@@ -2547,6 +2566,33 @@ function resolveCodeTabCheckoutId(
     ?.checkoutId;
 }
 
+/**
+ * The Computer card's facts for a thread in this mode: the host it runs on,
+ * and, only when that is this computer and the window is a local desktop
+ * window, the move routes and this Mac's unlock key.
+ */
+function threadMoveEnvironmentFor(
+  props: WorkspaceViewProps,
+  mode: "chat" | "code" | "work",
+): ThreadMoveEnvironment {
+  const host = props.workspace.contextByMode[mode].host;
+  const isThisComputer = host === "local";
+  const hostName =
+    props.hosts?.find((item) => String(item.hostId) === String(host))?.displayName ??
+    (isThisComputer ? "This computer" : String(host));
+  const hub = isThisComputer ? hubAdministrationOf(props.hostBridge) : undefined;
+  const unlock = ownerUnlockOf(props.hostBridge);
+  return {
+    hostName,
+    isThisComputer,
+    ...(hub === undefined || props.hostBridge === undefined
+      ? {}
+      : { client: threadMoveClientForBridge(props.hostBridge, hub) }),
+    ...(unlock === undefined ? {} : { unlock }),
+    ...(props.onOpenSettings === undefined ? {} : { onOpenHubSettings: props.onOpenSettings }),
+  };
+}
+
 function paneIsActive(props: WorkspaceViewProps, paneId: PaneId): boolean {
   return paneId === (props.focusedPaneId ?? props.workspace.activePaneIds[props.mode]);
 }
@@ -2592,6 +2638,8 @@ function threadBrowserReveal(
 }
 
 function ChatThreadWorkspace(props: {
+  readonly threadMove?: ThreadMoveEnvironment;
+  readonly memoryProposalClient?: ProjectMemoryProposalClient;
   readonly agentRunClient?: AgentRunClient;
   readonly chatClient: ChatClient;
   readonly chatReadCursorStore: ChatReadCursorStore;
@@ -2662,6 +2710,7 @@ function ChatThreadWorkspace(props: {
   );
   return (
     <ChatThreadEnvironment
+      {...(props.threadMove === undefined ? {} : { threadMove: props.threadMove })}
       {...(props.active === undefined ? {} : { active: props.active })}
       {...(props.agentRunClient === undefined ? {} : { agentRunClient: props.agentRunClient })}
       {...(props.onOpenAgents === undefined ? {} : { onOpenAgents: props.onOpenAgents })}
@@ -2689,6 +2738,9 @@ function ChatThreadWorkspace(props: {
         onRemoveCanvasSelection={props.onRemoveCanvasSelection}
         pendingCanvasSelections={props.pendingCanvasSelections}
         {...(props.extensionClient === undefined ? {} : { extensionClient: props.extensionClient })}
+        {...(props.memoryProposalClient === undefined
+          ? {}
+          : { memoryProposalClient: props.memoryProposalClient })}
         {...(props.browserAutomationClient === undefined
           ? {}
           : { browserAutomationClient: props.browserAutomationClient })}

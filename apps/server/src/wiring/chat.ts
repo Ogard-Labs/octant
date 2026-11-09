@@ -1,4 +1,5 @@
 import { decodeComputerUseOwner } from "@octant/contracts/computer-use-plugin";
+import type { ThreadMoveHolds } from "../hub/threadMoveHolds";
 import { randomUUID } from "node:crypto";
 import { approvedWorkingFolderRoot } from "../approvedWorkingFolders";
 import {
@@ -40,7 +41,7 @@ import { WorkTurnService } from "../work/workTurnService";
 import { attachWorkRequestRuntime } from "../work/workRequestRuntime";
 import { JournalNavigatorAssistantBindingStore } from "../navigatorAssistant/navigatorAssistantBindingStore";
 import { MAX_CHAT_ATTACHMENT_BYTES } from "../chat/chatAttachmentStore";
-import { createImageAgentTools } from "../image/imageAgentTools";
+import { createThreadImageAgentTools } from "../image/imageAgentTools";
 import { createLinkedThreadRouteHandler } from "../linkedThread/linkedThreadRoutes";
 import { createLinkedThreadRuntime } from "../linkedThread/linkedThreadRuntime";
 import { OCTANT_LOCAL_ACTOR_ID } from "../shellService";
@@ -106,6 +107,7 @@ export type ChatDependencies = Pick<ServerStart, "options" | "persistence"> &
     AuthorityWiring,
     | "agentRunPersistence"
     | "browserCaptures"
+    | "imageGenerationOffers"
     | "liveTurns"
     | "machineChangeFeed"
     | "windowAuthorityStore"
@@ -130,7 +132,7 @@ export type ChatDependencies = Pick<ServerStart, "options" | "persistence"> &
     | "threadOutsideContentMarks"
   > &
   Pick<ComputerUseWiring, "computerToolsFor" | "computerUseTools"> &
-  Pick<WorkspaceWiring, "contextHarness" | "shellService"> &
+  Pick<WorkspaceWiring, "contextHarness" | "projectMemoryAccess" | "shellService"> &
   Pick<WorkRequestStateWiring, "workRequestRuntime"> &
   Pick<CodeWiring, "environmentService"> &
   Pick<
@@ -158,6 +160,8 @@ export type ChatDependencies = Pick<ServerStart, "options" | "persistence"> &
     readonly workThreadService: () => WorkThreadService;
     /** Wired by wireWork; read only after startup. */
     readonly workTurnService: () => WorkTurnService;
+    /** Threads a move holds: frozen here while leaving, or arriving and not yet committed. */
+    readonly threadMoveHolds: ThreadMoveHolds;
   } & Pick<FoundationsWiring, "providerRuntimeRegistry" | "conversationInputTransfer">;
 
 export function wireChat(deps: ChatDependencies) {
@@ -185,6 +189,7 @@ export function wireChat(deps: ChatDependencies) {
     extensionPackageStore,
     externalContentIngestionStore,
     githubIssueContextService,
+    imageGenerationOffers,
     imageJobService,
     linearIssueContextService,
     liveTurns,
@@ -210,6 +215,7 @@ export function wireChat(deps: ChatDependencies) {
     workTurnService,
     workRequestRuntime,
     personMemoryAccess,
+    projectMemoryAccess,
   } = deps;
   return Effect.gen(function* () {
     let threadDialogueService: ThreadDialogueService | undefined;
@@ -422,6 +428,7 @@ export function wireChat(deps: ChatDependencies) {
       persistence,
       issueContext: githubIssueContextService,
       linearIssueContext: linearIssueContextService,
+      moveHold: (threadId) => deps.threadMoveHolds.isHeld({ mode: "chat", threadId }),
       reviewedModelManifest,
       hiddenThreadIds: chatHiddenThreadIds,
       // A Side Chat sidecar is a lane *about* one source thread, so that
@@ -478,7 +485,13 @@ export function wireChat(deps: ChatDependencies) {
       threadWork,
       providerRuntimeRegistry: providerRuntimeRegistry,
       nativeHarness: nativeHarnessHooks,
-      resolveAppManagedTools: ({ windowId, thread, threadMentionIds, coordinationDepth }) => {
+      resolveAppManagedTools: ({
+        windowId,
+        thread,
+        turnId,
+        threadMentionIds,
+        coordinationDepth,
+      }) => {
         const sideChat = sideChatSidecars.findBySidecarThread(thread.id) !== undefined;
         return combineAppManagedToolSets(
           taintAppManagedToolResults({
@@ -501,26 +514,23 @@ export function wireChat(deps: ChatDependencies) {
                       targetThreadIds: threadMentionIds ?? [],
                       ...(coordinationDepth === undefined ? {} : { coordinationDepth }),
                     }),
-                    createImageAgentTools({
+                    createThreadImageAgentTools({
+                      windowId,
                       threadKind: "chat-thread",
                       scopeId: decodeImageGenerationScopeId(String(thread.id)),
-                      port: {
-                        listInstances: () => persistence.readProviderInstances(),
-                        readImageGenerationCustomSources: () =>
-                          (persistence.readShellSettings()?.settings ?? defaultShellSettings())
-                            .imageGeneration.customSources,
-                        enqueue: (input) => imageJobService.enqueue(input),
-                        listJobs: (scopeId) => imageJobService.listByScope(scopeId),
-                      },
-                    }),
-                    createSideTaskTools({
-                      store: sideTasks,
-                      threadId: String(thread.id),
-                      mode: "chat",
-                      projectId: thread.projectId,
-                      suggestedBy: thread,
-                      uuid: randomUUID,
-                      clock: () => new Date().toISOString(),
+                      offers: imageGenerationOffers,
+                      jobs: imageJobService,
+                      listInstances: () => persistence.readProviderInstances(),
+                      readImageGenerationCustomSources: () =>
+                        (persistence.readShellSettings()?.settings ?? defaultShellSettings())
+                          .imageGeneration.customSources,
+                      readsImages: () =>
+                        providerRuntimeRegistry
+                          .observedState(thread.providerInstanceId)
+                          ?.models.find(
+                            (candidate) => String(candidate.id) === String(thread.modelId),
+                          )
+                          ?.inputModalities.includes("image") === true,
                     }),
                   ),
               }),
@@ -552,6 +562,15 @@ export function wireChat(deps: ChatDependencies) {
                   createdAt: thread.createdAt,
                   windowId,
                 }),
+                // Outside the taint wrapper too: it returns Project memory the
+                // person approved, and a Chat thread outside a Project gets no
+                // tool. Chat has no Plan posture.
+                projectMemoryAccess.toolsFor({
+                  windowId,
+                  mode: "chat",
+                  threadId: String(thread.id),
+                  projectId: thread.projectId === undefined ? undefined : String(thread.projectId),
+                }),
                 // Outside the taint wrapper: only a child's reply is outside
                 // content, and `wait` marks the thread itself before it hands
                 // one back; `delegate` refuses while the thread is marked.
@@ -560,6 +579,20 @@ export function wireChat(deps: ChatDependencies) {
                   parentThreadId: String(thread.id),
                   mode: "chat",
                   ...(thread.projectId === undefined ? {} : { projectId: thread.projectId }),
+                }),
+                // Outside the taint wrapper, as in Work and Code: an offer's
+                // answer is Octant's own receipt of what the model wrote, and
+                // inside the wrapper offering one card marked a Chat thread as
+                // having read outside content.
+                createSideTaskTools({
+                  store: sideTasks,
+                  threadId: String(thread.id),
+                  mode: "chat",
+                  projectId: thread.projectId,
+                  turnId: turnId === undefined ? undefined : String(turnId),
+                  suggestedBy: thread,
+                  uuid: randomUUID,
+                  clock: () => new Date().toISOString(),
                 }),
               ),
           }),

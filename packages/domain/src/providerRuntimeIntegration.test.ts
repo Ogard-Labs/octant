@@ -1,6 +1,9 @@
 import type { ProviderObservedState } from "@octant/contracts/providers";
 import { describe, expect, it } from "vitest";
-import { describeProviderRuntimeIntegration } from "./providerRuntimeIntegration";
+import {
+  describeProviderRuntimeIntegration,
+  hostedProviderCapabilities,
+} from "./providerRuntimeIntegration";
 
 const capabilities: ProviderObservedState["capabilities"] = {
   streaming: "supported",
@@ -141,5 +144,32 @@ describe("provider runtime integration", () => {
         ?.activity,
     ).toEqual({ source: "none" });
     expect(describeProviderRuntimeIntegration("openai-image", ready)).toBeUndefined();
+  });
+
+  it("reports task progress for a Harness endpoint once a model may call Octant's tools", () => {
+    const endpoint = {
+      capabilities: {
+        ...capabilities,
+        appManagedTools: "unsupported",
+        taskProgress: "unsupported",
+      },
+    } as const;
+    const verified = { ...endpoint, verifiedToolModelIds: ["gpt-fixture" as never] };
+    expect(hostedProviderCapabilities("openai-compatible", verified).taskProgress).toBe(
+      "supported",
+    );
+    expect(
+      describeProviderRuntimeIntegration("ollama", {
+        readiness: "ready",
+        capabilities: hostedProviderCapabilities("ollama", verified),
+      })?.activity,
+    ).toMatchObject({ observes: expect.arrayContaining(["task-progress"]) });
+    // Without a verified model the Harness offers no todo-write, so no list can arrive.
+    expect(hostedProviderCapabilities("openai-compatible", endpoint)).toBe(endpoint.capabilities);
+    expect(
+      hostedProviderCapabilities("openai-compatible", { ...endpoint, verifiedToolModelIds: [] }),
+    ).toBe(endpoint.capabilities);
+    // A runtime reports its own checklist; the host adds nothing to it.
+    expect(hostedProviderCapabilities("codex", verified)).toBe(verified.capabilities);
   });
 });

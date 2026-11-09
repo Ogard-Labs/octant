@@ -81,6 +81,7 @@ export * from "./hostDataMap";
 export * from "./hostExport";
 export * from "./remoteAccess";
 export * from "./hubAndSpokes";
+export * from "./hubThreadMove";
 export * from "./hubDelegation";
 export * from "./hubMembership";
 export * from "./hubOwners";
@@ -194,6 +195,7 @@ export * from "./canvasTags";
 
 export * from "./computerUsePlugin";
 export * from "./desktopLease";
+export { DesktopPreviewRequest, DesktopPreviewAnswer, DesktopPreviewAudit } from "./desktopPreview";
 export * from "./simulatorDevice";
 export * from "./gitHistory";
 

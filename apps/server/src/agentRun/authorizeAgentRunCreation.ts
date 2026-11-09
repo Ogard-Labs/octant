@@ -68,6 +68,17 @@ const codeParentLiveGrant = (
 };
 
 /**
+ * A Code parent's grant to its helpers. A helper run carries a posture, not
+ * the parent's sandbox choice, so a helper of a sandboxed Full access thread
+ * runs at Accept edits: inside the same wall with its commands asking, never
+ * at an open Full access the parent did not choose.
+ */
+const codeThreadLiveGrant = (thread: CodeThread): AgentRunAuthority =>
+  thread.executionPolicy === "full-access" && thread.fullAccessSandbox === true
+    ? codeParentLiveGrant("auto-accept-edits", "current-session")
+    : codeParentLiveGrant(thread.executionPolicy, thread.permissionPersistence);
+
+/**
  * The Code parent as its running turn may use it: a turn narrowed below the
  * thread (to Plan, say) gives its children no more than the turn holds. The
  * host supplies this; without one the thread is judged as it is stored.
@@ -186,10 +197,7 @@ export function authorizeAgentRunCreation(input: {
     );
     const effectiveThread = input.activeTurn?.(sessionThread) ?? sessionThread;
     const parentAuthority = defaultAgentRunAuthorityCeilingForMode("code");
-    const liveAuthority = codeParentLiveGrant(
-      effectiveThread.executionPolicy,
-      effectiveThread.permissionPersistence,
-    );
+    const liveAuthority = codeThreadLiveGrant(effectiveThread);
     return {
       parentMode: "code",
       parentAuthority,
@@ -288,7 +296,7 @@ export function scheduledAgentRunLiveAuthority(input: {
         ) ?? codeThread;
       // A resume while the parent is mid-turn is bound by that turn's posture too.
       const thread = input.activeTurn?.(sessionThread) ?? sessionThread;
-      return codeParentLiveGrant(thread.executionPolicy, thread.permissionPersistence);
+      return codeThreadLiveGrant(thread);
     }
     default:
       return undefined;
