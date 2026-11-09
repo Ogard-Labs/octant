@@ -1078,37 +1078,76 @@ const timer = setInterval(() => {
     // certificate in Settings, creates a browser pairing link there and
     // approves the request there. The API-seeded device above stays fixture
     // setup only and is not evidence for any of these steps.
+    // A refused native input in the pairing route prints the window text it
+    // actually saw, with key- or token-like runs hidden.
+    const pairedInput = async (stage: string, mode: string, label: string, value?: string) => {
+      try {
+        return await nativeInput(stage, mode, label, value);
+      } catch (error) {
+        const raw = await runBoundedCommand(
+          nativeControllerPath,
+          ["observe", String(ownPid), join(artifacts, `${stage}-refused.png`), stage],
+          process.env,
+          8000,
+        ).catch(() => "");
+        const texts =
+          raw === "" ? [] : decodeSnapshot(JSON.parse(raw)).texts.map((row) => row.text);
+        console.log(
+          `OCTANT_NATIVE_LAST_TEXT ${JSON.stringify({
+            stage,
+            texts: texts
+              .slice(0, 80)
+              .map((text) => text.replace(/[A-Za-z0-9+/=_-]{24,}/g, "<redacted>").slice(0, 120)),
+          })}`,
+        );
+        throw error;
+      }
+    };
+    const revealText = async (stage: string, text: string, anchor: string) => {
+      for (let attempt = 0; attempt < 5; attempt++) {
+        const raw = await runBoundedCommand(
+          nativeControllerPath,
+          ["observe", String(ownPid), join(artifacts, `${stage}-${attempt}.png`), stage],
+          process.env,
+          8000,
+        );
+        if (decodeSnapshot(JSON.parse(raw)).texts.some((row) => row.text.includes(text))) return;
+        await pairedInput(`${stage}-scroll-${attempt}`, "scroll-down", anchor);
+      }
+      throw Error(`The native ${text} control was not revealed.`);
+    };
     const listenerHost = pairedFixture.hostname;
     const listenerPort = pairedFixture.port;
     const listenerOrigin = pairedFixture.origin;
-    await nativeInput("paired-close-share", "escape", "Share");
-    await nativeInput("paired-settings", "settings", "Settings");
+    await pairedInput("paired-close-share", "escape", "Share");
+    await pairedInput("paired-settings", "settings", "Settings");
     await observeUntil("paired-settings-open", (snapshot) => hasText(snapshot, "Search settings"));
-    await nativeInput("listener-search", "fill", "Search settings", "Remote listener");
+    await pairedInput("listener-search", "fill", "Search settings", "Remote listener");
     await observeUntil("listener-search-result", (snapshot) =>
       hasText(snapshot, "in Remote access"),
     );
-    await nativeInput("listener-search-open", "enter", "Remote listener");
+    await pairedInput("listener-search-open", "enter", "Remote listener");
     await observeUntil(
       "listener-settings",
       (snapshot) => hasText(snapshot, "Hostname") && hasText(snapshot, "Certificate (PEM)"),
     );
-    await nativeInput("listener-hostname", "fill", "Hostname", listenerHost);
-    await nativeInput("listener-port", "fill", "Port", String(listenerPort));
+    await pairedInput("listener-hostname", "fill", "Hostname", listenerHost);
+    await pairedInput("listener-port", "fill", "Port", String(listenerPort));
+    await revealText("listener-certificate-reveal", "Private key (PEM)", "Hostname");
     setPasteboard(pastedListener.certificatePem);
-    await nativeInput("listener-certificate", "paste", "Certificate (PEM)");
+    await pairedInput("listener-certificate", "paste", "Certificate (PEM)");
     setPasteboard(pastedListener.privateKeyPem);
     try {
-      await nativeInput("listener-key", "paste", "Private key (PEM)");
+      await pairedInput("listener-key", "paste", "Private key (PEM)");
     } finally {
       setPasteboard("");
     }
     await observeUntil("listener-draft", (snapshot) => hasText(snapshot, "Move listener"));
-    await nativeInput("listener-move", "click", "Move listener");
+    await pairedInput("listener-move", "click", "Move listener");
     await observeUntil("listener-move-confirm", (snapshot) =>
       hasText(snapshot, "Move remote listener?"),
     );
-    await nativeInput("listener-move-confirmed", "click", "Confirm move");
+    await pairedInput("listener-move-confirmed", "click", "Confirm move");
     await waitForProcessCleanup(
       async () => {
         if (
@@ -1122,19 +1161,19 @@ const timer = setInterval(() => {
     console.log(
       `OCTANT_PAIRED_READER ${JSON.stringify({ stage: "native-pasted-listener", servesPastedCertificate: true })}`,
     );
-    await nativeInput("pairing-search", "fill", "Search settings", "Pair a device");
+    await pairedInput("pairing-search", "fill", "Search settings", "Pair a device");
     await observeUntil("pairing-search-result", (snapshot) =>
       hasText(snapshot, "in Remote access"),
     );
-    await nativeInput("pairing-search-open", "enter", "Pair a device");
+    await pairedInput("pairing-search-open", "enter", "Pair a device");
     await observeUntil("pairing-settings", (snapshot) => hasText(snapshot, "Create pairing link"));
-    await nativeInput("pairing-create-link", "click", "Create pairing link");
+    await pairedInput("pairing-create-link", "click", "Create pairing link");
     await observeUntil("pairing-link-shown", (snapshot) => hasText(snapshot, "Expires"));
     const linkPattern = /https:\/\/[^\s#]+\/#ticketId=[A-Za-z0-9%_-]+&ticketProof=[A-Za-z0-9%_-]+/g;
     let pairingLink: string | undefined;
     for (const target of ["ticketProof", "ticketPro", "#ticket", "ticket"]) {
       try {
-        await nativeInput(`pairing-link-copy-${target.replace(/\W/g, "")}`, "select-copy", target);
+        await pairedInput(`pairing-link-copy-${target.replace(/\W/g, "")}`, "select-copy", target);
       } catch {
         continue;
       }
@@ -1212,12 +1251,12 @@ const timer = setInterval(() => {
         );
         approvalVisible = true;
       } catch {
-        await nativeInput(`pairing-request-scroll-${attempt}`, "scroll-down", "Pair a device");
+        await pairedInput(`pairing-request-scroll-${attempt}`, "scroll-down", "Pair a device");
       }
     }
     if (!approvalVisible)
       throw Error("The native pairing request with the browser's comparison code was not shown.");
-    await nativeInput("pairing-approve", "click", approveLabel);
+    await pairedInput("pairing-approve", "click", approveLabel);
     await observeUntil("pairing-approved", (snapshot) => hasText(snapshot, "Approved"));
     console.log(
       `OCTANT_PAIRED_READER ${JSON.stringify({ stage: "native-approval", comparisonCodeMatched: true })}`,
@@ -1301,7 +1340,7 @@ const timer = setInterval(() => {
         2,
       ),
     );
-    await nativeInput("paired-back-to-app", "click", "Back to app");
+    await pairedInput("paired-back-to-app", "click", "Back to app");
     await observeUntil(
       "paired-return-canvas",
       (snapshot) => hasText(snapshot, "v1") && hasText(snapshot, "Signups this week"),
