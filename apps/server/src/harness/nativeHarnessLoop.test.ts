@@ -951,6 +951,63 @@ describe("a lead whose model keeps failing", () => {
     expect(backup.released()).toBe(true);
   });
 
+  it("refuses an image the fallback model's smaller request cannot carry", async () => {
+    const down = downEndpoint();
+    const sent: NativeHarnessRequest[] = [];
+    const script: NativeHarnessResponse[] = [
+      {
+        text: "Looking",
+        toolCalls: [{ toolCallId: "read-1", toolName: "read", argumentsJson: "{}" }],
+      },
+      { text: "Could not see it", toolCalls: [] },
+    ];
+    const smaller: NativeHarnessTransportSession = {
+      // The endpoint sizes a request by the model it names.
+      fits: (request) =>
+        String(request.modelId) !== "backup-model" ||
+        JSON.stringify(request.history).length <= 2_000,
+      release: () => undefined,
+      send: async (request) => {
+        sent.push(request);
+        const next = script.shift();
+        if (next === undefined) throw new Error("The script ran out of responses.");
+        return next;
+      },
+    };
+    const events = await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const connection = yield* connect(
+            { open: async () => down.session },
+            new MemoryNativeHarnessTranscriptStore(),
+            { next: async () => ({ status: "switched", target: backupTarget, endpoint: smaller }) },
+          );
+          yield* connection.start({ sessionId, modelId, executionPolicy: "approval-gated", tools });
+          yield* sendAndCollect(connection, "Look at it", (event) => event.kind === "tool-request");
+          const terminal = yield* Effect.fork(
+            Stream.runCollect((yield* connection.subscribe).pipe(Stream.takeUntil(isTerminal))),
+          );
+          yield* connection.answerTool({
+            sessionId,
+            requestId: "read-1",
+            resultJson: '{"kind":"image","path":"shot.png"}',
+            isError: false,
+            images: [{ mimeType: "image/png", data: "A".repeat(4_000) }],
+          });
+          return Array.from(yield* Fiber.join(terminal));
+        }),
+      ),
+    );
+
+    expect(events.at(-1)?.kind).toBe("completed");
+    const result = sent[1]?.history.at(-1)?.toolResults?.[0];
+    expect(sent[1]?.modelId).toBe("backup-model");
+    expect(result?.images).toBeUndefined();
+    expect(JSON.parse(result?.resultJson ?? "{}")).toMatchObject({
+      error: "image-too-large-for-endpoint",
+    });
+  });
+
   it("fails with the endpoint's own failure and says why when no other model is configured", async () => {
     const down = downEndpoint();
     const [events] = await run(down.session, {

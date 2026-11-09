@@ -526,6 +526,23 @@ export function createNativeHarnessConnection(
      * is asked at most once per turn; once the router has nothing left the
      * turn fails with the endpoint's own failure and the reason none was found.
      */
+    /**
+     * A request refitted for the model the turn moved to, which the endpoint
+     * sizes by its own model id; the request itself when the turn has not
+     * moved.
+     */
+    const fitOnFallback = (
+      state: SessionState,
+      request: NativeHarnessRequest,
+    ): NativeHarnessRequest | undefined =>
+      state.fallback === undefined
+        ? request
+        : fitRequest(
+            state.fallback.endpoint,
+            { ...request, modelId: state.fallback.target.modelId },
+            { journalNumberOf: journalNumberIn(state), mode: options.mode },
+          );
+
     const sendOnLead = async (
       state: SessionState,
       request: NativeHarnessRequest,
@@ -561,11 +578,7 @@ export function createNativeHarnessConnection(
       };
       let current = request;
       if (state.fallback !== undefined) {
-        const refit = fitRequest(
-          state.fallback.endpoint,
-          { ...request, modelId: state.fallback.target.modelId },
-          { journalNumberOf: journalNumberIn(state), mode: options.mode },
-        );
+        const refit = fitOnFallback(state, request);
         if (refit === undefined) {
           throw failure(
             "invalid-configuration",
@@ -1131,20 +1144,11 @@ export function createNativeHarnessConnection(
      * step that does not fit even without images fails as before.
      */
     const refuseImagesThatDoNotFit = (state: SessionState, pending: PendingStep): void => {
-      const endpoints = [
-        state.endpoint,
-        ...(state.fallback === undefined ? [] : [state.fallback.endpoint]),
-      ];
+      // The same fitting the results go through: `requestFor` when they
+      // advance, then the fallback's refit when `sendOnLead` sends them.
       const fits = () => {
-        const request = {
-          sessionId: state.sessionId,
-          modelId: state.modelId,
-          system: state.system,
-          history: [...state.messages, resultsMessage(pending)],
-          tools: sortToolDefinitionsByName(state.tools),
-        };
-        const fitting = { journalNumberOf: journalNumberIn(state), mode: options.mode };
-        return endpoints.every((endpoint) => fitRequest(endpoint, request, fitting) !== undefined);
+        const request = requestFor(state, [...state.messages, resultsMessage(pending)]);
+        return request !== undefined && fitOnFallback(state, request) !== undefined;
       };
       const imageCharacters = (answer: ProviderToolAnswer) =>
         (answer.images ?? []).reduce((total, image) => total + image.data.length, 0);
