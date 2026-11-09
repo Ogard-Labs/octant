@@ -487,6 +487,8 @@ export interface WorkThreadWorkspaceProps {
   readonly onOpenCanvas?: (card: CanvasThreadReferenceCard) => void;
   /** Opens the dock's Canvas tool on this Canvas; a Canvas drawn in the thread offers it. */
   readonly onOpenCanvasInSidebar?: (card: CanvasThreadReferenceCard) => void;
+  /** The remote reader opens the same Canvas without a local sidebar. */
+  readonly canvasOpenLabel?: string;
   /** The Canvas cards the host lists for this thread, each time they are read. */
   readonly onCanvasReferencesObserved?: (
     threadId: string,
@@ -2285,6 +2287,9 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
                           cards={canvasPlacement.byRow.get(row.key)}
                           client={canvasClient}
                           {...(openInSidebar === undefined ? {} : { onOpen: openInSidebar })}
+                          {...(props.canvasOpenLabel === undefined
+                            ? {}
+                            : { openLabel: props.canvasOpenLabel })}
                         />
                       )}
                       {imageClient === undefined || imageProfiles === undefined ? null : (

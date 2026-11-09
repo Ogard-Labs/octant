@@ -1,3 +1,7 @@
+import "../styles.css";
+import "../styles/dock.css";
+import { OctantDialog } from "../ui/base/OctantDialog";
+import { decodeCanvasPublicShareList } from "@octant/contracts/canvas-public-share";
 import { CANVAS_SCHEMA_VERSION } from "@octant/contracts/canvas";
 import type { CanvasClient } from "@octant/client-runtime/canvas-client";
 import type { CanvasInventoryEntry } from "@octant/contracts";
@@ -82,13 +86,13 @@ function createHarnessCanvasClient(): CanvasClient {
         kind: "denied",
         denialCode: "malformed-request",
         message: "Harness revise is not configured.",
-      }) as Awaited<ReturnType<CanvasClient["revise"]>>,
+      }) as Awaited<ReturnType<NonNullable<CanvasClient["revise"]>>>,
     create: async () =>
       ({
         kind: "denied",
         denialCode: "unavailable",
         message: "Harness create is not configured.",
-      }) as Awaited<ReturnType<CanvasClient["create"]>>,
+      }) as Awaited<ReturnType<NonNullable<CanvasClient["create"]>>>,
     threadReferenceCards: async ({ mode, threadId, projectId }) => ({
       mode,
       threadId: threadId as never,
@@ -203,11 +207,65 @@ function CanvasInventoryHarness() {
   );
 }
 
+function PairedCanvasHarness() {
+  const [open, setOpen] = useState(true);
+  const client = useMemo<CanvasClient>(() => {
+    const full = createHarnessCanvasClient();
+    return {
+      inventory: full.inventory,
+      get: full.get,
+      history: full.history,
+      threadReferenceCards: full.threadReferenceCards,
+      publicShares: async (canvasId) => {
+        if (new URL(location.href).searchParams.get("public-links") === "error")
+          throw Error("Owned unavailable fixture");
+        return decodeCanvasPublicShareList({
+          schemaVersion: 1,
+          kind: "canvas-public-share-list",
+          canvasId,
+          enabled: true,
+          serviceUrl: "https://shares.example.test",
+          shares: [
+            {
+              canvasId,
+              publicShareId: "AAAAAAAAAAAAAAAAAAAAAA",
+              url: "https://shares.example.test/s/AAAAAAAAAAAAAAAAAAAAAA",
+              serviceUrl: "https://shares.example.test",
+              versionId: quarterlyInventoryEntry.currentVersionId,
+              sequence: quarterlyInventoryEntry.currentSequence,
+              publishedAt: "2026-11-01T00:00:00.000Z",
+              updatedAt: "2026-11-01T00:00:00.000Z",
+              expiresAt: null,
+              passwordProtected: true,
+              status: "active",
+            },
+          ],
+        });
+      },
+    };
+  }, []);
+  return (
+    <main>
+      <OctantDialog
+        label={quarterlyInventoryEntry.title}
+        onClose={() => setOpen(false)}
+        open={open}
+      >
+        <CanvasWorkspaceTab tab={tabForEntry(quarterlyInventoryEntry)} client={client} />
+      </OctantDialog>
+    </main>
+  );
+}
+
 const root = document.getElementById("root");
 if (!root) throw new Error("Canvas inventory browser evidence root is missing");
 
 createRoot(root).render(
   <StrictMode>
-    <CanvasInventoryHarness />
+    {new URL(location.href).searchParams.has("public-links") ? (
+      <PairedCanvasHarness />
+    ) : (
+      <CanvasInventoryHarness />
+    )}
   </StrictMode>,
 );

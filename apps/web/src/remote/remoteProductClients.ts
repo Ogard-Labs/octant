@@ -8,6 +8,7 @@ import {
   type RemoteSessionBridge,
 } from "@octant/client-runtime";
 import { createChatClient, type ChatClient } from "@octant/client-runtime/chat-client";
+import { createCanvasClient, type CanvasClient } from "@octant/client-runtime/canvas-client";
 import { createCodeClient, type CodeClient } from "@octant/client-runtime/code-client";
 import { createProjectClient, type ProjectClient } from "@octant/client-runtime/project-client";
 import { createProviderClient, type ProviderClient } from "@octant/client-runtime/provider-client";
@@ -39,6 +40,7 @@ import { platformPasskeys } from "../host/ownerPasskey";
 export interface RemoteProductClients {
   readonly conversationInputs?: ConversationInputClient;
   readonly chat: ChatClient;
+  readonly canvas: CanvasClient;
   readonly code: CodeClient;
   readonly project: ProjectClient;
   readonly provider: ProviderClient;
@@ -70,9 +72,20 @@ export function createRemoteProductClients(bridge: RemoteSessionBridge): RemoteP
     fetch: createRemoteProductFetch({ bridge }),
     windowCapability: NO_WINDOW_CAPABILITY,
   };
+  const canvas = createCanvasClient(port);
   return {
     conversationInputs: createConversationInputClient(port),
     chat: createChatClient(port),
+    // Reading a Canvas never grants a paired browser the host's export,
+    // credential, editing or share-management authority.
+    canvas: {
+      inventory: canvas.inventory,
+      get: canvas.get,
+      history: canvas.history,
+      threadReferenceCards: canvas.threadReferenceCards,
+      ...(canvas.designAssets === undefined ? {} : { designAssets: canvas.designAssets }),
+      ...(canvas.publicShares === undefined ? {} : { publicShares: canvas.publicShares }),
+    },
     // A host may ask this paired browser's merge for an owner unlock first;
     // the browser gives it with its passkey if it is an owner of that host.
     code: createCodeClient({
