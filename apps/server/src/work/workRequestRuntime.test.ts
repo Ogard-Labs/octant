@@ -157,6 +157,63 @@ describe("WorkRequestRuntime", () => {
     });
   });
 
+  it("records a long questionnaire choice whose length limit lands on whitespace", async () => {
+    const recorded: WorkRequestRecordInput[] = [];
+    const interruptSession = vi.fn(() => []);
+    const runtime = new WorkRequestRuntime({
+      requests: {
+        record: (input: WorkRequestRecordInput) => {
+          recorded.push(input);
+          return { status: "ok", request: {} as never };
+        },
+        interruptSession,
+      } as never,
+      uuid: () => "00000000-0000-4000-8000-000000000905",
+    });
+    // With the "Option 1: " prefix, the 256-character limit ends on this space.
+    const longLabel = `${"a".repeat(245)} ${"b".repeat(10)}`;
+    const connection = {
+      subscribe: Effect.succeed(
+        Stream.fromIterable<ProviderRuntimeEvent>([
+          {
+            instanceId: providerInstanceId,
+            sessionId,
+            sequence: 1,
+            correlationId: decodeCorrelationId(String(projectId)),
+            occurredAt: decodeTimestamp("2026-08-10T08:00:00.000Z"),
+            kind: "user-input-request",
+            requestId: "native-form",
+            prompt: "Choose",
+            options: [],
+            questionnaire: {
+              questions: [
+                {
+                  id: "q0",
+                  prompt: "Pick one",
+                  selection: "single",
+                  options: [{ id: "o0", label: longLabel }],
+                },
+              ],
+            },
+          },
+        ]),
+      ),
+      answerApproval: () => Effect.void,
+      answerUserInput: () => Effect.void,
+      interrupt: () => Effect.void,
+    };
+    await Effect.runPromise(
+      runtime.subscribe({ connection, projectId, threadId, providerInstanceId, sessionId }),
+    );
+    expect(interruptSession).not.toHaveBeenCalled();
+    expect(recorded).toHaveLength(1);
+    expect(recorded[0]?.detail).toMatchObject({
+      questionnaire: {
+        questions: [{ options: [{ id: "o0", label: `Option 1: ${"a".repeat(245)}` }] }],
+      },
+    });
+  });
+
   it("forwards answers through the subscribed provider connection", async () => {
     const answerApproval = vi.fn(() => Effect.void);
     const answerUserInput = vi.fn(() => Effect.void);

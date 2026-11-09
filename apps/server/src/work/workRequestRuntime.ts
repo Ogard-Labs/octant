@@ -436,17 +436,18 @@ function sanitizedQuestionnaire(questionnaire: Questionnaire): Questionnaire {
       : { allowComment: questionnaire.allowComment }),
     questions: questionnaire.questions.map((question) => ({
       ...question,
-      prompt: sanitizeRequestText(question.prompt, "Input requested").slice(0, 1_024),
+      prompt: sanitizeRequestText(question.prompt, "Input requested").slice(0, 1_024).trim(),
       options: question.options.map((option, index) => ({
         ...option,
-        label: `Option ${index + 1}: ${sanitizeRequestText(option.label, "Choice")}`.slice(0, 256),
+        label: `Option ${index + 1}: ${sanitizeRequestText(option.label, "Choice")}`
+          .slice(0, 256)
+          .trim(),
         ...(option.description === undefined
           ? {}
           : {
-              description: sanitizeRequestText(option.description, "Choice description").slice(
-                0,
-                512,
-              ),
+              description: sanitizeRequestText(option.description, "Choice description")
+                .slice(0, 512)
+                .trim(),
             }),
       })),
     })),
