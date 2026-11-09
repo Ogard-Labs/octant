@@ -7,9 +7,9 @@ export interface FirstRunReadinessStepProps {
   readonly onSetup: (target: FirstRunHandoffSetupTarget) => void;
 }
 
-/** The one sentence first run says about person memory: that it is on, and where it is turned off. */
+/** Memory is optional; the capability card reports its current host setting. */
 export const FIRST_RUN_MEMORY_NOTICE =
-  "Octant remembers what you work on across threads and Projects so new threads start knowing it, and you can turn this off in Settings › Memory.";
+  "Octant can remember preferences and earlier work across threads and Projects. Review what it keeps and turn it on or off in Settings › Memory.";
 
 const MODE_COPY: Record<FirstRunHandoff["mode"], string> = {
   work: "Work",

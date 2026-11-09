@@ -375,6 +375,14 @@ synchronous server-spawn failures remain sanitized; readiness failures keep
 their classification for restart policy. An independently managed host is
 never added to this inventory or stopped with it.
 
+The Browser runtime broker owns its acquired surface subscriptions and loopback
+listener even when listening fails. Failed startup and ordinary close share one
+idempotent completion. Cleanup attempts both subscription removals, surface
+shutdown, and HTTP shutdown in that order even if an earlier stage throws;
+held HTTP connections are closed and listener completion is awaited. Failures
+remain explicit, including startup and cleanup errors together. This reuses the
+desktop's existing quit deadline rather than adding a separate watchdog.
+
 Accepted quit is terminal for host start and restart admission, including
 queued work. A start already in progress must close a late desktop-owned
 result; a late borrowed attachment is left alone. Confirmation remains
@@ -1528,8 +1536,10 @@ except where a bullet says otherwise.
   - A provider: sees memory only in a thread on that provider that uses it.
     Memory learned in a thread on one provider can reach a thread on another,
     and Settings › Memory says so in those words.
-- **First run.** The first-run flow says in one sentence that Octant
-  remembers across threads and that Settings › Memory turns it off.
+- **First run.** The first-run flow explains memory across threads and links
+  to Settings › Memory without assuming that the host's current setting is on.
+  The optional [Your first task capability card](design/start-screen.md#optional-capability-card-in-your-first-task)
+  reports that setting from the host; its examples run nothing and grant no authority.
 
 Work is not cut off from a person's integrations. Work is for files,
 browsers, and documents, and what separates it from Code is which developer
@@ -8025,7 +8035,11 @@ the model at another size.
   calls one. The `verify-model-tools` command sends one forced
   `octant_capability_echo` request through the same sender a turn uses, for one
   model; an Anthropic-compatible endpoint sends it in its own wire shape, with
-  `tool_choice` `any`. Ollama has no forced tool choice: its check first reads
+  `tool_choice` `any`. GPT-6 Luna requests offering function tools through
+  Chat Completions set `reasoning_effort` to `none`, the mode that endpoint
+  supports for function calls. This applies to both Verify tools and ordinary
+  tool turns; plain-text Luna requests and other models keep their defaults.
+  Ollama has no forced tool choice: its check first reads
   the model's `/api/show` capability list, answers "unsupported" without a
   generating request for a model that does not list `tools` (Ollama itself
   refuses tools to such a model), and otherwise sends one local `/api/chat`
