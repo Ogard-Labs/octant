@@ -1,12 +1,17 @@
 import { createHash } from "node:crypto";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, rmSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import type { ChatThread, ChatThreadView, ThreadMoveId, ThreadMoveOffer } from "@octant/contracts";
 import type { MovedChatThreadImport } from "../chat/chatService";
 import { createChatThreadMoveHost } from "./chatThreadMoveHost";
-import { noThreadParts } from "./movedThreadParts.test-support";
+import type { ThreadPartsSource } from "./movedThreadParts";
+import {
+  noThreadParts,
+  oneCaptureThreadParts,
+  oneOwnedCanvas,
+} from "./movedThreadParts.test-support";
 import { createThreadMoveHolds } from "./threadMoveHolds";
 
 const THREAD = "77777777-7777-4777-8777-777777777777";
@@ -77,7 +82,7 @@ const view = {
 } as unknown as ChatThreadView;
 
 /** The Project the branch's source thread is in now; an input is readable only from its recorded one. */
-function host(sourceThreadProject = SOURCE_PROJECT) {
+function host(sourceThreadProject = SOURCE_PROJECT, parts = noThreadParts()) {
   const imports: MovedChatThreadImport[] = [];
   const asked: string[] = [];
   const moveHost = createChatThreadMoveHost({
@@ -100,7 +105,9 @@ function host(sourceThreadProject = SOURCE_PROJECT) {
       const text = files[`${reference.source.threadId}/${reference.source.attachmentId}`];
       return text === undefined ? undefined : new TextEncoder().encode(text);
     },
-    parts: noThreadParts(),
+    originalInputSize: (reference) =>
+      reference.source.projectId === sourceThreadProject ? reference.byteLength : undefined,
+    parts,
     activeChatProject: () => true,
     purge: async () => {},
     holds: createThreadMoveHolds(),
@@ -172,5 +179,58 @@ describe("moving a Chat thread", () => {
       { kind: "attachment", name: "scan.txt" },
       { kind: "original-input", name: "map.txt" },
     ]);
+  });
+
+  it("measures its attachments, the inputs it would carry, its capture, and its Canvas without packing them", async () => {
+    const thread = { mode: "chat", threadId: THREAD } as const;
+    const withParts = oneCaptureThreadParts().parts;
+    const { moveHost } = host(SOURCE_PROJECT, {
+      ...withParts,
+      source: { ...withParts.source, canvases: () => [oneOwnedCanvas(thread)] },
+    });
+    const size = await moveHost.source.measure(thread);
+    if (size.status !== "measured") throw new Error("The thread was not measured.");
+    const bytesOf = (kind: string) => size.parts.find((part) => part.kind === kind)?.bytes;
+    // The three attachments as their records size them, sent or not, and the admitted input.
+    expect(bytesOf("attachment")).toBe(3);
+    expect(bytesOf("original-input")).toBe(17);
+    expect(bytesOf("browser-capture")).toBe(3);
+    expect(size.bytes).toBe(size.parts.reduce((total, part) => total + part.bytes, 0));
+
+    // The Canvas counts as exactly the part a move writes for it.
+    const folder = mkdtempSync(join(tmpdir(), "octant-chat-move-"));
+    folders.push(folder);
+    const packed = await moveHost.source.pack(thread, folder, MOVE);
+    if (packed.status !== "packed") throw new Error("Nothing was packed.");
+    const canvasPart = packed.parts.find((part) => part.kind === "canvas");
+    expect(canvasPart).toBeDefined();
+    expect(bytesOf("canvas")).toBe(statSync(canvasPart?.path ?? folder).size);
+  });
+
+  it("does not count an admitted input that would stay behind", async () => {
+    const { moveHost } = host(OTHER_PROJECT);
+    const size = await moveHost.source.measure({ mode: "chat", threadId: THREAD });
+    if (size.status !== "measured") throw new Error("The thread was not measured.");
+    expect(size.parts.map((part) => part.kind)).toEqual(["thread-bundle", "attachment"]);
+  });
+
+  it("reads a kind of part whose sizes cannot be read as unknown and still measures the rest", async () => {
+    const unreadable: ThreadPartsSource = {
+      ...oneCaptureThreadParts().parts.source,
+      canvases: () => {
+        throw new Error("The Canvas projection could not be read.");
+      },
+    };
+    const { moveHost } = host(SOURCE_PROJECT, { ...noThreadParts(), source: unreadable });
+    const size = await moveHost.source.measure({ mode: "chat", threadId: THREAD });
+    if (size.status !== "partly-measured") throw new Error("The thread was not partly measured.");
+    expect(size.unknownParts).toEqual(["canvas"]);
+    expect(size.parts.map((part) => part.kind)).toEqual([
+      "thread-bundle",
+      "attachment",
+      "original-input",
+      "browser-capture",
+    ]);
+    expect(size.bytes).toBe(size.parts.reduce((total, part) => total + part.bytes, 0));
   });
 });

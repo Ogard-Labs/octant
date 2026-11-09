@@ -60,6 +60,9 @@
     "./browser-download": "./src/browserDownload.ts",
     "./browser-flows": "./src/browserFlows.ts",
     "./browser-profiles": "./src/browserProfiles.ts",
+    "./browser-session-grants": "./src/browserSessionGrants.ts",
+    "./browser-upload-permissions": "./src/browserUploadPermissions.ts",
+    "./browser-download-permissions": "./src/browserDownloadPermissions.ts",
     "./browser-extensions": "./src/browserExtensions.ts",
     "./canvas": "./src/canvas.ts",
     "./canvas-actions": "./src/canvasActions.ts",
@@ -112,6 +115,7 @@
     "./providers": "./src/providers.ts",
     "./shield": "./src/shield.ts",
     "./shield-servers": "./src/shieldServers.ts",
+    "./remote-setup": "./src/remoteSetup.ts",
     "./server-projects": "./src/serverProjects.ts",
     "./provider-discovery": "./src/providerDiscovery.ts",
     "./provider-driver-catalog": "./src/providerDriverCatalog.ts",
@@ -164,7 +168,10 @@
     "./command-credentials": "./src/commandCredentials.ts",
     "./browser-page-script": "./src/browserPageScript.ts",
     "./owner-browser": "./src/ownerBrowser.ts",
-    "./browser-presentation": "./src/browserPresentation.ts"
+    "./browser-presentation": "./src/browserPresentation.ts",
+    "./provider-file-review": "./src/providerFileReview.ts",
+    "./code-provider-file-review": "./src/codeProviderFileReview.ts",
+    "./code-tool-contribution": "./src/codeToolContribution.ts"
   },
   "scripts": {
     "build": "tsdown src/index.ts --format esm --dts",

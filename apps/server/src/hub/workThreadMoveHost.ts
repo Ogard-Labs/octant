@@ -18,8 +18,10 @@ import {
 import { Schema } from "effect";
 import {
   MovedThreadParts,
+  measureThreadParts,
   packThreadParts,
   rehomeThreadParts,
+  threadMoveSize,
   type ThreadPartsDestination,
   type ThreadPartsSource,
 } from "./movedThreadParts";
@@ -144,9 +146,12 @@ export function createWorkThreadMoveHost(options: WorkThreadMoveHostOptions): {
     measure: async (thread) => {
       const moved = await movedOf(thread);
       if (moved === undefined) return { status: "unknown" };
-      // The very text pack writes, so the size is exact.
+      // The very text pack writes, short of the lines that list the bulk parts.
       const bytes = Buffer.byteLength(JSON.stringify(moved));
-      return { status: "measured", bytes, parts: [{ kind: "thread-bundle", bytes }] };
+      return threadMoveSize([
+        { status: "measured", kind: "thread-bundle", bytes },
+        ...measureThreadParts(thread, options.parts.source),
+      ]);
     },
     pack: async (thread, folder) => {
       const conversation = await movedOf(thread);

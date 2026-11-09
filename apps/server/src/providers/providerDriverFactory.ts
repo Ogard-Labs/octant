@@ -105,6 +105,8 @@ export function makeProviderDriver(
   instance: ProviderInstance,
   options: ProviderDriverFactoryOptions,
 ): ProviderDriver {
+  if (process.platform === "win32" && instance.driverKind !== "ollama")
+    throw new Error("Provider processes require Windows host confinement.");
   if (isImageProfileDriverKind(instance.driverKind)) {
     throw new ProviderDriverConfigurationError();
   }

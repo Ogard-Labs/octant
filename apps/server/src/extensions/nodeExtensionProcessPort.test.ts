@@ -65,6 +65,19 @@ afterEach(async () => {
 });
 
 describe("node extension process port", () => {
+  it("refuses Windows execution even when a runtime package omitted its sandbox request", async () => {
+    const spawn = vi.fn();
+    const port = createNodeExtensionProcessPort({
+      platform: "win32",
+      spawn: () => {
+        spawn();
+        throw Error("A Windows process may not start.");
+      },
+    });
+    await expect(port.start(startInput)).rejects.toThrow();
+    expect(spawn).not.toHaveBeenCalled();
+  });
+
   it("preserves an owned receipt when process identity cannot be observed", async () => {
     const receiptDirectory = await mkdtemp(join(tmpdir(), "octant-extension-receipts-"));
     receiptDirectories.push(receiptDirectory);

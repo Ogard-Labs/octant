@@ -35,6 +35,7 @@ export function CanvasCreatePanel(props: CanvasCreatePanelProps) {
   const [recipes, setRecipes] = useState<ReadonlyArray<CanvasDocumentRecipe>>([]);
   const createdCard = useRef<CanvasThreadReferenceCard | null>(null);
   const client = props.client;
+  const create = client.create;
   // A host without the import route offers no import, rather than a form
   // whose every submission fails.
   const importHtml =
@@ -59,6 +60,8 @@ export function CanvasCreatePanel(props: CanvasCreatePanelProps) {
     };
   }, [client]);
 
+  if (create === undefined) return null;
+
   return (
     <section aria-label="Create Canvas" data-testid="canvas-create-panel">
       <CreateCanvasDraft
@@ -69,7 +72,7 @@ export function CanvasCreatePanel(props: CanvasCreatePanelProps) {
           : { onAskAgentToFill: props.onAskAgentToFill })}
         onCreate={async (request) => {
           setDenial(null);
-          const result = await client.create(request);
+          const result = await create(request);
           if (result.kind === "denied") {
             setDenial(result.message);
             return null;

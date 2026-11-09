@@ -1314,7 +1314,11 @@ function ActiveSectionContent({
       const administration = remoteAccessAdministrationOf(props.hostBridge);
       const setupGuide = (
         <RemoteSetupGuide
+          focusedSetting={focusedSetting}
           canConfigureHost={administration !== undefined}
+          checks={props.serverProjectsClient}
+          servers={props.shieldServersClient}
+          readHostStatus={administration?.getPrivateListenerStatus}
           onContinue={(intent) =>
             onApplyDeepLink(
               intent === "control-host"
@@ -1625,7 +1629,9 @@ function RememberedBrowserOriginsPanel(props: {
             const profileName =
               site.profile.kind === "personal"
                 ? "Personal profile"
-                : `${props.projectNames.get(String(site.profile.projectId)) ?? "Project"} profile`;
+                : site.profile.kind === "account"
+                  ? `Account ${String(site.profile.profileId).slice(0, 8)} profile`
+                  : `${props.projectNames.get(String(site.profile.projectId)) ?? "Project"} profile`;
             return (
               <SettingRow
                 description={`Browser acts as you on this site in the ${profileName}, without asking.`}

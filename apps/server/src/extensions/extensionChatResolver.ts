@@ -418,6 +418,8 @@ export function buildCatalogs(
 
 function capabilityKind(component: ExtensionComponent): CapabilityComponentKind | undefined {
   switch (component.kind) {
+    case "code-tool":
+      return "plugin-tool";
     case "skill-instructions":
       return "plugin-instruction";
     case "mcp-server":

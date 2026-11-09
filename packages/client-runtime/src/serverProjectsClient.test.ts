@@ -76,3 +76,26 @@ it("rejects a malformed preview status instead of treating an unsafe endpoint as
   if (client.previewRead === undefined) throw new Error("missing preview client");
   await expect(client.previewRead(projectId)).rejects.toThrow();
 });
+it("authenticates a single cancellable read-only setup probe without retrying", async () => {
+  const fetch = vi.fn(async () =>
+    Response.json({ status: "disconnected", reason: "changed-identity" }),
+  );
+  const client = createServerProjectsClient({
+    baseUrl: "http://127.0.0.1:1234",
+    windowCapability: "window",
+    fetch,
+  });
+  if (client.check === undefined) throw new Error("missing check client");
+  const abort = new AbortController();
+  expect(
+    await client.check({ serverId: projectId as never, runtime: "octant-harness" }, abort.signal),
+  ).toEqual({ status: "disconnected", reason: "changed-identity" });
+  expect(fetch).toHaveBeenCalledTimes(1);
+  expect(fetch).toHaveBeenCalledWith(
+    "http://127.0.0.1:1234/api/remote-setup-check",
+    expect.objectContaining({
+      signal: abort.signal,
+      headers: expect.objectContaining({ "x-octant-window-capability": "window" }),
+    }),
+  );
+});

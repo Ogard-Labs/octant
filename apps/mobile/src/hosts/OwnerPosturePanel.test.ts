@@ -22,7 +22,7 @@ const target = (suffix: string, title = "Current task") => ({
     version: suffix.repeat(64),
   },
 });
-function fixture(memberId = "host", targets = [target("b")]) {
+function fixture(memberId = "host", targets: ReadonlyArray<unknown> = [target("b")]) {
   const refused = async () => ({ status: "refused", kind: "unsupported" }) as const;
   const listPostures = vi.fn<() => Promise<OwnerActionResult>>(async () => ({
     status: "done",
@@ -86,16 +86,37 @@ async function press(label: string, index = 0) {
 }
 
 describe("phone owner recovery across roster changes", () => {
+  it("chooses a Work level without offering Plan or adding a Code persistence grant", async () => {
+    const subject = { kind: "work-thread", threadId: "50000000-0000-4000-8000-000000000001" };
+    const work = {
+      title: "Work task",
+      posture: { subject, posture: "ask-first", version: "b".repeat(64) },
+    };
+    const { spoke, changePosture } = fixture("host", [work]);
+    mount([spoke]);
+    await press("Refresh access levels");
+    await press("Work thread: Work task");
+    expect(buttons("Plan (read only)")).toHaveLength(0);
+    expect(buttons("Auto")).toHaveLength(1);
+    await press("Auto");
+    await press("Apply level");
+    expect(changePosture).toHaveBeenCalledWith({
+      subject,
+      expectedVersion: work.posture.version,
+      posture: "auto",
+    });
+    expect(buttons("Apply level")).toHaveLength(0);
+  });
   it("discards a pending read from a replaced client before using the new client's authoritative target", async () => {
     const old = fixture("host", [target("a", "Old task")]);
     const next = fixture();
     const pending = deferred<OwnerActionResult>();
     old.listPostures.mockReturnValueOnce(pending.promise);
     const view = mount([old.spoke]);
-    await press("Refresh Code levels");
+    await press("Refresh access levels");
     view.render([next.spoke]);
-    expect(buttons("Refresh Code levels")[0]?.getAttribute("aria-disabled")).not.toBe("true");
-    await press("Refresh Code levels");
+    expect(buttons("Refresh access levels")[0]?.getAttribute("aria-disabled")).not.toBe("true");
+    await press("Refresh access levels");
     await act(async () =>
       pending.resolve({
         status: "done",
@@ -105,7 +126,7 @@ describe("phone owner recovery across roster changes", () => {
     expect(buttons("Thread: Old task")).toHaveLength(0);
     await press("Thread: Current task");
     await press("Full access");
-    await press("Apply Code level");
+    await press("Apply level");
     expect(old.changePosture).not.toHaveBeenCalled();
     expect(next.changePosture).toHaveBeenCalledWith(
       expect.objectContaining({ expectedVersion: "b".repeat(64) }),
@@ -116,16 +137,16 @@ describe("phone owner recovery across roster changes", () => {
     const old = fixture("old-host", [target("a", "Old task")]);
     const next = fixture("next-host");
     const view = mount([old.spoke]);
-    await press("Refresh Code levels");
+    await press("Refresh access levels");
     await press("Thread: Old task");
     await press("Full access");
     view.render([next.spoke]);
-    expect(buttons("Apply Code level")).toHaveLength(0);
+    expect(buttons("Apply level")).toHaveLength(0);
     expect(view.container.textContent).not.toContain("Current level:");
-    await press("Refresh Code levels");
+    await press("Refresh access levels");
     await press("Thread: Current task");
     await press("Full access");
-    await press("Apply Code level");
+    await press("Apply level");
     expect(old.changePosture).not.toHaveBeenCalled();
     expect(next.changePosture).toHaveBeenCalledWith(
       expect.objectContaining({ expectedVersion: "b".repeat(64) }),
@@ -138,18 +159,18 @@ describe("phone owner recovery across roster changes", () => {
     const pending = deferred<OwnerActionResult>();
     old.changePosture.mockReturnValueOnce(pending.promise);
     const view = mount([old.spoke]);
-    await press("Refresh Code levels");
+    await press("Refresh access levels");
     await press("Thread: Current task");
     await press("Full access");
-    await press("Apply Code level");
+    await press("Apply level");
     view.render([next.spoke]);
-    await press("Refresh Code levels");
+    await press("Refresh access levels");
     await press("Thread: Current task");
     await press("Full access");
     await act(async () => pending.resolve({ status: "done", body: {} }));
-    expect(buttons("Apply Code level")).toHaveLength(1);
+    expect(buttons("Apply level")).toHaveLength(1);
     expect(view.container.textContent).not.toContain("Level changed.");
-    await press("Apply Code level");
+    await press("Apply level");
     expect(next.changePosture).toHaveBeenCalledTimes(1);
   });
 
@@ -159,11 +180,11 @@ describe("phone owner recovery across roster changes", () => {
     const second = fixture("second", [target("a", "Same task"), target("b", "Same task")]);
     const view = mount([first.spoke, second.spoke]);
     await press("Home Mac", 1);
-    await press("Refresh Code levels");
+    await press("Refresh access levels");
     view.render([second.spoke, first.spoke]);
     await press("Thread: Same task", 1);
     await press("Full access");
-    await press("Apply Code level");
+    await press("Apply level");
     expect(first.listPostures).not.toHaveBeenCalled();
     expect(first.changePosture).not.toHaveBeenCalled();
     expect(second.changePosture).toHaveBeenCalledWith(

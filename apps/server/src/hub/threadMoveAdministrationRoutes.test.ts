@@ -39,13 +39,13 @@ const OTHER_CODE: MovedThreadReference = {
   mode: "code",
   threadId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
 };
-const member = (memberId: string, name: string) => ({
+const member = (memberId: string, name: string, privateNames: ReadonlyArray<string> = []) => ({
   memberId: memberId as never,
   name,
   role: "spoke" as const,
   identityKeyFingerprint: "a".repeat(64),
   listenerPin: "a".repeat(64),
-  privateNames: [],
+  privateNames,
   addresses: ["100.64.0.1"],
   owner: false,
 });
@@ -102,7 +102,10 @@ function setup(input: { readonly delegated?: boolean } = {}) {
       }),
       measure: async () => ({ status: "unknown" }),
     },
-    members: () => [member(MINI, "Mac mini"), member(STUDIO, "Studio")],
+    members: () => [
+      member(MINI, "Mac mini", ["mini.local"]),
+      member(STUDIO, "Studio", ["studio.tail1234.ts.net"]),
+    ],
     selfMemberId: () => DESKTOP,
     listThreads: async () => [],
     now: Date.now,
@@ -353,6 +356,43 @@ describe("starting a thread move from a window", () => {
       post(THREAD_MOVE_ADMINISTRATION_ROUTES.status, { thread: SHOWN, extra: true }),
     );
     expect(response?.status).toBe(400);
+  });
+});
+
+describe("where a moved thread's Open there can reach it", () => {
+  async function departedTo(destinationMemberId: string) {
+    const { handle, state } = setup();
+    state.save({
+      received: [],
+      sent: [],
+      departures: [
+        decodeDeparture({
+          moveId: PLAIN_MOVE,
+          thread: SHOWN,
+          destinationMemberId,
+          destinationThread: { mode: "work", threadId: "11111111-1111-4111-8111-111111111111" },
+          changesRemainInCheckout: false,
+          movedAt: "2026-11-09T09:00:00.000Z",
+        }),
+      ],
+    });
+    const answer = await handle(post(THREAD_MOVE_ADMINISTRATION_ROUTES.status, { thread: SHOWN }));
+    expect(answer?.status).toBe(200);
+    const body = (await answer?.json()) as { readonly departed?: Record<string, unknown> };
+    return body.departed;
+  }
+
+  it("names the web app the destination's signed roster entry serves", async () => {
+    expect((await departedTo(STUDIO))?.destinationWebOrigin).toBe("https://studio.tail1234.ts.net");
+  });
+
+  it("names none for a destination that serves no web app, or that the roster no longer lists", async () => {
+    const noWebApp = await departedTo(MINI);
+    expect(noWebApp?.destinationName).toBe("Mac mini");
+    expect(noWebApp).not.toHaveProperty("destinationWebOrigin");
+    const notListed = await departedTo(DESKTOP);
+    expect(notListed?.destinationName).toBe("another computer");
+    expect(notListed).not.toHaveProperty("destinationWebOrigin");
   });
 });
 

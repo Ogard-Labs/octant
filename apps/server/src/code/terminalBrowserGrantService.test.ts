@@ -1,8 +1,11 @@
+import { BrowserDelegatedChildren } from "../browser/browserDelegatedChildren";
+import { BrowserSessionGrants } from "../browser/browserSessionGrants";
 import { request as httpRequest } from "node:http";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
+  StoredBrowserProfile,
   ActorId,
   ReplayCursor,
   decodeBrowserThreadId,
@@ -107,6 +110,7 @@ function authorityFor(): ToolActionAuthority {
 interface HarnessOptions {
   readonly threads?: ReadonlyArray<CodeThread>;
   readonly lendsBrowser?: boolean;
+  readonly delegatedBrowserTools?: TerminalBrowserGrantServiceOptions["delegatedBrowserTools"];
   readonly canAccess?: (window: string, project: string) => boolean;
 }
 
@@ -131,6 +135,7 @@ function harness(options: HarnessOptions = {}) {
   const contexts = new Set<string>();
   const runtime: BrowserRuntimePort = {
     available: vi.fn(async () => true),
+    nativeAvailable: vi.fn(async () => true),
     createContext: vi.fn(async (contextId) => void contexts.add(String(contextId))),
     inspectTarget: vi.fn(async () => ({ sensitive: false })),
     act: vi.fn(async (_contextId, input) => ({
@@ -197,6 +202,9 @@ function harness(options: HarnessOptions = {}) {
             approvals,
           },
         }),
+    ...(options.delegatedBrowserTools === undefined
+      ? {}
+      : { delegatedBrowserTools: options.delegatedBrowserTools }),
     journal,
     personActor,
     hostActor,
@@ -1105,4 +1113,178 @@ describe("octant mcp against a terminal Browser grant", () => {
     expect(await cli.finished).toBe(1);
     expect(cli.stderr()).toContain("ended this terminal's Browser grant");
   });
+});
+
+it.each(["personal", "account"] as const)(
+  "lends a terminal its explicitly reviewed %s profile and ends it with that exact session",
+  async (kind) => {
+    const profileId = "40000000-0000-4000-8000-000000000002";
+    const profile = Schema.decodeUnknownSync(StoredBrowserProfile)(
+      kind === "personal" ? { kind } : { kind, profileId },
+    );
+    const profileChoice = kind === "personal" ? "personal" : `account:${profileId}`;
+    let delegated: BrowserDelegatedChildren | undefined;
+    let terminal: TerminalBrowserGrantService | undefined;
+    const fixture = harness({
+      delegatedBrowserTools: (input) => {
+        const initial = terminal?.currentSessionTarget(input.grantId);
+        return initial === undefined
+          ? undefined
+          : delegated?.tools({
+              target: initial.target,
+              executionId: String(input.grantId),
+              contentThreadId: input.threadId,
+              executionPolicy: input.executionPolicy,
+              current: () => {
+                const row = terminal?.currentSessionTarget(input.grantId);
+                return row?.revision === initial.revision ? row.target : undefined;
+              },
+            });
+      },
+    });
+    Object.defineProperty(fixture.runtime, "profiles", {
+      value: {
+        list: async () => [{ profile, label: "Reviewed test account", sizeBytes: 0 }],
+        clear: async () => undefined,
+        syncExtensions: async () => undefined,
+      },
+    });
+    terminal = fixture.service;
+    const opening = await open(fixture);
+    if (opening.kind !== "granted") throw Error("Expected terminal grant");
+    const grantId = opening.outcome.grantId;
+    const recipient = fixture.service.currentSessionTarget(grantId);
+    expect(recipient?.target.grantee).toEqual({ kind: "terminal", grantId });
+    const grants = new BrowserSessionGrants({
+      now: () => Date.parse(now),
+      uuid: () => crypto.randomUUID(),
+      isLocalWindow: () => true,
+      canReview: () => true,
+      targets: () => fixture.service.sessionTargets(),
+      current: (grantee) =>
+        grantee.kind === "terminal"
+          ? fixture.service.currentSessionTarget(grantee.grantId)
+          : undefined,
+      profileLabel: async () => "Personal",
+      record: () => {},
+      onRevoked: (id) => {
+        void delegated?.revoke(id);
+      },
+    });
+    vi.mocked(fixture.runtime.createContext).mockImplementation(async () => "native-live");
+    delegated = new BrowserDelegatedChildren({
+      runtime: fixture.runtime,
+      grants,
+      now: () => Date.parse(now),
+      uuid: () => crypto.randomUUID(),
+      recordExternalContentIngestion: fixture.recordExternalContentIngestion,
+    });
+    try {
+      const environment = environmentOf(fixture, opening);
+      const cli = await connect(environment.url, environment.token);
+      expect(await cli.list()).toMatchObject({
+        result: {
+          tools: [
+            {
+              inputSchema: {
+                properties: {
+                  profile: {
+                    type: "string",
+                    pattern: expect.stringContaining("account:"),
+                  },
+                },
+              },
+            },
+          ],
+        },
+      });
+      const navigate = {
+        operation: "navigate",
+        url: "https://example.com/report",
+        profile: profileChoice,
+      };
+      expect(await cli.call(navigate)).toMatchObject({
+        isError: true,
+        data: { error: "browser-session-permission-required" },
+      });
+      expect(fixture.runtime.createContext).not.toHaveBeenCalled();
+      const review = await grants.execute(windowId, {
+        kind: "review",
+        grantee: { kind: "terminal", grantId },
+        profile,
+        origins: ["https://example.com"],
+        durationMinutes: 15,
+      });
+      if (review.kind !== "browser-session-review") throw Error(JSON.stringify(review));
+      await grants.execute(windowId, { kind: "grant", reviewId: review.reviewId });
+      const opened = await cli.call(navigate);
+      expect(opened.isError, JSON.stringify(opened)).toBe(false);
+      expect(fixture.runtime.createContext).toHaveBeenCalledWith(
+        expect.anything(),
+        expect.objectContaining({ profile }),
+        expect.anything(),
+        expect.objectContaining({ threadId: String(grantId) }),
+      );
+      expect(fixture.recordExternalContentIngestion).toHaveBeenCalledWith(
+        expect.objectContaining({ threadId: String(threadA) }),
+      );
+      expect(
+        await cli.call({
+          operation: "navigate",
+          url: "https://other.example",
+          profile: profileChoice,
+        }),
+      ).toMatchObject({ isError: true });
+      expect(await cli.call({ operation: "download-save", downloadId: "d1" })).toMatchObject({
+        isError: true,
+        data: { error: "transfer-needs-separate-permission" },
+      });
+      fixture.service.terminalClosed(String(terminalA));
+      await vi.waitFor(() => expect(fixture.runtime.closeContext).toHaveBeenCalledOnce());
+      expect(fixture.service.currentSessionTarget(grantId)).toBeUndefined();
+      expect(
+        grants.find({ kind: "terminal", grantId }, profile, ["https://example.com"]),
+      ).toBeUndefined();
+      expect(fixture.runtime.closeAll).not.toHaveBeenCalled();
+    } finally {
+      grants.close();
+      await delegated.close();
+    }
+  },
+);
+
+it("refuses a stale terminal profile read instead of falling back to the thread's Private page", async () => {
+  let finishClose = () => {};
+  const closing = new Promise<void>((resolve) => {
+    finishClose = resolve;
+  });
+  const close = vi.fn(async () => closing);
+  const execute = vi.fn(async () => ({ result: { status: "profile-observation" } }));
+  const fixture = harness({ delegatedBrowserTools: () => ({ definitions: [], execute, close }) });
+  const opening = await open(fixture);
+  const environment = environmentOf(fixture, opening);
+  const cli = await connect(environment.url, environment.token);
+  expect(
+    await cli.call({ operation: "navigate", url: "https://example.com", profile: "personal" }),
+  ).toMatchObject({ isError: false });
+  fixture.threads.set(
+    ids.threadA,
+    codeThread(ids.threadA, { modelId: "model-b" as CodeThread["modelId"] }),
+  );
+  const stale = cli.call({ operation: "snapshot" });
+  try {
+    await vi.waitFor(() => expect(close).toHaveBeenCalledOnce());
+    expect(
+      await Promise.race([
+        cli.call({ operation: "snapshot" }),
+        new Promise((resolve) => setTimeout(() => resolve({ status: "still-pending" }), 200)),
+      ]),
+    ).toMatchObject({ isError: true, data: { error: "browser-busy" } });
+  } finally {
+    finishClose();
+  }
+  expect(await stale).toMatchObject({ isError: true, data: { error: "browser-authority-stale" } });
+  expect(close).toHaveBeenCalledOnce();
+  expect(execute).toHaveBeenCalledOnce();
+  expect(fixture.actSpy).not.toHaveBeenCalled();
 });

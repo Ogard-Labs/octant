@@ -1020,6 +1020,7 @@ function acquireConnection(
   options: Required<Pick<AcpProcessOptions, "shutdownTimeoutMs" | "startupTimeoutMs">> &
     Pick<AcpProcessOptions, "onDiagnostic" | "stderrBytes">,
   clientCapabilities: AcpClientCapabilities | undefined,
+  ownCleanup: (cleanup: () => Promise<void>) => void,
   onProcessStarted?: ProviderProcessStartedListener,
 ): Effect.Effect<ManagedConnection, ProviderFailure> {
   const name = profile.displayName;
@@ -1077,6 +1078,7 @@ function acquireConnection(
       })();
       return cleanupPromise;
     };
+    ownCleanup(cleanup);
     const exited = Promise.race([
       childExited,
       acp.exited.catch((error: unknown) => Promise.reject(error)),
@@ -1115,10 +1117,13 @@ function acquireConnection(
     child.once("close", onEarlyExit);
     const initialize = () =>
       acp.initialize(
-        clientCapabilities ?? {
-          readTextFile: false,
-          writeTextFile: false,
-          terminal: false,
+        {
+          ...(clientCapabilities ?? { readTextFile: false, writeTextFile: false, terminal: false }),
+          ...(profile.kind === "mistral-vibe" &&
+          version === "3.0.3" &&
+          profile.elicitationVersions?.includes(version) === true
+            ? { elicitationForm: true }
+            : {}),
         },
         profile.authentication.kind === "delegated-browser"
           ? { "browser-auth-delegated": true, "terminal-auth": false }
@@ -1261,7 +1266,8 @@ export function makeAcpProcessLive(options: AcpProcessOptions = {}): AcpProcessP
           ...(servers === undefined ? {} : { servers }),
           ...(input.nativeSetup === undefined ? {} : { nativeSetup: input.nativeSetup }),
         });
-        const managed = yield* Effect.acquireRelease(
+        let terminate: (() => Promise<void>) | undefined;
+        const managed = yield* Effect.acquireReleaseInterruptible(
           acquireConnection(
             profile,
             launch,
@@ -1273,9 +1279,13 @@ export function makeAcpProcessLive(options: AcpProcessOptions = {}): AcpProcessP
               ...(options.stderrBytes === undefined ? {} : { stderrBytes: options.stderrBytes }),
             },
             input.clientCapabilities,
+            (cleanup) => {
+              terminate = cleanup;
+            },
             input.onProcessStarted,
           ),
-          ({ terminate }) => cleanupEffect(profile.displayName, terminate),
+          () =>
+            terminate === undefined ? Effect.void : cleanupEffect(profile.displayName, terminate),
         );
         return managed.connection;
       }),

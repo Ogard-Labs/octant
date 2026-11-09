@@ -1,4 +1,10 @@
 import { requiresLiveCodeReviewAuthority } from "./code/codeReviewAuthority";
+import {
+  decodeCodeProviderFileReviewRequest,
+  decodeCodeProviderFileReviewRead,
+  type CodeProviderFileReviewRequest,
+  type CodeProviderFileReviewRead,
+} from "@octant/contracts/code-provider-file-review";
 import type { CodeOperationExecuteOptions } from "./code/codeOperationService";
 import {
   refusesTerminalSessionImport,
@@ -274,6 +280,12 @@ export type CodeConversationWindowAnswer =
   | { readonly status: "anchor-not-found" };
 
 export interface CodeRouteService {
+  readonly readProviderFileReview?: (
+    windowId: WindowId,
+    request: CodeProviderFileReviewRequest,
+    current: () => boolean,
+    signal?: AbortSignal,
+  ) => Promise<CodeProviderFileReviewRead>;
   readonly readGitHistory?: (
     windowId: WindowId,
     query: GitHistoryQuery,
@@ -975,6 +987,52 @@ export function createCodeRouteHandler(dependencies: CodeRouteDependencies) {
             }
           }
           break;
+        }
+        case "provider-file-review": {
+          requireMethodAndEmptyQuery(request, url, "POST");
+          requireJsonContentType(request);
+          const value = parseJson(await readBoundedBytes(request, jsonLimit));
+          let read: CodeProviderFileReviewRequest;
+          try {
+            read = decodeCodeProviderFileReviewRequest(value);
+          } catch {
+            throw new CodeRouteRejected("Code provider file read is invalid.", 400);
+          }
+          let active = true;
+          const current = () => {
+            if (!active || request.signal.aborted || principalAbortSignal?.aborted) return false;
+            if (callerKind !== "local-window") return true;
+            try {
+              if (request.headers.get(WINDOW_CAPABILITY_HEADER) !== originalWindowCapability)
+                return false;
+              const live = resolveLocalWindowPrincipal({
+                request,
+                store: dependencies.windowAuthorityStore,
+                now: now(),
+              });
+              return live.windowId === String(authenticatedWindowId);
+            } catch {
+              return false;
+            }
+          };
+          try {
+            if (!current())
+              throw new CodeRouteRejected("Code provider file read is unauthorized.", 401);
+            const answer =
+              dependencies.service.readProviderFileReview === undefined
+                ? ({ status: "refused", reason: "unsupported" } as const)
+                : await dependencies.service.readProviderFileReview(
+                    authenticatedWindowId,
+                    read,
+                    current,
+                    request.signal,
+                  );
+            if (!current())
+              throw new CodeRouteRejected("Code provider file read is unauthorized.", 401);
+            return jsonResponse(decodeCodeProviderFileReviewRead(answer), 200, origin);
+          } finally {
+            active = false;
+          }
         }
         case "language-documents":
         case "language-read": {
@@ -2286,7 +2344,8 @@ type MatchedRoute =
         | "project-pull-requests-switches"
         | "project-pull-requests-merge-when-ready"
         | "project-pull-requests-auto-fix"
-        | "composer-activity";
+        | "composer-activity"
+        | "provider-file-review";
     }>
   | Readonly<{ kind: "planner"; projectId: string }>
   | Readonly<{
@@ -2439,6 +2498,7 @@ function matchRoute(pathname: string): MatchedRoute | undefined {
     return { kind: "project-pull-requests-auto-fix" };
   }
   if (pathname === "/api/code/composer-activity") return { kind: "composer-activity" };
+  if (pathname === "/api/code/provider-file-review") return { kind: "provider-file-review" };
   if (pathname === "/api/code/language/documents") return { kind: "language-documents" };
   if (pathname === "/api/code/language/read") return { kind: "language-read" };
   if (pathname === "/api/code/language/approvals") return { kind: "language-approvals" };

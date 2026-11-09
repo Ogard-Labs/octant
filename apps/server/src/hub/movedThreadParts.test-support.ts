@@ -1,8 +1,13 @@
-// Bulk-part ports for the per-mode move host tests: one capture to carry, and
-// a destination that records what it was asked to keep.
+// Bulk-part ports for the per-mode move host tests: one capture to carry, a
+// Canvas to own, and a destination that records what it was asked to keep.
 
-import { decodeBrowserCapture } from "@octant/contracts";
-import type { ThreadPartsDestination, ThreadPartsSource } from "./movedThreadParts";
+import {
+  CANVAS_SCHEMA_VERSION,
+  decodeBrowserCapture,
+  decodeCanvasVersion,
+  type MovedThreadReference,
+} from "@octant/contracts";
+import type { OwnedCanvas, ThreadPartsDestination, ThreadPartsSource } from "./movedThreadParts";
 
 /** A thread that owns no bulk part. */
 export function noThreadParts(): {
@@ -10,6 +15,36 @@ export function noThreadParts(): {
   readonly destination: ThreadPartsDestination;
 } {
   return oneCaptureThreadParts({ captures: false }).parts;
+}
+
+/** A Canvas with one empty version, owned by the thread. */
+export function oneOwnedCanvas(thread: MovedThreadReference): OwnedCanvas {
+  const actor = { kind: "local-user", actorId: "dddddddd-0000-4000-8000-000000000003" } as const;
+  const version = decodeCanvasVersion({
+    schemaVersion: CANVAS_SCHEMA_VERSION,
+    canvasId: "dddddddd-0000-4000-8000-000000000001",
+    versionId: "dddddddd-0000-4000-8000-000000000002",
+    sequence: 1,
+    definition: {
+      schemaVersion: CANVAS_SCHEMA_VERSION,
+      title: "Trip plan",
+      provenance: {
+        mode: thread.mode,
+        hostId: "local",
+        projectId: null,
+        threadId: thread.threadId,
+        actor,
+        providerInstanceId: "dddddddd-0000-4000-8000-000000000004",
+        modelId: "model-a",
+        createdAt: "2026-11-08T10:00:00.000Z",
+      },
+      sourceManifest: [],
+      blocks: [],
+    },
+    createdBy: actor,
+    createdAt: "2026-11-08T10:00:00.000Z",
+  });
+  return { title: "Trip plan", versions: [version], carriesOutsideContent: false };
 }
 
 /** A thread that kept one Browser capture, and a destination that records each capture it keeps. */

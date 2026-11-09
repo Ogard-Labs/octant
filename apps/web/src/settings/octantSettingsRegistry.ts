@@ -1312,11 +1312,38 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
             "data map privacy stored location journal projections artifacts credentials keychain secret-service caches provider calls update checks marketplace",
         },
         {
+          id: settingId("browser-accounts"),
+          label: "Named account profiles",
+          scope: "host",
+          keywords: "browser named account profiles create separate sign-ins host local",
+        },
+        {
           id: settingId("browser-profiles"),
           label: "Browser profiles",
           scope: "host",
           keywords:
             "browser profiles sign out signed in cookies project personal private site data clear sign-in",
+        },
+        {
+          id: settingId("browser-upload-permissions"),
+          label: "Recurring Browser uploads",
+          scope: "host",
+          keywords:
+            "browser upload manifest recurring routine approved folder exact files content count bytes quota revoke expiry",
+        },
+        {
+          id: settingId("browser-download-permissions"),
+          label: "Recurring Browser downloads",
+          scope: "host",
+          keywords:
+            "browser download manifest recurring routine approved folder directory source origins file types count bytes quota revoke expiry",
+        },
+        {
+          id: settingId("browser-session-permissions"),
+          label: "Browser session permissions",
+          scope: "host",
+          keywords:
+            "browser delegated child routine terminal session permission grant revoke expiry signed in account",
         },
         {
           id: settingId("browser-flows"),
@@ -1415,6 +1442,13 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
       keywords:
         "remote access private listener lan tailscale https certificate pairing pair link ticket code approve deny device devices paired inventory browser phone revoke rename origin port exposure",
       settings: [
+        {
+          id: settingId("remote-setup-checks"),
+          label: "Remote setup checks",
+          scope: "host",
+          keywords:
+            "guided setup control host server command folder directory runtime connection connectivity diagnostic unknown changed identity ssh agent key reconnect disconnected stopped read-only check",
+        },
         {
           id: settingId("remote-listener"),
           label: "Remote listener",
