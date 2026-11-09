@@ -1007,15 +1007,20 @@ if mode == "picker-metadata" || mode == "picker-location-prompt" || (fixesOwnedF
                                     fixedFolder["status"] = "select-all-dispatched-no-text"
                                     if fieldReady(focus.node) {
                                         // A Unicode keyboard event has a bounded payload.
-                                        // Send one complete Character per pair so long paths
-                                        // are not dropped and surrogate pairs stay together.
+                                        // Keep each payload within 20 UTF-16 units without
+                                        // splitting a surrogate pair, even for long paths.
+                                        var chunks: [[UniChar]] = [[]]
+                                        for scalar in fixturePath.unicodeScalars {
+                                            let units = Array(String(scalar).utf16)
+                                            if chunks[chunks.count - 1].count + units.count > 20 { chunks.append([]) }
+                                            chunks[chunks.count - 1].append(contentsOf: units)
+                                        }
                                         var sent = 0
-                                        for character in fixturePath {
+                                        for utf16 in chunks where !utf16.isEmpty {
                                             guard fieldReady(focus.node),
                                                   let textDown = CGEvent(keyboardEventSource: nil, virtualKey: 0, keyDown: true),
                                                   let textUp = CGEvent(keyboardEventSource: nil, virtualKey: 0, keyDown: false) else { break }
                                             textDown.flags = []; textUp.flags = []
-                                            let utf16 = Array(String(character).utf16)
                                             utf16.withUnsafeBufferPointer { buffer in
                                                 if let base = buffer.baseAddress {
                                                     textDown.keyboardSetUnicodeString(stringLength: buffer.count, unicodeString: base)
@@ -1023,9 +1028,9 @@ if mode == "picker-metadata" || mode == "picker-location-prompt" || (fixesOwnedF
                                                 }
                                             }
                                             textDown.postToPid(processId); textUp.postToPid(processId)
-                                            sent += 1
+                                            sent += utf16.count
                                         }
-                                        fixedFolder["charactersDispatched"] = sent
+                                        fixedFolder["utf16UnitsDispatched"] = sent
                                         fixedFolder["typingDispatched"] = sent > 0
                                         fixedFolder["status"] = "typed-value-unconfirmed"
                                         // Posting a key pair does not mean AppKit
