@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -124,6 +124,26 @@ const offerFor = (
   }) as unknown as ThreadMoveOffer;
 
 describe("moving a Code thread", () => {
+  it("sizes the history and the checkout before a move without freezing or packing anything", async () => {
+    const { laptop, desktop, parts } = world();
+    writeFileSync(join(laptop, "app.ts"), `export const version = "${"2".repeat(5_000)}";\n`);
+    const { moveHost, holds } = host({ laptop, desktop });
+    const source: MovedThreadReference = { mode: "code", threadId: THREAD };
+
+    const size = await moveHost.source.measure(source);
+
+    if (size.status !== "measured") throw new Error("The thread was not measured.");
+    expect(size.parts.map((part) => part.kind)).toEqual(["thread-bundle", "git-bundle"]);
+    expect(size.parts[1]?.bytes).toBeGreaterThanOrEqual(5_000);
+    expect(size.bytes).toBe(size.parts.reduce((total, part) => total + part.bytes, 0));
+    expect(holds.isHeld(source)).toBe(false);
+    expect(readdirSync(parts)).toEqual([]);
+    expect(git(laptop, "for-each-ref", "refs/octant")).toBe("");
+
+    const notACheckout = host({ laptop: parts, desktop });
+    expect(await notACheckout.moveHost.source.measure(source)).toEqual({ status: "unknown" });
+  });
+
   it("starts the destination thread from the moved commit and both snapshots, with its history", async () => {
     const { laptop, desktop, parts } = world();
     writeFileSync(join(laptop, "app.ts"), "export const version = 2;\n");

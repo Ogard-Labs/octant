@@ -3,6 +3,7 @@ import {
   decodeHandoverNotice,
   decodeThreadMoveDestinationState,
   decodeThreadMoveOffer,
+  decodeThreadMoveSizes,
   THREAD_MOVE_EVENT_NAMES,
   THREAD_MOVE_FAILURE_REASONS,
 } from "./hubThreadMove";
@@ -120,6 +121,30 @@ describe("handover notices and failure reasons", () => {
   it("lists every reason a move can fail, once", () => {
     expect(new Set(THREAD_MOVE_FAILURE_REASONS).size).toBe(THREAD_MOVE_FAILURE_REASONS.length);
     expect(THREAD_MOVE_EVENT_NAMES.moveFailed).toBe("thread.move-failed@1");
+  });
+});
+
+describe("sizes before a move", () => {
+  it("reads a thread it could not measure as unknown and refuses a rate that would divide by zero", () => {
+    const sizes = (rate: Record<string, unknown>) => ({
+      status: "read",
+      rate,
+      rows: [
+        {
+          thread: { mode: "code", threadId: uuid(2) },
+          size: {
+            status: "measured",
+            bytes: 5_000_000_000,
+            parts: [{ kind: "git-bundle", bytes: 5_000_000_000 }],
+          },
+        },
+        { thread: { mode: "chat", threadId: uuid(3) }, size: { status: "unknown" } },
+      ],
+    });
+    expect(
+      decodeThreadMoveSizes(sizes({ basis: "assumed", bytesPerSecond: 1_048_576 })).rows[1]?.size,
+    ).toEqual({ status: "unknown" });
+    expect(() => decodeThreadMoveSizes(sizes({ basis: "measured", bytesPerSecond: 0 }))).toThrow();
   });
 });
 

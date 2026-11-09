@@ -102,6 +102,15 @@ export function createChatThreadMoveHost(options: ChatThreadMoveHostOptions): {
     freeze: (thread) => options.holds.hold(thread),
     unfreeze: (thread) => options.holds.release(thread),
     isFrozen: (thread) => options.holds.isHeld(thread),
+    measure: async (thread) => {
+      const view = viewOf(thread);
+      if (view === undefined) return { status: "unknown" };
+      // The very text pack writes, so the size is exact.
+      const bytes = Buffer.byteLength(
+        JSON.stringify(conversationOf(view, options.externalContentIngested(thread.threadId))),
+      );
+      return { status: "measured", bytes, parts: [{ kind: "thread-bundle", bytes }] };
+    },
     pack: async (thread, folder) => {
       const view = viewOf(thread);
       if (view === undefined) return { status: "refused", reason: "refused" };
