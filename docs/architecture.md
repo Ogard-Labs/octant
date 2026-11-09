@@ -7640,7 +7640,14 @@ the model at another size.
   output (`file(line,col): error TS…` and `file:line:col - error`), the
   `file:line:col: message` lines unix and gnu reporters print (ESLint,
   oxlint), Biome's diagnostic headers, and ESLint's default listing; `files`
-  narrows the returned problems, not what is checked. The list is capped at
+  narrows the returned problems, not what is checked. A turbo or pnpm runner
+  prefix names the problem's `package`; multi-line listings are followed per
+  package, so interleaved output stays apart. A package-relative path is made
+  checkout-relative by reading the root `package.json` `workspaces` and
+  `pnpm-workspace.yaml` `packages` (folders or `dir/*` patterns, at most 200
+  folders) and each folder's `package.json` `name`; a package it cannot place
+  keeps its own path, marked `packageRelative`, and `files` matches it only
+  exactly. These reads never count as the model's read before an edit. The list is capped at
   100 with a note saying how many were left out. `clean` holds only when every
   command that ran exited zero and printed no problem; a run that exits
   non-zero with nothing parsed carries its output tail and a note that it is

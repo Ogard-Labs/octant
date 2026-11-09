@@ -15,8 +15,14 @@ const MAX_OUTPUT_TAIL_BYTES = 4 * 1024;
 export type DiagnosticsCheck = "typecheck" | "lint" | "check" | "both";
 
 export interface NativeHarnessDiagnostic {
-  /** The workspace package a runner said the problem came from; `file` is relative to it. */
+  /** The workspace package a runner said the problem came from. */
   readonly package?: string;
+  /**
+   * Set when `file` is still relative to `package` because Octant could not
+   * find that package's folder in the checkout; a `files` filter then
+   * matches it only exactly.
+   */
+  readonly packageRelative?: true;
   readonly file: string;
   readonly line: number;
   readonly column: number;
@@ -152,51 +158,61 @@ export function parseDiagnostics(
     seen.add(key);
     problems.push(problem);
   };
+  const rootPrefix = `${root.replace(/\/+$/, "")}/`;
   const at = (pkg: string | undefined, file: string, line: string, column: string) => ({
     ...(pkg === undefined ? {} : { package: pkg }),
+    ...(pkg !== undefined && !file.startsWith(rootPrefix)
+      ? { packageRelative: true as const }
+      : {}),
     file: relativeTo(root, file),
     line: Number(line),
     column: Number(column),
   });
-  let stylish: { readonly pkg: string | undefined; readonly file: string } | undefined;
-  let biome:
-    | {
-        readonly pkg: string | undefined;
-        readonly file: string;
-        readonly line: string;
-        readonly column: string;
-        readonly code: string;
-      }
-    | undefined;
-  const flushBiome = () => {
+  interface PendingBiome {
+    readonly file: string;
+    readonly line: string;
+    readonly column: string;
+    readonly code: string;
+  }
+  // A runner interleaves its packages' lines, so the file an ESLint listing
+  // is under and a Biome header waiting for its message belong to the
+  // package whose prefix printed them.
+  const stylishFiles = new Map<string, string>();
+  const pendingBiome = new Map<string, PendingBiome>();
+  const keyOf = (pkg: string | undefined) => (pkg === undefined ? "" : `@${pkg}`);
+  const pkgOf = (key: string) => (key === "" ? undefined : key.slice(1));
+  const flushBiome = (key: string) => {
+    const biome = pendingBiome.get(key);
     if (biome === undefined) return;
+    pendingBiome.delete(key);
     add({
-      ...at(biome.pkg, biome.file, biome.line, biome.column),
+      ...at(pkgOf(key), biome.file, biome.line, biome.column),
       severity: "error",
       message: biome.code,
       code: biome.code,
     });
-    biome = undefined;
   };
   for (const raw of output.replace(ANSI, "").split(/\r?\n/)) {
     const { pkg, line } = withoutRunnerPrefix(raw.trimEnd());
+    const key = keyOf(pkg);
+    const biome = pendingBiome.get(key);
     if (biome !== undefined) {
       const message = BIOME_MESSAGE.exec(line);
       if (message !== null) {
         const [, mark = "", text = ""] = message;
+        pendingBiome.delete(key);
         add({
-          ...at(biome.pkg, biome.file, biome.line, biome.column),
+          ...at(pkg, biome.file, biome.line, biome.column),
           severity: mark === "ℹ" ? "info" : mark === "!" || mark === "⚠" ? "warning" : "error",
           message: clip(text),
           code: biome.code,
         });
-        biome = undefined;
         continue;
       }
     }
     const tsc = TSC.exec(line) ?? TSC_PRETTY.exec(line);
     if (tsc !== null && isPath(tsc[1])) {
-      flushBiome();
+      flushBiome(key);
       const [, file = "", row = "", column = "", severity = "", code, message = ""] = tsc;
       add({
         ...at(pkg, file, row, column),
@@ -208,7 +224,7 @@ export function parseDiagnostics(
     }
     const unix = UNIX.exec(line);
     if (unix !== null && isPath(unix[1])) {
-      flushBiome();
+      flushBiome(key);
       const [, file = "", row = "", column = "", rest = ""] = unix;
       let message = rest;
       let severity: NativeHarnessDiagnostic["severity"] = "error";
@@ -234,16 +250,17 @@ export function parseDiagnostics(
     }
     const header = BIOME_HEADER.exec(line);
     if (header !== null && isPath(header[1])) {
-      flushBiome();
+      flushBiome(key);
       const [, file = "", row = "", column = "", code = ""] = header;
-      biome = { pkg, file, line: row, column, code };
+      pendingBiome.set(key, { file, line: row, column, code });
       continue;
     }
     const row = STYLISH_ROW.exec(line);
-    if (row !== null && stylish !== undefined) {
+    const stylishFile = stylishFiles.get(key);
+    if (row !== null && stylishFile !== undefined) {
       const [, lineNumber = "", column = "", severity = "", message = "", code] = row;
       add({
-        ...at(stylish.pkg, stylish.file, lineNumber, column),
+        ...at(pkg, stylishFile, lineNumber, column),
         severity: severity === "warning" ? "warning" : "error",
         message: clip(message),
         ...(code === undefined ? {} : { code }),
@@ -251,9 +268,9 @@ export function parseDiagnostics(
       continue;
     }
     const file = STYLISH_FILE.exec(line);
-    if (file !== null && isPath(file[1])) stylish = { pkg, file: file[1] };
+    if (file !== null && isPath(file[1])) stylishFiles.set(key, file[1]);
   }
-  flushBiome();
+  for (const key of pendingBiome.keys()) flushBiome(key);
   return problems;
 }
 
@@ -267,18 +284,122 @@ function withoutRunnerPrefix(line: string): {
     : { pkg: prefixed[1], line: prefixed[3] ?? "" };
 }
 
-/** Whether a problem's file is one of the files the call asked about, or inside a folder it named. */
-export function matchesDiagnosticsFile(file: string, filters: ReadonlyArray<string>): boolean {
-  const problem = normalized(file);
+/**
+ * Whether a problem's file is one of the files the call asked about, or inside
+ * a folder it named. A path still relative to a package Octant could not place
+ * matches only a filter that names it exactly, since a suffix would match the
+ * same path in every package.
+ */
+export function matchesDiagnosticsFile(
+  problem: Pick<NativeHarnessDiagnostic, "file" | "packageRelative">,
+  filters: ReadonlyArray<string>,
+): boolean {
+  const file = normalized(problem.file);
   return filters.some((filter) => {
     const wanted = normalized(filter);
+    if (problem.packageRelative === true) return file === wanted;
     return (
-      problem === wanted ||
-      problem.endsWith(`/${wanted}`) ||
-      wanted.endsWith(`/${problem}`) ||
-      problem.startsWith(`${wanted}/`)
+      file === wanted ||
+      file.endsWith(`/${wanted}`) ||
+      wanted.endsWith(`/${file}`) ||
+      file.startsWith(`${wanted}/`)
     );
   });
+}
+
+/** At most this many workspace folders are read to place packages. */
+const MAX_WORKSPACE_PACKAGES = 200;
+
+/**
+ * The checkout folder of each workspace package, by its package.json `name`
+ * and by its folder. Folders come from the root package.json `workspaces`
+ * (an array, or `{ packages }`) and from `pnpm-workspace.yaml`'s `packages`
+ * list; a pattern may be a folder or end in `/*`, and anything else
+ * (negations, deeper globs) is skipped. Reads never count as the model's.
+ */
+export async function workspacePackageFolders(
+  filesystem: Pick<NativeHarnessFileSystemPort, "read">,
+): Promise<ReadonlyMap<string, string>> {
+  const patterns: string[] = [];
+  const manifest = await readJson(filesystem, "package.json");
+  const workspaces = recordField(manifest, "workspaces");
+  const listed = Array.isArray(workspaces) ? workspaces : recordField(workspaces, "packages");
+  if (Array.isArray(listed)) {
+    for (const entry of listed) if (typeof entry === "string") patterns.push(entry);
+  }
+  const pnpm = await filesystem.read({ path: "pnpm-workspace.yaml", marksRead: false });
+  if (pnpm.kind === "file") patterns.push(...pnpmWorkspacePatterns(pnpm.lines));
+  const folders: string[] = [];
+  for (const raw of patterns) {
+    const pattern = normalized(raw.trim());
+    if (pattern.length === 0 || pattern.startsWith("!") || pattern.includes("..")) continue;
+    if (pattern.endsWith("/*") && !pattern.slice(0, -2).includes("*")) {
+      const parent = pattern.slice(0, -2);
+      const listing = await filesystem.read({ path: parent, marksRead: false });
+      if (listing.kind !== "directory") continue;
+      for (const entry of listing.entries) {
+        if (entry.kind === "directory") folders.push(`${parent}/${entry.name}`);
+      }
+    } else if (!pattern.includes("*")) {
+      folders.push(pattern);
+    }
+  }
+  const places = new Map<string, string>();
+  for (const folder of [...new Set(folders)].slice(0, MAX_WORKSPACE_PACKAGES)) {
+    places.set(folder, folder);
+    const name = recordField(await readJson(filesystem, `${folder}/package.json`), "name");
+    if (typeof name === "string" && name.length > 0) places.set(name, folder);
+  }
+  return places;
+}
+
+/** Problems with each package-relative path made checkout-relative where its package was placed. */
+export function placeInCheckout(
+  problems: ReadonlyArray<NativeHarnessDiagnostic>,
+  folders: ReadonlyMap<string, string>,
+): ReadonlyArray<NativeHarnessDiagnostic> {
+  return problems.map((problem) => {
+    if (problem.packageRelative !== true || problem.package === undefined) return problem;
+    const folder = folders.get(problem.package);
+    if (folder === undefined) return problem;
+    const { packageRelative: _placed, ...rest } = problem;
+    return { ...rest, file: `${folder}/${problem.file}` };
+  });
+}
+
+function pnpmWorkspacePatterns(lines: ReadonlyArray<string>): ReadonlyArray<string> {
+  const patterns: string[] = [];
+  let inPackages = false;
+  for (const line of lines) {
+    if (/^packages:\s*$/.test(line)) {
+      inPackages = true;
+      continue;
+    }
+    if (!inPackages) continue;
+    const item = /^\s+-\s*['"]?([^'"#]+?)['"]?\s*(?:#.*)?$/.exec(line);
+    if (item !== null) patterns.push(item[1] ?? "");
+    else if (/^\S/.test(line)) inPackages = false;
+  }
+  return patterns;
+}
+
+async function readJson(
+  filesystem: Pick<NativeHarnessFileSystemPort, "read">,
+  path: string,
+): Promise<unknown> {
+  const read = await filesystem.read({ path, marksRead: false });
+  if (read.kind !== "file" || read.bounds.truncated) return undefined;
+  try {
+    return JSON.parse(read.lines.join("\n"));
+  } catch {
+    return undefined;
+  }
+}
+
+function recordField(value: unknown, field: string): unknown {
+  return typeof value === "object" && value !== null && Object.hasOwn(value, field)
+    ? (value as Readonly<Record<string, unknown>>)[field]
+    : undefined;
 }
 
 interface DiagnosticsRun {
@@ -388,11 +509,15 @@ export async function runNativeHarnessDiagnostics(
   if (runs.every((run) => run.status === "refused") && first !== undefined) {
     return refused(first.error ?? "tool-unavailable", first.message);
   }
+  // Workspace folders are read only when a runner named a package.
+  const placed = problems.some((problem) => problem.packageRelative === true)
+    ? placeInCheckout(problems, await workspacePackageFolders(filesystem))
+    : problems;
   const wanted = args.files;
   const shown =
     wanted === undefined || wanted.length === 0
-      ? problems
-      : problems.filter((problem) => matchesDiagnosticsFile(problem.file, wanted));
+      ? placed
+      : placed.filter((problem) => matchesDiagnosticsFile(problem, wanted));
   // Clean means every command that ran exited zero and printed no problem it
   // could read in output the shell kept whole; a failing exit with nothing
   // parsed, or output the shell cut, is reported, never clean.

@@ -1,6 +1,6 @@
-import { mkdtemp, realpath, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, realpath, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { describe, expect, it } from "vitest";
 import type { ProviderExecutionPolicy, ToolActionAuthority } from "@octant/contracts";
 import { ToolCallAuthorityService, type ToolCallLiveFacts } from "../toolCallAuthorityService";
@@ -42,6 +42,7 @@ async function fixture(input: {
 }) {
   const root = await realpath(await mkdtemp(join(tmpdir(), "octant-harness-diagnostics-")));
   for (const [name, content] of Object.entries(input.files ?? {})) {
+    await mkdir(dirname(join(root, name)), { recursive: true });
     await writeFile(join(root, name), content);
   }
   const ran: Ran[] = [];
@@ -114,6 +115,7 @@ describe("native harness diagnostics", () => {
       },
       {
         package: "@octant/server",
+        packageRelative: true,
         file: "src/b.ts",
         line: 10,
         column: 2,
@@ -257,6 +259,91 @@ describe("native harness diagnostics", () => {
     expect(
       (await call({ command: "turbo run typecheck", files: ["src/index.ts"] })).result,
     ).toMatchObject({ totalProblems: 2 });
+  });
+
+  it("keeps each package's ESLint file and pending Biome header apart when their lines interleave", () => {
+    const output = [
+      "a:lint: /repo/packages/a/src/x.ts",
+      "b:lint: /repo/packages/b/src/y.ts",
+      "a:lint:   1:1  error  bad a  rule-a",
+      "b:lint:   2:2  error  bad b  rule-b",
+      "c:lint: src/one.ts:1:1 lint/style/useConst",
+      "d:lint: src/two.ts:2:2 lint/style/noVar",
+      "c:lint:   ✖ message for c",
+      "d:lint:   ✖ message for d",
+    ].join("\n");
+    expect(
+      parseDiagnostics(output, "/repo").map(({ package: name, file, message }) => ({
+        name,
+        file,
+        message,
+      })),
+    ).toEqual([
+      { name: "a", file: "packages/a/src/x.ts", message: "bad a" },
+      { name: "b", file: "packages/b/src/y.ts", message: "bad b" },
+      { name: "c", file: "src/one.ts", message: "message for c" },
+      { name: "d", file: "src/two.ts", message: "message for d" },
+    ]);
+  });
+
+  it("places a workspace package's problems at their checkout path before filtering by file", async () => {
+    const line = "src/index.ts(3,7): error TS2322: Bad type.";
+    const { call } = await fixture({
+      files: {
+        "package.json": JSON.stringify({ workspaces: ["packages/*"] }),
+        "packages/contracts/package.json": JSON.stringify({ name: "@octant/contracts" }),
+        "packages/domain/package.json": JSON.stringify({ name: "@octant/domain" }),
+      },
+      output: () => ({
+        exitCode: 2,
+        output: [
+          `@octant/contracts:typecheck: ${line}`,
+          `@octant/domain:typecheck: ${line}`,
+          `@elsewhere/tool:typecheck: ${line}`,
+        ].join("\n"),
+      }),
+    });
+    const run = (files: ReadonlyArray<string>) =>
+      call({ command: "turbo run typecheck", files }).then(
+        (outcome) => outcome.result as { problems: ReadonlyArray<{ file: string }> },
+      );
+    expect((await run(["packages/contracts/src/index.ts"])).problems).toEqual([
+      expect.objectContaining({
+        package: "@octant/contracts",
+        file: "packages/contracts/src/index.ts",
+      }),
+    ]);
+    expect((await run(["packages/domain"])).problems).toEqual([
+      expect.objectContaining({ file: "packages/domain/src/index.ts" }),
+    ]);
+    // A package Octant cannot place keeps its own path, marked, and matches only exactly.
+    expect((await run(["index.ts"])).problems).toEqual([
+      expect.objectContaining({ file: "packages/contracts/src/index.ts" }),
+      expect.objectContaining({ file: "packages/domain/src/index.ts" }),
+    ]);
+    expect((await run(["src/index.ts"])).problems).toEqual([
+      expect.objectContaining({ file: "packages/contracts/src/index.ts" }),
+      expect.objectContaining({ file: "packages/domain/src/index.ts" }),
+      expect.objectContaining({
+        package: "@elsewhere/tool",
+        file: "src/index.ts",
+        packageRelative: true,
+      }),
+    ]);
+  });
+
+  it("reads pnpm's workspace list to place a package", async () => {
+    const { call } = await fixture({
+      files: {
+        "package.json": JSON.stringify({ name: "root" }),
+        "pnpm-workspace.yaml": "packages:\n  - 'apps/*'\n",
+        "apps/web/package.json": JSON.stringify({ name: "web" }),
+      },
+      output: () => ({ exitCode: 1, output: "web:lint: src/a.ts:1:2: Bad. [Error/rule]" }),
+    });
+    expect((await call({ command: "turbo run lint" })).result).toMatchObject({
+      problems: [{ package: "web", file: "apps/web/src/a.ts" }],
+    });
   });
 
   it("runs an explicit command instead of looking for scripts", async () => {
