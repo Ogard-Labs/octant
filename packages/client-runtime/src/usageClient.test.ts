@@ -207,3 +207,26 @@ describe("UsageClient.diagnostics", () => {
     await expect(client.diagnostics({})).rejects.toBeInstanceOf(UsageClientError);
   });
 });
+
+describe("UsageClient.hostHealth", () => {
+  it("reads the host's health history", async () => {
+    const fetch = vi.fn(async () =>
+      Response.json({
+        generatedAt: "2026-11-07T12:00:00.000Z",
+        resolution: "minute",
+        retentionDays: 14,
+        restarts: [],
+        samples: [],
+      }),
+    );
+    const client = createUsageClient({ baseUrl, fetch, windowCapability: capability });
+
+    const history = await client.hostHealth({ resolution: "minute" });
+
+    expect(history.retentionDays).toBe(14);
+    expect(fetch).toHaveBeenCalledWith(
+      `${baseUrl}/api/usage/host-health`,
+      expect.objectContaining({ method: "POST" }),
+    );
+  });
+});

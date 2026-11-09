@@ -15,15 +15,20 @@ import { MAX_JSON_REQUEST_BODY_SIZE, type ServerStart } from "./serverShape";
 import type { AuthorityWiring } from "./authority";
 import type { AgentRunsWiring } from "./agentRuns";
 import type { IntegrationsWiring } from "./integrations";
+import type { HostHealthRecorder } from "../metrics/hostHealthRecorder";
 
 export type UsageDependencies = Pick<ServerStart, "latencyStats" | "persistence" | "version"> &
   Pick<AuthorityWiring, "windowAuthorityStore"> &
   Pick<AgentRunsWiring, "spendCeilingHolder" | "turnMetrics"> &
-  Pick<IntegrationsWiring, "cacheStats">;
+  Pick<IntegrationsWiring, "cacheStats"> & {
+    /** Host-health samples over time; absent leaves the history route unanswered. */
+    readonly hostHealth?: Pick<HostHealthRecorder, "read">;
+  };
 
 export function wireUsage(deps: UsageDependencies) {
   const {
     cacheStats,
+    hostHealth,
     latencyStats,
     persistence,
     spendCeilingHolder,
@@ -65,6 +70,7 @@ export function wireUsage(deps: UsageDependencies) {
     maxRequestBodySize: MAX_JSON_REQUEST_BODY_SIZE,
     latencyStats: () => latencyStats.read(),
     turnMetrics,
+    ...(hostHealth === undefined ? {} : { hostHealth }),
   });
   const diagnosticsExportRoutes = createDiagnosticsExportRouteHandler({
     connection: persistence.connection,

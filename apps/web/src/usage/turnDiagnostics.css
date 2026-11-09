@@ -104,3 +104,63 @@
 .turn-diagnostics {
   grid-template-columns: minmax(0, 1fr);
 }
+
+.host-health__grid {
+  display: grid;
+  /* A grid item sizes to its content by default; this one must shrink to the
+     section so its columns are counted from the screen width. */
+  min-width: 0;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 260px), 1fr));
+  gap: var(--oct-space-3);
+}
+
+.host-health__metric {
+  display: grid;
+  min-width: 0;
+  gap: var(--oct-space-1);
+  margin: 0;
+  padding: var(--oct-space-3);
+  background: var(--oct-surface);
+  border: 1px solid var(--oct-border);
+  border-radius: var(--oct-radius-md);
+}
+
+.host-health__metric figcaption {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: var(--oct-space-1) var(--oct-space-2);
+  font-size: var(--oct-text-xs);
+}
+
+.host-health__label {
+  color: var(--oct-fg);
+}
+
+.host-health__peak {
+  color: var(--oct-muted);
+}
+
+.host-health__bars {
+  display: flex;
+  height: 56px;
+  align-items: flex-end;
+  gap: 1px;
+  margin: 0;
+  padding: 0;
+  overflow: hidden;
+  border-bottom: 1px solid var(--oct-border);
+  list-style: none;
+}
+
+.host-health__bar {
+  min-width: 1px;
+  flex: 1 1 0;
+  background: var(--oct-accent);
+  border-radius: 2px 2px 0 0;
+}
+
+/* Sections size to the page column, never to their widest content. */
+.turn-diagnostics .surface-section {
+  min-width: 0;
+}

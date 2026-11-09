@@ -2878,8 +2878,11 @@ and a disclosed table; Benchmarks by model with p50 and p95 first-token, speed,
 and turn length; Failures by cause with the newest redacted message; Tools, most
 failures first; Retries, limits, and waits; Turns to investigate, whose Open
 button leaves Usage for that thread; and Likely prompt-cache misses, worded as a
-likelihood. A figure no turn measured reads Unavailable, never zero. The header
-copies the whole report as JSON for offline analysis and benchmarking.
+likelihood; and Host health, one small chart per measure on its own scale
+(memory in use, event-loop stalls, longest stall, slow database statements,
+request p95, database size), each with its peak and when, a restart note, and a
+disclosed table. A figure no turn measured reads Unavailable, never zero. The
+header copies the whole report as JSON for offline analysis and benchmarking.
 
 The following canonical map applies to the Usage flow and its Settings entry:
 

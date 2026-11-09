@@ -47,7 +47,7 @@ import { makePublishedSnapshotSource } from "./publishedSnapshotSource";
 import type { PublishedSnapshotRunRequest, WindowId } from "@octant/contracts";
 import { MAX_CHAT_ATTACHMENT_BYTES } from "./chat/chatAttachmentStore";
 import { MAX_CODE_FILE_BODY_SIZE } from "./codeRoutes";
-import { existsSync } from "node:fs";
+import { existsSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { CANVAS_PREVIEW_ASSET_FOLDER, CANVAS_PREVIEW_PAGE } from "./canvas/canvasPreviewRenderer";
 import { healthResponse } from "./health";
@@ -57,6 +57,7 @@ import {
   PersistenceStartupFailed,
 } from "./persistence/persistenceService";
 import { LatencyStatsProjection } from "./latencyStatsProjection";
+import { HostHealthRecorder } from "./metrics/hostHealthRecorder";
 import {
   isAllowedRendererOrigin,
   isForeignLoopbackOrigin,
@@ -191,6 +192,26 @@ export function startOctantServer(
     for (const fact of persistence.projectionCatchUp) {
       latencyStats.record("projection-catch-up", fact.durationMs);
     }
+    const hostHealth = new HostHealthRecorder({
+      path: join(persistence.dataDirectory, "host-health.sqlite3"),
+      latencyWindow: () => latencyStats.takeWindow(),
+      // The main file's size on disk, not page_count * page_size: in WAL mode
+      // the page count includes pages that still live in the write-ahead log.
+      databaseBytes: () => {
+        const row = persistence.connection
+          .prepare("SELECT file FROM pragma_database_list WHERE name = 'main'")
+          .get();
+        if (typeof row !== "object" || row === null || !("file" in row)) return undefined;
+        if (typeof row.file !== "string" || row.file === "") return undefined;
+        try {
+          return statSync(row.file).size;
+        } catch {
+          return undefined;
+        }
+      },
+    });
+    const stopHostHealth = hostHealth.start();
+    yield* Effect.addFinalizer(() => Effect.sync(stopHostHealth));
 
     const serve = options.serve;
     if (serve === undefined) {
@@ -365,6 +386,7 @@ export function startOctantServer(
       zenEventStore,
     } = wireUsage({
       cacheStats,
+      hostHealth,
       latencyStats,
       persistence,
       spendCeilingHolder,
