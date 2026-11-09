@@ -11,6 +11,7 @@ type Props = Pick<ThreadUtilityDockContentProps, "serverUrl" | "subject" | "wind
 /** The host caches one snapshot for five seconds; asking faster only repeats it. */
 const POLL_MS = 5_000;
 const READ_TIMEOUT_MS = 5_000;
+const HOST_RESOURCES_DETAIL_PATH = "/api/host/resources?detail=vitals";
 const SERVER_RESOURCES_PATH = "/api/server-projects/resources";
 
 type VitalsState =
@@ -38,6 +39,7 @@ export default function VitalsModule(props: Props) {
         ? createHostResourceClient({
             baseUrl: serverUrl,
             fetch: globalThis.fetch,
+            path: HOST_RESOURCES_DETAIL_PATH,
             ...(windowCapability === undefined ? {} : { windowCapability }),
           })
         : createHostResourceClient({
@@ -89,8 +91,13 @@ export default function VitalsModule(props: Props) {
 function VitalsView(props: { readonly history: ReadonlyArray<HostResourceSnapshot> }) {
   const latest = props.history[props.history.length - 1];
   const series = useMemo(() => {
+    // A sample without the reading adds no point, so a missing reading is never
+    // drawn as zero; the line starts at the first sample that has it.
     const pick = (value: (snapshot: HostResourceSnapshot) => number | undefined) =>
-      props.history.map((snapshot) => value(snapshot) ?? 0);
+      props.history.flatMap((snapshot) => {
+        const reading = value(snapshot);
+        return reading === undefined ? [] : [reading];
+      });
     return {
       cpu: pick((s) => s.cpuPercent),
       memory: pick((s) => s.memory.usedBytes),

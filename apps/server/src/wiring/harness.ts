@@ -276,10 +276,7 @@ export function wireHarness(deps: HarnessDependencies) {
     windowAuthorityStore,
     store: serverProjectStore,
   });
-  const serverResourceReaders = new Map<
-    string,
-    (signal?: AbortSignal) => Promise<ServerResourceRead>
-  >();
+  const serverResourceReaders = new Map<string, () => Promise<ServerResourceRead>>();
   const resourceRoutes = createServerResourceRoutes({
     windows: windowAuthorityStore,
     readerFor: (projectId) => {

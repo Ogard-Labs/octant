@@ -25,11 +25,11 @@ export const SERVER_RESOURCE_SCRIPT = String.raw`m() { printf '#octant:%s\n' "$1
 m stat1; grep '^cpu ' /proc/stat
 sleep 0.2 2>/dev/null || sleep 1
 m stat2; grep '^cpu ' /proc/stat
-m cores; grep -c '^processor' /proc/cpuinfo 2>/dev/null
+m cores; grep -c '^cpu[0-9]' /proc/stat
 m mem; grep -E '^(MemTotal|MemAvailable|MemFree):' /proc/meminfo
 m net; cat /proc/net/dev 2>/dev/null
 m diskstats; cat /proc/diskstats 2>/dev/null
-m df; df -Pk "$1" 2>/dev/null | tail -n 1
+m df; df -Pk -- "$1" 2>/dev/null | tail -n 1
 m gpu; cat /sys/class/drm/card*/device/gpu_busy_percent 2>/dev/null
 nvidia-smi --query-gpu=utilization.gpu --format=csv,noheader,nounits 2>/dev/null
 m battery; cat /sys/class/power_supply/BAT0/capacity /sys/class/power_supply/BAT0/status 2>/dev/null
@@ -130,7 +130,7 @@ export interface ServerResourceReaderOptions {
 /** One reader per server Project: it keeps the last counters so throughput is a rate. */
 export function createServerResourceReader(
   options: ServerResourceReaderOptions,
-): (signal?: AbortSignal) => Promise<ServerResourceRead> {
+): () => Promise<ServerResourceRead> {
   const now = options.now ?? Date.now;
   let latest: ServerResourceReading | undefined;
   const sample = createHostVitalsSampler(
@@ -202,11 +202,13 @@ export function createServerResourceReader(
     };
   };
 
-  return (signal) => {
+  // The call is shared by every caller of the next five seconds, so no one
+  // caller's cancellation may end it: the connection's own timeout bounds it.
+  return () => {
     const at = now();
     if (cached !== undefined && at - cached.at < CACHE_MS) return Promise.resolve(cached.read);
     if (inflight !== undefined) return inflight;
-    const pending = fetchOnce(signal)
+    const pending = fetchOnce(undefined)
       .then((read) => {
         if (read.status === "ready" || read.status === "unsupported") {
           cached = { at: now(), read };

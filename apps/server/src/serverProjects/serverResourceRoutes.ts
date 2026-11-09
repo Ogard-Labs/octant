@@ -9,9 +9,7 @@ const PATH = "/api/server-projects/resources";
 export interface ServerResourceRouteDependencies {
   readonly windows: WindowAuthorityStore;
   /** The reader for a Project's server, or undefined when the Project is not on one. */
-  readonly readerFor: (
-    projectId: string,
-  ) => ((signal?: AbortSignal) => Promise<ServerResourceRead>) | undefined;
+  readonly readerFor: (projectId: string) => (() => Promise<ServerResourceRead>) | undefined;
   readonly now?: () => number;
 }
 
@@ -52,7 +50,7 @@ export function createServerResourceRoutes(dependencies: ServerResourceRouteDepe
     }
     const read = dependencies.readerFor(url.searchParams.get("projectId") ?? "");
     if (read === undefined) return json({ error: "That Project is not on a server." }, 404);
-    const result = await read(request.signal);
+    const result = await read();
     if (result.status === "ready") return json(result.snapshot satisfies HostResourceSnapshot);
     if (result.status === "unsupported") {
       return json({ error: "This server does not report load (Linux servers only)." }, 501);

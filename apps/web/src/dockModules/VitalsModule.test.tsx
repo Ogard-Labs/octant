@@ -28,7 +28,9 @@ it("shows this host's load and says so when it has no battery", async () => {
   expect(screen.getByText("54%")).toBeVisible();
   expect(screen.getByText("GPU")).toBeVisible();
   expect(screen.getByText("No battery")).toBeVisible();
-  expect(String(fetchMock.mock.calls[0]?.[0])).toBe("http://127.0.0.1:4000/api/host/resources");
+  expect(String(fetchMock.mock.calls[0]?.[0])).toBe(
+    "http://127.0.0.1:4000/api/host/resources?detail=vitals",
+  );
 });
 
 it("reads a thread's server over its Project's route and tells a refused window plainly", async () => {

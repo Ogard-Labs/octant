@@ -209,7 +209,9 @@ export function parseNetstatInterfaces(text: string): CumulativeCounters | undef
     const fields = line.trim().split(/\s+/);
     const name = fields[0];
     // One row per interface carries a <Link#n> network; later rows repeat it per address.
-    if (name === undefined || name.startsWith("lo") || counted.has(name)) continue;
+    // Only physical interfaces (en0, en1…): a VPN tunnel's bytes also cross the
+    // interface carrying it, so counting utun, awdl or bridge would double them.
+    if (name === undefined || !/^en\d+$/.test(name) || counted.has(name)) continue;
     if (!(fields[2] ?? "").startsWith("<Link#")) continue;
     // Rows without a MAC address drop one column, so index from the header's end.
     const shift = fields.length - header.length;
