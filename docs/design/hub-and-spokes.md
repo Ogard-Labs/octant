@@ -1257,7 +1257,8 @@ lists from a notice, or already settled is not offered. A host tells its own
 handovers by their ids, never by the `Octant-Origin` name, which another
 computer may share; it keeps the id of each handover continued here, and of
 each it made that was continued elsewhere or taken back, because the branch
-tip still names it. The source
+tip still names it. A notice that arrives for a handover already settled
+here is answered but not listed. The source
 erases only for a report naming the commit it made, since anyone who can push
 to the repository can write a branch claiming a handover's id. A note read
 from a branch came through a remote others may be

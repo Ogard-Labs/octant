@@ -35,6 +35,7 @@ import type {
 import { HandoverClaims } from "./threadHandovers";
 import {
   THREAD_MOVE_DEPARTURES_KEPT,
+  type ThreadMoveState,
   type ThreadMoveStatePort,
   withSettledHandover,
 } from "./threadMoveStateStore";
@@ -177,6 +178,13 @@ export class HandoverExchange {
       return refused(400);
     }
     const state = this.#options.state.load();
+    // A handover already settled here (continued from its fetched branch
+    // before this notice came) is not listed again: after a restart nothing
+    // else would stop a second Continue making a second thread. The sender is
+    // still answered as received, so it stops resending.
+    if (isSettled(state, String(notice.handoverId))) {
+      return { httpStatus: 200, body: { status: "received", handoverId: notice.handoverId } };
+    }
     const others = (state.receivedHandovers ?? []).filter(
       (entry) => String(entry.notice.handoverId) !== String(notice.handoverId),
     );
@@ -196,7 +204,10 @@ export class HandoverExchange {
 
   /** The handovers this computer was told about, each with the Code Projects that fit. */
   async list(): Promise<HandoverListing> {
-    const received = this.#options.state.load().receivedHandovers ?? [];
+    const state = this.#options.state.load();
+    const received = (state.receivedHandovers ?? []).filter(
+      (entry) => !isSettled(state, String(entry.notice.handoverId)),
+    );
     const projects = this.#options.codeProjects();
     const fittingFor = async (repositoryRemote: string) => {
       const fitting: ThreadMoveProjectChoice[] = [];
@@ -264,7 +275,9 @@ export class HandoverExchange {
 
   /** The handover a Continue names, from its notice or else a fetched branch. */
   async #offered(handoverId: string): Promise<OfferedHandover | undefined> {
-    const received = (this.#options.state.load().receivedHandovers ?? []).find(
+    const state = this.#options.state.load();
+    if (isSettled(state, handoverId)) return undefined;
+    const received = (state.receivedHandovers ?? []).find(
       (entry) => String(entry.notice.handoverId) === handoverId,
     );
     if (received !== undefined) {
@@ -506,6 +519,10 @@ export class HandoverExchange {
     });
     return { httpStatus: 200, body: { status: "erased" } };
   }
+}
+
+function isSettled(state: ThreadMoveState, handoverId: string): boolean {
+  return (state.settledHandoverIds ?? []).some((entry) => String(entry) === handoverId);
 }
 
 function refused(httpStatus: number): DestinationAnswer {

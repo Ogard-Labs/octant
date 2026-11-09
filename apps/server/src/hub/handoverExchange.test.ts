@@ -423,6 +423,22 @@ describe("a handover found on a fetched branch, with no notice", () => {
     expect((await noticed.desktop.list()).handovers[0]?.branch).toBe("feature/flaky");
   });
 
+  it("does not list or continue again a handover whose notice comes after it was continued from its branch", async () => {
+    const { desktop, desktopState, signed } = finding();
+    const request = { handoverId: HANDOVER as never, projectId: PROJECT as never };
+    expect(await desktop.continueHandover(request)).toMatchObject({ status: "continued" });
+
+    // A host restarted since, so only its saved state remembers the continue.
+    const restarted = finding({ state: desktopState });
+    expect((await restarted.desktop.receiveNotice(signed(notice))).httpStatus).toBe(200);
+    expect(desktopState.load().receivedHandovers ?? []).toEqual([]);
+    expect((await restarted.desktop.list()).handovers).toEqual([]);
+    expect(await restarted.desktop.continueHandover(request)).toEqual({
+      status: "refused",
+      reason: "refused",
+    });
+  });
+
   it("refuses without a default model, and continues without a report when no one member has its name", async () => {
     const noDefault = finding({ defaultProvider: () => undefined });
     expect(
