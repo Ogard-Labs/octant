@@ -240,3 +240,4 @@ export * from "./browserCredentialUsePolicy";
 export * from "./browserPageScriptPolicy";
 
 export * from "./ownerBrowserPolicy";
+export * from "./listenerKeyTransition";

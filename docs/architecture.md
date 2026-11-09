@@ -13125,8 +13125,8 @@ approval-gated` command that undoes it. The terminal shows no one-time
     accepts.
     - **What a client keeps.** Each origin's pairing record (the device key's
       metadata and the client host registry) holds that origin's trust:
-      `platform`, or `pinned` with a `sha256-` pin taken only from a pairing
-      code. A record from before pins, or for a pasted certificate, holds
+      `platform`, or `pinned` with a `sha256-` pin taken from a pairing
+      code or an old-key-signed listener transition. A record from before pins, or for a pasted certificate, holds
       `platform`. A stored trust that cannot be read is never read as a
       weaker one: the device-key record stops resolving, so the device pairs
       again, and the host registry refuses to load. Replacing the device key
@@ -13153,9 +13153,51 @@ approval-gated` command that undoes it. The terminal shows no one-time
       the end of its window. Until then either trust passes, and the first
       connection that passes only the staged one makes it current and drops
       the old; after it, only the current trust passes. A window ending more
-      than 30 days after the client's now is ignored, since the host never
-      announces a longer one. Nothing records a staged trust yet: the host's
-      announcement route is planned.
+      than seven days after the client's now is ignored. Preparation fixes
+      the absolute deadline; activation never extends it. A device that has
+      promoted the new pin keeps it after that deadline. A device that missed
+      the announcement or failed to promote before expiry refuses the new
+      pin and needs explicit re-pairing from the host; there is no fallback or
+      trust on first use.
+    - **Explicit key transition.** For an enabled self-made listener,
+      `octant listener prepare-key` generates a new P-256 key without changing
+      the serving key. The old TLS key signs a domain-separated payload
+      containing the host id, exact HTTPS origin, old and new SPKI pins, old
+      public key, preparation time and an expiry exactly seven days later.
+      The private stage is written atomically, owner-only under `remote/`,
+      before it is announced. Only the public signed envelope appears in local
+      status and the `x-octant-listener-transition` header of a successful
+      `GET /api/remote/hello`. The CLI displays both pins and the window.
+      Reconnect each paired app during preparation so it durably records the
+      signed stage under its old pinned TLS connection. Clients validate the
+      old public key against the recorded pin, the signature, origin, known
+      host id and seven-day interval; response headers from proxied product
+      routes cannot introduce or withdraw a stage.
+      Before a phone request under staged trust, a handshake-only exchange sends
+      zero HTTP bytes, rechecks expiry and persists promotion. The request's
+      separate handshake accepts only that proved key, so a storage failure,
+      expired stage or key change between handshakes cannot release HTTP bytes.
+      `octant listener activate-key --pin <prepared-new-pin>` rechecks that
+      exact prepared key and deadline, durably replaces the TLS key, then uses
+      the normal listener restart and session invalidation. A lost response
+      is checked with `octant listener status`, never followed by a new
+      preparation or automatic retry. A failed restart can be recovered by
+      explicitly enabling the same listener again; certificate renewal uses
+      the already selected key. Host identity and device registrations do not
+      change. Desktop main and phone secure storage persist staging and
+      promotion without allowing an in-flight response to resurrect a
+      forgotten pairing or replace newer registration facts.
+      `octant listener cancel-key` withdraws an unactivated stage while keeping
+      the old key. Connected apps remove it on their next trusted hello;
+      offline copies cannot be recalled and expire at the original deadline.
+      Cancellation cannot revert an activated key. No command silently rotates
+      a live key on startup, renewal or ordinary reconnect.
+      Activation is refused while this computer is an enabled hub or joined
+      spoke: signed roster pins retain their separate authority. Disable the
+      hub role and leave the hub before activation, then explicitly rejoin
+      affected members with the new key. Turning a hub role back on is not a
+      client trust migration; existing peers cannot fetch a new roster through
+      an unknown pin. A roster transition protocol remains unbuilt.
     - **Copy.** A pin mismatch says "This isn't the computer you paired with:
       its security key has changed. Octant stopped before sending anything.
       If its key was replaced on purpose, pair again from that computer."; a
