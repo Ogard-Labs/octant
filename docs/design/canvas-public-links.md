@@ -48,6 +48,31 @@ moved into this repository for one-command deploys (see
   the export approval card in a local window. A paired device may see the
   links and copy one, but prepare, approve, update, and revoke are refused for
   it, as minting an authenticated share already is.
+  Paired Chat, Work and Code threads use the same Canvas reader and link list
+  as the host. Opening a Canvas exposes its existing public links and Copy link
+  through the authenticated device session and current Canvas read grant. Its
+  client omits creation, editing, export and owner-management methods; their
+  controls are absent. Changing thread, mode or host client closes the reader.
+- A paired device's Canvas read grant is **thread read authority**: the host
+  serves a thread's Canvas cards, and a Canvas's content, history, design
+  images, HTML file, running-design page and public-link list, when the
+  device may open the thread the Canvas
+  belongs to, by the same check that thread's own routes run (Chat's thread
+  read rule, Work's and Code's thread reads). The thread must still be filed
+  in the Project and mode the request names or the Canvas carries; a Canvas a
+  Chat thread owned before it was filed stays the thread's. A refusal reads as
+  an empty card list or `unauthorized`, the same for a Canvas that does not
+  exist, so a device learns nothing about Canvases it cannot read. A window on
+  this host keeps its active-Project rule. Every Canvas write, share, export,
+  public-link change and Settings change keeps the window rule and stays
+  refused to a paired device.
+  _Rationale:_ a paired device's window has no active Project, and the shell
+  route that sets one is local-only, so the window rule left every paired
+  thread with no Canvas cards (seen on a real pairing in November 2026).
+  Letting a device switch the host's Project was rejected: it is a remote
+  workspace mutation that would widen a read into control of the host's
+  shell, and the device already holds the narrower grant that matters, the
+  threads it can open.
 - No agent tool reaches the export flow or the service, and none is added:
   the Canvas agent tools create, revise, and preview, and the host's own
   service port is reached only from the export destination and the revoke

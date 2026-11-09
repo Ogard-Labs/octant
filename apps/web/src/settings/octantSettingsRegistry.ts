@@ -1443,6 +1443,13 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
         "remote access private listener lan tailscale https certificate pairing pair link ticket code approve deny device devices paired inventory browser phone revoke rename origin port exposure",
       settings: [
         {
+          id: settingId("remote-setup-checks"),
+          label: "Remote setup checks",
+          scope: "host",
+          keywords:
+            "guided setup control host server command folder directory runtime connection connectivity diagnostic unknown changed identity ssh agent key reconnect disconnected stopped read-only check",
+        },
+        {
           id: settingId("remote-listener"),
           label: "Remote listener",
           scope: "host",

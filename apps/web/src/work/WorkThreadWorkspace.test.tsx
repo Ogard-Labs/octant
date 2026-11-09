@@ -1340,6 +1340,125 @@ describe("WorkThreadWorkspace", () => {
     expect(screen.getByText("Done.")).toBeVisible();
   });
 
+  it("submits every Work selection structurally and keeps the draft when delivery fails", async () => {
+    const user = userEvent.setup();
+    const questionnaire = {
+      allowComment: false,
+      questions: [
+        {
+          id: "q0",
+          prompt: "Formats?",
+          selection: "multiple",
+          options: [
+            { id: "pdf", label: "PDF" },
+            { id: "text", label: "Text" },
+          ],
+        },
+      ],
+    };
+    const requestClient = {
+      list: vi.fn(async () => ({
+        requests: [
+          {
+            requestId: "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+            projectId: "20000000-0000-4000-8000-000000000101",
+            threadId,
+            status: "pending",
+            detail: { kind: "user-input", prompt: "Choose formats", options: [], questionnaire },
+            version: 1,
+          },
+        ],
+      })),
+      execute: vi
+        .fn()
+        .mockRejectedValueOnce(new Error("unavailable"))
+        .mockResolvedValue({ kind: "work-request-resolved" }),
+    };
+    render(
+      <WorkThreadWorkspace
+        requestClient={requestClient as never}
+        threadClient={
+          { bootstrap: vi.fn(async () => ({ threads: [workThread()] })), execute: vi.fn() } as never
+        }
+        threadId={threadId}
+        title="Draft brief"
+      />,
+    );
+    await user.click(await screen.findByRole("checkbox", { name: "PDF" }));
+    await user.click(screen.getByRole("checkbox", { name: "Text" }));
+    expect(screen.queryByRole("textbox", { name: "Anything to add" })).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Send answers" }));
+    expect(await screen.findByText("The answer could not be delivered.")).toBeVisible();
+    expect(screen.getByRole("checkbox", { name: "PDF" })).toBeChecked();
+    expect(screen.getByRole("checkbox", { name: "Text" })).toBeChecked();
+    await user.click(screen.getByRole("button", { name: "Send answers" }));
+    expect(requestClient.execute).toHaveBeenLastCalledWith({
+      kind: "resolve-work-request",
+      requestId: "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+      expectedVersion: 1,
+      resolution: {
+        kind: "user-input",
+        answer: { version: 1, answers: [{ questionId: "q0", selectedOptionIds: ["pdf", "text"] }] },
+      },
+    });
+    await waitFor(() =>
+      expect(screen.queryByRole("button", { name: "Send answers" })).not.toBeInTheDocument(),
+    );
+  });
+
+  it("dismisses the owning Work questionnaire without submitting any answer", async () => {
+    const user = userEvent.setup();
+    const requestClient = {
+      list: vi.fn(async () => ({
+        requests: [
+          {
+            requestId: "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+            projectId: "20000000-0000-4000-8000-000000000101",
+            threadId,
+            status: "pending",
+            detail: {
+              kind: "user-input",
+              prompt: "Choose",
+              options: [],
+              questionnaire: {
+                allowComment: false,
+                questions: [
+                  {
+                    id: "q0",
+                    prompt: "Format?",
+                    selection: "single",
+                    options: [{ id: "pdf", label: "PDF" }],
+                  },
+                ],
+              },
+            },
+            version: 1,
+          },
+        ],
+      })),
+      execute: vi.fn(async () => ({ kind: "work-request-cancelled" })),
+    };
+    render(
+      <WorkThreadWorkspace
+        requestClient={requestClient as never}
+        threadClient={
+          { bootstrap: vi.fn(async () => ({ threads: [workThread()] })), execute: vi.fn() } as never
+        }
+        threadId={threadId}
+        title="Draft brief"
+      />,
+    );
+    await user.click(await screen.findByRole("button", { name: "Dismiss" }));
+    expect(requestClient.execute).toHaveBeenCalledExactlyOnceWith({
+      kind: "cancel-work-request",
+      requestId: "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+      expectedVersion: 1,
+    });
+    await waitFor(() =>
+      expect(screen.queryByRole("button", { name: "Dismiss" })).not.toBeInTheDocument(),
+    );
+  });
+
   it("renders the durable transcript and pending request projection", async () => {
     const user = userEvent.setup();
     const threadClient = {

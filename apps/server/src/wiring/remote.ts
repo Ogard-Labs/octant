@@ -266,6 +266,7 @@ export type RemoteDependencies = { readonly onSecretStoreLinkChange?: () => void
     | "threadMessageQueue"
     | "onWorkTurnCancelled"
     | "workThreadServiceWithWorkflows"
+    | "workThreadService"
     | "workTurnService"
   > &
   Pick<CanvasWiring, "canvasRoutes" | "canvasPublicShareService" | "canvasService"> &
@@ -358,6 +359,7 @@ export function wireRemote(deps: RemoteDependencies) {
     workAttachments,
     workThreadProjection,
     workThreadServiceWithWorkflows,
+    workThreadService,
     workTurnService,
   } = deps;
 
@@ -1807,6 +1809,11 @@ export function wireRemote(deps: RemoteDependencies) {
       projects: deps.projectService,
       readCodeThread: (threadId) => persistence.readCodeThread(threadId),
       readProject: (projectId) => persistence.readProject(projectId),
+      work: {
+        readThreads: () => workThreadProjection.list(),
+        readThread: (threadId) => workThreadProjection.read(threadId),
+        changeAccess: (input) => workThreadService.changeOwnerAccess(input),
+      },
     }),
     credentials: ownerCredentialCopy,
     threadMoves,

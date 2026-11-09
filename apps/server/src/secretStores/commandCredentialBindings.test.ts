@@ -85,6 +85,32 @@ function fixture(extra: Partial<CommandCredentialBindingsOptions> = {}) {
   };
 }
 describe("explicit named credential commands", () => {
+  it("starts no process after the contributing capability is disabled during review", async () => {
+    const f = fixture();
+    let admitted = true;
+    try {
+      const saved = await f.service.save(id(2), definition);
+      if (saved.kind !== "command-credential-view" || !saved.bindings[0])
+        throw Error("Expected binding");
+      const reviewed = await f.service.review(
+        id(2),
+        id(3),
+        saved.bindings[0].bindingId,
+        id(4),
+        () => admitted,
+      );
+      if (reviewed.kind !== "command-credential-view" || !reviewed.requests[0])
+        throw Error("Expected review");
+      admitted = false;
+      expect(await f.service.approve(id(2), reviewed.requests[0].requestId)).toMatchObject({
+        kind: "command-credential-refused",
+        reason: "unauthorized",
+      });
+      expect(f.execute).not.toHaveBeenCalled();
+    } finally {
+      f.service.close();
+    }
+  });
   it.each(["approval-gated", "auto-accept-edits"])(
     "prepares a separately approved fixed credential command at %s without widening its posture",
     async (executionPolicy) => {
