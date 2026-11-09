@@ -170,6 +170,12 @@ export interface NativeHarnessConnectionOptions {
    * it the turn simply fails once the endpoint's retries are spent.
    */
   readonly leadFallback?: NativeHarnessLeadFallback;
+  /**
+   * The model's window as the request-fitting rules settle on it, read when a
+   * request is sent; undefined when nothing names one. It gives the lead its
+   * window fill when no compaction point carries a window.
+   */
+  readonly contextWindow?: (modelId: ProviderModelId) => number | undefined;
   readonly onSessionCountChange?: (delta: 1 | -1) => void;
   readonly onReleased?: () => void;
   readonly clock: () => string;
@@ -604,7 +610,10 @@ export function createNativeHarnessConnection(
       for (;;) {
         try {
           state.requestStartedAt = options.clock();
-          return await (state.fallback?.endpoint ?? state.endpoint).send(current, stream);
+          return await (state.fallback?.endpoint ?? state.endpoint).send(
+            state.fallback === undefined ? withFitWindowFill(state, current) : current,
+            stream,
+          );
         } catch (error) {
           if (!signal.aborted && isContextOverflowFailure(sanitizeFailure(error))) {
             const compacted = compactionTried ? undefined : await compactToFit(state, signal);
@@ -1186,6 +1195,24 @@ export function createNativeHarnessConnection(
         });
       }
       pending.unsettled.clear();
+    };
+
+    /**
+     * The request with its window note, when the note still fits. Fitting
+     * measured the request without it, and an endpoint refuses a body over its
+     * limit as a configuration failure that is neither retried nor compacted,
+     * so a request at the very edge goes without the note rather than fail.
+     */
+    const withFitWindowFill = (
+      state: SessionState,
+      request: NativeHarnessRequest,
+    ): NativeHarnessRequest => {
+      const noted = withWindowFill(
+        state.compactionPoint?.contextWindow ?? options.contextWindow?.(state.modelId),
+        state.compactionPoint,
+        request,
+      );
+      return noted === request || state.endpoint.fits(noted) ? noted : request;
     };
 
     const requestFor = (state: SessionState, history: ReadonlyArray<NativeHarnessMessage>) =>
@@ -1885,7 +1912,47 @@ export function passesCompactionPoint(
   request: NativeHarnessRequest,
 ): boolean {
   if (point === undefined) return false;
-  return Math.ceil(JSON.stringify(request).length / 4) >= point.tokens;
+  return requestTokenEstimate(request) >= point.tokens;
+}
+
+/**
+ * The request as sent, ending with a note from Octant on how full the window
+ * is, so the lead can checkpoint before a compaction without calling
+ * `context-remaining` first. The note goes last, in its own user message,
+ * because endpoints drop text beside tool results, and it is never kept in
+ * the conversation, so the next request's prefix still matches this one and
+ * its cache. The figure is the estimate the compaction point is judged by,
+ * so "fills 80%" and "summarizes at 85%" mean the same arithmetic. With the
+ * rule off the loop still summarizes a request that no longer fits, and the
+ * note says that instead. A window nothing names gets no figure, as
+ * `context-remaining` refuses one it cannot stand behind.
+ */
+function withWindowFill(
+  contextWindow: number | undefined,
+  point: ProviderCompactionPoint | undefined,
+  request: NativeHarnessRequest,
+): NativeHarnessRequest {
+  if (contextWindow === undefined || contextWindow <= 0) return request;
+  const filled = Math.min(100, Math.round((requestTokenEstimate(request) * 100) / contextWindow));
+  const summarizes =
+    point === undefined
+      ? "Octant summarizes earlier turns only when a request no longer fits."
+      : `Octant summarizes earlier turns once a request passes ${String(Math.round((point.tokens * 100) / point.contextWindow))}%.`;
+  const note: NativeHarnessMessage = {
+    role: "user",
+    text: `[Note from Octant, not the user: this request fills about ${String(filled)}% of the model's ${windowSize(contextWindow)}-token window. ${summarizes}]`,
+  };
+  return { ...request, history: [...request.history, note] };
+}
+
+/** Four characters a token, as the endpoints estimate fit. */
+function requestTokenEstimate(request: NativeHarnessRequest): number {
+  return Math.ceil(JSON.stringify(request).length / 4);
+}
+
+function windowSize(tokens: number): string {
+  if (tokens >= 1_000_000) return `${String(Math.round(tokens / 100_000) / 10)}M`;
+  return `${String(Math.round(tokens / 1_000))}K`;
 }
 
 /** How much of the window one request filled: its input, cached reads and writes included. */

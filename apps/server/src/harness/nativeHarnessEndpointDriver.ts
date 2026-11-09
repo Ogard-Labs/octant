@@ -6,6 +6,7 @@ import {
   type ProviderInstanceId,
   type ProviderModelId,
 } from "@octant/contracts";
+import { resolveModelContextWindow } from "@octant/domain/model-context-window";
 import type { ProviderDriver } from "@octant/provider-sdk/driver";
 import type {
   HarnessEndpointDriver,
@@ -110,6 +111,12 @@ export function runOnNativeHarness(
           ? {}
           : { leadFallback: host.harness.leadFallback }),
         admitTurn,
+        contextWindow: (modelId) => {
+          const model = host.runtimeRegistry
+            .observedState(host.instanceId)
+            ?.models.find((candidate) => String(candidate.id) === String(modelId));
+          return model === undefined ? undefined : resolveModelContextWindow(model)?.contextWindow;
+        },
         onSessionCountChange: (delta) =>
           host.runtimeRegistry.setActiveSessionCount(
             host.instanceId,
