@@ -405,6 +405,10 @@ export interface OctantHostBridge {
   ) => () => void;
   /** Whether this host is in a hub with another member, so Quit offers Move threads first…. */
   readonly reportShutdownMovesOffered?: (offered: boolean) => void;
+  /** How far a running Prepare to shut down batch has come, for the menu bar; `undefined` when none runs. */
+  readonly reportShutdownProgress?: (
+    progress: { readonly ended: number; readonly total: number } | undefined,
+  ) => void;
   /** Quits through the guarded shutdown, which may still ask about running work. */
   readonly requestQuit?: () => void;
   readonly subscribeStartNewAgent: (listener: () => void) => () => void;
@@ -1204,6 +1208,16 @@ export function createHostBridge(
               .invoke(IPC_CHANNELS.shutdownMovesOffered, offered === true)
               .catch(() => undefined);
           },
+          reportShutdownProgress: (
+            progress: { readonly ended: number; readonly total: number } | undefined,
+          ) => {
+            void ipc
+              .invoke(
+                IPC_CHANNELS.shutdownProgress,
+                progress === undefined ? null : { ended: progress.ended, total: progress.total },
+              )
+              .catch(() => undefined);
+          },
           requestQuit: () => {
             void ipc.invoke(IPC_CHANNELS.requestQuit).catch(() => undefined);
           },
@@ -1410,6 +1424,7 @@ export const OCTANT_ONLY_BRIDGE_MEMBERS: ReadonlySet<string> = new Set([
   "hubAdministrationRequest",
   "subscribePrepareToShutDown",
   "reportShutdownMovesOffered",
+  "reportShutdownProgress",
   "requestQuit",
   "ownerUnlockMakeKey",
   "ownerUnlockSign",

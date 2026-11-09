@@ -1617,7 +1617,10 @@ shared SSH connection per server; and a thread's own worktree, made with Git on 
 pull request, opened by repository and branch name. A Work Project may be
 bound there too, in the same catalog: its Work threads run on the Octant
 Harness with file tools and commands on the server under the same rules, opened from the
-Work sidebar and composer. Not built: Work Files, research sources, the status
+Work sidebar and composer. A local window's Work Files panel lists names and
+sizes on the server with explicit Refresh and inert rows, without previews,
+editing, watching, or output attribution. Not built: Work file previews and
+editing, research sources, the status
 file and due dates, and the Project terminal for a Work Project on a server;
 extra folders; saved Project actions; a Project-level guardrail level or
 reviewer. It is tested only against a throwaway local `sshd`, never a real
@@ -15287,6 +15290,28 @@ unavailable until an approved Windows confinement design is documented: the conf
 supports only macOS and Linux and refuses every other platform, so Work and
 Code fail closed there. Simulator, the Apple workbench, and vibrancy stay
 macOS-only.
+
+The Windows provider credential building block uses an Octant native helper
+with `CredWriteW`, `CredReadW` and `CredDeleteW`, never a secret in `cmdkey`
+arguments or a PowerShell script. A generic credential's protected blob holds
+one UTF-8 value, at most 2,560 bytes; an empty, malformed or oversized value is
+refused before mutation. The broker's 12 KiB transport bound for other
+backends is unchanged. There is no truncation, chunking, attribute spill or
+file fallback. Targets use a fixed provider namespace, the host's store-scope
+UUID and the existing Octant or Nightly-test-data service family; no unscoped legacy target is read, copied or deleted
+implicitly. Secrets cross only bounded private child-process pipes, never
+arguments, environment variables, diagnostics or journal entries. Calls use a
+fixed absolute local helper path, an empty environment, a five-second operation
+deadline and joined owned-process cleanup. The standard Windows vault protects
+the user's account; it does not promise isolation from other programs running
+as that same account.
+
+This helper and its broker adapter do not admit a Windows host or Chat, package
+a Windows app, implement auxiliary secret namespaces or create a host signing
+identity. A missing trusted helper leaves the store unavailable. Native CI
+exercises synthetic targets on an ephemeral Windows runner; real Windows host
+ownership, private runtime paths and lifecycle remain separate prerequisites.
+Work and Code remain refused until their native confinement boundary is proven.
 
 **Updates** (`apps/desktop/src/appUpdateService.ts`, `appUpdateFeed.ts`,
 `packages/domain` `appUpdatePolicy`):

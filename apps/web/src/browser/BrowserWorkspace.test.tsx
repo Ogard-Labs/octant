@@ -116,6 +116,44 @@ describe("BrowserWorkspace", () => {
   // Opening a page records it as recent; a later test must not start from it.
   afterEach(() => globalThis.localStorage.clear());
 
+  it("discards a prior host's availability before the replacement host answers", async () => {
+    const browser = client();
+    vi.mocked(browser.inspectThread).mockResolvedValue(
+      decodeBrowserAutomationSnapshot({
+        status: "ready",
+        threadId,
+        evidence: [],
+        agentAvailability: { status: "available", readOnly: false },
+      }),
+    );
+    const tab = {
+      kind: "browser",
+      id: "90000000-0000-4000-8000-000000000010",
+      mode: "work",
+      title: "Browser",
+      threadId,
+    } as const;
+    const view = render(<BrowserWorkspace client={browser} tab={tab as never} />);
+    expect(await screen.findByText("Agent can use this Browser.")).toBeVisible();
+    const disconnected = client();
+    vi.mocked(disconnected.inspectThread).mockRejectedValue(new Error("disconnected"));
+    view.rerender(<BrowserWorkspace client={disconnected} tab={tab as never} />);
+    expect(screen.queryByText("Agent can use this Browser.")).toBeNull();
+    expect(screen.getByText("Browser availability is unknown.")).toBeVisible();
+  });
+  it("keeps an invalid host response inside polling failure handling", async () => {
+    const browser = client();
+    vi.mocked(browser.inspectThread).mockResolvedValue(undefined as never);
+    render(
+      <BrowserWorkspace
+        client={browser}
+        tab={{ kind: "browser", id: threadId, mode: "work", title: "Browser", threadId } as never}
+      />,
+    );
+    expect(await screen.findByText("Browser availability is unknown.")).toBeVisible();
+    await waitFor(() => expect(browser.inspectThread).toHaveBeenCalled());
+    expect(screen.getByRole("region", { name: "Browser automation" })).toBeVisible();
+  });
   it("keeps compact browser chrome ahead of the live or remote page surface", () => {
     const styles = readFileSync(resolve(process.cwd(), "src/styles/shell.css"), "utf8");
 
@@ -188,6 +226,15 @@ describe("BrowserWorkspace", () => {
   it("starts a repeated Browser tab fresh and reports the context it creates", async () => {
     const browser = client();
     const onContextCreated = vi.fn();
+    vi.mocked(browser.inspectThread).mockResolvedValue(
+      decodeBrowserAutomationSnapshot({
+        status: "running",
+        threadId,
+        context,
+        evidence: [],
+        agentAvailability: { status: "omitted", reason: "no-tool-transport" },
+      }),
+    );
     render(
       <BrowserWorkspace
         client={browser}
@@ -204,7 +251,13 @@ describe("BrowserWorkspace", () => {
     );
 
     await act(async () => undefined);
-    expect(browser.inspectThread).not.toHaveBeenCalled();
+    expect(await screen.findByText(/provider has no supported tool transport/)).toBeVisible();
+    expect(browser.inspectThread).toHaveBeenCalledWith(
+      { threadId, freshPicture: false },
+      expect.any(AbortSignal),
+    );
+    expect(screen.getByRole("button", { name: "Start browser" })).toBeDisabled();
+    expect(onContextCreated).not.toHaveBeenCalled();
     enterAddress("https://example.com");
     fireEvent.click(screen.getByRole("button", { name: "Start browser" }));
     await waitFor(() => expect(onContextCreated).toHaveBeenCalledWith(context.contextId));

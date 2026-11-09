@@ -139,8 +139,7 @@ export {
 } from "./secretServiceCredentialStore";
 export { isExecutable } from "./executableCheck";
 export {
-  CMDKEY_PATH,
-  POWERSHELL_PATH,
+  WINDOWS_CREDENTIAL_MAX_BYTES,
   makeWindowsCredentialStore,
   type MakeWindowsCredentialStoreOptions,
   type WindowsCommandExecutor,

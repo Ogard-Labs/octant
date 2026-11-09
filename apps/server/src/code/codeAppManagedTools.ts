@@ -1,3 +1,4 @@
+import { browserAgentAvailability } from "@octant/domain";
 import { browserProfileKey, storedBrowserProfile } from "@octant/domain";
 import type { StoredBrowserProfile } from "@octant/contracts";
 import type {
@@ -625,7 +626,14 @@ export function createCodeAppManagedTools(options: CodeAppManagedToolsOptions): 
     definitions: [
       // A family whose capability this host did not lend is omitted, not
       // advertised only to be refused on every call.
-      ...(options.browser === undefined ? [] : [BROWSER_TOOL_DEFINITION]),
+      ...(browserAgentAvailability({
+        toolTransport: true,
+        hostLendsBrowser: options.browser !== undefined,
+        toolConstraints: allowlist,
+        readOnly: options.thread.executionPolicy === "plan",
+      }).status === "available"
+        ? [BROWSER_TOOL_DEFINITION]
+        : []),
       terminalDefinition,
       ...(options.apple === undefined ? [] : [appleDefinition]),
       ...(options.android === undefined ? [] : [androidDefinition]),

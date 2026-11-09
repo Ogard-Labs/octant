@@ -84,6 +84,7 @@ export const NIGHTLY_CLIENT_CHANNELS = {
   // Prepare to shut down moves threads through Octant's hub administration.
   prepareToShutDown: "octant-only",
   shutdownMovesOffered: "octant-only",
+  shutdownProgress: "octant-only",
   requestQuit: "octant-only",
   previewHandoff: "local",
   requestCodeOperationApproval: "local",

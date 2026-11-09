@@ -1,3 +1,4 @@
+export * from "./browserAgentAvailability";
 export * from "./questionnaire";
 export * from "./browserAutomationPolicy";
 export * from "./browserElementFeedback";

@@ -40,6 +40,7 @@ import {
   decodeHandoverControlRequest,
   decodeHandoverRequest,
   decodeShutdownChallengeRequest,
+  decodeShutdownHandoverRequest,
   decodeShutdownStartRequest,
   decodeThreadMoveChallengeRequest,
   decodeThreadMoveControlRequest,
@@ -322,6 +323,12 @@ export const HUB_ADMINISTRATION_OPERATIONS = {
     method: "POST",
     path: "/api/desktop/hub/thread-moves/shutdown/start",
     decodeBody: decodeShutdownStartRequest,
+  },
+  // Hand over for a Prepare to shut down row, for the whole host as the batch acts.
+  "shutdown-handover": {
+    method: "POST",
+    path: "/api/desktop/hub/thread-moves/shutdown/handover",
+    decodeBody: decodeShutdownHandoverRequest,
   },
   "shutdown-sizes": {
     method: "POST",

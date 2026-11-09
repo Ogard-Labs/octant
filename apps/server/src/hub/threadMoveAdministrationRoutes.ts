@@ -14,12 +14,14 @@ import {
   decodeHandoverControlRequest,
   decodeHandoverRequest,
   decodeShutdownChallengeRequest,
+  decodeShutdownHandoverRequest,
   decodeShutdownStartRequest,
   decodeThreadMoveChallengeRequest,
   decodeThreadMoveControlRequest,
   decodeThreadMoveSizesRequest,
   decodeThreadMoveStartRequest,
   decodeThreadMoveThreadRequest,
+  type HandoverOutcome,
   type MovedThreadReference,
 } from "@octant/contracts";
 import { isLoopbackHostname } from "../shellRoutes";
@@ -51,6 +53,7 @@ export const THREAD_MOVE_ADMINISTRATION_ROUTES = {
   shutdownListing: "/api/desktop/hub/thread-moves/shutdown/listing",
   shutdownChallenge: "/api/desktop/hub/thread-moves/shutdown/challenge",
   shutdownStart: "/api/desktop/hub/thread-moves/shutdown/start",
+  shutdownHandover: "/api/desktop/hub/thread-moves/shutdown/handover",
   shutdownSizes: "/api/desktop/hub/thread-moves/shutdown/sizes",
   // A Code thread that cannot move hands over through its branch.
   handoverPreview: "/api/desktop/hub/thread-moves/handover/preview",
@@ -163,6 +166,20 @@ export function createThreadMoveAdministrationRouteHandler(
           );
         case THREAD_MOVE_ADMINISTRATION_ROUTES.shutdownStart:
           return outcome(await options.moves.shutdownStart(decodeShutdownStartRequest(value)));
+        // Prepare to shut down hands over for the whole host, as its batch
+        // moves do, so it is not limited to threads this window shows; it
+        // hands over only what the listing offers Hand over for.
+        case THREAD_MOVE_ADMINISTRATION_ROUTES.shutdownHandover: {
+          const asked = decodeShutdownHandoverRequest(value);
+          const refusal = await options.moves.shutdownHandoverRefusal(asked);
+          if (refusal !== undefined) {
+            const refused: HandoverOutcome = { status: "refused", reason: refusal };
+            return outcome(refused);
+          }
+          return outcome(
+            await options.handovers.handOver(asked.thread, String(asked.destinationMemberId)),
+          );
+        }
         case THREAD_MOVE_ADMINISTRATION_ROUTES.shutdownSizes:
           return outcome(await options.moves.sizes(decodeThreadMoveSizesRequest(value)));
         case THREAD_MOVE_ADMINISTRATION_ROUTES.handoverPreview:
