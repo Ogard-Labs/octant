@@ -199,15 +199,16 @@ func fixedFolderInputPoint(_ target: AXUIElement, _ deadline: Date, _ admit: (AX
     if windowStatus == .success, let windowRaw, CFGetTypeID(windowRaw) == AXUIElementGetTypeID() {
         resolvedWindow = unsafeBitCast(windowRaw, to: AXUIElement.self)
     } else if windowStatus == .noValue, let expectedFieldRoot,
-              mode == "picker-fill-owned-location" || mode == "picker-go-owned-location" {
-        // The actual location field returned no AXWindow. Resolve only its
+              mode == "picker-fill-owned-location" || mode == "picker-go-owned-location" || mode == "picker-choose-owned-folder" {
+        // AppKit sheet controls can return no AXWindow. Resolve only their
         // already-proved owned root through parents, never a foreign service.
         var fieldRole: CFTypeRef?, fieldSubrole: CFTypeRef?
         let roleStatus = AXUIElementCopyAttributeValue(target, kAXRoleAttribute as CFString, &fieldRole)
         let subroleStatus = AXUIElementCopyAttributeValue(target, kAXSubroleAttribute as CFString, &fieldSubrole)
         fixedFolderNativeStatuses["windowFieldRole"] = roleStatus.rawValue
         fixedFolderNativeStatuses["windowFieldSubrole"] = subroleStatus.rawValue
-        guard roleStatus == .success, (fieldRole as? String) == "AXTextField",
+        let expectedRole = mode == "picker-choose-owned-folder" ? "AXButton" : "AXTextField"
+        guard roleStatus == .success, (fieldRole as? String) == expectedRole,
               subroleStatus == .success || subroleStatus == .noValue || subroleStatus == .attributeUnsupported,
               !["AXSearchField", "AXSecureTextField"].contains(fieldSubrole as? String ?? "") else { return nil }
         var cursor = target, visited = Set<CFHashCode>()
@@ -275,16 +276,17 @@ func fixedFolderInputPoint(_ target: AXUIElement, _ deadline: Date, _ admit: (AX
         fixedFolderGeometry["topFrameMatched"] = abs(frame.minX - windowFrame.minX) <= 2 && abs(frame.minY - windowFrame.minY) <= 2 &&
             abs(frame.width - windowFrame.width) <= 2 && abs(frame.height - windowFrame.height) <= 2
     }
-    // A location sheet's frame can differ from its attached root. Only the
-    // fixed field may use its independently proved inner sheet's frame.
-    if (mode == "picker-fill-owned-location" || mode == "picker-go-owned-location"), expectedFieldSheets.count == 2,
+    // A sheet's frame can differ from its attached root. Only a fixed control
+    // may use the frame of its independently proved direct parent sheet.
+    if ((mode == "picker-fill-owned-location" || mode == "picker-go-owned-location") && expectedFieldSheets.count == 2 ||
+        mode == "picker-choose-owned-folder" && expectedFieldSheets.count == 1),
        let expectedFieldRoot, CFEqual(window, expectedFieldRoot),
        fixedFolderGeometry["topFrameMatched"] as? Bool == false,
        (top?[kCGWindowOwnerPID as String] as? NSNumber)?.int32Value == processId,
        let values = top?[kCGWindowBounds as String] as? [String: Any], let topFrame = CGRect(dictionaryRepresentation: values as CFDictionary),
        fieldCurrent?() == true, Date() < deadline, ownedFixturePath() != nil,
        NSWorkspace.shared.frontmostApplication?.processIdentifier == processId, AXIsProcessTrusted(), CGPreflightPostEventAccess() {
-        let inner = expectedFieldSheets[0], outer = expectedFieldSheets[1]
+        let inner = expectedFieldSheets[0], outer = expectedFieldSheets[expectedFieldSheets.count - 1]
         var child = target
         for (index, sheet) in expectedFieldSheets.enumerated() {
             var pid: pid_t = 0, parent: CFTypeRef?, role: CFTypeRef?
@@ -1069,17 +1071,30 @@ if mode == "picker-metadata" || mode == "picker-location-prompt" || (fixesOwnedF
                                     }
                                 }
                             }
+                            func chooserPoint(_ target: AXUIElement) -> CGPoint? {
+                                guard let rootWindows = windows as? [AXUIElement], rootWindows.indices.contains(entry.windowIndex) else { return nil }
+                                return fixedFolderInputPoint(target, deadline, admitMetadataNode, rootWindows[entry.windowIndex], [sheet], {
+                                    var parent: CFTypeRef?, targetPid: pid_t = 0
+                                    guard ownedFixturePath() == fixturePath, identitiesUnchanged(), associationUnchanged(),
+                                          let fresh = focusInSheet(), onlyOriginalSheet(fresh),
+                                          AXUIElementGetPid(target, &targetPid) == .success, targetPid == processId,
+                                          AXUIElementCopyAttributeValue(target, kAXParentAttribute as CFString, &parent) == .success,
+                                          let parent = axNode(parent), CFEqual(parent, sheet),
+                                          fixedFolderButtonEnabled(target), errors == priorErrors else { return false }
+                                    return true
+                                })
+                            }
                             if mode == "picker-choose-owned-folder", controlsComplete, cancelButtons == 1, chooserButtons == 1,
                                enabledChooserTargets.count == 1, let target = enabledChooserTargets.first,
                                let focus = focusInSheet(), onlyOriginalSheet(focus), associationUnchanged(),
                                fixedFolderButtonEnabled(target),
-                               let point = fixedFolderInputPoint(target, deadline, admitMetadataNode),
+                               let point = chooserPoint(target),
                                let down = CGEvent(mouseEventSource: nil, mouseType: .leftMouseDown, mouseCursorPosition: point, mouseButton: .left),
                                let up = CGEvent(mouseEventSource: nil, mouseType: .leftMouseUp, mouseCursorPosition: point, mouseButton: .left),
                                ownedFixturePath() == fixturePath, let finalFocus = focusInSheet(), onlyOriginalSheet(finalFocus),
                                associationUnchanged(), errors == priorErrors, fixedFolderButtonEnabled(target),
                                fixedLabel(target, kAXTitleAttribute as CFString, "Open") || fixedLabel(target, kAXTitleAttribute as CFString, "Choose"),
-                               errors == priorErrors, fixedFolderInputPoint(target, deadline, admitMetadataNode) == point,
+                               errors == priorErrors, chooserPoint(target) == point,
                                identitiesUnchanged(), errors == priorErrors {
                                 down.post(tap: .cghidEventTap); up.post(tap: .cghidEventTap)
                                 fixedFolder["chooserDispatched"] = true; fixedFolder["status"] = "dispatched"
