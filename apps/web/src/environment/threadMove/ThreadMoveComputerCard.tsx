@@ -617,11 +617,13 @@ function MovedNotice(props: {
   return (
     <OctantAlert title={`Moved to ${props.departed.destinationName}`} tone="neutral">
       Moved at {time}.
-      {props.departed.keptWorktree === undefined
-        ? props.departed.changesRemainInCheckout
-          ? " Its changes also remain in this Project's checkout."
-          : null
-        : ` Its worktree held files that stayed here, so it was kept at ${props.departed.keptWorktree}.`}
+      {props.departed.keptWorktree !== undefined
+        ? ` Its worktree held files that stayed here, so it was kept at ${props.departed.keptWorktree}.`
+        : props.departed.keptFolder !== undefined
+          ? ` Its folder held files that stayed here, so it was kept at ${props.departed.keptFolder}.`
+          : props.departed.changesRemainInCheckout
+            ? " Its changes also remain in this Project's checkout."
+            : null}
       {leftBehind === undefined ? null : ` ${leftBehind}`}
     </OctantAlert>
   );
@@ -766,9 +768,7 @@ function ThreadMoveSheet(props: {
               <PartSize kinds={["git-bundle"]} sizes={sizes} />
             </li>
           ) : null}
-          {props.thread.mode === "work" ? (
-            <li>Only the thread: the files in its folder stay on this computer</li>
-          ) : null}
+          {props.thread.mode === "work" ? <WorkFilesRow sizes={sizes} /> : null}
         </ul>
         <p className="thread-move-sheet__total">
           {sizes === "measuring"
@@ -790,6 +790,12 @@ function ThreadMoveSheet(props: {
           {props.thread.mode === "code" ? (
             <li>
               Ignored files, such as build output and .env files, and any file holding a secret
+            </li>
+          ) : null}
+          {props.thread.mode === "work" ? (
+            <li>
+              From its folder: ignored files, links, and any file holding a secret. The folder stays
+              here with them.
             </li>
           ) : null}
         </ul>
@@ -1156,5 +1162,35 @@ function PartSize(props: {
           ? "None"
           : "Size unknown"}
     </span>
+  );
+}
+
+/**
+ * A Work thread's folder row. The host measures a folder's files only when
+ * the thread is its sole user, so a measured size without them means the
+ * folder is shared and stays; until the size arrives the row says the rule.
+ */
+function WorkFilesRow(props: { readonly sizes: ThreadMoveSizes | "measuring" | "unknown" }) {
+  const size = typeof props.sizes === "string" ? undefined : props.sizes.rows[0]?.size;
+  if (size === undefined || size.status === "unknown") {
+    return <li>The files in its own folder, unless the Project or another thread shares it</li>;
+  }
+  // A folder whose files could not be sized is still the thread's own.
+  const ownFolder =
+    size.parts.some((part) => part.kind === "work-files") ||
+    (size.status === "partly-measured" && size.unknownParts.includes("work-files"));
+  if (!ownFolder) {
+    return (
+      <li>
+        Only the thread: its folder is shared with the Project or another thread, so the files stay
+        on this computer
+      </li>
+    );
+  }
+  return (
+    <li>
+      <span>The files in its own folder</span>
+      <PartSize kinds={["work-files"]} sizes={props.sizes} />
+    </li>
   );
 }

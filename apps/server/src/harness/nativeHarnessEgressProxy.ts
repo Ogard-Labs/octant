@@ -174,6 +174,14 @@ export interface ToolEgressProxyOptions {
    * decider allows.
    */
   readonly authentication?: "launch-token" | "none";
+  /**
+   * A second body line for a refusal a person can lift, saying where. The
+   * first line stays the machine-readable reason, which callers parse.
+   */
+  readonly refusalHint?: {
+    readonly reasons: ReadonlySet<ToolEgressRefusalReason>;
+    readonly text: string;
+  };
 }
 
 /**
@@ -1147,10 +1155,13 @@ export class ToolEgressProxy {
       );
       return;
     }
+    const hint = this.#options.refusalHint;
     respond(
       socket,
       403,
       `octant-egress-refused: ${reason} ${destination.host}:${String(destination.port)}`,
+      undefined,
+      hint !== undefined && hint.reasons.has(reason) ? hint.text : undefined,
     );
   }
 
@@ -1320,8 +1331,9 @@ function respond(
   status: ProxyFailureStatus,
   line: string,
   extraHeader?: string,
+  hint?: string,
 ): void {
-  const body = `${line}\n`;
+  const body = hint === undefined ? `${line}\n` : `${line}\n${hint}\n`;
   const head = [
     `HTTP/1.1 ${String(status)} ${STATUS_TEXT[status]}`,
     "Content-Type: text/plain; charset=utf-8",

@@ -1051,20 +1051,30 @@ export function makeCodexProcessLive(options: CodexProcessOptions = {}): CodexPr
             const appServerEnvironment =
               launchEnvironment ?? codexProcessEnvironment(binaryPath, process.env);
             const runtimePolicy = authority.kind === "thread" ? authority.executionPolicy : "plan";
+            const keepsSandbox =
+              runtimePolicy === "full-access" &&
+              authority.kind === "thread" &&
+              authority.fullAccessSandbox === true;
+            // Full access that keeps the sandbox stays inside Octant's profile,
+            // so its network is held as Accept edits' is, as Claude's sandbox
+            // asks for it; open Full access gets no proxy.
             const network =
-              runtimePolicy === "full-access"
+              runtimePolicy === "full-access" && !keepsSandbox
                 ? undefined
                 : yield* acquireProviderRuntimeNetwork(options.runtimeNetwork, {
                     runtime: "codex",
                     root: authority.kind === "thread" ? authority.root : "",
-                    executionPolicy: runtimePolicy,
+                    executionPolicy: keepsSandbox ? "auto-accept-edits" : runtimePolicy,
                     environment: appServerEnvironment,
                   });
             const servers =
               authority.kind === "thread"
                 ? yield* acquireProviderServerAccess(options.serverAccess, {
                     root: authority.root,
-                    executionPolicy: runtimePolicy,
+                    // Inside Octant's profile the person's own SSH setup is
+                    // out of reach, so a sandboxed launch gets the server
+                    // folder the guarded levels get.
+                    executionPolicy: keepsSandbox ? "auto-accept-edits" : runtimePolicy,
                   })
                 : undefined;
             const prepared = prepareCodexLaunch({

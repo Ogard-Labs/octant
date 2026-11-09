@@ -80,6 +80,12 @@ export interface PiConfinementPort {
     readonly resume?: boolean;
     readonly mode: PiSessionMode;
     readonly executionPolicy: ProviderExecutionPolicy;
+    /**
+     * A Full access thread that keeps the sandbox: approvals stay off as at
+     * Full access, but the launch takes the wall, network and server access
+     * Accept edits has. Absent, Full access launches unwrapped.
+     */
+    readonly fullAccessSandbox?: boolean;
     readonly environment: NodeJS.ProcessEnv;
     readonly tools?: ReadonlyArray<ProviderToolDefinition>;
     readonly toolBridge?: PiManagedToolBridgeConfig;
@@ -106,6 +112,12 @@ export interface PiProcessPort {
     readonly resume?: boolean;
     readonly mode: PiSessionMode;
     readonly executionPolicy: ProviderExecutionPolicy;
+    /**
+     * A Full access thread that keeps the sandbox: approvals stay off as at
+     * Full access, but the launch takes the wall, network and server access
+     * Accept edits has. Absent, Full access launches unwrapped.
+     */
+    readonly fullAccessSandbox?: boolean;
     /** The Pi provider the thread's model runs on; only its credentials reach the process. */
     readonly modelProvider?: string;
     readonly onProcessStarted?: ProviderProcessStartedListener;
@@ -334,6 +346,20 @@ export function piProcessEnvironment(
     ...sanitized,
     PATH: [...new Set(searched)].join(delimiter),
   };
+}
+
+/**
+ * The posture Pi's wall is built for. A Full access thread that keeps the
+ * sandbox is confined as Accept edits is (writes held to the Project, shell
+ * allowed, guarded network); its approvals and tools stay Full access's.
+ */
+function piWallPolicy(input: {
+  readonly executionPolicy: ProviderExecutionPolicy;
+  readonly fullAccessSandbox?: boolean;
+}): ProviderExecutionPolicy {
+  return input.executionPolicy === "full-access" && input.fullAccessSandbox === true
+    ? "auto-accept-edits"
+    : input.executionPolicy;
 }
 
 export function piArguments(
@@ -615,7 +641,8 @@ export function makePiConfinementLive(options: PiConfinementOptions = {}): PiCon
           tools.map((tool) => tool.name),
           resumePath,
         );
-        if (input.executionPolicy === "full-access") {
+        const wall = piWallPolicy(input);
+        if (wall === "full-access") {
           return { command: input.binaryPath, args, cwd: root, environment };
         }
         const temporaryDirectoryPath = yield* temporaryDirectory(
@@ -631,7 +658,7 @@ export function makePiConfinementLive(options: PiConfinementOptions = {}): PiCon
             ? materializeOsNetworkEgress(
                 resolveProviderRuntimeEgressPolicy({
                   mode: input.mode,
-                  executionPolicy: input.executionPolicy,
+                  executionPolicy: wall,
                 }),
               )
             : ({ kind: "proxied", endpoint: input.network.endpoint } as const);
@@ -815,19 +842,20 @@ export function makePiProcessLive(options: PiProcessOptions = {}): PiProcessPort
             input.executionPolicy === "full-access" ? "disabled" : "enabled",
             input.modelProvider,
           );
+          const wall = piWallPolicy(input);
           const network =
-            input.executionPolicy === "full-access"
+            wall === "full-access"
               ? undefined
               : yield* acquireProviderRuntimeNetwork(options.runtimeNetwork, {
                   runtime: "pi",
                   root: input.root,
-                  executionPolicy: input.executionPolicy,
+                  executionPolicy: wall,
                   loopbackPorts: loopbackPortOf(input.toolBridge),
                   environment: baseEnvironment,
                 });
           const servers = yield* acquireProviderServerAccess(options.serverAccess, {
             root: input.root,
-            executionPolicy: input.executionPolicy,
+            executionPolicy: wall,
           });
           const launch = yield* confinement.prepare({
             ...input,

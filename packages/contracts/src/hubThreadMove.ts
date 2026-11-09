@@ -71,7 +71,10 @@ export type HandoverAgentSummary = typeof HandoverAgentSummary.Type;
 /**
  * What a move carries. `index-snapshot` and `working-tree-snapshot` travel
  * inside the Git bundle as two commits, because one commit holds one tree and
- * a file staged at one version and edited again holds two.
+ * a file staged at one version and edited again holds two. `work-files` holds
+ * the files of a Work thread's own folder in one part; the thread bundle's
+ * file list gives each file its own size and digest, so the offer stays one
+ * manifest row however many files the folder holds.
  */
 export const ThreadMovePartKind = Schema.Literal(
   "thread-bundle",
@@ -81,6 +84,7 @@ export const ThreadMovePartKind = Schema.Literal(
   "browser-capture",
   "canvas",
   "git-bundle",
+  "work-files",
 );
 export type ThreadMovePartKind = typeof ThreadMovePartKind.Type;
 
@@ -546,8 +550,15 @@ export const ThreadMoveDeparture = Schema.Struct({
   /** A worktree moved out of the managed folder because it held what the move did not carry. */
   keptWorktree: Schema.optional(bounded(4_096)),
   /**
-   * What the kept worktree held that the move did not carry, relative to it:
-   * the first `KEPT_FILES_LISTED`, with `keptFileCount` counting them all.
+   * A Work thread's own folder, left where it is because it held what the
+   * move did not carry. It is the person's folder, so nothing offers to
+   * remove it.
+   */
+  keptFolder: Schema.optional(bounded(4_096)),
+  /**
+   * What the kept worktree or folder held that the move did not carry,
+   * relative to it: the first `KEPT_FILES_LISTED`, with `keptFileCount`
+   * counting them all.
    */
   keptFiles: Schema.optional(Schema.Array(KeptFilePath).pipe(Schema.maxItems(KEPT_FILES_LISTED))),
   keptFileCount: Schema.optional(NonNegativeInt),

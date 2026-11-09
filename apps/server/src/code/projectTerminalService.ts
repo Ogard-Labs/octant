@@ -141,7 +141,7 @@ export interface ProjectTerminalServiceOptions {
   readonly clock: () => string;
   readonly shell?: string;
   /**
-   * A Code Project on a registered server, which the local catalog never
+   * A Work or Code Project on a registered server, which the local catalog never
    * holds. Absent for every local Project.
    */
   readonly serverProject?: (projectId: ProjectId) => ServerProjectTerminalTarget | undefined;
@@ -149,8 +149,11 @@ export interface ProjectTerminalServiceOptions {
 
 /** Where a server Project's terminal logs in. Canonical: docs/design/server-projects.md § Threads. */
 export interface ServerProjectTerminalTarget {
-  /** Work server Projects expose saved actions, not a general interactive shell. */
-  readonly actionsOnly?: true;
+  readonly mode: "code" | "work";
+  /** Only a person's Work shell depends on this presentation choice. */
+  readonly interactiveAllowed?: boolean;
+  /** The captured Work binding and registered server still identify the same login. */
+  readonly current?: () => boolean;
   /** Derived from the Project, server, and folder, so a rebound Project ends its shells. */
   readonly bindingRevisionId: BindingRevisionId;
   /** The login now, or undefined once its server left the registry. */
@@ -167,7 +170,8 @@ interface Owner {
   /** Set once the end is journaled, so an exit racing a stop is recorded once. */
   ended: boolean;
   readonly action?: ActionReceipt;
-  readonly actionAuthorized?: () => boolean;
+  readonly authorized?: () => boolean;
+  readonly serverWorkShell?: true;
   uncertainty?: "server-transport-lost" | "server-stop-unconfirmed";
 }
 
@@ -202,6 +206,15 @@ export class ProjectTerminalService {
   readonly #options: ProjectTerminalServiceOptions;
   readonly #actor: EventActorValue;
   readonly #owners = new Map<string, Owner>();
+  readonly #startingServerWork = new Map<
+    string,
+    {
+      readonly windowId: WindowId;
+      readonly projectId: ProjectId;
+      readonly current: () => boolean;
+      cancelled: boolean;
+    }
+  >();
 
   constructor(options: ProjectTerminalServiceOptions) {
     this.#options = options;
@@ -250,6 +263,25 @@ export class ProjectTerminalService {
 
     const owner = this.#owners.get(String(command.terminalId));
     if (owner === undefined) {
+      const starting = this.#startingServerWork.get(String(command.terminalId));
+      if (starting !== undefined && command.kind === "stop") {
+        if (
+          String(starting.windowId) !== String(windowId) ||
+          String(starting.projectId) !== String(command.projectId)
+        )
+          return refused("unauthorized", "This terminal belongs to another window or Project.");
+        starting.cancelled = true;
+        return {
+          kind: "project-terminal",
+          terminal: {
+            projectId: command.projectId,
+            terminalId: command.terminalId,
+            state: "interrupted",
+            posture: "full-access",
+            uncertainty: "server-stop-unconfirmed",
+          },
+        };
+      }
       return refused("unavailable", "This terminal is not running on this host.");
     }
     if (
@@ -258,9 +290,9 @@ export class ProjectTerminalService {
     ) {
       return refused("unauthorized", "This terminal belongs to another window or Project.");
     }
-    if (owner.actionAuthorized?.() === false) {
+    if (owner.authorized?.() === false) {
       await this.#end(command.terminalId, owner, "authority-revoked");
-      return refused("authority-revoked", "This task no longer authorizes its action.");
+      return refused("authority-revoked", "This terminal's authority changed.");
     }
     const authority = this.#authority(windowId, command.projectId);
     if (authority.kind === "refused") {
@@ -281,7 +313,11 @@ export class ProjectTerminalService {
         case "read-output":
           return this.#view(command.terminalId, owner, command.afterCharacters);
         case "write":
-          if (authority.kind === "allowed-on-server" && authority.server.actionsOnly === true)
+          if (
+            owner.action !== undefined &&
+            authority.kind === "allowed-on-server" &&
+            authority.server.mode === "work"
+          )
             return refused(
               "unavailable",
               "Work server actions do not accept interactive terminal input.",
@@ -396,6 +432,7 @@ export class ProjectTerminalService {
       owner !== undefined &&
       String(owner.windowId) === String(windowId) &&
       String(owner.projectId) === String(projectId) &&
+      owner.authorized?.() !== false &&
       this.#authority(windowId, projectId).kind !== "refused"
     );
   }
@@ -406,10 +443,12 @@ export class ProjectTerminalService {
    * the journal commits a Project lifecycle or binding change, so a shell does
    * not keep running in a folder the Project no longer names.
    */
-  async settleActionAuthorities(): Promise<void> {
+  async settleAuthorities(): Promise<void> {
+    for (const starting of this.#startingServerWork.values())
+      if (!starting.current()) starting.cancelled = true;
     await Promise.allSettled(
       [...this.#owners.values()]
-        .filter((owner) => !owner.ended && owner.actionAuthorized?.() === false)
+        .filter((owner) => !owner.ended && owner.authorized?.() === false)
         .map((owner) => this.#end(owner.terminalId, owner, "authority-revoked")),
     );
   }
@@ -770,14 +809,32 @@ export class ProjectTerminalService {
     command: Extract<ProjectTerminalCommand, { readonly kind: "start" }>,
     authority: Extract<Authority, { readonly kind: "allowed-on-server" }>,
   ): Promise<ProjectTerminalResult> {
-    if (authority.server.actionsOnly === true)
+    const work = authority.server.mode === "work";
+    if (work && authority.server.interactiveAllowed !== true)
       return refused(
         "unavailable",
-        "This Work server Project offers saved actions, not a general Project terminal.",
+        "Turn on this Work Project's Developer tools to open your terminal.",
       );
-    if (command.folder !== undefined) {
+    if (command.folder !== undefined || (work && command.workThreadId !== undefined)) {
       return refused("unavailable", "That folder is not one of this Project's folders.");
     }
+    if (this.#startingServerWork.has(String(command.terminalId)))
+      return refused("unavailable", "This terminal is already starting.");
+    let cancelled = false;
+    const current = () => {
+      const fresh = this.#authority(windowId, command.projectId);
+      return (
+        !cancelled &&
+        this.#startingServerWork.get(String(command.terminalId))?.cancelled !== true &&
+        fresh.kind === "allowed-on-server" &&
+        fresh.server.mode === "work" &&
+        fresh.server.interactiveAllowed === true &&
+        authority.server.current?.() === true &&
+        String(fresh.bindingRevisionId) === String(authority.bindingRevisionId)
+      );
+    };
+    if (work && !current())
+      return refused("authority-revoked", "This Work Project's server or window binding changed.");
     const login = authority.server.login();
     if (login === undefined) {
       return refused(
@@ -785,6 +842,13 @@ export class ProjectTerminalService {
         "This Project's server is not registered. Register it again in Settings › Access › Servers.",
       );
     }
+    if (work)
+      this.#startingServerWork.set(String(command.terminalId), {
+        windowId,
+        projectId: command.projectId,
+        current,
+        cancelled: false,
+      });
     try {
       await this.#options.terminals.launch({
         terminalId: String(command.terminalId),
@@ -796,11 +860,24 @@ export class ProjectTerminalService {
         rows: command.rows,
         credentialReferences: [],
         server: login,
+        ...(work ? { admit: current } : {}),
       });
+      return await this.#own(
+        windowId,
+        command,
+        authority.bindingRevisionId,
+        "full-access",
+        undefined,
+        false,
+        work ? current : undefined,
+        work,
+      );
     } catch {
       return refused("unavailable", "The terminal could not start.");
+    } finally {
+      cancelled = this.#startingServerWork.get(String(command.terminalId))?.cancelled === true;
+      this.#startingServerWork.delete(String(command.terminalId));
     }
-    return this.#own(windowId, command, authority.bindingRevisionId, "full-access");
   }
 
   async #startServerAction(
@@ -884,7 +961,8 @@ export class ProjectTerminalService {
     posture: ProjectTerminalPosture,
     action?: ActionReceipt,
     recorded = false,
-    actionAuthorized?: () => boolean,
+    authorized?: () => boolean,
+    serverWorkShell = false,
   ): Promise<ProjectTerminalResult> {
     const owner: Owner = {
       terminalId: command.terminalId,
@@ -895,7 +973,8 @@ export class ProjectTerminalService {
       stopObserving: undefined,
       ended: false,
       ...(action === undefined ? {} : { action }),
-      ...(actionAuthorized === undefined ? {} : { actionAuthorized }),
+      ...(authorized === undefined ? {} : { authorized }),
+      ...(serverWorkShell ? { serverWorkShell: true } : {}),
     };
     try {
       if (!recorded)
@@ -920,7 +999,10 @@ export class ProjectTerminalService {
       (emission) => {
         if (emission.snapshot.status === "running" || owner.ended) return;
         owner.ended = true;
-        if (owner.action?.server !== undefined && emission.snapshot.exitCode === 255)
+        if (
+          (owner.action?.server !== undefined || owner.serverWorkShell) &&
+          emission.snapshot.exitCode === 255
+        )
           owner.uncertainty = "server-transport-lost";
         owner.stopObserving?.();
         this.#safeJournalEnded(
@@ -937,7 +1019,10 @@ export class ProjectTerminalService {
     const snapshot = this.#options.terminals.readSince(String(command.terminalId), 0).snapshot;
     if (snapshot.status !== "running" && !owner.ended) {
       owner.ended = true;
-      if (owner.action?.server !== undefined && snapshot.exitCode === 255)
+      if (
+        (owner.action?.server !== undefined || owner.serverWorkShell) &&
+        snapshot.exitCode === 255
+      )
         owner.uncertainty = "server-transport-lost";
       this.#safeJournalEnded(
         command.projectId,
@@ -947,9 +1032,12 @@ export class ProjectTerminalService {
       );
     }
     if (owner.ended) owner.stopObserving?.();
-    if (owner.actionAuthorized?.() === false && !owner.ended) {
+    if (owner.authorized?.() === false && !owner.ended) {
       await this.#end(command.terminalId, owner, "authority-revoked");
-      return refused("authority-revoked", "This task changed while its action was starting.");
+      return refused(
+        "authority-revoked",
+        "This terminal's authority changed while it was starting.",
+      );
     }
     // The launch awaited the process receipt, and an archive or relink that
     // committed meanwhile settled the Project before this shell had an owner
@@ -1023,7 +1111,8 @@ export class ProjectTerminalService {
 
   async #end(terminalId: CodeTerminalId, owner: Owner, reason: ProjectTerminalEndReason) {
     if (owner.ended) return;
-    if (owner.action?.server !== undefined) owner.uncertainty = "server-stop-unconfirmed";
+    if (owner.action?.server !== undefined || owner.serverWorkShell)
+      owner.uncertainty = "server-stop-unconfirmed";
     owner.ended = true;
     owner.stopObserving?.();
     let snapshot: TerminalSnapshot | undefined;

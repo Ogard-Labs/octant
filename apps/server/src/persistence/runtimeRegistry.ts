@@ -11,6 +11,10 @@ import {
   PendingQuestionDeferral,
 } from "@octant/contracts/pending-requests";
 import {
+  OWNER_APPROVAL_AUDIT_EVENT,
+  OwnerApprovalAuditRecord,
+} from "@octant/contracts/owner-approvals";
+import {
   BROWSER_SESSION_EVENT_NAMES,
   BrowserSessionGranted,
   BrowserSessionRevoked,
@@ -744,6 +748,7 @@ export function createPhase1RuntimeRegistries(): Phase1RuntimeRegistries {
     .register(TERMINAL_BROWSER_GRANT_EVENT_NAMES.revoked, 1, TerminalBrowserGrantRevoked)
     .register(HUB_MEMBERSHIP_CHANGED, 1, HubMembershipChangedPayload)
     .register(OWNER_BROWSER_AUDIT_EVENT, 1, OwnerBrowserAuditRecord)
+    .register(OWNER_APPROVAL_AUDIT_EVENT, 1, OwnerApprovalAuditRecord)
     .register(HUB_DELEGATION_RECORDED, 1, HubDelegationRecordedPayload)
     .register(REMOTE_SERVER_GRANT_OPENED, 1, RemoteServerGrantOpenedPayload)
     .register(REMOTE_SERVER_GRANT_CLOSED, 1, RemoteServerGrantClosedPayload)

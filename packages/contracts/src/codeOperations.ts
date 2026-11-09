@@ -1,3 +1,4 @@
+import { OwnerUnlockPrincipal } from "./hubAndSpokes";
 import { ConversationInputReceipt, ConversationInputPolicy } from "./conversationInputs";
 import { Questionnaire } from "./questionnaire";
 import { SideChatDraftReturnReferences } from "./sideChatReturn";
@@ -1772,6 +1773,13 @@ export const MAX_CODE_QUESTION_PROMPT_BYTES = 8 * 1024;
 export const CodeQuestionPromptText = boundedNonEmptyText(MAX_CODE_QUESTION_PROMPT_BYTES);
 export const CodeQuestionOptionText = boundedNonEmptyText(1_024);
 export const MAX_CODE_QUESTION_OPTIONS = 32;
+const OwnerApprovalSettledEvent = Schema.Struct({
+  kind: Schema.Literal("owner-approval-settled"),
+  approvalId: CodeApprovalId,
+  outcome: Schema.Literal("approved", "denied", "uncertain"),
+  actingPrincipal: OwnerUnlockPrincipal,
+}).annotations(strict);
+
 const ApprovalEvent = Schema.Struct({
   kind: Schema.Literal("approval-requested"),
   approvalId: CodeApprovalId,
@@ -2164,6 +2172,7 @@ export const CodeOperationEvent = Schema.Union(
   TerminalStateChangedEvent,
   ToolEvent,
   ApprovalEvent,
+  OwnerApprovalSettledEvent,
   ApprovalReviewedEvent,
   QuestionEvent,
   FileChangeEvent,

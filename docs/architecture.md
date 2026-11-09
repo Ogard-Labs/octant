@@ -1342,9 +1342,11 @@ starts a Code session at the same level, and a Work turn journals `shell` and
   is set only from a window on this host; a paired device is refused. It
   shows the Project terminal and Project actions, the developer surfaces Work
   has today; no thread's authority reads it. A server Work Project's separately
-  journaled choice exposes saved actions only in Settings and the active
-  header/palette, without enabling a general terminal; [Server Projects](design/server-projects.md#threads)
-  owns that narrower surface.
+  journaled choice exposes saved actions in Settings and the active
+  header/palette, plus the person's Project terminal in the bound Settings
+  row. Hiding it closes that person's SSH session without changing task or
+  already admitted saved-action authority; [Server Projects](design/server-projects.md#threads)
+  owns that surface and its lifecycle.
 
 An ACP agent whose shell runs in-process with no protocol request reports
 `unsupported` at Guarded and Reviewed and runs only at Full access, in Work as
@@ -9180,22 +9182,40 @@ proofs that suite already holds:
 
 ### Provider runtime network
 
-**Status: built on macOS and Linux, behind the Network limits switch, off by default (maintainer request, 2026-10-31; Linux, Claude's own process, and the composed reviewer 2026-11-01).** The decision is
+**Status: built on macOS and Linux, behind the Network limits switch, on by default for sandboxed runtimes (maintainer request, 2026-10-31; Linux, Claude's own process, and the composed reviewer 2026-11-01; on by default, 2026-11-09).** The decision is
 `decideProviderRuntimeEgress` in `packages/domain/src/safeNetworkPolicy.ts`,
 the places and records are in `packages/contracts/src/safeNetworks.ts`, and
 the host side is `apps/server/src/network/` (`providerRuntimeNetwork.ts`,
 `safeNetworkStore.ts`, `safeNetworkRoutes.ts`), composed in
 `wiring/runtimeNetwork.ts`. On Linux OpenCode keeps open network (below).
 
-**Network limits ship off.** No real provider turn has run through the proxy
-yet, and a runtime that ignores the proxy settings would lose all its
-network, so the proxy is behind a host setting, Settings › Access › Network
-limits, off by default. The switch is journaled whole as
+**Network limits ship on, for sandboxed runtimes only.** The proxy is behind
+a host setting, Settings › Access › Network limits, which reads on until a
+person turns it off (maintainer request, 2026-11-09: "network limits on by
+default — only if sandbox is enabled though"). It applies only where the
+runtime runs inside Octant's sandbox: the guarded levels, and Full access
+when the thread keeps the sandbox. Full access without the sandbox stays
+open network whatever the switch says. A host that recorded a choice keeps
+it: the default applies only while no `safe-networks.limits-set@1` exists,
+so a host that turned limits off before this change stays off, and one that
+never touched the switch starts limiting from its next runtime launch. The
+risk is a workflow that reaches a host nobody approved (a private registry,
+an internal API); the proxy's refusal names the host and says to trust it
+under Recently refused in Settings › Access › Safe networks, and turning
+the switch off restores open network. The switch also governs what Octant
+Harness commands may add to their own rules, which they follow either way:
+with it on, a command on an untainted thread also reaches the person's safe
+places and, at Auto, Octant Shield may allow an unlisted host for one call
+([harness tool egress rules](#harness-tool-egress-rules)). For commands, on
+is the wider setting. The switch is journaled whole as
 `safe-networks.limits-set@1` (on its own fixed aggregate id under
 `safe-networks`), changes only from a local window, and replays at startup.
 `ProviderRuntimeNetwork.start` reads it at each launch: off, it answers
 `open` for every runtime (open network as before, and Claude's sandbox without
-the proxy port); on, it does what follows. A change therefore applies to the
+the proxy port); on, it does what follows. A Full access launch answers
+`open` either way; a Full access thread that keeps the sandbox asks with the
+Accept edits posture its wall has (`auto-accept-edits`), so it is held and
+journaled as that level is. A change therefore applies to the
 next launch and never moves a running runtime. Safe networks stay editable
 either way, and `SafeNetworksView.limitsOn` lets the page say which it is.
 Everything below describes limits on.
@@ -9204,7 +9224,19 @@ Everything below describes limits on.
 endpoints, the loopback ports its own launch serves Octant's tools on, the
 hosts its Project's egress rules allow, and the places the person trusts in
 Settings › Access, and nothing else. `provider-endpoints-only` finally means
-that for the runtime process too. Full access stays open network.
+that for the runtime process too. Full access stays open network, except a
+thread that keeps the sandbox, which is held as the guarded levels are
+(Codex, whose app-server takes the proxy inside Octant's profile, Claude
+Code's own process and command sandbox, and Pi inside the Accept edits wall;
+the runtimes that cannot keep the sandbox refuse such a thread). A refused request gets a 403 whose
+first body line stays the machine-readable `octant-egress-refused: <reason>
+<host>:<port>`; for a refusal a person can lift (`no-rule`, `expired`,
+`ip-literal`, `private-destination`) a second line says to choose Trust
+beside it under Recently refused in Settings › Access › Safe networks. No
+host is allowed by default beyond the provider's own endpoints: a package
+registry or the Project's Git remote over HTTPS needs a Project egress rule
+or a safe network. Which hosts an ordinary Code turn reaches has not been
+measured on a live turn yet; that measurement is a maintainer check.
 
 **Where it applies.** Every wrapped runtime below Full access, Plan and Chat
 included: OpenCode, ACP agents, Pi, and the Codex app-server, each launch
@@ -11159,16 +11191,25 @@ mechanisms are:
       both its process and command sandbox resolve guarded egress when Network
       limits are on. The admitted session keeps this choice until it ends,
       including when resumed. Plan and credential confirmation are unchanged.
-      ACP agents, OpenCode, and Pi launch unwrapped at Full access, so a sandboxed thread on one of
+      Pi launches inside the wall Accept edits has (writes held to the
+      Project and its extra folders, shell allowed, guarded network and
+      server access) with its approvals still off and its Full access tools,
+      so nothing prompts (`piWallPolicy`); a runtime started open never
+      serves a sandboxed session, nor the reverse. Verified by a process test
+      that the sandboxed launch is wrapped and the open one is not; a real
+      Seatbelt run and a live Pi turn are maintainer checks.
+      ACP agents and OpenCode launch unwrapped at Full access, so a sandboxed thread on one of
       them refuses to start with a plain message
       (`refusesFullAccessSandbox`, checked before each Code and Work turn)
       rather than running open.
     - **Network.** The thread resolves the egress the guarded levels resolve
       (`provider-endpoints-only`). Commands are held to the provider
-      endpoints and approved hosts only where the host routes them through
-      its egress proxy, which today is behind the Network limits switch
-      ([provider runtime network](#provider-runtime-network)); without it
-      the OS rule is `allow`, as at the guarded levels.
+      endpoints and approved hosts where the host routes them through its
+      egress proxy: Codex's app-server, Claude Code and Pi ask for the
+      runtime proxy with the Accept edits posture, and Harness commands run
+      on their own proxy. The runtime's proxy follows the Network limits switch, which
+      ships on ([provider runtime network](#provider-runtime-network)); with
+      the switch off the OS rule is `allow`, as at the guarded levels.
     - **Helpers.** A helper run carries a posture, not the parent's sandbox
       choice, so a helper of a sandboxed Full access Code thread runs at
       Accept edits: inside the same wall, its commands asking.
@@ -11813,8 +11854,8 @@ approval-gated` command that undoes it. The terminal shows no one-time
   a host allowlist, so on macOS the runtime runs on `proxied` under the
   [provider runtime network](#provider-runtime-network): its OS rules reach
   only its own listener, which allows the provider's endpoints, the Project's
-  rules, and the person's safe networks, once the person turns Network limits
-  on (they ship off). On Linux, while the limits are off, and wherever the host
+  rules, and the person's safe networks, while Network limits are on (they
+  ship on). On Linux, while the limits are off, and wherever the host
   does not route runtimes, `provider-endpoints-only` still materializes as plain OS
   network `allow` (`materializeOsNetworkEgress`). Native-harness commands run
   on `proxied` under the [harness tool egress rules](#harness-tool-egress-rules)
@@ -11848,7 +11889,8 @@ approval-gated` command that undoes it. The terminal shows no one-time
   changes who answers, not the sandbox. At Full access no runtime keeps its
   own sandbox: Claude Code runs `bypassPermissions` and Codex
   `danger-full-access` (built), and OpenCode, ACP agents, Pi, and the Octant
-  Harness run without Octant's OS sandbox, unwrapped (built). Nothing nests,
+  Harness run without Octant's OS sandbox, unwrapped (built), unless the
+  thread keeps the sandbox ([Opt-in sandbox at Full access](#security-and-authority)). Nothing nests,
   so a program that applies a Seatbelt profile of its own works. Plan's read-only enforcement is the same at every level.
 
   A Work thread launches exactly as a Code thread at the same level would
@@ -11858,10 +11900,11 @@ approval-gated` command that undoes it. The terminal shows no one-time
 
   - **ACP, OpenCode, Pi:** wrapped at Guarded and Reviewed, with
     process exec and fork allowed and writes held to the Project root, so the
-    shell runs confined; unwrapped at Full access, with no sandbox. Egress at Guarded and Reviewed is
+    shell runs confined; unwrapped at Full access, with no sandbox, except
+    Pi for a thread that keeps the sandbox, which takes the Accept edits wall. Egress at Guarded and Reviewed is
     the provider's endpoints, the Project's egress rules, and the person's
     safe networks rather than a blanket `allow` (built on macOS, behind the
-    Network limits switch, which ships off;
+    Network limits switch, which ships on;
     [provider runtime network](#provider-runtime-network)).
   - **Claude Agent SDK:** unwrapped as in Code's approval-gated posture; the
     runtime's own sandbox holds commands to the Project root, and its
@@ -12614,7 +12657,13 @@ approval-gated` command that undoes it. The terminal shows no one-time
   a Work window shows it once the person turns on the Project's **Developer
   tools**, since a terminal is a developer surface, not authority (the host
   serves a Work Project's terminal either way, as Work's shell is not the
-  switch's to grant). Chat has no root. The shell runs at the
+  switch's to grant). A server Work Project instead uses the explicit
+  person-operated SSH terminal in its bound Settings row, with Developer
+  tools required throughout its lifetime; its Full remote posture and exact
+  window/registry/binding checks are owned by
+  [Server Projects](design/server-projects.md#threads). It confers no task
+  authority and a closed SSH session is not proof all remote programs ended.
+  Chat has no root. A local shell runs at the
   Project's bound root at its current binding revision (the Project's own
   folder, never a thread's managed worktree) through the same confinement a
   Code thread's terminal gets, with its own shell state and no credential
@@ -13009,6 +13058,13 @@ approval-gated` command that undoes it. The terminal shows no one-time
     budget is charged, a source over its ticket allowance is refused before the
     read, and a source may have at most four such reads open at once (a
     second's bound each); its surplus is refused without a read.
+    The hello of an already paired browser shares that budget, and a reload
+    spends several hellos, so a few reloads in a minute can draw a 429. A client
+    treats that 429 as the host asking it to wait, never as a rejection: the
+    pairing and device key stay, the person sees a "Too many requests" notice
+    instead of "Pairing failed", and the resume runs again once the
+    `Retry-After` the host named has passed (a minute when it names none, at
+    most five). The budget itself is unchanged.
     A person who approves after the window has failed, closed, or never
     reached the key step leaves an approved device that no client holds a key
     for, so the host removes it: an approved device that has not signed in once
@@ -14857,7 +14913,7 @@ private-network tags. Egress to a trusted place passes by rule; anything else
 goes to the Judge at Reviewed and to the person at Guarded. Each decision is
 journaled per host. Built for provider runtimes on macOS and Linux and for
 Octant Harness commands, behind the Network limits switch, which
-ships off ([provider runtime network](#provider-runtime-network)): a `host` place
+ships on ([provider runtime network](#provider-runtime-network)): a `host` place
 matches that name, a `domain` the name and every name under it, a range is
 CIDR, and the tags are `this-mac` (loopback), `local-network` (the private
 IPv4 ranges and IPv6 unique-local addresses), and `overlay-network`

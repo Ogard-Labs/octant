@@ -16,7 +16,12 @@ export interface OwnerSpoke {
   readonly memberId: string;
   readonly name: string;
   readonly client: OwnerClient &
-    Partial<Pick<OwnerAdministrationClient, "listPostures" | "changePosture">>;
+    Partial<
+      Pick<
+        OwnerAdministrationClient,
+        "listPostures" | "changePosture" | "readApprovals" | "answerApproval"
+      >
+    >;
   readonly browser?: OwnerBrowserClient;
   /**
    * Set when this client can only read: a browser's passkey belongs to the one

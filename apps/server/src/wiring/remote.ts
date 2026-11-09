@@ -1,3 +1,7 @@
+import { ownerApprovalContext } from "../hub/ownerApprovalFile";
+import { createOwnerApprovalHost } from "../hub/ownerApprovalHost";
+import { createOwnerApprovalJournal } from "../hub/ownerApprovalJournal";
+import type { WorkRequestStateWiring } from "./workRequestState";
 import { CodeService } from "../code/codeService";
 import { randomUUID } from "node:crypto";
 import { OwnerBrowserControlService } from "../browser/ownerBrowserControl";
@@ -107,6 +111,7 @@ import { createPeerCredentialRouteHandler } from "../hub/peerCredentialRoutes";
 import { createChatThreadMoveHost } from "../hub/chatThreadMoveHost";
 import { createCodeThreadMoveHost } from "../hub/codeThreadMoveHost";
 import { createWorkThreadMoveHost } from "../hub/workThreadMoveHost";
+import { workThreadFolderOf } from "../hub/workThreadMoveFolder";
 import { threadMoveHostsByMode } from "../hub/threadMoveHostsByMode";
 import type { MovedThreadHistory } from "../hub/movedThreadHistory";
 import type { ManagedWorktreeReceiptStore } from "../code/managedWorktreeReceiptStore";
@@ -282,7 +287,8 @@ export type RemoteDependencies = { readonly onSecretStoreLinkChange?: () => void
   Pick<RoutesWiring, "authenticatedProductDispatch"> &
   Pick<FoundationsWiring, "workThreadProjection"> &
   Pick<FoundationsWiring, "hostMemoryGuard" | "providerRuntimeRegistry"> &
-  Pick<CodeRuntimeWiring, "codeOperationRuntime" | "codeService"> & {
+  Pick<CodeRuntimeWiring, "codeOperationRuntime" | "codeService"> &
+  Pick<WorkRequestStateWiring, "workRequestRuntime" | "workRequestService"> & {
     readonly chatService: ChatService;
     readonly liveTurns: LiveTurnRegistry;
     readonly managedWorktreeReceipts: ManagedWorktreeReceiptStore;
@@ -1361,12 +1367,37 @@ export function wireRemote(deps: RemoteDependencies) {
           providerInstanceId: input.provider.providerInstanceId,
           modelId: input.provider.modelId,
           hostId: LOCAL_HOST_ID,
-          bindingRevisionId: String(
-            project.bindingHistory[project.bindingHistory.length - 1]?.revisionId,
-          ),
+          // The binding the files landed under, so a relink since is refused as stale.
+          bindingRevisionId:
+            input.bindingRevisionId ??
+            String(project.bindingHistory[project.bindingHistory.length - 1]?.revisionId),
+          ...(input.workingDirectory === undefined
+            ? {}
+            : { workingDirectory: input.workingDirectory }),
         },
         input.inheritedMark === undefined ? undefined : { inheritedMark: input.inheritedMark },
       );
+    },
+    ownFolder: (threadId) => {
+      const thread = workThreadProjection.read(threadId);
+      return thread === undefined
+        ? { status: "stays", reason: "unavailable" }
+        : workThreadFolderOf({
+            thread,
+            threads: workThreadProjection.list(),
+            projects: persistence.readProjects(),
+          });
+    },
+    partsDirectory: (moveId) => deps.threadMoveState.partsDirectory(moveId),
+    landingRoot: (projectId) => {
+      const project = persistence
+        .readProjects()
+        .find((candidate) => String(candidate.id) === projectId);
+      if (project?.type !== "work" || project.lifecycle !== "active") return undefined;
+      const bindingRevisionId = project.bindingHistory.at(-1)?.revisionId;
+      return bindingRevisionId === undefined
+        ? undefined
+        : { root: project.binding.canonicalRoot, bindingRevisionId: String(bindingRevisionId) };
     },
     journalHistory: (input) => deps.movedThreadHistory.journalImported(input),
     holds: deps.threadMoveHolds,
@@ -1817,7 +1848,89 @@ export function wireRemote(deps: RemoteDependencies) {
       clock: () => new Date().toISOString(),
     }),
   });
+  const ownerApprovals = createOwnerApprovalHost({
+    hostMemberId: String(hubService.hubMemberId()),
+    pending: () => [
+      ...(deps.codeOperationRuntime?.ownerApprovals?.() ?? []),
+      ...deps.workRequestRuntime.ownerApprovals(
+        persistence
+          .readProjects()
+          .filter((project) => project.type === "work")
+          .flatMap((project) => deps.workRequestService.listPending(project.id)),
+        async (request, approved, current) =>
+          (
+            await deps.workRequestService.resolve(
+              {
+                kind: "resolve-work-request",
+                requestId: request.requestId,
+                expectedVersion: request.version,
+                resolution: { kind: "approval", approved },
+              },
+              current,
+            )
+          ).status === "ok",
+      ),
+    ],
+    binding: (request) => {
+      const file =
+        request.action === undefined
+          ? undefined
+          : ownerApprovalContext(request.action, request.root);
+      if (file === undefined) return undefined;
+      const thread =
+        request.mode === "code"
+          ? persistence.readCodeThread(decodeCodeThreadId(request.threadId))
+          : workThreadProjection.read(decodeWorkThreadId(request.threadId));
+      if (thread === undefined || thread.lifecycle !== "active") return undefined;
+      const project = persistence.readProject(thread.projectId);
+      if (
+        project === undefined ||
+        project.lifecycle !== "active" ||
+        project.type !== request.mode ||
+        (thread.bindingRevisionId !== undefined &&
+          String(thread.bindingRevisionId) !== String(project.bindingHistory.at(-1)?.revisionId))
+      )
+        return undefined;
+      if (
+        request.action?.kind === "shell" &&
+        (("executionPolicy" in thread &&
+          (thread.executionPolicy === "plan" || thread.executionPolicy === "full-access")) ||
+          ("access" in thread && thread.access === "full-access"))
+      )
+        return undefined;
+      const provider =
+        thread.providerInstanceId === undefined
+          ? undefined
+          : persistence
+              .readProviderInstances()
+              .find((instance) => String(instance.id) === String(thread.providerInstanceId));
+      if (provider === undefined || !provider.enabled) return undefined;
+      const checkout =
+        "checkoutId" in thread ? persistence.readCodeCheckout(thread.checkoutId) : undefined;
+      if (
+        request.mode === "code" &&
+        (checkout?.availability !== "available" ||
+          !("repositoryId" in thread) ||
+          String(checkout.repositoryId) !== String(thread.repositoryId))
+      )
+        return undefined;
+      return {
+        title: thread.title,
+        projectName: project.name,
+        projectId: String(project.id),
+        version: { thread, project, checkout, provider, file },
+      };
+    },
+    audit: createOwnerApprovalJournal({
+      journal: persistence.journal,
+      connection: persistence.connection,
+      localActorId: OCTANT_LOCAL_ACTOR_ID,
+      uuid: randomUUID,
+      clock: () => new Date().toISOString(),
+    }),
+  });
   const hubOwnerRoutes = createHubOwnerRouteHandler({
+    approvals: ownerApprovals,
     browser: ownerBrowserControlService,
     hub: hubService,
     spoke: spokeLinkService,

@@ -28,6 +28,22 @@ describe("OctantSelectField", () => {
     expect(onValueChange).toHaveBeenCalledWith("messages");
   });
 
+  it("shows the placeholder, never an internal value, when there is nothing to choose", () => {
+    const { rerender } = render(
+      <OctantSelectField
+        aria-label="Planner thread"
+        options={[]}
+        placeholder="No Code threads yet"
+        value=""
+      />,
+    );
+    const select = screen.getByRole("combobox", { name: "Planner thread" });
+    expect(select).toHaveTextContent("No Code threads yet");
+
+    rerender(<OctantSelectField aria-label="Planner thread" options={[]} value="" />);
+    expect(select).not.toHaveTextContent("octant-select");
+  });
+
   it("keeps an empty option id for form filters and FormData", async () => {
     const user = userEvent.setup();
     let submitted = "";

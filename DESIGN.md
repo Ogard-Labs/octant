@@ -2026,9 +2026,12 @@ this is how it looks.
   destination Project after a slash. **What moves** follows as rows with their
   sizes in tabular figures at the right: Conversation (the turn count), one
   row for the attachments, admitted inputs, generated images, Browser
-  captures, and Canvases together (None when the thread has none), and the
+  captures, and Canvases together (None when the thread has none), the
   branch name in mono with its commit count and uncommitted `+`/`-` counts
-  (Code). A total line gives the size, every row included, and an estimate,
+  (Code), and the files in its own folder with their size (Work, when the
+  thread is that folder's only user; a Work thread whose folder the Project
+  or another thread shares says, in their place, that only the thread moves
+  and its files stay on this computer). A total line gives the size, every row included, and an estimate,
   and one meta sentence under it names what the estimate rests on: the speed
   earlier moves to that member reached, or the assumed rate when none has
   been timed. The sheet opens at once; the line reads Measuring… until the
@@ -2036,7 +2039,8 @@ this is how it looks.
   could not be sized reads Size unknown in place of its figure, and the total
   counts the rest and ends "1 size unknown". Neither holds the move back. **Stays here** is a closed disclosure naming each part that
   applies (terminals, previews, Browser pages, ignored files with their count,
-  Full access and grants, sign-ins). When the worktree holds files that stay
+  Full access and grants, sign-ins, and for Work the folder's ignored files,
+  links, and files holding a secret, with which the folder stays). When the worktree holds files that stay
   behind (refused by the Secret guard, or ignored), the disclosure opens by
   itself, lists them, and says the worktree folder stays on this computer
   with them. One sentence states the consequence in
@@ -2102,7 +2106,11 @@ this is how it looks.
   with it in mono (the first 200, then "and" the rest counted), the folder,
   and **Remove worktree** as a quiet button that asks once before removing
   it, saying the files have no other copy and that the branch and its remote
-  stay. Once removed, the row says so in one sentence. Opening the moved
+  stay. Once removed, the row says so in one sentence. When a Work thread's
+  own folder was kept, the row says "Its folder stayed on this computer at"
+  the folder in mono, lists what stayed the same way, and offers no remove
+  action, because the folder is the person's own; the Moved notice says its
+  folder held files that stayed here and names the folder. Opening the moved
   thread again after its pane closed (an old link, a notification, or a
   search) opens the same tombstone in the active pane without changing the
   window's Project; a window that cannot read this computer's moves (a remote
@@ -2605,7 +2613,8 @@ picker that says whether the chosen Project uses the account's servers or
 its own list, which starts as a copy of the account list and is edited with
 the same rows and form. **Safe networks** is built as Settings › Access, in the
 Privacy & data group after Permissions: a **Network limits** panel with a
-switch that is off by default, a sentence saying plainly whether limits are on,
+switch that is on by default, a sentence saying plainly whether limits are on
+(and, when on, that they hold sandboxed runtimes only),
 and a note that a change applies to the next runtime started; then an intro
 sentence, the **Every
 Project** list, a **Project** picker that says whether the chosen Project

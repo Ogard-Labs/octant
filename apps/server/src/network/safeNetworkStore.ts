@@ -70,7 +70,9 @@ export class SafeNetworkStore {
   readonly #options: SafeNetworkStoreOptions;
   readonly #actor: EventActorValue;
   #account: ReadonlyArray<SafeNetworkPlace> = [];
-  #limitsOn = false;
+  // On until a person turns it off: limits apply only to sandboxed runtimes,
+  // and a host's recorded choice, either way, replays over this default.
+  #limitsOn = true;
   readonly #projects = new Map<string, ReadonlyArray<SafeNetworkPlace>>();
   readonly #versions = new Map<string, number>();
   readonly #listeners = new Set<() => void>();
@@ -83,7 +85,7 @@ export class SafeNetworkStore {
   /** Rebuilds every scope from the journal, in journal order. A record that no longer decodes changes nothing. */
   load(): void {
     this.#account = [];
-    this.#limitsOn = false;
+    this.#limitsOn = true;
     this.#projects.clear();
     let after = 0;
     for (;;) {
@@ -126,7 +128,7 @@ export class SafeNetworkStore {
     return this.#account;
   }
 
-  /** The Network limits switch; off until a person at a local window turns it on. */
+  /** The Network limits switch; on until a person at a local window turns it off. */
   limitsOn(): boolean {
     return this.#limitsOn;
   }

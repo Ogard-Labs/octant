@@ -28,6 +28,9 @@ import { createServerWorkActionTask } from "./serverWorkProjectActions";
 import { serverWorkBindingRevisionId } from "./serverWorkThreads";
 import { decodeWorkThread } from "@octant/contracts/work-threads";
 import { contextKeyForProject, defaultWindowWorkspace } from "@octant/domain";
+import { windowCanAccessWorkProject } from "../windowCodeProjectAccess";
+import * as terminalProcess from "../code/terminalProcessPort";
+import { readProcessIdentity } from "../process/nodeOwnedProcessReceipt";
 import { LOCAL_HOST_ID } from "@octant/contracts/host";
 import {
   canRunThrowawaySshd,
@@ -195,7 +198,10 @@ describe.skipIf(!canRunThrowawaySshd)("saved actions on a throwaway server", () 
       terminals,
       ...remoteActions,
       readProject: () => undefined,
-      canAccessProject: (candidate, id) => candidate === windowId && id === project.id,
+      canAccessProject: (candidate, id) =>
+        candidate === windowId &&
+        id === project.id &&
+        (!work || (windowLive && windowCanAccessWorkProject({ workspace, projectId: id }))),
       resolveRoot: localResolve,
       suggestActions: localSuggestions,
       readRunning: () => [],
@@ -208,17 +214,29 @@ describe.skipIf(!canRunThrowawaySshd)("saved actions on a throwaway server", () 
         return current === undefined
           ? undefined
           : {
-              ...(current.mode === "work" ? { actionsOnly: true as const } : {}),
+              mode: current.mode ?? "code",
+              ...(current.mode === "work"
+                ? {
+                    interactiveAllowed: current.developerTools?.enabled === true,
+                    current: () => store.workProject(String(id))?.folder === current.folder,
+                  }
+                : {}),
               bindingRevisionId:
                 current.mode === "work"
                   ? serverWorkBindingRevisionId(current)
                   : serverCodeCheckout(current).bindingRevisionId,
-              login: () =>
-                current.mode === "work"
-                  ? undefined
-                  : serverTerminalLogin(connection, server, remoteRoot),
+              login: () => serverTerminalLogin(connection, server, remoteRoot),
             };
       },
+    });
+    const stopWatching = journal.subscribeCommitted((append) => {
+      if (
+        append.events.some(
+          (event) =>
+            event.aggregateType === "server-projects" || event.aggregateType === "shield-servers",
+        )
+      )
+        queueMicrotask(() => void service.settleAuthorities().catch(() => undefined));
     });
     const target = {
       projectId: project.id,
@@ -285,12 +303,195 @@ describe.skipIf(!canRunThrowawaySshd)("saved actions on a throwaway server", () 
         taskCurrent = false;
       },
       close: async () => {
+        stopWatching();
         await terminals.closeAll();
         sqlite.close();
         rmSync(scratch, { recursive: true, force: true });
       },
     };
   }
+
+  it("runs the person's Work SSH shell at the remote Project root, joins it when tools close, and never replays a dropped session", async () => {
+    const f = await fixture(
+      "if IFS= read -r line; then printf unexpected-input; else printf action-input-closed; fi; exec sleep 30",
+      false,
+      true,
+    );
+    const spawned = vi.spyOn(terminalProcess, "spawnHostPty");
+    try {
+      f.store.setDeveloperTools({
+        projectId: String(f.project.id),
+        enabled: true,
+        principal: "local-window",
+      });
+      const action = await f.start();
+      expect(action.result.kind).toBe("project-terminal");
+      await vi.waitFor(
+        () =>
+          expect(
+            f.terminals.attach(String(action.terminalId)).transcript.chunks.join(""),
+          ).toContain("action-input-closed"),
+        { timeout: 15000 },
+      );
+      const humanIndex = spawned.mock.results.length;
+      const terminalId = decodeCodeTerminalId(randomUUID());
+      const opened = await f.service.execute(f.windowId, "local-window", {
+        kind: "start",
+        projectId: f.project.id,
+        terminalId,
+        columns: 100,
+        rows: 30,
+      });
+      expect(opened).toMatchObject({
+        kind: "project-terminal",
+        terminal: { posture: "full-access" },
+      });
+      const process = spawned.mock.results[humanIndex];
+      if (process?.type !== "return") throw Error("Expected an owned native SSH process");
+      const pid = process.value.pid;
+      const birth = await readProcessIdentity(pid);
+      expect(birth).toBeDefined();
+      await f.service.execute(f.windowId, "local-window", {
+        kind: "write",
+        projectId: f.project.id,
+        terminalId,
+        data: "pwd -P; echo work-$((40 + 2))\n",
+      });
+      await vi.waitFor(
+        () => {
+          const text = f.terminals.attach(String(terminalId)).transcript.chunks.join("");
+          expect(text).toContain(`${f.remoteRoot}\r\n`);
+          expect(text).toContain("work-42");
+          expect(text).not.toContain(`${f.localRoot}\r\n`);
+        },
+        { timeout: 15000 },
+      );
+      await f.service.execute(f.windowId, "local-window", {
+        kind: "resize",
+        projectId: f.project.id,
+        terminalId,
+        columns: 92,
+        rows: 24,
+      });
+      f.store.setDeveloperTools({
+        projectId: String(f.project.id),
+        enabled: false,
+        principal: "local-window",
+      });
+      await vi.waitFor(() =>
+        expect(f.terminals.attach(String(terminalId)).status).not.toBe("running"),
+      );
+      await vi.waitFor(async () => expect(await readProcessIdentity(pid)).not.toBe(birth));
+      expect(f.terminals.attach(String(action.terminalId)).status).toBe("running");
+      expect(
+        await f.service.execute(f.windowId, "local-window", {
+          kind: "write",
+          projectId: f.project.id,
+          terminalId: action.terminalId,
+          data: "echo never\n",
+        }),
+      ).toMatchObject({ kind: "project-terminal-refused", reason: "unavailable" });
+      await f.service.execute(f.windowId, "local-window", {
+        kind: "stop",
+        projectId: f.project.id,
+        terminalId: action.terminalId,
+      });
+
+      f.store.setDeveloperTools({
+        projectId: String(f.project.id),
+        enabled: true,
+        principal: "local-window",
+      });
+      const secondId = decodeCodeTerminalId(randomUUID());
+      expect(
+        await f.service.execute(f.windowId, "local-window", {
+          kind: "start",
+          projectId: f.project.id,
+          terminalId: secondId,
+          columns: 100,
+          rows: 30,
+        }),
+      ).toMatchObject({ kind: "project-terminal" });
+      await f.service.execute(f.windowId, "local-window", {
+        kind: "write",
+        projectId: f.project.id,
+        terminalId: secondId,
+        data: "echo drop-$((1 + 1))\n",
+      });
+      await vi.waitFor(
+        () =>
+          expect(f.terminals.attach(String(secondId)).transcript.chunks.join("")).toContain(
+            "drop-2",
+          ),
+        { timeout: 15000 },
+      );
+      sshd.dropConnections();
+      await vi.waitFor(() => expect(f.terminals.attach(String(secondId)).status).toBe("exited"), {
+        timeout: 15000,
+      });
+      expect(
+        await f.service.execute(f.windowId, "local-window", {
+          kind: "attach",
+          projectId: f.project.id,
+          terminalId: secondId,
+        }),
+      ).toMatchObject({
+        kind: "project-terminal",
+        terminal: { uncertainty: "server-transport-lost" },
+      });
+      expect(spawned).toHaveBeenCalledTimes(3);
+      expect(f.localStart).not.toHaveBeenCalled();
+      expect(f.localResolve).not.toHaveBeenCalled();
+    } finally {
+      await f.close();
+      spawned.mockRestore();
+    }
+  }, 30000);
+
+  it("keeps project-level Work actions input-closed when no task is supplied and tools are hidden", async () => {
+    const f = await fixture(
+      "if IFS= read -r line; then printf unexpected-input; else printf stdin-closed; fi",
+      false,
+      true,
+    );
+    try {
+      const target = { projectId: f.project.id, actionId: f.target.actionId };
+      const preview = await f.service.execute(f.windowId, "local-window", {
+        kind: "preview-action",
+        ...target,
+      });
+      if (preview.kind !== "project-action-preview") throw Error("Expected person action review");
+      const terminalId = decodeCodeTerminalId(randomUUID());
+      expect(
+        await f.service.execute(f.windowId, "local-window", {
+          kind: "start-action",
+          ...target,
+          terminalId,
+          columns: 80,
+          rows: 24,
+          projectVersion: preview.projectVersion,
+          placementRevision: preview.action.server?.placementRevision,
+        }),
+      ).toMatchObject({ kind: "project-terminal" });
+      expect(
+        await f.service.execute(f.windowId, "local-window", {
+          kind: "write",
+          projectId: f.project.id,
+          terminalId,
+          data: "echo never\n",
+        }),
+      ).toMatchObject({ kind: "project-terminal-refused", reason: "unavailable" });
+      await vi.waitFor(() => expect(f.terminals.attach(String(terminalId)).status).toBe("exited"), {
+        timeout: 15000,
+      });
+      expect(f.terminals.attach(String(terminalId)).transcript.chunks.join("")).toContain(
+        "stdin-closed",
+      );
+      expect(f.localStart).not.toHaveBeenCalled();
+    } finally {
+      await f.close();
+    }
+  }, 30000);
 
   it("reads remote suggestions and runs a dedicated reviewed checkout command without writing into a busy terminal", async () => {
     const f = await fixture();
@@ -456,7 +657,7 @@ describe.skipIf(!canRunThrowawaySshd)("saved actions on a throwaway server", () 
     }
   });
 
-  it("runs a reviewed Work task on its server and retires it when task authority changes without enabling a general terminal", async () => {
+  it("keeps saved Work task authority separate from the person's terminal presentation", async () => {
     const f = await fixture("pwd; printf ready; exec sleep 30", false, true);
     try {
       expect(f.store.project(String(f.project.id))?.developerTools).toBeUndefined();
@@ -491,8 +692,20 @@ describe.skipIf(!canRunThrowawaySshd)("saved actions on a throwaway server", () 
           ),
         { timeout: 15000 },
       );
+      f.store.setDeveloperTools({
+        projectId: String(f.project.id),
+        enabled: true,
+        principal: "local-window",
+      });
+      f.store.setDeveloperTools({
+        projectId: String(f.project.id),
+        enabled: false,
+        principal: "local-window",
+      });
+      await f.service.settleAuthorities();
+      expect(f.terminals.attach(String(run.terminalId)).status).toBe("running");
       f.changeWorkAccess();
-      await f.service.settleActionAuthorities();
+      await f.service.settleAuthorities();
       expect(
         await f.service.execute(f.windowId, "local-window", {
           kind: "read-output",
@@ -542,10 +755,10 @@ describe.skipIf(!canRunThrowawaySshd)("saved actions on a throwaway server", () 
         { timeout: 15000 },
       );
       f.closeWindow();
-      await f.service.settleActionAuthorities();
+      await f.service.settleAuthorities();
       expect(f.terminals.attach(String(run.terminalId)).status).not.toBe("running");
       expect((await f.preview()).kind).toBe("project-terminal-refused");
-      await f.service.settleActionAuthorities();
+      await f.service.settleAuthorities();
       expect(readFileSync(join(f.taskRoot, "starts.txt"), "utf8")).toBe("started");
       expect(f.endedReasons()).toEqual([{ reason: "server-stop-unconfirmed" }]);
       expect(f.localStart).not.toHaveBeenCalled();
