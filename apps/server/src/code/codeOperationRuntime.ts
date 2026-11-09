@@ -1600,6 +1600,13 @@ export function createCodeOperationRuntime(
     },
     revokeApprovals: (windowId) => approvalStore?.revokeWindow(windowId),
     execute: async (windowId, rawCommand, executeOptions) => {
+      if (process.platform === "win32")
+        throw new CodeServiceError(
+          decodeCodeFailure({
+            category: "unavailable",
+            message: "Code execution requires Windows host confinement.",
+          }),
+        );
       // A turn counts as running for a compaction from the moment it passes the
       // compaction check until it is launched or refused, because it reads the
       // session it resumes while it is prepared.

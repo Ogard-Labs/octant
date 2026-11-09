@@ -1,6 +1,10 @@
 import type { AgentPluginsDiagnostic } from "./constants";
 import { AGENT_PLUGINS_NAME_PATTERN, AGENT_PLUGINS_PLUGIN_SCHEMA } from "./constants";
 import { asRecord, fail, isRecord } from "./errors";
+import {
+  decodeOctantCodeToolsNamespace,
+  type CodeToolContribution,
+} from "@octant/contracts/code-tool-contribution";
 
 const PERMITTED_MANIFEST_FIELDS = new Set([
   "$schema",
@@ -32,6 +36,7 @@ export interface AgentPluginsManifest {
   readonly license?: string;
   readonly keywords?: ReadonlyArray<string>;
   readonly extensions?: Readonly<Record<string, Record<string, unknown>>>;
+  readonly codeTools?: ReadonlyArray<CodeToolContribution>;
 }
 
 export interface AgentPluginsManifestResult {
@@ -46,6 +51,7 @@ export interface AgentPluginsManifestResult {
  */
 export function validateAgentPluginsManifest(raw: unknown): AgentPluginsManifestResult {
   const diagnostics: AgentPluginsDiagnostic[] = [];
+  let codeTools: ReadonlyArray<CodeToolContribution> | undefined;
   const record = asRecord(raw, "manifest-invalid", "plugin.json must be a JSON object.");
 
   const schema = record.$schema;
@@ -91,6 +97,13 @@ export function validateAgentPluginsManifest(raw: unknown): AgentPluginsManifest
       });
     } else {
       for (const [namespace, value] of Object.entries(record.extensions)) {
+        if (namespace === "octant") {
+          const decoded = decodeOctantCodeToolsNamespace(value);
+          if (decoded._tag === "Left")
+            fail("code-tools-invalid", "extensions.octant must declare bounded Code tools.");
+          codeTools = decoded.right.codeTools;
+          continue;
+        }
         if (!isRecord(value)) {
           diagnostics.push({
             code: "extension-namespace-ignored",
@@ -129,6 +142,7 @@ export function validateAgentPluginsManifest(raw: unknown): AgentPluginsManifest
       ...(repository === undefined ? {} : { repository }),
       ...(license === undefined ? {} : { license }),
       ...(keywords === undefined ? {} : { keywords }),
+      ...(codeTools === undefined ? {} : { codeTools }),
     },
     diagnostics,
   };

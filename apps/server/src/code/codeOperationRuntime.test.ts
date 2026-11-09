@@ -171,6 +171,27 @@ afterEach(() => {
 });
 
 describe("CodeOperationRuntime", () => {
+  it("refuses a Windows operation before a terminal or provider can start", async () => {
+    const fixture = runtimeFixture({});
+    vi.stubGlobal("process", Object.create(process, { platform: { value: "win32" } }));
+    try {
+      await expect(
+        fixture.runtime.execute(windowId, {
+          kind: "start-terminal",
+          threadId,
+          checkoutId,
+          operationId: operationId(1),
+          terminalId: operationId(2),
+          columns: 100,
+          rows: 30,
+          credentialRefs: [],
+        }),
+      ).rejects.toMatchObject({ failure: { category: "unavailable" } });
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
   it("prepares and confirms native approval only for the authoritative active scope", async () => {
     const fixture = runtimeFixture({ approvalValidator: false });
     const request = {

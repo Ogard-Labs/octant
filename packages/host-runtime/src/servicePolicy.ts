@@ -1,3 +1,5 @@
+import type { WindowsAuthorityStateFile } from "./windowsAuthorityState";
+import { readPrivateFileText, replacePrivateFileText } from "./privateFileText";
 import { randomUUID } from "node:crypto";
 import { chmod, lstat, mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { dirname, isAbsolute, join } from "node:path";
@@ -24,12 +26,14 @@ export interface ServicePolicyStoreOptions {
   readonly path: string;
   readonly now?: () => string;
   readonly uid?: number;
+  readonly privateFile?: WindowsAuthorityStateFile;
 }
 
 export class ServicePolicyStore {
   readonly #path: string;
   readonly #now: () => string;
-  readonly #uid: number;
+  readonly #uid: number | undefined;
+  readonly #privateFile: WindowsAuthorityStateFile | undefined;
 
   constructor(options: ServicePolicyStoreOptions) {
     if (!isAbsolute(options.path) || options.path.trim() !== options.path) {
@@ -37,7 +41,13 @@ export class ServicePolicyStore {
     }
     this.#path = options.path;
     this.#now = options.now ?? (() => new Date().toISOString());
-    this.#uid = options.uid ?? process.getuid?.() ?? 0;
+    this.#uid = options.uid ?? process.getuid?.();
+    this.#privateFile = options.privateFile;
+    if (process.platform === "win32" && this.#privateFile === undefined)
+      throw new ServicePolicyError(
+        "unsafe-file",
+        "Windows service policy requires native private storage.",
+      );
   }
 
   get path(): string {
@@ -46,6 +56,13 @@ export class ServicePolicyStore {
 
   async read(): Promise<HostServicePolicy> {
     try {
+      if (this.#privateFile !== undefined) {
+        const result = readPrivateFileText(this.#privateFile, 1024);
+        if (result.status === "missing") return this.#defaultPolicy();
+        if (result.status !== "ready")
+          throw new ServicePolicyError("unsafe-file", "Service policy is unavailable or unsafe.");
+        return decodePolicy(result.text);
+      }
       const metadata = await lstat(this.#path);
       if (!metadata.isFile() || metadata.uid !== this.#uid || (metadata.mode & 0o077) !== 0) {
         throw new ServicePolicyError("unsafe-file", "Service policy is not an owner-only file.");
@@ -68,6 +85,13 @@ export class ServicePolicyStore {
     };
     const directory = dirname(this.#path);
     try {
+      if (this.#privateFile !== undefined) {
+        if (
+          replacePrivateFileText(this.#privateFile, JSON.stringify(policy)).status !== "committed"
+        )
+          throw new ServicePolicyError("write-failed", "Service policy could not be written.");
+        return policy;
+      }
       await mkdir(directory, { recursive: true, mode: 0o700 });
       await assertOwnerOnlyDirectory(directory, this.#uid);
       await assertExistingPolicySafe(this.#path, this.#uid);
@@ -123,7 +147,7 @@ function decodePolicy(input: string): HostServicePolicy {
   });
 }
 
-async function assertExistingPolicySafe(path: string, uid: number): Promise<void> {
+async function assertExistingPolicySafe(path: string, uid: number | undefined): Promise<void> {
   try {
     const metadata = await lstat(path);
     if (!metadata.isFile() || metadata.uid !== uid || (metadata.mode & 0o077) !== 0) {
@@ -135,7 +159,7 @@ async function assertExistingPolicySafe(path: string, uid: number): Promise<void
   }
 }
 
-async function assertOwnerOnlyDirectory(path: string, uid: number): Promise<void> {
+async function assertOwnerOnlyDirectory(path: string, uid: number | undefined): Promise<void> {
   const metadata = await lstat(path);
   if (!metadata.isDirectory() || metadata.uid !== uid || (metadata.mode & 0o077) !== 0) {
     throw new ServicePolicyError("unsafe-file", "Service policy directory is not owner-only.");

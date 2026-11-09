@@ -8,6 +8,7 @@ import type {
 } from "@octant/contracts";
 
 export type CapabilityComponentKind =
+  | "plugin-tool"
   | "octant-tool"
   | "mcp-tool"
   | "mcp-prompt"
@@ -148,6 +149,7 @@ const accuracyRank: Record<KnownTokenMeasurement["accuracy"], number> = {
 };
 
 const capabilityComponentKinds = new Set<string>([
+  "plugin-tool",
   "octant-tool",
   "mcp-tool",
   "mcp-prompt",
@@ -345,6 +347,7 @@ const postureRank: Record<CapabilityPosture, number> = {
 };
 
 const componentKindRank: Record<CapabilityComponentKind, number> = {
+  "plugin-tool": 6,
   "octant-tool": 0,
   "mcp-tool": 1,
   "skill-instruction": 2,
@@ -507,7 +510,13 @@ const allowedComponentsBySource: Record<
 > = {
   "octant-tool": new Set(["octant-tool"]),
   "mcp-server": new Set(["mcp-tool", "mcp-prompt", "mcp-resource"]),
-  "plugin-package": new Set(["plugin-instruction", "mcp-tool", "mcp-prompt", "mcp-resource"]),
+  "plugin-package": new Set([
+    "plugin-tool",
+    "plugin-instruction",
+    "mcp-tool",
+    "mcp-prompt",
+    "mcp-resource",
+  ]),
   "skill-package": new Set(["skill-instruction"]),
   "agents-skills-directory": new Set(["skill-instruction"]),
 };
@@ -956,5 +965,9 @@ export function selectCapabilities(
 }
 
 function isNativeSearchableTool(entry: CapabilityCatalogEntry): boolean {
-  return entry.componentKind === "octant-tool" || entry.componentKind === "mcp-tool";
+  return (
+    entry.componentKind === "octant-tool" ||
+    entry.componentKind === "mcp-tool" ||
+    entry.componentKind === "plugin-tool"
+  );
 }
