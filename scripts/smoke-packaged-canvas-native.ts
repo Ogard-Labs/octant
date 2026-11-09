@@ -4,7 +4,16 @@ import { mkdtemp, mkdir, readFile, readdir, rm, writeFile } from "node:fs/promis
 import { networkInterfaces, tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { createServer } from "node:net";
-import { createHash, generateKeyPairSync, randomBytes, randomUUID, sign } from "node:crypto";
+import {
+  X509Certificate,
+  createHash,
+  generateKeyPairSync,
+  randomBytes,
+  randomUUID,
+  sign,
+} from "node:crypto";
+import { connect as tlsConnect } from "node:tls";
+import { chromium, type BrowserServer } from "playwright-core";
 import { request as httpsRequest } from "node:https";
 import { ActorId, decodeWindowId, decodeUtcTimestamp } from "@octant/contracts";
 import { CanvasPublicShareService } from "../apps/server/src/canvas/canvasPublicShareService";
@@ -237,7 +246,68 @@ async function seedPairedFixture(dataDirectory: string, projectId: string, signa
       clear: async () => undefined,
     },
   });
-  return { connection, origin };
+  return { connection, origin, hostname, port };
+}
+
+// A task-owned synthetic certificate stands in for "your own certificate" in
+// Settings: browsers pair only with a pasted certificate, never the host's
+// self-made one. Only the owned browser trusts it, by its exact key hash.
+async function createPastedListenerCertificate(directory: string, hostname: string) {
+  const keys = generateKeyPairSync("ec", { namedCurve: "P-256" });
+  const privateKeyPem = String(keys.privateKey.export({ format: "pem", type: "pkcs8" }));
+  const keyPath = join(directory, "pasted-listener-key.pem");
+  const certificatePath = join(directory, "pasted-listener-cert.pem");
+  await writeFile(keyPath, privateKeyPem, { mode: 0o600, flag: "wx" });
+  await runBoundedCommand(
+    "/usr/bin/openssl",
+    [
+      "req",
+      "-new",
+      "-x509",
+      "-key",
+      keyPath,
+      "-out",
+      certificatePath,
+      "-days",
+      "1",
+      "-sha256",
+      "-subj",
+      "/CN=Octant QA listener",
+      "-addext",
+      `subjectAltName=IP:${hostname}`,
+    ],
+    process.env,
+    10_000,
+  );
+  const certificatePem = await readFile(certificatePath, "utf8");
+  const certificate = new X509Certificate(certificatePem);
+  const spki = certificate.publicKey.export({ format: "der", type: "spki" });
+  return {
+    certificatePem,
+    privateKeyPem,
+    fingerprint256: certificate.fingerprint256,
+    spkiBase64: createHash("sha256").update(spki).digest("base64"),
+  };
+}
+
+function servedCertificateFingerprint(host: string, port: number): Promise<string | undefined> {
+  return new Promise((resolve) => {
+    const socket = tlsConnect({ host, port, rejectUnauthorized: false, timeout: 3000 }, () => {
+      const fingerprint = socket.getPeerCertificate().fingerprint256;
+      socket.destroy();
+      resolve(fingerprint);
+    });
+    socket.once("error", () => resolve(undefined));
+    socket.once("timeout", () => {
+      socket.destroy();
+      resolve(undefined);
+    });
+  });
+}
+
+function setPasteboard(value: string): void {
+  const result = spawnSync("/usr/bin/pbcopy", { input: value, timeout: 3000 });
+  if (result.status !== 0) throw Error("The owned pasteboard could not be set.");
 }
 
 async function main(): Promise<void> {
@@ -254,6 +324,8 @@ async function main(): Promise<void> {
   let shareService: ReturnType<typeof startShareService> | undefined;
   let packageProvenance: typeof PackageProvenance.Type | undefined;
   let pairedFixture: Awaited<ReturnType<typeof seedPairedFixture>> | undefined;
+  let pairedBrowser: BrowserServer | undefined;
+  let pairedBrowserExited = false;
   let fixtureDataDirectory: string | undefined;
   let scratchHostScope: string | undefined;
   let ownerSecretStore: ReturnType<typeof makeKeychainCredentialStore> | undefined;
@@ -264,7 +336,7 @@ async function main(): Promise<void> {
   const interrupted = () => controller.abort();
   process.once("SIGTERM", interrupted);
   process.once("SIGINT", interrupted);
-  const timer = setTimeout(interrupted, 420_000);
+  const timer = setTimeout(interrupted, 660_000);
   let continuation = false;
   let verified = false;
   let cleanupVerified = false;
@@ -338,6 +410,7 @@ async function main(): Promise<void> {
       },
     );
     pairedFixture = await seedPairedFixture(fixtureDataDirectory, projectId, controller.signal);
+    const pastedListener = await createPastedListenerCertificate(root, pairedFixture.hostname);
     const shareConfig = readShareConfig({
       OCTANT_SHARE_HOST: "127.0.0.1",
       OCTANT_SHARE_PORT: "0",
@@ -488,7 +561,7 @@ async function main(): Promise<void> {
         String.raw`
 const owner = Number(process.env.OCTANT_SMOKE_OWNER_PID);
 const group = Number(process.env.OCTANT_SMOKE_APP_PID);
-const deadline = Date.now() + 450000;
+const deadline = Date.now() + 690000;
 if (!Number.isSafeInteger(owner) || owner < 2 || !Number.isSafeInteger(group) || group < 2) process.exit(1);
 const alive = pid => { try { process.kill(pid, 0); return true; } catch (error) { return error?.code !== "ESRCH"; } };
 const signal = value => { try { process.kill(-group, value); } catch {} };
@@ -952,8 +1025,12 @@ const timer = setInterval(() => {
         2,
       ),
     );
-    const showPublicLinks = async (stage: string, closeLabel = "Export", active = true) => {
-      await nativeInput(`${stage}-close-export`, "escape", closeLabel);
+    const showPublicLinks = async (
+      stage: string,
+      closeLabel: string | null = "Export",
+      active = true,
+    ) => {
+      if (closeLabel !== null) await nativeInput(`${stage}-close-export`, "escape", closeLabel);
       await observeUntil(
         `${stage}-canvas-tab`,
         (snapshot) => hasText(snapshot, "v1") && hasText(snapshot, "Signups this week"),
@@ -984,6 +1061,239 @@ const timer = setInterval(() => {
         pairedBrowserClipboard: false,
       }),
     );
+    // Native pairing setup: the person gives the listener their own
+    // certificate in Settings, creates a browser pairing link there and
+    // approves the request there. The API-seeded device above stays fixture
+    // setup only and is not evidence for any of these steps.
+    const listenerHost = pairedFixture.hostname;
+    const listenerPort = pairedFixture.port;
+    const listenerOrigin = pairedFixture.origin;
+    await nativeInput("paired-close-share", "escape", "Share");
+    await nativeInput("paired-settings", "settings", "Settings");
+    await observeUntil("paired-settings-open", (snapshot) => hasText(snapshot, "Search settings"));
+    await nativeInput("listener-search", "fill", "Search settings", "Remote listener");
+    await observeUntil("listener-search-result", (snapshot) =>
+      hasText(snapshot, "in Remote access"),
+    );
+    await nativeInput("listener-search-open", "enter", "Remote listener");
+    await observeUntil(
+      "listener-settings",
+      (snapshot) => hasText(snapshot, "Hostname") && hasText(snapshot, "Certificate (PEM)"),
+    );
+    await nativeInput("listener-hostname", "fill", "Hostname", listenerHost);
+    await nativeInput("listener-port", "fill", "Port", String(listenerPort));
+    setPasteboard(pastedListener.certificatePem);
+    await nativeInput("listener-certificate", "paste", "Certificate (PEM)");
+    setPasteboard(pastedListener.privateKeyPem);
+    try {
+      await nativeInput("listener-key", "paste", "Private key (PEM)");
+    } finally {
+      setPasteboard("");
+    }
+    await observeUntil("listener-draft", (snapshot) => hasText(snapshot, "Move listener"));
+    await nativeInput("listener-move", "click", "Move listener");
+    await observeUntil("listener-move-confirm", (snapshot) =>
+      hasText(snapshot, "Move remote listener?"),
+    );
+    await nativeInput("listener-move-confirmed", "click", "Confirm move");
+    await waitForProcessCleanup(
+      async () => {
+        if (
+          (await servedCertificateFingerprint(listenerHost, listenerPort)) !==
+          pastedListener.fingerprint256
+        )
+          throw Error("The listener does not serve the pasted certificate yet.");
+      },
+      { timeoutMs: 20_000 },
+    );
+    console.log(
+      `OCTANT_PAIRED_READER ${JSON.stringify({ stage: "native-pasted-listener", servesPastedCertificate: true })}`,
+    );
+    await nativeInput("pairing-search", "fill", "Search settings", "Pair a device");
+    await observeUntil("pairing-search-result", (snapshot) =>
+      hasText(snapshot, "in Remote access"),
+    );
+    await nativeInput("pairing-search-open", "enter", "Pair a device");
+    await observeUntil("pairing-settings", (snapshot) => hasText(snapshot, "Create pairing link"));
+    await nativeInput("pairing-create-link", "click", "Create pairing link");
+    await observeUntil("pairing-link-shown", (snapshot) => hasText(snapshot, "Expires"));
+    const linkPattern = /https:\/\/[^\s#]+\/#ticketId=[A-Za-z0-9%_-]+&ticketProof=[A-Za-z0-9%_-]+/g;
+    let pairingLink: string | undefined;
+    for (const target of ["ticketProof", "ticketPro", "#ticket", "ticket"]) {
+      try {
+        await nativeInput(`pairing-link-copy-${target.replace(/\W/g, "")}`, "select-copy", target);
+      } catch {
+        continue;
+      }
+      const copied = await runBoundedCommand("/usr/bin/pbpaste", [], process.env, 3000);
+      const links = [...copied.matchAll(linkPattern)].map((match) => match[0]);
+      if (
+        links.length === 1 &&
+        links[0] !== undefined &&
+        links[0].startsWith(`${listenerOrigin}/#`)
+      ) {
+        pairingLink = links[0];
+        break;
+      }
+    }
+    setPasteboard("");
+    if (pairingLink === undefined)
+      throw Error("The native Settings pairing link could not be selected and copied.");
+    console.log(
+      `OCTANT_PAIRED_READER ${JSON.stringify({ stage: "native-pairing-link", copiedFromSettings: true, origin: listenerOrigin })}`,
+    );
+    const chrome = "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome";
+    pairedBrowser = await chromium.launchServer({
+      executablePath: chrome,
+      headless: true,
+      timeout: 20_000,
+      // Trust only this run's pasted listener key; no trust store changes.
+      args: [`--ignore-certificate-errors-spki-list=${pastedListener.spkiBase64}`],
+    });
+    const browserConnection = await chromium.connect(pairedBrowser.wsEndpoint());
+    const browserContext = await browserConnection.newContext({
+      permissions: ["clipboard-read", "clipboard-write"],
+    });
+    const browserPage = await browserContext.newPage();
+    const browserFailures: string[] = [];
+    browserPage.on("pageerror", (error) => browserFailures.push(error.message.slice(0, 300)));
+    const browserReceipt = async (stage: string) =>
+      console.log(
+        `OCTANT_PAIRED_READER ${JSON.stringify({
+          stage,
+          url: new URL(browserPage.url()).origin,
+          text: (
+            await browserPage
+              .locator("body")
+              .innerText()
+              .catch(() => "")
+          ).slice(0, 600),
+        })}`,
+      );
+    const deviceLabel = "Canvas acceptance browser";
+    let comparisonCode: string;
+    try {
+      await browserPage.goto(pairingLink);
+      await browserPage.getByRole("region", { name: "Confirm host identity" }).waitFor();
+      if (!(await browserPage.getByText(listenerOrigin).isVisible()))
+        throw Error("The paired browser did not confirm the exact listener origin.");
+      await browserPage.getByLabel("Device label").fill(deviceLabel);
+      await browserPage.getByRole("button", { name: "Pair this browser" }).click();
+      await browserPage.getByRole("heading", { name: "Waiting for host approval" }).waitFor();
+      comparisonCode = (
+        await browserPage.locator(".remote-pairing__comparison-code").innerText()
+      ).trim();
+      if (!/^\S{4,32}$/.test(comparisonCode))
+        throw Error("The paired browser did not show a comparison code.");
+    } catch (error) {
+      await browserReceipt("browser-pairing-failed");
+      throw error;
+    }
+    const approveLabel = `Approve ${deviceLabel}`;
+    let approvalVisible = false;
+    for (let attempt = 0; attempt < 6 && !approvalVisible; attempt++) {
+      try {
+        await observeUntil(
+          `pairing-request-${attempt}`,
+          (snapshot) => hasText(snapshot, approveLabel) && hasText(snapshot, comparisonCode),
+        );
+        approvalVisible = true;
+      } catch {
+        await nativeInput(`pairing-request-scroll-${attempt}`, "scroll-down", "Pair a device");
+      }
+    }
+    if (!approvalVisible)
+      throw Error("The native pairing request with the browser's comparison code was not shown.");
+    await nativeInput("pairing-approve", "click", approveLabel);
+    await observeUntil("pairing-approved", (snapshot) => hasText(snapshot, "Approved"));
+    console.log(
+      `OCTANT_PAIRED_READER ${JSON.stringify({ stage: "native-approval", comparisonCodeMatched: true })}`,
+    );
+    const readerWidths: number[] = [];
+    try {
+      for (const width of [1280, 390]) {
+        await browserPage.setViewportSize({ width, height: 844 });
+        await browserPage.goto(`${listenerOrigin}/`);
+        const threads = browserPage.getByRole("navigation", { name: "Chat thread list" });
+        await threads.waitFor({ timeout: 30_000 });
+        await threads.getByRole("button", { name: /Weekly signups brief/ }).click();
+        await browserPage.getByRole("button", { name: "Thread actions" }).click();
+        await browserPage.getByRole("menuitemradio", { name: "Show canvas" }).click();
+        await browserPage
+          .getByRole("button", { name: /Weekly signups brief/ })
+          .last()
+          .click();
+        const canvas = browserPage.getByRole("dialog", { name: /Weekly signups brief/ });
+        await canvas.getByText("Signups this week").first().waitFor();
+        await canvas.getByRole("button", { name: "More Canvas actions" }).click();
+        if (
+          (await browserPage.getByRole("menuitem", { name: "Refine…" }).count()) !== 0 ||
+          (await browserPage.getByRole("menuitem", { name: "Export…" }).count()) !== 0
+        )
+          throw Error("The paired reader offered owner Canvas actions.");
+        await browserPage.getByRole("menuitem", { name: "Share…" }).click();
+        await browserPage.getByRole("dialog", { name: "Share canvas" }).waitFor();
+        await browserPage.getByRole("button", { name: "Copy link" }).click();
+        const copied = await browserPage.evaluate(() => navigator.clipboard.readText());
+        if (copied !== publishedUrl)
+          throw Error("The paired browser clipboard did not hold the exact published URL.");
+        if (
+          (await browserPage.getByRole("button", { name: "Update", exact: true }).count()) !== 0 ||
+          (await browserPage.getByRole("button", { name: "Revoke", exact: true }).count()) !== 0
+        )
+          throw Error("The paired reader exposed public-link owner controls.");
+        await browserPage.screenshot({ path: join(artifacts, `paired-public-links-${width}.png`) });
+        readerWidths.push(width);
+        console.log(
+          `OCTANT_PAIRED_READER ${JSON.stringify({ stage: "paired-reader", width, exactClipboard: true, ownerControls: false })}`,
+        );
+      }
+      const viewerPage = await browserContext.newPage();
+      const viewerResponse = await viewerPage.goto(publishedUrl);
+      await viewerPage.getByText("Signups this week").first().waitFor();
+      if (viewerResponse?.status() !== 200)
+        throw Error("The fresh rendered viewer did not load the published link.");
+      await viewerPage.screenshot({ path: join(artifacts, "fresh-rendered-viewer.png") });
+      await viewerPage.close();
+      console.log(
+        `OCTANT_PAIRED_READER ${JSON.stringify({ stage: "fresh-rendered-viewer", status: 200, content: true })}`,
+      );
+    } catch (error) {
+      await browserReceipt("paired-reader-failed");
+      throw error;
+    }
+    if (browserFailures.length !== 0)
+      throw Error(`The paired browser reported page errors: ${browserFailures.join(" | ")}`);
+    await browserContext.close();
+    await pairedBrowser.close();
+    pairedBrowserExited =
+      pairedBrowser.process().exitCode !== null || pairedBrowser.process().signalCode !== null;
+    if (!pairedBrowserExited) throw Error("The owned paired browser did not exit.");
+    await writeFile(
+      join(artifacts, "paired-browser-checkpoint.json"),
+      JSON.stringify(
+        {
+          nativeSettingsPastedCertificateListener: true,
+          servedCertificateMatchesPasted: true,
+          nativeSettingsPairingLinkCopied: true,
+          browserTrust: "owned headless Chrome trusting only this run's listener key hash",
+          nativeApprovalWithMatchingComparisonCode: true,
+          pairedReaderWidths: readerWidths,
+          pairedBrowserClipboardMatchesExactPublishedURL: true,
+          pairedOwnerControlsAbsent: true,
+          freshRenderedViewer: true,
+          ownedBrowserExited: true,
+        },
+        null,
+        2,
+      ),
+    );
+    await nativeInput("paired-back-to-app", "click", "Back to app");
+    await observeUntil(
+      "paired-return-canvas",
+      (snapshot) => hasText(snapshot, "v1") && hasText(snapshot, "Signups this week"),
+    );
+    await showPublicLinks("paired-return", null);
     await nativeInput("native-update-link", "click", "Update");
     await observeUntil("update-export", (snapshot) => hasText(snapshot, "Review export"));
     await nativeInput("review-update", "click", "Review export");
@@ -1200,7 +1510,7 @@ const timer = setInterval(() => {
           format: exportRecord.format,
           approvedExport: true,
           viewerHTTP: true,
-          freshViewerBrowser: false,
+          freshViewerBrowser: true,
           sameUrlUpdate: true,
           passwordViewGrant: true,
           reportPrivacy: true,
@@ -1208,8 +1518,10 @@ const timer = setInterval(() => {
           nativeRevoke410: true,
           scopedOwnerCredentialRemoved: true,
           pairedClient: "actual-packaged-gateway-pinned-TLS-signed-session-read-and-export-refusal",
-          pairedSetup: "API-seeded owned device and Project scope; no native pairing UI",
-          pairedBrowserClipboard: false,
+          pairedSetup:
+            "API-seeded device for the signed-session negatives; separate browser paired through native Settings pasted-certificate listener, pairing link and approval",
+          pairedBrowserReader: "rendered read-only public links at 1280 and 390 widths",
+          pairedBrowserClipboard: true,
           offlineRetry: "native-offline-revoke-and-listing-retry-passed",
         },
         null,
@@ -1223,6 +1535,19 @@ const timer = setInterval(() => {
     process.removeListener("SIGTERM", interrupted);
     process.removeListener("SIGINT", interrupted);
     pairedFixture?.connection.disconnect();
+    if (pairedBrowser !== undefined && !pairedBrowserExited) {
+      const ownedBrowser = pairedBrowser;
+      const force = setTimeout(() => void ownedBrowser.kill(), 3000);
+      try {
+        await ownedBrowser.close();
+      } catch {
+        await ownedBrowser.kill();
+      } finally {
+        clearTimeout(force);
+      }
+      pairedBrowserExited =
+        ownedBrowser.process().exitCode !== null || ownedBrowser.process().signalCode !== null;
+    }
     if (shareService !== undefined) shareService.stop();
     if (app !== undefined && pid !== undefined && bundle !== undefined) {
       const ownPid = pid;
@@ -1286,7 +1611,8 @@ const timer = setInterval(() => {
           probe.close((error) => (error ? reject(error) : resolve())),
         );
       }
-      cleanupVerified = true;
+      // An owned paired browser that did not exit leaves cleanup unverified.
+      cleanupVerified = pairedBrowser === undefined || pairedBrowserExited;
     }
     if (ownerSecretStore !== undefined && publishedCredentialRef === undefined) {
       // An upload can finish before its success notice is observed. Recover
@@ -1439,7 +1765,7 @@ const timer = setInterval(() => {
         cleanup: "verified",
         publishAcceptance: "native-publish-update-revoke-passed",
         pairedAcceptance:
-          "actual pinned-TLS signed session read/export refusal; API-seeded pairing setup; browser clipboard not claimed",
+          "pinned-TLS signed session read/export refusal (API-seeded device); browser paired through native Settings with rendered read-only links, exact clipboard and fresh viewer",
         personalAccount: false,
       },
       null,

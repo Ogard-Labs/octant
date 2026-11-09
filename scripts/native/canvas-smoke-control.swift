@@ -69,7 +69,7 @@ _ = controllerApplication.setActivationPolicy(.prohibited)
 guard let application = NSRunningApplication(processIdentifier: pid), !application.isTerminated else {
     refuse("The owned application is no longer running.")
 }
-if mode == "choose-native-menu-item" || mode == "click" || mode == "fill" || mode == "fill-private" || mode == "toggle-before-field" || mode == "focus-before-text" || mode == "scroll-top" || mode == "scroll-bottom" || mode == "enter" || mode == "end" || mode == "escape" || mode == "settings" {
+if mode == "choose-native-menu-item" || mode == "click" || mode == "fill" || mode == "fill-private" || mode == "paste" || mode == "select-copy" || mode == "scroll-down" || mode == "toggle-before-field" || mode == "focus-before-text" || mode == "scroll-top" || mode == "scroll-bottom" || mode == "enter" || mode == "end" || mode == "escape" || mode == "settings" {
     guard CGPreflightPostEventAccess() else { refuse("Native event delivery is unavailable; no permission was requested.") }
     _ = application.activate(options: [.activateIgnoringOtherApps])
 }
@@ -110,7 +110,7 @@ let targets = (request.results ?? []).compactMap { result -> TextTarget? in
 var clicked = false
 var pointerProof: String?
 var nativeText: String?
-if mode == "read-text" || mode == "choose-native-menu-item" || mode == "click" || mode == "fill" || mode == "fill-private" || mode == "toggle-before-field" || mode == "focus-before-text" || mode == "scroll-top" || mode == "scroll-bottom" {
+if mode == "read-text" || mode == "choose-native-menu-item" || mode == "click" || mode == "fill" || mode == "fill-private" || mode == "paste" || mode == "select-copy" || mode == "scroll-down" || mode == "toggle-before-field" || mode == "focus-before-text" || mode == "scroll-top" || mode == "scroll-bottom" {
     guard !expected.isEmpty else { refuse("Supply a nonempty observed text target.") }
     let rowContext = mode == "click" && CommandLine.arguments.count == 6 ? CommandLine.arguments[5] : nil
     let observedRows = (request.results ?? []).filter { result in
@@ -232,16 +232,47 @@ if mode == "read-text" || mode == "choose-native-menu-item" || mode == "click" |
         guard let move = CGEvent(mouseEventSource: nil, mouseType: .mouseMoved, mouseCursorPosition: point, mouseButton: .left),
               let down = CGEvent(mouseEventSource: nil, mouseType: .leftMouseDown, mouseCursorPosition: point, mouseButton: .left),
               let up = CGEvent(mouseEventSource: nil, mouseType: .leftMouseUp, mouseCursorPosition: point, mouseButton: .left) else { refuse("Native pointer events are unavailable.") }
-        down.setIntegerValueField(.mouseEventClickState, value: 1)
-        up.setIntegerValueField(.mouseEventClickState, value: 1)
         move.post(tap: .cghidEventTap)
         usleep(75_000)
-        down.post(tap: .cghidEventTap)
-        usleep(50_000)
-        up.post(tap: .cghidEventTap)
+        // A person selects a whole displayed value with a triple click; the
+        // owned text is then copied with the ordinary Copy shortcut.
+        for count in 1...(mode == "select-copy" ? 3 : 1) {
+            down.setIntegerValueField(.mouseEventClickState, value: Int64(count))
+            up.setIntegerValueField(.mouseEventClickState, value: Int64(count))
+            down.post(tap: .cghidEventTap)
+            usleep(50_000)
+            up.post(tap: .cghidEventTap)
+            usleep(40_000)
+        }
         clicked = true
     }
-    if mode == "scroll-top" || mode == "scroll-bottom" {
+    if mode == "select-copy" || mode == "paste" {
+        // "paste" first focuses the field by its label, selects its contents,
+        // then pastes what the controller placed on the pasteboard.
+        let letter: CGKeyCode = mode == "paste" ? 9 : 8
+        if mode == "paste" {
+            guard let allDown = CGEvent(keyboardEventSource: nil, virtualKey: 0, keyDown: true),
+                  let allUp = CGEvent(keyboardEventSource: nil, virtualKey: 0, keyDown: false) else { refuse("Native keyboard input is unavailable.") }
+            allDown.flags = .maskCommand
+            allUp.flags = .maskCommand
+            allDown.postToPid(pid)
+            allUp.postToPid(pid)
+            usleep(50_000)
+        }
+        guard let keyDown = CGEvent(keyboardEventSource: nil, virtualKey: letter, keyDown: true),
+              let keyUp = CGEvent(keyboardEventSource: nil, virtualKey: letter, keyDown: false) else { refuse("Native keyboard input is unavailable.") }
+        keyDown.flags = .maskCommand
+        keyUp.flags = .maskCommand
+        keyDown.postToPid(pid)
+        usleep(50_000)
+        keyUp.postToPid(pid)
+        usleep(150_000)
+    } else if mode == "scroll-down" {
+        guard let scroll = CGEvent(scrollWheelEvent2Source: nil, units: .line, wheelCount: 1, wheel1: -6, wheel2: 0, wheel3: 0) else { refuse("Native scrolling is unavailable.") }
+        scroll.location = point
+        scroll.post(tap: .cghidEventTap)
+        usleep(150_000)
+    } else if mode == "scroll-top" || mode == "scroll-bottom" {
         for _ in 0..<3 {
             guard let scroll = CGEvent(scrollWheelEvent2Source: nil, units: .line, wheelCount: 1, wheel1: mode == "scroll-top" ? 200 : -200, wheel2: 0, wheel3: 0) else { refuse("Native scrolling is unavailable.") }
             scroll.location = point
