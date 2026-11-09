@@ -1,3 +1,4 @@
+import { withHandoverSummary } from "../agentRun/conversationHandoff";
 import { MAX_PROVIDER_ATTACHMENTS } from "@octant/contracts";
 import { THREAD_MOVING_REFUSAL } from "../hub/threadMoveHolds";
 import type {
@@ -487,6 +488,13 @@ export interface CodeOperationRuntimeOptions {
    * this host cannot hand a conversation over, so a turn on a provider other
    * than its session's is refused, naming that reason.
    */
+  /**
+   * The summary the limit rule wrote with the thread's earlier provider, when
+   * it still covers the thread's conversation; a provider switch leads with it.
+   */
+  readonly handoverSummary?: (
+    thread: CodeThread,
+  ) => { readonly content: string; readonly completedAt: string } | undefined;
   readonly providerSwitchContext?: (input: {
     readonly thread: CodeThread;
     readonly excludeOperationId: CodeOperationId;
@@ -2406,7 +2414,16 @@ export function threadWithActiveTurnPosture(
     requested: active.thread.executionPolicy,
     thread: thread.executionPolicy,
   });
-  return executionPolicy === thread.executionPolicy ? thread : { ...thread, executionPolicy };
+  // A turn that started sandboxed stays sandboxed: turning the sandbox off
+  // takes effect from the next turn, as a wider posture does.
+  const keepsSandbox =
+    active.thread.fullAccessSandbox === true && thread.fullAccessSandbox !== true;
+  if (executionPolicy === thread.executionPolicy && !keepsSandbox) return thread;
+  return {
+    ...thread,
+    executionPolicy,
+    ...(keepsSandbox ? { fullAccessSandbox: true } : {}),
+  };
 }
 
 /** The Code thread whose running turn holds this provider session, if any. */
@@ -3561,10 +3578,18 @@ class RuntimeTurnController implements CodeOperationTurnPort {
       if (inherited.source.projectId !== String(thread.projectId))
         return refused({ subject: "inherited", reason: "foreign-project" });
     }
+    // A switch to another provider leads with the summary the limit rule
+    // wrote, when one waits. A fork's handoff also carries its source's turns,
+    // which that summary never read, so a fork hands over as before.
+    const handover =
+      reason === "provider-switch" && origin === undefined
+        ? this.#handoverSummary(thread)
+        : undefined;
+    const carried = withHandoverSummary(selection, handover);
     return {
       status: "ready",
-      blocks: selection.blocks,
-      inputSelection: selection,
+      blocks: carried.blocks,
+      inputSelection: carried,
       record: {
         kind: "context-handoff-attached",
         reason,
@@ -3573,9 +3598,10 @@ class RuntimeTurnController implements CodeOperationTurnPort {
         previousSessionId: previous.sessionId,
         providerInstanceId: thread.providerInstanceId,
         modelId: thread.modelId,
-        messages: selection.blocks.length - 1,
-        omissions: selection.omissions,
-        externalContentIngested: selection.source.externalContentIngested,
+        messages: carried.blocks.filter((block) => block.kind !== "conversation-summary").length,
+        omissions: carried.omissions,
+        externalContentIngested: carried.source.externalContentIngested,
+        ...(carried === selection ? {} : { handoverSummary: true as const }),
         ...(origin === undefined || inherited === undefined
           ? {}
           : {
@@ -3589,6 +3615,17 @@ class RuntimeTurnController implements CodeOperationTurnPort {
         hiddenReasoningTransferred: false,
       },
     };
+  }
+
+  /** The limit rule's summary for the thread, if one waits; a read that fails hands over as before. */
+  #handoverSummary(
+    thread: CodeThread,
+  ): { readonly content: string; readonly completedAt: string } | undefined {
+    try {
+      return this.#options.handoverSummary?.(thread);
+    } catch {
+      return undefined;
+    }
   }
 
   /**
@@ -4973,6 +5010,7 @@ class RuntimeTurnController implements CodeOperationTurnPort {
       Effect.scoped(
         this.#runner.run({
           thread: active.thread,
+          providerDriverKind: active.driver.kind,
           ...(active.inputsCurrent === undefined ? {} : { inputsCurrent: active.inputsCurrent }),
           sessionId: active.sessionId as never,
           ...(active.resumeCursor === undefined ? {} : { resumeCursor: active.resumeCursor }),

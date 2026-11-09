@@ -144,6 +144,10 @@ describe("nativeHarnessResultTaintsThread", () => {
     // reaches a lead through `octant_agents`, which marks the thread itself.
     expect(taints("delegate")).toBe(true);
   });
+
+  it("does not mark a thread that loads a skill, because only an effective skill can be loaded", () => {
+    expect(nativeHarnessResultTaintsThread({ toolName: "skill" })).toBe(false);
+  });
 });
 
 describe("searchQueryRefusalUnderTaint", () => {

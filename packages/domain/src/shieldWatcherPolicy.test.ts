@@ -225,6 +225,12 @@ describe("Octant Shield's Watcher", () => {
     expect(callReadsProtectedSecret({ path: "~/.ssh/id_ed25519" }, guarded)).toBe(true);
     expect(callReadsProtectedSecret({ paths: ["src/a.ts", "~/.ssh/config"] }, guarded)).toBe(true);
     expect(callReadsProtectedSecret({ path: "src/a.ts" }, guarded)).toBe(false);
+    expect(
+      callReadsProtectedSecret(
+        { edits: [{ path: "src/a.ts" }, { path: "~/.ssh/config", oldText: "a", newText: "b" }] },
+        guarded,
+      ),
+    ).toBe(true);
     expect(callReadsProtectedSecret({ path: "~/.ssh/id_ed25519" }, undefined)).toBe(false);
   });
 

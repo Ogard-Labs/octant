@@ -169,6 +169,7 @@ function createMockClient(response: UsageQueryResponse): UsageClient {
         occurredAt: queryAt,
       }),
     ),
+    diagnostics: vi.fn(),
     retain: vi.fn(
       async (_request: UsageRetentionRequest): Promise<UsagePurgeResult> => ({
         purgedCount: 1,
@@ -279,6 +280,7 @@ describe("UsageDashboard", () => {
       }),
       export: vi.fn(async () => ({ format: "csv" as const, body: "" })),
       reset: vi.fn(async () => ({ purgedCount: 0, occurredAt: queryAt })),
+      diagnostics: vi.fn(),
       retain: vi.fn(async () => ({ purgedCount: 0, occurredAt: queryAt })),
     };
     render(<UsageDashboard client={client} />);

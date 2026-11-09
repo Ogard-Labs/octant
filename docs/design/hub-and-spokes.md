@@ -1182,10 +1182,12 @@ the usual case is one press and one unlock.
   it is never preselected. Changing the destination re-evaluates every row that
   still holds its starting choice and leaves the person's own choices alone.
 - **One press, one unlock per destination.** The primary action moves every
-  row set to move or hand over. A batch is one offer per destination naming
-  every thread in it, so one unlock covers the batch it names and nothing
-  else. Threads go smallest first, so most are done early, and a thread set to
-  move after its turn starts when that turn ends.
+  row set to move or hand over. A batch is one ticket per destination naming
+  every thread in it: the destination's owner challenge covers that list, and
+  the ticket then opens one move of each named thread and nothing else, so
+  one unlock covers the batch it names and nothing else. The batch's moves run
+  one after another, so most are done early, and a thread set to move after
+  its turn starts when that turn ends.
 - **Finishing.** The screen says **Safe to shut down** only when every chosen
   thread is committed, or handed over and pushed. A thread whose move cannot
   finish shows [This thread can't move](#a-thread-that-cannot-move) with its
@@ -2220,6 +2222,35 @@ a numbered slice. Built, with these narrower readings:
     with, the hub's own owner list for the unlock, and the hub listed in the
     Computer card like any member. What it does not do yet: carry bulk
     parts or Prepare to shut down.
+
+    The seventh part is Prepare to shut down. The window route lists every
+    thread on this host with its last journaled activity: a busy one (a turn
+    runs or it waits on the person), an open one active in the last 14
+    days, and older open threads folded closed. It asks each member once per
+    mode and repository which Projects fit. The dialog starts on the
+    destination the domain policy picks, puts each row on its starting
+    choice, re-reads untouched rows when the destination changes, and moves
+    every chosen row with one Touch ID through the batch ticket. One unlock
+    moves at most 64 threads, because the batch's thread list rides inside
+    the destination's owner challenge, whose body the owner routes cap at
+    16 KiB. When more are set to move, the dialog says so before the press,
+    counts the rest as staying here, and offers to move them next with one
+    more Touch ID. It then follows each row to Moved or Can't move and ends
+    on Safe to shut down, or on how many threads stay here. A row the
+    person sets themselves keeps its choice through destination changes.
+    Each thread's status says when the last move or wait a window started
+    for it ended, never dismissed and kept until it starts another move, so
+    a row that ended without moving (Don't move pressed, or its failure
+    notice already put away) counts as staying rather than waiting forever.
+    Hiding the dialog leaves its batch moving, and opening it again shows
+    that batch. **Prepare to Shut Down…** sits in the application menu above
+    Quit. The quit confirmation gains **Move threads
+    first…** while the window last saw this host in a hub with another
+    member, and the dialog then ends with Quit Octant through the guarded
+    quit. What it does not do yet: Hand over and Stop and move as row
+    choices, a row moving to a member other than the head's, sizes and an
+    estimate, the menu bar entry and progress, more than one destination's
+    unlock in turn, and carrying bulk parts.
 
 Any slice that would deploy an Octant-operated service, create an account, or
 spend money stops for a separate maintainer action.

@@ -76,6 +76,8 @@ import type { CodeController } from "../code/useCodeController";
 import { CodeSettingsView } from "../code/CodeSettingsView";
 import { UsageDashboard } from "../usage/UsageDashboard";
 import { ProviderUsageHistoryWorkspace } from "../usage/ProviderUsageHistoryWorkspace";
+import { TurnDiagnosticsWorkspace } from "../usage/TurnDiagnosticsWorkspace";
+import type { ProviderInstance } from "@octant/contracts";
 import type { LocalUsageHistoryClient } from "@octant/client-runtime/provider-usage-history-client";
 import type { CanvasClient } from "@octant/client-runtime/canvas-client";
 import type { UsageClient } from "@octant/client-runtime/usage-client";
@@ -85,6 +87,10 @@ import { SupportBundleControl } from "../support/SupportBundleControl";
 import { JournalGrowthTable } from "../support/JournalGrowthTable";
 import type { DiagnosticsExportClient } from "@octant/client-runtime/diagnostics-export-client";
 import type { ExtensionClient } from "@octant/client-runtime/extension-client";
+import {
+  runtimeCompactionDefaultsText,
+  useRuntimeCompactionDefaults,
+} from "../settings/runtimeCompactionDefaults";
 import type { HostControlClient } from "@octant/client-runtime/host-control-client";
 import type { PersonMemoryClient } from "@octant/client-runtime/person-memory-client";
 import type { ProtectedFilesClient } from "@octant/client-runtime/protected-files-client";
@@ -232,6 +238,8 @@ export interface SettingsViewProps {
   readonly usageClient?: UsageClient;
   readonly providerUsageLimitsClient?: ProviderUsageLimitsClient;
   readonly localUsageHistoryClient?: LocalUsageHistoryClient;
+  /** Leaves Settings for a thread a Usage or Diagnostics row names. */
+  readonly onOpenUsageSubject?: (subjectType: string, subjectId: string) => void;
   readonly diagnosticsExportClient?: DiagnosticsExportClient;
   readonly hostControlClient?: HostControlClient;
   /** Settings › Data & privacy › Browser profiles; absent where the host keeps none. */
@@ -1255,6 +1263,10 @@ function ActiveSectionContent({
           {...(props.localUsageHistoryClient === undefined
             ? {}
             : { historyClient: props.localUsageHistoryClient })}
+          providers={props.providerController?.instances ?? []}
+          {...(props.onOpenUsageSubject === undefined
+            ? {}
+            : { onOpenSubject: props.onOpenUsageSubject })}
           {...(props.providerUsageLimitsClient === undefined
             ? {}
             : {
@@ -1950,6 +1962,9 @@ function CompletedThreadArchiveSelect(props: {
 
 const AUTO_COMPACT_WINDOW_CHOICES: ReadonlyArray<number> = [50, 60, 70, 75, 80, 85, 90, 95];
 
+const RUNTIME_COMPACTION_DESCRIPTION =
+  "Claude Code, Codex and the other runtimes compact by themselves. A share picked here overrides theirs in the sessions Octant starts: Claude Code and Codex then compact at it inside a turn too, and the others between turns. Close to a full window, or on a small one, Claude Code keeps its own point.";
+
 /** How full a window may get before a compaction rule acts, plus off. */
 function AutoCompactWindowSelect(props: {
   readonly id: string;
@@ -2064,6 +2079,7 @@ function ProfileSection({ focusedSetting, props }: SectionProps) {
 }
 
 function GeneralSection({ focusedSetting, props }: SectionProps) {
+  const runtimeDefaults = useRuntimeCompactionDefaults(props.extensionClient);
   return (
     <section aria-label="General" className="settings-section-stack" id="settings-general">
       <SettingsSection title="Available modes">
@@ -2159,7 +2175,7 @@ function GeneralSection({ focusedSetting, props }: SectionProps) {
       <SettingsSection title="Compaction">
         <div className="setgroup">
           <SettingRow
-            description="When a thread Octant keeps (Octant Harness, and Chat or Work on a model endpoint) fills this much of its window, Octant compacts it before the next turn. The thread keeps every message."
+            description="When a thread Octant keeps (Octant Harness, and Chat or Work on a model endpoint) fills this much of its window, Octant compacts it before the next turn, and Octant Harness inside a long turn too. The thread keeps every message."
             focused={focusedSetting === settingId("auto-compact-octant")}
             label="Compact Octant threads"
             scope="host"
@@ -2176,7 +2192,11 @@ function GeneralSection({ focusedSetting, props }: SectionProps) {
             />
           </SettingRow>
           <SettingRow
-            description="Claude Code, Codex and the other runtimes compact by themselves. Pick a share to have Octant compact them sooner, between turns."
+            description={
+              runtimeDefaults === undefined
+                ? RUNTIME_COMPACTION_DESCRIPTION
+                : `${RUNTIME_COMPACTION_DESCRIPTION} ${runtimeCompactionDefaultsText(runtimeDefaults)}`
+            }
             focused={focusedSetting === settingId("auto-compact-runtime")}
             label="Compact runtime threads"
             scope="host"
@@ -2882,27 +2902,40 @@ function UsageSettingsSection(props: {
   readonly historyClient?: LocalUsageHistoryClient;
   readonly isNarrow?: boolean;
   readonly limits?: ReactNode;
+  readonly providers?: ReadonlyArray<ProviderInstance>;
+  readonly onOpenSubject?: (subjectType: string, subjectId: string) => void;
 }) {
-  const [source, setSource] = useState<"provider" | "octant">(
+  const [source, setSource] = useState<"provider" | "octant" | "diagnostics">(
     props.historyClient === undefined ? "octant" : "provider",
   );
-  const sourceControl =
-    props.historyClient === undefined ? undefined : (
-      <OctantToggleGroup<"provider" | "octant">
-        aria-label="Usage source"
-        value={[source]}
-        onValueChange={(values) => {
-          const next = values[0];
-          if (next !== undefined) setSource(next);
-        }}
-      >
+  // Diagnostics reads the same host as Octant records, so it is always offered.
+  const sourceControl = (
+    <OctantToggleGroup<"provider" | "octant" | "diagnostics">
+      aria-label="Usage source"
+      value={[source]}
+      onValueChange={(values) => {
+        const next = values[0];
+        if (next !== undefined) setSource(next);
+      }}
+    >
+      {props.historyClient === undefined ? null : (
         <OctantToggleGroupItem value="provider">Provider history</OctantToggleGroupItem>
-        <OctantToggleGroupItem value="octant">Octant records</OctantToggleGroupItem>
-      </OctantToggleGroup>
-    );
+      )}
+      <OctantToggleGroupItem value="octant">Octant records</OctantToggleGroupItem>
+      <OctantToggleGroupItem value="diagnostics">Diagnostics</OctantToggleGroupItem>
+    </OctantToggleGroup>
+  );
   return (
     <div className="settings-usage-stack" id="settings-usage">
-      {source === "provider" && props.historyClient !== undefined ? (
+      {source === "diagnostics" ? (
+        <TurnDiagnosticsWorkspace
+          client={props.client}
+          embedded
+          sourceControl={sourceControl}
+          {...(props.providers === undefined ? {} : { providers: props.providers })}
+          {...(props.onOpenSubject === undefined ? {} : { onOpenSubject: props.onOpenSubject })}
+        />
+      ) : source === "provider" && props.historyClient !== undefined ? (
         <ProviderUsageHistoryWorkspace
           client={props.historyClient}
           embedded

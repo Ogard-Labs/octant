@@ -2,10 +2,10 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import type { MovedThreadReference } from "@octant/contracts";
+import { decodeShutdownListing, type MovedThreadReference } from "@octant/contracts";
 import type { MovableThreadReading } from "./threadMoveService";
 import { createThreadMoveStateStore } from "./threadMoveStateStore";
-import { ThreadMovesFromWindow } from "./threadMovesFromWindow";
+import { hostThreads, shortenedForListing, ThreadMovesFromWindow } from "./threadMovesFromWindow";
 
 const THREAD: MovedThreadReference = {
   mode: "code",
@@ -59,6 +59,7 @@ describe("moving a thread after its turn", () => {
       },
       members: () => [],
       selfMemberId: () => "self",
+      listThreads: async () => [],
       now: Date.now,
       pollMs: 5,
     });
@@ -78,6 +79,112 @@ describe("moving a thread after its turn", () => {
     await new Promise((resolve) => setTimeout(resolve, 30));
 
     expect(start).not.toHaveBeenCalled();
+    // A batch that named the thread reads that it stays, rather than waiting on it.
+    expect(moves.status(THREAD).settled?.settledAt).toEqual(expect.any(String));
+    expect(moves.status(THREAD).waiting).toBeUndefined();
     moves.close();
+  });
+});
+
+describe("where a moved thread stands", () => {
+  it("still says a move ended after its failure notice was put away", async () => {
+    const folder = mkdtempSync(join(tmpdir(), "octant-move-settled-"));
+    folders.push(folder);
+    // The move fails and its notice has already been dismissed: the state holds none.
+    const start = vi.fn(async () => ({ status: "failed" as const, reason: "refused" as const }));
+    const moves = new ThreadMovesFromWindow({
+      moves: {
+        askProjects: async () => "unreachable",
+        start,
+        cancel: async () => ({ status: "cancelled" }),
+        takeBack: async () => {},
+        activateAnyway: async () => ({ httpStatus: 409, body: {} }),
+        dismissFailure: () => {},
+        refuseBeforeStart: () => {},
+      },
+      state: createThreadMoveStateStore(folder),
+      tickets: {
+        challenge: async () => ({ status: "refused", kind: "refused" }),
+        redeem: async () => ({ status: "issued", ticketId: "ticket" }),
+      },
+      source: { read: async () => reading(false) },
+      members: () => [],
+      selfMemberId: () => "self",
+      listThreads: async () => [],
+      now: Date.now,
+    });
+
+    expect(moves.status(THREAD).settled).toBeUndefined();
+    expect(
+      await moves.start({
+        thread: THREAD,
+        destinationMemberId: DESKTOP as never,
+        timing: "now",
+        unlock: { challengeId: "12345678-1234-4234-8234-123456789012", signature: "c2ln" },
+      }),
+    ).toEqual({ status: "started" });
+
+    await vi.waitFor(() => expect(start).toHaveBeenCalledOnce());
+    await vi.waitFor(() =>
+      expect(moves.status(THREAD).settled?.settledAt).toEqual(expect.any(String)),
+    );
+    expect(moves.status(THREAD).failure).toBeUndefined();
+    moves.close();
+  });
+});
+
+describe("which threads Prepare to shut down lists", () => {
+  const PROJECT = "44444444-4444-4444-8444-444444444444";
+  const DONE_AT = "2026-11-08T09:00:00.000Z";
+
+  it("counts a thread put away as completed as closed, in every mode", () => {
+    const listed = hostThreads({
+      chat: [
+        { id: "c-open", title: "Plan the trip", lifecycle: "active" },
+        { id: "c-done", title: "Booked", lifecycle: "active", completedAt: DONE_AT },
+      ],
+      code: [
+        { id: "k-open", title: "Add dark mode", projectId: PROJECT, lifecycle: "waiting" },
+        {
+          id: "k-done",
+          title: "Fix the build",
+          projectId: PROJECT,
+          lifecycle: "active",
+          completedAt: DONE_AT,
+        },
+      ],
+      work: [
+        { id: "w-open", title: "Weekly digest", projectId: PROJECT, lifecycle: "active" },
+        {
+          id: "w-done",
+          title: "Quarterly report",
+          projectId: PROJECT,
+          lifecycle: "active",
+          completedAt: DONE_AT,
+        },
+      ],
+    });
+
+    expect(listed.filter((entry) => entry.open).map((entry) => entry.thread.threadId)).toEqual([
+      "c-open",
+      "k-open",
+      "w-open",
+    ]);
+  });
+
+  it("lists a thread whose own title is longer than a listing row allows", () => {
+    const title = `  ${"A very long title ".repeat(30)}😀 end  `;
+    const shortened = shortenedForListing(title);
+
+    expect(shortened.length).toBeLessThanOrEqual(256);
+    expect(shortened.endsWith("…")).toBe(true);
+    expect(shortenedForListing("   ")).toBe("Untitled thread");
+    expect(
+      decodeShutdownListing({
+        status: "listed",
+        members: [],
+        rows: [{ thread: THREAD, title: shortened, busy: false, older: false, placements: [] }],
+      }).rows[0]?.title,
+    ).toBe(shortened);
   });
 });

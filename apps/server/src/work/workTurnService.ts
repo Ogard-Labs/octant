@@ -514,7 +514,12 @@ export interface WorkTurnServiceDependencies {
 /** The access each running Work turn holds, by thread, as the turn service records it. */
 export type RunningWorkTurnAccess = Map<
   string,
-  { readonly requestId: string; readonly access: WorkAccess }
+  {
+    readonly requestId: string;
+    readonly access: WorkAccess;
+    /** The sandbox choice the turn started with; a later change waits for the next turn. */
+    readonly fullAccessSandbox?: boolean;
+  }
 >;
 
 export class WorkTurnService {
@@ -712,7 +717,7 @@ export class WorkTurnService {
     try {
       return this.#contextHarness?.handoverSummary(
         decodeContextSubjectRef({ aggregateType, aggregateId: String(threadId) }),
-        this.sessionCompactionConversation(threadId),
+        () => this.sessionCompactionConversation(threadId),
       );
     } catch {
       // A ledger that cannot be read hands over the raw selection, as before.
@@ -1596,6 +1601,7 @@ export class WorkTurnService {
         command,
         ...(thread === undefined ? {} : { thread }),
         ...(thread === undefined ? {} : { access: turnAccess }),
+        ...(thread?.fullAccessSandbox === true ? { fullAccessSandbox: true } : {}),
         windowId: authenticatedWindowId,
         providerSessionId,
         ...(resumeCursor === undefined ? {} : { resumeCursor }),
@@ -2001,6 +2007,8 @@ export class WorkTurnService {
     readonly thread?: WorkThread;
     /** The thread's access, narrowed to ask-first when its caller held it. */
     readonly access?: WorkAccess;
+    /** The thread's sandbox choice at Full access when the turn starts. */
+    readonly fullAccessSandbox?: boolean;
     readonly windowId: WindowId;
     readonly providerSessionId: ProviderSessionId;
     readonly resumeCursor?: ProviderResumeCursor;
@@ -2142,6 +2150,7 @@ export class WorkTurnService {
         this.#runningAccess.set(String(input.command.threadId), {
           requestId: String(input.command.requestId),
           access: input.access,
+          ...(input.fullAccessSandbox === true ? { fullAccessSandbox: true } : {}),
         });
       }
       const outcome = await this.#turnRuntime.run({
@@ -2165,6 +2174,7 @@ export class WorkTurnService {
                 ),
             }),
         ...(input.access === undefined ? {} : { access: input.access }),
+        ...(input.fullAccessSandbox === true ? { fullAccessSandbox: true } : {}),
         ...(artifactToolName === undefined ? {} : { nativeArtifacts: true }),
         ...nativeSetupOption(
           sessionNativeSetup(this.#persistence, {

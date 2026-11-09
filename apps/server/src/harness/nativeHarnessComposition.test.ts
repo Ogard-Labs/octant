@@ -529,6 +529,10 @@ describe("native harness composition", () => {
       questions: { ask: async () => undefined } as never,
       webFetch: (async () => undefined) as never,
       resolveWebSearch: () => (async () => undefined) as never,
+      skills: () => ({
+        list: async () => ({ status: "listed" as const, skills: [] }),
+        load: async () => ({ status: "refused" as const, reason: "skill-not-found", message: "" }),
+      }),
     };
 
     const noJournal = {
@@ -568,21 +572,13 @@ describe("native harness composition", () => {
         "goal",
       ];
       const web = ["web-fetch", "web-search"];
+      // Skills a Chat Project's thread can have are effective there too, so every lead
+      // is offered skill; it lists and loads only what the activation ladder allows.
+      const files = ["read", "grep", "glob", "bash", "edit", "write"];
       expect({ chat, work, code }).toEqual({
-        chat: lead,
-        work: ["read", "grep", "glob", "bash", "edit", "write", ...web, ...lead, "goal-check"],
-        code: [
-          "read",
-          "grep",
-          "glob",
-          "bash",
-          "edit",
-          "write",
-          ...web,
-          ...lead,
-          "goal-check",
-          "diagnostics",
-        ],
+        chat: [...lead, "skill"],
+        work: [...files, ...web, ...lead, "goal-check", "skill"],
+        code: [...files, ...web, ...lead, "goal-check", "skill", "diagnostics"],
       });
     });
 
@@ -608,10 +604,21 @@ describe("native harness composition", () => {
         const readOnly = ["read", "grep", "glob"];
         const web = ["web-fetch", "web-search"];
         const lead = ["todo-write", "context-remaining", "second-opinion", "ask-user", "goal"];
+        // skill only reads, so Plan keeps it.
         expect(code).toEqual(
           writes
-            ? [...readOnly, "bash", "edit", "write", ...web, ...lead, "goal-check", "diagnostics"]
-            : [...readOnly, ...web, ...lead],
+            ? [
+                ...readOnly,
+                "bash",
+                "edit",
+                "write",
+                ...web,
+                ...lead,
+                "goal-check",
+                "skill",
+                "diagnostics",
+              ]
+            : [...readOnly, ...web, ...lead, "skill"],
         );
       },
     );
@@ -806,6 +813,7 @@ describe("native harness composition", () => {
         "webFetch:",
         "contextHarness",
         "journal:",
+        "skills:",
       ]) {
         expect(block, port).toContain(port);
       }

@@ -125,6 +125,7 @@ export type HarnessDependencies = Pick<ServerStart, "options" | "persistence"> &
   Pick<
     ProvidersWiring,
     | "configuredDriverOptions"
+    | "effectiveSkills"
     | "nativeHarnessLeadFallback"
     | "nativeHarnessTranscripts"
     | "providerDataDirectory"
@@ -140,7 +141,7 @@ export type HarnessDependencies = Pick<ServerStart, "options" | "persistence"> &
     | "nativeHarnessQuestions"
     | "nativeHarnessSessions"
   > &
-  Pick<WorkRequestStateWiring, "runningWorkTurnAccess"> &
+  Pick<WorkRequestStateWiring, "runningWorkTurnAccess" | "runningWorkTurnSandbox"> &
   Pick<
     FoundationsWiring,
     | "codeBoardEventStore"
@@ -182,6 +183,7 @@ export function wireHarness(deps: HarnessDependencies) {
     persistence,
     providerDataDirectory,
     runningWorkTurnAccess,
+    runningWorkTurnSandbox,
     sideTasks,
     threadFollowUpSuggestions,
     toolEgressRules,
@@ -846,6 +848,7 @@ export function wireHarness(deps: HarnessDependencies) {
         ? shieldServerStore.recordTag({ threadId, tag: "reads-secrets-then-egress", command })
         : "not-tagged",
     goals: goalService,
+    skills: deps.effectiveSkills,
     questions: nativeHarnessQuestions,
     approvals: nativeHarnessApprovals,
     shield: hostShield,
@@ -926,6 +929,17 @@ export function wireHarness(deps: HarnessDependencies) {
       codeSessionAuthority,
       codeOperationRuntime: { threadWithActiveTurnPosture: codeParentActiveTurn },
     }),
+    // A running turn keeps the sandbox it started with, so turning it off
+    // never opens commands the turn has not run yet; turning it on applies
+    // at once, since that only narrows.
+    readFullAccessSandbox: (threadId) => {
+      const code = persistence.readCodeThread(threadId as never);
+      if (code !== undefined) {
+        return (codeParentActiveTurn?.(code) ?? code).fullAccessSandbox === true;
+      }
+      const stored = workThreadProjection.read(threadId as never)?.fullAccessSandbox === true;
+      return stored || runningWorkTurnSandbox(threadId) === true;
+    },
     resolveWebSearch: () =>
       searxngHarnessWebSearch({
         readBaseUrl: () => persistence.readChatSettings()?.settings.searxngBaseUrl,

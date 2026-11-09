@@ -1,4 +1,5 @@
 import { defaultShellSettings } from "@octant/domain/shell-policy";
+import { buildTurnDiagnosticsReport } from "@octant/domain";
 import { decodeChatBootstrap } from "@octant/contracts/chat";
 import { DEFAULT_THEME_SETTINGS } from "@octant/contracts/theme";
 import type { ProviderInstance, SettingsDeepLink } from "@octant/contracts";
@@ -1477,6 +1478,59 @@ describe("SettingsView", () => {
     expect(screen.getAllByRole("heading", { name: "Usage" })).toHaveLength(1);
   });
 
+  it("offers Diagnostics in Usage and leaves Settings for the thread of a failed turn", async () => {
+    const threadId = "66000000-0000-4000-8000-0000000000d1";
+    const report = buildTurnDiagnosticsReport(
+      [
+        {
+          threadId,
+          mode: "work",
+          providerInstanceId: "66000000-0000-4000-8000-000000000001",
+          modelId: "model-a",
+          stopReason: "failed",
+          metrics: { precision: "unavailable", wallMs: 1_000 },
+          diagnostics: {
+            toolCalls: 0,
+            toolFailures: 0,
+            failure: { category: "provider-failed", message: "Provider stopped." },
+          },
+          startedAt: "2026-11-07T10:00:00.000Z",
+          endedAt: "2026-11-07T10:00:01.000Z",
+        } as never,
+      ],
+      { generatedAt: "2026-11-07T12:00:00.000Z", bucket: "day", timeZone: "UTC" },
+    );
+    const usageClient = {
+      query: vi.fn(async () => {
+        throw new Error("ledger unavailable in this test");
+      }),
+      diagnostics: vi.fn(async () => report),
+      export: vi.fn(),
+      reset: vi.fn(),
+      retain: vi.fn(),
+    };
+    const onOpenUsageSubject = vi.fn();
+    renderSettings({ usageClient: usageClient as never, onOpenUsageSubject });
+    fireEvent.click(
+      within(screen.getByRole("navigation", { name: "Settings sections" })).getByRole("button", {
+        name: "Usage",
+      }),
+    );
+
+    fireEvent.click(
+      within(screen.getByRole("group", { name: "Usage source" })).getByRole("button", {
+        name: "Diagnostics",
+      }),
+    );
+
+    const turns = await screen.findByRole("table", { name: "Turns to investigate" });
+    expect(within(turns).getByText(/Provider stopped\./)).toBeVisible();
+    // Embedded, it adds no second page title to Settings.
+    expect(screen.queryByRole("heading", { name: "Diagnostics" })).toBeNull();
+    fireEvent.click(within(turns).getByRole("button", { name: /Open the thread/ }));
+    expect(onOpenUsageSubject).toHaveBeenCalledWith("work-thread", threadId);
+  });
+
   it("forwards isNarrow to the Usage dashboard activity table", async () => {
     const usageClient = {
       query: vi.fn(async () => ({
@@ -1711,6 +1765,7 @@ describe("SettingsView", () => {
       extensionClient: {
         snapshot: async () => snapshot(),
         listDiscoveredTooling: async () => ({ servers: [], plugins: [], notes: [] }),
+        runtimeCompactionDefaults: async () => ({ claude: { autoCompact: true }, codex: {} }),
         execute,
         effectiveState: async () => ({
           sequence: 1,
@@ -1781,6 +1836,7 @@ describe("SettingsView", () => {
       importLocalPluginReceipt: vi.fn(),
       addUserMcpServer: vi.fn() as never,
       listDiscoveredTooling: vi.fn(async () => ({ servers: [], plugins: [], notes: [] })),
+      runtimeCompactionDefaults: async () => ({ claude: { autoCompact: true }, codex: {} }),
       mcpServerSignIn: vi.fn() as never,
       projectPins: vi.fn() as never,
       applyDiscoveredTooling: vi.fn() as never,
@@ -1853,6 +1909,7 @@ describe("SettingsView", () => {
   it("lists remembered tool approvals beside remembered websites, with the Project's name", async () => {
     const projectId = "44000000-0000-4000-8000-0000000000a1";
     const extensionClient = {
+      runtimeCompactionDefaults: async () => ({ claude: { autoCompact: true }, codex: {} }),
       toolGrantsAvailable: true,
       snapshot: vi.fn(async () => ({ packages: [] })),
       listToolGrants: vi.fn(async () => [
@@ -1884,6 +1941,7 @@ describe("SettingsView", () => {
 
   it("leaves remembered tool approvals out for a client that is not a local window", () => {
     const extensionClient = {
+      runtimeCompactionDefaults: async () => ({ claude: { autoCompact: true }, codex: {} }),
       toolGrantsAvailable: false,
       snapshot: vi.fn(async () => ({ packages: [] })),
       listToolGrants: vi.fn(),

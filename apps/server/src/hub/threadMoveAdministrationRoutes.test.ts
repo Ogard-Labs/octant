@@ -60,6 +60,7 @@ function setup() {
     },
     members: () => [],
     selfMemberId: () => DESKTOP,
+    listThreads: async () => [],
     now: Date.now,
   });
   const authority = new WindowAuthorityStore();

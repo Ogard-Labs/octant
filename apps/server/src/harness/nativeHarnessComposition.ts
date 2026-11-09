@@ -65,6 +65,7 @@ import {
   createNativeHarnessTools,
   type NativeHarnessShellPort,
   type NativeHarnessShellRun,
+  type NativeHarnessSkillPort,
   type NativeHarnessToolPorts,
 } from "./nativeHarnessTools";
 
@@ -177,6 +178,12 @@ export interface NativeHarnessCompositionOptions {
    */
   readonly readWorkExecutionPolicy?: (threadId: string) => ProviderExecutionPolicy | undefined;
   /**
+   * Whether a thread opted into the sandbox at Full access: with it, a Full
+   * access thread's egress stays proxied, so its commands run on the confined
+   * shell while approvals stay answered allow.
+   */
+  readonly readFullAccessSandbox?: (threadId: string) => boolean;
+  /**
    * The web search a turn may use, resolved each time a turn's tools are
    * composed: its backing endpoint is a live setting, not a startup fact.
    */
@@ -212,6 +219,18 @@ export interface NativeHarnessCompositionOptions {
     readonly projectId?: ProjectId | undefined;
     readonly lead: NativeHarnessSlotCandidate;
   }) => NonNullable<NativeHarnessToolPorts["secondOpinion"]>;
+  /**
+   * The skills effective for a lead thread, behind `skill`; absent on a host
+   * that cannot resolve them, where the tool is not offered.
+   */
+  readonly skills?: (scope: {
+    readonly mode: OctantMode;
+    readonly threadId: string;
+    readonly projectId: ProjectId | null;
+    readonly threadVersion: number;
+    readonly providerInstanceId: ProviderInstanceId;
+    readonly modelId: ChatThread["modelId"];
+  }) => NativeHarnessSkillPort;
   readonly hostId: ToolActionAuthority["hostId"];
   readonly readThreadTaint: (threadId: string) => boolean;
   /** Questions to the person; absent on a host with no surface to answer them. */
@@ -814,7 +833,11 @@ export function createNativeHarnessComposition(
     const executionPolicy = options.readCodeExecutionPolicy?.(threadId, windowId);
     return executionPolicy === undefined
       ? "none"
-      : resolveDefaultThreadEgressPolicy({ mode: "code", executionPolicy });
+      : resolveDefaultThreadEgressPolicy({
+          mode: "code",
+          executionPolicy,
+          fullAccessSandbox: options.readFullAccessSandbox?.(threadId),
+        });
   };
   const codeShell = (
     scope: HarnessEgressScope,
@@ -840,7 +863,11 @@ export function createNativeHarnessComposition(
     const executionPolicy = options.readWorkExecutionPolicy?.(threadId);
     return executionPolicy === undefined
       ? "none"
-      : resolveDefaultThreadEgressPolicy({ mode: "work", executionPolicy });
+      : resolveDefaultThreadEgressPolicy({
+          mode: "work",
+          executionPolicy,
+          fullAccessSandbox: options.readFullAccessSandbox?.(threadId),
+        });
   };
   // Work and Code share the shell at the thread's level, so a Work thread's
   // commands run on the shell a Code thread at that level gets.
@@ -877,6 +904,22 @@ export function createNativeHarnessComposition(
           journalLookup: createThreadJournalLookup({
             ...input,
             transcripts: options.journal.transcripts,
+          }),
+        };
+  const skillsFor = (
+    mode: OctantMode,
+    thread: ChatThread | WorkThread | CodeThread,
+  ): Pick<NativeHarnessToolPorts, "skills"> =>
+    options.skills === undefined
+      ? {}
+      : {
+          skills: options.skills({
+            mode,
+            threadId: String(thread.id),
+            projectId: thread.projectId ?? null,
+            threadVersion: Number(thread.version),
+            providerInstanceId: thread.providerInstanceId,
+            modelId: thread.modelId,
           }),
         };
   return {
@@ -1013,6 +1056,7 @@ export function createNativeHarnessComposition(
             projectId: thread.projectId,
             lead: leadOf(thread),
           }),
+          ...(sideChat ? {} : skillsFor("chat", thread)),
         },
       });
     },
@@ -1051,6 +1095,7 @@ export function createNativeHarnessComposition(
             projectId: thread.projectId,
             lead: leadOf(thread),
           }),
+          ...skillsFor("work", thread),
         },
       });
     },
@@ -1102,6 +1147,7 @@ export function createNativeHarnessComposition(
             projectId: thread.projectId,
             lead: leadOf(thread),
           }),
+          ...skillsFor("code", thread),
         },
       });
     },
@@ -1147,6 +1193,7 @@ export function createNativeHarnessComposition(
             projectId: thread.projectId,
             lead: leadOf(thread),
           }),
+          ...skillsFor("code", thread),
         },
       });
     },
@@ -1184,6 +1231,7 @@ export function createNativeHarnessComposition(
             projectId: thread.projectId,
             lead: leadOf(thread),
           }),
+          ...skillsFor("work", thread),
         },
       });
     },

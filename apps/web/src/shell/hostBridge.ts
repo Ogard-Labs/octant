@@ -286,7 +286,10 @@ export type HubAdministrationOperation =
   | "thread-move-cancel"
   | "thread-move-take-back"
   | "thread-move-activate"
-  | "thread-move-dismiss";
+  | "thread-move-dismiss"
+  | "shutdown-listing"
+  | "shutdown-challenge"
+  | "shutdown-start";
 
 /**
  * The loopback hub administration, which only a local window reaches. Absent
@@ -603,6 +606,17 @@ export interface OctantHostBridge
   ) => () => void;
   readonly subscribeCodeDeepLinks?: (listener: (target: CodeDeepLink) => void) => () => void;
   readonly subscribeOpenSettings?: (listener: () => void) => () => void;
+  /**
+   * Prepare to Shut Down… from the application menu, or Move threads first…
+   * from the quit confirmation (`fromQuit`). Absent outside the desktop app.
+   */
+  readonly subscribePrepareToShutDown?: (
+    listener: (request: { readonly fromQuit: boolean }) => void,
+  ) => () => void;
+  /** Quits through the desktop's guarded shutdown, which may still ask first. */
+  readonly requestQuit?: () => void;
+  /** Tells the desktop whether Quit may offer Move threads first…. */
+  readonly reportShutdownMovesOffered?: (offered: boolean) => void;
   /** The first ⌘Q press: the window shows "press again to quit". */
   readonly subscribeQuitShortcutHint?: (listener: () => void) => () => void;
   readonly subscribeStartNewAgent?: (listener: () => void) => () => void;

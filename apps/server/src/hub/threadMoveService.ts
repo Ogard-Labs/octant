@@ -253,6 +253,8 @@ interface Ticket {
   readonly ownerMemberId: string;
   readonly sourceMemberId: string;
   readonly expiresAt: number;
+  /** A batch ticket's threads not yet offered; absent for a one-move ticket. */
+  readonly threads?: ReadonlyArray<MovedThreadReference>;
 }
 
 const decodeMemberId = Schema.decodeUnknownSync(HubMemberId);
@@ -272,6 +274,7 @@ export class ThreadMoveService {
   issueTicket(input: {
     readonly ownerMemberId: string;
     readonly sourceMemberId: string;
+    readonly threads?: ReadonlyArray<MovedThreadReference>;
   }): TicketOutcome {
     const now = this.#options.now();
     for (const [ticketId, ticket] of this.#tickets) {
@@ -288,6 +291,7 @@ export class ThreadMoveService {
       ownerMemberId: input.ownerMemberId,
       sourceMemberId: input.sourceMemberId,
       expiresAt,
+      ...(input.threads === undefined ? {} : { threads: input.threads }),
     });
     return { status: "issued", ticketId, expiresAt };
   }
@@ -313,11 +317,21 @@ export class ThreadMoveService {
       }
       return this.#stateAnswer(existing);
     }
-    // The ticket is single-use: it is gone once any offer answers it.
+    // A one-move ticket is gone once any offer answers it. A batch ticket
+    // opens one move of each thread it names and nothing else, and is gone
+    // once the last of them is offered.
     const ticket = this.#tickets.get(body.ticketId);
-    this.#tickets.delete(body.ticketId);
+    if (ticket?.threads === undefined) this.#tickets.delete(body.ticketId);
     if (ticket === undefined || ticket.sourceMemberId !== sender.memberId) {
       return refusedAnswer(offer.moveId, "refused");
+    }
+    if (ticket.threads !== undefined) {
+      const remaining = ticket.threads.filter((thread) => !sameThread(thread, offer.source));
+      if (remaining.length === ticket.threads.length) {
+        return refusedAnswer(offer.moveId, "refused");
+      }
+      if (remaining.length === 0) this.#tickets.delete(body.ticketId);
+      else this.#tickets.set(body.ticketId, { ...ticket, threads: remaining });
     }
     if (this.#options.now() > ticket.expiresAt) {
       return refusedAnswer(offer.moveId, "unlock-required");

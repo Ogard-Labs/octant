@@ -2,7 +2,7 @@ import { threadWorkingDirectoryCurrent } from "../threadWorkingDirectoryAuthorit
 import type { ThreadMoveHolds } from "../hub/threadMoveHolds";
 import { decodeComputerUseOwner } from "@octant/contracts/computer-use-plugin";
 import { randomUUID } from "node:crypto";
-import { mkdirSync } from "node:fs";
+import { mkdirSync, rmSync } from "node:fs";
 import { lstat } from "node:fs/promises";
 import { join } from "node:path";
 import {
@@ -946,6 +946,12 @@ export function wireWork(deps: WorkDependencies) {
             const root = join(persistence.dataDirectory, "hand-off-scratch", threadId);
             mkdirSync(root, { recursive: true, mode: 0o700 });
             return root;
+          },
+          releaseScratchRoot: (threadId) => {
+            rmSync(join(persistence.dataDirectory, "hand-off-scratch", threadId), {
+              recursive: true,
+              force: true,
+            });
           },
           uuid: randomUUID,
         }),

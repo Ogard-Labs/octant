@@ -86,6 +86,7 @@ const SOURCE_WORDS: Readonly<Record<string, string>> = {
   "ask-user": "Your answer to a question",
   goal: "The thread's goal",
   "goal-check": "A goal check",
+  skill: "Skill instructions",
   diagnostics: "Typecheck and lint results",
 };
 

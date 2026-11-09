@@ -103,6 +103,7 @@ export interface ShellSettingsSurfaceProps {
   readonly usageClient: UsageClient;
   readonly providerUsageLimitsClient?: ProviderUsageLimitsClient;
   readonly localUsageHistoryClient?: LocalUsageHistoryClient;
+  readonly onOpenUsageSubject?: (subjectType: string, subjectId: string) => void;
   readonly backgroundImageLibrary?: BackgroundImageLibrary;
   readonly announcement: string;
   readonly announcementSequence: number;
@@ -227,6 +228,9 @@ export function ShellSettingsSurface(props: ShellSettingsSurfaceProps) {
             {...(props.localUsageHistoryClient === undefined
               ? {}
               : { localUsageHistoryClient: props.localUsageHistoryClient })}
+            {...(props.onOpenUsageSubject === undefined
+              ? {}
+              : { onOpenUsageSubject: props.onOpenUsageSubject })}
           />
         </Suspense>
       </SettingsSurfaceErrorBoundary>

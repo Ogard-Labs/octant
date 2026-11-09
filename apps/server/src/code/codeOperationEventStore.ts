@@ -1678,6 +1678,7 @@ function conversationHandoff(
         ...(event.inputReceipt === undefined ? {} : { inputReceipt: event.inputReceipt }),
         externalContentIngested: event.externalContentIngested,
         ...(event.inherited === undefined ? {} : { inherited: event.inherited }),
+        ...(event.handoverSummary === undefined ? {} : { handoverSummary: event.handoverSummary }),
       };
     case "fork":
       return {

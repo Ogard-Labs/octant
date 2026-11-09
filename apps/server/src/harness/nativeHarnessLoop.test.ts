@@ -2008,6 +2008,39 @@ describe("compacting an Octant Harness session", () => {
     ]);
   });
 
+  it("summarizes earlier turns inside a turn once its request passes the person's point", async () => {
+    const transcripts = new MemoryNativeHarnessTranscriptStore();
+    const { transport, requests } = scriptedTransport([
+      ...answers(2),
+      { text: "Earlier: chose the queue design.", toolCalls: [] },
+      { text: "answer 3", toolCalls: [] },
+    ]);
+    const long = "x".repeat(20_000);
+    const events = await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const connection = yield* connect(transport, transcripts);
+          yield* connection.start({
+            sessionId,
+            modelId,
+            executionPolicy: "approval-gated",
+            // Short turns stay under it; the long third prompt passes it.
+            compactionPoint: { tokens: 4_000, contextWindow: 100_000 },
+          });
+          yield* sendAndCollect(connection, "first", isTerminal);
+          yield* sendAndCollect(connection, "second", isTerminal);
+          return yield* sendAndCollect(connection, long, isTerminal);
+        }),
+      ),
+    );
+    expect(requests).toHaveLength(4);
+    expect(requests[2]?.tools).toEqual([]);
+    expect(requests[2]?.history[0]?.text).toContain("User: first");
+    expect(requests[3]?.history[0]?.text).toContain("Earlier: chose the queue design.");
+    expect(requests[3]?.history.at(-1)?.text).toBe(long);
+    expect(events.some((event) => event.kind === "context-compacted")).toBe(true);
+  });
+
   it("resumes a compacted session from its summary and the turns after it", async () => {
     const transcripts = new MemoryNativeHarnessTranscriptStore();
     const { transport, requests } = scriptedTransport([
