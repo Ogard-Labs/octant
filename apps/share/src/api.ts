@@ -194,11 +194,13 @@ async function createShare(
               shareId: owned.shareId,
               document,
               expiry,
-              password: password ?? null,
+              passwordProtected: password !== undefined,
             }),
           )
           .digest("hex");
-  const replayOwned = (): Response | undefined => {
+  // The digest records only whether a password was set. The password itself is
+  // checked against the stored argon2id hash, so no fast hash of it is kept.
+  const replayOwned = async (): Promise<Response | undefined> => {
     if (owned === undefined || requestDigest === undefined) return undefined;
     const existing = ctx.store.lookup(owned.shareId);
     if (existing.status === "missing") return undefined;
@@ -208,6 +210,12 @@ async function createShare(
     if (
       existing.share.creation === undefined ||
       !digestsMatch(requestDigest, existing.share.creation.requestDigest)
+    )
+      return refusal("conflict", "This id already belongs to a different approved publication.");
+    if (
+      password !== undefined &&
+      (existing.share.passwordHash === null ||
+        !(await Bun.password.verify(password, existing.share.passwordHash)))
     )
       return refusal("conflict", "This id already belongs to a different approved publication.");
     return jsonResponse(
@@ -222,14 +230,14 @@ async function createShare(
       201,
     );
   };
-  const replay = replayOwned();
+  const replay = await replayOwned();
   if (replay !== undefined) return replay;
   const now = ctx.store.now();
   const passwordHash =
     password === undefined ? null : await Bun.password.hash(password, { algorithm: "argon2id" });
   // Password hashing awaits. Another request may have completed this same id
   // while it ran, so repeat the authenticated idempotency check before write.
-  const completed = replayOwned();
+  const completed = await replayOwned();
   if (completed !== undefined) return completed;
   const ownerSecret = owned?.ownerSecret ?? ctx.store.newOwnerSecret();
   const share: StoredShare = {
