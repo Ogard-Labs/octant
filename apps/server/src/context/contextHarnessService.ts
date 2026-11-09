@@ -289,6 +289,13 @@ export class ContextHarnessError extends Error {
   }
 }
 
+/**
+ * The share of a plan's safe input budget a summary request may fill: the rest
+ * covers the difference between the planner's counts and the request as the
+ * endpoint measures it.
+ */
+const SUMMARY_REQUEST_BUDGET_SHARE = 0.85;
+
 export class ContextHarnessService {
   readonly #persistence: ContextHarnessPersistence;
   readonly #uuid: () => string;
@@ -1605,7 +1612,13 @@ export class ContextHarnessService {
     }
     const selection = selectSessionCompaction({
       items,
-      safeInputBudget: current.next.plan.safeInputBudget,
+      // The summary request is measured by the endpoint as sent, and the
+      // escaping and multi-byte text of a written conversation make it larger
+      // than the planner's per-entry counts: measured 2026-11-09 on an
+      // Anthropic-compatible endpoint, a summary picked to the full budget of
+      // a 12,000-token window was refused before it was sent. The headroom
+      // keeps a summary of a nearly full window sendable.
+      safeInputBudget: Math.floor(current.next.plan.safeInputBudget * SUMMARY_REQUEST_BUDGET_SHARE),
       summaryFraming: SUMMARY_PROMPT_FRAMING,
     });
     if (selection.kind === "nothing-to-compact") return selection;

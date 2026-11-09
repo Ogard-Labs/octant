@@ -1253,6 +1253,18 @@ over instead**, the source offers a handover:
    agent adds where the work stands and what comes next; if that turn fails or
    runs past two minutes, the note goes without it. The note is at most
    32 KiB, passes the Secret guard and redaction, and names no absolute path.
+   The turn is sent the way a thread hand-off document is: a fresh single-use
+   session on the thread's provider and model, in plan mode, with no tools
+   and an empty scratch folder, reading the thread's export cut in its prompt,
+   so it can change nothing. It runs on Commit and push only, never for the
+   preview, and only when the window's request says so; a request that does
+   not say spends no turn. The answer is filed under its own heading, "The
+   agent's summary", clipped like the other sections, and the whole note,
+   that section included, is redacted and has every home, temporary, system,
+   and drive folder replaced by "a folder on" the source computer. It never
+   enters the thread's transcript: `thread.handover-started@1` records whether
+   it was `added`, or why not (`unavailable`, `failed`, `timed-out`), and is
+   silent when the person turned it off.
 3. **Commit everything.** One commit on the thread's branch, or on a new
    `octant/handover/<thread slug>` branch when the thread works on the default
    branch or a detached head, takes the tracked changes and the untracked files
@@ -2331,10 +2343,19 @@ a numbered slice. Built, with these narrower readings:
     `no-remote` say the work is on no other computer yet), held across a
     restart, until **Take back here**. While it is held, no move of the
     thread can start: the move service refuses any frozen thread as busy
-    before touching it, and the Computer card offers no destination. What it
-    does not do yet: the agent's own summary turn, the notice to a chosen
-    destination, Handovers on the destination's start screen, Continue
-    handover, and the erase once a destination continues it.
+    before touching it, and the Computer card offers no destination. With
+    **Ask the agent to summarize** on (the sheet's default), Commit and push
+    first sends the thread's own agent one bounded summary turn on the frozen
+    thread, after the plan has refused a busy thread and before the handover
+    is journaled or saved, so a host that stops while the agent writes
+    restarts with nothing handed over and the thread free. A provider that is
+    not ready, a turn that fails or answers with nothing, and a turn still
+    running after two minutes (cancelled, and no longer waited on even if the
+    runtime ignores the cancel) all leave the note without it, and the
+    handover goes on. While it runs the sheet says "Asking the agent to
+    summarize…". What it does not do yet: the notice to a chosen destination,
+    Handovers on the destination's start screen, Continue handover, and the
+    erase once a destination continues it.
 
     The ninth part is the handover's destination side. A handover started
     with a chosen member sends it a signed notice (`POST
@@ -2366,8 +2387,7 @@ a numbered slice. Built, with these narrower readings:
     offline still lets its frozen copy go. A branch found by fetching
     without a notice is offered too, after the clone's next fetch, as the
     handover rules above describe; the continued report names the commit
-    continued, and the source erases only for its own. What it does not do
-    yet: the agent's own summary turn.
+    continued, and the source erases only for its own.
 
     The tenth part is the frozen bar and the pane tombstone. While a move
     holds a thread (moving away, set to move after its turn, handed over, or

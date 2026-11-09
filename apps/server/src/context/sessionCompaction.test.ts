@@ -31,6 +31,7 @@ import type {
 } from "@octant/provider-sdk/driver";
 import { deriveCatalogEpoch } from "./capabilityCatalog";
 import { ContextHarnessService, type SessionConversationMessage } from "./contextHarnessService";
+import { SUMMARY_PROMPT_FRAMING } from "./contextSummaryGenerator";
 import { automaticCompactionId } from "./automaticCompaction";
 import { makeProviderCapacityScheduler } from "./contextRuntime";
 import {
@@ -85,6 +86,53 @@ afterEach(() => {
 });
 
 describe("compacting a session on request", () => {
+  it("leaves headroom in the summary request, so a nearly full window stays sendable", async () => {
+    const world = createWorld();
+    planSession(world);
+    const budget = world.harness.inspect(subject).next.plan.safeInputBudget;
+    const { fixedTokens, perItemTokens } = SUMMARY_PROMPT_FRAMING;
+    // Each earlier message sized so all four would fill the whole budget, but
+    // only two fit the share a summary request may take.
+    const size = Math.floor((budget - fixedTokens) / 3) - perItemTokens;
+    expect(fixedTokens + 3 * (size + perItemTokens)).toBeGreaterThan(budget * 0.85);
+    expect(fixedTokens + 2 * (size + perItemTokens)).toBeLessThanOrEqual(budget * 0.85);
+    world.harness.planTurn({
+      subject,
+      displayLabel: "Signing keys",
+      requestShape: "chat-turn",
+      modelLimitObservations: [modelLimits()],
+      serviceLimits: serviceLimits(),
+      entries: [
+        currentRequest(10),
+        conversationEntry("m1", size),
+        conversationEntry("m2", size),
+        conversationEntry("m3", size),
+        conversationEntry("m4", size),
+      ],
+      reserves: { response: 200, reasoning: 50, framing: 50, variance: 50, safety: 50 },
+      watchHeadroomTokens: 100,
+      capabilityCatalog: {
+        entries: [],
+        epoch: deriveCatalogEpoch({
+          entries: [],
+          activeFacts: { providerInstanceId, activeScope },
+          invalidationFacts: [],
+        }),
+      },
+      capabilityRequest: {
+        providerInstanceId,
+        activeScope,
+        nativeToolSearch: "unsupported",
+        taskKeywords: [],
+        explicitSelections: [],
+      },
+    });
+    world.service.start(command(), "local-window");
+    await world.service.settled();
+    expect(world.provider.materials).toHaveLength(2);
+    world.close();
+  });
+
   it("summarizes the conversation before the recent tail and journals a receipt", async () => {
     const world = createWorld();
     planSession(world);

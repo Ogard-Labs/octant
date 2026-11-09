@@ -19,6 +19,7 @@ import {
   ThreadMovedOut,
   ThreadMovedOutWorktreeRemoved,
   UtcTimestamp,
+  type HandoverAgentSummary,
   type HandoverId,
   type MovedThreadReference,
   type ThreadMoveId,
@@ -136,6 +137,7 @@ export interface ThreadHandoverRecorder {
     readonly handoverId: HandoverId;
     readonly thread: MovedThreadReference;
     readonly branch: string;
+    readonly agentSummary?: HandoverAgentSummary;
   }) => void;
 }
 
