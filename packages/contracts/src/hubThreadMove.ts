@@ -61,6 +61,14 @@ export const HandoverShortfall = Schema.Literal("push-failed", "no-remote");
 export type HandoverShortfall = typeof HandoverShortfall.Type;
 
 /**
+ * What became of the agent's own summary turn the person asked for: added to
+ * the note, or the note went without it because the provider was not ready,
+ * the turn failed, or it ran past its bound and was cancelled.
+ */
+export const HandoverAgentSummary = Schema.Literal("added", "unavailable", "failed", "timed-out");
+export type HandoverAgentSummary = typeof HandoverAgentSummary.Type;
+
+/**
  * What a move carries. `index-snapshot` and `working-tree-snapshot` travel
  * inside the Git bundle as two commits, because one commit holds one tree and
  * a file staged at one version and edited again holds two.
@@ -280,6 +288,8 @@ export const ThreadHandoverStarted = Schema.Struct({
   handoverId: HandoverId,
   thread: MovedThreadReference,
   branch: bounded(255),
+  /** Absent when the person did not ask for the agent's summary, and on handovers recorded before it existed. */
+  agentSummary: Schema.optional(HandoverAgentSummary),
   startedAt: UtcTimestamp,
 }).annotations(strict);
 export type ThreadHandoverStarted = typeof ThreadHandoverStarted.Type;
@@ -655,6 +665,12 @@ export const HandoverRequest = Schema.Struct({
   thread: MovedThreadReference,
   /** The member to tell, so the handover shows under its Handovers before its next fetch. */
   destinationMemberId: Schema.optional(HubMemberId),
+  /**
+   * Ask the agent to summarize: one bounded turn of the thread's own agent adds
+   * where the work stands and what comes next. Only `true` asks; a request
+   * without it spends no provider turn.
+   */
+  summarize: Schema.optional(Schema.Boolean),
 }).annotations(strict);
 export type HandoverRequest = typeof HandoverRequest.Type;
 
