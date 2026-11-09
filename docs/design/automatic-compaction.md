@@ -1,6 +1,6 @@
 # Automatic compaction
 
-Status: Building (slice 4 of 4; live-runtime checks open)
+Status: Built (all four slices; live-runtime checks open)
 Size: Full — crosses contracts, the context service, every runtime adapter,
 Settings and the provider-switch handoff.
 Owner: maintainers · Started: 2026-11-07 · Approved: 2026-11-07, maintainer (Q-1 and Q-2 answered)
@@ -253,12 +253,12 @@ since its handoff carries the source's turns, which the summary never read.
 
 ## 6. Build plan
 
-| Slice | What it delivers                                                                                                                           | Requirement IDs                       | Status  |
-| ----- | ------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------- | ------- |
-| 1     | Rules in settings + pure decision; `host-policy` caller; window-fill trigger between turns on every runtime; reason on receipt and divider | FR-1 (fill), FR-2, FR-9, FR-10, NFR-1 | Built   |
-| 2     | Idle sweep                                                                                                                                 | FR-1 (idle), FR-5, NFR-2              | Built   |
-| 3     | Limit trigger, notice, handover summary read by switch and fork                                                                            | FR-1 (limit), FR-6, FR-7, FR-8        | Planned |
-| 4     | Runtime compaction point (Claude Code, Codex) and in-turn harness compaction                                                               | FR-3, FR-4                            | Built   |
+| Slice | What it delivers                                                                                                                           | Requirement IDs                       | Status |
+| ----- | ------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------- | ------ |
+| 1     | Rules in settings + pure decision; `host-policy` caller; window-fill trigger between turns on every runtime; reason on receipt and divider | FR-1 (fill), FR-2, FR-9, FR-10, NFR-1 | Built  |
+| 2     | Idle sweep                                                                                                                                 | FR-1 (idle), FR-5, NFR-2              | Built  |
+| 3     | Limit trigger, notice, handover summary read by a provider switch                                                                          | FR-1 (limit), FR-6, FR-7, FR-8        | Built  |
+| 4     | Runtime compaction point (Claude Code, Codex) and in-turn harness compaction                                                               | FR-3, FR-4                            | Built  |
 
 ## 7. Open questions
 
