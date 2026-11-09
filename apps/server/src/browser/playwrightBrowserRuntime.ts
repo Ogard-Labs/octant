@@ -950,22 +950,14 @@ export class PlaywrightBrowserRuntime implements BrowserRuntimePort {
       await session.detach?.().catch(() => undefined);
       throw new BrowserRecordingUnavailableError();
     }
-    // A page that does not repaint sends one frame at the start, and looking
-    // at it takes a credential check. Starting returns once it was looked at,
-    // so a click in the first step cannot move the page on before the
-    // recording holds the page it started on (a slow runner lost that frame
-    // and kept an empty recording). A page that sends none does not hold the
-    // call beyond the bound.
-    await Promise.race([
-      firstFrame,
-      new Promise((resolve) => setTimeout(resolve, FIRST_FRAME_WAIT_MS).unref?.()),
-    ]);
     const timer = setTimeout(() => {
       frames.stop(frames.deadlineMs, "duration-limit");
       endCollection(frames.deadlineMs);
       void session.send("Page.stopScreencast").catch(() => undefined);
     }, MAX_BROWSER_RECORDING_MS);
     timer.unref?.();
+    // Registered before the wait below, so a tab change, a drop, or a closing
+    // context during it ends the screencast like any other recording.
     owned.recording = {
       page,
       ended: () => ended,
@@ -976,8 +968,28 @@ export class PlaywrightBrowserRuntime implements BrowserRuntimePort {
       settled: () => tail,
       stopReceiving: () => {
         receiving = false;
+        // A recording that is ending has no first frame to wait for.
+        firstFrameLooked();
       },
     };
+    // A page that does not repaint sends one frame at the start, and looking
+    // at it takes a credential check. Starting returns once it was looked at,
+    // so a click in the first step cannot move the page on before the
+    // recording holds the page it started on (a slow runner lost that frame
+    // and kept an empty recording). A page that sends none does not hold the
+    // call beyond the bound.
+    let boundTimer: ReturnType<typeof setTimeout> | undefined;
+    try {
+      await Promise.race([
+        firstFrame,
+        new Promise((resolve) => {
+          boundTimer = setTimeout(resolve, FIRST_FRAME_WAIT_MS);
+          boundTimer.unref?.();
+        }),
+      ]);
+    } finally {
+      clearTimeout(boundTimer);
+    }
   }
 
   /** End the context's recording and build its animation; nothing running is empty. */
