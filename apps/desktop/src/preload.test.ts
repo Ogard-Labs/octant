@@ -801,6 +801,7 @@ describe("desktop preload bridge", () => {
       "renameRemoteDevice",
       "replaceProviderApiKey",
       "reportShutdownMovesOffered",
+      "reportShutdownProgress",
       "requestCaptureWindowPermission",
       "requestCodeOperationApproval",
       "requestComputerUsePermissions",

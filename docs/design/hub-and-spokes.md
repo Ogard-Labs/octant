@@ -1157,6 +1157,28 @@ The move sheet offers **Move after this turn**, which waits for the turn to
 end, and **Stop and move**, which stops it and cancels its pending approvals
 and questions.
 
+**Stop and move** is only ever the person's own choice in a window, and the
+source checks it per thread on the server: the window route acts only on a
+thread that window shows, and Prepare to shut down only on a thread its
+redeemed batch ticket names that is on this host and not delegated to it.
+The destination's unlock is redeemed first, so a declined or expired unlock
+stops nothing. The source then stops the thread's work through each mode's
+own Stop, the one the person presses in the thread: the running Chat
+attempt, the Code provider turn, or the Work turn, which ends the approvals
+and questions that turn was waiting on. It also cancels every child run the
+thread started here, with its own children, and asks each member running a
+child the thread delegated there to stop it. The move starts once the thread
+reads as idle; the thread's status says it is stopping meanwhile. A turn
+still running two minutes after the stop did not take it, and the move ends
+with `busy` rather than waiting on a turn the person asked to end.
+Rationale: a runtime that can be force-stopped keeps its turn streaming until
+it really ends, so the stop is not instant, but the person is about to switch
+the computer off and needs a clear answer. A thread already idle moves at
+once without anything being stopped. Nothing freezes the thread between the
+stop and the move: a new turn that starts in that moment (a delivered child
+result, a message from another member) makes the move end with `busy`, as
+for Move after this turn.
+
 **What moves.**
 
 - The thread's journal cut in the `octant.thread-bundle/1` form (transcript,
@@ -1367,14 +1389,20 @@ the usual case is one press and one unlock.
 - **The destination.** One **Move to** choice applies to every row set to
   move: the member the person last moved a thread to, otherwise the hub when it
   can take threads, otherwise the first eligible member that is online. A row
-  may name another member through its own choice.
+  may name another member through its own choice: its menu lists, after its
+  own choices, **Move to** each other member that can take it (after this
+  turn when it is busy), and the row then moves there whatever the head
+  names. Changing the head leaves such a row alone, as it does every row the
+  person set.
 - **Each row's starting choice.** A thread the destination can take starts on
   **Move**. One with a running turn or a waiting question starts on **Move
   after this turn**; nothing is stopped unless the person picks Stop and move.
   One the destination cannot take starts on **Leave here** with its
   [reason](#a-thread-that-cannot-move) shown, and when it is a Code thread its
   choice also offers **Hand over**. A handover writes a commit and may push, so
-  it is never preselected. Changing the destination re-evaluates every row that
+  it is never preselected. Only a Code thread that cannot move offers it: one
+  that can moves with its whole history, which a handover would leave behind.
+  Changing the destination re-evaluates every row that
   still holds its starting choice and leaves the person's own choices alone.
 - **One press, one unlock per destination.** The primary action moves every
   row set to move or hand over. A batch is one ticket per destination naming
@@ -1382,7 +1410,40 @@ the usual case is one press and one unlock.
   the ticket then opens one move of each named thread and nothing else, so
   one unlock covers the batch it names and nothing else. The batch's moves run
   one after another, so most are done early, and a thread set to move after
-  its turn starts when that turn ends.
+  its turn starts when that turn ends. When rows move to more than one member,
+  the press asks each destination's owner challenge and Touch ID in turn, the
+  head's first. A destination whose unlock is declined, whose challenge is
+  refused, or whose request fails outright moves nothing; the others still
+  move, its rows count as staying here with the reason on each row, and the
+  screen names that destination. Rows set to hand over are handed over one
+  after another once the unlocks are asked, each telling the head's
+  destination so it shows under its Handovers; one that is refused or whose
+  request fails stays here, named on its row and in the screen's alert. A row
+  set to move or hand over that did not is never counted toward Safe to shut
+  down. A handover that pushes but leaves files out, because the Secret guard
+  refused them, counts as handed over, yet those files have no other copy:
+  its row names them, and the screen never says a plain Safe to shut down
+  while any are left, saying instead how many files stay on this computer
+  and naming them, as a move's tombstone names the files its kept worktree
+  holds. Like the listing and the batch, a row's handover acts for the whole
+  host, so it reaches a Code thread in any Project, open in this window or
+  not; the window route for one thread's handover still acts only on a
+  thread that window shows. The source hands over that way only what the
+  listing offers Hand over for: a Code thread on this host, not delegated to
+  it and not waiting to move, that the head's destination cannot take. The
+  handover itself is the same as from the move sheet, so it still refuses a
+  held or frozen thread. It never runs the agent's summary turn, since the
+  dialog has no switch to ask for one, and no tool, agent, or routine
+  reaches it.
+- **Progress in the menu bar.** While the batch runs, the menu bar shows how
+  many of its threads have ended out of how many (`3/9` beside the glyph,
+  after only the host's own `!`) and a **Moving threads** line in its menu,
+  so hiding the dialog leaves the progress in sight. **Prepare to Shut Down…**
+  sits in the menu bar while the window last saw this host in a hub with
+  another member, or a batch runs, and brings the dialog back in the window
+  that runs the batch. Only that window's dialog changes the menu bar's
+  progress, so another window's dialog with nothing running cannot clear it;
+  closing that window lets the batch's progress go.
 - **Finishing.** The screen says **Safe to shut down** only when every chosen
   thread is committed, or handed over and pushed. A thread whose move cannot
   finish shows [This thread can't move](#a-thread-that-cannot-move) with its
@@ -1484,16 +1545,16 @@ reason, unfreezes the thread, and shows **This thread can't move** with that
 reason in the move sheet and as a notice on the thread itself, which stays until
 the person dismisses it or the thread moves. The reasons are:
 
-| Reason                    | Meaning                                                                                                                                              |
-| ------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `busy`                    | A turn runs, the thread waits on the person, or a child run or remote child run is still going, and the person did not choose Stop and move          |
-| `delegated`               | The thread was delegated to this host by a peer and belongs to that delegation                                                                       |
-| `unlock-required`         | The person declined the unlock, it expired, or this device is not an owner on the destination                                                        |
-| `refused`                 | The destination refused: no Move in item, Owners unticked, or the source is no longer in its roster. It answers every one of these in the same words |
-| `no-eligible-project`     | The destination has no Project of the thread's mode that accepts it (for Code, none bound to the same repository)                                    |
-| `destination-unreachable` | The destination could not be reached before the offer, or stopped answering during the transfer and the person gave up waiting                       |
-| `transfer-failed`         | A part failed its digest check twice, or the destination could not unpack it                                                                         |
-| `no-matching-provider`    | The destination has no provider of the kind the thread ran on, so it cannot continue it                                                              |
+| Reason                    | Meaning                                                                                                                                                                                                   |
+| ------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `busy`                    | A turn runs, the thread waits on the person, or a child run or remote child run is still going, and the person did not choose Stop and move, or the turn did not stop within two minutes of Stop and move |
+| `delegated`               | The thread was delegated to this host by a peer and belongs to that delegation                                                                                                                            |
+| `unlock-required`         | The person declined the unlock, it expired, or this device is not an owner on the destination                                                                                                             |
+| `refused`                 | The destination refused: no Move in item, Owners unticked, or the source is no longer in its roster. It answers every one of these in the same words                                                      |
+| `no-eligible-project`     | The destination has no Project of the thread's mode that accepts it (for Code, none bound to the same repository)                                                                                         |
+| `destination-unreachable` | The destination could not be reached before the offer, or stopped answering during the transfer and the person gave up waiting                                                                            |
+| `transfer-failed`         | A part failed its digest check twice, or the destination could not unpack it                                                                                                                              |
+| `no-matching-provider`    | The destination has no provider of the kind the thread ran on, so it cannot continue it                                                                                                                   |
 
 For a Code thread the same error offers **Hand over instead**. A handover that
 cannot finish its push says so as its own error (`push-failed`, or `no-remote`
@@ -2431,7 +2492,7 @@ a numbered slice. Built, with these narrower readings:
     turn for a busy thread), and shows the progress line with Cancel move,
     Take back here, the This thread can't move notice with Choose another
     computer and Dismiss, the Arriving notice with Activate anyway, and the
-    Moved notice. What it does not do yet: Stop and move, Hand over instead,
+    Moved notice. What it does not do yet: Hand over instead,
     an unlock other than this Mac's Touch ID, carry bulk parts, accept
     moves on the hub, or Prepare to shut down.
 
@@ -2466,10 +2527,7 @@ a numbered slice. Built, with these narrower readings:
     Quit. The quit confirmation gains **Move threads
     first…** while the window last saw this host in a hub with another
     member, and the dialog then ends with Quit Octant through the guarded
-    quit. What it does not do yet: Hand over and Stop and move as row
-    choices, a row moving to a member other than the head's, the menu bar
-    entry and progress, more than one destination's
-    unlock in turn, and carrying bulk parts.
+    quit. What it does not do yet: carrying bulk parts.
 
     The eighth part is the handover's source side. **Hand over instead**, in
     the move sheet and in This thread can't move for a Code thread, opens
@@ -2587,6 +2645,36 @@ a numbered slice. Built, with these narrower readings:
     with the basis under it. What it does not do yet: the conversation's
     turn count and the branch's commit and `+`/`-` counts beside the sizes,
     and sizes for bulk parts, which no move carries yet.
+
+    The tenth part is Stop and move and the rest of Prepare to shut down's
+    choices. The window's start and the batch's start take a `stop-and-move`
+    timing; after the destination's ticket is redeemed, the source stops the
+    thread through each mode's own Stop (the Chat attempt's interrupt, the
+    Code provider turn's cancel, the Work turn's cancel), cancels its child
+    runs here with their children and the children it delegated to other
+    members, and moves it once it reads idle, ending with `busy` when it is
+    still running two minutes later. A batch row on a delegated thread is
+    refused as `delegated` and never stopped. A thread with a child run still
+    going here, or a delegated child that has not reported back, now reads as
+    busy in every mode, so Move refuses it and Prepare to shut down starts it
+    on Move after this turn. The move sheet's busy thread gets the two-way
+    choice, with **Stop and move with Touch ID**, and the Computer card and
+    the dialog read Stopping until the turn has stopped. In Prepare to shut
+    down, Stop and move and Hand over are row choices, Hand over only for a
+    Code thread that cannot move to the head's destination, never
+    preselected; a row can name **Move to** another member that can take it;
+    the press asks each destination's challenge and Touch ID in turn and goes
+    on past one that is declined; rows set to hand over go, after the
+    unlocks, through a host-wide `shutdown/handover` window route that
+    hands over only a Code thread the head's destination cannot take,
+    telling that destination, and count as done only when pushed. The dialog reports its
+    batch's progress to the desktop, which shows it beside the menu bar glyph
+    and as a Moving threads line, and the menu bar offers Prepare to Shut
+    Down… while the window last saw this host in a hub with another member or
+    a batch runs. The dialog keeps reading its batch while hidden so the
+    progress stays current. Sizes are read per destination, the head's and
+    each member a row names, and each destination's total and estimate show
+    at the rate to that member, with one basis line each.
 
 Any slice that would deploy an Octant-operated service, create an account, or
 spend money stops for a separate maintainer action.
