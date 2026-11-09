@@ -410,14 +410,21 @@ static bool socket_rollback_measure(void)
   int status = 0; pid_t joined = -1;
   if (child > 0) do { joined = waitpid(child, &status, 0); } while (joined < 0 && errno == EINTR);
   bool reaped = child > 0 && joined == child;
+  /* Observe and remove through one held directory handle, so the check and
+   * the cleanup name the same directory rather than re-resolving a path. */
+  int names = open("/tmp/ns", O_RDONLY | O_DIRECTORY | O_CLOEXEC);
   struct stat entry;
-  bool first_intact = reaped && !lstat(first_path, &entry) && S_ISSOCK(entry.st_mode);
+  bool first_intact = reaped && names >= 0 &&
+    !fstatat(names, "first.socket", &entry, AT_SYMLINK_NOFOLLOW) && S_ISSOCK(entry.st_mode);
   errno = 0;
-  bool second_absent = reaped && lstat(second_path, &entry) == -1 && errno == ENOENT;
-  bool cleaned = !unlink(first_path);
-  /* Removed unconditionally: an absent entry only fails with ENOENT, and
-   * gating removal on the earlier lstat would act on a stale observation. */
-  unlink(second_path);
+  bool second_absent = reaped && names >= 0 &&
+    fstatat(names, "second.socket", &entry, AT_SYMLINK_NOFOLLOW) == -1 && errno == ENOENT;
+  bool cleaned = names >= 0 && !unlinkat(names, "first.socket", 0);
+  if (names >= 0) {
+    /* An absent entry only fails with ENOENT. */
+    unlinkat(names, "second.socket", 0);
+    close(names);
+  }
   passed = passed && reaped && WIFEXITED(status) && WEXITSTATUS(status) == 0 &&
     first_intact && second_absent && cleaned;
   printf("OCTANT_UNIX_ROLLBACK_SIGNAL {\"passed\":%s,\"signalPending\":%s,\"firstIntact\":%s,\"secondAbsent\":%s,\"ownedChildJoined\":%s,\"cleaned\":%s}\n",
