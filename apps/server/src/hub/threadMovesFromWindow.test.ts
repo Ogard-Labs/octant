@@ -271,6 +271,58 @@ describe("holding a move for an owner phone", () => {
     });
   }
 
+  it("fails only the row whose thread can no longer be read after the phone confirms, and moves the rest", async () => {
+    const OTHER: MovedThreadReference = {
+      mode: "chat",
+      threadId: "88888888-8888-4888-8888-888888888888",
+    };
+    let confirmed = false;
+    const unhandled: unknown[] = [];
+    const onUnhandled = (reason: unknown) => unhandled.push(reason);
+    process.on("unhandledRejection", onUnhandled);
+    try {
+      const { moves, refused, start } = heldMoves({
+        // The Code thread's checkout receipt became unreadable after the ask.
+        read: async () => {
+          if (confirmed && reads.next === THREAD.threadId) {
+            reads.next = OTHER.threadId;
+            throw new Error("The managed worktree receipt could not be read.");
+          }
+          return reading(false);
+        },
+      });
+      const reads = { next: THREAD.threadId };
+      await moves.shutdownAskPhone({
+        destinationMemberId: DESKTOP as never,
+        rows: [
+          { thread: THREAD, timing: "now" },
+          { thread: OTHER, timing: "now" },
+        ],
+      });
+      const [held] = moves.phoneConfirmations().confirmations;
+      if (held === undefined) throw new Error("Nothing waits for the phone.");
+      confirmed = true;
+
+      moves.confirmOnPhone({
+        confirmationId: held.confirmationId,
+        ticketId: "12345678-1234-4234-8234-123456789012",
+        principal: phone,
+      });
+
+      await vi.waitFor(() => expect(start).toHaveBeenCalledOnce());
+      expect(start).toHaveBeenCalledWith(expect.objectContaining({ thread: OTHER }));
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      expect(refused).toEqual([{ threadId: THREAD.threadId, reason: "transfer-failed" }]);
+      expect(moves.status(THREAD).settled?.settledAt).toEqual(expect.any(String));
+      // The failed row is no longer claimed, so the window can ask again.
+      expect(await moves.askPhone(ask)).toMatchObject({ status: "waiting-for-phone" });
+      expect(unhandled).toEqual([]);
+      moves.close();
+    } finally {
+      process.off("unhandledRejection", onUnhandled);
+    }
+  });
+
   it("gives the thread back when the ask is refused, so it can be asked again", async () => {
     const { moves } = heldMoves({ busy: true });
 

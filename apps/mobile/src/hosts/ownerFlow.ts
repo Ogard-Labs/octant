@@ -68,9 +68,9 @@ export interface PhoneThreadMoves {
 
 /**
  * Moves a window holds for this phone to confirm, or undefined when this phone
- * is not an owner or holds no unlock key. Only a spoke moves a thread away; a
- * destination may be a spoke or the hub, and each checks this phone against
- * its own owner list.
+ * is not an owner or holds no unlock key. A spoke or a standby computer moves a
+ * thread away, never the hub; a destination may be any of them, and each checks
+ * this phone against its own owner list.
  */
 export async function phoneThreadMovesOf(input: {
   readonly state: GuestHubState;
@@ -93,7 +93,9 @@ export async function phoneThreadMovesOf(input: {
     read: async () => {
       const answers = await Promise.all(
         targets
-          .filter((target) => target.role === "spoke")
+          // A standby computer is a spoke too and moves threads away; only the
+          // hub itself moves nothing away.
+          .filter((target) => target.role !== "hub")
           .map(async (target) => ({
             target,
             answer: await clientFor(target, unlock).moveConfirmations(),

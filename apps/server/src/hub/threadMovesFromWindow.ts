@@ -43,6 +43,7 @@ import { mayActivateAnyway, shutdownListing } from "@octant/domain";
 import type { ThreadMoveTicketClient } from "./threadMoveTicketClient";
 import {
   THREAD_MOVE_CHUNK_BYTES,
+  type MovableThreadReading,
   type ThreadMoveService,
   type ThreadMoveSourceHost,
 } from "./threadMoveService";
@@ -451,7 +452,8 @@ export class ThreadMovesFromWindow {
     void (async () => {
       for (const row of wait.rows) {
         const reservation = row.claim;
-        const reading = await this.#options.source.read(row.thread);
+        const reading = await this.#readClaimed(row.thread, reservation);
+        if (reading === undefined) continue;
         this.#launch({
           thread: row.thread,
           destinationMemberId: wait.destinationMemberId,
@@ -514,6 +516,31 @@ export class ThreadMovesFromWindow {
       if (wait.rows.some((row) => same(row.thread, thread))) return { confirmationId, wait };
     }
     return undefined;
+  }
+
+  /**
+   * Reads a claimed thread again just before its move launches. The read can
+   * fail after the ask was answered (a Code thread's managed worktree receipt
+   * that became unreadable rejects from its checkout lookup); that row then
+   * ends as one that could not move, its claim is given back, and the rest of
+   * its batch carries on.
+   */
+  async #readClaimed(
+    thread: MovedThreadReference,
+    claim: symbol,
+  ): Promise<MovableThreadReading | undefined> {
+    try {
+      return await this.#options.source.read(thread);
+    } catch {
+      const withdrawn = !this.#holdsClaim(thread, claim);
+      this.#release(thread, claim);
+      // Don't move pressed meanwhile already settled it; nothing more to say.
+      if (!withdrawn) {
+        this.#options.moves.refuseBeforeStart(thread, "transfer-failed");
+        this.#settle(thread);
+      }
+      return undefined;
+    }
   }
 
   /** Takes the thread's one claim, or undefined when another move or wait holds it. */
@@ -690,7 +717,8 @@ export class ThreadMovesFromWindow {
     }
     const queue = { tail: Promise.resolve() };
     for (const { row, claim } of claimed) {
-      const reading = await this.#options.source.read(row.thread);
+      const reading = await this.#readClaimed(row.thread, claim);
+      if (reading === undefined) continue;
       this.#launch({
         thread: row.thread,
         destinationMemberId: request.destinationMemberId,

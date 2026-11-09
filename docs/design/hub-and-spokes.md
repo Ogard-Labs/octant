@@ -1006,8 +1006,13 @@ action on the source). The source spends the confirmation whatever the ticket
 turns out to be and moves the threads, destination, and Projects it holds;
 the phone cannot change them. A ticket the destination did not issue, or
 issued for another source or other threads, is refused at the offer, and that
-move ends in This thread can't move with `refused`. A wait no phone answers
-ends with `unlock-required`, and Don't move in the window ends it sooner.
+move ends in This thread can't move with `refused`. A thread that can no
+longer be read when the confirmed move launches (a Code thread whose managed
+worktree receipt became unreadable) ends with `transfer-failed` and the rest
+of its batch carries on. A wait no phone answers ends with `unlock-required`,
+and Don't move in the window ends it sooner. The phone asks every spoke and
+standby computer it can reach for what waits there, since a standby is a spoke
+that can move threads away; it never asks the hub, which moves nothing away.
 Holding the phone's raw unlock key open for the one confirmation lets the
 person authenticate once for both computers; the key is dropped afterwards.
 Rationale: the destination's own owner check, with its challenge bound to the

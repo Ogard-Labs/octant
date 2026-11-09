@@ -98,6 +98,8 @@ async function world(
     down?: string;
     /** Whether the spoke holds a move right now; it always does unless this says otherwise. */
     holdsMove?: () => boolean;
+    /** The address of the computer that holds the move; member 2 unless this says otherwise. */
+    holdingAddress?: string;
   } = { presence: "confirmed" },
 ) {
   const keyPair = await crypto.subtle.generateKey({ name: "ECDSA", namedCurve: "P-256" }, true, [
@@ -166,7 +168,10 @@ async function world(
         return Response.json({
           status: "listed",
           confirmations:
-            origin.includes("100.101.102.104") && (options.holdsMove?.() ?? true) ? [heldMove] : [],
+            origin.includes(options.holdingAddress ?? "100.101.102.104") &&
+            (options.holdsMove?.() ?? true)
+              ? [heldMove]
+              : [],
         });
       }
       if (path === "/api/hub/owner/thread-moves/ticket") {
@@ -364,6 +369,39 @@ describe("a phone confirming a move a window holds for it", () => {
       { origin: "https://100.101.102.105:8443", path: "/api/hub/owner/thread-moves/ticket" },
       { origin: "https://100.101.102.104:8443", path: "/api/hub/owner/thread-moves/confirm" },
     ]);
+  });
+
+  it("lists a move a standby computer holds, and never asks the hub, which moves nothing away", async () => {
+    const w = await world({ presence: "confirmed", holdingAddress: "100.101.102.106" });
+    const joined = joinedState(true);
+    const state: GuestHubState = {
+      ...joined,
+      record: {
+        ...joined.record,
+        roster: {
+          ...joined.record.roster,
+          roster: {
+            ...joined.record.roster.roster,
+            members: [
+              ...joined.record.roster.roster.members,
+              member("4", "standby-hub", "100.101.102.106"),
+            ],
+          },
+        },
+      },
+    };
+    const moves = await phoneThreadMovesOf({ ...w, state });
+    if (moves === undefined) throw new Error("expected the phone's moves");
+    w.sentTo.length = 0;
+
+    const reading = await moves.read();
+
+    expect(reading.moves.map((move) => move.source.name)).toEqual(["member 4"]);
+    const asked = w.sentTo
+      .filter((entry) => entry.path === "/api/hub/owner/thread-moves/confirmations")
+      .map((entry) => entry.origin);
+    expect(asked).toContain("https://100.101.102.106:8443");
+    expect(asked).not.toContain("https://100.101.102.103:8443");
   });
 
   it("offers nothing to a phone that did not join with an owner code", async () => {
