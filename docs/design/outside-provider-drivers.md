@@ -988,7 +988,7 @@ These rules resolve what slice 7 left to implementation.
   `@octant/provider-sdk/outside-driver-sign` is the signing tool
   ([Signature rules](#signature-rules)). CI signs a copy of the example
   driver with a key made at test time; the repository holds no signing key. The user guide's
-  [Build a provider driver](../../apps/docs/advanced/provider-drivers.md) page
+  [Build a provider driver](https://github.com/Ogard-Labs/octant-site/blob/main/docs/advanced/provider-drivers.md) page
   is the author's how-to.
 - **The serve helper is plain JavaScript a package carries.** A driver can
   read nothing outside its package root, so it cannot import the helper from

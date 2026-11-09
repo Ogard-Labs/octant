@@ -140,14 +140,19 @@ function hasNul(bytes: Uint8Array): boolean {
 }
 
 /**
- * Validate that the bytes are legal UTF-8 by re-encoding the decoded text
- * and comparing lengths. `Buffer.toString("utf-8")` silently substitutes
- * replacement characters for invalid sequences, so a round-trip check is
- * the cheapest fatal decoder available without native TextDecoder support.
+ * Whether the bytes are legal UTF-8. The bytes are a sniffed head, so a
+ * character the cut splits at the end is not an error: a streaming fatal
+ * decode accepts it. The earlier round-trip check refused such a head, and
+ * with it a text file whose 4,096th byte fell inside a character such as
+ * "ø".
  */
 function isValidUtf8(bytes: Uint8Array): boolean {
-  const text = Buffer.from(bytes).toString("utf-8");
-  return Buffer.byteLength(text, "utf-8") === bytes.byteLength;
+  try {
+    new TextDecoder("utf-8", { fatal: true }).decode(bytes, { stream: true });
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 /**

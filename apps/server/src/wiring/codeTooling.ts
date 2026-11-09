@@ -19,7 +19,18 @@ import {
   decodeProjectId,
   decodeWindowId,
 } from "@octant/contracts";
-import { Effect } from "effect";
+import { Effect, Schema } from "effect";
+import {
+  AggregateId,
+  CorrelationId,
+  EventId,
+  EventName,
+  decodeAggregateVersion,
+  decodeUtcTimestamp,
+  decodeLocalServerRequestId,
+} from "@octant/contracts";
+import { createDesktopPreviewService } from "../computerUse/desktopPreviewService";
+import type { ComputerUseWiring } from "./computerUse";
 import type { LanguageServerHostPlatform } from "@octant/domain";
 import {
   BUNDLED_TYPESCRIPT_LANGUAGE_SERVER,
@@ -91,6 +102,7 @@ import type { ProvidersWiring } from "./providers";
 import { windowCanAccessWorkProject } from "../windowCodeProjectAccess";
 
 export type CodeToolingDependencies = Pick<ServerStart, "options" | "persistence" | "version"> &
+  Pick<ComputerUseWiring, "desktopLeases" | "installDesktopPreviewRequest"> &
   Pick<AuthorityWiring, "agentRunPersistence" | "codeSessionAuthority" | "windowAuthorityStore"> &
   Pick<AgentRunsWiring, "managedWorktreeReceipts"> &
   Pick<WorkspaceWiring, "projectRootPort" | "projectService"> &
@@ -698,7 +710,10 @@ export function wireCodeTooling(deps: CodeToolingDependencies) {
       }),
       // A server Octant stopped ends every grant to it at once; a grant
       // never forwards to whatever takes the port next.
-      onStopped: (stopped) => remoteServerGrants.closeServer(stopped),
+      onStopped: (stopped) => {
+        remoteServerGrants.closeServer(stopped);
+        void desktopPreviews.serverStopped(stopped);
+      },
     });
     const localServerRoutes = createLocalServerRouteHandler({
       service: localServerService,
@@ -731,6 +746,86 @@ export function wireCodeTooling(deps: CodeToolingDependencies) {
       uuid: randomUUID,
       clock: () => new Date().toISOString(),
     });
+    const desktopPreviews = createDesktopPreviewService({
+      lease: deps.desktopLeases.previewTarget,
+      revision: (caller) => {
+        const thread = persistence.readCodeThread(decodeCodeThreadId(caller.owner.threadId));
+        return thread === undefined
+          ? undefined
+          : JSON.stringify([
+              thread.projectId,
+              thread.checkoutId,
+              thread.bindingRevisionId,
+              thread.lifecycle,
+              thread.executionPolicy,
+            ]);
+      },
+      observe: async (caller, port) => {
+        const threadId = decodeCodeThreadId(caller.owner.threadId);
+        const thread = persistence.readCodeThread(threadId);
+        if (thread === undefined || caller.scopeId === undefined) return { status: "not-listed" };
+        const windowId = decodeWindowId(caller.scopeId);
+        const listed = await localServerService.execute(
+          windowId,
+          {
+            kind: "list-local-servers",
+            requestId: decodeLocalServerRequestId(randomUUID()),
+            threadId,
+            projectId: thread.projectId,
+          },
+          { actor: "local-user" },
+        );
+        if (listed.kind !== "local-servers-listed") return { status: "not-listed" };
+        const matches = listed.snapshot.currentCheckout.filter((row) => row.port === port);
+        const row = matches[0];
+        if (matches.length !== 1 || row === undefined) return { status: "not-listed" };
+        return localServerService.observeGrantTarget(
+          windowId,
+          {
+            surface: "local-servers",
+            threadId,
+            projectId: thread.projectId,
+            listenerId: row.listenerId,
+          },
+          { actor: "local-user" },
+        );
+      },
+      audit: (kind, payload, caller) => {
+        persistence.journal.append({
+          aggregate: {
+            aggregateType: "desktop-preview",
+            aggregateId: Schema.decodeUnknownSync(AggregateId)(payload.grantId),
+          },
+          expectedVersion: decodeAggregateVersion(kind === "granted" ? 0 : 1),
+          events: [
+            {
+              eventId: Schema.decodeUnknownSync(EventId)(randomUUID()),
+              eventName: Schema.decodeUnknownSync(EventName)(`desktop.preview-${kind}@1`),
+              eventVersion: 1,
+              correlationId: Schema.decodeUnknownSync(CorrelationId)(randomUUID()),
+              actor: caller.actor,
+              occurredAt: decodeUtcTimestamp(new Date().toISOString()),
+              payload,
+            },
+          ],
+        });
+      },
+    });
+    deps.installDesktopPreviewRequest(desktopPreviews.request);
+    const previewSweep = setInterval(() => {
+      void desktopPreviews.sweep();
+    }, 250);
+    previewSweep.unref();
+    const stopPreviewCommits = persistence.journal.subscribeCommitted(() => {
+      void desktopPreviews.sweep();
+    });
+    yield* Effect.addFinalizer(() =>
+      Effect.promise(async () => {
+        clearInterval(previewSweep);
+        stopPreviewCommits();
+        await desktopPreviews.close();
+      }),
+    );
     try {
       remoteServerGrants.reconcile();
     } catch {

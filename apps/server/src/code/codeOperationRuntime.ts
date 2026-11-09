@@ -1,4 +1,6 @@
+import { withHandoverSummary } from "../agentRun/conversationHandoff";
 import { MAX_PROVIDER_ATTACHMENTS } from "@octant/contracts";
+import { THREAD_MOVING_REFUSAL } from "../hub/threadMoveHolds";
 import type {
   ConversationInputReceipt,
   ConversationInputPurpose,
@@ -165,7 +167,7 @@ import type {
   NativeHarnessTurnAdmission,
   NativeHarnessTurnScope,
 } from "../harness/nativeHarnessTurnObserver";
-import type { TurnEndSummary } from "../metrics/turnEnd";
+import { withPromptDigest, type TurnEndSummary } from "../metrics/turnEnd";
 import type { AutomaticCompactionSighting } from "../context/automaticCompaction";
 import type { RuntimeOutsideContentMarking } from "../context/runtimeOutsideContentMark";
 import type { RuntimeForgeChangeObserver } from "../shield/runtimeForgeChanges";
@@ -296,6 +298,11 @@ function defaultAcpTerminalConfinement(): CodeAcpTerminalConfinement {
 
 export interface CodeOperationRuntimeOptions {
   readonly prepareWorktree?: CodeOperationServiceOptions["prepareWorktree"];
+  /**
+   * Whether a move holds the thread: frozen while it leaves this computer, or
+   * arriving and not yet committed. A held thread starts no turn.
+   */
+  readonly moveHold?: (threadId: string) => boolean;
   /** Where a running turn's start time and latest step are kept for the navigation read. */
   readonly liveTurns?: LiveTurnRegistry;
   /**
@@ -481,6 +488,13 @@ export interface CodeOperationRuntimeOptions {
    * this host cannot hand a conversation over, so a turn on a provider other
    * than its session's is refused, naming that reason.
    */
+  /**
+   * The summary the limit rule wrote with the thread's earlier provider, when
+   * it still covers the thread's conversation; a provider switch leads with it.
+   */
+  readonly handoverSummary?: (
+    thread: CodeThread,
+  ) => { readonly content: string; readonly completedAt: string } | undefined;
   readonly providerSwitchContext?: (input: {
     readonly thread: CodeThread;
     readonly excludeOperationId: CodeOperationId;
@@ -552,6 +566,8 @@ export interface CodeOperationRuntimeOptions {
   readonly sideTasks?: (input: {
     readonly windowId: WindowId;
     readonly thread: CodeThread;
+    /** The operation the tools serve; an offer names it as its turn. */
+    readonly operationId: string;
     readonly planner?: CodePlannerToolPort;
   }) => AppManagedToolSet | undefined;
   /**
@@ -631,6 +647,11 @@ export interface CodeOperationRuntimeOptions {
     readonly thread: CodeThread;
     readonly windowId: WindowId;
   }) => string | undefined;
+  /**
+   * The active Project memory entries this thread's turn carries, as a Chat
+   * or Work turn in the Project does. Absent gives none.
+   */
+  readonly projectMemoryEntries?: (thread: CodeThread) => ReadonlyArray<string>;
   readonly nativeHarness?: {
     readonly contextFor: (scope: NativeHarnessTurnScope) => ReadonlyArray<ProviderContextBlock>;
     /** Octant Shield's record of the remote commands a runtime runs with its own shell tool. */
@@ -644,6 +665,8 @@ export interface CodeOperationRuntimeOptions {
     readonly turnStarted: (scope: NativeHarnessTurnScope) => void;
     /** Every turn's end, whatever its outcome, with what the turn cost and how it ran. */
     readonly turnEnded?: (scope: NativeHarnessTurnScope, turn?: TurnEndSummary) => void;
+    /** The host's keyed prompt digest; absent when the host has no key. */
+    readonly promptDigest?: (text: string) => string;
     readonly turnCompleted: (
       input: NativeHarnessTurnScope & {
         readonly text: string;
@@ -917,7 +940,9 @@ export interface CodeOperationRuntime {
     /** How full its window was at the thread's latest usage report, and when. */
     readonly occupancy: (
       threadId: string,
-    ) => { readonly tokens: number; readonly observedAt: string } | undefined;
+    ) =>
+      | { readonly tokens: number; readonly observedAt: string; readonly contextWindow?: number }
+      | undefined;
     /**
      * How to open it, under the asking window's authority over the thread's
      * checkout; undefined when that window may not, or the session is gone.
@@ -2396,7 +2421,16 @@ export function threadWithActiveTurnPosture(
     requested: active.thread.executionPolicy,
     thread: thread.executionPolicy,
   });
-  return executionPolicy === thread.executionPolicy ? thread : { ...thread, executionPolicy };
+  // A turn that started sandboxed stays sandboxed: turning the sandbox off
+  // takes effect from the next turn, as a wider posture does.
+  const keepsSandbox =
+    active.thread.fullAccessSandbox === true && thread.fullAccessSandbox !== true;
+  if (executionPolicy === thread.executionPolicy && !keepsSandbox) return thread;
+  return {
+    ...thread,
+    executionPolicy,
+    ...(keepsSandbox ? { fullAccessSandbox: true } : {}),
+  };
 }
 
 /** The Code thread whose running turn holds this provider session, if any. */
@@ -2458,6 +2492,11 @@ interface ActiveTurn {
   readonly resumeCursor?: ProviderResumeCursor;
   /** What the provider session held of Octant's per-turn context before this turn. */
   readonly carriedSentContext: CarriedSentContext;
+  /**
+   * Whether this is the thread's first turn on a context of its own: no earlier
+   * turn, and no session, handoff or fork conversation carried in.
+   */
+  readonly firstTurn: boolean;
   /** Which of this turn's context blocks are Octant's instructions and skills. */
   readonly sentContext?: CodeTurnSentContext;
   readonly secrets: readonly string[];
@@ -2734,6 +2773,10 @@ class RuntimeTurnController implements CodeOperationTurnPort {
 
   async start(input: Parameters<CodeOperationTurnPort["start"]>[0]) {
     const key = String(input.thread.id);
+    if (this.#options.moveHold?.(key) === true) {
+      this.settleSpendReservation(input.operationId);
+      return turnState("failed", { category: "failed", message: THREAD_MOVING_REFUSAL });
+    }
     const existing = this.#active.get(key);
     if (
       existing !== undefined &&
@@ -3333,6 +3376,12 @@ class RuntimeTurnController implements CodeOperationTurnPort {
         ]),
       ].filter((folder) => folder !== (input.providerRoot ?? input.checkoutRoot)),
       driver,
+      firstTurn:
+        !priorTurn &&
+        resumeCursor === undefined &&
+        switchHandoff?.record === undefined &&
+        forkHandoff?.record === undefined &&
+        forkMerges.records.length === 0,
       carriedSentContext: carriedSentContext({
         freshSession: resumeCursor === undefined,
         forkSeeded,
@@ -3547,10 +3596,18 @@ class RuntimeTurnController implements CodeOperationTurnPort {
       if (inherited.source.projectId !== String(thread.projectId))
         return refused({ subject: "inherited", reason: "foreign-project" });
     }
+    // A switch to another provider leads with the summary the limit rule
+    // wrote, when one waits. A fork's handoff also carries its source's turns,
+    // which that summary never read, so a fork hands over as before.
+    const handover =
+      reason === "provider-switch" && origin === undefined
+        ? this.#handoverSummary(thread)
+        : undefined;
+    const carried = withHandoverSummary(selection, handover);
     return {
       status: "ready",
-      blocks: selection.blocks,
-      inputSelection: selection,
+      blocks: carried.blocks,
+      inputSelection: carried,
       record: {
         kind: "context-handoff-attached",
         reason,
@@ -3559,9 +3616,10 @@ class RuntimeTurnController implements CodeOperationTurnPort {
         previousSessionId: previous.sessionId,
         providerInstanceId: thread.providerInstanceId,
         modelId: thread.modelId,
-        messages: selection.blocks.length - 1,
-        omissions: selection.omissions,
-        externalContentIngested: selection.source.externalContentIngested,
+        messages: carried.blocks.filter((block) => block.kind !== "conversation-summary").length,
+        omissions: carried.omissions,
+        externalContentIngested: carried.source.externalContentIngested,
+        ...(carried === selection ? {} : { handoverSummary: true as const }),
         ...(origin === undefined || inherited === undefined
           ? {}
           : {
@@ -3575,6 +3633,17 @@ class RuntimeTurnController implements CodeOperationTurnPort {
         hiddenReasoningTransferred: false,
       },
     };
+  }
+
+  /** The limit rule's summary for the thread, if one waits; a read that fails hands over as before. */
+  #handoverSummary(
+    thread: CodeThread,
+  ): { readonly content: string; readonly completedAt: string } | undefined {
+    try {
+      return this.#options.handoverSummary?.(thread);
+    } catch {
+      return undefined;
+    }
   }
 
   /**
@@ -4770,6 +4839,7 @@ class RuntimeTurnController implements CodeOperationTurnPort {
         this.#options.sideTasks?.({
           windowId: active.windowId,
           thread: active.thread,
+          operationId: String(active.operationId),
           ...(this.#options.planner === undefined ? {} : { planner: this.#options.planner }),
         }),
         this.#options.canvas?.({ windowId: active.windowId, thread: active.thread }),
@@ -4851,6 +4921,7 @@ class RuntimeTurnController implements CodeOperationTurnPort {
       providerInstanceId: active.thread.providerInstanceId,
       modelId: active.thread.modelId,
       projectId: active.thread.projectId,
+      windowId: active.windowId,
     };
     const harnessContext = this.#options.nativeHarness?.contextFor(harnessScope) ?? [];
     this.#options.nativeHarness?.turnStarted(harnessScope);
@@ -4901,7 +4972,17 @@ class RuntimeTurnController implements CodeOperationTurnPort {
       personMemoryText === undefined
         ? []
         : [{ kind: "person-memory" as const, text: personMemoryText }];
-    const fullContext = [...harnessContext, ...hostGuidance, ...personMemory, ...(context ?? [])];
+    // After person memory, as in Chat and Work, and counted with it.
+    const projectMemory = (this.#options.projectMemoryEntries?.(active.thread) ?? []).map(
+      (text) => ({ kind: "project-memory" as const, text }),
+    );
+    const fullContext = [
+      ...harnessContext,
+      ...hostGuidance,
+      ...personMemory,
+      ...projectMemory,
+      ...(context ?? []),
+    ];
     // A runtime that keeps its own conversation already holds the standing
     // context an earlier completed turn of this session carried; only what is
     // new goes out, and only that is counted as this turn's copy.
@@ -4929,6 +5010,7 @@ class RuntimeTurnController implements CodeOperationTurnPort {
             ...sentNow([
               ...hostGuidance,
               ...personMemory,
+              ...projectMemory,
               ...(active.sentContext?.instructions ?? []),
             ]),
           ],
@@ -4957,6 +5039,7 @@ class RuntimeTurnController implements CodeOperationTurnPort {
       Effect.scoped(
         this.#runner.run({
           thread: active.thread,
+          providerDriverKind: active.driver.kind,
           ...(active.inputsCurrent === undefined ? {} : { inputsCurrent: active.inputsCurrent }),
           sessionId: active.sessionId as never,
           ...(active.resumeCursor === undefined ? {} : { resumeCursor: active.resumeCursor }),
@@ -5059,7 +5142,9 @@ class RuntimeTurnController implements CodeOperationTurnPort {
                 },
               }),
           onTurnEnded: (ended) => {
-            endedTurn = ended;
+            endedTurn = withPromptDigest(ended, this.#options.nativeHarness?.promptDigest, prompt, {
+              firstTurn: active.firstTurn,
+            });
           },
           ...(this.#options.liveTurns === undefined
             ? {}

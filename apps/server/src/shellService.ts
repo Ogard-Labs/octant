@@ -9,6 +9,7 @@ import {
   type WorkThreadId,
   EventId,
   LOCAL_HOST_ID,
+  type MovedThreadReference,
   UtcTimestamp,
   decodeShellCommand,
   type ProjectId,
@@ -123,6 +124,11 @@ export interface ShellServiceOptions {
   readonly clock: () => string;
   /** The user's home directory; the default folder must live inside it. */
   readonly home?: string;
+  /**
+   * Whether a thread moved to another computer and was erased here, as this
+   * host's departures record it. Its old link then opens the tombstone.
+   */
+  readonly departedThread?: (thread: MovedThreadReference) => boolean;
 }
 
 export class ShellServiceError extends Error {
@@ -140,11 +146,13 @@ export class ShellService implements ShellServiceApi {
   readonly #uuid: () => string;
   readonly #clock: () => string;
   readonly #home: string | undefined;
+  readonly #departedThread: ShellServiceOptions["departedThread"];
   readonly #registeredWindowIds = new Set<WindowId>();
 
   constructor(options: ShellServiceOptions) {
     this.#persistence = options.persistence;
     this.#readWorkThread = options.readWorkThread;
+    this.#departedThread = options.departedThread;
     this.#serverCodeProjects = options.serverCodeProjects ?? NO_SERVER_CODE_PROJECTS;
     this.#uuid = options.uuid;
     this.#clock = options.clock;
@@ -561,6 +569,20 @@ export class ShellService implements ShellServiceApi {
     return {
       tabContext: (tab) =>
         resolveTabContext(tab, persistence, this.#readWorkThread, this.#serverCodeProjects),
+      departedThread: (tab) => {
+        const departed = this.#departedThread;
+        if (departed === undefined) return false;
+        if (tab.kind === "chat-thread") {
+          return departed({ mode: "chat", threadId: String(tab.threadId) });
+        }
+        if (tab.kind === "code-overview") {
+          return departed({ mode: "code", threadId: String(tab.threadId) });
+        }
+        if (tab.kind === "work-thread") {
+          return departed({ mode: "work", threadId: String(tab.threadId) });
+        }
+        return false;
+      },
     };
   }
 

@@ -386,6 +386,20 @@ describe("Octant Shield's call normalization", () => {
         freshConfirmation: true,
       }),
     ).toMatchObject({ kind: "edit", paths: ["src/a.ts"], freshConfirmation: true });
+    expect(
+      shieldCallFromHarness({
+        toolName: "edit",
+        arguments: {
+          edits: [
+            { path: "src/a.ts", oldText: "a", newText: "b" },
+            { path: "src/b.ts", oldText: "a", newText: "b" },
+          ],
+        },
+        approvalClass: "project-file-writes",
+        workingDirectory: root,
+        freshConfirmation: false,
+      }),
+    ).toMatchObject({ kind: "edit", paths: ["src/a.ts", "src/b.ts"] });
   });
 
   it("reads each runtime's own request shape", () => {

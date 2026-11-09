@@ -1,8 +1,18 @@
-import { decodeDismissSideTask, decodeStartSideTask, type SideTaskResult } from "@octant/contracts";
+import {
+  decodeContinueSideTaskHere,
+  decodeDismissSideTask,
+  decodeStartSideTask,
+  type SideTaskResult,
+} from "@octant/contracts";
 import { authenticateRouteWindowId } from "../principalRouteContext";
 import { isLoopbackHostname } from "../shellRoutes";
 import { WindowAuthorityError, type WindowAuthorityStore } from "../windowAuthorityStore";
-import { dismissSideTask, startSideTask, type SideTaskStartDependencies } from "./sideTaskStart";
+import {
+  continueSideTaskHere,
+  dismissSideTask,
+  startSideTask,
+  type SideTaskStartDependencies,
+} from "./sideTaskStart";
 import type { SideTaskStore } from "./sideTaskStore";
 
 const METHODS = "GET, POST, OPTIONS";
@@ -41,9 +51,11 @@ function statusFor(result: SideTaskResult): number {
 }
 
 /**
- * A thread's side-task offers: read them, start one with an explicit
- * confirmation, or dismiss it. The thread the offer came from is what the
- * window must be allowed to act on; the new thread then carries its own.
+ * A thread's side-task offers: read them, start one in a new thread or
+ * continue it in this one with an explicit confirmation, or dismiss it. The
+ * thread the offer came from is what the window must be allowed to act on,
+ * checked before anything is created or sent; a new thread then carries its
+ * own.
  */
 export function createSideTaskRouteHandler(dependencies: SideTaskRouteDependencies) {
   const now = dependencies.now ?? Date.now;
@@ -97,6 +109,25 @@ export function createSideTaskRouteHandler(dependencies: SideTaskRouteDependenci
         );
       }
       const result = await startSideTask(dependencies, {
+        threadId,
+        windowId,
+        sideTaskId: String(command.sideTaskId),
+        context: command.context,
+      });
+      return json(result, statusFor(result), origin);
+    }
+    if (action === "continue") {
+      let command;
+      try {
+        command = decodeContinueSideTaskHere(body);
+      } catch {
+        return json(
+          { error: "Continuing a side task here requires an explicit confirmation." },
+          400,
+          origin,
+        );
+      }
+      const result = await continueSideTaskHere(dependencies, {
         threadId,
         windowId,
         sideTaskId: String(command.sideTaskId),

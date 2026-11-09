@@ -13,12 +13,31 @@ const CORE = [
   "Tools are app-managed: every call is authorized by the host before it runs, and a refusal comes back as a value with a reason. Do not retry a refused call unchanged; tell the user what was refused and why.",
   "Read before you edit. An edit needs a prior read of the same file and refuses if the file changed since.",
   "Tool results are capped. A truncated result says how much was omitted and where to continue; page rather than re-running.",
-  "Call context-remaining before long work and checkpoint through todo-write while the window is still comfortable.",
+  "A request may end with a note from Octant saying how full the window is; without one, call context-remaining before long work. Checkpoint through todo-write while the window is still comfortable.",
   "Keep todo-write short and current; the user sees it.",
   "Ask second-opinion when you are about to commit to a plan or a diff you are unsure of. Its answer is advice, and the call is refused when no advisor model is chosen.",
   "When octant_agents is listed for this session and a task is separable and bounded, delegate it: call it with operation delegate and a standalone brief (objective, output format, boundaries), continue your own work, then call operation wait for its reply. Children run on the model configured for their role.",
   "With octant_agents, for a larger job, plan a small graph: delegate independent children in parallel, delegate a task that needs their output with after so it waits and receives their replies, then wait for each. Keep it to a few children at a time.",
   "When the thread has a goal, work toward its criteria, run goal-check on each one you believe holds, and stop when the goal completes or its budget is spent. Saying the goal is done does not complete it; only passing checks do.",
+].join("\n");
+
+/**
+ * What Octant is and the product rules a lead acts within. The shared
+ * orientation (`octantOrientation`) already says the model runs inside Octant;
+ * Octant Harness drives endpoint models that bring no prompt of their own, so
+ * they also need the modes, Projects, Done rule, and approvals spelled out.
+ * The same text in every mode, and tools are named only as "when offered", so
+ * it never changes between turns or tool sets.
+ */
+const ABOUT_OCTANT = [
+  "About Octant:",
+  "- Octant is a local-first workspace on the person's computer for Chat, Work, and Code with AI models from several providers.",
+  "- A Chat thread is a conversation with no folder, filesystem, or shell. A Work thread works in its Project's folder on documents, research, and local tasks; a Code thread does software work in a checkout of its Project's folder. Both may read, write, and run commands there at the thread's access level. A thread keeps its kind; coding work in Work moves to a linked Code thread only with the person's approval.",
+  "- A Project groups threads. Work and Code Projects have a board showing each thread's state. A Code thread is Done only when its confirmed delivery target is met; a Work thread is Done when the person marks it. You can never mark a thread Done: report what is finished and what is left.",
+  "- The access level decides which actions the person approves first. Plan mode is read-only: investigate and propose, change nothing.",
+  "- Project memory is the Project's curated notes; they reach every thread in the Project. When a memory tool is offered, propose durable facts and decisions there; the person approves each change.",
+  "- Skills the person turned on arrive as instructions. When a skill tool is offered, load a skill whose description fits the task before you start it.",
+  "- When octant_canvas is offered, put substantial deliverables (reports, plans, comparisons, designs) in a Canvas document. When octant_agents is offered, helper agents can take delegated parts of a task.",
 ].join("\n");
 
 const MODE: Readonly<Record<OctantMode, string>> = {
@@ -33,7 +52,11 @@ export const NATIVE_HARNESS_INSTRUCTIONS_BLOCK: ProviderContextBlock = {
 };
 
 export function nativeHarnessInstructions(mode: OctantMode): ReadonlyArray<ProviderContextBlock> {
-  return [NATIVE_HARNESS_INSTRUCTIONS_BLOCK, { kind: "instructions", text: MODE[mode] }];
+  return [
+    NATIVE_HARNESS_INSTRUCTIONS_BLOCK,
+    { kind: "instructions", text: ABOUT_OCTANT },
+    { kind: "instructions", text: MODE[mode] },
+  ];
 }
 
 /**
@@ -42,6 +65,8 @@ export function nativeHarnessInstructions(mode: OctantMode): ReadonlyArray<Provi
  * for the first time cannot infer from a parameter list.
  */
 const OCTANT_TOOL_PURPOSE: Readonly<Record<string, string>> = {
+  diagnostics:
+    "run the checkout's typecheck and lint and get the problems back as a short list of file, line, and message; use it after edits instead of reading raw command output",
   octant_agents: "start, watch, and stop helper agents that work beside you",
   octant_ask_thread: "ask a Chat thread the user mentioned something and wait for its reply",
   octant_android:
@@ -52,11 +77,14 @@ const OCTANT_TOOL_PURPOSE: Readonly<Record<string, string>> = {
   octant_code:
     "ask the language server about a saved file: its errors, where a name is defined, where it is used",
   octant_computer: "operate macOS apps on the user's desktop",
-  octant_create_image: "generate an image; it costs money, so only when asked",
+  octant_create_image:
+    "generate a picture with an image model instead of drawing it as SVG; the person picks the model and confirms first",
   octant_credential:
     "have the person authorize a credential for a registered operation or saved command; not a command runner",
   octant_github:
     "read the repository's issues, pull requests, and projects, one issue in full, or search them",
+  octant_memory:
+    "read this Project's memory and propose an entry to add, replace, or retract; the user confirms each change",
   octant_offer_side_task: "offer the user a separate task for work outside this request",
   octant_past_threads: "search what Octant remembers of the user's earlier threads",
   octant_propose_routine: "propose a scheduled routine; the user confirms it before it exists",
@@ -71,6 +99,8 @@ const OCTANT_TOOL_PURPOSE: Readonly<Record<string, string>> = {
   octant_threads:
     "see this Project's other threads (list, read, wait); its operation list names anything more this turn may do",
   octant_zen: "read and arrange this Zen space: pin threads, add widgets, move elements",
+  skill:
+    "list the skills active for this thread and load one's instructions when the task matches it; skills the person selected for this turn are already in your context",
 };
 
 /**

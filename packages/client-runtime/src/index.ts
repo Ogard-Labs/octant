@@ -90,6 +90,7 @@ export * from "./fileMentionClient";
 export * from "./projectBrowserClient";
 export * from "./projectTerminalClient";
 export * from "./usageClient";
+export * from "./benchmarksClient";
 export * from "./usageDashboardClient";
 export * from "./spendCeilingClient";
 export * from "./protectedFilesClient";

@@ -81,6 +81,7 @@ export * from "./hostDataMap";
 export * from "./hostExport";
 export * from "./remoteAccess";
 export * from "./hubAndSpokes";
+export * from "./hubThreadMove";
 export * from "./hubDelegation";
 export * from "./hubMembership";
 export * from "./hubOwners";
@@ -158,6 +159,9 @@ export * from "./threadExport";
 export * from "./threadHandOff";
 export * from "./usage";
 export * from "./turnMetrics";
+export * from "./benchmarks";
+export * from "./turnDiagnosticsReport";
+export * from "./hostHealth";
 export * from "./usageResume";
 export * from "./usageRpc";
 export * from "./usageDashboard";
@@ -191,6 +195,7 @@ export * from "./canvasTags";
 
 export * from "./computerUsePlugin";
 export * from "./desktopLease";
+export { DesktopPreviewRequest, DesktopPreviewAnswer, DesktopPreviewAudit } from "./desktopPreview";
 export * from "./simulatorDevice";
 export * from "./gitHistory";
 

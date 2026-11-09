@@ -11,10 +11,16 @@ import {
   decodeTurnMetricsRecord,
   decodeTurnMetricsSummary,
   type OctantMode,
+  type TurnDiagnosticsReport,
   type TurnMetricsSummary,
   type TurnUsage,
 } from "@octant/contracts";
-import { addTurnToSessionMetrics, addTurnUsage } from "@octant/domain";
+import {
+  addTurnToSessionMetrics,
+  addTurnUsage,
+  buildTurnDiagnosticsReport,
+  type TurnDiagnosticsReportOptions,
+} from "@octant/domain";
 import { Schema } from "effect";
 import type { EventRegistry } from "../persistence/eventRegistry";
 import type { Journal } from "../persistence/journal";
@@ -110,17 +116,21 @@ export class TurnMetricsStore {
   }
 
   /**
+   * Every turn recorded for one thread, oldest first, for a host service that
+   * already owns the thread (a benchmark run reading its own cell). It applies
+   * no Project scope, so it is never the route for a reader's request.
+   */
+  forThread(threadId: string): ReadonlyArray<TurnMetricsRecord> {
+    return this.#threads.get(threadId)?.records ?? [];
+  }
+
+  /**
    * Totals over every turn the filter matches within the reader's scope, and
    * the most recent turns. Absent when nothing matches, so a surface hides the
    * figures instead of showing zeros.
    */
   summarize(filter: TurnMetricsFilter, scope: UsageProjectScope): TurnMetricsSummary | undefined {
-    const matching: TurnMetricsRecord[] = [];
-    for (const thread of this.#threads.values()) {
-      for (const record of thread.records) {
-        if (within(scope, record) && matches(filter, record)) matching.push(record);
-      }
-    }
+    const matching = this.#matching(filter, scope);
     if (matching.length === 0) return undefined;
     matching.sort((left, right) => left.endedAt.localeCompare(right.endedAt));
     let usage: TurnUsage | undefined;
@@ -135,6 +145,30 @@ export class TurnMetricsStore {
       ...(usage === undefined ? {} : { usage }),
       metrics: metrics!,
     });
+  }
+
+  /**
+   * How every turn the filter matches within the reader's scope went: stop
+   * reasons, failures, tools, retries, likely cache misses, and per-model
+   * speed. Built on each read from the recorded frames, so it never drifts
+   * from them.
+   */
+  report(
+    filter: TurnMetricsFilter,
+    scope: UsageProjectScope,
+    options: TurnDiagnosticsReportOptions,
+  ): TurnDiagnosticsReport {
+    return buildTurnDiagnosticsReport(this.#matching(filter, scope), options);
+  }
+
+  #matching(filter: TurnMetricsFilter, scope: UsageProjectScope): TurnMetricsRecord[] {
+    const matching: TurnMetricsRecord[] = [];
+    for (const thread of this.#threads.values()) {
+      for (const record of thread.records) {
+        if (within(scope, record) && matches(filter, record)) matching.push(record);
+      }
+    }
+    return matching;
   }
 
   #hydrate(): void {

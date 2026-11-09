@@ -27,8 +27,10 @@ import type { CodeRuntimeWiring } from "./codeRuntime";
 import type { CodeToolingWiring } from "./codeTooling";
 import type { ChatWiring } from "./chat";
 import type { WorkWiring } from "./work";
+import type { IntegrationsWiring } from "./integrations";
 
 export type ZenDependencies = Pick<ServerStart, "persistence"> &
+  Pick<IntegrationsWiring, "githubExtensionSnapshot"> &
   Pick<AuthorityWiring, "windowAuthorityStore"> &
   Pick<UsageWiring, "zenEventStore"> &
   Pick<WorkspaceWiring, "projectService" | "shellService"> &
@@ -57,15 +59,18 @@ export function wireZen(deps: ZenDependencies) {
     workThreadProjection,
     workTurnService,
     zenEventStore,
+    githubExtensionSnapshot,
   } = deps;
 
   // Bundled Zen is on by default: a missing extension-store row keeps today's
-  // routes and tools. Until the server's extension snapshot is wired here, the
-  // empty snapshot stands in for it, the same stand-in the GitHub and Linear
-  // gates use. Switching Zen off never deletes layouts, backgrounds, focus
-  // zones or events; it only refuses the routes and withholds the tool.
+  // routes and tools. The snapshot is read on every request, the same reader
+  // the GitHub and Linear gates use, so the person's switch takes effect at
+  // once. Switching Zen off never deletes layouts, backgrounds, focus zones
+  // or events; it only refuses the routes and withholds the tool.
   const zenIsEffective = () =>
-    isFirstPartyIntegrationEffective({ packages: [] }, "zen", { missingRow: "effective" });
+    isFirstPartyIntegrationEffective(githubExtensionSnapshot.read(), "zen", {
+      missingRow: "effective",
+    });
 
   const zenThreadCatalog = new ZenThreadCatalog({
     localHostId: LOCAL_HOST_ID,

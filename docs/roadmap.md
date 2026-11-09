@@ -180,7 +180,7 @@ authority, privacy, and release boundaries.
   built behind their seams; live provider smokes and wider placements remain
   ([disposable desktops](design/disposable-desktops.md),
   [outside provider drivers](design/outside-provider-drivers.md)).
-- **Terms and privacy** — minimal MIT/self-hosted documentation; final legal publication review remains required.
+- **EU/GDPR compliance package** — legal review is still required before it ships.
 - **Live guest sharing** — waits on the foundation named in its own design
   note; not among the tracks named in the release boundary.
 

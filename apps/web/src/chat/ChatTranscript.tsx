@@ -16,7 +16,7 @@ import type {
 import type { ProviderUsageLimit } from "@octant/contracts/providers";
 import type { ThreadCheckpoint } from "@octant/contracts/thread-checkpoints";
 import { activeChatTurns, chatTurnAnsweredAttempt } from "@octant/domain/chat-policy";
-import { withoutProviderCitationMarkers } from "@octant/domain/chat-message-parts";
+import { attemptReplyText, resolvedContent } from "./chatReply";
 import type { PickerGroup } from "@octant/domain";
 import { threadHandoffDisclosure } from "../providers/conversationHandoff";
 import { providerModelLabel } from "../providers/providerModelLabel";
@@ -36,6 +36,7 @@ import { OctantButton } from "../ui/base/OctantButton";
 import { OctantSeparatorWithLabel } from "../ui/base/OctantSeparator";
 import { ThreadCheckpointControls } from "../checkpoints/ThreadCheckpointControls";
 import { copyText, TurnActionMenu, type TurnAction } from "../transcript/TurnActionMenu";
+import { SideTaskInline } from "../followUps/SideTaskCards";
 import { ProviderQuestionCard } from "../transcript/ProviderQuestionCard";
 import { UsageLimitNotice } from "../transcript/UsageLimitNotice";
 import { ThreadTasksPanel } from "../transcript/ThreadTasksPanel";
@@ -261,6 +262,12 @@ export function ChatTranscript(props: ChatTranscriptProps) {
   // shows the conversation as it now stands and the turns it left out stay
   // behind it.
   const turns = useMemo(() => activeChatTurns(shown.turns), [shown.turns]);
+  const loadedTurnIds = useMemo(() => new Set(turns.map((turn) => String(turn.id))), [turns]);
+  const chatReplyInFlight = turns.some((turn) =>
+    turn.attempts.some(
+      (attempt) => attempt.outcome === "queued" || attempt.outcome === "streaming",
+    ),
+  );
   const turnIndexById = useMemo(
     () => new Map(turns.map((turn, index) => [String(turn.id), index])),
     [turns],
@@ -443,13 +450,8 @@ export function ChatTranscript(props: ChatTranscriptProps) {
         // "9view0\uE201 Next sentence.") leaked "9view0" into both copies when
         // each reference was cleaned on its own.
         const assistantBodies = turn.attempts.flatMap((attempt) => {
-          const joined = attempt.responseRefs
-            .flatMap((reference) => {
-              const content = resolvedContent(contentById, reference, "assistant");
-              return content === undefined ? [] : [content.body];
-            })
-            .join("");
-          return joined.length === 0 ? [] : [withoutProviderCitationMarkers(joined)];
+          const text = attemptReplyText(attempt, contentById);
+          return text === undefined ? [] : [text];
         });
         // From a person's message a fork runs through the turn before it and a
         // rewind removes this turn; from a reply, a fork runs through this
@@ -625,6 +627,14 @@ export function ChatTranscript(props: ChatTranscriptProps) {
                 />
               ))}
             </TurnActionMenu>
+            <SideTaskInline
+              last={detached === undefined && String(turn.id) === String(turns.at(-1)?.id)}
+              loadedTurnIds={loadedTurnIds}
+              // A Chat branch waits for every reply in flight in the thread, not
+              // only the offering turn's, so the card holds the fork choice too.
+              running={chatReplyInFlight || turn.attempts.at(-1)?.outcome === "waiting"}
+              turnId={String(turn.id)}
+            />
           </div>
         );
       }}
@@ -1234,17 +1244,6 @@ function CitationList(props: { readonly citations: ChatThreadView["citations"] }
       })}
     </ul>
   );
-}
-
-function resolvedContent(
-  contentById: ReadonlyMap<string, ChatContentBody>,
-  reference: ChatContentReference,
-  expectedRole: ChatContentBody["role"],
-): ChatContentBody | undefined {
-  const content = contentById.get(String(reference.contentId));
-  return content?.role === expectedRole && content.digest === reference.digest
-    ? content
-    : undefined;
 }
 
 function handoffLabel(previous: ChatAttempt | undefined, current: ChatAttempt): string | undefined {

@@ -23,6 +23,7 @@ import {
   decodeProjectId,
   decodeWindowId,
   decodeChatThreadId,
+  decodeThreadRetentionThreadId,
   decodeWorkTurnRequestId,
   decodeCodeThreadId,
   decodeCodeOperationId,
@@ -47,7 +48,7 @@ import { makePublishedSnapshotSource } from "./publishedSnapshotSource";
 import type { PublishedSnapshotRunRequest, WindowId } from "@octant/contracts";
 import { MAX_CHAT_ATTACHMENT_BYTES } from "./chat/chatAttachmentStore";
 import { MAX_CODE_FILE_BODY_SIZE } from "./codeRoutes";
-import { existsSync } from "node:fs";
+import { existsSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { CANVAS_PREVIEW_ASSET_FOLDER, CANVAS_PREVIEW_PAGE } from "./canvas/canvasPreviewRenderer";
 import { healthResponse } from "./health";
@@ -57,6 +58,7 @@ import {
   PersistenceStartupFailed,
 } from "./persistence/persistenceService";
 import { LatencyStatsProjection } from "./latencyStatsProjection";
+import { HostHealthRecorder } from "./metrics/hostHealthRecorder";
 import {
   isAllowedRendererOrigin,
   isForeignLoopbackOrigin,
@@ -100,11 +102,15 @@ import { wireWorkFiles } from "./wiring/workFiles";
 import { wireProviderCloudSessions } from "./wiring/providerCloudSessions";
 import { wireCanvas } from "./wiring/canvas";
 import { wireAutomation } from "./wiring/automation";
+import { ROUTINE_HOST_SCOPE_ID } from "./routineHostScope";
+import { wireBenchmarks, type BenchmarkThreadPurgeSlot } from "./wiring/benchmarks";
 import { integrationEventSources } from "./integration/integrationEventSources";
 import { wireThreadNotifications } from "./wiring/notifications";
 import { wireWorkRequests } from "./wiring/workRequests";
 import { wireRoutes } from "./wiring/routes";
 import { wireRemote } from "./wiring/remote";
+import { createThreadMoveHolds } from "./hub/threadMoveHolds";
+import { createThreadMoveStateStore, heldThreadsOf } from "./hub/threadMoveStateStore";
 import { wireReplica } from "./wiring/replica";
 
 export { MAX_CHAT_ATTACHMENT_BYTES };
@@ -189,6 +195,26 @@ export function startOctantServer(
     for (const fact of persistence.projectionCatchUp) {
       latencyStats.record("projection-catch-up", fact.durationMs);
     }
+    const hostHealth = new HostHealthRecorder({
+      path: join(persistence.dataDirectory, "host-health.sqlite3"),
+      latencyWindow: () => latencyStats.takeWindow(),
+      // The main file's size on disk, not page_count * page_size: in WAL mode
+      // the page count includes pages that still live in the write-ahead log.
+      databaseBytes: () => {
+        const row = persistence.connection
+          .prepare("SELECT file FROM pragma_database_list WHERE name = 'main'")
+          .get();
+        if (typeof row !== "object" || row === null || !("file" in row)) return undefined;
+        if (typeof row.file !== "string" || row.file === "") return undefined;
+        try {
+          return statSync(row.file).size;
+        } catch {
+          return undefined;
+        }
+      },
+    });
+    const stopHostHealth = hostHealth.start();
+    yield* Effect.addFinalizer(() => Effect.sync(stopHostHealth));
 
     const serve = options.serve;
     if (serve === undefined) {
@@ -206,6 +232,7 @@ export function startOctantServer(
       conversationInputTransfer,
       browserAuthority,
       codeBoardEventStore,
+      codeSessionConversation,
       codeEvidence,
       hostMemoryGuard,
       isProjectPolicyTargetAllowed,
@@ -241,6 +268,7 @@ export function startOctantServer(
       protectedFilesRoutes,
       processAuthorityNow,
       routineProposalService,
+      imageGenerationOffers,
       simulatorInputGrants,
       unsubscribeMachineChanges,
       windowAuthorityStore,
@@ -334,6 +362,7 @@ export function startOctantServer(
       peekCreateFromIssueFramed,
       siblingThreadsService,
       terminalSessionImports,
+      movedThreadHistory,
       terminalSessionRoutes,
       threadOutsideContentMarks,
       toolEgressRules,
@@ -360,6 +389,7 @@ export function startOctantServer(
       zenEventStore,
     } = wireUsage({
       cacheStats,
+      hostHealth,
       latencyStats,
       persistence,
       spendCeilingHolder,
@@ -375,6 +405,8 @@ export function startOctantServer(
       computerUseTools,
       threadDesktopDestination,
       desktopPaneRoutes,
+      desktopLeases,
+      installDesktopPreviewRequest,
       desktopRecipeKeys,
       launchSessionRoutes,
       machineChangeRoutes,
@@ -396,6 +428,12 @@ export function startOctantServer(
       windowAuthorityStore,
       workThreadProjection,
     });
+    // Which threads a move holds is shared by every mode's service and the
+    // move routes, and rebuilt from the saved moves so a restart keeps them
+    // held. The shell reads its departures too, to open a moved thread's
+    // tombstone. Moves keep their state in the host's data folder.
+    const threadMoveState = createThreadMoveStateStore(persistence.dataDirectory);
+    const threadMoveHolds = createThreadMoveHolds(heldThreadsOf(threadMoveState.load()));
     const {
       authorizeWorkThreadForWindow,
       codeBoardPlanProgressSource,
@@ -410,6 +448,7 @@ export function startOctantServer(
       managedCloneService,
       planRoutes,
       projectBindingRoutes,
+      projectMemoryAccess,
       projectRootPort,
       projectService,
       replyDetailRoutes,
@@ -421,6 +460,8 @@ export function startOctantServer(
       workProjectStatusFiles,
       workProjectStatusReader,
     } = yield* wireWorkspace({
+      isPairedDeviceScope,
+      machineChangeFeed,
       onWindowRevoked,
       serverProjectStore,
       bindingReceiptStore,
@@ -432,11 +473,13 @@ export function startOctantServer(
       persistence,
       providerRuntimeRegistry,
       spendCeilingHolder,
+      threadMoveState,
       windowAuthorityStore,
       workThreadProjection,
     });
     const {
       runningWorkTurnAccess,
+      runningWorkTurnSandbox,
       runningWorkTurns,
       workRequestRuntime,
       workRequestService,
@@ -483,8 +526,10 @@ export function startOctantServer(
       providerUsageLimitsService,
       refreshStandaloneSkills,
       resolveSelectedExtensions,
+      effectiveSkills,
       pinnedExtensionIds,
       reviewedModelManifest,
+      managedWorktreeService,
       skillDiscoveryService,
     } = yield* wireProviders({
       serverRegistry,
@@ -515,8 +560,10 @@ export function startOctantServer(
       beginGoogleCliChange,
       recoverGoogleCliCommands,
       credentialCommandProcess,
+      benchmarkCheckCommands,
       prepareCredentialCommand,
       personMemorySweep,
+      decisionReviewModelPort,
       runtimeForgeChanges,
       followUpCreation,
       restartContinuation,
@@ -533,9 +580,10 @@ export function startOctantServer(
       onHarnessPausedByPerson,
       onHarnessRecoveryLifted,
       researchRouter,
-      sideTaskFirstMessage,
+      sideTaskHost,
       sideTaskRoutes,
       hostShield,
+      observeTurnEnded,
       threadWork,
     } = wireHarness({
       personMemory,
@@ -561,6 +609,7 @@ export function startOctantServer(
       configuredDriverOptions,
       contextHarness,
       contributeChildTools,
+      effectiveSkills,
       externalContentIngestionStore,
       goalService,
       nativeHarnessLeadFallback,
@@ -569,6 +618,7 @@ export function startOctantServer(
       persistence,
       providerDataDirectory,
       runningWorkTurnAccess,
+      runningWorkTurnSandbox,
       sideTasks,
       threadFollowUpSuggestions,
       toolEgressRules,
@@ -599,6 +649,8 @@ export function startOctantServer(
       roots,
       workAttachments,
     } = yield* wireCode({
+      projectMemoryAccess,
+      threadMoveHolds,
       serverConnection,
       serverProjectStore,
       codeBoardEventStore,
@@ -729,6 +781,8 @@ export function startOctantServer(
       routeCodeService,
       terminalProcessPort,
     } = yield* wireCodeRuntime({
+      threadMoveHolds,
+      codeSessionConversation,
       worktreePreparation,
       conversationInputTransfer,
       browserModelBindings,
@@ -737,6 +791,8 @@ export function startOctantServer(
       serverProjectStore,
       shieldServerStore,
       hostShield,
+      imageGenerationOffers,
+      imageJobService,
       runtimeForgeChanges,
       onHarnessQuestionAsked,
       onHarnessQuestionSettled,
@@ -844,6 +900,8 @@ export function startOctantServer(
       remoteServerGrantLocalRoutes,
       remoteServerGrants,
     } = yield* wireCodeTooling({
+      desktopLeases,
+      installDesktopPreviewRequest,
       workThreadProjection,
       agentRunPersistence,
       worktreePreparation,
@@ -887,8 +945,10 @@ export function startOctantServer(
       threadMentionService,
       workspacePresetRoutes,
     } = yield* wireChat({
+      threadMoveHolds,
       conversationInputTransfer,
       personMemoryAccess,
+      projectMemoryAccess,
       workRequestRuntime,
       threadAwaitsHarnessApproval,
       agentMessageProjection,
@@ -912,6 +972,7 @@ export function startOctantServer(
       extensionPackageStore,
       externalContentIngestionStore,
       githubIssueContextService,
+      imageGenerationOffers,
       imageJobService,
       linearIssueContextService,
       liveTurns,
@@ -942,6 +1003,7 @@ export function startOctantServer(
       goalLoopRoutes,
       threadExportRoutes,
       threadExportService,
+      threadHandOffProvider,
       threadHandOffRoutes,
       threadMessageQueue,
       threadMessageQueueRoutes,
@@ -952,8 +1014,11 @@ export function startOctantServer(
       workTurnService,
       workflowService,
     } = yield* wireWork({
+      threadMoveHolds,
       conversationInputTransfer,
+      codeBoardEventStore,
       personMemoryAccess,
+      projectMemoryAccess,
       runtimeForgeChanges,
       nativeHarnessSessions,
       restartContinuation,
@@ -991,6 +1056,7 @@ export function startOctantServer(
       followUpCreation,
       githubIssueContextService,
       goalService,
+      imageGenerationOffers,
       imageJobService,
       linearIssueContextService,
       terminalSessionImports,
@@ -1014,7 +1080,7 @@ export function startOctantServer(
       routeCodeService,
       runtimeOutsideContentMarks,
       routineProposalService,
-      sideTaskFirstMessage,
+      sideTaskHost,
       sideTasks,
       siblingThreadsService,
       spendCeiling,
@@ -1049,6 +1115,7 @@ export function startOctantServer(
       wireZen({
         contributeChatTools,
         chatService,
+        githubExtensionSnapshot,
         codeOperationRuntime,
         navigatorAssistantBindings,
         persistence,
@@ -1063,40 +1130,48 @@ export function startOctantServer(
         workTurnService,
         zenEventStore,
       });
-    const { agentMessageRoutes, browserAutomationRoutes, contextRoutes, windowCanOpenThread } =
-      wireContext({
-        browserCredentialUseService,
-        agentMessageProjection,
-        browserModelBindings,
-        browserAuthority,
-        browserAutomationService,
-        browserCaptures,
-        browserExtensionService,
-        browserFlowService,
-        browserProfileService,
-        canAccessCodeProject,
-        capacityScheduler,
-        chatService,
-        codeOperationRuntime,
-        codeSessionAuthority,
-        configuredDriverOptions,
-        contextHarness,
-        hostShield,
-        liveProjectBrowsers,
-        nativeHarnessHooks,
-        persistence,
-        projectService,
-        providerRuntimeRegistry,
-        browserToolApprovalService,
-        routeCodeService,
-        serverProjectStore,
-        spendCeilingService,
-        windowAuthorityStore,
-        workThreadProjection,
-        workThreadService,
-        workTurnProjection,
-        workTurnService,
-      });
+    const {
+      agentMessageRoutes,
+      browserAutomationRoutes,
+      contextRoutes,
+      idleCompactions,
+      windowCanOpenThread,
+    } = wireContext({
+      browserCredentialUseService,
+      agentMessageProjection,
+      browserModelBindings,
+      browserAuthority,
+      browserAutomationService,
+      browserCaptures,
+      browserExtensionService,
+      browserFlowService,
+      browserProfileService,
+      canAccessCodeProject,
+      capacityScheduler,
+      chatService,
+      codeOperationRuntime,
+      codeSessionAuthority,
+      codeSessionConversation,
+      configuredDriverOptions,
+      contextHarness,
+      hostShield,
+      liveProjectBrowsers,
+      nativeHarnessHooks,
+      observeTurnEnded,
+      persistence,
+      projectService,
+      providerRuntimeRegistry,
+      providerUsageLimitsService,
+      browserToolApprovalService,
+      routeCodeService,
+      serverProjectStore,
+      spendCeilingService,
+      windowAuthorityStore,
+      workThreadProjection,
+      workThreadService,
+      workTurnProjection,
+      workTurnService,
+    });
     const {
       imageRoutes,
       previewHandoffBridgeRoutes,
@@ -1109,6 +1184,7 @@ export function startOctantServer(
       workResearchRoutes,
     } = wireWorkFiles({
       credentialResolver,
+      imageGenerationOffers,
       imageJobService,
       options,
       persistence,
@@ -1162,6 +1238,43 @@ export function startOctantServer(
       workThreadServiceWithWorkflows,
       workTurnService,
     });
+    const benchmarkThreadPurge: BenchmarkThreadPurgeSlot = {};
+    const { benchmarkRoutes, benchmarkRunner } = wireBenchmarks({
+      canAccessCodeProject,
+      awaitsPerson: (threadId) =>
+        codeOperationRuntime?.turnAwaitsPerson?.(threadId) === true ||
+        threadAwaitsHarnessApproval(threadId),
+      // The oldest approval or question the thread's turn waits on: when it was
+      // asked, from the journal, so a restart keeps counting from then, and what
+      // it asks, for a cell that ends blocked.
+      pendingApproval: async (threadId) => {
+        const pending = await codeOperationRuntime?.pendingRequests?.(ROUTINE_HOST_SCOPE_ID);
+        const oldest = (pending ?? [])
+          .filter((request) => String(request.threadId) === threadId)
+          .sort((left, right) =>
+            String(left.requestedAt).localeCompare(String(right.requestedAt)),
+          )[0];
+        return oldest === undefined
+          ? undefined
+          : { since: String(oldest.requestedAt), summary: oldest.text };
+      },
+      codeEvidence,
+      benchmarkCheckCommands,
+      managedWorktreeReceipts,
+      managedWorktreeService,
+      roots,
+      routeCodeService,
+      chatService,
+      personMemory,
+      persistence,
+      projectService,
+      threadPurge: benchmarkThreadPurge,
+      turnMetrics,
+      windowAuthorityStore,
+      ...(options.allowedRendererHttpOrigin === undefined
+        ? {}
+        : { allowedRendererHttpOrigin: options.allowedRendererHttpOrigin }),
+    });
     yield* wireThreadNotifications({
       chatHiddenThreadIds,
       hasPushStanding,
@@ -1180,6 +1293,8 @@ export function startOctantServer(
       workRequestRoutes,
       workThreadRoutes,
     } = wireWorkRequests({
+      decisionReviewModelPort,
+      isProjectPolicyTargetAllowed,
       observeWorkThreadRuntime,
       workRequestService,
       agentRunPersistence,
@@ -1290,6 +1405,20 @@ export function startOctantServer(
         : { resolveLinked: commandBroker.requestCardRead },
     );
     yield* Effect.addFinalizer(() => Effect.sync(() => credentialRequests.close()));
+    yield* Effect.addFinalizer(() => Effect.sync(() => projectMemoryAccess.proposals.close()));
+    // Plan reads Project memory and refuses every write to it.
+    contributeCodeTools(({ windowId, thread, readThread }) =>
+      projectMemoryAccess.toolsFor({
+        windowId,
+        mode: "code",
+        threadId: String(thread.id),
+        projectId: String(thread.projectId),
+        writeRefusal: () =>
+          (readThread()?.executionPolicy ?? thread.executionPolicy) === "plan"
+            ? "Plan mode cannot change Project memory. Leave Plan mode to propose the change."
+            : undefined,
+      }),
+    );
     const credentialRequestRoutes = createCredentialRequestRoutes(
       credentialRequests,
       windowAuthorityStore,
@@ -1473,6 +1602,7 @@ export function startOctantServer(
       artifactMirrorRoutes,
       automationNotificationRoutes,
       automationRoutes,
+      benchmarkRoutes,
       browserAutomationRoutes,
       canvasRoutes,
       chatRoutes,
@@ -1567,6 +1697,7 @@ export function startOctantServer(
       hostControlRoutes,
       supportBundleRoutes,
       delegationAdministrationRoutes,
+      threadMoveAdministrationRoutes,
       hubAdministrationRoutes,
       localDeviceAdministrationRoutes,
       privateListenerAdministrationRoutes,
@@ -1575,7 +1706,14 @@ export function startOctantServer(
       providerCredentialRoutes,
       secretStoresRoutes,
       remoteHost,
+      threadRetention,
     } = wireRemote({
+      chatService,
+      liveTurns,
+      managedWorktreeReceipts,
+      movedThreadHistory,
+      threadMoveHolds,
+      threadMoveState,
       beginGoogleCliChange,
       onSecretStoreLinkChange: () => commands.linkChanged(),
       browserAutomationService,
@@ -1586,6 +1724,7 @@ export function startOctantServer(
       browserProfileService,
       canvasPublicShareService,
       threadExportService,
+      threadHandOffProvider,
       agentMessageService,
       authenticatedProductDispatch,
       automationCommandService,
@@ -1633,6 +1772,23 @@ export function startOctantServer(
       workTurnService,
       agentRunAdmission,
     });
+    benchmarkThreadPurge.purge = async (threadId, mode) => {
+      const outcome = await threadRetention.purge(
+        {
+          scope: {
+            kind: "thread",
+            mode,
+            threadId: decodeThreadRetentionThreadId(threadId),
+          },
+          confirm: true,
+        },
+        "local-window",
+      );
+      if ("reason" in outcome) {
+        return outcome.reason === "unknown-thread" ? "absent" : "failed";
+      }
+      return "purged";
+    };
 
     yield* Effect.addFinalizer(() => Effect.promise(() => ownerBrowserControlService.close()));
     let remoteListenerError: PrivateListenerFailureCode | undefined;
@@ -1641,6 +1797,7 @@ export function startOctantServer(
     // runtime alive on its idle lease with nothing left to close it.
     let warmingProviders: Promise<void> = Promise.resolve();
     let stopArtifactSync: () => void = () => undefined;
+    let stopBenchmarkRunner: () => Promise<void> = () => Promise.resolve();
     let stopPublicShareSweep: () => void = () => undefined;
     return yield* Effect.acquireRelease(
       Effect.tryPromise({
@@ -1706,6 +1863,7 @@ export function startOctantServer(
                 (await privateListenerAdministrationRoutes(request)) ??
                 (await hubAdministrationRoutes(request)) ??
                 (await delegationAdministrationRoutes(request)) ??
+                (await threadMoveAdministrationRoutes(request)) ??
                 (await providerCredentialRoutes(request)) ??
                 (await secretStoresRoutes(request)) ??
                 (await commandRoutes(request)) ??
@@ -1752,6 +1910,8 @@ export function startOctantServer(
           // so a host that fails to bind never archives anything on its own,
           // and the stop below is registered before the first pass runs.
           completedThreadArchiveSweep.start();
+          idleCompactions.start();
+          stopBenchmarkRunner = benchmarkRunner.start();
           personMemorySweep.start();
           // The memory guard reads the last run's state before it overwrites
           // it, so the next-start notice survives a crash.
@@ -1848,7 +2008,14 @@ export function startOctantServer(
           } catch (error) {
             shutdownFailure ??= error;
           }
+          // Aborts any check command still running, which ends its process group.
+          try {
+            await stopBenchmarkRunner();
+          } catch (error) {
+            shutdownFailure ??= error;
+          }
           completedThreadArchiveSweep.stop();
+          idleCompactions.stop();
           personMemorySweep.stop();
           personMemory.close();
           try {
@@ -1941,6 +2108,7 @@ export function startOctantServer(
             shutdownFailure ??= error;
           }
           browserToolApprovalService?.close();
+          imageGenerationOffers.close();
           try {
             stopComputerSettingsWatch();
             stopDesktopLeases();

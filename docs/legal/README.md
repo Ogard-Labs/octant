@@ -1,39 +1,58 @@
-# Terms and privacy documentation
+# Legal drafts
 
-Octant is MIT-licensed, self-hosted software distributed by Ogard Labs. Ogard
-Labs receives no workspace data and operates no content service or telemetry
-collection. The documentation follows that scope:
+Draft legal and privacy positions for counsel review. They are **not**
+published notices, signed agreements, or certifications of GDPR compliance.
 
-- [LICENSE](../../LICENSE) is the software licence; keep its copyright and
-  permission notice with redistributed copies.
-- [Licence and contact](https://github.com/Ogard-Labs/octant-site/blob/main/docs/advanced/terms.md) identifies the
-  distributor and links the licence, with mandatory rights preserved.
-- [Privacy](https://github.com/Ogard-Labs/octant-site/blob/main/docs/advanced/privacy-notice.md) states the software's
-  data boundary and external connections.
-- [Privacy and security](https://github.com/Ogard-Labs/octant-site/blob/main/docs/advanced/privacy-and-security.md)
-  documents host storage, export, purge, approvals, and network controls.
+## User-facing privacy drafts (published in the guide, with draft banners)
 
-There is no separate EULA, customer-data DPA, SCC template, or declaration
-that a host owner or every provider has a particular GDPR role. Those
-agreements and roles depend on actual processing; distributing this software
-does not establish them. Do not add hypothetical hosted-service contracts.
+These live with the product docs at `octant-site/docs/advanced/` because they describe
+current product behavior for operators:
 
-## Review basis
+- [`privacy-notice.md`](https://github.com/Ogard-Labs/octant-site/blob/main/docs/advanced/privacy-notice.md) — what data exists, where it lives, what leaves the machine, and the export and purge rights that ship
+- [`privacy-and-security.md`](https://github.com/Ogard-Labs/octant-site/blob/main/docs/advanced/privacy-and-security.md) — the operational security model: storage, credentials, approvals, confinement, host-initiated network
+- [`sub-processors.md`](https://github.com/Ogard-Labs/octant-site/blob/main/docs/advanced/sub-processors.md) — BYO providers are the user's processors, not Octant's
+- [`data-residency.md`](https://github.com/Ogard-Labs/octant-site/blob/main/docs/advanced/data-residency.md) — the host is the region
 
-- [GDPR, Articles 2, 4, 13, 28 and Chapter V](https://eur-lex.europa.eu/eli/reg/2016/679/oj/eng):
-  duties depend on actual personal-data processing and roles. An installation's
-  local data controls are not certification of its operator's compliance.
-- [Norwegian e-commerce act, section 8](https://lovdata.no/dokument/NL/lov/2003-05-23-35):
-  applicable provider identification includes geographical and contact details.
-- [Norwegian digitalytelsesloven](https://lovdata.no/dokument/NL/lov/2022-06-17-56)
-  and [Directive (EU) 2019/770, Article 3](https://eur-lex.europa.eu/eli/dir/2019/770/oj/eng):
-  applicability depends on the supply and consideration, including personal
-  data, with an exclusion for qualifying free open-source software. MIT does
-  not by itself remove mandatory consumer rights.
+## Drafts in this directory (not published until counsel signs off)
 
-The public pages describe software use. They do not invent retention periods,
-legal bases, cookies, or supplier arrangements for company correspondence or
-website operations. Any such processing needs its own fact-based assessment.
-If the operating model or distribution terms change, reassess the affected
-notice before that change. Final legal publication review remains separate from
-implementation; these documents do not claim legal certification.
+| Draft                                                         | Topic                                                                                                                                                                           |
+| ------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| [Shared-host controller footing](./shared-host-controller.md) | When one host holds several principals' data: who is controller for the journal, logs, and audit export; alignment with collaboration design; shipped export and purge surfaces |
+| [DPA template](./dpa-template.md)                             | **Not in force** stub: no Ogard-operated hosted component exists; what would trigger a DPA if one ever ships                                                                    |
+| [SCC position](./scc-position.md)                             | **No SCCs exist** stub: BYO and the self-hosted share service are the customer's own relationships; what would trigger transfer tools                                           |
+| [EULA placeholders](./eula-placeholders.md)                   | Governing-law and venue blanks for the EULA counsel will deliver — the one live contract deliverable                                                                            |
+
+## Standard values drafted from the existing Ogard Labs setup
+
+- **Licensor entity:** Ogard Labs, organisation number 996 198 510,
+  Stavanger, Norway; contact `hello@octant.sh`. Ogard Labs licenses the
+  software; it operates **no** share or hosting service for Octant content.
+- **Public Canvas share service:** there is no Ogard-operated instance. The
+  reference app lives in this repository at `apps/share` and each user runs it
+  on their own host (or uses another service they choose). The privacy notice,
+  public-links guide, sub-processors, data residency, and SCC position all
+  describe that user-operated model; the DPA template is not in force.
+- **EULA proposal:** Norwegian law, Stavanger District Court as agreed
+  venue, no arbitration, notices to `hello@octant.sh`, English controlling
+  (mirrors the terms already published for Ogard Labs' other products).
+
+## Remaining counsel decisions
+
+- **EULA placeholders:** confirm or amend the proposed values (Norwegian law,
+  Stavanger venue, `hello@octant.sh`, English controlling) and deliver the
+  full license text for the preview.
+- **DPA template:** dormant — no Ogard-operated hosted component exists, so no
+  DPA is in force. Revisit only if a future hosted component ships.
+- **Update-check default:** changed to off-by-default (a store that never
+  recorded the preference decodes to off); the privacy notice and installation
+  guide describe the new default.
+- **Shared-host controller footing:** confirm or rewrite the default
+  "host owner is controller" sentence, and decide the joint-controller and
+  processor forms a recorded controller fact needs.
+
+## Rules for edits
+
+- Mark every page as draft pending legal review.
+- Ground claims in shipped behavior and accepted or proposed decision records.
+- Do not put tracker identifiers in these files.
+- Do not present a draft as a published notice or as legal advice.

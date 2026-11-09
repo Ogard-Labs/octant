@@ -108,7 +108,10 @@ Once applicable checks pass, proceed to delivery under the
   stack operation is the exception to the ordinary no-rewrite rule; do not rebase
   unrelated or shared work.
 - Behavior changes come with tests (see below). Documentation changes to
-  `docs/`, `apps/docs`, or this file are welcome on their own.
+  `docs/` or this file are welcome on their own. The VitePress user guide lives
+  in [octant-site/docs](https://github.com/Ogard-Labs/octant-site/tree/main/docs).
+  Link a companion guide PR in both descriptions when behavior changes need
+  user documentation; otherwise explain why no guide update is needed.
 - Describe what changed, why, and how you verified it. Link the issue if
   there is one.
 - The maintainers review and merge; expect questions rather than silent

@@ -26,6 +26,7 @@ import type { ContextWiring } from "./context";
 import type { WorkFilesWiring } from "./workFiles";
 import type { CanvasWiring } from "./canvas";
 import type { AutomationWiring } from "./automation";
+import type { BenchmarksWiring } from "./benchmarks";
 import type { WorkRequestsWiring } from "./workRequests";
 
 export type RoutesDependencies = {
@@ -133,6 +134,7 @@ export type RoutesDependencies = {
     "artifactLibraryRoutes" | "artifactMirrorRoutes" | "canvasRoutes" | "snapshotCanvas"
   > &
   Pick<AutomationWiring, "automationNotificationRoutes" | "automationRoutes"> &
+  Pick<BenchmarksWiring, "benchmarkRoutes"> &
   Pick<
     WorkRequestsWiring,
     | "fleetActivityRoutes"
@@ -161,6 +163,7 @@ export function wireRoutes(deps: RoutesDependencies) {
     artifactMirrorRoutes,
     automationNotificationRoutes,
     automationRoutes,
+    benchmarkRoutes,
     browserAutomationRoutes,
     canvasRoutes,
     chatRoutes,
@@ -321,6 +324,7 @@ export function wireRoutes(deps: RoutesDependencies) {
     (await artifactMirrorRoutes(request)) ??
     (await syncedArtifactRoutes(request)) ??
     (await automationRoutes(request)) ??
+    (await benchmarkRoutes(request)) ??
     (await automationNotificationRoutes(request)) ??
     (await workPromotionRoutes(request)) ??
     (await workRequestRoutes(request)) ??

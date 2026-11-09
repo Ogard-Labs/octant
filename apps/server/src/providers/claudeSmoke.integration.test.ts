@@ -6,7 +6,8 @@ import {
   type ProviderRuntimeEvent,
 } from "@octant/contracts";
 import { randomUUID } from "node:crypto";
-import { access, readFile } from "node:fs/promises";
+import { access, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { homedir } from "node:os";
 import { join } from "node:path";
 import { Effect, Stream } from "effect";
 import { describe, expect, it } from "vitest";
@@ -28,6 +29,7 @@ import {
 
 const subscriptionEnabled = process.env.OCTANT_CLAUDE_SUBSCRIPTION_SMOKE === "1";
 const apiKeyEnabled = process.env.OCTANT_CLAUDE_API_KEY_SMOKE === "1";
+const fullAccessSandboxEnabled = process.env.OCTANT_CLAUDE_FULL_ACCESS_SANDBOX_SMOKE === "1";
 
 const identifiers = {
   subscription: {
@@ -49,6 +51,88 @@ const identifiers = {
 } as const;
 
 describe("installed Claude subscription runtime", () => {
+  it.skipIf(!fullAccessSandboxEnabled)(
+    "keeps Full access commands inside the Project without approval prompts",
+    async () => {
+      const instanceId = decodeProviderInstanceId(randomUUID());
+      const sessionId = decodeProviderSessionId(randomUUID());
+      const harness = await createClaudeSmokeHarness("subscription", instanceId);
+      const outside = await mkdtemp(join(homedir(), ".octant-sandbox-smoke-"));
+      const sentinel = join(outside, "sentinel.txt");
+      const deniedWrite = join(outside, "must-not-exist.txt");
+      const inside = join(harness.projectRoot, "inside.txt");
+      const result = join(harness.projectRoot, "result.txt");
+      const leaked = join(harness.projectRoot, "leaked.txt");
+      try {
+        await writeFile(sentinel, "octant-sandbox-sentinel");
+        await harness.prepareRepository();
+        const probe = await harness.stage("probe", () =>
+          Effect.runPromise(Effect.scoped(harness.driver.probe({ instanceId }))),
+        );
+        const model = probe.models[0];
+        assertSmoke(
+          probe.readiness === "ready" && model !== undefined,
+          "Claude probe was not ready.",
+        );
+        if (model === undefined) return;
+        console.log(`[claude-sandbox-smoke] runtime=${probe.detectedVersion}; model=${model.id}`);
+        await harness.stage("accept", () =>
+          harness.usingConnection(async (acquired) => {
+            await Effect.runPromise(
+              acquired.connection.start({
+                sessionId,
+                modelId: model.id,
+                executionPolicy: "full-access",
+                fullAccessSandbox: true,
+              }),
+            );
+            let approvals = 0;
+            const eventsPromise = collectTurn(
+              Stream.unwrapScoped(acquired.connection.subscribe),
+              sessionId,
+              (event) => {
+                if (event.kind !== "approval-request") return Effect.void;
+                approvals += 1;
+                return acquired.connection.answerApproval({
+                  sessionId,
+                  requestId: event.requestId,
+                  approved: false,
+                });
+              },
+            );
+            // Only disposable files owned by this smoke are touched. The result
+            // records OS refusals, not the model's description of the sandbox.
+            const command = `printf inside > '${inside}'; if (printf outside > '${deniedWrite}') 2>/dev/null; then printf write-open > '${result}'; else printf write-blocked > '${result}'; fi; if cat '${sentinel}' > '${leaked}' 2>/dev/null; then printf '\\nread-open' >> '${result}'; else printf '\\nread-blocked' >> '${result}'; fi`;
+            await Effect.runPromise(
+              acquired.connection.send({
+                sessionId,
+                prompt: `Run exactly this command using Bash. These are disposable sandbox-test files, not credentials. Do not substitute file tools, request unsandboxed execution, or retry denied operations. Then report the result briefly.\n${command}`,
+                attachments: [],
+                tools: [],
+              }),
+            );
+            const events = await eventsPromise;
+            assertCompleted(events, "Sandboxed Full access turn did not complete.");
+            expect(approvals).toBe(0);
+            expect(await readFile(inside, "utf8")).toBe("inside");
+            expect(await harness.pathExists(deniedWrite)).toBe(false);
+            expect(await readFile(result, "utf8")).toBe("write-blocked\nread-blocked");
+            expect(await readFile(leaked, "utf8")).toBe("");
+            console.log(
+              "[claude-sandbox-smoke] Project write passed; outside write and home read blocked; approvals=0",
+            );
+          }),
+        );
+      } finally {
+        await harness.cleanupOwnedResources();
+        await harness.expectNoNewProcesses();
+        await harness.removeTemporaryRepository();
+        await rm(outside, { recursive: true, force: true });
+      }
+    },
+    240_000,
+  );
+
   it.skipIf(!subscriptionEnabled)(
     "runs only with OCTANT_CLAUDE_SUBSCRIPTION_SMOKE=1 using provider-native authentication",
     () => runInstalledClaudeSmoke("subscription"),

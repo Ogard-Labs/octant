@@ -114,6 +114,9 @@ const REMOTE_APPROVABLE_ACTIONS = new Set([
   "speech.transcribe",
   "preview.open-authorized",
   "settings.read-non-secret",
+  // Stars on one benchmark answer: a note about an answer already on screen,
+  // which spends nothing and changes no thread.
+  "benchmark.rate-cell",
   "provider.list-models",
   "usage.spend-ceiling.read",
 ]);

@@ -17,6 +17,12 @@ import {
   readLastModelChoice,
 } from "./modelChoiceMemory";
 import { ComposerModelPicker } from "./ComposerModelPicker";
+import { decodeContextCompactionReceipt } from "@octant/contracts/context";
+import { CompactionDivider } from "../context/CompactionDivider";
+import {
+  ComposerContextMeterGate,
+  ComposerContextMeterProvider,
+} from "../context/composerContextMeterScope";
 import type { ProviderUsageLimitsClient } from "@octant/client-runtime/provider-usage-limits-client";
 import { ComposerUsageWarning } from "../usage/ComposerUsageWarning";
 import { PlanUsageProvider } from "../usage/PlanUsageContext";
@@ -366,6 +372,66 @@ describe("ComposerModelPicker", () => {
     expect(screen.getByRole("button", { name: "Provider and model" })).toHaveTextContent(
       "Model One",
     );
+  });
+
+  it("opens from the limit notice under a compaction, so the person can move the thread", async () => {
+    const user = userEvent.setup();
+    const receipt = decodeContextCompactionReceipt({
+      compactionId: "60000000-0000-4000-8000-000000000009",
+      subject: {
+        aggregateType: "chat-thread",
+        aggregateId: "61000000-0000-4000-8000-000000000001",
+      },
+      executor: { kind: "runtime", driverKind: "codex", providerInstanceId: providerA },
+      trigger: "requested",
+      cause: { kind: "limit-near", window: "five_hour", usedPercent: 91, thresholdPercent: 90 },
+      tokensBefore: { kind: "known", tokens: 52_000, accuracy: "provider-reported" },
+      tokensAfter: { kind: "known", tokens: 10_800, accuracy: "provider-reported" },
+      tokensFreed: { kind: "measured", tokens: 41_200, accuracy: "provider-reported" },
+      summary: { visibility: "runtime-only" },
+      usage: { kind: "unreported" },
+      completedAt: "2026-11-07T10:00:00.000Z",
+    });
+    render(
+      <ComposerContextMeterProvider
+        status="ready"
+        subjectKey="chat-thread:61000000-0000-4000-8000-000000000001"
+      >
+        <ComposerModelPicker
+          ariaLabel="Overview model"
+          groups={groups()}
+          onSelect={vi.fn()}
+          selectedModelId={modelOne}
+          selectedProviderInstanceId={providerA}
+        />
+        <ComposerContextMeterGate enabled>
+          <CompactionDivider receipt={receipt} />
+          <ComposerModelPicker
+            groups={groups()}
+            onSelect={vi.fn()}
+            selectedModelId={modelOne}
+            selectedProviderInstanceId={providerA}
+          />
+        </ComposerContextMeterGate>
+      </ComposerContextMeterProvider>,
+    );
+
+    expect(screen.getByRole("separator")).toHaveTextContent(
+      "Compacted automatically · 5-hour limit 91% · 41.2K freed · summary by Codex",
+    );
+    expect(
+      screen.getByText(
+        "Codex is at 91% of its 5-hour limit. This thread is compacted and ready to move.",
+      ),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByRole("dialog", { name: "Choose provider and model" }),
+    ).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Switch model" }));
+    // Only the thread's own composer opens; a picker outside it stays shut.
+    expect(
+      await screen.findAllByRole("dialog", { name: "Choose provider and model" }),
+    ).toHaveLength(1);
   });
 
   it("opens a nested provider → model menu from the compact trigger", async () => {

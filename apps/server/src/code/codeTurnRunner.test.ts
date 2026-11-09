@@ -1836,6 +1836,34 @@ describe("CodeTurnRunner", () => {
     expect(observed.map((next) => next.providerKind)).toEqual(["completed"]);
   });
 
+  it("refuses to start a sandboxed Full access turn on a runtime that cannot keep the sandbox", async () => {
+    const outcomes: CodeTurnOutcome[] = [];
+    const provider: CodeProviderPort = { acquire: vi.fn() };
+    const sandboxed = {
+      ...thread(),
+      executionPolicy: "full-access" as const,
+      fullAccessSandbox: true,
+    };
+
+    for (const providerDriverKind of ["mistral-vibe", "opencode", "pi", undefined] as const) {
+      const exit = await Effect.runPromiseExit(
+        Effect.scoped(
+          new CodeTurnRunner().run(
+            input({
+              thread: sandboxed,
+              ...(providerDriverKind === undefined ? {} : { providerDriverKind }),
+              provider,
+              persistOutcome: (next) => Effect.sync(() => outcomes.push(next)),
+            }),
+          ),
+        ),
+      );
+      expect(exit._tag).toBe("Failure");
+    }
+    expect(outcomes).toEqual(["failed", "failed", "failed", "failed"]);
+    expect(provider.acquire).not.toHaveBeenCalled();
+  });
+
   it("records cancellation as interrupted", async () => {
     const controller = new AbortController();
     controller.abort();
@@ -2088,6 +2116,7 @@ describe("CodeTurnRunner", () => {
           toolMs: 0,
           modelCalls: 1,
         },
+        diagnostics: { toolCalls: 0, toolFailures: 0 },
       });
       expect(ended).toEqual([completed[0]?.turn]);
     });
@@ -2156,6 +2185,11 @@ describe("CodeTurnRunner", () => {
           startedAt: at(0),
           endedAt: at(1_000),
           metrics: { precision: "unavailable", wallMs: 1_000 },
+          diagnostics: {
+            toolCalls: 0,
+            toolFailures: 0,
+            failure: { category: "provider-failed", message: "Provider stopped." },
+          },
         },
       ]);
     });
