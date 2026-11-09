@@ -85,9 +85,18 @@ export function HomeComposerSheet(props: {
           fontWeight: "500",
         },
         modeLabelSelected: { color: colors.textPrimary },
-        context: { flexDirection: "row", alignItems: "center", gap: space.sm },
-        contextItem: { flexDirection: "row", alignItems: "center", gap: 5 },
+        context: { flexDirection: "row", flexWrap: "wrap", alignItems: "center", gap: space.sm },
+        contextItem: {
+          flexDirection: "row",
+          alignItems: "center",
+          gap: 5,
+          minWidth: 0,
+          maxWidth: "100%",
+          flexShrink: 1,
+        },
         contextText: {
+          minWidth: 0,
+          flexShrink: 1,
           color: colors.textSecondary,
           fontSize: typography.caption.fontSize,
           fontWeight: "500",
@@ -181,7 +190,7 @@ export function HomeComposerSheet(props: {
         </View>
       ) : null}
 
-      <View style={styles.context}>
+      <View style={styles.context} testID="mobile-home-composer-context">
         <View style={styles.contextItem}>
           <Ionicons
             color={colors.textTertiary}
@@ -194,13 +203,23 @@ export function HomeComposerSheet(props: {
             }
             size={16}
           />
-          <Text numberOfLines={1} style={styles.contextText}>
+          <Text
+            accessibilityLabel={projectLabel}
+            numberOfLines={1}
+            style={styles.contextText}
+            testID="mobile-home-composer-project-label"
+          >
             {projectLabel}
           </Text>
         </View>
         <View style={styles.contextItem}>
           <Ionicons color={colors.textTertiary} name="cloud-outline" size={16} />
-          <Text numberOfLines={1} style={styles.contextText}>
+          <Text
+            accessibilityLabel={props.placementLabel ?? "No host"}
+            numberOfLines={1}
+            style={styles.contextText}
+            testID="mobile-home-composer-host-label"
+          >
             {props.placementLabel ?? "No host"}
           </Text>
         </View>

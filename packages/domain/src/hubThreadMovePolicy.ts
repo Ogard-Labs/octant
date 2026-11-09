@@ -246,14 +246,16 @@ export type ShutdownRowStart = {
  * The choice each row starts on. A thread that can move starts on Move, or on
  * Move after this turn when busy; one that cannot starts on Leave here with
  * its reason. A handover writes a commit and may push, and Stop and move ends
- * work, so neither is ever preselected.
+ * work, so neither is ever preselected. Hand over is offered only to a Code
+ * thread that cannot move: one that can moves with its whole history, which a
+ * handover would leave behind.
  */
 export function startingShutdownChoice(input: {
   readonly mode: OctantMode;
   readonly eligibility: MoveEligibility;
 }): ShutdownRowStart {
-  const handover: ReadonlyArray<ShutdownChoice> = input.mode === "code" ? ["hand-over"] : [];
   if (input.eligibility.status === "cannot-move") {
+    const handover: ReadonlyArray<ShutdownChoice> = input.mode === "code" ? ["hand-over"] : [];
     return {
       choice: "leave-here",
       offers: [...handover, "leave-here"],
@@ -263,10 +265,10 @@ export function startingShutdownChoice(input: {
   if (input.eligibility.waitsForTurn) {
     return {
       choice: "move-after-turn",
-      offers: ["move-after-turn", "stop-and-move", ...handover, "leave-here"],
+      offers: ["move-after-turn", "stop-and-move", "leave-here"],
     };
   }
-  return { choice: "move", offers: ["move", ...handover, "leave-here"] };
+  return { choice: "move", offers: ["move", "leave-here"] };
 }
 
 /** A thread as Prepare to shut down reads it when building its list. */

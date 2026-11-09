@@ -2134,6 +2134,61 @@ describe("CanvasService adopting a version another computer wrote", () => {
   });
 });
 
+describe("CanvasService carrying a Canvas in with a moved thread", () => {
+  const carried = decodeCanvasId("aaaaaaaa-0000-4000-8000-000000000010");
+  const movedThread = "aaaaaaaa-0000-4000-8000-000000000011";
+  const newVersions = [
+    "aaaaaaaa-0000-4000-8000-000000000012",
+    "aaaaaaaa-0000-4000-8000-000000000013",
+  ];
+  const elsewhere = {
+    ...provenance,
+    hostId: "cccccccc-0000-4000-8000-000000000001",
+    projectId: null,
+    threadId: "cccccccc-0000-4000-8000-000000000003",
+  };
+  const sourceVersions = [
+    version({ definition: { ...definition, title: "First", provenance: elsewhere } }),
+    version({
+      versionId: ids.version2,
+      sequence: 2,
+      createdAt: later,
+      definition: { ...definition, title: "Second", provenance: elsewhere },
+    }),
+  ];
+
+  it("records every version in order under new ids, bound to the moved thread here, once", () => {
+    const { service, projection } = createService();
+    const carry = () =>
+      service.carryMovedCanvas({
+        canvasId: carried,
+        versions: sourceVersions.map((source, index) => ({
+          versionId: newVersions[index] as never,
+          source,
+        })),
+        provenance: { hostId: "local" as never, projectId: null, threadId: movedThread },
+        carriesOutsideContent: false,
+      });
+    carry();
+    // A finish asked again after a lost answer carries the same Canvas again.
+    carry();
+
+    const entry = projection.getById(carried);
+    expect(entry?.versions.map((held) => [String(held.versionId), held.definition.title])).toEqual([
+      [newVersions[0], "First"],
+      [newVersions[1], "Second"],
+    ]);
+    expect(entry?.currentVersion.definition.provenance).toMatchObject({
+      hostId: "local",
+      projectId: null,
+      threadId: movedThread,
+    });
+    expect(
+      projection.byThread({ projectId: null, threadId: movedThread, mode: "chat" }),
+    ).toHaveLength(1);
+  });
+});
+
 describe("CanvasService when the Canvas cannot be checked for outside content", () => {
   const tryAgain = expect.stringContaining("Try again");
   const unreadable = () => new CanvasEventStoreError("unreadable-mark", "Try again.");

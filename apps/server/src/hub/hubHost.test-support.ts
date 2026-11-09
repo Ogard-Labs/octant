@@ -753,6 +753,8 @@ export async function startHubTestHost(input: {
   const threadMoveRoutes = createThreadMoveRouteHandler({ moves: threadMoves });
   const threadMovesFromWindow = new ThreadMovesFromWindow({
     moves: threadMoves,
+    // These hosts run no turns, so nothing is ever there to stop.
+    stopWork: async () => ({ status: "stopped" }),
     state: threadMoveState,
     tickets: createThreadMoveTicketClient({
       identity: () => identity,
@@ -779,6 +781,7 @@ export async function startHubTestHost(input: {
     postures,
     credentials: credentialCopy,
     threadMoves,
+    phoneMoves: threadMovesFromWindow,
     provision: spokeProvision,
     signIn,
     spokeSignIn,

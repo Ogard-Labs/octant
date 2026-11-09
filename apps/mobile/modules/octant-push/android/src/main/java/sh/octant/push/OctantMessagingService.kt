@@ -8,11 +8,13 @@
 
 package sh.octant.push
 
+import android.app.NotificationChannel
+import android.app.NotificationManager
 import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
-import androidx.core.app.NotificationChannelCompat
+import android.os.Build
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
 import com.google.firebase.messaging.FirebaseMessagingService
@@ -38,11 +40,11 @@ class OctantMessagingService : FirebaseMessagingService() {
     fun post(context: Context, opened: OpenedNotification?) {
       val manager = NotificationManagerCompat.from(context)
       if (!manager.areNotificationsEnabled()) return
-      manager.createNotificationChannel(
-        NotificationChannelCompat.Builder(CHANNEL_ID, NotificationManagerCompat.IMPORTANCE_HIGH)
-          .setName("Thread updates")
-          .build()
-      )
+      if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+        manager.createNotificationChannel(
+          NotificationChannel(CHANNEL_ID, "Thread updates", NotificationManager.IMPORTANCE_HIGH)
+        )
+      }
       val builder =
         NotificationCompat.Builder(context, CHANNEL_ID)
           .setSmallIcon(context.applicationInfo.icon)
