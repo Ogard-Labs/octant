@@ -629,7 +629,9 @@ export function createRemoteConnection(config: RemoteConnectionConfig): RemoteCo
       headers["x-octant-csrf"] = session.csrfToken;
       headers["x-octant-command-id"] = randomUuid();
     }
-    return fetch(new URL(pathQuery, config.origin).toString(), {
+    // The gateway refuses a request whose path and query differ from the
+    // canonical form the proof signs (sorted query keys), so send that form.
+    return fetch(new URL(canonical, config.origin).toString(), {
       method,
       headers,
       body: safe ? null : bodyBytes.byteLength === 0 ? null : (bodyBytes as unknown as BodyInit),
