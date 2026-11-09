@@ -8,6 +8,7 @@ import { decodeThreadCheckpoint } from "@octant/contracts/thread-checkpoints";
 import type { PickerGroup } from "@octant/domain";
 import { describe, expect, it, vi } from "vitest";
 import { ChatTranscript } from "./ChatTranscript";
+import { SideTaskProvider } from "../followUps/SideTaskCards";
 
 const now = "2026-07-20T08:00:00.000Z";
 const ids = {
@@ -190,6 +191,43 @@ function longView(count: number) {
 }
 
 describe("ChatTranscript", () => {
+  it("shows a side-task offer inside the turn whose reply made it", async () => {
+    const offer = {
+      status: "offered",
+      offer: {
+        id: "00000000-0000-4000-8000-000000000861",
+        threadId: ids.thread,
+        mode: "chat",
+        suggestedBy: {
+          providerInstanceId: "10000000-0000-4000-8000-000000000001",
+          modelId: "model-a",
+        },
+        title: "Summarize the appendix",
+        reason: "The appendix is long enough to deserve its own conversation.",
+        prompt: "Summarize the appendix.",
+        target: "new-thread",
+        turnId: ids.turn,
+        offeredAt: now,
+      },
+    };
+    const client = {
+      sideTasks: vi.fn(async () => ({ threadId: ids.thread, tasks: [offer] })),
+      start: vi.fn(),
+      continueHere: vi.fn(),
+      dismiss: vi.fn(),
+    };
+    render(
+      <SideTaskProvider client={client as never} threadId={ids.thread}>
+        <ChatTranscript view={viewFixture()} />
+      </SideTaskProvider>,
+    );
+
+    const card = await screen.findByRole("article", { name: "Side task: Summarize the appendix" });
+    const turn = screen.getByText("Here is the summary.").closest("li");
+    expect(turn).not.toBeNull();
+    expect(turn).toContainElement(card);
+  });
+
   it("renders immutable ordered content, attachment names, attempt states, citations, and handoffs", () => {
     render(<ChatTranscript view={viewFixture()} />);
 

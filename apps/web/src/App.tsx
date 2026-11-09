@@ -206,6 +206,7 @@ import "./styles.css";
 import "./styles/shell.css";
 import "./styles/dock.css";
 import "./styles/environment.css";
+import { PrepareToShutDownHost } from "./environment/threadMove/PrepareToShutDownHost";
 // The shared component/material layer loads last so its assignments win.
 import "./styles/components.css";
 import { countSidebarTiles } from "./shell/sidebarTileCounts";
@@ -7636,6 +7637,10 @@ function LaunchedShell(
           projectAnnouncementSequence={projectController.announcementSequence}
         />
       </ShellFrame>
+      <PrepareToShutDownHost
+        hostBridge={props.hostBridge}
+        onOpenHubSettings={() => void controller.openSettings({ section: "remote-access" })}
+      />
       {threadExportNotice !== undefined ||
       replyDetailNotice !== undefined ||
       updateReadyNotice ||

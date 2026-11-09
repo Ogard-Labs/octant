@@ -341,7 +341,16 @@ function outputListsSecretVariable(output: string): boolean {
   return false;
 }
 
-const PATH_FIELDS = ["path", "paths", "file", "files", "filePath", "file_path", "filename"];
+const PATH_FIELDS = [
+  "path",
+  "paths",
+  "file",
+  "files",
+  "filePath",
+  "file_path",
+  "filename",
+  "edits",
+];
 
 function pathsOf(args: unknown): ReadonlyArray<string> {
   if (typeof args !== "object" || args === null) return [];
@@ -350,7 +359,13 @@ function pathsOf(args: unknown): ReadonlyArray<string> {
     const value = record[field];
     if (typeof value === "string") return [value];
     if (Array.isArray(value))
-      return value.filter((item): item is string => typeof item === "string");
+      return value.flatMap((item: unknown) => {
+        if (typeof item === "string") return [item];
+        // Each of several edits in one call names its own file.
+        const path =
+          typeof item === "object" && item !== null && "path" in item ? item.path : undefined;
+        return typeof path === "string" ? [path] : [];
+      });
     return [];
   });
   const command = record["command"];

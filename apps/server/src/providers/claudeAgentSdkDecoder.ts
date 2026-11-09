@@ -763,6 +763,18 @@ export function decodeAutoCompactThreshold(value: unknown): number | undefined {
   return threshold > 0 && threshold <= (maxTokens as number) ? threshold : undefined;
 }
 
+/**
+ * The window in a runtime's context-usage answer (`maxTokens`), whether or not
+ * it compacts by itself. A runtime's catalogue names its models by alias
+ * ("haiku"), which no window profile matches, so this is what the window is.
+ */
+export function decodeContextUsageWindow(value: unknown): number | undefined {
+  const maxTokens = object(value)?.maxTokens;
+  return Number.isSafeInteger(maxTokens) && (maxTokens as number) > 0
+    ? (maxTokens as number)
+    : undefined;
+}
+
 // The runtime's own category names. Claude Code 2.1.287 answers every
 // context-usage request with the ones it has content for. A name outside this
 // table (for example "MCP server instructions" or "Free space") is not a part

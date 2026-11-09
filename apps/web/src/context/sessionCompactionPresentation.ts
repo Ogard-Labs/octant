@@ -1,11 +1,14 @@
 import type {
+  ContextCompactionCause,
   ContextCompactionExecutor,
+  ContextCompactionReceipt,
   ContextCompactionFailureReason,
   ContextCompactionRecord,
   ContextCompactionRefusalReason,
 } from "@octant/contracts/context";
 import type { ContextCompactionState } from "@octant/contracts/context-rpc";
 import type { ProviderInstanceId, ProviderModelId } from "@octant/contracts/providers";
+import { providerLimitWindowLabel } from "../providers/providerLimitWindow";
 import { driverLabel, isModelEndpointDriverKind } from "../providers/providerSettingsPresentation";
 import { compactTokenCount } from "./contextInspectorModel";
 
@@ -143,15 +146,31 @@ export function compactionResultLine(
   record: ContextCompactionRecord,
   names: CompactionNames,
 ): string {
-  if (record.status === "running") return "Compacting…";
+  if (record.status === "running") {
+    return record.cause === undefined ? "Compacting…" : "Compacting automatically…";
+  }
   if (record.status === "failed") {
     const reason = failureClause(record.reason, executorName(record.executor, names));
+    const verb = record.cause === undefined ? "Couldn't compact" : "Couldn't compact automatically";
     return record.sessionMayHaveChanged
-      ? `Couldn't compact: ${reason}. The session may have changed; the next reply shows what it holds.`
-      : `Couldn't compact: ${reason}.`;
+      ? `${verb}: ${reason}. The session may have changed; the next reply shows what it holds.`
+      : `${verb}: ${reason}.`;
   }
   const { receipt } = record;
   const freed = receipt.tokensFreed;
+  if (receipt.cause !== undefined) {
+    // A rule the person set: say which rule and how full the window was, so
+    // a compaction they did not ask for this time is never a mystery.
+    const parts = [
+      "Compacted automatically",
+      causeClause(receipt.cause),
+      ...(freed.kind === "unknown"
+        ? []
+        : [freed.tokens === 0 ? "nothing freed" : `${compactTokenCount(freed.tokens)} freed`]),
+      `summary by ${executorName(receipt.executor, names)}`,
+    ];
+    return parts.join(" · ");
+  }
   if (receipt.trigger === "automatic") {
     // Nothing revisits a receipt the runtime's own compaction left, so an
     // amount it did not report is left out rather than promised for later.
@@ -176,4 +195,31 @@ export function refusalLine(reason: ContextCompactionRefusalReason): string {
 
 function sentence(clause: string): string {
   return `${clause.charAt(0).toUpperCase()}${clause.slice(1)}.`;
+}
+
+/**
+ * Which rule acted and what it measured: "window 91% full", "idle 31 min",
+ * "5-hour limit 91%".
+ */
+function causeClause(cause: ContextCompactionCause): string {
+  if (cause.kind === "window-fill") return `window ${String(cause.filledPercent)}% full`;
+  if (cause.kind === "limit-near") {
+    return `${providerLimitWindowLabel(cause.window)} ${String(cause.usedPercent)}%`;
+  }
+  const hours = Math.floor(cause.idleMinutes / 60);
+  return hours < 2 ? `idle ${String(cause.idleMinutes)} min` : `idle ${String(hours)} h`;
+}
+
+/**
+ * What the person is told after the limit rule compacted a thread, so they
+ * can move it before the limit stops them; undefined for any other cause.
+ */
+export function limitNearNotice(
+  receipt: ContextCompactionReceipt,
+  names: CompactionNames,
+): string | undefined {
+  const { cause } = receipt;
+  if (cause?.kind !== "limit-near") return undefined;
+  const limit = providerLimitWindowLabel(cause.window);
+  return `${executorName(receipt.executor, names)} is at ${String(cause.usedPercent)}% of its ${limit}. This thread is compacted and ready to move.`;
 }

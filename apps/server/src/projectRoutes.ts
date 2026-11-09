@@ -1,5 +1,8 @@
 import {
   decodeMemoryCommand,
+  decodeProjectMemoryProposalDecision,
+  decodeProjectMemoryProposalDecisionResult,
+  decodeProjectMemoryProposalList,
   decodeCodeThreadId,
   decodeProjectCommand,
   decodeProjectId,
@@ -9,6 +12,7 @@ import type { CodeEnvironmentServiceApi } from "./codeEnvironmentService";
 import { authenticateProjectRequest } from "./projectBindingRoutes";
 import { readPrincipalRouteContext } from "./principalRouteContext";
 import { ProjectServiceError, type ProjectServiceApi } from "./projectService";
+import type { ProjectMemoryProposalService } from "./projectMemory/projectMemoryProposalService";
 import { isLoopbackHostname } from "./shellRoutes";
 import { WindowAuthorityError, type WindowAuthorityStore } from "./windowAuthorityStore";
 
@@ -20,6 +24,8 @@ export interface ProjectRouteDependencies {
   readonly service: ProjectServiceApi;
   readonly environmentService: CodeEnvironmentServiceApi;
   readonly windowAuthorityStore: WindowAuthorityStore;
+  /** Memory changes agents asked for, answered by the window whose turn raised them. */
+  readonly memoryProposals?: Pick<ProjectMemoryProposalService, "list" | "decide">;
   readonly maxRequestBodySize?: number;
   readonly now?: () => number;
 }
@@ -50,6 +56,8 @@ export function createProjectRouteHandler(dependencies: ProjectRouteDependencies
     const isSearch = url.pathname === "/api/projects/search";
     const isCommands = url.pathname === "/api/projects/commands";
     const isMemoryCommands = url.pathname === "/api/projects/memory/commands";
+    const isMemoryProposals = url.pathname === "/api/projects/memory/proposals";
+    const isMemoryProposalDecision = url.pathname === "/api/projects/memory/proposals/decide";
     const memoryMatch = /^\/api\/projects\/([^/]+)\/memory$/.exec(url.pathname);
     const isMemory = memoryMatch !== null;
     const environmentMatch = /^\/api\/projects\/([^/]+)\/environment$/.exec(url.pathname);
@@ -59,13 +67,17 @@ export function createProjectRouteHandler(dependencies: ProjectRouteDependencies
       !isSearch &&
       !isCommands &&
       !isMemoryCommands &&
+      !isMemoryProposals &&
+      !isMemoryProposalDecision &&
       !isMemory &&
       !isEnvironment
     )
       return undefined;
+    const isPost = isCommands || isMemoryCommands || isMemoryProposalDecision;
     if (
-      ((isBootstrap || isSearch || isMemory || isEnvironment) && request.method !== "GET") ||
-      ((isCommands || isMemoryCommands) && request.method !== "POST")
+      ((isBootstrap || isSearch || isMemory || isMemoryProposals || isEnvironment) &&
+        request.method !== "GET") ||
+      (isPost && request.method !== "POST")
     ) {
       return response(
         { category: "unsupported", message: "HTTP method is not supported for this route." },
@@ -75,7 +87,7 @@ export function createProjectRouteHandler(dependencies: ProjectRouteDependencies
     }
 
     let body: unknown = {};
-    if (isCommands || isMemoryCommands) {
+    if (isPost) {
       const read = await readJson(request, bodyLimit);
       if (read.kind === "too-large")
         return response(
@@ -94,7 +106,7 @@ export function createProjectRouteHandler(dependencies: ProjectRouteDependencies
     if (
       (isBootstrap && url.search !== "") ||
       (isSearch && [...url.searchParams.keys()].some((key) => key !== "q")) ||
-      ((isCommands || isMemoryCommands || isMemory) && url.search !== "") ||
+      ((isPost || isMemory || isMemoryProposals) && url.search !== "") ||
       (isEnvironment &&
         [...url.searchParams.keys()].some((key) => key !== "threadId" && key !== "fresh"))
     ) {
@@ -181,6 +193,33 @@ export function createProjectRouteHandler(dependencies: ProjectRouteDependencies
           return response({ category: "invalid", message: "Project ID is invalid." }, 400, origin);
         }
         return response(await dependencies.service.memory(projectId), 200, origin);
+      }
+      if (isMemoryProposals) {
+        return response(
+          decodeProjectMemoryProposalList({
+            kind: "project-memory-proposal-list",
+            proposals: dependencies.memoryProposals?.list(windowId) ?? [],
+          }),
+          200,
+          origin,
+        );
+      }
+      if (isMemoryProposalDecision) {
+        let decision;
+        try {
+          decision = decodeProjectMemoryProposalDecision(body);
+        } catch {
+          return response(
+            { category: "invalid", message: "Memory proposal decision is invalid." },
+            400,
+            origin,
+          );
+        }
+        const result =
+          dependencies.memoryProposals === undefined
+            ? { kind: "project-memory-proposal-gone" as const }
+            : await dependencies.memoryProposals.decide(windowId, decision);
+        return response(decodeProjectMemoryProposalDecisionResult(result), 200, origin);
       }
       if (isMemoryCommands) {
         let command;

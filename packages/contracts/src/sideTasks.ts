@@ -43,8 +43,20 @@ export type SideTaskId = typeof SideTaskId.Type;
 export const SideTaskTarget = Schema.Literal("new-thread", "new-worktree");
 export type SideTaskTarget = typeof SideTaskTarget.Type;
 
-export const SideTaskStatus = Schema.Literal("offered", "started", "dismissed");
+/**
+ * What a new thread starts with: only the offer's prompt, or this thread's
+ * conversation through the offering turn followed by the prompt. A fork
+ * needs the offering turn to have finished; in Code it always gets its own
+ * worktree, because a fork carries the checkout as that turn left it.
+ */
+export const SideTaskContext = Schema.Literal("fresh", "fork");
+export type SideTaskContext = typeof SideTaskContext.Type;
+
+export const SideTaskStatus = Schema.Literal("offered", "started", "continued-here", "dismissed");
 export type SideTaskStatus = typeof SideTaskStatus.Type;
+
+/** Unconfirmed is a durable dispatch claim, never permission to replay it. */
+export const SideTaskHereDelivery = Schema.Literal("sent", "queued", "unconfirmed");
 
 export const SideTaskOffer = Schema.Struct({
   id: SideTaskId,
@@ -58,6 +70,15 @@ export const SideTaskOffer = Schema.Struct({
   /** Standalone: the new thread starts with this and nothing else. */
   prompt: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(MAX_SIDE_TASK_PROMPT_LENGTH)),
   target: SideTaskTarget,
+  /** Absent on offers made before forks existed; those start fresh. */
+  context: Schema.optional(SideTaskContext),
+  /**
+   * The turn that made the offer, in the mode's own identity (a Chat turn,
+   * a Work turn, or a Code operation): where the card sits in the
+   * transcript and the point a fork is taken through. Absent on offers made
+   * before cards were placed inline.
+   */
+  turnId: Schema.optional(Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(128))),
   offeredAt: UtcTimestamp,
 }).annotations(strict);
 export type SideTaskOffer = typeof SideTaskOffer.Type;
@@ -67,6 +88,10 @@ export const SideTask = Schema.Struct({
   status: SideTaskStatus,
   /** The thread a start created, present once started. */
   startedThreadId: Schema.optional(Schema.UUID),
+  /** Whether a new thread was forked from this conversation; present once started. */
+  startedWith: Schema.optional(SideTaskContext),
+  /** Confirmed delivery or a durable claim whose outcome is still unknown. */
+  continuedDelivery: Schema.optional(SideTaskHereDelivery),
   settledAt: Schema.optional(UtcTimestamp),
 }).annotations(strict);
 export type SideTask = typeof SideTask.Type;
@@ -80,9 +105,27 @@ export type ThreadSideTasks = typeof ThreadSideTasks.Type;
 export const SideTaskStarted = Schema.Struct({
   sideTaskId: SideTaskId,
   startedThreadId: Schema.UUID,
+  /** Absent on starts recorded before forks existed, which were all fresh. */
+  startedWith: Schema.optional(SideTaskContext),
   startedAt: UtcTimestamp,
 }).annotations(strict);
 export type SideTaskStarted = typeof SideTaskStarted.Type;
+
+/** The person chose to have the offering thread do the work itself. */
+export const SideTaskContinuedHere = Schema.Struct({
+  sideTaskId: SideTaskId,
+  /** Claimed before dispatch, then confirmed as sent or queued when possible. */
+  delivery: SideTaskHereDelivery,
+  continuedAt: UtcTimestamp,
+}).annotations(strict);
+export type SideTaskContinuedHere = typeof SideTaskContinuedHere.Type;
+
+/** A claimed continuation was explicitly refused before it dispatched anything. */
+export const SideTaskContinuationRefused = Schema.Struct({
+  sideTaskId: SideTaskId,
+  refusedAt: UtcTimestamp,
+}).annotations(strict);
+export type SideTaskContinuationRefused = typeof SideTaskContinuationRefused.Type;
 
 export const SideTaskDismissed = Schema.Struct({
   sideTaskId: SideTaskId,
@@ -90,12 +133,24 @@ export const SideTaskDismissed = Schema.Struct({
 }).annotations(strict);
 export type SideTaskDismissed = typeof SideTaskDismissed.Type;
 
-/** A person confirms; there is no shape in which a start is implicit. */
+/**
+ * A person confirms; there is no shape in which a start is implicit. The
+ * person may override the model's suggested context; the host still refuses
+ * a fork it cannot take.
+ */
 export const StartSideTask = Schema.Struct({
   sideTaskId: SideTaskId,
   confirmed: Schema.Literal(true),
+  context: Schema.optional(SideTaskContext),
 }).annotations(strict);
 export type StartSideTask = typeof StartSideTask.Type;
+
+/** "Do it here": the person confirms the offering thread should take the work on. */
+export const ContinueSideTaskHere = Schema.Struct({
+  sideTaskId: SideTaskId,
+  confirmed: Schema.Literal(true),
+}).annotations(strict);
+export type ContinueSideTaskHere = typeof ContinueSideTaskHere.Type;
 
 export const DismissSideTask = Schema.Struct({
   sideTaskId: SideTaskId,
@@ -110,11 +165,18 @@ export const SideTaskResult = Schema.Union(
     threadId: Schema.UUID,
     title: Schema.NonEmptyTrimmedString,
     projectId: Schema.optional(ProjectId),
+    startedWith: SideTaskContext,
     /**
      * False when the thread exists but its first message did not go out; the
      * prompt then waits in the new thread's composer for the person to send.
      */
     sent: Schema.Boolean,
+  }).annotations(strict),
+  Schema.Struct({
+    kind: Schema.Literal("side-task-continued-here"),
+    sideTaskId: SideTaskId,
+    threadId: Schema.UUID,
+    delivery: SideTaskHereDelivery,
   }).annotations(strict),
   Schema.Struct({
     kind: Schema.Literal("side-task-dismissed"),
@@ -123,7 +185,11 @@ export const SideTaskResult = Schema.Union(
   Schema.Struct({
     kind: Schema.Literal("side-task-refused"),
     sideTaskId: Schema.String,
-    reason: Schema.Literal("not-found", "already-settled", "target-unavailable"),
+    /**
+     * `turn-running`: a fork waits for the offering turn to finish, because
+     * a fork point must be a settled turn.
+     */
+    reason: Schema.Literal("not-found", "already-settled", "target-unavailable", "turn-running"),
     message: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(512)),
   }).annotations(strict),
 );
@@ -134,6 +200,8 @@ export const THREAD_SIDE_TASK_EVENT_NAMES = {
   offered: "side-task-offered@1",
   started: "side-task-started@1",
   dismissed: "side-task-dismissed@1",
+  continuedHere: "side-task-continued-here@1",
+  continuationRefused: "side-task-continuation-refused@1",
 } as const;
 
 export const decodeSideTaskId = Schema.decodeUnknownSync(SideTaskId);
@@ -141,4 +209,5 @@ export const decodeSideTaskOffer = Schema.decodeUnknownSync(SideTaskOffer);
 export const decodeThreadSideTasks = Schema.decodeUnknownSync(ThreadSideTasks);
 export const decodeStartSideTask = Schema.decodeUnknownSync(StartSideTask);
 export const decodeDismissSideTask = Schema.decodeUnknownSync(DismissSideTask);
+export const decodeContinueSideTaskHere = Schema.decodeUnknownSync(ContinueSideTaskHere);
 export const decodeSideTaskResult = Schema.decodeUnknownSync(SideTaskResult);
