@@ -599,6 +599,15 @@ fetch sends the proof-bound session cookie explicitly and disables the shared
 cookie jar to prevent duplicate or stale cookies. Browser cookie ownership is
 unchanged, and native remote requests refuse redirects.
 
+The public offline demo is available from the unpaired entry screen before the
+normal vault and live-session tree. A startup host-catalogue read preserves the
+usual vault route for already paired phones. Demo hosts, keys, preferences and
+interactions stay in memory and use only the existing mock transport; recording,
+file capture, pairing, owner recovery and native settings are not offered.
+Deep-link capture and live transport ownership do not mount in that branch.
+Leaving the demo discards its sample state and returns to the explicit connection
+choice. This is review preparation, not evidence of native or store acceptance.
+
 Its background shares the desktop's three Gradient pictures and Pixelate/Dither
 print effect (Appearance › Background), drawn once through a GL shader that
 uses the same ordered threshold.

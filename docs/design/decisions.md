@@ -2838,10 +2838,10 @@ Status: Built. Since: 2026-10-26. Detail: [Mobile maturity: capture](mobile-matu
 
 ### Android builds and public stores
 
-Android gets internal builds of the same remote client by link now. Public store listing waits for a release-boundary change.
+Android gets internal builds of the same remote client by link. Public store preparation is in preview scope; listing and submission remain separate maintainer actions.
 
 - Internal distribution uses signed builds by link; the Android hardening adapters and workflow are in the repository, and the build and device pass wait on the maintainer.
-- Public store distribution requires an offline, clearly labelled demo for review and no Octant account (not built yet).
+- Public store distribution requires a clearly labelled offline demo and no Octant account. Fresh-install entry precedes the live session; sample interactions and preferences stay in memory, device effects remain unavailable, and leaving discards sample changes. The shared composer keeps its input and Send above the onscreen keyboard at standard and larger system text. Its Project/host context wraps and constrains long labels while preserving full accessible names and font scaling; the transcript remains scrollable above the composer. Native/store acceptance is separate from source implementation.
 
 Status: Partly built. Since: 2026-10-26. Detail: [Mobile maturity: Android](mobile-maturity.md#phase-b-android-internal-builds-of-the-same-client) and [public stores](mobile-maturity.md#phase-e-public-store-distribution).
 

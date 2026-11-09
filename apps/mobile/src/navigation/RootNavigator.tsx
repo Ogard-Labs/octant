@@ -64,6 +64,7 @@ function HostsBody(props: {
     placementHostId,
     setPlacementHostId,
   } = useMobileSession();
+  const offlineDemo = environment.kind === "mock" && environment.offlineDemo;
   const [notAccepted, setNotAccepted] = useState<ReadonlyArray<GuestSpokeRefusal>>([]);
   useEffect(() => {
     // The computers on a joined hub that refused this phone are listed beside the hosts.
@@ -233,7 +234,7 @@ function HostsBody(props: {
             <View style={styles.mockNotice} testID="mobile-hosts-mock-notice">
               <Text style={styles.mockTitle}>Pair a computer</Text>
               <Text selectable style={styles.sectionBody}>
-                Pairing is off in mock mode. Use the live app to pair a computer.
+                Pairing is off in this sample workspace. Leave it to connect a computer.
               </Text>
             </View>
           ) : (
@@ -266,7 +267,7 @@ function HostsBody(props: {
           <>
             {environment.kind === "mock" ? (
               <View style={styles.mockNotice} testID="mobile-hosts-mock-notice">
-                <Text style={styles.mockTitle}>Mock workspace</Text>
+                <Text style={styles.mockTitle}>Sample workspace</Text>
                 <Text selectable style={styles.sectionBody}>
                   {environment.label}. Hosts, credentials, and actions stay in memory and never
                   connect to a real listener.
@@ -293,7 +294,7 @@ function HostsBody(props: {
               </Text>
             ) : null}
             <GuestHubRefusals refused={notAccepted} />
-            {unlockKey === undefined ? null : (
+            {offlineDemo || unlockKey === undefined ? null : (
               <OwnerAlertsPanel
                 deviceKeyStore={deviceKeyStore}
                 guestHubStore={guestHubStore}
@@ -395,19 +396,23 @@ function HostsBody(props: {
               })
             )}
             <Text style={styles.sectionBody}>{MOBILE_COPY.placementHint}</Text>
-            <AppearanceBackgroundPanel />
-            <PrivacySecurityPanel
-              hostHealth={
-                placementHostId !== undefined
-                  ? (healthByHostId.get(placementHostId)?.kind ?? "idle")
-                  : hosts[0] !== undefined
-                    ? (healthByHostId.get(hosts[0].hostId)?.kind ?? "idle")
-                    : "idle"
-              }
-              integrity={deviceIntegrity}
-              keyStorage={mobileKeyStorageProtection}
-              screenshotPrivacy={mobileScreenshotPrivacy}
-            />
+            {!offlineDemo ? (
+              <>
+                <AppearanceBackgroundPanel />
+                <PrivacySecurityPanel
+                  hostHealth={
+                    placementHostId !== undefined
+                      ? (healthByHostId.get(placementHostId)?.kind ?? "idle")
+                      : hosts[0] !== undefined
+                        ? (healthByHostId.get(hosts[0].hostId)?.kind ?? "idle")
+                        : "idle"
+                  }
+                  integrity={deviceIntegrity}
+                  keyStorage={mobileKeyStorageProtection}
+                  screenshotPrivacy={mobileScreenshotPrivacy}
+                />
+              </>
+            ) : null}
           </>
         )}
       </ScrollView>
@@ -429,9 +434,17 @@ export function RootNavigator(props: RootNavigatorProps) {
   const [hostEntryMode, setHostEntryMode] = useState<"manage" | "add" | "scan">("manage");
   const [agentListView, setAgentListView] = useState<AgentListView>("all");
   const [deepLinkNotice, setDeepLinkNotice] = useState<string | undefined>();
-  const { setInboxHostFilter, hosts, hostsLoaded, hostsError, transportForHost, transports } =
-    useMobileSession();
+  const {
+    environment,
+    setInboxHostFilter,
+    hosts,
+    hostsLoaded,
+    hostsError,
+    transportForHost,
+    transports,
+  } = useMobileSession();
   usePhoneNotificationRotation({
+    enabled: environment.kind === "live",
     book: mobilePushRegistrationBook(),
     permission: mobileNotificationPort,
     transportForHost,
