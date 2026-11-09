@@ -400,6 +400,50 @@ describe("native harness loop", () => {
     );
   });
 
+  it("refuses a tool image the endpoint's request cannot carry and continues the turn", async () => {
+    const image = { mimeType: "image/png" as const, data: "A".repeat(4_000) };
+    const scripted = scriptedTransport(
+      [
+        {
+          text: "Looking",
+          toolCalls: [{ toolCallId: "read-1", toolName: "read", argumentsJson: "{}" }],
+        },
+        { text: "Could not see it", toolCalls: [] },
+      ],
+      (request) => JSON.stringify(request.history).length <= 2_000,
+    );
+    const transcripts = new MemoryNativeHarnessTranscriptStore();
+    await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const connection = yield* connect(scripted.transport, transcripts);
+          yield* connection.start({ sessionId, modelId, executionPolicy: "plan", tools });
+          yield* sendAndCollect(connection, "Look at it", (event) => event.kind === "tool-request");
+          const terminal = yield* Effect.fork(
+            Stream.runCollect((yield* connection.subscribe).pipe(Stream.takeUntil(isTerminal))),
+          );
+          yield* connection.answerTool({
+            sessionId,
+            requestId: "read-1",
+            resultJson: '{"kind":"image","path":"big.png"}',
+            isError: false,
+            images: [image],
+          });
+          expect(Array.from(yield* Fiber.join(terminal)).at(-1)?.kind).toBe("completed");
+          const result = scripted.requests[1]?.history.at(-1)?.toolResults?.[0];
+          expect(result?.images).toBeUndefined();
+          expect(result?.isError).toBe(true);
+          expect(JSON.parse(result?.resultJson ?? "{}")).toMatchObject({
+            error: "image-too-large-for-endpoint",
+          });
+          expect(JSON.parse(result?.resultJson ?? "{}").message).toContain(
+            "4000 base64 characters",
+          );
+        }),
+      ),
+    );
+  });
+
   it("delivers steering after pending tool results and records it before acknowledging the note", async () => {
     const scripted = scriptedTransport([
       {

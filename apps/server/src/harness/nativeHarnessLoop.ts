@@ -1114,6 +1114,66 @@ export function createNativeHarnessConnection(
       }
     };
 
+    /**
+     * A step's results are the latest message, which fitting never trims, so
+     * an image too large for the endpoint's request would fail the whole turn
+     * ("The provider request exceeded the configured size limit"). Such an
+     * answer is refused here instead, with its images left out, and the turn
+     * goes on. The check is the request the results would actually go in, on
+     * every endpoint the turn may send it to.
+     */
+    const withImagesThatFit = (
+      state: SessionState,
+      pending: PendingStep,
+      input: ProviderToolAnswer,
+    ): ProviderToolAnswer => {
+      if (input.images === undefined || input.images.length === 0) return input;
+      const answers = new Map(pending.answers).set(input.requestId, input);
+      const results: NativeHarnessMessage = {
+        role: "assistant",
+        text: "",
+        toolResults: pending.calls.flatMap((call) => {
+          const answer = answers.get(call.toolCallId);
+          return answer === undefined
+            ? []
+            : [
+                {
+                  toolCallId: answer.requestId,
+                  resultJson: answer.resultJson,
+                  isError: answer.isError,
+                  ...(answer.images === undefined ? {} : { images: answer.images }),
+                },
+              ];
+        }),
+      };
+      const history = [...state.messages, results];
+      const endpoints = [
+        state.endpoint,
+        ...(state.fallback === undefined ? [] : [state.fallback.endpoint]),
+      ];
+      const request = {
+        sessionId: state.sessionId,
+        modelId: state.modelId,
+        system: state.system,
+        history,
+        tools: sortToolDefinitionsByName(state.tools),
+      };
+      const fitting = { journalNumberOf: journalNumberIn(state), mode: options.mode };
+      if (endpoints.every((endpoint) => fitRequest(endpoint, request, fitting) !== undefined)) {
+        return input;
+      }
+      const characters = input.images.reduce((total, image) => total + image.data.length, 0);
+      return {
+        sessionId: input.sessionId,
+        requestId: input.requestId,
+        resultJson: JSON.stringify({
+          error: "image-too-large-for-endpoint",
+          message: `The image is ${characters} base64 characters, and a request carrying it is over this endpoint's request size limit, so it was left out. Use a smaller image.`,
+        }),
+        isError: true,
+      };
+    };
+
     const requestFor = (state: SessionState, history: ReadonlyArray<NativeHarnessMessage>) =>
       fitRequest(
         state.endpoint,
@@ -1380,19 +1440,20 @@ export function createNativeHarnessConnection(
             ) {
               throw failure("protocol", "The tool request is unknown.");
             }
-            pending.answers.set(input.requestId, input);
+            const answer = withImagesThatFit(state, pending, input);
+            pending.answers.set(input.requestId, answer);
             state.answered.add(input.requestId);
             const call = pending.calls.find(
               (candidate) => candidate.toolCallId === input.requestId,
             );
             if (call?.toolName === "todo-write" && !input.isError) emitTaskList(state, call);
             state.transcripts.settle(state.transcriptId, {
-              toolCallId: input.requestId,
-              resultJson: input.resultJson,
-              isError: input.isError,
-              ...(input.images === undefined || input.images.length === 0
+              toolCallId: answer.requestId,
+              resultJson: answer.resultJson,
+              isError: answer.isError,
+              ...(answer.images === undefined || answer.images.length === 0
                 ? {}
-                : { imagesOmitted: input.images.length }),
+                : { imagesOmitted: answer.images.length }),
             });
             if (!pending.calls.every((call) => pending.answers.has(call.toolCallId))) {
               return undefined;
