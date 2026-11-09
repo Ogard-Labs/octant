@@ -9200,7 +9200,12 @@ never touched the switch starts limiting from its next runtime launch. The
 risk is a workflow that reaches a host nobody approved (a private registry,
 an internal API); the proxy's refusal names the host and says to trust it
 under Recently refused in Settings › Access › Safe networks, and turning
-the switch off restores open network. The switch is journaled whole as
+the switch off restores open network. The switch also governs what Octant
+Harness commands may add to their own rules, which they follow either way:
+with it on, a command on an untainted thread also reaches the person's safe
+places and, at Auto, Octant Shield may allow an unlisted host for one call
+([harness tool egress rules](#harness-tool-egress-rules)). For commands, on
+is the wider setting. The switch is journaled whole as
 `safe-networks.limits-set@1` (on its own fixed aggregate id under
 `safe-networks`), changes only from a local window, and replays at startup.
 `ProviderRuntimeNetwork.start` reads it at each launch: off, it answers

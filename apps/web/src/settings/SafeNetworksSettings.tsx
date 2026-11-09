@@ -24,7 +24,7 @@ export interface SafeNetworksSettingsProps {
 }
 
 export const SAFE_NETWORKS_INTRO =
-  "Below Full access, provider runtimes and Claude's commands reach only their provider's own endpoints, the Project's network rules, and the places listed here. Anything else is refused and shows under Recently refused.";
+  "Sandboxed provider runtimes and Claude's commands reach only their provider's own endpoints, the Project's network rules, and the places listed here. Anything else is refused and shows under Recently refused.";
 
 export const NETWORK_LIMITS_ON_NOTE =
   "Network limits are on. Sandboxed runtimes launched from now on reach only their provider, the Project's rules, and the places below. Full access without the sandbox keeps open network.";
