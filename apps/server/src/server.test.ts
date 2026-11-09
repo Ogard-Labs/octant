@@ -84,7 +84,7 @@ describe("startOctantServer", () => {
     const directory = mkdtempSync(join(tmpdir(), "octant-server-action-window-"));
     directories.push(directory);
     let routeHandler: ((request: Request) => Response | Promise<Response>) | undefined;
-    const settle = vi.spyOn(ProjectTerminalService.prototype, "settleActionAuthorities");
+    const settle = vi.spyOn(ProjectTerminalService.prototype, "settleAuthorities");
     const append = vi.spyOn(Journal.prototype, "append");
     try {
       await Effect.runPromise(
