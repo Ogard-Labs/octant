@@ -10,6 +10,7 @@ import { workspaceDockTabId } from "./workspaceDockTab";
 
 type Props = Pick<
   ThreadUtilityDockContentProps,
+  | "onAgentBrowserRecovery"
   | "browserAutomationClient"
   | "browserContextId"
   | "hostBridge"
@@ -37,6 +38,9 @@ export default function BrowserModule(props: Props) {
   return (
     <BrowserWorkspace
       client={props.browserAutomationClient}
+      {...(props.onAgentBrowserRecovery === undefined
+        ? {}
+        : { onAgentBrowserRecovery: props.onAgentBrowserRecovery })}
       {...(props.hostBridge === undefined ? {} : { hostBridge: props.hostBridge })}
       {...(props.serverUrl === undefined ? {} : { serverUrl: props.serverUrl })}
       {...(props.subject.projectId === undefined ? {} : { projectId: props.subject.projectId })}

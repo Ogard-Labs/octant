@@ -31,9 +31,26 @@ export const TaskAccessRecovery = Schema.Literal(
 );
 export type TaskAccessRecovery = typeof TaskAccessRecovery.Type;
 
+export const BrowserAgentAvailability = Schema.Union(
+  Schema.Struct({ status: Schema.Literal("unknown") }).annotations(strict),
+  Schema.Struct({ status: Schema.Literal("available"), readOnly: Schema.Boolean }).annotations(
+    strict,
+  ),
+  Schema.Struct({
+    status: Schema.Literal("omitted"),
+    reason: Schema.Literal(
+      "no-tool-transport",
+      "excluded-by-thread-constraints",
+      "host-lends-no-browser",
+    ),
+  }).annotations(strict),
+);
+export type BrowserAgentAvailability = typeof BrowserAgentAvailability.Type;
+
 /** Host facts describe a read; they are never a grant or a promise about a later call. */
 export const TaskAccessSnapshot = Schema.Struct({
   kind: Schema.Literal("task-access"),
+  browser: Schema.optional(BrowserAgentAvailability),
   subject: TaskAccessSubject,
   observedAt: UtcTimestamp,
   selectedMode: PermissionMode,
