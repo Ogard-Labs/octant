@@ -10,7 +10,7 @@
 // them so the worktree that holds them is kept.
 
 import { execFile } from "node:child_process";
-import { copyFile, mkdtemp, readFile, rm } from "node:fs/promises";
+import { copyFile, mkdtemp, readFile, realpath, rm, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
@@ -32,6 +32,16 @@ async function git(
     maxBuffer: GIT_MAX_BUFFER,
   });
   return stdout.trim();
+}
+
+/** As `git`, for NUL-separated path lists, whose first path may begin with a space. */
+async function gitUntrimmed(cwd: string, args: ReadonlyArray<string>): Promise<string> {
+  const { stdout } = await run("git", [...args], {
+    cwd,
+    env: { ...process.env, GIT_TERMINAL_PROMPT: "0" },
+    maxBuffer: GIT_MAX_BUFFER,
+  });
+  return stdout;
 }
 
 /** The ref the move's snapshot commits are kept under, on both computers. */
@@ -262,6 +272,86 @@ export async function checkoutStillMatchesMove(input: {
   } finally {
     await rm(scratch, { recursive: true, force: true });
   }
+}
+
+/**
+ * What a checkout holds that the move did not carry, relative to it: every
+ * path whose content differs from the snapshot (a file the Secret guard
+ * refused, or an edit made after the snapshot) and every ignored entry, which
+ * Git names by its folder when the whole folder is ignored. Read before the
+ * snapshot ref is forgotten. Without that ref every changed or ignored entry
+ * is listed, since none of them can be shown to have travelled.
+ */
+export async function filesTheMoveLeft(input: {
+  readonly checkoutRoot: string;
+  readonly moveId: string;
+}): Promise<ReadonlyArray<string>> {
+  const root = input.checkoutRoot;
+  const snapshotTree = await git(root, [
+    "rev-parse",
+    `${moveSnapshotRef(input.moveId)}^{tree}`,
+  ]).catch(() => "");
+  // Untrimmed: a path may begin with a space.
+  const status = (await gitUntrimmed(root, ["status", "--porcelain", "--ignored", "-z"]))
+    .split("\0")
+    .filter((entry) => entry.length > 3);
+  const ignored = status.filter((entry) => entry.startsWith("!! ")).map((entry) => entry.slice(3));
+  let changed: ReadonlyArray<string>;
+  if (snapshotTree.length === 0) {
+    changed = status.filter((entry) => !entry.startsWith("!! ")).map((entry) => entry.slice(3));
+  } else {
+    const scratch = await mkdtemp(join(tmpdir(), "octant-move-left-"));
+    try {
+      const scratchIndex = join(scratch, "index");
+      await indexDisk(root, scratchIndex, "HEAD");
+      const currentTree = await git(root, ["write-tree"], { GIT_INDEX_FILE: scratchIndex });
+      changed = (
+        await gitUntrimmed(root, [
+          "diff-tree",
+          "-r",
+          "--name-only",
+          "-z",
+          snapshotTree,
+          currentTree,
+        ])
+      )
+        .split("\0")
+        .filter((entry) => entry.length > 0);
+    } finally {
+      await rm(scratch, { recursive: true, force: true });
+    }
+  }
+  return [...new Set([...changed, ...ignored])].sort();
+}
+
+/**
+ * Removes a worktree a moved-out thread left beside the managed folder, with
+ * everything in it, from its repository's own checkout. Only a linked
+ * worktree is removed: a folder Git lists as the repository's main checkout,
+ * or does not list at all, is left as it is. A folder already gone has
+ * nothing left to remove. Its branch and every remote stay untouched.
+ */
+export async function removeMovedOutWorktree(
+  worktree: string,
+): Promise<"removed" | "not-a-linked-worktree"> {
+  const exists = await stat(worktree).then(
+    (entry) => entry.isDirectory(),
+    () => false,
+  );
+  if (!exists) return "removed";
+  const listing = await git(worktree, ["worktree", "list", "--porcelain", "-z"]).catch(() => "");
+  const listed = listing
+    .split("\0")
+    .filter((entry) => entry.startsWith("worktree "))
+    .map((entry) => entry.slice("worktree ".length));
+  const [mainCheckout, ...linked] = listed;
+  const real = await realpath(worktree);
+  const resolved = await Promise.all(linked.map((path) => realpath(path).catch(() => path)));
+  if (mainCheckout === undefined || !resolved.includes(real)) return "not-a-linked-worktree";
+  // Forced, because a kept worktree by definition holds files Git does not
+  // track or ignores; the person chose to remove them.
+  await git(mainCheckout, ["worktree", "remove", "--force", real]);
+  return "removed";
 }
 
 /**

@@ -42,6 +42,7 @@ import { decodeWorkMutationRequestId } from "@octant/contracts";
 import type {
   CodeOperationId,
   CodeProjectPullRequestRow,
+  MovedThreadReference,
   ThreadBoardPullRequestIdentity,
 } from "@octant/contracts";
 import type {
@@ -77,6 +78,7 @@ import { pickerHasReadyInstance } from "../providers/ComposerModelPicker";
 import { hubAdministrationOf, ownerUnlockOf, type OctantHostBridge } from "./hostBridge";
 import type { ThreadMoveEnvironment } from "../environment/threadMove/ThreadMoveComputerCard";
 import { threadMoveClientForBridge } from "../environment/threadMove/threadMoveClient";
+import { ThreadMoveHold } from "../environment/threadMove/ThreadMoveHold";
 import type { ProviderController } from "../providers/useProviderController";
 import { ShellState } from "./ShellState";
 import { TabActivationProvider, type TabActivationRegistry } from "./TabActivation";
@@ -1175,13 +1177,46 @@ function renderTab(
 ): React.ReactNode {
   const openProviderSettings = props.onOpenProviderSettings ?? props.onOpenSettings;
   if (isCodeWorkspaceTab(tab)) {
-    return (
+    const surface = (
       <CodeThreadTabSurface controllers={props.codeControllers} key={tab.id} tab={tab}>
         {(controller) => renderCodeTab(tab, props, paneId, controller)}
       </CodeThreadTabSurface>
     );
+    return tab.kind === "code-overview"
+      ? withThreadMoveHold(props, { mode: "code", threadId: String(tab.threadId) }, surface)
+      : surface;
   }
-  return renderNonCodeTab(tab, props, paneId, canvasContext, openProviderSettings, drafts);
+  const content = renderNonCodeTab(tab, props, paneId, canvasContext, openProviderSettings, drafts);
+  if (tab.kind === "chat-thread") {
+    return withThreadMoveHold(props, { mode: "chat", threadId: String(tab.threadId) }, content);
+  }
+  if (tab.kind === "work-thread") {
+    return withThreadMoveHold(props, { mode: "work", threadId: String(tab.threadId) }, content);
+  }
+  return content;
+}
+
+/**
+ * A thread pane as a move leaves it: its tombstone once it moved away, and
+ * its composer given to the frozen bar while a move holds it. Only a local
+ * desktop window reading this computer has the move routes.
+ */
+function withThreadMoveHold(
+  props: WorkspaceViewProps,
+  thread: MovedThreadReference,
+  content: ReactNode,
+): ReactNode {
+  const environment = threadMoveEnvironmentFor(props, thread.mode);
+  return (
+    <ThreadMoveHold
+      client={environment.client}
+      hostName={environment.hostName}
+      key={`${thread.mode}:${thread.threadId}`}
+      thread={thread}
+    >
+      {content}
+    </ThreadMoveHold>
+  );
 }
 
 /**

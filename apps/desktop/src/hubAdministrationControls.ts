@@ -294,6 +294,12 @@ export const HUB_ADMINISTRATION_OPERATIONS = {
     path: "/api/desktop/hub/thread-moves/dismiss",
     decodeBody: decodeThreadMoveThreadRequest,
   },
+  // Remove worktree on a moved thread's tombstone names the move, never a folder.
+  "thread-move-remove-kept-worktree": {
+    method: "POST",
+    path: "/api/desktop/hub/thread-moves/remove-kept-worktree",
+    decodeBody: decodeThreadMoveControlRequest,
+  },
   // Prepare to shut down: the host's threads, and one unlocked batch per destination.
   "shutdown-listing": {
     method: "POST",

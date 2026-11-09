@@ -1113,6 +1113,29 @@ remain there. The purge also starts the existing withdrawals: messages the
 thread sent that are not yet delivered are withdrawn, and messages waiting for
 it are refused.
 
+**The tombstone and Remove worktree.** A thread pane on the source whose
+thread this host recorded as departed shows the tombstone in its place. The
+files it lists are the ones the erase-time comparison found: every path whose
+content differs from the snapshot, and every ignored entry (Git names a wholly
+ignored folder by the folder). The departure records the first 200 by name
+and counts the rest, because the snapshot is forgotten once the move settles.
+Remove worktree is a window action on this host: the window must show the
+thread's pane in a mode it reads on this computer, and the request names the
+move, never a folder. The host removes only the folder that move's departure
+recorded, and only while Git lists it as a linked worktree of its repository,
+never a main checkout or a folder Git does not list; the removal is forced,
+because the untracked and ignored files are exactly what the person chose to
+remove. The thread's local branch and every remote stay. It journals
+`thread.moved-out-worktree-removed@1` on the move and records the removal on
+the departure; a second press answers `removed` without removing or journaling
+again, and a folder already gone counts as removed. No agent, routine, tool,
+peer, or paired device reaches it. **Open there** copies the moved thread's
+link in the form an Octant phone opens
+(`octant://hosts/{member}/threads/{mode}/{thread}`; a member is named by its
+host id). Rationale: no window path yet opens another computer's thread from
+what a departure records, which names no destination Project, so opening it in
+this window when the window already reads that host is not built yet.
+
 **Interruptions.**
 
 - **The source goes away after `arrived` and before `commit`.** Once the
@@ -2209,10 +2232,8 @@ a numbered slice. Built, with these narrower readings:
     turn for a busy thread), and shows the progress line with Cancel move,
     Take back here, the This thread can't move notice with Choose another
     computer and Dismiss, the Arriving notice with Activate anyway, and the
-    Moved notice. What it does not do yet: replace the composer with the
-    frozen bar (the held thread still refuses every command with the
-    moving reason), the pane tombstone with Open there and Remove worktree,
-    sizes and an estimate in the sheet, Stop and move, Hand over instead,
+    Moved notice. What it does not do yet: sizes and an estimate in the
+    sheet, Stop and move, Hand over instead,
     an unlock other than this Mac's Touch ID, carry bulk parts, accept
     moves on the hub, or Prepare to shut down.
 
@@ -2318,6 +2339,25 @@ a numbered slice. Built, with these narrower readings:
     it erased its copy or no longer holds the handover, so a source that was
     offline still lets its frozen copy go. What it does not do yet: a branch
     found by fetching without a notice, and the agent's own summary turn.
+
+    The tenth part is the frozen bar and the pane tombstone. While a move
+    holds a thread (moving away, set to move after its turn, handed over, or
+    arriving here), a window on that host gives the composer's place to the
+    frozen bar, which says what holds it and offers its one action: Moving to
+    the member with the progress line, the moved and total sizes, and Cancel
+    move (Take back here when the destination cannot confirm); Moving after
+    this turn with Don't move, because a message sent then would start another
+    turn and keep the move waiting; Handed over on the branch with Take back
+    here; or Arriving from the member, with Activate anyway after five minutes
+    of silence. The host still refuses every command on a held thread. A thread
+    pane whose thread departed shows the tombstone instead (the route line,
+    Moved to with the time, and Open there), and a kept worktree adds its
+    files and Remove worktree, which asks once, through a window route
+    (`remove-kept-worktree`) as
+    [Erase on the source](#moving-a-thread-to-another-member) describes. A
+    remote client, or a window reading another host, shows neither. What it
+    does not do yet: Open there opening the thread in this window, and the
+    estimate in the bar.
 
 Any slice that would deploy an Octant-operated service, create an account, or
 spend money stops for a separate maintainer action.

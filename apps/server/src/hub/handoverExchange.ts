@@ -31,6 +31,7 @@ import type {
   SignedRequest,
   DestinationAnswer,
 } from "./threadMoveService";
+import { keptWorktreeOfDeparture } from "./threadMoveService";
 import { HandoverClaims } from "./threadHandovers";
 import { THREAD_MOVE_DEPARTURES_KEPT, type ThreadMoveStatePort } from "./threadMoveStateStore";
 
@@ -374,7 +375,7 @@ export class HandoverExchange {
           thread: handover.thread,
           destinationMemberId: decodeMemberId(destinationMemberId),
           destinationThread: report.thread,
-          ...(erased.keptWorktree === undefined ? {} : { keptWorktree: erased.keptWorktree }),
+          ...keptWorktreeOfDeparture(erased),
           changesRemainInCheckout: erased.changesRemainInCheckout === true,
           movedAt: decodeTimestamp(this.#options.clock()),
         },

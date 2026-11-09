@@ -287,6 +287,7 @@ export type HubAdministrationOperation =
   | "thread-move-take-back"
   | "thread-move-activate"
   | "thread-move-dismiss"
+  | "thread-move-remove-kept-worktree"
   | "shutdown-listing"
   | "shutdown-challenge"
   | "shutdown-start"

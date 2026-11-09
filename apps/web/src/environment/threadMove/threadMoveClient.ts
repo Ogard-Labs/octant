@@ -2,6 +2,7 @@ import {
   decodeHandoverContinueOutcome,
   decodeHandoverListing,
   decodeHandoverOutcome,
+  decodeKeptWorktreeRemoveOutcome,
   decodeShutdownListing,
   decodeShutdownStartOutcome,
   decodeThreadMoveChallengeOutcome,
@@ -11,6 +12,7 @@ import {
   type HandoverContinueOutcome,
   type HandoverListing,
   type HandoverOutcome,
+  type KeptWorktreeRemoveOutcome,
   type MovedThreadReference,
   type ShutdownListing,
   type ShutdownStartOutcome,
@@ -38,6 +40,8 @@ export interface ThreadMoveClient {
   readonly takeBack: (moveId: string) => Promise<void>;
   readonly activate: (moveId: string) => Promise<boolean>;
   readonly dismiss: (thread: MovedThreadReference) => Promise<void>;
+  /** Remove worktree on a moved thread's tombstone: the folder its move kept here. */
+  readonly removeKeptWorktree: (moveId: string) => Promise<KeptWorktreeRemoveOutcome>;
   /** Prepare to shut down: every thread here, and one unlocked batch per destination. */
   readonly shutdownListing: () => Promise<ShutdownListing>;
   readonly shutdownChallenge: (
@@ -112,6 +116,8 @@ export function threadMoveClientOf(hub: HubAdministrationBridge): ThreadMoveClie
     dismiss: async (thread) => {
       await call("thread-move-dismiss", { thread });
     },
+    removeKeptWorktree: async (moveId) =>
+      decodeKeptWorktreeRemoveOutcome(await call("thread-move-remove-kept-worktree", { moveId })),
     shutdownListing: async () => decodeShutdownListing(await call("shutdown-listing", {})),
     shutdownChallenge: async (destinationMemberId, threads) =>
       decodeThreadMoveChallengeOutcome(

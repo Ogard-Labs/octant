@@ -2,12 +2,14 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { decodeWindowId, type MovedThreadReference } from "@octant/contracts";
+import { ThreadMoveDeparture, decodeWindowId, type MovedThreadReference } from "@octant/contracts";
+import { Schema } from "effect";
 import { WindowAuthorityStore } from "../windowAuthorityStore";
 import {
   THREAD_MOVE_ADMINISTRATION_ROUTES,
   createThreadMoveAdministrationRouteHandler,
 } from "./threadMoveAdministrationRoutes";
+import { KeptWorktreeRemoval } from "./keptWorktreeRemoval";
 import { createThreadMoveStateStore } from "./threadMoveStateStore";
 import { ThreadMovesFromWindow } from "./threadMovesFromWindow";
 
@@ -28,6 +30,11 @@ const ELSEWHERE: MovedThreadReference = {
   threadId: "88888888-8888-4888-8888-888888888888",
 };
 const DESKTOP = "55555555-5555-4555-8555-555555555555";
+const decodeDeparture = Schema.decodeUnknownSync(ThreadMoveDeparture);
+const KEPT_MOVE = "66666666-6666-4666-8666-666666666666";
+const PLAIN_MOVE = "44444444-4444-4444-8444-444444444444";
+const OTHER_MOVE = "22222222-2222-4222-8222-222222222222";
+const KEPT_FOLDER = "/Users/person/.octant/worktrees/plan-moved-out-66666666";
 
 function setup() {
   const folder = mkdtempSync(join(tmpdir(), "octant-move-routes-"));
@@ -63,6 +70,17 @@ function setup() {
     listThreads: async () => [],
     now: Date.now,
   });
+  const removedFolders: string[] = [];
+  const journaled: string[] = [];
+  const keptWorktrees = new KeptWorktreeRemoval({
+    state,
+    record: { keptWorktreeRemoved: (input) => journaled.push(String(input.moveId)) },
+    removeWorktree: async (folder) => {
+      removedFolders.push(folder);
+      return "removed";
+    },
+    clock: () => "2026-11-09T10:00:00.000Z",
+  });
   const authority = new WindowAuthorityStore();
   authority.register({ windowId, capability, now: Date.now() });
   const handle = createThreadMoveAdministrationRouteHandler({
@@ -79,10 +97,14 @@ function setup() {
       continueHandover: async () => ({ status: "refused", reason: "refused" }),
     },
     state,
+    keptWorktrees,
+    // A departed thread's record is gone; the window shows only its tombstone.
+    authorizeDepartedThread: ({ thread, windowId: asking }) =>
+      String(asking) === String(windowId) && thread.threadId === SHOWN.threadId,
     authorizeThread: ({ thread, windowId: asking }) =>
       String(asking) === String(windowId) && thread.threadId === SHOWN.threadId,
   });
-  return { handle, dismissed };
+  return { handle, dismissed, state, removedFolders, journaled };
 }
 
 function post(path: string, body: unknown, headers: Record<string, string> = {}) {
@@ -174,5 +196,78 @@ describe("starting a thread move from a window", () => {
       post(THREAD_MOVE_ADMINISTRATION_ROUTES.status, { thread: SHOWN, extra: true }),
     );
     expect(response?.status).toBe(400);
+  });
+});
+
+describe("removing the worktree a moved thread left behind", () => {
+  function departed(state: ReturnType<typeof setup>["state"]) {
+    const base = {
+      destinationMemberId: DESKTOP,
+      destinationThread: { mode: "code", threadId: "11111111-1111-4111-8111-111111111111" },
+      changesRemainInCheckout: false,
+      movedAt: "2026-11-09T09:00:00.000Z",
+    } as const;
+    state.save({
+      received: [],
+      sent: [],
+      departures: [
+        {
+          ...base,
+          moveId: KEPT_MOVE,
+          thread: { mode: "code", threadId: SHOWN.threadId },
+          keptWorktree: KEPT_FOLDER,
+          keptFiles: [".env"],
+          keptFileCount: 1,
+        },
+        { ...base, moveId: PLAIN_MOVE, thread: { mode: "code", threadId: SHOWN.threadId } },
+        {
+          ...base,
+          moveId: OTHER_MOVE,
+          thread: { mode: "code", threadId: ELSEWHERE.threadId },
+          keptWorktree: "/Users/person/.octant/worktrees/other-moved-out-22222222",
+        },
+      ].map((entry) => decodeDeparture(entry)),
+    });
+  }
+
+  it("removes exactly the folder the departure recorded, journals it once, and answers a second press again", async () => {
+    const { handle, state, removedFolders, journaled } = setup();
+    departed(state);
+    const path = THREAD_MOVE_ADMINISTRATION_ROUTES.removeKeptWorktree;
+
+    const first = await handle(post(path, { moveId: KEPT_MOVE }));
+    expect(first?.status).toBe(200);
+    expect(await first?.json()).toEqual({ status: "removed" });
+    const second = await handle(post(path, { moveId: KEPT_MOVE }));
+    expect(await second?.json()).toEqual({ status: "removed" });
+
+    expect(removedFolders).toEqual([KEPT_FOLDER]);
+    expect(journaled).toEqual([KEPT_MOVE]);
+    expect(
+      state.load().departures?.find((entry) => String(entry.moveId) === KEPT_MOVE)
+        ?.keptWorktreeRemovedAt,
+    ).toBe("2026-11-09T10:00:00.000Z");
+  });
+
+  it("refuses a move that kept no worktree, one this host never recorded, and a thread the window does not show", async () => {
+    const { handle, state, removedFolders, journaled } = setup();
+    departed(state);
+    const path = THREAD_MOVE_ADMINISTRATION_ROUTES.removeKeptWorktree;
+
+    const plain = await handle(post(path, { moveId: PLAIN_MOVE }));
+    expect(plain?.status).toBe(409);
+    expect(await plain?.json()).toEqual({ status: "refused", kind: "not-kept-worktree" });
+    for (const moveId of ["99999999-9999-4999-8999-999999999999", OTHER_MOVE]) {
+      const refused = await handle(post(path, { moveId }));
+      expect(refused?.status, moveId).toBe(409);
+      expect(await refused?.json(), moveId).toEqual({
+        status: "refused",
+        kind: "thread-unavailable",
+      });
+    }
+    // A folder is never named by the request.
+    expect((await handle(post(path, { moveId: KEPT_MOVE, folder: "/" })))?.status).toBe(400);
+    expect(removedFolders).toEqual([]);
+    expect(journaled).toEqual([]);
   });
 });

@@ -143,6 +143,7 @@ function fakeClient(
     takeBack: async () => {},
     activate: async () => true,
     dismiss: async () => {},
+    removeKeptWorktree: async () => ({ status: "removed" }),
     shutdownListing: async () => {
       listingsRead.count += 1;
       return input.listing ?? listing();
