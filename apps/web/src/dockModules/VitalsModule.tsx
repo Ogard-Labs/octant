@@ -11,6 +11,7 @@ type Props = Pick<ThreadUtilityDockContentProps, "serverUrl" | "subject" | "wind
 /** The host caches one snapshot for five seconds; asking faster only repeats it. */
 const POLL_MS = 5_000;
 const READ_TIMEOUT_MS = 5_000;
+const SERVER_RESOURCES_PATH = "/api/server-projects/resources";
 
 type VitalsState =
   | { readonly status: "waiting"; readonly history: ReadonlyArray<HostResourceSnapshot> }
@@ -42,7 +43,7 @@ export default function VitalsModule(props: Props) {
         : createHostResourceClient({
             baseUrl: serverUrl,
             fetch: globalThis.fetch,
-            path: `/api/server-projects/resources?projectId=${encodeURIComponent(String(serverProjectId))}`,
+            path: `${SERVER_RESOURCES_PATH}?projectId=${encodeURIComponent(String(serverProjectId))}`,
             ...(windowCapability === undefined ? {} : { windowCapability }),
           });
     let stopped = false;
