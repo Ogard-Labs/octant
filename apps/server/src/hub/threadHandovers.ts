@@ -10,6 +10,7 @@ import {
   HandoverId,
   UtcTimestamp,
   type HandedOverThread,
+  type HandoverAgentSummary,
   type HandoverNotice,
   type HandoverOutcome,
   type MovedThreadReference,
@@ -31,6 +32,15 @@ import { type ThreadMoveStatePort, withSettledHandover } from "./threadMoveState
 export const HANDOVER_NOTE_MAX_BYTES = 32 * 1024;
 const SECTION_LIMIT = 4_000;
 const CHANGE_LINES = 200;
+/** The agent's summary turn is cancelled past this, and the note goes without it. */
+export const HANDOVER_SUMMARY_TIMEOUT_MS = 120_000;
+/**
+ * Absolute paths the note must not name once the checkout's own folder reads
+ * as `.`: home folders, temporary and system folders, mounted volumes, and
+ * Windows drives. The agent's summary is free text, so it can name any of them.
+ */
+const LOCAL_PATH =
+  /(?<![\w.~-])(?:\/(?:Users|home|root|tmp|private|var|opt|Volumes|mnt|etc|srv)\/|[A-Za-z]:\\)[^\s'"`<>)\]]*/g;
 
 const decodeHandoverId = Schema.decodeUnknownSync(HandoverId);
 const decodeTimestamp = Schema.decodeUnknownSync(UtcTimestamp);
@@ -50,6 +60,25 @@ export interface HandoverCodeHost {
     readonly instruction?: string;
     readonly answer?: string;
   }>;
+  /**
+   * One bounded, tool-free turn of the thread's own agent saying where the
+   * work stands and what comes next, cancelled through `signal`. Absent on a
+   * host that cannot run one.
+   */
+  readonly summarize?: (threadId: string, signal: AbortSignal) => Promise<HandoverSummaryAnswer>;
+}
+
+/** What the thread's own agent answered when asked to summarize for the note. */
+export type HandoverSummaryAnswer =
+  | { readonly status: "summarized"; readonly text: string }
+  /** The provider is not ready, so no turn was started. */
+  | { readonly status: "unavailable" }
+  | { readonly status: "failed" };
+
+/** The person's choices on the handover sheet. */
+export interface HandoverChoices {
+  /** Ask the agent to summarize; only `true` spends a provider turn. */
+  readonly summarize?: boolean;
 }
 
 export interface ThreadHandoversOptions {
@@ -65,6 +94,8 @@ export interface ThreadHandoversOptions {
   readonly uuid?: () => string;
   /** Shared with the exchange that erases a continued handover's thread. */
   readonly claims?: HandoverClaims;
+  /** Defaults to {@link HANDOVER_SUMMARY_TIMEOUT_MS}. */
+  readonly summaryTimeoutMs?: number;
 }
 
 /**
@@ -125,6 +156,7 @@ export class ThreadHandovers {
   async handOver(
     thread: MovedThreadReference,
     destinationMemberId?: string,
+    choices: HandoverChoices = {},
   ): Promise<HandoverOutcome> {
     // A thread another step claimed, or one a move or handover already
     // holds, is busy: this attempt never freezes or unfreezes it.
@@ -132,7 +164,7 @@ export class ThreadHandovers {
       return { status: "refused", reason: "busy" };
     }
     try {
-      return await this.#handOverClaimed(thread, destinationMemberId);
+      return await this.#handOverClaimed(thread, destinationMemberId, choices);
     } finally {
       this.#claims.release(thread);
     }
@@ -141,6 +173,7 @@ export class ThreadHandovers {
   async #handOverClaimed(
     thread: MovedThreadReference,
     destinationMemberId: string | undefined,
+    choices: HandoverChoices,
   ): Promise<HandoverOutcome> {
     // The freeze comes before planning reads whether a turn runs: turn
     // admission checks the freeze, so no turn can start while the checkout
@@ -152,13 +185,23 @@ export class ThreadHandovers {
       this.#options.source.unfreeze(thread);
       return planned;
     }
+    // The summary turn runs on the frozen thread, after the plan refused a busy
+    // one and before anything is journaled or saved: a host that stops while
+    // the agent writes restarts with nothing handed over and the thread free.
+    const summary: { readonly outcome?: HandoverAgentSummary; readonly text?: string } =
+      choices.summarize === true ? await this.#summarize(thread) : {};
     const handoverId = decodeHandoverId((this.#options.uuid ?? randomUUID)());
     // The freeze is journaled before anything is written, and the hold is
     // saved before the commit and the push: a stop between them restarts with
     // the thread still held as handed over and not pushed, so it neither
     // becomes writable while its work may be on the remote nor loses the
     // record a continued report looks for. Take back here undoes it.
-    this.#options.record.handoverStarted({ handoverId, thread, branch: planned.branch });
+    this.#options.record.handoverStarted({
+      handoverId,
+      thread,
+      branch: planned.branch,
+      ...(summary.outcome === undefined ? {} : { agentSummary: summary.outcome }),
+    });
     const handedOverAt = decodeTimestamp(this.#options.clock());
     this.#saveHandover({
       handoverId,
@@ -175,7 +218,7 @@ export class ThreadHandovers {
     const committed = await commitHandover({
       checkoutRoot: planned.root,
       branch: planned.branch,
-      message: planned.note(String(handoverId)),
+      message: planned.note(String(handoverId), summary.text),
       noteWhenUnchanged: planned.branch === planned.checkout.branch,
     });
     if (committed.status === "refused") {
@@ -258,6 +301,42 @@ export class ThreadHandovers {
     return { status: "taken-back" };
   }
 
+  /**
+   * One turn of the thread's own agent, bounded: past the bound it is
+   * cancelled and the note goes without it, as it does when the turn fails.
+   * A provider that ignores the cancel cannot hold the handover, because the
+   * bound settles the wait whether or not the turn ever answers.
+   */
+  async #summarize(thread: MovedThreadReference): Promise<{
+    readonly outcome: HandoverAgentSummary;
+    readonly text?: string;
+  }> {
+    const summarize = this.#options.code.summarize;
+    if (summarize === undefined) return { outcome: "unavailable" };
+    const controller = new AbortController();
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const bound = new Promise<"timed-out">((resolve) => {
+      timer = setTimeout(() => {
+        controller.abort();
+        resolve("timed-out");
+      }, this.#options.summaryTimeoutMs ?? HANDOVER_SUMMARY_TIMEOUT_MS);
+    });
+    try {
+      const answer = await Promise.race([
+        summarize(thread.threadId, controller.signal).catch(
+          (): HandoverSummaryAnswer => ({ status: "failed" }),
+        ),
+        bound,
+      ]);
+      if (answer === "timed-out") return { outcome: "timed-out" };
+      if (answer.status !== "summarized") return { outcome: answer.status };
+      const text = answer.text.trim();
+      return text.length === 0 ? { outcome: "failed" } : { outcome: "added", text };
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+
   #saveHandover(record: HandedOverThread): void {
     const state = this.#options.state.load();
     this.#options.state.save({
@@ -286,7 +365,7 @@ export class ThreadHandovers {
         readonly remote: string | undefined;
         readonly remoteUrl: string | undefined;
         readonly title: string;
-        readonly note: (handoverId: string) => string;
+        readonly note: (handoverId: string, agentSummary?: string) => string;
       }
     | { readonly status: "refused"; readonly reason: "busy" | "delegated" | "refused" }
   > {
@@ -321,7 +400,7 @@ export class ThreadHandovers {
       remote,
       remoteUrl: checkout.remoteUrl,
       title: reading.title,
-      note: (handoverId) =>
+      note: (handoverId, agentSummary) =>
         composeHandoverNote({
           title: reading.title,
           originName,
@@ -329,6 +408,7 @@ export class ThreadHandovers {
           checkout,
           checkoutRoot: root,
           ...latest,
+          ...(agentSummary === undefined ? {} : { agentSummary }),
           handoverId,
         }),
     };
@@ -337,9 +417,10 @@ export class ThreadHandovers {
 
 /**
  * The note a handover commits as its message and the destination's first turn
- * reads: where the work stands, the latest instruction, what changed, and what
- * stayed behind, with the handover trailers. Secrets are redacted, the
- * checkout's folder never appears, and it is at most 32 KiB.
+ * reads: the agent's own summary when it gave one, where the work stands, the
+ * latest instruction, what changed, and what stayed behind, with the handover
+ * trailers. Secrets are redacted, no folder on this computer appears, and it
+ * is at most 32 KiB.
  */
 export function composeHandoverNote(input: {
   readonly title: string;
@@ -349,6 +430,8 @@ export function composeHandoverNote(input: {
   readonly checkoutRoot: string;
   readonly instruction?: string;
   readonly answer?: string;
+  /** The agent's own summary turn, filed under its own heading. */
+  readonly agentSummary?: string;
   readonly handoverId: string;
 }): string {
   const clip = (text: string, limit: number) =>
@@ -358,6 +441,9 @@ export function composeHandoverNote(input: {
   const sections = [
     `Hand over: ${input.title}`,
     `Handed over from ${input.originName} through the branch ${input.branch}, because the thread could not move there directly.`,
+    ...(input.agentSummary === undefined
+      ? []
+      : [`## The agent's summary\n\n${clip(input.agentSummary, SECTION_LIMIT)}`]),
     ...(input.answer === undefined
       ? []
       : [`## Where it stands\n\n${clip(input.answer, SECTION_LIMIT)}`]),
@@ -371,6 +457,7 @@ export function composeHandoverNote(input: {
   let body = redactSecrets(sections.join("\n\n")).text;
   // No absolute path: the checkout's folder reads as the repository itself.
   body = body.split(input.checkoutRoot).join(".");
+  body = body.replace(LOCAL_PATH, `[a folder on ${input.originName}]`);
   const room = HANDOVER_NOTE_MAX_BYTES - Buffer.byteLength(`\n\n${trailers}\n`, "utf8");
   while (Buffer.byteLength(body, "utf8") > room)
     body = body.slice(0, Math.floor(body.length * 0.9));

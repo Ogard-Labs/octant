@@ -35,6 +35,7 @@ function setup() {
   const state = createThreadMoveStateStore(folder);
   const dismissed: string[] = [];
   const stopped: string[] = [];
+  const summariesAsked: Array<boolean | undefined> = [];
   const moves = new ThreadMovesFromWindow({
     stopWork: async (thread) => {
       stopped.push(thread.threadId);
@@ -76,7 +77,10 @@ function setup() {
     moves,
     handovers: {
       preview: async () => ({ status: "refused", reason: "refused" }),
-      handOver: async () => ({ status: "refused", reason: "refused" }),
+      handOver: async (_thread, _destination, choices) => {
+        summariesAsked.push(choices?.summarize);
+        return { status: "refused", reason: "refused" };
+      },
       takeBack: () => ({ status: "taken-back" }),
     },
     exchange: {
@@ -87,7 +91,7 @@ function setup() {
     authorizeThread: ({ thread, windowId: asking }) =>
       String(asking) === String(windowId) && thread.threadId === SHOWN.threadId,
   });
-  return { handle, dismissed, stopped };
+  return { handle, dismissed, stopped, summariesAsked };
 }
 
 function post(path: string, body: unknown, headers: Record<string, string> = {}) {
@@ -181,6 +185,15 @@ describe("starting a thread move from a window", () => {
     );
     expect(response?.status).toBe(409);
     expect(await response?.json()).toEqual({ status: "refused", kind: "unlock-required" });
+  });
+
+  it("asks the agent to summarize a handover only when the window says so", async () => {
+    const { handle, summariesAsked } = setup();
+    const path = THREAD_MOVE_ADMINISTRATION_ROUTES.handover;
+    await handle(post(path, { thread: SHOWN, summarize: true }));
+    await handle(post(path, { thread: SHOWN, summarize: false }));
+    await handle(post(path, { thread: SHOWN }));
+    expect(summariesAsked).toEqual([true, false, false]);
   });
 
   it("rejects a body that is not exactly a move request", async () => {
