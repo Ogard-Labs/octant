@@ -2045,11 +2045,27 @@ this is how it looks.
   cancelled." and the primary into **Stop and move with Touch ID**; until the
   turn has stopped, the Computer row's pill reads Stopping and its progress
   line "Stopping this turn, then moving to" the member's name.
-  The primary button names the unlock it asks for (**Move with Touch ID**,
-  **Move with passkey**, or **Confirm on your phone**); Cancel sits beside it,
-  and a Code thread has **Hand over instead** as a quiet text button at the
-  sheet's start edge. Focus lands on the primary button, Escape cancels, and
-  the unlock prompt is the platform's own.
+  The primary button names the unlock it asks for: **Move with Touch ID**, or
+  **Confirm on your phone** in a window with no Touch ID key. Beside Move with
+  Touch ID, **Confirm on your phone** is an outline button, and one sentence
+  above the buttons names the phone it means (one that is an owner on the
+  destination). A browser passkey does not unlock a move, so no **Move with
+  passkey** button is offered. Cancel sits beside them, and a Code thread has
+  **Hand over instead** as a quiet text button at the sheet's start edge. Focus
+  lands on the primary button, Escape cancels, and the unlock prompt is the
+  platform's own.
+- **Waiting for your phone.** Confirm on your phone closes the sheet and puts
+  the Computer row's pill on Waiting for your phone. Its open content reads
+  "Confirm on your phone to move this thread to" the member's name, with the
+  time the wait ends, and **Don't move** as an outline button. The host
+  freezes nothing while it waits, but the composer gives its place to the
+  frozen bar titled Waiting for your phone, with the same sentence and Don't
+  move, because a message sent then would start a turn the move would have to
+  wait for. The phone app lists each waiting move under **Moves
+  waiting for you** ("Move" the thread's title, or the thread count, "from"
+  this computer "to" the member), with **Confirm move**, which asks for the
+  phone's unlock once. A wait that ends unanswered becomes This thread can't
+  move.
 - **While it moves.** The sheet closes when the unlock succeeds. The composer is
   replaced by a frozen bar in its place and height: a determinate progress
   line, "Moving to" and the member's name, the moved and total sizes with the
@@ -2082,7 +2098,10 @@ this is how it looks.
   thread again after its pane closed (an old link, a notification, or a
   search) opens the same tombstone in the active pane without changing the
   window's Project; a window that cannot read this computer's moves (a remote
-  client) shows the pane without the tombstone.
+  client) shows the pane without the tombstone. When a part of the thread
+  could not be read and stayed, the tombstone and the Moved notice name each
+  one in a sentence after the time (the first 1,000, then "and" the rest
+  counted).
 - **This thread can't move.** A failed move unfreezes the composer and puts an
   inline notice above it and in the Computer row's open content: the title
   "This thread can't move", the reason in one sentence, and its recovery as
@@ -2134,12 +2153,19 @@ this is how it looks.
     names the count and the unlock (**Move 9 threads with Touch ID**; **Move 9
     threads** when more than one destination needs its own unlock, asked in
     turn; **Hand over 2 threads** when only handovers are set, which need no
-    unlock). With nothing set to move, the primary is disabled and the summary
+    unlock). **Confirm on your phone** sits beside it as an outline button, and
+    is the primary in a window with no Touch ID key: every destination's rows
+    are held for the phone at once, one confirmation per destination on the
+    phone, and a row it holds reads Waiting for your phone until the phone
+    confirms. With nothing set to move, the primary is disabled and the summary
     says why. When a destination's unlock is declined or its request fails,
     the foot's alert names it, the other destinations still move, and each of
     its rows reads Stays here with a small neutral pill saying why (Not
     unlocked, Not an owner there, Offline, Not accepting moves, Couldn't
-    start, or Moves next past one unlock's limit).
+    start, or Moves next past one unlock's limit). A row the host did not take
+    from a batch it started reads Stays here with Already moving (another move
+    or wait holds it) or Can't move (its thread is gone), and the batch never
+    waits on it.
   - **While it runs.** The dialog stays and becomes the progress view: a
     determinate bar under the head for the whole batch, and on each row a thin
     progress line and a state word in place of its choice (Waiting, Moving with

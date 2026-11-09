@@ -76,6 +76,11 @@ function serverPatternInForce() {
   return serverPattern;
 }
 
+/** Exact host setup passed only to its owned mediation preparation worker. */
+export function secretGuardConfiguration(): Readonly<SecretGuardState> {
+  return state;
+}
+
 /** The list in force, as the expression a person's server is asked to refuse by. */
 export function currentServerProtectedPattern(): string {
   return serverPatternInForce().text;
@@ -124,6 +129,38 @@ export function secretGuardEntries(input: {
     }),
   );
   return [...entries, ...sshKeys];
+}
+
+export interface SecretGuardMediationPolicy {
+  readonly entries: ReadonlyArray<ResolvedProtectedEntry>;
+  readonly ownAccountPaths: ReadonlyArray<string>;
+  readonly sshCompanionDirectory: string | undefined;
+}
+
+/** Original structured rules, before startup enumeration or mount covers. */
+export function secretGuardMediationPolicy(input: {
+  readonly platform: NodeJS.Platform;
+  readonly homeDirectory?: string;
+  readonly ownAccountPaths: ReadonlyArray<string>;
+}): SecretGuardMediationPolicy {
+  const home = input.homeDirectory ?? homedir();
+  return {
+    entries: resolveProtectedFiles(
+      {
+        platform: secretGuardPlatform(input.platform),
+        home,
+        dataDirectory: state.dataDirectory,
+        runtimeDirectory: state.runtimeDirectory,
+      },
+      state.choice,
+    ),
+    // An enrolled account's canonical forms are fixed for that launch. A later
+    // symlink replacement must not transfer its exception to another sign-in.
+    ownAccountPaths: uniqueForms(input.ownAccountPaths),
+    sshCompanionDirectory: state.choice.removed.includes("ssh-private-keys")
+      ? undefined
+      : join(home, ".ssh"),
+  };
 }
 
 /**

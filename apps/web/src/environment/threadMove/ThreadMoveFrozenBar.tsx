@@ -7,14 +7,16 @@ import type { ThreadMoveClient } from "./threadMoveClient";
 
 /**
  * What holds a thread so that its composer gives way to the frozen bar:
- * moving away, set to move once its turn ends, handed over through its
- * branch, or arriving here and not yet committed. A failed move holds
- * nothing; its notice sits in the Environment and the composer returns.
+ * moving away, set to move once its turn ends, waiting for an owner phone to
+ * confirm the move, handed over through its branch, or arriving here and not
+ * yet committed. A failed move holds nothing; its notice sits in the
+ * Environment and the composer returns.
  */
 export function holdsThread(status: ThreadMoveThreadStatus | undefined): boolean {
   return (
     status?.sending !== undefined ||
     status?.waiting !== undefined ||
+    status?.waitingForPhone !== undefined ||
     status?.handedOver !== undefined ||
     status?.arriving !== undefined
   );
@@ -35,7 +37,7 @@ export function ThreadMoveFrozenBar(props: {
 }) {
   const [working, setWorking] = useState(false);
   const [takeBackOffered, setTakeBackOffered] = useState(false);
-  const { sending, waiting, handedOver, arriving } = props.status;
+  const { sending, waiting, waitingForPhone, handedOver, arriving } = props.status;
   const act = (action: () => Promise<unknown>) => {
     setWorking(true);
     void action().finally(() => {
@@ -118,6 +120,34 @@ export function ThreadMoveFrozenBar(props: {
         title={`Moving to ${waiting.destinationName} after this turn`}
       >
         A new message would start another turn and keep the move waiting.
+      </FrozenBarFrame>
+    );
+  }
+
+  // Nothing is frozen on the host yet, but a message sent now would start a
+  // turn, and a move set to start at once would then be refused as busy.
+  if (waitingForPhone !== undefined) {
+    return (
+      <FrozenBarFrame
+        action={
+          <OctantButton
+            disabled={working}
+            onClick={() => act(() => props.client.stopWaiting(props.thread))}
+            size="sm"
+            variant="outline"
+          >
+            Don't move
+          </OctantButton>
+        }
+        title="Waiting for your phone"
+      >
+        Confirm on your phone to move this thread to {waitingForPhone.destinationName}. It waits
+        until{" "}
+        {new Date(waitingForPhone.expiresAt).toLocaleTimeString([], {
+          hour: "numeric",
+          minute: "2-digit",
+        })}
+        .
       </FrozenBarFrame>
     );
   }

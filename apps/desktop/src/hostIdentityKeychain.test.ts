@@ -87,6 +87,33 @@ describe("host identity Keychain contract", () => {
 });
 
 describe("makeHostIdentitySigningService", () => {
+  it("selects a fixed Windows helper while preserving the service and recovery contract", async () => {
+    const windowsHelper = "C:\\Octant\\native\\octant-credential-helper.exe";
+    const execute = vi.fn<KeychainHelperExecutor>(async (spec, limits) => {
+      expect(spec.command).toBe(windowsHelper);
+      expect(limits.timeoutMs).toBe(5000);
+      return okResponse({
+        version: 1,
+        ok: true,
+        operation: "ensure",
+        keyId: HOST_IDENTITY_KEY_ID,
+        fingerprint,
+      });
+    });
+    const service = makeHostIdentitySigningService(windowsHelper, {
+      storeScope,
+      platform: "win32",
+      execute,
+    });
+    await expect(service.probeRecoveryState()).resolves.toMatchObject({
+      status: "ready",
+      fingerprint,
+    });
+    expect(() =>
+      makeHostIdentitySigningService("C:\\Octant\\other.exe", { storeScope, platform: "win32" }),
+    ).toThrow(HostIdentitySigningFailure);
+  });
+
   it("ensures a host identity key and returns only the fingerprint", async () => {
     const execute = vi.fn<KeychainHelperExecutor>(async (spec) => {
       expect(spec.command).toBe(helperPath);
