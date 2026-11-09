@@ -159,13 +159,9 @@ export function parseDiagnostics(
     seen.add(key);
     problems.push(problem);
   };
-  const rootPrefix = `${root.replace(/\/+$/, "")}/`;
   const at = (pkg: string | undefined, file: string, line: string, column: string) => ({
     ...(pkg === undefined ? {} : { package: pkg }),
-    ...(pkg !== undefined && !file.startsWith(rootPrefix)
-      ? { packageRelative: true as const }
-      : {}),
-    file: relativeTo(root, file),
+    ...reportedPath(file, pkg, root),
     line: Number(line),
     column: Number(column),
   });
@@ -287,28 +283,78 @@ function withoutRunnerPrefix(line: string): {
 
 /**
  * Whether a problem's file is one of the files the call asked about, or inside
- * a folder it named. A path still relative to a package Octant could not place
- * matches only a filter that names it exactly, since a suffix would match the
- * same path in every package. Paths and filters are compared in one spelling
- * (`a/../b` is `b`); one that leaves the checkout keeps its raw form and
- * matches only a filter written exactly the same.
+ * a folder it named; `.` or the checkout's own path names the whole checkout.
+ * Paths and filters are compared in one spelling (`./a//b/` is `a/b`, an
+ * absolute path inside the checkout is made relative). A path outside the
+ * checkout matches only a filter written exactly the same. A path still
+ * relative to a package Octant could not place matches only a filter that
+ * names it exactly, or the whole checkout, since a suffix would match the same
+ * path in every package.
  */
 export function matchesDiagnosticsFile(
   problem: Pick<NativeHarnessDiagnostic, "file" | "packageRelative">,
   filters: ReadonlyArray<string>,
+  root: string,
 ): boolean {
-  const file = insideCheckout(problem.file);
+  const file: CheckoutPath =
+    problem.packageRelative === true
+      ? problem.file === ".." || problem.file.startsWith("../")
+        ? { kind: "outside" }
+        : { kind: "inside", path: problem.file }
+      : checkoutPath(problem.file, root);
   return filters.some((filter) => {
-    const wanted = insideCheckout(filter);
-    if (file === undefined || wanted === undefined) return problem.file === filter;
-    if (problem.packageRelative === true) return file === wanted;
+    const wanted = checkoutPath(filter, root);
+    if (wanted.kind === "outside" || file.kind === "outside") return problem.file === filter;
+    if (wanted.path === "") return true;
+    if (problem.packageRelative === true) return file.path === wanted.path;
     return (
-      file === wanted ||
-      file.endsWith(`/${wanted}`) ||
-      wanted.endsWith(`/${file}`) ||
-      file.startsWith(`${wanted}/`)
+      file.path === wanted.path ||
+      file.path.endsWith(`/${wanted.path}`) ||
+      file.path.startsWith(`${wanted.path}/`)
     );
   });
+}
+
+type CheckoutPath =
+  /** `path` is relative to the checkout in one spelling; `""` is the checkout itself. */
+  { readonly kind: "inside"; readonly path: string } | { readonly kind: "outside" };
+
+/**
+ * Where a path is in the checkout. A relative path is taken from the
+ * checkout root; an absolute one is inside only under `root`. Anything that
+ * normalizes above the checkout, or an absolute path elsewhere, is outside.
+ */
+function checkoutPath(path: string, root: string): CheckoutPath {
+  const base = posix.normalize(root).replace(/\/+$/, "");
+  let clean = posix.normalize(path.trim());
+  if (posix.isAbsolute(clean)) {
+    if (clean.replace(/\/+$/, "") === base) return { kind: "inside", path: "" };
+    if (!clean.startsWith(`${base}/`)) return { kind: "outside" };
+    clean = clean.slice(base.length + 1);
+  }
+  clean = clean.replace(/\/+$/, "");
+  if (clean === "." || clean === "") return { kind: "inside", path: "" };
+  if (clean === ".." || clean.startsWith("../")) return { kind: "outside" };
+  return { kind: "inside", path: clean };
+}
+
+/**
+ * A reported path as a problem keeps it. Under a runner's package prefix only
+ * a relative path is the package's own and waits to be placed; an absolute
+ * path is never joined under a package folder. A path outside the checkout
+ * keeps the form the tool printed.
+ */
+function reportedPath(
+  file: string,
+  pkg: string | undefined,
+  root: string,
+): { readonly file: string; readonly packageRelative?: true } {
+  if (pkg !== undefined && !posix.isAbsolute(file)) {
+    const clean = posix.normalize(file).replace(/\/+$/, "");
+    return { file: clean, packageRelative: true };
+  }
+  const place = checkoutPath(file, root);
+  return { file: place.kind === "inside" ? place.path : file };
 }
 
 /** At most this many workspace folders are read to place packages. */
@@ -322,7 +368,7 @@ const MAX_WORKSPACE_PACKAGES = 200;
  * (negations, deeper globs) is skipped. Reads never count as the model's.
  */
 export async function workspacePackageFolders(
-  filesystem: Pick<NativeHarnessFileSystemPort, "read">,
+  filesystem: Pick<NativeHarnessFileSystemPort, "read" | "root">,
 ): Promise<ReadonlyMap<string, string>> {
   const patterns: string[] = [];
   const manifest = await readJson(filesystem, "package.json");
@@ -335,8 +381,10 @@ export async function workspacePackageFolders(
   if (pnpm.kind === "file") patterns.push(...pnpmWorkspacePatterns(pnpm.lines));
   const folders: string[] = [];
   for (const raw of patterns) {
-    const pattern = normalized(raw.trim());
-    if (pattern.length === 0 || pattern.startsWith("!") || pattern.includes("..")) continue;
+    if (raw.trim().startsWith("!")) continue;
+    const place = checkoutPath(raw.trim(), filesystem.root);
+    if (place.kind === "outside" || place.path === "") continue;
+    const pattern = place.path;
     if (pattern.endsWith("/*") && !pattern.slice(0, -2).includes("*")) {
       const parent = pattern.slice(0, -2);
       const listing = await filesystem.read({ path: parent, marksRead: false });
@@ -361,6 +409,7 @@ export async function workspacePackageFolders(
 export function placeInCheckout(
   problems: ReadonlyArray<NativeHarnessDiagnostic>,
   folders: ReadonlyMap<string, string>,
+  root: string,
 ): ReadonlyArray<NativeHarnessDiagnostic> {
   return problems.map((problem) => {
     if (problem.packageRelative !== true || problem.package === undefined) return problem;
@@ -368,7 +417,8 @@ export function placeInCheckout(
     if (folder === undefined) return problem;
     const { packageRelative: _placed, ...rest } = problem;
     const joined = `${folder}/${problem.file}`;
-    return { ...rest, file: insideCheckout(joined) ?? joined };
+    const place = checkoutPath(joined, root);
+    return { ...rest, file: place.kind === "inside" ? place.path : joined };
   });
 }
 
@@ -516,13 +566,13 @@ export async function runNativeHarnessDiagnostics(
   }
   // Workspace folders are read only when a runner named a package.
   const placed = problems.some((problem) => problem.packageRelative === true)
-    ? placeInCheckout(problems, await workspacePackageFolders(filesystem))
+    ? placeInCheckout(problems, await workspacePackageFolders(filesystem), filesystem.root)
     : problems;
   const wanted = args.files;
   const shown =
     wanted === undefined || wanted.length === 0
       ? placed
-      : placed.filter((problem) => matchesDiagnosticsFile(problem, wanted));
+      : placed.filter((problem) => matchesDiagnosticsFile(problem, wanted, filesystem.root));
   // Clean means every command that ran exited zero and printed no problem it
   // could read in output the shell kept whole; a failing exit with nothing
   // parsed, or output the shell cut, is reported, never clean.
@@ -581,23 +631,6 @@ export async function runNativeHarnessDiagnostics(
 
 function isPath(candidate: string | undefined): candidate is string {
   return candidate !== undefined && /[./]/.test(candidate) && !/^\d+(\.\d+)*$/.test(candidate);
-}
-
-function relativeTo(root: string, file: string): string {
-  const prefix = `${root.replace(/\/+$/, "")}/`;
-  return normalized(file.startsWith(prefix) ? file.slice(prefix.length) : file);
-}
-
-function normalized(path: string): string {
-  return insideCheckout(path) ?? path;
-}
-
-/** A relative path in one spelling, or undefined when it is absolute or leaves the checkout. */
-function insideCheckout(path: string): string | undefined {
-  if (path.startsWith("/")) return undefined;
-  const clean = posix.normalize(path).replace(/\/+$/, "");
-  if (clean === ".." || clean.startsWith("../")) return undefined;
-  return clean;
 }
 
 function severityOf(word: string): NativeHarnessDiagnostic["severity"] {

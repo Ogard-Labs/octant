@@ -7734,9 +7734,12 @@ the model at another size.
   `pnpm-workspace.yaml` `packages` (folders or `dir/*` patterns, at most 200
   folders) and each folder's `package.json` `name`; a package it cannot place
   keeps its own path, marked `packageRelative`, and `files` matches it only
-  exactly. Placed paths and `files` entries are compared normalized (`a/../b`
-  is `b`); one that leaves the checkout keeps its raw form and matches only
-  exactly. These reads never count as the model's read before an edit. The list is capped at
+  exactly. Only a relative path under a prefix is placed; an absolute one is
+  never joined under a package folder. Placed paths and `files` entries are
+  compared normalized (`./a//b/` and `a/x/../b` are `a/b`, an absolute path
+  inside the checkout is made relative, `.` or the checkout's own path is the
+  whole checkout); a path outside the checkout keeps its raw form and matches
+  only exactly. These reads never count as the model's read before an edit. The list is capped at
   100 with a note saying how many were left out. `clean` holds only when every
   command that ran exited zero and printed no problem; a run that exits
   non-zero with nothing parsed carries its output tail and a note that it is

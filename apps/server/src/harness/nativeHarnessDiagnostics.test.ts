@@ -4,7 +4,11 @@ import { dirname, join } from "node:path";
 import { describe, expect, it } from "vitest";
 import type { ProviderExecutionPolicy, ToolActionAuthority } from "@octant/contracts";
 import { ToolCallAuthorityService, type ToolCallLiveFacts } from "../toolCallAuthorityService";
-import { parseDiagnostics } from "./nativeHarnessDiagnostics";
+import {
+  matchesDiagnosticsFile,
+  parseDiagnostics,
+  placeInCheckout,
+} from "./nativeHarnessDiagnostics";
 import { NativeHarnessFileSystem } from "./nativeHarnessFileSystem";
 import {
   createNativeHarnessTools,
@@ -363,6 +367,122 @@ describe("native harness diagnostics", () => {
         message: "Outside.",
       }),
     ]);
+  });
+
+  // Each row: the path a tool printed, the runner package it came under, the
+  // path the problem keeps, and whether each filter matches it. Root is
+  // /repo; package `a` lives in packages/a and `zz` cannot be placed.
+  it.each([
+    [
+      "relative inside",
+      "src/x.ts",
+      undefined,
+      "src/x.ts",
+      { "src/x.ts": true, "x.ts": true, "rc/x.ts": false, src: true, sr: false },
+    ],
+    [
+      "./ prefix and duplicate slashes",
+      "./src//x.ts",
+      undefined,
+      "src/x.ts",
+      { "./src/": true, "src//": true, "src/x.ts/": true },
+    ],
+    [
+      "the whole checkout",
+      "src/x.ts",
+      undefined,
+      "src/x.ts",
+      { ".": true, "./": true, "/repo": true, "/repo/": true, "": true },
+    ],
+    [
+      "absolute inside",
+      "/repo//src/x.ts",
+      undefined,
+      "src/x.ts",
+      { "/repo/src": true, "/repo/src/x.ts": true, "/elsewhere/src/x.ts": false },
+    ],
+    [
+      "a sibling folder that shares the root's prefix",
+      "/repository/src/x.ts",
+      undefined,
+      "/repository/src/x.ts",
+      { ".": false, "src/x.ts": false, "/repository/src/x.ts": true },
+    ],
+    [
+      "absolute outside",
+      "/shared/src/x.ts",
+      undefined,
+      "/shared/src/x.ts",
+      { ".": false, "shared/src/x.ts": false, "/shared/src/x.ts": true },
+    ],
+    [
+      "absolute outside under a package",
+      "/shared/src/x.ts",
+      "a",
+      "/shared/src/x.ts",
+      { "packages/a": false, ".": false, "/shared/src/x.ts": true },
+    ],
+    [
+      "absolute inside under a package",
+      "/repo/packages/a/src/x.ts",
+      "a",
+      "packages/a/src/x.ts",
+      { "packages/a": true, "packages/a/src/x.ts": true },
+    ],
+    [
+      "relative above the checkout",
+      "../up.ts",
+      undefined,
+      "../up.ts",
+      { ".": false, "up.ts": false, "../up.ts": true },
+    ],
+    [
+      "placed under its package",
+      "src/x.ts",
+      "a",
+      "packages/a/src/x.ts",
+      {
+        "packages/a": true,
+        "packages/a/": true,
+        "packages/b": false,
+        "/repo/packages/a/src/x.ts": true,
+      },
+    ],
+    [
+      "placed into a sibling package",
+      "../b/src/y.ts",
+      "a",
+      "packages/b/src/y.ts",
+      { "packages/b": true, "packages/a": false },
+    ],
+    [
+      "placed above the checkout",
+      "../../../out/z.ts",
+      "a",
+      "packages/a/../../../out/z.ts",
+      { ".": false, "out/z.ts": false, "packages/a/../../../out/z.ts": true },
+    ],
+    [
+      "a package that cannot be placed",
+      "./src/x.ts",
+      "zz",
+      "src/x.ts",
+      { "src/x.ts": true, "./src/x.ts": true, "x.ts": false, ".": true },
+    ],
+  ] as const)("matches files and folders for a path %s", (_case, reported, pkg, kept, filters) => {
+    const line = `${pkg === undefined ? "" : `${pkg}:lint: `}${reported}:1:1: Problem.`;
+    const [problem] = placeInCheckout(
+      parseDiagnostics(line, "/repo"),
+      new Map([["a", "packages/a"]]),
+      "/repo",
+    );
+    expect(problem?.file).toBe(kept);
+    for (const [filter, matches] of Object.entries(filters)) {
+      expect([
+        filter,
+        problem !== undefined && matchesDiagnosticsFile(problem, [filter], "/repo"),
+      ]).toEqual([filter, matches]);
+    }
   });
 
   it("reads pnpm's workspace list to place a package", async () => {
