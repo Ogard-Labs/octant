@@ -1421,6 +1421,10 @@ for Move after this turn.
     each file's path, size, digest, and permission bits (`mode & 0o777`;
     setuid, setgid, and sticky bits never travel) in the thread bundle's file
     list, so the offer stays one manifest row however many files the folder
+    holds. Packing and landing complete every partial filesystem write before
+    advancing. A write that makes no progress or fails never acknowledges
+    arrival; the source retains any file that could not be packed, and a
+    destination checks each completed file size before accepting its landing.
     holds. The list also carries the permission bits of the folder itself
     and of every folder inside it that travels. A
     file up to the Secret guard's read limit (2 MiB) is read once, checked,
