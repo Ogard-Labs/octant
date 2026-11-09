@@ -1071,23 +1071,29 @@ Several threads of one Project may each drive their own page at the same time.
 ## Bounded page scripts
 
 `run-script` reaches the same owned native page as the fixed actions when a
-local Code thread already has Full access. It takes `source` and the
+local Code thread has Full access or a scoped script permission. It takes `source` and the
 `expectedObservationRevision` from a fresh page read. It opens no page or
 profile and takes no additional script approval at Full access. Existing site,
 profile, model, window, Project and thread authority still apply. Work,
 headless, paired, routine, managed-subagent and terminal-grant callers are
 currently refused. Scripts cannot enter `steps` or saved/replayed flows.
 
-The accepted permission matrix also permits one exact-source approval for a
-proved non-signed-in Private page below Full access. That part is not built:
-Private describes storage lifetime, not authentication. The server currently
-has no general evidence that a Private page is not signed in, so unknown
-session eligibility refuses below Full access. Known signed-in pages require
-Full access even in Private, and Project/Personal pages always count as signed
-in. A clear credential-field scan or source consent cannot override this rule.
-Plan refuses arbitrary JavaScript. Below-Full credential or uncertain frame/
-shadow inspection also refuses; presence-only closed-shadow detection is not
-proof of complete credential or authentication coverage.
+Below Full access, a local Code task may request a separate one-use script
+permission. The prompt shows the exact source and HTTPS origin, names the task
+and selected profile, and explains that it grants the page's account authority,
+even in Private or when sign-in state is unknown. It is never remembered as a
+site grant and cannot change host filesystem, process or network confinement.
+Existing site/profile approvals remain necessary. A changed task/model,
+posture, profile, context, page revision, person hold or cancellation invalidates
+the answer before dispatch. Each script request needs its own answer.
+
+Plan refuses arbitrary JavaScript. Below Full access, native DOM inspection
+must also cover the top document and open shadow roots without credential
+fields. An iframe, frame, embed, object, closed shadow root, missing inspection
+or exceeded inspection bound refuses the script. The check runs during native
+preparation and again before execution. This is a credential and coverage gate,
+not proof that the page is signed out, nor a guarantee against future page
+changes or callbacks installed by an explicitly authorized script.
 
 Source has the page's normal DOM and account authority, including same-origin
 frame access and page API effects. The dispatch target is its current top

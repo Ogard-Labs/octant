@@ -132,6 +132,8 @@ export interface BrowserPageScriptInput {
   readonly turnExecutionPolicy: ProviderExecutionPolicy;
   /** A server-owned turn/model binding check; it may only narrow persisted authority. */
   readonly callerIsCurrent: () => boolean;
+  /** One server-owned exact-source permission, rechecked through native preparation. */
+  readonly scriptPermissionIsCurrent?: () => boolean;
   readonly signal?: AbortSignal;
 }
 
@@ -877,6 +879,7 @@ export class BrowserAutomationService {
           thread: policy,
         }),
         caller: this.#isUnattendedScope(input.windowId) ? "unattended" : "person",
+        scopedPermission: input.scriptPermissionIsCurrent?.() === true,
       });
       if (decision.status === "refused") return refused(decision.reason);
       const call = this.#toolCalls.authorize({
@@ -910,6 +913,7 @@ export class BrowserAutomationService {
             owner,
             source: input.source,
             expectedUrl,
+            ...(input.scriptPermissionIsCurrent === undefined ? {} : { requiresClearPage: true }),
           },
           signal,
         );
@@ -926,7 +930,13 @@ export class BrowserAutomationService {
         dispatched = true;
         needsObservation = true;
         const result = await native(
-          { operation: "execute", contextId: input.contextId, owner, planId: prepared.planId },
+          {
+            operation: "execute",
+            contextId: input.contextId,
+            owner,
+            planId: prepared.planId,
+            ...(input.scriptPermissionIsCurrent === undefined ? {} : { requiresClearPage: true }),
+          },
           signal,
         );
         if (result.status !== "prepared" && result.effect === "none") needsObservation = false;

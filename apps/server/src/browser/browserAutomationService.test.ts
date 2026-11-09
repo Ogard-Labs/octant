@@ -495,6 +495,59 @@ describe("BrowserAutomationService", () => {
     await f.service.close();
   });
 
+  it("rechecks scoped script permission after native preparation and cancels on revocation", async () => {
+    let full = true;
+    const f = harness({ pageScriptPolicy: () => "approval-gated" });
+    let finishPrepare:
+      | ((value: {
+          readonly status: "prepared";
+          readonly planId: import("@octant/contracts/browser-page-script").BrowserPageScriptPlanId;
+        }) => void)
+      | undefined;
+    const prepared = new Promise<{
+      readonly status: "prepared";
+      readonly planId: import("@octant/contracts/browser-page-script").BrowserPageScriptPlanId;
+    }>((resolve) => {
+      finishPrepare = resolve;
+    });
+    const planId = importPlanId();
+    const calls: string[] = [];
+    if (f.runtime.runPageScript === undefined) throw new Error("native script fake missing");
+    vi.mocked(f.runtime.runPageScript).mockImplementation(async (command) => {
+      calls.push(command.operation);
+      return command.operation === "prepare" ? prepared : { status: "cancelled", effect: "none" };
+    });
+    await f.service.create({ windowId, threadId: threadOne, action: action(), policy });
+    const observed = await f.service.act({
+      windowId,
+      threadId: threadOne,
+      capturedBy: "agent",
+      request: request(),
+    });
+    expect(observed.failure).toBeUndefined();
+    expect(observed.observation).toBeDefined();
+    const run = f.service.runScript({
+      windowId,
+      threadId: threadOne,
+      contextId: contextOne,
+      source: "document.body.dataset.effect='ran'",
+      expectedObservationRevision: observed.observation?.revision ?? 0,
+      turnExecutionPolicy: "approval-gated",
+      scriptPermissionIsCurrent: () => full,
+      callerIsCurrent: () => true,
+    });
+    await vi.waitFor(() => expect(calls).toEqual(["prepare"]));
+    full = false;
+    finishPrepare?.({ status: "prepared", planId });
+    expect(await run).toMatchObject({
+      status: "refused",
+      effect: "none",
+      reason: "full-access-required",
+    });
+    expect(calls).toEqual(["prepare", "cancel"]);
+    await f.service.close();
+  });
+
   it("refuses a stale observation even when its new revision is obtained from the public snapshot", async () => {
     const f = harness({ pageScriptPolicy: () => "full-access" });
     const native = f.runtime.runPageScript;
