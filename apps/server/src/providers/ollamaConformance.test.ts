@@ -342,7 +342,12 @@ describe("Ollama harness tool round trip", () => {
       expect(fixture.chatBodies[0]).toMatchObject({
         tools: [{ type: "function", function: { name: "read_file" } }],
       });
-      const followUp = fixture.chatBodies[1]?.messages as ReadonlyArray<Record<string, unknown>>;
+      const sentMessages = fixture.chatBodies[1]?.messages as ReadonlyArray<
+        Record<string, unknown>
+      >;
+      // The harness ends every request with its window note, after the results.
+      expect(String(sentMessages.at(-1)?.content)).toMatch(/^\[Note from Octant, not the user:/);
+      const followUp = sentMessages.slice(0, -1);
       expect(followUp.slice(-2)).toEqual([
         {
           role: "assistant",
