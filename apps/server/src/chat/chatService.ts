@@ -913,10 +913,15 @@ export function readChatThreadView(
   };
 }
 
-function assertReadableChatThread(
+/**
+ * The Chat thread read rule every Open of a Chat thread applies, exported so
+ * a reader that serves something a thread owns asks this same rule rather
+ * than a copy of it. Returns the thread it admitted.
+ */
+export function assertReadableChatThread(
   persistence: Pick<PersistenceService, "readChatThread">,
   threadId: ChatThreadId,
-): void {
+): NonNullable<ReturnType<PersistenceService["readChatThread"]>> {
   const thread = persistence.readChatThread(threadId);
   if (thread === undefined || thread.lifecycle === "deleted") {
     throw new ChatServiceError({
@@ -930,6 +935,7 @@ function assertReadableChatThread(
       message: "Chat thread is being deleted.",
     });
   }
+  return thread;
 }
 
 function withChatThreadHeadVersion(
