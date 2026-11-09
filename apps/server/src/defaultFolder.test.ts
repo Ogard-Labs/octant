@@ -1,3 +1,5 @@
+import { Schema } from "effect";
+import { DefaultFolder } from "@octant/contracts";
 import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -12,6 +14,13 @@ import {
 const home = "/Users/ada";
 
 describe("the default folder", () => {
+  it("accepts a Windows host's wire spelling without treating it as an absolute path on another host", () => {
+    const folder = Schema.decodeUnknownSync(DefaultFolder)(String.raw`C:\Users\Ada\Octant`);
+    expect(hostDefaultFolder(home, { OCTANT_DEFAULT_FOLDER: folder })).toBe(folder);
+    if (process.platform !== "win32")
+      expect(judgeDefaultFolder(folder, home)).toMatchObject({ status: "refused" });
+  });
+
   it("gives Octant Nightly's test host the folder its desktop names, never Octant's", () => {
     expect(hostDefaultFolder(home, { OCTANT_DEFAULT_FOLDER: "/Users/ada/Octant Nightly" })).toBe(
       "/Users/ada/Octant Nightly",

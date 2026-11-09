@@ -236,6 +236,149 @@ the CLI. The hub depends on that:
     Credentials held only in a login-bound store, such as a provider app's own
     sign-in, are unavailable until someone logs in, and the hub says which
     ones.
+    The Windows server/member identity prerequisite uses only the native-held
+    closed profile data root and the fixed `remote/private-listener-host-id`
+    and `remote/private-listener-host-key.pem` records. Each read/create
+    revalidates the native known-folder path, profile/control UUID and physical
+    profile/data identities, and exact current-user ownership plus private
+    user-and-SYSTEM DACLs. Reparse points, hardlinks, nonregular files and
+    malformed/oversized records refuse without replacement. The fallback host
+    UUID is separate from the profile/control UUID; an existing journaled host
+    identity and display name retain precedence. The signing contract remains
+    P-256 with SHA-256 over SPKI for its fingerprint and SHA-256/P1363 payload
+    signatures. Private bytes cross only the internal native-storage boundary,
+    never a public signing API, response, error, journal, argument or environment.
+    Key records are capped at 4 KiB; the UUID record is at most 37 UTF-8 bytes.
+    Creation is exclusive and flushed before use; a competing creation refuses
+    or reads the existing winner, never overwrites it. A partial/corrupt record
+    is unavailable and needs explicit recovery; neither restart nor a read
+    silently rotates identity. The remote directory and each admitted record
+    stay held against rename/write until actual process exit. Reading existing
+    push signing never provisions a key or fallback identity. Missing native
+    storage refuses instead of using Windows mode bits as access control.
+    The dependent listener TLS store admits only
+    `remote/private-listener-tls-key.pem` and
+    `remote/private-listener-tls-cert.pem` through the same native profile
+    checks. The P-256 TLS key is distinct from the host signing key, capped
+    at 4 KiB, exclusively created and held against writes or replacement.
+    An existing corrupt, exposed or aliased key refuses without rotation.
+    Certificates are capped at 16 KiB. A private regular certificate may be
+    renewed using a flushed, exclusively created private staging file and a
+    native handle rename into the held remote directory; an unsafe certificate
+    entry refuses. The reopened destination must retain the staging file's
+    physical identity. Renewal and restart keep the key's SPKI pin; no private
+    bytes enter arguments, environment, journal, logs or public status.
+    Explicit listener key transitions refuse on this store: their staged key
+    and in-place key replacement are ordinary owner-only files, which native
+    storage does not admit.
+    Missing native TLS storage refuses instead of falling back to ordinary
+    Windows file operations. Certificate reads release their file handles so
+    renewal can replace the public certificate; the key and directory guards
+    remain held until process exit.
+    The roster signer has a separate fixed native operation for
+    `hub/roster-signing-key.pem` under that same profile boundary. Its P-256
+    PKCS#8 key is at most 4 KiB, exclusively created and held with its hub
+    directory until process exit. Reads and creation revalidate native
+    profile/physical-directory identity, ownership and private DACLs.
+    Empty, corrupt, wrong-curve, exposed or aliased keys refuse without
+    replacement or permission repair. The public port retains base64url SPKI
+    and SHA-256/P1363 signatures; transfer buffers are erased after import.
+    Restarts and concurrent first-use preserve the existing key. Missing native
+    roster storage refuses on Windows before ordinary-file operations.
+    The three mutable authority records, `hub/hub-state.json`,
+    `hub/delegations.json` and `hub/tailscale-certificate.json`, use closed native
+    storage ports on this same physical profile. Their domain schemas, history
+    retention and positive-missing defaults stay owned by their existing stores.
+    Corrupt UTF-8, invalid JSON/schema, unsafe records and I/O failures refuse;
+    a save never resets or overwrites such a record. Missing native storage on
+    Windows refuses before ordinary-file access.
+    Native transfers use opaque environment/profile/purpose-bound sessions with
+    sequential offsets and at most 16 KiB per chunk. Safe-integer lengths and
+    exact completion preserve existing state sizes without new product limits.
+    Read sessions hold an immutable snapshot. Only the currently claimed native
+    host owner in that same process, environment and profile may replace state;
+    merely preparing an owner grants nothing. Open and commit revalidate the
+    native owner PID/birth record, private DACLs and physical profile identity.
+    A replacement is exclusively staged and flushed, then renamed into the
+    fixed leaf with native POSIX replacement semantics and checked against the
+    reopened file identity. Existing read snapshots cannot block a newly
+    committed revocation; a new read sees the replacement. The private stage
+    excludes competing writers and deletion, permits snapshot readers, and is
+    fully flushed before publication with no later content writes. Read handles
+    share the publisher's existing write access so its final rename/flush/close
+    interval cannot make a complete visible snapshot temporarily unreadable.
+    This sharing grants no file permissions. Snapshot readers do
+    not erase old lawful bytes. Owner loss aborts writes, environment teardown
+    closes its sessions, and incomplete or invalid transfers discard their stage.
+    The physical hub directory stays held for the process lifetime. Store calls
+    remain synchronous inside the single owner process; services retain their
+    existing reload and cancellation-generation fences across asynchronous work.
+    Foreground host storage trusts the unconfined local account as an owner,
+    as its private control endpoint already does. Private owner-and-SYSTEM
+    ancestors, native owner exclusion and per-open unsafe/reparse/hardlink
+    refusal protect this boundary. A connection's actual main SQLite handle
+    must match its native admission before application SQL. Ordinary SQLite
+    keeps its WAL/SHM/rollback lifecycle and connection sharing; native main-file
+    guards end after actual connection close so migration recovery may replace
+    the store. Foreign read-only consumers, checkpoints, migration snapshots,
+    restore and crash recovery must retain their behavior. The existing bounded
+    backup labels resolve only to the native-owned main database's backup family;
+    its restore stage is fixed to the current process. Native no-create inspection
+    checks main, backup, stage and sidecar aliases before lifecycle operations,
+    and backup verification uses the same actual-handle admission as the live
+    connection. Existing VACUUM and atomic copy/rename recovery run under the
+    held private profile and claimed owner, with inspection before mutation and
+    native admission on reopening. These checks rely on the stated local-owner
+    trust boundary, rather than excluding arbitrary same-account programs.
+    Foreground composition also uses four closed native boot files: bridge and
+    host-info projections in the data directory, service policy in config, and
+    bounded service logs in logs. Existing schemas, limits, redaction and log
+    cursors remain authoritative. Discovery may read without claiming the host;
+    writes and removal require its actual current owner. The child receives the
+    existing bridge-secret launch seed and publishes its projections after
+    acquisition; the desktop never writes on its behalf. Cleanup checks the
+    expected instance and bridge value before removing only those two leaves.
+    UTF-8 failure or unsafe reads refuse instead of becoming empty/default state.
+    Bun connections use immediate close that finalizes all outstanding prepared
+    statements; a failed close retains its native guard. A deferred SQLite close
+    is insufficient because an ordinary cached statement can retain the file
+    past the application connection's lifetime.
+    This boundary does not protect from other unconfined programs running as
+    the same owner. Admitted remote clients, provider replies and plugins must
+    have no store-path mutation route. Work and Code stay refused until their
+    native confinement also denies the entire private profile. The authoritative
+    Work-turn and Code-command/operation entry points refuse Windows before
+    launch or journal mutation, including background routine calls; Full access
+    cannot bypass this gate. Provider process preparation refuses Windows before
+    its unconfined Full-access branch. Native experiments do not admit foreground
+    or desktop startup.
+    The Windows foreground entry resolves the fixed native artifacts from the
+    actual portable resources layout, claims the selected native profile before
+    server/persistence imports, and composes its journal, usage cache, private
+    authority stores, closed credential namespaces, logs and discovery ports.
+    It serves loopback Chat and keeps Work/Code and executable extensions refused.
+    CLI-backed provider construction is unavailable before catalog or session
+    work; only existing in-process API providers are composed. This also keeps
+    catalog/version discovery from launching a third-party executable at boot.
+    Linked secret-store state remains unavailable until it has native private
+    admission. Ready requires real native journal migration; owned local control
+    mediates verified backup and graceful drain. A stop callback waits for its
+    exact authenticated native connection's written-response/closed receipt,
+    so releasing the owner cannot discard a queued acknowledgement. The existing
+    bounded transport retires a peer that never reads; an unwritten or unrelated
+    connection cannot dispatch a stop. Shutdown reports unconfirmed
+    projection cleanup and always attempts native owner release even if broker
+    shutdown fails. Foreground admission needs actual entrypoint ready, authority
+    refusal, verified-backup and joined-listener/process cleanup evidence for
+    both profiles; desktop and Nightly bootstrap have their own additional gates.
+    Hosted native QA keeps the pinned runtime versions. When GitHub release
+    delivery fails, the same Bun version may come from its official npm Windows
+    artifact, verified against a pinned SHA-512 before extracting its sole regular
+    executable into the isolated runner's temporary directory. Version and platform
+    are checked before use; this changes test setup only.
+    Native storage mechanisms alone do not admit Windows desktop/server startup;
+    encrypted-disk setup checks and the boot service
+    remain separate composition and acceptance work.
   - **The machine itself.** The hub's setup turns on starting up after a
     power failure where the platform allows it, and explains what full-disk
     encryption asks at boot. FileVault, and LUKS with a passphrase, ask for a
@@ -244,14 +387,16 @@ the CLI. The hub depends on that:
     restart on macOS), and after a power cut someone unlocks the machine once.
     BitLocker with a TPM, and LUKS unlocked by a TPM, boot unattended. A
     standby keeps the members working meanwhile.
-  - **Windows.** Windows has no Octant design yet. The Windows parts of
-    this design (the Windows service and the access-list key file) are built
-    only when the Windows track starts, after the macOS preview and Linux
-    self-update evidence, as the
-    [release boundary](../architecture.md#current-release-boundary) orders.
-    Even then, a Windows hub runs the hub role, the web app, and the hub's
-    services; running agents on Windows waits for an approved Windows
-    confinement design.
+  - **Windows.** The native track is active. Its private profile, owner/control,
+    identity, credential and storage boundaries compose the foreground host
+    described above. Desktop and Nightly consumers require their own actual
+    bootstrap evidence. Boot-service installation and encrypted-disk setup
+    remain separate from this foreground implementation. Work, Code and
+    executable extensions remain unavailable until native confinement denies
+    the private profile and proves its filesystem, network and process-lifecycle
+    boundaries. The [platform release boundary](../architecture.md#current-release-boundary)
+    owns those admission requirements; storage or packaging evidence alone
+    does not grant them.
 
 - **Serves the web app.** The hub's private listener, on its Tailscale or LAN
   address, serves the same web app the desktop window shows. A phone or

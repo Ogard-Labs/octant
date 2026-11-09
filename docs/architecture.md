@@ -1580,6 +1580,13 @@ folder that is not a repository on a `plain-folder` checkout whose head is
 reports itself unavailable there rather than inventing a revision. On, both are
 refused.
 
+The default-folder wire value preserves the host's native absolute spelling:
+POSIX paths or Windows drive-absolute paths. Drive-relative paths, UNC/device
+namespaces and NUL bytes are refused. Decoding a path does not admit filesystem
+access: the host still checks its own native absolute form, resolves the actual
+ancestors and enforces the existing inside-home rule. A Windows value received
+on another platform is not reinterpreted as a local folder.
+
 The default folder used to be `~/Documents/Octant`, and threads without a
 Project in Code had a separate `allowDefaultFolderThreads` switch beside the Git
 requirement. A stored folder is kept, so an install that stored
@@ -15449,6 +15456,109 @@ supports only macOS and Linux and refuses every other platform, so Work and
 Code fail closed there. Simulator, the Apple workbench, and vibrancy stay
 macOS-only.
 
+The Windows owned-control prerequisite is an original in-process Node-API
+binding, not a separate owner daemon. Only a host-selected scope UUID reaches
+its fixed per-user `LocalAppData/Octant/runtime` namespace. Native code derives
+the current user, process ID and `GetProcessTimes` birth identity; it holds
+canonical directory ancestors without delete sharing, refuses reparse points
+and unsafe ownership/ACLs, and creates a first-instance named pipe with an
+explicit user-plus-SYSTEM DACL and remote clients refused. A client checks the
+actual pipe server's PID/birth and account before sending host-control data.
+The existing authenticated control schema is shared with the Unix transport;
+16 KiB is the complete wire-frame bound, including its newline, so a Windows
+JSON payload is at most 16,383 UTF-8 bytes. Oversized frames are refused, never
+truncated.
+
+Nonblocking byte-pipe polling has a two-second connection/request deadline and
+retains no overlapped kernel I/O buffer after a call returns. Only an explicitly
+busy connection that has dispatched no bytes may retry within that original
+deadline; a pending, refused or uncertain dispatched request is never replayed. The host strongly
+anchors its owner lease. Closing the endpoint, GC or environment/worker teardown
+cannot remove the native PID/birth record or release its retained directory and
+record guards while that process lives: the first-party module is pinned for
+that process's lifetime. A later claimant refuses a live or unverifiable writer,
+even when the endpoint no longer answers; only an OS-verified dead birth permits
+replacement. Host command callbacks retain their existing host-owned lifecycle;
+a late response cannot dispatch to a closed lease or a different connection.
+Only this control nonce/receipt is stored here, never provider credentials or an
+arbitrary secret selected by a caller.
+
+This prerequisite has no ordinary Windows host-path/startup admission. The
+binding must be proven on native Bun, Node and Electron with synthetic owned
+fixtures; missing or incompatible native code stays unavailable. Full data-path,
+control/lifecycle and credential integration remain separate Windows host
+requirements. It does not enable Chat, Work, Code, a native provider or a release.
+
+The dependent Windows persistent-profile boundary uses the native current user's
+LocalAppData known folder, with closed profiles at `Octant/hosts/octant` and
+`Octant/hosts/nightly-test-data`. Their `data`, `config`, `state` and `logs`
+directories have protected owner-plus-SYSTEM DACLs with object/container
+inheritance, so ordinary descendants do not acquire the process token's broader
+default DACL. The separate transient control namespace retains its existing
+non-inheriting DACLs. Native-held canonical directory handles exclude reparse
+points and prevent rename/replacement for the writer process's lifetime.
+Before any profile mutation the native boundary requires the process token's
+default owner to equal its user SID: inherited ACLs alone do not determine a
+new file's owner. A context whose default owner is an administrator group is
+unsupported and refused; production never changes the host or account token.
+
+A bounded, private native profile record binds a random persistent UUID to its
+profile kind and physical profile/data directory identities. A missing record can be
+created; a malformed, aliased, transplanted or unsafe record is refused rather
+than replaced. That UUID selects the control scope and owner receipt's runtime
+host identifier. It is not the cryptographic remote host/member identity:
+the private-listener signing port, key generation and journaled remote identity
+remain separate and receive no Windows admission from this boundary. The
+profile-aware owner consumer uses only these native facts. Windows external
+`OCTANT_DATA_DIR` and `OCTANT_LOGS_DIR` overrides are not supported and refuse
+explicitly; environment strings never select another profile store. Persistent
+guards and the profile record remain held until actual process exit, including
+owner release or environment teardown. This boundary still admits no Windows
+desktop/server startup, migration/restore path, provider, Chat, Work or Code.
+
+The Windows server/member P-256 identity storage prerequisite consumes that
+native-held profile boundary through the existing private-listener signing port.
+Only its fixed host-id and private-key files are admitted; the native operation
+revalidates current filesystem authority on every read/create, independent of
+JavaScript path facts. The public signer still exposes only SPKI, fingerprint
+and signatures; profile/control UUID, desktop HMAC identity and roster/TLS keys
+remain distinct. See [boot-key storage](design/hub-and-spokes.md#the-hub-is-a-server-first) for the
+owner, format, creation and refusal rules. The existing remote/member and push
+consumers carry a host-internal storage dependency; absence refuses on Windows.
+The dependent listener TLS store carries its own closed native dependency for
+the two fixed TLS key/certificate files. It reuses the profile admission
+boundary, exclusively creates and retains the separate P-256 key, and renews
+only private regular certificates through a flushed native staging handle and
+atomic rename into the held remote directory. The reopened file identity is
+checked before use. Renewal and restart preserve the SPKI pin; unsafe keys or
+certificate entries refuse without ordinary-file fallback or silent key rotation.
+Explicit listener key transitions refuse on this native store, because their
+staged key and key replacement use ordinary owner-only files.
+The dependent roster signer admits only its fixed `hub/roster-signing-key.pem`
+through a separate closed native operation on the same profile boundary.
+Exclusive creation preserves the existing P-256 key across restart or competing
+first-use. Unsafe, malformed and wrong-curve keys refuse without replacement or
+permission repair. Public SPKI and SHA-256/P1363 signatures retain their format;
+private transfer buffers are erased after import. Windows without this internal
+storage dependency refuses before ordinary-file access.
+The three existing hub, delegation and Tailscale-certificate authority records
+use closed native profile storage with bounded chunk sessions and their existing
+domain schemas and retention rules. Only the active claimed owner in the same
+native environment/profile/current PID-birth may commit a flushed private atomic
+replacement. Stable read snapshots do not block newer authority commits; corrupt
+or unsafe records refuse instead of becoming empty state. Detail and ownership:
+[boot-key and authority storage](design/hub-and-spokes.md#the-hub-is-a-server-first).
+These individual storage prerequisites alone do not admit Windows startup,
+encryption warnings, service integration or execution confinement. The Windows
+foreground entry composes their actual native owner and profile with the journal,
+usage cache, closed credential stores, policy, logs and discovery projections
+before importing server/persistence runtimes. Its loopback Chat lifecycle requires
+actual ready, authority-refusal, verified-backup and joined-shutdown proof for both
+profiles. Executable providers/extensions and Work/Code remain unavailable;
+desktop/Nightly bootstrap and service/encryption integration retain separate gates.
+The owning rules and local-owner trust limits are in
+[foreground storage and lifecycle](design/hub-and-spokes.md#the-hub-is-a-server-first).
+
 The Windows credential building block uses an Octant native helper
 with `CredWriteW`, `CredReadW` and `CredDeleteW`, never a secret in `cmdkey`
 arguments or a PowerShell script. A generic credential's protected blob holds
@@ -15500,10 +15610,11 @@ Windows executor uses empty arguments/environment and a five-second joined
 operation lifetime. Missing helper configuration stays recovery-only. macOS
 behavior and the existing Linux recovery-only path are unchanged.
 
-These native building blocks do not admit a Windows host or Chat, package
-a Windows app, supply server/member/roster P-256 identity or owner-presence unlock. A missing trusted helper leaves the store unavailable. Native CI
-exercises synthetic targets on an ephemeral Windows runner; real Windows host
-ownership, private runtime paths and lifecycle remain separate prerequisites.
+These credential building blocks remain distinct from native ownership/profile
+paths and server/member/roster P-256 identity. A missing trusted helper leaves
+the credential store unavailable. Native CI exercises synthetic targets on an
+ephemeral Windows runner. Complete foreground boot and lifecycle composition,
+owner-presence unlock and Windows app packaging remain separate work.
 Work and Code remain refused until their native confinement boundary is proven.
 
 **Updates** (`apps/desktop/src/appUpdateService.ts`, `appUpdateFeed.ts`,
