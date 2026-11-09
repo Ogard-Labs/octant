@@ -2,13 +2,14 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import type {
-  HubMemberId,
-  MovedThreadReference,
-  PeerGrant,
-  RosterMember,
-  ThreadMoveFailureReason,
-  ThreadMovePartLeftBehind,
+import {
+  THREAD_MOVE_PARTS_LEFT_BEHIND_NAMED,
+  type HubMemberId,
+  type MovedThreadReference,
+  type PeerGrant,
+  type RosterMember,
+  type ThreadMoveFailureReason,
+  type ThreadMovePartLeftBehind,
 } from "@octant/contracts";
 import type { HubHostIdentity } from "./hubService";
 import type { HubTransport } from "./pinnedHubTransport";
@@ -327,6 +328,27 @@ describe("moving a thread", () => {
     expect(h.received[1]?.bytes.every((byte) => byte === 1)).toBe(true);
     const departures = createThreadMoveStateStore(folders[0] ?? "").load().departures ?? [];
     expect(departures.map((departure) => departure.partsLeftBehind)).toEqual([[leftBehind]]);
+  });
+
+  it("finishes a move with more unreadable parts than the receipt names, naming the first and counting all", async () => {
+    const leftBehind: ReadonlyArray<ThreadMovePartLeftBehind> = Array.from(
+      { length: THREAD_MOVE_PARTS_LEFT_BEHIND_NAMED + 1 },
+      (_, index) => ({
+        kind: "browser-capture",
+        // A capture's title may be longer than the receipt holds.
+        name: index === 0 ? "x".repeat(1_000) : `capture ${index}`,
+      }),
+    );
+    const h = harness({ bulk: { parts: [], leftBehind } });
+    expect((await start(h)).status).toBe("moved");
+    expect(h.erased).toEqual([chatThread.threadId]);
+    const [departure] = createThreadMoveStateStore(folders[0] ?? "").load().departures ?? [];
+    expect(departure?.partsLeftBehind).toHaveLength(THREAD_MOVE_PARTS_LEFT_BEHIND_NAMED);
+    expect(departure?.partsLeftBehind?.[0]?.name).toHaveLength(512);
+    expect(departure?.partsLeftBehind?.at(-1)?.name).toBe(
+      `capture ${THREAD_MOVE_PARTS_LEFT_BEHIND_NAMED - 1}`,
+    );
+    expect(departure?.partsLeftBehindCount).toBe(THREAD_MOVE_PARTS_LEFT_BEHIND_NAMED + 1);
   });
 
   it("refuses an offer without the destination owner's ticket, and unfreezes with the reason", async () => {

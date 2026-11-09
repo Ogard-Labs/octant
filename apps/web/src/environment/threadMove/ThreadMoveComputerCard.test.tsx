@@ -173,6 +173,8 @@ describe("the Computer card", () => {
             { kind: "attachment", name: "scan.pdf" },
             { kind: "browser-capture", name: "Pricing" },
           ],
+          // More were left behind than the receipt names.
+          partsLeftBehindCount: 5,
           movedAt: "2026-11-08T12:00:00.000Z" as never,
           destinationName: "Desktop",
         },
@@ -190,7 +192,7 @@ describe("the Computer card", () => {
     );
     expect(
       await screen.findByText(
-        /2 parts could not be read here, so they did not move: scan\.pdf, Pricing\./,
+        /5 parts could not be read here, so they did not move: scan\.pdf, Pricing, and 3 more\./,
       ),
     ).toBeInTheDocument();
   });

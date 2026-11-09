@@ -574,6 +574,8 @@ function MovedNotice(props: {
     minute: "2-digit",
   });
   const leftBehind = props.departed.partsLeftBehind ?? [];
+  const leftBehindCount = props.departed.partsLeftBehindCount ?? leftBehind.length;
+  const unnamed = leftBehindCount - leftBehind.length;
   return (
     <OctantAlert title={`Moved to ${props.departed.destinationName}`} tone="neutral">
       Moved at {time}.
@@ -582,9 +584,9 @@ function MovedNotice(props: {
           ? " Its changes also remain in this Project's checkout."
           : null
         : ` Its worktree held files that stayed here, so it was kept at ${props.departed.keptWorktree}.`}
-      {leftBehind.length === 0
+      {leftBehindCount === 0
         ? null
-        : ` ${leftBehind.length === 1 ? "1 part" : `${leftBehind.length} parts`} could not be read here, so ${leftBehind.length === 1 ? "it" : "they"} did not move: ${leftBehind.map((part) => part.name).join(", ")}.`}
+        : ` ${leftBehindCount === 1 ? "1 part" : `${leftBehindCount} parts`} could not be read here, so ${leftBehindCount === 1 ? "it" : "they"} did not move: ${leftBehind.map((part) => part.name).join(", ")}${unnamed > 0 ? `, and ${unnamed} more` : ""}.`}
     </OctantAlert>
   );
 }

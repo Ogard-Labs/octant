@@ -482,6 +482,15 @@ export const HandedOverThread = Schema.Struct({
 }).annotations(strict);
 export type HandedOverThread = typeof HandedOverThread.Type;
 
+/** The longest name a receipt keeps for a part left behind. */
+export const THREAD_MOVE_PART_NAME_LENGTH = 512;
+/**
+ * How many parts left behind a receipt names; the rest are only counted. The
+ * source applies this when it packs, before anything is erased, so the
+ * "Moved to" record it saves after the erase always fits.
+ */
+export const THREAD_MOVE_PARTS_LEFT_BEHIND_NAMED = 1_000;
+
 /**
  * A part the thread owned that the move could not carry, because its bytes
  * could not be read on the source when the move packed it. The erase still
@@ -490,7 +499,7 @@ export type HandedOverThread = typeof HandedOverThread.Type;
  */
 export const ThreadMovePartLeftBehind = Schema.Struct({
   kind: ThreadMovePartKind,
-  name: bounded(512),
+  name: bounded(THREAD_MOVE_PART_NAME_LENGTH),
 }).annotations(strict);
 export type ThreadMovePartLeftBehind = typeof ThreadMovePartLeftBehind.Type;
 
@@ -504,10 +513,14 @@ export const ThreadMoveDeparture = Schema.Struct({
   keptWorktree: Schema.optional(bounded(4_096)),
   /** The Project's own checkout kept the thread's changes too. */
   changesRemainInCheckout: Schema.Boolean,
-  /** Parts the move could not carry; absent when every part travelled. */
+  /** Parts the move could not carry, the first ones named; absent when every part travelled. */
   partsLeftBehind: Schema.optional(
-    Schema.Array(ThreadMovePartLeftBehind).pipe(Schema.maxItems(1_000)),
+    Schema.Array(ThreadMovePartLeftBehind).pipe(
+      Schema.maxItems(THREAD_MOVE_PARTS_LEFT_BEHIND_NAMED),
+    ),
   ),
+  /** How many parts the move could not carry, named or not. */
+  partsLeftBehindCount: Schema.optional(Schema.Int.pipe(Schema.positive())),
   movedAt: UtcTimestamp,
 }).annotations(strict);
 export type ThreadMoveDeparture = typeof ThreadMoveDeparture.Type;
