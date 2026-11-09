@@ -56,6 +56,11 @@ export function ThreadMoveTombstone(props: {
     timeStyle: "short",
   });
 
+  // Open there copies rather than opens. No window shows a thread another
+  // member holds (a pane always reads this window's own host), and the
+  // desktop app's own `octant://` handler takes only `octant://code/` links,
+  // so handing this link to the system would bring it back here and do
+  // nothing. The phone app is what opens it.
   const openThere = () => {
     const write = props.writeClipboard ?? ((text: string) => navigator.clipboard.writeText(text));
     write(movedThreadLink(departed)).then(
@@ -100,7 +105,7 @@ export function ThreadMoveTombstone(props: {
           <OctantButton onClick={openThere}>Open there</OctantButton>
           <p aria-live="polite" className="thread-move-tombstone__meta">
             {copied === "copied"
-              ? `Link copied. Open it on ${departed.destinationName} or your phone.`
+              ? `Link copied. This window can't open threads on ${departed.destinationName}; the Octant phone app opens this link.`
               : copied === "failed"
                 ? "The link couldn't be copied."
                 : ""}

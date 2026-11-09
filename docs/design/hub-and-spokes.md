@@ -1285,9 +1285,19 @@ again, and a folder already gone counts as removed. No agent, routine, tool,
 peer, or paired device reaches it. **Open there** copies the moved thread's
 link in the form an Octant phone opens
 (`octant://hosts/{member}/threads/{mode}/{thread}`; a member is named by its
-host id). Rationale: no window path yet opens another computer's thread from
-what a departure records, which names no destination Project, so opening it in
-this window when the window already reads that host is not built yet.
+host id), and the line under it says this window can't open threads on that
+member and that the Octant phone app opens the link. It opens nothing and
+reaches nothing on the destination. Rationale (checked 2026-11-09): no window
+shows a thread another member holds. A pane's content always comes from the
+window's own host, whose context is always this computer; a pane's host id
+only marks a thread as elsewhere and refuses it, and the federated paired
+computers a desktop window reads carry Running services and resources, not
+threads. Handing the link to the system does not help either: the desktop app
+registers the `octant` scheme, but its handler takes only `octant://code/`
+links and ignores every other one, so the link would come back to this app and
+do nothing. Opening the moved thread here needs a window view of another
+member's thread, a new surface of its own; until one exists the departure
+records no destination Project, because nothing would read it.
 
 **Interruptions.**
 
@@ -2582,8 +2592,12 @@ a numbered slice. Built, with these narrower readings:
     [Erase on the source](#moving-a-thread-to-another-member) describes.
     The shell opens a departed thread's pane again after it closed, so an old
     link, a notification, or a search reaches the tombstone. A remote client,
-    or a window reading another host, shows neither. What it
-    does not do yet: Open there opening the thread in this window, and the
+    or a window reading another host, shows neither. Open there copies the
+    link and says this window can't open it, because no window shows another
+    member's thread and the desktop's `octant://` handler takes only Code
+    links, as [the tombstone rules](#moving-a-thread-to-another-member)
+    record. What it does not do yet: Open there opening the thread in this
+    window, which waits on a window view of another member's thread, and the
     estimate in the bar.
 
     The eleventh part lets an owner phone unlock a move a window started, as

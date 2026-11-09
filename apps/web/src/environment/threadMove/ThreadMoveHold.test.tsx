@@ -211,11 +211,12 @@ describe("a moved thread's pane on the computer it left", () => {
     movedAt: "2026-11-09T09:30:00.000Z",
   };
 
-  it("shows Moved to with Open there, which copies the thread's link on that computer", async () => {
+  it("shows Moved to with Open there, which copies the thread's link and says this window can't open it", async () => {
     const user = userEvent.setup();
     const writeText = vi.fn(async () => {});
     Object.defineProperty(navigator, "clipboard", { configurable: true, value: { writeText } });
-    const { client } = fakeClient({ status: "read", departed });
+    const open = vi.spyOn(window, "open").mockReturnValue(null);
+    const { client, calls } = fakeClient({ status: "read", departed });
     pane(client);
 
     expect(await screen.findByRole("heading", { name: "Moved to Desktop" })).toBeInTheDocument();
@@ -223,7 +224,16 @@ describe("a moved thread's pane on the computer it left", () => {
     expect(screen.queryByRole("button", { name: "Remove worktree" })).not.toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "Open there" }));
     expect(writeText).toHaveBeenCalledWith(`octant://hosts/${DESKTOP}/threads/code/${ARRIVED}`);
-    expect(await screen.findByText(/Link copied/)).toBeInTheDocument();
+    expect(
+      await screen.findByText(
+        "Link copied. This window can't open threads on Desktop; the Octant phone app opens this link.",
+      ),
+    ).toBeInTheDocument();
+    // Copying is all it does: nothing is navigated or handed to the system,
+    // and the move routes are asked nothing that changes anything.
+    expect(open).not.toHaveBeenCalled();
+    expect(calls).toEqual([]);
+    open.mockRestore();
   });
 
   it("names the parts that could not be read here and did not move, on the tombstone", async () => {

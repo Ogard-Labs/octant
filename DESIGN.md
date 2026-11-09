@@ -2083,10 +2083,13 @@ this is how it looks.
   offered. A failed move holds nothing, so its composer returns.
 - **Moved.** On `committed` the pane becomes the tombstone: the source and
   destination route line, "Moved to" and the member's name with the time, and
-  **Open there**, which opens the thread on that host in this window when the
-  window already reads that host, and copies its link otherwise (for now it
-  always copies the link, in the form an Octant phone opens, and says "Link
-  copied" under the button). The thread's
+  **Open there**, which copies the thread's link in the form an Octant phone
+  opens and says under the button, in one polite line, "Link copied. This
+  window can't open threads on" the member, "the Octant phone app opens this
+  link." No window shows another member's thread yet, so it opens nothing
+  here and hands nothing to the system
+  ([why](docs/design/hub-and-spokes.md#moving-a-thread-to-another-member)).
+  The thread's
   sidebar row leaves this host's list; a window that reads both hosts shows it
   under the destination with the cloud glyph, so it appears to travel rather
   than vanish. One notification says the move finished. When the worktree was
