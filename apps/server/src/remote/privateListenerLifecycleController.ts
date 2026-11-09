@@ -30,6 +30,7 @@
 
 import { createHash, X509Certificate } from "node:crypto";
 import { classifyRemoteListenerAddress } from "@octant/domain";
+import type { ListenerKeyTransition } from "@octant/contracts";
 import {
   isPrivateListenerFailureCode,
   validatePrivateListenerConfig,
@@ -78,6 +79,7 @@ export interface PrivateListenerHostStatus {
    * certificate's key for display, and no client reads it as a pin.
    */
   readonly tlsPin: string | null;
+  readonly keyTransition?: ListenerKeyTransition;
   readonly errorCode?: PrivateListenerFailureCode;
 }
 
@@ -112,6 +114,9 @@ export interface CreatePrivateListenerLifecycleControllerOptions {
    * listener. Without it a self-made request is refused as `invalid-tls`.
    */
   readonly selfMadeCertificate?: SelfMadeListenerCertificateStore;
+  readonly hostId?: () => string;
+  /** Signed roster pins have their own authority; activation must not rewrite them. */
+  readonly allowKeyActivation?: () => boolean;
 }
 
 /** Why a tailnet certificate was not applied; the listener serves what it served before. */
@@ -122,6 +127,13 @@ export interface PrivateListenerLifecycleController {
   readonly enable: (config: RequestedPrivateListenerConfig) => Promise<PrivateListenerHostStatus>;
   readonly disable: () => Promise<PrivateListenerHostStatus>;
   readonly restart: (config: RequestedPrivateListenerConfig) => Promise<PrivateListenerHostStatus>;
+  readonly transitionKey: (input: {
+    readonly action: "prepare" | "activate" | "cancel";
+    readonly newPin?: string;
+  }) => Promise<
+    | PrivateListenerHostStatus
+    | { readonly status: "refused"; readonly code: "roster-transition-required" }
+  >;
   /**
    * Serves a tailnet certificate to clients that ask for its name by SNI, beside
    * the certificate the listener already serves; `undefined` goes back to one
@@ -249,6 +261,8 @@ export function createPrivateListenerLifecycleController(
       exposureClass = null;
     }
     const port = derivePort(facts.origin, config.port);
+    const transition =
+      activeSource === "self-made" ? options.selfMadeCertificate?.transition() : undefined;
     return {
       enabled: true,
       state: "ready",
@@ -260,6 +274,7 @@ export function createPrivateListenerLifecycleController(
       certificateReady: true,
       certificateSource: activeSource,
       tlsPin: activeSource === "self-made" ? activePin : null,
+      ...(transition?.origin === facts.origin ? { keyTransition: transition } : {}),
     };
   };
 
@@ -470,6 +485,37 @@ export function createPrivateListenerLifecycleController(
     status,
     enable: (config) => serialize(() => apply(config)),
     restart: (config) => serialize(() => apply(config)),
+    transitionKey: (input) =>
+      serialize(async () => {
+        const store = options.selfMadeCertificate;
+        const requested = activeRequested;
+        const origin = status().origin;
+        if (
+          state !== "ready" ||
+          requested?.tls !== "self-made" ||
+          store === undefined ||
+          options.hostId === undefined ||
+          origin === null
+        )
+          throw new PrivateListenerLifecycleError("invalid-tls");
+        if (input.action === "prepare") {
+          if (store.prepareTransition({ hostId: options.hostId(), origin }).status !== "prepared")
+            throw new PrivateListenerLifecycleError("invalid-tls");
+        } else if (input.action === "cancel") {
+          if (!store.cancelTransition()) throw new PrivateListenerLifecycleError("invalid-tls");
+        } else {
+          if (options.allowKeyActivation?.() === false)
+            return { status: "refused", code: "roster-transition-required" };
+          if (
+            input.newPin === undefined ||
+            store.transition()?.origin !== origin ||
+            store.activateTransition(input.newPin).status !== "activated"
+          )
+            throw new PrivateListenerLifecycleError("invalid-tls");
+          return apply(requested);
+        }
+        return status();
+      }),
     disable: () => serialize(disable),
     setTailnetCertificate: (tls) => serialize(() => setTailnetCertificate(tls)),
     tailnetCertificateName: () => tailnetTls?.serverName,

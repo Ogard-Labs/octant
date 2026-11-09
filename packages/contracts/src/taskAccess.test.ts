@@ -38,6 +38,22 @@ describe("bounded descriptive task access contract", () => {
       reviewer: { kind: "unknown" },
     });
   });
+  it("accepts bounded Browser facts and refuses invented grants or reasons", () => {
+    for (const browser of [
+      { status: "unknown" },
+      { status: "available", readOnly: true },
+      ...["no-tool-transport", "excluded-by-thread-constraints", "host-lends-no-browser"].map(
+        (reason) => ({ status: "omitted", reason }),
+      ),
+    ])
+      expect(decodeTaskAccessSnapshot({ ...snapshot(), browser }).browser).toEqual(browser);
+    for (const browser of [
+      { status: "available" },
+      { status: "omitted", reason: "approved" },
+      { status: "unknown", approved: true },
+    ])
+      expect(() => decodeTaskAccessSnapshot({ ...snapshot(), browser })).toThrow();
+  });
   it("rejects other subjects, forged identity/access and an accidental mutation-shaped query", () => {
     for (const aggregateType of ["chat-thread", "project", "agent-run"])
       expect(() =>

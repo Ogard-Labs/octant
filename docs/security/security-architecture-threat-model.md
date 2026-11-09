@@ -332,7 +332,7 @@ process; they run on macOS only, in the `macos-15` CI job, and passed there on 2
   most of them outright), for each closed-catalog entry marked `irreversibleUnderTaint`, and a
   catalog test refuses an entry in any of the four classes without that flag. Today `mcp-tool`
   (privilege expansion) is the only entry in one of the four classes; the flag also covers
-  `computer-use`, `web-fetch`, and the harness `bash`, `edit`, `write`, and `goal-check`. A Code Git action a person takes from a window (discard, restore, push, create a
+  `computer-use`, `web-fetch`, and the harness `bash`, `edit`, `write`, `goal-check`, and `diagnostics`. A Code Git action a person takes from a window (discard, restore, push, create a
   pull request, bring a run home) is that person's own per-action act, and no agent tool issues
   one. The prompt says the mark is why it asks and names the sources that marked the thread,
   with how often and when each was last read: the harness, MCP tool, and Computer use approvals

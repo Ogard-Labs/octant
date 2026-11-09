@@ -1,6 +1,8 @@
 import {
   AGENT_RUN_TURN_REQUEST_SHAPE,
   AGENT_RUN_USAGE_AGGREGATE_TYPE,
+  DECISION_REVIEW_REQUEST_SHAPE,
+  DECISION_REVIEW_USAGE_AGGREGATE_TYPE,
   PERSON_MEMORY_REQUEST_SHAPE,
   PERSON_MEMORY_USAGE_AGGREGATE_TYPE,
   SHIELD_REVIEW_REQUEST_SHAPE,
@@ -60,7 +62,8 @@ export class UsageProjection implements Projection {
       event.aggregateType !== PROVIDER_CLOUD_USAGE_AGGREGATE_TYPE &&
       event.aggregateType !== AGENT_RUN_USAGE_AGGREGATE_TYPE &&
       event.aggregateType !== SHIELD_REVIEW_USAGE_AGGREGATE_TYPE &&
-      event.aggregateType !== PERSON_MEMORY_USAGE_AGGREGATE_TYPE
+      event.aggregateType !== PERSON_MEMORY_USAGE_AGGREGATE_TYPE &&
+      event.aggregateType !== DECISION_REVIEW_USAGE_AGGREGATE_TYPE
     )
       return;
     this.#applyUsageReconciled(connection, event);
@@ -93,7 +96,8 @@ export class UsageProjection implements Projection {
             ? "agent-run"
             : event.aggregateType === SHIELD_REVIEW_USAGE_AGGREGATE_TYPE
               ? shieldReviewedThreadType(connection, event.aggregateId)
-              : event.aggregateType === PERSON_MEMORY_USAGE_AGGREGATE_TYPE
+              : event.aggregateType === PERSON_MEMORY_USAGE_AGGREGATE_TYPE ||
+                  event.aggregateType === DECISION_REVIEW_USAGE_AGGREGATE_TYPE
                 ? distilledThreadType(connection, event.aggregateId)
                 : event.aggregateType,
       aggregateId: event.aggregateId,
@@ -212,7 +216,8 @@ export class UsageProjection implements Projection {
         // either; the request-detail table says so instead of showing zero.
         reconciliation.requestShape === AGENT_RUN_TURN_REQUEST_SHAPE ||
           reconciliation.requestShape === SHIELD_REVIEW_REQUEST_SHAPE ||
-          reconciliation.requestShape === PERSON_MEMORY_REQUEST_SHAPE
+          reconciliation.requestShape === PERSON_MEMORY_REQUEST_SHAPE ||
+          reconciliation.requestShape === DECISION_REVIEW_REQUEST_SHAPE
           ? 0
           : 1,
       );

@@ -21,6 +21,8 @@ import {
   createPrivateKey,
   createPublicKey,
   generateKeyPairSync,
+  sign,
+  verify,
   X509Certificate,
 } from "node:crypto";
 import {
@@ -38,6 +40,9 @@ import {
 } from "node:fs";
 import { isIP } from "node:net";
 import { dirname, join } from "node:path";
+import { Schema } from "effect";
+import { ListenerKeyTransition, StableHostId } from "@octant/contracts";
+import { LISTENER_KEY_TRANSITION_WINDOW_MS, listenerKeyTransitionPayload } from "@octant/domain";
 import type { PrivateListenerTls } from "../privateListener";
 import {
   certificatePem,
@@ -48,6 +53,7 @@ import {
 const REMOTE_SUBDIR = "remote";
 export const SELF_MADE_LISTENER_KEY_FILE = "private-listener-tls-key.pem";
 export const SELF_MADE_LISTENER_CERTIFICATE_FILE = "private-listener-tls-cert.pem";
+export const LISTENER_KEY_TRANSITION_FILE = "private-listener-key-transition.json";
 const DAY_MS = 24 * 60 * 60 * 1_000;
 const VALIDITY_MS = 365 * DAY_MS;
 const RENEW_BEFORE_END_MS = 30 * DAY_MS;
@@ -67,6 +73,19 @@ export type SelfMadeListenerCertificate =
 export interface SelfMadeListenerCertificateStore {
   /** Loads or makes the key, renews the certificate when due, and returns both with the pin. */
   readonly ensure: (hostname: string) => SelfMadeListenerCertificate;
+  readonly transition: () => ListenerKeyTransition | undefined;
+  readonly prepareTransition: (input: {
+    readonly hostId: string;
+    readonly origin: string;
+  }) =>
+    | { readonly status: "prepared"; readonly transition: ListenerKeyTransition }
+    | { readonly status: "refused"; readonly code: "invalid-transition" };
+  readonly activateTransition: (
+    newPin: string,
+  ) =>
+    | { readonly status: "activated" }
+    | { readonly status: "refused"; readonly code: "invalid-transition" };
+  readonly cancelTransition: () => boolean;
 }
 
 export interface CreateSelfMadeListenerCertificateStoreOptions {
@@ -94,8 +113,55 @@ export function createSelfMadeListenerCertificateStore(
   const keyPath = join(directory, SELF_MADE_LISTENER_KEY_FILE);
   const certificatePath = join(directory, SELF_MADE_LISTENER_CERTIFICATE_FILE);
   const now = options.now ?? (() => new Date());
+  const transitionPath = join(directory, LISTENER_KEY_TRANSITION_FILE);
+  const decodeStage = Schema.decodeUnknownSync(
+    Schema.Struct({
+      transition: ListenerKeyTransition,
+      newKeyPem: Schema.NonEmptyString,
+    }).annotations({ parseOptions: { onExcessProperty: "error" } }),
+  );
+  const keyPin = (pem: string): string =>
+    `sha256-${createHash("sha256")
+      .update(createPublicKey(pem).export({ format: "der", type: "spki" }))
+      .digest("base64url")}`;
+  const currentPin = (): string => {
+    const current = readOwnerOnlyKey(keyPath);
+    if (current.status !== "loaded") throw new Error("Listener key unavailable.");
+    return keyPin(current.pem);
+  };
+  const readStage = (): ReturnType<typeof decodeStage> | undefined => {
+    const loaded = readOwnerOnlyKey(transitionPath);
+    if (loaded.status === "missing") return undefined;
+    if (loaded.status === "exposed") throw new Error("Listener transition exposed.");
+    const value: unknown = JSON.parse(loaded.pem);
+    if (value === null) return undefined;
+    const stage = decodeStage(value);
+    const t = stage.transition;
+    const oldKey = createPublicKey({
+      key: Buffer.from(t.oldPublicKey, "base64url"),
+      type: "spki",
+      format: "der",
+    });
+    const newKey = createPrivateKey(stage.newKeyPem);
+    if (
+      newKey.asymmetricKeyType !== "ec" ||
+      newKey.asymmetricKeyDetails?.namedCurve !== "prime256v1" ||
+      keyPin(stage.newKeyPem) !== t.newPin ||
+      keyPin(String(oldKey.export({ type: "spki", format: "pem" }))) !== t.oldPin ||
+      Date.parse(t.expiresAt) - Date.parse(t.preparedAt) !== LISTENER_KEY_TRANSITION_WINDOW_MS ||
+      !verify(
+        "sha256",
+        Buffer.from(listenerKeyTransitionPayload(t)),
+        { key: oldKey, dsaEncoding: "ieee-p1363" },
+        Buffer.from(t.signature, "base64url"),
+      )
+    ) {
+      throw new Error("Invalid listener transition.");
+    }
+    return stage;
+  };
 
-  return {
+  const store: SelfMadeListenerCertificateStore = {
     ensure: (hostname) => {
       const address = listenerAddress(hostname);
       if (address === undefined) return { status: "refused", code: "invalid-tls" };
@@ -225,7 +291,106 @@ export function createSelfMadeListenerCertificateStore(
         tlsPin: listenerTlsPin(certificate),
       };
     },
+    transition: () => {
+      try {
+        const stage = readStage();
+        if (stage === undefined || Date.parse(stage.transition.expiresAt) <= now().getTime())
+          return undefined;
+        const pin = currentPin();
+        return pin === stage.transition.oldPin || pin === stage.transition.newPin
+          ? stage.transition
+          : undefined;
+      } catch {
+        return undefined;
+      }
+    },
+    prepareTransition: (input) => {
+      try {
+        const origin = new URL(input.origin);
+        if (origin.protocol !== "https:" || origin.origin !== input.origin)
+          throw new Error("Invalid origin.");
+        const hostId = Schema.decodeUnknownSync(StableHostId)(input.hostId);
+        const serving = store.ensure(origin.hostname);
+        if (serving.status !== "ready") throw new Error("Listener key unavailable.");
+        const previous = readStage();
+        const at = now();
+        if (previous !== undefined && Date.parse(previous.transition.expiresAt) > at.getTime()) {
+          const t = previous.transition;
+          if (
+            t.oldPin !== serving.tlsPin ||
+            t.origin !== input.origin ||
+            String(t.hostId) !== String(hostId)
+          )
+            throw new Error("A transition is already active.");
+          return { status: "prepared", transition: t };
+        }
+        const generated = generateKeyPairSync("ec", { namedCurve: "P-256" });
+        const unsigned = Schema.decodeUnknownSync(ListenerKeyTransition.omit("signature"))({
+          version: 1 as const,
+          hostId,
+          origin: input.origin,
+          oldPin: serving.tlsPin,
+          newPin: keyPin(String(generated.publicKey.export({ type: "spki", format: "pem" }))),
+          oldPublicKey: createPublicKey(String(serving.tls.key))
+            .export({ type: "spki", format: "der" })
+            .toString("base64url"),
+          preparedAt: at.toISOString(),
+          expiresAt: new Date(at.getTime() + LISTENER_KEY_TRANSITION_WINDOW_MS).toISOString(),
+        });
+        const transition = Schema.decodeUnknownSync(ListenerKeyTransition)({
+          ...unsigned,
+          signature: sign("sha256", Buffer.from(listenerKeyTransitionPayload(unsigned)), {
+            key: String(serving.tls.key),
+            dsaEncoding: "ieee-p1363",
+          }).toString("base64url"),
+        });
+        writeOwnerOnly(
+          transitionPath,
+          JSON.stringify({
+            transition,
+            newKeyPem: String(generated.privateKey.export({ type: "pkcs8", format: "pem" })),
+          }),
+        );
+        return { status: "prepared", transition };
+      } catch {
+        return { status: "refused", code: "invalid-transition" };
+      }
+    },
+    activateTransition: (newPin) => {
+      try {
+        const stage = readStage();
+        if (stage === undefined || stage.transition.newPin !== newPin)
+          throw new Error("Transition changed.");
+        const pin = currentPin();
+        if (pin === newPin) return { status: "activated" };
+        const t = stage.transition;
+        if (
+          pin !== t.oldPin ||
+          Date.parse(t.preparedAt) > now().getTime() ||
+          Date.parse(t.expiresAt) <= now().getTime()
+        )
+          throw new Error("Transition expired.");
+        // The signed stage is durable first. If power fails after replacing the
+        // key, ensure renews the old certificate for this same new key.
+        writeOwnerOnly(keyPath, stage.newKeyPem);
+        return { status: "activated" };
+      } catch {
+        return { status: "refused", code: "invalid-transition" };
+      }
+    },
+    cancelTransition: () => {
+      try {
+        const stage = readStage();
+        if (stage === undefined) return true;
+        if (currentPin() !== stage.transition.oldPin) return false;
+        writeOwnerOnly(transitionPath, "null");
+        return true;
+      } catch {
+        return false;
+      }
+    },
   };
+  return store;
 }
 
 type LoadedKey =

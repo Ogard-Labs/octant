@@ -422,7 +422,7 @@ describe("private listener lifecycle controller with a self-made certificate", (
     }
   });
 
-  function setup() {
+  function setup(allowKeyActivation?: () => boolean) {
     const directory = mkdtempSync(join(tmpdir(), "octant-listener-self-made-"));
     directories.push(directory);
     const served: RemoteGatewayConfig[] = [];
@@ -438,6 +438,8 @@ describe("private listener lifecycle controller with a self-made certificate", (
         return gateway;
       },
       selfMadeCertificate: createSelfMadeListenerCertificateStore({ dataDirectory: directory }),
+      hostId: () => "11111111-1111-4111-8111-111111111111",
+      ...(allowKeyActivation === undefined ? {} : { allowKeyActivation }),
     });
     return { directory, served, controller, gateway };
   }
@@ -448,6 +450,73 @@ describe("private listener lifecycle controller with a self-made certificate", (
     origin: "https://100.64.0.7:8443",
     tls: "self-made",
   } as const;
+
+  it("advertises preparation without restarting and activates only the exact displayed new key", async () => {
+    const { served, controller } = setup();
+    const before = await controller.enable(SELF_MADE);
+    const prepared = await controller.transitionKey({ action: "prepare" });
+    if ("status" in prepared) throw new Error("unexpected refusal");
+    const transition = prepared.keyTransition;
+    if (transition === undefined) throw new Error("expected visible transition");
+    expect(prepared.tlsPin).toBe(before.tlsPin);
+    expect(transition.oldPin).toBe(before.tlsPin);
+    expect(served).toHaveLength(1);
+    await expect(
+      controller.transitionKey({ action: "activate", newPin: transition.oldPin }),
+    ).rejects.toMatchObject({ code: "invalid-tls" });
+    expect(served).toHaveLength(1);
+    const activated = await controller.transitionKey({
+      action: "activate",
+      newPin: transition.newPin,
+    });
+    if ("status" in activated) throw new Error("unexpected refusal");
+    expect(activated.tlsPin).toBe(transition.newPin);
+    expect(served).toHaveLength(2);
+    expect(listenerTlsPin(String(served[1]?.listener.tls.cert))).toBe(transition.newPin);
+    expect(JSON.stringify(activated)).not.toContain("PRIVATE KEY");
+    await expect(controller.transitionKey({ action: "cancel" })).rejects.toMatchObject({
+      code: "invalid-tls",
+    });
+  });
+
+  it("withdraws preparation while retaining the old key and refuses pasted or disabled listeners", async () => {
+    const { controller } = setup();
+    await expect(controller.transitionKey({ action: "prepare" })).rejects.toMatchObject({
+      code: "invalid-tls",
+    });
+    const before = await controller.enable(SELF_MADE);
+    await controller.transitionKey({ action: "prepare" });
+    const cancelled = await controller.transitionKey({ action: "cancel" });
+    if ("status" in cancelled) throw new Error("unexpected refusal");
+    expect(cancelled.tlsPin).toBe(before.tlsPin);
+    expect(cancelled.keyTransition).toBeUndefined();
+    await controller.restart(lanConfig());
+    await expect(controller.transitionKey({ action: "prepare" })).rejects.toMatchObject({
+      code: "invalid-tls",
+    });
+  });
+
+  it("does not activate over a hub roster pin and rechecks membership immediately before changing the key", async () => {
+    let permitted = true;
+    const { controller, served } = setup(() => permitted);
+    const before = await controller.enable(SELF_MADE);
+    const prepared = await controller.transitionKey({ action: "prepare" });
+    if ("status" in prepared || prepared.keyTransition === undefined)
+      throw new Error("expected preparation");
+    permitted = false;
+    expect(
+      await controller.transitionKey({ action: "activate", newPin: prepared.keyTransition.newPin }),
+    ).toEqual({ status: "refused", code: "roster-transition-required" });
+    expect(controller.status().tlsPin).toBe(before.tlsPin);
+    expect(served).toHaveLength(1);
+    permitted = true;
+    const activated = await controller.transitionKey({
+      action: "activate",
+      newPin: prepared.keyTransition.newPin,
+    });
+    if ("status" in activated) throw new Error("unexpected refusal");
+    expect(activated.tlsPin).toBe(prepared.keyTransition.newPin);
+  });
 
   it("serves the key the status pins and keeps that pin across a restart", async () => {
     const { served, controller } = setup();
@@ -493,6 +562,7 @@ describe("private listener lifecycle controller with a self-made certificate", (
     const { gateway, calls } = fakeGateway();
     const createGateway = vi.fn(() => gateway);
     const refusing = {
+      ...createSelfMadeListenerCertificateStore({ dataDirectory: directory }),
       ensure: () => ({ status: "refused", code: "tls-key-exposed" }) as const,
     };
     const controller = createPrivateListenerLifecycleController({

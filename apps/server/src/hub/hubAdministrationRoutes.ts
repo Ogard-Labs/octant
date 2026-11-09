@@ -30,6 +30,7 @@ import {
   decodeHubStandbyOrderRequest,
   decodeHubWakeHardwareAddressRequest,
   decodeHubWakeSwitchRequest,
+  decodeHubAcceptMovedThreadsRequest,
   decodeOwnerAdditionRequest,
   decodeOwnerAlertRequest,
   decodeOwnerMemberRequest,
@@ -92,6 +93,8 @@ export const HUB_ADMINISTRATION_ROUTES = {
   standInRemove: "/api/desktop/hub/stand-in/members/remove",
   /** The hub's wake service switch: only a window on the hub turns it on or off. */
   wake: "/api/desktop/hub/wake",
+  /** Accept moved threads: only a window on the hub turns it on or off. */
+  acceptMovedThreads: "/api/desktop/hub/accept-moved-threads",
   /** A spoke's own window enters or clears this computer's hardware address. */
   wakeHardwareAddress: "/api/desktop/hub/wake/hardware-address",
   /** The hub's push switch: only a window on the hub turns it on or off. */
@@ -182,6 +185,7 @@ export function createHubAdministrationRouteHandler(
           ...options.hub.status(),
           owners: options.hub.listOwners(),
           ownerCandidates: options.hub.ownerCandidates(),
+          acceptMovedThreads: options.hub.acceptsMovedThreads(),
         },
         spoke: options.spoke.status(),
         failover: options.failover.status(),
@@ -331,6 +335,10 @@ export function createHubAdministrationRouteHandler(
         case HUB_ADMINISTRATION_ROUTES.wake: {
           const value = decodeHubWakeSwitchRequest(parseJson(request, body.text));
           return outcome(await options.wake.setEnabled(value.enabled, WINDOW_PRINCIPAL));
+        }
+        case HUB_ADMINISTRATION_ROUTES.acceptMovedThreads: {
+          const value = decodeHubAcceptMovedThreadsRequest(parseJson(request, body.text));
+          return outcome(options.hub.setAcceptMovedThreads(value.enabled, WINDOW_PRINCIPAL));
         }
         case HUB_ADMINISTRATION_ROUTES.push: {
           const value = decodeHubPushSwitchRequest(parseJson(request, body.text));

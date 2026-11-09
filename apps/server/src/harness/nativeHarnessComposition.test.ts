@@ -519,6 +519,7 @@ describe("native harness composition", () => {
         "todo-write",
         "context-remaining",
         "second-opinion",
+        "diagnostics",
       ]);
     });
 
@@ -528,6 +529,10 @@ describe("native harness composition", () => {
       questions: { ask: async () => undefined } as never,
       webFetch: (async () => undefined) as never,
       resolveWebSearch: () => (async () => undefined) as never,
+      skills: () => ({
+        list: async () => ({ status: "listed" as const, skills: [] }),
+        load: async () => ({ status: "refused" as const, reason: "skill-not-found", message: "" }),
+      }),
     };
 
     const noJournal = {
@@ -567,10 +572,13 @@ describe("native harness composition", () => {
         "goal",
       ];
       const web = ["web-fetch", "web-search"];
+      // Skills a Chat Project's thread can have are effective there too, so every lead
+      // is offered skill; it lists and loads only what the activation ladder allows.
+      const files = ["read", "grep", "glob", "bash", "edit", "write"];
       expect({ chat, work, code }).toEqual({
-        chat: lead,
-        work: ["read", "grep", "glob", "bash", "edit", "write", ...web, ...lead, "goal-check"],
-        code: ["read", "grep", "glob", "bash", "edit", "write", ...web, ...lead, "goal-check"],
+        chat: [...lead, "skill"],
+        work: [...files, ...web, ...lead, "goal-check", "skill"],
+        code: [...files, ...web, ...lead, "goal-check", "skill", "diagnostics"],
       });
     });
 
@@ -596,10 +604,21 @@ describe("native harness composition", () => {
         const readOnly = ["read", "grep", "glob"];
         const web = ["web-fetch", "web-search"];
         const lead = ["todo-write", "context-remaining", "second-opinion", "ask-user", "goal"];
+        // skill only reads, so Plan keeps it.
         expect(code).toEqual(
           writes
-            ? [...readOnly, "bash", "edit", "write", ...web, ...lead, "goal-check"]
-            : [...readOnly, ...web, ...lead],
+            ? [
+                ...readOnly,
+                "bash",
+                "edit",
+                "write",
+                ...web,
+                ...lead,
+                "goal-check",
+                "skill",
+                "diagnostics",
+              ]
+            : [...readOnly, ...web, ...lead, "skill"],
         );
       },
     );
@@ -616,7 +635,7 @@ describe("native harness composition", () => {
           windowId: "window-1",
         })!,
       );
-      for (const refused of ["bash", "edit", "write", "goal-check"]) {
+      for (const refused of ["bash", "edit", "write", "goal-check", "diagnostics"]) {
         expect(code).not.toContain(refused);
       }
       expect(code).toContain("read");
@@ -794,6 +813,7 @@ describe("native harness composition", () => {
         "webFetch:",
         "contextHarness",
         "journal:",
+        "skills:",
       ]) {
         expect(block, port).toContain(port);
       }
@@ -1164,7 +1184,18 @@ describe("native harness composition", () => {
           inputJson: JSON.stringify({ command }),
           signal: new AbortController().signal,
         });
-      return { ran, asked, reviewed, shown, review, bash, recorded, tagged, forgeRecorded };
+      return {
+        composition,
+        ran,
+        asked,
+        reviewed,
+        shown,
+        review,
+        bash,
+        recorded,
+        tagged,
+        forgeRecorded,
+      };
     };
 
     it("refuses a Full access merge or a push to another thread's branch before it runs, and journals it", async () => {
@@ -1363,6 +1394,20 @@ describe("native harness composition", () => {
       );
       expect(harness.reviewed).not.toHaveBeenCalled();
       expect(harness.ran).toEqual(["ls -la"]);
+    });
+
+    it("admits a long Code command whose approval summary is cut at a space or inside wide characters", async () => {
+      const harness = setup({ fullAccessTag: "not-tagged" });
+      // "bash: " plus 2,041 characters puts the 2,048-character cut on the space.
+      for (const command of [`echo ${"x".repeat(2_036)} ${"y".repeat(100)}`, "é".repeat(3_000)]) {
+        const prepared = await harness.composition.prepareCodeCommand({
+          thread: autoThread,
+          checkoutRoot: "/Users/dev/app",
+          windowId: "window-1",
+          command,
+        });
+        expect(prepared).toMatchObject({ status: "admitted" });
+      }
     });
 
     it("asks the person as before when Shield is not the thread's reviewer", async () => {

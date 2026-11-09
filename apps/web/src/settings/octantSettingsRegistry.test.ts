@@ -155,6 +155,7 @@ describe("octantSettingsRegistry", () => {
     expect(work?.settings.map((setting) => setting.id)).toEqual([
       "work-default-model",
       "work-default-access",
+      "work-full-access-sandbox",
     ]);
   });
 
@@ -220,6 +221,7 @@ describe("octantSettingsRegistry", () => {
     expect(providers?.settings.map((setting) => setting.id)).toEqual([
       "automatic-model-judge",
       "automatic-model-memory",
+      "automatic-model-decision-review",
       "opencode-managed-update",
       "provider-display-name",
       "provider-binary-path",
@@ -241,6 +243,7 @@ describe("octantSettingsRegistry", () => {
       "project-view-switcher",
       "code-default-access",
       "code-auto-reviewer",
+      "code-full-access-sandbox",
       "code-editor-executable",
       "code-editor-arguments",
       "open-in-applications",

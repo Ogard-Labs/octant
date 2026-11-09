@@ -638,6 +638,60 @@ describe("Project routes", () => {
   });
 });
 
+describe("Project memory proposal routes", () => {
+  const headers = { "x-octant-window-capability": capability };
+  const proposalId = "00000000-0000-4000-8000-000000000705";
+
+  it("lists and answers only the authenticated window's proposals", async () => {
+    const list = vi.fn(() => []);
+    const decide = vi.fn(async () => ({ kind: "project-memory-proposal-declined" }));
+    const { route } = routeFixtureWithClock({}, undefined, {}, { list, decide });
+
+    const listed = await route(
+      new Request("http://127.0.0.1/api/projects/memory/proposals", { headers }),
+    );
+    expect(listed?.status).toBe(200);
+    expect(await listed?.json()).toEqual({ kind: "project-memory-proposal-list", proposals: [] });
+    expect(list).toHaveBeenCalledWith(windowId);
+
+    const answered = await route(
+      new Request("http://127.0.0.1/api/projects/memory/proposals/decide", {
+        method: "POST",
+        headers: { ...headers, "content-type": "application/json" },
+        body: JSON.stringify({ proposalId, decision: "decline" }),
+      }),
+    );
+    expect(answered?.status).toBe(200);
+    expect(await answered?.json()).toEqual({ kind: "project-memory-proposal-declined" });
+    expect(decide).toHaveBeenCalledWith(windowId, { proposalId, decision: "decline" });
+  });
+
+  it("refuses an unauthenticated, forged, or malformed answer before it reaches a proposal", async () => {
+    const decide = vi.fn();
+    const { route } = routeFixtureWithClock({}, undefined, {}, { list: vi.fn(() => []), decide });
+    const post = (body: unknown, requestHeaders: Record<string, string>) =>
+      route(
+        new Request("http://127.0.0.1/api/projects/memory/proposals/decide", {
+          method: "POST",
+          headers: { ...requestHeaders, "content-type": "application/json" },
+          body: JSON.stringify(body),
+        }),
+      );
+
+    expect((await post({ proposalId, decision: "confirm" }, {}))?.status).toBe(401);
+    expect((await post({ proposalId, decision: "confirm", windowId }, headers))?.status).toBe(400);
+    expect((await post({ proposalId, decision: "always" }, headers))?.status).toBe(400);
+    expect(
+      (
+        await route(
+          new Request("http://127.0.0.1/api/projects/memory/proposals/decide", { headers }),
+        )
+      )?.status,
+    ).toBe(400);
+    expect(decide).not.toHaveBeenCalled();
+  });
+});
+
 function routeFixture(
   overrides: Record<string, unknown>,
   environmentOverrides: Record<string, unknown> = {},
@@ -649,6 +703,7 @@ function routeFixtureWithClock(
   overrides: Record<string, unknown> = {},
   maxRequestBodySize?: number,
   environmentOverrides: Record<string, unknown> = {},
+  memoryProposals?: Record<string, unknown>,
 ) {
   const store = new WindowAuthorityStore();
   store.register({ windowId, capability, now: 0 });
@@ -672,6 +727,7 @@ function routeFixtureWithClock(
       windowAuthorityStore: store,
       now: () => now.value,
       ...(maxRequestBodySize === undefined ? {} : { maxRequestBodySize }),
+      ...(memoryProposals === undefined ? {} : { memoryProposals: memoryProposals as never }),
     }),
     now,
   };

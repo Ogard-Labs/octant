@@ -1,3 +1,4 @@
+import { browserAgentAvailability } from "@octant/domain";
 import type { BrowserModelBinding } from "../browser/browserAppManagedTools";
 import type {
   BrowserAutomationSnapshot,
@@ -560,6 +561,112 @@ describe("Code app-managed tools", () => {
     });
     expect(JSON.stringify(result)).not.toContain("late-private-result");
     runScript.mockClear();
+    expect((await tools.execute(input)).isError).toBe(true);
+    expect(runScript).not.toHaveBeenCalled();
+  });
+
+  it("asks once for the exact source below Full access and invalidates it when the task changes", async () => {
+    let current = thread({ executionPolicy: "approval-gated" });
+    const initial = current;
+    let bound = true;
+    let reviewedRevision = 3;
+    let afterAnswer = () => {};
+    const snapshot = browserSnapshot(browserAuthority());
+    if (snapshot.context === undefined) throw new Error("expected Browser context");
+    const active = {
+      ...snapshot,
+      observation: { url: "https://example.com/", revision: 3, stale: false } as never,
+      context: { ...snapshot.context, presentation: "native-live" as const },
+    };
+    const runScript = vi.fn(
+      async (
+        _input: import("../browser/browserAutomationService").BrowserPageScriptInput,
+      ): Promise<import("@octant/contracts/browser-page-script").BrowserPageScriptReceipt> => {
+        reviewedRevision++;
+        return { status: "completed", effect: "possible", valueJson: "42" };
+      },
+    );
+    const tools = createCodeAppManagedTools({
+      windowId,
+      thread: initial,
+      readThread: () => current,
+      uuid: uuidFactory(),
+      executeOperation: vi.fn(),
+      terminal: { read: vi.fn() },
+      browser: {
+        resolveAuthority: () => browserAuthority(),
+        inspectThread: () => ({
+          ...active,
+          observation: {
+            url: "https://example.com/",
+            revision: reviewedRevision,
+            stale: reviewedRevision !== 3,
+          } as never,
+        }),
+        create: vi.fn(),
+        act: vi.fn(),
+        releaseThread: vi.fn(),
+        runScript,
+      },
+      browserSignIn: { refusal: () => undefined, request: vi.fn() },
+      browserProfiles: {
+        approvals: {
+          request: vi.fn(async (request) => {
+            expect(request.origin).toBe("https://example.com");
+            expect(request.script?.source).toBe("42");
+            afterAnswer();
+            return "approved" as const;
+          }),
+        },
+        readBinding: () =>
+          bound ? { modelId: String(initial.modelId), authority: browserAuthority() } : undefined,
+        rememberBinding: vi.fn(),
+        forgetBinding: vi.fn(),
+      },
+    });
+    const input = {
+      name: CODE_BROWSER_TOOL_NAME,
+      inputJson: JSON.stringify({
+        operation: "run-script",
+        source: "42",
+        expectedObservationRevision: 3,
+      }),
+    };
+    expect(await tools.execute(input)).toMatchObject({
+      isError: false,
+      result: { script: { status: "completed", valueJson: "42" } },
+    });
+    expect(reviewedRevision).toBe(4);
+    reviewedRevision = 3;
+    runScript.mockResolvedValue({
+      status: "completed",
+      effect: "possible",
+      valueJson: JSON.stringify("\u0000".repeat(4000)),
+    });
+    expect(runScript.mock.calls[0]?.[0].scriptPermissionIsCurrent?.()).toBe(true);
+    const bounded = await tools.execute(input);
+    expect(bounded).toMatchObject({
+      isError: false,
+      result: { script: { status: "truncated", effect: "possible" } },
+    });
+    expect(Buffer.byteLength(JSON.stringify(bounded.result))).toBeLessThanOrEqual(24576);
+    runScript.mockImplementation(async () => {
+      current = thread({ executionPolicy: "plan" });
+      return { status: "completed", effect: "possible", valueJson: '"late-private-result"' };
+    });
+    const result = await tools.execute(input);
+    expect(result).toMatchObject({
+      isError: true,
+      result: { script: { status: "refused", effect: "possible" } },
+    });
+    expect(JSON.stringify(result)).not.toContain("late-private-result");
+    runScript.mockClear();
+    expect((await tools.execute(input)).isError).toBe(true);
+    expect(runScript).not.toHaveBeenCalled();
+    current = initial;
+    afterAnswer = () => {
+      bound = false;
+    };
     expect((await tools.execute(input)).isError).toBe(true);
     expect(runScript).not.toHaveBeenCalled();
   });
@@ -1477,6 +1584,18 @@ describe("Code app-managed tools", () => {
         "Let the agent save report.pdf (1.2 MB, PDF) from https://example.com into this thread's workspace?",
         undefined,
       );
+    });
+
+    it("keeps the Code turn cancellation signal through download preparation and approval", async () => {
+      const { tools, saveDownload, request } = downloadTools({});
+      const abort = new AbortController();
+      await tools.execute({
+        name: CODE_BROWSER_TOOL_NAME,
+        inputJson: JSON.stringify({ operation: "download-save", downloadId: "d1" }),
+        signal: abort.signal,
+      });
+      expect(saveDownload).toHaveBeenCalledWith(expect.objectContaining({ signal: abort.signal }));
+      expect(request).toHaveBeenCalledWith(expect.any(String), abort.signal);
     });
 
     it("refuses on a paired device's turn and in Plan mode, asking no one", async () => {
@@ -3169,8 +3288,14 @@ describe("Code tool families", () => {
       terminal: { read: vi.fn() },
     });
 
-    expect(tools.definitions.map((definition) => definition.name)).not.toContain(
-      CODE_BROWSER_TOOL_NAME,
+    const reported = browserAgentAvailability({
+      toolTransport: true,
+      hostLendsBrowser: false,
+      readOnly: false,
+    });
+    expect(reported).toEqual({ status: "omitted", reason: "host-lends-no-browser" });
+    expect(tools.definitions.some((definition) => definition.name === CODE_BROWSER_TOOL_NAME)).toBe(
+      reported.status === "available",
     );
     const outcome = await tools.execute({
       name: CODE_BROWSER_TOOL_NAME,

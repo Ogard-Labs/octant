@@ -262,6 +262,8 @@ export const HubSideState = Schema.Struct({
   joinTickets: Schema.Array(HubJoinTicketRecord),
   /** The hub's own owner list. A roster's owner mark never adds to it. */
   owners: Schema.optional(Schema.Array(HostOwnerRecord)),
+  /** Accept moved threads, which is on unless a window on the hub turned it off. */
+  acceptMovedThreads: Schema.optional(Schema.Literal(false)),
   /**
    * The members this hub removed, with the roster sequence of each removal. A
    * standby that stood in hands back its changes against a base sequence, and

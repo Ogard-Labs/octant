@@ -1,3 +1,4 @@
+import { browserAgentAvailability } from "@octant/domain";
 import { browserSignInOriginRefusal } from "./browserRecoveryMessages";
 import { browserToolImage } from "./browserToolImage";
 import { admitBrowserUpload } from "./browserUploadFiles";
@@ -32,7 +33,7 @@ import type {
   WindowId,
 } from "@octant/contracts";
 import { MAX_BROWSER_TABS_PER_CONTEXT, sameToolActionAuthority } from "@octant/contracts";
-import { browserProfileKey, isToolAllowedByAllowlist, storedBrowserProfile } from "@octant/domain";
+import { browserProfileKey, storedBrowserProfile } from "@octant/domain";
 import { withToolFamilyHelp, type AppManagedToolSet } from "../providers/appManagedToolSet";
 import {
   browserFlowAgentActor,
@@ -100,6 +101,7 @@ export interface BrowserAppManagedToolsOptions {
       readonly threadId: BrowserThreadId;
       readonly downloadId: string;
       readonly workspaceRoot: string | undefined;
+      readonly signal?: AbortSignal;
       readonly ask: (
         facts: { readonly name: string; readonly sizeBytes: number; readonly mediaType: string },
         origin: string,
@@ -167,9 +169,17 @@ export function createBrowserAppManagedTools(
   options: BrowserAppManagedToolsOptions,
 ): AppManagedToolSet {
   const initialAuthority = options.resolveAuthority(options.threadId, options.mode);
-  const definitions = isToolAllowedByAllowlist(options.toolConstraints ?? [], BROWSER_TOOL_NAME)
-    ? [BROWSER_TOOL_DEFINITION]
-    : [];
+  const definitions =
+    browserAgentAvailability({
+      toolTransport: true,
+      hostLendsBrowser: true,
+      ...(options.toolConstraints === undefined
+        ? {}
+        : { toolConstraints: options.toolConstraints }),
+      readOnly: options.executionPolicy === "plan",
+    }).status === "available"
+      ? [BROWSER_TOOL_DEFINITION]
+      : [];
   // One operation, admitted on its own: a batch runs each step through here.
   const runOne = async (
     input: Exclude<BrowserToolInput, { readonly operation: "steps" }>,
@@ -422,6 +432,7 @@ export function createBrowserAppManagedTools(
         threadId: options.threadId,
         downloadId: input.downloadId,
         workspaceRoot: options.uploadRoot?.(),
+        ...(signal === undefined ? {} : { signal }),
         ask: (facts, pageOrigin) =>
           approvals.request({
             windowId: options.windowId,

@@ -13,6 +13,8 @@ import type { PushRegistrationBook } from "./pushRegistrationBook";
  * again at the next trigger; nothing is shown to the person.
  */
 export function usePhoneNotificationRotation(input: {
+  /** Offline sample sessions must not read or mutate the real notification book. */
+  readonly enabled: boolean;
   readonly book: PushRegistrationBook;
   readonly permission: MobileNotificationPermissionPort;
   readonly transportForHost: (hostId: string) => MobileRemoteTransport | undefined;
@@ -25,6 +27,7 @@ export function usePhoneNotificationRotation(input: {
   const queued = useRef(false);
 
   const run = useCallback(async (): Promise<void> => {
+    if (!latest.current.enabled) return;
     if (running.current) {
       queued.current = true;
       return;
@@ -45,13 +48,14 @@ export function usePhoneNotificationRotation(input: {
   }, []);
 
   useEffect(() => {
-    void run();
-  }, [input.transports, run]);
+    if (input.enabled) void run();
+  }, [input.enabled, input.transports, run]);
 
   useEffect(() => {
+    if (!input.enabled) return;
     const subscription = AppState.addEventListener("change", (state) => {
       if (state === "active") void run();
     });
     return () => subscription.remove();
-  }, [run]);
+  }, [input.enabled, run]);
 }

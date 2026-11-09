@@ -8,7 +8,13 @@ import {
   type UsageResetRequest,
   type UsageRetentionRequest,
 } from "@octant/contracts/usage-rpc";
-import { decodeHostAnswer } from "@octant/contracts";
+import {
+  decodeHostAnswer,
+  HostHealthHistory,
+  TurnDiagnosticsReport,
+  type HostHealthHistoryRequest,
+  type UsageDiagnosticsRequest,
+} from "@octant/contracts";
 import { bindFetchPort } from "./bindFetchPort";
 
 export interface UsageClientOptions {
@@ -24,6 +30,10 @@ export interface UsageExportResult {
 
 export interface UsageClient {
   query(request: UsageQueryRequest): Promise<UsageQueryResponse>;
+  /** How the matching turns went: failures, tools, retries, cache misses, and speed. */
+  diagnostics(request: UsageDiagnosticsRequest): Promise<TurnDiagnosticsReport>;
+  /** The host process's memory, stalls, slow statements, and latency over time. */
+  hostHealth(request: HostHealthHistoryRequest): Promise<HostHealthHistory>;
   export(request: UsageExportRequest): Promise<UsageExportResult>;
   reset(request: UsageResetRequest): Promise<UsagePurgeResult>;
   retain(request: UsageRetentionRequest): Promise<UsagePurgeResult>;
@@ -92,6 +102,40 @@ export function createUsageClient(options: UsageClientOptions): UsageClient {
       const body = await readJsonBody(response);
       try {
         return decodeHostAnswer(UsageQueryResponse)(body);
+      } catch {
+        throw new UsageClientError("Usage service returned an invalid response.");
+      }
+    },
+    async diagnostics(request) {
+      const response = await postJson(
+        resolved,
+        "/api/usage/diagnostics",
+        request,
+        DEFAULT_TIMEOUT_MS,
+      );
+      if (!response.ok) {
+        throw new UsageClientError(`Usage diagnostics failed with status ${response.status}.`);
+      }
+      const body = await readJsonBody(response);
+      try {
+        return decodeHostAnswer(TurnDiagnosticsReport)(body);
+      } catch {
+        throw new UsageClientError("Usage service returned an invalid response.");
+      }
+    },
+    async hostHealth(request) {
+      const response = await postJson(
+        resolved,
+        "/api/usage/host-health",
+        request,
+        DEFAULT_TIMEOUT_MS,
+      );
+      if (!response.ok) {
+        throw new UsageClientError(`Host health failed with status ${response.status}.`);
+      }
+      const body = await readJsonBody(response);
+      try {
+        return decodeHostAnswer(HostHealthHistory)(body);
       } catch {
         throw new UsageClientError("Usage service returned an invalid response.");
       }

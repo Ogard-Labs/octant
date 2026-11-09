@@ -6,8 +6,10 @@ import {
   type PendingRequest,
   type ProductSurfaceSettings,
 } from "@octant/contracts";
+import { TurnDecisionReview } from "@octant/contracts/pending-requests";
 import type { DeviceId, RemoteSessionId, StableHostId } from "@octant/contracts/remote-access";
 import { defaultShellSettings } from "@octant/domain";
+import { Schema } from "effect";
 import { describe, expect, it, vi } from "vitest";
 import { createRemoteDevicePrincipal } from "./clientPrincipal";
 import { createPendingRequestRouteHandler } from "./pendingRequestRoutes";
@@ -117,6 +119,35 @@ describe("pending request route", () => {
       requests: [codeDecision, codeApproval, workApproval, chatQuestion],
       truncated: false,
     });
+  });
+
+  it("shows a reviewed decision with its second opinion, under a stable decision key", async () => {
+    const review = Schema.decodeUnknownSync(TurnDecisionReview)({
+      status: "reviewed",
+      providerInstanceId: "00000000-0000-4000-8000-000000000b01",
+      modelId: "gpt-5",
+      providerName: "Reviewer account",
+      backs: "Wait",
+      reason: "The change is not reviewed yet.",
+      reviewedAt: "2026-10-06T08:10:00.000Z",
+    });
+    const reviewFor = vi.fn((_key: string, _decision: unknown) => review);
+    const { route } = fixture({ code: [codeDecision], reviews: { reviewFor } });
+    const body = await (await route(request()))?.json();
+    const listed = body.requests.find((r: PendingRequest) => r.kind === "decision");
+    expect(listed.review).toEqual(review);
+    expect(reviewFor).toHaveBeenCalledWith(
+      expect.stringMatching(/^[a-f0-9]{64}$/),
+      expect.objectContaining({ kind: "decision" }),
+    );
+    // Only a decision is reviewed; an approval carries no review.
+    expect(body.requests.filter((r: PendingRequest) => "review" in r)).toHaveLength(1);
+  });
+
+  it("lists a decision without a review while no second opinion is chosen", async () => {
+    const { route } = fixture({ code: [codeDecision], reviews: { reviewFor: () => undefined } });
+    const body = await (await route(request()))?.json();
+    expect(body.requests.some((r: PendingRequest) => "review" in r)).toBe(false);
   });
 
   it("lists a waiting subagent beside the requests it works under, without a way to answer it", async () => {
@@ -307,6 +338,7 @@ function request(search = ""): Request {
 function fixture(
   options: {
     readonly deferrals?: PendingRequestSources["deferrals"];
+    readonly reviews?: PendingRequestSources["reviews"];
     readonly settings?: ProductSurfaceSettings;
     readonly work?: ReadonlyArray<PendingRequest>;
     readonly code?: ReadonlyArray<PendingRequest> | (() => Promise<ReadonlyArray<PendingRequest>>);
@@ -319,6 +351,7 @@ function fixture(
   const code = options.code;
   const sources = {
     ...(options.deferrals === undefined ? {} : { deferrals: options.deferrals }),
+    ...(options.reviews === undefined ? {} : { reviews: options.reviews }),
     readSettings: () => options.settings ?? defaultShellSettings(),
     work: vi.fn(async () => [...(options.work ?? [workApproval])]),
     code: vi.fn(typeof code === "function" ? code : async () => code ?? [codeApproval]),
@@ -433,4 +466,44 @@ it("keeps deferral bound to the current choices and access in every answerable m
     expect(await service.defer(windowId, change, () => true)).toBe(false);
     expect(record).toHaveBeenCalledTimes(1);
   }
+});
+
+it("defers a decision by the turn that asked it and brings it back with its deferral", async () => {
+  const decision = decodePendingRequest({
+    mode: "code",
+    kind: "decision",
+    projectId,
+    threadId: "00000000-0000-4000-8000-000000000904",
+    threadTitle: "Fix the parser",
+    text: "Open the pull request now?",
+    options: [{ label: "Open it", recommended: true }],
+    requestedAt: "2026-10-06T08:05:00.000Z",
+    answer: {
+      threadId: "00000000-0000-4000-8000-000000000904",
+      checkoutId: "00000000-0000-4000-8000-000000000905",
+      operationId: "00000000-0000-4000-8000-000000000a02",
+    },
+  });
+  const untilByKey = new Map<string, string>();
+  const service = new PendingRequestService({
+    readSettings: defaultShellSettings,
+    work: async () => [],
+    code: async () => [decision],
+    children: async () => [],
+    chat: () => [],
+    deferrals: {
+      read: (key: string) => untilByKey.get(key),
+      record: (change: { key: string; until: string | null }) => {
+        if (change.until === null) untilByKey.delete(change.key);
+        else untilByKey.set(change.key, change.until);
+      },
+    },
+  });
+  const listed = (await service.list(windowId)).requests[0];
+  const key = listed?.deferralKey ?? "missing";
+  expect(listed?.deferredUntil).toBeUndefined();
+  const until = decodeUtcTimestamp("2099-01-01T00:00:00.000Z");
+  expect(await service.defer(windowId, { key, until }, () => true)).toBe(true);
+  expect((await service.list(windowId)).requests[0]?.deferredUntil).toBe(until);
+  expect(await service.defer(windowId, { key: "a".repeat(64), until }, () => true)).toBe(false);
 });

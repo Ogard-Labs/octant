@@ -8,9 +8,13 @@ import {
   ProjectCommandResult,
   ProjectFailure,
   type ProjectId,
+  ProjectMemoryProposalDecisionResult,
+  ProjectMemoryProposalList,
   ProjectMemoryView,
   ProjectSummary,
   decodeHostAnswer,
+  type ProjectMemoryProposal,
+  type ProjectMemoryProposalDecision,
 } from "@octant/contracts";
 
 export interface ProjectClientOptions {
@@ -36,6 +40,11 @@ export interface ProjectClient {
     fresh?: boolean,
   ): Promise<CodeEnvironmentObservation>;
   executeMemory(command: MemoryCommand): Promise<MemoryCommandResult>;
+  /** Memory changes this window's agents asked for, waiting for the person. */
+  listMemoryProposals(signal?: AbortSignal): Promise<ReadonlyArray<ProjectMemoryProposal>>;
+  decideMemoryProposal(
+    decision: ProjectMemoryProposalDecision,
+  ): Promise<ProjectMemoryProposalDecisionResult>;
 }
 
 export class ProjectClientFailure extends Error {
@@ -125,6 +134,26 @@ export function createProjectClient(options: ProjectClientOptions): ProjectClien
           body: JSON.stringify(command),
         },
         decodeHostAnswer(MemoryCommandResult),
+      );
+    },
+    listMemoryProposals(signal) {
+      return request(
+        options.fetch,
+        new URL("/api/projects/memory/proposals", options.baseUrl).toString(),
+        { method: "GET", headers, ...(signal === undefined ? {} : { signal }) },
+        (value) => decodeHostAnswer(ProjectMemoryProposalList)(value).proposals,
+      );
+    },
+    decideMemoryProposal(decision) {
+      return request(
+        options.fetch,
+        new URL("/api/projects/memory/proposals/decide", options.baseUrl).toString(),
+        {
+          method: "POST",
+          headers: { ...headers, "content-type": "application/json" },
+          body: JSON.stringify(decision),
+        },
+        decodeHostAnswer(ProjectMemoryProposalDecisionResult),
       );
     },
   };

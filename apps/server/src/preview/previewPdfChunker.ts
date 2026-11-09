@@ -178,14 +178,22 @@ function decodeContentStream(obj: PdfObject): Uint8Array | undefined {
  * operators, `[...] TJ` array operators, and inserts line breaks on `T*`
  * and `Td`/`TD` positioning operators. PDF string escapes (`\(`, `\)`,
  * `\\`, octal `\nnn`) and nested balanced parens are honored. The
- * extracted text is bounded at `maxPageTextBytes`.
+ * extracted text is bounded at `maxPageTextBytes`, and `truncated` says
+ * when that bound left text out.
  */
-function extractPageText(stream: Uint8Array, maxPageTextBytes: number): string {
+function extractPageText(
+  stream: Uint8Array,
+  maxPageTextBytes: number,
+): { readonly text: string; readonly truncated: boolean } {
   const view = Buffer.from(stream.buffer, stream.byteOffset, stream.byteLength).toString("latin1");
   let out = "";
+  let dropped = false;
   let i = 0;
   const pushText = (text: string) => {
-    if (Buffer.byteLength(out, "utf-8") >= maxPageTextBytes) return;
+    if (Buffer.byteLength(out, "utf-8") >= maxPageTextBytes) {
+      if (text.length > 0) dropped = true;
+      return;
+    }
     out += text;
   };
   while (i < view.length) {
@@ -242,7 +250,17 @@ function extractPageText(stream: Uint8Array, maxPageTextBytes: number): string {
   }
   // Trim leading line breaks produced by the initial positioning operators
   // (the first `Td` sets the baseline and should not introduce a blank line).
-  return sliceUtf8AtByteBudget(out.replace(/^[\n\r]+/, ""), maxPageTextBytes);
+  return pageTextWithin(out.replace(/^[\n\r]+/, ""), maxPageTextBytes, dropped);
+}
+
+/** Text cut to the page budget, and whether anything was left out on the way. */
+function pageTextWithin(
+  text: string,
+  maxPageTextBytes: number,
+  alreadyTruncated: boolean,
+): { readonly text: string; readonly truncated: boolean } {
+  const kept = sliceUtf8AtByteBudget(text, maxPageTextBytes);
+  return { text: kept, truncated: alreadyTruncated || kept.length < text.length };
 }
 
 /**
@@ -362,24 +380,36 @@ export function parsePdf(
     }
     const contentsRef = /\/Contents\s+(\d+)\s+0\s+R/.exec(page.dict);
     const contentsArray = /\/Contents\s*\[([^\]]*)\]/.exec(page.dict);
-    let text = "";
+    let extracted: { readonly text: string; readonly truncated: boolean } = {
+      text: "",
+      truncated: false,
+    };
     if (contentsRef !== null) {
       const obj = objects.get(Number.parseInt(contentsRef[1] ?? "0", 10));
       if (obj !== undefined) {
         const stream = decodeContentStream(obj);
-        if (stream !== undefined) text = extractPageText(stream, budget.maxPageTextBytes);
+        if (stream !== undefined) extracted = extractPageText(stream, budget.maxPageTextBytes);
       }
     } else if (contentsArray !== null) {
+      // A page drawn from several streams is held to the page budget as a
+      // whole, not to one budget per stream.
       const refRegex = /(\d+)\s+0\s+R/g;
       let rm: RegExpExecArray | null;
       while ((rm = refRegex.exec(contentsArray[1] ?? "")) !== null) {
         const obj = objects.get(Number.parseInt(rm[1] ?? "0", 10));
         if (obj === undefined) continue;
         const stream = decodeContentStream(obj);
-        if (stream !== undefined) text += extractPageText(stream, budget.maxPageTextBytes);
+        if (stream === undefined) continue;
+        const part = extractPageText(stream, budget.maxPageTextBytes);
+        extracted = pageTextWithin(
+          extracted.text + part.text,
+          budget.maxPageTextBytes,
+          extracted.truncated || part.truncated,
+        );
       }
     }
-    pages.push(text);
+    if (extracted.truncated) truncated = true;
+    pages.push(extracted.text);
   }
   return { pages, truncated };
 }

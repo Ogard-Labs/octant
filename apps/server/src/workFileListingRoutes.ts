@@ -11,9 +11,10 @@ import { projectExtraFolderRoots } from "@octant/domain";
 import type { PersistenceService } from "./persistence/persistenceService";
 import type { ProjectService } from "./projectService";
 import { isLoopbackHostname } from "./shellRoutes";
-import { authenticateRouteWindowId } from "./principalRouteContext";
+import { authenticateRouteWindowId, authenticateRoutePrincipal } from "./principalRouteContext";
 import { WindowAuthorityError, type WindowAuthorityStore } from "./windowAuthorityStore";
 import type { WorkFileListingService } from "./work/workFileListingService";
+import type { ServerWorkFileListing } from "./serverProjects/serverWorkFiles";
 
 const METHODS = "GET, OPTIONS";
 const HEADERS = "content-type, x-octant-window-capability";
@@ -31,6 +32,7 @@ export interface WorkFileListingRouteDependencies {
   readonly persistence: Pick<PersistenceService, "readProject">;
   readonly projects: Pick<ProjectService, "bootstrap">;
   readonly windowAuthorityStore: WindowAuthorityStore;
+  readonly server?: ServerWorkFileListing;
   readonly now?: () => number;
 }
 
@@ -109,6 +111,59 @@ export function createWorkFileListingRouteHandler(dependencies: WorkFileListingR
 
     try {
       const { projectId, threadId, directory } = decodeListingParams(url);
+      if (dependencies.server?.holds(projectId)) {
+        const context = authenticateRoutePrincipal({
+          request,
+          store: dependencies.windowAuthorityStore,
+          now: now(),
+        });
+        if (context.principal.kind !== "local-window")
+          return failureResponse(
+            { category: "unauthorized", message: "Server Work files require a local window." },
+            403,
+            origin,
+          );
+        const capability = request.headers.get("x-octant-window-capability");
+        const nativeSignal =
+          capability === null
+            ? undefined
+            : dependencies.windowAuthorityStore.nativeRequestSignal(capability, now());
+        const signal =
+          nativeSignal === undefined
+            ? request.signal
+            : AbortSignal.any([request.signal, nativeSignal]);
+        const current = () => {
+          if (signal.aborted) return false;
+          try {
+            const fresh = authenticateRoutePrincipal({
+              request,
+              store: dependencies.windowAuthorityStore,
+              now: now(),
+            });
+            return (
+              fresh.principal.kind === "local-window" &&
+              String(fresh.scopeId) === String(authenticatedWindowId)
+            );
+          } catch {
+            return false;
+          }
+        };
+        const result = await dependencies.server.list({
+          windowId: authenticatedWindowId,
+          projectId,
+          threadId,
+          directory,
+          signal,
+          current,
+        });
+        if (!current())
+          return failureResponse(
+            { category: "unauthorized", message: "Work file listing authority changed." },
+            403,
+            origin,
+          );
+        return jsonResponse(decodeWorkFileListingResult(result), 200, origin);
+      }
       const project = await loadAccessibleWorkProject(
         dependencies.projects,
         dependencies.persistence,

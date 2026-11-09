@@ -2,7 +2,7 @@ import type { GithubCatalogueReadResponse } from "@octant/contracts";
 import type { PendingRequest } from "@octant/contracts/pending-requests";
 import type { GithubAssignedWorkPage } from "@octant/contracts";
 import type { AssignedLinearIssuesList } from "./loadAssignedLinearIssues";
-import { CircleDot, GitPullRequest, Inbox, ListTodo, RefreshCw } from "lucide-react";
+import { CircleDot, Folder, GitPullRequest, Inbox, ListTodo, RefreshCw } from "lucide-react";
 import { useEffect, useState } from "react";
 import type { ThreadAttentionSignal } from "../notifications/threadAttention";
 import { PendingRequestRow } from "../pendingRequests/PendingRequestRow";
@@ -19,12 +19,19 @@ import {
 } from "../pendingRequests/usePendingRequestRows";
 import { Surface, SurfaceEmpty, SurfaceHeader, SurfaceSection } from "../surface/SurfaceHeader";
 import { OctantButton } from "../ui/base/OctantButton";
+import { OctantToggleGroup, OctantToggleGroupItem } from "../ui/base/OctantToggleGroup";
 import {
   ASSIGNED_WORK_CATEGORY_LABELS,
+  INBOX_FILTERS,
   assignedWorkSeenKey,
+  groupInboxByProject,
   inboxAttentionMeta,
+  inboxFilterCounts,
+  inboxWaitingItems,
   linearIssueSeenKey,
+  matchesInboxFilter,
   type InboxAttentionItem,
+  type InboxFilter,
 } from "./inboxModel";
 import { markInboxKeySeen, readSeenInboxKeys } from "./inboxSeen";
 import { OctantAlert } from "../ui/base/OctantAlert";
@@ -83,6 +90,7 @@ export function InboxView(props: InboxViewProps) {
   const [github, setGithub] = useState<GithubSection>({ kind: "loading" });
   const [linear, setLinear] = useState<LinearSection>({ kind: "loading" });
   const [refreshNonce, setRefreshNonce] = useState(0);
+  const [filter, setFilter] = useState<InboxFilter>("all");
   const [seenKeys, setSeenKeys] = useState<ReadonlySet<string>>(() => readSeenInboxKeys());
   const loadGithub = props.loadAssignedGithubWork;
   const loadLinear = props.loadAssignedLinearIssues;
@@ -174,11 +182,36 @@ export function InboxView(props: InboxViewProps) {
     decisionRows,
     (request) => request.kind === "question" || isLeadQuestionPendingRequest(request),
   );
+  // A finished turn that closed with a decision is already listed as that
+  // decision, so it is not listed again under Finished.
+  const deciding = threadsWith(decisionRows, (request) => request.kind === "decision");
   const attentionItems = props.attentionItems.filter(
     (item) =>
       !(item.signal.reason === "approval-required" && approving.has(item.signal.threadId)) &&
-      !(item.signal.reason === "question-asked" && asking.has(item.signal.threadId)),
+      !(item.signal.reason === "question-asked" && asking.has(item.signal.threadId)) &&
+      !(item.signal.reason === "turn-finished" && deciding.has(item.signal.threadId)),
   );
+
+  const waiting = inboxWaitingItems(
+    decisions === undefined ? [] : decisionRows,
+    attentionItems,
+    decisions?.now ?? 0,
+  );
+  const counts = inboxFilterCounts(waiting);
+  const projectNames = new Map([
+    ...attentionItems.flatMap((item) =>
+      item.signal.projectId === undefined || item.projectName === undefined
+        ? []
+        : [[item.signal.projectId, item.projectName] as const],
+    ),
+    ...(decisions?.projectNames ?? []),
+  ]);
+  const groups = groupInboxByProject(
+    waiting.filter((item) => matchesInboxFilter(item, filter)),
+    projectNames,
+  );
+  const activeFilter = INBOX_FILTERS.find((entry) => entry.id === filter);
+  const showAssigned = filter === "all";
 
   return (
     <Surface ariaLabel="Inbox" measure="wide">
@@ -203,67 +236,113 @@ export function InboxView(props: InboxViewProps) {
             }
           : {})}
       />
-      <SurfaceSection label="Needs you">
-        {decisions === undefined || decisionRows.length === 0 ? null : (
-          <ul className="surface-list">
-            {decisionRows.map(({ request, unlisted }) => (
-              <li className="surface-row" key={pendingRequestKey(request)}>
-                <PendingRequestRow
-                  onDefer={defer}
-                  now={decisions.now}
-                  onAnswer={answer}
-                  onOpenThread={decisions.onOpenThread}
-                  projectName={decisions.projectNames.get(String(request.projectId))}
-                  request={request}
-                  settled={unlisted}
-                />
-              </li>
-            ))}
-          </ul>
+      <p className="oct-meta inbox-view__summary">
+        {`${counts.all} waiting`}
+        {counts.urgent === 0 ? null : (
+          <>
+            {" · "}
+            <span className="inbox-view__urgent">{`${counts.urgent} urgent`}</span>
+          </>
         )}
-        {attentionItems.length === 0 && decisionRows.length === 0 ? (
-          <SurfaceEmpty
-            icon={<Inbox size={20} strokeWidth={1.5} />}
-            title="No thread is waiting on you"
-            {...(props.onOpenBoard === undefined
-              ? {}
-              : {
-                  action: (
-                    <OctantButton
-                      onClick={props.onOpenBoard}
-                      size="sm"
-                      type="button"
-                      variant="outline"
-                    >
-                      Open the Board
-                    </OctantButton>
+      </p>
+      <OctantToggleGroup<InboxFilter>
+        aria-label="Filter the Inbox"
+        className="inbox-view__filters"
+        onValueChange={(value) => {
+          const next = INBOX_FILTERS.find((entry) => entry.id === value[0]);
+          if (next !== undefined) setFilter(next.id);
+        }}
+        value={[filter]}
+      >
+        {INBOX_FILTERS.map((entry) => (
+          <OctantToggleGroupItem key={entry.id} value={entry.id}>
+            {entry.label}
+            <span className="oct-meta">{counts[entry.id]}</span>
+          </OctantToggleGroupItem>
+        ))}
+      </OctantToggleGroup>
+      <SurfaceSection label="Needs you">
+        {groups.length === 0 ? (
+          filter === "all" ? (
+            <SurfaceEmpty
+              icon={<Inbox size={20} strokeWidth={1.5} />}
+              title="No thread is waiting on you"
+              {...(props.onOpenBoard === undefined
+                ? {}
+                : {
+                    action: (
+                      <OctantButton
+                        onClick={props.onOpenBoard}
+                        size="sm"
+                        type="button"
+                        variant="outline"
+                      >
+                        Open the Board
+                      </OctantButton>
+                    ),
+                  })}
+            />
+          ) : (
+            <p className="surface-section__note" role="status">
+              {activeFilter?.empty}
+            </p>
+          )
+        ) : (
+          groups.map((group) => (
+            <section
+              aria-label={group.name}
+              className="inbox-group"
+              key={group.projectKey === "" ? "no-project" : group.projectKey}
+            >
+              <h3 className="inbox-group__head">
+                <Folder aria-hidden="true" className="icon" size={14} strokeWidth={1.5} />
+                <span className="oct-row-label">{group.name}</span>
+                <span className="oct-meta">{group.items.length}</span>
+                {group.urgentCount === 0 ? null : (
+                  <span className="oct-meta inbox-view__urgent">{`${group.urgentCount} urgent`}</span>
+                )}
+              </h3>
+              <ul className="surface-list">
+                {group.items.map((item) =>
+                  item.kind === "request" ? (
+                    <li className="surface-row" key={item.key}>
+                      <PendingRequestRow
+                        onDefer={defer}
+                        now={decisions?.now ?? 0}
+                        onAnswer={answer}
+                        onOpenThread={(request) => decisions?.onOpenThread(request)}
+                        projectName={decisions?.projectNames.get(
+                          String(item.entry.request.projectId),
+                        )}
+                        request={item.entry.request}
+                        settled={item.entry.unlisted}
+                      />
+                    </li>
+                  ) : (
+                    <li className="surface-row" key={item.key}>
+                      <OctantButton
+                        className="inbox-view__row"
+                        onClick={() => props.onOpenThread(item.item.signal)}
+                        type="button"
+                        variant="bare"
+                      >
+                        <span className="surface-row__copy">
+                          <span className="oct-row-label">{item.item.signal.title}</span>
+                          <span className="oct-meta">{inboxAttentionMeta(item.item)}</span>
+                          {item.item.signal.detail === undefined ? null : (
+                            <span className="oct-row-detail">{item.item.signal.detail}</span>
+                          )}
+                        </span>
+                      </OctantButton>
+                    </li>
                   ),
-                })}
-          />
-        ) : attentionItems.length === 0 ? null : (
-          <ul className="surface-list">
-            {attentionItems.map((item) => (
-              <li className="surface-row" key={`${item.signal.threadId}:${item.signal.reason}`}>
-                <OctantButton
-                  className="inbox-view__row"
-                  onClick={() => props.onOpenThread(item.signal)}
-                  type="button"
-                  variant="bare"
-                >
-                  <span className="surface-row__copy">
-                    <span className="oct-row-label">{item.signal.title}</span>
-                    <span className="oct-meta">{inboxAttentionMeta(item)}</span>
-                    {item.signal.detail === undefined ? null : (
-                      <span className="oct-row-detail">{item.signal.detail}</span>
-                    )}
-                  </span>
-                </OctantButton>
-              </li>
-            ))}
-          </ul>
+                )}
+              </ul>
+            </section>
+          ))
         )}
       </SurfaceSection>
-      {loadGithub === undefined ? null : (
+      {loadGithub === undefined || !showAssigned ? null : (
         <SurfaceSection label="GitHub">
           {github.kind === "loading" ? (
             <p className="surface-section__note" role="status">
@@ -316,7 +395,7 @@ export function InboxView(props: InboxViewProps) {
           )}
         </SurfaceSection>
       )}
-      {loadLinear === undefined ? null : (
+      {loadLinear === undefined || !showAssigned ? null : (
         <SurfaceSection label="Linear">
           {linear.kind === "loading" ? (
             <p className="surface-section__note" role="status">

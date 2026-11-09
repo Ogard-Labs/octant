@@ -25,7 +25,11 @@ export type OneShotOutcome =
       /** What the provider reported the request used; absent when it reported nothing. */
       readonly usage?: TurnUsage;
     }
-  | { readonly status: "withheld" }
+  | {
+      readonly status: "withheld";
+      /** The request was paid for even though its reply is not used. */
+      readonly usage?: TurnUsage;
+    }
   | { readonly status: "interrupted" }
   | { readonly status: "timed-out" }
   | { readonly status: "unreached" }
@@ -130,7 +134,7 @@ export async function completeOnceOutcome(input: OneShotInput): Promise<OneShotO
     if (interrupted) return { status: "interrupted" } as const;
     if (!completed) return { status: "unreached" } as const;
     return readOutsideContent
-      ? ({ status: "withheld" } as const)
+      ? ({ status: "withheld", ...(usage === undefined ? {} : { usage }) } as const)
       : ({ status: "completed", text, ...(usage === undefined ? {} : { usage }) } as const);
   });
   try {

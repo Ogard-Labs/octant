@@ -258,29 +258,49 @@ export function useProjectController(options: ProjectControllerOptions) {
   async function setCodePermissionMode(
     projectId: ProjectId,
     permissionMode: PermissionMode | undefined,
+    /**
+     * The sandbox at Full access for this Project's new threads: a choice,
+     * "settings" to follow Settings, or "keep" (the default) to leave the
+     * Project's current choice, since the command returns an unmentioned
+     * choice to Settings.
+     */
+    fullAccessSandbox: boolean | "settings" | "keep" = "keep",
   ): Promise<boolean> {
     const project = projectById.get(projectId);
-    if (project?.type === "work") {
+    if (project?.type !== "work" && project?.type !== "code") return false;
+    const sandbox =
+      fullAccessSandbox === "keep"
+        ? project.defaultFullAccessSandbox
+        : fullAccessSandbox === "settings"
+          ? undefined
+          : fullAccessSandbox;
+    if (
+      project.defaultPermissionMode === permissionMode &&
+      project.defaultFullAccessSandbox === sandbox
+    ) {
+      return true;
+    }
+    const sandboxField = sandbox === undefined ? {} : { fullAccessSandbox: sandbox };
+    if (project.type === "work") {
       if (permissionMode === "plan") return false;
-      if (project.defaultPermissionMode === permissionMode) return true;
       return execute(
         {
           kind: "change-work-project-permission-mode",
           projectId,
           expectedVersion: project.version,
           ...(permissionMode === undefined ? {} : { permissionMode }),
+          ...sandboxField,
         },
         "Work Project default mode updated.",
       );
     }
-    if (project?.type !== "code") return false;
-    if (project.defaultPermissionMode === permissionMode) return true;
     return execute(
       {
         kind: "change-code-project-permission-mode",
         projectId,
         expectedVersion: project.version,
         ...(permissionMode === undefined ? {} : { permissionMode }),
+        ...sandboxField,
       },
       "Code Project default mode updated.",
     );

@@ -1,3 +1,4 @@
+import { decodeBrowserPageScriptNativeCommand } from "@octant/contracts/browser-page-script";
 import {
   BROWSER_EDITABLE_WORLD_NAME,
   observeBrowserEditableTarget,
@@ -779,6 +780,89 @@ describe.skipIf(chrome === undefined)(
   "the desktop Browser on a real page",
   { timeout: 30_000 },
   () => {
+    it.each(["clear", "password", "frame", "closed-shadow"] as const)(
+      "admits only a fully inspected credential-free scoped script on a real page: %s",
+      async (kind) => {
+        const { page, view } = await pageView();
+        const site = "https://script.fixture.test/";
+        const owner = { windowId: crypto.randomUUID(), threadId: crypto.randomUUID() };
+        const contextId = crypto.randomUUID();
+        const host = createBrowserSurfaceHost({ createView: () => view });
+        try {
+          await page.route(`${site}**`, (route) =>
+            route.fulfill({
+              contentType: "text/html",
+              body: "<!doctype html><title>Script fixture</title><main>Reviewed page</main>",
+            }),
+          );
+          await page.goto(site);
+          if (kind === "password")
+            await page.evaluate(() => {
+              const input = document.createElement("input");
+              input.type = "password";
+              document.body.append(input);
+            });
+          if (kind === "frame")
+            await page.evaluate(() => {
+              document.body.append(document.createElement("iframe"));
+            });
+          if (kind === "closed-shadow")
+            await page.evaluate(() => {
+              const element = document.createElement("div");
+              document.body.append(element);
+              element.attachShadow({ mode: "closed" }).innerHTML = "<input type=password>";
+            });
+          await host.createContext({
+            contextId,
+            owner,
+            policy: {
+              profileMode: "isolated",
+              allowedOrigins: [new URL(site).origin],
+              credentialFieldProtection: true,
+              maxConcurrentTabs: 1,
+              sessionTimeoutMs: 300000,
+            },
+          });
+          const command = (input: Record<string, unknown>) =>
+            decodeBrowserPageScriptNativeCommand({
+              contextId,
+              owner,
+              requiresClearPage: true,
+              ...input,
+            });
+          const prepared = await host.runPageScript(
+            command({
+              operation: "prepare",
+              source: "document.body.dataset.scopedScript='ran';42",
+              expectedUrl: site,
+            }),
+            new AbortController().signal,
+          );
+          if (kind === "clear") {
+            if (prepared.status !== "prepared")
+              throw Error(`Preparation refused: ${JSON.stringify(prepared)}`);
+            expect(
+              await host.runPageScript(
+                command({ operation: "execute", planId: prepared.planId }),
+                new AbortController().signal,
+              ),
+            ).toMatchObject({ status: "completed", valueJson: "42" });
+            expect(await page.evaluate(() => document.body.dataset.scopedScript)).toBe("ran");
+          } else {
+            expect(prepared).toMatchObject({
+              status: "refused",
+              reason: "credential-or-frame-protected",
+              effect: "none",
+            });
+            expect(await page.evaluate(() => document.body.dataset.scopedScript)).toBeUndefined();
+          }
+        } finally {
+          await host.closeAll();
+          await page.context().close();
+        }
+      },
+    );
+
     it("fills only the reviewed top document's login fields and requires a separate submit without hiding page callbacks", async () => {
       const { page, view } = await pageView();
       const site = "https://login.fixture.test";

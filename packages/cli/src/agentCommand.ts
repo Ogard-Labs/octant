@@ -82,6 +82,10 @@ export type AgentCliCommand =
       readonly mode: "chat" | "work" | "code" | "auto";
       /** A model for a new thread; Work and Code use harness endpoints: `model` or `endpoint/model`. */
       readonly model?: string;
+      /** The access a new Work or Code thread starts at, as the composer's mode picker names it. */
+      readonly access?: AgentAccessMode;
+      /** Keep the OS sandbox and proxied network on at Full access (needs --access full-access). */
+      readonly sandbox?: boolean;
     }
   | { readonly action: "harness-slots"; readonly json: boolean }
   | { readonly action: "harness-session"; readonly threadId: string; readonly json: boolean }
@@ -92,6 +96,13 @@ export type AgentCliCommand =
       readonly child?: string;
       readonly json: boolean;
     };
+
+const AGENT_ACCESS_MODES = ["ask-first", "accept-edits", "auto", "plan", "full-access"] as const;
+export type AgentAccessMode = (typeof AGENT_ACCESS_MODES)[number];
+
+function isAgentAccessMode(value: string): value is AgentAccessMode {
+  return (AGENT_ACCESS_MODES as ReadonlyArray<string>).includes(value);
+}
 
 const AGENT_FLAGS: ReadonlyArray<string> = [
   "prompt",
@@ -105,6 +116,8 @@ const AGENT_FLAGS: ReadonlyArray<string> = [
   "quiet",
   "mode",
   "model",
+  "access",
+  "sandbox",
 ];
 
 export function resolveAgentCliCommand(
@@ -123,7 +136,14 @@ export function resolveAgentCliCommand(
     const title = text("title");
     const theme = text("theme");
     const model = text("model");
+    const access = text("access");
     if (theme !== undefined && !isTuiThemeId(theme)) return undefined;
+    if (access !== undefined && !isAgentAccessMode(access)) return undefined;
+    // The sandbox only exists at Full access, so asking for it with any other
+    // level (or none) is refused rather than quietly ignored.
+    if (flags.sandbox !== undefined && (flags.sandbox !== true || access !== "full-access")) {
+      return undefined;
+    }
     const mode = text("mode") ?? "auto";
     if (mode !== "chat" && mode !== "work" && mode !== "code" && mode !== "auto") return undefined;
     return {
@@ -133,6 +153,8 @@ export function resolveAgentCliCommand(
       ...(project === undefined ? {} : { project }),
       ...(title === undefined ? {} : { title }),
       ...(model === undefined ? {} : { model }),
+      ...(access === undefined ? {} : { access }),
+      ...(flags.sandbox === true ? { sandbox: true } : {}),
       json: flags.json === true,
       plain: flags.plain === true,
       last: flags.last === true,
@@ -1000,6 +1022,17 @@ async function resolveThread(input: RunAgentCliCommandInput): Promise<string | u
     return undefined;
   }
   if (
+    input.command.access !== undefined &&
+    (input.command.threadId !== undefined || input.command.last)
+  ) {
+    // An existing thread keeps its own level; running this prompt at another
+    // one than asked would be worse than refusing.
+    input.stderr.write(
+      "--access sets a new thread's level. To change an existing thread's level, use its mode picker.\n",
+    );
+    return undefined;
+  }
+  if (
     (input.command.threadId !== undefined || input.command.last) &&
     input.command.mode !== "chat"
   ) {
@@ -1050,6 +1083,8 @@ async function resolveThread(input: RunAgentCliCommandInput): Promise<string | u
       input.command.title ?? `Agent ${new Date().toISOString().slice(0, 16).replace("T", " ")}`,
     projectName: input.command.project,
     model: input.command.model,
+    access: input.command.access,
+    sandbox: input.command.sandbox === true,
   });
   if (created.kind === "refused") {
     input.stderr.write(`${created.message}\n`);
@@ -1061,6 +1096,13 @@ async function resolveThread(input: RunAgentCliCommandInput): Promise<string | u
       created.mode === "chat"
         ? "New Chat thread.\n"
         : `New ${created.mode === "code" ? "Code" : "Work"} thread in ${created.projectName ?? "the Project"}.\n`,
+    );
+  }
+  if (created.projectRemembersFullAccess === true) {
+    // The flag saved Full access on the Project, not only on this thread, so
+    // say so where the person can see it and undo it.
+    input.stderr.write(
+      `Project ${created.projectName ?? ""} now remembers Full access: new Code threads there start at Full access. Undo with: octant project access ${JSON.stringify(created.projectName ?? "")} approval-gated\n`,
     );
   }
   return created.threadId;

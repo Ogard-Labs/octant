@@ -33,6 +33,24 @@ async function publicKeyPem(publicKey: CryptoKey): Promise<string> {
 }
 
 describe("expoSecureDeviceKeyStore", () => {
+  it("does not resurrect a forgotten pairing when a concurrent signed transition is persisted", async () => {
+    const storage = createInMemoryExpoSecureStringStorage();
+    const store = createExpoSecureDeviceKeyStore({ storage });
+    const reopened = createExpoSecureDeviceKeyStore({ storage });
+    const origin = "https://100.64.0.7:8443";
+    const keyId = await store.set(await generateExtractablePair(), { origin, hostId });
+    const previous = { current: { kind: "pinned", pin: `sha256-${"A".repeat(43)}` } } as const;
+    const next = { current: { kind: "pinned", pin: `sha256-${"B".repeat(43)}` } } as const;
+    await store.updateMetadata(keyId, {
+      deviceId: "22222222-2222-4222-8222-222222222222",
+      credentialGeneration: 2,
+      hostKeyFingerprint: "f".repeat(64),
+      listenerTrust: previous,
+    });
+    await Promise.all([store.remove(keyId), reopened.updateListenerTrust?.(keyId, previous, next)]);
+    expect(await reopened.findByOrigin(origin)).toBeUndefined();
+    expect(await reopened.get(keyId)).toBeUndefined();
+  });
   it("requires extractable private keys for SecureStore persistence", () => {
     const store = createExpoSecureDeviceKeyStore({
       storage: createInMemoryExpoSecureStringStorage(),

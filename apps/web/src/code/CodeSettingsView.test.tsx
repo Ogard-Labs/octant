@@ -66,7 +66,12 @@ describe("CodeSettingsView", () => {
       const { unmount } = render(
         <CodeSettingsView onUpdate={update} settings={settings as never} />,
       );
-      expect(screen.queryByRole("switch", { name: /sandbox/i })).toBeNull();
+      // The retired switch turned Full access's sandbox off. The only sandbox
+      // switch now is the opt-in that keeps one, and it starts off.
+      expect(screen.queryByRole("switch", { name: /sandbox off|no sandbox/i })).toBeNull();
+      expect(
+        screen.getByRole("switch", { name: "Keep the sandbox at Full access" }),
+      ).not.toBeChecked();
 
       await chooseSelectFieldOption(
         user,
