@@ -81,6 +81,44 @@ describe("browser automation routes", () => {
     });
   });
 
+  it("reads Browser admission only after the window can inspect its thread", async () => {
+    const availability = vi.fn(() => ({
+      status: "omitted" as const,
+      reason: "no-tool-transport" as const,
+    }));
+    let admitted = true;
+    const read = createBrowserAutomationRouteHandler({
+      service: {
+        create: async () => snapshot,
+        act: async () => snapshot,
+        cancel: async () => snapshot,
+        stop: async () => snapshot,
+        inspect: () => snapshot,
+        inspectThread: () => snapshot,
+        releaseThread: async () => snapshot,
+      },
+      agentAvailability: availability,
+      authority: { canAccessWindow: () => admitted, resolve: () => authority },
+      windowAuthorityStore: store,
+      maxRequestBodySize: 64_000,
+    });
+    const request = () =>
+      new Request("http://127.0.0.1/api/browser/contexts/current", {
+        method: "POST",
+        headers: { "x-octant-window-capability": capability },
+        body: JSON.stringify({ threadId }),
+      });
+    const response = await read(request());
+    expect(response?.status).toBe(200);
+    expect(await response?.json()).toMatchObject({
+      agentAvailability: { status: "omitted", reason: "no-tool-transport" },
+    });
+    expect(availability).toHaveBeenCalledTimes(1);
+    admitted = false;
+    expect((await read(request()))?.status).toBe(403);
+    expect(availability).toHaveBeenCalledTimes(1);
+  });
+
   describe("task default profile transaction", () => {
     const choice = { threadId, mode: "work", expectedVersion: 1, profile: "personal" };
     const post = (path: string, value: unknown) =>

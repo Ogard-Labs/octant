@@ -1,4 +1,5 @@
 import type { BrowserProfileChoice } from "@octant/contracts/project-browser";
+import { browserAgentAvailability } from "@octant/domain";
 import { describe, expect, it, vi } from "vitest";
 import {
   decodeToolActionAuthority,
@@ -30,6 +31,38 @@ function snapshot(overrides: Partial<BrowserAutomationSnapshot> = {}): BrowserAu
 }
 
 describe("createBrowserAppManagedTools", () => {
+  it.each([[], ["octant_browser"], ["octant_terminal"]])(
+    "offers Browser exactly when its reported constraints admit it: %j",
+    (...toolConstraints) => {
+      const tools = createBrowserAppManagedTools({
+        windowId,
+        threadId,
+        mode: "work",
+        modelId,
+        resolveModelId: () => modelId,
+        modelBindings: new Map(),
+        executionPolicy: "approval-gated",
+        toolConstraints,
+        resolveAuthority: () => authority,
+        browser: {
+          inspectThread: () => snapshot(),
+          create: vi.fn(),
+          act: vi.fn(),
+          releaseThread: vi.fn(),
+        },
+        uuid: () => "80000000-0000-4000-8000-000000000001",
+      });
+      const reported = browserAgentAvailability({
+        toolTransport: true,
+        hostLendsBrowser: true,
+        toolConstraints,
+        readOnly: false,
+      });
+      expect(tools.definitions.some((definition) => definition.name === "octant_browser")).toBe(
+        reported.status === "available",
+      );
+    },
+  );
   it("offers Chat browser on demand and keeps approval separate from filesystem tools", async () => {
     const create = vi.fn(async () =>
       snapshot({

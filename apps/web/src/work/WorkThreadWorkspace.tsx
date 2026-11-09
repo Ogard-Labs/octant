@@ -2961,6 +2961,7 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
                     className="work-thread-workspace__bound-model"
                   >
                     <ComposerModelPicker
+                      threadId={String(thread.id)}
                       ariaLabel="Provider and model"
                       disabled={providerChanging || creating || completionLocked}
                       // Once any turn ran, the host checks the latest one

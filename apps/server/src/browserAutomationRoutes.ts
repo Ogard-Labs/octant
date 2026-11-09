@@ -9,6 +9,7 @@ import {
 } from "@octant/contracts/browser-upload-permissions";
 import type { BrowserUploadPermissions } from "./browser/browserUploadPermissions";
 import { browserProfileFromChoice } from "@octant/domain";
+import type { BrowserAgentAvailability } from "@octant/contracts";
 import { randomUUID } from "node:crypto";
 import { sameToolActionAuthority, type ToolActionAuthority } from "@octant/contracts";
 import {
@@ -101,6 +102,10 @@ export interface BrowserAutomationRouteDependencies {
   readonly downloadPermissions?: Pick<BrowserDownloadPermissions, "execute">;
   readonly uploadPermissions?: Pick<BrowserUploadPermissions, "execute">;
   readonly sessionGrants?: Pick<BrowserSessionGrants, "execute">;
+  readonly agentAvailability?: (
+    windowId: WindowId,
+    threadId: BrowserThreadId,
+  ) => BrowserAgentAvailability;
   readonly credentialUse?: Pick<BrowserCredentialUseService, "execute">;
   readonly service: Pick<
     BrowserAutomationService,
@@ -172,6 +177,12 @@ export interface BrowserAutomationRouteDependencies {
 export function createBrowserAutomationRouteHandler(
   dependencies: BrowserAutomationRouteDependencies,
 ): (request: Request) => Promise<Response | undefined> {
+  const withAvailability = (windowId: WindowId, snapshot: BrowserAutomationSnapshot) => ({
+    ...snapshot,
+    agentAvailability: dependencies.agentAvailability?.(windowId, snapshot.threadId) ?? {
+      status: "unknown" as const,
+    },
+  });
   const notThisWindowsThread = (origin: string | null): Response =>
     failure(
       { category: "unauthorized", message: "Browser thread is not owned by this window." },
@@ -676,14 +687,17 @@ export function createBrowserAutomationRouteHandler(
         return success(
           shown(
             decodeBrowserAutomationSnapshot(
-              dependencies.service.peekContext === undefined
-                ? dependencies.service.inspect(windowId, input.threadId, input.contextId)
-                : await dependencies.service.peekContext(
-                    windowId,
-                    input.threadId,
-                    input.contextId,
-                    request.signal,
-                  ),
+              withAvailability(
+                windowId,
+                dependencies.service.peekContext === undefined
+                  ? dependencies.service.inspect(windowId, input.threadId, input.contextId)
+                  : await dependencies.service.peekContext(
+                      windowId,
+                      input.threadId,
+                      input.contextId,
+                      request.signal,
+                    ),
+              ),
             ),
           ),
           origin,
@@ -708,7 +722,10 @@ export function createBrowserAutomationRouteHandler(
           dependencies.service.peekThread === undefined || input.freshPicture === false
             ? dependencies.service.inspectThread(windowId, input.threadId)
             : await dependencies.service.peekThread(windowId, input.threadId, request.signal);
-        return success(shown(decodeBrowserAutomationSnapshot(snapshot)), origin);
+        return success(
+          shown(decodeBrowserAutomationSnapshot(withAvailability(windowId, snapshot))),
+          origin,
+        );
       }
       if (url.pathname === "/api/browser/captures") {
         const input = decodeBrowserCapturesCommand(decoded.value);

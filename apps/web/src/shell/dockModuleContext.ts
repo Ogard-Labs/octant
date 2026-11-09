@@ -58,6 +58,9 @@ export interface ThreadUtilityDockContentProps {
   readonly androidToolchainClient?: AndroidToolchainClient;
   readonly browserAutomationClient?: BrowserAutomationClient;
   readonly browserContextId?: string;
+  readonly onAgentBrowserRecovery?: (
+    reason: "no-tool-transport" | "excluded-by-thread-constraints" | "host-lends-no-browser",
+  ) => void;
   readonly canvasClient?: CanvasClient;
   readonly chatClient: ChatClient;
   readonly chatReadCursorStore: ChatReadCursorStore;
