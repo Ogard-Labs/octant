@@ -519,6 +519,7 @@ describe("native harness composition", () => {
         "todo-write",
         "context-remaining",
         "second-opinion",
+        "diagnostics",
       ]);
     });
 
@@ -577,7 +578,7 @@ describe("native harness composition", () => {
       expect({ chat, work, code }).toEqual({
         chat: [...lead, "skill"],
         work: [...files, ...web, ...lead, "goal-check", "skill"],
-        code: [...files, ...web, ...lead, "goal-check", "skill"],
+        code: [...files, ...web, ...lead, "goal-check", "skill", "diagnostics"],
       });
     });
 
@@ -606,7 +607,17 @@ describe("native harness composition", () => {
         // skill only reads, so Plan keeps it.
         expect(code).toEqual(
           writes
-            ? [...readOnly, "bash", "edit", "write", ...web, ...lead, "goal-check", "skill"]
+            ? [
+                ...readOnly,
+                "bash",
+                "edit",
+                "write",
+                ...web,
+                ...lead,
+                "goal-check",
+                "skill",
+                "diagnostics",
+              ]
             : [...readOnly, ...web, ...lead, "skill"],
         );
       },
@@ -624,7 +635,7 @@ describe("native harness composition", () => {
           windowId: "window-1",
         })!,
       );
-      for (const refused of ["bash", "edit", "write", "goal-check"]) {
+      for (const refused of ["bash", "edit", "write", "goal-check", "diagnostics"]) {
         expect(code).not.toContain(refused);
       }
       expect(code).toContain("read");

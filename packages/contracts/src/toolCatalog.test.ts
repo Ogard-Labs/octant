@@ -21,6 +21,7 @@ describe("closed tool catalog", () => {
       "harness-ask-user",
       "harness-bash",
       "harness-context-remaining",
+      "harness-diagnostics",
       "harness-edit",
       "harness-glob",
       "harness-goal",

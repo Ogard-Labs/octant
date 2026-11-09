@@ -107,6 +107,7 @@ Plan mode drops every tool whose approval class it refuses.
 | `todo-write`, `context-remaining`, `goal`      | All but Side Chat (`context-remaining` everywhere) | Thread-local                                                                                                                                                                     |
 | `journal-lookup`, `second-opinion`, `ask-user` | All but Side Chat                                  | Thread-local; `second-opinion` is refused without an advisor model; `ask-user` asks the person                                                                                   |
 | `goal-check`                                   | Work, Code                                         | Runs the goal's checks as shell commands; refused in Plan                                                                                                                        |
+| `diagnostics`                                  | Code                                               | Runs the checkout's typecheck and lint, each command authorized as a `bash` call; returns parsed problems, capped; not offered in Plan                                           |
 
 The harness has no child-run tool of its own: a lead delegates through
 `octant_agents`, which each mode adds beside the harness set.

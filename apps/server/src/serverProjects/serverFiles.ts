@@ -169,6 +169,11 @@ export class ServerFileSystem implements NativeHarnessFileSystemPort {
     readonly path: string;
     readonly offset?: number | undefined;
     readonly limit?: number | undefined;
+    /**
+     * Whether this read lets a later edit of the file through. A read Octant
+     * makes for itself, not one the model asked for, passes false.
+     */
+    readonly marksRead?: boolean;
   }): Promise<NativeHarnessReadResult> {
     const lexical = this.#lexical(input.path);
     const guarded = guard(lexical);
@@ -207,7 +212,8 @@ export class ServerFileSystem implements NativeHarnessFileSystemPort {
     }
     if (kind === "b") return refusedWith("file-too-large");
     if (kind !== "f") return refusedWith("not-a-file");
-    this.#readMarks.set(resolved.path, digest(payload.toString("utf8")));
+    if (input.marksRead !== false)
+      this.#readMarks.set(resolved.path, digest(payload.toString("utf8")));
     return readFileContent(display, payload, input);
   }
 

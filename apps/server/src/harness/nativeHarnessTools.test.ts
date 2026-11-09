@@ -98,6 +98,7 @@ describe("native harness tools", () => {
       "bash",
       "edit",
       "write",
+      "diagnostics",
     ]);
   });
 

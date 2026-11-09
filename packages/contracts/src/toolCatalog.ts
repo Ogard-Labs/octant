@@ -295,6 +295,15 @@ const NATIVE_HARNESS_TOOL_POLICY: Readonly<
     irreversibleUnderTaint: false,
     resultTaintsThread: false,
   },
+  // Each command it runs is also authorized as a `bash` call, so this entry
+  // only decides where it is offered and can never be looser than the shell.
+  diagnostics: {
+    modes: ["code"],
+    requiredCapabilityClass: "shell",
+    approvalClass: "shell-commands",
+    irreversibleUnderTaint: true,
+    resultTaintsThread: false,
+  },
 };
 
 const nativeHarnessCatalogEntries: ReadonlyArray<ClosedToolCatalogEntry> =

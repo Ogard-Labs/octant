@@ -46,8 +46,8 @@ describe("native harness tools", () => {
     ).toThrow();
   });
 
-  it("offers the nine working tools, the three harness reads, the question, the goal tools, and skills", () => {
-    expect(NATIVE_HARNESS_TOOL_NAMES.length).toBe(16);
+  it("offers the nine working tools, the three harness reads, the question, the goal tools, skills, and diagnostics", () => {
+    expect(NATIVE_HARNESS_TOOL_NAMES.length).toBe(17);
     expect(NATIVE_HARNESS_TOOL_NAMES).toContain("journal-lookup");
     // A lookup names only a message number; it can never point at another thread.
     expect(() =>

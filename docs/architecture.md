@@ -4285,7 +4285,7 @@ flowchart LR
   afresh, under every posture below Full access that allows the tool at all,
   for each closed-catalog entry marked `irreversibleUnderTaint`
   (MCP tools, computer-use, the harness's `web-fetch`, `bash`, `edit`,
-  `write`, and `goal-check`); Plan refuses all of these but `web-fetch`
+  `write`, `goal-check`, and `diagnostics`); Plan refuses all of these but `web-fetch`
   before that check. At Full access in Work and Code the taint is recorded only (see
   [modes](#modes-chat-work-and-code)). A contract test refuses a catalog entry in a
   destructive, credential, outside-Project, or privilege-expansion class
@@ -7661,7 +7661,7 @@ the model at another size.
   back by an `octant_agents` `wait`, which records the mark before it returns
   the reply, or delivered as a new turn, journaled before the turn is
   admitted; a reply whose taint cannot be recorded stays owed. Local `read`, `grep`, `glob`, `bash`,
-  `edit`, `write`, and `goal-check` results do not, so local work keeps its
+  `edit`, `write`, `goal-check`, and `diagnostics` results do not, so local work keeps its
   ordinary approvals; the catalog's `resultTaintsThread` marks each tool and
   `nativeHarnessResultTaintsThread` decides, failing closed for a name it does
   not know. A command under OS-level `allow` egress (Full access, or a host
@@ -7672,7 +7672,7 @@ the model at another size.
   approvals stay active after it. Under the `proxied` level
   a launch taints when it received bytes from an outside host, as the
   [egress rules](#harness-tool-egress-rules) describe. Once tainted, `bash`, `edit`,
-  `write`, `goal-check`, and `web-fetch` need a person's confirmation for every
+  `write`, `goal-check`, `diagnostics` (each command, as a `bash` call), and `web-fetch` need a person's confirmation for every
   call below Full access, and refuse when no approval surface exists;
   `web-fetch` is included because a GET can carry data out in its URL. That
   confirmation is single-use: a remembered "always" approval stops covering
@@ -7700,7 +7700,7 @@ the model at another size.
   words, but only to the endpoint the person chose. Revisit if a default
   hosted third-party search provider ships. A tool the thread was not offered
   refuses as `tool-unavailable` without reaching policy or a person. A harness
-  `bash` or `goal-check` command on an approval-gated or auto-accept-edits Code
+  `bash`, `goal-check`, or `diagnostics` command on an approval-gated or auto-accept-edits Code
   thread runs on the `proxied` OS level: the OS rules deny it direct egress and
   open only its launch's loopback proxy, its environment names that proxy, and
   the host proxy decides each outside connection by the thread's and Project's
@@ -7770,6 +7770,44 @@ the model at another size.
   Goal panel, a read-only Goal row in a Code thread's Environment that appears
   once a goal exists, and `/goal` in the terminal. The ledger is a view; it
   adds no write path and no authority.
+- **Diagnostics.** `diagnostics` (Code only; not offered in Plan) runs the
+  checkout's typecheck, lint, or both (`which`, both when omitted) and returns
+  the problems as `file`, `line`, `column`, `severity`, `message`, and an
+  optional `code`. Without an explicit `command` it reads the `scripts` of the
+  `package.json` at the checkout root: `typecheck` and `lint` by name, and
+  `check` only when neither requested script exists, run with the package
+  manager its lockfile names (`bun.lock` or `bun.lockb`, then
+  `pnpm-lock.yaml`, `yarn.lock`, `package-lock.json`; npm when there is
+  none). With nothing found it refuses (`no-diagnostics-command`) and tells the
+  lead to pass the command. Each command is authorized, approved, and run as
+  its own `bash` call on the same shell port, so it has exactly the shell's
+  confinement, egress, approval class, taint confirmation, and Plan refusal;
+  the tool's own catalog entry decides only where it is offered. It reads tsc
+  output (`file(line,col): error TS…` and `file:line:col - error`), the
+  `file:line:col: message` lines unix and gnu reporters print (ESLint,
+  oxlint), Biome's diagnostic headers, and ESLint's default listing; `files`
+  narrows the returned problems, not what is checked. A turbo or pnpm runner
+  prefix names the problem's `package`; multi-line listings are followed per
+  package, so interleaved output stays apart. A package-relative path is made
+  checkout-relative by reading the root `package.json` `workspaces` and
+  `pnpm-workspace.yaml` `packages` (folders or `dir/*` patterns, at most 200
+  folders) and each folder's `package.json` `name`; a package it cannot place
+  keeps its own path, marked `packageRelative`, and `files` matches it only
+  exactly. Only a relative path under a prefix is placed; an absolute one is
+  never joined under a package folder. Placed paths and `files` entries are
+  compared normalized (`./a//b/` and `a/x/../b` are `a/b`, an absolute path
+  inside the checkout is made relative, `.` or the checkout's own path is the
+  whole checkout); a path outside the checkout keeps its raw form and matches
+  only exactly. These reads never count as the model's read before an edit. The list is capped at
+  100 problems and the whole serialized result at three quarters of
+  `MAX_PROVIDER_TOOL_RESULT_BYTES` (messages clipped to 500 characters,
+  echoed commands to 256, then only whole problems that fit), with a note
+  saying how many were left out and to narrow with `files`. `clean` holds only when every
+  command that ran exited zero and printed no problem; a run that exits
+  non-zero with nothing parsed carries its output tail and a note that it is
+  not clean, a run whose output the shell cut (local or server shell) is
+  marked `outputTruncated`, noted, and never clean, and a requested script
+  that was missing is named.
 - **Routing.** `NativeHarnessRoutingStore` journals a host default and
   Project overrides of slot tables; `resolveNativeHarnessRoute` in
   `@octant/domain` is the pure resolver; `NativeHarnessRouter` adds cooldowns
@@ -8026,7 +8064,8 @@ the model at another size.
   Harness parity while any item is open.
   1. **Offered tools.** Always offered: `todo-write`, `context-remaining`,
      and `second-opinion` in every mode; `read`, `grep`, `glob`, `edit`,
-     `write`, `bash`, and `goal-check` in Work and Code;
+     `write`, `bash`, and `goal-check` in Work and Code; `diagnostics` in
+     Code only (Work and Chat have no checkout to check);
      `journal-lookup` in every mode when the host supplies the journal (and,
      in Code, the turn's secret list). Offered
      when the host supplies the port: `ask-user` and `goal` (every mode),
@@ -8042,7 +8081,8 @@ the model at another size.
      research is on) the web tools, never `todo-write`, `ask-user`,
      `goal`, or `skill`, and not the `octant_agents` child-run tool either. A Code thread in Plan is offered only what Plan allows:
      `read`, `grep`, and `glob`, the web tools, and the rest of the lead
-     set above, with no `edit`, `write`, `bash`, or `goal-check`. Plan does
+     set above, with no `edit`, `write`, `bash`, `goal-check`, or
+     `diagnostics`. Plan does
      not refuse `web-fetch` (a tainted thread still confirms it afresh), so
      it stays. A thread stored as Plan, or a turn narrowed to Plan, composes
      that set. The offered set is not the boundary: every call is judged by
@@ -8592,7 +8632,8 @@ where it was or narrows it:
   journaled never runs its command, and a command whose summary or taint
   cannot be recorded returns `unavailable` without its output.
 - _Which commands._ `bash` and `goal-check`, the two harness tools that run a
-  command. Each run is one launch named by its authorized call. The Code
+  command, and each command `diagnostics` runs, which is authorized as a `bash`
+  call. Each run is one launch named by its authorized call. The Code
   terminal, Git, and provider runtimes are unchanged.
 - _Proxy variables._ The launch adds the proxy variables after the
   environment check, which refuses lowercase names from any caller, so only
@@ -10501,6 +10542,7 @@ and the marketplace and plugin registry are no longer extraction candidates.
 | Canvas, preview viewers, backgrounds, theme presets                   | Core; scoped artifact contracts, registered viewers, and appearance contributions                                       |
 | Usage, diagnostics, Navigator, automations UI                         | Core; underlying authority stays in the host                                                                            |
 | Project memory and its agent tool                                     | Core; the journal, the person's confirmation, and purge stay host-owned                                                 |
+| Octant Harness built-in tools (`read`, `edit`, `bash`, `diagnostics`) | Core; part of the harness loop's closed catalog, judged by the same authority path                                      |
 | Browser/computer use, agent hierarchy, remote/mobile, Apple workbench | Core; capability, lifecycle, and security remain app-managed                                                            |
 | Marketplace and plugin registry                                       | Core; they stay in the host because they admit and activate other components                                            |
 | Provider drivers                                                      | Bundled vendor plugins through provider-sdk; generic ACP transport and honest-capability enforcement stay host-owned    |

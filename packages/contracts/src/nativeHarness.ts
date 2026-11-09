@@ -78,6 +78,7 @@ export const NATIVE_HARNESS_TOOL_NAMES = [
   "goal",
   "goal-check",
   "skill",
+  "diagnostics",
 ] as const;
 export const NativeHarnessToolName = Schema.Literal(...NATIVE_HARNESS_TOOL_NAMES);
 export type NativeHarnessToolName = typeof NativeHarnessToolName.Type;
@@ -371,6 +372,23 @@ export const NativeHarnessSkillArguments = Schema.Union(
   }).annotations(strict),
 );
 export type NativeHarnessSkillArguments = typeof NativeHarnessSkillArguments.Type;
+export const MAX_NATIVE_HARNESS_DIAGNOSTICS_FILES = 50;
+
+/**
+ * Runs the checkout's typecheck, lint, or both and returns the problems they
+ * print. Without `command` the commands come from the checkout's own scripts;
+ * `files` narrows the returned problems, not what the command checks.
+ */
+export const NativeHarnessDiagnosticsArguments = Schema.Struct({
+  which: Schema.optional(Schema.Literal("typecheck", "lint", "both")),
+  command: Schema.optional(
+    Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(MAX_NATIVE_HARNESS_COMMAND_LENGTH)),
+  ),
+  files: Schema.optional(
+    Schema.Array(ToolPath).pipe(Schema.maxItems(MAX_NATIVE_HARNESS_DIAGNOSTICS_FILES)),
+  ),
+}).annotations(strict);
+export type NativeHarnessDiagnosticsArguments = typeof NativeHarnessDiagnosticsArguments.Type;
 
 const toolArgumentDecoders: Readonly<Record<NativeHarnessToolName, (value: unknown) => unknown>> = {
   read: Schema.decodeUnknownSync(NativeHarnessReadArguments),
@@ -389,6 +407,7 @@ const toolArgumentDecoders: Readonly<Record<NativeHarnessToolName, (value: unkno
   goal: Schema.decodeUnknownSync(NativeHarnessGoalArguments),
   "goal-check": Schema.decodeUnknownSync(NativeHarnessGoalCheckArguments),
   skill: Schema.decodeUnknownSync(NativeHarnessSkillArguments),
+  diagnostics: Schema.decodeUnknownSync(NativeHarnessDiagnosticsArguments),
 };
 
 /** Throws on a malformed argument object; the catalog's argument-schema step relies on it. */
@@ -680,6 +699,23 @@ export const NATIVE_HARNESS_TOOL_DEFINITIONS: ReadonlyArray<ProviderToolDefiniti
         offset: { type: "integer", minimum: 0 },
       },
       required: ["operation"],
+    },
+  },
+  {
+    name: "diagnostics",
+    description:
+      "Run the checkout's typecheck, lint, or both (which, both when omitted) and get the problems back as file, line, column, severity and message, capped. Without command it runs the typecheck and lint (or check) scripts in package.json with the package manager its lockfile names; when there are none it refuses, so pass the command to run. Each command is approved like bash. files narrows the returned problems, not what is checked. A non-zero exit with no problems read is not clean: read outputTail.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        which: { type: "string", enum: ["typecheck", "lint", "both"] },
+        command: { type: "string", maxLength: MAX_NATIVE_HARNESS_COMMAND_LENGTH },
+        files: {
+          type: "array",
+          items: pathProperty,
+          maxItems: MAX_NATIVE_HARNESS_DIAGNOSTICS_FILES,
+        },
+      },
     },
   },
 ];
