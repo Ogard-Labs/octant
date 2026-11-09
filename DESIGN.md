@@ -2872,17 +2872,29 @@ Diagnostics is the third source in the same toggle group, offered when the host
 answers turn diagnostics. It reads how turns went across every provider and mode
 ([architecture: reading how turns went](docs/architecture.md#context-and-usage-accounting))
 and has its own Range (24 hours to all recorded turns), Mode, Provider, and
-Trend-by controls. Its sections, in order: a Summary of tiles; Turns by day or
-hour as bars with failed and stopped turns as a hatched base segment, a legend,
-and a disclosed table; Benchmarks by model with p50 and p95 first-token, speed,
-and turn length; Failures by cause with the newest redacted message; Tools, most
-failures first; Retries, limits, and waits; Turns to investigate, whose Open
-button leaves Usage for that thread; and Likely prompt-cache misses, worded as a
+Trend-by controls. It opens as a dashboard drawn with the Canvas visuals, so
+every chart has hover readings and a disclosed table: headline tiles (turns, finished share, failed and stopped turns, turns cut at
+the output limit, tool failure rate, typical and slow first token, typical
+speed, typical and slow turn length, retries, provider-reported cost, likely
+cache misses), each
+with a sparkline and, for a bounded range, its change against the same span
+before, toned by which way is good; How turns ended (finished, stopped, and
+failed stacked by day or hour, failures in the alarm hue, beside the share that
+failed or stopped); Speed over time (typical first token and speed); Model
+comparison (ranked bars of typical and p95 first token and speed, full model
+names); and What fails most (failed turns by cause, failing tools). A tile's
+change is shown only beside the reading whose span it was measured against.
+Details follow: Benchmarks by model with p50 and p95 first-token, speed, and turn
+length; Turns by day or hour as a disclosed table of every bucket's turns,
+failures, stops, tool failures, retries, first token, and speed; Failures by
+cause with the newest redacted message; Tools, most failures
+first; Retries, limits, and waits; Turns to investigate, whose Open button
+leaves Usage for that thread; Likely prompt-cache misses, worded as a
 likelihood; and Host health, one small chart per measure on its own scale
 (memory in use, event-loop stalls, longest stall, slow database statements,
 request p95, database size), each with its peak and when, a restart note, and a
-disclosed table. A figure no turn measured reads Unavailable, never zero. The
-header copies the whole report as JSON for offline analysis and benchmarking.
+disclosed table. A figure no turn measured is left out or reads Unavailable,
+never zero. The header copies the whole report as JSON for offline analysis and benchmarking.
 
 The following canonical map applies to the Usage flow and its Settings entry:
 
