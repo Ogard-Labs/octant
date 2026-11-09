@@ -7582,7 +7582,24 @@ the model at another size.
   replacement by index and changes nothing. A write that fails after those
   checks puts back the files the call had written and lists any it could
   not. Per-file approvals were rejected: a person would answer one call
-  several times, and a denial halfway would leave a partial change. `bash` writes the command to a
+  several times, and a denial halfway would leave a partial change.
+  `read` recognizes a PNG, JPEG, GIF,
+  or WebP image and a PDF by its first bytes, whatever the file is named. An
+  image of at most 1,572,864 bytes (the most one tool image carries once
+  base64-encoded) goes to the model beside a result that names only its path,
+  type, and size, and only when the provider reports that the session's model
+  takes image input; otherwise the read refuses as `image-input-unsupported`,
+  and a larger image as `file-too-large` naming the limit. Once every
+  result of a step is in, the loop checks the request they go in (the step's
+  results are the one message fitting never trims) on every endpoint the turn
+  may use; while it does not fit, it refuses the largest image answer as
+  `image-too-large-for-endpoint`, with its image left out, so the turn goes on
+  instead of failing on the endpoint's request size limit. A step that does not
+  fit even without images fails as before. An answer with images is journaled
+  only after that check, so the journal holds what the model was sent. Like the text a read
+  returns, the image is local and does not taint the thread, and its pixels are
+  never journaled. A PDF refuses as `document-input-unsupported`: no harness
+  endpoint carries a document in a tool result yet. `bash` writes the command to a
   script in its own subdirectory of `harness/scripts` and runs it through the
   same confined owned-process-group port as repository tests (Seatbelt on
   macOS, the bubblewrap sandbox on Linux), so a timeout or cancel ends the

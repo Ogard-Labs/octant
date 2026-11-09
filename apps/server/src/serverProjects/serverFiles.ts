@@ -11,7 +11,7 @@ import {
   MAX_GREP_LINE_LENGTH,
   MAX_GREP_PATTERN_LENGTH,
   MAX_GREP_RESULT_BYTES,
-  readSlice,
+  readFileContent,
   SKIPPED_DIRECTORY_NAMES,
   type NativeHarnessEditFilesResult,
   type NativeHarnessEditResult,
@@ -212,9 +212,8 @@ export class ServerFileSystem implements NativeHarnessFileSystemPort {
     }
     if (kind === "b") return refusedWith("file-too-large");
     if (kind !== "f") return refusedWith("not-a-file");
-    const content = payload.toString("utf8");
-    if (input.marksRead !== false) this.#readMarks.set(resolved.path, digest(content));
-    return readSlice(display, content, input);
+    if (input.marksRead !== false) this.#readMarks.set(resolved.path, digest(payload.toString("utf8")));
+    return readFileContent(display, payload, input);
   }
 
   async write(input: {
