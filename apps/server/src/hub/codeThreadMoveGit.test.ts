@@ -1,14 +1,24 @@
 import { execFileSync } from "node:child_process";
 import { randomBytes } from "node:crypto";
-import { mkdtempSync, readFileSync, rmSync, statSync, utimesSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  statSync,
+  utimesSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import {
   captureCheckoutForMove,
   checkoutStillMatchesMove,
+  filesTheMoveLeft,
   measureCheckoutForMove,
   receiveCheckoutFromMove,
+  removeMovedOutWorktree,
 } from "./codeThreadMoveGit";
 
 const MOVE = "99999999-9999-4999-8999-999999999999";
@@ -216,6 +226,50 @@ describe("carrying a Code checkout between computers", () => {
     expect(
       await receiveCheckoutFromMove({ repositoryRoot: stranger, moveId: MOVE, bundlePath }),
     ).toEqual({ status: "refused", reason: "transfer-failed" });
+  });
+});
+
+describe("the worktree a moved-out thread leaves behind", () => {
+  it("names what the move did not carry: a refused file, a later edit, and ignored files", async () => {
+    const { laptop } = repositories();
+    writeFileSync(join(laptop, "app.ts"), "export const version = 2;\n");
+    writeFileSync(join(laptop, "config.ts"), `export const token = "ghp_${"c".repeat(36)}";\n`);
+    const bundlePath = join(laptop, "..", "left.bundle");
+    await captureCheckoutForMove({ checkoutRoot: laptop, moveId: MOVE, bundlePath });
+    writeFileSync(join(laptop, "notes.md"), "written after the snapshot\n");
+    writeFileSync(join(laptop, ".env"), "LOCAL_ONLY=1\n");
+
+    expect(await filesTheMoveLeft({ checkoutRoot: laptop, moveId: MOVE })).toEqual([
+      ".env",
+      "config.ts",
+      "notes.md",
+    ]);
+  });
+
+  it("removes a kept linked worktree with its untracked and ignored files, and leaves its branch", async () => {
+    const { laptop } = repositories();
+    const kept = join(laptop, "..", "laptop-thread-moved-out-99999999");
+    git(laptop, "worktree", "add", "-q", "-b", "octant/thread", kept);
+    writeFileSync(join(kept, ".env"), "LOCAL_ONLY=1\n");
+    writeFileSync(join(kept, "draft.md"), "not committed\n");
+
+    expect(await removeMovedOutWorktree(kept)).toBe("removed");
+    expect(existsSync(kept)).toBe(false);
+    expect(git(laptop, "worktree", "list")).not.toContain("moved-out");
+    expect(git(laptop, "branch", "--list", "octant/thread")).toContain("octant/thread");
+    // Asked again, the folder is already gone.
+    expect(await removeMovedOutWorktree(kept)).toBe("removed");
+  });
+
+  it("refuses to remove a repository's main checkout or a folder Git does not list", async () => {
+    const { laptop } = repositories();
+    const stray = mkdtempSync(join(tmpdir(), "octant-move-stray-"));
+    folders.push(stray);
+
+    expect(await removeMovedOutWorktree(laptop)).toBe("not-a-linked-worktree");
+    expect(await removeMovedOutWorktree(stray)).toBe("not-a-linked-worktree");
+    expect(existsSync(join(laptop, "app.ts"))).toBe(true);
+    expect(existsSync(stray)).toBe(true);
   });
 });
 

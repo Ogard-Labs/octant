@@ -22,6 +22,7 @@ import { OctantSelectField } from "../../ui/base/OctantSelect";
 import { OctantSwitch } from "../../ui/base/OctantSwitch";
 import { EnvironmentCard, EnvironmentTile } from "../EnvironmentGroup";
 import type { ThreadMoveClient } from "./threadMoveClient";
+import { partsLeftBehindSentence } from "./ThreadMoveTombstone";
 import { estimateBasis, formatBytes, sizeAndEstimate } from "./threadMoveSize";
 import { useThreadMove } from "./useThreadMove";
 
@@ -313,7 +314,7 @@ function computerPill(status: ThreadMoveThreadStatus | undefined): {
   return { label: "This computer", tone: "secondary" };
 }
 
-function percent(sending: NonNullable<ThreadMoveThreadStatus["sending"]>): number {
+export function percent(sending: NonNullable<ThreadMoveThreadStatus["sending"]>): number {
   if (sending.state === "arrived" || sending.state === "committed") return 100;
   if (sending.bytesTotal === 0) return 0;
   return Math.min(99, Math.floor((sending.bytesSent / sending.bytesTotal) * 100));
@@ -577,9 +578,7 @@ function MovedNotice(props: {
     hour: "numeric",
     minute: "2-digit",
   });
-  const leftBehind = props.departed.partsLeftBehind ?? [];
-  const leftBehindCount = props.departed.partsLeftBehindCount ?? leftBehind.length;
-  const unnamed = leftBehindCount - leftBehind.length;
+  const leftBehind = partsLeftBehindSentence(props.departed);
   return (
     <OctantAlert title={`Moved to ${props.departed.destinationName}`} tone="neutral">
       Moved at {time}.
@@ -588,9 +587,7 @@ function MovedNotice(props: {
           ? " Its changes also remain in this Project's checkout."
           : null
         : ` Its worktree held files that stayed here, so it was kept at ${props.departed.keptWorktree}.`}
-      {leftBehindCount === 0
-        ? null
-        : ` ${leftBehindCount === 1 ? "1 part" : `${leftBehindCount} parts`} could not be read here, so ${leftBehindCount === 1 ? "it" : "they"} did not move: ${leftBehind.map((part) => part.name).join(", ")}${unnamed > 0 ? `, and ${unnamed} more` : ""}.`}
+      {leftBehind === undefined ? null : ` ${leftBehind}`}
     </OctantAlert>
   );
 }

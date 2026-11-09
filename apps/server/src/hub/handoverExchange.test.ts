@@ -90,7 +90,11 @@ function world(
     source: {
       erase: async ({ thread }) => {
         erased.push(thread.threadId);
-        return { worktreeKept: true, keptWorktree: "/w/octant-moved-out" };
+        return {
+          worktreeKept: true,
+          keptWorktree: "/w/octant-moved-out",
+          keptFiles: [".env", " leading space.txt"],
+        };
       },
       unfreeze: () => {},
     },
@@ -180,6 +184,9 @@ describe("continuing a handover on another computer", () => {
       destinationMemberId: DESKTOP,
       destinationThread: { mode: "code", threadId: NEW_THREAD },
       keptWorktree: "/w/octant-moved-out",
+      // The tombstone names what stayed, a name with a leading space included.
+      keptFiles: [".env", " leading space.txt"],
+      keptFileCount: 2,
     });
   });
 
