@@ -26,6 +26,9 @@ export type ThreadMoveId = typeof ThreadMoveId.Type;
 export const HandoverId = Schema.UUID.pipe(Schema.brand("HandoverId"));
 export type HandoverId = typeof HandoverId.Type;
 
+/** A Git commit id, SHA-1 or SHA-256. */
+const CommitId = Schema.String.pipe(Schema.pattern(/^(?:[0-9a-f]{40}|[0-9a-f]{64})$/));
+
 /** A thread named by its mode and its id; each mode brands its own id. */
 export const MovedThreadReference = Schema.Struct({
   mode: OctantMode,
@@ -467,6 +470,13 @@ export const HandedOverThread = Schema.Struct({
   branch: bounded(255),
   pushed: Schema.Boolean,
   shortfall: Schema.optional(HandoverShortfall),
+  /**
+   * The commit carrying this handover's note. A continued report must name
+   * it: anyone who can push to the repository can write another branch whose
+   * tip claims this handover's id, and continuing that one must not erase
+   * this thread. Absent in a record written before it was kept.
+   */
+  commit: Schema.optional(CommitId),
   refusedFiles: Schema.Array(bounded(4_096)).pipe(Schema.maxItems(1_000)),
   handedOverAt: UtcTimestamp,
 }).annotations(strict);
@@ -766,6 +776,8 @@ export type HandoverControlRequest = typeof HandoverControlRequest.Type;
 export const HandoverContinuedReport = Schema.Struct({
   handoverId: HandoverId,
   thread: MovedThreadReference,
+  /** The commit the destination continued from, whose note named this handover. */
+  commit: Schema.optional(CommitId),
 }).annotations(strict);
 export type HandoverContinuedReport = typeof HandoverContinuedReport.Type;
 
@@ -775,7 +787,11 @@ export const ReceivedHandoverView = Schema.Struct({
   title: bounded(256),
   branch: bounded(255),
   repositoryRemote: bounded(2_048),
-  originMemberId: HubMemberId,
+  /**
+   * The member that sent the notice. Absent for a handover found on a fetched
+   * branch whose `Octant-Origin` trailer names no single member.
+   */
+  originMemberId: Schema.optional(HubMemberId),
   originName: bounded(256),
   /** Code Projects here bound to a clone of the same repository. */
   projects: Schema.Array(ThreadMoveProjectChoice).pipe(Schema.maxItems(256)),

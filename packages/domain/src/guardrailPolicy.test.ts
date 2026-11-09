@@ -118,13 +118,14 @@ describe("guardrail levels", () => {
     ).toMatchObject({ sandbox: "none", egress: "unrestricted" });
   });
 
-  it("keeps the sandbox at Full access only on Codex and the Octant Harness, and refuses it elsewhere or on an unknown runtime", () => {
+  it("keeps the sandbox at Full access on Codex, Claude and the Octant Harness, and refuses it elsewhere or on an unknown runtime", () => {
     const sandboxed = { executionPolicy: "full-access", fullAccessSandbox: true } as const;
     expect(refusesFullAccessSandbox({ access: sandboxed, driverKind: "codex" })).toBe(false);
+    expect(refusesFullAccessSandbox({ access: sandboxed, driverKind: "claude" })).toBe(false);
     expect(refusesFullAccessSandbox({ access: sandboxed, driverKind: "openai-compatible" })).toBe(
       false,
     );
-    for (const driverKind of ["claude", "opencode", "pi", "mistral-vibe", undefined] as const) {
+    for (const driverKind of ["opencode", "pi", "mistral-vibe", undefined] as const) {
       expect(refusesFullAccessSandbox({ access: sandboxed, driverKind })).toBe(true);
     }
     // Without the choice, or below Full access, nothing refuses.
