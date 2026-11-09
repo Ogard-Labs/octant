@@ -1306,7 +1306,11 @@ function ActiveSectionContent({
       const administration = remoteAccessAdministrationOf(props.hostBridge);
       const setupGuide = (
         <RemoteSetupGuide
+          focusedSetting={focusedSetting}
           canConfigureHost={administration !== undefined}
+          checks={props.serverProjectsClient}
+          servers={props.shieldServersClient}
+          readHostStatus={administration?.getPrivateListenerStatus}
           onContinue={(intent) =>
             onApplyDeepLink(
               intent === "control-host"

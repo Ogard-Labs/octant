@@ -588,6 +588,7 @@ export function startOctantServer(
       observeTurnEnded,
       threadWork,
     } = wireHarness({
+      serverConnection,
       personMemory,
       safeNetworkStore,
       projectService,
