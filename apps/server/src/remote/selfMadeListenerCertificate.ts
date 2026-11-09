@@ -230,12 +230,14 @@ export function createSelfMadeListenerCertificateStore(
 
       const at = now();
       let certificate: string | undefined;
+      let firstUse = false;
       if (files === undefined)
         certificate = readUsableCertificate(certificatePath, publicKey, address, at);
       else {
         const loaded = files.read("certificate");
         if (loaded.status !== "ready" && loaded.status !== "missing")
           return { status: "refused", code: "invalid-tls" };
+        firstUse = loaded.status === "missing";
         if (loaded.status === "ready") {
           try {
             if (loaded.bytes.length > 16384) return { status: "refused", code: "invalid-tls" };
@@ -263,7 +265,12 @@ export function createSelfMadeListenerCertificateStore(
           else {
             const candidate = Buffer.from(certificate);
             try {
-              const saved = files.replaceCertificate(candidate);
+              // A concurrent first use may have written its certificate since
+              // the read; creating adopts that winner rather than replacing a
+              // certificate another ensure already returned.
+              const saved = firstUse
+                ? files.createCertificate(candidate)
+                : files.replaceCertificate(candidate);
               if (saved.status !== "ready") return { status: "refused", code: "invalid-tls" };
               try {
                 const admitted = usableCertificate(

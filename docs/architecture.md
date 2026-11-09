@@ -563,15 +563,24 @@ variables, and a debug console, deciding no refusal itself
 **Host resources.** `GET /api/host/resources` is a read-only snapshot of this
 host's load: CPU use averaged over a short sample of the process's CPU times,
 used and total memory, the core count, and used and free space on the volume
-that holds the data directory. The disk figures are omitted when that volume
-cannot be read. The snapshot names no path, no user, and no process. The server
+that holds the data directory. When the host can read them it also reports
+network and block-device throughput (bytes per second between its last two
+samples, so absent on the first), the busiest GPU's utilisation, and battery
+level with charging state; each is omitted when unreadable. Linux reads
+`/proc`, `/sys/class/drm` (AMD `gpu_busy_percent`), `nvidia-smi` for NVIDIA, and `/sys/class/power_supply`;
+macOS reads `netstat`, `ioreg`, and `pmset`; other platforms and GPUs report
+none. The disk figures are omitted when that volume cannot be read. The snapshot names no path, no user, and no process. The server
 keeps one snapshot for about five seconds. The local owner always receives it.
 A paired remote device with an active session receives it under the same
 `project.overview.read` action as the Project overview reads; an
 unauthenticated caller is refused, with no figures in the refusal. The route
 also compares the device's host identity with this host's, but every paired
 device row on a host carries that host's own identity, so the comparison does
-not separate one paired device from another. The Computers card
+not separate one paired device from another. A server Project's server is read by
+`GET /api/server-projects/resources?projectId=`, which runs one fixed
+read-only script over that Project's SSH connection and answers the same
+snapshot; a local window only, never a paired device, and Linux servers only.
+The Computers card
 reads the route only while the card is on screen and the window is visible,
 about every ten seconds, at most one read per host at a time and each abandoned
 after five seconds, and does not poll in the background.
@@ -15554,8 +15563,9 @@ owner, format, creation and refusal rules. The existing remote/member and push
 consumers carry a host-internal storage dependency; absence refuses on Windows.
 The dependent listener TLS store carries its own closed native dependency for
 the two fixed TLS key/certificate files. It reuses the profile admission
-boundary, exclusively creates and retains the separate P-256 key, and renews
-only private regular certificates through a flushed native staging handle and
+boundary, exclusively creates and retains the separate P-256 key, exclusively
+creates the first certificate (a concurrent first use adopts the winner), and
+renews only private regular certificates through a flushed native staging handle and
 atomic rename into the held remote directory. The reopened file identity is
 checked before use. Renewal and restart preserve the SPKI pin; unsafe keys or
 certificate entries refuse without ordinary-file fallback or silent key rotation.

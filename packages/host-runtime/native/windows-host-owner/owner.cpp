@@ -576,14 +576,17 @@ napi_value private_profile_file(napi_env env, napi_callback_info info, ProfileFi
   const std::string purpose = roster ? "roster-key" : string_arg(env, arguments[3]);
   const auto found = profiles.find(name);
   if (found == profiles.end() || found->second->scope != scope ||
-      (!roster && (tls ? (purpose != "key" && purpose != "certificate") : (purpose != "host-id" && purpose != "host-key")))) return object(env, "refused");
-  const bool certificate = tls && purpose == "certificate";
+      (!roster && (tls ? (purpose != "key" && purpose != "certificate" && purpose != "certificate-renewal") : (purpose != "host-id" && purpose != "host-key")))) return object(env, "refused");
+  // First use creates the certificate exclusively like the key and adopts a
+  // concurrent winner. Only an explicit renewal replaces an existing record.
+  const bool renewal = tls && purpose == "certificate-renewal";
+  const bool certificate = tls && (purpose == "certificate" || renewal);
   const DWORD maximum = purpose == "host-id" ? 37 : certificate ? 16384 : 4096;
   napi_valuetype candidate_type;
   if (napi_typeof(env, arguments[roster ? 3 : 4], &candidate_type) != napi_ok) return object(env, "refused");
   const bool create = candidate_type != napi_null;
   Bytes candidate;
-  if (create && (!byte_arg(env, arguments[roster ? 3 : 4], candidate, maximum) || candidate.empty())) return object(env, "refused");
+  if ((renewal && !create) || (create && (!byte_arg(env, arguments[roster ? 3 : 4], candidate, maximum) || candidate.empty()))) return object(env, "refused");
   bool missing_directory = false;
   auto admission = profile_directory(name, scope, expected_data, roster ? ProfileDirectoryKind::Hub : ProfileDirectoryKind::Remote, create, missing_directory);
   if (!admission) return object(env, missing_directory ? "missing" : "refused");
@@ -595,7 +598,7 @@ napi_value private_profile_file(napi_env env, napi_callback_info info, ProfileFi
     ? (certificate ? L"\\private-listener-tls-cert.pem" : L"\\private-listener-tls-key.pem")
     : (purpose == "host-id" ? L"\\private-listener-host-id" : L"\\private-listener-host-key.pem"));
   FILE_ID_INFO created_identity{}; bool wrote_identity = false;
-  if (certificate && create) {
+  if (renewal) {
     if (!replace_listener_certificate(*root, path, candidate, created_identity)) return object(env, "refused");
     wrote_identity = true;
   }
@@ -635,7 +638,7 @@ napi_value private_profile_file(napi_env env, napi_callback_info info, ProfileFi
   if (!ReadFile(file.value, bytes.data(), static_cast<DWORD>(bytes.size()), &got, nullptr) || got != bytes.size()) return object(env, "refused");
   napi_value result = object(env, "ready");
   put(env, result, "dataDirectory", expected_data); buffer(env, result, "bytes", bytes);
-  auto& retained = found->second->identity_guards[tls ? "tls-" + purpose : purpose];
+  auto& retained = found->second->identity_guards[tls ? (certificate ? std::string("tls-certificate") : "tls-" + purpose) : purpose];
   retained.clear();
   retained.push_back(std::move(remote));
   if (!certificate) retained.push_back(std::move(file));
