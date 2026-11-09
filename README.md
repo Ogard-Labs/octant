@@ -10,8 +10,8 @@
   <a href="https://octant.sh">octant.sh</a>
 </p>
 
-Octant is a local-first macOS workspace for **Chat**, **Work**, and **Code**
-across many AI providers. One authoritative local server owns your Projects,
+Octant is a local-first macOS workspace for **Work** and **Code** across many
+AI providers. One authoritative local server owns your Projects,
 threads, memory, approvals, and history; the desktop app (and optionally an
 authenticated browser or remote client) is a renderer over it. Octant runs the
 providers you already have — local coding CLIs, agent SDKs, Ollama, or any
@@ -20,14 +20,20 @@ requires a specific vendor or an Octant-operated cloud service.
 
 ## Modes
 
-- **Chat** — conversations in virtual Projects with scoped memory and no
-  implicit filesystem or shell authority.
-- **Work** — knowledge work confined to one user-approved folder: research
-  with citations, artifacts, previews, and Goals.
+The app shows two modes, switched by two icon buttons at the top of the
+sidebar:
+
+- **Work** — conversations and knowledge work. Its composer starts either a
+  **Chat** (no folder: virtual Projects with scoped memory and no implicit
+  filesystem or shell authority) or a thread **In a folder** (confined to one
+  user-approved folder: research with citations, artifacts, previews, and
+  Goals).
 - **Code** — engineering confined to one user-approved folder: approval-gated
   access, managed worktrees, terminals, an editor, tests, and a thread board.
 
-Modes are enforced on the server, not toggled in the renderer. Work and Code
+Modes are enforced on the server, not toggled in the renderer. Chat and Work
+stay separate server modes with their own authority, and a thread never
+converts between them. Work and Code
 are meant to do the same things under the same guardrail level; they differ
 in focus, with Work hiding Git and other developer tools unless you turn them
 on (the shared capability set is not built yet). Work never silently becomes

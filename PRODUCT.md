@@ -12,7 +12,7 @@ Octant first serves solo power users who coordinate many active projects and rep
 
 ## Product Purpose
 
-Octant is a local-first agent development environment for Chat, Work, and Code across multiple AI providers. It succeeds when one person can supervise concurrent project work, use thread-owned tools beside the conversation, and finish only when a confirmed delivery target has objective evidence.
+Octant is a local-first agent development environment for Work (chats and folder work) and Code across multiple AI providers. It succeeds when one person can supervise concurrent project work, use thread-owned tools beside the conversation, and finish only when a confirmed delivery target has objective evidence.
 
 ## Positioning
 
@@ -24,7 +24,7 @@ Users work across repositories and document projects with long-running threads, 
 
 ## Capabilities and Constraints
 
-- Chat, Work, and Code are server-enforced modes with different authority.
+- Chat, Work, and Code are server-enforced modes with different authority; the interface shows two, Work (Chat and Work threads together) and Code.
 - Work and Code Projects bind OS-confined roots; Chat Projects grant no filesystem authority.
 - Child AgentRuns inherit or narrow parent authority and use one provider-neutral hierarchy.
 - Project and thread state is local-first, journaled, rebuildable, and server-authoritative.

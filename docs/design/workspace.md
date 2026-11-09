@@ -101,8 +101,8 @@ tool (its Computer card), under
 
 ## Navigation and Projects
 
-The window is mode-first: a persistent left sidebar with the Work and Code
-icon buttons (Work presents the Chat and Work domains together; see
+The window is mode-first: a persistent left sidebar headed by the Work and
+Code icon buttons (Work presents the Chat and Work domains together; see
 [architecture](../architecture.md#modes-chat-work-and-code)), optional count tiles, mode-aware destinations, Projects and
 threads, and settings (the sidebar's anatomy is in [DESIGN.md](../../DESIGN.md#shell-and-layout)); an
 integrated borderless top chrome; a central workspace; and an optional right
