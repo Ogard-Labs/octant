@@ -2159,7 +2159,10 @@ this is how it looks.
     the foot's alert names it, the other destinations still move, and each of
     its rows reads Stays here with a small neutral pill saying why (Not
     unlocked, Not an owner there, Offline, Not accepting moves, Couldn't
-    start, or Moves next past one unlock's limit).
+    start, or Moves next past one unlock's limit). A row the host did not take
+    from a batch it started reads Stays here with Already moving (another move
+    or wait holds it) or Can't move (its thread is gone), and the batch never
+    waits on it.
   - **While it runs.** The dialog stays and becomes the progress view: a
     determinate bar under the head for the whole batch, and on each row a thin
     progress line and a state word in place of its choice (Waiting, Moving with

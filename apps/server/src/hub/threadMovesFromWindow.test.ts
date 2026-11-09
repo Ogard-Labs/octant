@@ -93,7 +93,7 @@ describe("holding a move for an owner phone", () => {
   function heldMoves(
     options: {
       readonly busy?: boolean;
-      readonly read?: () => Promise<MovableThreadReading>;
+      readonly read?: (thread: MovedThreadReference) => Promise<MovableThreadReading>;
     } = {},
   ) {
     const folder = mkdtempSync(join(tmpdir(), "octant-move-phone-"));
@@ -138,6 +138,8 @@ describe("holding a move for an owner phone", () => {
     expect(await moves.askPhone(ask)).toEqual({
       status: "waiting-for-phone",
       expiresAt: clock.now + 5 * 60_000,
+      held: [THREAD],
+      leftOut: [],
     });
     const [held] = moves.phoneConfirmations().confirmations;
     if (held === undefined) throw new Error("Nothing waits for the phone.");
@@ -323,6 +325,59 @@ describe("holding a move for an owner phone", () => {
     } finally {
       process.off("unhandledRejection", onUnhandled);
     }
+  });
+
+  it("ends a batch row whose thread is gone with its reason, and names which rows it holds", async () => {
+    const GONE: MovedThreadReference = {
+      mode: "chat",
+      threadId: "99999999-9999-4999-8999-999999999999",
+    };
+    // Archived or deleted after the listing loaded.
+    const { moves, refused } = heldMoves({
+      read: async (thread) =>
+        thread.threadId === GONE.threadId ? { status: "missing" } : reading(false),
+    });
+
+    const outcome = await moves.shutdownAskPhone({
+      destinationMemberId: DESKTOP as never,
+      rows: [
+        { thread: THREAD, timing: "now" },
+        { thread: GONE, timing: "now" },
+      ],
+    });
+
+    expect(outcome).toMatchObject({
+      status: "waiting-for-phone",
+      held: [THREAD],
+      leftOut: [{ thread: GONE, reason: "refused" }],
+    });
+    expect(refused).toEqual([{ threadId: GONE.threadId, reason: "refused" }]);
+    expect(moves.status(GONE).settled?.settledAt).toEqual(expect.any(String));
+    expect(
+      moves.phoneConfirmations().confirmations[0]?.threads.map((entry) => entry.thread),
+    ).toEqual([THREAD]);
+    moves.close();
+  });
+
+  it("names a Touch ID batch row another move already holds, rather than leaving it unanswered", async () => {
+    const { moves } = heldMoves();
+    await moves.askPhone({ ...ask, timing: "now" });
+    const OTHER: MovedThreadReference = {
+      mode: "chat",
+      threadId: "88888888-8888-4888-8888-888888888888",
+    };
+
+    expect(
+      await moves.shutdownStart({
+        destinationMemberId: DESKTOP as never,
+        rows: [
+          { thread: THREAD, timing: "now" },
+          { thread: OTHER, timing: "now" },
+        ],
+        unlock: { challengeId: "12345678-1234-4234-8234-123456789012", signature: "c2ln" },
+      }),
+    ).toEqual({ status: "started", leftOut: [{ thread: THREAD, reason: "busy" }] });
+    moves.close();
   });
 
   it("gives the thread back when the ask is refused, so it can be asked again", async () => {

@@ -23,6 +23,7 @@ import {
   type ShutdownListing,
   type ShutdownPhoneAskRequest,
   type ShutdownPlacement,
+  type ShutdownRowLeftOut,
   type ShutdownStartOutcome,
   type ShutdownStartRequest,
   type ShutdownThreadRow,
@@ -421,10 +422,15 @@ export class ThreadMovesFromWindow {
 
   /** Holds one destination's Prepare to shut down batch until an owner phone confirms it. */
   async shutdownAskPhone(request: ShutdownPhoneAskRequest): Promise<ThreadMovePhoneAskOutcome> {
-    // Every row is claimed before the first read; a thread already moving or
-    // waiting keeps that move and is left out, as a Touch ID batch does.
+    // Every row is claimed before the first read. A thread already moving or
+    // waiting keeps that move and is named as left out as busy, with no
+    // failure of its own, since that other move will say how it ends; a thread
+    // that is gone ends here as refused. Either way the window learns which
+    // rows are held, so it never waits on one nothing will move.
+    const leftOut: ShutdownRowLeftOut[] = [];
     const claimed = request.rows.flatMap((row) => {
       const claim = this.#claim(row.thread);
+      if (claim === undefined) leftOut.push({ thread: row.thread, reason: "busy" });
       return claim === undefined ? [] : [{ row, claim }];
     });
     const rows: HeldRow[] = [];
@@ -433,6 +439,9 @@ export class ThreadMovesFromWindow {
         const reading = await this.#options.source.read(row.thread);
         if (reading.status === "missing") {
           this.#release(row.thread, claim);
+          this.#options.moves.refuseBeforeStart(row.thread, "refused");
+          this.#settle(row.thread);
+          leftOut.push({ thread: row.thread, reason: "refused" });
           continue;
         }
         rows.push({ ...row, title: shortenedForListing(reading.title), claim });
@@ -442,7 +451,7 @@ export class ThreadMovesFromWindow {
       throw error;
     }
     if (rows.length === 0) return { status: "refused", reason: "busy" };
-    return this.#holdForPhone(request.destinationMemberId, rows);
+    return this.#holdForPhone(request.destinationMemberId, rows, leftOut);
   }
 
   /** The moves held here for an owner phone, as the phone lists them. */
@@ -498,6 +507,7 @@ export class ThreadMovesFromWindow {
   #holdForPhone(
     destinationMemberId: HubMemberId,
     asked: ReadonlyArray<HeldRow>,
+    alreadyLeftOut: ReadonlyArray<ShutdownRowLeftOut> = [],
   ): ThreadMovePhoneAskOutcome {
     let rows = asked;
     this.#expirePhoneWaits();
@@ -508,6 +518,13 @@ export class ThreadMovesFromWindow {
       for (const row of current) this.#release(row.thread, row.claim);
       return { status: "refused", reason: "busy" };
     }
+    // Don't move already settled a row withdrawn while it was read.
+    const leftOut = [
+      ...alreadyLeftOut,
+      ...asked
+        .filter((row) => !current.includes(row))
+        .map((row) => ({ thread: row.thread, reason: "busy" as const })),
+    ];
     rows = current;
     const confirmationId = randomUUID();
     const expiresAt = this.#options.now() + THREAD_MOVE_PHONE_WAIT_MS;
@@ -515,7 +532,12 @@ export class ThreadMovesFromWindow {
     timer.unref?.();
     for (const row of rows) this.#settledAt.delete(key(row.thread));
     this.#phoneWaits.set(confirmationId, { destinationMemberId, rows, expiresAt, timer });
-    return { status: "waiting-for-phone", expiresAt };
+    return {
+      status: "waiting-for-phone",
+      expiresAt,
+      held: rows.map((row) => row.thread),
+      leftOut,
+    };
   }
 
   /** A wait the phone did not answer in time ends as an unlock that never came. */
@@ -748,9 +770,11 @@ export class ThreadMovesFromWindow {
   async shutdownStart(request: ShutdownStartRequest): Promise<ShutdownStartOutcome> {
     const threads = request.rows.map((row) => row.thread);
     // Claimed before the ticket is redeemed; a thread already moving or
-    // waiting keeps that move and is left out.
+    // waiting keeps that move and is named as left out as busy.
+    const leftOut: ShutdownRowLeftOut[] = [];
     const claimed = request.rows.flatMap((row) => {
       const claim = this.#claim(row.thread);
+      if (claim === undefined) leftOut.push({ thread: row.thread, reason: "busy" });
       return claim === undefined ? [] : [{ row, claim }];
     });
     const releaseAll = () => {
@@ -786,7 +810,7 @@ export class ThreadMovesFromWindow {
         queue,
       });
     }
-    return { status: "started" };
+    return { status: "started", ...(leftOut.length === 0 ? {} : { leftOut }) };
   }
 
   /**

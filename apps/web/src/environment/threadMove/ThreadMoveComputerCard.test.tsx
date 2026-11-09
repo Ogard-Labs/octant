@@ -96,7 +96,12 @@ function fakeClient(input: {
           expiresAt: 1_900_000_000_000,
         },
       };
-      return { status: "waiting-for-phone", expiresAt: 1_900_000_000_000 };
+      return {
+        status: "waiting-for-phone",
+        expiresAt: 1_900_000_000_000,
+        held: [request.thread],
+        leftOut: [],
+      };
     },
     status: async () => status,
     stopWaiting: async () => {

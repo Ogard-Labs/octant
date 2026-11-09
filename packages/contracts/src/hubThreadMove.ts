@@ -694,8 +694,21 @@ export const ShutdownStartRequest = Schema.Struct({
 }).annotations(strict);
 export type ShutdownStartRequest = typeof ShutdownStartRequest.Type;
 
+/**
+ * A batch row this host did not take, and why: its thread is gone, or another
+ * move or wait already holds it. Every requested row either starts or is
+ * named here, so a window never waits on a row nothing will move.
+ */
+export const ShutdownRowLeftOut = Schema.Struct({
+  thread: MovedThreadReference,
+  reason: ThreadMoveFailureReason,
+}).annotations(strict);
+export type ShutdownRowLeftOut = typeof ShutdownRowLeftOut.Type;
+
+const RowsLeftOut = Schema.Array(ShutdownRowLeftOut).pipe(Schema.maxItems(SHUTDOWN_BATCH_MAX));
+
 export const ShutdownStartOutcome = Schema.Union(
-  Schema.Struct({ status: Schema.Literal("started") }),
+  Schema.Struct({ status: Schema.Literal("started"), leftOut: Schema.optional(RowsLeftOut) }),
   Schema.Struct({ status: Schema.Literal("refused"), reason: ThreadMoveFailureReason }),
 );
 export type ShutdownStartOutcome = typeof ShutdownStartOutcome.Type;
@@ -732,6 +745,10 @@ export const ThreadMovePhoneAskOutcome = Schema.Union(
   Schema.Struct({
     status: Schema.Literal("waiting-for-phone"),
     expiresAt: Schema.Int.pipe(Schema.positive()),
+    /** The threads held for the phone. */
+    held: Schema.Array(MovedThreadReference).pipe(Schema.maxItems(SHUTDOWN_BATCH_MAX)),
+    /** Requested threads not held, each with why. */
+    leftOut: RowsLeftOut,
   }),
   Schema.Struct({ status: Schema.Literal("refused"), reason: ThreadMoveFailureReason }),
 );

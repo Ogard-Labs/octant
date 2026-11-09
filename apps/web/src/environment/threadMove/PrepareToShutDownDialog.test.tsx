@@ -106,6 +106,10 @@ function fakeClient(
       memberId: string,
       threads: ReadonlyArray<MovedThreadReference>,
     ) => Promise<ThreadMoveSizes>;
+    /** A thread archived or deleted after the listing loaded: the phone ask leaves it out. */
+    readonly goneBeforePhone?: MovedThreadReference;
+    /** Once true, the phone never answered and the held moves ended. */
+    readonly phoneWaitEnded?: () => boolean;
   } = {},
 ) {
   const challenged: Array<{
@@ -125,14 +129,25 @@ function fakeClient(
     askPhone: async () => ({ status: "refused", reason: "refused" }),
     status: async (thread): Promise<ThreadMoveThreadStatus> =>
       askedPhone.length > 0 && !moved
-        ? {
-            status: "read",
-            waitingForPhone: {
-              destinationMemberId: MINI as never,
-              destinationName: "Mac mini",
-              expiresAt: 1_900_000_000_000,
-            },
-          }
+        ? thread.threadId === input.goneBeforePhone?.threadId
+          ? { status: "read" }
+          : input.phoneWaitEnded?.() === true
+            ? {
+                status: "read",
+                failure: {
+                  moveId: "77777777-7777-4777-8777-777777777777" as never,
+                  reason: "unlock-required",
+                  failedAt: new Date().toISOString() as never,
+                },
+              }
+            : {
+                status: "read",
+                waitingForPhone: {
+                  destinationMemberId: MINI as never,
+                  destinationName: "Mac mini",
+                  expiresAt: 1_900_000_000_000,
+                },
+              }
         : moved && input.settled !== undefined && input.settled.threadId === thread.threadId
           ? { status: "read", settled: { settledAt: movedAt as never } }
           : moved && input.arrives?.() === false
@@ -203,7 +218,19 @@ function fakeClient(
     },
     shutdownAskPhone: async (request) => {
       askedPhone.push(request);
-      return { status: "waiting-for-phone", expiresAt: 1_900_000_000_000 };
+      const gone = input.goneBeforePhone;
+      const held = request.rows
+        .map((row) => row.thread)
+        .filter((thread) => thread.threadId !== gone?.threadId);
+      return {
+        status: "waiting-for-phone",
+        expiresAt: 1_900_000_000_000,
+        held,
+        leftOut:
+          gone !== undefined && held.length < request.rows.length
+            ? [{ thread: gone, reason: "refused" }]
+            : [],
+      };
     },
     handoverPreview: async () => ({ status: "refused", reason: "refused" }),
     handOver: async () => ({ status: "refused", reason: "refused" }),
@@ -241,6 +268,29 @@ describe("Prepare to shut down", () => {
     expect(challenged).toEqual([]);
     expect(started).toEqual([]);
     expect(await screen.findAllByText("Waiting for your phone")).toHaveLength(2);
+  });
+
+  it("names a row whose thread went away before the phone was asked, and finishes once the held row ends", async () => {
+    const user = userEvent.setup();
+    let ended = false;
+    const { client, askedPhone } = fakeClient({
+      goneBeforePhone: TRIP,
+      phoneWaitEnded: () => ended,
+    });
+    render(<PrepareToShutDownDialog client={client} onClose={() => {}} open />);
+    await screen.findByText("Plan the trip");
+    await user.click(screen.getByRole("button", { name: "Confirm on your phone" }));
+
+    await waitFor(() => expect(askedPhone).toHaveLength(1));
+    expect(await screen.findByText("Can't move")).toBeInTheDocument();
+    expect(await screen.findAllByText("Waiting for your phone")).toHaveLength(1);
+
+    // The phone never answered: the held row ends, and the dialog with it.
+    ended = true;
+    expect(
+      await screen.findByRole("heading", { name: /stays? on this computer/ }),
+    ).toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: /Safe to shut down/ })).not.toBeInTheDocument();
   });
 
   it("starts on the hub with each thread on its own choice, and moves them with one Touch ID", async () => {

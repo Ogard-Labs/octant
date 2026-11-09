@@ -8,7 +8,9 @@ import {
   type ShutdownListedMember,
   type ShutdownListing,
   type ShutdownPlacement,
+  type ShutdownRowLeftOut,
   type ShutdownThreadRow,
+  type ThreadMoveFailureReason,
   type ThreadMoveSize,
   type ThreadMoveSizes,
   type ThreadMoveThreadStatus,
@@ -288,11 +290,14 @@ export function PrepareToShutDownDialog(props: PrepareToShutDownDialogProps) {
         const name = batch.member.name;
         const threads = batch.rows.map((row) => row.thread);
         let outcome: Awaited<ReturnType<typeof startBatch>>;
+        // Rows the host did not take (gone, or another move already holds
+        // them) end here with their reason, so the batch never waits on them.
+        const leftOut: ShutdownRowLeftOut[] = [];
         try {
           outcome =
             via === "phone"
-              ? await holdBatchForPhone(batch.member.memberId, batch.rows)
-              : await startBatch(batch.member.memberId, batch.rows);
+              ? await holdBatchForPhone(batch.member.memberId, batch.rows, leftOut)
+              : await startBatch(batch.member.memberId, batch.rows, leftOut);
         } catch {
           // The desktop request or the signing failed; this destination is
           // not known to have started anything, so its rows stay here.
@@ -300,7 +305,12 @@ export function PrepareToShutDownDialog(props: PrepareToShutDownDialogProps) {
         }
         if (outcome === "started") {
           const to = String(batch.member.memberId);
-          started.push(...threads.map((thread) => ({ thread, to })));
+          const left = new Map(leftOut.map((entry) => [rowKey(entry.thread), entry.reason]));
+          for (const thread of threads) {
+            const reason = left.get(rowKey(thread));
+            if (reason === undefined) started.push({ thread, to });
+            else unstarted.set(rowKey(thread), LEFT_OUT_WORDS[reason] ?? "Couldn't start");
+          }
           continue;
         }
         for (const thread of threads) unstarted.set(rowKey(thread), NOT_STARTED_WORDS[outcome]);
@@ -352,17 +362,21 @@ export function PrepareToShutDownDialog(props: PrepareToShutDownDialogProps) {
   const holdBatchForPhone = async (
     memberId: HubMemberId,
     batchRows: ReadonlyArray<ShutdownThreadRow>,
+    leftOut: ShutdownRowLeftOut[],
   ): Promise<"started" | "not-started"> => {
     const asked = await props.client.shutdownAskPhone({
       destinationMemberId: memberId,
       rows: batchRequestRows(memberId, batchRows),
     });
-    return asked.status === "refused" ? "not-started" : "started";
+    if (asked.status === "refused") return "not-started";
+    leftOut.push(...asked.leftOut);
+    return "started";
   };
 
   const startBatch = async (
     memberId: HubMemberId,
     batchRows: ReadonlyArray<ShutdownThreadRow>,
+    leftOut: ShutdownRowLeftOut[],
   ): Promise<
     | "started"
     | "declined"
@@ -383,7 +397,9 @@ export function PrepareToShutDownDialog(props: PrepareToShutDownDialogProps) {
       rows: batchRequestRows(memberId, batchRows),
       unlock: { challengeId: asked.challenge.challengeId, signature: signed.signature },
     });
-    return started.status === "refused" ? "not-started" : "started";
+    if (started.status === "refused") return "not-started";
+    leftOut.push(...(started.leftOut ?? []));
+    return "started";
   };
 
   const moveStates = chosen.map(({ thread, to }) => ({
@@ -898,6 +914,13 @@ function ShutdownRow(props: {
 }
 
 /** Why a destination's rows did not start, as each of its rows says it. */
+/** Why the host did not take a row of a batch it started. */
+const LEFT_OUT_WORDS: Readonly<Partial<Record<ThreadMoveFailureReason, string>>> = {
+  busy: "Already moving",
+  refused: "Can't move",
+  delegated: "Delegated here",
+};
+
 const NOT_STARTED_WORDS: Readonly<
   Record<
     "declined" | "unlock-required" | "destination-unreachable" | "refused" | "not-started",

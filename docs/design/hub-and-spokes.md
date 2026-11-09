@@ -1019,7 +1019,12 @@ turn only once the phone confirms and the thread is read again, never while
 it waits. In Prepare to shut down, Confirm on your phone holds every
 destination's rows at once, one confirmation per destination on the phone;
 one press uses one way to unlock, so Touch ID for one destination and the
-phone for another in the same press is not offered. The phone asks every spoke and
+phone for another in the same press is not offered. Every row a batch asks
+for, by phone or Touch ID, either starts or comes back named as left out with
+its reason: a thread already gone ends as `refused` with its own failure, and
+one another move or wait already holds comes back as `busy` with no failure
+of its own, since that move says how it ends. The window waits only on the
+rows the host took. The phone asks every spoke and
 standby computer it can reach for what waits there, since a standby is a spoke
 that can move threads away; it never asks the hub, which moves nothing away.
 Holding the phone's raw unlock key open for the one confirmation lets the
