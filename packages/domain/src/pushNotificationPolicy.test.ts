@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   admitRemotePushByRate,
   buildRedactedAutomationPushNotification,
+  buildRedactedMoveWaitingPushNotification,
   buildRedactedPushNotification,
   automationNotificationKindForLifecycle,
   isAutomationNotificationKindEnabled,
@@ -112,6 +113,35 @@ describe("buildRedactedPushNotification", () => {
   });
 });
 
+describe("buildRedactedMoveWaitingPushNotification", () => {
+  it("says only that a move waits and names the destination", () => {
+    expect(
+      buildRedactedMoveWaitingPushNotification({ hostId, destinationName: "Studio Mac" }),
+    ).toEqual({
+      kind: "move-waiting",
+      hostId,
+      title: "A move is waiting for your phone",
+      body: "To Studio Mac",
+    });
+  });
+
+  it("keeps a destination name that looks like a secret or a path off the lock screen", () => {
+    for (const destinationName of ["sk-live-abc", "/Users/example/Mac", "  "]) {
+      expect(buildRedactedMoveWaitingPushNotification({ hostId, destinationName }).body).toBe(
+        "To another computer",
+      );
+    }
+  });
+
+  it("stays within the payload's byte bounds for a long destination name", () => {
+    const body = buildRedactedMoveWaitingPushNotification({
+      hostId,
+      destinationName: "æ".repeat(200),
+    }).body;
+    expect(encoder.encode(body).byteLength).toBeLessThanOrEqual(120);
+  });
+});
+
 describe("buildRedactedAutomationPushNotification", () => {
   it("includes automation navigation without requiring a thread id", () => {
     const payload = buildRedactedAutomationPushNotification({
@@ -197,6 +227,7 @@ describe("remote push delivery policy", () => {
     expect(remotePushUrgency("waiting")).toBe("high");
     expect(remotePushUrgency("failure")).toBe("normal");
     expect(remotePushUrgency("completion")).toBe("normal");
+    expect(remotePushUrgency("move-waiting")).toBe("high");
   });
 });
 

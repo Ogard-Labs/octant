@@ -131,6 +131,27 @@ export const RemotePushNotificationPayloadV1 = Schema.Struct({
 }).annotations(strict);
 export type RemotePushNotificationPayloadV1 = typeof RemotePushNotificationPayloadV1.Type;
 
+/**
+ * A thread move a window on this host holds until an owner phone confirms it.
+ * It is its own kind, outside the thread kinds a phone can turn off one by one
+ * and the Automation kinds that share them, because it names no thread: the
+ * phone opens its Moves waiting for you list, which reads the threads itself.
+ */
+export const RemotePushMoveWaitingKind = Schema.Literal("move-waiting");
+export type RemotePushMoveWaitingKind = typeof RemotePushMoveWaitingKind.Type;
+
+/**
+ * Redacted lock-screen payload for a held move: that a move waits and the
+ * destination's name, never a thread, a title, or a Project.
+ */
+export const RemotePushMoveWaitingPayloadV1 = Schema.Struct({
+  kind: RemotePushMoveWaitingKind,
+  hostId: StableHostId,
+  title: boundedNonEmptyText(80),
+  body: boundedText(120),
+}).annotations(strict);
+export type RemotePushMoveWaitingPayloadV1 = typeof RemotePushMoveWaitingPayloadV1.Type;
+
 /** The most content a notification seals for the phone, before encryption. */
 export const REMOTE_PUSH_SEALED_CONTENT_MAX_BYTES = 2_048;
 
@@ -207,6 +228,25 @@ export const RemotePushDeliveryRecordedV1 = Schema.Struct({
   recordedAt: UtcTimestamp,
 }).annotations(strict);
 export type RemotePushDeliveryRecordedV1 = typeof RemotePushDeliveryRecordedV1.Type;
+
+/**
+ * One receipt per held-move notification to one device. It names no thread
+ * and no move: the move's wait lives in memory only, so its id would point at
+ * nothing once the wait ends.
+ */
+export const REMOTE_PUSH_MOVE_WAITING_DELIVERY_EVENT_NAMES = {
+  recorded: "remote.push-move-waiting-delivery-recorded@1",
+} as const;
+
+export const RemotePushMoveWaitingDeliveryRecordedV1 = Schema.Struct({
+  hostId: StableHostId,
+  deviceId: DeviceId,
+  outcome: RemotePushDeliveryOutcome,
+  failureCategory: Schema.optional(Schema.String.pipe(Schema.pattern(/^[a-z0-9-]{1,64}$/))),
+  recordedAt: UtcTimestamp,
+}).annotations(strict);
+export type RemotePushMoveWaitingDeliveryRecordedV1 =
+  typeof RemotePushMoveWaitingDeliveryRecordedV1.Type;
 
 /**
  * The push gateway: the one sender that holds the platform push credential.
@@ -344,7 +384,13 @@ export const decodeRemotePushRegistrationClearedV1 = Schema.decodeUnknownSync(
 export const decodeRemotePushNotificationPayloadV1 = Schema.decodeUnknownSync(
   RemotePushNotificationPayloadV1,
 );
+export const decodeRemotePushMoveWaitingPayloadV1 = Schema.decodeUnknownSync(
+  RemotePushMoveWaitingPayloadV1,
+);
 export const decodeRemotePushEnvelopeV1 = Schema.decodeUnknownSync(RemotePushEnvelopeV1);
+export const decodeRemotePushMoveWaitingDeliveryRecordedV1 = Schema.decodeUnknownSync(
+  RemotePushMoveWaitingDeliveryRecordedV1,
+);
 export const decodeRemotePushDeliveryRecordedV1 = Schema.decodeUnknownSync(
   RemotePushDeliveryRecordedV1,
 );

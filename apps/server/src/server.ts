@@ -1293,7 +1293,7 @@ export function startOctantServer(
         ? {}
         : { allowedRendererHttpOrigin: options.allowedRendererHttpOrigin }),
     });
-    yield* wireThreadNotifications({
+    const { threadNotifications } = yield* wireThreadNotifications({
       chatHiddenThreadIds,
       hasPushStanding,
       persistence,
@@ -1762,6 +1762,7 @@ export function startOctantServer(
       movedThreadHistory,
       threadMoveHolds,
       threadMoveState,
+      threadNotifications,
       beginGoogleCliChange,
       workThreadService,
       onSecretStoreLinkChange: () => commands.linkChanged(),

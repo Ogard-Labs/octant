@@ -100,6 +100,17 @@ export interface ThreadMovesFromWindowOptions {
   readonly now: () => number;
   readonly pollMs?: number;
   readonly stopWaitMs?: number;
+  /**
+   * Tells this host's owner phones that a move waits for one of them, once
+   * per wait: a Prepare to shut down batch for one destination is one wait.
+   * It sends through the phone notification path and never holds up the
+   * wait; with notifications off it sends nothing, and the phone's list
+   * still shows the wait when the person opens it.
+   */
+  readonly tellOwnerPhones?: (wait: {
+    readonly waitId: string;
+    readonly destinationName: string;
+  }) => void;
 }
 
 /** One thread on this host, as Prepare to shut down reads it. */
@@ -533,6 +544,14 @@ export class ThreadMovesFromWindow {
     timer.unref?.();
     for (const row of rows) this.#settledAt.delete(key(row.thread));
     this.#phoneWaits.set(confirmationId, { destinationMemberId, rows, expiresAt, timer });
+    try {
+      this.#options.tellOwnerPhones?.({
+        waitId: confirmationId,
+        destinationName: this.#nameOf(String(destinationMemberId)),
+      });
+    } catch {
+      // A notification is awareness only; the wait stands without it.
+    }
     return {
       status: "waiting-for-phone",
       expiresAt,
