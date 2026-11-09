@@ -376,16 +376,55 @@ turned on a switch, and then only after they answer for that file.
   host setting for the same reason the remembered sites are: an agent must not
   be able to widen its own reach. Cancelling at the cap, rather than checking
   afterwards, keeps a page from filling the disk with a file nobody asked for;
-  the headless runtime cannot tell which file in its download folder belongs
-  to which download, so when any file passes the cap it cancels the context's
-  running downloads. The person's own download in the pane stays blocked: this
+  the headless runtime watches the browser's shared download folder. A uniquely
+  attributed file cancels only its own download at the cap. When concurrent
+  arrivals cannot be attributed and an unclaimed file crosses the cap, every
+  still-running candidate is cancelled, including candidates in other contexts;
+  waiting for completion would leave the in-flight limit unenforced. Downloads
+  whose files are already attributed are not candidates. A native completion
+  that races a cancellation remains refused and its file is deleted. The person's own download in the pane stays blocked: this
   switch is for agents' downloads into the workspace only, and a file the
   person wants they can fetch themselves.
+- Destination creation holds the checked folder as a working directory,
+  verifies its physical location before creating a file, and writes only an
+  exclusive relative basename. A concurrent ancestor/directory-link swap
+  cannot redirect that creation or its cleanup to an outside folder. An
+  unavailable destination refuses without a saved receipt. Only macOS and
+  Linux have this save path; unsupported platforms refuse.
+- The save boundary accepts a trusted host-selected destination internally;
+  the ordinary `download-save` tool still passes only the workspace default.
+  The internal selection carries the current host-resolved approved Project
+  folder (main or extra), its canonical root, the exact reviewed bounded
+  relative directory (`.` for that root), and the reviewed directory's device
+  and inode. The directory must already exist. The host rechecks that this
+  folder identity still belongs to the Project; an unavailable selection never
+  falls back to the current checkout. Agent JSON cannot supply a root or these
+  callbacks. This port does not itself grant recurring transfer permission or
+  add a destination picker.
+- Root and destination proofs are read-only. The native writer checks the
+  root identity and its held destination's device/inode and physical canonical
+  position before exclusive relative creation. It uses native `realpath` so
+  Node's cached working-directory string cannot hide a rename. An ordinary
+  missing `downloads/` is made only inside that writer after admission; an
+  internal selected directory is never made implicitly.
+- The save checks cancellation and selection currentness after asynchronous
+  preparation. The final bytes must retain the sniffed prefix, so a held-file
+  rewrite cannot carry stale type facts into admission. Once all held bytes
+  and target proofs are available, a
+  synchronous host callback admits current source, authority and any quota
+  reservation immediately before writer dispatch. The ordinary service supplies
+  its current context/authority fence and combines context and caller
+  cancellation. Refusal before dispatch creates no file or directory. After
+  dispatch an unsuccessful writer may have written: this boundary never refunds
+  a reservation or dispatches a retry on an uncertain result.
+- Ordinary saved receipts and the existing journal remain workspace-relative.
+  A trusted selected save instead returns its opaque approved-folder id, a
+  path-free display label and an explicit `selected-root` path base: its path
+  is relative to that selected approved root, not to the thread's workspace.
+  A future selected-destination consumer must carry that receipt honestly;
+  it cannot write it as a legacy workspace-relative event.
 - Not covered: a person's own downloads in the Browser pane, and a download
-  that starts after an action's settling has ended (it is cancelled). The check that the file is not written through a
-  link is made on the folder's path before and after the write; a process of
-  the person's own that swaps `downloads/` for a link in between, which can
-  already write anywhere in the workspace, is not stopped.
+  that starts after an action's settling has ended (it is cancelled).
 
 ## Steps
 
@@ -1071,23 +1110,29 @@ Several threads of one Project may each drive their own page at the same time.
 ## Bounded page scripts
 
 `run-script` reaches the same owned native page as the fixed actions when a
-local Code thread already has Full access. It takes `source` and the
+local Code thread has Full access or a scoped script permission. It takes `source` and the
 `expectedObservationRevision` from a fresh page read. It opens no page or
 profile and takes no additional script approval at Full access. Existing site,
 profile, model, window, Project and thread authority still apply. Work,
 headless, paired, routine, managed-subagent and terminal-grant callers are
 currently refused. Scripts cannot enter `steps` or saved/replayed flows.
 
-The accepted permission matrix also permits one exact-source approval for a
-proved non-signed-in Private page below Full access. That part is not built:
-Private describes storage lifetime, not authentication. The server currently
-has no general evidence that a Private page is not signed in, so unknown
-session eligibility refuses below Full access. Known signed-in pages require
-Full access even in Private, and Project/Personal pages always count as signed
-in. A clear credential-field scan or source consent cannot override this rule.
-Plan refuses arbitrary JavaScript. Below-Full credential or uncertain frame/
-shadow inspection also refuses; presence-only closed-shadow detection is not
-proof of complete credential or authentication coverage.
+Below Full access, a local Code task may request a separate one-use script
+permission. The prompt shows the exact source and HTTPS origin, names the task
+and selected profile, and explains that it grants the page's account authority,
+even in Private or when sign-in state is unknown. It is never remembered as a
+site grant and cannot change host filesystem, process or network confinement.
+Existing site/profile approvals remain necessary. A changed task/model,
+posture, profile, context, page revision, person hold or cancellation invalidates
+the answer before dispatch. Each script request needs its own answer.
+
+Plan refuses arbitrary JavaScript. Below Full access, native DOM inspection
+must also cover the top document and open shadow roots without credential
+fields. An iframe, frame, embed, object, closed shadow root, missing inspection
+or exceeded inspection bound refuses the script. The check runs during native
+preparation and again before execution. This is a credential and coverage gate,
+not proof that the page is signed out, nor a guarantee against future page
+changes or callbacks installed by an explicitly authorized script.
 
 Source has the page's normal DOM and account authority, including same-origin
 frame access and page API effects. The dispatch target is its current top

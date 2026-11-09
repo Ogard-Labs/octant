@@ -22,7 +22,11 @@ class OctantDeviceProtectionModule : Module() {
 
     // A recreated activity has a fresh window without the flag; the choice is
     // applied again whenever the activity returns to the foreground.
-    OnActivityEntersForeground { applySecureWindow() }
+    OnActivityEntersForeground {
+      // Initial module registration can replay foreground on the JavaScript
+      // thread. Android window flags must still be changed on the UI thread.
+      appContext.currentActivity?.runOnUiThread { applySecureWindow() }
+    }
 
     AsyncFunction("setSecureWindow") { secure: Boolean ->
       secureWindow = secure

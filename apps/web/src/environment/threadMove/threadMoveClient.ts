@@ -56,6 +56,11 @@ export interface ThreadMoveClient {
     threads: ReadonlyArray<MovedThreadReference>,
   ) => Promise<ThreadMoveChallengeOutcome>;
   readonly shutdownStart: (request: ShutdownStartRequest) => Promise<ShutdownStartOutcome>;
+  /** Hand over for one Prepare to shut down row, naming the head's destination. */
+  readonly shutdownHandOver: (
+    thread: MovedThreadReference,
+    destinationMemberId: string,
+  ) => Promise<HandoverOutcome>;
   /** The same sizes for any of this host's threads, as Prepare to shut down lists them. */
   readonly shutdownSizes: (
     destinationMemberId: string,
@@ -140,6 +145,8 @@ export function threadMoveClientOf(hub: HubAdministrationBridge): ThreadMoveClie
       ),
     shutdownStart: async (request) =>
       decodeShutdownStartOutcome(await call("shutdown-start", request)),
+    shutdownHandOver: async (thread, destinationMemberId) =>
+      decodeHandoverOutcome(await call("shutdown-handover", { thread, destinationMemberId })),
     shutdownSizes: async (destinationMemberId, threads) =>
       decodeThreadMoveSizes(await call("shutdown-sizes", { destinationMemberId, threads })),
     handoverPreview: async (thread) =>

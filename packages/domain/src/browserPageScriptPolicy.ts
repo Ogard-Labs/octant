@@ -11,11 +11,12 @@ export type BrowserPageScriptDecision =
 export function evaluateBrowserPageScriptPolicy(input: {
   readonly executionPolicy: ProviderExecutionPolicy;
   readonly caller: BrowserProfileCaller;
+  readonly scopedPermission?: boolean;
 }): BrowserPageScriptDecision {
   if (input.caller !== "person") return { status: "refused", reason: "local-person-required" };
   if (input.executionPolicy === "plan") return { status: "refused", reason: "plan-is-read-only" };
-  // Private is a storage lifecycle, not evidence that a page has no signed-in session.
-  if (input.executionPolicy !== "full-access")
+  // A scoped permission explicitly grants page account authority, even in Private.
+  if (input.executionPolicy !== "full-access" && input.scopedPermission !== true)
     return { status: "refused", reason: "full-access-required" };
   return { status: "allowed" };
 }

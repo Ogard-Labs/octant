@@ -328,6 +328,31 @@ describe("hub administration controls", () => {
     expect(calls).toHaveLength(3);
   });
 
+  it("forwards a Prepare to shut down handover only with exactly the thread and the head's destination", async () => {
+    const { calls, runtime: controls } = runtime(() => Response.json({ status: "refused" }));
+    const thread = { mode: "code", threadId: "77777777-7777-4777-8777-777777777777" };
+    const destinationMemberId = "11111111-1111-4111-8111-111111111111";
+
+    await sendHubAdministrationOperation(controls, "shutdown-handover", {
+      thread,
+      destinationMemberId,
+    });
+    expect(calls.map((call) => call.url)).toEqual([
+      "http://127.0.0.1:4317/api/desktop/hub/thread-moves/shutdown/handover",
+    ]);
+
+    for (const body of [
+      { thread },
+      { thread, destinationMemberId, summarize: true },
+      { thread: { mode: "code" }, destinationMemberId },
+    ]) {
+      expect(
+        await sendHubAdministrationOperation(controls, "shutdown-handover", body),
+      ).toMatchObject({ status: 400 });
+    }
+    expect(calls).toHaveLength(1);
+  });
+
   it("forwards Remove worktree naming only the move, never a folder", async () => {
     const { calls, runtime: controls } = runtime(() => Response.json({ status: "removed" }));
     const moveId = "66666666-6666-4666-8666-666666666666";

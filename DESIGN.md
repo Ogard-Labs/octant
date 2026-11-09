@@ -2040,6 +2040,11 @@ this is how it looks.
   plain words, never a warning colour: "This thread is erased from this
   computer once" and the member's name "has it." A busy thread adds a two-way
   choice above the buttons, Move after this turn (selected) and Stop and move.
+  Choosing Stop and move turns the consequence sentence's tail into "The
+  running turn stops now, and its pending approvals and questions are
+  cancelled." and the primary into **Stop and move with Touch ID**; until the
+  turn has stopped, the Computer row's pill reads Stopping and its progress
+  line "Stopping this turn, then moving to" the member's name.
   The primary button names the unlock it asks for (**Move with Touch ID**,
   **Move with passkey**, or **Confirm on your phone**); Cancel sits beside it,
   and a Code thread has **Hand over instead** as a quiet text button at the
@@ -2116,8 +2121,11 @@ this is how it looks.
     threads first, then newest activity): the mode glyph, the title (truncating
     first), the Project in meta ink, the size in tabular figures, and the row's
     choice as a trailing menu button showing its current word (Move, After this
-    turn, Hand over, Leave here). A row moving somewhere other than the head's
-    destination names that member in the button. A row that cannot move shows
+    turn, Stop and move, Hand over, Leave here). Its menu lists the row's own
+    choices, then **Move to** each other member that can take the thread ("Move
+    to" the member's name, with "after this turn" for a busy one). A row moving
+    somewhere other than the head's destination names that member in the
+    button, and drops the head's reason pill. A row that cannot move shows
     its reason as a small neutral pill before the button. A running thread
     carries the spinner the sidebar uses; a waiting one, the warning dot.
     "Older threads" is one closed disclosure row with its count.
@@ -2128,19 +2136,35 @@ this is how it looks.
     Size unknown and still moves. Then the buttons: Cancel, and the primary, which
     names the count and the unlock (**Move 9 threads with Touch ID**; **Move 9
     threads** when more than one destination needs its own unlock, asked in
-    turn). With nothing set to move, the primary is disabled and the summary
-    says why.
+    turn; **Hand over 2 threads** when only handovers are set, which need no
+    unlock). With nothing set to move, the primary is disabled and the summary
+    says why. When a destination's unlock is declined or its request fails,
+    the foot's alert names it, the other destinations still move, and each of
+    its rows reads Stays here with a small neutral pill saying why (Not
+    unlocked, Not an owner there, Offline, Not accepting moves, Couldn't
+    start, or Moves next past one unlock's limit).
   - **While it runs.** The dialog stays and becomes the progress view: a
     determinate bar under the head for the whole batch, and on each row a thin
     progress line and a state word in place of its choice (Waiting, Moving with
-    its percentage, After this turn, Moved with a check, Handed over, Can't
-    move). Escape or closing hides the dialog without stopping anything; the
-    menu bar icon shows the batch's progress, and Prepare to Shut Down… brings
-    the dialog back. Each moving thread also shows the single-move frozen bar
+    its percentage, After this turn, Stopping, Moved with a check, Handing
+    over, Handed over, Handed over, not pushed, Can't move, Can't hand over).
+    A handover that left files out because they hold a secret reads "Handed
+    over · 2 files stayed here", with the file names in mono meta ink after it.
+    Escape or closing hides the dialog without stopping anything; the menu bar
+    shows the batch's progress as the ended and total counts beside its glyph
+    ("3/9") and a disabled "Moving threads · 3 of 9" line above **Prepare to
+    Shut Down…**, which brings the dialog back in the window that runs the
+    batch. The menu bar lists Prepare to
+    Shut Down… while the window last saw this host in a hub with another
+    member, or while a batch runs. Each moving thread also shows the single-move frozen bar
     in its own pane. Assistive technology hears the start, each thread that
     finishes or fails, and the end, through one polite live region.
   - **Done.** The head becomes a success check and **Safe to shut down**, with
-    the count moved and where. Opened from Quit, the primary is **Quit Octant**;
+    the count moved and where ("8 moved to Mac mini, 1 to Desktop, 1 handed
+    over."). When a handover left files out, the head reads "Safe to shut
+    down; 2 files stay on this computer" and the meta sentence adds "Left out
+    because they hold a secret:" with their names, never a plain Safe to shut
+    down. Opened from Quit, the primary is **Quit Octant**;
     otherwise **Done**. With failures, the head instead reads how many threads
     stay on this computer in the warning ink, failed rows rise to the top with
     their reason and recovery buttons (Try again, Hand over for Code), and the
