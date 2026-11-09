@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, rmSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -10,6 +10,7 @@ import {
 } from "@octant/contracts";
 import { afterEach, describe, expect, it } from "vitest";
 import {
+  measureThreadParts,
   packThreadParts,
   rehomeDesignAssets,
   rehomeThreadParts,
@@ -223,6 +224,20 @@ describe("the bulk parts a moved thread carries", () => {
     );
     expect(second.canvases[0]?.canvasId).toBe(first.canvases[0]?.canvasId);
     expect(first.canvases[0]?.canvasId).not.toBe(String(canvasVersion.canvasId));
+  });
+
+  it("sizes each kind of part from what the stores record, and each Canvas as the part a move writes", async () => {
+    const measured = measureThreadParts(sourceThread, source);
+    const folder = mkdtempSync(join(tmpdir(), "octant-moved-parts-"));
+    folders.push(folder);
+    const packed = await packThreadParts(sourceThread, folder, source);
+    const canvasPath = packed.parts.find((part) => part.kind === "canvas")?.path ?? folder;
+    expect(measured).toEqual([
+      // Both images as recorded: reading the bytes is the move's job, not the measure's.
+      { status: "measured", kind: "generated-image", bytes: 8 },
+      { status: "measured", kind: "browser-capture", bytes: 8 },
+      { status: "measured", kind: "canvas", bytes: statSync(canvasPath).size },
+    ]);
   });
 
   it("points a carried design's images and captures at the copies that arrived, so they resolve here", async () => {

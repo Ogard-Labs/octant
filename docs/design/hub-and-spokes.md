@@ -1308,9 +1308,21 @@ for Move after this turn.
   move would send now: the thread bundle exactly, and for a Code thread
   about its Git bundle, read as the on-disk size of the objects the head
   reaches that no remote-tracking ref holds plus each changed or untracked
-  file Git does not ignore, counted once at its size on disk. Reading it
-  packs, freezes, and writes nothing (not even the index's stat cache), and a
-  thread that cannot be measured shows **Size unknown** and still moves. The
+  file Git does not ignore, counted once at its size on disk. The bulk parts
+  count too, exactly the ones a move would carry: each attachment, admitted
+  original input, generated image, and Browser capture at the byte size its
+  store recorded, and each owned Canvas as the very text its part would hold,
+  read from the versions the Canvas projection already holds (a Canvas records
+  no byte size). An admitted input is sized through the same scope check as
+  the reader that packs it, so one that would stay behind (its source thread
+  moved to another Project, or its attachment is gone or no longer the one the
+  turn recorded) is not counted; a part whose bytes turn out unreadable only
+  when the move reads them is counted and then stays behind as above. Reading
+  it packs, freezes, and writes nothing (not even the index's stat cache), and
+  reads no part's bytes. A thread that cannot be measured shows **Size
+  unknown** and still moves; a kind of part whose sizes cannot be read leaves
+  the rest measured, is left out of the total, and shows its row as **Size
+  unknown**, and it never holds the move back. The
   estimate divides the size by the rate the latest full chunks to that
   member reached (up to the last 32 full 512 KiB chunks, kept while the host
   runs), or by an assumed 1 MiB a second when no full chunk to that member
@@ -2777,7 +2789,7 @@ a numbered slice. Built, with these narrower readings:
     same journal unit, then records the images, captures, and Canvases under
     ids derived from the move and the part, so a finish asked again records
     each once; a part it cannot record answers `transfer-failed`. The move
-    sheet lists these parts under What moves, without their sizes yet.
+    sheet lists these parts under What moves as one row with their size.
 
     Sizes and an estimate are built for the move sheet and Prepare to shut
     down. Two read-only window routes,
@@ -2787,15 +2799,19 @@ a numbered slice. Built, with these narrower readings:
     threads and answer each thread's size, by part, with the rate to that
     destination as described under
     [What moves](#moving-a-thread-to-another-member); at most four threads
-    are measured at once. The move sheet's What moves rows show the
-    conversation's and the checkout's sizes, with a total line, the
-    estimate, and its basis, and it opens and moves without waiting for
-    them. Prepare to shut down measures the rows its destination can take
-    when the list or the destination changes, shows each row's size, and
-    adds the total and estimate of the rows set to move to its summary,
-    with the basis under it. What it does not do yet: the conversation's
-    turn count and the branch's commit and `+`/`-` counts beside the sizes,
-    and the sizes of bulk parts, which the measure does not count yet.
+    are measured at once. Each answer lists the size of every kind of part
+    the move would carry, bulk parts included, and a thread whose bulk-part
+    sizes could not all be read answers `partly-measured`, naming the kinds
+    left out. The move sheet's What moves rows show the conversation's, the
+    bulk parts', and the checkout's sizes (a row whose parts could not be
+    sized reads Size unknown), with a total line, the estimate, and its
+    basis, and it opens and moves without waiting for them. Prepare to shut
+    down measures the rows its destination can take when the list or the
+    destination changes, shows each row's size ("At least" what was measured
+    for a partly measured thread), and adds the total and estimate of the
+    rows set to move to its summary, with the basis under it. What it does
+    not do yet: the conversation's turn count and the branch's commit and
+    `+`/`-` counts beside the sizes.
 
     The tenth part is Stop and move and the rest of Prepare to shut down's
     choices. The window's start and the batch's start take a `stop-and-move`
