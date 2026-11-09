@@ -555,12 +555,9 @@ export async function landWorkFolderFromMove(input: {
   const candidates = [index.workingDirectory, ...Option.toArray(fresh)];
   for (const candidate of candidates) {
     const state = await landingState(input.root, candidate, index);
-    if (state === "ours") {
-      // An earlier try may have stopped between landing and setting the
-      // folder's own bits, which stay private until then.
-      await chmod(join(input.root, candidate), index.rootMode).catch(() => undefined);
-      return { status: "landed", workingDirectory: candidate };
-    }
+    // Used as it is: a folder that only looks like an earlier landing may be
+    // the person's own, and its permission bits are theirs.
+    if (state === "ours") return { status: "landed", workingDirectory: candidate };
     if (state === "taken") continue;
     const target = join(input.root, candidate);
     const staging = join(dirname(target), `.octant-move-${input.moveId}`);
@@ -575,10 +572,12 @@ export async function landWorkFolderFromMove(input: {
       for (const folder of [...index.folderModes].reverse()) {
         await chmod(join(staging, folder.path), folder.mode);
       }
+      // The folder takes its own bits before it lands, so a landing found
+      // later already has them and nothing changes an existing folder's.
+      await chmod(staging, index.rootMode);
       // Rename replaces only an empty folder; one that gained an entry
       // since the check refuses, and nothing of the person's is touched.
       await rename(staging, target);
-      await chmod(target, index.rootMode);
     } catch {
       await rm(staging, { recursive: true, force: true }).catch(() => undefined);
       return { status: "refused" };
@@ -812,7 +811,11 @@ export async function settleMovedWorkFolder(input: {
       await input.afterMovedAside?.(path);
       await settleAside(aside, file, entry);
     }
-    for (const directory of await foldersDeepestFirst(folder)) {
+    // Only folders that travelled: an empty folder the move left out (ignored,
+    // past the entry limit, or made since it packed) stays, and so does the
+    // folder holding it, which the listing below then names.
+    for (const directory of carriedFoldersDeepestFirst(input.index)) {
+      if (!(await plainFoldersOnTheWay(folder, directory, { create: false }))) continue;
       await rmdir(join(folder, directory)).catch(() => undefined);
     }
     await rmdir(folder).catch(() => undefined);
@@ -894,23 +897,16 @@ async function plainFoldersOnTheWay(
   return true;
 }
 
-/** Every folder inside `root`, deepest first, found without following a link. */
-async function foldersDeepestFirst(root: string): Promise<ReadonlyArray<string>> {
-  const found: string[] = [];
-  let level: ReadonlyArray<string> = [""];
-  while (level.length > 0) {
-    const next: string[] = [];
-    for (const parent of level) {
-      const children = await readdir(join(root, parent), { withFileTypes: true }).catch(() => []);
-      for (const child of children) {
-        if (!child.isDirectory()) continue;
-        next.push(parent === "" ? child.name : `${parent}/${child.name}`);
-      }
+/** The folders a move carried, empty or holding a carried file, deepest first. */
+function carriedFoldersDeepestFirst(index: MovedWorkFolder): ReadonlyArray<string> {
+  const folders = new Set<string>(index.emptyFolders.map(String));
+  for (const file of index.files) {
+    const parts = String(file.path).split("/");
+    for (let depth = 1; depth < parts.length; depth += 1) {
+      folders.add(parts.slice(0, depth).join("/"));
     }
-    found.push(...next);
-    level = next;
   }
-  return found.reverse();
+  return [...folders].sort((a, b) => b.split("/").length - a.split("/").length);
 }
 
 /**

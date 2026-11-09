@@ -1390,10 +1390,11 @@ for Move after this turn.
     stays runnable. Folders are the same: the staging folder and every folder
     in it are made private (`0o700`) while the files are written, each then
     takes its own bits deepest first, and the folder itself takes its own
-    once renamed into place, so a private folder never lands wider than it
-    was. A
-    retried arrival that finds a folder holding exactly these files uses it
-    rather than landing a second copy. A move that is discarded after landing
+    just before it is renamed into place, so a private folder never lands
+    wider than it was. A retried arrival that finds a folder holding exactly
+    these files uses it as it is, rather than landing a second copy, and
+    never changes its permission bits: such a folder may be the person's
+    own. A move that is discarded after landing
     leaves that copy where it is; the source still holds its own.
 - There is no size limit ([decision H22](#decisions)). A large thread or
   worktree takes longer; the move sheet and Prepare to shut down show the
@@ -1520,8 +1521,10 @@ keeps), so a write to its path afterwards makes a new file that stays; only
 the moved file is then compared with the size and digest that travelled and
 deleted when it matches. One that no longer matches is put back, or kept
 beside its path as `<file>-kept` when the path has been taken again. Folders
-are then removed bottom-up one at a time with a plain remove that fails on
-any folder still holding something, the set-aside folder only when empty,
+that travelled (empty ones the move carried, and those holding a carried
+file) are then removed bottom-up one at a time with a plain remove that fails
+on any folder still holding something, so a folder the move left out stays
+and keeps the folder with it, the set-aside folder only when empty,
 and nothing is ever removed recursively. A clean-up can stop after setting a
 file aside and before settling it (the host stops, or a step fails), and that
 file may be the only copy of an edit made after the move packed. So the

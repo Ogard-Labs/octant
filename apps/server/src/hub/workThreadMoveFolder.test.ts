@@ -160,6 +160,18 @@ describe("clearing a Work folder whose files moved", () => {
     expect(existsSync(join(folder, "agenda.md"))).toBe(false);
   });
 
+  it("leaves an empty folder that never travelled, and the folder holding it", async () => {
+    const { folder, index } = travelledFolder({ "agenda.md": "# Offsite\n" });
+    mkdirSync(join(folder, "drafts"));
+
+    expect(await settleMovedWorkFolder({ folder, index, moveId: MOVE })).toEqual({
+      status: "kept",
+      keptFiles: ["drafts"],
+    });
+    expect(existsSync(join(folder, "drafts"))).toBe(true);
+    expect(existsSync(join(folder, "agenda.md"))).toBe(false);
+  });
+
   it("puts a changed file back, beside its path when that path was taken again", async () => {
     const { folder, index } = travelledFolder({ "agenda.md": "# Offsite\n" });
     writeFileSync(join(folder, "agenda.md"), "# Changed before the clean-up\n");

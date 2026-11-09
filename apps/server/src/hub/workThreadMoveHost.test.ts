@@ -342,6 +342,21 @@ describe("moving a Work thread's own folder", () => {
     expect(statSync(join(landed, "shared")).mode & 0o777).toBe(0o770);
   });
 
+  it("leaves an existing folder holding the same files with its own permission bits", async () => {
+    const moved = filesHost();
+    writeFileSync(join(moved.sourceFolder, "agenda.md"), "# Offsite\n");
+    chmodSync(moved.sourceFolder, 0o755);
+    const existing = join(moved.destinationRoot, "report");
+    mkdirSync(existing);
+    writeFileSync(join(existing, "agenda.md"), "# Offsite\n");
+    chmodSync(existing, 0o700);
+
+    const { offer, parts } = await packAndOffer(moved.moveHost, moved.partsFolder);
+    expect((await arriveWith(moved.moveHost, offer, parts)).status).toBe("arrived");
+
+    expect(statSync(existing).mode & 0o777).toBe(0o700);
+  });
+
   it("keeps the folder when a file in it changed after the move packed", async () => {
     const moved = filesHost();
     writeFileSync(join(moved.sourceFolder, "agenda.md"), "# Offsite\n");
