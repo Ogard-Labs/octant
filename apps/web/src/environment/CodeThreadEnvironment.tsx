@@ -41,6 +41,10 @@ import { EnvironmentPullRequests } from "./EnvironmentPullRequests";
 import { countGroupedLocalServerListenersByScope } from "./localServerGroups";
 import { LocalServersGroup } from "./LocalServersGroup";
 import { ThreadEnvironmentPanel } from "./ThreadEnvironmentPanel";
+import {
+  ThreadMoveComputerCard,
+  type ThreadMoveEnvironment,
+} from "./threadMove/ThreadMoveComputerCard";
 import { useCodeEnvironmentController } from "./useCodeEnvironmentController";
 import { useLocalServersController } from "./useLocalServersController";
 import { ChangeWorkingFolder, workingFolderLabel } from "./WorkingDirectoryControl";
@@ -59,6 +63,8 @@ import {
 type CodeThreadWorkspaceTab = Extract<WorkspaceTab, { readonly mode: "code" }>;
 
 export interface CodeThreadEnvironmentProps {
+  /** Where the thread runs and how it moves to another computer; absent, no Computer card. */
+  readonly threadMove?: ThreadMoveEnvironment;
   readonly tab: CodeThreadWorkspaceTab;
   readonly active?: boolean;
   /** Defers filesystem and Git observation until the primary transcript is ready. */
@@ -227,6 +233,17 @@ export function CodeThreadEnvironment(props: CodeThreadEnvironmentProps) {
       />
       <ThreadEnvironmentPanel
         {...(props.active === undefined ? {} : { active: props.active })}
+        {...(props.threadMove === undefined
+          ? {}
+          : {
+              computer: (
+                <ThreadMoveComputerCard
+                  {...props.threadMove}
+                  thread={{ mode: "code", threadId: String(props.tab.threadId) }}
+                  threadTitle={props.tab.title}
+                />
+              ),
+            })}
         open={environmentOpen}
         headerContent={
           <section className="environment-checkout" aria-label="Checkout">

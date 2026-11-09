@@ -1,17 +1,22 @@
 import { createHash } from "node:crypto";
 import { posix } from "node:path";
 import { classifyPathContainment } from "@octant/domain";
+import type { NativeHarnessReplacement } from "@octant/contracts";
 import {
   editedText,
+  editFiles,
   globToRegExp,
   firstSegment,
   MAX_GLOB_RESULTS,
   MAX_GREP_LINE_LENGTH,
   MAX_GREP_PATTERN_LENGTH,
   MAX_GREP_RESULT_BYTES,
-  readSlice,
+  countsAsTextRead,
+  readFileContent,
   SKIPPED_DIRECTORY_NAMES,
+  type NativeHarnessEditFilesResult,
   type NativeHarnessEditResult,
+  type NativeHarnessEditTarget,
   type NativeHarnessFileRefused,
   type NativeHarnessFileSystemPort,
   type NativeHarnessGlobResult,
@@ -165,6 +170,11 @@ export class ServerFileSystem implements NativeHarnessFileSystemPort {
     readonly path: string;
     readonly offset?: number | undefined;
     readonly limit?: number | undefined;
+    /**
+     * Whether this read lets a later edit of the file through. A read Octant
+     * makes for itself, not one the model asked for, passes false.
+     */
+    readonly marksRead?: boolean;
   }): Promise<NativeHarnessReadResult> {
     const lexical = this.#lexical(input.path);
     const guarded = guard(lexical);
@@ -203,9 +213,10 @@ export class ServerFileSystem implements NativeHarnessFileSystemPort {
     }
     if (kind === "b") return refusedWith("file-too-large");
     if (kind !== "f") return refusedWith("not-a-file");
-    const content = payload.toString("utf8");
-    this.#readMarks.set(resolved.path, digest(content));
-    return readSlice(display, content, input);
+    const result = readFileContent(display, payload, input);
+    if (input.marksRead !== false && countsAsTextRead(result))
+      this.#readMarks.set(resolved.path, digest(payload.toString("utf8")));
+    return result;
   }
 
   async write(input: {
@@ -242,7 +253,29 @@ export class ServerFileSystem implements NativeHarnessFileSystemPort {
     readonly newText: string;
     readonly replaceAll?: boolean | undefined;
   }): Promise<NativeHarnessEditResult> {
-    const lexical = this.#lexical(input.path);
+    const target = await this.#loadForEdit(input.path);
+    if (target.kind === "refused") return target;
+    const edited = editedText(target.content, input);
+    if (edited.kind === "refused") return edited;
+    const put = await this.#put(target.key, edited.text);
+    if (put !== undefined) return put;
+    return {
+      kind: "edited",
+      path: target.path,
+      replacements: edited.count,
+      fuzzy: edited.fuzzy,
+    };
+  }
+
+  editFiles(edits: ReadonlyArray<NativeHarnessReplacement>): Promise<NativeHarnessEditFilesResult> {
+    return editFiles(edits, {
+      load: (path) => this.#loadForEdit(path),
+      put: (key, text) => this.#put(key, text),
+    });
+  }
+
+  async #loadForEdit(path: string): Promise<NativeHarnessEditTarget | NativeHarnessFileRefused> {
+    const lexical = this.#lexical(path);
     const guarded = guard(lexical);
     if (guarded !== undefined) return guarded;
     const resolved = await this.#resolve(READ_SCRIPT, [
@@ -260,23 +293,15 @@ export class ServerFileSystem implements NativeHarnessFileSystemPort {
     if (kind !== "f") return refusedWith("not-a-file");
     const content = resolved.rest.subarray(1).toString("utf8");
     if (digest(content) !== mark) return refusedWith("file-changed-since-read");
-    const edited = editedText(content, input);
-    if (edited.kind === "refused") return edited;
-    const put = await this.#call(
-      PUT_SCRIPT,
-      [resolved.path],
-      Buffer.from(edited.text, "utf8"),
-      1_024,
-    );
+    return { kind: "loaded", key: resolved.path, path: this.#display(resolved.path), content };
+  }
+
+  async #put(key: string, text: string): Promise<NativeHarnessFileRefused | undefined> {
+    const put = await this.#call(PUT_SCRIPT, [key], Buffer.from(text, "utf8"), 1_024);
     if (put.status !== "ran") return unreachable(put);
     if (put.exitCode !== 0) return refusedWith("not-a-file");
-    this.#readMarks.set(resolved.path, digest(edited.text));
-    return {
-      kind: "edited",
-      path: this.#display(resolved.path),
-      replacements: edited.count,
-      fuzzy: edited.fuzzy,
-    };
+    this.#readMarks.set(key, digest(text));
+    return undefined;
   }
 
   async glob(input: {

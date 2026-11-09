@@ -77,6 +77,8 @@ export const NATIVE_HARNESS_TOOL_NAMES = [
   "ask-user",
   "goal",
   "goal-check",
+  "skill",
+  "diagnostics",
 ] as const;
 export const NativeHarnessToolName = Schema.Literal(...NATIVE_HARNESS_TOOL_NAMES);
 export type NativeHarnessToolName = typeof NativeHarnessToolName.Type;
@@ -167,11 +169,13 @@ export const MAX_NATIVE_HARNESS_GREP_MATCHES = 500;
 export const MAX_NATIVE_HARNESS_COMMAND_LENGTH = 16_384;
 export const MAX_NATIVE_HARNESS_COMMAND_TIMEOUT_MS = 10 * 60_000;
 export const MAX_NATIVE_HARNESS_EDIT_TEXT_LENGTH = 65_536;
+export const MAX_NATIVE_HARNESS_EDITS_PER_CALL = 20;
 export const MAX_NATIVE_HARNESS_WRITE_LENGTH = 512 * 1024;
 export const MAX_NATIVE_HARNESS_FETCH_BYTES = 512 * 1024;
 export const MAX_NATIVE_HARNESS_SEARCH_RESULTS = 10;
 export const MAX_NATIVE_HARNESS_TODO_ITEMS = 40;
 export const MAX_NATIVE_HARNESS_JOURNAL_LOOKUP_MESSAGES = 20;
+export const MAX_NATIVE_HARNESS_SKILL_CHARACTERS = 32_000;
 
 /** A path the model names. Relative to the thread's root; never containing NUL. */
 const ToolPath = Schema.NonEmptyTrimmedString.pipe(
@@ -216,7 +220,7 @@ export type NativeHarnessBashArguments = typeof NativeHarnessBashArguments.Type;
  * Search-and-replace. Exact match first; the runtime retries once with
  * whitespace normalized; more than one match refuses unless `replaceAll`.
  */
-export const NativeHarnessEditArguments = Schema.Struct({
+export const NativeHarnessReplacement = Schema.Struct({
   path: ToolPath,
   oldText: Schema.String.pipe(
     Schema.minLength(1),
@@ -225,6 +229,22 @@ export const NativeHarnessEditArguments = Schema.Struct({
   newText: Schema.String.pipe(Schema.maxLength(MAX_NATIVE_HARNESS_EDIT_TEXT_LENGTH)),
   replaceAll: Schema.optional(Schema.Boolean),
 }).annotations(strict);
+export type NativeHarnessReplacement = typeof NativeHarnessReplacement.Type;
+
+/**
+ * One replacement, or several in `edits`, across one or more files. Several
+ * are all or nothing: every one is checked before any file is written, and
+ * replacements in the same file apply in the order given.
+ */
+export const NativeHarnessEditArguments = Schema.Union(
+  NativeHarnessReplacement,
+  Schema.Struct({
+    edits: Schema.Array(NativeHarnessReplacement).pipe(
+      Schema.minItems(1),
+      Schema.maxItems(MAX_NATIVE_HARNESS_EDITS_PER_CALL),
+    ),
+  }).annotations(strict),
+);
 export type NativeHarnessEditArguments = typeof NativeHarnessEditArguments.Type;
 
 export const NativeHarnessWriteArguments = Schema.Struct({
@@ -333,6 +353,43 @@ export const NativeHarnessGoalCheckArguments = Schema.Struct({
 }).annotations(strict);
 export type NativeHarnessGoalCheckArguments = typeof NativeHarnessGoalCheckArguments.Type;
 
+/**
+ * The skills effective for this thread: `list` names them, `load` returns one
+ * skill's instructions. `name` is a skill name as a person types it after `$`
+ * in the composer, or its source-qualified id when two skills share a name.
+ * Neither operation installs, trusts, enables, or activates anything.
+ */
+export const NativeHarnessSkillArguments = Schema.Union(
+  Schema.Struct({ operation: Schema.Literal("list") }).annotations(strict),
+  Schema.Struct({
+    operation: Schema.Literal("load"),
+    name: Schema.NonEmptyTrimmedString.pipe(
+      Schema.maxLength(512),
+      Schema.pattern(/^[A-Za-z0-9][A-Za-z0-9._~:-]*$/),
+    ),
+    /** Character to resume from, as a truncated load's nextOffset names. */
+    offset: Schema.optional(NonNegativeInt),
+  }).annotations(strict),
+);
+export type NativeHarnessSkillArguments = typeof NativeHarnessSkillArguments.Type;
+export const MAX_NATIVE_HARNESS_DIAGNOSTICS_FILES = 50;
+
+/**
+ * Runs the checkout's typecheck, lint, or both and returns the problems they
+ * print. Without `command` the commands come from the checkout's own scripts;
+ * `files` narrows the returned problems, not what the command checks.
+ */
+export const NativeHarnessDiagnosticsArguments = Schema.Struct({
+  which: Schema.optional(Schema.Literal("typecheck", "lint", "both")),
+  command: Schema.optional(
+    Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(MAX_NATIVE_HARNESS_COMMAND_LENGTH)),
+  ),
+  files: Schema.optional(
+    Schema.Array(ToolPath).pipe(Schema.maxItems(MAX_NATIVE_HARNESS_DIAGNOSTICS_FILES)),
+  ),
+}).annotations(strict);
+export type NativeHarnessDiagnosticsArguments = typeof NativeHarnessDiagnosticsArguments.Type;
+
 const toolArgumentDecoders: Readonly<Record<NativeHarnessToolName, (value: unknown) => unknown>> = {
   read: Schema.decodeUnknownSync(NativeHarnessReadArguments),
   grep: Schema.decodeUnknownSync(NativeHarnessGrepArguments),
@@ -349,6 +406,8 @@ const toolArgumentDecoders: Readonly<Record<NativeHarnessToolName, (value: unkno
   "ask-user": Schema.decodeUnknownSync(NativeHarnessAskUserArguments),
   goal: Schema.decodeUnknownSync(NativeHarnessGoalArguments),
   "goal-check": Schema.decodeUnknownSync(NativeHarnessGoalCheckArguments),
+  skill: Schema.decodeUnknownSync(NativeHarnessSkillArguments),
+  diagnostics: Schema.decodeUnknownSync(NativeHarnessDiagnosticsArguments),
 };
 
 /** Throws on a malformed argument object; the catalog's argument-schema step relies on it. */
@@ -392,7 +451,8 @@ export const WEB_SEARCH_TOOL_DEFINITION: ProviderToolDefinition = {
 export const NATIVE_HARNESS_TOOL_DEFINITIONS: ReadonlyArray<ProviderToolDefinition> = [
   {
     name: "read",
-    description: "Read a file as numbered lines. Page with offset and limit; results are capped.",
+    description:
+      "Read a file as numbered lines. Page with offset and limit; results are capped. A PNG, JPEG, GIF, or WebP image is returned as an image when the model takes images. Word (.docx), PowerPoint (.pptx), and PDF files are returned as their text and Excel (.xlsx) as tab-separated rows per sheet; other binary files are refused.",
     inputSchema: {
       type: "object",
       properties: {
@@ -441,8 +501,7 @@ export const NATIVE_HARNESS_TOOL_DEFINITIONS: ReadonlyArray<ProviderToolDefiniti
   },
   {
     name: "edit",
-    description:
-      "Replace oldText with newText in a file you have read. Exact match; set replaceAll for every occurrence.",
+    description: `Replace oldText with newText in a file you have read. Exact match; set replaceAll for every occurrence. For several changes, in one file or many, pass edits instead (up to ${MAX_NATIVE_HARNESS_EDITS_PER_CALL}, each with path, oldText, newText, and optional replaceAll): they apply in order, and if any one fails no file changes and the result names which one.`,
     inputSchema: {
       type: "object",
       properties: {
@@ -450,8 +509,22 @@ export const NATIVE_HARNESS_TOOL_DEFINITIONS: ReadonlyArray<ProviderToolDefiniti
         oldText: { type: "string" },
         newText: { type: "string" },
         replaceAll: { type: "boolean" },
+        edits: {
+          type: "array",
+          minItems: 1,
+          maxItems: MAX_NATIVE_HARNESS_EDITS_PER_CALL,
+          items: {
+            type: "object",
+            properties: {
+              path: pathProperty,
+              oldText: { type: "string" },
+              newText: { type: "string" },
+              replaceAll: { type: "boolean" },
+            },
+            required: ["path", "oldText", "newText"],
+          },
+        },
       },
-      required: ["path", "oldText", "newText"],
     },
   },
   {
@@ -613,6 +686,36 @@ export const NATIVE_HARNESS_TOOL_DEFINITIONS: ReadonlyArray<ProviderToolDefiniti
       type: "object",
       properties: { criterionId: { type: "string", description: "c1, c2, ..." } },
       required: ["criterionId"],
+    },
+  },
+  {
+    name: "skill",
+    description: `List the skills active for this thread (operation list: name and description), or load one skill's instructions by name when the task calls for it (operation load). Skills the person selected or pinned for this turn are already in your context; do not load them again. A skill that is not active here is refused; this tool never installs or turns on a skill. Instructions over ${MAX_NATIVE_HARNESS_SKILL_CHARACTERS} characters are cut, and the result says where to continue with offset.`,
+    inputSchema: {
+      type: "object",
+      properties: {
+        operation: { type: "string", enum: ["list", "load"] },
+        name: { type: "string", description: "The skill's name, as list returns it." },
+        offset: { type: "integer", minimum: 0 },
+      },
+      required: ["operation"],
+    },
+  },
+  {
+    name: "diagnostics",
+    description:
+      "Run the checkout's typecheck, lint, or both (which, both when omitted) and get the problems back as file, line, column, severity and message, capped. Without command it runs the typecheck and lint (or check) scripts in package.json with the package manager its lockfile names; when there are none it refuses, so pass the command to run. Each command is approved like bash. files narrows the returned problems, not what is checked. A non-zero exit with no problems read is not clean: read outputTail.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        which: { type: "string", enum: ["typecheck", "lint", "both"] },
+        command: { type: "string", maxLength: MAX_NATIVE_HARNESS_COMMAND_LENGTH },
+        files: {
+          type: "array",
+          items: pathProperty,
+          maxItems: MAX_NATIVE_HARNESS_DIAGNOSTICS_FILES,
+        },
+      },
     },
   },
 ];

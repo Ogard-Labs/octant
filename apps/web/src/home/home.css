@@ -581,3 +581,53 @@
     grid-template-columns: 3.25rem minmax(0, 1fr) 2.25rem;
   }
 }
+
+/* Handovers: work another computer committed and pushed because its thread
+   could not move, each with Continue handover. */
+.handovers-card {
+  display: grid;
+  gap: var(--oct-space-2);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.handovers-card__row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--oct-space-2);
+}
+
+.handovers-card__text {
+  display: grid;
+  min-width: 0;
+  flex: 1 1 12rem;
+}
+
+.handovers-card__title {
+  overflow: hidden;
+  color: var(--oct-fg);
+  font-size: var(--oct-text-sm);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.handovers-card__meta {
+  overflow: hidden;
+  color: var(--oct-muted);
+  font-size: var(--oct-text-xs);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.handovers-card__meta > code {
+  font-family: var(--oct-font-mono);
+}
+
+.handovers-card__problem {
+  flex-basis: 100%;
+  margin: 0;
+  color: var(--octant-warning-text);
+  font-size: var(--oct-text-xs);
+}

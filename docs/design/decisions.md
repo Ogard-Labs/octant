@@ -44,7 +44,7 @@ The former decision archive is history in `docs/legacy/` and has no authority.
 | [Transcript records](#transcript-records)                                             | 1         | 1       | 0            | 0                   |
 | [Persistence](#persistence)                                                           | 10        | 9       | 1            | 0                   |
 | [Providers](#providers)                                                               | 6         | 6       | 0            | 0                   |
-| [Context and usage](#context-and-usage)                                               | 8         | 7       | 1            | 0                   |
+| [Context and usage](#context-and-usage)                                               | 9         | 8       | 1            | 0                   |
 | [Native harness](#native-harness)                                                     | 6         | 6       | 0            | 0                   |
 | [Extensions](#extensions)                                                             | 8         | 8       | 0            | 0                   |
 | [Authority and approvals](#authority-and-approvals)                                   | 7         | 7       | 0            | 0                   |
@@ -63,10 +63,11 @@ The former decision archive is history in `docs/legacy/` and has no authority.
 | [Model endpoints and organization sign-in](#model-endpoints-and-organization-sign-in) | 6         | 5       | 1            | 0                   |
 | [Outside provider drivers](#outside-provider-drivers)                                 | 3         | 3       | 0            | 0                   |
 | [Device workbench and mobile](#device-workbench-and-mobile)                           | 8         | 6       | 2            | 0                   |
-| [Hubs, relay and Nightly](#hubs-relay-and-nightly)                                    | 5         | 3       | 1            | 1                   |
+| [Hubs, relay and Nightly](#hubs-relay-and-nightly)                                    | 6         | 3       | 2            | 1                   |
 | [Code tooling](#code-tooling)                                                         | 2         | 1       | 1            | 0                   |
 | [Disposable desktops](#disposable-desktops)                                           | 4         | 3       | 1            | 0                   |
-| **All areas**                                                                         | **226**   | **192** | **31**       | **3**               |
+| [Bots](#bots)                                                                         | 1         | 0       | 0            | 1                   |
+| **All areas**                                                                         | **229**   | **193** | **32**       | **4**               |
 
 ## Principles and hard lines
 
@@ -148,6 +149,8 @@ One setting says how much a thread's tool calls are guarded, with four levels: A
 - Built in Code: Ask first, Accept edits, Auto with the key CLI providers' own reviewers, Plan, and Full access with no sandbox and no prompts for every runtime, with a first-run default, a Settings › Code › Access default, a Project override, and the one-time warning.
 - Built in Work: Auto, Ask first, Accept edits and Full access, set from Settings › Work and the composer, with the one-time warning; Work has no Plan.
 - Built in both: a Work Project and a Code Project can override the mode new threads start in; the first-run answer sets the default for new Work threads as well as Code; the thread header shows the level in force and the scope it came from; every level lowered at the global, Project or thread scope is journaled with who, when, from which level (absent when a Project override replaced the default it followed) and which scope.
+- `octant agent --access <mode>` starts a new Work or Code thread at the asked-for level from the terminal, on hosts with or without a desktop window: `full-access` on a Code thread is remembered for the Project through the same `change-code-project-access` command `octant project access` sends, and a Work thread takes the level through `change-work-thread-access`. `octant settings access <mode> [--work]` sets the global default new threads start at, through `update-code-settings` / `update-work-settings`.
+- Full access can be opted into a sandbox per thread (`fullAccessSandbox` on the Code or Work thread, `octant agent --access full-access --sandbox`): no prompts, but the confinement the guarded levels have. Built for Codex (kept inside Octant's profile and told the sandbox is external), Claude Code (its command sandbox with no unsandboxed retry and Octant's Project-path gate for file tools), and the Octant Harness (confined shell); ACP agents, OpenCode and Pi refuse a sandboxed thread rather than run it open. Network limits to approved hosts apply only behind the Network limits switch. Helpers of a sandboxed thread run at Accept edits. The choice is dropped below Full access and replays as off on older journals. Rationale: Full access's no-sandbox rule (2026-10-31) stays the default; the choice adds containment for people who want no prompts without giving up the wall. Live Codex turn under the mapping: maintainer check. The choice has a Project default and a Settings default (Code and Work), is set in the app from the thread's mode picker, Settings, and a Project's default mode, and from the terminal with `octant settings sandbox on|off [--work]`.
 - The shared Work/Code indicator's Access details reads host facts under existing thread-read authority: selected/effective level and running/session limit, current default match, reviewer/account/model and observed runtime limits. Unknowns remain explicit; failed or superseded reads retain no old account assertion. Recovery uses existing actions and never changes authority or recommends a protected-file bypass. A current default match is not historical provenance. Server-backed Work reads reuse the server catalog's exact thread binding and global Work default, without a local Project substitute.
 - Computer and Browser keep their ask at the first action in each app at every level, Full access included, by a separate maintainer decision.
 - Built in Code: Mistral Vibe's auto-approve mode, the one ACP profile that declares its own reviewer. Every other ACP agent reports no reviewer of its own, and its capability report says so; a profile gains one by declaring the mode that answers its prompts.
@@ -557,6 +560,7 @@ Modes are server-enforced domain policy, not renderer flags. The shell shows two
 - A new-thread composer chooses Chat (no folder) or In a folder (a Work thread bound to a Project root). The choice only selects the create command, and nothing converts a thread between Chat and Work.
 - Chat binds a virtual, memory-scoped Project or none; Work binds exactly one OS-confined root; Code binds exactly one directory and selects a checkout inside it.
 - Project memory is scoped to one Project and keeps source, kind, timestamps and supersession; moving it across Projects or modes is explicit and keeps provenance. Person memory, beside it, crosses Projects ([Person memory across Projects](#person-memory-across-projects)). _Here only._
+- Every Chat, Work and Code turn in a Project carries its active Project memory. Agents read it and propose changes through `octant_memory`; every write waits for the person's confirmation in the thread, no answer is remembered, Plan refuses writes, and a confirmed write is marked as agent-written with its thread. Built 2026-11-08 ([Architecture: Project memory](../architecture.md#project-memory)).
 - Move to Project: a No-project Chat can be filed into a Chat Project, and a Work or Code thread into another Project of its own mode. The thread keeps its kind, history and guardrail level and gains no filesystem reach: a Work or Code thread moves only into an active Project whose folder is its own folder or contains it, and is refused while a turn runs or the thread waits on the person. A Code thread also needs its checkout to stay valid, so only a Project bound to the same repository folder is accepted. The server checks authority before the move, only a person can make it, and it is journaled with who and when.
 
 Status: Built. Since: —. Detail: [Architecture: Modes: Chat, Work, and Code](../architecture.md#modes-chat-work-and-code).
@@ -936,6 +940,7 @@ Status: Built. Since: —. Detail: [Architecture: Modes: Chat, Work, and Code](.
 The agent's plan panel and tool-call groups are projections of journaled state, never renderer-owned plans.
 
 - Providers that report their own task plans emit task events; each restatement names the ids the plan now holds (at most 64), so a dropped step leaves the panel.
+- An Octant Harness lead's `todo-write` list reaches the same panel: the loop reports each list the runner accepted as the same task events. Settings reports task progress supported for a Harness endpoint once one of its models passes Verify tools; the driver's own probe keeps `taskProgress` unsupported, because conformance requires a claimed capability's events in every scripted turn.
 - Chat and Work record each tool call as id, name, state and a redacted message of at most 2,048 bytes, with at most 64 steps per turn.
 - No tool input and no tool output is captured, except a page a call published outside the host; purging the thread removes the records.
 - Workspace navigation, panes, tabs and dock tools are owned by the workspace specification, with visual treatment in the design system.
@@ -1148,9 +1153,10 @@ Image generation is a journaled job with exactly one profile, and voice is an ap
 - A provider credential goes only over HTTPS to hosts the driver declares, or to the origin of a base URL the person configured.
 - A custom image source is a provider, model and label from a bounded list. A request is accepted only for an exact listed pair, and a removed or disabled instance fails with a reason, never falling back. _Here only._
 - An image driver that cannot honour a requested image count or reference images fails closed as invalid configuration. A per-image safety failure turns the whole result into a refusal with no partial success. _Here only._
+- An agent generates an image in Chat, Work and Code only through a card in its thread: the person picks the profile and model, lets the agent draw it as SVG instead, or cancels, and may tell the thread not to ask again; that choice lives in host memory until a restart. The tool is offered only while an image profile is ready, never in Plan, a Side Chat or a routine's turn, and every provider is told to call it for a picture instead of drawing one (maintainer decision, 2026-11-07). A call waits up to two minutes for the image and hands the finished image to a model that reads images; the thread shows each image after the turn that made it. In Work and Code the agent can save a finished image as a new file under the folder its turn works in, at the turn's level, confined and never overwriting.
 - Voice persists nothing. A paired device reaches transcription but never synthesis.
 
-Status: Built. Since: —. Detail: [Architecture: Providers](../architecture.md#providers).
+Status: Built. Since: —; agent images in every mode 2026-11-07. Detail: [Architecture: Providers](../architecture.md#providers).
 
 ## Context and usage
 
@@ -1203,7 +1209,7 @@ Status: Built. Since: —. Detail: [Architecture: Context and usage accounting](
 
 ### Compact session
 
-Compact session replaces what the model sees with a summary and a recent tail, only when the person asks and outside a turn. It never deletes or rewrites the journal.
+Compact session replaces what the model sees with a summary and a recent tail, when the person asks or a rule they set asks for them, and always outside a turn. It never deletes or rewrites the journal.
 
 - Who compacts follows who owns the conversation: the host for host-planned history, the runtime where its adapter claims support. Octant refuses where the runtime cannot compact.
 - The command needs a local window that can open the thread, uses the thread's own provider and model, and needs no tool approval. A paired device is refused, and Plan stays allowed and read-only.
@@ -1212,6 +1218,20 @@ Compact session replaces what the model sees with a summary and a recent tail, o
 - No compaction has been run against a real runtime yet, and two runtimes declare no support.
 
 Status: Partly built. Since: —. Detail: [Architecture: Context and usage accounting](../architecture.md#context-and-usage-accounting).
+
+### Automatic compaction rules
+
+Octant compacts a thread on its own only by a rule the person set in Settings: the window filling past a share, the thread going quiet, or its provider's account limit getting close. Each rule runs the same compaction a window's Compact session does.
+
+- A rule asks as `host-policy` and meets every refusal a window meets; a refused rule leaves nothing behind. A Code thread is compacted only under the window whose turn crossed the rule.
+- By default Octant compacts the threads it keeps (Octant Harness, and Chat and Work on a direct endpoint) at 85% of the window, and leaves runtimes that compact by themselves to their own point.
+- Every rule-started compaction records its cause, and the timeline says which rule ran and how full the window was.
+- A rule never switches a thread to another provider; the person picks the next model.
+- The limit rule (off by default) compacts a thread once per account-limit period and first writes a summary with the thread's own provider that a switch to another provider leads with. The thread then says it is ready to move, with **Switch model**.
+- The shares also reach inside a turn: Claude Code and Codex get them as a per-session setting (never in the person's files), and Octant Harness summarizes earlier turns once a step passes its share. Settings shows each runtime's own setting beside Octant's.
+- Built: every rule above. Not verified yet: each on a live runtime.
+
+Status: Built. Since: 2026-11-07. Detail: [Automatic compaction](automatic-compaction.md).
 
 ### Held standing context and resume
 
@@ -1262,8 +1282,10 @@ Direct-endpoint providers run under the native harness, which owns the agent loo
 - A model is offered Octant's tools only after a person ran Verify tools on that model. Only the host-run command writes the record, and a tool call in a turn widens nothing.
 - The conversation is journaled step by step. Resume closes interrupted calls as safe or unsafe to replay, and nothing is silently re-run.
 - When a request outgrows the endpoint, the loop first compacts earlier turns tool-less on the session's own endpoint, then trims. The lead can read cut exchanges back through a read-only journal lookup.
+- Every lead request ends with a note from Octant on how full the window is, worked out the same way as the compaction point. The note is never kept in the conversation, so the cached prefix holds. With automatic compaction off the note still shows the fill and says Octant summarizes only when a request no longer fits. A model whose window nothing names, or a turn on a fallback model, gets no figure.
 - The harness never parses prose as a tool call. An unknown tool name, version, id or argument, or an unoffered capability, fails closed, and an ambiguously accepted call becomes waiting or failed rather than an unsafe replay. _Here only._
 - After any context reduction or summary, the goal, its acceptance criteria and the recently edited files are restored to the request. Reduction changes only the assembled request, never the journal. _Here only._
+- The harness's standing instructions include one fixed About Octant block, the same in every mode: the modes and what each may touch, Projects and the board, that an agent never marks a thread Done, access levels and read-only Plan mode, Project memory, skills, Canvas and helper agents, each tool named only as "when offered".
 
 Status: Built. Since: —. Detail: [Architecture: Native harness](../architecture.md#native-harness).
 
@@ -1272,13 +1294,17 @@ Status: Built. Since: —. Detail: [Architecture: Native harness](../architectur
 Every harness tool call is authorized under the thread's current authority before any port runs, and outside content taints the thread.
 
 - The offered tools follow the mode. A call is judged by the narrower of the thread's stored posture and the running turn's posture, so a turn narrowed to Plan refuses writes and commands.
+- A tool that runs commands for the lead, such as Code's typecheck-and-lint `diagnostics`, authorizes and runs each command as a shell call, so it is never looser than the shell.
 - A direct-endpoint request goes only to the configured base URL and follows no redirect. Web fetches refuse private destinations and carry no credential.
 - Only harness results that bring in outside content taint the thread. On a tainted thread, shell, edit, write, check and web-fetch need a single-use confirmation, and remembered approvals stop covering them.
 - A tainted thread's search query is refused when it looks like it carries data, before any request leaves; it is a guard the person lowers with the outside-content gate, so at Full access in Work and Code the refusal does not apply.
 - At Full access in Code a tainted thread records the taint and asks no confirmation.
+- An `edit` call may make several replacements across files. It is one call under one approval that names every file, and it is all or nothing: every replacement is checked first, a refusal names the one that failed and changes nothing, and a write that fails afterwards puts the call's earlier writes back.
 - Every tool result is hard-capped with a truncation marker and paging, and nothing variable enters the stable request prefix. _Here only._
+- `read` hands the model a PNG, JPEG, GIF or WebP image, recognized by its bytes and capped at one tool image, only when the session's model takes image input, and otherwise refuses with the reason. Word, PowerPoint and PDF files read as their text and Excel workbooks as rows, through the preview parsers and under their limits, and such a read does not count as the read an edit needs; any other binary file is refused.
+- A lead's `skill` tool lists and loads only the skills effective for its thread under the activation ladder, refuses any other, and never installs, trusts, enables or activates one; it only reads, so Plan keeps it.
 
-Status: Built. Since: —. Detail: [Architecture: Native harness](../architecture.md#native-harness) and [Search queries on a tainted thread](search-query-taint.md).
+Status: Built. Since: —. Detail: [Architecture: Native harness](../architecture.md#native-harness), [On-demand skills](../architecture.md#extensions-and-skills), and [Search queries on a tainted thread](search-query-taint.md).
 
 ### Harness retries, routing and fallback
 
@@ -2844,6 +2870,23 @@ Credentials and work move between spokes only by explicit, narrowed, journaled a
 
 Status: Built. Since: 2026-10-28. Detail: [Hub and spokes: shared sign-ins](hub-and-spokes.md#shared-sign-ins), [delegation](hub-and-spokes.md#spoke-to-spoke-discovery-and-delegation) and [wake service](hub-and-spokes.md#wake-service).
 
+### Moving a thread between members
+
+Before shutting down or restarting a computer, a person can move a Chat, Work or Code thread to another of their computers and carry on there; a Code thread that cannot move hands over through its branch (maintainer request, 2026-11-07).
+
+- Only planned moves: a computer that dies without warning hands nothing over.
+- Only a person starts a move. The destination accepts it only with an owner device's own fresh unlock and its Move in peer-grant item, and the moved thread is the person's own thread there.
+- The source freezes the thread before anything is sent and erases its copy through the ordinary purge only after the destination commits, so one copy takes turns at a time unless the person chooses otherwise.
+- History, attachments, original inputs, captures, owned Canvases and a Code thread's branch and uncommitted work travel with no size limit; credentials, the provider's session, Full access, grants, processes and ignored files never do. Attachments, original inputs, captures and owned Canvases: not built yet.
+- A Code thread that cannot move is committed to its branch with a generated note, pushed when it has a remote (never forced, never to the default branch), and continued elsewhere with the note as outside content. There is no file export. The source side, the agent's bounded summary turn (on by default, two minutes, tool-free in plan mode, the note goes without it when it fails), the notice, the Handovers card, Continue handover, the source's erase, and a branch found without a notice (continued on the destination's own default model, erased on the source only for the commit it made) are built.
+- A thread's move starts only in its Environment tool, whose Computer card lists the person's other computers with each one's eligibility and opens a move sheet stating what moves, what stays and that the source is erased; Prepare to shut down is the one host-wide entry (maintainer request, 2026-11-08). The Computer card, the move sheet with its sizes and estimate, their notices, the frozen bar and the pane tombstone are built; Open there opening the moved thread in this window rather than copying its link is not built yet.
+- A moved thread's pane on the source shows its tombstone, also when reopened after the purge from an old link, a notification, or a search (the shell opens only that thread's own pane for a recorded departure, binding no Project and granting no thread authority), and a kept worktree's files with Remove worktree: a person's act at a local desktop window showing that pane, naming the move rather than a folder, which removes only the linked worktree the move recorded (its branch and every remote stay), journals it once, and answers a second press the same (maintainer request, 2026-11-09).
+- Prepare to shut down asks before anything moves: each thread starts on Move when the destination can take it (Move after this turn when busy) and on Leave here with its reason otherwise; a handover or Stop and move is never preselected, so the usual case is one press and one unlock per destination. The quit confirmation offers Move threads first when another member can take a thread (maintainer request, 2026-11-08). The dialog, the menu entry, the batch ticket, Move threads first, and each row's size with the total's estimate are built; Hand over and Stop and move as row choices, per-row destinations, and the menu bar progress are not built yet.
+- Before a move, the move sheet and Prepare to shut down show what it would send and an estimate that names its basis: the rate the latest full chunks to that member reached while the host runs, or an assumed 1 MiB a second. Measuring packs, freezes and writes nothing, and a size that cannot be read shows as unknown without blocking the move (maintainer request, 2026-11-09). Built.
+- A move that cannot finish always ends in an explicit This thread can't move error with one journaled reason; the thread unfreezes and stays on the source, and Prepare to shut down never says Safe to shut down while a chosen thread failed (maintainer request, 2026-11-08).
+
+Status: Partly built. Since: 2026-11-07. Detail: [Hub and spokes: moving a thread to another member](hub-and-spokes.md#moving-a-thread-to-another-member) and [Design system: shell and layout](../../DESIGN.md#shell-and-layout).
+
 ### Hosted relay
 
 A hosted relay would let an already-paired app reach its host when no other path works. It is a ciphertext-only pipe: the same pinned TLS session passes through, so the relay sees no plaintext, holds no authority and needs no account.
@@ -2953,3 +2996,20 @@ Desktop providers are plugin contributions through the `desktop-provider` seam; 
 - The drivers are built against recorded and fake providers and are offered on every host (E2B everywhere, the Cua daemon driver on Linux); live smokes are owed.
 
 Status: Partly built. Since: 2026-10-28. Detail: [Disposable desktops: provider seam](disposable-desktops.md#provider-seam), [authority](disposable-desktops.md#authority) and [billed placements](disposable-desktops.md#expiry-and-teardown-when-the-daemons-host-may-die).
+
+## Bots
+
+### Bots, with Navigator as the lead bot
+
+A bot is a lasting, app-wide assistant on one host: a name, avatar, role, instructions, model and access level, a host-managed Work home, one conversation that never ends, its own memory and routines, and optionally its own sandboxed desktop. Navigator is the lead bot on every host. Threads and tasks keep their behavior.
+
+- A bot is not a fourth mode: its conversation is a Work thread in its own home Project, so it has a Work thread's tools and authority, and routines a bot owns post into that conversation.
+- Navigator moves to a Work conversation as the lead bot; it cannot be deleted, and it acts on its own within its access level.
+- A new bot starts at Auto where its provider has its own reviewer (Claude Code, Codex) and at Ask first otherwise; never at Full access. At Auto, Octant Shield answers once a web page withdraws the provider's reviewer.
+- Paying, buying, or sending a message as the person always asks, at every level and in routines, when the action is classified as such; inside a bot's own desktop there is no site approval and no first-action ask.
+- The sidebar rail shows pinned bots with their status; All bots lists every bot from every connected host; the paired browser and the phone show the same bots, may create bots and may answer bot cards, except billed desktop starts and login grants.
+- A bot desktop is kept between uses and runs in a Docker-compatible engine or Apple's container tool on this machine, or with E2B or Cua; it reaches the web only through a host proxy that refuses private and host addresses, and holds no host credential or checkout.
+- A bot signs in with logins the person gave it, only on those logins' sites and without asking, also in routines; the host fills them into the bot's browser and the model never reads them. Ask me each time is a per-login choice.
+- Bots ask each other by name and share rooms under the existing agent messaging limits; a person can call a bot by voice; a bot can carry on with a fallback model.
+
+Status: Designed, not built. Since: 2026-11-08. Detail: [Bots](bots.md).

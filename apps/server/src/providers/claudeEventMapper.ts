@@ -125,6 +125,8 @@ export interface ClaudeEventContext {
    * driver carries it into each turn's context.
    */
   autoCompactThreshold?: number;
+  /** The session's window in tokens, as the runtime reported it when it opened. */
+  contextWindow?: number;
   /**
    * What the latest request put in the window: the input the model read,
    * cached or not. A turn's usage is a sum over its requests, so the window's
@@ -282,6 +284,7 @@ function usageEvent(
     ...(context.autoCompactThreshold === undefined
       ? {}
       : { autoCompactThreshold: context.autoCompactThreshold }),
+    ...(context.contextWindow === undefined ? {} : { contextWindow: context.contextWindow }),
     ...(contextBreakdown === undefined ? {} : { contextBreakdown }),
     // Each prompt is a user message the session sends again with every later
     // request until Claude Code compacts it; the compaction is its own event,
