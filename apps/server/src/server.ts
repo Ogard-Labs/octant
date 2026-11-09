@@ -34,6 +34,7 @@ import { CredentialRequests } from "./credentials/credentialRequests";
 import { createCredentialRequestRoutes } from "./credentials/credentialRequestRoutes";
 import { registeredCredentialOperations } from "./credentials/credentialRequestTools";
 import { createCredentialTool } from "./credentials/credentialTool";
+import { createCodeToolHostPort } from "./credentials/codeToolHost";
 import { OCTANT_CREDENTIAL_TOOL } from "@octant/contracts/credential-request";
 import {
   startupFailedOutput,
@@ -492,6 +493,7 @@ export function startOctantServer(
     });
     const {
       agentPluginMcpSessionManager,
+      bindCodeToolHost,
       githubRoutineEventSources,
       chatAttachmentStore,
       chatDataDirectory,
@@ -1438,6 +1440,33 @@ export function startOctantServer(
       credentialRequests,
       windowAuthorityStore,
     );
+    bindCodeToolHost(({ windowId, thread, contribution, toolName, current }) => {
+      const providerVersion = persistence.readProviderInstance(thread.providerInstanceId)?.version;
+      return createCodeToolHostPort({
+        windowId: String(windowId),
+        thread,
+        contribution,
+        toolName,
+        credentialRequests,
+        commands,
+        operations: credentialOperations,
+        readThread: () => {
+          const stored = persistence.readCodeThread(thread.id);
+          if (stored === undefined) return undefined;
+          const effective = codeSessionAuthority.effectiveThread(windowId, stored);
+          return codeOperationRuntime?.threadWithActiveTurnPosture?.(effective) ?? effective;
+        },
+        current: () =>
+          current() &&
+          providerVersion !== undefined &&
+          persistence.readProviderInstance(thread.providerInstanceId)?.enabled === true &&
+          persistence.readProviderInstance(thread.providerInstanceId)?.version ===
+            providerVersion &&
+          isCodeProviderModelAllowed(thread) &&
+          canAccessCodeProject(windowId, thread.projectId) &&
+          windowAuthorityStore.listWindowIds().some((id) => String(id) === String(windowId)),
+      });
+    });
     // One credential tool, composed from two sides that each keep their own
     // authority check: registered integration operations and saved commands.
     contributeCodeTools(({ windowId, thread, readThread }) => {
