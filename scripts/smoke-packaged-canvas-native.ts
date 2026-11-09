@@ -1174,8 +1174,15 @@ const timer = setInterval(() => {
       (snapshot) => hasText(snapshot, "Hostname") && hasText(snapshot, "Move the listener"),
     );
     await pairedInput("listener-hostname", "fill", "Hostname", listenerHost);
-    await pairedInput("listener-port", "fill", "Port", String(listenerPort));
-    await logWindowText("listener-address-filled");
+    // Port starts with a default value, and a posted Select All does not
+    // select it; focusing it with Tab selects its contents, so paste there.
+    setPasteboard(String(listenerPort));
+    await pairedInput("listener-port", "paste-after", "Hostname", "1");
+    await observeUntil(
+      "listener-address-filled",
+      (snapshot) =>
+        hasExactText(snapshot, listenerHost) && hasExactText(snapshot, String(listenerPort)),
+    );
     // The window shows only the first listener fields, so the certificate,
     // key and Move listener button are reached from Port with Tab.
     setPasteboard(pastedListener.certificatePem);
