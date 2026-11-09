@@ -332,6 +332,39 @@ describe("native harness diagnostics", () => {
     ]);
   });
 
+  it("normalizes a placed path and the filters, and matches a path that leaves the checkout only exactly", async () => {
+    const { call } = await fixture({
+      files: {
+        "package.json": JSON.stringify({ workspaces: ["packages/*"] }),
+        "packages/contracts/package.json": JSON.stringify({ name: "@octant/contracts" }),
+      },
+      output: () => ({
+        exitCode: 2,
+        output: [
+          "@octant/contracts:typecheck: ../domain/src/index.ts(1,1): error TS1: Sibling.",
+          "@octant/contracts:typecheck: ../../../outside/a.ts(2,2): error TS2: Outside.",
+        ].join("\n"),
+      }),
+    });
+    const run = (files: ReadonlyArray<string>) =>
+      call({ command: "turbo run typecheck", files }).then(
+        (outcome) => (outcome.result as { problems: ReadonlyArray<{ file: string }> }).problems,
+      );
+    expect(await run(["packages/domain/src/index.ts"])).toEqual([
+      expect.objectContaining({ file: "packages/domain/src/index.ts", message: "Sibling." }),
+    ]);
+    expect(await run(["./packages/contracts/../domain/src"])).toEqual([
+      expect.objectContaining({ file: "packages/domain/src/index.ts" }),
+    ]);
+    expect(await run(["outside/a.ts"])).toEqual([]);
+    expect(await run(["packages/contracts/../../../outside/a.ts"])).toEqual([
+      expect.objectContaining({
+        file: "packages/contracts/../../../outside/a.ts",
+        message: "Outside.",
+      }),
+    ]);
+  });
+
   it("reads pnpm's workspace list to place a package", async () => {
     const { call } = await fixture({
       files: {

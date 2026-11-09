@@ -2,6 +2,7 @@ import {
   MAX_NATIVE_HARNESS_COMMAND_TIMEOUT_MS,
   type NativeHarnessDiagnosticsArguments,
 } from "@octant/contracts";
+import { posix } from "node:path";
 import type { NativeHarnessFileSystemPort } from "./nativeHarnessFileSystem";
 import { admitNativeHarnessTool } from "./nativeHarnessToolAdmission";
 import type { CreateNativeHarnessToolsOptions } from "./nativeHarnessTools";
@@ -288,15 +289,18 @@ function withoutRunnerPrefix(line: string): {
  * Whether a problem's file is one of the files the call asked about, or inside
  * a folder it named. A path still relative to a package Octant could not place
  * matches only a filter that names it exactly, since a suffix would match the
- * same path in every package.
+ * same path in every package. Paths and filters are compared in one spelling
+ * (`a/../b` is `b`); one that leaves the checkout keeps its raw form and
+ * matches only a filter written exactly the same.
  */
 export function matchesDiagnosticsFile(
   problem: Pick<NativeHarnessDiagnostic, "file" | "packageRelative">,
   filters: ReadonlyArray<string>,
 ): boolean {
-  const file = normalized(problem.file);
+  const file = insideCheckout(problem.file);
   return filters.some((filter) => {
-    const wanted = normalized(filter);
+    const wanted = insideCheckout(filter);
+    if (file === undefined || wanted === undefined) return problem.file === filter;
     if (problem.packageRelative === true) return file === wanted;
     return (
       file === wanted ||
@@ -363,7 +367,8 @@ export function placeInCheckout(
     const folder = folders.get(problem.package);
     if (folder === undefined) return problem;
     const { packageRelative: _placed, ...rest } = problem;
-    return { ...rest, file: `${folder}/${problem.file}` };
+    const joined = `${folder}/${problem.file}`;
+    return { ...rest, file: insideCheckout(joined) ?? joined };
   });
 }
 
@@ -584,7 +589,15 @@ function relativeTo(root: string, file: string): string {
 }
 
 function normalized(path: string): string {
-  return path.replace(/^(\.\/)+/, "").replace(/\/+$/, "");
+  return insideCheckout(path) ?? path;
+}
+
+/** A relative path in one spelling, or undefined when it is absolute or leaves the checkout. */
+function insideCheckout(path: string): string | undefined {
+  if (path.startsWith("/")) return undefined;
+  const clean = posix.normalize(path).replace(/\/+$/, "");
+  if (clean === ".." || clean.startsWith("../")) return undefined;
+  return clean;
 }
 
 function severityOf(word: string): NativeHarnessDiagnostic["severity"] {
