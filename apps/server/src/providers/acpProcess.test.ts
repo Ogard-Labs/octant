@@ -1397,6 +1397,42 @@ describe("Kimi Code host-profile extension surfaces", () => {
     },
   );
 
+  it("wraps a Full access launch that keeps the sandbox, denying the host profile's extensions, and leaves open Full access unwrapped", async () => {
+    const target = fixture(kimi);
+    const managedHome = join(target.canonicalRoot, "managed-kimi");
+    const hostHome = realpathSync(mkdtempSync(join(tmpdir(), "octant-acp-host-")));
+    directories.push(hostHome);
+    const hostAuthenticationPath = join(hostHome, ".kimi-code");
+    mkdirSync(join(hostAuthenticationPath, "skills"), { recursive: true });
+    const canonicalHostPath = realpathSync(hostAuthenticationPath);
+    const confinement = makeAcpConfinementLive({
+      platform: "darwin",
+      sandboxPath: target.sandboxPath,
+      temporaryDirectory: join(target.canonicalRoot, "tmp"),
+      hostAuthenticationPath: canonicalHostPath,
+    });
+    const request = {
+      profile: kimi,
+      binaryPath: target.binaryPath,
+      root: target.canonicalRoot,
+      managedHome,
+      mode: "code",
+      executionPolicy: "full-access",
+      environment: {},
+    } as const;
+    const open = await Effect.runPromise(confinement.prepare(request));
+    expect(open.command).toBe(target.binaryPath);
+
+    const sandboxed = await Effect.runPromise(
+      confinement.prepare({ ...request, fullAccessSandbox: true }),
+    );
+    expect(sandboxed.command).toBe(target.sandboxPath);
+    const profile = sandboxed.args[1] ?? "";
+    expect(profile).toContain(`(allow file-write* (subpath "${target.canonicalRoot}"))`);
+    expect(profile).toContain("(allow process-exec)");
+    expect(profile).toContain(join(canonicalHostPath, "skills"));
+  });
+
   it("starts Linux Full access unwrapped on a setuid Bubblewrap, while approval-gated still starts", async () => {
     const target = fixture(kimi);
     const managedHome = join(target.canonicalRoot, "managed-kimi");
