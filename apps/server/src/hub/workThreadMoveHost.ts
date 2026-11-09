@@ -115,8 +115,13 @@ export interface WorkThreadMoveHostOptions {
   readonly externalContentIngested: (threadId: string) => boolean;
   readonly purge: (threadId: WorkThreadId) => Promise<void>;
   readonly activeWorkProject: (projectId: string) => boolean;
-  /** The main folder of an active Work Project here, where moved files land. */
-  readonly landingRoot: (projectId: string) => string | undefined;
+  /**
+   * The main folder of an active Work Project here, where moved files land,
+   * and the binding it belongs to, so the thread opens on that same binding.
+   */
+  readonly landingRoot: (
+    projectId: string,
+  ) => { readonly root: string; readonly bindingRevisionId: string } | undefined;
   readonly resolveProvider: (
     driverKind: string,
     modelId: string,
@@ -129,6 +134,12 @@ export interface WorkThreadMoveHostOptions {
     readonly provider: { readonly providerInstanceId: string; readonly modelId: string };
     /** Where the moved files landed, under the Project's main folder; absent for the folder itself. */
     readonly workingDirectory?: ThreadWorkingDirectory;
+    /**
+     * The binding the files landed under. A Project relinked since then names
+     * another folder, so the thread refuses to open rather than work in files
+     * that are not the moved ones; absent when no file landed.
+     */
+    readonly bindingRevisionId?: string;
     /** Set when the source thread had read outside content; the new thread starts marked too. */
     readonly inheritedMark?: { readonly sourceLabel: string; readonly contentReference: string };
   }) => Promise<void>;
@@ -397,6 +408,7 @@ export function createWorkThreadMoveHost(options: WorkThreadMoveHostOptions): {
       const provider = options.resolveProvider(moved.providerDriverKind, String(moved.modelId));
       if (provider === undefined) return { status: "refused", reason: "no-matching-provider" };
       let workingDirectory: ThreadWorkingDirectory | undefined;
+      let bindingRevisionId: string | undefined;
       if (moved.folder !== undefined) {
         const filesPartId = moved.folder.partId;
         const filesPart =
@@ -405,8 +417,8 @@ export function createWorkThreadMoveHost(options: WorkThreadMoveHostOptions): {
             : offer.manifest.parts.find(
                 (part) => part.partId === filesPartId && part.kind === "work-files",
               );
-        const root = options.landingRoot(String(offer.destinationProjectId));
-        if (root === undefined) return { status: "refused", reason: "no-eligible-project" };
+        const landing = options.landingRoot(String(offer.destinationProjectId));
+        if (landing === undefined) return { status: "refused", reason: "no-eligible-project" };
         if (filesPartId !== undefined && filesPart === undefined) {
           return { status: "refused", reason: "transfer-failed" };
         }
@@ -414,13 +426,14 @@ export function createWorkThreadMoveHost(options: WorkThreadMoveHostOptions): {
         // knows its files are in place, and one that does not finds this
         // landing and uses it rather than landing a second copy.
         const landed = await landWorkFolderFromMove({
-          root,
+          root: landing.root,
           index: moved.folder,
           partPath: filesPart === undefined ? undefined : parts.get(filesPart.partId),
           moveId: String(offer.moveId),
         }).catch(() => ({ status: "refused" as const }));
         if (landed.status === "refused") return { status: "refused", reason: "transfer-failed" };
         workingDirectory = landed.workingDirectory;
+        bindingRevisionId = landing.bindingRevisionId;
       }
       options.holds.hold(planned);
       try {
@@ -430,6 +443,7 @@ export function createWorkThreadMoveHost(options: WorkThreadMoveHostOptions): {
           title: moved.title,
           provider,
           ...(workingDirectory === undefined ? {} : { workingDirectory }),
+          ...(bindingRevisionId === undefined ? {} : { bindingRevisionId }),
           ...(moved.externalContentIngested
             ? {
                 inheritedMark: {

@@ -234,7 +234,7 @@ describe("moving a Work thread's own folder", () => {
           folder: sourceFolder,
           workingDirectory: decodeThreadWorkingDirectory("report"),
         }),
-        landingRoot: () => destinationRoot,
+        landingRoot: () => ({ root: destinationRoot, bindingRevisionId: "binding-1" }),
       },
       behaviour,
     );
@@ -355,6 +355,36 @@ describe("moving a Work thread's own folder", () => {
     expect((await arriveWith(moved.moveHost, offer, parts)).status).toBe("arrived");
 
     expect(statSync(existing).mode & 0o777).toBe(0o700);
+  });
+
+  it("refuses the arrival when the Project is relinked while the files land", async () => {
+    let currentBinding = "binding-1";
+    const moved = filesHost();
+    const relinked = host({
+      ownFolder: () => ({
+        status: "own",
+        folder: moved.sourceFolder,
+        workingDirectory: decodeThreadWorkingDirectory("report"),
+      }),
+      landingRoot: () => {
+        const landing = { root: moved.destinationRoot, bindingRevisionId: currentBinding };
+        // The person relinks the Project to another folder before the thread opens.
+        currentBinding = "binding-2";
+        return landing;
+      },
+      createThread: async (input) => {
+        if ((input.bindingRevisionId ?? currentBinding) !== currentBinding) {
+          throw new Error("Work Project binding changed; reload and retry.");
+        }
+      },
+    });
+    writeFileSync(join(moved.sourceFolder, "agenda.md"), "# Offsite\n");
+
+    const { offer, parts } = await packAndOffer(relinked.moveHost, relinked.partsFolder);
+    expect(await arriveWith(relinked.moveHost, offer, parts)).toEqual({
+      status: "refused",
+      reason: "transfer-failed",
+    });
   });
 
   it("keeps the folder when a file in it changed after the move packed", async () => {

@@ -1396,8 +1396,11 @@ for Move after this turn.
     wider than it was. A retried arrival that finds a folder holding exactly
     these files uses it as it is, rather than landing a second copy, and
     never changes its permission bits: such a folder may be the person's
-    own. A move that is discarded after landing
-    leaves that copy where it is; the source still holds its own.
+    own. The thread opens on the Project binding the files landed under: a
+    Project relinked to another folder meanwhile refuses the arrival with
+    `transfer-failed`, so the thread never works in files that are not the
+    moved ones and the source keeps it. A move that is discarded after
+    landing leaves that copy where it is; the source still holds its own.
 - There is no size limit ([decision H22](#decisions)). A large thread or
   worktree takes longer; the move sheet and Prepare to shut down show the
   size and an estimate, read before anything freezes. The size is what a

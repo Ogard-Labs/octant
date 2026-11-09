@@ -1362,9 +1362,10 @@ export function wireRemote(deps: RemoteDependencies) {
           providerInstanceId: input.provider.providerInstanceId,
           modelId: input.provider.modelId,
           hostId: LOCAL_HOST_ID,
-          bindingRevisionId: String(
-            project.bindingHistory[project.bindingHistory.length - 1]?.revisionId,
-          ),
+          // The binding the files landed under, so a relink since is refused as stale.
+          bindingRevisionId:
+            input.bindingRevisionId ??
+            String(project.bindingHistory[project.bindingHistory.length - 1]?.revisionId),
           ...(input.workingDirectory === undefined
             ? {}
             : { workingDirectory: input.workingDirectory }),
@@ -1387,9 +1388,11 @@ export function wireRemote(deps: RemoteDependencies) {
       const project = persistence
         .readProjects()
         .find((candidate) => String(candidate.id) === projectId);
-      return project?.type === "work" && project.lifecycle === "active"
-        ? project.binding.canonicalRoot
-        : undefined;
+      if (project?.type !== "work" || project.lifecycle !== "active") return undefined;
+      const bindingRevisionId = project.bindingHistory.at(-1)?.revisionId;
+      return bindingRevisionId === undefined
+        ? undefined
+        : { root: project.binding.canonicalRoot, bindingRevisionId: String(bindingRevisionId) };
     },
     journalHistory: (input) => deps.movedThreadHistory.journalImported(input),
     holds: deps.threadMoveHolds,
