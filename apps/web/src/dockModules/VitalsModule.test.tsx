@@ -17,7 +17,9 @@ afterEach(() => {
 });
 
 it("shows this host's load and says so when it has no battery", async () => {
-  const fetchMock = vi.fn(async () => Response.json(snapshot({ gpu: { percent: 42 } })));
+  const fetchMock = vi.fn(async (_input: RequestInfo | URL) =>
+    Response.json(snapshot({ gpu: { percent: 42 } })),
+  );
   vi.stubGlobal("fetch", fetchMock);
   render(
     <VitalsModule serverUrl="http://127.0.0.1:4000" subject={{ mode: "code", threadId: "t" }} />,
@@ -30,7 +32,7 @@ it("shows this host's load and says so when it has no battery", async () => {
 });
 
 it("reads a thread's server over its Project's route and tells a refused window plainly", async () => {
-  const fetchMock = vi.fn(async () => new Response("{}", { status: 403 }));
+  const fetchMock = vi.fn(async (_input: RequestInfo | URL) => new Response("{}", { status: 403 }));
   vi.stubGlobal("fetch", fetchMock);
   render(
     <ServerCodeProjectsContext.Provider
