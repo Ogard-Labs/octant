@@ -168,6 +168,39 @@ describe("BrowserCaptureService", () => {
     expect(Buffer.from(found?.bytes ?? [])).toEqual(PNG);
   });
 
+  it("keeps a capture carried in with a moved thread under the new thread, once, without its source profile", async () => {
+    const { connection, service } = open();
+    const captureId = decodeBrowserCaptureId("d0000000-0000-4000-8000-0000000000c1");
+    const carried = {
+      threadId: threadB,
+      captureId,
+      bytes: PNG,
+      facts: {
+        origin: "https://example.com",
+        url: "https://example.com/pricing",
+        title: "Pricing",
+        capturedAt: now as never,
+        profile: { kind: "personal" as const },
+      },
+    };
+    await service.carryMoved(carried);
+    // A finish asked again after a lost answer carries the same capture again.
+    await service.carryMoved(carried);
+
+    const [capture, ...rest] = service.list(threadB);
+    expect(rest).toEqual([]);
+    expect(capture).toMatchObject({
+      captureId,
+      url: "https://example.com/pricing",
+      capturedAt: now,
+    });
+    // The profile named a Browser profile on the other computer, which never moves.
+    expect(capture?.profile).toBeUndefined();
+    expect(Buffer.from((await service.read(threadB, captureId))?.bytes ?? [])).toEqual(PNG);
+    // Moving a thread is the person's act, so the person is the actor.
+    expect(journalRows(connection).map((row) => row.actor_kind)).toEqual(["local-user"]);
+  });
+
   it("does not hand a capture to another thread", async () => {
     const { service } = open();
     const captureId = kept(await service.keep(request()));

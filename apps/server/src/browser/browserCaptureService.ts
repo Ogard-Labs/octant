@@ -8,6 +8,7 @@ import {
   decodeBrowserCapture,
   decodeBrowserCaptureId,
   decodeBrowserStep,
+  CorrelationId,
   decodeEventActor,
   EventId,
   EventName,
@@ -22,7 +23,6 @@ import {
   type BrowserRecordingFacts,
   type BrowserStep,
   type BrowserThreadId,
-  type CorrelationId,
   type EventActor,
   type ProviderInstanceId,
   type StoredBrowserProfile,
@@ -52,6 +52,7 @@ const decodeAggregateVersion = Schema.decodeUnknownSync(AggregateVersion);
 const decodeEventId = Schema.decodeUnknownSync(EventId);
 const decodeEventName = Schema.decodeUnknownSync(EventName);
 const decodeTimestamp = Schema.decodeUnknownSync(UtcTimestamp);
+const decodeCorrelationId = Schema.decodeUnknownSync(CorrelationId);
 
 const MAX_APPEND_ATTEMPTS = 3;
 const SCREENSHOT_DATA_URL = /^data:image\/(?:png|jpeg);base64,([A-Za-z0-9+/]+={0,2})$/;
@@ -186,6 +187,61 @@ export class BrowserCaptureService {
   }
 
   /**
+   * Keep a capture carried here with a thread that moved from another of the
+   * person's computers, under the moved thread. Moving is the person's act, so
+   * the person is the journal actor. The profile the page lived in is left
+   * out: it names a Browser profile on the other computer, and profiles never
+   * move. A capture already kept under this id is left as it is, so a finish
+   * asked again keeps nothing twice. Unlike `keep`, a failure throws: the move
+   * must not arrive without a part it promised.
+   */
+  async carryMoved(input: {
+    readonly threadId: BrowserThreadId;
+    readonly captureId: BrowserCaptureId;
+    readonly bytes: Uint8Array;
+    readonly facts: Omit<BrowserCapture, "captureId" | "threadId" | "hash" | "size" | "mime">;
+  }): Promise<void> {
+    if (this.#window(input.threadId).some((capture) => capture.captureId === input.captureId)) {
+      return;
+    }
+    const { profile: _otherComputers, ...facts } = input.facts;
+    let version: number;
+    try {
+      // An earlier try that stopped before journaling may have left the file.
+      await this.#store.remove(input.threadId, input.captureId).catch(() => undefined);
+      const finalized = await this.#store.finalize(
+        await this.#store.stage({
+          threadId: input.threadId,
+          captureId: input.captureId,
+          bytes: input.bytes,
+        }),
+      );
+      const capture = decodeBrowserCapture({
+        ...facts,
+        captureId: input.captureId,
+        threadId: input.threadId,
+        hash: finalized.hash,
+        size: finalized.size,
+        mime: finalized.mime,
+      });
+      version = this.#appendOne(
+        BROWSER_CAPTURE_AGGREGATE_TYPE,
+        BROWSER_CAPTURE_KEPT,
+        capture,
+        { actor: this.#personActor, correlationId: decodeCorrelationId(this.#uuid()) },
+        capture.capturedAt,
+      );
+    } catch (error) {
+      await this.#store.remove(input.threadId, input.captureId).catch(() => undefined);
+      throw error;
+    }
+    await this.#dropOlderThan(input.threadId, version).catch(() => undefined);
+    if (facts.recording !== undefined) {
+      await this.#dropRecordingsPastCap(input.threadId).catch(() => undefined);
+    }
+  }
+
+  /**
    * Record one step of the agent's Browser check. Best effort like keeping a
    * capture: a step that cannot be journaled never fails the action. Only
    * what `browserStepRecord` keeps reaches the journal; the request itself,
@@ -199,7 +255,10 @@ export class BrowserCaptureService {
         ...browserStepRecord(input.facts),
         recordedAt: this.#clock(),
       });
-      this.#appendOne(BROWSER_STEP_AGGREGATE_TYPE, BROWSER_STEP_RECORDED, step, input);
+      this.#appendOne(BROWSER_STEP_AGGREGATE_TYPE, BROWSER_STEP_RECORDED, step, {
+        actor: this.#actor(input),
+        correlationId: input.correlationId,
+      });
     } catch {
       // The proof is a convenience beside the action; losing a step is better
       // than failing a page the agent already acted on.
@@ -285,7 +344,7 @@ export class BrowserCaptureService {
       BROWSER_CAPTURE_AGGREGATE_TYPE,
       BROWSER_CAPTURE_KEPT,
       capture,
-      input,
+      { actor: this.#actor(input), correlationId: input.correlationId },
       capture.capturedAt,
     );
   }
@@ -294,12 +353,7 @@ export class BrowserCaptureService {
     aggregateType: string,
     eventName: string,
     payload: BrowserCapture | BrowserStep,
-    input: {
-      readonly threadId: BrowserThreadId;
-      readonly providerInstanceId: ProviderInstanceId;
-      readonly correlationId: CorrelationId;
-      readonly takenBy?: BrowserCaptureTaker;
-    },
+    input: { readonly actor: EventActor; readonly correlationId: CorrelationId },
     occurredAt: string = "recordedAt" in payload ? payload.recordedAt : this.#clock(),
   ): number {
     const aggregateId = decodeAggregateId(String(payload.threadId));
@@ -317,7 +371,7 @@ export class BrowserCaptureService {
               eventName: decodeEventName(eventName),
               eventVersion: 1,
               correlationId: input.correlationId,
-              actor: this.#actor(input),
+              actor: input.actor,
               occurredAt: decodeTimestamp(occurredAt),
               payload,
             },

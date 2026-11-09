@@ -1,6 +1,15 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { AppState } from "react-native";
 import { createPollGuard } from "./pollGuard";
+import { pollWhileActive, type AppActivity } from "./pollWhileActive";
+
+const nativeAppActivity: AppActivity = {
+  isActive: () => AppState.currentState === "active",
+  onChange: (listener) => {
+    const subscription = AppState.addEventListener("change", (next) => listener(next === "active"));
+    return () => subscription.remove();
+  },
+};
 
 export interface PolledResource<T> {
   /** The newest successful answer; kept while later reads fail. */
@@ -55,16 +64,11 @@ export function usePolledResource<T>(
 
   useEffect(() => {
     if (!enabled) return;
-    const timer = setInterval(() => {
-      if (AppState.currentState === "active") void runner.current?.(false);
-    }, intervalMs);
-    const subscription = AppState.addEventListener("change", (next) => {
-      if (next === "active") void runner.current?.(false);
+    return pollWhileActive({
+      run: () => void runner.current?.(false),
+      intervalMs,
+      activity: nativeAppActivity,
     });
-    return () => {
-      clearInterval(timer);
-      subscription.remove();
-    };
   }, [enabled, intervalMs]);
 
   const reload = useCallback(async () => {

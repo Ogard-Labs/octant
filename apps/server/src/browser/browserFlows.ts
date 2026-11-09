@@ -32,6 +32,7 @@ import type { Journal } from "../persistence/journal";
 import { ConcurrencyConflict } from "../persistence/journalErrors";
 import type { SqliteConnection } from "../persistence/sqlitePort";
 import {
+  browserToolCallDidNotRun,
   isBrowserToolFlowInput,
   isBrowserToolRecordingInput,
   parseBrowserToolInput,
@@ -650,11 +651,13 @@ interface ReplayedStep {
  * page's path and title are compared with the recorded ones; the first step
  * that differs, fails, or is refused ends the replay and is named.
  */
-async function replayBrowserFlow(
+export async function replayBrowserFlow(
   flow: BrowserFlow,
   deps: {
     readonly refs: () => BrowserFlowRefs;
     readonly run: (step: BrowserToolStep) => Promise<BrowserToolAnswer>;
+    readonly startAt?: number;
+    readonly onStep?: (index: number) => void;
   },
 ): Promise<BrowserToolAnswer> {
   const completed: ReplayedStep[] = [];
@@ -668,14 +671,20 @@ async function replayBrowserFlow(
     isError: true,
   });
   for (const [index, stored] of flow.steps.entries()) {
+    if (index < (deps.startAt ?? 0)) continue;
     const record: Record<string, unknown> = { ...stored.input };
-    if (stored.targets !== undefined && Object.keys(stored.targets).length > 0) {
+    // Untargeted keypresses need a fresh reading too: after a hand-back the
+    // service otherwise substitutes a snapshot for the input without acting.
+    if (
+      stored.operation === "press" ||
+      (stored.targets !== undefined && Object.keys(stored.targets).length > 0)
+    ) {
       const snapshot = await deps.run({ operation: "snapshot" });
       if (snapshot.isError) {
         return stopped(index, stored.operation, { answer: snapshot.result });
       }
       const refs = deps.refs();
-      for (const [key, target] of Object.entries(stored.targets)) {
+      for (const [key, target] of Object.entries(stored.targets ?? {})) {
         const matches = refs.filter(
           (candidate) => candidate.role === target.role && candidate.name === target.name,
         );
@@ -718,6 +727,8 @@ async function replayBrowserFlow(
     if (answer.isError) {
       return stopped(index, stored.operation, { answer: answer.result });
     }
+    if (browserToolCallDidNotRun(answer))
+      return stopped(index, stored.operation, { reason: "person-handoff", answer: answer.result });
     const found = flowOutcomeOf(answer);
     const changed = (answer.result as { readonly page?: { readonly changed?: unknown } }).page
       ?.changed;
@@ -738,6 +749,7 @@ async function replayBrowserFlow(
       ...(typeof changed === "string" ? { changed } : {}),
     });
     last = answer;
+    deps.onStep?.(index);
   }
   return {
     result: { ...(last?.result as Record<string, unknown>), flow: flow.name, steps: completed },
