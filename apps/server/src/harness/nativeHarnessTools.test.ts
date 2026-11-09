@@ -297,6 +297,38 @@ describe("native harness tools", () => {
     });
   });
 
+  it("asks about and runs a long command whose approval summary is cut at a space or inside wide characters", async () => {
+    const summaries: string[] = [];
+    const ran: string[] = [];
+    const { tools } = await fixture(
+      { executionPolicy: "approval-gated", approvalSatisfied: false },
+      {
+        approvals: async (input) => {
+          summaries.push(input.summary);
+          return "approved";
+        },
+        shell: {
+          run: async (input) => {
+            ran.push(input.command);
+            return { status: "ran", exitCode: 0, output: "", truncated: false };
+          },
+        },
+      },
+    );
+    // "bash: " plus 2,041 characters puts the 2,048-character cut on the space.
+    const spaced = `echo ${"x".repeat(2_036)} ${"y".repeat(100)}`;
+    const wide = "é".repeat(3_000);
+    for (const command of [spaced, wide]) {
+      expect(await call(tools, "bash", { command })).toMatchObject({ isError: false });
+    }
+    expect(ran).toEqual([spaced, wide]);
+    expect(summaries).toHaveLength(2);
+    for (const summary of summaries) {
+      expect(summary).toBe(summary.trim());
+      expect(new TextEncoder().encode(summary).byteLength).toBeLessThanOrEqual(4_096);
+    }
+  });
+
   it("runs a command through the shell port and reports its exit code and bounded output", async () => {
     const seen: string[] = [];
     const { tools, root } = await fixture(
