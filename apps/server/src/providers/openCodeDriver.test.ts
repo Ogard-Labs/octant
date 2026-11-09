@@ -117,6 +117,42 @@ describe("OpenCode driver", () => {
     expect(fixture.processInputs[0]?.executionPolicy).toBe("plan");
   });
 
+  it("starts a sandboxed Full access session's server inside the sandbox, and refuses to resume it open on the same server", async () => {
+    const fixture = driverFixture();
+    const exit = await Effect.runPromise(
+      Effect.scoped(
+        fixture.driver.acquire({ instanceId, projectRoot: "/tmp/project" }).pipe(
+          Effect.flatMap((connection) =>
+            connection
+              .start({
+                sessionId,
+                modelId,
+                executionPolicy: "full-access",
+                fullAccessSandbox: true,
+              })
+              .pipe(
+                Effect.flatMap((handle) =>
+                  Effect.exit(
+                    connection.resume({
+                      sessionId,
+                      resumeCursor: handle.resumeCursor!,
+                      executionPolicy: "full-access",
+                    }),
+                  ),
+                ),
+              ),
+          ),
+        ),
+      ),
+    );
+    expect(String(exit)).toContain("unauthorized");
+    expect(fixture.processInputs).toHaveLength(1);
+    expect(fixture.processInputs[0]).toMatchObject({
+      executionPolicy: "full-access",
+      fullAccessSandbox: true,
+    });
+  });
+
   it("proves MCP declaration support through a confined loopback probe lease", async () => {
     const fixture = driverFixture();
     const probe = await Effect.runPromise(Effect.scoped(fixture.driver.probe({ instanceId })));

@@ -926,6 +926,53 @@ describe("OpenCodeProcessPort", () => {
     expect(prepared.some((args) => args.includes("serve"))).toBe(false);
   });
 
+  it("wraps a Full access server that keeps the sandbox as Accept edits would, on its own egress proxy", async () => {
+    const fixture = profileRecordingWrapper("isolation-supported");
+    const prepared: Parameters<ProcessConfinementPort["prepare"]>[0][] = [];
+    const confinement: ProcessConfinementPort = {
+      prepare: (input) => {
+        prepared.push(input);
+        return { command: input.executable, args: input.args };
+      },
+    };
+    const policies: Array<string> = [];
+    await Effect.runPromise(
+      Effect.scoped(
+        makeOpenCodeProcessLive({
+          confinement,
+          platform: "darwin",
+          runtimeConfigResolver: async () => undefined,
+          startupTimeoutMs: 2_000,
+          runtimeNetwork: {
+            start: async (input) => {
+              policies.push(input.executionPolicy);
+              return {
+                status: "proxied",
+                endpoint: { kind: "loopback", port: 47004 },
+                environment: { HTTPS_PROXY: "http://octant:token@127.0.0.1:47004" },
+                release: async () => undefined,
+              };
+            },
+          },
+        }).start({
+          binaryPath: fixture.binaryPath,
+          cwd: fixture.root,
+          mode: "code",
+          executionPolicy: "full-access",
+          fullAccessSandbox: true,
+        }),
+      ),
+    );
+    const server = prepared.find((input) => input.args.includes("serve"));
+    expect(server).toMatchObject({
+      boundRoot: realpathSync(fixture.root),
+      writeBoundRoot: true,
+      allowProcessExec: true,
+      networkEgress: { kind: "proxied", endpoint: { kind: "loopback", port: 47004 } },
+    });
+    expect(policies).toEqual(["auto-accept-edits"]);
+  });
+
   it("starts the server on its own egress proxy below Full access and keeps loopback off the proxy", async () => {
     const fixture = profileRecordingWrapper("isolation-supported");
     let captured: Parameters<ProcessConfinementPort["prepare"]>[0] | undefined;
