@@ -1497,22 +1497,36 @@ time, deleting only what the erase has just proved travelled, because a
 frozen Work thread stops its turns, not an editor or terminal the person has
 open there, and a check of the whole folder followed by a recursive removal
 could destroy a file written in between. Each file that travelled is first
-renamed into a private trash folder made beside the folder (same file
-system, unique name), so a write to its path afterwards makes a new file
-that stays; only the moved file is then compared with the size and digest
-that travelled and deleted when it matches. One that no longer matches is
-put back, or kept beside its path as `<file>-kept` when the path has been
-taken again. Folders are then removed bottom-up one at a time with a plain
-remove that fails on any folder still holding something, the trash folder
-only when empty, and nothing is ever removed recursively. When anything is
+renamed into the move's set-aside folder beside the folder,
+`.<folder>-octant-moving-<move>` (same file system, named for the move, each
+file in it named by its position in the move's file list, which the source
+keeps), so a write to its path afterwards makes a new file that stays; only
+the moved file is then compared with the size and digest that travelled and
+deleted when it matches. One that no longer matches is put back, or kept
+beside its path as `<file>-kept` when the path has been taken again. Folders
+are then removed bottom-up one at a time with a plain remove that fails on
+any folder still holding something, the set-aside folder only when empty,
+and nothing is ever removed recursively. A clean-up can stop after setting a
+file aside and before settling it (the host stops, or a step fails), and that
+file may be the only copy of an edit made after the move packed. So the
+source records that the clean-up started, and where it sets files aside,
+before it sets aside the first one; a failed clean-up records no outcome, so
+the erase runs again; and every clean-up first settles whatever the
+set-aside folder already holds the same way (deleted when it matches what
+travelled, otherwise put back or kept as `-kept`), before setting anything
+else aside. A clean-up that has started finishes even if another thread has
+started working in the folder since. The erase reports the folder removed
+only when nothing is left in it or set aside. When anything is
 left (an ignored file, a link, a file the Secret guard refused, one past the
 bound, a file changed since the move packed, or one added during the
 clean-up), the folder stays where it is with exactly that, and the tombstone
-names it and those files. It is the person's folder,
-so nothing offers to remove it. A folder another thread has started working
-in since the move packed is kept as it is. The source keeps what travelled
-and what the erase decided beside the move's parts, never sent, so an erase
-run again after a stop reports the same and removes nothing twice. The purge also starts the existing withdrawals: messages the
+names it and those files; a file that could be neither put back nor kept
+beside its path stays set aside and is named by its path there. It is the
+person's folder, so nothing offers to remove it. A folder another thread has
+started working in since the move packed, before any clean-up started, is
+kept as it is. The source keeps what travelled and what the erase decided
+beside the move's parts, never sent, so an erase run again after it finished
+reports the same and removes nothing twice. The purge also starts the existing withdrawals: messages the
 thread sent that are not yet delivered are withdrawn, and messages waiting for
 it are refused.
 

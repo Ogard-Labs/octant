@@ -21,6 +21,7 @@ import {
 
 const main = { kind: "main", root: "/Users/person/Offsite" } as const;
 const report = decodeThreadWorkingDirectory("report");
+const MOVE = "99999999-9999-4999-8999-999999999999";
 
 const parents: string[] = [];
 afterEach(() => {
@@ -58,7 +59,9 @@ describe("clearing a Work folder whose files moved", () => {
       "agenda.md": "# Offsite\n",
       "notes/day-one/rooms.txt": "Room A",
     });
-    expect(await settleMovedWorkFolder({ folder, index })).toEqual({ status: "removed" });
+    expect(await settleMovedWorkFolder({ folder, index, moveId: MOVE })).toEqual({
+      status: "removed",
+    });
     expect(existsSync(folder)).toBe(false);
     expect(readdirSync(parent)).toEqual([]);
   });
@@ -71,6 +74,7 @@ describe("clearing a Work folder whose files moved", () => {
     const outcome = await settleMovedWorkFolder({
       folder,
       index,
+      moveId: MOVE,
       afterMovedAside: async (path) => {
         if (path === "agenda.md") writeFileSync(join(folder, "agenda.md"), "# Edited just now\n");
       },
@@ -89,6 +93,7 @@ describe("clearing a Work folder whose files moved", () => {
     const outcome = await settleMovedWorkFolder({
       folder,
       index,
+      moveId: MOVE,
       afterMovedAside: async (path) => {
         if (path === "agenda.md") writeFileSync(join(folder, "notes", "late.txt"), "New");
       },
@@ -104,6 +109,7 @@ describe("clearing a Work folder whose files moved", () => {
     const outcome = await settleMovedWorkFolder({
       folder,
       index,
+      moveId: MOVE,
       afterMovedAside: async () =>
         writeFileSync(join(folder, "agenda.md"), "# Written meanwhile\n"),
     });
@@ -112,6 +118,72 @@ describe("clearing a Work folder whose files moved", () => {
     expect(readFileSync(join(folder, "agenda.md-kept"), "utf8")).toBe(
       "# Changed before the clean-up\n",
     );
+  });
+
+  /** A first clean-up that stops right after setting `stopAt` aside, as a host that stopped would. */
+  async function stoppedAfterSettingAside(
+    folder: string,
+    index: MovedWorkFolder,
+    stopAt: string,
+  ): Promise<void> {
+    await expect(
+      settleMovedWorkFolder({
+        folder,
+        index,
+        moveId: MOVE,
+        afterMovedAside: async (path) => {
+          if (path === stopAt) throw new Error("The host stopped.");
+        },
+      }),
+    ).rejects.toThrow("stopped");
+  }
+
+  it("brings back an edited file a stopped clean-up had set aside, and names it", async () => {
+    const { parent, folder, index } = travelledFolder({
+      "agenda.md": "# Offsite\n",
+      "rooms.txt": "Room A",
+    });
+    writeFileSync(join(folder, "agenda.md"), "# Edited after the move packed\n");
+    await stoppedAfterSettingAside(folder, index, "agenda.md");
+    expect(existsSync(join(folder, "agenda.md"))).toBe(false);
+
+    expect(await settleMovedWorkFolder({ folder, index, moveId: MOVE })).toEqual({
+      status: "kept",
+      keptFiles: ["agenda.md"],
+    });
+    expect(readFileSync(join(folder, "agenda.md"), "utf8")).toBe(
+      "# Edited after the move packed\n",
+    );
+    expect(existsSync(join(folder, "rooms.txt"))).toBe(false);
+    expect(readdirSync(parent)).toEqual(["report"]);
+  });
+
+  it("keeps a stopped clean-up's edited file beside its path when the path was taken since", async () => {
+    const { folder, index } = travelledFolder({ "agenda.md": "# Offsite\n" });
+    writeFileSync(join(folder, "agenda.md"), "# Edited after the move packed\n");
+    await stoppedAfterSettingAside(folder, index, "agenda.md");
+    writeFileSync(join(folder, "agenda.md"), "# Written before the retry\n");
+
+    expect(await settleMovedWorkFolder({ folder, index, moveId: MOVE })).toEqual({
+      status: "kept",
+      keptFiles: ["agenda.md", "agenda.md-kept"],
+    });
+    expect(readFileSync(join(folder, "agenda.md-kept"), "utf8")).toBe(
+      "# Edited after the move packed\n",
+    );
+  });
+
+  it("deletes a matching file a stopped clean-up had set aside and removes the folder", async () => {
+    const { parent, folder, index } = travelledFolder({
+      "agenda.md": "# Offsite\n",
+      "notes/rooms.txt": "Room A",
+    });
+    await stoppedAfterSettingAside(folder, index, "agenda.md");
+
+    expect(await settleMovedWorkFolder({ folder, index, moveId: MOVE })).toEqual({
+      status: "removed",
+    });
+    expect(readdirSync(parent)).toEqual([]);
   });
 });
 

@@ -26,7 +26,6 @@ import {
   link,
   lstat,
   mkdir,
-  mkdtemp,
   open,
   readFile,
   readdir,
@@ -36,7 +35,7 @@ import {
   rmdir,
   type FileHandle,
 } from "node:fs/promises";
-import { dirname, isAbsolute, join, relative, sep } from "node:path";
+import { basename, dirname, isAbsolute, join, relative, sep } from "node:path";
 import {
   ThreadWorkingDirectory,
   type ApprovedWorkingFolder,
@@ -571,83 +570,126 @@ export type SettledWorkFolder =
   | { readonly status: "kept"; readonly keptFiles: ReadonlyArray<string> };
 
 /**
+ * The folder a move's clean-up sets files aside in: beside the source
+ * folder, so on the same file system, and named for the move, so a clean-up
+ * that stopped partway finds it again after a restart. Each file in it is
+ * named by its position in the move's file list, which the source keeps,
+ * so what it was needs nothing held in memory and no name grows with its path.
+ */
+export function movedAsideFolder(folder: string, moveId: string): string {
+  return join(dirname(folder), `.${basename(folder)}-octant-moving-${moveId.slice(0, 8)}`);
+}
+
+/**
  * Clears the source folder once its thread moved, deleting only what it has
  * just proved travelled. A frozen Work thread stops its turns but not an
  * editor or a terminal the person has open there, so a check of the whole
  * folder followed by a recursive removal could destroy a file written in
- * between. Instead each file that travelled is first renamed into a private
- * trash folder beside the folder, so a later write to its path makes a new
- * file there, and only the moved file is compared and deleted. One that no
- * longer matches is put back, or kept beside its path as `-kept` when that
- * path has been taken again. Folders are then removed bottom-up one at a
- * time, which fails on any folder that still holds something, so anything
- * added during the clean-up stays. Whatever is left keeps the folder and is
- * listed.
+ * between. Instead each file that travelled is first renamed into the move's
+ * set-aside folder, so a later write to its path makes a new file there, and
+ * only the moved file is compared and deleted. One that no longer matches is
+ * put back, or kept beside its path as `-kept` when that path has been taken
+ * again. Folders are then removed bottom-up one at a time, which fails on any
+ * folder that still holds something, so anything added during the clean-up
+ * stays. Whatever is left keeps the folder and is listed.
+ *
+ * A clean-up that stopped after setting a file aside (the host stopped, or
+ * the call failed) left that file in the set-aside folder, possibly the only
+ * copy of an edit made after the move packed. Every run therefore first
+ * settles whatever an earlier run left there, the same way, before it sets
+ * anything else aside, and reports `removed` only when nothing is left there
+ * or in the folder.
  */
 export async function settleMovedWorkFolder(input: {
   readonly folder: string;
   readonly index: MovedWorkFolder;
+  readonly moveId: string;
   /**
    * Called after a file is moved aside and before it is compared: the moment
-   * an outside writer could still change the folder. Tests use it to write
-   * there.
+   * an outside writer could still change the folder, or the host could stop.
+   * Tests use it to write there, or to throw.
    */
   readonly afterMovedAside?: (path: string) => Promise<void>;
 }): Promise<SettledWorkFolder> {
   const folder = input.folder;
-  const top = await lstat(folder).catch((error: unknown) => {
-    if (isMissing(error)) return undefined;
-    throw error;
-  });
-  if (top === undefined) return { status: "removed" };
-  // A folder that turned into a link, or moved, is not touched.
-  if (!top.isDirectory() || (await realpath(folder).catch(() => "")) !== folder) {
-    return { status: "kept", keptFiles: [] };
-  }
-  const trash = await mkdtemp(join(dirname(folder), ".octant-move-trash-"));
-  let moved = 0;
-  for (const file of input.index.files) {
-    const path = String(file.path);
-    const original = join(folder, path);
-    // A folder on the way that became a link would lead outside the folder.
-    if (!(await plainFoldersOnTheWay(folder, path))) continue;
-    const entry = await lstat(original).catch(() => undefined);
-    if (entry === undefined || !entry.isFile()) continue;
-    moved += 1;
-    const aside = join(trash, String(moved));
-    try {
-      await rename(original, aside);
-    } catch {
-      continue;
-    }
-    await input.afterMovedAside?.(path);
+  const trash = movedAsideFolder(folder, input.moveId);
+  const files = input.index.files;
+
+  /** Deletes a set-aside file that matches what travelled, or puts it back. */
+  const settleAside = async (aside: string, file: MovedWorkFolder["files"][number]) => {
     const travelled =
       (await lstat(aside)
-        .then((found) => found.size)
+        .then((found) => (found.isFile() ? found.size : -1))
         .catch(() => -1)) === file.bytes &&
       (await fileSha256(aside).catch(() => "")) === file.sha256;
     if (travelled) {
       await rm(aside, { force: true });
-      continue;
+      return;
     }
-    // Back where it was, or beside it when its path was taken again.
+    const original = join(folder, String(file.path));
+    // Only into the folder itself, never through a link; otherwise it stays
+    // set aside, where the listing below names it.
+    if (!(await folderIsItself(folder))) return;
+    if (!(await plainFoldersOnTheWay(folder, String(file.path), { create: true }))) return;
     for (const name of [original, `${original}-kept`, `${original}-kept-2`, `${original}-kept-3`]) {
-      if (await placeWithoutOverwriting(aside, name)) break;
+      if (await placeWithoutOverwriting(aside, name)) return;
     }
+  };
+
+  // What an earlier run left set aside, first.
+  for (const name of await readdir(trash).catch(() => [])) {
+    const position = /^[0-9]+$/.test(name) ? Number(name) : undefined;
+    const file = position === undefined ? undefined : files[position];
+    if (file !== undefined) await settleAside(join(trash, name), file);
   }
-  for (const directory of await foldersDeepestFirst(folder)) {
-    await rmdir(join(folder, directory)).catch(() => undefined);
+
+  const top = await lstat(folder).catch((error: unknown) => {
+    if (isMissing(error)) return undefined;
+    throw error;
+  });
+  if (top !== undefined && (await folderIsItself(folder))) {
+    await mkdir(trash, { recursive: true, mode: 0o700 });
+    for (const [position, file] of files.entries()) {
+      const path = String(file.path);
+      const original = join(folder, path);
+      const aside = join(trash, String(position));
+      // A folder on the way that became a link would lead outside the folder.
+      if (!(await plainFoldersOnTheWay(folder, path, { create: false }))) continue;
+      const entry = await lstat(original).catch(() => undefined);
+      if (entry === undefined || !entry.isFile()) continue;
+      // A name still taken in the set-aside folder is never renamed over.
+      if (
+        await lstat(aside).then(
+          () => true,
+          () => false,
+        )
+      )
+        continue;
+      try {
+        await rename(original, aside);
+      } catch {
+        continue;
+      }
+      await input.afterMovedAside?.(path);
+      await settleAside(aside, file);
+    }
+    for (const directory of await foldersDeepestFirst(folder)) {
+      await rmdir(join(folder, directory)).catch(() => undefined);
+    }
+    await rmdir(folder).catch(() => undefined);
   }
-  await rmdir(folder).catch(() => undefined);
-  const trashEmpty = await rmdir(trash).then(
-    () => true,
-    () => false,
-  );
+
+  const trashLeft = await readdir(trash).catch(() => []);
+  if (trashLeft.length === 0) await rmdir(trash).catch(() => undefined);
   const remains = await lstat(folder).then(
     () => true,
     () => false,
   );
-  if (!remains && trashEmpty) return { status: "removed" };
+  if (!remains && trashLeft.length === 0) return { status: "removed" };
+  if (top !== undefined && remains && !(await folderIsItself(folder))) {
+    // A folder that turned into a link, or moved, was not touched.
+    return { status: "kept", keptFiles: [] };
+  }
   let kept: Array<string> = [];
   if (remains) {
     try {
@@ -658,13 +700,19 @@ export async function settleMovedWorkFolder(input: {
     }
   }
   // A file that could be neither put back nor kept beside its path is still
-  // in the trash folder, named relative to the folder so it can be found.
-  if (!trashEmpty) {
-    for (const name of await readdir(trash).catch(() => [])) {
-      kept.push(join(relative(folder, trash), name));
-    }
-  }
+  // set aside, named relative to the folder so it can be found.
+  for (const name of trashLeft) kept.push(join(relative(folder, trash), name));
   return { status: "kept", keptFiles: kept.sort() };
+}
+
+/** Whether the folder is a real folder at exactly its own path, not a link. */
+async function folderIsItself(folder: string): Promise<boolean> {
+  const entry = await lstat(folder).catch(() => undefined);
+  return (
+    entry !== undefined &&
+    entry.isDirectory() &&
+    (await realpath(folder).catch(() => "")) === folder
+  );
 }
 
 /** Moves a file to `target` only when nothing is there, never replacing what is. */
@@ -684,11 +732,24 @@ async function placeWithoutOverwriting(from: string, target: string): Promise<bo
   return true;
 }
 
-/** Whether every folder between `root` and the file is a plain folder, not a link. */
-async function plainFoldersOnTheWay(root: string, path: string): Promise<boolean> {
+/**
+ * Whether every folder between `root` and the file is a plain folder, not a
+ * link. With `create`, a missing one is made, one level at a time, so a file
+ * put back after its folders were cleared lands where it was.
+ */
+async function plainFoldersOnTheWay(
+  root: string,
+  path: string,
+  options: { readonly create: boolean },
+): Promise<boolean> {
   const parts = path.split("/");
   for (let depth = 1; depth < parts.length; depth += 1) {
-    const entry = await lstat(join(root, ...parts.slice(0, depth))).catch(() => undefined);
+    const step = join(root, ...parts.slice(0, depth));
+    let entry = await lstat(step).catch(() => undefined);
+    if (entry === undefined && options.create) {
+      await mkdir(step).catch(() => undefined);
+      entry = await lstat(step).catch(() => undefined);
+    }
     if (entry === undefined || !entry.isDirectory()) return false;
   }
   return true;

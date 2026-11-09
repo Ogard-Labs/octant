@@ -41,6 +41,7 @@ import {
   landWorkFolderFromMove,
   measureWorkFolderForMove,
   MovedWorkFolder,
+  movedAsideFolder,
   settleMovedWorkFolder,
   type WorkThreadFolder,
 } from "./workThreadMoveFolder";
@@ -74,6 +75,8 @@ const decodeWorkThreadId = Schema.decodeUnknownSync(WorkThreadId);
 const WorkFolderOnSource = Schema.Struct({
   folder: Schema.NonEmptyString,
   index: MovedWorkFolder,
+  /** The erase's clean-up has started, setting files aside in this folder. */
+  settling: Schema.optional(Schema.Struct({ setAside: Schema.NonEmptyString }).annotations(strict)),
   settled: Schema.optional(
     Schema.Union(
       Schema.Struct({ status: Schema.Literal("removed") }).annotations(strict),
@@ -178,9 +181,9 @@ export function createWorkThreadMoveHost(options: WorkThreadMoveHostOptions): {
   /**
    * Clears what travelled from the folder the files came from, deleting only
    * what it proves travelled, and keeps the folder, listing what is left,
-   * when anything is. A folder
-   * another thread has started working in since the move packed is kept
-   * as it is. Nothing is reported when no folder travelled.
+   * when anything is. A folder another thread has started working in since
+   * the move packed is kept as it is, unless an earlier erase's clean-up had
+   * already started there. Nothing is reported when no folder travelled.
    */
   const settleFolder = async (
     id: WorkThreadId,
@@ -193,18 +196,36 @@ export function createWorkThreadMoveHost(options: WorkThreadMoveHostOptions): {
     } catch {
       return {};
     }
+    const save = (note: WorkFolderOnSource) =>
+      writeFile(path, JSON.stringify(encodeWorkFolderOnSource(note)), { mode: 0o600 });
     let settled = onSource.settled;
     if (settled === undefined) {
       const own = options.ownFolder(id);
-      settled =
-        own.status === "own" && own.folder === onSource.folder
-          ? await settleMovedWorkFolder({ folder: onSource.folder, index: onSource.index }).catch(
-              () => ({ status: "kept" as const, keptFiles: [] }),
-            )
-          : { status: "kept", keptFiles: [] };
-      await writeFile(path, JSON.stringify(encodeWorkFolderOnSource({ ...onSource, settled })), {
-        mode: 0o600,
-      });
+      // A clean-up already started must finish, whatever the folder's use
+      // now: an earlier run may have set files aside that only it can put back.
+      if (
+        onSource.settling !== undefined ||
+        (own.status === "own" && own.folder === onSource.folder)
+      ) {
+        // Recorded before the first file is set aside, so the note says
+        // where an interrupted clean-up left them.
+        if (onSource.settling === undefined) {
+          await save({
+            ...onSource,
+            settling: { setAside: movedAsideFolder(onSource.folder, moveId) },
+          });
+        }
+        // Not caught: a clean-up that fails partway records no outcome, so
+        // the erase runs again and the next clean-up settles what it left.
+        settled = await settleMovedWorkFolder({
+          folder: onSource.folder,
+          index: onSource.index,
+          moveId,
+        });
+      } else {
+        settled = { status: "kept", keptFiles: [] };
+      }
+      await save({ ...onSource, settled });
     }
     return settled.status === "kept"
       ? { keptFolder: onSource.folder, keptFiles: settled.keptFiles }
