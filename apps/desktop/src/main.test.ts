@@ -1362,6 +1362,7 @@ describe("hub administration IPC handlers", () => {
   it("refuses a sender that is not a trusted local window and reaches the host for one that is", async () => {
     const handlers = new Map<string, (event: unknown, ...args: unknown[]) => unknown>();
     const fetch = vi.fn(async () => Response.json({ hub: {}, spoke: {} }));
+    const openExternal = vi.fn(async (_url: string) => {});
     installHubAdministrationIpcHandlers({
       handle: (channel, handler) => {
         handlers.set(channel, handler);
@@ -1375,6 +1376,7 @@ describe("hub administration IPC handlers", () => {
           fetch: fetch as unknown as typeof globalThis.fetch,
         };
       },
+      openExternal,
     });
 
     const handler = handlers.get("octant:hub-administration:request");
@@ -1386,6 +1388,15 @@ describe("hub administration IPC handlers", () => {
       body: { hub: {}, spoke: {} },
     });
     expect(fetch).toHaveBeenCalledOnce();
+
+    // Open there takes the same sender check, and opens nothing for an answer
+    // that names no departure.
+    const openThere = handlers.get("octant:thread-move:open-there");
+    const thread = { mode: "work", threadId: "77777777-7777-4777-8777-777777777777" };
+    await expect(openThere?.("foreign", thread)).rejects.toThrow(/unauthorized hub request/);
+    expect(fetch).toHaveBeenCalledOnce();
+    await expect(openThere?.("owned", thread)).resolves.toEqual({ status: "refused" });
+    expect(openExternal).not.toHaveBeenCalled();
   });
 });
 

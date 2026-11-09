@@ -50,22 +50,35 @@ export function ThreadMoveTombstone(props: {
   const { departed } = props;
   const leftBehind = partsLeftBehindSentence(departed);
   const titleId = useId();
-  const [copied, setCopied] = useState<"copied" | "failed" | undefined>(undefined);
+  const [answer, setAnswer] = useState<"opened" | "copied" | "failed" | undefined>(undefined);
   const time = new Date(departed.movedAt).toLocaleString([], {
     dateStyle: "medium",
     timeStyle: "short",
   });
 
-  // Open there copies rather than opens. No window shows a thread another
-  // member holds (a pane always reads this window's own host), and the
-  // desktop app's own `octant://` handler takes only `octant://code/` links,
-  // so handing this link to the system would bring it back here and do
-  // nothing. The phone app is what opens it.
-  const openThere = () => {
+  // Open there opens the thread on the destination's own web app in the
+  // person's browser, which admits that browser as it already would, so this
+  // computer grants nothing; the desktop reads where it went from the host and
+  // the window names only the thread. No window shows another member's thread
+  // in place, and the desktop's own `octant://` handler takes only
+  // `octant://code/` links, so when the destination serves no web app, or the
+  // window has no such door, the link is copied for the phone app instead.
+  const copyLink = () => {
     const write = props.writeClipboard ?? ((text: string) => navigator.clipboard.writeText(text));
     write(movedThreadLink(departed)).then(
-      () => setCopied("copied"),
-      () => setCopied("failed"),
+      () => setAnswer("copied"),
+      () => setAnswer("failed"),
+    );
+  };
+  const openThere = () => {
+    const open = props.client.openThere;
+    if (departed.destinationWebOrigin === undefined || open === undefined) {
+      copyLink();
+      return;
+    }
+    open(departed.thread).then(
+      (outcome) => (outcome === "opened" ? setAnswer("opened") : copyLink()),
+      () => copyLink(),
     );
   };
 
@@ -104,11 +117,13 @@ export function ThreadMoveTombstone(props: {
         <div className="thread-move-tombstone__actions">
           <OctantButton onClick={openThere}>Open there</OctantButton>
           <p aria-live="polite" className="thread-move-tombstone__meta">
-            {copied === "copied"
-              ? `Link copied. This window can't open threads on ${departed.destinationName}; the Octant phone app opens this link.`
-              : copied === "failed"
-                ? "The link couldn't be copied."
-                : ""}
+            {answer === "opened"
+              ? `Opened on ${departed.destinationName}'s own page in your browser.`
+              : answer === "copied"
+                ? `Link copied. This window can't open threads on ${departed.destinationName}; the Octant phone app opens this link.`
+                : answer === "failed"
+                  ? "The link couldn't be copied."
+                  : ""}
           </p>
         </div>
       </div>

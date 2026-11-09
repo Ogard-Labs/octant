@@ -128,6 +128,7 @@ export const NIGHTLY_CLIENT_CHANNELS = {
   remoteDeviceRevokeAll: "octant-only",
   remoteDeviceReconcileExpired: "octant-only",
   hubAdministrationRequest: "octant-only",
+  threadMoveOpenThere: "octant-only",
   ownerUnlockMake: "octant-only",
   ownerUnlockSign: "octant-only",
   ownerUnlockForget: "octant-only",

@@ -9,6 +9,7 @@ import type {
 } from "@octant/contracts/app-updates";
 import type { DesktopOwnerUnlockPort } from "@octant/client-runtime";
 import type { NativeMenuRequest, NativeMenuOutcome } from "@octant/contracts/shell";
+import type { MovedThreadReference } from "@octant/contracts";
 
 export type { AppUpdateState };
 
@@ -311,6 +312,15 @@ export interface HubAdministrationBridge {
     operation: HubAdministrationOperation,
     body?: unknown,
   ) => Promise<{ readonly status: number; readonly body: unknown }>;
+  /**
+   * Open there on a moved thread's tombstone: the desktop opens the thread on
+   * the destination's own web app in the default browser, from where this
+   * host says it went. The window names only the thread. Absent on a desktop
+   * app that predates it.
+   */
+  readonly openMovedThreadThere?: (
+    thread: MovedThreadReference,
+  ) => Promise<{ readonly status: "opened" | "refused" }>;
 }
 
 /** The hub administration when this window is a local desktop window, else nothing. */
@@ -318,7 +328,12 @@ export function hubAdministrationOf(
   bridge: OctantHostBridge | undefined,
 ): HubAdministrationBridge | undefined {
   const request = bridge?.hubAdministrationRequest;
-  return request === undefined ? undefined : { hubAdministrationRequest: request };
+  if (request === undefined) return undefined;
+  const openThere = bridge?.openMovedThreadThere;
+  return {
+    hubAdministrationRequest: request,
+    ...(openThere === undefined ? {} : { openMovedThreadThere: openThere }),
+  };
 }
 
 /**

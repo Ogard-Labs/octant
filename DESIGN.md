@@ -2083,11 +2083,13 @@ this is how it looks.
   offered. A failed move holds nothing, so its composer returns.
 - **Moved.** On `committed` the pane becomes the tombstone: the source and
   destination route line, "Moved to" and the member's name with the time, and
-  **Open there**, which copies the thread's link in the form an Octant phone
-  opens and says under the button, in one polite line, "Link copied. This
-  window can't open threads on" the member, "the Octant phone app opens this
-  link." No window shows another member's thread yet, so it opens nothing
-  here and hands nothing to the system
+  **Open there**, which opens the thread on that member's own web page in
+  the default browser and says under the button, in one polite line,
+  "Opened on" the member's "own page in your browser." When that member
+  serves no web page it copies the thread's link in the form an Octant phone
+  opens instead and says "Link copied. This window can't open threads on"
+  the member, "the Octant phone app opens this link." Nothing opens inside
+  this window
   ([why](docs/design/hub-and-spokes.md#moving-a-thread-to-another-member)).
   The thread's
   sidebar row leaves this host's list; a window that reads both hosts shows it

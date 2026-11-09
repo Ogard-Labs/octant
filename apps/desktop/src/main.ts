@@ -323,6 +323,7 @@ import {
   sendHubAdministrationOperation,
   type HubAdministrationControlRuntime,
 } from "./hubAdministrationControls";
+import { openMovedThreadThere } from "./threadMoveOpenThere";
 import {
   installPairedComputerIpcHandlers,
   type PageStoragePort,
@@ -558,7 +559,24 @@ export function installHubAdministrationIpcHandlers(options: {
     handler: (event: unknown, ...args: readonly unknown[]) => unknown,
   ) => void;
   readonly runtimeFor: (event: unknown) => HubAdministrationControlRuntime;
+  /** Hands a validated page to the person's default browser. */
+  readonly openExternal: (url: string) => Promise<void>;
 }): void {
+  // Open there on a moved thread's tombstone. The window names the thread and
+  // nothing else; the page comes from the host's own answer for it.
+  options.handle(IPC_CHANNELS.threadMoveOpenThere, async (event, thread) => {
+    let runtime: HubAdministrationControlRuntime;
+    try {
+      runtime = options.runtimeFor(event);
+    } catch {
+      throw new Error("Octant rejected an unauthorized hub request.");
+    }
+    try {
+      return await openMovedThreadThere({ runtime, thread, openExternal: options.openExternal });
+    } catch {
+      throw new Error("Octant hub controls are unavailable.");
+    }
+  });
   options.handle(IPC_CHANNELS.hubAdministrationRequest, async (event, operation, body) => {
     let runtime: HubAdministrationControlRuntime;
     try {
@@ -3277,6 +3295,7 @@ function installIpcHandlers(): void {
         fetch: globalThis.fetch,
       };
     },
+    openExternal: (url) => shell.openExternal(url),
   });
   installHostIdentityIpcHandlers({
     handle: (channel, handler) => ipcMain.handle(channel, handler),
