@@ -9234,8 +9234,8 @@ Settings › Access, and nothing else. `provider-endpoints-only` finally means
 that for the runtime process too. Full access stays open network, except a
 thread that keeps the sandbox, which is held as the guarded levels are
 (Codex, whose app-server takes the proxy inside Octant's profile, Claude
-Code's own process and command sandbox, and Pi and OpenCode inside the
-Accept edits wall;
+Code's own process and command sandbox, and Pi, OpenCode and ACP agents
+inside the Accept edits wall;
 the runtimes that cannot keep the sandbox refuse such a thread). A refused request gets a 403 whose
 first body line stays the machine-readable `octant-egress-refused: <reason>
 <host>:<port>`; for a refusal a person can lift (`no-rule`, `expired`,
@@ -11217,15 +11217,29 @@ mechanisms are:
       serves a sandboxed session, nor the reverse. Verified by process and
       driver tests; a real Seatbelt run and a live OpenCode turn are
       maintainer checks.
-      ACP agents launch unwrapped at Full access, so a sandboxed thread on one of
+      An ACP agent launches inside the wall Accept edits has (writes held
+      to the Project and its extra folders, shell allowed, the profile's
+      credential-file and extension denials, guarded network and server
+      access) while its own session mode and managed files stay Full
+      access's, so it asks nothing and Octant answers anything it does ask
+      allow (`acpWallPolicy`). Each profile's guards against handing the
+      session to a process outside the sandbox (Grok's leader, Cline's hub
+      daemon) hold at every level. The sandbox choice is part of the key for
+      reusing a running agent, so one started open never serves a sandboxed
+      session, nor the reverse. Verified by a process test that the
+      sandboxed launch is wrapped and the open one is not; a real Seatbelt
+      run and a live turn on an ACP agent are maintainer checks; an agent
+      whose own Full access mode starts a sandbox of its own would fail
+      inside Octant's rather than run open.
+      Any other runtime launches unwrapped at Full access, so a sandboxed thread on one of
       them refuses to start with a plain message
       (`refusesFullAccessSandbox`, checked before each Code and Work turn)
       rather than running open.
     - **Network.** The thread resolves the egress the guarded levels resolve
       (`provider-endpoints-only`). Commands are held to the provider
       endpoints and approved hosts where the host routes them through its
-      egress proxy: Codex's app-server, Claude Code, Pi and OpenCode ask for
-      the runtime proxy with the Accept edits posture, and Harness commands run
+      egress proxy: Codex's app-server, Claude Code, Pi, OpenCode and ACP
+      agents ask for the runtime proxy with the Accept edits posture, and Harness commands run
       on their own proxy. The runtime's proxy follows the Network limits switch, which
       ships on ([provider runtime network](#provider-runtime-network)); with
       the switch off the OS rule is `allow`, as at the guarded levels.
@@ -11920,7 +11934,7 @@ approval-gated` command that undoes it. The terminal shows no one-time
   - **ACP, OpenCode, Pi:** wrapped at Guarded and Reviewed, with
     process exec and fork allowed and writes held to the Project root, so the
     shell runs confined; unwrapped at Full access, with no sandbox, except
-    Pi and OpenCode for a thread that keeps the sandbox, which takes the Accept edits wall. Egress at Guarded and Reviewed is
+    Pi, OpenCode and an ACP agent for a thread that keeps the sandbox, which takes the Accept edits wall. Egress at Guarded and Reviewed is
     the provider's endpoints, the Project's egress rules, and the person's
     safe networks rather than a blanket `allow` (built on macOS, behind the
     Network limits switch, which ships on;

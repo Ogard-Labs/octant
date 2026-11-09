@@ -1381,6 +1381,26 @@ describe.each(profiles)("ACP provider driver ($displayName)", (profile) => {
       },
     );
 
+    it("starts a sandboxed Full access session's agent inside the sandbox", async () => {
+      const { driver, starts } = fixture(profile, { runtimeVersion: "2.25.0" });
+      await Effect.runPromise(
+        Effect.scoped(
+          Effect.gen(function* () {
+            const connection = yield* driver.acquire({ instanceId, projectRoot, mode: "code" });
+            yield* connection.start({
+              sessionId,
+              modelId,
+              executionPolicy: "full-access",
+              fullAccessSandbox: true,
+            });
+            yield* connection.stop(sessionId);
+          }),
+        ),
+      );
+      expect(starts).toHaveLength(1);
+      expect(starts[0]).toMatchObject({ executionPolicy: "full-access", fullAccessSandbox: true });
+    });
+
     it.each(["approval-gated", "full-access"] as const)(
       "resumes a settled native conversation under %s without concurrent writers",
       async (nextPolicy) => {
