@@ -1,3 +1,7 @@
+import {
+  ProjectMemoryProposalPrompt,
+  type ProjectMemoryProposalClient,
+} from "../projects/ProjectMemoryProposalPrompt";
 import { ProviderCloudSessions } from "./ProviderCloudSessions";
 import { useDroppedFolderMentions } from "../composer/useDroppedFolderMentions";
 import { ToolCatalogContinuation } from "../providers/ToolCatalogContinuation";
@@ -271,6 +275,7 @@ export interface CodeThreadWorkspaceProps {
   readonly messageQueueClient?: ThreadMessageQueueClient;
   readonly extensionClient?: ExtensionClient;
   readonly automationClient?: AutomationClient;
+  readonly memoryProposalClient?: ProjectMemoryProposalClient;
 }
 
 /**
@@ -2302,6 +2307,12 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
         <RoutineProposalPrompt
           className="thread-column"
           client={props.automationClient}
+          threadId={String(props.threadId)}
+          turnActive={busy}
+        />
+        <ProjectMemoryProposalPrompt
+          className="thread-column"
+          client={props.memoryProposalClient}
           threadId={String(props.threadId)}
           turnActive={busy}
         />

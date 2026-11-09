@@ -1,4 +1,5 @@
 import { WorkspaceViewStateContext, useWorkspaceViewStore } from "./workspaceViewState";
+import type { ProjectMemoryProposalClient } from "../projects/ProjectMemoryProposalPrompt";
 import { workspaceContentStorageKey } from "./workspaceContentPersistence";
 import { ContinuityScreenContext } from "../continuity/ContinueElsewhere";
 import type { CodeReviewFileRequest } from "../code/codeReviewNavigation";
@@ -1291,6 +1292,9 @@ function renderCodeTab(
           ? {}
           : { appleToolchainClient: props.appleToolchainClient })}
         {...(props.extensionClient === undefined ? {} : { extensionClient: props.extensionClient })}
+        {...(props.projectClient === undefined
+          ? {}
+          : { memoryProposalClient: props.projectClient })}
         {...(props.automationClient === undefined
           ? {}
           : { automationClient: props.automationClient })}
@@ -1792,6 +1796,9 @@ function renderNonCodeTab(
   if (tab.kind === "chat-thread") {
     return (
       <ChatThreadWorkspace
+        {...(props.projectClient === undefined
+          ? {}
+          : { memoryProposalClient: props.projectClient })}
         threadMove={threadMoveEnvironmentFor(props, "chat")}
         {...(props.onCreateProject === undefined ? {} : { onCreateProject: props.onCreateProject })}
         chatClient={props.chatClient}
@@ -1989,6 +1996,9 @@ function renderNonCodeTab(
                 {...(props.automationClient === undefined
                   ? {}
                   : { automationClient: props.automationClient })}
+                {...(props.projectClient === undefined
+                  ? {}
+                  : { memoryProposalClient: props.projectClient })}
                 {...(props.onOpenCanvasReference === undefined
                   ? {}
                   : { onOpenCanvas: props.onOpenCanvasReference })}
@@ -2629,6 +2639,7 @@ function threadBrowserReveal(
 
 function ChatThreadWorkspace(props: {
   readonly threadMove?: ThreadMoveEnvironment;
+  readonly memoryProposalClient?: ProjectMemoryProposalClient;
   readonly agentRunClient?: AgentRunClient;
   readonly chatClient: ChatClient;
   readonly chatReadCursorStore: ChatReadCursorStore;
@@ -2727,6 +2738,9 @@ function ChatThreadWorkspace(props: {
         onRemoveCanvasSelection={props.onRemoveCanvasSelection}
         pendingCanvasSelections={props.pendingCanvasSelections}
         {...(props.extensionClient === undefined ? {} : { extensionClient: props.extensionClient })}
+        {...(props.memoryProposalClient === undefined
+          ? {}
+          : { memoryProposalClient: props.memoryProposalClient })}
         {...(props.browserAutomationClient === undefined
           ? {}
           : { browserAutomationClient: props.browserAutomationClient })}

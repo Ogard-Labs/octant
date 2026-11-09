@@ -132,7 +132,7 @@ export type ChatDependencies = Pick<ServerStart, "options" | "persistence"> &
     | "threadOutsideContentMarks"
   > &
   Pick<ComputerUseWiring, "computerToolsFor" | "computerUseTools"> &
-  Pick<WorkspaceWiring, "contextHarness" | "shellService"> &
+  Pick<WorkspaceWiring, "contextHarness" | "projectMemoryAccess" | "shellService"> &
   Pick<WorkRequestStateWiring, "workRequestRuntime"> &
   Pick<CodeWiring, "environmentService"> &
   Pick<
@@ -215,6 +215,7 @@ export function wireChat(deps: ChatDependencies) {
     workTurnService,
     workRequestRuntime,
     personMemoryAccess,
+    projectMemoryAccess,
   } = deps;
   return Effect.gen(function* () {
     let threadDialogueService: ThreadDialogueService | undefined;
@@ -560,6 +561,15 @@ export function wireChat(deps: ChatDependencies) {
                   projectId: thread.projectId === undefined ? undefined : String(thread.projectId),
                   createdAt: thread.createdAt,
                   windowId,
+                }),
+                // Outside the taint wrapper too: it returns Project memory the
+                // person approved, and a Chat thread outside a Project gets no
+                // tool. Chat has no Plan posture.
+                projectMemoryAccess.toolsFor({
+                  windowId,
+                  mode: "chat",
+                  threadId: String(thread.id),
+                  projectId: thread.projectId === undefined ? undefined : String(thread.projectId),
                 }),
                 // Outside the taint wrapper: only a child's reply is outside
                 // content, and `wait` marks the thread itself before it hands

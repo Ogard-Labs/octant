@@ -100,6 +100,8 @@ function client(initial = bootstrap()) {
       throw new Error("Unexpected thread environment request.");
     }),
     executeMemory: vi.fn(),
+    listMemoryProposals: vi.fn(async () => []),
+    decideMemoryProposal: vi.fn(),
   };
   return { api, read: () => state };
 }

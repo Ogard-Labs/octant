@@ -28,6 +28,9 @@ import { ManagedRepositoryInventory } from "../github/managedRepositoryInventory
 import { createGithubCloneRouteHandler } from "../githubCloneRoutes";
 import { createProjectBindingRouteHandler } from "../projectBindingRoutes";
 import { ProjectService } from "../projectService";
+import { createProjectMemoryAccess } from "../projectMemory/projectMemoryAccess";
+import { readApprovalOutsideContent } from "../context/externalContentTaintProjection";
+import { isRoutineHostScope } from "../routineHostScope";
 import { ProjectRootPort } from "../projectRootPort";
 import { WorkProjectStatusFiles } from "../work/workProjectStatusFiles";
 import { WorkProjectStatusReader } from "../work/workProjectStatusReader";
@@ -47,7 +50,14 @@ import type { ComputerUseWiring } from "./computerUse";
 import type { HarnessStateWiring } from "./harnessState";
 import { serverProjectOf } from "../serverProjects/serverProjectThreads";
 export type WorkspaceDependencies = Pick<ServerStart, "options" | "persistence"> &
-  Pick<AuthorityWiring, "bindingReceiptStore" | "onWindowRevoked" | "windowAuthorityStore"> &
+  Pick<
+    AuthorityWiring,
+    | "bindingReceiptStore"
+    | "isPairedDeviceScope"
+    | "machineChangeFeed"
+    | "onWindowRevoked"
+    | "windowAuthorityStore"
+  > &
   Pick<AgentRunsWiring, "spendCeilingHolder"> &
   Pick<IntegrationsWiring, "githubCapabilityService" | "githubIntegrationIsEffective"> &
   Pick<FoundationsWiring, "providerRuntimeRegistry" | "workThreadProjection"> &
@@ -61,6 +71,8 @@ export function wireWorkspace(deps: WorkspaceDependencies) {
     desktopRecipeKeys,
     githubCapabilityService,
     githubIntegrationIsEffective,
+    isPairedDeviceScope,
+    machineChangeFeed,
     offeredDesktopProviders,
     onWindowRevoked,
     options,
@@ -357,6 +369,23 @@ export function wireWorkspace(deps: WorkspaceDependencies) {
       offeredDesktopProviders,
       desktopRecipeKeys,
     });
+    // Memory changes a thread's agent asked for wait for the window whose
+    // turn raised them, like the routine proposals, so they ride the same
+    // change topic.
+    const projectMemoryAccess = createProjectMemoryAccess({
+      projects: projectService,
+      readMemory: (projectId) =>
+        persistence.readProject(projectId) === undefined
+          ? undefined
+          : persistence.readProjectMemory(projectId),
+      isHostScope: isRoutineHostScope,
+      isPairedDeviceScope,
+      outsideContent: (threadId) => readApprovalOutsideContent(persistence.connection, threadId),
+      uuid: randomUUID,
+      now: Date.now,
+      onChanged: () => machineChangeFeed.publish(["tool-approvals"]),
+    });
+    onWindowRevoked((windowId) => projectMemoryAccess.proposals.revokeWindow(windowId));
     return {
       authorizeWorkThreadForWindow,
       codeBoardPlanProgressSource,
@@ -371,6 +400,7 @@ export function wireWorkspace(deps: WorkspaceDependencies) {
       managedCloneService,
       planRoutes,
       projectBindingRoutes,
+      projectMemoryAccess,
       projectRootPort,
       projectService,
       replyDetailRoutes,
