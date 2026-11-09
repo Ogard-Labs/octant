@@ -10,6 +10,7 @@ import {
   type OwnerBrowserTarget,
 } from "@octant/contracts/owner-browser";
 import type { HubMemberId, UtcTimestamp } from "@octant/contracts";
+import type { PersistentBrowserLeaseBinding } from "@octant/contracts/persistent-browser-owner";
 import type { OwnerBrowserHost } from "./ownerBrowserControl";
 import type {
   BrowserPageScriptReceipt,
@@ -143,6 +144,15 @@ export interface BrowserPageScriptInput {
 }
 
 export interface BrowserAutomationServiceOptions {
+  /**
+   * Private host execution service. Its window key records the actual local
+   * review's provenance only; it never owns or routes the native page.
+   */
+  readonly executionOwner?: {
+    readonly kind: "execution";
+    readonly binding: PersistentBrowserLeaseBinding;
+    readonly isCurrent: () => boolean;
+  };
   /** A delegated owner closes its own contexts without shutting down the shared engine. */
   readonly sharedRuntime?: boolean;
   /** Host-owned exact caller/profile/site permission, never supplied by an RPC command. */
@@ -376,6 +386,7 @@ export interface BrowserFlowCustody {
 }
 
 export class BrowserAutomationService {
+  readonly #executionOwner: BrowserAutomationServiceOptions["executionOwner"];
   readonly #sharedRuntime: boolean;
   readonly #delegatedProfileIsCurrent: BrowserAutomationServiceOptions["delegatedProfileIsCurrent"];
   readonly #runtime: BrowserRuntimePort;
@@ -420,6 +431,7 @@ export class BrowserAutomationService {
   readonly #removePersonInputListener: (() => void) | undefined;
 
   constructor(options: BrowserAutomationServiceOptions) {
+    this.#executionOwner = options.executionOwner;
     this.#sharedRuntime = options.sharedRuntime === true;
     this.#delegatedProfileIsCurrent = options.delegatedProfileIsCurrent;
     this.#runtime = options.runtime;
@@ -430,7 +442,10 @@ export class BrowserAutomationService {
       createBrowserToolCallAuthorityService(options.authority, options.clock);
     this.#recordExternalContentIngestion = options.recordExternalContentIngestion;
     this.#captures = options.captures;
-    this.#isUnattendedScope = options.isUnattendedScope ?? (() => false);
+    this.#isUnattendedScope =
+      options.executionOwner === undefined
+        ? (options.isUnattendedScope ?? (() => false))
+        : () => true;
     this.#agentDownloadsEnabled = options.agentDownloadsEnabled ?? (() => false);
     this.#downloads = options.downloads;
     this.#uuid = options.uuid;
@@ -667,15 +682,25 @@ export class BrowserAutomationService {
           owned.record = stoppedRecord(owned.record, this.#clock(), "authority-revoked", "failed");
           return;
         }
-        const presentation = await this.#runtime.createContext(
-          contextId,
-          input.policy,
-          owned.abort.signal,
-          {
-            windowId: input.windowId,
-            threadId: input.threadId,
-          },
-        );
+        let presentation: "native-live" | "headless" | void;
+        if (this.#executionOwner !== undefined) {
+          const result = await this.#runtime.persistentOwner?.createContext(
+            contextId,
+            input.policy,
+            owned.abort.signal,
+            this.#executionOwner.binding,
+          );
+          if (result?.status !== "created" || !this.#executionOwner.isCurrent())
+            throw new BrowserProfileUnavailableError();
+          presentation = "native-live";
+        } else {
+          presentation = await this.#runtime.createContext(
+            contextId,
+            input.policy,
+            owned.abort.signal,
+            { windowId: input.windowId, threadId: input.threadId },
+          );
+        }
         if (owned.abort.signal.aborted || owned.record.state !== "creating") {
           await this.#safeClose(contextId);
           return;
@@ -934,6 +959,8 @@ export class BrowserAutomationService {
   }
 
   async runScript(input: BrowserPageScriptInput): Promise<BrowserPageScriptReceipt> {
+    if (this.#executionOwner !== undefined)
+      return { status: "refused", effect: "none", reason: "unavailable" };
     const owned = this.#contexts.get(input.contextId);
     const native = this.#runtime.runPageScript?.bind(this.#runtime);
     const refused = (reason: BrowserPageScriptRefusalReason): BrowserPageScriptReceipt => ({
@@ -2794,6 +2821,7 @@ export class BrowserAutomationService {
   }
 
   async revokeWindow(windowId: WindowId): Promise<void> {
+    if (this.#executionOwner !== undefined) return;
     this.#forgetExpiry(windowId);
     await Promise.all(
       [...this.#contexts.values()]
@@ -2831,6 +2859,8 @@ export class BrowserAutomationService {
     policy: BrowserContextPolicy,
     threadId: BrowserThreadId,
   ): BrowserAutomationFailure | undefined {
+    if (this.#executionOwner !== undefined && !this.#executionOwner.isCurrent())
+      return { category: "unauthorized", message: "Browser execution owner is no longer current." };
     if (request.approval.kind === "pending" || request.approval.kind === "denied") {
       return { category: "unauthorized", message: "Browser action approval is not active." };
     }
@@ -2926,6 +2956,7 @@ export class BrowserAutomationService {
     threadId: BrowserThreadId,
     kind: "sign-in" | "take-over" = "sign-in",
   ): (() => void) | undefined {
+    if (this.#executionOwner !== undefined) return undefined;
     const owned = this.#current(windowId, threadId);
     if (owned === undefined) return () => undefined;
     if (this.#expired(owned)) {
@@ -3413,6 +3444,7 @@ export class BrowserAutomationService {
       [...(this.#uploadAdmissions.get(owned.record.contextId) ?? [])].some((current) => !current())
     )
       return false;
+    if (this.#executionOwner !== undefined && !this.#executionOwner.isCurrent()) return false;
     const profile = storedBrowserProfile(owned.record.policy.profile);
     if (
       profile !== undefined &&

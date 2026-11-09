@@ -220,3 +220,5 @@ export * from "./listenerKeyTransition";
 
 export * from "./providerFileReview";
 export * from "./codeProviderFileReview";
+
+export * from "./persistentBrowserOwner";

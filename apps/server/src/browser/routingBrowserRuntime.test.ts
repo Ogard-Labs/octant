@@ -4,6 +4,10 @@ import { decodeHumanBrowserRequest } from "@octant/contracts/browser-presentatio
 import { describe, expect, it, vi } from "vitest";
 import { DesktopBrowserOwnerUnavailable } from "./desktopBrowserRuntime";
 import { RoutingBrowserRuntime } from "./routingBrowserRuntime";
+import {
+  decodePersistentBrowserLeaseBinding,
+  decodePersistentBrowserContextCreated,
+} from "@octant/contracts/persistent-browser-owner";
 
 const contextId = "60000000-0000-4000-8000-000000000001" as never;
 const owner = {
@@ -45,6 +49,55 @@ function runtime(presentation: "native-live" | "headless" = "native-live") {
 }
 
 describe("RoutingBrowserRuntime", () => {
+  it("keeps execution pages native and forgets their routing only after confirmed release", async () => {
+    const binding = decodePersistentBrowserLeaseBinding({
+      ownerId: "10000000-0000-4000-8000-000000000001",
+      grantId: "10000000-0000-4000-8000-000000000002",
+      executionId: "10000000-0000-4000-8000-000000000003",
+      threadId: "10000000-0000-4000-8000-000000000004",
+      mode: "code",
+      projectId: "10000000-0000-4000-8000-000000000005",
+      providerId: "provider",
+      modelId: "model",
+      authorityRevision: "revision",
+      profile: { kind: "personal" },
+      origins: ["https://example.com"],
+      expiresAt: "2026-11-07T20:30:00.000Z",
+    });
+    const receipt = decodePersistentBrowserContextCreated({
+      status: "created",
+      ownerId: binding.ownerId,
+      leaseId: binding.grantId,
+    });
+    if (receipt.status !== "created") throw new Error("Expected a created receipt");
+    const release = vi.fn(async (): Promise<"closed" | "unconfirmed"> => "unconfirmed");
+    const native = {
+      ...runtime(),
+      persistentOwner: {
+        status: async () => ({ status: "ready" as const, ownerId: binding.ownerId }),
+        configure: async () => ({ status: "disabled" as const }),
+        createContext: vi.fn(async () => receipt),
+        release,
+      },
+    };
+    const headless = runtime("headless");
+    const router = new RoutingBrowserRuntime({ native, headless });
+    await router.persistentOwner?.createContext(
+      contextId,
+      { ...policy, profile: binding.profile },
+      new AbortController().signal,
+      binding,
+    );
+    expect(await router.persistentOwner?.release(receipt.leaseId)).toBe("unconfirmed");
+    await router.act(contextId, { kind: "snapshot" } as never, new AbortController().signal);
+    expect(native.act).toHaveBeenCalledOnce();
+    release.mockResolvedValue("closed");
+    await router.persistentOwner?.release(receipt.leaseId);
+    expect(() =>
+      router.act(contextId, { kind: "snapshot" } as never, new AbortController().signal),
+    ).toThrow("stale or unknown");
+    expect(headless.createContext).not.toHaveBeenCalled();
+  });
   it("refuses native-only control for a headless fallback instead of borrowing the native owner's page", async () => {
     const native = runtime();
     native.available.mockResolvedValue(false);

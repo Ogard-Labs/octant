@@ -1,3 +1,8 @@
+import {
+  decodeBrowserContextId,
+  decodeBrowserContextPolicy,
+  decodePersistentBrowserLeaseBinding,
+} from "@octant/contracts";
 import { EventEmitter } from "node:events";
 import { createContext, runInContext } from "node:vm";
 import { decodeBrowserPageScriptNativeCommand } from "@octant/contracts/browser-page-script";
@@ -3211,5 +3216,263 @@ describe("native page script ownership", () => {
     } finally {
       await f.host.closeAll();
     }
+  });
+});
+
+describe("the native execution owner boundary", () => {
+  it.each(["dialog preparation", "target lookup"] as const)(
+    "refuses an expired execution before dispatch when %s finishes late",
+    async (stage) => {
+      const started = Date.now();
+      const clock = vi.spyOn(Date, "now").mockReturnValue(started);
+      const native = view();
+      const entered = Promise.withResolvers<void>();
+      const preparation = Promise.withResolvers<void>();
+      const host = createBrowserSurfaceHost({ createView: () => native });
+      try {
+        const ready = await host.persistentOwner.configure(true);
+        if (ready.status !== "ready") throw Error("Expected execution owner");
+        const policy = decodeBrowserContextPolicy({
+          profileMode: "isolated",
+          profile: { kind: "personal" },
+          allowedOrigins: ["https://example.com"],
+          credentialFieldProtection: true,
+          maxConcurrentTabs: 1,
+          sessionTimeoutMs: 60000,
+        });
+        const binding = decodePersistentBrowserLeaseBinding({
+          ownerId: ready.ownerId,
+          grantId: contextId,
+          executionId: contextId,
+          threadId,
+          mode: "work",
+          projectId: contextId,
+          providerId: "provider",
+          modelId: "model",
+          authorityRevision: "revision",
+          profile: policy.profile,
+          origins: policy.allowedOrigins,
+          expiresAt: new Date(started + 60000).toISOString(),
+        });
+        await host.persistentOwner.createContext(
+          decodeBrowserContextId(contextId),
+          policy,
+          new AbortController().signal,
+          binding,
+        );
+        if (stage === "dialog preparation") {
+          native.webContents.debugger.on = vi.fn();
+          vi.mocked(native.webContents.debugger.sendCommand).mockImplementation(async (method) => {
+            if (method === "Page.enable") {
+              entered.resolve();
+              await preparation.promise;
+            }
+          });
+        } else {
+          vi.mocked(native.webContents.executeJavaScriptInIsolatedWorld).mockImplementation(
+            async () => {
+              entered.resolve();
+              await preparation.promise;
+              return { x: 20, y: 20 };
+            },
+          );
+        }
+        const action = host
+          .act(
+            contextId,
+            stage === "dialog preparation"
+              ? { kind: "navigate", target: "https://example.com/new" }
+              : { kind: "type", target: "#field", value: "synthetic" },
+          )
+          .catch(() => undefined);
+        await entered.promise;
+        clock.mockReturnValue(started + 60001);
+        preparation.resolve();
+        await action;
+        expect(native.webContents.loadURL).not.toHaveBeenCalled();
+        expect(
+          vi
+            .mocked(native.webContents.debugger.sendCommand)
+            .mock.calls.some(([method]) => method.startsWith("Input.")),
+        ).toBe(false);
+      } finally {
+        preparation.resolve();
+        clock.mockRestore();
+        await host.closeAll();
+      }
+    },
+  );
+  it("retains only opted-in execution pages when the last renderer closes and lends no renderer control", async () => {
+    const created: Array<
+      Parameters<Parameters<typeof createBrowserSurfaceHost>[0]["createView"]>[0]
+    > = [];
+    const views: BrowserSurfaceViewPort[] = [];
+    let windowAvailable = true;
+    const host = createBrowserSurfaceHost({
+      isOwnerWindowAvailable: () => windowAvailable,
+      createView: (input) => {
+        created.push(input);
+        const native = view();
+        views.push(native);
+        return native;
+      },
+    });
+    const policy = decodeBrowserContextPolicy({
+      profileMode: "isolated",
+      profile: { kind: "personal" },
+      allowedOrigins: ["https://example.com"],
+      credentialFieldProtection: true,
+      maxConcurrentTabs: 1,
+      sessionTimeoutMs: 60000,
+    });
+    await host.createContext({ contextId, owner: { windowId: "window-a", threadId }, policy });
+    const ready = await host.persistentOwner.configure(true);
+    if (ready.status !== "ready") throw Error("owner missing");
+    const executionId = decodeBrowserContextId("60000000-0000-4000-8000-000000000002");
+    const binding = decodePersistentBrowserLeaseBinding({
+      ownerId: ready.ownerId,
+      grantId: contextId,
+      executionId,
+      threadId,
+      mode: "work",
+      projectId: contextId,
+      providerId: "provider",
+      modelId: "model",
+      authorityRevision: "revision",
+      profile: { kind: "personal" },
+      origins: policy.allowedOrigins,
+      expiresAt: new Date(Date.now() + 60000).toISOString(),
+    });
+    expect(
+      await host.persistentOwner.createContext(
+        executionId,
+        policy,
+        new AbortController().signal,
+        binding,
+      ),
+    ).toMatchObject({ status: "created" });
+    windowAvailable = false;
+    await host.closeOwnerContexts("window-a");
+    expect(() => host.state(contextId)).toThrow();
+    expect(host.state(executionId).contextId).toBe(executionId);
+    expect(created.map((row) => row.partition)).toEqual([
+      "persist:octant-profile-personal",
+      "persist:octant-profile-personal",
+    ]);
+    expect(created[1]?.owner).not.toHaveProperty("windowId");
+    const shell = {
+      contentView: { addChildView: vi.fn(), removeChildView: vi.fn() },
+      isDestroyed: () => false,
+      webContents: { send: vi.fn() },
+    };
+    expect(() =>
+      host.attach(executionId, { windowId: "window-a", threadId }, shell, {
+        x: 0,
+        y: 0,
+        width: 800,
+        height: 600,
+      }),
+    ).toThrow("owning Project window");
+    expect(
+      await host.prepareCredentialFill(
+        executionId,
+        { windowId: "window-a", threadId },
+        "https://example.com",
+      ),
+    ).toMatchObject({ status: "refused" });
+    expect(
+      await host.humanPresentation(
+        decodeHumanBrowserRequest({ kind: "attach", contextId: executionId, threadId }),
+        contextId,
+      ),
+    ).toMatchObject({ status: "refused" });
+    expect(
+      await host.runPageScript(
+        decodeBrowserPageScriptNativeCommand({
+          operation: "prepare",
+          contextId: executionId,
+          owner: { windowId: contextId, threadId },
+          source: "42",
+          expectedUrl: "https://example.com/",
+        }),
+        new AbortController().signal,
+      ),
+    ).toMatchObject({ status: "refused" });
+    expect(
+      await host.ownerControl(
+        decodeOwnerBrowserNativeCommand({
+          operation: "inspect",
+          contextId: executionId,
+          owner: { windowId: contextId, threadId },
+        }),
+      ),
+    ).toMatchObject({ status: "refused" });
+    await host.persistentOwner.configure(false);
+    expect(() => host.state(executionId)).toThrow();
+    expect(views[1]?.webContents.close).toHaveBeenCalled();
+    await host.closeAll();
+  });
+
+  it("releases an execution's native reservation when its last page crashes", async () => {
+    const views: BrowserSurfaceViewPort[] = [];
+    const host = createBrowserSurfaceHost({
+      createView: () => {
+        const native = view();
+        views.push(native);
+        return native;
+      },
+    });
+    const gone = vi.fn();
+    host.onContextGone(gone);
+    const policy = decodeBrowserContextPolicy({
+      profileMode: "isolated",
+      profile: { kind: "personal" },
+      allowedOrigins: ["https://example.com"],
+      credentialFieldProtection: true,
+      maxConcurrentTabs: 1,
+      sessionTimeoutMs: 60000,
+    });
+    const ready = await host.persistentOwner.configure(true);
+    if (ready.status !== "ready") throw Error("owner missing");
+    const executionId = decodeBrowserContextId("60000000-0000-4000-8000-000000000003");
+    const binding = decodePersistentBrowserLeaseBinding({
+      ownerId: ready.ownerId,
+      grantId: contextId,
+      executionId,
+      threadId,
+      mode: "work",
+      projectId: contextId,
+      providerId: "provider",
+      modelId: "model",
+      authorityRevision: "revision",
+      profile: { kind: "personal" },
+      origins: policy.allowedOrigins,
+      expiresAt: new Date(Date.now() + 60000).toISOString(),
+    });
+    expect(
+      await host.persistentOwner.createContext(
+        executionId,
+        policy,
+        new AbortController().signal,
+        binding,
+      ),
+    ).toMatchObject({ status: "created" });
+    const crashed = vi
+      .mocked(views[0]?.webContents.on)
+      ?.mock.calls.find(([event]) => event === "render-process-gone")?.[1];
+
+    crashed?.();
+
+    expect(gone).toHaveBeenCalledWith(executionId);
+    expect(host.persistentOwner.reserves(String(executionId))).toBe(false);
+    expect(
+      await host.persistentOwner.createContext(
+        executionId,
+        policy,
+        new AbortController().signal,
+        binding,
+      ),
+    ).toMatchObject({ status: "created" });
+    await host.closeAll();
   });
 });

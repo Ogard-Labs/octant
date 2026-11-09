@@ -16,10 +16,30 @@ import {
 } from "./browserDelegatedChildren";
 import { defaultAgentRunAuthorityCeilingForMode } from "@octant/domain";
 import type { BrowserRuntimePort } from "./browserRuntimePort";
+import {
+  decodePersistentBrowserOwnerStatus,
+  decodePersistentBrowserContextCreated,
+} from "@octant/contracts/persistent-browser-owner";
 
-it.each(["child", "routine"] as const)(
-  "keeps the %s context separate and closes only its owned context on revocation",
-  async (kind) => {
+it.each([
+  ["child", false],
+  ["routine", false],
+  ["routine", true],
+] as const)(
+  "keeps the %s context separate with persistent ownership %s and closes only its owned context on revocation",
+  async (kind, persistent) => {
+    let localWindow = true;
+    let nativeStatus = decodePersistentBrowserOwnerStatus({
+      status: "ready",
+      ownerId: "a0000000-0000-4000-8000-000000000001",
+    });
+    const persistentCreate = vi.fn(async () =>
+      decodePersistentBrowserContextCreated({
+        status: "created",
+        ownerId: "a0000000-0000-4000-8000-000000000001",
+        leaseId: "a0000000-0000-4000-8000-000000000002",
+      }),
+    );
     const command = decodeBrowserSessionGrantsCommand({
       kind: "review",
       grantee:
@@ -111,6 +131,16 @@ it.each(["child", "routine"] as const)(
     expect(workRun.authority).toEqual(authority);
     expect(workRun.authority.network).toBe(false);
     const runtime: BrowserRuntimePort = {
+      ...(persistent
+        ? {
+            persistentOwner: {
+              status: async () => nativeStatus,
+              configure: async () => nativeStatus,
+              createContext: persistentCreate,
+              release: async () => "closed" as const,
+            },
+          }
+        : {}),
       available: async () => true,
       nativeAvailable: async () => true,
       createContext: vi.fn(async (_contextId, _policy, _signal, owner) => {
@@ -133,7 +163,8 @@ it.each(["child", "routine"] as const)(
     const grants = new BrowserSessionGrants({
       now: Date.now,
       uuid: () => crypto.randomUUID(),
-      isLocalWindow: () => true,
+      isLocalWindow: () => localWindow,
+      ...(persistent ? { persistentOwnerStatus: async () => nativeStatus } : {}),
       canReview: () => true,
       targets: () => [{ target, revision: "one" }],
       current: () => ({ target, revision: "one" }),
@@ -185,9 +216,36 @@ it.each(["child", "routine"] as const)(
         expect(runtime.createContext).not.toHaveBeenCalled();
         executionAvailable = true;
       }
+      if (persistent) {
+        localWindow = false;
+        await children.closeWindow(windowId);
+      }
       expect(await tools.execute(call)).toMatchObject({ isError: false });
-      expect(runtime.createContext).toHaveBeenCalledOnce();
+      if (persistent) {
+        expect(runtime.createContext).not.toHaveBeenCalled();
+        expect(persistentCreate).toHaveBeenCalledOnce();
+        await children.closeWindow(windowId);
+        expect(runtime.closeContext).not.toHaveBeenCalled();
+        expect(
+          await tools.execute({
+            name: call.name,
+            inputJson: JSON.stringify({ operation: "snapshot" }),
+          }),
+        ).toMatchObject({ isError: false });
+        vi.mocked(runtime.act).mockClear();
+        await tools.execute(call);
+      } else expect(runtime.createContext).toHaveBeenCalledOnce();
       expect(workRun.authority).toEqual(authority);
+      if (persistent)
+        expect(
+          await tools.execute({
+            name: call.name,
+            inputJson: JSON.stringify({
+              operation: "sign-in",
+              reason: "The task explicitly needs a local sign-in",
+            }),
+          }),
+        ).toMatchObject({ isError: true, result: { error: "browser-needs-login" } });
       const offSite = await tools.execute({
         name: call.name,
         inputJson: JSON.stringify({
@@ -216,6 +274,7 @@ it.each(["child", "routine"] as const)(
       });
       try {
         await vi.waitFor(() => expect(runtime.act).toHaveBeenCalledTimes(2));
+        localWindow = true;
         await grants.execute(windowId, { kind: "revoke", grantId: allowed.grant.grantId });
         const answer = await pending;
         expect(answer.isError).toBe(true);
@@ -229,6 +288,24 @@ it.each(["child", "routine"] as const)(
         isError: true,
         result: { error: "browser-session-permission-required" },
       });
+      if (persistent) {
+        const again = await grants.execute(windowId, command);
+        if (again.kind !== "browser-session-review") throw Error("Expected fresh review");
+        await grants.execute(windowId, { kind: "grant", reviewId: again.reviewId });
+        nativeStatus = decodePersistentBrowserOwnerStatus({
+          status: "ready",
+          ownerId: "a0000000-0000-4000-8000-000000000003",
+        });
+        expect(await tools.execute(call)).toMatchObject({
+          isError: true,
+          result: { error: "browser-needs-a-native-owner" },
+        });
+        expect(persistentCreate).toHaveBeenCalledOnce();
+        expect(await grants.execute(windowId, { kind: "list" })).toMatchObject({
+          kind: "browser-session-grants",
+          grants: [],
+        });
+      }
     } finally {
       await tools.close?.();
       grants.close();

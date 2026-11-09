@@ -274,6 +274,13 @@ entries are excluded.
 
 ## Process topology
 
+The desktop's single native Browser owner may explicitly retain host-owned
+execution pages after its last renderer closes, using the same native profile
+store. These pages carry native execution leases rather than renderer window
+authority; restart rotates their generation and accepted Quit closes them.
+The default-off preference, fresh local review and exact grant/task scope are
+owned by [Background native ownership](design/browser-profiles.md#background-native-ownership).
+
 On macOS, both trusted desktop executables use sealed ASAR entries and fixed
 launch roles. Each app's separately identified, same-version bundled runtime runs
 its host, managed tools and executable extensions as Node (Stable's also runs its

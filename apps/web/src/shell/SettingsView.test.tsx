@@ -85,6 +85,15 @@ function navigateTo(label: string) {
   fireEvent.click(screen.getByRole("button", { name: label }));
 }
 
+it("starts background Browser ownership off and saves only an explicit local choice", async () => {
+  const { props } = renderSettings();
+  navigateTo("Data & storage");
+  const toggle = screen.getByRole("switch", { name: "Keep Browser available without windows" });
+  expect(toggle).not.toBeChecked();
+  await userEvent.setup().click(toggle);
+  expect(props.onSettingsChange).toHaveBeenCalledWith({ persistentBrowserOwner: true });
+});
+
 /**
  * Render SettingsView with a controlled `search` prop so the search results
  * panel can be exercised (the real App controls the search string).

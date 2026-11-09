@@ -50,6 +50,8 @@ export const BrowserSessionGrant = Schema.Struct({
   ),
   grantedAt: UtcTimestamp,
   expiresAt: UtcTimestamp,
+  /** Host-selected during review; never accepted in a grant command. */
+  continuesWithoutWindow: Schema.optional(Schema.Boolean),
 }).annotations(strict);
 export type BrowserSessionGrant = typeof BrowserSessionGrant.Type;
 
