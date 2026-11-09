@@ -3,6 +3,7 @@ import { dirname, join } from "node:path";
 import { NO_PROTECTED_FILES_CHANGES } from "@octant/domain/secret-guard-policy";
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 import { applyProtectedFilesChoice } from "../process/secretGuard";
+import { buildDocxFixture } from "../preview/previewTestFixtures";
 import { ServerConnection } from "./serverConnection";
 import { ServerFileSystem } from "./serverFiles";
 import {
@@ -65,6 +66,24 @@ describe.skipIf(!canRunThrowawaySshd)("the harness's file tools on a server fold
         { name: "link-out.txt", kind: "other" },
       ]),
     );
+  });
+
+  it("reads a Word document as text and refuses another binary file there, as on this host", async () => {
+    writeFileSync(join(root, "notes.docx"), buildDocxFixture(["First point"]));
+    writeFileSync(join(root, "bundle.zip"), Buffer.from([0x50, 0x4b, 0x03, 0x04, 0, 0, 0, 0]));
+    const tools = files();
+    expect(await tools.read({ path: "notes.docx" })).toMatchObject({
+      kind: "file",
+      extractedFrom: "docx",
+      lines: ["First point"],
+    });
+    expect(await tools.read({ path: "bundle.zip" })).toMatchObject({
+      kind: "refused",
+      reason: "binary-file",
+    });
+    expect(
+      await tools.edit({ path: "notes.docx", oldText: "First", newText: "Last" }),
+    ).toMatchObject({ kind: "refused", reason: "not-read-first" });
   });
 
   it("refuses a link out of the folder and a credential location, at any depth", async () => {
