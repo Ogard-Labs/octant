@@ -40,6 +40,28 @@ private to the relay until answer/cleanup. The relay checks device/inode and
 and repeats the mount/identity query around classification. Guest strings are
 never translated into host paths.
 
+### OverlayFS copy-up ordering
+
+The pinned Linux 6.18 source has a pre-admission copy-up path: OverlayFS may
+copy a lower file into its upper layer while opening it for write
+([`ovl_open`](https://github.com/torvalds/linux/blob/v6.18/fs/overlayfs/file.c));
+the candidate's `file_permission` admission is later on the read/write path
+([`rw_verify_area`](https://github.com/torvalds/linux/blob/v6.18/fs/read_write.c)).
+The QEMU-only `overlayfs_workload.c` fixture uses the actual compiled kernel
+and the actual `runLinuxMediationBroker` policy process. It opens one
+synthetic lower-layer `~/.ssh/deployment` for writing while no `.pub`
+companion exists, then pauses. Before the owner publishes that companion, the
+independent fixture requires the exact unchanged bytes in a distinct upper
+object. It then requires the enrolled process's first write to be refused by
+the real broker and the upper copy to remain byte-identical. The private mount
+is unmounted and the exact temporary tree is removed.
+
+This is a narrow side-effect/order measurement. A denied write after copy-up
+does not establish complete OverlayFS or mount enforcement, erase already
+copied bytes, or make the candidate production-ready. It uses only a private
+QEMU tmpfs mount and synthetic data; it neither mounts nor changes the
+developer host. The workflow receipt keeps `productionReady: false`.
+
 For unlink/rmdir/rename, the classifier re-runs the original structured policy
 against a metadata-only proposed namespace, using actual parent identity and
 copied byte names. It refuses loss of protection for still-existing objects,

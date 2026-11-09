@@ -1129,7 +1129,8 @@ static int core_probe_measure(void)
 static int policy_measure(const char *mode)
 {
   bool capture = !mode || !strcmp(mode, "--bubblewrap") ||
-    !strcmp(mode, "--runtime-bun") || !strcmp(mode, "--runtime-node") || !strcmp(mode, "--fileattr");
+    !strcmp(mode, "--runtime-bun") || !strcmp(mode, "--runtime-node") ||
+    !strcmp(mode, "--fileattr") || !strcmp(mode, "--overlay-copyup");
   pid_t child = fork();
   if (!child) {
     char *arguments[] = {"/policy-broker", (char *)mode, NULL};
@@ -1237,9 +1238,11 @@ int main(void)
     // Measure the new criterion before an intermittent older controller crash.
     // Its own failure must not suppress the original acceptance cases.
     int fileattr_result = !result ? policy_measure("--fileattr") : 0;
+    int overlay_result = !result ? policy_measure("--overlay-copyup") : 0;
     // An unconfirmed retirement or crashed controller cannot safely be
     // followed by another launch. Other failures are held for final reporting.
     if (fileattr_result == 34) result = fileattr_result;
+    if (overlay_result == 34) result = overlay_result;
     if (!result) result = policy_measure(NULL);
     // Reuse the same scenario, not a broader matrix: the earlier UID-map
     // failure was timing-sensitive. Ordinary policy processes have a 15s
@@ -1263,6 +1266,7 @@ int main(void)
       if (children.count || children.remaining) result = 36;
     }
     if (!result) result = fileattr_result;
+    if (!result) result = overlay_result;
     printf("OCTANT_KERNEL_EXIT %d\n", result);
   }
   fflush(stdout);

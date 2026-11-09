@@ -131,7 +131,7 @@ def main():
                    "SIGNALFD", "INOTIFY_USER", "ADVISE_SYSCALLS", "MEMFD_CREATE", "POSIX_TIMERS",
                    "FILE_LOCKING", "NET", "UNIX", "NAMESPACES", "USER_NS", "PID_NS", "UTS_NS",
                    "IPC_NS", "NET_NS", "SECCOMP", "SECCOMP_FILTER", "INET", "SYSVIPC",
-                   "UNIX98_PTYS", "DEVPTS_FS", "BLK_DEV", "EXT4_FS", "VIRTIO",
+                   "UNIX98_PTYS", "DEVPTS_FS", "BLK_DEV", "EXT4_FS", "OVERLAY_FS", "VIRTIO",
                    "VIRTIO_MENU", "VIRTIO_PCI", "VIRTIO_BLK", "DEVTMPFS_MOUNT",
                    "COREDUMP", "ELF_CORE", "PROC_SYSCTL"):
         run("scripts/config", "--enable", symbol, cwd=kernel, timeout=10)
@@ -141,7 +141,7 @@ def main():
     configured = set((kernel / ".config").read_text().splitlines())
     for symbol in ("SMP", "BLOCK", "BLK_DEV", "PCI", "VIRTIO_MENU", "VIRTIO_PCI", "VIRTIO_BLK",
                    "EXT4_FS", "DEVTMPFS", "DEVTMPFS_MOUNT", "USER_NS", "PID_NS", "NET_NS",
-                   "SECURITY", "SECURITY_PATH", "SECURITY_OCTANT_MEDIATION",
+                   "OVERLAY_FS", "SECURITY", "SECURITY_PATH", "SECURITY_OCTANT_MEDIATION",
                    "TMPFS_XATTR", "TMPFS_POSIX_ACL", "EXT4_FS_POSIX_ACL",
                    "COREDUMP", "ELF_CORE", "PROC_SYSCTL", "SYSCTL"):
         if f"CONFIG_{symbol}=y" not in configured:
@@ -161,10 +161,14 @@ def main():
     core_notes_binary = root / "core-notes"
     core_probe = root / "core-probe"
     fileattr_workload = root / "fileattr-workload"
+    overlayfs_workload = root / "overlayfs-workload"
+    overlayfs_fixture = root / "overlayfs-fixture"
     for source, target in ((native / "broker.c", relay),
                            (repository / "scripts/linux-file-view/kernel_policy_workload.c", workload),
                            (repository / "scripts/linux-file-view/kernel_core_probe.c", core_probe),
-                           (repository / "scripts/linux-file-view/kernel_fileattr_workload.c", fileattr_workload)):
+                           (repository / "scripts/linux-file-view/kernel_fileattr_workload.c", fileattr_workload),
+                           (repository / "scripts/linux-file-view/overlayfs_workload.c", overlayfs_workload),
+                           (repository / "scripts/linux-file-view/overlayfs_fixture.c", overlayfs_fixture)):
         run("gcc", "-static", "-std=c11", "-Wall", "-Wextra", "-Werror", str(source), "-o", str(target), timeout=30)
     core_check = root / "core-notes-check"
     run("gcc", "-std=c11", "-Wall", "-Wextra", "-Werror", "-DOCTANT_CORE_NOTES_TEST=1",
@@ -195,6 +199,8 @@ def main():
             run("ldd", str(runtime_path), timeout=10, output=output)
     guest_files = {"octant-mediation": relay, "policy-workload": workload,
                    "fileattr-workload": fileattr_workload,
+                   "overlayfs-workload": overlayfs_workload,
+                   "overlayfs-fixture": overlayfs_fixture,
                    "core-probe": core_probe,
                    "policy-broker": policy, "session-cases": session_cases, "usr/bin/bwrap": Path("/usr/bin/bwrap"),
                    "kernel-runtime.mjs": repository / "scripts/linux-file-view/kernel_runtime.mjs",
@@ -257,12 +263,15 @@ def main():
     runtime_joins = []
     outside = []
     fileattr_cases, fileattr_owners, fileattr_filesystems, fileattr_brokers = [], [], [], []
+    overlay_reproductions = []
     probe_addresses, probe_exits, core_notes, core_targets, core_retirements, processes = [], [], [], [], [], []
     for line in log.splitlines():
         if line.startswith("{"):
             value = json.loads(line)
             if value.get("status") == "measured-original-policy-broker":
                 cases.append(value)
+            elif value.get("status") == "measured-overlayfs-copy-up":
+                overlay_reproductions.append(value)
             elif value.get("status") == "measured-kernel-runtime":
                 runtime_receipts.append(value)
             elif value.get("status") in ("measured-fileattr-broker", "failed-fileattr-broker"):
@@ -321,9 +330,9 @@ def main():
             len(session_joins) != 1 or any(session_joins[0].get(key) != value for key, value in {"controllerJoined": True, "controllerCode": 0, "orphansJoined": 1, "remaining": False}.items())):
         raise SystemExit("The actual owned session needs all lifecycle/stdio/private-root controls and exact orphan joins.")
     expected_modes = ["--metadata-control", "direct", "--bubblewrap", "--bubblewrap", "--bubblewrap",
-                      "--runtime-bun", "--runtime-node", "--fileattr"]
-    if (len(processes) != 8 or sorted(entry.get("mode", "") for entry in processes) != sorted(expected_modes) or
-            len(core_targets) != 9 or len(core_retirements) != 10 or
+                      "--runtime-bun", "--runtime-node", "--fileattr", "--overlay-copyup"]
+    if (len(processes) != 9 or sorted(entry.get("mode", "") for entry in processes) != sorted(expected_modes) or
+            len(core_targets) != 10 or len(core_retirements) != 11 or
             {entry.get("pid") for entry in core_retirements} != {pid, *(entry.get("pid") for entry in processes), session_joins[0].get("controllerPid")} or
             any(entry.get("held") is not True or entry.get("retired") is not True for entry in core_retirements) or
             any(entry.get("diagnosticObserver") is not False or entry.get("joined") is not True
@@ -342,6 +351,19 @@ def main():
             fileattr_brokers[0].get("ownedCommandJoined") is not True or
             fileattr_brokers[0].get("cleaned") is not True):
         raise SystemExit("The ext4 attributes need private read/mutation refusals, unchanged output/owner state and public positive controls.")
+    if (len(overlay_reproductions) != 1 or
+            overlay_reproductions[0].get("actualBubblewrapBuilder") is not False or
+            overlay_reproductions[0].get("productionReady") is not False or
+            overlay_reproductions[0].get("ended") != {"status": "exited", "code": 0} or
+            overlay_reproductions[0].get("overlayCopyupBeforeTransition") is not True or
+            overlay_reproductions[0].get("overlayWriteRefused") is not True or
+            overlay_reproductions[0].get("overlayVerified") is not True or
+            overlay_reproductions[0].get("overlayUnmounted") is not True or
+            overlay_reproductions[0].get("cleaned") is not True or
+            overlay_reproductions[0].get("overlayReport", {}).get("upperCopyAfterDeniedWrite") is not True or
+            overlay_reproductions[0].get("overlayReport", {}).get("contentUnchanged") is not True or
+            overlay_reproductions[0].get("overlayReport", {}).get("distinctUpperObject") is not True):
+        raise SystemExit("The isolated OverlayFS case needs pre-transition copy-up, denied first write, unchanged upper bytes, confirmed unmount and cleanup.")
     if any(entry.get("code") != 0 or entry.get("signal") != 0 for entry in processes):
         raise SystemExit("Every untraced policy process must also exit normally with code zero.")
     expected_outside = {"pivot-root", "remount", "mount-setattr", "propagation", "open-create",

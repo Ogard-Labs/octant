@@ -91,20 +91,52 @@ const runtime =
       : undefined;
 const capsule = process.argv[2] === "--bubblewrap" || runtime !== undefined;
 const fileattr = process.argv[2] === "--fileattr";
-const workload = fileattr ? "/fileattr-workload" : "/policy-workload";
+const overlayCopyup = process.argv[2] === "--overlay-copyup";
+const workload = overlayCopyup
+  ? "/overlayfs-workload"
+  : fileattr
+    ? "/fileattr-workload"
+    : "/policy-workload";
 const root = fileattr ? "/octant-fileattr" : "/tmp/octant-policy-broker";
 const home = `${root}/home`;
 const key = `${home}/.ssh/deployment`;
+const stage = overlayCopyup ? `${root}/overlay-copyup-stage` : `${root}/stage`;
 const owner = new AbortController();
 const maximum = setTimeout(() => owner.abort(), runtime === undefined ? 15_000 : 25_000);
 let result = false;
 let cleaned = false;
 let ready = false;
 let metadataVerified = false;
+let overlayMounted = false;
+let overlayCopyupBeforeTransition = false;
+let overlayWriteRefused = false;
+let overlayVerified = false;
+let overlayUnmounted = false;
+let overlayReport: Record<string, unknown> | undefined;
 let ended: Awaited<ReturnType<typeof runLinuxMediationBroker>> | undefined;
 let running: ReturnType<typeof runLinuxMediationBroker> | undefined;
 try {
-  await mkdir(`${home}/.ssh`, { recursive: true, mode: 0o700 });
+  if (overlayCopyup) {
+    const setup = spawnSync("/overlayfs-fixture", ["mount"], {
+      encoding: "utf8",
+      timeout: 4_000,
+    });
+    overlayMounted =
+      setup.status === 0 &&
+      setup.stdout
+        .trim()
+        .split("\n")
+        .some((line) => {
+          try {
+            return JSON.parse(line).overlayFs === true;
+          } catch {
+            return false;
+          }
+        });
+    assert(overlayMounted, "The private disposable OverlayFS setup did not mount.");
+  } else {
+    await mkdir(`${home}/.ssh`, { recursive: true, mode: 0o700 });
+  }
   await mkdir(`${root}/tmp`, { mode: 0o700 });
   if (runtime !== undefined)
     await writeFile(`${root}/runtime.mjs`, await readFile("/kernel-runtime.mjs"));
@@ -123,20 +155,22 @@ try {
           ownAccountAccess: "none",
         })
       : { command: workload, args: [] };
-  await writeFile(key, "synthetic original-policy bytes", { mode: 0o600 });
-  await link(key, `${root}/alias`);
-  await writeFile(`${root}/ordinary`, "permitted before", { mode: 0o600 });
-  await mkdir(`${root}/empty`, { mode: 0o700 });
-  await mkdir(`${home}/.aws/sso/cache`, { recursive: true, mode: 0o700 });
-  await writeFile(`${home}/.aws/sso/cache/token`, "synthetic guarded folder contents", {
-    mode: 0o600,
-  });
-  await writeFile(`${home}/.ssh/id_independent`, "synthetic independently protected", {
-    mode: 0o600,
-  });
-  await writeFile(`${home}/.ssh/id_independent.pub`, "public independent", { mode: 0o600 });
-  await symlink("synthetic protected link text", `${home}/.ssh/id_link`);
-  await symlink("deployment.pub", `${home}/.ssh/link.pub`);
+  if (!overlayCopyup) {
+    await writeFile(key, "synthetic original-policy bytes", { mode: 0o600 });
+    await link(key, `${root}/alias`);
+    await writeFile(`${root}/ordinary`, "permitted before", { mode: 0o600 });
+    await mkdir(`${root}/empty`, { mode: 0o700 });
+    await mkdir(`${home}/.aws/sso/cache`, { recursive: true, mode: 0o700 });
+    await writeFile(`${home}/.aws/sso/cache/token`, "synthetic guarded folder contents", {
+      mode: 0o600,
+    });
+    await writeFile(`${home}/.ssh/id_independent`, "synthetic independently protected", {
+      mode: 0o600,
+    });
+    await writeFile(`${home}/.ssh/id_independent.pub`, "public independent", { mode: 0o600 });
+    await symlink("synthetic protected link text", `${home}/.ssh/id_link`);
+    await symlink("deployment.pub", `${home}/.ssh/link.pub`);
+  }
   running = runLinuxMediationBroker({
     nativeExecutable: "/octant-mediation",
     command: launch.command,
@@ -163,7 +197,7 @@ try {
         await rename(`${root}/runtime-outside-pending`, `${root}/runtime-outside`);
         outsidePublished = true;
       }
-      ready = (await stat(`${root}/stage`)).isFile();
+      ready = (await stat(stage)).isFile();
     } catch {
       // The enrolled synthetic command has not reached its allowed-read step.
     }
@@ -171,29 +205,100 @@ try {
     await pause(10);
   }
   if (ready) {
-    await writeFile(`${root}/unrelated.pub`, "synthetic public companion", { mode: 0o600 });
-    // Publish the companion last so the client sees both names atomically
-    // with respect to its synchronization condition.
-    await link(`${root}/unrelated.pub`, `${key}.pub`);
+    if (overlayCopyup) {
+      const before = spawnSync("/overlayfs-fixture", ["check-copyup"], {
+        encoding: "utf8",
+        timeout: 4_000,
+      });
+      overlayCopyupBeforeTransition =
+        before.status === 0 &&
+        before.stdout
+          .trim()
+          .split("\n")
+          .some((line) => {
+            try {
+              return JSON.parse(line).copyUpBeforeTransition === true;
+            } catch {
+              return false;
+            }
+          });
+      if (overlayCopyupBeforeTransition) {
+        await writeFile(`${key}.pub`, "synthetic public companion", { mode: 0o600 });
+      } else {
+        owner.abort();
+      }
+    } else {
+      await writeFile(`${root}/unrelated.pub`, "synthetic public companion", { mode: 0o600 });
+      // Publish the companion last so the client sees both names atomically
+      // with respect to its synchronization condition.
+      await link(`${root}/unrelated.pub`, `${key}.pub`);
+    }
   } else owner.abort();
   ended = await running;
-  metadataVerified =
-    runtime !== undefined ||
-    spawnSync(workload, [fileattr ? "--verify-fileattr" : "--verify-metadata"], {
-      stdio: "inherit",
-      timeout: 2_000,
-    }).status === 0;
-  result =
-    ready &&
-    ended.status === "exited" &&
-    ended.code === 0 &&
-    (await readFile(`${root}/ordinary`, "utf8")) === "permitted after" &&
-    (await readFile(key, "utf8")) === "synthetic original-policy bytes" &&
-    metadataVerified;
+  if (overlayCopyup) {
+    const inspected = spawnSync("/overlayfs-fixture", ["inspect-unmount"], {
+      encoding: "utf8",
+      timeout: 4_000,
+    });
+    for (const line of inspected.stdout.trim().split("\n")) {
+      try {
+        const report = JSON.parse(line) as Record<string, unknown>;
+        if (report.status === "overlayfs-disposable-repro") overlayReport = report;
+      } catch {
+        // Only the fixture's fixed JSON receipt is retained.
+      }
+    }
+    overlayVerified =
+      inspected.status === 0 &&
+      overlayReport?.upperCopyAfterDeniedWrite === true &&
+      overlayReport.contentUnchanged === true &&
+      overlayReport.distinctUpperObject === true &&
+      overlayReport.unmounted === true &&
+      overlayReport.productionReady === false;
+    overlayUnmounted = overlayReport?.unmounted === true;
+    overlayWriteRefused = ended.status === "exited" && ended.code === 0;
+    result =
+      ready &&
+      overlayCopyupBeforeTransition &&
+      overlayWriteRefused &&
+      overlayVerified;
+  } else {
+    metadataVerified =
+      runtime !== undefined ||
+      spawnSync(workload, [fileattr ? "--verify-fileattr" : "--verify-metadata"], {
+        stdio: "inherit",
+        timeout: 2_000,
+      }).status === 0;
+    result =
+      ready &&
+      ended.status === "exited" &&
+      ended.code === 0 &&
+      (await readFile(`${root}/ordinary`, "utf8")) === "permitted after" &&
+      (await readFile(key, "utf8")) === "synthetic original-policy bytes" &&
+      metadataVerified;
+  }
 } finally {
   clearTimeout(maximum);
   owner.abort();
   await running;
+  if (overlayCopyup && !overlayUnmounted) {
+    const cleanup = spawnSync("/overlayfs-fixture", ["unmount"], {
+      encoding: "utf8",
+      timeout: 4_000,
+    });
+    overlayUnmounted =
+      cleanup.status === 0 &&
+      cleanup.stdout
+        .trim()
+        .split("\n")
+        .some((line) => {
+          try {
+            return JSON.parse(line).unmounted === true;
+          } catch {
+            return false;
+          }
+        });
+  }
   await rm(root, { recursive: true, force: true });
   try {
     await stat(root);
@@ -205,19 +310,32 @@ try {
 result = result && cleaned;
 console.log(
   JSON.stringify({
-    status: fileattr
+    status: overlayCopyup
       ? result
-        ? "measured-fileattr-broker"
-        : "failed-fileattr-broker"
-      : result
-        ? "measured-original-policy-broker"
-        : "failed",
+        ? "measured-overlayfs-copy-up"
+        : "failed-overlayfs-copy-up"
+      : fileattr
+        ? result
+          ? "measured-fileattr-broker"
+          : "failed-fileattr-broker"
+        : result
+          ? "measured-original-policy-broker"
+          : "failed",
     ended,
     productionReady: false,
     lateCompanion: ready,
     actualBubblewrapBuilder: capsule || fileattr,
     runtime: runtime ?? "native",
-    ...(runtime === undefined ? { metadataUnchanged: metadataVerified } : {}),
+    ...(runtime === undefined && !overlayCopyup ? { metadataUnchanged: metadataVerified } : {}),
+    ...(overlayCopyup
+      ? {
+          overlayCopyupBeforeTransition,
+          overlayWriteRefused,
+          overlayVerified,
+          overlayUnmounted,
+          overlayReport,
+        }
+      : {}),
     ownedCommandJoined: ended?.status === "exited",
     cleaned,
   }),
