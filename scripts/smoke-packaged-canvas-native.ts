@@ -1080,41 +1080,56 @@ const timer = setInterval(() => {
     // setup only and is not evidence for any of these steps.
     // A refused native input in the pairing route prints the window text it
     // actually saw, with key- or token-like runs hidden.
+    const logWindowText = async (stage: string) => {
+      const raw = await runBoundedCommand(
+        nativeControllerPath,
+        ["observe", String(ownPid), join(artifacts, `${stage}-refused.png`), stage],
+        process.env,
+        8000,
+      ).catch(() => "");
+      const texts = raw === "" ? [] : decodeSnapshot(JSON.parse(raw)).texts.map((row) => row.text);
+      console.log(
+        `OCTANT_NATIVE_LAST_TEXT ${JSON.stringify({
+          stage,
+          texts: texts
+            .slice(0, 80)
+            .map((text) => text.replace(/[A-Za-z0-9+/=_-]{24,}/g, "<redacted>").slice(0, 120)),
+        })}`,
+      );
+    };
     const pairedInput = async (stage: string, mode: string, label: string, value?: string) => {
       try {
         return await nativeInput(stage, mode, label, value);
       } catch (error) {
-        const raw = await runBoundedCommand(
-          nativeControllerPath,
-          ["observe", String(ownPid), join(artifacts, `${stage}-refused.png`), stage],
-          process.env,
-          8000,
-        ).catch(() => "");
-        const texts =
-          raw === "" ? [] : decodeSnapshot(JSON.parse(raw)).texts.map((row) => row.text);
-        console.log(
-          `OCTANT_NATIVE_LAST_TEXT ${JSON.stringify({
-            stage,
-            texts: texts
-              .slice(0, 80)
-              .map((text) => text.replace(/[A-Za-z0-9+/=_-]{24,}/g, "<redacted>").slice(0, 120)),
-          })}`,
-        );
+        await logWindowText(stage);
         throw error;
       }
     };
-    const revealText = async (stage: string, text: string, anchor: string) => {
-      for (let attempt = 0; attempt < 5; attempt++) {
+    // The settings window is short; scroll the pane at a visible anchor until
+    // the expected state is on screen.
+    const observeScrolling = async (
+      stage: string,
+      accept: (snapshot: typeof Snapshot.Type) => boolean,
+      anchors: ReadonlyArray<string>,
+    ) => {
+      for (let attempt = 0; attempt < 8; attempt++) {
         const raw = await runBoundedCommand(
           nativeControllerPath,
           ["observe", String(ownPid), join(artifacts, `${stage}-${attempt}.png`), stage],
           process.env,
           8000,
         );
-        if (decodeSnapshot(JSON.parse(raw)).texts.some((row) => row.text.includes(text))) return;
-        await pairedInput(`${stage}-scroll-${attempt}`, "scroll-down", anchor);
+        const snapshot = decodeSnapshot(JSON.parse(raw));
+        if (accept(snapshot)) {
+          console.log(`Observed native stage: ${stage}`);
+          return snapshot;
+        }
+        const visible = anchors.find((label) => hasText(snapshot, label));
+        if (visible === undefined || attempt % 2 === 0) await pause(1000);
+        else await nativeInput(`${stage}-scroll-${attempt}`, "scroll-down", visible);
       }
-      throw Error(`The native ${text} control was not revealed.`);
+      await logWindowText(stage);
+      throw Error(`The real packaged ${stage} state was not observed.`);
     };
     const listenerHost = pairedFixture.hostname;
     const listenerPort = pairedFixture.port;
@@ -1129,21 +1144,40 @@ const timer = setInterval(() => {
     await pairedInput("listener-search-open", "enter", "Remote listener");
     await observeUntil(
       "listener-settings",
-      (snapshot) => hasText(snapshot, "Hostname") && hasText(snapshot, "Certificate (PEM)"),
+      (snapshot) => hasText(snapshot, "Hostname") && hasText(snapshot, "Move the listener"),
     );
     await pairedInput("listener-hostname", "fill", "Hostname", listenerHost);
     await pairedInput("listener-port", "fill", "Port", String(listenerPort));
-    await revealText("listener-certificate-reveal", "Private key (PEM)", "Hostname");
+    // The window shows only the first listener fields, so the certificate,
+    // key and Move listener button are reached from Port with Tab.
     setPasteboard(pastedListener.certificatePem);
-    await pairedInput("listener-certificate", "paste", "Certificate (PEM)");
+    await pairedInput("listener-certificate", "paste-after", "Port", "1");
+    // Focusing the certificate may scroll the form, so later steps start
+    // from whichever earlier label is still on screen.
+    const afterListenerLabel = async (stage: string, mode: string, offset: number) => {
+      const anchors = [
+        { label: "Port", tabs: offset },
+        { label: "Hostname", tabs: offset + 1 },
+      ];
+      let lastError: unknown;
+      for (const anchor of anchors) {
+        try {
+          await nativeInput(`${stage}-${anchor.label}`, mode, anchor.label, String(anchor.tabs));
+          return;
+        } catch (error) {
+          lastError = error;
+        }
+      }
+      await logWindowText(stage);
+      throw lastError;
+    };
     setPasteboard(pastedListener.privateKeyPem);
     try {
-      await pairedInput("listener-key", "paste", "Private key (PEM)");
+      await afterListenerLabel("listener-key", "paste-after", 2);
     } finally {
       setPasteboard("");
     }
-    await observeUntil("listener-draft", (snapshot) => hasText(snapshot, "Move listener"));
-    await pairedInput("listener-move", "click", "Move listener");
+    await afterListenerLabel("listener-move", "press-after", 3);
     await observeUntil("listener-move-confirm", (snapshot) =>
       hasText(snapshot, "Move remote listener?"),
     );
@@ -1166,9 +1200,17 @@ const timer = setInterval(() => {
       hasText(snapshot, "in Remote access"),
     );
     await pairedInput("pairing-search-open", "enter", "Pair a device");
-    await observeUntil("pairing-settings", (snapshot) => hasText(snapshot, "Create pairing link"));
+    await observeScrolling(
+      "pairing-settings",
+      (snapshot) => hasText(snapshot, "Create pairing link"),
+      ["Pair a device", "Pairing link"],
+    );
     await pairedInput("pairing-create-link", "click", "Create pairing link");
-    await observeUntil("pairing-link-shown", (snapshot) => hasText(snapshot, "Expires"));
+    await observeScrolling(
+      "pairing-link-shown",
+      (snapshot) => hasText(snapshot, "ticketProof") || hasText(snapshot, "Expires"),
+      ["Create pairing link", "Pairing link", "Pair a device"],
+    );
     const linkPattern = /https:\/\/[^\s#]+\/#ticketId=[A-Za-z0-9%_-]+&ticketProof=[A-Za-z0-9%_-]+/g;
     let pairingLink: string | undefined;
     for (const target of ["ticketProof", "ticketPro", "#ticket", "ticket"]) {
@@ -1242,22 +1284,17 @@ const timer = setInterval(() => {
       throw error;
     }
     const approveLabel = `Approve ${deviceLabel}`;
-    let approvalVisible = false;
-    for (let attempt = 0; attempt < 6 && !approvalVisible; attempt++) {
-      try {
-        await observeUntil(
-          `pairing-request-${attempt}`,
-          (snapshot) => hasText(snapshot, approveLabel) && hasText(snapshot, comparisonCode),
-        );
-        approvalVisible = true;
-      } catch {
-        await pairedInput(`pairing-request-scroll-${attempt}`, "scroll-down", "Pair a device");
-      }
-    }
-    if (!approvalVisible)
-      throw Error("The native pairing request with the browser's comparison code was not shown.");
+    await observeScrolling(
+      "pairing-request",
+      (snapshot) => hasText(snapshot, approveLabel) && hasText(snapshot, comparisonCode),
+      ["Expires", "Network", "Create pairing link", "Pairing link", "Pair a device"],
+    );
     await pairedInput("pairing-approve", "click", approveLabel);
-    await observeUntil("pairing-approved", (snapshot) => hasText(snapshot, "Approved"));
+    await observeScrolling("pairing-approved", (snapshot) => hasText(snapshot, "Approved"), [
+      "Paired devices",
+      "Pairing link",
+      "Pair a device",
+    ]);
     console.log(
       `OCTANT_PAIRED_READER ${JSON.stringify({ stage: "native-approval", comparisonCodeMatched: true })}`,
     );

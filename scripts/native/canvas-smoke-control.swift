@@ -69,7 +69,7 @@ _ = controllerApplication.setActivationPolicy(.prohibited)
 guard let application = NSRunningApplication(processIdentifier: pid), !application.isTerminated else {
     refuse("The owned application is no longer running.")
 }
-if mode == "choose-native-menu-item" || mode == "click" || mode == "fill" || mode == "fill-private" || mode == "paste" || mode == "select-copy" || mode == "scroll-down" || mode == "toggle-before-field" || mode == "focus-before-text" || mode == "scroll-top" || mode == "scroll-bottom" || mode == "enter" || mode == "end" || mode == "escape" || mode == "settings" {
+if mode == "choose-native-menu-item" || mode == "click" || mode == "fill" || mode == "fill-private" || mode == "paste" || mode == "paste-after" || mode == "press-after" || mode == "select-copy" || mode == "scroll-down" || mode == "toggle-before-field" || mode == "focus-before-text" || mode == "scroll-top" || mode == "scroll-bottom" || mode == "enter" || mode == "end" || mode == "escape" || mode == "settings" {
     guard CGPreflightPostEventAccess() else { refuse("Native event delivery is unavailable; no permission was requested.") }
     _ = application.activate(options: [.activateIgnoringOtherApps])
 }
@@ -110,7 +110,7 @@ let targets = (request.results ?? []).compactMap { result -> TextTarget? in
 var clicked = false
 var pointerProof: String?
 var nativeText: String?
-if mode == "read-text" || mode == "choose-native-menu-item" || mode == "click" || mode == "fill" || mode == "fill-private" || mode == "paste" || mode == "select-copy" || mode == "scroll-down" || mode == "toggle-before-field" || mode == "focus-before-text" || mode == "scroll-top" || mode == "scroll-bottom" {
+if mode == "read-text" || mode == "choose-native-menu-item" || mode == "click" || mode == "fill" || mode == "fill-private" || mode == "paste" || mode == "paste-after" || mode == "press-after" || mode == "select-copy" || mode == "scroll-down" || mode == "toggle-before-field" || mode == "focus-before-text" || mode == "scroll-top" || mode == "scroll-bottom" {
     guard !expected.isEmpty else { refuse("Supply a nonempty observed text target.") }
     let rowContext = mode == "click" && CommandLine.arguments.count == 6 ? CommandLine.arguments[5] : nil
     let observedRows = (request.results ?? []).filter { result in
@@ -246,7 +246,31 @@ if mode == "read-text" || mode == "choose-native-menu-item" || mode == "click" |
         }
         clicked = true
     }
-    if mode == "select-copy" || mode == "paste" {
+    if mode == "paste-after" || mode == "press-after" {
+        // The label focuses its own field; Tab then moves through the next
+        // controls in document order, as a keyboard user would.
+        guard CommandLine.arguments.count == 6, let tabs = Int(CommandLine.arguments[5]), (1...4).contains(tabs) else {
+            refuse("Supply how many fields follow the labelled one.")
+        }
+        for _ in 0..<tabs {
+            guard let tabDown = CGEvent(keyboardEventSource: nil, virtualKey: 48, keyDown: true),
+                  let tabUp = CGEvent(keyboardEventSource: nil, virtualKey: 48, keyDown: false) else { refuse("Native keyboard input is unavailable.") }
+            tabDown.postToPid(pid)
+            tabUp.postToPid(pid)
+            usleep(80_000)
+        }
+        let sequence: [(CGKeyCode, CGEventFlags)] = mode == "paste-after" ? [(0, .maskCommand), (9, .maskCommand)] : [(49, [])]
+        for (key, flags) in sequence {
+            guard let keyDown = CGEvent(keyboardEventSource: nil, virtualKey: key, keyDown: true),
+                  let keyUp = CGEvent(keyboardEventSource: nil, virtualKey: key, keyDown: false) else { refuse("Native keyboard input is unavailable.") }
+            keyDown.flags = flags
+            keyUp.flags = flags
+            keyDown.postToPid(pid)
+            usleep(50_000)
+            keyUp.postToPid(pid)
+            usleep(80_000)
+        }
+    } else if mode == "select-copy" || mode == "paste" {
         // "paste" first focuses the field by its label, selects its contents,
         // then pastes what the controller placed on the pasteboard.
         let letter: CGKeyCode = mode == "paste" ? 9 : 8
