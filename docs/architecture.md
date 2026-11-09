@@ -9226,9 +9226,9 @@ hosts its Project's egress rules allow, and the places the person trusts in
 Settings › Access, and nothing else. `provider-endpoints-only` finally means
 that for the runtime process too. Full access stays open network, except a
 thread that keeps the sandbox, which is held as the guarded levels are
-(Codex, whose app-server takes the proxy inside Octant's profile, and Claude
-Code's own process and command sandbox; the runtimes that cannot keep the
-sandbox refuse such a thread). A refused request gets a 403 whose
+(Codex, whose app-server takes the proxy inside Octant's profile, Claude
+Code's own process and command sandbox, and Pi inside the Accept edits wall;
+the runtimes that cannot keep the sandbox refuse such a thread). A refused request gets a 403 whose
 first body line stays the machine-readable `octant-egress-refused: <reason>
 <host>:<port>`; for a refusal a person can lift (`no-rule`, `expired`,
 `ip-literal`, `private-destination`) a second line says to choose Trust
@@ -11191,16 +11191,23 @@ mechanisms are:
       both its process and command sandbox resolve guarded egress when Network
       limits are on. The admitted session keeps this choice until it ends,
       including when resumed. Plan and credential confirmation are unchanged.
-      ACP agents, OpenCode, and Pi launch unwrapped at Full access, so a sandboxed thread on one of
+      Pi launches inside the wall Accept edits has (writes held to the
+      Project and its extra folders, shell allowed, guarded network and
+      server access) with its approvals still off and its Full access tools,
+      so nothing prompts (`piWallPolicy`); a runtime started open never
+      serves a sandboxed session, nor the reverse. Verified by a process test
+      that the sandboxed launch is wrapped and the open one is not; a real
+      Seatbelt run and a live Pi turn are maintainer checks.
+      ACP agents and OpenCode launch unwrapped at Full access, so a sandboxed thread on one of
       them refuses to start with a plain message
       (`refusesFullAccessSandbox`, checked before each Code and Work turn)
       rather than running open.
     - **Network.** The thread resolves the egress the guarded levels resolve
       (`provider-endpoints-only`). Commands are held to the provider
       endpoints and approved hosts where the host routes them through its
-      egress proxy: Codex's app-server and Claude Code ask for the runtime
-      proxy with the Accept edits posture, and Harness commands run on their
-      own proxy. The runtime's proxy follows the Network limits switch, which
+      egress proxy: Codex's app-server, Claude Code and Pi ask for the
+      runtime proxy with the Accept edits posture, and Harness commands run
+      on their own proxy. The runtime's proxy follows the Network limits switch, which
       ships on ([provider runtime network](#provider-runtime-network)); with
       the switch off the OS rule is `allow`, as at the guarded levels.
     - **Helpers.** A helper run carries a posture, not the parent's sandbox
@@ -11882,7 +11889,8 @@ approval-gated` command that undoes it. The terminal shows no one-time
   changes who answers, not the sandbox. At Full access no runtime keeps its
   own sandbox: Claude Code runs `bypassPermissions` and Codex
   `danger-full-access` (built), and OpenCode, ACP agents, Pi, and the Octant
-  Harness run without Octant's OS sandbox, unwrapped (built). Nothing nests,
+  Harness run without Octant's OS sandbox, unwrapped (built), unless the
+  thread keeps the sandbox ([Opt-in sandbox at Full access](#security-and-authority)). Nothing nests,
   so a program that applies a Seatbelt profile of its own works. Plan's read-only enforcement is the same at every level.
 
   A Work thread launches exactly as a Code thread at the same level would
@@ -11892,7 +11900,8 @@ approval-gated` command that undoes it. The terminal shows no one-time
 
   - **ACP, OpenCode, Pi:** wrapped at Guarded and Reviewed, with
     process exec and fork allowed and writes held to the Project root, so the
-    shell runs confined; unwrapped at Full access, with no sandbox. Egress at Guarded and Reviewed is
+    shell runs confined; unwrapped at Full access, with no sandbox, except
+    Pi for a thread that keeps the sandbox, which takes the Accept edits wall. Egress at Guarded and Reviewed is
     the provider's endpoints, the Project's egress rules, and the person's
     safe networks rather than a blanket `allow` (built on macOS, behind the
     Network limits switch, which ships on;
