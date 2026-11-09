@@ -1325,13 +1325,33 @@ const timer = setInterval(() => {
         .text()
         .catch(() => "")
         .then((body) => {
-          if (canvasResponses.length < 40)
-            canvasResponses.push(
-              `${response.request().method()} ${path} ${response.status()} ${body
-                .replace(/[A-Za-z0-9+/=_-]{24,}/g, "<redacted>")
-                .slice(0, 200)}`,
-            );
+          // Keep the latest responses: a failure late in the reader is what
+          // the receipt has to explain, and the first forty are pairing.
+          canvasResponses.push(
+            `${response.request().method()} ${path} ${response.status()} ${body
+              .replace(/[A-Za-z0-9+/=_-]{24,}/g, "<redacted>")
+              .slice(0, 200)}`,
+          );
+          if (canvasResponses.length > 40) canvasResponses.shift();
         });
+    });
+    browserPage.on("requestfailed", (request) => {
+      const path = new URL(request.url()).pathname;
+      if (!path.startsWith("/api/")) return;
+      canvasResponses.push(
+        `${request.method()} ${path} failed ${request.failure()?.errorText ?? ""}`,
+      );
+      if (canvasResponses.length > 40) canvasResponses.shift();
+    });
+    browserPage.on("console", (message) => {
+      if (message.type() !== "error") return;
+      canvasResponses.push(
+        `console ${message
+          .text()
+          .replace(/[A-Za-z0-9+/=_-]{24,}/g, "<redacted>")
+          .slice(0, 200)}`,
+      );
+      if (canvasResponses.length > 40) canvasResponses.shift();
     });
     const browserReceipt = async (stage: string) =>
       console.log(
