@@ -1,3 +1,5 @@
+import { HubMemberId } from "@octant/contracts";
+import { providerApprovalCall } from "../providers/providerApprovalCall";
 import { ConversationInputTransfer } from "../attachments/conversationInputTransfer";
 import { applyProtectedFilesChoice, currentProtectedFilesChoice } from "../process/secretGuard";
 import { createExistingWorktreeCodeFileRootAuthority } from "../wiring/code";
@@ -3331,6 +3333,100 @@ describe("CodeOperationRuntime", () => {
       fixture.close();
     }
   });
+
+  it.each(["Write", "Bash"] as const)(
+    "answers a complete live owner %s approval once and refuses a revoked admission before delivery",
+    async (tool) => {
+      const queue = Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>());
+      const connection = {
+        ...providerConnection(queue),
+        approvalCall: vi.fn(() =>
+          providerApprovalCall({
+            tool,
+            arguments:
+              tool === "Write"
+                ? { file_path: "/fixture/file.txt", content: "entire owner-consented content" }
+                : { command: "printf entire-owner-consented-command" },
+            workingDirectory: "/fixture",
+            ownerShell: tool === "Bash",
+          }),
+        ),
+      };
+      const fixture = runtimeFixture({
+        provider: providerDriver(connection),
+        approvalValidator: false,
+      });
+      try {
+        await fixture.runtime.execute(windowId, {
+          kind: "start-provider-turn",
+          operationId: operationId(10),
+          threadId,
+          checkoutId,
+          sessionId,
+          prompt: fixture.prompt,
+        });
+        await Effect.runPromise(
+          Queue.offer(
+            queue,
+            providerEvent({
+              kind: "approval-request",
+              requestId: "owner-file-callback",
+              action: tool,
+              description: "Write file",
+            }),
+          ),
+        );
+        await vi.waitFor(() => expect(fixture.runtime.ownerApprovals?.()).toHaveLength(1));
+        const pending = fixture.runtime.ownerApprovals?.()[0];
+        if (pending === undefined) throw new Error("Owner file approval was not offered.");
+        expect(pending.action?.input).toContain(
+          tool === "Write" ? "entire owner-consented content" : "entire-owner-consented-command",
+        );
+        expect(
+          await pending.answer(true, () => false, {
+            kind: "owner-unlock",
+            memberId: HubMemberId.make(String(windowId)),
+          }),
+        ).toBe(false);
+        expect(connection.answerApproval).not.toHaveBeenCalled();
+        let admissions = 0;
+        await expect(
+          pending.answer(true, () => ++admissions < 3, {
+            kind: "owner-unlock",
+            memberId: HubMemberId.make(String(windowId)),
+          }),
+        ).rejects.toThrow("target changed before delivery");
+        expect(connection.answerApproval).not.toHaveBeenCalled();
+        expect(
+          await pending.answer(true, pending.current, {
+            kind: "owner-unlock",
+            memberId: HubMemberId.make(String(windowId)),
+          }),
+        ).toBe(true);
+        expect(connection.answerApproval).toHaveBeenCalledWith({
+          sessionId,
+          requestId: "owner-file-callback",
+          approved: true,
+          scope: "once",
+        });
+        expect(fixture.runtime.ownerApprovals?.()).toHaveLength(0);
+        expect(
+          (await fixture.runtime.subscribe(windowId, threadId, operationId(10), 0, 50)).map(
+            (frame) => frame.event,
+          ),
+        ).toContainEqual(
+          expect.objectContaining({
+            kind: "owner-approval-settled",
+            outcome: "approved",
+            actingPrincipal: { kind: "owner-unlock", memberId: String(windowId) },
+          }),
+        );
+      } finally {
+        await fixture.runtime.close();
+        fixture.close();
+      }
+    },
+  );
 
   it("runs a provider turn asynchronously and owns exact input, approval, and cancellation", async () => {
     const queue = Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>());

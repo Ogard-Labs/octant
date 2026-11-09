@@ -1771,6 +1771,8 @@ export function startOctantServer(
       remoteHost,
       threadRetention,
     } = wireRemote({
+      workRequestRuntime,
+      workRequestService,
       chatService,
       browserCaptures,
       canvasService,
