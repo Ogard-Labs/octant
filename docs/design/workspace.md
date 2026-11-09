@@ -687,8 +687,20 @@ its title band offers the common tools, Add tool lists the rest, and an open
 dock shows a tool strip. Direct tools are Side Chat, Browser, Files,
 Document, Canvas, artifact-gated Plan, conditional Delivery, Review, Terminal,
 Tests, Run and debug ([language services](language-services.md#debugger-panel-rules)),
-iOS Simulator, Android emulator, and Desktop, as mode and capability allow. Chat
-admits only the [Agents dock](#subagents) and has no bottom panel. Side
+iOS Simulator, Android emulator, Desktop, and Vitals, as mode and capability allow. Chat
+admits only the [Agents dock](#subagents) and has no bottom panel. **Vitals**
+(Work and Code) shows the load on the host the dock is connected to, local or
+remote, from the host-resources read: a CPU history line with the core count,
+memory used and total, network in and out, disk throughput, disk space, GPU
+utilisation, and **Energy**. Each reading is drawn only when that host reports
+it; a host with no battery says "No battery", and a figure the host cannot read
+is left out rather than drawn as zero. The tool keeps the last five minutes of
+samples in the window (nothing is stored), reads about every five seconds only
+while it is mounted and the window is visible, never overlaps reads, abandons one
+after five seconds, and on a failed read drops its figures and history instead
+of showing old ones as current. A window without authority to read the host is
+told so. It is not offered for threads in a server Project until the dock reads
+that server's host. Side
 Chat is a Chat conversation about the pane's thread: it reads that thread's
 conversation, current state, files, and subagent results, and changes none of
 them ([authority](../architecture.md#security-and-authority)). Its notice says

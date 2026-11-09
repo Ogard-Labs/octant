@@ -559,8 +559,13 @@ variables, and a debug console, deciding no refusal itself
 **Host resources.** `GET /api/host/resources` is a read-only snapshot of this
 host's load: CPU use averaged over a short sample of the process's CPU times,
 used and total memory, the core count, and used and free space on the volume
-that holds the data directory. The disk figures are omitted when that volume
-cannot be read. The snapshot names no path, no user, and no process. The server
+that holds the data directory. When the host can read them it also reports
+network and block-device throughput (bytes per second between its last two
+samples, so absent on the first), the busiest GPU's utilisation, and battery
+level with charging state; each is omitted when unreadable. Linux reads
+`/proc`, `/sys/class/drm` (AMD `gpu_busy_percent`), and `/sys/class/power_supply`;
+macOS reads `netstat`, `ioreg`, and `pmset`; other platforms and GPUs report
+none. The disk figures are omitted when that volume cannot be read. The snapshot names no path, no user, and no process. The server
 keeps one snapshot for about five seconds. The local owner always receives it.
 A paired remote device with an active session receives it under the same
 `project.overview.read` action as the Project overview reads; an

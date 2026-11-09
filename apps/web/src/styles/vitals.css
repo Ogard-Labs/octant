@@ -1,0 +1,67 @@
+/* Vitals: load on the host a thread works on. One tile per reading, each a
+   label and figure over a short history line; the dock's width never forces
+   horizontal scroll. */
+
+.vitals {
+  display: grid;
+  gap: var(--oct-space-3);
+  align-content: start;
+  height: 100%;
+  min-width: 0;
+  padding: var(--oct-space-3);
+  overflow-y: auto;
+  color: var(--oct-fg);
+  font-size: var(--oct-text-sm);
+  background: var(--oct-bg);
+}
+
+.vitals__empty {
+  margin: 0;
+  color: var(--oct-muted);
+}
+
+.vitals__tile {
+  display: grid;
+  gap: var(--oct-space-2);
+  min-width: 0;
+  padding: var(--oct-space-3);
+  border: 1px solid var(--oct-border);
+  border-radius: var(--oct-radius-md, 8px);
+  background: var(--oct-surface);
+}
+
+.vitals__head {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--oct-space-2);
+  min-width: 0;
+  font-size: var(--oct-text-xs);
+  font-variant-numeric: tabular-nums;
+}
+
+.vitals__head > :first-child {
+  color: var(--oct-muted);
+}
+
+.vitals__chart {
+  width: 100%;
+  height: 36px;
+}
+
+.vitals__chart[data-tall="true"] {
+  height: 72px;
+}
+
+.vitals__line {
+  stroke: var(--oct-accent);
+  stroke-width: 1.5;
+}
+
+.vitals__line[data-series="1"] {
+  stroke: var(--oct-success-fg);
+}
+
+.vitals__meter {
+  width: 100%;
+  height: 6px;
+}
