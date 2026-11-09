@@ -733,6 +733,12 @@ export const KNOWN_UNCALLED_ENDPOINTS: ReadonlyMap<string, string> = new Map([
     endpoint,
     "The computer a thread is leaving signs and sends each step of a move here over the private listener from apps/server (threadMoveService.ts), which builds the path itself, against a ticket an owner device made on this host; no window or device calls it. Remove when the checker counts apps/server as a caller of its own listener's routes.",
   ]),
+  ...["/api/hub/peer/handovers", "/api/hub/peer/handovers/continued"].map(
+    (endpoint): [string, string] => [
+      endpoint,
+      "A handover's source sends its notice, and its destination the continued report, over the private listener from apps/server (handoverExchange.ts), which builds the path itself; no window or device calls it. Remove when the checker counts apps/server as a caller of its own listener's routes.",
+    ],
+  ),
   [
     "/api/hub/peer/credentials",
     "The host that holds an API key signs and sends it here over the private listener from apps/server (ownerCredentialCopy.ts), which builds the path itself, against a ticket an owner device made on the receiving host; no window or device calls it. Remove when the checker counts apps/server as a caller of its own listener's routes.",

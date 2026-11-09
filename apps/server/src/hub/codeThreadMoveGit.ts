@@ -221,7 +221,8 @@ export async function receiveCheckoutFromMove(input: {
   }
 }
 
-async function holdsSecret(path: string): Promise<boolean> {
+/** Whether a file on disk holds a secret the Secret guard refuses to let leave this computer. */
+export async function holdsSecret(path: string): Promise<boolean> {
   let text: string;
   try {
     const bytes = await readFile(path);

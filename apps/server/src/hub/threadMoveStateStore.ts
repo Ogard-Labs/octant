@@ -9,6 +9,9 @@
 import { chmodSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import {
+  HandedOverThread,
+  HandoverContinuedReport,
+  HandoverNotice,
   HubMemberId,
   MovedThreadReference,
   ThreadMoveDeparture,
@@ -82,6 +85,26 @@ export const ThreadMoveFailureNotice = Schema.Struct({
 }).annotations(strict);
 export type ThreadMoveFailureNotice = typeof ThreadMoveFailureNotice.Type;
 
+/** A handover a member told this computer about, kept until it is continued here. */
+export const ReceivedHandover = Schema.Struct({
+  senderMemberId: HubMemberId,
+  notice: HandoverNotice,
+  receivedAt: UtcTimestamp,
+}).annotations(strict);
+export type ReceivedHandover = typeof ReceivedHandover.Type;
+
+/**
+ * A handover continued here whose source has not yet confirmed it erased its
+ * copy, kept and sent again until it does: an unreachable source would
+ * otherwise keep its frozen copy for good.
+ */
+export const PendingContinuedReport = Schema.Struct({
+  sourceMemberId: HubMemberId,
+  report: HandoverContinuedReport,
+  continuedAt: UtcTimestamp,
+}).annotations(strict);
+export type PendingContinuedReport = typeof PendingContinuedReport.Type;
+
 /** How many departures a host keeps for "Moved to" tombstones; the oldest go first. */
 export const THREAD_MOVE_DEPARTURES_KEPT = 500;
 
@@ -91,6 +114,12 @@ export const ThreadMoveState = Schema.Struct({
   // Absent in a file written before notices and tombstones were kept.
   failures: Schema.optional(Schema.Array(ThreadMoveFailureNotice)),
   departures: Schema.optional(Schema.Array(ThreadMoveDeparture)),
+  /** Threads handed over through their branch, frozen until continued elsewhere or taken back. */
+  handovers: Schema.optional(Schema.Array(HandedOverThread)),
+  /** Handovers other members told this computer about, for the Handovers card. */
+  receivedHandovers: Schema.optional(Schema.Array(ReceivedHandover)),
+  /** Continued reports the source has not acknowledged yet. */
+  pendingContinuedReports: Schema.optional(Schema.Array(PendingContinuedReport)),
 }).annotations(strict);
 export type ThreadMoveState = typeof ThreadMoveState.Type;
 
@@ -100,12 +129,14 @@ const decodeState = Schema.decodeUnknownSync(ThreadMoveState);
 
 /**
  * The threads a move holds when the host starts: every thread a move is still
- * sending (frozen until it fails or commits) and every thread that arrived here
- * and is not yet committed.
+ * sending (frozen until it fails or commits), every thread handed over and not
+ * yet continued or taken back, and every thread that arrived here and is not
+ * yet committed.
  */
 export function heldThreadsOf(state: ThreadMoveState): ReadonlyArray<MovedThreadReference> {
   return [
     ...state.sent.map((move) => move.thread),
+    ...(state.handovers ?? []).map((handover) => handover.thread),
     // A receiving move names its thread before the thread exists, so a stop
     // between opening it and recording the arrival still holds it.
     ...state.received.flatMap((move) =>

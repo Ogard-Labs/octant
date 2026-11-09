@@ -556,6 +556,12 @@ export class ThreadMoveService {
     if (target.status === "refused" || memberOrigin(target.member) === undefined) {
       return this.#refuseUnfrozen(input.thread, "destination-unreachable");
     }
+    // A thread another move or a handover holds is refused before anything is
+    // touched: this move's failure or cancel would otherwise unfreeze it and
+    // release that hold, and a held handover's thread must not also move.
+    if (this.#options.source.isFrozen(input.thread)) {
+      return this.#refuseUnfrozen(input.thread, "busy");
+    }
     const reading = await this.#options.source.read(input.thread);
     if (reading.status === "missing") return this.#refuseUnfrozen(input.thread, "refused");
     if (reading.delegated) return this.#refuseUnfrozen(input.thread, "delegated");
@@ -714,6 +720,18 @@ export class ThreadMoveService {
     }
     await this.#unfreezeSent(move);
     return { status: "cancelled" };
+  }
+
+  /** Sends one signed member request over the pinned link, for a handover's notice and report. */
+  sendSigned(
+    targetMemberId: string,
+    path: string,
+    body: unknown,
+  ): Promise<
+    | { readonly status: "answered"; readonly body: Record<string, unknown> }
+    | { readonly status: "unreachable" }
+  > {
+    return this.#sendTo(targetMemberId, path, body);
   }
 
   /** Asks a member which of its Projects would take a thread placed like this. */

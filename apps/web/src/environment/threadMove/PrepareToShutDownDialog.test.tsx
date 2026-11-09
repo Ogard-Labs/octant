@@ -161,6 +161,11 @@ function fakeClient(
       }
       return { status: "started" };
     },
+    handoverPreview: async () => ({ status: "refused", reason: "refused" }),
+    handOver: async () => ({ status: "refused", reason: "refused" }),
+    handoverTakeBack: async () => {},
+    handoversList: async () => ({ status: "listed", handovers: [] }),
+    handoversContinue: async () => ({ status: "refused", reason: "refused" }),
   };
   return { client, challenged, started, listingsRead };
 }

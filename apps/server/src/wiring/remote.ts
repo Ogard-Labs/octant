@@ -5,6 +5,7 @@ import { createOwnerBrowserJournal } from "../browser/ownerBrowserJournal";
 import { homedir } from "node:os";
 import {
   AgentRunParentThreadId,
+  type CodeThreadId,
   decodeChatThreadId,
   decodeCodeThreadId,
   decodeImageGenerationScopeId,
@@ -95,6 +96,11 @@ import { createThreadMoveJournal } from "../hub/threadMoveJournal";
 import { createThreadMoveRouteHandler } from "../hub/threadMoveRoutes";
 import { createThreadMoveAdministrationRouteHandler } from "../hub/threadMoveAdministrationRoutes";
 import { ThreadMoveService } from "../hub/threadMoveService";
+import { HandoverClaims, ThreadHandovers } from "../hub/threadHandovers";
+import { HandoverExchange } from "../hub/handoverExchange";
+import { createHandoverRouteHandler } from "../hub/handoverRoutes";
+import { readHandoverNote, remoteNamedFor } from "../hub/codeThreadHandoverGit";
+import { branchExists } from "../hub/codeThreadMoveGit";
 import { createThreadMoveSenders } from "../hub/threadMoveSenders";
 import { createThreadMoveTicketClient } from "../hub/threadMoveTicketClient";
 import { hostThreads, ThreadMovesFromWindow } from "../hub/threadMovesFromWindow";
@@ -163,6 +169,8 @@ import type { RoutesWiring } from "./routes";
 const FAILOVER_LOOK_MS = 15_000;
 /** How often the hub looks for an occurrence to wake a spoke for, and a spoke for a changed routine time to report. */
 const WAKE_LOOK_MS = 15_000;
+/** How often a continued handover's report is sent again until its source confirms the erase. */
+const HANDOVER_REPORT_RETRY_MS = 60_000;
 const WAKE_REPORT_MS = 30_000;
 /** How often the push sender forgets old rate marks and hands standbys its switch. */
 const PUSH_LOOK_MS = 60_000;
@@ -450,6 +458,7 @@ export function wireRemote(deps: RemoteDependencies) {
             (await peerDelegationRoutes(request)) ??
             (await peerCredentialRoutes(request)) ??
             (await threadMoveRoutes(request)) ??
+            (await handoverRoutes(request)) ??
             (await directPushRoutes(request, facts)) ??
             hubOwnerRoutes(request)),
         hubWebOrigin: services.hubWebOrigin ?? (() => spokeLinkService.hubWebOrigin()),
@@ -991,21 +1000,23 @@ export function wireRemote(deps: RemoteDependencies) {
       ? undefined
       : { providerInstanceId: String(sameKind.id), modelId };
   };
+  // Where a Code thread's files are: its managed worktree, or its Project's checkout.
+  const codeCheckoutRoot = async (threadId: CodeThreadId): Promise<string | undefined> => {
+    const thread = persistence.readCodeThread(threadId);
+    if (thread === undefined) return undefined;
+    const checkout = persistence.readCodeCheckout(thread.checkoutId);
+    if (checkout?.kind === "managed-worktree") {
+      return (await deps.managedWorktreeReceipts.load(String(checkout.ownershipReceiptId)))
+        ?.canonicalWorktreePath;
+    }
+    if (checkout?.kind !== "existing-worktree") return undefined;
+    const project = persistence.readProject(thread.projectId);
+    return project?.type === "code" ? project.binding.canonicalRoot : undefined;
+  };
   const codeThreadMoveHost = createCodeThreadMoveHost({
     readThread: (threadId) => persistence.readCodeThread(threadId),
     isBusy: (threadId) => deps.liveTurns.read(String(threadId)) !== undefined,
-    checkoutRoot: async (threadId) => {
-      const thread = persistence.readCodeThread(threadId);
-      if (thread === undefined) return undefined;
-      const checkout = persistence.readCodeCheckout(thread.checkoutId);
-      if (checkout?.kind === "managed-worktree") {
-        return (await deps.managedWorktreeReceipts.load(String(checkout.ownershipReceiptId)))
-          ?.canonicalWorktreePath;
-      }
-      if (checkout?.kind !== "existing-worktree") return undefined;
-      const project = persistence.readProject(thread.projectId);
-      return project?.type === "code" ? project.binding.canonicalRoot : undefined;
-    },
+    checkoutRoot: codeCheckoutRoot,
     ownsManagedWorktree: (threadId) => {
       const thread = persistence.readCodeThread(threadId);
       return (
@@ -1184,6 +1195,13 @@ export function wireRemote(deps: RemoteDependencies) {
     code: codeThreadMoveHost,
     work: workThreadMoveHost,
   });
+  const threadMoveJournal = createThreadMoveJournal({
+    journal: persistence.journal,
+    connection: persistence.connection,
+    localActorId: OCTANT_LOCAL_ACTOR_ID,
+    uuid: randomUUID,
+    clock: () => new Date().toISOString(),
+  });
   // A spoke and the hub each judge a move's sender and target by their own role.
   const threadMoveSenders = createThreadMoveSenders({
     spoke: spokeLinkService,
@@ -1194,13 +1212,7 @@ export function wireRemote(deps: RemoteDependencies) {
     state: deps.threadMoveState,
     source: byMode.source,
     destination: byMode.destination,
-    record: createThreadMoveJournal({
-      journal: persistence.journal,
-      connection: persistence.connection,
-      localActorId: OCTANT_LOCAL_ACTOR_ID,
-      uuid: randomUUID,
-      clock: () => new Date().toISOString(),
-    }),
+    record: threadMoveJournal,
     identity: resolveHubIdentity,
     target: threadMoveSenders.target,
     transport: hubTransport,
@@ -1270,10 +1282,156 @@ export function wireRemote(deps: RemoteDependencies) {
     },
     now: Date.now,
   });
+  // Where a handover goes after its push: a notice to the chosen member, and
+  // Continue handover there, which tells this host to erase its copy.
+  // One set of claims for every step that acts on a handover's thread here.
+  const handoverClaims = new HandoverClaims();
+  const handoverExchange = new HandoverExchange({
+    claims: handoverClaims,
+    state: deps.threadMoveState,
+    authenticate: threadMoveSenders.authenticate,
+    send: (targetMemberId, path, body) => threadMoves.sendSigned(targetMemberId, path, body),
+    memberName: (memberId) => {
+      const target = threadMoveSenders.target(memberId);
+      return target.status === "member" ? target.member.name : "another computer";
+    },
+    codeProjects: () =>
+      persistence
+        .readProjects()
+        .filter((project) => project.type === "code" && project.lifecycle === "active")
+        .map((project) => ({ projectId: project.id, title: project.name })),
+    acceptsProject: (placement) => byMode.destination.acceptsProject(placement),
+    resolveProvider: resolveMovedProvider,
+    readNote: async ({ projectId, repositoryRemote, branch, handoverId }) => {
+      const project = persistence.readProjects().find((entry) => String(entry.id) === projectId);
+      if (project?.type !== "code") return undefined;
+      const remote = await remoteNamedFor(project.binding.canonicalRoot, repositoryRemote);
+      if (remote === undefined) return undefined;
+      return readHandoverNote({
+        repositoryRoot: project.binding.canonicalRoot,
+        remote,
+        branch,
+        handoverId,
+      });
+    },
+    branchTaken: async ({ projectId, branch }) => {
+      const project = persistence.readProjects().find((entry) => String(entry.id) === projectId);
+      return project?.type === "code" && branchExists(project.binding.canonicalRoot, branch);
+    },
+    createThread: async (input) => {
+      const project = persistence
+        .readProjects()
+        .find((entry) => String(entry.id) === input.projectId);
+      if (project?.type !== "code") throw new Error("The Code Project is gone.");
+      // The clone may name the handover's repository `upstream` rather than `origin`.
+      const remoteName = await remoteNamedFor(
+        project.binding.canonicalRoot,
+        input.repositoryRemote,
+      );
+      if (remoteName === undefined) throw new Error("The clone has no remote for this repository.");
+      const command = decodeCodeCommand({
+        kind: "create-managed-code-thread",
+        threadId: input.threadId,
+        projectId: input.projectId,
+        bindingRevisionId: String(
+          project.bindingHistory[project.bindingHistory.length - 1]?.revisionId,
+        ),
+        title: input.title,
+        providerInstanceId: input.provider.providerInstanceId,
+        modelId: input.provider.modelId,
+        executionPolicy: "approval-gated",
+        permissionPersistence: "current-session",
+        deliveryTarget: {
+          branchIntent: input.threadBranch,
+          remoteName,
+          proposedBaseRepository: input.projectId,
+          proposedBaseBranch: input.branch,
+          outcomeKind: "local-implementation",
+          confirmedAt: new Date().toISOString(),
+        },
+        sourceBranch: input.branch,
+        // The commit whose note was checked, already fetched: a revision
+        // source never fetches again, so the thread cannot start from a tip
+        // pushed after the check.
+        startFromOrigin: false,
+        sourceRevision: input.commit,
+        remoteName,
+      });
+      // The note came through a branch others may push to: the thread starts marked.
+      await deps.codeService.execute(ROUTINE_HOST_SCOPE_ID, command, undefined, {
+        inheritedMark: {
+          sourceLabel: "handover-note",
+          contentReference: `handover-${input.handoverId}`,
+        },
+      });
+    },
+    journalNote: ({ threadId, handoverId, note }) =>
+      deps.movedThreadHistory.journalImported({
+        threadId,
+        moveId: handoverId,
+        entries: [{ role: "assistant", text: note, occurredAt: new Date().toISOString() as never }],
+        origin: "handover-note",
+      }),
+    source: byMode.source,
+    clock: () => new Date().toISOString(),
+  });
+  const handoverRoutes = createHandoverRouteHandler({ exchange: handoverExchange });
+  // A Code thread that cannot move hands over through its branch.
+  const threadHandovers = new ThreadHandovers({
+    claims: handoverClaims,
+    source: byMode.source,
+    code: {
+      checkoutRoot: async (threadId) => {
+        try {
+          return await codeCheckoutRoot(decodeCodeThreadId(threadId));
+        } catch {
+          return undefined;
+        }
+      },
+      provider: (threadId) => {
+        let thread;
+        try {
+          thread = persistence.readCodeThread(decodeCodeThreadId(threadId));
+        } catch {
+          return undefined;
+        }
+        const driverKind = persistence
+          .readProviderInstances()
+          .find(
+            (instance) => String(instance.id) === String(thread?.providerInstanceId),
+          )?.driverKind;
+        return thread === undefined || driverKind === undefined
+          ? undefined
+          : { driverKind, modelId: String(thread.modelId) };
+      },
+      latest: async (threadId) => {
+        const exported = await deps.threadExportService.exportThread(
+          ROUTINE_HOST_SCOPE_ID,
+          "local-window",
+          { mode: "code", threadId },
+        );
+        if (exported.kind !== "exported") return {};
+        const entries = exported.bundle.transcript.entries;
+        const instruction = entries.findLast((entry) => entry.role === "user")?.text;
+        const answer = entries.findLast((entry) => entry.role !== "user")?.text;
+        return {
+          ...(instruction === undefined ? {} : { instruction }),
+          ...(answer === undefined ? {} : { answer }),
+        };
+      },
+    },
+    record: threadMoveJournal,
+    state: deps.threadMoveState,
+    notify: (destinationMemberId, notice) => handoverExchange.notify(destinationMemberId, notice),
+    originName: () => resolveHubIdentity().displayName,
+    clock: () => new Date().toISOString(),
+  });
   const threadMoveAdministrationRoutes = createThreadMoveAdministrationRouteHandler({
     desktopBridgeSecret: options.desktopBridgeSecret,
     windowAuthorityStore,
     moves: threadMovesFromWindow,
+    handovers: threadHandovers,
+    exchange: handoverExchange,
     state: deps.threadMoveState,
     authorizeThread: ({ thread, windowId }) =>
       authorizeAgentRunParentThread({
@@ -1286,6 +1444,13 @@ export function wireRemote(deps: RemoteDependencies) {
   // A move that was under way when this host stopped resumes from what its
   // destination holds; only a committed move erases the thread here.
   void threadMoves.recover().catch(() => undefined);
+  // A continued handover's report waits here until its source confirms the
+  // erase, so a source that was offline still lets go of its frozen copy.
+  void handoverExchange.deliverPendingReports().catch(() => undefined);
+  setInterval(
+    () => void handoverExchange.deliverPendingReports().catch(() => undefined),
+    HANDOVER_REPORT_RETRY_MS,
+  ).unref();
   const ownerBrowserControlService = new OwnerBrowserControlService({
     host: browserAutomationService.ownerBrowserHost({
       hostMemberId: () => Schema.decodeUnknownSync(HubMemberId)(hubService.hubMemberId()),

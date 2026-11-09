@@ -151,6 +151,8 @@ export const REMOTE_HUB_LINK_ROUTE_IDS = {
   threadMoveStatus: "hub-link-thread-move-status",
   threadMoveDiscard: "hub-link-thread-move-discard",
   threadMoveProjects: "hub-link-thread-move-projects",
+  handoverNotice: "hub-link-handover-notice",
+  handoverContinued: "hub-link-handover-continued",
 } as const;
 
 /**
@@ -196,6 +198,16 @@ const THREAD_MOVE_PEER_ROUTES: ReadonlyArray<{
     id: REMOTE_HUB_LINK_ROUTE_IDS.threadMoveProjects,
     path: "/api/hub/peer/thread-moves/projects",
     maxBodyBytes: 64 * 1024,
+  },
+  {
+    id: REMOTE_HUB_LINK_ROUTE_IDS.handoverNotice,
+    path: "/api/hub/peer/handovers",
+    maxBodyBytes: 16 * 1024,
+  },
+  {
+    id: REMOTE_HUB_LINK_ROUTE_IDS.handoverContinued,
+    path: "/api/hub/peer/handovers/continued",
+    maxBodyBytes: 4_096,
   },
 ];
 

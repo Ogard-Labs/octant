@@ -6,6 +6,7 @@ import {
   type ThreadMoveFailureReason,
   type ThreadMoveThreadStatus,
   type ThreadMoveUnlockChallenge,
+  type HandoverOutcome,
 } from "@octant/contracts";
 import { Schema } from "effect";
 import type { DesktopOwnerUnlockPort } from "@octant/client-runtime";
@@ -71,6 +72,8 @@ function MovableComputerCard(props: ThreadMoveComputerCardProps & { client: Thre
   const [chosenMember, setChosenMember] = useState<string | undefined>(undefined);
   const [chosenProject, setChosenProject] = useState<string | undefined>(undefined);
   const [sheetOpen, setSheetOpen] = useState(false);
+  const [handoverOpen, setHandoverOpen] = useState(false);
+  const canHandOver = props.thread.mode === "code";
   const [takeBackOffered, setTakeBackOffered] = useState(false);
   const contentId = useId();
   const status = move.status;
@@ -132,11 +135,13 @@ function MovableComputerCard(props: ThreadMoveComputerCardProps & { client: Thre
                 takeBackOffered={takeBackOffered}
                 thread={props.thread}
               />
-              {/* A thread that is moving, waiting for its turn, or still
-                  arriving here is held, so it offers no other move. */}
+              {/* A thread that is moving, waiting for its turn, still
+                  arriving here, or handed over is held, so it offers no
+                  other move. */}
               {status?.sending !== undefined ||
               status?.waiting !== undefined ||
-              status?.arriving !== undefined ? null : (
+              status?.arriving !== undefined ||
+              status?.handedOver !== undefined ? null : (
                 <DestinationPicker
                   mode={props.thread.mode}
                   chosenMember={chosenMember}
@@ -175,6 +180,11 @@ function MovableComputerCard(props: ThreadMoveComputerCardProps & { client: Thre
               >
                 Choose another computer
               </OctantButton>
+              {canHandOver ? (
+                <OctantButton onClick={() => setHandoverOpen(true)} size="sm" variant="outline">
+                  Hand over instead
+                </OctantButton>
+              ) : null}
               <OctantButton
                 onClick={() => {
                   void props.client.dismiss(props.thread).finally(move.refresh);
@@ -196,6 +206,31 @@ function MovableComputerCard(props: ThreadMoveComputerCardProps & { client: Thre
         <ArrivingNotice arriving={status.arriving} client={props.client} onChanged={move.refresh} />
       )}
       {status?.departed === undefined ? null : <MovedNotice departed={status.departed} />}
+      {status?.handedOver === undefined ? null : (
+        <HandedOverNotice
+          handedOver={status.handedOver}
+          onTakeBack={() =>
+            void props.client
+              .handoverTakeBack(String(status.handedOver?.handoverId))
+              .finally(move.refresh)
+          }
+        />
+      )}
+      {handoverOpen ? (
+        <HandoverSheet
+          {...(member === undefined || !eligible(member)
+            ? {}
+            : { destination: { memberId: String(member.memberId), name: member.name } })}
+          client={props.client}
+          onClose={() => setHandoverOpen(false)}
+          onHandedOver={() => {
+            setHandoverOpen(false);
+            move.refresh();
+          }}
+          thread={props.thread}
+          threadTitle={props.threadTitle}
+        />
+      ) : null}
       <p aria-live="polite" className="visually-hidden">
         {live}
       </p>
@@ -210,6 +245,14 @@ function MovableComputerCard(props: ThreadMoveComputerCardProps & { client: Thre
             setSheetOpen(false);
             move.refresh();
           }}
+          {...(canHandOver
+            ? {
+                onHandOver: () => {
+                  setSheetOpen(false);
+                  setHandoverOpen(true);
+                },
+              }
+            : {})}
           projectTitle={projectChoices.find((choice) => choice.id === project)?.label}
           projectId={project === NO_PROJECT ? undefined : project}
           thread={props.thread}
@@ -261,6 +304,7 @@ function computerPill(status: ThreadMoveThreadStatus | undefined): {
   }
   if (status?.waiting !== undefined) return { label: "Moves after this turn", tone: "outline" };
   if (status?.arriving !== undefined) return { label: "Arriving", tone: "outline" };
+  if (status?.handedOver !== undefined) return { label: "Handed over", tone: "outline" };
   if (status?.failure !== undefined) return { label: "Can't move", tone: "warning" };
   return { label: "This computer", tone: "secondary" };
 }
@@ -553,6 +597,8 @@ function ThreadMoveSheet(props: {
   readonly unlock: Pick<DesktopOwnerUnlockPort, "ownerUnlockSign"> | undefined;
   readonly onClose: () => void;
   readonly onStarted: () => void;
+  /** For a Code thread: Hand over instead, a quiet button at the sheet's start edge. */
+  readonly onHandOver?: () => void;
 }) {
   const titleId = useId();
   const primary = useRef<HTMLButtonElement>(null);
@@ -670,6 +716,15 @@ function ThreadMoveSheet(props: {
         </p>
       ) : null}
       <footer className="thread-move-sheet__foot">
+        {props.onHandOver === undefined ? null : (
+          <OctantButton
+            className="thread-move-sheet__aside"
+            onClick={props.onHandOver}
+            variant="link"
+          >
+            Hand over instead
+          </OctantButton>
+        )}
         <OctantButton onClick={props.onClose} variant="ghost">
           Cancel
         </OctantButton>
@@ -684,6 +739,163 @@ function ThreadMoveSheet(props: {
     </OctantDialog>
   );
 }
+
+function HandedOverNotice(props: {
+  readonly handedOver: NonNullable<ThreadMoveThreadStatus["handedOver"]>;
+  readonly onTakeBack: () => void;
+}) {
+  const { handedOver } = props;
+  return (
+    <OctantAlert
+      action={
+        <OctantButton onClick={props.onTakeBack} size="sm" variant="outline">
+          Take back here
+        </OctantButton>
+      }
+      title="Handed over"
+      tone={handedOver.pushed ? "neutral" : "warning"}
+    >
+      {handedOver.pushed
+        ? `The work is committed and pushed on ${handedOver.branch}. Continue it on any computer that can fetch that branch.`
+        : handedOver.shortfall === "no-remote"
+          ? `The work is committed on ${handedOver.branch}, but the branch has no remote, so it is on no other computer yet.`
+          : `The work is committed on ${handedOver.branch}, but the push failed, so it is on no other computer yet.`}
+      {handedOver.refusedFiles.length === 0
+        ? null
+        : ` Left out because they hold a secret: ${handedOver.refusedFiles.join(", ")}.`}
+    </OctantAlert>
+  );
+}
+
+/**
+ * Hand over through Git: the branch, where it pushes, and the note, before
+ * anything is frozen or written. Committing is the person's act; the push is
+ * never forced and never to the default branch.
+ */
+function HandoverSheet(props: {
+  /** The computer chosen in the Computer card, which is told about the handover. */
+  readonly destination?: { readonly memberId: string; readonly name: string };
+  readonly thread: MovedThreadReference;
+  readonly threadTitle: string;
+  readonly client: ThreadMoveClient;
+  readonly onClose: () => void;
+  readonly onHandedOver: () => void;
+}) {
+  const titleId = useId();
+  const primary = useRef<HTMLButtonElement>(null);
+  const [preview, setPreview] = useState<
+    Extract<HandoverOutcome, { readonly status: "preview" }> | undefined
+  >(undefined);
+  const [problem, setProblem] = useState<string | undefined>(undefined);
+  const [working, setWorking] = useState(false);
+  useEffect(() => {
+    let stopped = false;
+    props.client
+      .handoverPreview(props.thread)
+      .then((answer) => {
+        if (stopped) return;
+        if (answer.status === "preview") setPreview(answer);
+        else if (answer.status === "refused") setProblem(HANDOVER_REFUSALS[answer.reason]);
+      })
+      .catch(() => {
+        if (!stopped) setProblem("This computer could not read the checkout.");
+      });
+    return () => {
+      stopped = true;
+    };
+  }, [props.client, props.thread]);
+  useEffect(() => {
+    if (preview !== undefined) primary.current?.focus();
+  }, [preview]);
+
+  const handOver = async () => {
+    setWorking(true);
+    setProblem(undefined);
+    try {
+      const answer = await props.client.handOver(props.thread, props.destination?.memberId);
+      if (answer.status === "refused") {
+        setProblem(HANDOVER_REFUSALS[answer.reason]);
+        return;
+      }
+      props.onHandedOver();
+    } catch {
+      setProblem("This computer could not hand the thread over.");
+    } finally {
+      setWorking(false);
+    }
+  };
+
+  return (
+    <OctantDialog
+      className="thread-move-sheet"
+      initialFocus={primary}
+      label="Hand over through Git"
+      labelledBy={titleId}
+      onClose={props.onClose}
+      open
+    >
+      <header className="thread-move-sheet__head">
+        <h2 className="thread-move-sheet__title" id={titleId}>
+          Hand over through Git
+        </h2>
+        <p className="thread-move-sheet__meta">{props.threadTitle}</p>
+      </header>
+      {preview === undefined ? (
+        problem === undefined ? (
+          <p className="thread-move-sheet__consequence">Reading the checkout…</p>
+        ) : null
+      ) : (
+        <>
+          <section className="thread-move-sheet__section">
+            <h3 className="thread-move-sheet__heading">
+              {preview.newBranch ? "Commits to a new branch" : "Commits to its branch"}
+            </h3>
+            <code className="thread-move-sheet__branch">{preview.branch}</code>
+          </section>
+          <p className="thread-move-sheet__consequence">
+            {preview.remote === undefined
+              ? "This branch has no remote, so the work then stays on this computer."
+              : `Then pushes it to ${preview.remote}, never forced. Continue it on any computer that can fetch the branch${props.destination === undefined ? "" : `; ${props.destination.name} is told about it`}.`}
+          </p>
+          <details className="thread-move-sheet__section">
+            <summary className="thread-move-sheet__heading">The note</summary>
+            <pre className="thread-move-sheet__note">{preview.note}</pre>
+          </details>
+          <p className="thread-move-sheet__consequence">
+            The thread stays here, frozen, until it is continued elsewhere or you take it back.
+          </p>
+        </>
+      )}
+      {problem === undefined ? null : (
+        <OctantAlert title="This thread can't be handed over" tone="warning">
+          {problem}
+        </OctantAlert>
+      )}
+      <footer className="thread-move-sheet__foot">
+        <OctantButton onClick={props.onClose} variant="ghost">
+          Cancel
+        </OctantButton>
+        <OctantButton
+          disabled={preview === undefined || working}
+          onClick={() => void handOver()}
+          ref={primary}
+        >
+          {preview?.remote === undefined ? "Commit" : "Commit and push"}
+        </OctantButton>
+      </footer>
+    </OctantDialog>
+  );
+}
+
+const HANDOVER_REFUSALS: Readonly<
+  Record<Extract<HandoverOutcome, { readonly status: "refused" }>["reason"], string>
+> = {
+  busy: "A turn is running or the thread is waiting on you. Try again when it finishes.",
+  delegated: "Another computer delegated this thread here, so it stays with that delegation.",
+  refused: "This thread's checkout can't be read here.",
+  "nothing-to-hand-over": "There's nothing to hand over: no changes and no branch of its own.",
+  "commit-failed": "Git could not write the commit. Nothing was handed over.",
+};
 
 function challengeProblem(
   kind: "unlock-required" | "destination-unreachable" | "refused",

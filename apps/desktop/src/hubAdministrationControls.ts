@@ -36,6 +36,9 @@ import {
   decodeOwnerMemberRequest,
   decodeOwnerRemovalRequest,
   decodePairedMergeUnlockRequest,
+  decodeHandoverContinueRequest,
+  decodeHandoverControlRequest,
+  decodeHandoverRequest,
   decodeShutdownChallengeRequest,
   decodeShutdownStartRequest,
   decodeThreadMoveChallengeRequest,
@@ -307,6 +310,33 @@ export const HUB_ADMINISTRATION_OPERATIONS = {
     method: "POST",
     path: "/api/desktop/hub/thread-moves/shutdown/start",
     decodeBody: decodeShutdownStartRequest,
+  },
+  // A Code thread that cannot move hands over through its branch.
+  "handover-preview": {
+    method: "POST",
+    path: "/api/desktop/hub/thread-moves/handover/preview",
+    decodeBody: decodeHandoverRequest,
+  },
+  handover: {
+    method: "POST",
+    path: "/api/desktop/hub/thread-moves/handover",
+    decodeBody: decodeHandoverRequest,
+  },
+  "handover-take-back": {
+    method: "POST",
+    path: "/api/desktop/hub/thread-moves/handover/take-back",
+    decodeBody: decodeHandoverControlRequest,
+  },
+  "handovers-list": {
+    method: "POST",
+    path: "/api/desktop/hub/thread-moves/handovers/list",
+    decodeBody: Schema.decodeUnknownSync(EmptyBody),
+    bodyOptional: true,
+  },
+  "handovers-continue": {
+    method: "POST",
+    path: "/api/desktop/hub/thread-moves/handovers/continue",
+    decodeBody: decodeHandoverContinueRequest,
   },
 } as const satisfies Readonly<Record<string, HubAdministrationRoute>>;
 

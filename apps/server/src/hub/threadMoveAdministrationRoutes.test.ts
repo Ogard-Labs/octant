@@ -69,6 +69,15 @@ function setup() {
     desktopBridgeSecret: secret,
     windowAuthorityStore: authority,
     moves,
+    handovers: {
+      preview: async () => ({ status: "refused", reason: "refused" }),
+      handOver: async () => ({ status: "refused", reason: "refused" }),
+      takeBack: () => ({ status: "taken-back" }),
+    },
+    exchange: {
+      list: async () => ({ status: "listed", handovers: [] }),
+      continueHandover: async () => ({ status: "refused", reason: "refused" }),
+    },
     state,
     authorizeThread: ({ thread, windowId: asking }) =>
       String(asking) === String(windowId) && thread.threadId === SHOWN.threadId,
