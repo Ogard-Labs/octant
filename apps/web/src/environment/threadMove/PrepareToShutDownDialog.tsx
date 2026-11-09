@@ -110,6 +110,11 @@ export function PrepareToShutDownDialog(props: PrepareToShutDownDialogProps) {
     [],
   );
   const [handovers, setHandovers] = useState<ReadonlyMap<string, HandoverEnd>>(new Map());
+  // Files each handover left out because the Secret guard refused them: they
+  // stay on this computer even when the rest of the work pushed.
+  const [leftOutFiles, setLeftOutFiles] = useState<ReadonlyMap<string, ReadonlyArray<string>>>(
+    new Map(),
+  );
   // Rows set to move that this batch did not start, each with why: shown on
   // the row, and counted as staying here so the screen never says Safe to
   // shut down while one of them is still on this computer.
@@ -153,6 +158,7 @@ export function PrepareToShutDownDialog(props: PrepareToShutDownDialogProps) {
     setStatuses(new Map());
     setChosen([]);
     setHandovers(new Map());
+    setLeftOutFiles(new Map());
     setNotStarted(new Map());
     setLeftOver(0);
     // A fresh listing is measured again; an earlier read describes earlier work.
@@ -232,7 +238,13 @@ export function PrepareToShutDownDialog(props: PrepareToShutDownDialogProps) {
         // thread the head's destination cannot take.
         if (notify !== undefined) {
           const outcome = await props.client.shutdownHandOver(row.thread, notify);
-          if (outcome.status === "handed-over") end = outcome.pushed ? "pushed" : "not-pushed";
+          if (outcome.status === "handed-over") {
+            end = outcome.pushed ? "pushed" : "not-pushed";
+            const files = outcome.refusedFiles;
+            if (files.length > 0) {
+              setLeftOutFiles((current) => new Map(current).set(rowKey(row.thread), files));
+            }
+          }
         }
       } catch {
         end = "refused";
@@ -482,6 +494,9 @@ export function PrepareToShutDownDialog(props: PrepareToShutDownDialogProps) {
   // A dialog that goes away mid-batch stops reporting a progress it can no longer read.
   useEffect(() => () => reportProgress?.(undefined), [reportProgress]);
 
+  // A file a handover left out has no other copy, so Safe to shut down names
+  // it rather than standing alone, as a move names the files its kept worktree holds.
+  const leftOut = [...leftOutFiles.values()].flat();
   const movedSentence = (() => {
     const perDestination = members
       .map((entry) => ({
@@ -496,8 +511,15 @@ export function PrepareToShutDownDialog(props: PrepareToShutDownDialogProps) {
       );
     const parts = perDestination.length === 0 ? ["Nothing moved"] : perDestination;
     if (handedOver > 0) parts.push(`${String(handedOver)} handed over`);
-    return `${parts.join(", ")}.`;
+    const sentence = `${parts.join(", ")}.`;
+    return leftOut.length === 0
+      ? sentence
+      : `${sentence} Left out because they hold a secret: ${leftOut.join(", ")}.`;
   })();
+  const safeHeading =
+    leftOut.length === 0
+      ? "Safe to shut down"
+      : `Safe to shut down; ${leftOut.length === 1 ? "1 file stays" : `${String(leftOut.length)} files stay`} on this computer`;
 
   const summary = (() => {
     if (pressCount === 0) return "Nothing is set to move.";
@@ -536,6 +558,7 @@ export function PrepareToShutDownDialog(props: PrepareToShutDownDialogProps) {
       <ShutdownRow
         destination={destination}
         handover={handovers.get(id)}
+        leftOutFiles={leftOutFiles.get(id)}
         inBatch={chosen.some((entry) => rowKey(entry.thread) === id)}
         notStarted={notStarted.get(id)}
         key={id}
@@ -563,7 +586,7 @@ export function PrepareToShutDownDialog(props: PrepareToShutDownDialogProps) {
       <header className="shutdown-dialog__head">
         {done && staysHere === 0 ? (
           <h2 className="shutdown-dialog__title" id={titleId}>
-            <CircleCheck aria-hidden="true" size={20} /> Safe to shut down
+            <CircleCheck aria-hidden="true" size={20} /> {safeHeading}
           </h2>
         ) : done ? (
           <h2 className="shutdown-dialog__title shutdown-dialog__title--warning" id={titleId}>
@@ -672,7 +695,7 @@ export function PrepareToShutDownDialog(props: PrepareToShutDownDialogProps) {
           {phase === "running"
             ? done
               ? staysHere === 0
-                ? "Safe to shut down."
+                ? `${safeHeading}.`
                 : `${String(staysHere)} threads stay on this computer.`
               : `${String(ended)} of ${String(total)} done.`
             : ""}
@@ -734,6 +757,8 @@ function ShutdownRow(props: {
   readonly phase: "choosing" | "running";
   readonly status: ThreadMoveThreadStatus | undefined;
   readonly handover: HandoverEnd | undefined;
+  /** Files this row's handover left out because they hold a secret. */
+  readonly leftOutFiles: ReadonlyArray<string> | undefined;
   /** The running batch moves this row; one it left out stays here. */
   readonly inBatch: boolean;
   /** Why this row, set to move, did not start: it stays here. */
@@ -793,12 +818,18 @@ function ShutdownRow(props: {
       {props.phase === "running" ? (
         <span className="shutdown-row__state">
           {props.handover !== undefined
-            ? HANDOVER_WORDS[props.handover]
+            ? props.leftOutFiles === undefined
+              ? HANDOVER_WORDS[props.handover]
+              : `${HANDOVER_WORDS[props.handover]} · ${props.leftOutFiles.length === 1 ? "1 file stayed here" : `${String(props.leftOutFiles.length)} files stayed here`}`
             : props.inBatch
               ? runningWord(props.pick.choice, props.status, props.startedAt)
               : "Stays here"}
         </span>
-      ) : (
+      ) : null}
+      {props.phase === "running" && props.leftOutFiles !== undefined ? (
+        <span className="shutdown-row__files">{props.leftOutFiles.join(", ")}</span>
+      ) : null}
+      {props.phase === "running" ? null : (
         <>
           {start.reason === undefined || named !== undefined ? null : (
             <span className="shutdown-row__reason">

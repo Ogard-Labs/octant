@@ -1241,7 +1241,12 @@ the usual case is one press and one unlock.
   destination so it shows under its Handovers; one that is refused or whose
   request fails stays here, named on its row and in the screen's alert. A row
   set to move or hand over that did not is never counted toward Safe to shut
-  down. Like the listing and the batch, a row's handover acts for the whole
+  down. A handover that pushes but leaves files out, because the Secret guard
+  refused them, counts as handed over, yet those files have no other copy:
+  its row names them, and the screen never says a plain Safe to shut down
+  while any are left, saying instead how many files stay on this computer
+  and naming them, as a move's tombstone names the files its kept worktree
+  holds. Like the listing and the batch, a row's handover acts for the whole
   host, so it reaches a Code thread in any Project, open in this window or
   not; the window route for one thread's handover still acts only on a
   thread that window shows. The source hands over that way only what the

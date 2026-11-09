@@ -2125,6 +2125,8 @@ this is how it looks.
     progress line and a state word in place of its choice (Waiting, Moving with
     its percentage, After this turn, Stopping, Moved with a check, Handing
     over, Handed over, Handed over, not pushed, Can't move, Can't hand over).
+    A handover that left files out because they hold a secret reads "Handed
+    over · 2 files stayed here", with the file names in mono meta ink after it.
     Escape or closing hides the dialog without stopping anything; the menu bar
     shows the batch's progress as the ended and total counts beside its glyph
     ("3/9") and a disabled "Moving threads · 3 of 9" line above **Prepare to
@@ -2136,7 +2138,10 @@ this is how it looks.
     finishes or fails, and the end, through one polite live region.
   - **Done.** The head becomes a success check and **Safe to shut down**, with
     the count moved and where ("8 moved to Mac mini, 1 to Desktop, 1 handed
-    over."). Opened from Quit, the primary is **Quit Octant**;
+    over."). When a handover left files out, the head reads "Safe to shut
+    down; 2 files stay on this computer" and the meta sentence adds "Left out
+    because they hold a secret:" with their names, never a plain Safe to shut
+    down. Opened from Quit, the primary is **Quit Octant**;
     otherwise **Done**. With failures, the head instead reads how many threads
     stay on this computer in the warning ink, failed rows rise to the top with
     their reason and recovery buttons (Try again, Hand over for Code), and the

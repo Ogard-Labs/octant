@@ -1189,6 +1189,18 @@ details.thread-move-sheet__section > summary {
   white-space: nowrap;
 }
 
+/* Files a handover left on this computer because they hold a secret. */
+.shutdown-row__files {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--oct-muted);
+  font-family: var(--oct-font-mono);
+  font-size: var(--oct-text-xs);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .shutdown-row__size {
   flex: none;
   color: var(--oct-muted);

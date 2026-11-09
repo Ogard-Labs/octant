@@ -99,6 +99,8 @@ function fakeClient(
     readonly startThrowsFor?: string;
     /** Every handover request fails outright. */
     readonly handOverThrows?: boolean;
+    /** Files a handover that pushed left out because the Secret guard refused them. */
+    readonly refusedFiles?: ReadonlyArray<string>;
     readonly sizes?: (
       memberId: string,
       threads: ReadonlyArray<MovedThreadReference>,
@@ -196,7 +198,7 @@ function fakeClient(
         handoverId: "12121212-1212-4212-8212-121212121212" as never,
         branch: "add-dark-mode",
         pushed: true,
-        refusedFiles: [],
+        refusedFiles: input.refusedFiles ?? [],
       };
     },
     handoverTakeBack: async () => {},
@@ -663,6 +665,41 @@ describe("Prepare to shut down", () => {
     ).toBeInTheDocument();
     expect(screen.getByText("Can't hand over")).toBeInTheDocument();
     expect(screen.getByRole("alert")).toHaveTextContent("Add dark mode couldn't be handed over.");
+  });
+
+  it("names the files a pushed handover left on this computer, on its row and instead of a plain Safe to shut down", async () => {
+    const user = userEvent.setup();
+    const { client } = fakeClient({ refusedFiles: [".env.local", "keys/deploy.pem"] });
+    render(
+      <PrepareToShutDownDialog
+        client={client}
+        onClose={() => {}}
+        open
+        unlock={{ ownerUnlockSign: async () => ({ status: "done", signature: "c2ln" }) }}
+      />,
+    );
+    await screen.findByText("Add dark mode");
+    await user.click(screen.getByRole("combobox", { name: "Move to" }));
+    await user.click(await screen.findByRole("option", { name: /Desktop/ }));
+    await user.click(screen.getByRole("combobox", { name: "Choice for Add dark mode" }));
+    await user.click(await screen.findByRole("option", { name: "Hand over" }));
+    await user.click(screen.getByRole("button", { name: "Move 2 threads with Touch ID" }));
+
+    expect(
+      await screen.findByRole("heading", {
+        name: "Safe to shut down; 2 files stay on this computer",
+      }),
+    ).toBeInTheDocument();
+    const dark = screen.getByText("Add dark mode").closest(".shutdown-row");
+    if (!(dark instanceof HTMLElement)) throw new Error("No row.");
+    expect(within(dark).getByText("Handed over · 2 files stayed here")).toBeInTheDocument();
+    expect(dark).toHaveTextContent(".env.local, keys/deploy.pem");
+    expect(
+      screen.getByText("Left out because they hold a secret: .env.local, keys/deploy.pem.", {
+        exact: false,
+      }),
+    ).toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: /^Safe to shut down$/ })).not.toBeInTheDocument();
   });
 
   it("tells the menu bar how far the batch has come while it runs, and nothing once it ends", async () => {
