@@ -4,7 +4,10 @@ import { WorktreePreparationService } from "../code/worktreePreparationService";
 import { RepositoryTestProcessPort } from "../code/repositoryTestProcessPort";
 import { createLocalUsageHistoryCheckpointStore } from "../persistence/localUsageHistoryCheckpointStore";
 import { createLocalUsageHistoryLastReadStore } from "../persistence/localUsageHistoryLastReadStore";
-import { createSelectedExtensionResolver } from "../extensions/selectedExtensions";
+import {
+  createEffectiveSkillReader,
+  createSelectedExtensionResolver,
+} from "../extensions/selectedExtensions";
 import { randomUUID } from "node:crypto";
 import { bindGeneratedMcpSignInPolicy } from "../extensions/generatedMcpSignInPolicy";
 import { lstatSync, realpathSync } from "node:fs";
@@ -1134,6 +1137,23 @@ export function wireProviders(deps: ProvidersDependencies) {
         );
       },
     });
+    // What the harness `skill` tool reads: the same snapshot, activation,
+    // and material a turn's selections resolve through.
+    const effectiveSkills = createEffectiveSkillReader({
+      snapshot: async () => {
+        await standaloneSkillService.reconcile();
+        return extensionApiService.snapshot();
+      },
+      resolveEffectiveState: (snapshot, query) =>
+        extensionActivationService.resolve(snapshot, query),
+      providerFamily: (providerInstanceId) => {
+        const instance = persistence.readProviderInstance(providerInstanceId);
+        return instance === undefined
+          ? undefined
+          : Schema.decodeUnknownSync(ExtensionProviderFamily)(instance.driverKind);
+      },
+      materialLoader: createStoredExtensionMaterialLoader(extensionPackageStore),
+    });
     githubExtensionSnapshot.read = () => extensionApiService.snapshot();
     // One store for the host: the folder picker issues a receipt through the
     // extension routes, and installing a Browser extension consumes it.
@@ -2177,6 +2197,7 @@ export function wireProviders(deps: ProvidersDependencies) {
       providerUsageLimitsService,
       refreshStandaloneSkills,
       resolveSelectedExtensions,
+      effectiveSkills,
       pinnedExtensionIds,
       reviewedModelManifest,
       skillDiscoveryService,

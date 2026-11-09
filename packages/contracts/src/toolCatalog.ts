@@ -285,6 +285,16 @@ const NATIVE_HARNESS_TOOL_POLICY: Readonly<
     irreversibleUnderTaint: true,
     resultTaintsThread: false,
   },
+  // Reads only skills the activation ladder already made effective for this
+  // thread, the same text a person's selection would add to the turn, so it
+  // reaches nothing a Chat thread or a Plan turn lacks.
+  skill: {
+    modes: ["chat", "work", "code"],
+    requiredCapabilityClass: "instructions",
+    approvalClass: "thread-local",
+    irreversibleUnderTaint: false,
+    resultTaintsThread: false,
+  },
 };
 
 const nativeHarnessCatalogEntries: ReadonlyArray<ClosedToolCatalogEntry> =

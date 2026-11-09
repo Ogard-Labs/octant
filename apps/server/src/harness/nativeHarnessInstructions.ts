@@ -95,6 +95,8 @@ const OCTANT_TOOL_PURPOSE: Readonly<Record<string, string>> = {
   octant_threads:
     "see this Project's other threads (list, read, wait); its operation list names anything more this turn may do",
   octant_zen: "read and arrange this Zen space: pin threads, add widgets, move elements",
+  skill:
+    "list the skills active for this thread and load one's instructions when the task matches it; skills the person selected for this turn are already in your context",
 };
 
 /**
