@@ -124,13 +124,14 @@ export const FULL_ACCESS_SANDBOX_UNSUPPORTED =
 
 /**
  * Runtimes that honor the opt-in sandbox at Full access: Codex, whose process
- * stays inside Octant's profile, and the Octant Harness, whose commands run
- * on the confined shell. Every other runtime launches unwrapped at Full
+ * stays inside Octant's profile, Claude, whose commands keep its own sandbox
+ * and whose file tools keep Octant's path gate, and the Octant Harness, whose
+ * commands run on the confined shell. Every other runtime launches unwrapped at Full
  * access, so a sandboxed thread on one of them is refused rather than run
  * open while it says it is sandboxed.
  */
 export function fullAccessSandboxSupported(driverKind: ProviderDriverKind): boolean {
-  return driverKind === "codex" || isNativeHarnessDriverKind(driverKind);
+  return driverKind === "codex" || driverKind === "claude" || isNativeHarnessDriverKind(driverKind);
 }
 
 /**
