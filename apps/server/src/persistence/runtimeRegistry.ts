@@ -407,6 +407,8 @@ import {
   GithubCloneProjection,
 } from "./githubCloneProjection";
 import { ImageJobProjection } from "../image/imageJobProjection";
+import { registerBenchmarkEvents } from "../benchmarks/benchmarkEventStore";
+import { BenchmarkProjection } from "../benchmarks/benchmarkProjection";
 import {
   DesktopLeaseProjection,
   registerDesktopLeaseEvents,
@@ -428,6 +430,7 @@ export interface Phase1RuntimeRegistries {
   readonly automationProjection: AutomationProjection;
   readonly githubCloneProjection: GithubCloneProjection;
   readonly imageJobProjection: ImageJobProjection;
+  readonly benchmarkProjection: BenchmarkProjection;
   readonly desktopLeaseProjection: DesktopLeaseProjection;
   readonly replicaMembershipProjection: ReplicaMembershipProjection;
   readonly replicaArtifactProjection: ReplicaArtifactProjection;
@@ -762,6 +765,7 @@ export function createPhase1RuntimeRegistries(): Phase1RuntimeRegistries {
   registerReplicaMembershipEvents(events);
   registerReplicaStoreSettingsEvents(events);
   registerDesktopLeaseEvents(events);
+  registerBenchmarkEvents(events);
 
   const hostIdentityMigrations = createRuntimeHostIdentityMigrationRegistry(events);
   const agentRunProjection = new AgentRunProjection();
@@ -769,6 +773,7 @@ export function createPhase1RuntimeRegistries(): Phase1RuntimeRegistries {
   const automationProjection = new AutomationProjection();
   const githubCloneProjection = new GithubCloneProjection();
   const imageJobProjection = new ImageJobProjection();
+  const benchmarkProjection = new BenchmarkProjection();
   const desktopLeaseProjection = new DesktopLeaseProjection();
   const replicaMembershipProjection = new ReplicaMembershipProjection();
   const replicaArtifactProjection = new ReplicaArtifactProjection();
@@ -781,6 +786,7 @@ export function createPhase1RuntimeRegistries(): Phase1RuntimeRegistries {
     automationProjection,
     githubCloneProjection,
     imageJobProjection,
+    benchmarkProjection,
     desktopLeaseProjection,
     replicaMembershipProjection,
     replicaArtifactProjection,
@@ -800,6 +806,7 @@ export function createPhase1RuntimeRegistries(): Phase1RuntimeRegistries {
       .register(automationProjection)
       .register(githubCloneProjection)
       .register(imageJobProjection)
+      .register(benchmarkProjection)
       .register(desktopLeaseProjection)
       .register(new ZenProjection())
       .register(new AgentProfileProjection())

@@ -1736,6 +1736,7 @@ export function wireRemote(deps: RemoteDependencies) {
     providerCredentialRoutes,
     remoteHost,
     secretStoresRoutes,
+    threadRetention,
   };
 }
 

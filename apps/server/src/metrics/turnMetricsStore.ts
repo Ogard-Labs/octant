@@ -116,6 +116,15 @@ export class TurnMetricsStore {
   }
 
   /**
+   * Every turn recorded for one thread, oldest first, for a host service that
+   * already owns the thread (a benchmark run reading its own cell). It applies
+   * no Project scope, so it is never the route for a reader's request.
+   */
+  forThread(threadId: string): ReadonlyArray<TurnMetricsRecord> {
+    return this.#threads.get(threadId)?.records ?? [];
+  }
+
+  /**
    * Totals over every turn the filter matches within the reader's scope, and
    * the most recent turns. Absent when nothing matches, so a surface hides the
    * figures instead of showing zeros.

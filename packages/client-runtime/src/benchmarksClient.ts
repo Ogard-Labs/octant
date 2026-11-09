@@ -1,0 +1,117 @@
+import {
+  BENCHMARK_ROUTE_PATHS,
+  BenchmarkRunCancelResponse,
+  BenchmarkRunPurgeResponse,
+  BenchmarkRunReadResponse,
+  BenchmarkRunsListResponse,
+  BenchmarkRunStartResponse,
+  BenchmarkSuiteDeleteResponse,
+  BenchmarkSuiteSaveResponse,
+  BenchmarkSuitesListResponse,
+  decodeHostAnswer,
+  type BenchmarkRunCancelRequest,
+  type BenchmarkRunPurgeRequest,
+  type BenchmarkRunReadRequest,
+  type BenchmarkRunsListRequest,
+  type BenchmarkRunStartRequest,
+  type BenchmarkSuiteDeleteRequest,
+  type BenchmarkSuiteSaveRequest,
+} from "@octant/contracts";
+import { Schema } from "effect";
+import { bindFetchPort } from "./bindFetchPort";
+
+export interface BenchmarksClientOptions {
+  readonly baseUrl: string;
+  readonly fetch: typeof globalThis.fetch;
+  readonly windowCapability: string;
+}
+
+export interface BenchmarksClient {
+  listSuites(): Promise<BenchmarkSuitesListResponse>;
+  saveSuite(request: BenchmarkSuiteSaveRequest): Promise<BenchmarkSuiteSaveResponse>;
+  deleteSuite(request: BenchmarkSuiteDeleteRequest): Promise<BenchmarkSuiteDeleteResponse>;
+  listRuns(request: BenchmarkRunsListRequest): Promise<BenchmarkRunsListResponse>;
+  /** A run with its leaderboard and each cell's measured figures. */
+  readRun(request: BenchmarkRunReadRequest): Promise<BenchmarkRunReadResponse>;
+  startRun(request: BenchmarkRunStartRequest): Promise<BenchmarkRunStartResponse>;
+  cancelRun(request: BenchmarkRunCancelRequest): Promise<BenchmarkRunCancelResponse>;
+  purgeRun(request: BenchmarkRunPurgeRequest): Promise<BenchmarkRunPurgeResponse>;
+}
+
+/** A refusal keeps the host's own sentence and status, so a page can show why. */
+export class BenchmarksClientError extends Error {
+  override readonly name = "BenchmarksClientError";
+  constructor(
+    message: string,
+    readonly status?: number,
+  ) {
+    super(message);
+  }
+}
+
+const DEFAULT_TIMEOUT_MS = 10_000;
+const SAVE_TIMEOUT_MS = 30_000;
+
+export function createBenchmarksClient(options: BenchmarksClientOptions): BenchmarksClient {
+  const fetch = bindFetchPort(options.fetch);
+
+  async function call<A, I>(
+    path: string,
+    body: unknown,
+    schema: Schema.Schema<A, I, never>,
+    timeoutMs: number = DEFAULT_TIMEOUT_MS,
+  ): Promise<A> {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
+    let response: Response;
+    try {
+      response = await fetch(new URL(path, options.baseUrl).toString(), {
+        method: "POST",
+        headers: {
+          "x-octant-window-capability": options.windowCapability,
+          "content-type": "application/json",
+        },
+        body: JSON.stringify(body),
+        signal: controller.signal,
+      });
+    } catch {
+      throw new BenchmarksClientError("Benchmarks are unavailable.");
+    } finally {
+      clearTimeout(timer);
+    }
+    let answer: unknown;
+    try {
+      answer = await response.json();
+    } catch {
+      throw new BenchmarksClientError("Benchmarks returned an invalid response.", response.status);
+    }
+    if (!response.ok) {
+      const message =
+        typeof answer === "object" && answer !== null && "message" in answer
+          ? String(answer.message)
+          : `Benchmarks failed with status ${response.status}.`;
+      throw new BenchmarksClientError(message, response.status);
+    }
+    try {
+      return decodeHostAnswer(schema)(answer);
+    } catch {
+      throw new BenchmarksClientError("Benchmarks returned an invalid response.", response.status);
+    }
+  }
+
+  return {
+    listSuites: () => call(BENCHMARK_ROUTE_PATHS.suitesList, {}, BenchmarkSuitesListResponse),
+    saveSuite: (request) =>
+      call(BENCHMARK_ROUTE_PATHS.suitesSave, request, BenchmarkSuiteSaveResponse, SAVE_TIMEOUT_MS),
+    deleteSuite: (request) =>
+      call(BENCHMARK_ROUTE_PATHS.suitesDelete, request, BenchmarkSuiteDeleteResponse),
+    listRuns: (request) => call(BENCHMARK_ROUTE_PATHS.runsList, request, BenchmarkRunsListResponse),
+    readRun: (request) => call(BENCHMARK_ROUTE_PATHS.runsRead, request, BenchmarkRunReadResponse),
+    startRun: (request) =>
+      call(BENCHMARK_ROUTE_PATHS.runsStart, request, BenchmarkRunStartResponse, SAVE_TIMEOUT_MS),
+    cancelRun: (request) =>
+      call(BENCHMARK_ROUTE_PATHS.runsCancel, request, BenchmarkRunCancelResponse),
+    purgeRun: (request) =>
+      call(BENCHMARK_ROUTE_PATHS.runsPurge, request, BenchmarkRunPurgeResponse),
+  };
+}

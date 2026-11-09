@@ -263,6 +263,15 @@ export function classifyProductAction(request: Request): string | undefined {
     // mutation stays local-window and is refused by the route for remote.
     return method === "GET" || method === "HEAD" ? "settings.read-non-secret" : undefined;
   }
+  if (path.startsWith("/api/benchmarks/")) {
+    // Reads of suites and runs only; every change stays with a local window.
+    return method === "POST" &&
+      (path === "/api/benchmarks/suites/list" ||
+        path === "/api/benchmarks/runs/list" ||
+        path === "/api/benchmarks/runs/read")
+      ? "settings.read-non-secret"
+      : undefined;
+  }
   if (path.startsWith("/api/usage/")) {
     // Every Usage read is POST by construction — the routes answer 405 to any
     // other method — so admitting only GET/HEAD left the whole surface

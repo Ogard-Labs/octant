@@ -97,6 +97,10 @@ export const KNOWN_ISLANDS: ReadonlyMap<string, string> = new Map([
   ],
   // ── Delivered ahead of its first caller by a staged design ──
   [
+    "packages/client-runtime/src/benchmarksClient.ts",
+    "Benchmarks host client, delivered with the benchmark routes it calls in the engine slice of docs/design/model-benchmarks.md before the Benchmarks pages that use it. Remove once the Usage workspace's Benchmarks source imports it.",
+  ],
+  [
     "packages/domain/src/hostedRelayProtocol.ts",
     "Hosted relay route id derivation, registration message, and frame reader, delivered as the contracts-and-policy slice of docs/design/hosted-relay.md before the relay service and host connector that call it. Remove once the relay service reads frames with it.",
   ],
@@ -680,8 +684,24 @@ export function findUnregisteredRouteModules(
  */
 export const KNOWN_UNCALLED_ENDPOINTS: ReadonlyMap<string, string> = new Map([
   [
-    "/api/usage/diagnostics",
-    "The turn diagnostics report, served by the host one stacked change ahead of the Usage page that reads it. Remove once the client runtime's usage client calls it.",
+    "/api/benchmarks/suites/save",
+    "Benchmark write route, served by the engine slice of docs/design/model-benchmarks.md ahead of the Benchmarks pages that call it. Remove once the Usage workspace's Benchmarks source calls it.",
+  ],
+  [
+    "/api/benchmarks/suites/delete",
+    "Benchmark write route, served by the engine slice of docs/design/model-benchmarks.md ahead of the Benchmarks pages that call it. Remove once the Usage workspace's Benchmarks source calls it.",
+  ],
+  [
+    "/api/benchmarks/runs/start",
+    "Benchmark write route, served by the engine slice of docs/design/model-benchmarks.md ahead of the Benchmarks pages that call it. Remove once the Usage workspace's Benchmarks source calls it.",
+  ],
+  [
+    "/api/benchmarks/runs/cancel",
+    "Benchmark write route, served by the engine slice of docs/design/model-benchmarks.md ahead of the Benchmarks pages that call it. Remove once the Usage workspace's Benchmarks source calls it.",
+  ],
+  [
+    "/api/benchmarks/runs/purge",
+    "Benchmark write route, served by the engine slice of docs/design/model-benchmarks.md ahead of the Benchmarks pages that call it. Remove once the Usage workspace's Benchmarks source calls it.",
   ],
   [
     "/api/code/language/documents",

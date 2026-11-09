@@ -1,4 +1,5 @@
 import {
+  BENCHMARK_RUN_AGGREGATE_TYPE,
   BROWSER_FLOW_AGGREGATE_TYPE,
   NATIVE_HARNESS_TRANSCRIPT_AGGREGATE_TYPE,
   TOOL_EGRESS_PROJECT_AGGREGATE,
@@ -228,10 +229,16 @@ const RUN_LINK_PATHS = ["$.parentRunId", "$.run.parentRunId"] as const;
 // A Project's egress rules name the thread they were granted from, but they
 // are the Project's: purging that thread must not take them away. A Project
 // erase removes them.
+// A benchmark run's cell events name the cell's thread, but the run is the
+// benchmark's: purging a cell thread must not delete the run's journal history.
+// Observed: it did, the run's head went with it, and the run's later purge
+// event restarted at version 1, below the version the projection had reached,
+// so the projection skipped it and kept listing the run.
 const RETAINED_AGGREGATE_TYPES = new Set<string>([
   THREAD_RETENTION_AGGREGATE,
   "context-ledger",
   TOOL_EGRESS_PROJECT_AGGREGATE,
+  BENCHMARK_RUN_AGGREGATE_TYPE,
 ]);
 
 const USAGE_EVENT_NAME = "context.usage-reconciled@1";
