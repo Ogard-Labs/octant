@@ -302,13 +302,21 @@ describe("hub administration controls", () => {
       timing: "now",
       unlock,
     });
+    await sendHubAdministrationOperation(controls, "thread-move-phone-ask", {
+      thread,
+      destinationMemberId,
+      timing: "now",
+    });
     expect(calls.map((call) => call.url)).toEqual([
       "http://127.0.0.1:4317/api/desktop/hub/thread-moves/destinations",
       "http://127.0.0.1:4317/api/desktop/hub/thread-moves/start",
+      "http://127.0.0.1:4317/api/desktop/hub/thread-moves/phone-ask",
     ]);
 
     for (const [operation, body] of [
       ["thread-move-destinations", { thread: { mode: "code" } }],
+      // Asking the phone carries no unlock: the phone makes its own on the destination.
+      ["thread-move-phone-ask", { thread, destinationMemberId, timing: "now", unlock }],
       ["thread-move-start", { thread, destinationMemberId, timing: "now" }],
       ["thread-move-start", { thread, destinationMemberId, timing: "later", unlock }],
       ["thread-move-start", { thread, destinationMemberId, timing: "now", unlock, force: true }],
@@ -318,7 +326,7 @@ describe("hub administration controls", () => {
         status: 400,
       });
     }
-    expect(calls).toHaveLength(2);
+    expect(calls).toHaveLength(3);
   });
 
   it("sends the wake switch and the hardware address only with their decoded bodies", async () => {

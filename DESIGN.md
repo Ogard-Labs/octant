@@ -2030,11 +2030,24 @@ this is how it looks.
   plain words, never a warning colour: "This thread is erased from this
   computer once" and the member's name "has it." A busy thread adds a two-way
   choice above the buttons, Move after this turn (selected) and Stop and move.
-  The primary button names the unlock it asks for (**Move with Touch ID**,
-  **Move with passkey**, or **Confirm on your phone**); Cancel sits beside it,
-  and a Code thread has **Hand over instead** as a quiet text button at the
-  sheet's start edge. Focus lands on the primary button, Escape cancels, and
-  the unlock prompt is the platform's own.
+  The primary button names the unlock it asks for: **Move with Touch ID**, or
+  **Confirm on your phone** in a window with no Touch ID key. Beside Move with
+  Touch ID, **Confirm on your phone** is an outline button, and one sentence
+  above the buttons names the phone it means (one that is an owner on the
+  destination). A browser passkey does not unlock a move yet, so no **Move with
+  passkey** button is offered. Cancel sits beside them, and a Code thread has
+  **Hand over instead** as a quiet text button at the sheet's start edge. Focus
+  lands on the primary button, Escape cancels, and the unlock prompt is the
+  platform's own.
+- **Waiting for your phone.** Confirm on your phone closes the sheet and puts
+  the Computer row's pill on Waiting for your phone. Its open content reads
+  "Confirm on your phone to move this thread to" the member's name, with the
+  time the wait ends, and **Don't move** as an outline button. Nothing is
+  frozen while it waits. The phone app lists each waiting move under **Moves
+  waiting for you** ("Move" the thread's title, or the thread count, "from"
+  this computer "to" the member), with **Confirm move**, which asks for the
+  phone's unlock once. A wait that ends unanswered becomes This thread can't
+  move.
 - **While it moves.** The sheet closes when the unlock succeeds. The composer is
   replaced by a frozen bar in its place and height: a determinate progress
   line, "Moving to" and the member's name, the moved and total sizes with the
@@ -2095,8 +2108,10 @@ this is how it looks.
     1.4 GB, about 2 min"), then the buttons: Cancel, and the primary, which
     names the count and the unlock (**Move 9 threads with Touch ID**; **Move 9
     threads** when more than one destination needs its own unlock, asked in
-    turn). With nothing set to move, the primary is disabled and the summary
-    says why.
+    turn). **Confirm on your phone** sits beside it as an outline button, and
+    is the primary in a window with no Touch ID key; a row it holds reads
+    Waiting for your phone until the phone confirms. With nothing set to move,
+    the primary is disabled and the summary says why.
   - **While it runs.** The dialog stays and becomes the progress view: a
     determinate bar under the head for the whole batch, and on each row a thin
     progress line and a state word in place of its choice (Waiting, Moving with

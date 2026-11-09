@@ -143,6 +143,10 @@ describe("starting a thread move from a window", () => {
           unlock: { challengeId: "12345678-1234-4234-8234-123456789012", signature: "AAAA" },
         },
       ],
+      [
+        THREAD_MOVE_ADMINISTRATION_ROUTES.phoneAsk,
+        { thread: ELSEWHERE, destinationMemberId: DESKTOP, timing: "now" },
+      ],
       [THREAD_MOVE_ADMINISTRATION_ROUTES.dismiss, { thread: ELSEWHERE }],
       [
         THREAD_MOVE_ADMINISTRATION_ROUTES.cancel,
@@ -166,6 +170,23 @@ describe("starting a thread move from a window", () => {
     );
     expect(response?.status).toBe(409);
     expect(await response?.json()).toEqual({ status: "refused", kind: "unlock-required" });
+  });
+
+  it("holds a thread the window shows for an owner phone, and lists it on the thread", async () => {
+    const { handle } = setup();
+    const response = await handle(
+      post(THREAD_MOVE_ADMINISTRATION_ROUTES.phoneAsk, {
+        thread: SHOWN,
+        destinationMemberId: DESKTOP,
+        timing: "now",
+      }),
+    );
+    expect(response?.status).toBe(200);
+    expect(await response?.json()).toMatchObject({ status: "waiting-for-phone" });
+    const status = await handle(post(THREAD_MOVE_ADMINISTRATION_ROUTES.status, { thread: SHOWN }));
+    expect(await status?.json()).toMatchObject({
+      waitingForPhone: { destinationMemberId: DESKTOP },
+    });
   });
 
   it("rejects a body that is not exactly a move request", async () => {

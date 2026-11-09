@@ -86,6 +86,96 @@ describe("moving a thread after its turn", () => {
   });
 });
 
+describe("holding a move for an owner phone", () => {
+  function heldMoves(options: { readonly busy?: boolean } = {}) {
+    const folder = mkdtempSync(join(tmpdir(), "octant-move-phone-"));
+    folders.push(folder);
+    const clock = { now: 1_000_000 };
+    const refused: Array<{ readonly threadId: string; readonly reason: string }> = [];
+    const start = vi.fn(async () => ({ status: "interrupted" as const }));
+    const moves = new ThreadMovesFromWindow({
+      moves: {
+        askProjects: async () => "unreachable",
+        start,
+        cancel: async () => ({ status: "cancelled" }),
+        takeBack: async () => {},
+        activateAnyway: async () => ({ httpStatus: 409, body: {} }),
+        dismissFailure: () => {},
+        refuseBeforeStart: (thread, reason) => refused.push({ threadId: thread.threadId, reason }),
+      },
+      state: createThreadMoveStateStore(folder),
+      tickets: {
+        challenge: async () => ({ status: "refused", kind: "refused" }),
+        redeem: async () => ({ status: "issued", ticketId: "ticket" }),
+      },
+      source: { read: async () => reading(options.busy ?? false) },
+      members: () => [],
+      selfMemberId: () => "self",
+      listThreads: async () => [],
+      now: () => clock.now,
+    });
+    return { moves, clock, refused, start };
+  }
+  const ask = { thread: THREAD, destinationMemberId: DESKTOP as never, timing: "now" } as const;
+  const phone = { kind: "owner-unlock", memberId: DESKTOP as never } as const;
+
+  it("ends the wait as an unlock that never came once five minutes pass without the phone", async () => {
+    const { moves, clock, refused, start } = heldMoves();
+    expect(await moves.askPhone(ask)).toEqual({
+      status: "waiting-for-phone",
+      expiresAt: clock.now + 5 * 60_000,
+    });
+    const [held] = moves.phoneConfirmations().confirmations;
+    if (held === undefined) throw new Error("Nothing waits for the phone.");
+
+    clock.now += 5 * 60_000 + 1;
+
+    expect(moves.status(THREAD).waitingForPhone).toBeUndefined();
+    expect(refused).toEqual([{ threadId: THREAD.threadId, reason: "unlock-required" }]);
+    expect(moves.phoneConfirmations().confirmations).toEqual([]);
+    expect(
+      moves.confirmOnPhone({
+        confirmationId: held.confirmationId,
+        ticketId: "12345678-1234-4234-8234-123456789012",
+        principal: phone,
+      }),
+    ).toEqual({ status: "refused", kind: "no-such-confirmation" });
+    expect(start).not.toHaveBeenCalled();
+    moves.close();
+  });
+
+  it("refuses a second move of a thread that already waits for the phone, and Don't move ends the wait", async () => {
+    const { moves, start } = heldMoves();
+    await moves.askPhone(ask);
+
+    expect(await moves.askPhone(ask)).toEqual({ status: "refused", reason: "busy" });
+    expect(
+      await moves.start({
+        ...ask,
+        unlock: { challengeId: "12345678-1234-4234-8234-123456789012", signature: "c2ln" },
+      }),
+    ).toEqual({ status: "refused", reason: "busy" });
+
+    moves.stopWaiting(THREAD);
+
+    expect(moves.status(THREAD).waitingForPhone).toBeUndefined();
+    expect(moves.status(THREAD).settled?.settledAt).toEqual(expect.any(String));
+    expect(moves.phoneConfirmations().confirmations).toEqual([]);
+    expect(start).not.toHaveBeenCalled();
+    moves.close();
+  });
+
+  it("asks no phone to move a busy thread now", async () => {
+    const { moves } = heldMoves({ busy: true });
+
+    expect(await moves.askPhone(ask)).toEqual({ status: "refused", reason: "busy" });
+    expect(await moves.askPhone({ ...ask, timing: "after-turn" })).toMatchObject({
+      status: "waiting-for-phone",
+    });
+    moves.close();
+  });
+});
+
 describe("where a moved thread stands", () => {
   it("still says a move ended after its failure notice was put away", async () => {
     const folder = mkdtempSync(join(tmpdir(), "octant-move-settled-"));

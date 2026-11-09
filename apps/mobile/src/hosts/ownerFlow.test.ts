@@ -16,7 +16,7 @@ import {
 } from "@octant/client-runtime";
 import { describe, expect, it } from "vitest";
 import type { GuestHubState } from "./hubGuestFlow";
-import { ownerSpokesOf, phoneOwnerMergeUnlock } from "./ownerFlow";
+import { ownerSpokesOf, phoneOwnerMergeUnlock, phoneThreadMovesOf } from "./ownerFlow";
 import { createPhoneUnlockKey } from "./ownerUnlockKey";
 
 const id = (suffix: string) => `00000000-0000-4000-8000-${suffix.padStart(12, "0")}` as HubMemberId;
@@ -27,6 +27,20 @@ const alert: NewMemberAlert = {
   role: "spoke",
   identityKeyFingerprint: "c".repeat(64),
   raisedAt: "2026-10-29T10:00:00.000Z" as NewMemberAlert["raisedAt"],
+};
+
+const TICKET = "00000000-0000-4000-8000-0000000000d1";
+const heldMove = {
+  confirmationId: "00000000-0000-4000-8000-0000000000e1",
+  destinationMemberId: "00000000-0000-4000-8000-000000000003",
+  destinationName: "member 3",
+  threads: [
+    {
+      thread: { mode: "chat", threadId: "00000000-0000-4000-8000-0000000000f1" },
+      title: "Plan the trip",
+    },
+  ],
+  expiresAt: 1_900_000_000_000,
 };
 
 const member = (suffix: string, role: RosterMember["role"], address: string): RosterMember => ({
@@ -94,6 +108,7 @@ async function world(
     remove: async () => {},
   };
   const order: string[] = [];
+  const sentTo: Array<{ readonly origin: string; readonly path: string }> = [];
   let storedPrivate: string | undefined;
   let storedPublic: string | null = null;
   const unlockKey = createPhoneUnlockKey({
@@ -129,6 +144,7 @@ async function world(
     fetch: (async (input: string | URL | Request) => {
       const path = new URL(String(input)).pathname;
       order.push(path);
+      sentTo.push({ origin, path });
       if (options.down !== undefined && origin.includes(options.down)) throw new Error("down");
       if (path === "/api/hub/owner/challenge") {
         return Response.json({
@@ -140,6 +156,18 @@ async function world(
         });
       }
       if (path === "/api/hub/owner/alerts") return Response.json({ alerts: [alert] });
+      if (path === "/api/hub/owner/thread-moves/confirmations") {
+        return Response.json({
+          status: "listed",
+          confirmations: origin.includes("100.101.102.104") ? [heldMove] : [],
+        });
+      }
+      if (path === "/api/hub/owner/thread-moves/ticket") {
+        return Response.json({ status: "issued", ticketId: TICKET, expiresAt: 1 });
+      }
+      if (path === "/api/hub/owner/thread-moves/confirm") {
+        return Response.json({ status: "started" });
+      }
       if (path === "/api/hub/owner/held-members") {
         return Response.json({
           members: [
@@ -155,7 +183,7 @@ async function world(
       return Response.json({ status: "removed", alertId: String(alert.alertId) });
     }) as typeof globalThis.fetch,
   });
-  return { deviceKeyStore, unlockKey, transport, order };
+  return { deviceKeyStore, unlockKey, transport, order, sentTo };
 }
 
 describe("a phone that is an owner of its hub", () => {
@@ -303,5 +331,47 @@ describe("a phone's unlock for a merge its paired host asks for", () => {
       status: "not-unlocked",
     });
     expect(w.order).not.toContain("/api/hub/owner/challenge");
+  });
+});
+
+describe("a phone confirming a move a window holds for it", () => {
+  it("lists the moves each spoke holds and confirms one with a single unlock, asking the destination for the ticket first", async () => {
+    const w = await world();
+    const moves = await phoneThreadMovesOf({ ...w, state: joinedState(true) });
+    if (moves === undefined) throw new Error("expected the phone's moves");
+
+    const reading = await moves.read();
+    expect(
+      reading.moves.map((move) => [move.source.name, move.confirmation.destinationName]),
+    ).toEqual([["member 2", "member 3"]]);
+    const [held] = reading.moves;
+    if (held === undefined) throw new Error("expected a held move");
+    w.order.length = 0;
+    w.sentTo.length = 0;
+
+    const result = await moves.confirm(held);
+
+    expect(result.status).toBe("done");
+    expect(w.order.filter((entry) => entry === "unlock-asked")).toHaveLength(1);
+    expect(w.sentTo.filter((entry) => entry.path !== "/api/hub/owner/challenge")).toEqual([
+      { origin: "https://100.101.102.105:8443", path: "/api/hub/owner/thread-moves/ticket" },
+      { origin: "https://100.101.102.104:8443", path: "/api/hub/owner/thread-moves/confirm" },
+    ]);
+  });
+
+  it("offers nothing to a phone that did not join with an owner code", async () => {
+    const w = await world();
+    expect(await phoneThreadMovesOf({ ...w, state: joinedState(false) })).toBeUndefined();
+  });
+
+  it("tells the source nothing when the person declines the unlock", async () => {
+    const w = await world({ presence: "denied" });
+    const moves = await phoneThreadMovesOf({ ...w, state: joinedState(true) });
+    const [held] = (await moves?.read())?.moves ?? [];
+    if (moves === undefined || held === undefined) throw new Error("expected a held move");
+    w.sentTo.length = 0;
+
+    expect(await moves.confirm(held)).toEqual({ status: "not-unlocked", reason: "cancelled" });
+    expect(w.sentTo).toEqual([]);
   });
 });

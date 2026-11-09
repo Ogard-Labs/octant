@@ -1,6 +1,7 @@
 import type {
   MovedThreadReference,
   ShutdownListing,
+  ShutdownPhoneAskRequest,
   ShutdownStartRequest,
   ThreadMoveThreadStatus,
 } from "@octant/contracts";
@@ -101,6 +102,7 @@ function fakeClient(
     readonly threads: ReadonlyArray<MovedThreadReference>;
   }> = [];
   const started: ShutdownStartRequest[] = [];
+  const askedPhone: ShutdownPhoneAskRequest[] = [];
   const listingsRead = { count: 0 };
   let moved = false;
   let movedAt = new Date().toISOString();
@@ -108,36 +110,46 @@ function fakeClient(
     destinations: async () => ({ status: "listed", busy: false, destinations: [] }),
     challenge: async () => ({ status: "refused", kind: "refused" }),
     start: async () => ({ status: "refused", reason: "refused" }),
+    askPhone: async () => ({ status: "refused", reason: "refused" }),
     status: async (thread): Promise<ThreadMoveThreadStatus> =>
-      moved && input.settled !== undefined && input.settled.threadId === thread.threadId
-        ? { status: "read", settled: { settledAt: movedAt as never } }
-        : moved && input.arrives?.() === false
-          ? {
-              status: "read",
-              sending: {
-                moveId: "66666666-6666-4666-8666-666666666666" as never,
-                destinationMemberId: MINI as never,
-                destinationName: "Mac mini",
-                state: "offered",
-                bytesSent: 0,
-                bytesTotal: 1,
-                startedAt: new Date().toISOString() as never,
-              },
-            }
-          : moved
+      askedPhone.length > 0 && !moved
+        ? {
+            status: "read",
+            waitingForPhone: {
+              destinationMemberId: MINI as never,
+              destinationName: "Mac mini",
+              expiresAt: 1_900_000_000_000,
+            },
+          }
+        : moved && input.settled !== undefined && input.settled.threadId === thread.threadId
+          ? { status: "read", settled: { settledAt: movedAt as never } }
+          : moved && input.arrives?.() === false
             ? {
                 status: "read",
-                departed: {
+                sending: {
                   moveId: "66666666-6666-4666-8666-666666666666" as never,
-                  thread,
                   destinationMemberId: MINI as never,
-                  destinationThread: thread,
-                  changesRemainInCheckout: false,
-                  movedAt: movedAt as never,
                   destinationName: "Mac mini",
+                  state: "offered",
+                  bytesSent: 0,
+                  bytesTotal: 1,
+                  startedAt: new Date().toISOString() as never,
                 },
               }
-            : { status: "read" },
+            : moved
+              ? {
+                  status: "read",
+                  departed: {
+                    moveId: "66666666-6666-4666-8666-666666666666" as never,
+                    thread,
+                    destinationMemberId: MINI as never,
+                    destinationThread: thread,
+                    changesRemainInCheckout: false,
+                    movedAt: movedAt as never,
+                    destinationName: "Mac mini",
+                  },
+                }
+              : { status: "read" },
     stopWaiting: async () => {},
     cancel: async () => "cancelled",
     takeBack: async () => {},
@@ -161,16 +173,37 @@ function fakeClient(
       }
       return { status: "started" };
     },
+    shutdownAskPhone: async (request) => {
+      askedPhone.push(request);
+      return { status: "waiting-for-phone", expiresAt: 1_900_000_000_000 };
+    },
     handoverPreview: async () => ({ status: "refused", reason: "refused" }),
     handOver: async () => ({ status: "refused", reason: "refused" }),
     handoverTakeBack: async () => {},
     handoversList: async () => ({ status: "listed", handovers: [] }),
     handoversContinue: async () => ({ status: "refused", reason: "refused" }),
   };
-  return { client, challenged, started, listingsRead };
+  return { client, challenged, started, askedPhone, listingsRead };
 }
 
 describe("Prepare to shut down", () => {
+  it("asks an owner phone to confirm the batch when this window has no Touch ID key", async () => {
+    const user = userEvent.setup();
+    const { client, challenged, started, askedPhone } = fakeClient();
+    render(<PrepareToShutDownDialog client={client} onClose={() => {}} open />);
+
+    expect(await screen.findByText("Plan the trip")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /with Touch ID/ })).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Confirm on your phone" }));
+
+    await waitFor(() => expect(askedPhone).toHaveLength(1));
+    expect(askedPhone[0]?.destinationMemberId).toBe(MINI);
+    expect(askedPhone[0]?.rows.map((row) => row.timing)).toEqual(["now", "after-turn"]);
+    expect(challenged).toEqual([]);
+    expect(started).toEqual([]);
+    expect(await screen.findAllByText("Waiting for your phone")).toHaveLength(2);
+  });
+
   it("starts on the hub with each thread on its own choice, and moves them with one Touch ID", async () => {
     const user = userEvent.setup();
     const { client, challenged, started } = fakeClient();

@@ -181,6 +181,55 @@ export function PrepareToShutDownDialog(props: PrepareToShutDownDialogProps) {
   const staying = rows.length - moving.length;
   const batch = moving.slice(0, SHUTDOWN_BATCH_MAX);
 
+  const batchRows = (memberId: string) =>
+    batch.map((row) => {
+      const placement = placementFor(row, memberId);
+      const project = placement === undefined ? undefined : projectFor(row, placement);
+      return {
+        thread: row.thread,
+        ...(project === undefined ? {} : { destinationProjectId: project }),
+        timing:
+          choices.get(rowKey(row.thread)) === "move-after-turn"
+            ? ("after-turn" as const)
+            : ("now" as const),
+      };
+    });
+
+  const running = (threads: ReadonlyArray<MovedThreadReference>, cutoff: number) => {
+    setChosen(threads);
+    setStartedAt(cutoff);
+    setLeftOver(moving.length - batch.length);
+    batchUnsettled.current = true;
+    setPhase("running");
+  };
+
+  // A phone on the destination's owner list unlocks there itself; this
+  // computer holds the batch until the phone hands it the ticket.
+  const startOnPhone = async () => {
+    if (member === undefined || batch.length === 0) return;
+    setWorking(true);
+    setProblem(undefined);
+    try {
+      const cutoff = Date.now() - 1_000;
+      const asked = await props.client.shutdownAskPhone({
+        destinationMemberId: member.memberId,
+        rows: batchRows(String(member.memberId)),
+      });
+      if (asked.status === "refused") {
+        setProblem("The batch couldn't wait for your phone. Nothing moved.");
+        return;
+      }
+      running(
+        batch.map((row) => row.thread),
+        cutoff,
+      );
+    } catch {
+      setProblem("This computer could not ask your phone.");
+    } finally {
+      setWorking(false);
+    }
+  };
+
   const start = async () => {
     if (props.unlock === undefined || member === undefined || batch.length === 0) return;
     setWorking(true);
@@ -191,7 +240,7 @@ export function PrepareToShutDownDialog(props: PrepareToShutDownDialogProps) {
       if (asked.status !== "challenge") {
         setProblem(
           asked.kind === "unlock-required"
-            ? `This Mac isn't an owner on ${member.name}. Mark it as an owner there in Settings › Remote access › Hub.`
+            ? `This Mac isn't an owner on ${member.name}. Mark it as an owner there in Settings › Remote access › Hub, or confirm on a phone that is an owner there.`
             : asked.kind === "destination-unreachable"
               ? `${member.name} couldn't be reached.`
               : `${member.name} doesn't accept moved threads from this computer.`,
@@ -209,26 +258,14 @@ export function PrepareToShutDownDialog(props: PrepareToShutDownDialogProps) {
       const cutoff = Date.now() - 1_000;
       const started = await props.client.shutdownStart({
         destinationMemberId: member.memberId,
-        rows: batch.map((row) => {
-          const placement = placementFor(row, String(member.memberId));
-          const project = placement === undefined ? undefined : projectFor(row, placement);
-          return {
-            thread: row.thread,
-            ...(project === undefined ? {} : { destinationProjectId: project }),
-            timing: choices.get(rowKey(row.thread)) === "move-after-turn" ? "after-turn" : "now",
-          };
-        }),
+        rows: batchRows(String(member.memberId)),
         unlock: { challengeId: asked.challenge.challengeId, signature: signed.signature },
       });
       if (started.status === "refused") {
         setProblem("The batch couldn't start. Nothing moved.");
         return;
       }
-      setChosen(threads);
-      setStartedAt(cutoff);
-      setLeftOver(moving.length - batch.length);
-      batchUnsettled.current = true;
-      setPhase("running");
+      running(threads, cutoff);
     } catch {
       setProblem("This computer could not start the moves.");
     } finally {
@@ -426,15 +463,34 @@ export function PrepareToShutDownDialog(props: PrepareToShutDownDialogProps) {
               <OctantButton onClick={props.onClose} variant="ghost">
                 Cancel
               </OctantButton>
-              <OctantButton
-                disabled={props.unlock === undefined || batch.length === 0 || working}
-                onClick={() => void start()}
-                ref={primary}
-              >
-                {batch.length === 1
-                  ? "Move 1 thread with Touch ID"
-                  : `Move ${String(batch.length)} threads with Touch ID`}
-              </OctantButton>
+              {props.unlock === undefined ? (
+                <OctantButton
+                  disabled={batch.length === 0 || working}
+                  onClick={() => void startOnPhone()}
+                  ref={primary}
+                >
+                  Confirm on your phone
+                </OctantButton>
+              ) : (
+                <>
+                  <OctantButton
+                    disabled={batch.length === 0 || working}
+                    onClick={() => void startOnPhone()}
+                    variant="outline"
+                  >
+                    Confirm on your phone
+                  </OctantButton>
+                  <OctantButton
+                    disabled={batch.length === 0 || working}
+                    onClick={() => void start()}
+                    ref={primary}
+                  >
+                    {batch.length === 1
+                      ? "Move 1 thread with Touch ID"
+                      : `Move ${String(batch.length)} threads with Touch ID`}
+                  </OctantButton>
+                </>
+              )}
             </>
           )}
         </div>
@@ -593,7 +649,12 @@ function settledState(
   status: ThreadMoveThreadStatus | undefined,
   startedAt: number,
 ): "moved" | "failed" | "stayed" | "running" {
-  if (status === undefined || status.sending !== undefined || status.waiting !== undefined) {
+  if (
+    status === undefined ||
+    status.sending !== undefined ||
+    status.waiting !== undefined ||
+    status.waitingForPhone !== undefined
+  ) {
     return "running";
   }
 
@@ -621,6 +682,7 @@ function runningWord(
   if (state === "failed") return "Can't move";
   if (state === "stayed") return "Stays here";
   if (status?.waiting !== undefined) return "After this turn";
+  if (status?.waitingForPhone !== undefined) return "Waiting for your phone";
   if (status?.sending !== undefined) {
     const { bytesSent, bytesTotal } = status.sending;
     const percent = bytesTotal === 0 ? 0 : Math.min(99, Math.floor((bytesSent / bytesTotal) * 100));

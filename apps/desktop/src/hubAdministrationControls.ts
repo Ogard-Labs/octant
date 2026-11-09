@@ -40,9 +40,11 @@ import {
   decodeHandoverControlRequest,
   decodeHandoverRequest,
   decodeShutdownChallengeRequest,
+  decodeShutdownPhoneAskRequest,
   decodeShutdownStartRequest,
   decodeThreadMoveChallengeRequest,
   decodeThreadMoveControlRequest,
+  decodeThreadMovePhoneAskRequest,
   decodeThreadMoveStartRequest,
   decodeThreadMoveThreadRequest,
 } from "@octant/contracts";
@@ -264,6 +266,11 @@ export const HUB_ADMINISTRATION_OPERATIONS = {
     path: "/api/desktop/hub/thread-moves/start",
     decodeBody: decodeThreadMoveStartRequest,
   },
+  "thread-move-phone-ask": {
+    method: "POST",
+    path: "/api/desktop/hub/thread-moves/phone-ask",
+    decodeBody: decodeThreadMovePhoneAskRequest,
+  },
   "thread-move-status": {
     method: "POST",
     path: "/api/desktop/hub/thread-moves/status",
@@ -310,6 +317,11 @@ export const HUB_ADMINISTRATION_OPERATIONS = {
     method: "POST",
     path: "/api/desktop/hub/thread-moves/shutdown/start",
     decodeBody: decodeShutdownStartRequest,
+  },
+  "shutdown-phone-ask": {
+    method: "POST",
+    path: "/api/desktop/hub/thread-moves/shutdown/phone-ask",
+    decodeBody: decodeShutdownPhoneAskRequest,
   },
   // A Code thread that cannot move hands over through its branch.
   "handover-preview": {
