@@ -2052,17 +2052,31 @@ this is how it looks.
   with "Moving" as its reason. The Computer row's pill reads Moving with the
   percentage, and the title row's environment mark carries a small arrow
   badge. Assistive technology hears the start, every quarter, and the end
-  through one polite live region, never each chunk.
+  through one polite live region, never each chunk. The same bar, without the
+  progress line, holds the composer's place whenever something else holds the
+  thread: "Moving to" the member "after this turn" with **Don't move** (a
+  message sent then would start another turn and keep the move waiting),
+  "Handed over on" the branch in mono with **Take back here**, and on the
+  destination "Arriving from" the member, with **Activate anyway** once it is
+  offered. A failed move holds nothing, so its composer returns.
 - **Moved.** On `committed` the pane becomes the tombstone: the source and
   destination route line, "Moved to" and the member's name with the time, and
   **Open there**, which opens the thread on that host in this window when the
-  window already reads that host, and copies its link otherwise. The thread's
+  window already reads that host, and copies its link otherwise (for now it
+  always copies the link, in the form an Octant phone opens, and says "Link
+  copied" under the button). The thread's
   sidebar row leaves this host's list; a window that reads both hosts shows it
   under the destination with the cloud glyph, so it appears to travel rather
   than vanish. One notification says the move finished. When the worktree was
   kept, the tombstone adds one row under the route line: the files that stayed
-  with it, and **Remove worktree** as a quiet button that asks once before
-  removing it.
+  with it in mono (the first 200, then "and" the rest counted), the folder,
+  and **Remove worktree** as a quiet button that asks once before removing
+  it, saying the files have no other copy and that the branch and its remote
+  stay. Once removed, the row says so in one sentence. Opening the moved
+  thread again after its pane closed (an old link, a notification, or a
+  search) opens the same tombstone in the active pane without changing the
+  window's Project; a window that cannot read this computer's moves (a remote
+  client) shows the pane without the tombstone.
 - **This thread can't move.** A failed move unfreezes the composer and puts an
   inline notice above it and in the Computer row's open content: the title
   "This thread can't move", the reason in one sentence, and its recovery as

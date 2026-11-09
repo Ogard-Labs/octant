@@ -428,6 +428,12 @@ export function startOctantServer(
       windowAuthorityStore,
       workThreadProjection,
     });
+    // Which threads a move holds is shared by every mode's service and the
+    // move routes, and rebuilt from the saved moves so a restart keeps them
+    // held. The shell reads its departures too, to open a moved thread's
+    // tombstone. Moves keep their state in the host's data folder.
+    const threadMoveState = createThreadMoveStateStore(persistence.dataDirectory);
+    const threadMoveHolds = createThreadMoveHolds(heldThreadsOf(threadMoveState.load()));
     const {
       authorizeWorkThreadForWindow,
       codeBoardPlanProgressSource,
@@ -467,6 +473,7 @@ export function startOctantServer(
       persistence,
       providerRuntimeRegistry,
       spendCeilingHolder,
+      threadMoveState,
       windowAuthorityStore,
       workThreadProjection,
     });
@@ -548,10 +555,6 @@ export function startOctantServer(
       windowAuthorityStore,
       workThreadProjection,
     });
-    // Which threads a move holds is shared by every mode's service and the
-    // move routes, and rebuilt from the saved moves so a restart keeps them held.
-    const threadMoveState = createThreadMoveStateStore(providerDataDirectory);
-    const threadMoveHolds = createThreadMoveHolds(heldThreadsOf(threadMoveState.load()));
     const {
       readHarnessProcessReceipts,
       beginGoogleCliChange,

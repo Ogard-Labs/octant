@@ -93,6 +93,7 @@ function fakeClient(input: {
       dismissed.push(thread.threadId);
       status = { status: "read" };
     },
+    removeKeptWorktree: async () => ({ status: "removed" }),
     sizes:
       input.sizes ??
       (async (_memberId, threads) => ({

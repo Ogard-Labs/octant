@@ -10,6 +10,7 @@ import {
   decodeChatThreadId,
   decodeCodeThreadId,
   decodeImageGenerationScopeId,
+  decodeWindowId,
   decodeProjectId,
   decodeThreadMessageQueueScope,
   decodeWorkThreadId,
@@ -101,6 +102,9 @@ import type { ManagedWorktreeReceiptStore } from "../code/managedWorktreeReceipt
 import type { LiveTurnRegistry } from "../liveTurn/liveTurnRegistry";
 import type { ThreadMoveHolds } from "../hub/threadMoveHolds";
 import { createThreadMoveJournal } from "../hub/threadMoveJournal";
+import { KeptWorktreeRemoval } from "../hub/keptWorktreeRemoval";
+import { removeMovedOutWorktree } from "../hub/codeThreadMoveGit";
+import { windowShowsDepartedThread } from "../hub/departedThreadWindow";
 import { createThreadMoveRouteHandler } from "../hub/threadMoveRoutes";
 import { createThreadMoveAdministrationRouteHandler } from "../hub/threadMoveAdministrationRoutes";
 import { ThreadMoveService } from "../hub/threadMoveService";
@@ -1610,6 +1614,18 @@ export function wireRemote(deps: RemoteDependencies) {
     handovers: threadHandovers,
     exchange: handoverExchange,
     state: deps.threadMoveState,
+    keptWorktrees: new KeptWorktreeRemoval({
+      state: deps.threadMoveState,
+      record: threadMoveJournal,
+      removeWorktree: removeMovedOutWorktree,
+      clock: () => new Date().toISOString(),
+    }),
+    // The thread was erased here, so only its pane can show this window
+    // holds it: the pane naming it, in a mode this window reads on this host.
+    authorizeDepartedThread: ({ thread, windowId }) => {
+      const workspace = persistence.readWindowWorkspace(decodeWindowId(windowId))?.workspace;
+      return workspace !== undefined && windowShowsDepartedThread(workspace, thread);
+    },
     authorizeThread: ({ thread, windowId }) =>
       authorizeAgentRunParentThread({
         persistence,

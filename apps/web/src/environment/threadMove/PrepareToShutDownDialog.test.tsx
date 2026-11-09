@@ -155,6 +155,7 @@ function fakeClient(
     takeBack: async () => {},
     activate: async () => true,
     dismiss: async () => {},
+    removeKeptWorktree: async () => ({ status: "removed" }),
     sizes: async () => ({
       status: "read",
       rate: { basis: "assumed", bytesPerSecond: 1_048_576 },

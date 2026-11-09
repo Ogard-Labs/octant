@@ -17,10 +17,12 @@ import {
   ThreadMoveStarted,
   ThreadMovedIn,
   ThreadMovedOut,
+  ThreadMovedOutWorktreeRemoved,
   UtcTimestamp,
   type HandoverAgentSummary,
   type HandoverId,
   type MovedThreadReference,
+  type ThreadMoveId,
 } from "@octant/contracts";
 import { Schema } from "effect";
 import type { EventRegistry } from "../persistence/eventRegistry";
@@ -37,7 +39,8 @@ export function registerThreadMoveEvents(registry: EventRegistry): EventRegistry
     .register(THREAD_MOVE_EVENT_NAMES.moveCommitted, 1, ThreadMoveCommittedEvent)
     .register(THREAD_MOVE_EVENT_NAMES.movedOut, 1, ThreadMovedOut)
     .register(THREAD_MOVE_EVENT_NAMES.moveFailed, 1, ThreadMoveFailed)
-    .register(THREAD_MOVE_EVENT_NAMES.handoverStarted, 1, ThreadHandoverStarted);
+    .register(THREAD_MOVE_EVENT_NAMES.handoverStarted, 1, ThreadHandoverStarted)
+    .register(THREAD_MOVE_EVENT_NAMES.keptWorktreeRemoved, 1, ThreadMovedOutWorktreeRemoved);
 }
 
 const decodeActorId = Schema.decodeUnknownSync(ActorId);
@@ -63,7 +66,7 @@ export interface ThreadMoveJournalOptions {
  */
 export function createThreadMoveJournal(
   options: ThreadMoveJournalOptions,
-): ThreadMoveRecorder & ThreadHandoverRecorder {
+): ThreadMoveRecorder & ThreadHandoverRecorder & KeptWorktreeRecorder {
   const selectHead = options.connection.prepare(
     `SELECT aggregate_version FROM aggregate_heads WHERE aggregate_type = ? AND aggregate_id = ?`,
   );
@@ -120,6 +123,11 @@ export function createThreadMoveJournal(
         ...input,
         startedAt: now(),
       }),
+    keptWorktreeRemoved: (input) =>
+      append(String(input.moveId), THREAD_MOVE_EVENT_NAMES.keptWorktreeRemoved, {
+        ...input,
+        removedAt: now(),
+      }),
   };
 }
 
@@ -130,5 +138,14 @@ export interface ThreadHandoverRecorder {
     readonly thread: MovedThreadReference;
     readonly branch: string;
     readonly agentSummary?: HandoverAgentSummary;
+  }) => void;
+}
+
+/** A person removed the worktree a moved-out thread left behind. */
+export interface KeptWorktreeRecorder {
+  readonly keptWorktreeRemoved: (input: {
+    readonly moveId: ThreadMoveId;
+    readonly thread: MovedThreadReference;
+    readonly worktree: string;
   }) => void;
 }
