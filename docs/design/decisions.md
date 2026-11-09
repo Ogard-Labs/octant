@@ -1274,6 +1274,7 @@ Direct-endpoint providers run under the native harness, which owns the agent loo
 
 - A local model endpoint must be a loopback origin, and every request names its context window.
 - A model is offered Octant's tools only after a person ran Verify tools on that model. Only the host-run command writes the record, and a tool call in a turn widens nothing.
+- GPT-6 Luna function-tool requests through Chat Completions use its supported `none` reasoning mode, for both verification and real turns. Other models and plain-text requests keep their defaults.
 - The conversation is journaled step by step. Resume closes interrupted calls as safe or unsafe to replay, and nothing is silently re-run.
 - When a request outgrows the endpoint, the loop first compacts earlier turns tool-less on the session's own endpoint, then trims. The lead can read cut exchanges back through a read-only journal lookup.
 - Every lead request ends with a note from Octant on how full the window is, worked out the same way as the compaction point. The note is never kept in the conversation, so the cached prefix holds. With automatic compaction off the note still shows the fill and says Octant summarizes only when a request no longer fits. A model whose window nothing names, or a turn on a fallback model, gets no figure.
