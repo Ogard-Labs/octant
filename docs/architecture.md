@@ -599,6 +599,15 @@ fetch sends the proof-bound session cookie explicitly and disables the shared
 cookie jar to prevent duplicate or stale cookies. Browser cookie ownership is
 unchanged, and native remote requests refuse redirects.
 
+The public offline demo is available from the unpaired entry screen before the
+normal vault and live-session tree. A startup host-catalogue read preserves the
+usual vault route for already paired phones. Demo hosts, keys, preferences and
+interactions stay in memory and use only the existing mock transport; recording,
+file capture, pairing, owner recovery and native settings are not offered.
+Deep-link capture and live transport ownership do not mount in that branch.
+Leaving the demo discards its sample state and returns to the explicit connection
+choice. This is review preparation, not evidence of native or store acceptance.
+
 Its background shares the desktop's three Gradient pictures and Pixelate/Dither
 print effect (Appearance › Background), drawn once through a GL shader that
 uses the same ordered threshold.
@@ -1611,7 +1620,10 @@ shared SSH connection per server; and a thread's own worktree, made with Git on 
 pull request, opened by repository and branch name. A Work Project may be
 bound there too, in the same catalog: its Work threads run on the Octant
 Harness with file tools and commands on the server under the same rules, opened from the
-Work sidebar and composer. Not built: Work Files, research sources, the status
+Work sidebar and composer. A local window's Work Files panel lists names and
+sizes on the server with explicit Refresh and inert rows, without previews,
+editing, watching, or output attribution. Not built: Work file previews and
+editing, research sources, the status
 file and due dates, and the Project terminal for a Work Project on a server;
 extra folders; saved Project actions; a Project-level guardrail level or
 reviewer. It is tested only against a throwaway local `sshd`, never a real
@@ -13020,6 +13032,21 @@ approval-gated` command that undoes it. The terminal shows no one-time
     certificate's SubjectPublicKeyInfo, not of its PEM text. It is shown in
     Settings and by `octant listener` for the person to compare, and no
     client pins it.
+- **Desktop identity controls.** The desktop-owned native signing service is
+  separate from the listener/member P-256 identity above, the roster signer,
+  owner-presence unlock and the profile/control UUID. It keeps a random
+  32-byte secret in the native store and returns only SHA-256 of those raw
+  bytes as a lowercase fingerprint, or a base64 HMAC-SHA256 over the exact
+  caller payload. Its production API has ensure, sign, explicit rotation and
+  recovery state; it never exports or imports the key. Local owned-window
+  status/rotation/recovery IPC uses this service. A failed store/helper leaves
+  this identity recovery-only while the local desktop remains usable. The
+  expected fingerprint parameter proves only a former Mac singleton's legacy
+  migration; it does not pin the currently scoped key or authorize adopting a
+  Windows legacy target. macOS uses the Keychain helper; the existing Linux
+  desktop path has no native implementation of this separate service.
+  Windows' internal prerequisite and its admission limits are specified in the
+  [Current Release Boundary](#current-release-boundary).
 - **Listener certificate.** The listener serves a certificate and key the
   person pastes exactly as given, or, when enabled with neither (the
   administration route without PEMs, or `octant listener enable` without
@@ -13132,8 +13159,8 @@ approval-gated` command that undoes it. The terminal shows no one-time
     accepts.
     - **What a client keeps.** Each origin's pairing record (the device key's
       metadata and the client host registry) holds that origin's trust:
-      `platform`, or `pinned` with a `sha256-` pin taken only from a pairing
-      code. A record from before pins, or for a pasted certificate, holds
+      `platform`, or `pinned` with a `sha256-` pin taken from a pairing
+      code or an old-key-signed listener transition. A record from before pins, or for a pasted certificate, holds
       `platform`. A stored trust that cannot be read is never read as a
       weaker one: the device-key record stops resolving, so the device pairs
       again, and the host registry refuses to load. Replacing the device key
@@ -13160,9 +13187,51 @@ approval-gated` command that undoes it. The terminal shows no one-time
       the end of its window. Until then either trust passes, and the first
       connection that passes only the staged one makes it current and drops
       the old; after it, only the current trust passes. A window ending more
-      than 30 days after the client's now is ignored, since the host never
-      announces a longer one. Nothing records a staged trust yet: the host's
-      announcement route is planned.
+      than seven days after the client's now is ignored. Preparation fixes
+      the absolute deadline; activation never extends it. A device that has
+      promoted the new pin keeps it after that deadline. A device that missed
+      the announcement or failed to promote before expiry refuses the new
+      pin and needs explicit re-pairing from the host; there is no fallback or
+      trust on first use.
+    - **Explicit key transition.** For an enabled self-made listener,
+      `octant listener prepare-key` generates a new P-256 key without changing
+      the serving key. The old TLS key signs a domain-separated payload
+      containing the host id, exact HTTPS origin, old and new SPKI pins, old
+      public key, preparation time and an expiry exactly seven days later.
+      The private stage is written atomically, owner-only under `remote/`,
+      before it is announced. Only the public signed envelope appears in local
+      status and the `x-octant-listener-transition` header of a successful
+      `GET /api/remote/hello`. The CLI displays both pins and the window.
+      Reconnect each paired app during preparation so it durably records the
+      signed stage under its old pinned TLS connection. Clients validate the
+      old public key against the recorded pin, the signature, origin, known
+      host id and seven-day interval; response headers from proxied product
+      routes cannot introduce or withdraw a stage.
+      Before a phone request under staged trust, a handshake-only exchange sends
+      zero HTTP bytes, rechecks expiry and persists promotion. The request's
+      separate handshake accepts only that proved key, so a storage failure,
+      expired stage or key change between handshakes cannot release HTTP bytes.
+      `octant listener activate-key --pin <prepared-new-pin>` rechecks that
+      exact prepared key and deadline, durably replaces the TLS key, then uses
+      the normal listener restart and session invalidation. A lost response
+      is checked with `octant listener status`, never followed by a new
+      preparation or automatic retry. A failed restart can be recovered by
+      explicitly enabling the same listener again; certificate renewal uses
+      the already selected key. Host identity and device registrations do not
+      change. Desktop main and phone secure storage persist staging and
+      promotion without allowing an in-flight response to resurrect a
+      forgotten pairing or replace newer registration facts.
+      `octant listener cancel-key` withdraws an unactivated stage while keeping
+      the old key. Connected apps remove it on their next trusted hello;
+      offline copies cannot be recalled and expire at the original deadline.
+      Cancellation cannot revert an activated key. No command silently rotates
+      a live key on startup, renewal or ordinary reconnect.
+      Activation is refused while this computer is an enabled hub or joined
+      spoke: signed roster pins retain their separate authority. Disable the
+      hub role and leave the hub before activation, then explicitly rejoin
+      affected members with the new key. Turning a hub role back on is not a
+      client trust migration; existing peers cannot fetch a new roster through
+      an unknown pin. A roster transition protocol remains unbuilt.
     - **Copy.** A pin mismatch says "This isn't the computer you paired with:
       its security key has changed. Octant stopped before sending anything.
       If its key was replaced on purpose, pair again from that computer."; a
@@ -14405,6 +14474,112 @@ cards; general Azure CLI credentials remain unavailable by design.
   device. The journal holds changes, not the list, so a group a later Octant
   adds is protected on every host. Changes reach every launch prepared after
   them.
+- **Linux access-time mediation is not yet shipped.** Existing Bubblewrap
+  file covers are prepared at launch; they do not enforce the complete rule
+  for absent files or later companion/alias changes. The replacement must use
+  the original structured rules and exact own-account exceptions, preserve live
+  permitted files, durable writes, real hardlinks and native notifications, and
+  leave Full access unchanged. Modern pre-access hooks cover new mappings as
+  well as reads, but the measured stock listener permits unanswered and future
+  reads after its group closes. Its lifecycle cannot be a fail-closed guard.
+  An original credential-bound kernel admission core is being built only in an
+  owned networkless disposable guest. It has finite requests, one-use enrollment
+  after `no_new_privs`, and broker-loss refusal; its production coverage remains
+  zero. Complete namespace and pre-effect mutation ordering, effective policy,
+  aliases and process/data routes, the production launch and native compatibility
+  proof remain required before any production integration. No live kernel,
+  driver, boot configuration or installed host policy changes as part of this
+  development path. Prior admitted operations and mappings need not be erased.
+  A mediated workload must not weaken that live policy by destructively moving
+  or removing a current companion or ancestor when doing so would declassify
+  still-existing protected content. The pre-effect admission binds the actual
+  operation, source, destination and current namespace epoch. This adds no
+  content denial for public keys: their reads/writes, new public-key creation,
+  unrelated aliases and legitimate permitted namespace operations remain
+  available. Host/unconfined changes and Full access retain their normal
+  behavior. There is no sticky per-launch protection floor and no freeze of
+  external writers while userspace inspects metadata. An own-account exception
+  retains its initially enrolled lexical/canonical forms; replacing that path
+  with a link never transfers the exception to a different sign-in.
+  Audited creation entries prepare the actual parent, copied name and any
+  held hardlink source before inode locks. A task/context-bound one-use scope
+  compares those identities and the current epoch immediately before the
+  filesystem effect; every return and delegation retry retires it. Filesystem
+  Unix socket binding follows the same rule. Its failed-bind rollback obtains
+  a fresh UNLINK decision outside the parent lock, then revalidates the exact
+  created socket before removal. It never removes a replacement. Only that
+  rollback may wait through a pending signal, within the existing two-second
+  admission ceiling, so ordinary interruption need not strand its own new
+  node. Broker loss, policy refusal and changed identity or epoch still refuse;
+  unused approval is discarded. Other admission waits remain interruptible.
+  The disposable candidate's owned session prepares the unchanged shared
+  Bubblewrap builder in a separate trusted worker, carrying the exact protected
+  file configuration and structured policy. Real ABI/status and a policy
+  snapshot precede command creation; a second barrier holds exec until the
+  command's actual PID/birth receipt is durable. Private control descriptors
+  never become command stdio. Input, output and error streams use bounded
+  backpressure, with no normal-output drain timeout shorter than the caller's
+  deadline. Closed input refuses before dispatch; an accepted write that loses
+  its pipe reports uncertainty and is never replayed. Preparation shares the
+  caller's finite deadline, capped at this candidate's existing 180 seconds.
+  Cancellation or owner-channel loss closes admission before owned group
+  cleanup. Cleanup has its own four-second bound and reports uncertainty for
+  unconfirmed identities, groups or pipe retirement; relay exit alone is not
+  proof that every descendant joined. The existing canonical owner-only
+  receipt directory is denied read/write by the actual capsule. This port is
+  not selected by production launchers, the device remains root-only, and
+  complete eligible-host lifecycle, data-route and controller reliability
+  acceptance remains required with production coverage zero.
+  Metadata mediation includes a protected symlink's own inode and its followed
+  target; a dangling protected link still has link text and metadata. Blocking
+  preparation belongs before inode locks, under one paired user-operation
+  scope. The final LSM check only compares the actual native identity,
+  operation, live context and current epoch and consumes that scope's decision.
+  Every return clears unused state, and fork, clone and exec inherit none.
+  An unprepared path in the current restricted context refuses until its compatibility is proved; a
+  callback never waits for broker metadata while holding an inode lock.
+  The disposable candidate covers ordinary mode, owner, timestamp and truncate
+  requests at their four pinned entries: preparation precedes the inode lock,
+  and the final write comparison immediately precedes `notify_change`.
+  Delegation retries end the consumed scope before waiting and prepare a fresh
+  attempt. Early refusal retains mount-write and automatic-scope cleanup.
+  Ordinary filesystem-attribute writes prepare in the three audited user
+  entry points: `ioctl_setflags`, `ioctl_fssetxattr` and `file_setattr`. Each
+  uses its actual held file or resolved path after copying values and acquiring
+  mount-write access. Its automatic scope ends before mount-write cleanup,
+  including on refusal. The common setter only compares the decision after
+  the existing security check, immediately before the filesystem effect under
+  the inode lock; it never prepares or waits. Ordinary attribute reads prepare
+  READ in `ioctl_getflags`, `ioctl_fsgetxattr` and `file_getattr`, using their
+  actual held file or resolved path. Their scopes end before copying the
+  admitted result to userspace. The exported getter consumes only an exact READ
+  decision. Only the setter's private internal getter inspects its exact
+  prepared WRITE without consuming it; the final setter consumes once. Both
+  retain native checks and perform no broker I/O. The private purpose is not
+  caller-selectable, and an ordinary read cannot borrow WRITE authority. Failed
+  inspection exits through unlock and outer cleanup, without retry or reuse.
+  Native acceptance requires refusing a protected held attribute read with its
+  output unchanged, and refusing the protected inode's NODUMP
+  change with flags and metadata unchanged while the public file's same toggle,
+  readback, restoration and permitted writes succeed.
+  The bounded ordinary ioctl-read correction covers `FIONREAD` and `FIOQSIZE`
+  on regular file descriptors through the native and conditional compat LSM
+  entries before copyout. Protected observations require pre-effect EACCES with
+  output sentinels unchanged; public files, pipes and sockets retain their
+  permitted observations. Actual native and compat acceptance for this added
+  correction remains pending; it is not a generic ioctl framework.
+  This is not a global `inode_setattr` or ioctl guard. Other attribute routes,
+  internal privilege clearing during writes, other filesystem ioctls, stacked
+  filesystems and kernel credential overrides remain unfinished and must be
+  proved before any production coverage is enabled;
+  the candidate's production coverage remains zero. A global callback without
+  their pre-lock lifetimes would break permitted writes or wait under locks.
+  _Rationale._ Otherwise deleting a readable `name.pub` marker could make its
+  still-existing custom-named private key readable. Retaining all former secret
+  inodes forever would instead reject legitimate host changes and require
+  additional inode-lifetime state. Operation-specific namespace admission keeps
+  the live policy without either shortcut. Complete implementation and native
+  proof of this boundary remain required above.
 - **Work goes through the channel instead of the file.** SSH through the
   agent socket in `SSH_AUTH_SOCK`, a password manager's SSH agent included;
   Git over HTTPS through the system credential helper, which reaches the
@@ -15243,6 +15418,63 @@ unavailable until an approved Windows confinement design is documented: the conf
 supports only macOS and Linux and refuses every other platform, so Work and
 Code fail closed there. Simulator, the Apple workbench, and vibrancy stay
 macOS-only.
+
+The Windows credential building block uses an Octant native helper
+with `CredWriteW`, `CredReadW` and `CredDeleteW`, never a secret in `cmdkey`
+arguments or a PowerShell script. A generic credential's protected blob holds
+one UTF-8 value, at most 2,560 bytes; an empty, malformed or oversized value is
+refused before mutation. The broker's 12 KiB transport bound for other
+backends is unchanged. There is no truncation, chunking, attribute spill or
+file fallback. Targets use closed fixed-purpose namespaces, the host's store-scope
+UUID and the existing Octant or Nightly-test-data service family; no unscoped legacy target is read, copied or deleted
+implicitly. Secrets cross only bounded private child-process pipes, never
+arguments, environment variables, diagnostics or journal entries. Calls use a
+fixed absolute local helper path, an empty environment, a five-second operation
+deadline and joined owned-process cleanup. The standard Windows vault protects
+the user's account; it does not promise isolation from other programs running
+as that same account.
+
+The desktop backend supplies seven distinct auxiliary stores: replica device
+keys, replica-store credentials, Canvas public-share secrets, MCP-server
+credentials, desktop-provider credentials, push-platform credentials and SSH
+keys. Their fixed purpose prefixes cannot reach provider targets or one another,
+including when the same UUID is used. All purposes use the same atomic blob cap;
+a larger auxiliary value is refused without modifying the stored value. There
+is no separate overflow store. The private frame is versioned; an unknown
+version or purpose is refused before any native credential operation. Existing
+provider target names are unchanged; no migration is implied.
+
+Native vault operations serialize across helper processes with one fixed
+user-SID-derived global mutex shared by all eight purposes, families and stores.
+The native token supplies the SID, never a caller or environment path. Both new
+and existing objects require that User owner and exactly User plus SYSTEM access,
+with a protected DACL. Coordination waits at most three seconds inside the
+existing five-second adapter deadline. Unsafe, blocked or abandoned coordination
+refuses as unavailable before any vault operation; no mutation is retried. Owned
+mutex handles are released on every return or by the OS on process death. This
+boundary preserves concurrent callers: native Windows Server 2025 acceptance
+observed parallel deletes reporting success while some owned entries remained
+present; ordered fixture cleanup alone did not satisfy that contract.
+
+A separate desktop HMAC identity protocol uses the same fixed native helper
+and per-user serialization, but a closed `desktop-host-identity` namespace
+outside every generic provider/auxiliary purpose. Native CNG generates its
+32-byte raw key (well below the 2,560-byte blob cap), hashes it with SHA-256 and
+signs with HMAC-SHA256; only the public fingerprint and MAC leave native code.
+A malformed existing blob refuses ensure/sign without replacing it; explicit
+rotation intentionally recovers it with one atomic replacement. No production
+operation imports, exports or deletes the key, and no unscoped or other
+namespace is read or migrated. Its existing normalized request bound remains
+16 KiB; the blob cap does not restrict sign payloads to 2,560 bytes. A fixed
+Windows executor uses empty arguments/environment and a five-second joined
+operation lifetime. Missing helper configuration stays recovery-only. macOS
+behavior and the existing Linux recovery-only path are unchanged.
+
+These native building blocks do not admit a Windows host or Chat, package
+a Windows app, supply server/member/roster P-256 identity or owner-presence unlock. A missing trusted helper leaves the store unavailable. Native CI
+exercises synthetic targets on an ephemeral Windows runner; real Windows host
+ownership, private runtime paths and lifecycle remain separate prerequisites.
+Work and Code remain refused until their native confinement boundary is proven.
 
 **Updates** (`apps/desktop/src/appUpdateService.ts`, `appUpdateFeed.ts`,
 `packages/domain` `appUpdatePolicy`):

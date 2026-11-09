@@ -1,3 +1,4 @@
+import { requestThreadControl } from "../composer/threadControlNavigation";
 import {
   decodeProviderInstance,
   decodeProviderInstanceId,
@@ -39,6 +40,18 @@ describe("ComposerModelPicker", () => {
     localStorage.clear();
   });
 
+  it("opens the requested task's existing picker without selecting or granting anything", async () => {
+    const onSelect = vi.fn();
+    requestThreadControl("browser-owner", "provider");
+    const other = render(
+      <ComposerModelPicker threadId="other-task" groups={groups()} onSelect={onSelect} />,
+    );
+    expect(screen.queryByRole("dialog")).toBeNull();
+    other.unmount();
+    render(<ComposerModelPicker threadId="browser-owner" groups={groups()} onSelect={onSelect} />);
+    expect(await screen.findByRole("dialog", { name: "Choose provider and model" })).toBeVisible();
+    expect(onSelect).not.toHaveBeenCalled();
+  });
   it("restores reasoning on a new draft only for the exact model's supported levels", () => {
     const selection = { providerInstanceId: providerA, modelId: modelOne };
     const source = groups().map((group) => ({

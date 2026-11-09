@@ -12,6 +12,20 @@ device passes; a public App Store listing stays deferred.
 
 ## Push notifications
 
+Native Android changes also run the **Mobile (Android native modules)** workflow.
+It generates the Android project from the pinned Expo template and compiles the
+device-protection, pinned-TLS and push module release Kotlin targets without
+signing, a Firebase project or an Expo account. To run that compile locally:
+
+```sh
+node ../../node_modules/expo/bin/cli prebuild --platform android --no-install --skip-dependency-update react,react-native,expo,react-native-web
+cd android
+./gradlew --no-daemon --max-workers=2 :octant-device-protection:compileReleaseKotlin :octant-pinned-tls:compileReleaseKotlin :octant-push:compileReleaseKotlin
+```
+
+Run these commands from `apps/mobile`. This is compilation evidence, not an
+installed app or device acceptance pass.
+
 A paired computer can notify this phone when a thread finishes, fails, waits, or
 needs an approval. The spec is
 [Mobile maturity](../../docs/design/mobile-maturity.md#phase-c-host-originated-push);
@@ -85,6 +99,14 @@ Rebuild the native app after changing native dependencies.
 Native startup installs WebCrypto before the session code loads. The iOS 27
 scene lifecycle is enabled through `expo-build-properties` on Expo SDK 57.0.24
 or newer. The browser mock keeps its browser-provided crypto.
+
+The **Mobile (iOS offline native acceptance)** workflow builds a Release app
+and exercises public offline entry, a sample reply, foreground return and reset
+on a task-owned Simulator, then repeats entry/reply with larger system text.
+Its XCTest target is added only to the generated native project. It uses no
+store signing, account or paired computer, and retains screenshot protection.
+The job publishes test receipts and cleans up its own Simulator. This does not
+replace physical-device, paired-vault, push or store acceptance.
 
 For a live connection, enable **Settings → Remote access** on the Octant host
 with a private HTTPS address and a certificate trusted by the device. Both

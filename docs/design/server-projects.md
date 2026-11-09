@@ -367,16 +367,31 @@ host key. A future structured diagnostic must preserve those trust boundaries.
   Octant Harness) is refused before it starts, and a call that cannot reach
   the server runs nothing anywhere.
 - **Windows.** A window binds a server Work Project, and its threads, with no
-  folder of this host (`boundRoot: null`), so Work Files, Browser, and every
-  root-backed Work surface fail closed for it.
+  folder of this host (`boundRoot: null`). Its Files panel reads only server
+  metadata through the bound server connection; Browser and other surfaces
+  that need a folder of this host stay unavailable.
+- **Files.** The local window admitted to an active Work thread can list names
+  and byte sizes in that thread's exact server Project folder. Refresh reads
+  again; there is no watcher, preview, download, reveal, editing, or attribution
+  of files to Work output. Rows stay inert. The listing uses the same resolved
+  root and protected-path checks as server Code files, skips links and hidden
+  entries, and is capped at 1,000 entries and eight levels below the requested
+  folder, with an incomplete notice when bounded output is truncated. Sizes
+  come from the server's GNU or BSD `stat`, without reading file contents.
+  Missing metadata makes the list incomplete. Cancellation, loss of the
+  connection, removal of the server or Project, rebinding, or loss of the
+  window's access withholds the result; no local folder is tried instead. The
+  binding, registry and window authority are checked again after the remote
+  read. Paired-device callers are refused.
 - **Views.** Settings › Access › Servers binds one with **Project kind: Work**.
   The Work sidebar lists it under **On your servers** with its threads; the
   Work composer offers it, with only Octant Harness models choosable and no
   extension, issue, or terminal session to start from; and its thread view
   names its server and folder and offers no Browser, extension, image
   generation, or file mention. Its dock keeps only Side chat, Document,
-  Canvas, Plan, and Agents, since Work's Files, terminal, and other tools read
-  a folder of this host and none has a server form yet.
+  Canvas, Plan, Agents, and Files. Files names the server location and explains
+  that it shows names and sizes only; terminal and other host-folder tools
+  have no server form yet.
 
 ### Panels
 
@@ -503,7 +518,7 @@ host key. A future structured diagnostic must preserve those trust boundaries.
 
 ## Not built yet
 
-- Work Files, research sources, the status file and due dates, and the
+- Work file previews and editing, research sources, the status file and due dates, and the
   Project terminal for a Work Project on a server; its threads are built. A
   local Work Project shows its terminal through its Developer tools switch on
   its overview. A Work Project on a server offers a saved-action presentation

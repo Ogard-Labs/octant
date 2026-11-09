@@ -40,9 +40,12 @@ import {
   decodeHandoverControlRequest,
   decodeHandoverRequest,
   decodeShutdownChallengeRequest,
+  decodeShutdownPhoneAskRequest,
+  decodeShutdownHandoverRequest,
   decodeShutdownStartRequest,
   decodeThreadMoveChallengeRequest,
   decodeThreadMoveControlRequest,
+  decodeThreadMovePhoneAskRequest,
   decodeThreadMoveSizesRequest,
   decodeThreadMoveStartRequest,
   decodeThreadMoveThreadRequest,
@@ -265,6 +268,11 @@ export const HUB_ADMINISTRATION_OPERATIONS = {
     path: "/api/desktop/hub/thread-moves/start",
     decodeBody: decodeThreadMoveStartRequest,
   },
+  "thread-move-phone-ask": {
+    method: "POST",
+    path: "/api/desktop/hub/thread-moves/phone-ask",
+    decodeBody: decodeThreadMovePhoneAskRequest,
+  },
   "thread-move-status": {
     method: "POST",
     path: "/api/desktop/hub/thread-moves/status",
@@ -322,6 +330,17 @@ export const HUB_ADMINISTRATION_OPERATIONS = {
     method: "POST",
     path: "/api/desktop/hub/thread-moves/shutdown/start",
     decodeBody: decodeShutdownStartRequest,
+  },
+  "shutdown-phone-ask": {
+    method: "POST",
+    path: "/api/desktop/hub/thread-moves/shutdown/phone-ask",
+    decodeBody: decodeShutdownPhoneAskRequest,
+  },
+  // Hand over for a Prepare to shut down row, for the whole host as the batch acts.
+  "shutdown-handover": {
+    method: "POST",
+    path: "/api/desktop/hub/thread-moves/shutdown/handover",
+    decodeBody: decodeShutdownHandoverRequest,
   },
   "shutdown-sizes": {
     method: "POST",

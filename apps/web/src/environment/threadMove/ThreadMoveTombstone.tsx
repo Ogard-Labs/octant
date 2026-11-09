@@ -19,6 +19,20 @@ export function movedThreadLink(departed: Departed): string {
 }
 
 /**
+ * The sentence that names the parts a move could not read and left behind,
+ * the first ones by name and the rest counted; undefined when every part
+ * travelled. The tombstone and the Moved notice say it the same way.
+ */
+export function partsLeftBehindSentence(departed: Departed): string | undefined {
+  const named = departed.partsLeftBehind ?? [];
+  const count = departed.partsLeftBehindCount ?? named.length;
+  if (count === 0) return undefined;
+  const unnamed = count - named.length;
+  const names = named.map((part) => part.name).join(", ");
+  return `${count === 1 ? "1 part" : `${String(count)} parts`} could not be read here, so ${count === 1 ? "it" : "they"} did not move: ${names}${unnamed > 0 ? `, and ${String(unnamed)} more` : ""}.`;
+}
+
+/**
  * What a moved thread's pane shows on the computer it left, opened from an
  * old link, a notification, or a search: where it went, Open there, and the
  * worktree that stayed when it held files the move did not carry. The
@@ -34,6 +48,7 @@ export function ThreadMoveTombstone(props: {
   readonly writeClipboard?: (text: string) => Promise<void>;
 }) {
   const { departed } = props;
+  const leftBehind = partsLeftBehindSentence(departed);
   const titleId = useId();
   const [copied, setCopied] = useState<"copied" | "failed" | undefined>(undefined);
   const time = new Date(departed.movedAt).toLocaleString([], {
@@ -79,6 +94,7 @@ export function ThreadMoveTombstone(props: {
           {departed.changesRemainInCheckout
             ? ". Its changes also remain in this Project's checkout."
             : ""}
+          {leftBehind === undefined ? "" : `. ${leftBehind}`}
         </p>
         <div className="thread-move-tombstone__actions">
           <OctantButton onClick={openThere}>Open there</OctantButton>

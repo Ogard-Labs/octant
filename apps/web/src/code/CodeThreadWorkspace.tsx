@@ -2664,6 +2664,7 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
             trailing: (
               <>
                 <ComposerModelPicker
+                  threadId={String(thread.id)}
                   ariaLabel="Provider and model"
                   disabled={busy}
                   groups={threadModelGroups}

@@ -128,6 +128,10 @@ export type RemoteProductDispatch = (
 ) => Promise<Response | undefined>;
 
 export interface RemoteGatewayServices {
+  /** Public old-key-signed transition, read only over the already pinned hello connection. */
+  readonly listenerKeyTransition?: () =>
+    | import("@octant/contracts").ListenerKeyTransition
+    | undefined;
   readonly connection: SqliteConnection;
   readonly journal: Journal;
   readonly hostId: StableHostId;
@@ -798,7 +802,22 @@ function assembleServices(
       sourceKey: transportFacts.sourceKey,
     };
     try {
-      return await routeHandler(request, routeFacts);
+      const response = await routeHandler(request, routeFacts);
+      if (
+        request.method === "GET" &&
+        new URL(request.url).pathname === "/api/remote/hello" &&
+        response.status === 200 &&
+        options.listenerKeyTransition !== undefined
+      ) {
+        const transition = options.listenerKeyTransition();
+        response.headers.set(
+          "x-octant-listener-transition",
+          transition?.origin === new URL(request.url).origin
+            ? Buffer.from(JSON.stringify(transition)).toString("base64url")
+            : "none",
+        );
+      }
+      return response;
     } finally {
       // Durably persist any monotonic advance observed while handling
       // this request (outside the handler's own transaction, which has already

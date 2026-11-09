@@ -9214,6 +9214,60 @@ describe("ChatService", () => {
       expect(service.read(imported.id).turns).toHaveLength(2);
     });
 
+    it("opens a moved thread with the attachments its turns carried and the ones not yet sent, readable here", async () => {
+      const { service } = openFixture();
+      const bytes = (text: string) => new TextEncoder().encode(text);
+      const imported = await service.importMovedThread({
+        moveId: "99999999-9999-4999-8999-999999999999",
+        threadId: "dddddddd-0000-4000-8000-000000000001" as never,
+        title: "Read the itinerary",
+        externalContentIngested: false,
+        turns: [
+          {
+            userText: "What does this say?",
+            createdAt: "2026-11-08T10:00:00.000Z" as never,
+            attachments: [
+              {
+                attachmentId: "dddddddd-0000-4000-8000-000000000002" as never,
+                displayName: "itinerary.txt",
+                mediaType: "text/plain",
+                bytes: bytes("Lisbon, then Porto."),
+              },
+            ],
+            attempts: [],
+          },
+        ],
+        unsentAttachments: [
+          {
+            attachmentId: "dddddddd-0000-4000-8000-000000000003" as never,
+            displayName: "draft.txt",
+            mediaType: "text/plain",
+            bytes: bytes("Not sent yet."),
+          },
+        ],
+      });
+
+      const view = service.read(imported.id);
+      expect(view.turns[0]?.attachmentIds.map(String)).toEqual([
+        "dddddddd-0000-4000-8000-000000000002",
+      ]);
+      expect(
+        view.attachments.map((attachment) => [
+          attachment.displayName,
+          attachment.turnId === undefined ? "unsent" : "sent",
+          attachment.status,
+        ]),
+      ).toEqual([
+        ["itinerary.txt", "sent", "finalized"],
+        ["draft.txt", "unsent", "finalized"],
+      ]);
+      const read = await service.readAttachment(
+        imported.id,
+        "dddddddd-0000-4000-8000-000000000002" as never,
+      );
+      expect(new TextDecoder().decode(read)).toBe("Lisbon, then Porto.");
+    });
+
     it("branches a thread that carries the conversation and inherits scope from the server", async () => {
       const { service } = openFixture();
       const created = await service.execute({

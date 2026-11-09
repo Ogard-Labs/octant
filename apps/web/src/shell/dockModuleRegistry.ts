@@ -57,6 +57,7 @@ export const dockModuleInputs = {
     "windowCapability",
   ],
   browser: [
+    "onAgentBrowserRecovery",
     "browserAutomationClient",
     "browserContextId",
     "hostBridge",

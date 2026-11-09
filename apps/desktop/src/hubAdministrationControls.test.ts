@@ -302,6 +302,11 @@ describe("hub administration controls", () => {
       timing: "now",
       unlock,
     });
+    await sendHubAdministrationOperation(controls, "thread-move-phone-ask", {
+      thread,
+      destinationMemberId,
+      timing: "now",
+    });
     await sendHubAdministrationOperation(controls, "thread-move-sizes", {
       destinationMemberId,
       threads: [thread],
@@ -309,11 +314,14 @@ describe("hub administration controls", () => {
     expect(calls.map((call) => call.url)).toEqual([
       "http://127.0.0.1:4317/api/desktop/hub/thread-moves/destinations",
       "http://127.0.0.1:4317/api/desktop/hub/thread-moves/start",
+      "http://127.0.0.1:4317/api/desktop/hub/thread-moves/phone-ask",
       "http://127.0.0.1:4317/api/desktop/hub/thread-moves/sizes",
     ]);
 
     for (const [operation, body] of [
       ["thread-move-destinations", { thread: { mode: "code" } }],
+      // Asking the phone carries no unlock: the phone makes its own on the destination.
+      ["thread-move-phone-ask", { thread, destinationMemberId, timing: "now", unlock }],
       ["thread-move-start", { thread, destinationMemberId, timing: "now" }],
       ["thread-move-start", { thread, destinationMemberId, timing: "later", unlock }],
       ["thread-move-start", { thread, destinationMemberId, timing: "now", unlock, force: true }],
@@ -325,7 +333,32 @@ describe("hub administration controls", () => {
         status: 400,
       });
     }
-    expect(calls).toHaveLength(3);
+    expect(calls).toHaveLength(4);
+  });
+
+  it("forwards a Prepare to shut down handover only with exactly the thread and the head's destination", async () => {
+    const { calls, runtime: controls } = runtime(() => Response.json({ status: "refused" }));
+    const thread = { mode: "code", threadId: "77777777-7777-4777-8777-777777777777" };
+    const destinationMemberId = "11111111-1111-4111-8111-111111111111";
+
+    await sendHubAdministrationOperation(controls, "shutdown-handover", {
+      thread,
+      destinationMemberId,
+    });
+    expect(calls.map((call) => call.url)).toEqual([
+      "http://127.0.0.1:4317/api/desktop/hub/thread-moves/shutdown/handover",
+    ]);
+
+    for (const body of [
+      { thread },
+      { thread, destinationMemberId, summarize: true },
+      { thread: { mode: "code" }, destinationMemberId },
+    ]) {
+      expect(
+        await sendHubAdministrationOperation(controls, "shutdown-handover", body),
+      ).toMatchObject({ status: 400 });
+    }
+    expect(calls).toHaveLength(1);
   });
 
   it("forwards Remove worktree naming only the move, never a folder", async () => {
