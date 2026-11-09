@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -8,6 +8,7 @@ import type {
   PeerGrant,
   RosterMember,
   ThreadMoveFailureReason,
+  ThreadMovePartLeftBehind,
 } from "@octant/contracts";
 import type { HubHostIdentity } from "./hubService";
 import type { HubTransport } from "./pinnedHubTransport";
@@ -52,6 +53,7 @@ interface Harness {
   readonly frozen: Set<string>;
   readonly erased: string[];
   readonly arrived: MovedThreadReference[];
+  readonly received: ReadonlyArray<{ readonly partId: string; readonly bytes: Buffer }>;
   readonly active: string[];
   readonly discarded: string[];
   readonly network: {
@@ -70,7 +72,15 @@ afterEach(() => {
 });
 
 function harness(
-  options: { readonly grant?: Partial<PeerGrant>; readonly bytes?: number } = {},
+  options: {
+    readonly grant?: Partial<PeerGrant>;
+    readonly bytes?: number;
+    /** Bulk parts the thread owns beside its bundle, and the ones that could not be read. */
+    readonly bulk?: {
+      readonly parts: ReadonlyArray<{ readonly partId: string; readonly bytes: number }>;
+      readonly leftBehind: ReadonlyArray<ThreadMovePartLeftBehind>;
+    };
+  } = {},
 ): Harness {
   const laptopFolder = mkdtempSync(join(tmpdir(), "octant-move-laptop-"));
   const miniFolder = mkdtempSync(join(tmpdir(), "octant-move-mini-"));
@@ -79,6 +89,7 @@ function harness(
   const frozen = new Set<string>();
   const erased: string[] = [];
   const arrived: MovedThreadReference[] = [];
+  const received: Array<{ readonly partId: string; readonly bytes: Buffer }> = [];
   const active: string[] = [];
   const discarded: string[] = [];
   const network: Harness["network"] = {
@@ -168,7 +179,16 @@ function harness(
       pack: async (_thread, folder) => {
         const path = join(folder, "bundle.part");
         writeFileSync(path, Buffer.alloc(bytes, 7));
-        return { status: "packed", parts: [{ partId: "bundle", kind: "thread-bundle", path }] };
+        const bulk = (options.bulk?.parts ?? []).map((part, index) => {
+          const partPath = join(folder, `${part.partId}.bytes`);
+          writeFileSync(partPath, Buffer.alloc(part.bytes, index + 1));
+          return { partId: part.partId, kind: "attachment" as const, path: partPath };
+        });
+        return {
+          status: "packed",
+          parts: [{ partId: "bundle", kind: "thread-bundle", path }, ...bulk],
+          ...(options.bulk === undefined ? {} : { partsLeftBehind: options.bulk.leftBehind }),
+        };
       },
       erase: async ({ thread }) => {
         erased.push(thread.threadId);
@@ -206,10 +226,11 @@ function harness(
     },
     destination: {
       acceptsProject: (placement) => placement.mode === "chat",
-      arrive: async ({ thread }) => {
+      arrive: async ({ thread, parts }) => {
         // Idempotent by the planned id, as a real host must be.
         if (opened.has(thread.threadId)) return { status: "arrived", thread };
         opened.add(thread.threadId);
+        for (const [partId, path] of parts) received.push({ partId, bytes: readFileSync(path) });
         arrived.push(thread);
         if (network.stopAfterOpening) {
           network.stopAfterOpening = false;
@@ -253,6 +274,7 @@ function harness(
     frozen,
     erased,
     arrived,
+    received,
     active,
     discarded,
     network,
@@ -283,6 +305,28 @@ describe("moving a thread", () => {
     expect(h.active).toEqual([id(9)]);
     expect(h.erased).toEqual([chatThread.threadId]);
     expect(h.frozen.size).toBe(0);
+  });
+
+  it("carries every bulk part beside the bundle and names the ones it could not read in the receipt", async () => {
+    const leftBehind: ThreadMovePartLeftBehind = { kind: "attachment", name: "scan.pdf" };
+    const h = harness({
+      bulk: {
+        parts: [
+          { partId: "attachment-1", bytes: THREAD_MOVE_CHUNK_BYTES + 5 },
+          { partId: "attachment-2", bytes: 3 },
+        ],
+        leftBehind: [leftBehind],
+      },
+    });
+    expect((await start(h)).status).toBe("moved");
+    expect(h.received.map((part) => [part.partId, part.bytes.length])).toEqual([
+      ["bundle", 1_000],
+      ["attachment-1", THREAD_MOVE_CHUNK_BYTES + 5],
+      ["attachment-2", 3],
+    ]);
+    expect(h.received[1]?.bytes.every((byte) => byte === 1)).toBe(true);
+    const departures = createThreadMoveStateStore(folders[0] ?? "").load().departures ?? [];
+    expect(departures.map((departure) => departure.partsLeftBehind)).toEqual([[leftBehind]]);
   });
 
   it("refuses an offer without the destination owner's ticket, and unfreezes with the reason", async () => {

@@ -31,6 +31,13 @@ import {
   relocateWorktree,
   repositoryRemotes,
 } from "./codeThreadMoveGit";
+import {
+  MovedThreadParts,
+  packThreadParts,
+  rehomeThreadParts,
+  type ThreadPartsDestination,
+  type ThreadPartsSource,
+} from "./movedThreadParts";
 import type { ThreadMoveHolds } from "./threadMoveHolds";
 import type {
   PackedPart,
@@ -53,6 +60,7 @@ const MovedCodeThread = Schema.Struct({
   externalContentIngested: Schema.Boolean,
   refusedFiles: Schema.Array(Schema.String).pipe(Schema.maxItems(10_000)),
   entries: Schema.Array(MovedHistoryEntry).pipe(Schema.maxItems(10_000)),
+  parts: Schema.optional(MovedThreadParts),
 }).annotations(strict);
 type MovedCodeThread = typeof MovedCodeThread.Type;
 
@@ -110,6 +118,10 @@ export interface CodeThreadMoveHostOptions {
     readonly entries: ReadonlyArray<MovedHistoryEntry>;
   }) => void;
   readonly holds: ThreadMoveHolds;
+  readonly parts: {
+    readonly source: ThreadPartsSource;
+    readonly destination: ThreadPartsDestination;
+  };
 }
 
 export function createCodeThreadMoveHost(options: CodeThreadMoveHostOptions): {
@@ -161,6 +173,7 @@ export function createCodeThreadMoveHost(options: CodeThreadMoveHostOptions): {
       } catch {
         return { status: "refused", reason: "transfer-failed" };
       }
+      const bulk = await packThreadParts(thread, folder, options.parts.source);
       const moved: MovedCodeThread = {
         format: MOVED_CODE_THREAD_FORMAT,
         title: code.title,
@@ -170,14 +183,20 @@ export function createCodeThreadMoveHost(options: CodeThreadMoveHostOptions): {
         externalContentIngested: options.externalContentIngested(thread.threadId),
         refusedFiles: captured.refusedFiles,
         entries: await options.transcript(code.id),
+        ...(bulk.index === undefined ? {} : { parts: bulk.index }),
       };
       const threadPath = join(folder, "thread.json");
       await writeFile(threadPath, JSON.stringify(moved), { mode: 0o600 });
       const parts: ReadonlyArray<PackedPart> = [
         { partId: "thread", kind: "thread-bundle", path: threadPath },
         { partId: "checkout", kind: "git-bundle", path: bundlePath },
+        ...bulk.parts,
       ];
-      return { status: "packed", parts };
+      return {
+        status: "packed",
+        parts,
+        ...(bulk.partsLeftBehind.length === 0 ? {} : { partsLeftBehind: bulk.partsLeftBehind }),
+      };
     },
     erase: async ({ thread, moveId }) => {
       const code = codeThreadOf(thread);
@@ -249,15 +268,31 @@ export function createCodeThreadMoveHost(options: CodeThreadMoveHostOptions): {
         moveId: String(offer.moveId),
         entries: moved.entries,
       };
+      // Bulk parts are re-homed under ids the move derives, so a second try
+      // records nothing twice.
+      const rehome = async () =>
+        (
+          await rehomeThreadParts({
+            index: moved.parts,
+            parts,
+            moveId: String(offer.moveId),
+            thread: planned,
+            projectId: String(offer.destinationProjectId),
+            destination: options.parts.destination,
+          })
+        ).status === "carried"
+          ? ({ status: "arrived", thread: planned } as const)
+          : ({ status: "refused", reason: "transfer-failed" } as const);
       // A thread already started under the planned id was started by an
       // earlier try that stopped before it was recorded: hold it and start no
-      // second. That try may have stopped before the history was kept, so it
-      // is kept now (a second import keeps the first), before the source is
-      // told it arrived and erases the only other copy.
+      // second. That try may have stopped before the history was kept or
+      // every part re-homed, so they are now (a second import keeps the
+      // first), before the source is told it arrived and erases the only
+      // other copy.
       if (codeThreadOf(planned) !== undefined) {
         options.holds.hold(planned);
         options.journalHistory(history);
-        return { status: "arrived", thread: planned };
+        return rehome();
       }
       const project = options.codeProject(String(offer.destinationProjectId));
       if (project === undefined) return { status: "refused", reason: "no-eligible-project" };
@@ -299,7 +334,7 @@ export function createCodeThreadMoveHost(options: CodeThreadMoveHostOptions): {
         return { status: "refused", reason: "transfer-failed" };
       }
       options.journalHistory(history);
-      return { status: "arrived", thread: planned };
+      return rehome();
     },
     activate: async (thread) => options.holds.release(thread),
     discard: async (thread) => {

@@ -18,6 +18,7 @@ import {
   ThreadMoveFailureReason,
   ThreadMoveId,
   ThreadMoveOffer,
+  ThreadMovePartLeftBehind,
   UtcTimestamp,
 } from "@octant/contracts";
 import { Schema } from "effect";
@@ -69,6 +70,8 @@ export const SentMove = Schema.Struct({
   parts: Schema.Array(SentMovePart),
   state: Schema.Literal("frozen", "offered", "arrived", "committed"),
   destinationThread: Schema.optional(MovedThreadReference),
+  /** Parts the thread owned that could not be read when it was packed, for the receipt. */
+  partsLeftBehind: Schema.optional(Schema.Array(ThreadMovePartLeftBehind)),
   startedAt: UtcTimestamp,
 }).annotations(strict);
 export type SentMove = typeof SentMove.Type;

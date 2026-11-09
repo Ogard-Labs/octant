@@ -138,6 +138,9 @@ describe("the Computer card", () => {
     expect(sheet).toHaveTextContent(
       "This thread is erased from this computer once Desktop has it.",
     );
+    expect(sheet).toHaveTextContent(
+      "Its attachments, generated images, Browser captures, and Canvases",
+    );
     await user.click(screen.getByRole("button", { name: "Move with Touch ID" }));
 
     await waitFor(() => expect(started).toHaveLength(1));
@@ -154,6 +157,42 @@ describe("the Computer card", () => {
       "25",
     );
     expect(screen.getByText("Moving 25%")).toBeInTheDocument();
+  });
+
+  it("names the parts that could not be read here and did not move, on the Moved notice", async () => {
+    const { client } = fakeClient({
+      status: {
+        status: "read",
+        departed: {
+          moveId: "66666666-6666-4666-8666-666666666666" as never,
+          thread: THREAD,
+          destinationMemberId: DESKTOP as never,
+          destinationThread: { mode: "code", threadId: PROJECT },
+          changesRemainInCheckout: false,
+          partsLeftBehind: [
+            { kind: "attachment", name: "scan.pdf" },
+            { kind: "browser-capture", name: "Pricing" },
+          ],
+          movedAt: "2026-11-08T12:00:00.000Z" as never,
+          destinationName: "Desktop",
+        },
+      },
+    });
+    render(
+      <ThreadMoveComputerCard
+        client={client}
+        hostName="Laptop"
+        isThisComputer
+        thread={THREAD}
+        threadTitle="Add dark mode"
+        unlock={{ ownerUnlockSign: vi.fn() }}
+      />,
+    );
+    expect(
+      await screen.findByText(
+        /2 parts could not be read here, so they did not move: scan\.pdf, Pricing\./,
+      ),
+    ).toBeInTheDocument();
   });
 
   it("offers to move a busy thread after its turn", async () => {

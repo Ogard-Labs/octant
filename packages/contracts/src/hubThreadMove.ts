@@ -472,6 +472,18 @@ export const HandedOverThread = Schema.Struct({
 }).annotations(strict);
 export type HandedOverThread = typeof HandedOverThread.Type;
 
+/**
+ * A part the thread owned that the move could not carry, because its bytes
+ * could not be read on the source when the move packed it. The erase still
+ * removes it with the thread, so the receipt names it rather than letting it
+ * vanish unannounced.
+ */
+export const ThreadMovePartLeftBehind = Schema.Struct({
+  kind: ThreadMovePartKind,
+  name: bounded(512),
+}).annotations(strict);
+export type ThreadMovePartLeftBehind = typeof ThreadMovePartLeftBehind.Type;
+
 /** A thread that moved away from this host, for its "Moved to" tombstone. */
 export const ThreadMoveDeparture = Schema.Struct({
   moveId: ThreadMoveId,
@@ -482,6 +494,10 @@ export const ThreadMoveDeparture = Schema.Struct({
   keptWorktree: Schema.optional(bounded(4_096)),
   /** The Project's own checkout kept the thread's changes too. */
   changesRemainInCheckout: Schema.Boolean,
+  /** Parts the move could not carry; absent when every part travelled. */
+  partsLeftBehind: Schema.optional(
+    Schema.Array(ThreadMovePartLeftBehind).pipe(Schema.maxItems(1_000)),
+  ),
   movedAt: UtcTimestamp,
 }).annotations(strict);
 export type ThreadMoveDeparture = typeof ThreadMoveDeparture.Type;

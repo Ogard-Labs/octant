@@ -6,9 +6,14 @@ import { homedir } from "node:os";
 import {
   AgentRunParentThreadId,
   type CodeThreadId,
+  decodeChatAttachmentId,
   decodeChatThreadId,
   decodeCodeThreadId,
+  decodeImageArtifactId,
   decodeImageGenerationScopeId,
+  decodeImageJobId,
+  decodeCanvasId,
+  decodeCanvasVersionId,
   decodeProjectId,
   decodeThreadMessageQueueScope,
   decodeWorkThreadId,
@@ -18,7 +23,12 @@ import {
   decodeCodeCommand,
 } from "@octant/contracts";
 import { Schema } from "effect";
-import { decodeBrowserThreadId } from "@octant/contracts/browser-automation";
+import {
+  decodeBrowserCaptureId,
+  decodeBrowserThreadId,
+} from "@octant/contracts/browser-automation";
+import { canvasOutsideContentWriters } from "../canvas/canvasOutsideContentMark";
+import type { ThreadPartsDestination, ThreadPartsSource } from "../hub/movedThreadParts";
 import { managedWorktreeRoot } from "../code/managedWorktreeService";
 import { purgeThreadArtifacts, removeMirrorFiles } from "../persistence/threadArtifactPurge";
 import { readHostIdentity } from "../persistence/remoteAccessProjection";
@@ -184,7 +194,10 @@ export type RemoteDependencies = { readonly onSecretStoreLinkChange?: () => void
   "options" | "persistence" | "serve" | "startedAt" | "version"
 > &
   Pick<HarnessWiring, "beginGoogleCliChange"> &
-  Pick<AuthorityWiring, "browserCaptureStore" | "personMemory" | "windowAuthorityStore"> &
+  Pick<
+    AuthorityWiring,
+    "browserCaptureStore" | "browserCaptures" | "personMemory" | "windowAuthorityStore"
+  > &
   Pick<
     AgentRunsWiring,
     "agentRunAdmission" | "externalContentIngestionStore" | "remoteDelegationHolder"
@@ -200,6 +213,7 @@ export type RemoteDependencies = { readonly onSecretStoreLinkChange?: () => void
     | "credentialResolver"
     | "extensionApiService"
     | "generatedImageStore"
+    | "imageJobService"
     | "providerDataDirectory"
     | "providerService"
   > &
@@ -227,7 +241,7 @@ export type RemoteDependencies = { readonly onSecretStoreLinkChange?: () => void
     | "workThreadServiceWithWorkflows"
     | "workTurnService"
   > &
-  Pick<CanvasWiring, "canvasRoutes" | "canvasPublicShareService"> &
+  Pick<CanvasWiring, "canvasRoutes" | "canvasPublicShareService" | "canvasService"> &
   Pick<
     AutomationWiring,
     | "automationCommandService"
@@ -957,7 +971,86 @@ export function wireRemote(deps: RemoteDependencies) {
     now: Date.now,
   });
   const peerCredentialRoutes = createPeerCredentialRouteHandler({ copy: ownerCredentialCopy });
-  // Moving a thread between the person's computers.
+  // Moving a thread between the person's computers. Every mode carries the
+  // same bulk parts beside its conversation: the images the thread generated,
+  // the Browser captures it kept, and every Canvas its provenance names (the
+  // ones its erase would remove).
+  const threadParts: {
+    readonly source: ThreadPartsSource;
+    readonly destination: ThreadPartsDestination;
+  } = {
+    source: {
+      generatedImages: (threadId) => {
+        try {
+          return deps.imageJobService.listByScope(decodeImageGenerationScopeId(threadId));
+        } catch {
+          return [];
+        }
+      },
+      readGeneratedImage: async (job, attachmentId) =>
+        (await deps.imageJobService.readArtifact(job.id, attachmentId))?.bytes,
+      browserCaptures: (threadId) => {
+        try {
+          return deps.browserCaptures.list(decodeBrowserThreadId(threadId));
+        } catch {
+          return [];
+        }
+      },
+      readBrowserCapture: async (capture) =>
+        (await deps.browserCaptures.read(capture.threadId, capture.captureId))?.bytes,
+      canvases: (thread) =>
+        [...persistence.canvasProjection.snapshot().values()]
+          .filter(
+            (entry) =>
+              entry.currentVersion.definition.provenance.mode === thread.mode &&
+              String(entry.currentVersion.definition.provenance.threadId) === thread.threadId,
+          )
+          .map((entry) => ({
+            title: entry.currentVersion.definition.title,
+            versions: entry.versions,
+            carriesOutsideContent:
+              canvasOutsideContentWriters(persistence.journal, String(entry.canvasId)).length > 0,
+          })),
+    },
+    destination: {
+      carryGeneratedImage: (input) =>
+        deps.imageJobService.carryMovedJob({
+          jobId: decodeImageJobId(input.jobId),
+          threadKind: `${input.mode}-thread`,
+          scopeId: decodeImageGenerationScopeId(input.threadId),
+          profileInstanceId: input.profileInstanceId,
+          modelId: input.modelId,
+          promptHash: input.promptHash,
+          createdAt: input.createdAt,
+          updatedAt: input.updatedAt,
+          images: input.images.map((image) => ({
+            attachmentId: decodeImageArtifactId(image.attachmentId),
+            bytes: image.bytes,
+          })),
+        }),
+      carryBrowserCapture: (input) =>
+        deps.browserCaptures.carryMoved({
+          threadId: decodeBrowserThreadId(input.threadId),
+          captureId: decodeBrowserCaptureId(input.captureId),
+          bytes: input.bytes,
+          facts: input.facts,
+        }),
+      carryCanvas: (input) =>
+        deps.canvasService.carryMovedCanvas({
+          canvasId: decodeCanvasId(input.canvasId),
+          versions: input.versions.map((version) => ({
+            versionId: decodeCanvasVersionId(version.versionId),
+            source: version.source,
+          })),
+          provenance: {
+            hostId: LOCAL_HOST_ID,
+            projectId: input.projectId,
+            threadId: input.threadId,
+          },
+          carriesOutsideContent: input.carriesOutsideContent,
+        }),
+    },
+  };
   const chatThreadMoveHost = createChatThreadMoveHost({
     readView: (threadId) => persistence.readChatThreadView(threadId),
     isBusy: (view) =>
@@ -972,6 +1065,17 @@ export function wireRemote(deps: RemoteDependencies) {
     externalContentIngested: (threadId) =>
       readThreadExternalContentTaint(persistence.connection, threadId).externalContentIngested,
     importMovedThread: (input) => deps.chatService.importMovedThread(input),
+    readAttachment: async (threadId, attachmentId) => {
+      try {
+        return await deps.chatService.readAttachment(
+          decodeChatThreadId(threadId),
+          decodeChatAttachmentId(attachmentId),
+        );
+      } catch {
+        return undefined;
+      }
+    },
+    parts: threadParts,
     activeChatProject: (projectId) => {
       const project = persistence
         .readProjects()
@@ -1104,6 +1208,7 @@ export function wireRemote(deps: RemoteDependencies) {
     },
     journalHistory: (input) => deps.movedThreadHistory.journalImported(input),
     holds: deps.threadMoveHolds,
+    parts: threadParts,
   });
   const workThreadMoveHost = createWorkThreadMoveHost({
     readThread: (threadId) => {
@@ -1188,6 +1293,7 @@ export function wireRemote(deps: RemoteDependencies) {
     },
     journalHistory: (input) => deps.movedThreadHistory.journalImported(input),
     holds: deps.threadMoveHolds,
+    parts: threadParts,
   });
   // Each mode's adapter handles its own threads; the move service sees one host.
   const byMode = threadMoveHostsByMode({

@@ -32,6 +32,7 @@ import {
   type ThreadMoveFailureReason,
   type ThreadMoveOffer,
   type ThreadMovePartKind,
+  type ThreadMovePartLeftBehind,
   type ThreadMoveProjectChoice,
   type ThreadMoveProjects,
   type ThreadMoveProjectsRequest,
@@ -102,13 +103,21 @@ export interface ThreadMoveSourceHost {
   readonly freeze: (thread: MovedThreadReference) => void;
   readonly unfreeze: (thread: MovedThreadReference) => void;
   readonly isFrozen: (thread: MovedThreadReference) => boolean;
-  /** Writes the thread's parts into `folder`; exactly one part is the thread bundle. */
+  /**
+   * Writes the thread's parts into `folder`; exactly one part is the thread
+   * bundle. A part the thread owns whose bytes cannot be read is named in
+   * `partsLeftBehind` rather than failing the move, so the receipt says so.
+   */
   readonly pack: (
     thread: MovedThreadReference,
     folder: string,
     moveId: ThreadMoveId,
   ) => Promise<
-    | { readonly status: "packed"; readonly parts: ReadonlyArray<PackedPart> }
+    | {
+        readonly status: "packed";
+        readonly parts: ReadonlyArray<PackedPart>;
+        readonly partsLeftBehind?: ReadonlyArray<ThreadMovePartLeftBehind>;
+      }
     | { readonly status: "refused"; readonly reason: ThreadMoveFailureReason }
   >;
   /** Erases the thread through the ordinary purge once the destination committed. */
@@ -618,6 +627,9 @@ export class ThreadMoveService {
       ...move,
       offer,
       parts: offer.manifest.parts.map((part) => ({ partId: part.partId, acknowledgedChunks: 0 })),
+      ...(packed.partsLeftBehind === undefined || packed.partsLeftBehind.length === 0
+        ? {}
+        : { partsLeftBehind: packed.partsLeftBehind }),
     };
     this.#saveSent(offered);
     const answer = await this.#send(offered, THREAD_MOVE_ROUTES.offer, {
@@ -914,6 +926,7 @@ export class ThreadMoveService {
       destinationThread: destination,
       ...(erased.keptWorktree === undefined ? {} : { keptWorktree: erased.keptWorktree }),
       changesRemainInCheckout: erased.changesRemainInCheckout === true,
+      ...(move.partsLeftBehind === undefined ? {} : { partsLeftBehind: move.partsLeftBehind }),
       movedAt: this.#timestamp(),
     };
     this.#options.state.save({

@@ -10,6 +10,7 @@ import type {
   ThreadMoveOffer,
 } from "@octant/contracts";
 import { createCodeThreadMoveHost, type CodeThreadMoveHostOptions } from "./codeThreadMoveHost";
+import { noThreadParts } from "./movedThreadParts.test-support";
 import { createThreadMoveHolds } from "./threadMoveHolds";
 
 const THREAD = "77777777-7777-4777-8777-777777777777";
@@ -106,6 +107,7 @@ function host(input: {
     },
     journalHistory: (history) => histories.push(history),
     holds,
+    parts: noThreadParts(),
   });
   return { moveHost, created, histories, purged, holds };
 }

@@ -2053,7 +2053,8 @@ this is how it looks.
   than vanish. One notification says the move finished. When the worktree was
   kept, the tombstone adds one row under the route line: the files that stayed
   with it, and **Remove worktree** as a quiet button that asks once before
-  removing it.
+  removing it. When a part of the thread could not be read and stayed, the
+  notice names each one in the same sentence style, after the time.
 - **This thread can't move.** A failed move unfreezes the composer and puts an
   inline notice above it and in the Computer row's open content: the title
   "This thread can't move", the reason in one sentence, and its recovery as

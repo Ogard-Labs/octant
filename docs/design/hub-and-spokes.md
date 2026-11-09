@@ -1018,7 +1018,35 @@ and questions.
   evidence, provenance, and taint), plus each thread-owned part that export
   lists as an omission: attachment bytes, admitted original inputs, generated
   images, retained Browser captures, and the Canvases the thread owns with
-  their versions.
+  their versions. Each is its own manifest part with its size and digest, and
+  the destination records it under the new thread with new ids:
+  - An attachment arrives on the turn that sent it, and one added but not
+    sent arrives unsent. An original input a turn admitted from another
+    thread arrives as an attachment of the moved turn, because that thread
+    stays on the source.
+  - A generated image arrives as a completed image of the new thread. It
+    records no usage on the destination: it ran, and was billed, on the
+    source, whose accounting keeps it.
+  - A Browser capture arrives without the name of the Browser profile its
+    page lived in, because profiles never move.
+  - The Canvases the thread owns are every Canvas whose provenance names it,
+    the ones its erase would remove. Each arrives with every version, in
+    order, in the Project the thread moves into (none for a Chat thread moved
+    into none). Its content is unchanged, so a source reference in it still
+    names the computer it was read on. A Canvas that recorded outside content
+    on the source carries that mark from its first version, and marks every
+    agent that reads it.
+  - A part whose bytes cannot be read on the source, or no longer match the
+    digest a turn admitted, stays behind. The move goes on, because the person
+    is about to shut the computer down, and the "Moved to" record names each
+    part that stayed. The erase removes it with the thread. A part the
+    destination cannot record refuses the arrival with `transfer-failed`, so
+    the source keeps the thread.
+  - The Secret guard reads the checkout, not these parts. Rationale: they are
+    content the thread already holds and handed its provider, sent to the
+    person's own computer over the pinned member link, and a part the guard
+    kept back would be destroyed by the erase rather than kept the way a
+    refused worktree file is.
 - For a Code thread, a Git bundle of its checkout: the commits on the thread's
   branch that the source's remote-tracking refs do not hold, and the
   uncommitted work as two snapshot commits that never join the branch: an
@@ -2182,10 +2210,9 @@ a numbered slice. Built, with these narrower readings:
     destination (the folder's files stay where they are), the thread opened
     under the host's own scope on a provider of the same kind, the freeze
     on Work commands and turn admission, and a delegated Work thread read
-    as one that cannot move. What it does not do yet: carry attachments and
-    other bulk parts, accept moves on the hub (which keeps no peer grants
-    and needs its own Accept moved threads setting), offer a window route
-    to start a move, or show any screen.
+    as one that cannot move. What it does not do yet: accept moves on the
+    hub (which keeps no peer grants and needs its own Accept moved threads
+    setting), offer a window route to start a move, or show any screen.
 
     The fifth part lets a person start a move from the thread's Environment.
     The window route, under `/api/desktop/hub/thread-moves/`, is
@@ -2213,15 +2240,15 @@ a numbered slice. Built, with these narrower readings:
     frozen bar (the held thread still refuses every command with the
     moving reason), the pane tombstone with Open there and Remove worktree,
     sizes and an estimate in the sheet, Stop and move, Hand over instead,
-    an unlock other than this Mac's Touch ID, carry bulk parts, accept
-    moves on the hub, or Prepare to shut down.
+    an unlock other than this Mac's Touch ID, accept moves on the hub, or
+    Prepare to shut down.
 
     The sixth part lets the hub take moved threads: its Accept moved
     threads setting (on by default, a window on the hub only, journaled),
     the hub checking a move's sender against the key that member joined
     with, the hub's own owner list for the unlock, and the hub listed in the
-    Computer card like any member. What it does not do yet: carry bulk
-    parts or Prepare to shut down.
+    Computer card like any member. What it does not do yet: Prepare to shut
+    down.
 
     The seventh part is Prepare to shut down. The window route lists every
     thread on this host with its last journaled activity: a busy one (a turn
@@ -2249,8 +2276,8 @@ a numbered slice. Built, with these narrower readings:
     member, and the dialog then ends with Quit Octant through the guarded
     quit. What it does not do yet: Hand over and Stop and move as row
     choices, a row moving to a member other than the head's, sizes and an
-    estimate, the menu bar entry and progress, more than one destination's
-    unlock in turn, and carrying bulk parts.
+    estimate, the menu bar entry and progress, and more than one
+    destination's unlock in turn.
 
     The eighth part is the handover's source side. **Hand over instead**, in
     the move sheet and in This thread can't move for a Code thread, opens
@@ -2318,6 +2345,22 @@ a numbered slice. Built, with these narrower readings:
     it erased its copy or no longer holds the handover, so a source that was
     offline still lets its frozen copy go. What it does not do yet: a branch
     found by fetching without a notice, and the agent's own summary turn.
+
+    A further part carries each thread's bulk parts with every move, in all
+    three modes, as described under **What moves**. The source packs a Chat
+    thread's sent and unsent attachments and the inputs its turns admitted
+    from another Chat thread, and in every mode the thread's completed
+    generated images, its retained Browser captures (oldest first, so the
+    newest stay newest), and every version of each Canvas whose provenance
+    names it. Each becomes a manifest part beside the conversation, which
+    lists them, and crosses the existing chunked transfer. A part it cannot
+    read, or whose bytes no longer match the digest a turn admitted, is kept
+    on the sent move and named on the "Moved to" record and its notice. The
+    destination opens a Chat thread with each attachment on its turn in the
+    same journal unit, then records the images, captures, and Canvases under
+    ids derived from the move and the part, so a finish asked again records
+    each once; a part it cannot record answers `transfer-failed`. The move
+    sheet lists these parts under What moves, without their sizes yet.
 
 Any slice that would deploy an Octant-operated service, create an account, or
 spend money stops for a separate maintainer action.

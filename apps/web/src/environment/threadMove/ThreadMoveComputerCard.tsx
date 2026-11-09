@@ -573,6 +573,7 @@ function MovedNotice(props: {
     hour: "numeric",
     minute: "2-digit",
   });
+  const leftBehind = props.departed.partsLeftBehind ?? [];
   return (
     <OctantAlert title={`Moved to ${props.departed.destinationName}`} tone="neutral">
       Moved at {time}.
@@ -581,6 +582,9 @@ function MovedNotice(props: {
           ? " Its changes also remain in this Project's checkout."
           : null
         : ` Its worktree held files that stayed here, so it was kept at ${props.departed.keptWorktree}.`}
+      {leftBehind.length === 0
+        ? null
+        : ` ${leftBehind.length === 1 ? "1 part" : `${leftBehind.length} parts`} could not be read here, so ${leftBehind.length === 1 ? "it" : "they"} did not move: ${leftBehind.map((part) => part.name).join(", ")}.`}
     </OctantAlert>
   );
 }
@@ -680,6 +684,7 @@ function ThreadMoveSheet(props: {
         <h3 className="thread-move-sheet__heading">What moves</h3>
         <ul className="thread-move-sheet__list">
           <li>The conversation</li>
+          <li>Its attachments, generated images, Browser captures, and Canvases</li>
           {props.thread.mode === "code" ? (
             <li>The branch, its unpushed commits, and the staged and unstaged changes</li>
           ) : null}
