@@ -965,6 +965,11 @@ export function createBrowserSurfaceHost(options: BrowserSurfaceHostOptions) {
         // Detachment may hide destruction events. Keep unknown old worlds and refuse at the cap.
         if (state.worlds.size >= 32)
           return { status: "refused", effect: "none", reason: "unavailable" };
+        if (command.requiresClearPage === true) {
+          const document = await send("DOM.getDocument", { depth: -1, pierce: true });
+          if (!scriptPageIsClear(document) || !current())
+            return { status: "refused", effect: "none", reason: "credential-or-frame-protected" };
+        }
         const tree = await send("Page.getFrameTree");
         if (
           !scriptRecord(tree) ||
@@ -4944,4 +4949,56 @@ function closeSurfaceView(
 ): void {
   if (view.close !== undefined) view.close();
   else if (!contents.isDestroyed()) contents.close();
+}
+
+/** Inspect native DOM structure only; missing coverage refuses rather than guessing sign-in state. */
+function scriptPageIsClear(value: unknown): boolean {
+  if (!scriptRecord(value) || !scriptRecord(value.root)) return false;
+  const pending: unknown[] = [value.root];
+  let count = 0;
+  while (pending.length > 0) {
+    const node = pending.pop();
+    if (++count > 20_000 || !scriptRecord(node) || typeof node.nodeName !== "string") return false;
+    if (
+      ["IFRAME", "FRAME", "EMBED", "OBJECT"].includes(node.nodeName.toUpperCase()) ||
+      node.shadowRootType === "closed"
+    )
+      return false;
+    const attributes = node.attributes;
+    const editable =
+      Array.isArray(attributes) &&
+      attributes.some(
+        (name, index) =>
+          index % 2 === 0 && name === "contenteditable" && attributes[index + 1] !== "false",
+      );
+    if (["INPUT", "TEXTAREA"].includes(node.nodeName.toUpperCase()) || editable) {
+      if (
+        !Array.isArray(attributes) ||
+        attributes.some((entry) => typeof entry !== "string") ||
+        attributes.length % 2 !== 0
+      )
+        return false;
+      for (let index = 0; index < attributes.length; index += 2) {
+        const name: unknown = attributes[index];
+        const hint: unknown = attributes[index + 1];
+        if (typeof name !== "string" || typeof hint !== "string") return false;
+        if (
+          ["type", "autocomplete", "name", "id", "aria-label"].includes(name.toLowerCase()) &&
+          /(?:password|passcode|one-time-code|otp|webauthn|cc-|credit|card|ssn|secret|token|api.?key)/i.test(
+            hint,
+          )
+        )
+          return false;
+      }
+    }
+    for (const field of ["children", "shadowRoots"]) {
+      const children = node[field];
+      if (children !== undefined) {
+        if (!Array.isArray(children)) return false;
+        pending.push(...children);
+      }
+    }
+    if (node.contentDocument !== undefined) return false;
+  }
+  return true;
 }

@@ -194,7 +194,7 @@ describe("mobile mock scenarios", () => {
     });
   });
 
-  it("persists a Code follow-up so a later conversation load still shows the prompt", async () => {
+  it("keeps Code prompts and sample replies when the conversation is loaded again", async () => {
     const scenario = createMobileMockScenario("full");
     const transport = scenario.transports[0]!;
     const projects = await fetchMobileCodeProjects(transport);
@@ -225,8 +225,14 @@ describe("mobile mock scenarios", () => {
 
     await expect(loadMobileCodeConversation(transport, threadId)).resolves.toEqual({
       turns: [
-        expect.objectContaining({ prompt: "Polish the phone Code flow" }),
-        expect.objectContaining({ prompt: "Also lint the new screen" }),
+        expect.objectContaining({
+          prompt: "Polish the phone Code flow",
+          assistant: ["Mock reply to: Polish the phone Code flow"],
+        }),
+        expect.objectContaining({
+          prompt: "Also lint the new screen",
+          assistant: ["Mock reply to: Also lint the new screen"],
+        }),
       ],
       hasEarlier: false,
     });

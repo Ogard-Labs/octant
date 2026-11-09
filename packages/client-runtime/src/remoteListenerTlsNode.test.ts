@@ -1,4 +1,11 @@
-import { createHash, X509Certificate } from "node:crypto";
+import { createHash, sign, X509Certificate } from "node:crypto";
+import { Schema } from "effect";
+import { ListenerKeyTransition } from "@octant/contracts";
+import {
+  LISTENER_KEY_TRANSITION_HEADER,
+  LISTENER_KEY_TRANSITION_WINDOW_MS,
+  listenerKeyTransitionPayload,
+} from "@octant/domain";
 import { readdirSync, readFileSync } from "node:fs";
 import { connect as connectTcp, createServer as createTcpServer, type Socket } from "node:net";
 import { dirname, join } from "node:path";
@@ -255,7 +262,7 @@ describe("a listener connection under its stored trust", () => {
     const listener = await startListener({ cert: SELF_MADE_CERT, key: SELF_MADE_KEY });
     const trust: ListenerOriginTrust = {
       current: { kind: "pinned", pin: PLATFORM_TRUSTED_PIN },
-      staged: { trust: { kind: "pinned", pin: SELF_MADE_PIN }, until: "2026-11-01T00:00:00.000Z" },
+      staged: { trust: { kind: "pinned", pin: SELF_MADE_PIN }, until: "2026-10-20T00:00:00.000Z" },
     };
 
     const connection = await secureOverLoopback(listener.port, trust);
@@ -415,14 +422,18 @@ describe("a fetch held to a listener's trust", () => {
   const ORIGIN = "https://listener.example-tailnet.ts.net:8443";
 
   /** An HTTPS listener on loopback that answers every request and records what reached it. */
-  async function startHttpsListener() {
+  async function startHttpsListener(responseHeaders: () => Record<string, string> = () => ({})) {
     const requests: string[] = [];
     const server = createHttpsServer({ cert: SELF_MADE_CERT, key: SELF_MADE_KEY }, (req, res) => {
       let body = "";
       req.on("data", (chunk: Buffer) => (body += chunk.toString("utf8")));
       req.on("end", () => {
         requests.push(`${req.method} ${req.url} host=${req.headers.host} ${body}`);
-        res.writeHead(201, { "content-type": "application/json", "x-octant-test": "yes" });
+        res.writeHead(201, {
+          "content-type": "application/json",
+          "x-octant-test": "yes",
+          ...responseHeaders(),
+        });
         res.end(JSON.stringify({ answered: true }));
       });
     });
@@ -437,13 +448,18 @@ describe("a fetch held to a listener's trust", () => {
           server.close(() => resolve());
         }),
     );
-    return { port: address.port, requests };
+    return { port: address.port, requests, server };
   }
 
   /** Dials loopback but reports the Tailscale peer the judged address names. */
-  function fetchFor(port: number, trust: ListenerOriginTrust) {
+  function fetchFor(
+    port: number,
+    trust: ListenerOriginTrust,
+    onTrust?: ListenerConnectionOptions["onTrust"],
+    now: () => number = () => NOW,
+  ) {
     return testOnlyListenerTls.createListenerFetchOver(
-      { origin: ORIGIN, trust, now: () => NOW },
+      { origin: ORIGIN, trust, now, ...(onTrust === undefined ? {} : { onTrust }) },
       {
         resolve: async () => ["100.101.102.103"],
         dial: async () => {
@@ -455,6 +471,69 @@ describe("a fetch held to a listener's trust", () => {
       },
     );
   }
+
+  it("records a signed transition under the old TLS key, persists promotion and refuses missed or expired windows", async () => {
+    const unsigned = Schema.decodeUnknownSync(ListenerKeyTransition.omit("signature"))({
+      version: 1,
+      hostId: "11111111-1111-4111-8111-111111111111",
+      origin: ORIGIN,
+      oldPin: SELF_MADE_PIN,
+      newPin: PLATFORM_TRUSTED_PIN,
+      oldPublicKey: new X509Certificate(SELF_MADE_CERT).publicKey
+        .export({ type: "spki", format: "der" })
+        .toString("base64url"),
+      preparedAt: new Date(NOW).toISOString(),
+      expiresAt: new Date(NOW + LISTENER_KEY_TRANSITION_WINDOW_MS).toISOString(),
+    });
+    const transition = {
+      ...unsigned,
+      signature: sign("sha256", Buffer.from(listenerKeyTransitionPayload(unsigned)), {
+        key: SELF_MADE_KEY,
+        dsaEncoding: "ieee-p1363",
+      }).toString("base64url"),
+    };
+    const listener = await startHttpsListener(() => ({
+      [LISTENER_KEY_TRANSITION_HEADER]: Buffer.from(JSON.stringify(transition)).toString(
+        "base64url",
+      ),
+    }));
+    let saved = pinned(SELF_MADE_PIN);
+    const fetch = fetchFor(listener.port, saved, (_previous, next) => {
+      saved = next;
+    });
+    await (await fetch(`${ORIGIN}/api/remote/hello`)).text();
+    const offline = saved;
+    expect(saved.staged?.trust).toEqual({ kind: "pinned", pin: PLATFORM_TRUSTED_PIN });
+    listener.server.setSecureContext({ cert: PLATFORM_TRUSTED_CERT, key: PLATFORM_TRUSTED_KEY });
+    await (await fetch(`${ORIGIN}/api/remote/hello`)).text();
+    expect(saved).toEqual(pinned(PLATFORM_TRUSTED_PIN));
+    await (
+      await fetchFor(
+        listener.port,
+        saved,
+        undefined,
+        () => NOW + 8 * 86400000,
+      )(`${ORIGIN}/api/remote/hello`)
+    ).text();
+    const requestCount = listener.requests.length;
+    await expect(
+      fetchFor(listener.port, pinned(SELF_MADE_PIN))(`${ORIGIN}/api/remote/hello`),
+    ).rejects.toMatchObject({ reason: "pin-mismatch" });
+    await expect(
+      fetchFor(
+        listener.port,
+        offline,
+        undefined,
+        () => NOW + LISTENER_KEY_TRANSITION_WINDOW_MS,
+      )(`${ORIGIN}/api/remote/hello`),
+    ).rejects.toMatchObject({ reason: "pin-mismatch" });
+    await expect(
+      fetchFor(listener.port, offline, () => {
+        throw new Error("pairing forgotten");
+      })(`${ORIGIN}/api/remote/hello`),
+    ).rejects.toThrow("pairing forgotten");
+    expect(listener.requests).toHaveLength(requestCount);
+  });
 
   it("carries a request to a listener serving the pinned key and reads its answer", async () => {
     const listener = await startHttpsListener();

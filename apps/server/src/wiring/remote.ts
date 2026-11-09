@@ -461,11 +461,19 @@ export function wireRemote(deps: RemoteDependencies) {
       startupRemoteListener = currentRemoteGateway?.listener();
     },
   };
+  const listenerCertificates = createSelfMadeListenerCertificateStore({
+    dataDirectory: providerDataDirectory,
+    tlsFiles: options.listenerTlsFiles,
+  });
   const privateListenerController = createPrivateListenerLifecycleController({
+    hostId: () => String(resolveRemoteGatewayServices().hostId),
+    allowKeyActivation: () =>
+      !hubService.status().enabled && spokeLinkService.status().membership !== "member",
     createGateway: (config) => {
       const services = resolveRemoteGatewayServices();
       const gateway = createRemoteGateway({
         ...services,
+        listenerKeyTransition: () => listenerCertificates.transition(),
         productDispatch: services.productDispatch ?? authenticatedProductDispatch,
         hubLink:
           services.hubLink ??
@@ -494,10 +502,7 @@ export function wireRemote(deps: RemoteDependencies) {
       spokeLinkService.settlePendingRevocations();
       return gateway;
     },
-    selfMadeCertificate: createSelfMadeListenerCertificateStore({
-      dataDirectory: providerDataDirectory,
-      tlsFiles: options.listenerTlsFiles,
-    }),
+    selfMadeCertificate: listenerCertificates,
   });
   // The hub role and this host's hub membership. The private listener is where
   // members reach each other; the routes below are the loopback administration

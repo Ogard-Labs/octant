@@ -515,18 +515,22 @@ function pullRequestReview(operationId: string) {
   } as const;
 }
 
-function waitForAbort(signal: AbortSignal | undefined): Response {
-  const stream = new ReadableStream<Uint8Array>({
-    start(controller) {
-      if (signal?.aborted) {
-        controller.close();
-        return;
-      }
-      signal?.addEventListener("abort", () => controller.close(), { once: true });
-    },
-  });
-  return new Response(stream, {
-    headers: { "content-type": "application/x-ndjson" },
+/** React Native's Response constructor has no static JSON factory. */
+function mockJsonResponse(value: unknown, init?: ResponseInit): Response {
+  const headers = new Headers(init?.headers);
+  if (!headers.has("content-type")) headers.set("content-type", "application/json");
+  return new Response(JSON.stringify(value), { ...init, headers });
+}
+
+/** Sample feeds have no frames; keep only their owning view's abortable wait. */
+function waitForAbort(signal: AbortSignal | undefined): Promise<Response> {
+  return new Promise((_resolve, reject) => {
+    const abort = () => reject(new DOMException("Sample event wait ended.", "AbortError"));
+    if (signal === undefined || signal.aborted) {
+      abort();
+      return;
+    }
+    signal.addEventListener("abort", abort, { once: true });
   });
 }
 
@@ -569,10 +573,12 @@ function createMockTransport(input: {
     hostId: input.hostId,
     async authenticatedFetch(request) {
       if (request.method === "GET" && request.path === "/api/chat/bootstrap") {
-        return Response.json(decodeChatBootstrap({ settings: chatSettings, threads: chatThreads }));
+        return mockJsonResponse(
+          decodeChatBootstrap({ settings: chatSettings, threads: chatThreads }),
+        );
       }
       if (request.method === "GET" && request.path === "/api/work/threads/bootstrap") {
-        return Response.json(decodeWorkThreadBootstrap({ threads: workThreads }));
+        return mockJsonResponse(decodeWorkThreadBootstrap({ threads: workThreads }));
       }
       if (request.method === "GET" && request.path.startsWith("/api/work/turns/transcript/")) {
         const threadId = decodeURIComponent(
@@ -594,7 +600,7 @@ function createMockTransport(input: {
             : turn,
         );
         workTurns.set(threadId, turns);
-        return Response.json({ threadId, turns, liveCursor: turns.length });
+        return mockJsonResponse({ threadId, turns, liveCursor: turns.length });
       }
       if (request.method === "POST" && request.path === "/api/work/turns") {
         const command = JSON.parse(String(request.body ?? "{}")) as {
@@ -630,7 +636,7 @@ function createMockTransport(input: {
           updatedAt: NOW,
         };
         workTurns.set(command.threadId, [...(workTurns.get(command.threadId) ?? []), turn]);
-        return Response.json({ kind: "accepted", turn });
+        return mockJsonResponse({ kind: "accepted", turn });
       }
       if (
         request.method === "GET" &&
@@ -642,7 +648,7 @@ function createMockTransport(input: {
         );
         const limit = Number(new URLSearchParams(request.query ?? "").get("limit") ?? "20");
         const turns = codeTurns.get(threadId) ?? [];
-        return Response.json({
+        return mockJsonResponse({
           version: 1,
           threadId,
           turns: turns.slice(-limit),
@@ -659,7 +665,7 @@ function createMockTransport(input: {
           request.path.slice("/api/code/threads/".length, -"/conversation".length),
         );
         const turns = codeTurns.get(threadId) ?? [];
-        return Response.json({
+        return mockJsonResponse({
           version: 3,
           threadId,
           turns,
@@ -687,10 +693,10 @@ function createMockTransport(input: {
             },
           ];
         });
-        return Response.json({ threadId: body.threadId, items });
+        return mockJsonResponse({ threadId: body.threadId, items });
       }
       if (request.method === "GET" && request.path === "/api/code/bootstrap") {
-        return Response.json(
+        return mockJsonResponse(
           decodeCodeBootstrap({
             settings: codeSettings,
             threads: codeThreads,
@@ -700,13 +706,13 @@ function createMockTransport(input: {
         );
       }
       if (request.method === "POST" && request.path === "/api/code/board") {
-        return Response.json(createCodeBoardView(codeThreads));
+        return mockJsonResponse(createCodeBoardView(codeThreads));
       }
       if (request.method === "GET" && request.path === "/api/providers/bootstrap") {
-        return Response.json(providerSnapshot());
+        return mockJsonResponse(providerSnapshot());
       }
       if (request.method === "GET" && request.path === "/api/projects/bootstrap") {
-        return Response.json(projectBootstrap());
+        return mockJsonResponse(projectBootstrap());
       }
       if (request.method === "GET" && request.path.endsWith("/events")) {
         return waitForAbort(request.signal);
@@ -714,14 +720,16 @@ function createMockTransport(input: {
       if (request.method === "GET" && request.path.startsWith("/api/chat/threads/")) {
         const threadId = decodeURIComponent(request.path.slice("/api/chat/threads/".length));
         const view = chatViews.get(threadId);
-        return view === undefined ? new Response("missing", { status: 404 }) : Response.json(view);
+        return view === undefined
+          ? new Response("missing", { status: 404 })
+          : mockJsonResponse(view);
       }
       if (request.method === "GET" && request.path.startsWith("/api/code/threads/")) {
         const threadId = decodeURIComponent(request.path.slice("/api/code/threads/".length));
         const thread = codeThreads.find((candidate) => String(candidate.id) === threadId);
         return thread === undefined
           ? new Response("missing", { status: 404 })
-          : Response.json({ thread, checkout: codeCheckout, lastSequence: 0 });
+          : mockJsonResponse({ thread, checkout: codeCheckout, lastSequence: 0 });
       }
       if (request.method === "POST" && request.path === "/api/code/commands") {
         const command = JSON.parse(String(request.body ?? "{}")) as {
@@ -747,14 +755,14 @@ function createMockTransport(input: {
           };
         };
         if (command.kind === "prepare-code-project-checkout") {
-          return Response.json({
+          return mockJsonResponse({
             kind: "checkout-prepared",
             bindingRevisionId: BINDING_ID,
             checkout: codeCheckout,
           });
         }
         if (command.kind === "get-worktree-remote-facts") {
-          return Response.json({
+          return mockJsonResponse({
             kind: "worktree-remote-facts-retrieved",
             projectId: CODE_PROJECT_ID,
             facts: { remotes: ["origin"], defaultRemote: "origin" },
@@ -800,7 +808,7 @@ function createMockTransport(input: {
             updatedAt: NOW,
           } as CodeThread;
           codeThreads.unshift(thread);
-          return Response.json(
+          return mockJsonResponse(
             command.kind === "create-code-thread"
               ? { kind: "thread-created", thread }
               : {
@@ -824,6 +832,22 @@ function createMockTransport(input: {
             command.prompt.byteLength !== undefined
           ) {
             const existing = codeTurns.get(command.threadId) ?? [];
+            const assistant: Array<{
+              readonly contentId: string;
+              readonly digest: string;
+              readonly byteLength: number;
+            }> = [];
+            const prompt = codeEvidence.get(command.prompt.contentId);
+            if (prompt !== undefined) {
+              const text = `Mock reply to: ${prompt.text}`;
+              const reply = {
+                contentId: globalThis.crypto.randomUUID(),
+                digest: mockDigest(codeEvidence.size + 1),
+                byteLength: new TextEncoder().encode(text).byteLength,
+              };
+              codeEvidence.set(reply.contentId, { ...reply, text });
+              assistant.push(reply);
+            }
             codeTurns.set(command.threadId, [
               ...existing,
               {
@@ -836,23 +860,23 @@ function createMockTransport(input: {
                   digest: command.prompt.digest,
                   byteLength: command.prompt.byteLength,
                 },
-                assistant: [],
+                assistant,
                 status: "completed",
                 startedAt: NOW,
                 updatedAt: NOW,
               },
             ]);
           }
-          return Response.json({
+          return mockJsonResponse({
             kind: "provider-turn-state",
             operationId: command.operationId,
             state: "running",
           });
         }
         if (command.kind === "observe-pull-request" && command.operationId !== undefined) {
-          return Response.json(pullRequestReview(command.operationId));
+          return mockJsonResponse(pullRequestReview(command.operationId));
         }
-        return Response.json({
+        return mockJsonResponse({
           kind: "pull-request-state",
           operationId: command.operationId,
           state: "failed",
@@ -865,7 +889,7 @@ function createMockTransport(input: {
         const digest = "f".repeat(64);
         const byteLength = new TextEncoder().encode(body).byteLength;
         codeEvidence.set(contentId, { contentId, digest, byteLength, text: body });
-        return Response.json({
+        return mockJsonResponse({
           contentId,
           digest,
           byteLength,
@@ -886,7 +910,7 @@ function createMockTransport(input: {
           });
           chatThreads.unshift(thread);
           chatViews.set(String(thread.id), createChatView(thread, false));
-          return Response.json({ kind: "thread-created", thread });
+          return mockJsonResponse({ kind: "thread-created", thread });
         }
         if (command.kind === "change-chat-provider" && command.threadId !== undefined) {
           const thread = chatThreads.find((entry) => String(entry.id) === command.threadId);
@@ -900,7 +924,7 @@ function createMockTransport(input: {
           if (view !== undefined) {
             chatViews.set(command.threadId, { ...view, thread: updated });
           }
-          return Response.json({ kind: "thread-updated", thread: updated });
+          return mockJsonResponse({ kind: "thread-updated", thread: updated });
         }
         if (
           command.kind === "send-chat-turn" &&
@@ -915,9 +939,9 @@ function createMockTransport(input: {
             (entry) => String(entry.id) === command.threadId,
           );
           if (threadIndex >= 0) chatThreads[threadIndex] = nextView.thread;
-          return Response.json({ kind: "turn-created", turn: nextView.turns.at(-1) });
+          return mockJsonResponse({ kind: "turn-created", turn: nextView.turns.at(-1) });
         }
-        return Response.json({ kind: "command-accepted" });
+        return mockJsonResponse({ kind: "command-accepted" });
       }
       if (request.method === "POST" && request.path === "/api/work/threads/commands") {
         const command = JSON.parse(String(request.body ?? "{}")) as {
@@ -939,7 +963,7 @@ function createMockTransport(input: {
           modelId: command.modelId,
         });
         workThreads.unshift(thread);
-        return Response.json({ kind: "thread-created", thread });
+        return mockJsonResponse({ kind: "thread-created", thread });
       }
       const attachmentMode =
         request.method === "POST" && request.path === "/api/chat/attachments"
@@ -960,7 +984,7 @@ function createMockTransport(input: {
           byteLength,
           digest: "0".repeat(64),
         };
-        return Response.json(
+        return mockJsonResponse(
           attachmentMode === "chat"
             ? {
                 ...fields,
@@ -973,7 +997,7 @@ function createMockTransport(input: {
         );
       }
       if (request.method === "GET" && request.path === "/api/reply-detail") {
-        return Response.json(mockReplyDetailReading());
+        return mockJsonResponse(mockReplyDetailReading());
       }
       return new Response("Mock route not found", { status: 404 });
     },

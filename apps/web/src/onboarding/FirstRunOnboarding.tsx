@@ -1,3 +1,4 @@
+import { FirstTaskCapabilities, type FirstTaskCapabilitiesProps } from "./FirstTaskCapabilities";
 import type { PermissionMode } from "@octant/contracts/providers";
 import type { ProviderInstanceId, ProviderModelId } from "@octant/contracts";
 import type { ProjectId } from "@octant/contracts/projects";
@@ -48,6 +49,7 @@ const MODE_LABEL: Record<FirstRunTaskMode, string> = {
 };
 
 export interface FirstRunOnboardingProps {
+  readonly capabilities?: Omit<FirstTaskCapabilitiesProps, "browser" | "onDismiss">;
   readonly controller: FirstRunOnboardingController;
   readonly readiness: FirstRunReadinessSummary;
   readonly discoveryNotice?: FirstRunDiscoveryNotice;
@@ -113,6 +115,7 @@ export interface FirstRunOnboardingProps {
  */
 export function FirstRunOnboarding(props: FirstRunOnboardingProps) {
   const titleId = useId();
+  const [capabilitiesDismissed, setCapabilitiesDismissed] = useState(false);
   const hostPlatform = useHostPlatform();
   const { controller } = props;
   const [step, setStep] = useState<FirstRunStepId>("providers");
@@ -394,7 +397,34 @@ export function FirstRunOnboarding(props: FirstRunOnboardingProps) {
               </span>
             </header>
           )}
-          {handoffOpen ? <FirstRunReadinessStep handoff={handoff} onSetup={openSetup} /> : null}
+          {handoffOpen ? (
+            <>
+              <FirstRunReadinessStep handoff={handoff} onSetup={openSetup} />
+              {blocked || capabilitiesDismissed || props.capabilities === undefined ? null : (
+                <FirstTaskCapabilities
+                  {...props.capabilities}
+                  browser={(() => {
+                    const model = handoff.model;
+                    const group = modeGroups.find(
+                      (candidate) => candidate.instance.id === model?.providerInstanceId,
+                    );
+                    if (
+                      group?.appManagedTools === "supported" ||
+                      group?.verifiedToolModelIds?.some(
+                        (id) => String(id) === String(model?.modelId),
+                      )
+                    )
+                      return "supported";
+                    return group?.appManagedTools === undefined ? "unknown" : "unsupported";
+                  })()}
+                  onDismiss={() => {
+                    setCapabilitiesDismissed(true);
+                    stepHeading.current?.focus();
+                  }}
+                />
+              )}
+            </>
+          ) : null}
 
           {handoffOpen || step !== "providers" ? null : (
             <FirstRunProviderStep

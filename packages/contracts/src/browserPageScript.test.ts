@@ -16,6 +16,7 @@ describe("private bounded script messages", () => {
         operation: "prepare",
         source: "42",
         expectedUrl: "https://example.com/",
+        requiresClearPage: true,
       }).operation,
     ).toBe("prepare");
     expect(() => decodeBrowserActionKind("run-script")).toThrow();

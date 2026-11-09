@@ -119,8 +119,23 @@ export async function requestPairedComputer(input: {
   const pin = input.pins.reachPinFor(origin, pairing);
   if (pin === undefined) return { status: "refused", message: NOT_PAIRED };
 
-  const trust: ListenerOriginTrust = { current: { kind: "pinned", pin } };
-  const fetchFor = input.fetchFor ?? ((o, t) => createListenerFetch({ origin: o, trust: t }));
+  const trust = input.pins.trustFor(origin, pairing);
+  const hostId = input.pins.hostIdFor(origin);
+  if (trust === undefined) return { status: "refused", message: NOT_PAIRED };
+  const fetchFor =
+    input.fetchFor ??
+    ((o, t) =>
+      createListenerFetch({
+        origin: o,
+        trust: t,
+        ...(hostId === undefined ? {} : { hostId }),
+        ...(input.pins.pinFor(o) === undefined
+          ? {}
+          : {
+              onTrust: (previous: ListenerOriginTrust, next: ListenerOriginTrust) =>
+                input.pins.rememberTrust(o, previous, next),
+            }),
+      }));
   const signal = AbortSignal.timeout(PAIRED_COMPUTER_REQUEST_LIMITS.timeoutMs);
   let response: Response;
   try {
@@ -140,7 +155,16 @@ export async function requestPairedComputer(input: {
   const read = await readBounded(response, signal);
   // A computer forgotten (or re-paired under another key) while this request
   // was out answers nothing, whatever it sent back.
-  if (input.pins.reachPinFor(origin, pairing) !== pin)
+  const currentTrust = input.pins.trustFor(origin, pairing);
+  if (
+    currentTrust === undefined ||
+    (input.pins.reachPinFor(origin, pairing) !== pin &&
+      !(
+        trust.staged?.trust.kind === "pinned" &&
+        currentTrust.current.kind === "pinned" &&
+        currentTrust.current.pin === trust.staged.trust.pin
+      ))
+  )
     return { status: "refused", message: NOT_PAIRED };
   if (read === undefined) {
     return { status: "unreachable", message: "That computer's answer was too large or too slow." };

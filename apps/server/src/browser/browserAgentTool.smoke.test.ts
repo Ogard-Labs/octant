@@ -1519,6 +1519,37 @@ describe.skipIf(!available)("the agent's Browser tool on a real page", () => {
       await rm(workspace, { recursive: true, force: true });
     });
 
+    it("stops simultaneous downloads in separate contexts before their streams finish", async () => {
+      const firstRoot = await mkdtemp(join(tmpdir(), "octant-download-concurrent-a-"));
+      const secondRoot = await mkdtemp(join(tmpdir(), "octant-download-concurrent-b-"));
+      const first = agentTool({ uploadRoot: firstRoot, downloads: true });
+      const second = agentTool({ uploadRoot: secondRoot, downloads: true });
+      try {
+        const [firstRef, secondRef] = await Promise.all([
+          openDownloadsPage(first),
+          openDownloadsPage(second),
+        ]);
+        const answers = await Promise.all([
+          first.call({ operation: "click", ref: firstRef(/"Big"/) }),
+          second.call({ operation: "click", ref: secondRef(/"Big"/) }),
+        ]);
+        for (const answer of answers)
+          expect(downloadsOf(answer)).toEqual([
+            { state: "refused", name: "big.bin", reason: "too-large" },
+          ]);
+        await new Promise((resolve) => setTimeout(resolve, 300));
+        expect(bigChunksSent).toBeLessThan(BIG_CHUNKS);
+        expect(existsSync(join(firstRoot, "downloads"))).toBe(false);
+        expect(existsSync(join(secondRoot, "downloads"))).toBe(false);
+      } finally {
+        await Promise.all([first.stop(), second.stop()]);
+        await Promise.all([
+          rm(firstRoot, { recursive: true, force: true }),
+          rm(secondRoot, { recursive: true, force: true }),
+        ]);
+      }
+    });
+
     it("never overwrites: a second file of the same name gets a number", async () => {
       const workspace = await mkdtemp(join(tmpdir(), "octant-download-"));
       const tool = agentTool({ uploadRoot: workspace, downloads: true });

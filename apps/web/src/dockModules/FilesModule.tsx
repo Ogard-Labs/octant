@@ -5,6 +5,7 @@ import { CodeFileExplorerPanel } from "../code/CodeFileExplorerPanel";
 import { decodeCodeThreadId, decodeWorkThreadId } from "@octant/contracts";
 import { Suspense } from "react";
 import { ShellState } from "../shell/ShellState";
+import { serverCodeProjectFor, useServerCodeProjects } from "../projects/serverProjectEntries";
 
 type Props = Pick<
   ThreadUtilityDockContentProps,
@@ -17,9 +18,14 @@ type Props = Pick<
 >;
 
 export default function FilesModule(props: Props) {
+  const server = serverCodeProjectFor(
+    useServerCodeProjects().workProjects,
+    props.subject.projectId,
+  );
   if (props.subject.mode === "work") {
     return (
       <WorkFilesPanel
+        {...(server === undefined ? {} : { serverLocation: server.location })}
         {...(props.workFileListingClient === undefined
           ? {}
           : { client: props.workFileListingClient })}
