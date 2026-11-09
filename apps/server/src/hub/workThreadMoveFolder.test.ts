@@ -1,9 +1,119 @@
-import { describe, expect, it } from "vitest";
+import { createHash } from "node:crypto";
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  realpathSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { afterEach, describe, expect, it } from "vitest";
 import { decodeThreadWorkingDirectory } from "@octant/contracts";
-import { workThreadOwnFolder } from "./workThreadMoveFolder";
+import {
+  settleMovedWorkFolder,
+  workThreadOwnFolder,
+  type MovedWorkFolder,
+} from "./workThreadMoveFolder";
 
 const main = { kind: "main", root: "/Users/person/Offsite" } as const;
 const report = decodeThreadWorkingDirectory("report");
+
+const parents: string[] = [];
+afterEach(() => {
+  for (const parent of parents.splice(0)) rmSync(parent, { recursive: true, force: true });
+});
+
+/** A source folder holding `files`, with the index a move that carried them all would have kept. */
+function travelledFolder(files: Readonly<Record<string, string>>) {
+  const parent = realpathSync(mkdtempSync(join(tmpdir(), "octant-work-settle-")));
+  parents.push(parent);
+  const folder = join(parent, "report");
+  mkdirSync(folder);
+  const entries = Object.entries(files).map(([path, text]) => {
+    mkdirSync(join(folder, path, ".."), { recursive: true });
+    writeFileSync(join(folder, path), text);
+    return {
+      path: decodeThreadWorkingDirectory(path),
+      bytes: Buffer.byteLength(text),
+      sha256: createHash("sha256").update(text).digest("hex"),
+      mode: 0o644,
+    };
+  });
+  const index: MovedWorkFolder = {
+    workingDirectory: report,
+    partId: "work-files",
+    files: entries,
+    emptyFolders: [],
+  };
+  return { parent, folder, index };
+}
+
+describe("clearing a Work folder whose files moved", () => {
+  it("removes every file and folder that travelled, and its trash folder", async () => {
+    const { parent, folder, index } = travelledFolder({
+      "agenda.md": "# Offsite\n",
+      "notes/day-one/rooms.txt": "Room A",
+    });
+    expect(await settleMovedWorkFolder({ folder, index })).toEqual({ status: "removed" });
+    expect(existsSync(folder)).toBe(false);
+    expect(readdirSync(parent)).toEqual([]);
+  });
+
+  it("keeps a file written to a path after the travelled one was checked and cleared", async () => {
+    const { parent, folder, index } = travelledFolder({
+      "agenda.md": "# Offsite\n",
+      "rooms.txt": "Room A",
+    });
+    const outcome = await settleMovedWorkFolder({
+      folder,
+      index,
+      afterMovedAside: async (path) => {
+        if (path === "agenda.md") writeFileSync(join(folder, "agenda.md"), "# Edited just now\n");
+      },
+    });
+    expect(outcome).toEqual({ status: "kept", keptFiles: ["agenda.md"] });
+    expect(readFileSync(join(folder, "agenda.md"), "utf8")).toBe("# Edited just now\n");
+    expect(readdirSync(folder)).toEqual(["agenda.md"]);
+    expect(readdirSync(parent)).toEqual(["report"]);
+  });
+
+  it("keeps a file created while the folder was being cleared, and the folder with it", async () => {
+    const { folder, index } = travelledFolder({
+      "agenda.md": "# Offsite\n",
+      "notes/rooms.txt": "Room A",
+    });
+    const outcome = await settleMovedWorkFolder({
+      folder,
+      index,
+      afterMovedAside: async (path) => {
+        if (path === "agenda.md") writeFileSync(join(folder, "notes", "late.txt"), "New");
+      },
+    });
+    expect(outcome).toEqual({ status: "kept", keptFiles: ["notes/late.txt"] });
+    expect(readFileSync(join(folder, "notes", "late.txt"), "utf8")).toBe("New");
+    expect(existsSync(join(folder, "agenda.md"))).toBe(false);
+  });
+
+  it("puts a changed file back, beside its path when that path was taken again", async () => {
+    const { folder, index } = travelledFolder({ "agenda.md": "# Offsite\n" });
+    writeFileSync(join(folder, "agenda.md"), "# Changed before the clean-up\n");
+    const outcome = await settleMovedWorkFolder({
+      folder,
+      index,
+      afterMovedAside: async () =>
+        writeFileSync(join(folder, "agenda.md"), "# Written meanwhile\n"),
+    });
+    expect(outcome).toEqual({ status: "kept", keptFiles: ["agenda.md", "agenda.md-kept"] });
+    expect(readFileSync(join(folder, "agenda.md"), "utf8")).toBe("# Written meanwhile\n");
+    expect(readFileSync(join(folder, "agenda.md-kept"), "utf8")).toBe(
+      "# Changed before the clean-up\n",
+    );
+  });
+});
 
 describe("which Work folder a move carries", () => {
   it("carries the subfolder a thread was started in when no other thread or Project uses it", () => {

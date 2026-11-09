@@ -1,5 +1,6 @@
 import { execFileSync } from "node:child_process";
 import {
+  chmodSync,
   existsSync,
   mkdirSync,
   mkdtempSync,
@@ -282,15 +283,26 @@ describe("moving a Work thread's own folder", () => {
       keptFiles: ["debug.log", "keys.txt", "rules"],
     };
     expect(await moved.moveHost.source.erase({ thread: SOURCE, moveId: MOVE })).toEqual(kept);
-    expect(readdirSync(moved.sourceFolder).sort()).toEqual([
-      "agenda.md",
-      "debug.log",
-      "keys.txt",
-      "rules",
-    ]);
+    // Only what travelled is cleared; the folder stays with what did not.
+    expect(readdirSync(moved.sourceFolder).sort()).toEqual(["debug.log", "keys.txt", "rules"]);
     // An erase run again after a stop reports the same and removes nothing.
     expect(await moved.moveHost.source.erase({ thread: SOURCE, moveId: MOVE })).toEqual(kept);
-    expect(existsSync(join(moved.sourceFolder, "agenda.md"))).toBe(true);
+    expect(readdirSync(moved.sourceFolder).sort()).toEqual(["debug.log", "keys.txt", "rules"]);
+  });
+
+  it("lands each file with the permission bits it had on the source", async () => {
+    const moved = filesHost();
+    writeFileSync(join(moved.sourceFolder, "build.sh"), "#!/bin/sh\necho built\n");
+    chmodSync(join(moved.sourceFolder, "build.sh"), 0o755);
+    writeFileSync(join(moved.sourceFolder, "private.txt"), "Only mine");
+    chmodSync(join(moved.sourceFolder, "private.txt"), 0o600);
+
+    const { offer, parts } = await packAndOffer(moved.moveHost, moved.partsFolder);
+    expect((await arriveWith(moved.moveHost, offer, parts)).status).toBe("arrived");
+
+    const landed = join(moved.destinationRoot, "report");
+    expect(statSync(join(landed, "build.sh")).mode & 0o777).toBe(0o755);
+    expect(statSync(join(landed, "private.txt")).mode & 0o777).toBe(0o600);
   });
 
   it("keeps the folder when a file in it changed after the move packed", async () => {

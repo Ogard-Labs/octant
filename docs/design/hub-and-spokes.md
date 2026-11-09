@@ -1331,8 +1331,10 @@ for Move after this turn.
     stay behind.
   - **How it travels.** Every file that travels goes back to back in one
     `work-files` part, with the part's size and digest in the manifest and
-    each file's path, size, and digest in the thread bundle's file list, so
-    the offer stays one manifest row however many files the folder holds. A
+    each file's path, size, digest, and permission bits (`mode & 0o777`;
+    setuid, setgid, and sticky bits never travel) in the thread bundle's file
+    list, so the offer stays one manifest row however many files the folder
+    holds. A
     file up to the Secret guard's read limit (2 MiB) is read once, checked,
     and written from that same read; a larger one travels unread, as a large
     Code file does. An older destination that does not know the part refuses
@@ -1346,6 +1348,10 @@ for Move after this turn.
     so the source keeps the thread. The files are written into a staging
     folder of the move's own and renamed into place in one step, before the
     thread opens, so a stop leaves either nothing or the whole folder, and a
+    file lands with its own permission bits: it is created with them, which
+    the umask can only narrow, and then set to exactly them, so a private
+    file is never readable by others even while it is written and a script
+    stays runnable. A
     retried arrival that finds a folder holding exactly these files uses it
     rather than landing a second copy. A move that is discarded after landing
     leaves that copy where it is; the source still holds its own.
@@ -1450,13 +1456,23 @@ removing the folder would destroy work the move never carried. Nothing is
 pushed or deleted on a remote. A thread that worked
 in the Project's current checkout leaves that folder as it is, because Octant
 never resets the person's own checkout, and the receipt says the changes also
-remain there. A Work thread's own folder that travelled is removed only when
-it still holds exactly what the move carried, compared at erase time for the
-same reason (a frozen Work thread stops its turns, not an editor or terminal
-the person has open there). When it holds anything that stayed behind (an
-ignored file, a link, a file the Secret guard refused, one past the bound, or
-a file added or changed since the move packed), the folder stays where it
-is, and the tombstone names it and those files. It is the person's folder,
+remain there. A Work thread's own folder that travelled is cleared at erase
+time, deleting only what the erase has just proved travelled, because a
+frozen Work thread stops its turns, not an editor or terminal the person has
+open there, and a check of the whole folder followed by a recursive removal
+could destroy a file written in between. Each file that travelled is first
+renamed into a private trash folder made beside the folder (same file
+system, unique name), so a write to its path afterwards makes a new file
+that stays; only the moved file is then compared with the size and digest
+that travelled and deleted when it matches. One that no longer matches is
+put back, or kept beside its path as `<file>-kept` when the path has been
+taken again. Folders are then removed bottom-up one at a time with a plain
+remove that fails on any folder still holding something, the trash folder
+only when empty, and nothing is ever removed recursively. When anything is
+left (an ignored file, a link, a file the Secret guard refused, one past the
+bound, a file changed since the move packed, or one added during the
+clean-up), the folder stays where it is with exactly that, and the tombstone
+names it and those files. It is the person's folder,
 so nothing offers to remove it. A folder another thread has started working
 in since the move packed is kept as it is. The source keeps what travelled
 and what the erase decided beside the move's parts, never sent, so an erase

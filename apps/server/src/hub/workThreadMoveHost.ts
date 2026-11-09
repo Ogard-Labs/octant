@@ -173,8 +173,9 @@ export function createWorkThreadMoveHost(options: WorkThreadMoveHostOptions): {
   };
 
   /**
-   * Removes the folder the files came from when it still holds exactly what
-   * travelled, or keeps it and lists what it holds that did not. A folder
+   * Clears what travelled from the folder the files came from, deleting only
+   * what it proves travelled, and keeps the folder, listing what is left,
+   * when anything is. A folder
    * another thread has started working in since the move packed is kept
    * as it is. Nothing is reported when no folder travelled.
    */

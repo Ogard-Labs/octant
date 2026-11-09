@@ -20,16 +20,20 @@
 
 import { spawn } from "node:child_process";
 import { createHash } from "node:crypto";
-import { createReadStream } from "node:fs";
+import { constants as fsConstants, createReadStream } from "node:fs";
 import {
+  copyFile,
+  link,
   lstat,
   mkdir,
+  mkdtemp,
   open,
   readFile,
   readdir,
   realpath,
   rename,
   rm,
+  rmdir,
   type FileHandle,
 } from "node:fs/promises";
 import { dirname, isAbsolute, join, relative, sep } from "node:path";
@@ -71,6 +75,12 @@ export const MovedWorkFolder = Schema.Struct({
       path: MovedWorkPath,
       bytes: Schema.Int.pipe(Schema.nonNegative()),
       sha256: Schema.String.pipe(Schema.pattern(/^[a-f0-9]{64}$/)),
+      /**
+       * The file's permission bits (`mode & 0o777`), so a script stays
+       * runnable and a private file stays private. Setuid, setgid, and
+       * sticky bits never travel.
+       */
+      mode: Schema.Int.pipe(Schema.between(0, 0o777)),
     }).annotations(strict),
   ).pipe(Schema.maxItems(MOVED_WORK_FOLDER_ENTRIES_MAX)),
   emptyFolders: Schema.Array(MovedWorkPath).pipe(Schema.maxItems(MOVED_WORK_FOLDER_ENTRIES_MAX)),
@@ -211,7 +221,11 @@ export function workThreadFolderOf(input: {
 }
 
 interface WalkedFolder {
-  readonly files: ReadonlyArray<{ readonly path: string; readonly bytes: number }>;
+  readonly files: ReadonlyArray<{
+    readonly path: string;
+    readonly bytes: number;
+    readonly mode: number;
+  }>;
   readonly emptyFolders: ReadonlyArray<string>;
   /** Entries that never travel: ignored, `.git`, links, special files, unnamable paths, past the bound. */
   readonly left: ReadonlyArray<string>;
@@ -227,7 +241,7 @@ async function walkWorkFolder(folder: string): Promise<WalkedFolder> {
   if (!top.isDirectory() || (await realpath(folder)) !== folder) {
     throw new Error("The Work folder is not a plain folder at its own path.");
   }
-  const files: Array<{ path: string; bytes: number }> = [];
+  const files: Array<{ path: string; bytes: number; mode: number }> = [];
   const emptyFolders: string[] = [];
   const left: string[] = [];
   const ignoring = await insideGitWorkTree(folder);
@@ -276,7 +290,9 @@ async function walkWorkFolder(folder: string): Promise<WalkedFolder> {
           if (isMissing(error)) return undefined;
           throw error;
         });
-        if (found !== undefined) files.push({ path: entry.path, bytes: found.size });
+        if (found !== undefined) {
+          files.push({ path: entry.path, bytes: found.size, mode: found.mode & 0o777 });
+        }
       }
     }
     level = next;
@@ -372,6 +388,7 @@ export async function captureWorkFolderForMove(input: {
         path: Schema.decodeSync(MovedWorkPath)(file.path),
         bytes,
         sha256: hash.digest("hex"),
+        mode: file.mode,
       });
     }
   } finally {
@@ -458,7 +475,9 @@ async function writeLandedFiles(
     for (const file of index.files) {
       const target = join(staging, file.path);
       await mkdir(dirname(target), { recursive: true });
-      const out = await open(target, "wx", 0o644);
+      // Opened with its own bits, which the umask can only narrow, so a
+      // private file is never readable by others even while it is written.
+      const out = await open(target, "wx", file.mode);
       const hash = createHash("sha256");
       try {
         let remaining = file.bytes;
@@ -473,6 +492,8 @@ async function writeLandedFiles(
           offset += bytesRead;
           remaining -= bytesRead;
         }
+        // Exactly its bits, which the umask may have narrowed on open.
+        await out.chmod(file.mode);
       } finally {
         await out.close();
       }
@@ -546,55 +567,150 @@ async function folderHoldsExactly(
 export type SettledWorkFolder =
   /** Everything in it travelled unchanged, so it was removed (or an earlier erase already had). */
   | { readonly status: "removed" }
-  /** It holds something the move did not carry, so it stays where it is. */
+  /** Something in it did not travel, so the folder stays with exactly that. */
   | { readonly status: "kept"; readonly keptFiles: ReadonlyArray<string> };
 
 /**
- * Removes the source folder once its thread moved, only when it still holds
- * exactly what travelled: the comparison is made now, because a frozen Work
- * thread stops its turns but not an editor or a terminal the person has open
- * there. Otherwise the folder stays, and what it holds that did not travel
- * is listed: what stayed when the move packed, and anything added or changed
- * since.
+ * Clears the source folder once its thread moved, deleting only what it has
+ * just proved travelled. A frozen Work thread stops its turns but not an
+ * editor or a terminal the person has open there, so a check of the whole
+ * folder followed by a recursive removal could destroy a file written in
+ * between. Instead each file that travelled is first renamed into a private
+ * trash folder beside the folder, so a later write to its path makes a new
+ * file there, and only the moved file is compared and deleted. One that no
+ * longer matches is put back, or kept beside its path as `-kept` when that
+ * path has been taken again. Folders are then removed bottom-up one at a
+ * time, which fails on any folder that still holds something, so anything
+ * added during the clean-up stays. Whatever is left keeps the folder and is
+ * listed.
  */
 export async function settleMovedWorkFolder(input: {
   readonly folder: string;
   readonly index: MovedWorkFolder;
+  /**
+   * Called after a file is moved aside and before it is compared: the moment
+   * an outside writer could still change the folder. Tests use it to write
+   * there.
+   */
+  readonly afterMovedAside?: (path: string) => Promise<void>;
 }): Promise<SettledWorkFolder> {
-  const present = await lstat(input.folder).then(
-    () => true,
-    (error: unknown) => {
-      if (isMissing(error)) return false;
-      throw error;
-    },
-  );
-  if (!present) return { status: "removed" };
-  let walked: WalkedFolder;
-  try {
-    walked = await walkWorkFolder(input.folder);
-  } catch {
-    // A folder that turned into a link or cannot be read is not removed.
+  const folder = input.folder;
+  const top = await lstat(folder).catch((error: unknown) => {
+    if (isMissing(error)) return undefined;
+    throw error;
+  });
+  if (top === undefined) return { status: "removed" };
+  // A folder that turned into a link, or moved, is not touched.
+  if (!top.isDirectory() || (await realpath(folder).catch(() => "")) !== folder) {
     return { status: "kept", keptFiles: [] };
   }
-  const carried = new Map(input.index.files.map((file) => [String(file.path), file]));
-  const carriedFolders = new Set<string>(input.index.emptyFolders.map(String));
-  const kept = [...walked.left];
-  for (const file of walked.files) {
-    const sent = carried.get(file.path);
-    if (
-      sent === undefined ||
-      sent.bytes !== file.bytes ||
-      (await fileSha256(join(input.folder, file.path))) !== sent.sha256
-    ) {
-      kept.push(file.path);
+  const trash = await mkdtemp(join(dirname(folder), ".octant-move-trash-"));
+  let moved = 0;
+  for (const file of input.index.files) {
+    const path = String(file.path);
+    const original = join(folder, path);
+    // A folder on the way that became a link would lead outside the folder.
+    if (!(await plainFoldersOnTheWay(folder, path))) continue;
+    const entry = await lstat(original).catch(() => undefined);
+    if (entry === undefined || !entry.isFile()) continue;
+    moved += 1;
+    const aside = join(trash, String(moved));
+    try {
+      await rename(original, aside);
+    } catch {
+      continue;
+    }
+    await input.afterMovedAside?.(path);
+    const travelled =
+      (await lstat(aside)
+        .then((found) => found.size)
+        .catch(() => -1)) === file.bytes &&
+      (await fileSha256(aside).catch(() => "")) === file.sha256;
+    if (travelled) {
+      await rm(aside, { force: true });
+      continue;
+    }
+    // Back where it was, or beside it when its path was taken again.
+    for (const name of [original, `${original}-kept`, `${original}-kept-2`, `${original}-kept-3`]) {
+      if (await placeWithoutOverwriting(aside, name)) break;
     }
   }
-  for (const folder of walked.emptyFolders) {
-    if (!carriedFolders.has(folder)) kept.push(folder);
+  for (const directory of await foldersDeepestFirst(folder)) {
+    await rmdir(join(folder, directory)).catch(() => undefined);
   }
-  if (kept.length > 0) return { status: "kept", keptFiles: kept.sort() };
-  await rm(input.folder, { recursive: true, force: true });
-  return { status: "removed" };
+  await rmdir(folder).catch(() => undefined);
+  const trashEmpty = await rmdir(trash).then(
+    () => true,
+    () => false,
+  );
+  const remains = await lstat(folder).then(
+    () => true,
+    () => false,
+  );
+  if (!remains && trashEmpty) return { status: "removed" };
+  let kept: Array<string> = [];
+  if (remains) {
+    try {
+      const walked = await walkWorkFolder(folder);
+      kept = [...walked.files.map((entry) => entry.path), ...walked.emptyFolders, ...walked.left];
+    } catch {
+      kept = [];
+    }
+  }
+  // A file that could be neither put back nor kept beside its path is still
+  // in the trash folder, named relative to the folder so it can be found.
+  if (!trashEmpty) {
+    for (const name of await readdir(trash).catch(() => [])) {
+      kept.push(join(relative(folder, trash), name));
+    }
+  }
+  return { status: "kept", keptFiles: kept.sort() };
+}
+
+/** Moves a file to `target` only when nothing is there, never replacing what is. */
+async function placeWithoutOverwriting(from: string, target: string): Promise<boolean> {
+  try {
+    await link(from, target);
+  } catch (error) {
+    if (error instanceof Error && "code" in error && error.code === "EEXIST") return false;
+    // A file system without hard links: copy, refusing an existing target.
+    try {
+      await copyFile(from, target, fsConstants.COPYFILE_EXCL);
+    } catch {
+      return false;
+    }
+  }
+  await rm(from, { force: true });
+  return true;
+}
+
+/** Whether every folder between `root` and the file is a plain folder, not a link. */
+async function plainFoldersOnTheWay(root: string, path: string): Promise<boolean> {
+  const parts = path.split("/");
+  for (let depth = 1; depth < parts.length; depth += 1) {
+    const entry = await lstat(join(root, ...parts.slice(0, depth))).catch(() => undefined);
+    if (entry === undefined || !entry.isDirectory()) return false;
+  }
+  return true;
+}
+
+/** Every folder inside `root`, deepest first, found without following a link. */
+async function foldersDeepestFirst(root: string): Promise<ReadonlyArray<string>> {
+  const found: string[] = [];
+  let level: ReadonlyArray<string> = [""];
+  while (level.length > 0) {
+    const next: string[] = [];
+    for (const parent of level) {
+      const children = await readdir(join(root, parent), { withFileTypes: true }).catch(() => []);
+      for (const child of children) {
+        if (!child.isDirectory()) continue;
+        next.push(parent === "" ? child.name : `${parent}/${child.name}`);
+      }
+    }
+    found.push(...next);
+    level = next;
+  }
+  return found.reverse();
 }
 
 async function fileSha256(path: string): Promise<string> {
