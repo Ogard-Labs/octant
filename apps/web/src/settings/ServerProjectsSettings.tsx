@@ -20,6 +20,7 @@ import { OctantAlert } from "../ui/base/OctantAlert";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantInput } from "../ui/base/OctantInput";
 import { OctantSelectField } from "../ui/base/OctantSelect";
+import { OctantSwitch } from "../ui/base/OctantSwitch";
 import { SettingsPanel, SettingsState } from "./primitives";
 import { ShieldServersSettings } from "./ShieldServersSettings";
 
@@ -35,6 +36,7 @@ export interface ServerProjectsSettingsProps {
   readonly terminalClient?: ProjectTerminalClient;
   readonly actionStoragePrefix?: string;
   readonly codeProjectId?: ProjectId | undefined;
+  readonly workProjectId?: ProjectId | undefined;
   readonly onOpenServerProject?: (project: ServerProject) => void;
 }
 
@@ -172,7 +174,7 @@ export function ServerProjectsSettings(props: ServerProjectsSettingsProps) {
                   {aliasOf(String(project.serverId))}:{project.folder}
                 </span>
                 <span className="shield-servers__row-actions">
-                  {project.mode === "work" ? null : (
+                  {project.mode === "work" && project.developerTools?.enabled !== true ? null : (
                     <OctantButton
                       aria-expanded={editingActions === String(project.id)}
                       onClick={() =>
@@ -200,9 +202,37 @@ export function ServerProjectsSettings(props: ServerProjectsSettingsProps) {
                     Remove
                   </OctantButton>
                 </span>
-                {project.mode === "work" || props.terminalClient === undefined ? null : (
+                {project.mode === "work" ? (
+                  <div className="basis-full min-w-0">
+                    <div className="project-overview-inspector__row">
+                      <div>
+                        <h3>Developer tools</h3>
+                        <p id={`${fieldId}-${project.id}-actions`}>
+                          Show saved actions. Tasks keep their existing access; this does not enable
+                          a general Project terminal.
+                        </p>
+                      </div>
+                      <OctantSwitch
+                        label={`Show developer tools for ${project.name}`}
+                        describedBy={`${fieldId}-${project.id}-actions`}
+                        checked={project.developerTools?.enabled === true}
+                        disabled={busy}
+                        onCheckedChange={(enabled) =>
+                          void send({
+                            kind: "set-server-work-developer-tools",
+                            projectId: project.id,
+                            enabled,
+                          })
+                        }
+                      />
+                    </div>
+                  </div>
+                ) : null}
+                {(project.mode === "work" && project.developerTools?.enabled !== true) ||
+                props.terminalClient === undefined ? null : (
                   <span className="shield-servers__row-actions min-w-0 max-w-full flex-wrap">
-                    {String(props.codeProjectId) !== String(project.id) ? (
+                    {String(project.mode === "work" ? props.workProjectId : props.codeProjectId) !==
+                    String(project.id) ? (
                       <>
                         <span>Open this Project to run actions and read suggestions.</span>
                         {props.onOpenServerProject === undefined ? null : (
@@ -233,13 +263,16 @@ export function ServerProjectsSettings(props: ServerProjectsSettingsProps) {
                     )}
                   </span>
                 )}
-                {project.mode === "work" || editingActions !== String(project.id) ? null : (
+                {(project.mode === "work" && project.developerTools?.enabled !== true) ||
+                editingActions !== String(project.id) ? null : (
                   <div className="basis-full min-w-0">
                     <ProjectActionsSection
                       key={`${project.id}:${project.actionsVersion ?? 0}`}
                       project={project}
                       {...(props.terminalClient === undefined ||
-                      String(props.codeProjectId) !== String(project.id)
+                      String(
+                        project.mode === "work" ? props.workProjectId : props.codeProjectId,
+                      ) !== String(project.id)
                         ? {}
                         : { client: props.terminalClient })}
                       disabled={busy}
@@ -385,6 +418,7 @@ export function ServerAccessSettings(props: {
   readonly terminalClient?: ProjectTerminalClient;
   readonly actionStoragePrefix?: string;
   readonly codeProjectId?: ProjectId | undefined;
+  readonly workProjectId?: ProjectId | undefined;
   readonly onOpenServerProject?: (project: ServerProject) => void;
   readonly servers: ShieldServersClient | undefined;
   readonly projects:
@@ -419,6 +453,7 @@ export function ServerAccessSettings(props: {
       />
       <ServerProjectsSettings
         codeProjectId={props.codeProjectId}
+        workProjectId={props.workProjectId}
         {...(props.onOpenServerProject === undefined
           ? {}
           : { onOpenServerProject: props.onOpenServerProject })}

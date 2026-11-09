@@ -296,7 +296,7 @@ checks never change registry/configuration or journal state.
   Full access. _Rationale:_ the posture says what holds the shell, and on a
   server nothing does: Octant has no sandbox there, and the person opening
   their own shell is the approval, as it is for a local Project terminal.
-- **Saved Code Project actions.** Settings → Access → Servers edits up to
+- **Saved Project actions.** Settings → Access → Servers edits up to
   twelve saved commands on the server Project's own catalog record. Action
   saves have an optimistic revision and a journaled `server-projects.actions-replaced@1`
   event; old records remain valid. Root package scripts and Makefile targets
@@ -332,6 +332,34 @@ checks never change registry/configuration or journal state.
   the review retains its run identity. Lost replies, repeated identities and
   host restart never replay a command; preparing another run is a fresh person
   decision after checking the server.
+
+  Work server Projects use the same dedicated saved-action runs, with their
+  own real Work binding rather than a Code checkout or local Project. A Work
+  task's current access, provider/model/options, binding and relative working
+  directory bind the review; changing them, completing the task, disabling Work,
+  closing its window or switching that window to another Work Project retires
+  its admitted action authority. A mixed-mode or stale task is refused before
+  remote reads or effects. Project-level runs still require that live window's
+  persisted Work Project. An explicit local-person Run approves only its saved
+  SSH command; it grants no additional agent, terminal or credential authority.
+  Settings uses this window's Work binding for its suggestions and Run controls;
+  a different or unbound Work Project offers the same explicit Open Project
+  transition as Code, while manual action edits remain available.
+
+  The Work server Project's **Show developer tools** switch is off by default
+  in its existing Settings → Access → Servers row. A local-only
+  `set-server-work-developer-tools` command journals who and when as
+  `server-projects.work-developer-tools-changed@1`. It reveals the action editor,
+  saved-action buttons and active Work header/palette entries; it changes only
+  presentation. It does not enable a general Project terminal, a Developer tools
+  pane or other absent server Work surfaces. A person may turn it off while an
+  already admitted command keeps its separate execution authority. Work actions
+  have closed standard input, refuse interactive terminal writes, and keep their
+  output in the action dialog without a terminal handoff. This is an input/UI
+  boundary, not confinement of the saved command's SSH-user authority.
+  They
+  retain the same honest no-confinement review and uncertain remote completion
+  after connection loss or Stop as Code.
 
 - **Fail closed in a turn.** A file call that cannot reach the server is
   refused `target-unavailable` and a command reports the shell unavailable;
@@ -526,11 +554,9 @@ checks never change registry/configuration or journal state.
 - Work file previews and editing, research sources, the status file and due dates, and the
   Project terminal for a Work Project on a server; its threads are built. A
   local Work Project shows its terminal through its Developer tools switch on
-  its overview, and a Work Project on a server has neither yet.
+  its overview. A Work Project on a server offers a saved-action presentation
+  switch in Settings, but has no general Project terminal or tools pane.
 - Extra folders in a server Project.
-- Saved actions and suggestions for a Work Project on a server. Code server
-  Project actions are built; Work support remains separate from its absent
-  general Project terminal.
 - A Project-level guardrail level or reviewer for a server Project; the
   thread and account levels apply.
 - Real servers are untested: the connection, folder check, file tools,

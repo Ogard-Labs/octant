@@ -92,6 +92,8 @@ import type { CodeRuntimeWiring } from "./codeRuntime";
 import type { HarnessStateWiring } from "./harnessState";
 import { serverCodeCheckout, serverThreadOf } from "../serverProjects/serverProjectThreads";
 import { createServerProjectActions } from "../serverProjects/serverProjectActions";
+import { createServerWorkActionTask } from "../serverProjects/serverWorkProjectActions";
+import { serverWorkBindingRevisionId } from "../serverProjects/serverWorkThreads";
 import { serverTerminalLogin } from "../serverProjects/serverTerminal";
 import {
   decodeServerProjectRemovedPayload,
@@ -104,7 +106,10 @@ import { windowCanAccessWorkProject } from "../windowCodeProjectAccess";
 
 export type CodeToolingDependencies = Pick<ServerStart, "options" | "persistence" | "version"> &
   Pick<ComputerUseWiring, "desktopLeases" | "installDesktopPreviewRequest"> &
-  Pick<AuthorityWiring, "agentRunPersistence" | "codeSessionAuthority" | "windowAuthorityStore"> &
+  Pick<
+    AuthorityWiring,
+    "agentRunPersistence" | "codeSessionAuthority" | "windowAuthorityStore" | "onWindowRevoked"
+  > &
   Pick<AgentRunsWiring, "managedWorktreeReceipts"> &
   Pick<WorkspaceWiring, "projectRootPort" | "projectService"> &
   Pick<
@@ -146,6 +151,7 @@ export function wireCodeTooling(deps: CodeToolingDependencies) {
     extensionLifecycleService,
     extensionPackageStore,
     managedWorktreeReceipts,
+    onWindowRevoked,
     options,
     persistence,
     projectRootPort,
@@ -185,6 +191,17 @@ export function wireCodeTooling(deps: CodeToolingDependencies) {
     const serverActions = createServerProjectActions({
       store: serverProjectStore,
       connection: serverConnection,
+      workTask: createServerWorkActionTask({
+        store: serverProjectStore,
+        readThread: (id) => workThreadProjection.read(id),
+        workspace: (id) => persistence.readWindowWorkspace(id)?.workspace,
+        isWindowLive: (id) =>
+          windowAuthorityStore.listWindowIds().some((live) => String(live) === String(id)),
+        workEnabled: () =>
+          enabledModes(
+            persistence.readShellSettings()?.settings ?? defaultShellSettings(),
+          ).includes("work"),
+      }),
       task: async (windowId, projectId, requested) => {
         const view = await routeCodeService.read(windowId, requested.threadId);
         if (
@@ -244,11 +261,18 @@ export function wireCodeTooling(deps: CodeToolingDependencies) {
             readProject: persistence.readProject,
             canAccessProject: (scopeId, projectId) => {
               const project = persistence.readProject(projectId);
-              if (project?.type !== "work") return canAccessCodeProject(scopeId, projectId);
+              if (
+                project?.type !== "work" &&
+                serverProjectStore.workProject(String(projectId)) === undefined
+              )
+                return canAccessCodeProject(scopeId, projectId);
               // A Work window reaches the Work Project its own persisted
               // workspace binds, while it is live, as a Code window does.
               return (
-                project.lifecycle === "active" &&
+                (project === undefined || project.lifecycle === "active") &&
+                enabledModes(
+                  persistence.readShellSettings()?.settings ?? defaultShellSettings(),
+                ).includes("work") &&
                 windowAuthorityStore.listWindowIds().some((id) => String(id) === String(scopeId)) &&
                 windowCanAccessWorkProject({
                   workspace: persistence.readWindowWorkspace(scopeId)?.workspace,
@@ -450,12 +474,17 @@ export function wireCodeTooling(deps: CodeToolingDependencies) {
             },
             suggestActions: suggestProjectActions,
             serverProject: (projectId) => {
-              const project = serverProjectStore.codeProject(String(projectId));
+              const project = serverProjectStore.project(String(projectId));
               if (project === undefined) return undefined;
               return {
-                bindingRevisionId: serverCodeCheckout(project).bindingRevisionId,
+                ...(project.mode === "work" ? { actionsOnly: true as const } : {}),
+                bindingRevisionId:
+                  project.mode === "work"
+                    ? serverWorkBindingRevisionId(project)
+                    : serverCodeCheckout(project).bindingRevisionId,
                 // Read at each start, so a server removed from the registry refuses.
                 login: () => {
+                  if (project.mode === "work") return undefined;
                   const address = serverProjectStore.addressOf(String(projectId));
                   return address.kind === "address"
                     ? serverTerminalLogin(serverConnection, address.server, address.folder)
@@ -470,12 +499,21 @@ export function wireCodeTooling(deps: CodeToolingDependencies) {
             clock: () => new Date().toISOString(),
           });
     projectTerminals?.reconcile();
+    // Closing a window revokes its in-memory authority without a journal
+    // commit. Retire its saved actions at that boundary, before another call.
+    onWindowRevoked(() => void projectTerminals?.settleActionAuthorities());
     const unsubscribeProjectTerminalAuthority = persistence.journal.subscribeCommitted((append) => {
       if (projectTerminals === undefined) return;
       for (const event of append.events) {
         if (event.aggregateType === "server-projects" || event.aggregateType === "shield-servers")
           void projectTerminals.settleActionAuthorities();
-        if (event.aggregateType === "code-thread" || event.aggregateType === "code-checkout")
+        if (
+          event.aggregateType === "code-thread" ||
+          event.aggregateType === "code-checkout" ||
+          event.aggregateType === "work-thread" ||
+          event.aggregateType === "shell-settings" ||
+          event.aggregateType === "window-workspace"
+        )
           void projectTerminals.settleActionAuthorities();
         if (
           event.aggregateType === "project" &&

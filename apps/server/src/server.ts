@@ -926,6 +926,7 @@ export function startOctantServer(
       remoteServerGrantLocalRoutes,
       remoteServerGrants,
     } = yield* wireCodeTooling({
+      onWindowRevoked,
       desktopLeases,
       installDesktopPreviewRequest,
       workThreadProjection,

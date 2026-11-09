@@ -95,6 +95,90 @@ function storeOn(
 }
 
 describe("server Project catalog", () => {
+  it("keeps Work action presentation off until a local person changes it and replays that choice", async () => {
+    const journal = openJournal(scratch());
+    const store = storeOn(journal, answering(() => resolvedTo("/srv/work")).connection);
+    const bound = await store.bind({
+      name: "Notes",
+      serverId: String(web.serverId),
+      folder: "/srv/work",
+      mode: "work",
+      principal: "local-window",
+    });
+    if (bound.kind !== "changed" || bound.project === undefined)
+      throw Error("Expected fixture Project");
+    const projectId = String(bound.project.id);
+    expect(store.project(projectId)?.developerTools).toBeUndefined();
+    expect(
+      store.setDeveloperTools({ projectId, enabled: true, principal: "remote-device" }),
+    ).toMatchObject({ kind: "refused", reason: "needs-local-window" });
+    expect(
+      store.setDeveloperTools({ projectId, enabled: true, principal: "local-window" }),
+    ).toMatchObject({
+      kind: "changed",
+      project: { developerTools: { enabled: true, changedBy: { kind: "local-user" } } },
+    });
+    expect(
+      store.setActions({
+        projectId,
+        actions: decodeProjectActions([
+          {
+            id: "11111111-1111-4111-8111-111111111111",
+            name: "Check",
+            command: "echo check",
+            directory: ".",
+          },
+        ]),
+        expectedVersion: 0,
+        principal: "local-window",
+      }),
+    ).toMatchObject({ kind: "changed" });
+    const replayed = storeOn(journal, answering(() => resolvedTo("/srv/work")).connection);
+    replayed.load();
+    expect(replayed.project(projectId)).toMatchObject({
+      mode: "work",
+      actionsVersion: 1,
+      actions: [{ command: "echo check" }],
+      developerTools: { enabled: true },
+    });
+    const windowId = decodeWindowId("00000000-0000-4000-8000-000000000470");
+    const capability = "BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBA";
+    const windows = new WindowAuthorityStore();
+    windows.register({ windowId, capability, now: 0 });
+    const route = createServerProjectRouteHandler({
+      store,
+      windowAuthorityStore: windows,
+      now: () => 1,
+    });
+    const body = JSON.stringify({
+      kind: "set-server-work-developer-tools",
+      projectId,
+      enabled: false,
+    });
+    const remote = new Request("http://127.0.0.1/api/server-projects", { method: "POST", body });
+    bindPrincipalRouteContext(remote, {
+      principal: {
+        kind: "remote-device",
+        deviceId: "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee",
+      } as never,
+      scopeId: windowId,
+    });
+    expect(await (await route(remote))?.json()).toMatchObject({ reason: "needs-local-window" });
+    expect(
+      await (
+        await route(
+          new Request("http://127.0.0.1/api/server-projects", {
+            method: "POST",
+            body,
+            headers: { "x-octant-window-capability": capability },
+          }),
+        )
+      )?.json(),
+    ).toMatchObject({
+      kind: "server-projects-updated",
+      view: { projects: [{ developerTools: { enabled: false } }] },
+    });
+  });
   it("saves only a local person's current server action list and replays it without creating a local Project", async () => {
     const directory = scratch();
     const server = answering(() => resolvedTo("/srv/app"));

@@ -12,6 +12,8 @@ import {
   decodeProjectTerminalResult,
   type ProjectId,
 } from "@octant/contracts";
+import { ServerProject as ServerProjectSchema } from "@octant/contracts/server-projects";
+import { Schema } from "effect";
 import type { ProjectTerminalClient } from "@octant/client-runtime/project-terminal-client";
 import { render, screen, within, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
@@ -47,6 +49,7 @@ function setup(options: {
   readonly answer?: (command: ServerProjectsCommand) => ServerProjectsCommandResult;
   readonly terminalClient?: ProjectTerminalClient;
   readonly codeProjectId?: ProjectId;
+  readonly workProjectId?: ProjectId;
   readonly onOpenServerProject?: (project: ServerProject) => void;
 }) {
   const initial = options.initial ?? { projects: [SITE] };
@@ -68,6 +71,7 @@ function setup(options: {
       servers={servers}
       {...(options.terminalClient === undefined ? {} : { terminalClient: options.terminalClient })}
       {...(options.codeProjectId === undefined ? {} : { codeProjectId: options.codeProjectId })}
+      {...(options.workProjectId === undefined ? {} : { workProjectId: options.workProjectId })}
       {...(options.onOpenServerProject === undefined
         ? {}
         : { onOpenServerProject: options.onOpenServerProject })}
@@ -134,6 +138,44 @@ describe("ServerProjectsSettings", () => {
       actionId: TEST_ACTION.id,
     });
   });
+  it("uses the Work binding rather than the Code binding for Work action reads and review", async () => {
+    const project = Schema.decodeUnknownSync(ServerProjectSchema)({
+      ...SITE,
+      mode: "work",
+      actions: [TEST_ACTION],
+      developerTools: {
+        enabled: true,
+        changedBy: { kind: "local-user", actorId: "22222222-2222-4222-8222-222222222222" },
+        changedAt: "2026-11-07T10:00:00.000Z",
+      },
+    });
+    const execute = vi.fn(async () =>
+      decodeProjectTerminalResult({
+        kind: "project-action-preview",
+        projectId: SITE.id,
+        projectVersion: 0,
+        action: {
+          actionId: TEST_ACTION.id,
+          name: TEST_ACTION.name,
+          folder: SITE.folder,
+          branch: "main",
+        },
+      }),
+    );
+    const { user } = setup({
+      initial: { projects: [project] },
+      codeProjectId: decodeProjectId("11111111-1111-4111-8111-222222222222"),
+      workProjectId: SITE.id,
+      terminalClient: { execute },
+    });
+    await user.click(await screen.findByRole("button", { name: "Run Test" }));
+    expect(await screen.findByRole("button", { name: "Run action" })).toBeEnabled();
+    expect(execute).toHaveBeenCalledExactlyOnceWith({
+      kind: "preview-action",
+      projectId: SITE.id,
+      actionId: TEST_ACTION.id,
+    });
+  });
   it("shows a binding refusal after the Project whose action editor was open is removed", async () => {
     const { user } = setup({
       answer: (command) =>
@@ -153,6 +195,38 @@ describe("ServerProjectsSettings", () => {
     await user.type(within(form).getByLabelText("Folder on the server"), "/srv/missing");
     await user.click(within(form).getByRole("button", { name: "Bind folder" }));
     expect(await screen.findByText("That folder is missing on the server.")).toBeVisible();
+  });
+  it("reveals a server Work Project's saved actions only after its presentation switch is chosen", async () => {
+    const project = { ...SITE, mode: "work" as const };
+    const { user, command } = setup({
+      initial: { projects: [project] },
+      answer: (sent) => ({
+        kind: "server-projects-updated",
+        view: {
+          projects: [
+            Schema.decodeUnknownSync(ServerProjectSchema)({
+              ...project,
+              developerTools: {
+                enabled: sent.kind === "set-server-work-developer-tools" && sent.enabled,
+                changedBy: { kind: "local-user", actorId: "22222222-2222-4222-8222-222222222222" },
+                changedAt: "2026-11-07T10:00:00.000Z",
+              },
+            }),
+          ],
+        },
+      }),
+    });
+    const toggle = await screen.findByRole("switch", { name: "Show developer tools for Website" });
+    expect(toggle).not.toBeChecked();
+    expect(screen.queryByRole("button", { name: "Actions" })).toBeNull();
+    await user.click(toggle);
+    expect(command).toHaveBeenCalledExactlyOnceWith({
+      kind: "set-server-work-developer-tools",
+      projectId: SITE.id,
+      enabled: true,
+    });
+    expect(await screen.findByRole("button", { name: "Actions" })).toBeVisible();
+    expect(screen.getByText(/does not enable a general Project terminal/)).toBeVisible();
   });
   it("retains a refused action draft until the person reloads the current saved list", async () => {
     let current: ServerProjectsView = { projects: [SITE] };
