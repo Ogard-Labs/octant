@@ -1,6 +1,8 @@
 import { useMemo, type ReactNode } from "react";
 import {
+  KeyboardAvoidingView,
   Modal,
+  Platform,
   Pressable,
   StyleSheet,
   Text,
@@ -69,7 +71,7 @@ export function BottomSheet(props: BottomSheetProps) {
 
   return (
     <Modal animationType="slide" onRequestClose={props.onClose} transparent visible={props.visible}>
-      <View style={styles.root}>
+      <KeyboardAvoidingView behavior="padding" enabled={Platform.OS === "ios"} style={styles.root}>
         <Pressable onPress={props.onClose} style={styles.backdrop} testID="mobile-sheet-backdrop" />
         <GlassSurface
           contentStyle={[styles.sheetContent, props.contentStyle]}
@@ -95,7 +97,7 @@ export function BottomSheet(props: BottomSheetProps) {
           )}
           {props.children}
         </GlassSurface>
-      </View>
+      </KeyboardAvoidingView>
     </Modal>
   );
 }

@@ -761,6 +761,8 @@ const USAGE: ReadonlyArray<{ readonly octant: string; readonly nightly?: string 
       "listener enable --hostname <lan-or-tailscale-address> --port <port> --cert <path> --key <path>",
   },
   { octant: "listener disable" },
+  { octant: "listener prepare-key|cancel-key" },
+  { octant: "listener activate-key --pin <prepared-new-pin>" },
   { octant: "hub status" },
   { octant: "hub enable [--install-service]", nightly: "hub enable" },
   { octant: "hub disable [--remove-service]", nightly: "hub disable" },

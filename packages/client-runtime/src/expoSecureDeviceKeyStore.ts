@@ -23,6 +23,8 @@ export interface ExpoSecureStringStorage {
   readonly deleteItem: (key: string) => Promise<void>;
 }
 
+const catalogWrites = new WeakMap<ExpoSecureStringStorage, Promise<void>>();
+
 interface PersistedDeviceKeyRecord {
   readonly keyId: string;
   readonly origin: string;
@@ -163,6 +165,20 @@ export function createExpoSecureDeviceKeyStore(
       await writeCatalog(records);
     },
 
+    async updateListenerTrust(keyId, previous, next) {
+      const records = await readCatalog();
+      const index = records.findIndex((entry) => entry.keyId === keyId);
+      const current = records[index];
+      if (
+        current === undefined ||
+        JSON.stringify(metadataFromPersisted(current)?.listenerTrust) !== JSON.stringify(previous)
+      )
+        return false;
+      records[index] = { ...current, listenerTrust: next };
+      await writeCatalog(records);
+      return true;
+    },
+
     async removeOtherApprovedForOrigin(origin, keepKeyId) {
       const records = await readCatalog();
       const keep = records.find((entry) => entry.keyId === keepKeyId);
@@ -195,7 +211,30 @@ export function createExpoSecureDeviceKeyStore(
     },
   };
 
-  return store;
+  // SecureStore has no compare-and-swap transaction. Serialize catalog reads
+  // and writes so a delayed transition cannot resurrect a forgotten pairing.
+  const serialize = <T>(operation: () => Promise<T>): Promise<T> => {
+    const result = (catalogWrites.get(storage) ?? Promise.resolve()).then(operation);
+    catalogWrites.set(
+      storage,
+      result.then(
+        () => undefined,
+        () => undefined,
+      ),
+    );
+    return result;
+  };
+  return {
+    ...store,
+    set: (...args) => serialize(() => store.set(...args)),
+    copyKey: (...args) => serialize(() => store.copyKey(...args)),
+    updateMetadata: (...args) => serialize(() => store.updateMetadata(...args)),
+    updateListenerTrust: (...args) =>
+      serialize(async () => store.updateListenerTrust?.(...args) ?? false),
+    removeOtherApprovedForOrigin: (...args) =>
+      serialize(() => store.removeOtherApprovedForOrigin(...args)),
+    remove: (...args) => serialize(() => store.remove(...args)),
+  };
 }
 
 export function createInMemoryExpoSecureStringStorage(): ExpoSecureStringStorage {

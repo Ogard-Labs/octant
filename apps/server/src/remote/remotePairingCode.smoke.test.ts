@@ -127,6 +127,8 @@ async function startHost(options: { readonly now: () => number }) {
   cleanups.push(() => gateway.stop());
 
   const requests: string[] = [];
+  let requestBytes = 0;
+  const connectionsClosed: Array<Promise<void>> = [];
   const listener: Server = createHttpsServer(certificate.tls, (incoming, outgoing) => {
     const chunks: Buffer[] = [];
     incoming.on("data", (chunk: Buffer) => chunks.push(chunk));
@@ -150,6 +152,14 @@ async function startHost(options: { readonly now: () => number }) {
       })();
     });
   });
+  listener.on("secureConnection", (socket) => {
+    socket.on("data", (bytes: Buffer) => {
+      requestBytes += bytes.byteLength;
+    });
+    connectionsClosed.push(
+      new Promise<void>((resolveClose) => socket.once("close", () => resolveClose())),
+    );
+  });
   listener.on("tlsClientError", () => undefined);
   await new Promise<void>((resolve) => listener.listen(0, "127.0.0.1", resolve));
   const address = listener.address();
@@ -163,7 +173,14 @@ async function startHost(options: { readonly now: () => number }) {
   );
   const administration = gateway.localDeviceAdministration();
   if (administration === undefined) throw new Error("No local administration.");
-  return { port: address.port, pin: certificate.tlsPin, administration, requests };
+  return {
+    port: address.port,
+    pin: certificate.tlsPin,
+    administration,
+    requests,
+    requestBytes: () => requestBytes,
+    connectionsClosed: () => Promise.all(connectionsClosed),
+  };
 }
 
 /** The network seams of the Node transport, dialling the listener's address on loopback. */
@@ -641,6 +658,68 @@ const phoneExchanges: ReadonlyArray<{
 ];
 
 describe.each(phoneExchanges)("pairing a phone from a code over $name", ({ exchange, runs }) => {
+  it.runIf(runs())(
+    "refuses a staged key that expires during the native handshake without sending HTTP bytes",
+    async () => {
+      const host = await startHost({ now: () => Date.now() });
+      let now = Date.now();
+      const expires = now + 60_000;
+      const open = exchange(host.port);
+      const fetch = createExchangeListenerFetch({
+        origin: ORIGIN,
+        now: () => now,
+        trust: {
+          current: { kind: "pinned", pin: `sha256-${Buffer.alloc(32, 9).toString("base64url")}` },
+          staged: {
+            trust: { kind: "pinned", pin: host.pin },
+            until: new Date(expires).toISOString(),
+          },
+        },
+        port: {
+          resolve: async () => [ADDRESS],
+          open: async (request) => {
+            const result = await open(request);
+            now = expires;
+            return result;
+          },
+        },
+      });
+      await expect(
+        fetch(`${ORIGIN}/api/remote/auth/session`, { method: "POST", body: "fixture-proof" }),
+      ).rejects.toMatchObject({ reason: "pin-mismatch" });
+      await host.connectionsClosed();
+      expect(host.requestBytes()).toBe(0);
+      expect(host.requests).toEqual([]);
+    },
+    30_000,
+  );
+  it.runIf(runs())(
+    "persists a staged key before sending any HTTP bytes and refuses storage failure",
+    async () => {
+      const host = await startHost({ now: () => Date.now() });
+      const fetch = createExchangeListenerFetch({
+        origin: ORIGIN,
+        trust: {
+          current: { kind: "pinned", pin: `sha256-${Buffer.alloc(32, 9).toString("base64url")}` },
+          staged: {
+            trust: { kind: "pinned", pin: host.pin },
+            until: new Date(Date.now() + 60_000).toISOString(),
+          },
+        },
+        port: { resolve: async () => [ADDRESS], open: exchange(host.port) },
+        onTrust: async () => {
+          throw new Error("Device key was forgotten or storage failed.");
+        },
+      });
+      await expect(
+        fetch(`${ORIGIN}/api/remote/auth/session`, { method: "POST", body: "fixture-proof" }),
+      ).rejects.toThrow("storage failed");
+      await host.connectionsClosed();
+      expect(host.requestBytes()).toBe(0);
+      expect(host.requests).toEqual([]);
+    },
+    30_000,
+  );
   it.runIf(runs())(
     "pairs from the code alone, pinned to the host-made certificate, and opens a session",
     async () => {

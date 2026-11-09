@@ -16,7 +16,12 @@ const native = requireOptionalNativeModule<OctantPinnedTlsNativeModule>("OctantP
  * module (Expo Go) reports unavailable, so a pinned origin is refused rather
  * than reached through the platform `fetch`.
  */
-export const mobilePinnedListenerTransport: PinnedListenerTransportPort = ({ origin, trust }) =>
+export const mobilePinnedListenerTransport: PinnedListenerTransportPort = ({
+  origin,
+  trust,
+  hostId,
+  onTrust,
+}) =>
   native === null
     ? { status: "unavailable" }
     : {
@@ -24,6 +29,8 @@ export const mobilePinnedListenerTransport: PinnedListenerTransportPort = ({ ori
         fetch: createExchangeListenerFetch({
           origin,
           trust,
+          ...(hostId === undefined ? {} : { hostId }),
+          ...(onTrust === undefined ? {} : { onTrust }),
           port: nativePinnedTlsExchangePort(native),
         }),
       };

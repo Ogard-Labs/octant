@@ -87,8 +87,8 @@ class NotificationKeyVault(context: Context) {
       null
     }
 
-  private fun encrypt(text: String): String? =
-    try {
+  private fun encrypt(text: String): String? {
+    return try {
       val cipher = Cipher.getInstance(TRANSFORMATION)
       cipher.init(Cipher.ENCRYPT_MODE, wrappingKey() ?: return null)
       val sealed = cipher.iv + cipher.doFinal(text.toByteArray(Charsets.UTF_8))
@@ -96,9 +96,10 @@ class NotificationKeyVault(context: Context) {
     } catch (error: Exception) {
       null
     }
+  }
 
-  private fun decrypt(stored: String): String? =
-    try {
+  private fun decrypt(stored: String): String? {
+    return try {
       val bytes = Base64.decode(stored, Base64.NO_WRAP)
       val cipher = Cipher.getInstance(TRANSFORMATION)
       cipher.init(
@@ -110,6 +111,7 @@ class NotificationKeyVault(context: Context) {
     } catch (error: Exception) {
       null
     }
+  }
 
   private companion object {
     const val PREFERENCES = "octant_push_keys"

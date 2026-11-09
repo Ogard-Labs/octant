@@ -54,6 +54,7 @@ function setup(overrides: Partial<PrivateListenerLifecycleController> = {}) {
     enable: vi.fn(async () => readyStatus()),
     disable: vi.fn(async () => disabledStatus()),
     restart: vi.fn(async () => readyStatus()),
+    transitionKey: vi.fn(async () => readyStatus()),
     setTailnetCertificate: vi.fn(async () => ({ status: "applied" as const })),
     tailnetCertificateName: vi.fn(() => undefined),
     ...overrides,
@@ -99,6 +100,41 @@ function enableBody() {
 }
 
 describe("private listener administration routes", () => {
+  it("requires the local bridge and owned window before preparing or activating a listener key", async () => {
+    const { handle, control } = setup();
+    const path = "/api/desktop/private-listener/key-transition";
+    const init = {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ action: "prepare" }),
+    };
+    for (const denied of [
+      new Request(`http://127.0.0.1${path}`, init),
+      request(path, { ...init, headers: { ...init.headers, origin: "http://127.0.0.1" } }),
+      request(path, {
+        ...init,
+        headers: { ...init.headers, "x-octant-window-capability": "wrong" },
+      }),
+    ])
+      expect((await handle(denied))?.status).toBe(401);
+    expect(control.transitionKey).not.toHaveBeenCalled();
+    expect((await handle(request(path, init)))?.status).toBe(200);
+    expect(control.transitionKey).toHaveBeenCalledWith({ action: "prepare" });
+    const activate = {
+      ...init,
+      body: JSON.stringify({ action: "activate", newPin: "sha256-new" }),
+    };
+    expect((await handle(request(path, activate)))?.status).toBe(200);
+    expect(control.transitionKey).toHaveBeenLastCalledWith({
+      action: "activate",
+      newPin: "sha256-new",
+    });
+    const invalid = {
+      ...init,
+      body: JSON.stringify({ action: "prepare", hostname: "another-host" }),
+    };
+    expect((await handle(request(path, invalid)))?.status).toBe(400);
+  });
   it("returns the authoritative persisted host-key fingerprint without exposing SQLite", async () => {
     const { handle, control } = setup();
     const response = await handle(

@@ -833,20 +833,40 @@ that reaches it.
 
 ## Phase E: public store distribution
 
-In scope for the first preview (maintainer decision, 2026-11-06). Build it
-after Phases B to D have been dogfooded so that store presence is the remaining
-gap; submission stays a separate maintainer action.
+In scope for the first preview (maintainer decision, 2026-11-06). Offline demo
+and review-file preparation proceed independently of Phases B to D device
+acceptance. Native acceptance, legal assessment, account/signing actions and
+submission keep their own gates; submission remains a separate maintainer action.
 
 - The listed app is the same remote client. It requires no Octant account; it
   is useful only with the person's own computer.
 - Store review needs a usable app without a reviewer's computer. The app offers
   a clearly labelled offline demo built from the existing mock scenario, with
   no network access and no pairing ([decision M6](#maintainer-decisions)).
-- The privacy disclosures state that Octant collects no data; that content goes
-  only to computers the person paired; and, when push is enabled, that the
-  platform token and host fingerprint go to the push gateway. Listing copy
+  On a phone with no saved computer, the entry choice appears before the vault,
+  session, device-key store or deep-link consumer mounts. A read-only startup
+  check of the host catalogue preserves the usual vault flow for an already
+  paired phone; an unavailable catalogue leaves the entry choice available.
+  Entering the demo creates a fresh in-memory scenario and appearance store.
+  Its create/reply interactions use only the mock transport. The shared composer
+  keeps its input and Send control above the onscreen keyboard, including with
+  larger system text. Its Project/conversation and chosen-host context items
+  wrap within the sheet; long labels can ellipsize without losing their full
+  accessible names or limiting font scaling. A thread's transcript scrolls
+  above its sibling composer, so the beginning and end of a long reply remain
+  reachable without shrinking its text. Device recording,
+  attachments, pairing, owner recovery and native settings are unavailable.
+  Leave demo returns to the entry choice and discards the sample workspace;
+  Connect a computer explicitly enters the normal vault and pairing flow.
+- Privacy disclosures describe the actual data flows: content goes only to
+  computers the person paired, and optional push sends the platform token and
+  host fingerprint through the configured gateway. Store-form classifications
+  and retention statements need legal assessment and deployment evidence;
+  absence of analytics alone does not settle either store's collection form. Listing copy
   names no third-party product and promises no capability the host may not
   grant.
+- The [store review pack](../release/mobile-store-review.md) holds draft listing
+  copy, reviewer steps, data-flow questions and the native acceptance matrix.
 - Export compliance, publisher identity, and the privacy policy page are
   maintainer and legal sign-offs, recorded in the release change.
 

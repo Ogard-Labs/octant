@@ -109,8 +109,8 @@ export function TerminalBrowserApprovalPrompt(props: TerminalBrowserApprovalProm
   };
 
   // The thread's own agent asks the person to sign in through the same list;
-  // that question is the agent's, not a terminal's, and is never remembered.
-  if (pending.signIn !== undefined) {
+  // that question, like an exact-source script permission, is never remembered.
+  if (pending.signIn !== undefined || pending.script !== undefined) {
     return (
       <OctantApprovalCard
         actions={
@@ -121,7 +121,7 @@ export function TerminalBrowserApprovalPrompt(props: TerminalBrowserApprovalProm
               size="sm"
               type="button"
             >
-              Continue
+              {pending.script === undefined ? "Continue" : "Run once"}
             </OctantButton>
             <OctantButton
               disabled={busy}
@@ -135,9 +135,18 @@ export function TerminalBrowserApprovalPrompt(props: TerminalBrowserApprovalProm
           </>
         }
         {...(props.className === undefined ? {} : { className: props.className })}
-        detail={browserApprovalDetail(pending)}
+        detail={
+          pending.script === undefined
+            ? browserApprovalDetail(pending)
+            : `Task: ${props.threadTitle}. ${browserApprovalDetail(pending)}`
+        }
+        context={
+          pending.script === undefined ? undefined : (
+            <code className="approval-row__code">{pending.script.source}</code>
+          )
+        }
         error={message}
-        label="Browser sign-in"
+        label={pending.script === undefined ? "Browser sign-in" : "Browser script permission"}
         summary={browserApprovalSummary(pending)}
       />
     );
@@ -155,15 +164,17 @@ export function TerminalBrowserApprovalPrompt(props: TerminalBrowserApprovalProm
           >
             Approve once
           </OctantButton>
-          <OctantButton
-            disabled={busy}
-            onClick={() => void decide("approved", true)}
-            size="sm"
-            type="button"
-            variant="secondary"
-          >
-            Always allow
-          </OctantButton>
+          {pending.script === undefined ? (
+            <OctantButton
+              disabled={busy}
+              onClick={() => void decide("approved", true)}
+              size="sm"
+              type="button"
+              variant="secondary"
+            >
+              Always allow
+            </OctantButton>
+          ) : null}
           <OctantButton
             disabled={busy}
             onClick={() => void decide("denied")}

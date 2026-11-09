@@ -268,6 +268,9 @@ the CLI. The hub depends on that:
     entry refuses. The reopened destination must retain the staging file's
     physical identity. Renewal and restart keep the key's SPKI pin; no private
     bytes enter arguments, environment, journal, logs or public status.
+    Explicit listener key transitions refuse on this store: their staged key
+    and in-place key replacement are ordinary owner-only files, which native
+    storage does not admit.
     Missing native TLS storage refuses instead of falling back to ordinary
     Windows file operations. Certificate reads release their file handles so
     renewal can replace the public certificate; the key and directory guards

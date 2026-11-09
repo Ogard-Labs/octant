@@ -73,6 +73,12 @@ export interface RemoteDeviceKeyStore {
       readonly listenerTrust: ListenerOriginTrust;
     },
   ) => Promise<void>;
+  /** Atomically changes only listener trust, without reviving a removed key or replacing newer registration facts. */
+  readonly updateListenerTrust?: (
+    keyId: string,
+    previous: ListenerOriginTrust,
+    next: ListenerOriginTrust,
+  ) => Promise<boolean>;
   /** Remove previously approved registrations for this origin after a new
    * approval is committed. Pending claims (records without approved metadata)
    * are preserved so a concurrent pairing in another tab is not destroyed. */
@@ -583,6 +589,16 @@ export function createInMemoryDeviceKeyStore(): RemoteDeviceKeyStore {
       }
       records.set(keyId, { ...record, ...metadata });
     },
+    async updateListenerTrust(keyId, previous, next) {
+      const record = records.get(keyId);
+      if (
+        record === undefined ||
+        JSON.stringify(metadataFromRecord(record)?.listenerTrust) !== JSON.stringify(previous)
+      )
+        return false;
+      records.set(keyId, { ...record, listenerTrust: next });
+      return true;
+    },
     async removeOtherApprovedForOrigin(origin, keepKeyId) {
       const keepRecord = records.get(keepKeyId);
       if (keepRecord === undefined || keepRecord.origin !== origin) {
@@ -716,6 +732,31 @@ export function createIndexedDbDeviceKeyStore(): RemoteDeviceKeyStore {
         transaction.oncomplete = () => resolve();
         transaction.onabort = () => reject(new Error("Failed to update remote device metadata."));
         transaction.onerror = () => reject(new Error("Failed to update remote device metadata."));
+      });
+    },
+    async updateListenerTrust(keyId, previous, next) {
+      const db = await openDb();
+      return new Promise<boolean>((resolve, reject) => {
+        let changed = false;
+        const transaction = db.transaction(STORE_NAME, "readwrite");
+        const store = transaction.objectStore(STORE_NAME);
+        const request = store.get(keyId);
+        request.onsuccess = () => {
+          const record = request.result as StoredDeviceKeyRecord | undefined;
+          if (
+            record === undefined ||
+            JSON.stringify(metadataFromRecord(record)?.listenerTrust) !== JSON.stringify(previous)
+          )
+            return;
+          const update = store.put({ ...record, listenerTrust: next });
+          update.onsuccess = () => {
+            changed = true;
+          };
+          update.onerror = () => transaction.abort();
+        };
+        transaction.oncomplete = () => resolve(changed);
+        transaction.onabort = () => reject(new Error("Failed to update listener trust."));
+        transaction.onerror = () => reject(new Error("Failed to update listener trust."));
       });
     },
     async removeOtherApprovedForOrigin(origin, keepKeyId) {

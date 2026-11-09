@@ -47,6 +47,38 @@ describe("BrowserToolApprovalService", () => {
     expect(service.list(windowId)).toEqual([]);
   });
 
+  it("never remembers a script answer or lets a paired device answer it", async () => {
+    const rememberOrigin = vi.fn();
+    const service = new BrowserToolApprovalService({
+      uuid: () => crypto.randomUUID(),
+      now: Date.now,
+      authorityIsCurrent: () => true,
+      isLocalWindow: (id) => id === windowId,
+      rememberOrigin,
+    });
+    const pending = service.request({
+      windowId,
+      threadId: "50000000-0000-4000-8000-000000000001",
+      authority,
+      origin: "https://example.com",
+      script: { source: "42" },
+    });
+    expect(service.list("60000000-0000-4000-8000-000000000001" as never)).toEqual([]);
+    const prompt = service.list(windowId)[0];
+    if (prompt === undefined) throw Error("Expected script prompt");
+    expect(prompt.script?.source).toBe("42");
+    expect(
+      service.decide(windowId, {
+        approvalId: prompt.approvalId,
+        decision: "approved",
+        remember: true,
+      }),
+    ).toBe(true);
+    await expect(pending).resolves.toBe("approved");
+    expect(rememberOrigin).not.toHaveBeenCalled();
+    service.close();
+  });
+
   it("reports a new prompt and every way it leaves the waiting list", async () => {
     vi.useFakeTimers();
     try {
