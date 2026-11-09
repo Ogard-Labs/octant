@@ -1404,8 +1404,18 @@ const timer = setInterval(() => {
     );
     const readerWidths: number[] = [];
     try {
+      let lastReaderLoad: number | undefined;
       for (const width of [1280, 390]) {
         await browserPage.setViewportSize({ width, height: 844 });
+        // Each load says hello to the host several times, and hello shares
+        // the pairing budget of ten per source per minute; a second load right
+        // after pairing was refused 429 and showed "Pairing failed". Pace the
+        // reloads past that window instead of loading inside it.
+        if (lastReaderLoad !== undefined) {
+          const wait = lastReaderLoad + 62_000 - Date.now();
+          if (wait > 0) await pause(wait);
+        }
+        lastReaderLoad = Date.now();
         await browserPage.goto(`${listenerOrigin}/`);
         const threads = browserPage.getByRole("navigation", { name: "Chat thread list" });
         await threads.waitFor({ timeout: 30_000 });
