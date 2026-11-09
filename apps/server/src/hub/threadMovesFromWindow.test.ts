@@ -210,6 +210,71 @@ describe("holding a move for an owner phone", () => {
     });
   }
 
+  /** A source whose reads all wait until the test opens the gate. */
+  function gatedReads() {
+    const waiting: Array<() => void> = [];
+    return {
+      read: () =>
+        new Promise<MovableThreadReading>((resolve) => {
+          waiting.push(() => resolve(reading(false)));
+        }),
+      pending: () => waiting.length,
+      open: () => {
+        for (const release of waiting.splice(0)) release();
+      },
+    };
+  }
+  const single = () => (moves: ThreadMovesFromWindow) => moves.askPhone(ask);
+  const batch = () => (moves: ThreadMovesFromWindow) =>
+    moves.shutdownAskPhone({
+      destinationMemberId: DESKTOP as never,
+      rows: [{ thread: THREAD, timing: "now" }],
+    });
+
+  for (const [first, second, title] of [
+    [single(), single(), "two windows ask the phone"],
+    [batch(), batch(), "two Prepare to shut down batches ask the phone"],
+    [single(), batch(), "a window and a Prepare to shut down batch ask the phone"],
+    [batch(), single(), "a Prepare to shut down batch and a window ask the phone"],
+  ] as const) {
+    it(`holds one wait when ${title} for the same thread at once, and Don't move leaves nothing to confirm`, async () => {
+      const gate = gatedReads();
+      const { moves, start } = heldMoves({ read: gate.read });
+
+      const asked = [first(moves), second(moves)];
+      await vi.waitFor(() => expect(gate.pending()).toBeGreaterThan(0));
+      gate.open();
+      const answers = await Promise.all(asked);
+
+      expect(answers.map((answer) => answer.status).sort()).toEqual([
+        "refused",
+        "waiting-for-phone",
+      ]);
+      expect(answers.find((answer) => answer.status === "refused")).toEqual({
+        status: "refused",
+        reason: "busy",
+      });
+      expect(moves.phoneConfirmations().confirmations).toHaveLength(1);
+
+      moves.stopWaiting(THREAD);
+
+      expect(moves.phoneConfirmations().confirmations).toEqual([]);
+      expect(moves.status(THREAD).waitingForPhone).toBeUndefined();
+      expect(start).not.toHaveBeenCalled();
+      moves.close();
+    });
+  }
+
+  it("gives the thread back when the ask is refused, so it can be asked again", async () => {
+    const { moves } = heldMoves({ busy: true });
+
+    expect(await moves.askPhone(ask)).toEqual({ status: "refused", reason: "busy" });
+    expect(await moves.askPhone({ ...ask, timing: "after-turn" })).toMatchObject({
+      status: "waiting-for-phone",
+    });
+    moves.close();
+  });
+
   it("asks no phone to move a busy thread now", async () => {
     const { moves } = heldMoves({ busy: true });
 
