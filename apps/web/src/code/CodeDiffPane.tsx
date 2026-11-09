@@ -1,4 +1,5 @@
 import { WorkspaceViewStateContext } from "../shell/workspaceViewState";
+import { CodeProviderFileReview } from "./CodeProviderFileReview";
 import type { CodeReviewLineSelection } from "./CodeLocalReview";
 import type { CodeReviewFileRequest } from "./codeReviewNavigation";
 import type { CodeClient } from "@octant/client-runtime/code-client";
@@ -63,7 +64,10 @@ export type CodeDiffProjection =
 export interface CodeDiffPaneProps {
   readonly onSelectReviewLine?: (selection: CodeReviewLineSelection) => void;
   readonly requestedCodeReviewFile?: CodeReviewFileRequest;
-  readonly client: Pick<CodeClient, "operationContent" | "executeOperation">;
+  readonly client: Pick<
+    CodeClient,
+    "operationContent" | "executeOperation" | "readProviderFileReview"
+  >;
   readonly createGitOperationId?: () => CodeGitOperationId;
   readonly createOperationId?: () => CodeOperationId;
   readonly diff: CodeDiffProjection;
@@ -171,7 +175,39 @@ function AvailableDiff(
   const [selectedPath, setSelectedPath] = useState<string | undefined>(() =>
     savedReview?.kind === "review" ? savedReview.path : undefined,
   );
+  const [providerReadsAvailable, setProviderReadsAvailable] = useState(false);
+  const [providerFile, setProviderFile] = useState<{
+    readonly path: string;
+    readonly view: string;
+  }>();
+  const providerRead = props.client.readProviderFileReview;
+  const checkpointOpener = useRef<HTMLElement>(null);
+  useEffect(() => {
+    setProviderReadsAvailable(false);
+    if (props.diff.state !== "available" || providerRead === undefined) return;
+    const controller = new AbortController();
+    let active = true;
+    void providerRead(
+      { kind: "availability", threadId: props.diff.threadId, checkoutId: props.diff.checkoutId },
+      controller.signal,
+    )
+      .then((answer) => {
+        if (active && !controller.signal.aborted)
+          setProviderReadsAvailable(answer.status === "available");
+      })
+      .catch(() => {});
+    return () => {
+      active = false;
+      controller.abort();
+    };
+  }, [providerRead, props.diff.state, props.diff.threadId, props.diff.checkoutId, viewKey]);
+  function readProviderFile(path: string) {
+    checkpointOpener.current =
+      document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    setProviderFile({ path, view: viewKey });
+  }
   function choosePath(path: string) {
+    setProviderFile(undefined);
     setSelectedPath(path);
     viewStore?.write(viewKey, {
       kind: "review",
@@ -424,6 +460,24 @@ function AvailableDiff(
           their original anchors; choose another file.
         </OctantAlert>
       ) : null}
+      {props.diff.state === "available" &&
+      providerReadsAvailable &&
+      providerRead !== undefined &&
+      providerFile?.view === viewKey &&
+      files.some((file) => file.path === providerFile.path) ? (
+        <CodeProviderFileReview
+          key={`${viewKey}:${providerFile.path}`}
+          read={providerRead}
+          threadId={props.diff.threadId}
+          checkoutId={props.diff.checkoutId}
+          path={providerFile.path}
+          onClose={() => {
+            setProviderFile(undefined);
+            checkpointOpener.current?.focus();
+          }}
+          {...(props.loadRuntime === undefined ? {} : { loadRuntime: props.loadRuntime })}
+        />
+      ) : null}
       {selected === undefined ? (
         files.length === 0 ? null : (
           <nav aria-label="Choose a captured file">
@@ -452,6 +506,9 @@ function AvailableDiff(
         >
           <UnifiedDiffList
             files={displayFiles}
+            {...(props.diff.state === "available" && providerReadsAvailable
+              ? { onReadProviderFile: readProviderFile }
+              : {})}
             {...(props.requestedCodeReviewFile === undefined
               ? {}
               : { requestedFile: props.requestedCodeReviewFile })}
@@ -510,6 +567,16 @@ function AvailableDiff(
           <div className="code-diff-pane__detail">
             <div className="code-diff-pane__detail-header">
               <h2>{selected.path}</h2>
+              {props.diff.state === "available" && providerReadsAvailable ? (
+                <OctantButton
+                  size="sm"
+                  variant="outline"
+                  type="button"
+                  onClick={() => readProviderFile(selected.path)}
+                >
+                  Provider checkpoint
+                </OctantButton>
+              ) : null}
               {selected.previousPath === undefined ? null : (
                 <p className="code-diff-pane__renamed-from">Renamed from {selected.previousPath}</p>
               )}

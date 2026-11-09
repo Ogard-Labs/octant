@@ -281,6 +281,7 @@ export type HubAdministrationOperation =
   | "thread-move-destinations"
   | "thread-move-challenge"
   | "thread-move-start"
+  | "thread-move-phone-ask"
   | "thread-move-status"
   | "thread-move-stop-waiting"
   | "thread-move-cancel"
@@ -292,6 +293,7 @@ export type HubAdministrationOperation =
   | "shutdown-listing"
   | "shutdown-challenge"
   | "shutdown-start"
+  | "shutdown-phone-ask"
   | "shutdown-handover"
   | "shutdown-sizes"
   | "handover-preview"
@@ -423,6 +425,7 @@ export interface OctantHostBridge
   /** Shows an extension's popup or options page beside the Browser toolbar's extensions button. */
   readonly openBrowserExtensionPopup?: (request: {
     readonly profile:
+      | { readonly kind: "account"; readonly profileId: string }
       | { readonly kind: "personal" }
       | { readonly kind: "project"; readonly projectId: string };
     readonly extensionId: string;

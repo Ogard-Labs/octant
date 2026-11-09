@@ -220,6 +220,139 @@ function harness(
 }
 
 describe("BrowserAutomationService", () => {
+  it("gives a reviewed flow exclusive agent custody while the person can still use the page", async () => {
+    const f = harness();
+    await f.service.create({ windowId, threadId: threadOne, action: action(), policy });
+    let current = true;
+    const custody = f.service.claimFlowRun({
+      windowId,
+      threadId: threadOne,
+      mode: "work",
+      current: () => current,
+    });
+    expect(custody).toBeDefined();
+    if (custody === undefined) throw Error("custody refused");
+    expect(
+      (
+        await f.service.act({
+          windowId,
+          threadId: threadOne,
+          request: request(),
+          capturedBy: "agent",
+        })
+      ).failure?.category,
+    ).toBe("unavailable");
+    expect(f.runtime.act).not.toHaveBeenCalled();
+    expect(
+      (await f.service.create({ windowId, threadId: threadOne, action: action(), policy })).failure
+        ?.category,
+    ).toBe("unavailable");
+    await f.service.act({
+      windowId,
+      threadId: threadOne,
+      request: request(),
+      capturedBy: "person",
+    });
+    expect(f.runtime.act).toHaveBeenCalledOnce();
+    await f.service.act({
+      windowId,
+      threadId: threadOne,
+      request: request(),
+      capturedBy: "agent",
+      flowRun: custody,
+    });
+    expect(f.runtime.act).toHaveBeenCalledTimes(2);
+    current = false;
+    await f.service.act({
+      windowId,
+      threadId: threadOne,
+      request: request(),
+      capturedBy: "agent",
+      flowRun: custody,
+    });
+    expect(f.runtime.act).toHaveBeenCalledTimes(2);
+    custody.release();
+    await f.service.act({
+      windowId,
+      threadId: threadOne,
+      request: request(),
+      capturedBy: "agent",
+      flowRun: custody,
+    });
+    expect(f.runtime.act).toHaveBeenCalledTimes(2);
+    await f.service.close();
+  });
+
+  it("rechecks reviewed flow admission after target inspection and withholds a revoked observation", async () => {
+    const f = harness();
+    await f.service.create({ windowId, threadId: threadOne, action: action(), policy });
+    let current = true;
+    const custody = f.service.claimFlowRun({
+      windowId,
+      threadId: threadOne,
+      mode: "work",
+      current: () => current,
+    });
+    if (custody === undefined) throw Error("custody refused");
+    vi.mocked(f.runtime.inspectTarget).mockImplementationOnce(async () => {
+      current = false;
+      return { sensitive: false };
+    });
+    const refused = await f.service.act({
+      windowId,
+      threadId: threadOne,
+      request: request({ kind: "press", target: undefined, value: "Enter" }),
+      capturedBy: "agent",
+      flowRun: custody,
+    });
+    expect(refused.failure?.category).toBe("stale");
+    expect(f.runtime.act).not.toHaveBeenCalled();
+    current = true;
+    vi.mocked(f.runtime.act).mockImplementationOnce(async () => {
+      current = false;
+      return { url: "https://example.com/start", extractedText: "withheld" };
+    });
+    const withheld = await f.service.act({
+      windowId,
+      threadId: threadOne,
+      request: request(),
+      capturedBy: "agent",
+      flowRun: custody,
+    });
+    expect(withheld.failure?.category).toBe("stale");
+    expect(withheld.observation?.extractedText).not.toBe("withheld");
+    custody.release();
+    await f.service.close();
+  });
+
+  it("refuses flow custody while another agent call is in flight and rechecks before dispatch", async () => {
+    const f = harness();
+    await f.service.create({ windowId, threadId: threadOne, action: action(), policy });
+    const entered = Promise.withResolvers<void>();
+    const finish = Promise.withResolvers<void>();
+    vi.mocked(f.runtime.act).mockImplementationOnce(async () => {
+      entered.resolve();
+      await finish.promise;
+      return { url: "https://example.com/start" };
+    });
+    const running = f.service.act({
+      windowId,
+      threadId: threadOne,
+      request: request(),
+      capturedBy: "agent",
+    });
+    await entered.promise;
+    expect(
+      f.service.claimFlowRun({ windowId, threadId: threadOne, mode: "work", current: () => true }),
+    ).toBeUndefined();
+    finish.resolve();
+    await running;
+    expect(
+      f.service.claimFlowRun({ windowId, threadId: threadOne, mode: "work", current: () => true }),
+    ).toBeDefined();
+    await f.service.close();
+  });
+
   it.each([
     { mode: "work" as const, unattended: false, dedicated: false },
     { mode: "code" as const, unattended: true, dedicated: false },
@@ -448,6 +581,42 @@ describe("BrowserAutomationService", () => {
     settle.resolve();
     await pending;
   });
+  it("refuses an unknown account identity before opening a native page", async () => {
+    const f = harness();
+    const account = {
+      kind: "account" as const,
+      profileId: "40000000-0000-4000-8000-000000000002" as never,
+    };
+    const list = vi.fn(
+      async (): Promise<
+        ReadonlyArray<{ profile: typeof account; label: string; sizeBytes: number }>
+      > => [],
+    );
+    Object.defineProperty(f.runtime, "profiles", {
+      value: { list, clear: async () => undefined, syncExtensions: async () => undefined },
+      configurable: true,
+    });
+    expect(
+      await f.service.create({
+        windowId,
+        threadId: threadOne,
+        action: action(),
+        policy: { ...policy, profile: account },
+      }),
+    ).toMatchObject({ failure: { reason: "profile-unavailable" } });
+    expect(f.runtime.createContext).not.toHaveBeenCalled();
+    list.mockResolvedValue([{ profile: account, label: "Work account", sizeBytes: 0 }]);
+    expect(
+      await f.service.create({
+        windowId,
+        threadId: threadOne,
+        action: action(),
+        policy: { ...policy, profile: account },
+      }),
+    ).toMatchObject({ status: "running", context: { policy: { profile: account } } });
+    await f.service.close();
+  });
+
   it("rechecks Full access after native realm preparation and cancels the unstarted script when revoked", async () => {
     let full = true;
     const f = harness({ pageScriptPolicy: () => (full ? "full-access" : "approval-gated") });

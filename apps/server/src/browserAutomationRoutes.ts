@@ -1,4 +1,5 @@
 import type { BrowserAgentAvailability } from "@octant/contracts";
+import { browserProfileFromChoice } from "@octant/domain";
 import { randomUUID } from "node:crypto";
 import { sameToolActionAuthority, type ToolActionAuthority } from "@octant/contracts";
 import {
@@ -27,7 +28,6 @@ import {
   decodeBrowserAutomationFailure,
   type BrowserAutomationFailure,
   type BrowserThreadId,
-  type BrowserProfile,
 } from "@octant/contracts/browser-automation";
 import {
   decodeBrowserCaptureImage,
@@ -55,6 +55,7 @@ import type { ProjectBrowserService } from "./browser/projectBrowserService";
 import type { BrowserProfileService } from "./browser/browserProfileService";
 import type { BrowserExtensionService } from "./browser/browserExtensionService";
 import type { BrowserFlowService } from "./browser/browserFlows";
+import type { BrowserFlowRuns } from "./browser/browserFlowRuns";
 import {
   decodeBrowserFlowsCommand,
   decodeBrowserFlowsResult,
@@ -152,6 +153,7 @@ export interface BrowserAutomationRouteDependencies {
   readonly profiles?: Pick<BrowserProfileService, "execute">;
   /** The Projects' saved Browser flows, listed and deleted by the person; absent on a host without them. */
   readonly flows?: Pick<BrowserFlowService, "summaries" | "delete">;
+  readonly flowRuns?: BrowserFlowRuns;
   readonly windowAuthorityStore: WindowAuthorityStore;
   readonly maxRequestBodySize: number;
 }
@@ -295,12 +297,7 @@ export function createBrowserAutomationRouteHandler(
             409,
             origin,
           );
-        const profile: BrowserProfile | undefined =
-          selection.profile === "project"
-            ? authority.projectId === undefined
-              ? undefined
-              : { kind: "project", projectId: authority.projectId }
-            : { kind: selection.profile };
+        const profile = browserProfileFromChoice(selection.profile, authority.projectId);
         if (profile === undefined)
           return failure(
             { category: "unavailable", message: "This task has no Project Browser profile." },
@@ -498,6 +495,31 @@ export function createBrowserAutomationRouteHandler(
             }),
             origin,
           );
+        }
+        if (command.kind !== "delete") {
+          const runs = dependencies.flowRuns;
+          if (runs === undefined)
+            return failure(
+              { category: "unavailable", message: "Reviewed Browser flow runs are unavailable." },
+              503,
+              origin,
+            );
+          const result =
+            command.kind === "run-tasks"
+              ? runs.tasks(windowId, command.projectId)
+              : command.kind === "review-run"
+                ? runs.review(windowId, command.projectId, command.name, {
+                    threadId: command.threadId,
+                    mode: command.mode,
+                  })
+                : command.kind === "start-run"
+                  ? await runs.start(windowId, command.runId, command.values)
+                  : command.kind === "resume-run"
+                    ? await runs.resume(windowId, command.runId)
+                    : command.kind === "cancel-run"
+                      ? runs.cancel(windowId, command.runId)
+                      : runs.inspect(windowId, command.runId);
+          return success(decodeBrowserFlowsResult(result), origin);
         }
         return success(
           decodeBrowserFlowsResult(

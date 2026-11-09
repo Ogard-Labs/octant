@@ -1372,6 +1372,8 @@ export class CodeService {
     executionContext?: CodeServiceExecutionContext,
   ): Promise<CodeCommandResult> {
     try {
+      if (process.platform === "win32")
+        throw this.#failure("unavailable", "Code execution requires Windows host confinement.");
       let command;
       try {
         command = decodeCodeCommand(input);

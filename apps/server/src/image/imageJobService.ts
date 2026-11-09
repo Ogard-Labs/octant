@@ -369,6 +369,91 @@ export class ImageJobService {
     return job;
   }
 
+  /**
+   * Records a completed job another of the person's computers ran, carried
+   * here with a thread that moved, under the moved thread's scope. The job
+   * ran and was billed there, so it reaches no provider and records no usage
+   * here. It is journaled as queued, running, and completed in one unit, the
+   * path every completed job took. A job already recorded under this id is
+   * left as it is, so a finish asked again carries nothing twice.
+   */
+  async carryMovedJob(input: {
+    readonly jobId: ImageJobId;
+    readonly threadKind: ImageJobThreadKind;
+    readonly scopeId: ImageGenerationScopeId;
+    readonly profileInstanceId: ProviderInstanceId;
+    readonly modelId: ProviderModelId;
+    readonly promptHash: ImageJob["promptHash"];
+    readonly createdAt: UtcTimestamp;
+    readonly updatedAt: UtcTimestamp;
+    readonly images: ReadonlyArray<{
+      readonly attachmentId: ImageArtifactId;
+      readonly bytes: Uint8Array;
+    }>;
+  }): Promise<void> {
+    if (this.#projection.getById(input.jobId) !== undefined) return;
+    const queued = decodeImageJob({
+      id: input.jobId,
+      status: "queued",
+      threadKind: input.threadKind,
+      scopeId: input.scopeId,
+      profileInstanceId: input.profileInstanceId,
+      modelId: input.modelId,
+      promptHash: input.promptHash,
+      artifacts: [],
+      version: 1,
+      createdAt: input.createdAt,
+      updatedAt: input.createdAt,
+    });
+    const artifacts: Array<ImageArtifactRecord> = [];
+    try {
+      for (const image of input.images) {
+        // An earlier try that stopped before journaling may have left the file.
+        await this.#attachments.remove(queued.scopeId, image.attachmentId).catch(() => undefined);
+        const finalized = await this.#attachments.finalize(
+          await this.#attachments.stage({
+            scopeId: queued.scopeId,
+            attachmentId: image.attachmentId,
+            displayName: "generated.png",
+            bytes: image.bytes,
+          }),
+        );
+        artifacts.push({
+          attachmentId: finalized.attachmentId,
+          hash: finalized.hash,
+          size: finalized.size,
+          mime: finalized.mime,
+          evidence: {
+            profileInstanceId: queued.profileInstanceId,
+            modelId: queued.modelId,
+            promptHash: queued.promptHash,
+            jobId: queued.id,
+          },
+        });
+      }
+      const changed = (fromStatus: ImageJobStatus, toStatus: ImageJobStatus, version: number) => ({
+        eventName: IMAGE_JOB_STATUS_CHANGED,
+        payload: {
+          jobId: queued.id,
+          fromStatus,
+          toStatus,
+          version,
+          updatedAt: input.updatedAt,
+          ...(toStatus === "completed" ? { artifacts } : {}),
+        },
+        occurredAt: input.updatedAt,
+      });
+      this.#append(queued.id, 0, [
+        { eventName: IMAGE_JOB_QUEUED, payload: { job: queued }, occurredAt: queued.createdAt },
+        changed("queued", "running", 2),
+        changed("running", "completed", 3),
+      ]);
+    } catch (error) {
+      await this.#removeArtifacts(queued, artifacts);
+      throw error;
+    }
+  }
+
   async cancel(jobId: ImageJobId): Promise<ImageJob> {
     const job = this.#require(jobId);
     if (isImageJobTerminalStatus(job.status)) return job;

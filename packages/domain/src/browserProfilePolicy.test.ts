@@ -35,6 +35,65 @@ describe("browser profile partitions", () => {
     );
   });
 
+  it("keeps named account stores and remembered site grants separate across Projects", () => {
+    const first = decodeBrowserProfile({
+      kind: "account",
+      profileId: "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+    });
+    const second = decodeBrowserProfile({
+      kind: "account",
+      profileId: "11111111-2222-4333-8444-555555555555",
+    });
+    expect(browserProfilePartition(first, "one")).toBe(browserProfilePartition(first, "two"));
+    expect(browserProfilePartition(first, "one")).not.toBe(browserProfilePartition(second, "one"));
+    expect(browserProfilePartition(first, "one")).not.toBe(
+      browserProfilePartition(personal, "one"),
+    );
+    expect(browserProfilePartition(second, "one")).not.toBe(
+      browserProfilePartition(project, "one"),
+    );
+    expect(sameBrowserProfile(first, second)).toBe(false);
+    if (first.kind !== "account" || second.kind !== "account")
+      throw Error("Expected account profiles");
+    expect(
+      isBrowserProfileSiteRemembered(
+        [{ origin: "https://example.com", profile: first }],
+        "https://example.com",
+        first,
+      ),
+    ).toBe(true);
+    expect(
+      isBrowserProfileSiteRemembered(
+        [{ origin: "https://example.com", profile: first }],
+        "https://example.com",
+        second,
+      ),
+    ).toBe(false);
+    expect(
+      storedBrowserProfileOfPartitionFolder(
+        browserProfilePartition(first, "one").slice("persist:".length),
+      ),
+    ).toEqual(first);
+    expect(
+      evaluateBrowserProfileUse({
+        profile: first,
+        caller: "unattended",
+        nativeBrowserAvailable: true,
+      }).kind,
+    ).toBe("refused");
+    expect(
+      evaluateBrowserProfileUse({
+        profile: first,
+        caller: "remote-device",
+        nativeBrowserAvailable: true,
+      }).kind,
+    ).toBe("refused");
+    expect(
+      evaluateBrowserProfileUse({ profile: first, caller: "person", nativeBrowserAvailable: false })
+        .kind,
+    ).toBe("refused");
+  });
+
   it("never lets two Projects share a partition", () => {
     expect(browserProfilePartition(project, "a")).not.toBe(
       browserProfilePartition({ kind: "project", projectId: otherProjectId }, "a"),
@@ -46,11 +105,7 @@ describe("browser profile partitions", () => {
       const stored = decodeBrowserProfile(profile);
       if (stored.kind === "private") throw new Error("expected a stored profile");
       const folder = browserProfilePartitionFolder(stored);
-      expect(storedBrowserProfileOfPartitionFolder(folder)).toEqual(
-        stored.kind === "personal"
-          ? { kind: "personal" }
-          : { kind: "project", projectId: String(stored.projectId) },
-      );
+      expect(storedBrowserProfileOfPartitionFolder(folder)).toEqual(stored);
     }
   });
 

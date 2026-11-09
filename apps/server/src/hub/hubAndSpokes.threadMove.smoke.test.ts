@@ -2,6 +2,7 @@
 // moves from one spoke to the other over the real member routes, against a
 // ticket the phone made on the destination with a fresh unlock.
 
+import { createHash } from "node:crypto";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { HubMemberId, type MovedThreadReference } from "@octant/contracts";
@@ -14,6 +15,7 @@ import { HUB_OWNER_ROUTES } from "./hubOwnerRoutes";
 import {
   ownerCall,
   softwareAuthenticator,
+  type OwnerUnlockChoice,
   type SoftwareAuthenticator,
 } from "./hubOwner.test-support";
 import type { ThreadMoveDestinationHost, ThreadMoveSourceHost } from "./threadMoveService";
@@ -38,12 +40,17 @@ const SECOND: MovedThreadReference = {
   threadId: "99999999-9999-4999-8999-999999999999",
 };
 const CONVERSATION = JSON.stringify({ title: "Plan the trip", turns: ["Where should we go?"] });
+/** An attachment larger than one chunk, so it crosses several chunk requests. */
+const ATTACHMENT = Buffer.alloc(1_300_000, "itinerary ");
+const sha256 = (bytes: Buffer) => createHash("sha256").update(bytes).digest("hex");
 
 /** A computer holding one Chat thread it can move away, and nothing it can receive. */
 function leavingThreads(folder: string) {
   const frozen = new Set<string>();
   const erased: string[] = [];
   const turn = { running: false };
+  /** Set when the thread owns an attachment beside its conversation, and one that cannot be read. */
+  const bulk = { carried: false };
   const source: ThreadMoveSourceHost = {
     read: async (thread) =>
       (thread.threadId === THREAD.threadId || thread.threadId === SECOND.threadId) &&
@@ -64,7 +71,19 @@ function leavingThreads(folder: string) {
       mkdirSync(partsFolder, { recursive: true });
       const path = join(partsFolder, "thread.json");
       writeFileSync(path, CONVERSATION);
-      return { status: "packed", parts: [{ partId: "thread", kind: "thread-bundle", path }] };
+      if (!bulk.carried) {
+        return { status: "packed", parts: [{ partId: "thread", kind: "thread-bundle", path }] };
+      }
+      const attachmentPath = join(partsFolder, "attachment-1.part");
+      writeFileSync(attachmentPath, ATTACHMENT);
+      return {
+        status: "packed",
+        parts: [
+          { partId: "thread", kind: "thread-bundle", path },
+          { partId: "attachment-1", kind: "attachment", path: attachmentPath },
+        ],
+        partsLeftBehind: [{ kind: "attachment", name: "scan.pdf" }],
+      };
     },
     erase: async ({ thread }) => {
       erased.push(thread.threadId);
@@ -90,18 +109,22 @@ function leavingThreads(folder: string) {
         lastActivityAt: Date.now(),
         repositoryRemotes: [],
       }));
-  return { hosts: { source, destination, listThreads }, frozen, erased, turn };
+  return { hosts: { source, destination, listThreads }, frozen, erased, turn, bulk };
 }
 
 /** A computer that opens Chat threads moved to it. */
 function arrivingThreads() {
   const opened: string[] = [];
+  const received = new Map<string, string>();
   const active: string[] = [];
   const destination: ThreadMoveDestinationHost = {
     acceptsProject: (placement) => placement.mode === "chat",
     arrive: async ({ parts }) => {
       const { readFile } = await import("node:fs/promises");
-      for (const path of parts.values()) opened.push(await readFile(path, "utf8"));
+      for (const [partId, path] of parts) {
+        if (partId === "thread") opened.push(await readFile(path, "utf8"));
+        received.set(partId, sha256(await readFile(path)));
+      }
       return { status: "arrived", thread: ARRIVED };
     },
     activate: async (thread) => {
@@ -118,7 +141,7 @@ function arrivingThreads() {
     pack: async () => ({ status: "refused", reason: "refused" }),
     erase: async () => ({ worktreeKept: false }),
   };
-  return { hosts: { source, destination }, opened, active };
+  return { hosts: { source, destination }, opened, received, active };
 }
 
 async function joinHub(
@@ -216,7 +239,19 @@ async function startWorld(options: { readonly laptopIsOwner?: boolean } = {}) {
       body: { sourceMemberId: laptop.hostId },
       ...(withUnlock ? { unlock } : {}),
     });
-  return { hub, laptop, desktop, leaving, arriving, atHub, ticket, laptopUnlock };
+  return {
+    hub,
+    laptop,
+    desktop,
+    phone,
+    network,
+    authenticator,
+    leaving,
+    arriving,
+    atHub,
+    ticket,
+    laptopUnlock,
+  };
 }
 
 /** What this Mac's Touch ID prompt signs: exactly the destination's challenge. */
@@ -254,6 +289,26 @@ describe("moving a thread between two of the person's computers", () => {
     expect(leaving.frozen.size).toBe(0);
     expect(laptop.threadMoveRecords).toEqual(["move-started", "moved-out"]);
     expect(desktop.threadMoveRecords).toEqual(["moved-in", "move-committed"]);
+  }, 60_000);
+
+  it("carries the thread's bulk parts over the member routes byte for byte and names the one left behind", async () => {
+    const { laptop, desktop, leaving, arriving, ticket } = await startWorld();
+    leaving.bulk.carried = true;
+    const issued = await ticket();
+    const ticketId = (issued.json as { ticketId: string }).ticketId;
+
+    const outcome = await laptop.threadMoves.start({
+      thread: THREAD,
+      targetMemberId: desktop.hostId,
+      ticketId,
+      principal: window,
+    });
+
+    expect(outcome.status).toBe("moved");
+    expect(arriving.received.get("attachment-1")).toBe(sha256(ATTACHMENT));
+    expect(laptop.threadMovesFromWindow.status(THREAD).departed?.partsLeftBehind).toEqual([
+      { kind: "attachment", name: "scan.pdf" },
+    ]);
   }, 60_000);
 
   it("issues no ticket without the owner's own fresh unlock, so nothing can move", async () => {
@@ -418,6 +473,234 @@ describe("moving a thread between two of the person's computers", () => {
     });
 
     expect(started).toEqual({ status: "started" });
+    await vi.waitFor(() =>
+      expect([...leaving.erased].sort()).toEqual([THREAD.threadId, SECOND.threadId].sort()),
+    );
+    expect(arriving.opened).toHaveLength(2);
+  }, 60_000);
+});
+
+describe("confirming a move on an owner phone", () => {
+  /** A world where the phone is an owner on the source as well as on the destination. */
+  async function phoneWorld() {
+    const world = await startWorld();
+    listAsOwner(world.laptop, world.phone, world.authenticator);
+    const unlock = { authenticator: world.authenticator, shape: "raw" } as const;
+    const asPhone = (
+      target: HubTestHost,
+      route: string,
+      input: {
+        readonly body?: unknown;
+        readonly method?: "GET" | "POST";
+        readonly unlock?: OwnerUnlockChoice;
+        readonly session?: string;
+      } = {},
+    ) =>
+      ownerCall({
+        device: world.phone,
+        network: world.network,
+        target,
+        route,
+        ...input,
+      });
+    const waiting = async () => {
+      const listed = await asPhone(world.laptop, HUB_OWNER_ROUTES.threadMoveConfirmations, {
+        method: "GET",
+      });
+      const confirmations = (
+        listed.json as {
+          confirmations?: ReadonlyArray<{
+            confirmationId: string;
+            destinationName: string;
+            threads: ReadonlyArray<{ thread: MovedThreadReference; title: string }>;
+          }>;
+        }
+      ).confirmations;
+      const first = confirmations?.[0];
+      if (first === undefined) throw new Error(JSON.stringify(listed));
+      return first;
+    };
+    /** The destination's ticket for exactly these threads, after the phone's own fresh unlock there. */
+    const ticketFor = async (threads: ReadonlyArray<MovedThreadReference>) => {
+      const issued = await asPhone(world.desktop, HUB_OWNER_ROUTES.threadMoveTicket, {
+        body: { sourceMemberId: world.laptop.hostId, threads },
+        unlock,
+      });
+      const ticketId = (issued.json as { ticketId?: string }).ticketId;
+      if (ticketId === undefined) throw new Error(JSON.stringify(issued));
+      return ticketId;
+    };
+    const confirm = (confirmationId: string, ticketId: string) =>
+      asPhone(world.laptop, HUB_OWNER_ROUTES.threadMoveConfirm, {
+        body: { confirmationId, ticketId },
+        unlock,
+      });
+    const askPhone = () =>
+      world.laptop.threadMovesFromWindow.askPhone({
+        thread: THREAD,
+        destinationMemberId: decodeMemberId(world.desktop.hostId),
+        timing: "now",
+      });
+    return { ...world, unlock, asPhone, waiting, ticketFor, confirm, askPhone };
+  }
+
+  it("moves a thread its window held for the phone once the phone unlocks on the destination", async () => {
+    const { laptop, desktop, leaving, arriving, waiting, ticketFor, confirm, askPhone } =
+      await phoneWorld();
+
+    expect(await askPhone()).toMatchObject({ status: "waiting-for-phone" });
+    expect(laptop.threadMovesFromWindow.status(THREAD).waitingForPhone?.destinationName).toBe(
+      "Desktop",
+    );
+    // Nothing is frozen or sent while the move waits for the phone.
+    expect(leaving.frozen.size).toBe(0);
+
+    const held = await waiting();
+    expect(held.destinationName).toBe("Desktop");
+    expect(held.threads).toEqual([{ thread: THREAD, title: "Plan the trip" }]);
+    const confirmed = await confirm(
+      held.confirmationId,
+      await ticketFor(held.threads.map((entry) => entry.thread)),
+    );
+
+    expect(confirmed).toMatchObject({ status: 200, json: { status: "started" } });
+    await vi.waitFor(() => expect(leaving.erased).toEqual([THREAD.threadId]));
+    expect(arriving.opened).toEqual([CONVERSATION]);
+    expect(desktop.threadMoveRecords).toEqual(["moved-in", "move-committed"]);
+    expect(laptop.threadMovesFromWindow.status(THREAD).waitingForPhone).toBeUndefined();
+  }, 60_000);
+
+  it("refuses a phone that is not an owner on the source, which neither reads nor confirms the wait", async () => {
+    const { laptop, desktop, phone, network, authenticator, leaving } = await startWorld();
+    expect(
+      await laptop.threadMovesFromWindow.askPhone({
+        thread: THREAD,
+        destinationMemberId: decodeMemberId(desktop.hostId),
+        timing: "now",
+      }),
+    ).toMatchObject({ status: "waiting-for-phone" });
+
+    const listed = await ownerCall({
+      device: phone,
+      network,
+      target: laptop,
+      route: HUB_OWNER_ROUTES.threadMoveConfirmations,
+      method: "GET",
+    });
+    const confirmed = await ownerCall({
+      device: phone,
+      network,
+      target: laptop,
+      route: HUB_OWNER_ROUTES.threadMoveConfirm,
+      body: {
+        confirmationId: "12345678-1234-4234-8234-123456789012",
+        ticketId: "12345678-1234-4234-8234-123456789013",
+      },
+      unlock: { authenticator, shape: "raw" },
+    });
+
+    expect(listed).toMatchObject({ status: 403, json: { kind: "not-an-owner" } });
+    expect(confirmed).toMatchObject({ status: 403, json: { kind: "not-an-owner" } });
+    expect(laptop.threadMovesFromWindow.status(THREAD).waitingForPhone).toBeDefined();
+    expect(leaving.frozen.size).toBe(0);
+  }, 60_000);
+
+  it("asks the phone for an unlock on the source too, and spends a confirmation once", async () => {
+    const { laptop, leaving, asPhone, waiting, ticketFor, confirm, askPhone } = await phoneWorld();
+    await askPhone();
+    const held = await waiting();
+    const ticketId = await ticketFor([THREAD]);
+
+    const unsigned = await asPhone(laptop, HUB_OWNER_ROUTES.threadMoveConfirm, {
+      body: { confirmationId: held.confirmationId, ticketId },
+    });
+    expect(unsigned).toMatchObject({ status: 403, json: { kind: "unlock-required" } });
+    expect(laptop.threadMovesFromWindow.status(THREAD).waitingForPhone).toBeDefined();
+
+    expect(await confirm(held.confirmationId, ticketId)).toMatchObject({ status: 200 });
+    const again = await confirm(held.confirmationId, ticketId);
+
+    expect(again).toMatchObject({
+      status: 409,
+      json: { status: "refused", kind: "no-such-confirmation" },
+    });
+    await vi.waitFor(() => expect(leaving.erased).toEqual([THREAD.threadId]));
+  }, 60_000);
+
+  it("issues no ticket for a challenge bound to another body, or under an administration session", async () => {
+    const { laptop, desktop, asPhone, unlock, askPhone } = await phoneWorld();
+    await askPhone();
+    const body = { sourceMemberId: laptop.hostId, threads: [THREAD] };
+
+    const otherBody = await asPhone(desktop, HUB_OWNER_ROUTES.threadMoveTicket, {
+      body,
+      unlock: {
+        ...unlock,
+        boundTo: {
+          route: HUB_OWNER_ROUTES.threadMoveTicket,
+          body: JSON.stringify({ sourceMemberId: laptop.hostId, threads: [SECOND] }),
+        },
+      },
+    });
+    const opened = await asPhone(desktop, HUB_OWNER_ROUTES.session, { unlock });
+    const sessionId = (opened.json as { session?: { sessionId?: string } }).session?.sessionId;
+    if (sessionId === undefined) throw new Error(JSON.stringify(opened));
+    const underSession = await asPhone(desktop, HUB_OWNER_ROUTES.threadMoveTicket, {
+      body,
+      session: sessionId,
+    });
+
+    expect(otherBody).toMatchObject({ status: 403, json: { kind: "unlock-action-mismatch" } });
+    expect(underSession).toMatchObject({ status: 403, json: { kind: "own-unlock-required" } });
+  }, 60_000);
+
+  it("moves nothing on a ticket the destination issued for other threads", async () => {
+    const { laptop, leaving, arriving, waiting, ticketFor, confirm, askPhone } = await phoneWorld();
+    await askPhone();
+    const held = await waiting();
+
+    const confirmed = await confirm(held.confirmationId, await ticketFor([SECOND]));
+
+    expect(confirmed).toMatchObject({ status: 200 });
+    await vi.waitFor(() =>
+      expect(laptop.threadMovesFromWindow.status(THREAD).failure?.reason).toBe("refused"),
+    );
+    expect(arriving.opened).toEqual([]);
+    expect(leaving.erased).toEqual([]);
+    expect(leaving.frozen.size).toBe(0);
+  }, 60_000);
+
+  it("refuses the move once the phone is no longer an owner on the destination", async () => {
+    const { laptop, desktop, phone, leaving, arriving, waiting, ticketFor, confirm, askPhone } =
+      await phoneWorld();
+    await askPhone();
+    const held = await waiting();
+    const ticketId = await ticketFor([THREAD]);
+
+    desktop.spoke.removeOwner(phone.hostId, window);
+    await confirm(held.confirmationId, ticketId);
+
+    await vi.waitFor(() =>
+      expect(laptop.threadMovesFromWindow.status(THREAD).failure?.reason).toBe("refused"),
+    );
+    expect(arriving.opened).toEqual([]);
+    expect(leaving.erased).toEqual([]);
+  }, 60_000);
+
+  it("moves a Prepare to shut down batch with one confirmation on the phone", async () => {
+    const { laptop, desktop, leaving, arriving, waiting, ticketFor, confirm } = await phoneWorld();
+    const threads = [THREAD, SECOND];
+    expect(
+      await laptop.threadMovesFromWindow.shutdownAskPhone({
+        destinationMemberId: decodeMemberId(desktop.hostId),
+        rows: threads.map((thread) => ({ thread, timing: "now" as const })),
+      }),
+    ).toMatchObject({ status: "waiting-for-phone" });
+
+    const held = await waiting();
+    expect(held.threads.map((entry) => entry.thread)).toEqual(threads);
+    await confirm(held.confirmationId, await ticketFor(held.threads.map((entry) => entry.thread)));
+
     await vi.waitFor(() =>
       expect([...leaving.erased].sort()).toEqual([THREAD.threadId, SECOND.threadId].sort()),
     );

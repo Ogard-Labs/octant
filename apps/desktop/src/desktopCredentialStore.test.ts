@@ -43,8 +43,17 @@ describe("resolveDesktopCredentialBackend", () => {
       keychainHelperPath: helperPath,
       storeScope,
     });
-    expect(backend.kind).toBe("credential-manager");
-    expect(backend.store).toBeDefined();
+    expect(backend).toEqual({
+      kind: "credential-manager",
+      store: expect.any(Object),
+      replicaDeviceKeys: expect.any(Object),
+      replicaStoreCredentials: expect.any(Object),
+      canvasPublicShareSecrets: expect.any(Object),
+      mcpServerCredentials: expect.any(Object),
+      desktopProviderCredentials: expect.any(Object),
+      pushPlatformCredentials: expect.any(Object),
+      sshKeys: expect.any(Object),
+    });
   });
 });
 

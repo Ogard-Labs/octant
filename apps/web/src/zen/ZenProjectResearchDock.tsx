@@ -1,3 +1,5 @@
+import { useBrowserAccountProfiles } from "../browser/useBrowserAccountProfiles";
+import { browserProfileFromChoice, storedBrowserProfile } from "@octant/domain";
 import type { ProjectBrowserClient } from "@octant/client-runtime/project-browser-client";
 import type {
   BrowserProfileChoice,
@@ -63,6 +65,7 @@ export function ZenProjectResearchDock(props: ZenProjectResearchDockProps) {
   const [message, setMessage] = useState<string>();
   const [opening, setOpening] = useState(false);
   const [nativeSupported, setNativeSupported] = useState<boolean>();
+  const accounts = useBrowserAccountProfiles(client, nativeSupported === true);
   // Where the next page keeps its site data; remembered per Project in this
   // renderer, and applied only to pages the person opens.
   const [profileChoice, setProfileChoice] = useState<BrowserProfileChoice>(() =>
@@ -182,10 +185,12 @@ export function ZenProjectResearchDock(props: ZenProjectResearchDockProps) {
     const shown = context?.profile;
     const manage = client.manageProfiles;
     if (manage === undefined || shown === undefined || shown === "private") return;
+    const profile = storedBrowserProfile(browserProfileFromChoice(shown, projectId));
+    if (profile === undefined) return;
     try {
       const result = await manage.call(client, {
         kind: "clear",
-        profile: shown === "personal" ? { kind: "personal" } : { kind: "project", projectId },
+        profile,
         scope: "all",
       });
       setMessage(
@@ -272,6 +277,7 @@ export function ZenProjectResearchDock(props: ZenProjectResearchDockProps) {
         </>
       ) : null}
       <BrowserProfileControl
+        accounts={accounts}
         disabled={opening}
         onChange={(choice) => void chooseProfile(choice)}
         profile={active ? (context?.profile ?? "private") : profileChoice}
@@ -284,9 +290,7 @@ export function ZenProjectResearchDock(props: ZenProjectResearchDockProps) {
           agentDriving={false}
           client={client}
           hostBridge={props.hostBridge}
-          profile={
-            context.profile === "personal" ? { kind: "personal" } : { kind: "project", projectId }
-          }
+          profile={storedBrowserProfile(browserProfileFromChoice(context.profile, projectId))}
           refreshKey={String(context.contextId)}
         />
       ) : null}

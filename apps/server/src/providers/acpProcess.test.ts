@@ -501,6 +501,54 @@ describe("ACP process lifecycle", () => {
     expect(spawnRecord(target.root)).toBeUndefined();
   });
 
+  it("cancels a receipt-held initialization and removes every owned child before returning", async () => {
+    const target = fixture(kilo);
+    let release: (() => void) | undefined;
+    const ownershipReady = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    let callbacks = 0;
+    const controller = new AbortController();
+    const pending = Effect.runPromise(
+      Effect.scoped(
+        port({ startupTimeoutMs: 5_000 }).start({
+          profile: kilo,
+          binaryPath: target.binaryPath,
+          root: target.root,
+          managedHome: target.root,
+          mode: "code",
+          executionPolicy: "plan",
+          onProcessStarted: async () => {
+            callbacks += 1;
+            if (callbacks === 2) await ownershipReady;
+            return { ready: Promise.resolve(), remove: async () => undefined };
+          },
+        }),
+      ),
+      { signal: controller.signal },
+    );
+    void pending.catch(() => undefined);
+    try {
+      await vi.waitFor(() => expect(spawnRecord(target.root)).toBeDefined(), { timeout: 5_000 });
+      expect(records(target.root).some((record) => record.kind === "message")).toBe(false);
+      controller.abort();
+      await expect(pending).rejects.toThrow();
+      const owned = records(target.root)
+        .filter((record) => record.kind === "pid")
+        .map((record) => Number(record.pid));
+      expect(owned.length).toBeGreaterThan(0);
+      expect(owned.map((pid) => isRunning(pid))).toEqual(owned.map(() => false));
+      release?.();
+      await Promise.resolve();
+      await Promise.resolve();
+      expect(records(target.root).some((record) => record.kind === "message")).toBe(false);
+    } finally {
+      controller.abort();
+      release?.();
+      await pending.catch(() => undefined);
+    }
+  });
+
   it("persists process ownership before ACP initialization", async () => {
     const target = fixture(kilo);
     let releaseOwnership!: () => void;

@@ -117,6 +117,9 @@ export function withCodeOperationRuntime(
       service.execute(windowId, command, signal, context),
     executeOperation: (windowId, command, options) => runtime.execute(windowId, command, options),
     inspectTerminal: (windowId, input) => runtime.inspectTerminal(windowId, input),
+    ...(runtime.readProviderFileReview === undefined
+      ? {}
+      : { readProviderFileReview: runtime.readProviderFileReview.bind(runtime) }),
     watchTerminal: (windowId, input) => runtime.watchTerminal(windowId, input),
     subscribe: (windowId, threadId, afterSequence, signal) =>
       service.subscribe(windowId, threadId, afterSequence, signal),
