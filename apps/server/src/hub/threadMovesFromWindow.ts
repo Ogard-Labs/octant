@@ -204,6 +204,11 @@ export class ThreadMovesFromWindow {
   readonly #waiting = new Map<string, Waiting>();
   // In memory only: a restart ends every wait, and the window asks again.
   readonly #phoneWaits = new Map<string, PhoneWait>();
+  // A thread whose phone wait was confirmed but whose move has not started
+  // yet: reading the thread (for Code, its checkout and Git) takes a while,
+  // and Don't move pressed meanwhile must still stop it. Each confirmation
+  // holds its own token, so only the confirmation still current may launch.
+  readonly #reserved = new Map<string, symbol>();
   // When the last move or wait a window started for each thread ended, until
   // that thread starts another; a failure notice can be dismissed, this cannot.
   readonly #settledAt = new Map<string, UtcTimestamp>();
@@ -367,8 +372,13 @@ export class ThreadMovesFromWindow {
     clearTimeout(wait.timer);
     this.#phoneWaits.delete(input.confirmationId);
     const queue = { tail: Promise.resolve() };
+    const reservations = new Map(
+      wait.rows.map((row) => [key(row.thread), Symbol(key(row.thread))] as const),
+    );
+    for (const [threadKey, token] of reservations) this.#reserved.set(threadKey, token);
     void (async () => {
       for (const row of wait.rows) {
+        const reservation = reservations.get(key(row.thread));
         const reading = await this.#options.source.read(row.thread);
         this.#launch({
           thread: row.thread,
@@ -380,6 +390,7 @@ export class ThreadMovesFromWindow {
           waitForTurn: reading.status === "found" && reading.busy && row.timing === "after-turn",
           queue,
           principal: input.principal,
+          ...(reservation === undefined ? {} : { reservation }),
         });
       }
     })();
@@ -425,7 +436,11 @@ export class ThreadMovesFromWindow {
   }
 
   #isWaiting(thread: MovedThreadReference): boolean {
-    return this.#waiting.has(key(thread)) || this.#phoneWaitFor(thread) !== undefined;
+    return (
+      this.#waiting.has(key(thread)) ||
+      this.#reserved.has(key(thread)) ||
+      this.#phoneWaitFor(thread) !== undefined
+    );
   }
 
   #nameOf(memberId: string): string {
@@ -601,10 +616,20 @@ export class ThreadMovesFromWindow {
     readonly queue: { tail: Promise<void> } | undefined;
     /** Who unlocked it: this window's Touch ID, or the owner phone that confirmed it. */
     readonly principal?: AuditActingPrincipal;
+    /** A phone confirmation's hold on the thread; Don't move withdraws it, and then nothing moves. */
+    readonly reservation?: symbol;
   }): void {
     const { thread } = input;
+    const threadKey = key(thread);
+    const reserved = () =>
+      input.reservation === undefined || this.#reserved.get(threadKey) === input.reservation;
+    // Withdrawn while the thread was read: nothing moves and the spent ticket is dropped.
+    if (!reserved()) return;
     this.#settledAt.delete(key(thread));
     const run = async () => {
+      // A batch's queue or a turn wait may run this long after the launch.
+      if (!reserved()) return;
+      if (input.reservation !== undefined) this.#reserved.delete(threadKey);
       await this.#options.moves
         .start({
           thread,
@@ -643,6 +668,7 @@ export class ThreadMovesFromWindow {
         if (now.status === "found" && now.busy) {
           if (this.#options.now() - startedWaitingAt > TICKET_WAIT_LIMIT_MS) {
             this.#stopWaiting(thread);
+            if (reserved() && input.reservation !== undefined) this.#reserved.delete(threadKey);
             this.#options.moves.refuseBeforeStart(thread, "unlock-required");
             this.#settle(thread);
           }
@@ -660,6 +686,7 @@ export class ThreadMovesFromWindow {
   stopWaiting(thread: MovedThreadReference): { readonly status: "stopped" } {
     if (this.#isWaiting(thread)) this.#settle(thread);
     this.#stopWaiting(thread);
+    this.#reserved.delete(key(thread));
     // Taken out of a phone's wait, the thread no longer moves when the phone
     // confirms; a wait with no thread left ends.
     const held = this.#phoneWaitFor(thread);
@@ -793,6 +820,7 @@ export class ThreadMovesFromWindow {
     this.#waiting.clear();
     for (const wait of this.#phoneWaits.values()) clearTimeout(wait.timer);
     this.#phoneWaits.clear();
+    this.#reserved.clear();
   }
 
   #settle(thread: MovedThreadReference): void {

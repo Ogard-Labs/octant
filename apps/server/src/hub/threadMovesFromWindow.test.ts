@@ -87,7 +87,12 @@ describe("moving a thread after its turn", () => {
 });
 
 describe("holding a move for an owner phone", () => {
-  function heldMoves(options: { readonly busy?: boolean } = {}) {
+  function heldMoves(
+    options: {
+      readonly busy?: boolean;
+      readonly read?: () => Promise<MovableThreadReading>;
+    } = {},
+  ) {
     const folder = mkdtempSync(join(tmpdir(), "octant-move-phone-"));
     folders.push(folder);
     const clock = { now: 1_000_000 };
@@ -108,11 +113,12 @@ describe("holding a move for an owner phone", () => {
         challenge: async () => ({ status: "refused", kind: "refused" }),
         redeem: async () => ({ status: "issued", ticketId: "ticket" }),
       },
-      source: { read: async () => reading(options.busy ?? false) },
+      source: { read: options.read ?? (async () => reading(options.busy ?? false)) },
       members: () => [],
       selfMemberId: () => "self",
       listThreads: async () => [],
       now: () => clock.now,
+      pollMs: 5,
     });
     return { moves, clock, refused, start };
   }
@@ -164,6 +170,45 @@ describe("holding a move for an owner phone", () => {
     expect(start).not.toHaveBeenCalled();
     moves.close();
   });
+
+  for (const timing of ["after-turn", "now"] as const) {
+    const would = timing === "after-turn" ? "wait for its turn" : "start at once";
+    it(`moves nothing when Don't move is pressed while a phone-confirmed move that would ${would} is still being read`, async () => {
+      let reads = 0;
+      let releaseRead: ((value: MovableThreadReading) => void) | undefined;
+      const { moves, start } = heldMoves({
+        // The ask sees the turn running; the read after the phone confirms is held open.
+        read: () => {
+          reads += 1;
+          if (reads === 1) return Promise.resolve(reading(true));
+          return new Promise((resolve) => {
+            releaseRead = resolve;
+          });
+        },
+      });
+      await moves.askPhone({ ...ask, timing: "after-turn" });
+      const [held] = moves.phoneConfirmations().confirmations;
+      if (held === undefined) throw new Error("Nothing waits for the phone.");
+      expect(
+        moves.confirmOnPhone({
+          confirmationId: held.confirmationId,
+          ticketId: "12345678-1234-4234-8234-123456789012",
+          principal: phone,
+        }),
+      ).toEqual({ status: "started" });
+      await vi.waitFor(() => expect(releaseRead).toBeDefined());
+
+      expect(moves.stopWaiting(THREAD)).toEqual({ status: "stopped" });
+      // Busy for after-turn, so a turn wait would be installed; idle for now, so it would start.
+      releaseRead?.(reading(timing === "after-turn"));
+      await new Promise((resolve) => setTimeout(resolve, 40));
+
+      expect(start).not.toHaveBeenCalled();
+      expect(moves.status(THREAD).waiting).toBeUndefined();
+      expect(moves.status(THREAD).settled?.settledAt).toEqual(expect.any(String));
+      moves.close();
+    });
+  }
 
   it("asks no phone to move a busy thread now", async () => {
     const { moves } = heldMoves({ busy: true });
