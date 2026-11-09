@@ -110,6 +110,7 @@ export class LocalPluginFolderRegistry {
       ...(entry.content === undefined ? {} : { content: entry.content }),
     }));
     const packageInput: PluginPackageInput =
+      loaded.format === "canvas-export-package" ||
       loaded.format === "language-server-package" ||
       loaded.format === "outside-provider-driver" ||
       loaded.format === "debug-adapter-package"

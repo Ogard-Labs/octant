@@ -78,6 +78,9 @@ describe("effective extension activation", () => {
   );
 
   it.each([
+    ["darwin", "canvas-export-target", true],
+    ["linux", "canvas-export-target", false],
+    ["win32", "canvas-export-target", false],
     ["darwin", "provider-driver", true],
     ["linux", "provider-driver", false],
     ["win32", "provider-driver", false],

@@ -70,6 +70,7 @@ export class ExtensionPackageStore {
   readonly #quarantine: string;
   readonly #metadata: string;
   readonly #pluginData: string;
+  readonly #canvasExportWorkerEntryPoint: string | undefined;
   readonly #outsideDriverRuntime: OutsideDriverRuntime | undefined;
 
   constructor(options: {
@@ -80,8 +81,10 @@ export class ExtensionPackageStore {
      * runs this server. Without one, no driver launch is authorized.
      */
     readonly outsideDriverRuntime?: OutsideDriverRuntime;
+    readonly canvasExportWorkerEntryPoint?: string;
   }) {
     this.#uuid = options.uuid;
+    this.#canvasExportWorkerEntryPoint = options.canvasExportWorkerEntryPoint;
     this.#outsideDriverRuntime = options.outsideDriverRuntime;
     this.#root = join(options.dataDirectory, "extensions");
     this.#staging = join(this.#root, "staging");
@@ -277,6 +280,14 @@ export class ExtensionPackageStore {
     target: ExtensionVersionReference,
     componentId: string,
   ): Promise<{ readonly packageRoot: string; readonly entryPoint: string } | undefined> {
+    return this.verifiedModuleEntry(target, componentId, "provider-driver");
+  }
+
+  async verifiedModuleEntry(
+    target: ExtensionVersionReference,
+    componentId: string,
+    kind: "provider-driver" | "canvas-export-target",
+  ): Promise<{ readonly packageRoot: string; readonly entryPoint: string } | undefined> {
     try {
       validateTarget(target);
       if (!(await this.verifyVersion(target))) return undefined;
@@ -288,7 +299,7 @@ export class ExtensionPackageStore {
       const relativeEntryPoint = receipt.entryPoints[componentId];
       const entry = receipt.files.find((file) => file.path === relativeEntryPoint);
       if (
-        component?.kind !== "provider-driver" ||
+        component?.kind !== kind ||
         relativeEntryPoint === undefined ||
         entry?.executable !== false
       ) {
@@ -373,6 +384,27 @@ export class ExtensionPackageStore {
       const component = receipt.manifest.components.find(
         (candidate) => candidate.id === input.componentId,
       );
+      if (component?.kind === "canvas-export-target") {
+        const runtime = this.#outsideDriverRuntime;
+        const worker = this.#canvasExportWorkerEntryPoint;
+        if (relativeEntryPoint === undefined || runtime === undefined || worker === undefined)
+          return false;
+        const entry = receipt.files.find((file) => file.path === relativeEntryPoint);
+        const expectedEntryPoint = safeContentPath(contentRoot, relativeEntryPoint);
+        return (
+          entry?.executable === false &&
+          input.entryPoint === expectedEntryPoint &&
+          input.command === runtime.path &&
+          input.args?.length === 2 &&
+          input.args[0] === worker &&
+          input.args[1] === expectedEntryPoint &&
+          input.cwd === contentRoot &&
+          input.sandbox?.kind === "canvas-export" &&
+          input.sandbox.runtime === runtime.kind &&
+          input.sandbox.packageRoot === contentRoot &&
+          input.sandbox.workerEntryPoint === worker
+        );
+      }
       if (component?.kind === "provider-driver") {
         // A stored provider driver is an outside driver: the package ships no
         // executable, so the host's own runtime runs its one entry module, in

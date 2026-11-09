@@ -1,4 +1,5 @@
 import { Schema } from "effect";
+import { CanvasExportContribution } from "./canvasExportContribution";
 import { CodeToolContribution } from "./codeToolContribution";
 import { AggregateVersion, UtcTimestamp } from "./events";
 import { HostId } from "./host";
@@ -294,6 +295,7 @@ export const ExtensionComponentKind = Schema.Literal(
   "appearance-pack",
   "preview-viewer",
   "provider-driver",
+  "canvas-export-target",
   "replica-store",
   "desktop-provider",
   "language-server",
@@ -496,6 +498,30 @@ export const ExtensionDebugAdapterDeclaration = Schema.Struct({
   );
 export type ExtensionDebugAdapterDeclaration = typeof ExtensionDebugAdapterDeclaration.Type;
 
+/** Explicit egress scope shown with an export approval; no ambient network is granted. */
+export const ExtensionCanvasExportDeclaration = Schema.Struct({
+  contribution: CanvasExportContribution,
+  allowedOrigins: Schema.Array(
+    Schema.String.pipe(
+      Schema.maxLength(256),
+      Schema.filter((value) => {
+        try {
+          const url = new URL(value);
+          return (
+            url.protocol === "https:" && url.origin === value && !url.username && !url.password
+          );
+        } catch {
+          return false;
+        }
+      }),
+    ),
+  ).pipe(
+    Schema.maxItems(8),
+    Schema.filter((values) => new Set(values).size === values.length),
+  ),
+}).annotations(strict);
+export type ExtensionCanvasExportDeclaration = typeof ExtensionCanvasExportDeclaration.Type;
+
 export const ExtensionComponent = Schema.Struct({
   id: ExtensionComponentId,
   kind: ExtensionComponentKind,
@@ -511,6 +537,8 @@ export const ExtensionComponent = Schema.Struct({
   languageServer: Schema.optional(ExtensionLanguageServerDeclaration),
   /** Present exactly when `kind` is `debug-adapter`. */
   debugAdapter: Schema.optional(ExtensionDebugAdapterDeclaration),
+  /** Present exactly for a Canvas export target. */
+  canvasExport: Schema.optional(ExtensionCanvasExportDeclaration),
   /** A data-only Code capability, with no executable module. */
   codeTool: Schema.optional(CodeToolContribution),
 }).annotations(strict);
@@ -525,6 +553,7 @@ const executableKinds = new Set<ExtensionComponentKind>([
   "board",
   "integration",
   "provider-driver",
+  "canvas-export-target",
   "desktop-provider",
   "language-server",
   "debug-adapter",
@@ -711,6 +740,8 @@ export const ExtensionPackageManifest = Schema.Struct({
         if ((component.kind === "debug-adapter") !== (component.debugAdapter !== undefined)) {
           return false;
         }
+        if ((component.kind === "canvas-export-target") !== (component.canvasExport !== undefined))
+          return false;
         if ((component.kind === "code-tool") !== (component.codeTool !== undefined)) return false;
         if (
           component.kind === "code-tool" &&
@@ -913,6 +944,8 @@ export const ExtensionPackageState = Schema.Struct({
   slug: Schema.optional(ExtensionSlug),
   displayName: Schema.optional(boundedText(128)),
   stateVersion: AggregateVersion,
+  /** Admission revision; isolated invocation observations do not revoke their own approval. */
+  activationVersion: Schema.optional(AggregateVersion),
   version: ExtensionPackageVersion,
   digest: ExtensionContentDigest,
   source: ExtensionSource,
@@ -963,6 +996,8 @@ export const ExtensionEffectivePackageState = Schema.Struct({
   slug: Schema.optional(ExtensionSlug),
   displayName: Schema.optional(boundedText(128)),
   stateVersion: AggregateVersion,
+  /** Admission revision; isolated invocation observations do not revoke their own approval. */
+  activationVersion: Schema.optional(AggregateVersion),
   version: ExtensionPackageVersion,
   digest: ExtensionContentDigest,
   source: ExtensionSource,

@@ -54,7 +54,16 @@ export interface ExtensionProcessStartInput {
   readonly sandbox?: ExtensionProcessSandbox;
 }
 
-export type ExtensionProcessSandbox = ExtensionSeatbeltSandbox | OutsideDriverProcessSandbox;
+export type ExtensionProcessSandbox =
+  | ExtensionSeatbeltSandbox
+  | OutsideDriverProcessSandbox
+  | CanvasExportProcessSandbox;
+
+/** A host-owned protocol worker under the same deny-default isolation as outside drivers. */
+export interface CanvasExportProcessSandbox extends Omit<OutsideDriverProcessSandbox, "kind"> {
+  readonly kind: "canvas-export";
+  readonly workerEntryPoint: string;
+}
 
 export interface ExtensionSeatbeltSandbox {
   readonly kind: "macos-seatbelt";
@@ -763,7 +772,8 @@ function sameIdentity(
 
 function sandboxScopeKey(sandbox: ExtensionProcessSandbox | undefined): string {
   if (sandbox === undefined) return "global";
-  if (sandbox.kind === "outside-driver") return `outside-driver\u0000${sandbox.instanceId}`;
+  if (sandbox.kind === "outside-driver" || sandbox.kind === "canvas-export")
+    return `${sandbox.kind}\u0000${sandbox.instanceId}`;
   const { scope } = sandbox;
   return [
     scope.hostId,

@@ -9996,6 +9996,50 @@ and its size instead of showing a body, and a destination receives named files
 only if it declared the format. A host with no browser refuses a picture export
 as a value (`unavailable`) before anything is held. The
 call returns a receipt (a link, a path, or a remote id) or a typed refusal.
+A local package declares exactly one `canvas-export-target` component in
+`octant-canvas-export.json`, with a bundled JavaScript entry, its contribution
+and a bounded set of exact HTTPS origins. The host assigns identity, source,
+digest and review; package code runs no installation scripts and receives no
+filesystem, shell or credential authority. Package/component activation is
+resolved in the Canvas's current host, mode, Project and thread scope. Install,
+trust and enablement remain distinct. Duplicate target IDs are omitted.
+
+Executable exports use the portable `canvas-export/1` stdio protocol through a
+host-owned supervised worker; package modules never enter the server process.
+Each invocation gets a fresh process and private temporary directory. The OS
+profile denies ambient host data, direct network, child execution and fork.
+macOS uses the existing deny-default native process boundary; Linux and Windows
+remain host-prohibited until their corresponding boundary is implemented and
+verified. A shared protocol is not evidence of platform confinement.
+
+The reference page-host example includes a local package document naming its
+built `dist/index.mjs`. Bundle the public SDK schemas with the entry before
+installation: an isolated package cannot resolve SDK imports from the host
+checkout. Its endpoint and allowed-origin declaration belong to the reviewed
+package; a worker inherits neither host endpoint environment variables nor
+keys. The installed-example native smoke exercises the real folder loader,
+journal, separate trust and enablement, approval and supervised process with a
+controlled HTTP response. That proves package integration, not a live external
+publication or the packaged window's approval interaction.
+
+Destination descriptions may be synchronous or asynchronous, with a ten-second
+host deadline and an eight-second worker deadline. Inspection/module loading
+and description have no network access. A changed activation or package identity
+invalidates the pending card. The host binds a journal-derived admission revision,
+not the general package state version or catalogue epoch: starting/stopping one
+isolated invocation must neither invalidate itself nor drain sibling invocations.
+Explicit disable/uninstall, integrity holds and uncertain startup cleanup keep
+their ordinary gates, and replay rebuilds the admission revision.
+The approval names the declared HTTPS destinations;
+only the approved export phase may request mediated HTTP operations, with no
+ambient cookies, credentials or authorization headers. The host enforces the
+exact origin, public IP addresses at connection time, bounded requests and
+responses, and no automatic redirect following. It rechecks current activation
+before dispatch and completion. At most eight requests (four in flight) and a
+thirty-second export deadline apply; termination and revocation stop the owned
+process and abort its requests. Failure after possible external effects requires
+checking the destination before retrying; the host never retries automatically.
+
 Each completed export is a `canvas.export@1` journal event and is rebuilt by
 replay. When the destination was called but the journal could not take the
 record, the answer is `unrecorded` and carries the destination's outcome; it is

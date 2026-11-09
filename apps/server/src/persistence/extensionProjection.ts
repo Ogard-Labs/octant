@@ -1,3 +1,4 @@
+import { Schema } from "effect";
 import {
   decodeExtensionLifecycleEvent,
   type ExtensionLifecycleEvent,
@@ -12,7 +13,7 @@ import {
   type ExtensionPublisherKeyFingerprint,
 } from "@octant/contracts/extensions";
 import { decodeExtensionSnapshot, type ExtensionSnapshot } from "@octant/contracts/extension-rpc";
-import type { EventEnvelope } from "@octant/contracts/events";
+import { AggregateVersion, type EventEnvelope } from "@octant/contracts/events";
 import { outsideDriverPublisherStanding } from "@octant/domain/outside-driver-publisher-policy";
 import { resolveExtensionActivation } from "@octant/plugin-host/activation";
 import type { Projection } from "./projection";
@@ -100,6 +101,8 @@ export interface ProjectedExtensionRecord {
     readonly reason: Exclude<ExtensionToolGrantRevocationReason, "person">;
   };
   readonly aggregateVersion: number;
+  /** Last admission-changing lifecycle event, rebuilt from the authoritative journal. */
+  readonly activationVersion?: number;
   readonly lastSequence: number;
 }
 
@@ -175,6 +178,23 @@ export function readExtensionSnapshot(
   return decodeExtensionSnapshot({ sequence: head.sequence, snapshotAt, packages, collisions: [] });
 }
 
+function observesCanvasExportInvocation(
+  record: ProjectedExtensionRecord | undefined,
+  payload: ExtensionLifecycleEvent["payload"],
+): boolean {
+  return (
+    payload.kind === "runtime-state-observed" &&
+    ["starting", "ready", "stopping", "stopped", "disable-pending", "crashed"].includes(
+      payload.state,
+    ) &&
+    record?.current?.components.some(
+      (component) =>
+        String(component.id) === String(payload.componentId) &&
+        component.kind === "canvas-export-target",
+    ) === true
+  );
+}
+
 function applyLifecycle(
   existing: ProjectedExtensionRecord | undefined,
   event: ExtensionLifecycleEvent,
@@ -205,7 +225,14 @@ function applyLifecycle(
     lastSequence,
   };
   assertEnvelope(next.packageId === packageId);
-  next = { ...next, aggregateVersion, lastSequence };
+  next = {
+    ...next,
+    aggregateVersion,
+    lastSequence,
+    activationVersion: observesCanvasExportInvocation(existing, payload)
+      ? (existing?.activationVersion ?? existing?.aggregateVersion ?? aggregateVersion)
+      : aggregateVersion,
+  };
 
   switch (payload.kind) {
     case "install-prepared":
@@ -382,6 +409,15 @@ function applyLifecycle(
       };
     }
     case "runtime-state-observed":
+      // Export invocations are finite, separately supervised processes. One
+      // invocation stopping must not drain another or revoke its own approval.
+      // Integrity and explicit activation events retain their ordinary gates.
+      if (observesCanvasExportInvocation(existing, payload)) {
+        return payload.reason === undefined
+          ? next
+          : { ...next, diagnostics: appendDiagnostic(next.diagnostics, payload.reason) };
+      }
+
       // One package serves every instance added from it, each with its own
       // process and crash limit (`outsideDriverProcess.ts`). A crash of one
       // is that instance's to count, so it does not break the package for
@@ -449,6 +485,9 @@ function projectPackageState(record: ProjectedExtensionRecord): ExtensionPackage
     slug: manifest.slug,
     displayName: manifest.displayName,
     stateVersion: record.aggregateVersion as never,
+    activationVersion: Schema.decodeUnknownSync(AggregateVersion)(
+      record.activationVersion ?? record.aggregateVersion,
+    ),
     version: manifest.version,
     digest: manifest.digest,
     source: manifest.source,

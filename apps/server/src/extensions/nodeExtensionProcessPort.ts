@@ -4,6 +4,7 @@ import { spawn as nodeSpawn, type ChildProcessWithoutNullStreams } from "node:ch
 import {
   access,
   chmod,
+  copyFile,
   lstat,
   mkdir,
   readdir,
@@ -34,6 +35,7 @@ import type {
   ExtensionProcessReceipt,
   ExtensionProcessStartInput,
   OutsideDriverProcessSandbox,
+  CanvasExportProcessSandbox,
 } from "./extensionSupervisor";
 
 const DEFAULT_SHUTDOWN_TIMEOUT_MS = 2_000;
@@ -118,7 +120,7 @@ async function startProcess(
       cwd: input.cwd,
       detached: process.platform !== "win32",
       env:
-        input.sandbox?.kind === "outside-driver"
+        input.sandbox?.kind === "outside-driver" || input.sandbox?.kind === "canvas-export"
           ? outsideDriverEnvironment(input.sandbox)
           : { PATH: SAFE_PATH, ...input.env },
       shell: false,
@@ -301,7 +303,7 @@ async function prepareProcessLaunch(
   if (input.sandbox === undefined) {
     return { command: input.command, args: [...input.args] };
   }
-  if (input.sandbox.kind === "outside-driver") {
+  if (input.sandbox.kind === "outside-driver" || input.sandbox.kind === "canvas-export") {
     return await prepareOutsideDriverLaunch(
       input,
       input.sandbox,
@@ -434,7 +436,7 @@ const OUTSIDE_DRIVER_SYSTEM_FILE_READS = ["/etc", "/private/etc/localtime"];
  * fuses, and no flag, since the entry is the command line's one argument.
  */
 function outsideDriverEnvironment(
-  sandbox: OutsideDriverProcessSandbox,
+  sandbox: OutsideDriverProcessSandbox | CanvasExportProcessSandbox,
 ): Readonly<Record<string, string>> {
   return {
     PATH: SAFE_PATH,
@@ -487,7 +489,7 @@ function outsideDriverRuntimeReadRoots(
  * driver process owner makes exactly such a folder for every start.
  */
 async function assertOwnTemporaryFolder(
-  sandbox: OutsideDriverProcessSandbox,
+  sandbox: OutsideDriverProcessSandbox | CanvasExportProcessSandbox,
   homeDirectory: string | undefined,
 ): Promise<void> {
   const folder = sandbox.temporaryDirectory;
@@ -523,7 +525,7 @@ function isInsideOrEqual(path: string, root: string): boolean {
  */
 async function prepareOutsideDriverLaunch(
   input: ExtensionProcessStartInput,
-  sandbox: OutsideDriverProcessSandbox,
+  sandbox: OutsideDriverProcessSandbox | CanvasExportProcessSandbox,
   platform: NodeJS.Platform,
   sandboxPath: string,
   homeDirectory: string | undefined,
@@ -535,6 +537,18 @@ async function prepareOutsideDriverLaunch(
     throw new Error("Extension sandbox paths must be absolute.");
   }
   await assertOwnTemporaryFolder(sandbox, homeDirectory);
+  let args = input.args;
+  if (sandbox.kind === "canvas-export") {
+    if (args[0] !== sandbox.workerEntryPoint)
+      throw new Error("Canvas export bootstrap does not match its launch.");
+    // Bun enumerates the entry's directory before loading it. Stage only the
+    // trusted bootstrap in the already-private scratch folder; never grant a
+    // read of the host checkout to satisfy module discovery.
+    const stagedWorker = join(sandbox.temporaryDirectory, "canvas-export-bootstrap.mjs");
+    await copyFile(sandbox.workerEntryPoint, stagedWorker, constants.COPYFILE_EXCL);
+    await chmod(stagedWorker, 0o400);
+    args = [stagedWorker, ...args.slice(1)];
+  }
   const runtime = await realpath(input.command).catch(() => input.command);
   const readRoots = uniqueAbsolutePaths([
     sandbox.packageRoot,
@@ -561,7 +575,7 @@ async function prepareOutsideDriverLaunch(
     ...(homeDirectory === undefined ? {} : { homeDirectory }),
   }).prepare({
     executable: input.command,
-    args: input.args,
+    args,
     boundRoot: sandbox.packageRoot,
     writeBoundRoot: false,
     temporaryDirectory: sandbox.temporaryDirectory,

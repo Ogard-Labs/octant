@@ -1,3 +1,5 @@
+import { ExtensionActivationScope } from "@octant/contracts/extensions";
+import { canvasExportPluginTargets } from "../canvas/canvasExportPluginTargets";
 import { randomUUID } from "node:crypto";
 import { homedir } from "node:os";
 import { join } from "node:path";
@@ -150,7 +152,14 @@ export type CanvasDependencies = Pick<ServerStart, "options" | "persistence"> &
   > &
   Pick<WorkspaceWiring, "projectService" | "shellService"> &
   Pick<CodeWiring, "folderBrowseService"> &
-  Pick<ProvidersWiring, "chatDataDirectory" | "extensionApiService" | "imageJobService"> &
+  Pick<
+    ProvidersWiring,
+    | "chatDataDirectory"
+    | "extensionApiService"
+    | "imageJobService"
+    | "extensionActivationService"
+    | "canvasExportWorkerOptions"
+  > &
   Pick<
     FoundationsWiring,
     "providerRuntimeRegistry" | "workArtifactProjection" | "workThreadProjection"
@@ -1058,6 +1067,21 @@ export function wireCanvas(deps: CanvasDependencies) {
     actor: { kind: "local-user", actorId: OCTANT_LOCAL_ACTOR_ID },
   });
   const canvasExportRegistration: CanvasExportTargetRegistration = {
+    pluginsFor: (canvasId) =>
+      canvasExportPluginTargets(deps.canvasExportWorkerOptions, () => {
+        const provenance =
+          persistence.canvasProjection.getById(canvasId)?.currentVersion.definition.provenance;
+        if (provenance === undefined) return undefined;
+        return deps.extensionActivationService.resolve(extensionApiService.snapshot(), {
+          scope: Schema.decodeUnknownSync(ExtensionActivationScope)({
+            hostId: provenance.hostId,
+            mode: provenance.mode,
+            projectId: provenance.projectId,
+            threadId: provenance.threadId,
+            providerFamily: "canvas-export",
+          }),
+        });
+      }),
     folderFor: (canvasId) => {
       const entry = persistence.canvasProjection.getById(canvasId);
       if (entry === undefined) return undefined;

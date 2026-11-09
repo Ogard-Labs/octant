@@ -248,12 +248,39 @@ jobs:
       # Desktop tests import the pinned Electron package too, so install it
       # before they run rather than waiting for the later native smokes.
       - name: Install pinned Electron for native process checks
+        id: pinned_electron
         env:
           GH_TOKEN: ${{ github.token }}
         run: bun scripts/ensure-ci-electron.ts
       - name: Native download redirect source receipt
         timeout-minutes: 2
         run: bun run smoke:browser-download-source
+      # Prove the protocol workers' native boundary before the broader suites.
+      - name: Bun export worker isolation
+        id: export_worker_bun
+        timeout-minutes: 2
+        run: bun run --cwd apps/server canvas:export:plugin:smoke
+      - name: Installed example through native export approval
+        timeout-minutes: 3
+        run: |
+          set -euo pipefail
+          export_example_directory=$(mktemp -d "$RUNNER_TEMP/octant-export-example.XXXXXX")
+          trap 'rm -r -- "$export_example_directory"' EXIT
+          # The reference package is an independent first-party change. Pin its
+          # source while validating the loader without duplicating its diff.
+          git fetch --no-tags origin e5693698170efae0fbf399984d72fea90c39835c
+          git archive e5693698170efae0fbf399984d72fea90c39835c packages/plugin-api/examples/docs-md-export | tar -x -C "$export_example_directory"
+          OCTANT_QA_EXPORT_EXAMPLE_ROOT="$export_example_directory/packages/plugin-api/examples/docs-md-export" bun run --cwd apps/server canvas:export:installed:smoke
+          test -z "$(git status --porcelain -- packages/plugin-api)"
+      - name: Electron Node export worker isolation
+        if: ${{ !cancelled() && steps.pinned_electron.outcome == 'success' }}
+        timeout-minutes: 2
+        run: |
+          export_smoke_directory=$(mktemp -d "$RUNNER_TEMP/octant-export-smoke.XXXXXX")
+          trap 'rm -r -- "$export_smoke_directory"' EXIT
+          bun build apps/server/src/canvas/canvasExportWorker.smoke.ts --target=node --format=esm --outfile "$export_smoke_directory/canvasExportWorker.smoke.mjs"
+          cp apps/server/src/canvas/canvasExportWorker.mjs "$export_smoke_directory/canvasExportWorker.mjs"
+          ELECTRON_RUN_AS_NODE=1 node_modules/electron/dist/Electron.app/Contents/MacOS/Electron "$export_smoke_directory/canvasExportWorker.smoke.mjs"
       - run: bun run --cwd apps/desktop typecheck
       - run: bun run --cwd apps/desktop test
       # Confined Code and Work opens prove where they landed with

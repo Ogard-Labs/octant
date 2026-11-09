@@ -57,6 +57,8 @@ export interface CanvasExportTargetRegistration {
    * uploads are allowed — so it is offered on every host.
    */
   readonly sharehtml?: SharehtmlExportTargetDependencies;
+  /** Already scoped and admitted by the host activation service. */
+  readonly pluginsFor?: (canvasId: CanvasId) => ReadonlyArray<CanvasExportTargetBinding>;
 }
 
 export function canvasExportTargetBindings(
@@ -77,6 +79,7 @@ export function canvasExportTargetBindings(
   const sharehtml = registration.sharehtml;
   return [
     folder,
+    ...(registration.pluginsFor?.(canvasId) ?? []),
     ...(gist === undefined || gist.isEffective?.() === false
       ? []
       : [

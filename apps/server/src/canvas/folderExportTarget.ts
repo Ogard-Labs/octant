@@ -8,7 +8,7 @@ import {
   type CanvasExportRenderedOutput,
 } from "@octant/contracts/canvas-export";
 import { canvasExportPlannedName, freeCanvasExportFileName } from "@octant/domain";
-import type { CanvasExportTarget } from "@octant/plugin-api/canvas-export";
+import type { CanvasExportTarget, CanvasExportDestination } from "@octant/plugin-api/canvas-export";
 import type { CanvasExportFilePort } from "./canvasExportFilePort";
 
 /**
@@ -50,9 +50,14 @@ function refused(code: CanvasExportRefusal["code"], message: string): CanvasExpo
   return { kind: "refused", code, message };
 }
 
-export function createFolderExportTarget(
-  dependencies: FolderExportTargetDependencies,
-): CanvasExportTarget {
+export function createFolderExportTarget(dependencies: FolderExportTargetDependencies): Omit<
+  CanvasExportTarget,
+  "describeDestination"
+> & {
+  readonly describeDestination: (
+    output: CanvasExportRenderedOutput,
+  ) => CanvasExportDestination | undefined;
+} {
   return {
     contribution: decodeCanvasExportContribution({
       schemaVersion: 1,

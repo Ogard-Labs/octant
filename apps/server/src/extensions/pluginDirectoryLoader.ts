@@ -1,3 +1,4 @@
+import { CANVAS_EXPORT_PACKAGE_DOCUMENT_PATH } from "@octant/plugin-api/canvas-export-package";
 import {
   AGENT_PLUGINS_MCP_SCHEMA,
   AGENT_PLUGINS_PLUGIN_SCHEMA,
@@ -21,10 +22,12 @@ export type PluginDirectoryFormat =
   | "claude-plugin"
   | "language-server-package"
   | "outside-provider-driver"
-  | "debug-adapter-package";
+  | "debug-adapter-package"
+  | "canvas-export-package";
 
 /** Octant's own package documents; a folder holding one is read as that package alone. */
 const PACKAGE_DOCUMENT_PATHS = [
+  CANVAS_EXPORT_PACKAGE_DOCUMENT_PATH,
   LANGUAGE_SERVER_PACKAGE_DOCUMENT_PATH,
   OUTSIDE_PROVIDER_DRIVER_DOCUMENT_PATH,
   DEBUG_ADAPTER_PACKAGE_DOCUMENT_PATH,
@@ -53,6 +56,7 @@ export interface LoadedPluginDirectory extends ReadPluginDirectory {
 export function detectPluginDirectoryFormat(
   entries: ReadonlyArray<AgentPluginsPackageEntry>,
 ): PluginDirectoryFormat | undefined {
+  if (holdsFile(entries, CANVAS_EXPORT_PACKAGE_DOCUMENT_PATH)) return "canvas-export-package";
   if (holdsFile(entries, LANGUAGE_SERVER_PACKAGE_DOCUMENT_PATH)) return "language-server-package";
   if (holdsFile(entries, OUTSIDE_PROVIDER_DRIVER_DOCUMENT_PATH)) return "outside-provider-driver";
   if (holdsFile(entries, DEBUG_ADAPTER_PACKAGE_DOCUMENT_PATH)) return "debug-adapter-package";
@@ -105,6 +109,7 @@ export async function loadPluginDirectory(
     );
   }
   if (
+    format === "canvas-export-package" ||
     format === "agent-plugins" ||
     format === "language-server-package" ||
     format === "outside-provider-driver" ||

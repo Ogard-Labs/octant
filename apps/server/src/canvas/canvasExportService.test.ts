@@ -1398,3 +1398,84 @@ describe("canvas export service", () => {
     connection.close();
   });
 });
+
+describe("asynchronous destination descriptions", () => {
+  it("waits for the destination before showing the approval card", async () => {
+    const calls: CanvasExportRenderedOutput[] = [];
+    const original = binding("reading-copy", calls);
+    const target = {
+      ...original.target,
+      describeDestination: async () => ({ account: "Review account" }),
+    };
+    const { service, connection } = harness(() => [{ ...original, target }]);
+    const prepared = await service.prepare(prepareRequest(), true);
+    expect(prepared).toMatchObject({
+      kind: "approval",
+      card: { destinationAccount: "Review account" },
+    });
+    expect(calls).toHaveLength(0);
+    connection.close();
+  });
+
+  it("refuses a destination disabled while its description is pending", async () => {
+    const calls: CanvasExportRenderedOutput[] = [];
+    const original = binding("reading-copy", calls);
+    let enabled = true;
+    const target = {
+      ...original.target,
+      describeDestination: async () => {
+        enabled = false;
+        return { account: "Review account" };
+      },
+    };
+    const { service, connection } = harness(() => (enabled ? [{ ...original, target }] : []));
+    expect(await service.prepare(prepareRequest(), true)).toMatchObject({
+      kind: "refused",
+      code: "not-offered",
+    });
+    expect(calls).toHaveLength(0);
+    connection.close();
+  });
+
+  it("refuses a rejected description without exporting or recording an event", async () => {
+    const calls: CanvasExportRenderedOutput[] = [];
+    const original = binding("reading-copy", calls);
+    const target = {
+      ...original.target,
+      describeDestination: async () => {
+        throw new Error("private plugin diagnostic");
+      },
+    };
+    const { service, connection, envelopes } = harness(() => [{ ...original, target }]);
+    expect(await service.prepare(prepareRequest(), true)).toMatchObject({
+      kind: "refused",
+      code: "unavailable",
+    });
+    expect(calls).toHaveLength(0);
+    expect(envelopes()).toHaveLength(0);
+    connection.close();
+  });
+});
+
+describe("export package identity", () => {
+  it("requires a new approval after a destination package changes", async () => {
+    const calls: CanvasExportRenderedOutput[] = [];
+    const original = binding("reading-copy", calls);
+    let identity = "reviewed-package-digest";
+    const { service, connection } = harness(() => [{ ...original, identity }]);
+    const prepared = await service.prepare(prepareRequest(), true);
+    if (prepared.kind !== "approval") throw new Error("expected approval");
+    identity = "replacement-package-digest";
+    expect(
+      await service.decide({
+        canvasId,
+        approvalId: prepared.card.approvalId,
+        decision: "approved",
+        permitted: true,
+        actor: localActor,
+      }),
+    ).toMatchObject({ kind: "refused", code: "not-offered" });
+    expect(calls).toHaveLength(0);
+    connection.close();
+  });
+});

@@ -18,6 +18,8 @@
     "./debug-adapter-package": "./src/debugAdapterPackage.ts",
     "./outside-provider-driver": "./src/outsideProviderDriver.ts",
     "./credential-request": "./src/credentialRequest.ts",
+    "./canvas-export-package": "./src/canvasExportPackage.ts",
+    "./canvas-export-worker": "./src/canvasExportWorker.ts",
     "./code-tools": "./src/codeTools.ts"
   },
   "scripts": {

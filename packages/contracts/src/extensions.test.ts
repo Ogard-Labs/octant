@@ -67,6 +67,38 @@ function manifest() {
   };
 }
 
+it("accepts an export destination only as an executable package component with an entry point", () => {
+  const packageManifest = manifest();
+  const target = {
+    id: "page-export",
+    kind: "canvas-export-target",
+    displayName: "Page export",
+    declaredCapabilities: ["network"],
+    entryPoint: "export.mjs",
+    canvasExport: {
+      contribution: {
+        schemaVersion: 1,
+        kind: "canvas-export-contribution",
+        targetId: "page-export",
+        label: "Page export",
+        formats: ["markdown"],
+      },
+      allowedOrigins: ["https://example.test"],
+    },
+  };
+  const exporting = { ...packageManifest, primaryComponentId: target.id, components: [target] };
+  expect(decodeExtensionPackageManifest(exporting).components[0]?.kind).toBe(
+    "canvas-export-target",
+  );
+  const { entryPoint: _entryPoint, ...withoutEntry } = target;
+  expect(() =>
+    decodeExtensionPackageManifest({ ...exporting, components: [withoutEntry] }),
+  ).toThrow();
+  expect(() =>
+    decodeExtensionPackageManifest({ ...exporting, declaredCapabilities: [] }),
+  ).toThrow();
+});
+
 function languageServerManifest(
   languageServer: Record<string, unknown> = {
     languages: ["typescript", "javascript"],

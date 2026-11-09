@@ -114,14 +114,15 @@ export interface CanvasExportTarget {
    * is built so the card can name the file, the account, and the audience — and
    * so the person approves those, not a destination's reputation.
    *
-   * Optional, and synchronous on purpose: the offer list and the card cannot
-   * wait on I/O. A destination with nothing to describe omits this and is
+   * Optional. The host bounds asynchronous descriptions and rechecks activation
+   * before holding the card. Description must have no external side effects.
+   * A destination with nothing to describe omits this and is
    * invoked without a confirmation; a target that names no file must not
    * replace an existing one.
    */
   readonly describeDestination?: (
     output: CanvasExportRenderedOutput,
-  ) => CanvasExportDestination | undefined;
+  ) => CanvasExportDestination | undefined | Promise<CanvasExportDestination | undefined>;
   /**
    * Perform the export. `confirmed` is the destination the approval card named
    * — including the audience the person chose — and the person approved; when

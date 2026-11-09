@@ -12,4 +12,5 @@ export * from "./computerUse";
 export * from "./canvasExport";
 export type { GitHistoryReader } from "./gitHistory";
 
+export * from "./canvasExportPackage";
 export * from "./codeTools";
