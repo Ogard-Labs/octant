@@ -33,6 +33,10 @@ export interface TaskAccessFactsDependencies {
   readonly observed: (id: ProviderInstanceId) => ProviderObservedState | undefined;
   readonly reviewer: HostShield["describe"];
   readonly clock: () => string;
+  readonly browser?: (
+    subject: ContextSubjectRef,
+    windowId: WindowId,
+  ) => TaskAccessSnapshot["browser"];
 }
 
 /** A fresh read over the same host policy inputs; nothing here persists or executes. */
@@ -166,6 +170,7 @@ export function createTaskAccessFacts(deps: TaskAccessFactsDependencies) {
       });
     return decodeTaskAccessSnapshot({
       kind: "task-access",
+      ...(deps.browser === undefined ? {} : { browser: deps.browser(subject, windowId) }),
       subject,
       observedAt: deps.clock(),
       selectedMode,
