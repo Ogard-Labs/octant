@@ -92,4 +92,60 @@ describe("benchmarks client", () => {
       }),
     );
   });
+
+  it("posts a suite id to the history path and decodes the runs", async () => {
+    const history = {
+      suiteId: suite.suiteId,
+      runs: [
+        {
+          runId: "67000000-0000-4000-8000-000000000009",
+          startedAt: at,
+          status: "finished",
+          suiteRevision: 1,
+          rows: [
+            {
+              contender: {
+                providerInstanceId: "67000000-0000-4000-8000-0000000000b1",
+                modelId: "m",
+              },
+              cells: 2,
+              answered: 2,
+              checkPassRate: 0.5,
+              totalTokens: 10,
+              failedCount: 0,
+            },
+          ],
+        },
+      ],
+    };
+    const fetch = vi.fn(async () => Response.json(history));
+    const client = createBenchmarksClient({ baseUrl, fetch, windowCapability: capability });
+
+    const read = await client.history({ suiteId: suite.suiteId as never });
+
+    expect(read.runs[0]?.rows[0]?.checkPassRate).toBe(0.5);
+    expect(fetch).toHaveBeenCalledWith(
+      `${baseUrl}/api/benchmarks/suites/history`,
+      expect.objectContaining({ method: "POST", body: JSON.stringify({ suiteId: suite.suiteId }) }),
+    );
+  });
+
+  it("posts a run id and format to the export path and returns the file", async () => {
+    const file = {
+      fileName: "benchmark-smoke-67000000.csv",
+      contentType: "text/csv",
+      content: "a\r\n",
+    };
+    const fetch = vi.fn(async () => Response.json(file));
+    const client = createBenchmarksClient({ baseUrl, fetch, windowCapability: capability });
+    const runId = "67000000-0000-4000-8000-000000000009";
+
+    const exported = await client.exportRun({ runId: runId as never, format: "csv" });
+
+    expect(exported).toEqual(file);
+    expect(fetch).toHaveBeenCalledWith(
+      `${baseUrl}/api/benchmarks/runs/export`,
+      expect.objectContaining({ body: JSON.stringify({ runId, format: "csv" }) }),
+    );
+  });
 });

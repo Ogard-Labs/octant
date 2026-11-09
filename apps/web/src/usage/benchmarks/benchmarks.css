@@ -309,6 +309,13 @@
   gap: var(--oct-space-1);
 }
 
+.benchmark-history__charts {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 320px), 1fr));
+  gap: var(--oct-space-3);
+  min-width: 0;
+}
+
 .benchmark-commands {
   display: grid;
   gap: var(--oct-space-2);

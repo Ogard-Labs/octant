@@ -1,6 +1,8 @@
 import {
   BENCHMARK_ROUTE_PATHS,
   BenchmarkCellRateResponse,
+  BenchmarkHistoryResponse,
+  BenchmarkRunExportResponse,
   BenchmarkRunCancelResponse,
   BenchmarkRunPurgeResponse,
   BenchmarkRunReadResponse,
@@ -11,6 +13,8 @@ import {
   BenchmarkSuitesListResponse,
   decodeHostAnswer,
   type BenchmarkCellRateRequest,
+  type BenchmarkHistoryRequest,
+  type BenchmarkRunExportRequest,
   type BenchmarkRunCancelRequest,
   type BenchmarkRunPurgeRequest,
   type BenchmarkRunReadRequest,
@@ -40,6 +44,10 @@ export interface BenchmarksClient {
   purgeRun(request: BenchmarkRunPurgeRequest): Promise<BenchmarkRunPurgeResponse>;
   /** Stars for one answered cell; rating again replaces the earlier rating. */
   rateCell(request: BenchmarkCellRateRequest): Promise<BenchmarkCellRateResponse>;
+  /** A suite's runs, newest first, each with one row of figures per contender. */
+  history(request: BenchmarkHistoryRequest): Promise<BenchmarkHistoryResponse>;
+  /** A run as a JSON or CSV file to save; it never carries answer text. */
+  exportRun(request: BenchmarkRunExportRequest): Promise<BenchmarkRunExportResponse>;
 }
 
 /** A refusal keeps the host's own sentence and status, so a page can show why. */
@@ -117,5 +125,8 @@ export function createBenchmarksClient(options: BenchmarksClientOptions): Benchm
       call("/api/benchmarks/runs/cancel", request, BenchmarkRunCancelResponse),
     purgeRun: (request) => call("/api/benchmarks/runs/purge", request, BenchmarkRunPurgeResponse),
     rateCell: (request) => call("/api/benchmarks/cells/rate", request, BenchmarkCellRateResponse),
+    history: (request) => call("/api/benchmarks/suites/history", request, BenchmarkHistoryResponse),
+    exportRun: (request) =>
+      call("/api/benchmarks/runs/export", request, BenchmarkRunExportResponse, SAVE_TIMEOUT_MS),
   };
 }

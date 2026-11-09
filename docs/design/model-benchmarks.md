@@ -143,7 +143,7 @@ A **Benchmarks** source joins Diagnostics in the Usage source switch:
 2. Suite and run contracts, domain policy (cells, budget, scoring), journal
    aggregates, routes, and the prompt-case runner with checks. (built)
 3. Benchmarks pages: suites, run builder, live grid, leaderboard, case
-   compare.
+   compare. (built)
 4. Judge scoring and stars. (built)
-5. Code cases: pinned worktrees, check commands, approval handling. (in progress)
-6. History across runs and export.
+5. Code cases: pinned worktrees, check commands, approval handling. (built)
+6. History across runs and export. (in progress)

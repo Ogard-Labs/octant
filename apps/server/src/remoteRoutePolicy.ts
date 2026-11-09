@@ -882,6 +882,8 @@ const DEFAULT_AUTHENTICATED_ROUTE_MATCHES = [
     "/api/benchmarks/suites/list",
     "/api/benchmarks/runs/list",
     "/api/benchmarks/runs/read",
+    "/api/benchmarks/suites/history",
+    "/api/benchmarks/runs/export",
     "/api/benchmarks/cells/rate",
   ].map((path) => ({ kind: "exact" as const, path, methods: ["POST"] as const })),
   {

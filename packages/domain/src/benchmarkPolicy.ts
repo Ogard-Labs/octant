@@ -1,4 +1,5 @@
 import {
+  MAX_BENCHMARK_HISTORY_RUNS,
   BENCHMARK_CHECK_DETAIL_CHARS,
   BENCHMARK_CODE_ONLY_CHECK_KINDS,
   BENCHMARK_FAILURE_REASON_CHARS,
@@ -10,6 +11,7 @@ import {
   type BenchmarkCellMetrics,
   type BenchmarkCheck,
   type BenchmarkCheckResult,
+  type BenchmarkHistoryRun,
   type BenchmarkLeaderboardRow,
   type BenchmarkOverhead,
   type BenchmarkRun,
@@ -733,4 +735,50 @@ export function summarizeBenchmarkRun(run: BenchmarkRun): BenchmarkRunSummary {
     answeredCount: run.cells.filter((cell) => cell.state === "answered").length,
     failedCount: run.cells.filter((cell) => cell.state === "failed").length,
   };
+}
+
+/**
+ * A suite's runs, newest first and at most the history limit, each reduced to
+ * one row per contender by the leaderboard function. Contenders are identified
+ * by what they are, so a page can follow one model across runs.
+ */
+export function benchmarkHistory(
+  runs: ReadonlyArray<BenchmarkRun>,
+  metricsForRun: (run: BenchmarkRun) => ReadonlyMap<string, BenchmarkCellMetrics>,
+): ReadonlyArray<BenchmarkHistoryRun> {
+  return [...runs]
+    .sort((a, b) => (a.startedAt < b.startedAt ? 1 : a.startedAt > b.startedAt ? -1 : 0))
+    .slice(0, MAX_BENCHMARK_HISTORY_RUNS)
+    .map((run) => {
+      const leaderboard = benchmarkLeaderboard(run, metricsForRun(run));
+      return {
+        runId: run.runId,
+        startedAt: run.startedAt,
+        status: run.status,
+        suiteRevision: run.suiteRevision,
+        rows: leaderboard.flatMap((row) => {
+          const contender = run.contenders[row.contenderIndex];
+          if (contender === undefined) return [];
+          return [
+            {
+              contender,
+              cells: row.cells,
+              answered: row.answered,
+              ...(row.checkPassRate === undefined ? {} : { checkPassRate: row.checkPassRate }),
+              ...(row.meanJudgeScore === undefined ? {} : { meanJudgeScore: row.meanJudgeScore }),
+              ...(row.meanStars === undefined ? {} : { meanStars: row.meanStars }),
+              ...(row.firstTokenP50Ms === undefined
+                ? {}
+                : { firstTokenP50Ms: row.firstTokenP50Ms }),
+              ...(row.tokensPerSecondP50 === undefined
+                ? {}
+                : { tokensPerSecondP50: row.tokensPerSecondP50 }),
+              totalTokens: row.totalTokens,
+              ...(row.totalCostUsd === undefined ? {} : { totalCostUsd: row.totalCostUsd }),
+              failedCount: row.failedCount,
+            },
+          ];
+        }),
+      };
+    });
 }

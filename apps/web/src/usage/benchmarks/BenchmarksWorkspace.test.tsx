@@ -28,6 +28,28 @@ import {
   summary,
 } from "./benchmarksFixtures";
 
+type HistoryRunFixture = Awaited<ReturnType<BenchmarksClient["history"]>>["runs"][number];
+
+function historyRun(runId: string, startedAt: string, passRate: number): HistoryRunFixture {
+  return {
+    runId,
+    startedAt,
+    status: "finished" as const,
+    suiteRevision: 1,
+    rows: [
+      {
+        contender: { providerInstanceId: PROVIDER, modelId: "model-a" },
+        cells: 2,
+        answered: 2,
+        checkPassRate: passRate,
+        meanJudgeScore: 8,
+        totalTokens: 100,
+        failedCount: 0,
+      },
+    ],
+  } as never;
+}
+
 function makeClient(overrides: Partial<BenchmarksClient> = {}) {
   const base = {
     listSuites: vi.fn(async () => ({ suites: [suite()] })),
@@ -58,6 +80,18 @@ function makeClient(overrides: Partial<BenchmarksClient> = {}) {
         },
       }),
     ),
+    history: vi.fn(async () => ({
+      suiteId: suite().suiteId,
+      runs: [
+        historyRun("77000000-0000-4000-8000-0000000000c2", "2026-11-07T12:00:00.000Z", 0.9),
+        historyRun("77000000-0000-4000-8000-0000000000c1", "2026-11-05T12:00:00.000Z", 0.5),
+      ],
+    })),
+    exportRun: vi.fn(async (request: Parameters<BenchmarksClient["exportRun"]>[0]) => ({
+      fileName: `benchmark-smoke.${request.format}`,
+      contentType: request.format === "csv" ? "text/csv" : "application/json",
+      content: request.format === "csv" ? "Case\r\n" : "{}",
+    })),
   } satisfies BenchmarksClient;
   // Overrides replace calls the test asserts on; the mock handles stay typed.
   return { ...base, ...overrides } as typeof base;
@@ -815,6 +849,17 @@ describe("rating an answer", () => {
     await waitFor(() => expect(client.readRun.mock.calls.length).toBeGreaterThan(readsBefore));
   });
 
+  it("reads the suite's history again after a rating, so its mean stars are current", async () => {
+    const actor = user();
+    const { client, column } = await deepColumn(actor);
+    await waitFor(() => expect(client.history).toHaveBeenCalledTimes(1));
+
+    await actor.click(within(column).getByRole("radio", { name: "3 of 5 stars" }));
+    await actor.click(within(column).getByRole("button", { name: "Save rating" }));
+
+    await waitFor(() => expect(client.history).toHaveBeenCalledTimes(2));
+  });
+
   it("shows the rating already given and replaces it when rated again", async () => {
     const actor = user();
     const client = makeClient({
@@ -888,5 +933,144 @@ describe("judge results and overhead", () => {
       within(grid).getByText("Judge did not score: The judge answered out of range."),
     ).toBeInTheDocument();
     expect(within(grid).getByText("Judge 9 of 10")).toBeInTheDocument();
+  });
+});
+
+describe("history and export", () => {
+  it("shows the selected suite across its runs as lines and a table", async () => {
+    const actor = user();
+    const client = makeClient();
+    mount(client);
+
+    await actor.click(await screen.findByRole("button", { name: "Capital cities" }));
+
+    const table = await screen.findByRole("table", { name: "Runs by contender" });
+    expect(client.history).toHaveBeenCalledWith({ suiteId: SUITE_ID });
+    expect(within(table).getAllByRole("row")).toHaveLength(3);
+    expect(within(table).getByText("90%")).toBeInTheDocument();
+    expect(within(table).getByText("50%")).toBeInTheDocument();
+    expect(screen.getByText("Check pass rate by run")).toBeInTheDocument();
+    expect(screen.getByText("Mean judge score by run")).toBeInTheDocument();
+  });
+
+  it("saves a run as CSV and as JSON through the same save path as a suite", async () => {
+    const actor = user();
+    const saveFile = vi.fn();
+    const client = makeClient();
+    mount(client, { saveFile });
+    await actor.click(await screen.findByRole("button", { name: "Capital cities" }));
+
+    await actor.click(
+      (await screen.findAllByRole("button", { name: /Export the run from .* as CSV/ }))[0]!,
+    );
+    await waitFor(() => expect(saveFile).toHaveBeenCalledWith("benchmark-smoke.csv", "Case\r\n"));
+    expect(client.exportRun).toHaveBeenLastCalledWith({ runId: RUN_ID, format: "csv" });
+
+    await actor.click(
+      screen.getAllByRole("button", { name: /Export the run from .* as JSON/ })[0]!,
+    );
+    await waitFor(() => expect(saveFile).toHaveBeenCalledWith("benchmark-smoke.json", "{}"));
+    expect(client.exportRun).toHaveBeenLastCalledWith({ runId: RUN_ID, format: "json" });
+  });
+
+  it("says why an export failed", async () => {
+    const actor = user();
+    const client = makeClient({
+      exportRun: vi.fn(async () => {
+        throw new BenchmarksClientError("That run does not exist.", 404);
+      }),
+    });
+    mount(client, { saveFile: vi.fn() });
+    await actor.click(await screen.findByRole("button", { name: "Capital cities" }));
+    await actor.click(
+      (await screen.findAllByRole("button", { name: /Export the run from .* as JSON/ }))[0]!,
+    );
+    expect(await screen.findByText("That run does not exist.")).toBeVisible();
+  });
+
+  it("never shows another suite's history while its own is being read", async () => {
+    const actor = user();
+    const other = suite({
+      suiteId: "77000000-0000-4000-8000-0000000000a2",
+      name: "Other suite",
+    });
+    const history = vi.fn(
+      (request: Parameters<BenchmarksClient["history"]>[0]) =>
+        new Promise<Awaited<ReturnType<BenchmarksClient["history"]>>>((resolve) => {
+          if (String(request.suiteId) === SUITE_ID) {
+            resolve({
+              suiteId: request.suiteId,
+              runs: [historyRun("77000000-0000-4000-8000-0000000000c1", NOW, 0.5)],
+            });
+          }
+        }),
+    );
+    mount(makeClient({ listSuites: vi.fn(async () => ({ suites: [suite(), other] })), history }));
+
+    await actor.click(await screen.findByRole("button", { name: "Capital cities" }));
+    expect(await screen.findByRole("table", { name: "Runs by contender" })).toBeInTheDocument();
+
+    await actor.click(screen.getByRole("button", { name: "Other suite" }));
+    await waitFor(() => expect(history).toHaveBeenCalledTimes(2));
+    expect(screen.queryByRole("table", { name: "Runs by contender" })).toBeNull();
+  });
+
+  it("reads history when a run ends and not while its cells settle", async () => {
+    const actor = user();
+    let reads = 0;
+    const client = makeClient({
+      listRuns: vi.fn(async () => ({ runs: [summary(reads >= 4 ? "finished" : "running")] })),
+      readRun: vi.fn(async () => readResponse(++reads >= 4 ? "finished" : "running")),
+    });
+    mount(client);
+
+    await openRun(actor);
+    await waitFor(() => expect(reads).toBeGreaterThanOrEqual(3));
+    expect(client.history).toHaveBeenCalledTimes(1);
+
+    await waitFor(() => expect(client.history).toHaveBeenCalledTimes(2));
+    expect(reads).toBeGreaterThanOrEqual(4);
+  });
+
+  it("charts only the models that ran in every run, says so, and keeps them all in the table", async () => {
+    const actor = user();
+    const joiner = { providerInstanceId: PROVIDER, modelId: "model-b" };
+    const first = historyRun(
+      "77000000-0000-4000-8000-0000000000c1",
+      "2026-11-05T12:00:00.000Z",
+      0.5,
+    );
+    const second = historyRun(
+      "77000000-0000-4000-8000-0000000000c2",
+      "2026-11-07T12:00:00.000Z",
+      0.9,
+    );
+    const secondWithJoiner: HistoryRunFixture = {
+      ...second,
+      rows: [
+        ...second.rows,
+        { ...second.rows[0]!, contender: joiner as never, checkPassRate: 0.2, meanJudgeScore: 3 },
+      ],
+    };
+    const client = makeClient({
+      history: vi.fn(async () => ({
+        suiteId: suite().suiteId,
+        runs: [secondWithJoiner, first],
+      })),
+    });
+    mount(client);
+
+    await actor.click(await screen.findByRole("button", { name: "Capital cities" }));
+
+    const table = await screen.findByRole("table", { name: "Runs by contender" });
+    expect(within(table).getAllByRole("row")).toHaveLength(4);
+    expect(within(table).getByText("20%")).toBeInTheDocument();
+    expect(
+      screen.getAllByText("Shown only where a model ran in every run; see the table for all."),
+    ).toHaveLength(2);
+    const charts = screen.getAllByRole("region", { name: "Chart data" });
+    for (const data of charts) {
+      expect(within(data).queryByText(/model-b/)).toBeNull();
+    }
   });
 });

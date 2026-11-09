@@ -414,7 +414,12 @@ export const BENCHMARK_ROUTE_PATHS = {
   runsCancel: "/api/benchmarks/runs/cancel",
   runsPurge: "/api/benchmarks/runs/purge",
   cellsRate: "/api/benchmarks/cells/rate",
+  suitesHistory: "/api/benchmarks/suites/history",
+  runsExport: "/api/benchmarks/runs/export",
 } as const;
+
+/** The most runs one history read returns, newest first. */
+export const MAX_BENCHMARK_HISTORY_RUNS = 50;
 
 export const BenchmarkSuitesListRequest = Schema.Struct({}).annotations(strict);
 export type BenchmarkSuitesListRequest = typeof BenchmarkSuitesListRequest.Type;
@@ -484,6 +489,54 @@ export const BenchmarkRunReadResponse = Schema.Struct({
   ),
 }).annotations(strict);
 export type BenchmarkRunReadResponse = typeof BenchmarkRunReadResponse.Type;
+
+export const BenchmarkHistoryRequest = Schema.Struct({ suiteId: BenchmarkSuiteId }).annotations(
+  strict,
+);
+export type BenchmarkHistoryRequest = typeof BenchmarkHistoryRequest.Type;
+/** One contender's figures in one run: the leaderboard row without the percentile tails. */
+export const BenchmarkHistoryRow = Schema.Struct({
+  contender: BenchmarkContender,
+  cells: NonNegativeInt,
+  answered: NonNegativeInt,
+  checkPassRate: Schema.optional(Schema.Number.pipe(Schema.between(0, 1))),
+  meanJudgeScore: Schema.optional(NonNegativeNumber),
+  meanStars: Schema.optional(NonNegativeNumber),
+  firstTokenP50Ms: Schema.optional(NonNegativeNumber),
+  tokensPerSecondP50: Schema.optional(NonNegativeNumber),
+  totalTokens: NonNegativeInt,
+  totalCostUsd: Schema.optional(NonNegativeNumber),
+  failedCount: NonNegativeInt,
+}).annotations(strict);
+export type BenchmarkHistoryRow = typeof BenchmarkHistoryRow.Type;
+export const BenchmarkHistoryRun = Schema.Struct({
+  runId: BenchmarkRunId,
+  startedAt: UtcTimestamp,
+  status: BenchmarkRunStatus,
+  suiteRevision: PositiveInt,
+  rows: Schema.Array(BenchmarkHistoryRow),
+}).annotations(strict);
+export type BenchmarkHistoryRun = typeof BenchmarkHistoryRun.Type;
+export const BenchmarkHistoryResponse = Schema.Struct({
+  suiteId: BenchmarkSuiteId,
+  runs: Schema.Array(BenchmarkHistoryRun).pipe(Schema.maxItems(MAX_BENCHMARK_HISTORY_RUNS)),
+}).annotations(strict);
+export type BenchmarkHistoryResponse = typeof BenchmarkHistoryResponse.Type;
+
+export const BenchmarkExportFormat = Schema.Literal("json", "csv");
+export type BenchmarkExportFormat = typeof BenchmarkExportFormat.Type;
+export const BenchmarkRunExportRequest = Schema.Struct({
+  runId: BenchmarkRunId,
+  format: BenchmarkExportFormat,
+}).annotations(strict);
+export type BenchmarkRunExportRequest = typeof BenchmarkRunExportRequest.Type;
+/** A file the client saves. It never carries answer text. */
+export const BenchmarkRunExportResponse = Schema.Struct({
+  fileName: Schema.String.pipe(Schema.minLength(1), Schema.maxLength(200)),
+  contentType: Schema.String,
+  content: Schema.String,
+}).annotations(strict);
+export type BenchmarkRunExportResponse = typeof BenchmarkRunExportResponse.Type;
 
 /** The caller mints `runId`, so a retried start finds the run it already made. */
 export const BenchmarkRunStartRequest = Schema.Struct({
@@ -656,3 +709,9 @@ export const decodeBenchmarkRunPurgeRequest = Schema.decodeUnknownSync(Benchmark
 export const decodeBenchmarkRunPurgeResponse = Schema.decodeUnknownSync(BenchmarkRunPurgeResponse);
 export const decodeBenchmarkCellRateRequest = Schema.decodeUnknownSync(BenchmarkCellRateRequest);
 export const decodeBenchmarkCellRateResponse = Schema.decodeUnknownSync(BenchmarkCellRateResponse);
+export const decodeBenchmarkHistoryRequest = Schema.decodeUnknownSync(BenchmarkHistoryRequest);
+export const decodeBenchmarkHistoryResponse = Schema.decodeUnknownSync(BenchmarkHistoryResponse);
+export const decodeBenchmarkRunExportRequest = Schema.decodeUnknownSync(BenchmarkRunExportRequest);
+export const decodeBenchmarkRunExportResponse = Schema.decodeUnknownSync(
+  BenchmarkRunExportResponse,
+);

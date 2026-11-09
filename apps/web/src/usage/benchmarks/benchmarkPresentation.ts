@@ -17,6 +17,7 @@ import {
   CANVAS_SCHEMA_VERSION,
   decodeCanvasBlock,
   type CanvasBarListBlock,
+  type CanvasChartBlock,
 } from "@octant/contracts/canvas";
 
 /** What a cell's state is called on the page, beside its icon. */
@@ -762,4 +763,125 @@ export function exportFileName(suite: BenchmarkSuite): string {
     .replace(/[^a-z0-9]+/g, "-")
     .replace(/^-|-$/g, "");
   return `${slug === "" ? "benchmark-suite" : slug}.json`;
+}
+
+// ── History ────────────────────────────────────────────────────────────────
+
+export interface HistoryRunLike {
+  readonly runId: string;
+  readonly startedAt: string;
+  readonly rows: ReadonlyArray<{
+    readonly contender: ContenderRef;
+    readonly checkPassRate?: number | undefined;
+    readonly meanJudgeScore?: number | undefined;
+  }>;
+}
+
+/** The same model with the same effort is one line, whichever run it ran in. */
+export function historyContenderKey(contender: ContenderRef): string {
+  return `${contenderKey(String(contender.providerInstanceId), String(contender.modelId))}\u0000${contender.effort ?? ""}`;
+}
+
+export interface HistoryChart {
+  readonly block: CanvasChartBlock | undefined;
+  /** Some contender has no reading in every run, so the chart leaves it out. */
+  readonly leftOut: boolean;
+}
+
+export interface HistoryCharts {
+  readonly checkPassRate: HistoryChart;
+  readonly judgeScore: HistoryChart;
+}
+
+export const HISTORY_LEFT_OUT_NOTE =
+  "Shown only where a model ran in every run; see the table for all.";
+
+/**
+ * Check pass rate and mean judge score per contender over the suite's runs,
+ * oldest on the left. The Canvas chart places points by position and has no
+ * gap, so a contender is drawn only when it has a reading in every run;
+ * drawing it over fewer points would put it at another run's position. The
+ * others are reported as left out, and the table still lists them. Each block
+ * passes the Canvas schema, so one that does not fit is dropped rather than
+ * breaking the page.
+ */
+export function historyCharts(
+  runs: ReadonlyArray<HistoryRunLike>,
+  names: ContenderNames,
+): HistoryCharts {
+  const oldestFirst = [...runs].reverse();
+  const seen = new Set<string>();
+  const labels = oldestFirst.map((run) => {
+    const base = new Date(run.startedAt).toLocaleString("en", {
+      month: "short",
+      day: "numeric",
+      hour: "2-digit",
+      minute: "2-digit",
+    });
+    let label = base;
+    for (let n = 2; seen.has(label); n += 1) label = `${base} (${n})`;
+    seen.add(label);
+    return label;
+  });
+  const build = (
+    id: string,
+    title: string,
+    format: "percent" | "number",
+    pick: (row: HistoryRunLike["rows"][number]) => number | undefined,
+  ): HistoryChart => {
+    const byContender = new Map<
+      string,
+      { label: string; points: Array<{ x: string; y: number }> }
+    >();
+    oldestFirst.forEach((run, runIndex) => {
+      for (const row of run.rows) {
+        const value = pick(row);
+        if (value === undefined) continue;
+        const key = historyContenderKey(row.contender);
+        const entry = byContender.get(key) ?? {
+          label: contenderLabel(row.contender, names),
+          points: [],
+        };
+        entry.points.push({ x: labels[runIndex] ?? run.startedAt, y: value });
+        byContender.set(key, entry);
+      }
+    });
+    const complete = [...byContender.values()].filter(
+      (entry) => entry.points.length === oldestFirst.length,
+    );
+    const leftOut = complete.length < byContender.size;
+    if (complete.length === 0) return { block: undefined, leftOut };
+    try {
+      const block = decodeCanvasBlock({
+        blockId: `benchmarks-history-${id}`,
+        schemaVersion: CANVAS_SCHEMA_VERSION,
+        kind: "chart",
+        chartType: "line",
+        title,
+        format,
+        series: complete.map((entry, index) => ({
+          seriesId: `contender-${index + 1}`,
+          label: entry.label,
+          points: entry.points,
+        })),
+      });
+      return { block: block.kind === "chart" ? block : undefined, leftOut };
+    } catch {
+      return { block: undefined, leftOut };
+    }
+  };
+  return {
+    checkPassRate: build(
+      "check-pass-rate",
+      "Check pass rate by run",
+      "percent",
+      (row) => row.checkPassRate,
+    ),
+    judgeScore: build(
+      "judge-score",
+      "Mean judge score by run",
+      "number",
+      (row) => row.meanJudgeScore,
+    ),
+  };
 }
