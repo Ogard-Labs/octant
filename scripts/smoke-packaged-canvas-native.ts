@@ -1153,12 +1153,20 @@ const timer = setInterval(() => {
           return snapshot;
         }
         // Anchors in `above` mean the pane is past the target; scroll up.
-        const past = above.find((label) => hasText(snapshot, label));
-        const visible = anchors.find((label) => hasText(snapshot, label));
-        if (past !== undefined)
-          await nativeInput(`${stage}-scroll-up-${attempt}`, "scroll-up", past);
-        else if (visible === undefined || attempt % 2 === 0) await pause(1000);
-        else await nativeInput(`${stage}-scroll-${attempt}`, "scroll-down", visible);
+        // A scroll is aimed at a label the controller can find exactly once.
+        const unique = (label: string) =>
+          snapshot.texts.filter((row) => row.text.toLowerCase().includes(label.toLowerCase()))
+            .length === 1;
+        const past = above.find(unique);
+        const visible = anchors.find(unique);
+        try {
+          if (past !== undefined)
+            await nativeInput(`${stage}-scroll-up-${attempt}`, "scroll-up", past);
+          else if (visible === undefined || attempt % 2 === 0) await pause(1000);
+          else await nativeInput(`${stage}-scroll-${attempt}`, "scroll-down", visible);
+        } catch {
+          await pause(500);
+        }
       }
       await logWindowText(stage);
       throw Error(`The real packaged ${stage} state was not observed.`);
