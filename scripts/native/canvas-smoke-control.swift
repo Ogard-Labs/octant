@@ -69,7 +69,7 @@ _ = controllerApplication.setActivationPolicy(.prohibited)
 guard let application = NSRunningApplication(processIdentifier: pid), !application.isTerminated else {
     refuse("The owned application is no longer running.")
 }
-if mode == "choose-native-menu-item" || mode == "click" || mode == "fill" || mode == "fill-private" || mode == "paste" || mode == "paste-after" || mode == "press-after" || mode == "select-copy" || mode == "scroll-down" || mode == "toggle-before-field" || mode == "focus-before-text" || mode == "scroll-top" || mode == "scroll-bottom" || mode == "enter" || mode == "end" || mode == "escape" || mode == "settings" {
+if mode == "choose-native-menu-item" || mode == "click" || mode == "fill" || mode == "fill-private" || mode == "paste" || mode == "paste-after" || mode == "press-after" || mode == "select-copy" || mode == "scroll-down" || mode == "scroll-up" || mode == "toggle-before-field" || mode == "focus-before-text" || mode == "scroll-top" || mode == "scroll-bottom" || mode == "enter" || mode == "end" || mode == "escape" || mode == "settings" {
     guard CGPreflightPostEventAccess() else { refuse("Native event delivery is unavailable; no permission was requested.") }
     _ = application.activate(options: [.activateIgnoringOtherApps])
 }
@@ -110,7 +110,7 @@ let targets = (request.results ?? []).compactMap { result -> TextTarget? in
 var clicked = false
 var pointerProof: String?
 var nativeText: String?
-if mode == "read-text" || mode == "choose-native-menu-item" || mode == "click" || mode == "fill" || mode == "fill-private" || mode == "paste" || mode == "paste-after" || mode == "press-after" || mode == "select-copy" || mode == "scroll-down" || mode == "toggle-before-field" || mode == "focus-before-text" || mode == "scroll-top" || mode == "scroll-bottom" {
+if mode == "read-text" || mode == "choose-native-menu-item" || mode == "click" || mode == "fill" || mode == "fill-private" || mode == "paste" || mode == "paste-after" || mode == "press-after" || mode == "select-copy" || mode == "scroll-down" || mode == "scroll-up" || mode == "toggle-before-field" || mode == "focus-before-text" || mode == "scroll-top" || mode == "scroll-bottom" {
     guard !expected.isEmpty else { refuse("Supply a nonempty observed text target.") }
     let rowContext = mode == "click" && CommandLine.arguments.count == 6 ? CommandLine.arguments[5] : nil
     let observedRows = (request.results ?? []).filter { result in
@@ -291,8 +291,8 @@ if mode == "read-text" || mode == "choose-native-menu-item" || mode == "click" |
         usleep(50_000)
         keyUp.postToPid(pid)
         usleep(150_000)
-    } else if mode == "scroll-down" {
-        guard let scroll = CGEvent(scrollWheelEvent2Source: nil, units: .line, wheelCount: 1, wheel1: -6, wheel2: 0, wheel3: 0) else { refuse("Native scrolling is unavailable.") }
+    } else if mode == "scroll-down" || mode == "scroll-up" {
+        guard let scroll = CGEvent(scrollWheelEvent2Source: nil, units: .line, wheelCount: 1, wheel1: mode == "scroll-up" ? 6 : -6, wheel2: 0, wheel3: 0) else { refuse("Native scrolling is unavailable.") }
         scroll.location = point
         scroll.post(tap: .cghidEventTap)
         usleep(150_000)

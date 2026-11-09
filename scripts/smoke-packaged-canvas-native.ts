@@ -1138,6 +1138,7 @@ const timer = setInterval(() => {
       stage: string,
       accept: (snapshot: typeof Snapshot.Type) => boolean,
       anchors: ReadonlyArray<string>,
+      above: ReadonlyArray<string> = [],
     ) => {
       for (let attempt = 0; attempt < 8; attempt++) {
         const raw = await runBoundedCommand(
@@ -1151,8 +1152,12 @@ const timer = setInterval(() => {
           console.log(`Observed native stage: ${stage}`);
           return snapshot;
         }
+        // Anchors in `above` mean the pane is past the target; scroll up.
+        const past = above.find((label) => hasText(snapshot, label));
         const visible = anchors.find((label) => hasText(snapshot, label));
-        if (visible === undefined || attempt % 2 === 0) await pause(1000);
+        if (past !== undefined)
+          await nativeInput(`${stage}-scroll-up-${attempt}`, "scroll-up", past);
+        else if (visible === undefined || attempt % 2 === 0) await pause(1000);
         else await nativeInput(`${stage}-scroll-${attempt}`, "scroll-down", visible);
       }
       await logWindowText(stage);
@@ -1255,12 +1260,14 @@ const timer = setInterval(() => {
       "pairing-settings",
       (snapshot) => hasText(snapshot, "Create pairing link"),
       ["Pair a device", "Pairing link"],
+      ["Paired devices", "Revoke all", "Act as hub"],
     );
     await pairedInput("pairing-create-link", "click", "Create pairing link");
     await observeScrolling(
       "pairing-link-shown",
       (snapshot) => hasText(snapshot, "ticketProof") || hasText(snapshot, "Expires"),
       ["Create pairing link", "Pairing link", "Pair a device"],
+      ["Act as hub", "Join a hub"],
     );
     const linkPattern = /https:\/\/[^\s#]+\/#ticketId=[A-Za-z0-9%_-]+&ticketProof=[A-Za-z0-9%_-]+/g;
     let pairingLink: string | undefined;
@@ -1339,6 +1346,7 @@ const timer = setInterval(() => {
       "pairing-request",
       (snapshot) => hasText(snapshot, approveLabel) && hasText(snapshot, comparisonCode),
       ["Expires", "Network", "Create pairing link", "Pairing link", "Pair a device"],
+      ["Act as hub", "Join a hub"],
     );
     await pairedInput("pairing-approve", "click", approveLabel);
     await observeScrolling("pairing-approved", (snapshot) => hasText(snapshot, "Approved"), [
