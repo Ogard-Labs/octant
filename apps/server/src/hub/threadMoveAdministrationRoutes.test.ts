@@ -78,6 +78,7 @@ function setup(input: { readonly delegated?: boolean } = {}) {
       activateAnyway: async () => ({ httpStatus: 409, body: {} }),
       dismissFailure: (thread) => dismissed.push(thread.threadId),
       refuseBeforeStart: () => {},
+      rateTo: () => ({ basis: "assumed", bytesPerSecond: 1_048_576 }),
     },
     state,
     tickets: {
@@ -92,6 +93,7 @@ function setup(input: { readonly delegated?: boolean } = {}) {
         delegated: input.delegated === true,
         repositoryRemotes: ["git@github.com:Ogard-Labs/octant.git"],
       }),
+      measure: async () => ({ status: "unknown" }),
     },
     members: () => [member(MINI, "Mac mini"), member(STUDIO, "Studio")],
     selfMemberId: () => DESKTOP,
@@ -193,6 +195,10 @@ describe("starting a thread move from a window", () => {
       ],
       [THREAD_MOVE_ADMINISTRATION_ROUTES.dismiss, { thread: ELSEWHERE }],
       [
+        THREAD_MOVE_ADMINISTRATION_ROUTES.sizes,
+        { destinationMemberId: DESKTOP, threads: [SHOWN, ELSEWHERE] },
+      ],
+      [
         THREAD_MOVE_ADMINISTRATION_ROUTES.cancel,
         { moveId: "99999999-9999-4999-8999-999999999999" },
       ],
@@ -206,6 +212,29 @@ describe("starting a thread move from a window", () => {
     }
     expect(dismissed).toEqual([]);
     expect(stopped).toEqual([]);
+  });
+
+  it("sizes the thread a window shows, and any thread here for Prepare to shut down", async () => {
+    const { handle } = setup();
+    const shown = await handle(
+      post(THREAD_MOVE_ADMINISTRATION_ROUTES.sizes, {
+        destinationMemberId: DESKTOP,
+        threads: [SHOWN],
+      }),
+    );
+    expect(shown?.status).toBe(200);
+    expect(await shown?.json()).toEqual({
+      status: "read",
+      rate: { basis: "assumed", bytesPerSecond: 1_048_576 },
+      rows: [{ thread: SHOWN, size: { status: "unknown" } }],
+    });
+    const hostWide = await handle(
+      post(THREAD_MOVE_ADMINISTRATION_ROUTES.shutdownSizes, {
+        destinationMemberId: DESKTOP,
+        threads: [ELSEWHERE],
+      }),
+    );
+    expect(hostWide?.status).toBe(200);
   });
 
   it("reports the explicit error when this Mac is not an owner on the destination", async () => {

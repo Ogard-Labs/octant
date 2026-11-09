@@ -1,6 +1,7 @@
 import {
   SHUTDOWN_BATCH_MAX,
   type HubMemberId,
+  THREAD_MOVE_SIZES_MAX,
   type MovedThreadReference,
   type ProjectId,
   type ShutdownChoice,
@@ -8,6 +9,8 @@ import {
   type ShutdownListing,
   type ShutdownPlacement,
   type ShutdownThreadRow,
+  type ThreadMoveSize,
+  type ThreadMoveSizes,
   type ThreadMoveThreadStatus,
   type ThreadMoveTiming,
   type ThreadMoveUnlockChallenge,
@@ -25,6 +28,7 @@ import { OctantButton } from "../../ui/base/OctantButton";
 import { OctantDialog } from "../../ui/base/OctantDialog";
 import { OctantSelectField } from "../../ui/base/OctantSelect";
 import type { ThreadMoveClient } from "./threadMoveClient";
+import { estimateBasis, formatBytes, sizeAndEstimate } from "./threadMoveSize";
 
 /** How far a running batch has come, for the menu bar while the dialog is hidden. */
 export interface ShutdownBatchProgress {
@@ -77,6 +81,7 @@ const REASON_WORDS: Readonly<Record<string, string>> = {
 const ELSEWHERE = "elsewhere:";
 
 const POLL_MS = 1_000;
+const UNKNOWN_SIZE: ThreadMoveSize = { status: "unknown" };
 
 /** How a handover the batch started ended, as its own request answered. */
 type HandoverEnd = "handing-over" | "pushed" | "not-pushed" | "refused";
@@ -119,6 +124,8 @@ export function PrepareToShutDownDialog(props: PrepareToShutDownDialogProps) {
   // A batch keeps moving on the server while the dialog is hidden, so opening
   // the dialog again shows that batch rather than starting over.
   const batchUnsettled = useRef(false);
+  // What each thread would send, read per destination member.
+  const [sizes, setSizes] = useState<ReadonlyMap<string, ThreadMoveSizes | "unknown">>(new Map());
 
   const load = useCallback(() => {
     setLoadFailed(false);
@@ -148,6 +155,8 @@ export function PrepareToShutDownDialog(props: PrepareToShutDownDialogProps) {
     setHandovers(new Map());
     setNotStarted(new Map());
     setLeftOver(0);
+    // A fresh listing is measured again; an earlier read describes earlier work.
+    setSizes(new Map());
     load();
   }, [load]);
 
@@ -359,6 +368,78 @@ export function PrepareToShutDownDialog(props: PrepareToShutDownDialogProps) {
   const ended = moved.length + failed + stayed + handedOver;
   const done = phase === "running" && total > 0 && ended === total;
   const progress = total === 0 ? 0 : Math.round((ended / total) * 100);
+
+  // What each row would send, read per destination: the head's and each
+  // member a row names. Sizes are read beside the list, never before it: the
+  // rows and the primary button are usable while Git measures each checkout.
+  const sizeTargets = [
+    ...new Set(
+      [destination, ...rows.map((row) => pickOf(row).memberId)].filter(
+        (memberId): memberId is string => memberId !== undefined,
+      ),
+    ),
+  ].sort();
+  const sizeTargetsKey = sizeTargets.join(" ");
+  useEffect(() => {
+    if (!props.open || phase !== "choosing" || listing === undefined) return;
+    let stopped = false;
+    for (const memberId of sizeTargetsKey === "" ? [] : sizeTargetsKey.split(" ")) {
+      const threads = listing.rows
+        .filter((row) => placementFor(row, memberId)?.reason === undefined)
+        .slice(0, THREAD_MOVE_SIZES_MAX)
+        .map((row) => row.thread);
+      if (threads.length === 0) continue;
+      props.client
+        .shutdownSizes(memberId, threads)
+        .then((read) => {
+          if (!stopped) setSizes((current) => new Map(current).set(memberId, read));
+        })
+        .catch(() => {
+          if (!stopped) setSizes((current) => new Map(current).set(memberId, "unknown"));
+        });
+    }
+    return () => {
+      stopped = true;
+    };
+  }, [props.open, phase, listing, sizeTargetsKey, props.client]);
+  const sizeOf = (row: ShutdownThreadRow): ThreadMoveSize | undefined => {
+    const target = targetOf(row);
+    if (target === undefined || placementFor(row, target)?.reason !== undefined) return undefined;
+    const measured = sizes.get(target);
+    if (measured === undefined) return undefined;
+    if (measured === "unknown") return UNKNOWN_SIZE;
+    return (
+      measured.rows.find((entry) => rowKey(entry.thread) === rowKey(row.thread))?.size ??
+      UNKNOWN_SIZE
+    );
+  };
+  // Each destination's total and estimate, at the rate to that member.
+  const groupTotals = groups.map((group) => {
+    const measured = sizes.get(String(group.member.memberId));
+    const text =
+      measured === undefined
+        ? undefined
+        : measured === "unknown"
+          ? group.rows.length === 1
+            ? "Size unknown"
+            : "Sizes unknown"
+          : sizeAndEstimate(
+              group.rows.map((row) => sizeOf(row) ?? UNKNOWN_SIZE),
+              measured.rate,
+            );
+    const basis =
+      typeof measured === "object" && group.rows.some((row) => sizeOf(row)?.status === "measured")
+        ? estimateBasis(measured.rate, group.member.name)
+        : undefined;
+    return { name: group.member.name, text, basis };
+  });
+  const totalText =
+    groupTotals.length === 0 || groupTotals.some((entry) => entry.text === undefined)
+      ? undefined
+      : groupTotals.length === 1
+        ? groupTotals[0]?.text
+        : groupTotals.map((entry) => `${String(entry.text)} to ${entry.name}`).join(", ");
+
   useEffect(() => {
     if (done) batchUnsettled.current = false;
   }, [done]);
@@ -463,6 +544,7 @@ export function PrepareToShutDownDialog(props: PrepareToShutDownDialogProps) {
         phase={phase}
         pick={pickOf(row)}
         row={row}
+        size={sizeOf(row)}
         startedAt={startedAt}
         status={moveState}
       />
@@ -568,9 +650,19 @@ export function PrepareToShutDownDialog(props: PrepareToShutDownDialogProps) {
       <footer className="shutdown-dialog__foot">
         {phase === "choosing" && listing !== undefined && rows.length > 0 ? (
           <p aria-live="polite" className="shutdown-dialog__summary">
-            {summary}
+            <span>{summary}</span>
+            {totalText === undefined ? null : <span> · {totalText}</span>}
           </p>
         ) : null}
+        {phase === "choosing"
+          ? groupTotals.map((entry) =>
+              entry.basis === undefined ? null : (
+                <p className="shutdown-dialog__basis" key={entry.name}>
+                  {entry.basis}
+                </p>
+              ),
+            )
+          : null}
         {problem === undefined ? null : (
           <p className="shutdown-dialog__problem" role="alert">
             {problem}
@@ -647,6 +739,8 @@ function ShutdownRow(props: {
   /** Why this row, set to move, did not start: it stays here. */
   readonly notStarted: string | undefined;
   readonly startedAt: number;
+  /** What the row would send; absent while measuring or when it cannot move there. */
+  readonly size: ThreadMoveSize | undefined;
   readonly onChoose: (pick: RowPick) => void;
 }) {
   const { row } = props;
@@ -685,6 +779,11 @@ function ShutdownRow(props: {
       <span className="shutdown-row__title">{row.title}</span>
       {row.projectName === undefined ? null : (
         <span className="shutdown-row__project">{row.projectName}</span>
+      )}
+      {props.size === undefined ? null : (
+        <span className="shutdown-row__size">
+          {props.size.status === "measured" ? formatBytes(props.size.bytes) : "Size unknown"}
+        </span>
       )}
       {props.phase === "running" && props.notStarted !== undefined ? (
         <span className="shutdown-row__reason">

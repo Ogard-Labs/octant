@@ -41,6 +41,7 @@ describe("moving a thread after its turn", () => {
         activateAnyway: async () => ({ httpStatus: 409, body: {} }),
         dismissFailure: () => {},
         refuseBeforeStart: () => {},
+        rateTo: () => ({ basis: "assumed", bytesPerSecond: 1_048_576 }),
       },
       state: createThreadMoveStateStore(folder),
       tickets: {
@@ -49,6 +50,7 @@ describe("moving a thread after its turn", () => {
       },
       stopWork: async () => ({ status: "stopped" }),
       source: {
+        measure: async () => ({ status: "unknown" }),
         // The start sees the turn running; the poll's read is held open.
         read: () => {
           reads += 1;
@@ -119,6 +121,7 @@ describe("Stop and move", () => {
         activateAnyway: async () => ({ httpStatus: 409, body: {} }),
         dismissFailure: () => {},
         refuseBeforeStart,
+        rateTo: () => ({ basis: "assumed", bytesPerSecond: 1_048_576 }),
       },
       state: createThreadMoveStateStore(folder),
       tickets: {
@@ -132,6 +135,7 @@ describe("Stop and move", () => {
       },
       source: {
         read: async () => ({ ...reading(running), delegated: options.delegated === true }),
+        measure: async () => ({ status: "unknown" }),
       },
       stopWork,
       members: () => [],
@@ -251,13 +255,14 @@ describe("where a moved thread stands", () => {
         activateAnyway: async () => ({ httpStatus: 409, body: {} }),
         dismissFailure: () => {},
         refuseBeforeStart: () => {},
+        rateTo: () => ({ basis: "assumed", bytesPerSecond: 1_048_576 }),
       },
       state: createThreadMoveStateStore(folder),
       tickets: {
         challenge: async () => ({ status: "refused", kind: "refused" }),
         redeem: async () => ({ status: "issued", ticketId: "ticket" }),
       },
-      source: { read: async () => reading(false) },
+      source: { read: async () => reading(false), measure: async () => ({ status: "unknown" }) },
       stopWork: async () => ({ status: "stopped" }),
       members: () => [],
       selfMemberId: () => "self",
@@ -281,6 +286,71 @@ describe("where a moved thread stands", () => {
     );
     expect(moves.status(THREAD).failure).toBeUndefined();
     moves.close();
+  });
+});
+
+describe("sizes before a move", () => {
+  it("reads each thread's size with the rate to that member, and a thread it cannot measure as unknown", async () => {
+    const folder = mkdtempSync(join(tmpdir(), "octant-move-sizes-"));
+    folders.push(folder);
+    const broken: MovedThreadReference = {
+      mode: "chat",
+      threadId: "88888888-8888-4888-8888-888888888888",
+    };
+    const start = vi.fn(async () => ({ status: "interrupted" as const }));
+    const moves = new ThreadMovesFromWindow({
+      moves: {
+        askProjects: async () => "unreachable",
+        start,
+        cancel: async () => ({ status: "cancelled" }),
+        takeBack: async () => {},
+        activateAnyway: async () => ({ httpStatus: 409, body: {} }),
+        dismissFailure: () => {},
+        refuseBeforeStart: () => {},
+        rateTo: (memberId) =>
+          memberId === DESKTOP
+            ? { basis: "measured", bytesPerSecond: 4_000_000 }
+            : { basis: "assumed", bytesPerSecond: 1_048_576 },
+      },
+      stopWork: async () => ({ status: "stopped" }),
+      state: createThreadMoveStateStore(folder),
+      tickets: {
+        challenge: async () => ({ status: "refused", kind: "refused" }),
+        redeem: async () => ({ status: "issued", ticketId: "ticket" }),
+      },
+      source: {
+        read: async () => reading(false),
+        measure: async (thread) => {
+          if (thread.threadId === broken.threadId) throw new Error("The checkout is gone.");
+          return {
+            status: "measured",
+            bytes: 12_000_000,
+            parts: [
+              { kind: "thread-bundle", bytes: 40_000 },
+              { kind: "git-bundle", bytes: 11_960_000 },
+            ],
+          };
+        },
+      },
+      members: () => [],
+      selfMemberId: () => "self",
+      listThreads: async () => [],
+      now: Date.now,
+    });
+
+    const sizes = await moves.sizes({
+      destinationMemberId: DESKTOP as never,
+      threads: [THREAD, broken],
+    });
+
+    expect(sizes.rate).toEqual({ basis: "measured", bytesPerSecond: 4_000_000 });
+    expect(sizes.rows.map((row) => [row.thread.threadId, row.size.status])).toEqual([
+      [THREAD.threadId, "measured"],
+      [broken.threadId, "unknown"],
+    ]);
+    // Measuring never starts or freezes a move.
+    expect(start).not.toHaveBeenCalled();
+    expect(moves.status(THREAD)).toEqual({ status: "read" });
   });
 });
 

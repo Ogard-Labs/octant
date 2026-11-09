@@ -664,6 +664,57 @@ export const ShutdownStartOutcome = Schema.Union(
 );
 export type ShutdownStartOutcome = typeof ShutdownStartOutcome.Type;
 
+// ── Sizes and an estimate ──────────────────────────────────────────────────
+
+/**
+ * How much a move of one thread would send now, read without packing or
+ * freezing it. `unknown` when the thread could not be measured; that never
+ * stops a move.
+ */
+export const ThreadMoveSize = Schema.Union(
+  Schema.Struct({
+    status: Schema.Literal("measured"),
+    bytes: NonNegativeInt,
+    parts: Schema.Array(
+      Schema.Struct({ kind: ThreadMovePartKind, bytes: NonNegativeInt }).annotations(strict),
+    ).pipe(Schema.maxItems(16)),
+  }).annotations(strict),
+  Schema.Struct({ status: Schema.Literal("unknown") }).annotations(strict),
+);
+export type ThreadMoveSize = typeof ThreadMoveSize.Type;
+
+/**
+ * How fast a move to one member is expected to send: what earlier chunks to
+ * that member measured, or the stated conservative default when none did.
+ */
+export const ThreadMoveRate = Schema.Struct({
+  basis: Schema.Literal("measured", "assumed"),
+  bytesPerSecond: Schema.Int.pipe(Schema.positive()),
+}).annotations(strict);
+export type ThreadMoveRate = typeof ThreadMoveRate.Type;
+
+/** The most threads one sizes request names; the request body stays under the route's cap. */
+export const THREAD_MOVE_SIZES_MAX = 512;
+
+/** The threads a window would move to one member, to size before the move. */
+export const ThreadMoveSizesRequest = Schema.Struct({
+  destinationMemberId: HubMemberId,
+  threads: Schema.Array(MovedThreadReference).pipe(
+    Schema.minItems(1),
+    Schema.maxItems(THREAD_MOVE_SIZES_MAX),
+  ),
+}).annotations(strict);
+export type ThreadMoveSizesRequest = typeof ThreadMoveSizesRequest.Type;
+
+export const ThreadMoveSizes = Schema.Struct({
+  status: Schema.Literal("read"),
+  rate: ThreadMoveRate,
+  rows: Schema.Array(
+    Schema.Struct({ thread: MovedThreadReference, size: ThreadMoveSize }).annotations(strict),
+  ).pipe(Schema.maxItems(THREAD_MOVE_SIZES_MAX)),
+}).annotations(strict);
+export type ThreadMoveSizes = typeof ThreadMoveSizes.Type;
+
 // ── Handover ───────────────────────────────────────────────────────────────
 
 /** A window asks what a handover would do, or does it. */
@@ -819,3 +870,5 @@ export const decodeHandoverContinuedReport = Schema.decodeUnknownSync(HandoverCo
 export const decodeHandoverListing = Schema.decodeUnknownSync(HandoverListing);
 export const decodeHandoverContinueRequest = Schema.decodeUnknownSync(HandoverContinueRequest);
 export const decodeHandoverContinueOutcome = Schema.decodeUnknownSync(HandoverContinueOutcome);
+export const decodeThreadMoveSizesRequest = Schema.decodeUnknownSync(ThreadMoveSizesRequest);
+export const decodeThreadMoveSizes = Schema.decodeUnknownSync(ThreadMoveSizes);

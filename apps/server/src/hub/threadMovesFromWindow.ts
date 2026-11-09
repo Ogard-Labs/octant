@@ -24,6 +24,9 @@ import type {
   ThreadMoveDestination,
   ThreadMoveDestinations,
   ThreadMoveFailureReason,
+  ThreadMoveSize,
+  ThreadMoveSizes,
+  ThreadMoveSizesRequest,
   ThreadMoveStartOutcome,
   ThreadMoveStartRequest,
   ThreadMoveThreadStatus,
@@ -40,6 +43,8 @@ import type { SentMove, ThreadMoveStatePort } from "./threadMoveStateStore";
 
 /** How often a thread set to move after its turn is checked. */
 const TURN_POLL_MS = 2_000;
+/** Threads measured at once: each Code thread runs Git in its own checkout. */
+const MEASURED_AT_ONCE = 4;
 
 /**
  * How long a stopped turn may take to end before Stop and move gives up with
@@ -63,10 +68,11 @@ export interface ThreadMovesFromWindowOptions {
     | "activateAnyway"
     | "dismissFailure"
     | "refuseBeforeStart"
+    | "rateTo"
   >;
   readonly state: ThreadMoveStatePort;
   readonly tickets: ThreadMoveTicketClient;
-  readonly source: Pick<ThreadMoveSourceHost, "read">;
+  readonly source: Pick<ThreadMoveSourceHost, "read" | "measure">;
   /**
    * Stops the thread's running turn, its child runs here and the ones it
    * delegated to another member, and its pending approvals and questions,
@@ -249,6 +255,39 @@ export class ThreadMovesFromWindow {
       }),
     );
     return { status: "listed", busy: reading.busy, destinations };
+  }
+
+  /**
+   * How much moving each thread to a member would send, and how fast a move
+   * there is expected to go. Read-only, so the move sheet and Prepare to shut
+   * down ask before anything freezes; a thread that cannot be measured reads
+   * as size unknown, which never stops its move.
+   */
+  async sizes(request: ThreadMoveSizesRequest): Promise<ThreadMoveSizes> {
+    const sizes: ThreadMoveSize[] = [];
+    let next = 0;
+    const measureNext = async (): Promise<void> => {
+      while (next < request.threads.length) {
+        const index = next;
+        next += 1;
+        const thread = request.threads[index];
+        if (thread === undefined) continue;
+        sizes[index] = await this.#options.source
+          .measure(thread)
+          .catch((): ThreadMoveSize => ({ status: "unknown" }));
+      }
+    };
+    await Promise.all(
+      Array.from({ length: Math.min(MEASURED_AT_ONCE, request.threads.length) }, measureNext),
+    );
+    return {
+      status: "read",
+      rate: this.#options.moves.rateTo(String(request.destinationMemberId)),
+      rows: request.threads.map((thread, index) => ({
+        thread,
+        size: sizes[index] ?? { status: "unknown" },
+      })),
+    };
   }
 
   challenge(destinationMemberId: string): Promise<ThreadMoveChallengeOutcome> {
