@@ -36,11 +36,13 @@ export type ServerCall =
       readonly truncated: boolean;
     }
   /** The server could not be reached, or the connection dropped; `message` says what ssh reported. */
-  | { readonly status: "unreachable"; readonly message: string };
+  | { readonly status: "unreachable"; readonly message: string; readonly errorOutput?: string };
 
 export interface ServerCallInput {
   /** A POSIX `sh` script; its arguments arrive as `$1`, `$2`, …. */
   readonly script: string;
+  /** Rechecks SSH identity and login without a cached control connection. Setup diagnostics only. */
+  readonly freshConnection?: true;
   readonly args?: ReadonlyArray<string>;
   readonly stdin?: Buffer;
   /**
@@ -178,7 +180,7 @@ export function serverSshArguments(
 ): ReadonlyArray<string> {
   const control =
     options.controlSocket === undefined
-      ? ["ControlMaster=no", "ControlPath=none"]
+      ? ["ControlMaster=no", "ControlPath=none", "ControlPersist=no"]
       : [
           "ControlMaster=auto",
           `ControlPath=${options.controlSocket}`,
@@ -263,9 +265,9 @@ export class ServerConnection {
         message: "This call is too long to send to the server. Nothing ran.",
       });
     }
-    let controlSocket: string;
+    let controlSocket: string | undefined;
     try {
-      controlSocket = this.#controlSocket(server);
+      if (input.freshConnection !== true) controlSocket = this.#controlSocket(server);
     } catch {
       return Promise.resolve({
         status: "unreachable",
@@ -283,7 +285,8 @@ export class ServerConnection {
         return;
       }
       const child = spawn(this.#options.sshPath ?? "ssh", [...args], {
-        env: this.#environment(),
+        env: { ...this.#environment(), ...(input.freshConnection === true ? { LC_ALL: "C" } : {}) },
+        detached: input.freshConnection === true,
         stdio: ["pipe", "pipe", "pipe"],
       });
       const chunks: Buffer[] = [];
@@ -291,11 +294,27 @@ export class ServerConnection {
       let truncated = false;
       let reached = false;
       let errorText = "";
+      let errorReceived = 0;
       let ended: "timed-out" | "cancelled" | undefined;
+      let forceStop: ReturnType<typeof setTimeout> | undefined;
+      const killOwned = (signal: NodeJS.Signals) => {
+        if (
+          input.freshConnection === true &&
+          process.platform !== "win32" &&
+          child.pid !== undefined
+        ) {
+          try {
+            process.kill(-child.pid, signal);
+          } catch {
+            /* Already exited. */
+          }
+        } else child.kill(signal);
+      };
       const stop = (why: "timed-out" | "cancelled") => {
         if (ended !== undefined) return;
         ended = why;
-        child.kill("SIGTERM");
+        killOwned("SIGTERM");
+        if (input.freshConnection === true) forceStop = setTimeout(() => killOwned("SIGKILL"), 250);
       };
       const timer = setTimeout(() => stop("timed-out"), input.timeoutMs);
       const onAbort = () => stop("cancelled");
@@ -320,13 +339,17 @@ export class ServerConnection {
         received += data.length;
       });
       child.stderr.on("data", (chunk: Buffer) => {
-        if (errorText.length < 4_096) errorText += chunk.toString("utf8");
+        const part = chunk.subarray(0, Math.max(0, 4_096 - errorReceived));
+        errorReceived += part.length;
+        errorText += part.toString("utf8");
       });
       child.stdin.on("error", () => undefined);
       if (input.stdin !== undefined) child.stdin.end(input.stdin);
       else if (!terminal) child.stdin.end();
       const finish = (result: ServerCall) => {
         clearTimeout(timer);
+        clearTimeout(forceStop);
+        if (input.freshConnection === true) killOwned("SIGKILL");
         input.signal?.removeEventListener("abort", onAbort);
         resolve(result);
       };
@@ -348,6 +371,7 @@ export class ServerConnection {
           finish({
             status: "unreachable",
             message: message ?? "The connection closed before the server answered.",
+            errorOutput: errorText.slice(0, 4_096),
           });
           return;
         }

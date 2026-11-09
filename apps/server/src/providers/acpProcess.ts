@@ -1117,10 +1117,13 @@ function acquireConnection(
     child.once("close", onEarlyExit);
     const initialize = () =>
       acp.initialize(
-        clientCapabilities ?? {
-          readTextFile: false,
-          writeTextFile: false,
-          terminal: false,
+        {
+          ...(clientCapabilities ?? { readTextFile: false, writeTextFile: false, terminal: false }),
+          ...(profile.kind === "mistral-vibe" &&
+          version === "3.0.3" &&
+          profile.elicitationVersions?.includes(version) === true
+            ? { elicitationForm: true }
+            : {}),
         },
         profile.authentication.kind === "delegated-browser"
           ? { "browser-auth-delegated": true, "terminal-auth": false }

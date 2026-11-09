@@ -16,6 +16,7 @@ import {
   OWNER_SESSION_HEADER,
   OWNER_UNLOCK_HEADER,
   ProviderInstance,
+  decodeOwnerPosture,
   type OwnerPosture,
   type OwnerPostureChangeRequest,
   type OwnerPostureSubject,
@@ -317,17 +318,18 @@ export class TestPostureHost implements OwnerPostureHost {
     if (
       request.subject.kind === "code-thread" &&
       request.posture === "full-access" &&
+      "persistence" in request &&
       request.persistence === "project-default"
     ) {
       return { status: "refused", kind: "project-default-not-enabled" };
     }
     this.changes.push(request);
-    const next: OwnerPosture = {
+    const next = decodeOwnerPosture({
       subject: request.subject,
       version: "a".repeat(64),
       posture: request.posture,
-      persistence: request.persistence,
-    };
+      ...("persistence" in request ? { persistence: request.persistence } : {}),
+    });
     this.postures.set(key, next);
     return { status: "changed", posture: next };
   }

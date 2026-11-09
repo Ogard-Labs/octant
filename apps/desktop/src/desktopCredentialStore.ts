@@ -4,6 +4,7 @@ import {
   type CredentialPurgeStore,
   type CredentialStore,
   type SecretServiceNamespace,
+  type WindowsCredentialNamespace,
 } from "@octant/host-runtime";
 import {
   makeKeychainCredentialPurgeStore,
@@ -54,13 +55,13 @@ export type DesktopCredentialBackend =
       readonly kind: "credential-manager";
       readonly store: CredentialStore;
       readonly purgeStore?: undefined;
-      readonly replicaDeviceKeys?: undefined;
-      readonly replicaStoreCredentials?: undefined;
-      readonly canvasPublicShareSecrets?: undefined;
-      readonly mcpServerCredentials?: undefined;
-      readonly desktopProviderCredentials?: undefined;
-      readonly pushPlatformCredentials?: undefined;
-      readonly sshKeys?: undefined;
+      readonly replicaDeviceKeys: CredentialStore;
+      readonly replicaStoreCredentials: CredentialStore;
+      readonly canvasPublicShareSecrets: CredentialStore;
+      readonly mcpServerCredentials: CredentialStore;
+      readonly desktopProviderCredentials: CredentialStore;
+      readonly pushPlatformCredentials: CredentialStore;
+      readonly sshKeys: CredentialStore;
     }
   | {
       readonly kind: "unavailable";
@@ -149,13 +150,24 @@ export async function resolveDesktopCredentialBackend(options: {
     };
   }
   if (options.platform === "win32" && options.windowsCredentialHelperPath !== undefined) {
-    return {
-      kind: "credential-manager",
-      store: makeWindowsCredentialStore({
-        helperPath: options.windowsCredentialHelperPath,
+    const helperPath = options.windowsCredentialHelperPath;
+    const store = (namespace: WindowsCredentialNamespace) =>
+      makeWindowsCredentialStore({
+        helperPath,
         storeScope: options.storeScope,
         serviceFamily: options.serviceFamily ?? "octant",
-      }),
+        namespace,
+      });
+    return {
+      kind: "credential-manager",
+      store: store("provider"),
+      replicaDeviceKeys: store("replica-device-key"),
+      replicaStoreCredentials: store("replica-store-credential"),
+      canvasPublicShareSecrets: store("canvas-public-share-secret"),
+      mcpServerCredentials: store("mcp-server-credential"),
+      desktopProviderCredentials: store("desktop-provider-credential"),
+      pushPlatformCredentials: store("push-platform-credential"),
+      sshKeys: store("ssh-key"),
     };
   }
   return { kind: "unavailable" };

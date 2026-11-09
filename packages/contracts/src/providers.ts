@@ -1,4 +1,5 @@
 import { Schema } from "effect";
+import { Questionnaire } from "./questionnaire";
 import { AggregateVersion, CorrelationId, UtcTimestamp } from "./events";
 import {
   ExtensionComponentId,
@@ -2987,6 +2988,7 @@ export const ProviderRuntimeEvent = Schema.Union(
   Schema.Struct({
     ...ProviderRuntimeEventFields,
     kind: Schema.Literal("user-input-request"),
+    questionnaire: Schema.optional(Questionnaire),
     requestId: Schema.NonEmptyTrimmedString,
     prompt: Schema.NonEmptyTrimmedString,
     options: Schema.Array(ProviderQuestionOption),

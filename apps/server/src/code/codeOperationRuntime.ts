@@ -1,4 +1,5 @@
 import { withHandoverSummary } from "../agentRun/conversationHandoff";
+import { validateQuestionnaireAnswer } from "@octant/domain";
 import { MAX_PROVIDER_ATTACHMENTS } from "@octant/contracts";
 import { THREAD_MOVING_REFUSAL } from "../hub/threadMoveHolds";
 import type {
@@ -2548,6 +2549,7 @@ interface ActiveTurn {
   readonly browserGrantKeys: Set<string>;
   readonly browserProfileContexts: Set<string>;
   readonly questions: Set<string>;
+  readonly providerQuestionnaires: Map<string, Questionnaire>;
   /** Questions the native harness asked on this turn; answered by the host, not the provider. */
   readonly harnessQuestions: Set<string>;
   connection?: ProviderConnection;
@@ -3438,6 +3440,7 @@ class RuntimeTurnController implements CodeOperationTurnPort {
       browserProfileContexts: new Set(),
       questions: new Set(),
       harnessQuestions: new Set(),
+      providerQuestionnaires: new Map(),
       cursor: 0,
       deniedApprovals: 0,
       state: "running",
@@ -3808,7 +3811,21 @@ class RuntimeTurnController implements CodeOperationTurnPort {
       return answeredTurnState(active.state);
     }
     if (active.connection === undefined) return turnState("failed");
+    const questionnaire = active.providerQuestionnaires.get(input.requestId);
+    if (
+      questionnaire !== undefined &&
+      validateQuestionnaireAnswer(questionnaire, input.response).status === "invalid"
+    ) {
+      return {
+        state: active.state,
+        failure: {
+          category: "invalid",
+          message: "The questionnaire answer is incomplete or contains invalid choices.",
+        },
+      };
+    }
     active.questions.delete(input.requestId);
+    active.providerQuestionnaires.delete(input.requestId);
     await Effect.runPromise(
       active.connection.answerUserInput({
         sessionId: active.sessionId as never,
@@ -5905,6 +5922,8 @@ function normalizedOperationEvent(
   }
   if (event.category === "question" && event.requestId !== undefined) {
     active.questions.add(event.requestId);
+    if (event.questionnaire !== undefined)
+      active.providerQuestionnaires.set(event.requestId, event.questionnaire);
     return {
       kind: "input-requested",
       requestId: event.requestId,
@@ -5915,6 +5934,7 @@ function normalizedOperationEvent(
           "",
         ) ?? "Provider input requested.",
       options: boundProviderInputOptions(event.options ?? []),
+      ...(event.questionnaire === undefined ? {} : { questionnaire: event.questionnaire }),
     };
   }
   if (

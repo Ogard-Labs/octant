@@ -304,7 +304,7 @@ export function CanvasWorkspaceTab(props: CanvasWorkspaceTabProps): ReactNode {
 
   const handleRevise = useCallback(
     async (request: CanvasReviseRequest) => {
-      if (props.client === undefined) return false;
+      if (props.client?.revise === undefined) return false;
       const result = await props.client.revise(request);
       if (result.kind !== "accepted") return false;
       await loadCanvas();
@@ -729,8 +729,9 @@ export function CanvasWorkspaceTab(props: CanvasWorkspaceTabProps): ReactNode {
   // A Share dialog opened while a picked older version was still loading would
   // otherwise stay open on that version once it arrived.
   useEffect(() => {
-    if (dialog === "share" && versionSettled && !sharingHead) setDialog(undefined);
-  }, [dialog, versionSettled, sharingHead]);
+    if (dialog === "share" && shares !== undefined && versionSettled && !sharingHead)
+      setDialog(undefined);
+  }, [dialog, shares, versionSettled, sharingHead]);
 
   if (definition === undefined) {
     return (
@@ -815,7 +816,7 @@ export function CanvasWorkspaceTab(props: CanvasWorkspaceTabProps): ReactNode {
     }
   }
   const overflowItems = [
-    ...(reviseBase !== null && reviseBase.mode === "chat"
+    ...(props.client?.revise !== undefined && reviseBase !== null && reviseBase.mode === "chat"
       ? [
           {
             label: "Refine…",
@@ -837,12 +838,13 @@ export function CanvasWorkspaceTab(props: CanvasWorkspaceTabProps): ReactNode {
           },
         ]
       : []),
-    ...(shares !== undefined && selectedVersionId !== undefined
+    ...((shares !== undefined || props.client?.publicShares !== undefined) &&
+    selectedVersionId !== undefined
       ? [
           {
             label: "Share…",
             value: "share",
-            ...(sharingHead
+            ...(shares === undefined || sharingHead
               ? {}
               : {
                   disabled: true,
@@ -1179,16 +1181,21 @@ export function CanvasWorkspaceTab(props: CanvasWorkspaceTabProps): ReactNode {
               : { resolveDesignPage: props.client.sharedDesignPageUrl })}
           />
         ) : null}
-        {props.client?.publicShares !== undefined &&
-        props.client.revokePublicShare !== undefined ? (
+        {props.client?.publicShares !== undefined ? (
           <CanvasPublicLinksSection
             canvasId={props.tab.canvasId}
             onList={props.client.publicShares}
-            onRevoke={props.client.revokePublicShare}
-            onUpdate={() => {
-              setExportTargetId("public-link");
-              setDialog("export");
-            }}
+            {...(props.client.revokePublicShare === undefined
+              ? {}
+              : { onRevoke: props.client.revokePublicShare })}
+            {...(props.client.prepareExport === undefined || props.client.decideExport === undefined
+              ? {}
+              : {
+                  onUpdate: () => {
+                    setExportTargetId("public-link");
+                    setDialog("export");
+                  },
+                })}
             revision={publicLinksRevision}
           />
         ) : null}
