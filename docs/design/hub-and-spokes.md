@@ -1536,7 +1536,12 @@ renamed into the move's set-aside folder beside the folder,
 file in it named by its position in the move's file list, which the source
 keeps), so a write to its path afterwards makes a new file that stays; only
 the moved file is then compared with the size and digest that travelled and
-deleted when it matches. One that no longer matches is put back, or kept
+deleted when it matches. Only the very file that was packed is set aside:
+the source keeps each file's device and inode from packing (never sent), and
+a file found at the path with another identity (one reached through a folder
+swapped for a link, or one the person replaced since) stays where it is, and
+something swapped in just before the rename goes straight back through the
+same path. One that no longer matches is put back, or kept
 beside its path as `<file>-kept` when the path has been taken again. Folders
 that travelled (empty ones the move carried, and those holding a carried
 file) are then removed bottom-up one at a time with a plain remove that fails

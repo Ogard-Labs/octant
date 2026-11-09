@@ -43,6 +43,7 @@ import {
   MovedWorkFolder,
   movedAsideFolder,
   settleMovedWorkFolder,
+  type PackedFileIdentity,
   type WorkThreadFolder,
 } from "./workThreadMoveFolder";
 
@@ -75,6 +76,10 @@ const decodeWorkThreadId = Schema.decodeUnknownSync(WorkThreadId);
 const WorkFolderOnSource = Schema.Struct({
   folder: Schema.NonEmptyString,
   index: MovedWorkFolder,
+  /** Each travelled file's device and inode when packed, in `index.files` order. */
+  identities: Schema.Array(
+    Schema.Struct({ dev: Schema.Number, ino: Schema.Number }).annotations(strict),
+  ),
   /** The erase's clean-up has started, setting files aside in this folder. */
   settling: Schema.optional(Schema.Struct({ setAside: Schema.NonEmptyString }).annotations(strict)),
   settled: Schema.optional(
@@ -237,6 +242,7 @@ export function createWorkThreadMoveHost(options: WorkThreadMoveHostOptions): {
         settled = await settleMovedWorkFolder({
           folder: onSource.folder,
           index: onSource.index,
+          identities: onSource.identities,
           moveId,
         });
       } else {
@@ -303,18 +309,19 @@ export function createWorkThreadMoveHost(options: WorkThreadMoveHostOptions): {
       const bulk = await packThreadParts(thread, folder, options.parts.source);
       const own = options.ownFolder(id);
       let files: MovedWorkFolder | undefined;
+      let identities: ReadonlyArray<PackedFileIdentity> = [];
       const filesParts: PackedPart[] = [];
       if (own.status === "own") {
         const partPath = join(folder, `${WORK_FILES_PART}.part`);
         try {
-          files = (
-            await captureWorkFolderForMove({
-              folder: own.folder,
-              workingDirectory: own.workingDirectory,
-              partId: WORK_FILES_PART,
-              partPath,
-            })
-          ).index;
+          const captured = await captureWorkFolderForMove({
+            folder: own.folder,
+            workingDirectory: own.workingDirectory,
+            partId: WORK_FILES_PART,
+            partPath,
+          });
+          files = captured.index;
+          identities = captured.identities;
         } catch {
           return { status: "refused", reason: "transfer-failed" };
         }
@@ -324,7 +331,9 @@ export function createWorkThreadMoveHost(options: WorkThreadMoveHostOptions): {
         // Kept here before anything is sent, so the erase always finds it.
         await writeNoteAtomically(
           join(folder, WORK_FOLDER_ON_SOURCE),
-          JSON.stringify(encodeWorkFolderOnSource({ folder: own.folder, index: files })),
+          JSON.stringify(
+            encodeWorkFolderOnSource({ folder: own.folder, index: files, identities }),
+          ),
         );
       }
       const moved: MovedWorkThread = {

@@ -420,8 +420,19 @@ export async function measureWorkFolderForMove(folder: string): Promise<number> 
   return walked.files.reduce((total, file) => total + file.bytes, 0);
 }
 
+/** Which file on the source a moved file was: its device and inode when it was packed. */
+export interface PackedFileIdentity {
+  readonly dev: number;
+  readonly ino: number;
+}
+
 export interface CapturedWorkFolder {
   readonly index: MovedWorkFolder;
+  /**
+   * The identity of each file in `index.files`, in the same order. Kept on
+   * the source and never sent, so its clean-up touches only these files.
+   */
+  readonly identities: ReadonlyArray<PackedFileIdentity>;
   /** Paths that stay on this computer, relative to the folder. */
   readonly left: ReadonlyArray<string>;
 }
@@ -448,6 +459,7 @@ export async function captureWorkFolderForMove(input: {
 }): Promise<CapturedWorkFolder> {
   const walked = await walkWorkFolder(input.folder, input.beforeListing);
   const files: Array<MovedWorkFolder["files"][number]> = [];
+  const identities: PackedFileIdentity[] = [];
   const left = [...walked.left];
   const workingDirectory = Schema.decodeSync(MovedWorkPath)(input.workingDirectory);
   let part: FileHandle | undefined;
@@ -496,6 +508,7 @@ export async function captureWorkFolderForMove(input: {
         await source.handle.close();
       }
       offset += bytes;
+      identities.push({ dev: file.dev, ino: file.ino });
       files.push({
         path: Schema.decodeSync(MovedWorkPath)(file.path),
         bytes,
@@ -508,6 +521,7 @@ export async function captureWorkFolderForMove(input: {
   }
   if (part !== undefined && files.length === 0) await rm(input.partPath, { force: true });
   return {
+    identities,
     index: {
       workingDirectory,
       ...(files.length === 0 ? {} : { partId: input.partId }),
@@ -823,6 +837,8 @@ export function movedAsideFolder(folder: string, moveId: string): string {
 export async function settleMovedWorkFolder(input: {
   readonly folder: string;
   readonly index: MovedWorkFolder;
+  /** Each travelled file's identity when it was packed, in `index.files` order. */
+  readonly identities: ReadonlyArray<PackedFileIdentity>;
   readonly moveId: string;
   /**
    * Called after a file is moved aside and before it is compared: the moment
@@ -830,6 +846,12 @@ export async function settleMovedWorkFolder(input: {
    * Tests use it to write there, or to throw.
    */
   readonly afterMovedAside?: (path: string) => Promise<void>;
+  /**
+   * Called after the folders on a file's way are checked and before the file
+   * is looked at: the moment an outside writer could swap one for a link.
+   * Tests use it to do so.
+   */
+  readonly beforeSettingAside?: (path: string) => Promise<void>;
 }): Promise<SettledWorkFolder> {
   const folder = input.folder;
   const trash = movedAsideFolder(folder, input.moveId);
@@ -880,8 +902,14 @@ export async function settleMovedWorkFolder(input: {
       const aside = join(trash, String(position));
       // A folder on the way that became a link would lead outside the folder.
       if (!(await plainFoldersOnTheWay(folder, path, { create: false }))) continue;
+      await input.beforeSettingAside?.(path);
       const entry = await lstat(original).catch(() => undefined);
       if (entry === undefined || !entry.isFile()) continue;
+      // Only the very file that was packed is set aside. A folder on the way
+      // swapped for a link would otherwise reach a file outside the folder,
+      // and a file replaced since is the person's newer one; both stay.
+      const packed = input.identities[position];
+      if (packed === undefined || entry.dev !== packed.dev || entry.ino !== packed.ino) continue;
       // A name still taken in the set-aside folder is never renamed over.
       if (
         await lstat(aside).then(
@@ -893,6 +921,14 @@ export async function settleMovedWorkFolder(input: {
       try {
         await rename(original, aside);
       } catch {
+        continue;
+      }
+      // Swapped in between the check and the rename: what was moved is not
+      // the packed file, so it goes straight back through the same path,
+      // which puts it where it came from.
+      const moved = await lstat(aside).catch(() => undefined);
+      if (moved !== undefined && (moved.dev !== packed.dev || moved.ino !== packed.ino)) {
+        await placeWithoutOverwriting(aside, original);
         continue;
       }
       await input.afterMovedAside?.(path);

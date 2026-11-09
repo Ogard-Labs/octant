@@ -7,6 +7,7 @@ import {
   readFileSync,
   realpathSync,
   rmSync,
+  statSync,
   symlinkSync,
   writeFileSync,
 } from "node:fs";
@@ -24,6 +25,7 @@ import {
   settleMovedWorkFolder,
   workThreadOwnFolder,
   type MovedWorkFolder,
+  type PackedFileIdentity,
 } from "./workThreadMoveFolder";
 
 const main = { kind: "main", root: "/Users/person/Offsite" } as const;
@@ -34,6 +36,10 @@ const parents: string[] = [];
 afterEach(() => {
   for (const parent of parents.splice(0)) rmSync(parent, { recursive: true, force: true });
 });
+
+/** Each travelled folder's file identities as packed, the way the source keeps them. */
+const packedIdentities = new Map<string, ReadonlyArray<PackedFileIdentity>>();
+const identitiesOf = (folder: string) => packedIdentities.get(folder) ?? [];
 
 /** A source folder holding `files`, with the index a move that carried them all would have kept. */
 function travelledFolder(files: Readonly<Record<string, string>>) {
@@ -51,6 +57,13 @@ function travelledFolder(files: Readonly<Record<string, string>>) {
       mode: 0o644,
     };
   });
+  packedIdentities.set(
+    folder,
+    entries.map((entry) => {
+      const found = statSync(join(folder, entry.path));
+      return { dev: found.dev, ino: found.ino };
+    }),
+  );
   const index: MovedWorkFolder = {
     workingDirectory: report,
     partId: "work-files",
@@ -200,7 +213,14 @@ describe("clearing a Work folder whose files moved", () => {
       "agenda.md": "# Offsite\n",
       "notes/day-one/rooms.txt": "Room A",
     });
-    expect(await settleMovedWorkFolder({ folder, index, moveId: MOVE })).toEqual({
+    expect(
+      await settleMovedWorkFolder({
+        folder,
+        index,
+        identities: identitiesOf(folder),
+        moveId: MOVE,
+      }),
+    ).toEqual({
       status: "removed",
     });
     expect(existsSync(folder)).toBe(false);
@@ -214,6 +234,7 @@ describe("clearing a Work folder whose files moved", () => {
     });
     const outcome = await settleMovedWorkFolder({
       folder,
+      identities: identitiesOf(folder),
       index,
       moveId: MOVE,
       afterMovedAside: async (path) => {
@@ -233,6 +254,7 @@ describe("clearing a Work folder whose files moved", () => {
     });
     const outcome = await settleMovedWorkFolder({
       folder,
+      identities: identitiesOf(folder),
       index,
       moveId: MOVE,
       afterMovedAside: async (path) => {
@@ -248,7 +270,14 @@ describe("clearing a Work folder whose files moved", () => {
     const { folder, index } = travelledFolder({ "agenda.md": "# Offsite\n" });
     mkdirSync(join(folder, "drafts"));
 
-    expect(await settleMovedWorkFolder({ folder, index, moveId: MOVE })).toEqual({
+    expect(
+      await settleMovedWorkFolder({
+        folder,
+        index,
+        identities: identitiesOf(folder),
+        moveId: MOVE,
+      }),
+    ).toEqual({
       status: "kept",
       keptFiles: ["drafts"],
     });
@@ -256,11 +285,37 @@ describe("clearing a Work folder whose files moved", () => {
     expect(existsSync(join(folder, "agenda.md"))).toBe(false);
   });
 
+  it("never sets aside or deletes a file outside the folder reached through a swapped folder", async () => {
+    const { parent, folder, index } = travelledFolder({
+      "agenda.md": "# Offsite\n",
+      "notes/rooms.txt": "Room A",
+    });
+    // An unrelated document outside, with the very bytes that travelled.
+    mkdirSync(join(parent, "outside"));
+    writeFileSync(join(parent, "outside", "rooms.txt"), "Room A");
+
+    const outcome = await settleMovedWorkFolder({
+      folder,
+      identities: identitiesOf(folder),
+      index,
+      moveId: MOVE,
+      beforeSettingAside: async (path) => {
+        if (path !== "notes/rooms.txt") return;
+        rmSync(join(folder, "notes"), { recursive: true });
+        symlinkSync(join(parent, "outside"), join(folder, "notes"));
+      },
+    });
+
+    expect(readFileSync(join(parent, "outside", "rooms.txt"), "utf8")).toBe("Room A");
+    expect(outcome.status).toBe("kept");
+  });
+
   it("puts a changed file back, beside its path when that path was taken again", async () => {
     const { folder, index } = travelledFolder({ "agenda.md": "# Offsite\n" });
     writeFileSync(join(folder, "agenda.md"), "# Changed before the clean-up\n");
     const outcome = await settleMovedWorkFolder({
       folder,
+      identities: identitiesOf(folder),
       index,
       moveId: MOVE,
       afterMovedAside: async () =>
@@ -282,6 +337,7 @@ describe("clearing a Work folder whose files moved", () => {
     await expect(
       settleMovedWorkFolder({
         folder,
+        identities: identitiesOf(folder),
         index,
         moveId: MOVE,
         afterMovedAside: async (path) => {
@@ -300,7 +356,14 @@ describe("clearing a Work folder whose files moved", () => {
     await stoppedAfterSettingAside(folder, index, "agenda.md");
     expect(existsSync(join(folder, "agenda.md"))).toBe(false);
 
-    expect(await settleMovedWorkFolder({ folder, index, moveId: MOVE })).toEqual({
+    expect(
+      await settleMovedWorkFolder({
+        folder,
+        index,
+        identities: identitiesOf(folder),
+        moveId: MOVE,
+      }),
+    ).toEqual({
       status: "kept",
       keptFiles: ["agenda.md"],
     });
@@ -317,7 +380,14 @@ describe("clearing a Work folder whose files moved", () => {
     await stoppedAfterSettingAside(folder, index, "agenda.md");
     writeFileSync(join(folder, "agenda.md"), "# Written before the retry\n");
 
-    expect(await settleMovedWorkFolder({ folder, index, moveId: MOVE })).toEqual({
+    expect(
+      await settleMovedWorkFolder({
+        folder,
+        index,
+        identities: identitiesOf(folder),
+        moveId: MOVE,
+      }),
+    ).toEqual({
       status: "kept",
       keptFiles: ["agenda.md", "agenda.md-kept"],
     });
@@ -333,7 +403,14 @@ describe("clearing a Work folder whose files moved", () => {
     });
     await stoppedAfterSettingAside(folder, index, "agenda.md");
 
-    expect(await settleMovedWorkFolder({ folder, index, moveId: MOVE })).toEqual({
+    expect(
+      await settleMovedWorkFolder({
+        folder,
+        index,
+        identities: identitiesOf(folder),
+        moveId: MOVE,
+      }),
+    ).toEqual({
       status: "removed",
     });
     expect(readdirSync(parent)).toEqual([]);
