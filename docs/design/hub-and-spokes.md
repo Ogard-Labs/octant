@@ -1039,7 +1039,10 @@ and questions.
   - A part whose bytes cannot be read on the source, or no longer match the
     digest a turn admitted, stays behind. The move goes on, because the person
     is about to shut the computer down, and the "Moved to" record names each
-    part that stayed. The erase removes it with the thread. A part the
+    part that stayed, up to the first 1,000 (each name cut to 512
+    characters), and counts them all. The source bounds the list when it
+    packs, before anything is erased, so the record it writes after the erase
+    always fits. The erase removes the part with the thread. A part the
     destination cannot record refuses the arrival with `transfer-failed`, so
     the source keeps the thread.
   - The Secret guard reads the checkout, not these parts. Rationale: they are
