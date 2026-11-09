@@ -14,6 +14,7 @@ import type { HubTransport } from "./pinnedHubTransport";
 import type { MemberTarget } from "./spokeLinkService";
 import { createThreadMoveStateStore, heldThreadsOf } from "./threadMoveStateStore";
 import {
+  THREAD_MOVE_ASSUMED_BYTES_PER_SECOND,
   THREAD_MOVE_CHUNK_BYTES,
   THREAD_MOVE_ROUTES,
   THREAD_MOVE_TICKET_LIFETIME_MS,
@@ -59,6 +60,8 @@ interface Harness {
     dropNextAnswerTo: string | undefined;
     dropChunkAfter: number | undefined;
     stopAfterOpening: boolean;
+    /** How long each chunk takes to answer, on the shared clock. */
+    chunkMs: number;
   };
   readonly clock: { now: number };
   ticket: () => string;
@@ -86,6 +89,7 @@ function harness(
     dropNextAnswerTo: undefined,
     dropChunkAfter: undefined,
     stopAfterOpening: false,
+    chunkMs: 0,
   };
   const clock = { now: Date.parse("2026-11-08T12:00:00Z") };
   let sequence = 0;
@@ -129,6 +133,7 @@ function harness(
     if (!network.up) throw new Error("unreachable");
     if (path === THREAD_MOVE_ROUTES.chunk) {
       chunkRequests += 1;
+      clock.now += network.chunkMs;
       if (network.dropChunkAfter !== undefined && chunkRequests > network.dropChunkAfter) {
         network.up = false;
         throw new Error("cut");
@@ -165,6 +170,7 @@ function harness(
       freeze: (thread) => frozen.add(thread.threadId),
       unfreeze: (thread) => frozen.delete(thread.threadId),
       isFrozen: (thread) => frozen.has(thread.threadId),
+      measure: async () => ({ status: "unknown" }),
       pack: async (_thread, folder) => {
         const path = join(folder, "bundle.part");
         writeFileSync(path, Buffer.alloc(bytes, 7));
@@ -201,6 +207,7 @@ function harness(
       freeze: () => {},
       unfreeze: () => {},
       isFrozen: () => false,
+      measure: async () => ({ status: "unknown" }),
       pack: async () => ({ status: "refused", reason: "refused" }),
       erase: async () => ({ worktreeKept: false }),
     },
@@ -268,6 +275,30 @@ const start = (h: Harness, ticketId = h.ticket()) =>
     ticketId,
     principal: { kind: "local-window" },
   });
+
+describe("estimating how long a move takes", () => {
+  it("assumes the stated default for a member no full chunk has been timed to", async () => {
+    const h = harness({ bytes: 1_000 });
+    h.network.chunkMs = 5_000;
+    await start(h);
+    // One small chunk's time is mostly the round trip, so it sets no rate.
+    expect(h.laptop.rateTo(miniId)).toEqual({
+      basis: "assumed",
+      bytesPerSecond: THREAD_MOVE_ASSUMED_BYTES_PER_SECOND,
+    });
+  });
+
+  it("estimates from the rate earlier full chunks to that member reached", async () => {
+    const h = harness({ bytes: THREAD_MOVE_CHUNK_BYTES * 2 + 17 });
+    h.network.chunkMs = 250;
+    await start(h);
+    expect(h.laptop.rateTo(miniId)).toEqual({
+      basis: "measured",
+      bytesPerSecond: THREAD_MOVE_CHUNK_BYTES * 4,
+    });
+    expect(h.laptop.rateTo(laptopId).basis).toBe("assumed");
+  });
+});
 
 describe("moving a thread", () => {
   it("freezes, transfers, commits on the destination, and erases the source once committed", async () => {

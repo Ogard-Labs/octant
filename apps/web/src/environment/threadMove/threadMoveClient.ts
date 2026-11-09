@@ -7,6 +7,7 @@ import {
   decodeThreadMoveChallengeOutcome,
   decodeThreadMoveDestinations,
   decodeThreadMovePhoneAskOutcome,
+  decodeThreadMoveSizes,
   decodeThreadMoveStartOutcome,
   decodeThreadMoveThreadStatus,
   type HandoverContinueOutcome,
@@ -21,6 +22,7 @@ import {
   type ThreadMoveDestinations,
   type ThreadMovePhoneAskOutcome,
   type ThreadMovePhoneAskRequest,
+  type ThreadMoveSizes,
   type ThreadMoveStartOutcome,
   type ThreadMoveStartRequest,
   type ThreadMoveThreadStatus,
@@ -44,6 +46,11 @@ export interface ThreadMoveClient {
   readonly takeBack: (moveId: string) => Promise<void>;
   readonly activate: (moveId: string) => Promise<boolean>;
   readonly dismiss: (thread: MovedThreadReference) => Promise<void>;
+  /** What moving the thread to a member would send, and how fast; read-only. */
+  readonly sizes: (
+    destinationMemberId: string,
+    threads: ReadonlyArray<MovedThreadReference>,
+  ) => Promise<ThreadMoveSizes>;
   /** Prepare to shut down: every thread here, and one unlocked batch per destination. */
   readonly shutdownListing: () => Promise<ShutdownListing>;
   readonly shutdownChallenge: (
@@ -54,6 +61,11 @@ export interface ThreadMoveClient {
   readonly shutdownAskPhone: (
     request: ShutdownPhoneAskRequest,
   ) => Promise<ThreadMovePhoneAskOutcome>;
+  /** The same sizes for any of this host's threads, as Prepare to shut down lists them. */
+  readonly shutdownSizes: (
+    destinationMemberId: string,
+    threads: ReadonlyArray<MovedThreadReference>,
+  ) => Promise<ThreadMoveSizes>;
   /** A Code thread that cannot move: what a handover would do, doing it, and taking it back. */
   readonly handoverPreview: (thread: MovedThreadReference) => Promise<HandoverOutcome>;
   readonly handOver: (
@@ -124,6 +136,8 @@ export function threadMoveClientOf(hub: HubAdministrationBridge): ThreadMoveClie
     dismiss: async (thread) => {
       await call("thread-move-dismiss", { thread });
     },
+    sizes: async (destinationMemberId, threads) =>
+      decodeThreadMoveSizes(await call("thread-move-sizes", { destinationMemberId, threads })),
     shutdownListing: async () => decodeShutdownListing(await call("shutdown-listing", {})),
     shutdownChallenge: async (destinationMemberId, threads) =>
       decodeThreadMoveChallengeOutcome(
@@ -133,6 +147,8 @@ export function threadMoveClientOf(hub: HubAdministrationBridge): ThreadMoveClie
       decodeShutdownStartOutcome(await call("shutdown-start", request)),
     shutdownAskPhone: async (request) =>
       decodeThreadMovePhoneAskOutcome(await call("shutdown-phone-ask", request)),
+    shutdownSizes: async (destinationMemberId, threads) =>
+      decodeThreadMoveSizes(await call("shutdown-sizes", { destinationMemberId, threads })),
     handoverPreview: async (thread) =>
       decodeHandoverOutcome(await call("handover-preview", { thread })),
     handOver: async (thread, destinationMemberId, choices) =>
