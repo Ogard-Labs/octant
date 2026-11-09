@@ -100,7 +100,7 @@ export type BrowserDependencies = Pick<ServerStart, "options" | "persistence"> &
   > &
   Pick<AgentRunsWiring, "externalContentIngestionStore" | "contributeChildTools"> &
   Pick<HarnessStateWiring, "agentRunInteractions"> &
-  Pick<WorkspaceWiring, "projectService" | "shellService"> &
+  Pick<WorkspaceWiring, "shellService"> &
   Pick<ProvidersWiring, "localPluginImportReceipts" | "providerDataDirectory"> &
   Pick<
     FoundationsWiring,
