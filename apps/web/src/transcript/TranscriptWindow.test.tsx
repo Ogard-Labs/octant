@@ -150,7 +150,12 @@ describe("TranscriptWindow", () => {
     fireEvent.click(screen.getByRole("button", { name: "Load kept transcript" }));
     await waitFor(() => expect(scroller().scrollTop).toBe(640));
     fireEvent.scroll(scroller());
-    expect(screen.queryByRole("button", { name: "Row 99" })).not.toBeInTheDocument();
+    // The DOM offset can settle before the virtualizer commits its React range.
+    await waitFor(() => {
+      expect(scroller().scrollTop).toBe(640);
+      expect(screen.getByRole("button", { name: "Row 8" })).toBeVisible();
+      expect(screen.queryByRole("button", { name: "Row 99" })).not.toBeInTheDocument();
+    });
   });
 
   it("restores the previous scroll offset when the same thread mounts again", async () => {
