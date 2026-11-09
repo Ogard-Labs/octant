@@ -210,6 +210,14 @@ function previousOwner(
   }
 }
 
+/** Fixed refusal classes; none carries a path, PID, endpoint or secret. */
+export type WindowsHostOwnerAttachRefusal =
+  | "unsupported"
+  | "lookup"
+  | "owner-record"
+  | "unanswered"
+  | "status-mismatch";
+
 /**
  * Independent Windows owner prerequisite; ordinary platform startup still
  * refuses Windows. No path, PID, token or endpoint is accepted from a client.
@@ -219,7 +227,8 @@ export async function attachWindowsHostRuntimeOwner(
   options: Pick<AcquireWindowsHostOwnerOptions, "native" | "scope" | "hostId" | "wireVersion">,
 ): Promise<
   | { readonly status: "attached"; readonly attachment: HostRuntimeAttachment }
-  | { readonly status: "missing" | "refused" }
+  | { readonly status: "missing" }
+  | { readonly status: "refused"; readonly reason: WindowsHostOwnerAttachRefusal }
 > {
   const { native } = options;
   if (
@@ -228,31 +237,35 @@ export async function attachWindowsHostRuntimeOwner(
     native.apiVersion !== 1 ||
     native.frameBytes !== MAX_CONTROL_MESSAGE_BYTES
   )
-    return { status: "refused" };
+    return { status: "refused", reason: "unsupported" };
   try {
     const found = native.lookup(options.scope);
-    if (!record(found)) return { status: "refused" };
+    if (!record(found)) return { status: "refused", reason: "lookup" };
     if (found.status === "missing" || found.status === "dead") return { status: "missing" };
     if (
       found.status !== "existing" ||
       typeof found.endpoint !== "string" ||
       !ENDPOINT.test(found.endpoint)
     )
-      return { status: "refused" };
+      return { status: "refused", reason: "lookup" };
     const existing = previousOwner(found, options, found.endpoint);
-    if (existing === undefined) return { status: "refused" };
+    if (existing === undefined) return { status: "refused", reason: "owner-record" };
     const status = await requestControl(native, options.scope, existing.secret, {
       type: "status",
       principal: "local",
     });
+    // A verified owner record whose pipe gives no reply inside the bound is a
+    // busy or exiting host, not evidence of a foreign one. Callers may look
+    // again; every attempt repeats the full authentication.
+    if (status === undefined) return { status: "refused", reason: "unanswered" };
     if (
-      status?.ok !== true ||
+      status.ok !== true ||
       !record(status.owner) ||
       status.owner.instanceId !== existing.receipt.instanceId ||
       status.owner.pid !== existing.receipt.pid ||
       status.owner.processStart !== existing.receipt.processStart
     )
-      return { status: "refused" };
+      return { status: "refused", reason: "status-mismatch" };
     return {
       status: "attached",
       attachment: {
@@ -269,7 +282,7 @@ export async function attachWindowsHostRuntimeOwner(
       },
     };
   } catch {
-    return { status: "refused" };
+    return { status: "refused", reason: "lookup" };
   }
 }
 

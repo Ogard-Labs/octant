@@ -221,14 +221,47 @@ describe("native Windows owner admission", () => {
     for (const status of ["missing", "dead", "unknown"]) {
       vi.spyOn(fake.native, "lookup").mockReturnValue({ status });
       expect(await attachWindowsHostRuntimeOwner({ ...ownerOptions, native: fake.native })).toEqual(
-        {
-          status: status === "unknown" ? "refused" : "missing",
-        },
+        status === "unknown" ? { status: "refused", reason: "lookup" } : { status: "missing" },
       );
     }
     expect(prepare).not.toHaveBeenCalled();
     expect(claim).not.toHaveBeenCalled();
     expect(fake.native.close).not.toHaveBeenCalled();
+  });
+
+  it("distinguishes a verified owner whose pipe never answers from a forged owner record", async () => {
+    const fake = nativeFixture();
+    const nonce = Buffer.alloc(32, 7);
+    const owner = {
+      ...receipt,
+      hostId: ownerOptions.hostId,
+      endpoint,
+      pid: 4242,
+      processStart: "win32:0000000100000002",
+      nonceDigest: createHash("sha256").update(nonce.toString("base64url")).digest("hex"),
+    };
+    const lookup = (record: typeof owner) => ({
+      status: "existing",
+      endpoint,
+      pid: 4242,
+      processStart: "win32:0000000100000002",
+      receipt: Buffer.from(JSON.stringify(record)),
+      secret: Buffer.from(nonce),
+    });
+    vi.spyOn(fake.native, "lookup").mockImplementation(() => lookup(owner));
+    vi.spyOn(fake.native, "beginRequest").mockReturnValue({ status: "pending", id: 9 });
+    vi.spyOn(fake.native, "pollRequest").mockReturnValue({ status: "refused" });
+    expect(await attachWindowsHostRuntimeOwner({ ...ownerOptions, native: fake.native })).toEqual({
+      status: "refused",
+      reason: "unanswered",
+    });
+    vi.spyOn(fake.native, "lookup").mockImplementation(() =>
+      lookup({ ...owner, nonceDigest: "0".repeat(64) }),
+    );
+    expect(await attachWindowsHostRuntimeOwner({ ...ownerOptions, native: fake.native })).toEqual({
+      status: "refused",
+      reason: "owner-record",
+    });
   });
 
   it("records the native process birth and refuses unauthenticated control effects", async () => {

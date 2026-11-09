@@ -32,6 +32,18 @@ export function resolveWindowsDesktopHost(options: {
   return { native: options.native, paths: resolved.paths, startup };
 }
 
+const UNANSWERED_ATTACH_ATTEMPTS = 3;
+const UNANSWERED_ATTACH_PAUSE_MS = 250;
+
+function discoverWindowsDesktopOwner(host: WindowsDesktopHost) {
+  return attachWindowsHostRuntimeOwner({
+    native: host.native,
+    scope: host.paths.profileId,
+    hostId: host.paths.profileId,
+    wireVersion: "1",
+  });
+}
+
 /** Only positive native absence permits launch; unsafe discovery never becomes a second host. */
 export async function attachWindowsDesktopHost(
   host: WindowsDesktopHost,
@@ -45,15 +57,26 @@ export async function attachWindowsDesktopHost(
     startingChild.signalCode === null
   )
     return undefined;
-  const found = await attachWindowsHostRuntimeOwner({
-    native: host.native,
-    scope: host.paths.profileId,
-    hostId: host.paths.profileId,
-    wireVersion: "1",
-  });
+  let found = await discoverWindowsDesktopOwner(host);
+  // Package run 42539121763 refused a valid Stable owner right after it
+  // published readiness, while the identical code had attached in the run
+  // before. Only an unanswered control pipe is retried, a bounded number of
+  // times; each lookup re-authenticates the owner record and process birth.
+  for (
+    let attempt = 1;
+    attempt < UNANSWERED_ATTACH_ATTEMPTS &&
+    found.status === "refused" &&
+    found.reason === "unanswered";
+    attempt += 1
+  ) {
+    await new Promise<void>((resolve) => setTimeout(resolve, UNANSWERED_ATTACH_PAUSE_MS));
+    found = await discoverWindowsDesktopOwner(host);
+  }
   if (found.status === "missing") return undefined;
   if (found.status !== "attached")
-    throw new Error("Octant could not authenticate its existing native Windows host.");
+    throw new Error(
+      `Octant could not authenticate its existing native Windows host (${found.reason}).`,
+    );
   const owner = found.attachment.owner;
   const attached = await resolveStableHostAttachment({
     readReceipt: async () => {
@@ -83,12 +106,7 @@ export async function requestWindowsDesktopHostStop(
   host: WindowsDesktopHost,
   instanceId: string,
 ): Promise<boolean> {
-  const found = await attachWindowsHostRuntimeOwner({
-    native: host.native,
-    scope: host.paths.profileId,
-    hostId: host.paths.profileId,
-    wireVersion: "1",
-  });
+  const found = await discoverWindowsDesktopOwner(host);
   return (
     found.status === "attached" &&
     found.attachment.owner.instanceId === instanceId &&

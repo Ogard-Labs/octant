@@ -108,10 +108,37 @@ it("permits startup only on positive native absence and refuses unsafe discovery
   const host = fixture();
   vi.mocked(attachWindowsHostRuntimeOwner).mockResolvedValue({ status: "missing" });
   await expect(attachWindowsDesktopHost(host)).resolves.toBeUndefined();
-  vi.mocked(attachWindowsHostRuntimeOwner).mockResolvedValue({ status: "refused" });
-  await expect(attachWindowsDesktopHost(host)).rejects.toThrow("authenticate");
+  vi.mocked(attachWindowsHostRuntimeOwner).mockResolvedValue({
+    status: "refused",
+    reason: "status-mismatch",
+  });
+  await expect(attachWindowsDesktopHost(host)).rejects.toThrow(
+    "could not authenticate its existing native Windows host (status-mismatch)",
+  );
+  expect(attachWindowsHostRuntimeOwner).toHaveBeenCalledTimes(2);
   expect(host.startup.readHostInfo).not.toHaveBeenCalled();
   expect(probeHostInfoReceipt).not.toHaveBeenCalled();
+});
+
+it("looks again at an owner whose control pipe did not answer, then fails closed", async () => {
+  const host = fixture();
+  attached();
+  vi.mocked(attachWindowsHostRuntimeOwner).mockResolvedValueOnce({
+    status: "refused",
+    reason: "unanswered",
+  });
+  await expect(attachWindowsDesktopHost(host)).resolves.toMatchObject({
+    probe: { instanceId },
+  });
+  expect(attachWindowsHostRuntimeOwner).toHaveBeenCalledTimes(2);
+
+  vi.mocked(attachWindowsHostRuntimeOwner).mockClear();
+  vi.mocked(attachWindowsHostRuntimeOwner).mockResolvedValue({
+    status: "refused",
+    reason: "unanswered",
+  });
+  await expect(attachWindowsDesktopHost(host)).rejects.toThrow("(unanswered)");
+  expect(attachWindowsHostRuntimeOwner).toHaveBeenCalledTimes(3);
 });
 
 it("attaches only the native profile identity and matching authenticated generation without mutation", async () => {
@@ -151,7 +178,10 @@ it("refuses a projection from another native owner instance or endpoint rather t
 it("defers competing-owner discovery while its exact startup child remains live", async () => {
   const host = fixture();
   const child = { exitCode: null as number | null, signalCode: null };
-  vi.mocked(attachWindowsHostRuntimeOwner).mockResolvedValue({ status: "refused" });
+  vi.mocked(attachWindowsHostRuntimeOwner).mockResolvedValue({
+    status: "refused",
+    reason: "status-mismatch",
+  });
   await expect(attachWindowsDesktopHost(host, child)).resolves.toBeUndefined();
   expect(attachWindowsHostRuntimeOwner).not.toHaveBeenCalled();
   expect(host.startup.readHostInfo).not.toHaveBeenCalled();
@@ -179,6 +209,9 @@ it("stops only its authenticated exact owned launch and never another profile ow
     requestWindowsDesktopHostStop(host, "33333333-3333-4333-8333-333333333333"),
   ).resolves.toBe(false);
   expect(found.attachment.requestStop).not.toHaveBeenCalled();
-  vi.mocked(attachWindowsHostRuntimeOwner).mockResolvedValue({ status: "refused" });
+  vi.mocked(attachWindowsHostRuntimeOwner).mockResolvedValue({
+    status: "refused",
+    reason: "status-mismatch",
+  });
   await expect(requestWindowsDesktopHostStop(host, instanceId)).resolves.toBe(false);
 });
