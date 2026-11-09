@@ -444,6 +444,58 @@ describe("native harness loop", () => {
     );
   });
 
+  it("refuses an image once a later result in the same step leaves no room for it", async () => {
+    const image = { mimeType: "image/png" as const, data: "A".repeat(1_000) };
+    const scripted = scriptedTransport(
+      [
+        {
+          text: "Looking",
+          toolCalls: [
+            { toolCallId: "read-1", toolName: "read", argumentsJson: "{}" },
+            { toolCallId: "grep-1", toolName: "grep", argumentsJson: "{}" },
+          ],
+        },
+        { text: "Used the matches", toolCalls: [] },
+      ],
+      (request) => JSON.stringify(request.history).length <= 2_000,
+    );
+    const transcripts = new MemoryNativeHarnessTranscriptStore();
+    await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const connection = yield* connect(scripted.transport, transcripts);
+          yield* connection.start({ sessionId, modelId, executionPolicy: "plan", tools });
+          yield* sendAndCollect(connection, "Look at it", (event) => event.kind === "tool-request");
+          const terminal = yield* Effect.fork(
+            Stream.runCollect((yield* connection.subscribe).pipe(Stream.takeUntil(isTerminal))),
+          );
+          yield* connection.answerTool({
+            sessionId,
+            requestId: "read-1",
+            resultJson: '{"kind":"image","path":"shot.png"}',
+            isError: false,
+            images: [image],
+          });
+          yield* connection.answerTool({
+            sessionId,
+            requestId: "grep-1",
+            resultJson: JSON.stringify({ matches: "m".repeat(1_200) }),
+            isError: false,
+          });
+          expect(Array.from(yield* Fiber.join(terminal)).at(-1)?.kind).toBe("completed");
+          const [read, grep] = scripted.requests[1]?.history.at(-1)?.toolResults ?? [];
+          expect(read?.images).toBeUndefined();
+          expect(JSON.parse(read?.resultJson ?? "{}")).toMatchObject({
+            error: "image-too-large-for-endpoint",
+          });
+          expect(grep?.isError).toBe(false);
+          const journaled = transcripts.load(sessionId)?.messages.at(-2)?.toolResults?.[0];
+          expect(journaled?.resultJson).toBe(read?.resultJson);
+        }),
+      ),
+    );
+  });
+
   it("delivers steering after pending tool results and records it before acknowledging the note", async () => {
     const scripted = scriptedTransport([
       {

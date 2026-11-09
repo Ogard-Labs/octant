@@ -7547,11 +7547,14 @@ the model at another size.
   base64-encoded) goes to the model beside a result that names only its path,
   type, and size, and only when the provider reports that the session's model
   takes image input; otherwise the read refuses as `image-input-unsupported`,
-  and a larger image as `file-too-large` naming the limit. A tool image
-  that a request to the session's endpoint cannot carry beside the rest of the
-  turn (the step's results are the one message fitting never trims) is refused
-  by the loop as `image-too-large-for-endpoint`, with the image left out, so
-  the turn goes on instead of failing on the endpoint's request size limit. Like the text a read
+  and a larger image as `file-too-large` naming the limit. Once every
+  result of a step is in, the loop checks the request they go in (the step's
+  results are the one message fitting never trims) on every endpoint the turn
+  may use; while it does not fit, it refuses the largest image answer as
+  `image-too-large-for-endpoint`, with its image left out, so the turn goes on
+  instead of failing on the endpoint's request size limit. A step that does not
+  fit even without images fails as before. An answer with images is journaled
+  only after that check, so the journal holds what the model was sent. Like the text a read
   returns, the image is local and does not taint the thread, and its pixels are
   never journaled. A PDF refuses as `document-input-unsupported`: no harness
   endpoint carries a document in a tool result yet. `bash` writes the command to a
