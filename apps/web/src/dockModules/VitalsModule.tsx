@@ -94,11 +94,17 @@ export default function VitalsModule(props: Props) {
   if (serverUrl === undefined) return unavailable("Vitals", "No host is connected.");
   if (catalogUnknown) {
     return serverProjects.catalog === "failed"
-      ? unavailable("Vitals", "Server Projects could not be read, so this thread's host is unknown.")
+      ? unavailable(
+          "Vitals",
+          "Server Projects could not be read, so this thread's host is unknown.",
+        )
       : loading("Vitals");
   }
   if (state.status === "unsupported") {
-    return unavailable("Vitals", "This server does not report load. Vitals works on Linux servers.");
+    return unavailable(
+      "Vitals",
+      "This server does not report load. Vitals works on Linux servers.",
+    );
   }
   if (state.status === "refused") {
     return unavailable("Vitals", "This window may not read this host's load.");
