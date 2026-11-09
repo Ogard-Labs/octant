@@ -55,6 +55,7 @@ import {
 } from "./canvasExportTargets";
 import { FOLDER_EXPORT_TARGET_ID } from "./folderExportTarget";
 import { GIST_EXPORT_TARGET_ID, type GistExportAvailability } from "./gistExportTarget";
+import { createPageHostExportTarget } from "../../../../packages/plugin-api/examples/docs-md-export/index.mjs";
 import type { GistCreationRequest, GistCreationResult } from "../github/gistCreationPort";
 
 const directories: string[] = [];
@@ -314,6 +315,95 @@ function pictureRequest(format: "png" | "pdf") {
 }
 
 describe("canvas export service", () => {
+  it("offers the example destination through activation and publishes only its approved payload", async () => {
+    const target = createPageHostExportTarget({ apiBase: "https://pages.example/api" });
+    let facts: CanvasExportActivationFacts = {
+      installed: false,
+      trusted: false,
+      desiredEnabled: false,
+      effectiveState: { kind: "blocked", reason: "waiting" },
+      connected: true,
+    };
+    const { service, eventStore, connection } = harness(() => [{ target, facts }]);
+    const upload = vi.fn(async (_input: Request) =>
+      Response.json({ url: "https://pages.example/launch", id: "page-1" }, { status: 201 }),
+    );
+    const originalFetch = globalThis.fetch;
+    vi.stubGlobal("fetch", upload);
+    try {
+      expect(service.offers(canvasId)?.targets).toEqual([]);
+      facts = { ...facts, installed: true };
+      expect(service.offers(canvasId)?.targets).toEqual([]);
+      facts = { ...facts, trusted: true };
+      expect(service.offers(canvasId)?.targets).toEqual([]);
+      facts = { ...facts, desiredEnabled: true };
+      expect(service.offers(canvasId)?.targets).toEqual([]);
+      facts = { ...facts, effectiveState: { kind: "effective" } };
+      expect(service.offers(canvasId)?.targets).toMatchObject([
+        { targetId: "example-page-host", status: "ready" },
+      ]);
+
+      const prepared = await service.prepare(prepareRequest("example-page-host"), true);
+      expect(prepared.kind).toBe("approval");
+      expect(upload).not.toHaveBeenCalled();
+      expect(eventStore.replay()).toEqual([]);
+      if (prepared.kind !== "approval") throw new Error("Expected a held export card.");
+      expect(prepared.card.destinationNote).toContain("host can read it");
+      await service.decide({
+        canvasId,
+        approvalId: prepared.card.approvalId,
+        decision: "denied",
+        permitted: true,
+        actor: localActor,
+      });
+      expect(upload).not.toHaveBeenCalled();
+
+      const accepted = await service.prepare(prepareRequest("example-page-host"), true);
+      if (accepted.kind !== "approval") throw new Error("Expected a held export card.");
+      const delivery = await service.decide({
+        canvasId,
+        approvalId: accepted.card.approvalId,
+        decision: "approved",
+        permitted: true,
+        actor: localActor,
+      });
+      expect(delivery).toMatchObject({
+        kind: "exported",
+        record: {
+          outcome: {
+            kind: "receipt",
+            receipt: { kind: "link", href: "https://pages.example/launch" },
+          },
+        },
+      });
+      expect(upload).toHaveBeenCalledTimes(1);
+      expect(upload.mock.calls[0]?.[0]?.url).toBe("https://pages.example/api/pages");
+      expect(await upload.mock.calls[0]?.[0]?.json()).toEqual({
+        title: accepted.card.title,
+        format: accepted.card.format,
+        body: accepted.card.payload,
+      });
+      expect(eventStore.replay()).toHaveLength(1);
+
+      const revoked = await service.prepare(prepareRequest("example-page-host"), true);
+      if (revoked.kind !== "approval") throw new Error("Expected a held export card.");
+      facts = { ...facts, desiredEnabled: false };
+      expect(
+        await service.decide({
+          canvasId,
+          approvalId: revoked.card.approvalId,
+          decision: "approved",
+          permitted: true,
+          actor: localActor,
+        }),
+      ).toMatchObject({ kind: "refused", code: "not-offered" });
+      expect(upload).toHaveBeenCalledTimes(1);
+    } finally {
+      vi.stubGlobal("fetch", originalFetch);
+      connection.close();
+    }
+  });
+
   it("keeps a design the deck does not place as its own sheets after the slides", async () => {
     const requests: CanvasExportPictureRequest[] = [];
     const doc: CanvasExportDocument = {

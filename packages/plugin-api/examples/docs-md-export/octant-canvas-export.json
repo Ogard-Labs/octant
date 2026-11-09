@@ -1,0 +1,38 @@
+{
+  "manifest": {
+    "manifestVersion": 1,
+    "slug": "docs-md-example",
+    "displayName": "docs-md (example)",
+    "version": "1.0.0",
+    "provenance": {
+      "publisher": "Octant examples",
+      "canonicalUrl": "https://github.com/Ogard-Labs/octant/tree/main/packages/plugin-api/examples/docs-md-export"
+    },
+    "license": { "kind": "spdx", "identifier": "MIT" },
+    "compatibility": {
+      "platforms": ["macos", "linux", "windows"],
+      "modes": ["chat", "work", "code"],
+      "providerFamilies": []
+    },
+    "declaredCapabilities": ["network"],
+    "components": [
+      {
+        "id": "export",
+        "kind": "canvas-export-target",
+        "displayName": "docs-md (example)",
+        "declaredCapabilities": ["network"],
+        "entryPoint": "dist/index.mjs",
+        "canvasExport": {
+          "contribution": {
+            "schemaVersion": 1,
+            "kind": "canvas-export-contribution",
+            "targetId": "docs-md-example",
+            "label": "docs-md (example)",
+            "formats": ["markdown", "html"]
+          },
+          "allowedOrigins": ["https://docs-md.com"]
+        }
+      }
+    ]
+  }
+}
