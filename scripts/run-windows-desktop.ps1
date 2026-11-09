@@ -253,31 +253,47 @@ try {
               ($octantDiagnosticTokens.Count -eq 2 -and $octantDiagnosticTokens[1] -ceq '"%1"') -or
               ($octantDiagnosticTokens.Count -eq 3 -and $octantDiagnosticTokens[1] -ceq '--' -and $octantDiagnosticTokens[2] -ceq '"%1"')
             )
+      $octantAdjacentImageArgumentMatched =
+        $octantImage.StartsWith('"') -and
+        $octantImage.EndsWith('"') -and
+        $octantLeadingSeparatorKind -eq 'none' -and
+        $octantInternalSeparatorKinds.Count -eq 1 -and
+        $octantInternalSeparatorKinds[0] -in @('space', 'tab') -and
+        $octantDiagnosticTokens.Count -eq 2 -and
+        $octantArgumentPathKinds.Count -eq 1 -and
+        $octantArgumentPathKinds[0] -eq 'staged-executable' -and
+        $octantDiagnosticTokens[1] -ceq '"%1"' -and
+        $octantExactStagedImageUrlSequence -and
+        $octantCommand -ceq $octantTrimmedCommand
+      if ($octantAdjacentImageArgumentMatched) { $octantOwnedCommand = $true }
           break
         }
         if ($octantImageAtStart) { break }
       }
-      $octantArgumentShape = if ($octantCommand.EndsWith('"%1"', [StringComparison]::OrdinalIgnoreCase)) { 'quoted-url' } else { 'other' }
-      $octantSeparator = $octantCommand.Contains(' -- ')
-      Write-Output (@{
-        protocolCleanup = 'refused'
-        executable = $octantImageShape
-        executableAtStart = $octantImageAtStart
-        argumentLayout = $octantArgumentLayout
-        argumentTokenShapes = $octantArgumentTokenShapes
-        argumentPathShapes = $octantArgumentPathShapes
-        argumentPathKinds = $octantArgumentPathKinds
-        argumentQuotedUrlMatches = $octantArgumentQuotedUrlMatches
-        argumentTokenCount = $octantArgumentTokenCount
-        exactStagedImageUrlSequence = $octantExactStagedImageUrlSequence
-        imageQuoted = $octantImage.StartsWith('"') -and $octantImage.EndsWith('"')
-        imageToArgumentsSeparator = $octantLeadingSeparatorKind
-        argumentInternalSeparators = $octantInternalSeparatorKinds
-        commandHadOuterWhitespace = $octantCommand -cne $octantCommand.Trim()
-        argument = $octantArgumentShape
-        electronSeparator = $octantSeparator
-      } | ConvertTo-Json -Compress)
-      throw 'Refusing removal of another protocol command'
+      if (-not $octantOwnedCommand) {
+        $octantArgumentShape = if ($octantCommand.EndsWith('"%1"', [StringComparison]::OrdinalIgnoreCase)) { 'quoted-url' } else { 'other' }
+        $octantSeparator = $octantCommand.Contains(' -- ')
+        Write-Output (@{
+          protocolCleanup = 'refused'
+          executable = $octantImageShape
+          executableAtStart = $octantImageAtStart
+          argumentLayout = $octantArgumentLayout
+          argumentTokenShapes = $octantArgumentTokenShapes
+          argumentPathShapes = $octantArgumentPathShapes
+          argumentPathKinds = $octantArgumentPathKinds
+          argumentQuotedUrlMatches = $octantArgumentQuotedUrlMatches
+          argumentTokenCount = $octantArgumentTokenCount
+          exactStagedImageUrlSequence = $octantExactStagedImageUrlSequence
+          exactAdjacentStagedImageArgument = $octantAdjacentImageArgumentMatched
+          imageQuoted = $octantImage.StartsWith('"') -and $octantImage.EndsWith('"')
+          imageToArgumentsSeparator = $octantLeadingSeparatorKind
+          argumentInternalSeparators = $octantInternalSeparatorKinds
+          commandHadOuterWhitespace = $octantCommand -cne $octantCommand.Trim()
+          argument = $octantArgumentShape
+          electronSeparator = $octantSeparator
+        } | ConvertTo-Json -Compress)
+        throw 'Refusing removal of another protocol command'
+      }
     }
     Remove-Item -LiteralPath $octantProtocol -Recurse -Force
     if (Test-Path -LiteralPath $octantProtocol) { throw 'Owned protocol cleanup was not confirmed' }
