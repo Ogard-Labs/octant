@@ -2630,7 +2630,8 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
                 {/* An upload's, a download's, or a sign-in's answer is never remembered. */}
                 {pendingBrowserApproval.upload === undefined &&
                 pendingBrowserApproval.download === undefined &&
-                pendingBrowserApproval.signIn === undefined ? (
+                pendingBrowserApproval.signIn === undefined &&
+                pendingBrowserApproval.script === undefined ? (
                   <OctantButton
                     disabled={browserApprovalBusy}
                     onClick={() => void decideBrowserApproval("approved", true)}
@@ -2960,6 +2961,7 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
                     className="work-thread-workspace__bound-model"
                   >
                     <ComposerModelPicker
+                      threadId={String(thread.id)}
                       ariaLabel="Provider and model"
                       disabled={providerChanging || creating || completionLocked}
                       // Once any turn ran, the host checks the latest one

@@ -109,7 +109,7 @@ describe("judging a listener's certificate", () => {
     });
 
     it("keeps the staged trust while the current one still passes", () => {
-      const trust = staged("2026-11-01T00:00:00.000Z");
+      const trust = staged("2026-10-20T00:00:00.000Z");
 
       expect(
         judgeListenerCertificate({ trust, servedPin: PIN_A, platformTrusted: false, now: NOW }),
@@ -119,7 +119,7 @@ describe("judging a listener's certificate", () => {
     it("makes the staged trust current, dropping the old one, when only it passes", () => {
       expect(
         judgeListenerCertificate({
-          trust: staged("2026-11-01T00:00:00.000Z"),
+          trust: staged("2026-10-20T00:00:00.000Z"),
           servedPin: PIN_B,
           platformTrusted: false,
           now: NOW,
@@ -139,7 +139,7 @@ describe("judging a listener's certificate", () => {
     });
 
     it("ignores a staged window that ends further out than the host ever announces", () => {
-      const trust = staged("2027-01-01T00:00:00.000Z");
+      const trust = staged("2026-10-23T12:00:00.000Z");
 
       expect(
         judgeListenerCertificate({ trust, servedPin: PIN_B, platformTrusted: false, now: NOW }),
@@ -152,7 +152,7 @@ describe("judging a listener's certificate", () => {
     it("moves a pinned origin to platform trust only through a staged platform trust", () => {
       const trust: ListenerOriginTrust = {
         current: { kind: "pinned", pin: PIN_A },
-        staged: { trust: { kind: "platform" }, until: "2026-11-01T00:00:00.000Z" },
+        staged: { trust: { kind: "platform" }, until: "2026-10-20T00:00:00.000Z" },
       };
 
       expect(
@@ -177,7 +177,7 @@ describe("reading a stored trust", () => {
   it("reads what it stores", () => {
     const trust: ListenerOriginTrust = {
       current: { kind: "pinned", pin: PIN_A },
-      staged: { trust: { kind: "platform" }, until: "2026-11-01T00:00:00.000Z" },
+      staged: { trust: { kind: "platform" }, until: "2026-10-20T00:00:00.000Z" },
     };
 
     expect(decodeListenerOriginTrust(JSON.parse(JSON.stringify(trust)))).toEqual(trust);

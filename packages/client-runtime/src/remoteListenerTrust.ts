@@ -10,7 +10,11 @@
 // replaces platform validation for a pinned origin; it is never an extra
 // option on top of it.
 
-import { classifyRemoteListenerAddress, PAIRING_CODE_PIN_ALGORITHM } from "@octant/domain";
+import {
+  classifyRemoteListenerAddress,
+  PAIRING_CODE_PIN_ALGORITHM,
+  LISTENER_KEY_TRANSITION_WINDOW_MS,
+} from "@octant/domain";
 
 /** How one origin's certificate is trusted. */
 export type ListenerTrust =
@@ -35,10 +39,10 @@ export interface ListenerOriginTrust {
 
 /**
  * The longest staged window a client honours, counted from now: the host
- * announces the next trust for up to 30 days. A window ending later is
+ * announces the next trust for seven days. A window ending later is
  * ignored, so a damaged or hostile record cannot keep an old trust alive.
  */
-export const MAX_STAGED_TRUST_WINDOW_MS = 30 * 24 * 60 * 60 * 1_000;
+export const MAX_STAGED_TRUST_WINDOW_MS = LISTENER_KEY_TRANSITION_WINDOW_MS;
 
 /** The trust of an origin paired before pins existed, or through a certificate the person pasted. */
 export const PLATFORM_LISTENER_TRUST: ListenerOriginTrust = { current: { kind: "platform" } };

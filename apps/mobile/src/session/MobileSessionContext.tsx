@@ -54,6 +54,7 @@ export interface MobileSessionContextValue {
         readonly kind: "mock";
         readonly scenarioId: MobileMockScenario["id"];
         readonly label: string;
+        readonly offlineDemo: boolean;
       };
   readonly registry: MobileHostRegistry;
   /** The hub this phone joined as a guest, if any. */
@@ -315,6 +316,7 @@ function MockMobileSessionProvider(props: {
       kind: "mock",
       scenarioId: props.scenario.id,
       label: props.scenario.label,
+      offlineDemo: props.scenario.offlineDemo === true,
     },
     registry,
     guestHubStore,
