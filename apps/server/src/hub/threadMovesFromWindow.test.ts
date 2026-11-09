@@ -48,6 +48,7 @@ describe("moving a thread after its turn", () => {
         challenge: async () => ({ status: "refused", kind: "refused" }),
         redeem: async () => ({ status: "issued", ticketId: "ticket" }),
       },
+      stopWork: async () => ({ status: "stopped" }),
       source: {
         measure: async () => ({ status: "unknown" }),
         // The start sees the turn running; the poll's read is held open.
@@ -88,6 +89,157 @@ describe("moving a thread after its turn", () => {
   });
 });
 
+describe("Stop and move", () => {
+  const UNLOCK = { challengeId: "12345678-1234-4234-8234-123456789012", signature: "c2ln" };
+
+  function stopAndMoveHost(options: {
+    readonly redeem?: "issued" | "refused";
+    readonly stopTakes?: boolean;
+    readonly delegated?: boolean;
+    readonly idle?: boolean;
+  }) {
+    const folder = mkdtempSync(join(tmpdir(), "octant-move-stop-"));
+    folders.push(folder);
+    const order: string[] = [];
+    let running = options.idle !== true;
+    const start = vi.fn(async () => {
+      order.push("move");
+      return { status: "interrupted" as const };
+    });
+    const refuseBeforeStart = vi.fn();
+    const stopWork = vi.fn(async () => {
+      order.push("stop");
+      if (options.stopTakes !== false) running = false;
+      return { status: "stopped" as const };
+    });
+    const moves = new ThreadMovesFromWindow({
+      moves: {
+        askProjects: async () => "unreachable",
+        start,
+        cancel: async () => ({ status: "cancelled" }),
+        takeBack: async () => {},
+        activateAnyway: async () => ({ httpStatus: 409, body: {} }),
+        dismissFailure: () => {},
+        refuseBeforeStart,
+        rateTo: () => ({ basis: "assumed", bytesPerSecond: 1_048_576 }),
+      },
+      state: createThreadMoveStateStore(folder),
+      tickets: {
+        challenge: async () => ({ status: "refused", kind: "refused" }),
+        redeem: async () => {
+          order.push("unlock");
+          return options.redeem === "refused"
+            ? { status: "refused", reason: "unlock-required" }
+            : { status: "issued", ticketId: "ticket" };
+        },
+      },
+      source: {
+        read: async () => ({ ...reading(running), delegated: options.delegated === true }),
+        measure: async () => ({ status: "unknown" }),
+      },
+      stopWork,
+      members: () => [],
+      selfMemberId: () => "self",
+      listThreads: async () => [],
+      now: Date.now,
+      pollMs: 5,
+      stopWaitMs: 40,
+    });
+    return { moves, order, start, stopWork, refuseBeforeStart };
+  }
+
+  it("stops the running turn only after the destination's unlock, then moves the thread", async () => {
+    const host = stopAndMoveHost({});
+
+    expect(
+      await host.moves.start({
+        thread: THREAD,
+        destinationMemberId: DESKTOP as never,
+        timing: "stop-and-move",
+        unlock: UNLOCK,
+      }),
+    ).toEqual({ status: "started" });
+
+    await vi.waitFor(() => expect(host.start).toHaveBeenCalledOnce());
+    expect(host.order).toEqual(["unlock", "stop", "move"]);
+    host.moves.close();
+  });
+
+  it("stops nothing when the person's unlock is refused", async () => {
+    const host = stopAndMoveHost({ redeem: "refused" });
+
+    expect(
+      await host.moves.start({
+        thread: THREAD,
+        destinationMemberId: DESKTOP as never,
+        timing: "stop-and-move",
+        unlock: UNLOCK,
+      }),
+    ).toEqual({ status: "refused", reason: "unlock-required" });
+    expect(host.stopWork).not.toHaveBeenCalled();
+    expect(host.start).not.toHaveBeenCalled();
+    host.moves.close();
+  });
+
+  it("says it is stopping until the turn has stopped, and ends as busy when it never does", async () => {
+    const host = stopAndMoveHost({ stopTakes: false });
+
+    await host.moves.start({
+      thread: THREAD,
+      destinationMemberId: DESKTOP as never,
+      timing: "stop-and-move",
+      unlock: UNLOCK,
+    });
+    expect(host.moves.status(THREAD).waiting?.stopping).toBe(true);
+
+    await vi.waitFor(() => expect(host.refuseBeforeStart).toHaveBeenCalledWith(THREAD, "busy"));
+    expect(host.start).not.toHaveBeenCalled();
+    expect(host.moves.status(THREAD).waiting).toBeUndefined();
+    expect(host.moves.status(THREAD).settled).toBeDefined();
+    host.moves.close();
+  });
+
+  it("stops each batch row set to Stop and move once the batch is unlocked, and no delegated one", async () => {
+    const host = stopAndMoveHost({});
+    const delegatedHost = stopAndMoveHost({ delegated: true });
+
+    expect(
+      await host.moves.shutdownStart({
+        destinationMemberId: DESKTOP as never,
+        rows: [{ thread: THREAD, timing: "stop-and-move" }],
+        unlock: UNLOCK,
+      }),
+    ).toEqual({ status: "started" });
+    await vi.waitFor(() => expect(host.start).toHaveBeenCalledOnce());
+    expect(host.order).toEqual(["unlock", "stop", "move"]);
+
+    await delegatedHost.moves.shutdownStart({
+      destinationMemberId: DESKTOP as never,
+      rows: [{ thread: THREAD, timing: "stop-and-move" }],
+      unlock: UNLOCK,
+    });
+    expect(delegatedHost.stopWork).not.toHaveBeenCalled();
+    expect(delegatedHost.refuseBeforeStart).toHaveBeenCalledWith(THREAD, "delegated");
+    host.moves.close();
+    delegatedHost.moves.close();
+  });
+
+  it("moves an idle thread at once without stopping anything", async () => {
+    const host = stopAndMoveHost({ idle: true });
+
+    await host.moves.start({
+      thread: THREAD,
+      destinationMemberId: DESKTOP as never,
+      timing: "stop-and-move",
+      unlock: UNLOCK,
+    });
+
+    await vi.waitFor(() => expect(host.start).toHaveBeenCalledOnce());
+    expect(host.stopWork).not.toHaveBeenCalled();
+    host.moves.close();
+  });
+});
+
 describe("where a moved thread stands", () => {
   it("still says a move ended after its failure notice was put away", async () => {
     const folder = mkdtempSync(join(tmpdir(), "octant-move-settled-"));
@@ -111,6 +263,7 @@ describe("where a moved thread stands", () => {
         redeem: async () => ({ status: "issued", ticketId: "ticket" }),
       },
       source: { read: async () => reading(false), measure: async () => ({ status: "unknown" }) },
+      stopWork: async () => ({ status: "stopped" }),
       members: () => [],
       selfMemberId: () => "self",
       listThreads: async () => [],
@@ -159,6 +312,7 @@ describe("sizes before a move", () => {
             ? { basis: "measured", bytesPerSecond: 4_000_000 }
             : { basis: "assumed", bytesPerSecond: 1_048_576 },
       },
+      stopWork: async () => ({ status: "stopped" }),
       state: createThreadMoveStateStore(folder),
       tickets: {
         challenge: async () => ({ status: "refused", kind: "refused" }),

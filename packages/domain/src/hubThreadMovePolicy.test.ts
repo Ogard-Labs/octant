@@ -289,7 +289,17 @@ describe("Prepare to shut down", () => {
         mode: "code",
         eligibility: { status: "eligible", projects: [], waitsForTurn: false },
       }),
-    ).toEqual({ choice: "move", offers: ["move", "hand-over", "leave-here"] });
+    ).toEqual({ choice: "move", offers: ["move", "leave-here"] });
+    // Hand over is for a Code thread that cannot move; one that can moves properly.
+    expect(
+      startingShutdownChoice({
+        mode: "code",
+        eligibility: { status: "eligible", projects: [], waitsForTurn: true },
+      }),
+    ).toEqual({
+      choice: "move-after-turn",
+      offers: ["move-after-turn", "stop-and-move", "leave-here"],
+    });
     expect(
       startingShutdownChoice({
         mode: "work",
