@@ -1091,13 +1091,22 @@ export class ProjectTerminalService {
   #view(terminalId: CodeTerminalId, owner: Owner, afterCharacters?: number): ProjectTerminalResult {
     const read = this.#options.terminals.readSince(String(terminalId), afterCharacters ?? 0);
     const snapshot = read.snapshot;
+    // The exit can be readable before the terminal observer records it, so a
+    // dropped SSH connection is classified here too, from the same exit code.
+    const uncertainty =
+      owner.uncertainty ??
+      (owner.action?.server !== undefined &&
+      snapshot.status !== "running" &&
+      snapshot.exitCode === 255
+        ? "server-transport-lost"
+        : undefined);
     return decodeProjectTerminalResult({
       kind: "project-terminal",
       terminal: {
         projectId: owner.projectId,
         terminalId,
-        state: owner.uncertainty === undefined ? snapshot.status : "interrupted",
-        ...(owner.uncertainty === undefined ? {} : { uncertainty: owner.uncertainty }),
+        state: uncertainty === undefined ? snapshot.status : "interrupted",
+        ...(uncertainty === undefined ? {} : { uncertainty }),
         ...(snapshot.exitCode === undefined ? {} : { exitCode: snapshot.exitCode }),
         posture: owner.posture,
         ...(owner.action === undefined ? {} : { action: owner.action }),
