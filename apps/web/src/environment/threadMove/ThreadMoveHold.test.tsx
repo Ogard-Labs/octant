@@ -344,4 +344,24 @@ describe("a moved thread's pane on the computer it left", () => {
     );
     expect(screen.queryByRole("button", { name: "Remove worktree" })).not.toBeInTheDocument();
   });
+
+  it("names where a Work thread's kept folder is and what stayed in it, offering nothing to remove it", async () => {
+    const { client } = fakeClient({
+      status: "read",
+      departed: {
+        ...departed,
+        thread: { mode: "work", threadId: THREAD.threadId },
+        keptFolder: "/Users/person/Offsite/report",
+        keptFiles: ["debug.log", "keys.txt"],
+        keptFileCount: 2,
+      },
+    });
+    pane(client);
+
+    expect(await screen.findByText("/Users/person/Offsite/report")).toBeInTheDocument();
+    const files = screen.getByRole("list", { name: "Files that stayed" });
+    expect(files).toHaveTextContent("debug.log");
+    expect(files).toHaveTextContent("keys.txt");
+    expect(screen.queryByRole("button", { name: /Remove/ })).not.toBeInTheDocument();
+  });
 });
