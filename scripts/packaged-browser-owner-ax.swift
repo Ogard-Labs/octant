@@ -991,6 +991,11 @@ if mode == "picker-metadata" || mode == "picker-location-prompt" || (fixesOwnedF
                                 if status != .success { errors += 1; recordPickerError("owned-location-value", status) }
                                 let equal = status == .success && (raw as? String) == fixturePath
                                 fixedFolder["fixedOwnedFieldValueMatched"] = equal
+                                // Only shape/equality facts from the already owned
+                                // fixture field leave this process, never its text.
+                                fixedFolder["fixedOwnedFieldValueLength"] = (raw as? String)?.utf16.count ?? -1
+                                fixedFolder["expectedOwnedFieldValueLength"] = fixturePath.utf16.count
+                                fixedFolder["fixedOwnedFieldValueIsPrefix"] = (raw as? String).map { fixturePath.hasPrefix($0) } ?? false
                                 return equal && fieldReady(field)
                             }
                             if mode == "picker-fill-owned-location", let focus = focusInSheet(), nestedLocation(focus), fieldReady(focus.node),
@@ -1013,13 +1018,14 @@ if mode == "picker-metadata" || mode == "picker-location-prompt" || (fixesOwnedF
                                         textDown.postToPid(processId); textUp.postToPid(processId)
                                         fixedFolder["typingDispatched"] = true
                                         fixedFolder["status"] = "typed-value-unconfirmed"
-                                        // Allow the ordinary posted key pair to be
-                                        // consumed before the one equality read.
+                                        // Posting a key pair does not mean AppKit
+                                        // has consumed it. Observe under the same
+                                        // bounded field/owner guards without ever
+                                        // replaying the input on a mismatch.
                                         Thread.sleep(forTimeInterval: 0.05)
-                                        while Date() < deadline, errors == priorErrors {
+                                        while Date() < deadline, errors == priorErrors, fieldReady(focus.node) {
                                             if exactOwnedValue(focus.node) { fixedFolder["status"] = "completed"; break }
-                                            // A mismatch is a refusal, never a text retry.
-                                            break
+                                            Thread.sleep(forTimeInterval: min(0.05, max(0, deadline.timeIntervalSinceNow)))
                                         }
                                     }
                                 }
