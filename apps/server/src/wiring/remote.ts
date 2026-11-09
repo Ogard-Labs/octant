@@ -1806,6 +1806,7 @@ export function wireRemote(deps: RemoteDependencies) {
     }),
     credentials: ownerCredentialCopy,
     threadMoves,
+    phoneMoves: threadMovesFromWindow,
     provision: spokeProvisionService,
     signIn: signInService,
     spokeSignIn: spokeSignInService,

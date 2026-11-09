@@ -591,6 +591,14 @@ export const ThreadMoveThreadStatus = Schema.Struct({
       stopping: Schema.optional(Schema.Boolean),
     }).annotations(strict),
   ),
+  /** Held until an owner phone confirms the move, or the wait runs out. */
+  waitingForPhone: Schema.optional(
+    Schema.Struct({
+      destinationMemberId: HubMemberId,
+      destinationName: bounded(256),
+      expiresAt: Schema.Int.pipe(Schema.positive()),
+    }).annotations(strict),
+  ),
   /**
    * The last move or wait a window started for this thread has ended: it
    * moved, could not move, or the person pressed Don't move. Kept until the
@@ -715,11 +723,94 @@ export const ShutdownStartRequest = Schema.Struct({
 }).annotations(strict);
 export type ShutdownStartRequest = typeof ShutdownStartRequest.Type;
 
+/**
+ * A batch row this host did not take, and why: its thread is gone, or another
+ * move or wait already holds it. Every requested row either starts or is
+ * named here, so a window never waits on a row nothing will move.
+ */
+export const ShutdownRowLeftOut = Schema.Struct({
+  thread: MovedThreadReference,
+  reason: ThreadMoveFailureReason,
+}).annotations(strict);
+export type ShutdownRowLeftOut = typeof ShutdownRowLeftOut.Type;
+
+const RowsLeftOut = Schema.Array(ShutdownRowLeftOut).pipe(Schema.maxItems(SHUTDOWN_BATCH_MAX));
+
 export const ShutdownStartOutcome = Schema.Union(
-  Schema.Struct({ status: Schema.Literal("started") }),
+  Schema.Struct({ status: Schema.Literal("started"), leftOut: Schema.optional(RowsLeftOut) }),
   Schema.Struct({ status: Schema.Literal("refused"), reason: ThreadMoveFailureReason }),
 );
 export type ShutdownStartOutcome = typeof ShutdownStartOutcome.Type;
+
+// ── Confirming a move on an owner phone ────────────────────────────────────
+// A window with no Touch ID key, or a person who would rather use their phone,
+// asks this host to hold the move until an owner phone confirms it. The phone
+// reads what waits here, has the destination issue the ticket after its own
+// fresh unlock there, and hands this host only the ticket id.
+
+/** How long a move waits for the phone before it ends with `unlock-required`. */
+export const THREAD_MOVE_PHONE_WAIT_MS = 5 * 60_000;
+
+/** A window asks the phone to confirm moving one thread. */
+export const ThreadMovePhoneAskRequest = Schema.Struct({
+  thread: MovedThreadReference,
+  destinationMemberId: HubMemberId,
+  destinationProjectId: Schema.optional(ProjectId),
+  timing: ThreadMoveTiming,
+}).annotations(strict);
+export type ThreadMovePhoneAskRequest = typeof ThreadMovePhoneAskRequest.Type;
+
+/** Prepare to shut down asks the phone to confirm one destination's batch. */
+export const ShutdownPhoneAskRequest = Schema.Struct({
+  destinationMemberId: HubMemberId,
+  rows: Schema.Array(ShutdownBatchRow).pipe(
+    Schema.minItems(1),
+    Schema.maxItems(SHUTDOWN_BATCH_MAX),
+  ),
+}).annotations(strict);
+export type ShutdownPhoneAskRequest = typeof ShutdownPhoneAskRequest.Type;
+
+export const ThreadMovePhoneAskOutcome = Schema.Union(
+  Schema.Struct({
+    status: Schema.Literal("waiting-for-phone"),
+    expiresAt: Schema.Int.pipe(Schema.positive()),
+    /** The threads held for the phone. */
+    held: Schema.Array(MovedThreadReference).pipe(Schema.maxItems(SHUTDOWN_BATCH_MAX)),
+    /** Requested threads not held, each with why. */
+    leftOut: RowsLeftOut,
+  }),
+  Schema.Struct({ status: Schema.Literal("refused"), reason: ThreadMoveFailureReason }),
+);
+export type ThreadMovePhoneAskOutcome = typeof ThreadMovePhoneAskOutcome.Type;
+
+/** One move waiting on this host for an owner phone, as the phone lists it. */
+export const ThreadMovePhoneConfirmation = Schema.Struct({
+  confirmationId: Schema.UUID,
+  destinationMemberId: HubMemberId,
+  destinationName: bounded(256),
+  threads: Schema.Array(
+    Schema.Struct({ thread: MovedThreadReference, title: bounded(256) }).annotations(strict),
+  ).pipe(Schema.minItems(1), Schema.maxItems(SHUTDOWN_BATCH_MAX)),
+  expiresAt: Schema.Int.pipe(Schema.positive()),
+}).annotations(strict);
+export type ThreadMovePhoneConfirmation = typeof ThreadMovePhoneConfirmation.Type;
+
+export const ThreadMovePhoneConfirmations = Schema.Struct({
+  status: Schema.Literal("listed"),
+  confirmations: Schema.Array(ThreadMovePhoneConfirmation).pipe(Schema.maxItems(16)),
+}).annotations(strict);
+export type ThreadMovePhoneConfirmations = typeof ThreadMovePhoneConfirmations.Type;
+
+/**
+ * The phone hands this host the ticket the destination issued it. The
+ * threads, destination, and Projects are the ones this host holds for the
+ * confirmation; the phone cannot change them.
+ */
+export const OwnerThreadMoveConfirmRequest = Schema.Struct({
+  confirmationId: Schema.UUID,
+  ticketId: Schema.UUID,
+}).annotations(strict);
+export type OwnerThreadMoveConfirmRequest = typeof OwnerThreadMoveConfirmRequest.Type;
 
 // ── Sizes and an estimate ──────────────────────────────────────────────────
 
@@ -933,6 +1024,15 @@ export const decodeShutdownListing = Schema.decodeUnknownSync(ShutdownListing);
 export const decodeShutdownChallengeRequest = Schema.decodeUnknownSync(ShutdownChallengeRequest);
 export const decodeShutdownStartRequest = Schema.decodeUnknownSync(ShutdownStartRequest);
 export const decodeShutdownStartOutcome = Schema.decodeUnknownSync(ShutdownStartOutcome);
+export const decodeThreadMovePhoneAskRequest = Schema.decodeUnknownSync(ThreadMovePhoneAskRequest);
+export const decodeShutdownPhoneAskRequest = Schema.decodeUnknownSync(ShutdownPhoneAskRequest);
+export const decodeThreadMovePhoneAskOutcome = Schema.decodeUnknownSync(ThreadMovePhoneAskOutcome);
+export const decodeThreadMovePhoneConfirmations = Schema.decodeUnknownSync(
+  ThreadMovePhoneConfirmations,
+);
+export const decodeOwnerThreadMoveConfirmRequest = Schema.decodeUnknownSync(
+  OwnerThreadMoveConfirmRequest,
+);
 export const decodeHandoverRequest = Schema.decodeUnknownSync(HandoverRequest);
 export const decodeShutdownHandoverRequest = Schema.decodeUnknownSync(ShutdownHandoverRequest);
 export const decodeHandoverOutcome = Schema.decodeUnknownSync(HandoverOutcome);

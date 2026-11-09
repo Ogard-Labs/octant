@@ -781,6 +781,7 @@ export async function startHubTestHost(input: {
     postures,
     credentials: credentialCopy,
     threadMoves,
+    phoneMoves: threadMovesFromWindow,
     provision: spokeProvision,
     signIn,
     spokeSignIn,

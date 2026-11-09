@@ -955,8 +955,10 @@ peer grant for the source has the **Move in** item. Move in is in the
 full-member grant ([decision H2](#decisions)); a destination with Owners
 unticked refuses every move. Usually the source is itself an owner device, so
 the person touches Touch ID on the laptop they are leaving; a phone that is an
-owner on both hosts can start the move instead. A source that is not an owner
-on the destination is told so, with how to mark it.
+owner on both hosts can unlock the move instead, from a move the person started
+in the source's window ([Confirming on a phone](#moving-a-thread-to-another-member),
+below). A source that is not an owner on the destination is told so, with how
+to mark it, and offered the phone.
 
 A full member's grant stored before Move in existed has no such item. It
 reads as on while the rest of it is still exactly the full-member grant, and
@@ -985,6 +987,66 @@ source, which sends the ticket request with it. The ticket that answers lasts
 fifteen minutes and opens one move from that source. Rationale: Move after
 this turn waits for the turn to end without asking the person again, and a
 turn that outlasts the ticket ends the move with `unlock-required`.
+
+**Confirming on a phone.** A window with no Touch ID key, or a person who
+would rather use their phone, presses **Confirm on your phone** instead. The
+source then holds the move, freezing and sending nothing, for at most five
+minutes. A phone that is an owner on the source reads what waits there (an
+owner read that asks for no unlock, `GET /api/hub/owner/thread-moves/confirmations`),
+showing each held move's threads by title and its destination by name. On
+**Confirm move**, the phone asks the destination for the move ticket itself, as
+an owner on the destination's own list: the destination's owner challenge
+names the ticket route and that exact body (the source the phone read the wait
+from, never one the listing names, and exactly the held threads), the phone's
+own unlock key signs it after Face ID, Touch ID, or the passcode, and the
+destination issues the ticket only after that fresh own-class unlock. The phone
+then hands the source only the ticket id
+(`POST /api/hub/owner/thread-moves/confirm`, an administration-class owner
+action on the source). The source spends the confirmation whatever the ticket
+turns out to be and moves the threads, destination, and Projects it holds;
+the phone cannot change them. A ticket the destination did not issue, or
+issued for another source or other threads, is refused at the offer, and that
+move ends in This thread can't move with `refused`. A thread that can no
+longer be read when the confirmed move launches (a Code thread whose managed
+worktree receipt became unreadable) ends with `transfer-failed` and the rest
+of its batch carries on. A wait no phone answers ends with `unlock-required`,
+and Don't move in the window ends it sooner. Each thread has one claim, from
+the moment a window asks to move it until its move starts or its wait ends,
+shared by Move with Touch ID, Stop and move, Prepare to shut down, and the
+phone: a second way to move a thread already claimed is refused as `busy`
+rather than started twice. A phone-held row set to Stop and move stops its
+turn only once the phone confirms and the thread is read again, never while
+it waits. In Prepare to shut down, Confirm on your phone holds every
+destination's rows at once, one confirmation per destination on the phone;
+one press uses one way to unlock, so Touch ID for one destination and the
+phone for another in the same press is not offered. Every row a batch asks
+for, by phone or Touch ID, either starts or comes back named as left out with
+its reason: a thread already gone ends as `refused` with its own failure, and
+one another move or wait already holds comes back as `busy` with no failure
+of its own, since that move says how it ends. The window waits only on the
+rows the host took. The phone asks every spoke and
+standby computer it can reach for what waits there, since a standby is a spoke
+that can move threads away; it never asks the hub, which moves nothing away.
+Holding the phone's raw unlock key open for the one confirmation lets the
+person authenticate once for both computers; the key is dropped afterwards.
+Rationale: the destination's own owner check, with its challenge bound to the
+ticket route and body, is unchanged and stays the only thing that authorizes
+the move; the source learns nothing it could replay, because a ticket opens
+moves only from that source and only of the threads it names; and asking for
+an unlock on the source as well keeps a stolen phone without the person's
+face, finger, or passcode from even spending a confirmation there. The
+waits live in memory only, so a restart ends them and the person asks again.
+
+**A browser passkey does not confirm a move, and none is planned.** A passkey belongs to the one
+origin that registered it, and the destination checks a passkey owner only on
+its own origin, so a browser on the source's page holds no passkey the
+destination would accept. Confirming from a browser would need the person to
+open the destination's own page, which would then have to read what the source
+holds and hand the source the ticket: a cross-origin read and a cross-origin
+write to the source. Every request that changes something stays same-origin
+(see [Delivery plan](#delivery-plan), Guests and client views). Touch ID and
+an owner phone cover the move, so no new credential, origin allowance, or
+related-origin passkey is added for it.
 
 **The person is the same everywhere.** A host has one person, and every member
 is that person's own device, so a moved thread arrives as the person's own
@@ -2388,9 +2450,9 @@ a numbered slice. Built, with these narrower readings:
     turn for a busy thread), and shows the progress line with Cancel move,
     Take back here, the This thread can't move notice with Choose another
     computer and Dismiss, the Arriving notice with Activate anyway, and the
-    Moved notice. What it does not do yet: Hand over instead, an unlock
-    other than this Mac's Touch ID, accept moves on the hub, or Prepare to
-    shut down.
+    Moved notice. What it does not do yet: Hand over instead, accept moves
+    on the hub, or Prepare to shut down. The eleventh part adds the owner
+    phone.
 
     The sixth part lets the hub take moved threads: its Accept moved
     threads setting (on by default, a window on the hub only, journaled),
@@ -2523,6 +2585,35 @@ a numbered slice. Built, with these narrower readings:
     or a window reading another host, shows neither. What it
     does not do yet: Open there opening the thread in this window, and the
     estimate in the bar.
+
+    The eleventh part lets an owner phone unlock a move a window started, as
+    [Confirming on a phone](#moving-a-thread-to-another-member) describes.
+    The move sheet offers **Confirm on your phone** beside Move with Touch
+    ID, and as its primary button in a window with no Touch ID key; Prepare
+    to shut down offers it for the batch the same way. The window route
+    (`phone-ask`, and `shutdown/phone-ask` for a batch) holds the move on
+    the source for five minutes and runs the checks Move with Touch ID runs
+    first; the thread's status reads Waiting for your phone with Don't move,
+    in the Computer card and in the frozen bar in the composer's place,
+    and a wait no phone answers journals `unlock-required`. Two owner routes
+    on the source list what waits (a read) and take the ticket id (an
+    administration-class action, so a session covers it). The destination's
+    ticket route is unchanged: the phone asks it for the ticket as an owner
+    there, with its own fresh own-class unlock bound to the route and to the
+    body naming the source and the held threads. The phone app lists the
+    waits under Moves waiting for you, read again every five seconds while
+    the Computers screen shows and the app is in front and at once when the
+    app returns to the front, so a move held after the screen opened
+    appears before its wait runs out. It confirms one with a single
+    biometric prompt, asking the destination before telling the source.
+    Server smokes cover the move and the batch, a phone that is not an owner
+    on the source, a confirmation spent once, a confirmation without an
+    unlock, a challenge bound to another body, an administration session on
+    the ticket route, a ticket for other threads, and a phone removed from
+    the destination's owner list after the ticket. What it does not do yet:
+    a notification telling the phone a move waits (the person opens the
+    app) and a run on a real phone, which is a maintainer gate. A browser
+    passkey confirming a move is not planned (above).
 
     A further part carries each thread's bulk parts with every move, in all
     three modes, as described under **What moves**. The source packs a Chat
