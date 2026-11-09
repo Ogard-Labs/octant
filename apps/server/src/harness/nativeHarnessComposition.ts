@@ -65,6 +65,7 @@ import {
   createNativeHarnessTools,
   type NativeHarnessShellPort,
   type NativeHarnessShellRun,
+  type NativeHarnessSkillPort,
   type NativeHarnessToolPorts,
 } from "./nativeHarnessTools";
 
@@ -226,6 +227,18 @@ export interface NativeHarnessCompositionOptions {
     readonly projectId?: ProjectId | undefined;
     readonly lead: NativeHarnessSlotCandidate;
   }) => NonNullable<NativeHarnessToolPorts["secondOpinion"]>;
+  /**
+   * The skills effective for a lead thread, behind `skill`; absent on a host
+   * that cannot resolve them, where the tool is not offered.
+   */
+  readonly skills?: (scope: {
+    readonly mode: OctantMode;
+    readonly threadId: string;
+    readonly projectId: ProjectId | null;
+    readonly threadVersion: number;
+    readonly providerInstanceId: ProviderInstanceId;
+    readonly modelId: ChatThread["modelId"];
+  }) => NativeHarnessSkillPort;
   readonly hostId: ToolActionAuthority["hostId"];
   readonly readThreadTaint: (threadId: string) => boolean;
   /** Questions to the person; absent on a host with no surface to answer them. */
@@ -901,6 +914,22 @@ export function createNativeHarnessComposition(
             transcripts: options.journal.transcripts,
           }),
         };
+  const skillsFor = (
+    mode: OctantMode,
+    thread: ChatThread | WorkThread | CodeThread,
+  ): Pick<NativeHarnessToolPorts, "skills"> =>
+    options.skills === undefined
+      ? {}
+      : {
+          skills: options.skills({
+            mode,
+            threadId: String(thread.id),
+            projectId: thread.projectId ?? null,
+            threadVersion: Number(thread.version),
+            providerInstanceId: thread.providerInstanceId,
+            modelId: thread.modelId,
+          }),
+        };
   return {
     prepareCodeCommand: async ({
       thread,
@@ -1035,6 +1064,7 @@ export function createNativeHarnessComposition(
             projectId: thread.projectId,
             lead: leadOf(thread),
           }),
+          ...(sideChat ? {} : skillsFor("chat", thread)),
         },
       });
     },
@@ -1074,6 +1104,7 @@ export function createNativeHarnessComposition(
             projectId: thread.projectId,
             lead: leadOf(thread),
           }),
+          ...skillsFor("work", thread),
         },
       });
     },
@@ -1126,6 +1157,7 @@ export function createNativeHarnessComposition(
             projectId: thread.projectId,
             lead: leadOf(thread),
           }),
+          ...skillsFor("code", thread),
         },
       });
     },
@@ -1172,6 +1204,7 @@ export function createNativeHarnessComposition(
             projectId: thread.projectId,
             lead: leadOf(thread),
           }),
+          ...skillsFor("code", thread),
         },
       });
     },
@@ -1210,6 +1243,7 @@ export function createNativeHarnessComposition(
             projectId: thread.projectId,
             lead: leadOf(thread),
           }),
+          ...skillsFor("work", thread),
         },
       });
     },

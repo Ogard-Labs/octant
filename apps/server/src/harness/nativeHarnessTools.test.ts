@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import {
+  MAX_NATIVE_HARNESS_SKILL_CHARACTERS,
   decodeNativeHarnessContextRemaining,
   type ProviderExecutionPolicy,
   type ToolActionAuthority,
@@ -662,6 +663,58 @@ describe("native harness tools", () => {
       });
       expect(asked).toEqual(["shell-commands|goal-check: bun run test parser"]);
       expect(commands).toEqual([]);
+    });
+  });
+
+  describe("skills", () => {
+    const longInstructions = "x".repeat(MAX_NATIVE_HARNESS_SKILL_CHARACTERS + 10);
+    const skills: NonNullable<NativeHarnessToolPorts["skills"]> = {
+      list: async () => ({ status: "listed", skills: [{ name: "review", description: "Review" }] }),
+      load: async (name) =>
+        name === "long"
+          ? { status: "loaded", name, instructions: longInstructions }
+          : name === "review"
+            ? { status: "loaded", name, instructions: "Use the checklist." }
+            : { status: "refused", reason: "skill-not-effective", message: `${name} is off.` },
+    };
+
+    it("offers skill in Chat and in a Plan turn, because it only reads", async () => {
+      const chat = await fixture({}, { skills }, "chat");
+      expect(chat.tools.definitions.map((definition) => definition.name)).toEqual(["skill"]);
+      const plan = await fixture({ executionPolicy: "plan", approvalSatisfied: false }, { skills });
+      expect(await call(plan.tools, "skill", { operation: "list" })).toEqual({
+        result: { skills: [{ name: "review", description: "Review" }] },
+        isError: false,
+      });
+    });
+
+    it("returns a skill's instructions and passes a refusal through with its reason", async () => {
+      const { tools } = await fixture({}, { skills });
+      expect(await call(tools, "skill", { operation: "load", name: "review" })).toEqual({
+        result: { name: "review", instructions: "Use the checklist.", truncated: false },
+        isError: false,
+      });
+      expect(await call(tools, "skill", { operation: "load", name: "deploy" })).toEqual({
+        result: { error: "skill-not-effective", message: "deploy is off." },
+        isError: true,
+      });
+    });
+
+    it("cuts long instructions, says how much was left out, and continues from the offset it names", async () => {
+      const { tools } = await fixture({}, { skills });
+      const first = await call(tools, "skill", { operation: "load", name: "long" });
+      expect(first.result).toMatchObject({
+        truncated: true,
+        omittedCharacters: 10,
+        nextOffset: MAX_NATIVE_HARNESS_SKILL_CHARACTERS,
+        note: expect.stringContaining(`offset ${MAX_NATIVE_HARNESS_SKILL_CHARACTERS}`),
+      });
+      const rest = await call(tools, "skill", {
+        operation: "load",
+        name: "long",
+        offset: MAX_NATIVE_HARNESS_SKILL_CHARACTERS,
+      });
+      expect(rest.result).toEqual({ name: "long", instructions: "x".repeat(10), truncated: false });
     });
   });
 });
