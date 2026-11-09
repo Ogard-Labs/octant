@@ -7705,6 +7705,31 @@ the model at another size.
   step are answered as not run, so the conversation stays valid for the next
   send. An unknown stream event type is
   ignored and logged, never fatal.
+- **Window fill on every request.** Every request a lead sends ends with one
+  user message from Octant saying how full the window is: "[Note from Octant,
+  not the user: this request fills about 62% of the model's 200K-token window.
+  Octant summarizes earlier turns once a request passes 85%.]" The figure is
+  the four-characters-a-token estimate the session's compaction point is
+  judged by, taken from the request as fitted and after any compaction, so the
+  two numbers mean the same arithmetic. The note is added to the copy that is
+  sent and never joins the conversation or the journal, so the next request
+  carries the same earlier messages and its prefix still matches the cache. It
+  is a message of its own because endpoints drop text beside tool results. The
+  window is the compaction point's; with the rule off it is the one the
+  request-fitting rules settle on (`resolveModelContextWindow` over the
+  instance's observed model, read as each request is sent), and the note's
+  second sentence becomes "Octant summarizes earlier turns only when a request
+  no longer fits.", which is what the loop then does. A model whose window
+  nothing names and a turn running on a fallback model get no note, since
+  neither has a window Octant can stand behind; `context-remaining` answers as
+  before. A summary request carries none, and a request the endpoint's own
+  size check would refuse only because of the note goes without it, since a
+  body over the limit fails as a configuration error that is never retried or
+  compacted. The Anthropic Messages body marks the
+  message before a trailing note as well as the note itself, since a cache
+  entry ending at the note is never read again. Rationale: the lead was told
+  to call `context-remaining` before long work, so it learned how full the
+  window was only when it remembered to ask.
 - **Endpoint port.** A direct endpoint reaches the harness through the
   provider-sdk harness endpoint port (`@octant/provider-sdk/harness-endpoint`),
   the same seam a third-party driver would use. The port is types only: the
@@ -11037,8 +11062,14 @@ mechanisms are:
       `HOME` denied) and is told the sandbox is external (thread `read-only`,
       each turn `externalSandbox`, approval `never`), because macOS refuses a
       second Seatbelt inside the first; and the Octant Harness, whose
-      commands run on the confined shell. Claude Code, ACP agents, OpenCode,
-      and Pi launch unwrapped at Full access, so a sandboxed thread on one of
+      commands run on the confined shell. Claude Code keeps its own command
+      sandbox with `failIfUnavailable` and no unsandboxed-command retry;
+      Octant checks file tools against the Project and extra folders before
+      answering allow. Its permission mode stays `bypassPermissions`, and
+      both its process and command sandbox resolve guarded egress when Network
+      limits are on. The admitted session keeps this choice until it ends,
+      including when resumed. Plan and credential confirmation are unchanged.
+      ACP agents, OpenCode, and Pi launch unwrapped at Full access, so a sandboxed thread on one of
       them refuses to start with a plain message
       (`refusesFullAccessSandbox`, checked before each Code and Work turn)
       rather than running open.
