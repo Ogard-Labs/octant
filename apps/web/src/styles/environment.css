@@ -963,6 +963,26 @@ details.thread-move-sheet__section > summary {
   font-size: var(--oct-text-sm);
 }
 
+.thread-move-sheet__size {
+  float: inline-end;
+  margin-inline-start: var(--oct-space-3);
+  color: var(--oct-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.thread-move-sheet__total {
+  margin: 0;
+  color: var(--oct-fg);
+  font-size: var(--oct-text-sm);
+  font-variant-numeric: tabular-nums;
+}
+
+.thread-move-sheet__basis {
+  margin: 0;
+  color: var(--oct-muted);
+  font-size: var(--oct-text-xs);
+}
+
 .thread-move-sheet__consequence {
   margin: 0;
   color: var(--oct-fg);
@@ -1057,6 +1077,7 @@ details.thread-move-sheet__section > summary {
 
 .shutdown-dialog__meta,
 .shutdown-dialog__summary,
+.shutdown-dialog__basis,
 .shutdown-dialog__sentence {
   margin: 0;
   color: var(--oct-muted);
@@ -1159,6 +1180,12 @@ details.thread-move-sheet__section > summary {
   color: var(--oct-muted);
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.shutdown-row__size {
+  flex: none;
+  color: var(--oct-muted);
+  font-variant-numeric: tabular-nums;
 }
 
 .shutdown-row__reason {

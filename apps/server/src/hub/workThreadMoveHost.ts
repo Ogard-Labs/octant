@@ -108,6 +108,23 @@ export function createWorkThreadMoveHost(options: WorkThreadMoveHostOptions): {
     return id === undefined ? undefined : options.readThread(id);
   };
 
+  /** The thread as its part carries it; undefined when it cannot move. */
+  const movedOf = async (thread: MovedThreadReference): Promise<MovedWorkThread | undefined> => {
+    const id = idOf(thread);
+    const work = id === undefined ? undefined : options.readThread(id);
+    const driverKind =
+      work === undefined ? undefined : options.providerDriverKind(work.providerInstanceId);
+    if (id === undefined || work === undefined || driverKind === undefined) return undefined;
+    return {
+      format: MOVED_WORK_THREAD_FORMAT,
+      title: work.title,
+      providerDriverKind: driverKind,
+      modelId: work.modelId as MovedWorkThread["modelId"],
+      externalContentIngested: options.externalContentIngested(thread.threadId),
+      entries: await options.transcript(id),
+    };
+  };
+
   const source: ThreadMoveSourceHost = {
     read: async (thread) => {
       const id = idOf(thread);
@@ -124,22 +141,19 @@ export function createWorkThreadMoveHost(options: WorkThreadMoveHostOptions): {
     freeze: (thread) => options.holds.hold(thread),
     unfreeze: (thread) => options.holds.release(thread),
     isFrozen: (thread) => options.holds.isHeld(thread),
+    measure: async (thread) => {
+      const moved = await movedOf(thread);
+      if (moved === undefined) return { status: "unknown" };
+      // The very text pack writes, so the size is exact.
+      const bytes = Buffer.byteLength(JSON.stringify(moved));
+      return { status: "measured", bytes, parts: [{ kind: "thread-bundle", bytes }] };
+    },
     pack: async (thread, folder) => {
-      const id = idOf(thread);
-      const work = id === undefined ? undefined : options.readThread(id);
-      const driverKind =
-        work === undefined ? undefined : options.providerDriverKind(work.providerInstanceId);
-      if (id === undefined || work === undefined || driverKind === undefined) {
-        return { status: "refused", reason: "refused" };
-      }
+      const conversation = await movedOf(thread);
+      if (conversation === undefined) return { status: "refused", reason: "refused" };
       const bulk = await packThreadParts(thread, folder, options.parts.source);
       const moved: MovedWorkThread = {
-        format: MOVED_WORK_THREAD_FORMAT,
-        title: work.title,
-        providerDriverKind: driverKind,
-        modelId: work.modelId as MovedWorkThread["modelId"],
-        externalContentIngested: options.externalContentIngested(thread.threadId),
-        entries: await options.transcript(id),
+        ...conversation,
         ...(bulk.index === undefined ? {} : { parts: bulk.index }),
       };
       const path = join(folder, "thread.json");

@@ -18,6 +18,8 @@ export function threadMoveHostsByMode(hosts: Partial<Record<OctantMode, ModeHost
       freeze: (thread) => of(thread)?.source.freeze(thread),
       unfreeze: (thread) => of(thread)?.source.unfreeze(thread),
       isFrozen: (thread) => of(thread)?.source.isFrozen(thread) ?? false,
+      measure: async (thread) =>
+        (await of(thread)?.source.measure(thread)) ?? { status: "unknown" },
       pack: async (thread, folder, moveId) =>
         (await of(thread)?.source.pack(thread, folder, moveId)) ?? {
           status: "refused",

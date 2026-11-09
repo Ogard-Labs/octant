@@ -65,6 +65,7 @@ function leavingThreads(folder: string) {
     freeze: (thread) => frozen.add(thread.threadId),
     unfreeze: (thread) => frozen.delete(thread.threadId),
     isFrozen: (thread) => frozen.has(thread.threadId),
+    measure: async () => ({ status: "unknown" }),
     pack: async (_thread, partsFolder) => {
       mkdirSync(partsFolder, { recursive: true });
       const path = join(partsFolder, "thread.json");
@@ -135,6 +136,7 @@ function arrivingThreads() {
     freeze: () => {},
     unfreeze: () => {},
     isFrozen: () => false,
+    measure: async () => ({ status: "unknown" }),
     pack: async () => ({ status: "refused", reason: "refused" }),
     erase: async () => ({ worktreeKept: false }),
   };
