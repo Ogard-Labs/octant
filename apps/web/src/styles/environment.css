@@ -990,6 +990,13 @@ details.thread-move-sheet__section > summary {
   line-height: 1.5;
 }
 
+/* A busy thread's two-way choice: Move after this turn, or Stop and move. */
+.thread-move-sheet__timing {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--oct-space-2);
+}
+
 .thread-move-sheet__foot {
   display: flex;
   justify-content: flex-end;
@@ -1178,6 +1185,18 @@ details.thread-move-sheet__section > summary {
   min-width: 0;
   overflow: hidden;
   color: var(--oct-muted);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Files a handover left on this computer because they hold a secret. */
+.shutdown-row__files {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--oct-muted);
+  font-family: var(--oct-font-mono);
+  font-size: var(--oct-text-xs);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
