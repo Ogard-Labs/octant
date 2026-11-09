@@ -12,12 +12,14 @@ import { randomUUID } from "node:crypto";
 import {
   THREAD_MOVE_PHONE_WAIT_MS,
   type AuditActingPrincipal,
+  type HandoverRefusal,
   type HubMemberId,
   type MovedThreadReference,
   type ProjectId,
   type RosterMember,
   type ShutdownBatchRow,
   type ShutdownChallengeRequest,
+  type ShutdownHandoverRequest,
   type ShutdownListing,
   type ShutdownPhoneAskRequest,
   type ShutdownPlacement,
@@ -54,6 +56,18 @@ const TURN_POLL_MS = 2_000;
 /** Threads measured at once: each Code thread runs Git in its own checkout. */
 const MEASURED_AT_ONCE = 4;
 
+/**
+ * How long a stopped turn may take to end before Stop and move gives up with
+ * `busy`. A runtime that can be force-stopped keeps its turn streaming until
+ * it really ends, so the stop is not instant; one still running after this
+ * did not take the stop, and the person sees This thread can't move rather
+ * than a move that waits on a turn they asked to end.
+ */
+const STOP_WAIT_LIMIT_MS = 2 * 60_000;
+
+/** What stopping a thread's work answered. */
+export type ThreadWorkStop = { readonly status: "stopped" } | { readonly status: "refused" };
+
 export interface ThreadMovesFromWindowOptions {
   readonly moves: Pick<
     ThreadMoveService,
@@ -69,6 +83,13 @@ export interface ThreadMovesFromWindowOptions {
   readonly state: ThreadMoveStatePort;
   readonly tickets: ThreadMoveTicketClient;
   readonly source: Pick<ThreadMoveSourceHost, "read" | "measure">;
+  /**
+   * Stops the thread's running turn, its child runs here and the ones it
+   * delegated to another member, and its pending approvals and questions,
+   * each through its own mode's existing stop. Called only for Stop and move,
+   * after the destination's unlock was redeemed.
+   */
+  readonly stopWork: (thread: MovedThreadReference) => Promise<ThreadWorkStop>;
   /** The roster this host holds; empty when it is in no hub. */
   readonly members: () => ReadonlyArray<RosterMember>;
   readonly selfMemberId: () => string;
@@ -76,6 +97,7 @@ export interface ThreadMovesFromWindowOptions {
   readonly listThreads: () => Promise<ReadonlyArray<ShutdownThreadFacts>>;
   readonly now: () => number;
   readonly pollMs?: number;
+  readonly stopWaitMs?: number;
 }
 
 /** One thread on this host, as Prepare to shut down reads it. */
@@ -185,6 +207,8 @@ export function shortenedForListing(text: string): string {
 interface Waiting {
   readonly destinationMemberId: HubMemberId;
   readonly timer: ReturnType<typeof setInterval>;
+  /** Stop and move: the turn was told to stop, and the move starts once it has. */
+  readonly stopping: boolean;
 }
 
 /** The most moves held for a phone at once; each names up to a batch of threads. */
@@ -327,6 +351,8 @@ export class ThreadMovesFromWindow {
       if (reading.delegated) return refused("delegated");
       if (reading.busy && request.timing === "now") return refused("busy");
 
+      // The unlock is redeemed before anything is stopped, so a declined or
+      // expired unlock leaves the person's running turn alone.
       const ticket = await this.#options.tickets.redeem({
         destinationMemberId: String(request.destinationMemberId),
         challengeId: request.unlock.challengeId,
@@ -334,6 +360,10 @@ export class ThreadMovesFromWindow {
       });
       if (ticket.status === "refused") return refused(ticket.reason);
 
+      const stopping = reading.busy && request.timing === "stop-and-move";
+      if (stopping && (await this.#options.stopWork(thread)).status === "refused") {
+        return refused("busy");
+      }
       this.#launch({
         thread,
         destinationMemberId: request.destinationMemberId,
@@ -342,10 +372,11 @@ export class ThreadMovesFromWindow {
           ? {}
           : { destinationProjectId: request.destinationProjectId }),
         waitForTurn: reading.busy,
+        stopping,
         queue: undefined,
         reservation: claim,
       });
-      return reading.busy ? { status: "waiting-for-turn" } : { status: "started" };
+      return reading.busy && !stopping ? { status: "waiting-for-turn" } : { status: "started" };
     } catch (error) {
       this.#release(thread, claim);
       throw error;
@@ -451,20 +482,13 @@ export class ThreadMovesFromWindow {
     const queue = { tail: Promise.resolve() };
     void (async () => {
       for (const row of wait.rows) {
-        const reservation = row.claim;
-        const reading = await this.#readClaimed(row.thread, reservation);
-        if (reading === undefined) continue;
-        this.#launch({
-          thread: row.thread,
+        await this.#launchClaimed({
+          row,
+          claim: row.claim,
           destinationMemberId: wait.destinationMemberId,
           ticketId: input.ticketId,
-          ...(row.destinationProjectId === undefined
-            ? {}
-            : { destinationProjectId: row.destinationProjectId }),
-          waitForTurn: reading.status === "found" && reading.busy && row.timing === "after-turn",
           queue,
           principal: input.principal,
-          reservation,
         });
       }
     })();
@@ -674,6 +698,38 @@ export class ThreadMovesFromWindow {
     };
   }
 
+  /**
+   * Whether Prepare to shut down may hand this thread over, or why not. Like
+   * the listing, it acts for the whole host, so it offers exactly what the
+   * listing offers Hand over for: a Code thread here, not delegated to this
+   * host, not waiting to move, that the head's destination cannot take. A
+   * thread that can move moves with its history, which a handover would
+   * leave behind. The handover itself still refuses a held or frozen thread.
+   */
+  async shutdownHandoverRefusal(
+    request: ShutdownHandoverRequest,
+  ): Promise<HandoverRefusal | undefined> {
+    const { thread } = request;
+    if (thread.mode !== "code") return "refused";
+    const member = this.#candidates().find(
+      (candidate) => String(candidate.memberId) === String(request.destinationMemberId),
+    );
+    if (member === undefined) return "refused";
+    if (this.#isWaiting(thread)) return "busy";
+    const reading = await this.#options.source.read(thread);
+    if (reading.status === "missing") return "refused";
+    if (reading.delegated) return "delegated";
+    const answer = await this.#options.moves.askProjects(String(member.memberId), {
+      mode: "code",
+      repositoryRemotes: reading.repositoryRemotes,
+    });
+    const takes =
+      answer !== "unreachable" &&
+      answer !== "refused" &&
+      (answer.projects.length > 0 || answer.noProjectAllowed);
+    return takes ? "refused" : undefined;
+  }
+
   /** The destination's challenge for one batch: one unlock covers exactly these threads. */
   shutdownChallenge(request: ShutdownChallengeRequest): Promise<ThreadMoveChallengeOutcome> {
     return this.#options.tickets.challenge(String(request.destinationMemberId), request.threads);
@@ -682,7 +738,12 @@ export class ThreadMovesFromWindow {
   /**
    * Starts one destination's batch on a single ticket. Threads moving now go
    * one after another, so most finish early; one set to move after its turn
-   * joins when that turn ends. Every way each ends is recorded by its move.
+   * joins when that turn ends, and one set to Stop and move is stopped as soon
+   * as the batch is unlocked and joins once it has stopped. Every way each
+   * ends is recorded by its move. Prepare to shut down acts for the whole
+   * host, as its menu entry does, so a row is stopped only when the redeemed
+   * ticket names its thread, the thread is here, and it is not delegated to
+   * this host by a peer, whose turn belongs to that delegation.
    */
   async shutdownStart(request: ShutdownStartRequest): Promise<ShutdownStartOutcome> {
     const threads = request.rows.map((row) => row.thread);
@@ -717,21 +778,62 @@ export class ThreadMovesFromWindow {
     }
     const queue = { tail: Promise.resolve() };
     for (const { row, claim } of claimed) {
-      const reading = await this.#readClaimed(row.thread, claim);
-      if (reading === undefined) continue;
-      this.#launch({
-        thread: row.thread,
+      await this.#launchClaimed({
+        row,
+        claim,
         destinationMemberId: request.destinationMemberId,
         ticketId: ticket.ticketId,
-        ...(row.destinationProjectId === undefined
-          ? {}
-          : { destinationProjectId: row.destinationProjectId }),
-        waitForTurn: reading.status === "found" && reading.busy && row.timing === "after-turn",
         queue,
-        reservation: claim,
       });
     }
     return { status: "started" };
+  }
+
+  /**
+   * Launches one claimed row of a batch on a ticket in hand, after reading
+   * its thread again. A row set to Stop and move whose turn still runs has
+   * that turn stopped first, unless the thread was delegated here by a peer
+   * (its turn belongs to that delegation) or Don't move withdrew the claim
+   * meanwhile. Every way the row ends gives its claim back.
+   */
+  async #launchClaimed(input: {
+    readonly row: ShutdownBatchRow;
+    readonly claim: symbol;
+    readonly destinationMemberId: HubMemberId;
+    readonly ticketId: string;
+    readonly queue: { tail: Promise<void> };
+    readonly principal?: AuditActingPrincipal;
+  }): Promise<void> {
+    const { row, claim } = input;
+    const reading = await this.#readClaimed(row.thread, claim);
+    if (reading === undefined) return;
+    const busy = reading.status === "found" && reading.busy;
+    const stopping = busy && row.timing === "stop-and-move";
+    const endsHere = (reason: ThreadMoveFailureReason) => {
+      this.#release(row.thread, claim);
+      this.#options.moves.refuseBeforeStart(row.thread, reason);
+      this.#settle(row.thread);
+    };
+    if (stopping) {
+      if (reading.status === "found" && reading.delegated) return endsHere("delegated");
+      // Don't move pressed while the thread was read: its turn is left alone.
+      if (!this.#holdsClaim(row.thread, claim)) return;
+      const stopped = await this.#options.stopWork(row.thread).catch(() => undefined);
+      if (stopped === undefined || stopped.status === "refused") return endsHere("busy");
+    }
+    this.#launch({
+      thread: row.thread,
+      destinationMemberId: input.destinationMemberId,
+      ticketId: input.ticketId,
+      ...(row.destinationProjectId === undefined
+        ? {}
+        : { destinationProjectId: row.destinationProjectId }),
+      waitForTurn: busy && row.timing !== "now",
+      stopping,
+      queue: input.queue,
+      ...(input.principal === undefined ? {} : { principal: input.principal }),
+      reservation: claim,
+    });
   }
 
   #candidates(): ReadonlyArray<RosterMember> {
@@ -755,10 +857,12 @@ export class ThreadMovesFromWindow {
     readonly ticketId: string;
     readonly destinationProjectId?: ProjectId;
     readonly waitForTurn: boolean;
+    /** Stop and move: the wait ends as `busy` when the turn has not stopped in time. */
+    readonly stopping: boolean;
     readonly queue: { tail: Promise<void> } | undefined;
     /** Who unlocked it: this window's Touch ID, or the owner phone that confirmed it. */
     readonly principal?: AuditActingPrincipal;
-    /** A phone confirmation's hold on the thread; Don't move withdraws it, and then nothing moves. */
+    /** The thread's one claim; Don't move withdraws it, and then nothing moves. */
     readonly reservation?: symbol;
   }): void {
     const { thread } = input;
@@ -808,7 +912,13 @@ export class ThreadMovesFromWindow {
         // the move, while the thread was read: only the wait still current acts.
         if (!current()) return;
         if (now.status === "found" && now.busy) {
-          if (this.#options.now() - startedWaitingAt > TICKET_WAIT_LIMIT_MS) {
+          const waited = this.#options.now() - startedWaitingAt;
+          if (input.stopping && waited > (this.#options.stopWaitMs ?? STOP_WAIT_LIMIT_MS)) {
+            this.#stopWaiting(thread);
+            if (reserved() && input.reservation !== undefined) this.#reserved.delete(threadKey);
+            this.#options.moves.refuseBeforeStart(thread, "busy");
+            this.#settle(thread);
+          } else if (waited > TICKET_WAIT_LIMIT_MS) {
             this.#stopWaiting(thread);
             if (reserved() && input.reservation !== undefined) this.#reserved.delete(threadKey);
             this.#options.moves.refuseBeforeStart(thread, "unlock-required");
@@ -821,7 +931,11 @@ export class ThreadMovesFromWindow {
       })();
     }, this.#options.pollMs ?? TURN_POLL_MS);
     timer.unref?.();
-    this.#waiting.set(key(thread), { destinationMemberId: input.destinationMemberId, timer });
+    this.#waiting.set(key(thread), {
+      destinationMemberId: input.destinationMemberId,
+      timer,
+      stopping: input.stopping,
+    });
   }
 
   /** The person changed their mind before the turn ended. */
@@ -908,6 +1022,7 @@ export class ThreadMovesFromWindow {
             waiting: {
               destinationMemberId: waiting.destinationMemberId,
               destinationName: nameOf(String(waiting.destinationMemberId)),
+              ...(waiting.stopping ? { stopping: true } : {}),
             },
           }),
       ...(phoneWait === undefined

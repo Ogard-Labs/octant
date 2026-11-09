@@ -307,7 +307,12 @@ function computerPill(status: ThreadMoveThreadStatus | undefined): {
   if (status?.sending !== undefined) {
     return { label: `Moving ${String(percent(status.sending))}%`, tone: "outline" };
   }
-  if (status?.waiting !== undefined) return { label: "Moves after this turn", tone: "outline" };
+  if (status?.waiting !== undefined) {
+    return {
+      label: status.waiting.stopping === true ? "Stopping" : "Moves after this turn",
+      tone: "outline",
+    };
+  }
   if (status?.waitingForPhone !== undefined) {
     return { label: "Waiting for your phone", tone: "outline" };
   }
@@ -476,7 +481,9 @@ function MoveProgress(props: {
     return (
       <div className="environment-move__progress">
         <p className="environment-move__sentence">
-          Moves to {waiting.destinationName} when this turn ends.
+          {waiting.stopping === true
+            ? `Stopping this turn, then moving to ${waiting.destinationName}.`
+            : `Moves to ${waiting.destinationName} when this turn ends.`}
         </p>
         <OctantButton
           onClick={() => void props.client.stopWaiting(props.thread).finally(props.onChanged)}
@@ -630,7 +637,10 @@ function ThreadMoveSheet(props: {
   const primary = useRef<HTMLButtonElement>(null);
   const [working, setWorking] = useState(false);
   const [problem, setProblem] = useState<string | undefined>(undefined);
+  // A busy thread moves after its turn unless the person picks Stop and move.
+  const [whenBusy, setWhenBusy] = useState<"after-turn" | "stop-and-move">("after-turn");
   const { member } = props;
+  const stopsFirst = props.busy && whenBusy === "stop-and-move";
   const sizes = useMoveSizes(props.client, String(member.memberId), props.thread);
   const size = typeof sizes === "string" ? undefined : sizes.rows[0]?.size;
 
@@ -646,7 +656,7 @@ function ThreadMoveSheet(props: {
         ...(props.projectId === undefined
           ? {}
           : { destinationProjectId: decodeProjectId(props.projectId) }),
-        timing: props.busy ? "after-turn" : "now",
+        timing: props.busy ? whenBusy : "now",
       });
       if (asked.status === "refused") {
         setProblem(FAILURE_SENTENCES[asked.reason]);
@@ -686,7 +696,7 @@ function ThreadMoveSheet(props: {
         ...(props.projectId === undefined
           ? {}
           : { destinationProjectId: decodeProjectId(props.projectId) }),
-        timing: props.busy ? "after-turn" : "now",
+        timing: props.busy ? whenBusy : "now",
         unlock: { challengeId: asked.challenge.challengeId, signature: signed.signature },
       });
       if (started.status === "refused") {
@@ -773,8 +783,35 @@ function ThreadMoveSheet(props: {
       </details>
       <p className="thread-move-sheet__consequence">
         This thread is erased from this computer once {member.name} has it.
-        {props.busy ? " A turn is running, so it moves when the turn ends." : ""}
+        {stopsFirst
+          ? " The running turn stops now, and its pending approvals and questions are cancelled."
+          : props.busy
+            ? " A turn is running, so it moves when the turn ends."
+            : ""}
       </p>
+      {props.busy ? (
+        <div aria-label="When to move" className="thread-move-sheet__timing" role="radiogroup">
+          {(
+            [
+              ["after-turn", "Move after this turn"],
+              ["stop-and-move", "Stop and move"],
+            ] as const
+          ).map(([value, label]) => (
+            <OctantButton
+              aria-checked={whenBusy === value}
+              className="thread-move-sheet__timing-choice window-no-drag"
+              key={value}
+              onClick={() => setWhenBusy(value)}
+              role="radio"
+              size="sm"
+              type="button"
+              variant={whenBusy === value ? "secondary" : "outline"}
+            >
+              {label}
+            </OctantButton>
+          ))}
+        </div>
+      ) : null}
       {problem === undefined ? null : (
         <OctantAlert title="This thread can't move" tone="warning">
           {problem}
@@ -812,7 +849,11 @@ function ThreadMoveSheet(props: {
               Confirm on your phone
             </OctantButton>
             <OctantButton disabled={working} onClick={() => void moveWithUnlock()} ref={primary}>
-              {props.busy ? "Move after this turn with Touch ID" : "Move with Touch ID"}
+              {stopsFirst
+                ? "Stop and move with Touch ID"
+                : props.busy
+                  ? "Move after this turn with Touch ID"
+                  : "Move with Touch ID"}
             </OctantButton>
           </>
         )}

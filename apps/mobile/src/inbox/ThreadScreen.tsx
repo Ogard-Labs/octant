@@ -56,7 +56,8 @@ export interface ThreadScreenProps {
 
 export function ThreadScreen(props: ThreadScreenProps) {
   const { colors } = useTheme();
-  const { transportForHost, hosts, health, hub } = useMobileSession();
+  const { environment, transportForHost, hosts, health, hub } = useMobileSession();
+  const offlineDemo = environment.kind === "mock" && environment.offlineDemo;
   const selected = props.selected;
   const hostId = selected?.hostId;
   const transport = useMemo(
@@ -202,11 +203,12 @@ export function ThreadScreen(props: ThreadScreenProps) {
   const threadAttachments = mode === "work" ? work : mode === "code" ? code : chat;
   const pendingAttachments = threadAttachments.pendingAttachments;
   const attachFrom = (source: MobileAttachmentSource) => {
+    if (offlineDemo) return;
     setAttachOpen(false);
     void threadAttachments.attach(source, attachmentOffer);
   };
   const attachProps =
-    staleGate.allowProductMutations && attachmentOffer.sources.length > 0
+    !offlineDemo && staleGate.allowProductMutations && attachmentOffer.sources.length > 0
       ? { onPressAttach: () => setAttachOpen(true) }
       : {};
   const followUpComposerCopy =
@@ -224,7 +226,11 @@ export function ThreadScreen(props: ThreadScreenProps) {
     (text: string) => setPrompt((draft) => appendTranscript(draft, text)),
     [],
   );
-  const voice = useVoiceDictation({ transport, editable: composerEditable, appendToDraft });
+  const voice = useVoiceDictation({
+    transport: offlineDemo ? undefined : transport,
+    editable: composerEditable,
+    appendToDraft,
+  });
   const replyDetail = useThreadReplyDetail({ transport, mode, threadId });
 
   const styles = useMemo(
@@ -333,19 +339,22 @@ export function ThreadScreen(props: ThreadScreenProps) {
         <View style={styles.topSpacer} />
       </View>
 
-      <ThreadSurfaceSwitcher active={activeSurface} onSelect={setSurface} surfaces={surfaces} />
+      {offlineDemo ? null : (
+        <ThreadSurfaceSwitcher active={activeSurface} onSelect={setSurface} surfaces={surfaces} />
+      )}
 
       <ScrollView
         contentContainerStyle={styles.content}
         keyboardShouldPersistTaps="handled"
         style={styles.scroll}
+        testID="mobile-thread-transcript"
       >
         {connectionStatus.kind === "waiting-to-retry" || chat.reconnecting ? (
           <Text style={styles.connectionStatus}>{RECONNECTING_COPY}</Text>
         ) : connectionStatus.kind === "offline" ? (
           <Text style={styles.connectionStatus}>Waiting for the network.</Text>
         ) : null}
-        {activeSurface === "browser" && transport !== undefined ? (
+        {!offlineDemo && activeSurface === "browser" && transport !== undefined ? (
           <BrowserSurfacePanel
             mode={selected.mode}
             reach={browserReach}
@@ -355,10 +364,10 @@ export function ThreadScreen(props: ThreadScreenProps) {
         ) : null}
         {activeSurface === "browser" ? null : (
           <>
-            {transport === undefined ? null : (
+            {offlineDemo || transport === undefined ? null : (
               <ExtensionToolApprovalCard threadId={selected.threadId} transport={transport} />
             )}
-            {transport === undefined ? null : (
+            {offlineDemo || transport === undefined ? null : (
               <NativeHarnessSessionPanel threadId={selected.threadId} transport={transport} />
             )}
             {busy && chat.activeAttempt === undefined ? (
@@ -370,7 +379,8 @@ export function ThreadScreen(props: ThreadScreenProps) {
                 {turnActions.notice}
               </Text>
             ) : null}
-            {selected.mode === "code" &&
+            {!offlineDemo &&
+            selected.mode === "code" &&
             (codePolicy === "approval-gated" || codePolicy === "auto-accept-edits") ? (
               <ApprovalDeferralSheet
                 executionPolicy={codePolicy}
@@ -380,7 +390,7 @@ export function ThreadScreen(props: ThreadScreenProps) {
                 {...(hostLabel === undefined ? {} : { hostLabel })}
               />
             ) : null}
-            {selected.mode === "code" && transport !== undefined ? (
+            {!offlineDemo && selected.mode === "code" && transport !== undefined ? (
               <PullRequestReviewPanel threadId={selected.threadId} transport={transport} />
             ) : null}
             <ThreadTranscript

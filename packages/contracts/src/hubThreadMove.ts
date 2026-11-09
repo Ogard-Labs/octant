@@ -455,8 +455,12 @@ export const ThreadMoveChallengeOutcome = Schema.Union(
 );
 export type ThreadMoveChallengeOutcome = typeof ThreadMoveChallengeOutcome.Type;
 
-/** When the move starts: now, or once the running turn ends. */
-export const ThreadMoveTiming = Schema.Literal("now", "after-turn");
+/**
+ * When the move starts: now, once the running turn ends, or after stopping
+ * the running turn, its child runs, and its pending approvals and questions
+ * (Stop and move, only ever the person's explicit choice).
+ */
+export const ThreadMoveTiming = Schema.Literal("now", "after-turn", "stop-and-move");
 export type ThreadMoveTiming = typeof ThreadMoveTiming.Type;
 
 export const ThreadMoveStartRequest = Schema.Struct({
@@ -554,6 +558,8 @@ export const ThreadMoveThreadStatus = Schema.Struct({
     Schema.Struct({
       destinationMemberId: HubMemberId,
       destinationName: bounded(256),
+      /** The person chose Stop and move: the turn was told to stop, and the move starts once it has. */
+      stopping: Schema.optional(Schema.Boolean),
     }).annotations(strict),
   ),
   /** Held until an owner phone confirms the move, or the wait runs out. */
@@ -827,6 +833,18 @@ export const HandoverRequest = Schema.Struct({
 }).annotations(strict);
 export type HandoverRequest = typeof HandoverRequest.Type;
 
+/**
+ * Prepare to shut down's Hand over for one row. It acts for the whole host,
+ * as the batch does, so it names the head's destination: the source hands
+ * over only a Code thread that destination cannot take. It never asks for
+ * the agent's summary turn, because the batch has no switch to ask with.
+ */
+export const ShutdownHandoverRequest = Schema.Struct({
+  thread: MovedThreadReference,
+  destinationMemberId: HubMemberId,
+}).annotations(strict);
+export type ShutdownHandoverRequest = typeof ShutdownHandoverRequest.Type;
+
 /** What a handover would do, before anything is frozen or written. */
 export const HandoverPreview = Schema.Struct({
   status: Schema.Literal("preview"),
@@ -970,6 +988,7 @@ export const decodeOwnerThreadMoveConfirmRequest = Schema.decodeUnknownSync(
   OwnerThreadMoveConfirmRequest,
 );
 export const decodeHandoverRequest = Schema.decodeUnknownSync(HandoverRequest);
+export const decodeShutdownHandoverRequest = Schema.decodeUnknownSync(ShutdownHandoverRequest);
 export const decodeHandoverOutcome = Schema.decodeUnknownSync(HandoverOutcome);
 export const decodeHandoverControlRequest = Schema.decodeUnknownSync(HandoverControlRequest);
 export const decodeHandoverContinuedReport = Schema.decodeUnknownSync(HandoverContinuedReport);

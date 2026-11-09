@@ -67,6 +67,11 @@ export type PinnedListenerTransport =
 export type PinnedListenerTransportPort = (input: {
   readonly origin: string;
   readonly trust: ListenerOriginTrust;
+  readonly hostId?: string;
+  readonly onTrust?: (
+    previous: ListenerOriginTrust,
+    next: ListenerOriginTrust,
+  ) => Promise<void> | void;
 }) => PinnedListenerTransport;
 
 export type AppPairingCodeRefusal =

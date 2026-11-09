@@ -1191,6 +1191,8 @@ export function startOctantServer(
       projectService,
       providerDataDirectory,
       routeCodeService,
+      serverConnection,
+      serverProjectStore,
       shellService,
       windowAuthorityStore,
       windowCanOpenThread,
@@ -1771,6 +1773,7 @@ export function startOctantServer(
       workThreadServiceWithWorkflows,
       workTurnService,
       agentRunAdmission,
+      agentRunOrchestration,
     });
     benchmarkThreadPurge.purge = async (threadId, mode) => {
       const outcome = await threadRetention.purge(

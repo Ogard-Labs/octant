@@ -2995,6 +2995,78 @@ async function preparedScript(host: ReturnType<typeof createBrowserSurfaceHost>,
 }
 
 describe("native page script ownership", () => {
+  it.each([
+    { nodeName: "INPUT", attributes: ["type", "password"] },
+    { nodeName: "DIV", attributes: ["contenteditable", "true", "aria-label", "Password"] },
+    { nodeName: "IFRAME" },
+    { nodeName: "#document-fragment", shadowRootType: "closed" },
+  ])("refuses a restricted script when native DOM coverage is unsafe: $nodeName", async (node) => {
+    const f = await scriptHost();
+    const original = vi.mocked(f.created.webContents.debugger.sendCommand).getMockImplementation();
+    vi.mocked(f.created.webContents.debugger.sendCommand).mockImplementation(
+      async (method, params) =>
+        method === "DOM.getDocument"
+          ? { root: { nodeName: "#document", children: [node] } }
+          : original?.(method, params),
+    );
+    try {
+      expect(
+        await f.host.runPageScript(
+          scriptCommand({
+            operation: "prepare",
+            source: "42",
+            expectedUrl: "https://example.com/",
+            requiresClearPage: true,
+          }),
+          new AbortController().signal,
+        ),
+      ).toMatchObject({
+        status: "refused",
+        effect: "none",
+        reason: "credential-or-frame-protected",
+      });
+    } finally {
+      await f.host.closeAll();
+    }
+  });
+
+  it("rechecks native credential coverage between scoped preparation and execution", async () => {
+    const f = await scriptHost();
+    let nodes: ReadonlyArray<unknown> = [{ nodeName: "BUTTON", attributes: [] }];
+    const original = vi.mocked(f.created.webContents.debugger.sendCommand).getMockImplementation();
+    vi.mocked(f.created.webContents.debugger.sendCommand).mockImplementation(
+      async (method, params) =>
+        method === "DOM.getDocument"
+          ? { root: { nodeName: "#document", children: nodes } }
+          : original?.(method, params),
+    );
+    try {
+      const prepared = await f.host.runPageScript(
+        scriptCommand({
+          operation: "prepare",
+          source: "42",
+          expectedUrl: "https://example.com/",
+          requiresClearPage: true,
+        }),
+        new AbortController().signal,
+      );
+      if (prepared.status !== "prepared") throw Error("Expected clean scoped preparation");
+      nodes = [{ nodeName: "INPUT", attributes: ["autocomplete", "one-time-code"] }];
+      expect(
+        await f.host.runPageScript(
+          scriptCommand({ operation: "execute", planId: prepared.planId, requiresClearPage: true }),
+          new AbortController().signal,
+        ),
+      ).toMatchObject({
+        status: "refused",
+        reason: "credential-or-frame-protected",
+        effect: "none",
+      });
+    } finally {
+      await f.host.closeAll();
+    }
+  });
+
   it("reuses the private kernel after debugger reattachment and bounds retained unknown documents", async () => {
     const f = await scriptHost();
     try {

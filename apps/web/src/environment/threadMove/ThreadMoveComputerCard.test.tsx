@@ -126,6 +126,7 @@ function fakeClient(input: {
     shutdownChallenge: async () => ({ status: "refused", kind: "refused" }),
     shutdownStart: async () => ({ status: "refused", reason: "refused" }),
     shutdownAskPhone: async () => ({ status: "refused", reason: "refused" }),
+    shutdownHandOver: async () => ({ status: "refused", reason: "refused" }),
     handoverPreview: async () => ({ status: "refused", reason: "refused" }),
     handOver: async () => ({ status: "refused", reason: "refused" }),
     handoverTakeBack: async () => {},
@@ -277,6 +278,60 @@ describe("the Computer card", () => {
       await screen.findByRole("button", { name: "Move after this turn with Touch ID" }),
     );
     await waitFor(() => expect(started[0]?.timing).toBe("after-turn"));
+  });
+
+  it("stops a busy thread's turn and moves it only when the person picks Stop and move", async () => {
+    const user = userEvent.setup();
+    const { client, started } = fakeClient({ destinations: listing({ busy: true }) });
+    render(
+      <ThreadMoveComputerCard
+        client={client}
+        hostName="Laptop"
+        isThisComputer
+        thread={THREAD}
+        threadTitle="Add dark mode"
+        unlock={{ ownerUnlockSign: async () => ({ status: "done", signature: "c2ln" }) }}
+      />,
+    );
+    await user.click(screen.getByRole("button", { name: /Laptop/ }));
+    await user.click(await screen.findByRole("radio", { name: /Desktop/ }));
+    await user.click(screen.getByRole("button", { name: "Review move" }));
+
+    // Move after this turn is the sheet's starting choice; stopping work is never preselected.
+    expect(await screen.findByRole("radio", { name: "Move after this turn" })).toHaveAttribute(
+      "aria-checked",
+      "true",
+    );
+    await user.click(screen.getByRole("radio", { name: "Stop and move" }));
+    expect(screen.getByRole("dialog")).toHaveTextContent(
+      "The running turn stops now, and its pending approvals and questions are cancelled.",
+    );
+    await user.click(screen.getByRole("button", { name: "Stop and move with Touch ID" }));
+
+    await waitFor(() => expect(started[0]?.timing).toBe("stop-and-move"));
+  });
+
+  it("says the turn is stopping while Stop and move waits for it", async () => {
+    const { client } = fakeClient({
+      status: {
+        status: "read",
+        waiting: {
+          destinationMemberId: DESKTOP as never,
+          destinationName: "Desktop",
+          stopping: true,
+        },
+      },
+    });
+    render(
+      <ThreadMoveComputerCard
+        client={client}
+        hostName="Laptop"
+        isThisComputer
+        thread={THREAD}
+        threadTitle="Add dark mode"
+      />,
+    );
+    expect(await screen.findByText("Stopping")).toBeInTheDocument();
   });
 
   it("says plainly when this Mac is not an owner on the chosen computer, and moves nothing", async () => {

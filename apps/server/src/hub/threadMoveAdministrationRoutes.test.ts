@@ -30,21 +30,55 @@ const ELSEWHERE: MovedThreadReference = {
   threadId: "88888888-8888-4888-8888-888888888888",
 };
 const DESKTOP = "55555555-5555-4555-8555-555555555555";
+/** A member with no Project bound to the thread's repository. */
+const MINI = "66666666-6666-4666-8666-666666666666";
+/** A member with a Project that would take the thread. */
+const STUDIO = "99999999-9999-4999-8999-999999999999";
+/** A Code thread in another Project, in no layout this window has open. */
+const OTHER_CODE: MovedThreadReference = {
+  mode: "code",
+  threadId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+};
+const member = (memberId: string, name: string) => ({
+  memberId: memberId as never,
+  name,
+  role: "spoke" as const,
+  identityKeyFingerprint: "a".repeat(64),
+  listenerPin: "a".repeat(64),
+  privateNames: [],
+  addresses: ["100.64.0.1"],
+  owner: false,
+});
 const decodeDeparture = Schema.decodeUnknownSync(ThreadMoveDeparture);
 const KEPT_MOVE = "66666666-6666-4666-8666-666666666666";
 const PLAIN_MOVE = "44444444-4444-4444-8444-444444444444";
 const OTHER_MOVE = "22222222-2222-4222-8222-222222222222";
 const KEPT_FOLDER = "/Users/person/.octant/worktrees/plan-moved-out-66666666";
 
-function setup() {
+function setup(input: { readonly delegated?: boolean } = {}) {
   const folder = mkdtempSync(join(tmpdir(), "octant-move-routes-"));
   folders.push(folder);
   const state = createThreadMoveStateStore(folder);
   const dismissed: string[] = [];
+  const stopped: string[] = [];
   const summariesAsked: Array<boolean | undefined> = [];
+  const handedOver: string[] = [];
   const moves = new ThreadMovesFromWindow({
+    stopWork: async (thread) => {
+      stopped.push(thread.threadId);
+      return { status: "stopped" };
+    },
     moves: {
-      askProjects: async () => ({ status: "listed", projects: [], noProjectAllowed: true }),
+      askProjects: async (memberId) =>
+        memberId === MINI
+          ? { status: "listed", projects: [], noProjectAllowed: false }
+          : memberId === STUDIO
+            ? {
+                status: "listed",
+                projects: [{ projectId: STUDIO as never, title: "octant" }],
+                noProjectAllowed: false,
+              }
+            : { status: "listed", projects: [], noProjectAllowed: true },
       start: async () => ({ status: "interrupted" }),
       cancel: async () => ({ status: "cancelled" }),
       takeBack: async () => {},
@@ -63,12 +97,12 @@ function setup() {
         status: "found",
         title: "Plan the trip",
         busy: false,
-        delegated: false,
-        repositoryRemotes: [],
+        delegated: input.delegated === true,
+        repositoryRemotes: ["git@github.com:Ogard-Labs/octant.git"],
       }),
       measure: async () => ({ status: "unknown" }),
     },
-    members: () => [],
+    members: () => [member(MINI, "Mac mini"), member(STUDIO, "Studio")],
     selfMemberId: () => DESKTOP,
     listThreads: async () => [],
     now: Date.now,
@@ -92,8 +126,9 @@ function setup() {
     moves,
     handovers: {
       preview: async () => ({ status: "refused", reason: "refused" }),
-      handOver: async (_thread, _destination, choices) => {
+      handOver: async (thread, _destination, choices) => {
         summariesAsked.push(choices?.summarize);
+        handedOver.push(thread.threadId);
         return { status: "refused", reason: "refused" };
       },
       takeBack: () => ({ status: "taken-back" }),
@@ -110,7 +145,16 @@ function setup() {
     authorizeThread: ({ thread, windowId: asking }) =>
       String(asking) === String(windowId) && thread.threadId === SHOWN.threadId,
   });
-  return { handle, dismissed, state, removedFolders, journaled, summariesAsked };
+  return {
+    handle,
+    dismissed,
+    stopped,
+    state,
+    removedFolders,
+    journaled,
+    summariesAsked,
+    handedOver,
+  };
 }
 
 function post(path: string, body: unknown, headers: Record<string, string> = {}) {
@@ -158,8 +202,8 @@ describe("starting a thread move from a window", () => {
     expect(await handle(post("/api/desktop/hub/thread-moves/other", body))).toBeUndefined();
   });
 
-  it("refuses to list destinations for, start, or dismiss a thread the window does not show", async () => {
-    const { handle, dismissed } = setup();
+  it("refuses to list destinations for, start, stop and move, or dismiss a thread the window does not show", async () => {
+    const { handle, dismissed, stopped } = setup();
     for (const [path, body] of [
       [THREAD_MOVE_ADMINISTRATION_ROUTES.destinations, { thread: ELSEWHERE }],
       [
@@ -174,6 +218,15 @@ describe("starting a thread move from a window", () => {
       [
         THREAD_MOVE_ADMINISTRATION_ROUTES.phoneAsk,
         { thread: ELSEWHERE, destinationMemberId: DESKTOP, timing: "now" },
+      ],
+      [
+        THREAD_MOVE_ADMINISTRATION_ROUTES.start,
+        {
+          thread: ELSEWHERE,
+          destinationMemberId: DESKTOP,
+          timing: "stop-and-move",
+          unlock: { challengeId: "12345678-1234-4234-8234-123456789012", signature: "AAAA" },
+        },
       ],
       [THREAD_MOVE_ADMINISTRATION_ROUTES.dismiss, { thread: ELSEWHERE }],
       [
@@ -193,6 +246,7 @@ describe("starting a thread move from a window", () => {
       });
     }
     expect(dismissed).toEqual([]);
+    expect(stopped).toEqual([]);
   });
 
   it("sizes the thread a window shows, and any thread here for Prepare to shut down", async () => {
@@ -251,6 +305,46 @@ describe("starting a thread move from a window", () => {
     await handle(post(path, { thread: SHOWN, summarize: false }));
     await handle(post(path, { thread: SHOWN }));
     expect(summariesAsked).toEqual([true, false, false]);
+  });
+
+  it("hands over a Code thread from Prepare to shut down that this window does not show", async () => {
+    const { handle, handedOver } = setup();
+    const path = THREAD_MOVE_ADMINISTRATION_ROUTES.shutdownHandover;
+
+    // The single-thread route acts only on a thread the window shows.
+    expect(
+      (await handle(post(THREAD_MOVE_ADMINISTRATION_ROUTES.handover, { thread: OTHER_CODE })))
+        ?.status,
+    ).toBe(409);
+    expect(handedOver).toEqual([]);
+
+    await handle(post(path, { thread: OTHER_CODE, destinationMemberId: MINI }));
+    expect(handedOver).toEqual([OTHER_CODE.threadId]);
+  });
+
+  it("refuses a shutdown handover for a thread the listing would not offer Hand over for", async () => {
+    const { handle, handedOver } = setup();
+    const delegated = setup({ delegated: true });
+    const path = THREAD_MOVE_ADMINISTRATION_ROUTES.shutdownHandover;
+    for (const [routes, body, reason] of [
+      // The head's destination can take it, so it moves instead.
+      [handle, { thread: OTHER_CODE, destinationMemberId: STUDIO }, "refused"],
+      // Chat and Work threads have no branch to carry them.
+      [handle, { thread: ELSEWHERE, destinationMemberId: MINI }, "refused"],
+      // A computer outside the roster is no destination.
+      [handle, { thread: OTHER_CODE, destinationMemberId: DESKTOP }, "refused"],
+      [delegated.handle, { thread: OTHER_CODE, destinationMemberId: MINI }, "delegated"],
+    ] as const) {
+      const response = await routes(post(path, body));
+      expect(response?.status).toBe(409);
+      expect(await response?.json()).toEqual({ status: "refused", reason });
+    }
+    expect(
+      (await handle(post(path, { thread: OTHER_CODE, destinationMemberId: MINI, summarize: true })))
+        ?.status,
+    ).toBe(400);
+    expect(handedOver).toEqual([]);
+    expect(delegated.handedOver).toEqual([]);
   });
 
   it("rejects a body that is not exactly a move request", async () => {

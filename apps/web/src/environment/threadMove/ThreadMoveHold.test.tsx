@@ -66,6 +66,7 @@ function fakeClient(initial: unknown) {
     shutdownChallenge: async () => ({ status: "refused", kind: "refused" }),
     shutdownStart: async () => ({ status: "refused", reason: "refused" }),
     shutdownAskPhone: async () => ({ status: "refused", reason: "refused" }),
+    shutdownHandOver: async () => ({ status: "refused", reason: "refused" }),
     handoverPreview: async () => ({ status: "refused", reason: "refused" }),
     handOver: async () => ({ status: "refused", reason: "refused" }),
     handoverTakeBack: async (handoverId) => {
