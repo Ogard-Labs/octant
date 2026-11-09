@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   decodeHandoverNotice,
+  decodeShutdownStartRequest,
   decodeThreadMoveDestinationState,
   decodeThreadMoveOffer,
   THREAD_MOVE_EVENT_NAMES,
@@ -120,6 +121,23 @@ describe("handover notices and failure reasons", () => {
   it("lists every reason a move can fail, once", () => {
     expect(new Set(THREAD_MOVE_FAILURE_REASONS).size).toBe(THREAD_MOVE_FAILURE_REASONS.length);
     expect(THREAD_MOVE_EVENT_NAMES.moveFailed).toBe("thread.move-failed@1");
+  });
+});
+
+describe("Stop and move", () => {
+  it("is a timing a window can ask for, for one thread or a batch row, and nothing else stops work", () => {
+    const unlock = { challengeId: uuid(4), signature: "c2ln" };
+    const row = (timing: string) => ({ thread: { mode: "chat", threadId: uuid(2) }, timing });
+    expect(
+      decodeShutdownStartRequest({
+        destinationMemberId: uuid(5),
+        rows: [row("stop-and-move")],
+        unlock,
+      }).rows[0]?.timing,
+    ).toBe("stop-and-move");
+    expect(() =>
+      decodeShutdownStartRequest({ destinationMemberId: uuid(5), rows: [row("stop")], unlock }),
+    ).toThrow();
   });
 });
 

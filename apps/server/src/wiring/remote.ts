@@ -4,6 +4,7 @@ import { OwnerBrowserControlService } from "../browser/ownerBrowserControl";
 import { createOwnerBrowserJournal } from "../browser/ownerBrowserJournal";
 import { homedir } from "node:os";
 import {
+  type AgentRunId,
   AgentRunParentThreadId,
   type CodeThreadId,
   decodeChatThreadId,
@@ -16,6 +17,7 @@ import {
   HubMemberId,
   ThreadRetentionThreadId,
   decodeCodeCommand,
+  type MovedThreadReference,
 } from "@octant/contracts";
 import { Schema } from "effect";
 import { decodeBrowserThreadId } from "@octant/contracts/browser-automation";
@@ -48,7 +50,12 @@ import {
 import { ExternalContentClearStore } from "../context/externalContentClearStore";
 import { readThreadExternalContentTaint } from "../context/externalContentTaintProjection";
 import { ROUTINE_HOST_SCOPE_ID } from "../routineHostScope";
-import { defaultShellSettings, enabledModes, rosterMemberWebOrigin } from "@octant/domain";
+import {
+  defaultShellSettings,
+  enabledModes,
+  isAgentRunActiveStatus,
+  rosterMemberWebOrigin,
+} from "@octant/domain";
 import {
   createRemoteGateway,
   type RemoteGateway,
@@ -103,7 +110,11 @@ import { readHandoverNote, remoteNamedFor } from "../hub/codeThreadHandoverGit";
 import { branchExists } from "../hub/codeThreadMoveGit";
 import { createThreadMoveSenders } from "../hub/threadMoveSenders";
 import { createThreadMoveTicketClient } from "../hub/threadMoveTicketClient";
-import { hostThreads, ThreadMovesFromWindow } from "../hub/threadMovesFromWindow";
+import {
+  hostThreads,
+  ThreadMovesFromWindow,
+  type ThreadWorkStop,
+} from "../hub/threadMovesFromWindow";
 import type { ThreadMoveStatePort } from "../hub/threadMoveStateStore";
 import type { ChatService } from "../chat/chatService";
 import { OwnerUnlockService } from "../hub/ownerUnlock";
@@ -187,7 +198,10 @@ export type RemoteDependencies = { readonly onSecretStoreLinkChange?: () => void
   Pick<AuthorityWiring, "browserCaptureStore" | "personMemory" | "windowAuthorityStore"> &
   Pick<
     AgentRunsWiring,
-    "agentRunAdmission" | "externalContentIngestionStore" | "remoteDelegationHolder"
+    | "agentRunAdmission"
+    | "agentRunOrchestration"
+    | "externalContentIngestionStore"
+    | "remoteDelegationHolder"
   > &
   Pick<HarnessStateWiring, "nativeHarnessSessions"> &
   Pick<IntegrationsWiring, "agentMessageService" | "toolEgressRules"> &
@@ -269,6 +283,7 @@ export function wireRemote(deps: RemoteDependencies) {
     browserProfileService,
     agentMessageService,
     agentRunAdmission,
+    agentRunOrchestration,
     authenticatedProductDispatch,
     automationCommandService,
     automationScheduler,
@@ -958,17 +973,32 @@ export function wireRemote(deps: RemoteDependencies) {
   });
   const peerCredentialRoutes = createPeerCredentialRouteHandler({ copy: ownerCredentialCopy });
   // Moving a thread between the person's computers.
+  // A child run still going here, or one the thread delegated to another
+  // member and that has not reported back, keeps the thread busy: moving it
+  // would leave that child working for a thread this host then erases.
+  const childRunsGoing = (threadId: string): ReadonlyArray<AgentRunId> =>
+    agentRunOrchestration
+      .parentSummary(decodeAgentRunParentThreadId(threadId))
+      .filter((run) => isAgentRunActiveStatus(run.lifecycleStatus))
+      .map((run) => run.runId);
+  const remoteChildrenPending = (threadId: string): boolean =>
+    delegatingSpoke
+      .listForParent(threadId)
+      .some(
+        (entry) =>
+          entry.resultRecorded !== true && entry.state !== "failed" && entry.state !== "cancelled",
+      );
+  const childWorkGoing = (threadId: string): boolean =>
+    childRunsGoing(threadId).length > 0 || remoteChildrenPending(threadId);
+  const chatAttemptGoing = (attempt: { readonly outcome: string }): boolean =>
+    attempt.outcome === "queued" ||
+    attempt.outcome === "streaming" ||
+    attempt.outcome === "waiting";
   const chatThreadMoveHost = createChatThreadMoveHost({
     readView: (threadId) => persistence.readChatThreadView(threadId),
     isBusy: (view) =>
-      view.turns.some((turn) =>
-        turn.attempts.some(
-          (attempt) =>
-            attempt.outcome === "queued" ||
-            attempt.outcome === "streaming" ||
-            attempt.outcome === "waiting",
-        ),
-      ),
+      view.turns.some((turn) => turn.attempts.some(chatAttemptGoing)) ||
+      childWorkGoing(String(view.thread.id)),
     externalContentIngested: (threadId) =>
       readThreadExternalContentTaint(persistence.connection, threadId).externalContentIngested,
     importMovedThread: (input) => deps.chatService.importMovedThread(input),
@@ -1015,7 +1045,8 @@ export function wireRemote(deps: RemoteDependencies) {
   };
   const codeThreadMoveHost = createCodeThreadMoveHost({
     readThread: (threadId) => persistence.readCodeThread(threadId),
-    isBusy: (threadId) => deps.liveTurns.read(String(threadId)) !== undefined,
+    isBusy: (threadId) =>
+      deps.liveTurns.read(String(threadId)) !== undefined || childWorkGoing(String(threadId)),
     checkoutRoot: codeCheckoutRoot,
     ownsManagedWorktree: (threadId) => {
       const thread = persistence.readCodeThread(threadId);
@@ -1121,7 +1152,8 @@ export function wireRemote(deps: RemoteDependencies) {
     // yet, but it is a turn all the same.
     isBusy: (threadId) =>
       deps.liveTurns.read(String(threadId)) !== undefined ||
-      workTurnService.isTurnStarting(threadId),
+      workTurnService.isTurnStarting(threadId) ||
+      childWorkGoing(String(threadId)),
     isDelegated: (threadId) =>
       delegationState.load().received.some((received) => received.threadId === String(threadId)),
     providerDriverKind: (providerInstanceId) =>
@@ -1227,8 +1259,71 @@ export function wireRemote(deps: RemoteDependencies) {
   });
   const threadMoveRoutes = createThreadMoveRouteHandler({ moves: threadMoves });
   // A person at a window starts a move from the thread's Environment tool.
+  // Stop and move: the same Stop a person presses in each mode, then every
+  // child run the thread started here and every child it delegated elsewhere.
+  // Stopping the turn ends the approvals and questions it was waiting on.
+  const stopThreadWork = async (thread: MovedThreadReference): Promise<ThreadWorkStop> => {
+    try {
+      if (thread.mode === "chat") {
+        const threadId = decodeChatThreadId(thread.threadId);
+        const going = (persistence.readChatThreadView(threadId)?.turns ?? []).flatMap((turn) =>
+          turn.attempts.filter(chatAttemptGoing).map((attempt) => ({ turn, attempt })),
+        );
+        for (const { turn, attempt } of going) {
+          const version = persistence.readChatThreadView(threadId)?.thread.version;
+          if (version === undefined) break;
+          await deps.chatService.execute({
+            kind: "interrupt-chat-turn",
+            threadId,
+            expectedVersion: version,
+            turnId: turn.id,
+            attemptId: attempt.id,
+          });
+        }
+      } else if (thread.mode === "code") {
+        const code = persistence.readCodeThread(decodeCodeThreadId(thread.threadId));
+        if (code !== undefined && deps.liveTurns.read(thread.threadId) !== undefined) {
+          const stopped = await deps.codeOperationRuntime?.execute(ROUTINE_HOST_SCOPE_ID, {
+            kind: "cancel-provider-turn",
+            operationId: randomUUID(),
+            threadId: code.id,
+            checkoutId: code.checkoutId,
+          });
+          if (stopped === undefined || stopped.kind === "operation-failed") {
+            return { status: "refused" };
+          }
+        }
+      } else {
+        const threadId = decodeWorkThreadId(thread.threadId);
+        const turns = await workTurnService.turns(ROUTINE_HOST_SCOPE_ID, threadId);
+        for (const turn of turns) {
+          if (
+            turn.status === "completed" ||
+            turn.status === "cancelled" ||
+            turn.status === "failed"
+          )
+            continue;
+          await workTurnService.cancelFirstTurn(ROUTINE_HOST_SCOPE_ID, {
+            kind: "cancel-work-turn",
+            requestId: turn.requestId,
+            threadId: turn.threadId,
+            turnId: turn.turnId,
+          });
+        }
+      }
+      for (const runId of childRunsGoing(thread.threadId)) {
+        await agentRunOrchestration.cancelLeafFirst({ runId, scope: "subtree" });
+      }
+      await delegatingSpoke.cancelParent(thread.threadId);
+      return { status: "stopped" };
+    } catch {
+      // A stop the mode refused leaves the turn as it was; the move does not start.
+      return { status: "refused" };
+    }
+  };
   const threadMovesFromWindow = new ThreadMovesFromWindow({
     moves: threadMoves,
+    stopWork: stopThreadWork,
     state: deps.threadMoveState,
     tickets: createThreadMoveTicketClient({
       identity: resolveHubIdentity,

@@ -34,7 +34,12 @@ function setup() {
   folders.push(folder);
   const state = createThreadMoveStateStore(folder);
   const dismissed: string[] = [];
+  const stopped: string[] = [];
   const moves = new ThreadMovesFromWindow({
+    stopWork: async (thread) => {
+      stopped.push(thread.threadId);
+      return { status: "stopped" };
+    },
     moves: {
       askProjects: async () => ({ status: "listed", projects: [], noProjectAllowed: true }),
       start: async () => ({ status: "interrupted" }),
@@ -82,7 +87,7 @@ function setup() {
     authorizeThread: ({ thread, windowId: asking }) =>
       String(asking) === String(windowId) && thread.threadId === SHOWN.threadId,
   });
-  return { handle, dismissed };
+  return { handle, dismissed, stopped };
 }
 
 function post(path: string, body: unknown, headers: Record<string, string> = {}) {
@@ -130,8 +135,8 @@ describe("starting a thread move from a window", () => {
     expect(await handle(post("/api/desktop/hub/thread-moves/other", body))).toBeUndefined();
   });
 
-  it("refuses to list destinations for, start, or dismiss a thread the window does not show", async () => {
-    const { handle, dismissed } = setup();
+  it("refuses to list destinations for, start, stop and move, or dismiss a thread the window does not show", async () => {
+    const { handle, dismissed, stopped } = setup();
     for (const [path, body] of [
       [THREAD_MOVE_ADMINISTRATION_ROUTES.destinations, { thread: ELSEWHERE }],
       [
@@ -140,6 +145,15 @@ describe("starting a thread move from a window", () => {
           thread: ELSEWHERE,
           destinationMemberId: DESKTOP,
           timing: "now",
+          unlock: { challengeId: "12345678-1234-4234-8234-123456789012", signature: "AAAA" },
+        },
+      ],
+      [
+        THREAD_MOVE_ADMINISTRATION_ROUTES.start,
+        {
+          thread: ELSEWHERE,
+          destinationMemberId: DESKTOP,
+          timing: "stop-and-move",
           unlock: { challengeId: "12345678-1234-4234-8234-123456789012", signature: "AAAA" },
         },
       ],
@@ -157,6 +171,7 @@ describe("starting a thread move from a window", () => {
       });
     }
     expect(dismissed).toEqual([]);
+    expect(stopped).toEqual([]);
   });
 
   it("reports the explicit error when this Mac is not an owner on the destination", async () => {

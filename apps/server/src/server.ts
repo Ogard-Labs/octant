@@ -1766,6 +1766,7 @@ export function startOctantServer(
       workThreadServiceWithWorkflows,
       workTurnService,
       agentRunAdmission,
+      agentRunOrchestration,
     });
     benchmarkThreadPurge.purge = async (threadId, mode) => {
       const outcome = await threadRetention.purge(

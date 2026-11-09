@@ -432,8 +432,12 @@ export const ThreadMoveChallengeOutcome = Schema.Union(
 );
 export type ThreadMoveChallengeOutcome = typeof ThreadMoveChallengeOutcome.Type;
 
-/** When the move starts: now, or once the running turn ends. */
-export const ThreadMoveTiming = Schema.Literal("now", "after-turn");
+/**
+ * When the move starts: now, once the running turn ends, or after stopping
+ * the running turn, its child runs, and its pending approvals and questions
+ * (Stop and move, only ever the person's explicit choice).
+ */
+export const ThreadMoveTiming = Schema.Literal("now", "after-turn", "stop-and-move");
 export type ThreadMoveTiming = typeof ThreadMoveTiming.Type;
 
 export const ThreadMoveStartRequest = Schema.Struct({
@@ -506,6 +510,8 @@ export const ThreadMoveThreadStatus = Schema.Struct({
     Schema.Struct({
       destinationMemberId: HubMemberId,
       destinationName: bounded(256),
+      /** The person chose Stop and move: the turn was told to stop, and the move starts once it has. */
+      stopping: Schema.optional(Schema.Boolean),
     }).annotations(strict),
   ),
   /**
