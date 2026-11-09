@@ -2063,7 +2063,11 @@ this is how it looks.
   with it in mono (the first 200, then "and" the rest counted), the folder,
   and **Remove worktree** as a quiet button that asks once before removing
   it, saying the files have no other copy and that the branch and its remote
-  stay. Once removed, the row says so in one sentence.
+  stay. Once removed, the row says so in one sentence. Opening the moved
+  thread again after its pane closed (an old link, a notification, or a
+  search) opens the same tombstone in the active pane without changing the
+  window's Project; a window that cannot read this computer's moves (a remote
+  client) shows the pane without the tombstone.
 - **This thread can't move.** A failed move unfreezes the composer and puts an
   inline notice above it and in the Computer row's open content: the title
   "This thread can't move", the reason in one sentence, and its recovery as

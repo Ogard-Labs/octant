@@ -96,7 +96,7 @@ import type { ThreadMoveHolds } from "../hub/threadMoveHolds";
 import { createThreadMoveJournal } from "../hub/threadMoveJournal";
 import { KeptWorktreeRemoval } from "../hub/keptWorktreeRemoval";
 import { removeMovedOutWorktree } from "../hub/codeThreadMoveGit";
-import { layoutContainsAgentRunThread } from "../agentRun/authorizeAgentRunCreation";
+import { windowShowsDepartedThread } from "../hub/departedThreadWindow";
 import { createThreadMoveRouteHandler } from "../hub/threadMoveRoutes";
 import { createThreadMoveAdministrationRouteHandler } from "../hub/threadMoveAdministrationRoutes";
 import { ThreadMoveService } from "../hub/threadMoveService";
@@ -1501,12 +1501,7 @@ export function wireRemote(deps: RemoteDependencies) {
     // holds it: the pane naming it, in a mode this window reads on this host.
     authorizeDepartedThread: ({ thread, windowId }) => {
       const workspace = persistence.readWindowWorkspace(decodeWindowId(windowId))?.workspace;
-      if (workspace === undefined) return false;
-      const host = String(workspace.contextByMode[thread.mode].host);
-      return (
-        host === String(LOCAL_HOST_ID) &&
-        layoutContainsAgentRunThread(workspace.layouts[thread.mode], thread.threadId, host)
-      );
+      return workspace !== undefined && windowShowsDepartedThread(workspace, thread);
     },
     authorizeThread: ({ thread, windowId }) =>
       authorizeAgentRunParentThread({

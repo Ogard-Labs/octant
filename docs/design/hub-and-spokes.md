@@ -1114,7 +1114,18 @@ thread sent that are not yet delivered are withdrawn, and messages waiting for
 it are refused.
 
 **The tombstone and Remove worktree.** A thread pane on the source whose
-thread this host recorded as departed shows the tombstone in its place. The
+thread this host recorded as departed shows the tombstone in its place.
+Opening the thread again after its pane closed (an old link, a notification,
+or a search) opens that pane even though the purge erased the thread's
+record: the shell opens a Chat, Work, or Code thread's own pane, and none of
+its other surfaces, for a thread id that matches a departure this host
+recorded, and binds no Project, so the window keeps the context it reads and
+gains no thread authority (no command, composer, or thread data). Any window
+on the source may open one, because it carries nothing; only a local desktop
+window shows its content, because the status and Remove worktree routes are
+the loopback desktop routes, and any such window may already read every
+departure this host records. A thread id with no departure is refused as
+before. The
 files it lists are the ones the erase-time comparison found: every path whose
 content differs from the snapshot, and every ignored entry (Git names a wholly
 ignored folder by the folder). The departure records the first 200 by name
@@ -2372,8 +2383,10 @@ a numbered slice. Built, with these narrower readings:
     Moved to with the time, and Open there), and a kept worktree adds its
     files and Remove worktree, which asks once, through a window route
     (`remove-kept-worktree`) as
-    [Erase on the source](#moving-a-thread-to-another-member) describes. A
-    remote client, or a window reading another host, shows neither. What it
+    [Erase on the source](#moving-a-thread-to-another-member) describes.
+    The shell opens a departed thread's pane again after it closed, so an old
+    link, a notification, or a search reaches the tombstone. A remote client,
+    or a window reading another host, shows neither. What it
     does not do yet: Open there opening the thread in this window, and the
     estimate in the bar.
 
