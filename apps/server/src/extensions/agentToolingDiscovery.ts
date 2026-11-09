@@ -6,6 +6,7 @@ import type {
   DiscoveredAgentToolingOrigin,
   DiscoveredMcpServer,
   DiscoveredPlugin,
+  RuntimeCompactionDefaults,
   UserAddedMcpServerRequest,
 } from "@octant/contracts/extension-rpc";
 import {
@@ -119,6 +120,34 @@ export class AgentToolingDiscovery {
       servers: [...servers.values()].map((record) => record.listing).slice(0, 256),
       plugins: [...plugins.values()].map((record) => record.listing).slice(0, 256),
       notes: [...new Set(notes)].slice(0, 64),
+    };
+  }
+
+  /**
+   * What the person's own Claude Code and Codex files say about compacting,
+   * so Settings can show the runtime's own point beside Octant's. Reads, never
+   * writes; a file that is missing or unreadable reads as the runtime default.
+   */
+  async compactionDefaults(): Promise<RuntimeCompactionDefaults> {
+    const global = await this.#readJson(join(this.#options.home, ".claude.json"));
+    const settings = await this.#readJson(join(this.#options.home, ".claude", "settings.json"));
+    const codex = await this.#readToml(join(this.#options.home, ".codex", "config.toml"));
+    const env = isRecord(settings) && isRecord(settings.env) ? settings.env : {};
+    const disabled =
+      (isRecord(global) && global.autoCompactEnabled === false) ||
+      (isRecord(settings) && settings.autoCompactEnabled === false) ||
+      isTruthyFlag(env.DISABLE_AUTO_COMPACT) ||
+      isTruthyFlag(env.DISABLE_COMPACT);
+    const window = isRecord(settings) ? positiveInteger(settings.autoCompactWindow) : undefined;
+    const limit = isRecord(codex)
+      ? positiveInteger(codex.model_auto_compact_token_limit)
+      : undefined;
+    return {
+      claude: {
+        autoCompact: !disabled,
+        ...(window === undefined ? {} : { autoCompactWindow: window }),
+      },
+      codex: limit === undefined ? {} : { autoCompactTokenLimit: limit },
     };
   }
 
@@ -561,4 +590,17 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 function digest(text: string): string {
   return createHash("sha256").update(text).digest("hex").slice(0, 32);
+}
+
+function positiveInteger(value: unknown): number | undefined {
+  return typeof value === "number" && Number.isSafeInteger(value) && value > 0 ? value : undefined;
+}
+
+/** Claude Code reads its switches as on for any value but empty, `0` or `false`. */
+function isTruthyFlag(value: unknown): boolean {
+  if (typeof value !== "string" && typeof value !== "number" && typeof value !== "boolean") {
+    return false;
+  }
+  const text = String(value).trim().toLowerCase();
+  return text.length > 0 && text !== "0" && text !== "false";
 }

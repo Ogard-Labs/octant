@@ -4,7 +4,10 @@ import { WorktreePreparationService } from "../code/worktreePreparationService";
 import { RepositoryTestProcessPort } from "../code/repositoryTestProcessPort";
 import { createLocalUsageHistoryCheckpointStore } from "../persistence/localUsageHistoryCheckpointStore";
 import { createLocalUsageHistoryLastReadStore } from "../persistence/localUsageHistoryLastReadStore";
-import { createSelectedExtensionResolver } from "../extensions/selectedExtensions";
+import {
+  createEffectiveSkillReader,
+  createSelectedExtensionResolver,
+} from "../extensions/selectedExtensions";
 import { randomUUID } from "node:crypto";
 import { bindGeneratedMcpSignInPolicy } from "../extensions/generatedMcpSignInPolicy";
 import { lstatSync, realpathSync } from "node:fs";
@@ -23,6 +26,7 @@ import {
   type PermissionPersistence,
   type ProviderDriverKind,
   type ProviderInstance,
+  type ProviderModelId,
   type ProviderInstanceId,
   type ProviderProbeResult,
   type ProviderRuntimeEvent,
@@ -140,6 +144,7 @@ import { ProviderUsageReadingStore } from "../providers/providerUsageReadingStor
 import { HeldTurnContextFile, heldTurnContext } from "../providers/heldTurnContext";
 import { ProviderRuntimeUsageLimitsStore } from "../providers/providerRuntimeUsageLimitsStore";
 import { attachProviderRuntimeUsageLimits } from "../providers/providerRuntimeUsageLimitsDriver";
+import { compactionPointFor, withCompactionPoint } from "../providers/compactionPointDriver";
 import { redactProviderRuntimeSecrets } from "../providers/secretRedactingDriver";
 import { OCTANT_LOCAL_ACTOR_ID } from "../shellService";
 import { NativeHarnessLeadFallbackService } from "../harness/nativeHarnessLeadFallback";
@@ -215,6 +220,8 @@ import {
   effectiveClaudeAccountConfigDirectory,
   isImageProfileDriverKind,
   isKeyProviderDriverKind,
+  providerKeepsConversation,
+  resolveModelContextWindow,
 } from "@octant/domain";
 import { ChatAttachmentStore } from "../chat/chatAttachmentStore";
 import { MAX_JSON_REQUEST_BODY_SIZE, type ServerStart, ServerStartupFailed } from "./serverShape";
@@ -247,6 +254,12 @@ export interface ConfiguredProviderDriverOptions {
   readonly claudeInstances?: ReadonlyArray<ProviderInstance>;
   readonly codexInstances?: ReadonlyArray<ProviderInstance>;
   readonly runtimeRegistry: ProviderRuntimeRegistry;
+  /**
+   * The share of a model's window, from Settings, at which the person wants a
+   * session compacted: for threads Octant keeps, or for runtimes; `null` for
+   * none. Read at every session start and resume.
+   */
+  readonly compactionShare?: (keeper: "octant" | "runtime") => number | null;
   readonly permissionPersistence: () => PermissionPersistence;
   readonly credentialResolver?: ProviderCredentialResolver;
   readonly subscriptionOAuth?: import("@octant/provider-sdk/subscription-oauth").SubscriptionOAuthHost;
@@ -266,6 +279,13 @@ export interface ConfiguredProviderDriverOptions {
     instance: ProviderInstance,
   ) => ProviderLocalUsageHistorySource | undefined;
 }
+
+/**
+ * The window each runtime last reported for a model, by instance, for the
+ * compaction point of a model its catalogue gives no window. Process memory:
+ * one figure per model an instance ran, gone with the host.
+ */
+const REPORTED_MODEL_WINDOWS = new Map<string, number>();
 
 export function makeConfiguredProviderDriver(
   instance: ProviderInstance,
@@ -418,6 +438,33 @@ export function makeConfiguredProviderDriver(
   }
   if (localUsageHistory !== undefined) {
     driver = { ...driver, localUsageHistory };
+  }
+  if (options.compactionShare !== undefined) {
+    const share = options.compactionShare;
+    // A runtime that keeps its own conversation takes the runtime share; one
+    // that runs on Octant Harness takes the share for threads Octant keeps.
+    const keeper = providerKeepsConversation(instance.driverKind) ? "runtime" : "octant";
+    const windowKey = (modelId: ProviderModelId) =>
+      `${String(instance.id)}\u0000${String(modelId)}`;
+    driver = withCompactionPoint(
+      driver,
+      (modelId) => {
+        const model = options.runtimeRegistry
+          .observedState(instance.id)
+          ?.models.find((candidate) => String(candidate.id) === String(modelId));
+        // The window the request-fitting rules settle on (an override, a
+        // learned window, the catalogue's, a reviewed profile), else the one
+        // the runtime itself last reported for this model: a runtime's
+        // catalogue often names none.
+        const window =
+          (model === undefined ? undefined : resolveModelContextWindow(model)?.contextWindow) ??
+          REPORTED_MODEL_WINDOWS.get(windowKey(modelId));
+        return compactionPointFor(share(keeper), window);
+      },
+      (modelId, contextWindow) => {
+        REPORTED_MODEL_WINDOWS.set(windowKey(modelId), contextWindow);
+      },
+    );
   }
   // Redaction comes first, so every consumer of the stream, the usage tap
   // included, reads the redacted events.
@@ -1089,6 +1136,23 @@ export function wireProviders(deps: ProvidersDependencies) {
           ) === true
         );
       },
+    });
+    // What the harness `skill` tool reads: the same snapshot, activation,
+    // and material a turn's selections resolve through.
+    const effectiveSkills = createEffectiveSkillReader({
+      snapshot: async () => {
+        await standaloneSkillService.reconcile();
+        return extensionApiService.snapshot();
+      },
+      resolveEffectiveState: (snapshot, query) =>
+        extensionActivationService.resolve(snapshot, query),
+      providerFamily: (providerInstanceId) => {
+        const instance = persistence.readProviderInstance(providerInstanceId);
+        return instance === undefined
+          ? undefined
+          : Schema.decodeUnknownSync(ExtensionProviderFamily)(instance.driverKind);
+      },
+      materialLoader: createStoredExtensionMaterialLoader(extensionPackageStore),
     });
     githubExtensionSnapshot.read = () => extensionApiService.snapshot();
     // One store for the host: the folder picker issues a receipt through the
@@ -1860,6 +1924,12 @@ export function wireProviders(deps: ProvidersDependencies) {
     const chatDataDirectory = join(providerDataDirectory, "chat");
     const chatAttachmentStore = new ChatAttachmentStore(chatDataDirectory);
     const configuredDriverOptions: ConfiguredProviderDriverOptions = {
+      compactionShare: (keeper) => {
+        const settings = persistence.readShellSettings()?.settings ?? defaultShellSettings();
+        return keeper === "octant"
+          ? settings.autoCompactOctantWindowPercent
+          : settings.autoCompactRuntimeWindowPercent;
+      },
       openCodeProcess,
       codexProcess,
       acpProcess,
@@ -2127,6 +2197,7 @@ export function wireProviders(deps: ProvidersDependencies) {
       providerUsageLimitsService,
       refreshStandaloneSkills,
       resolveSelectedExtensions,
+      effectiveSkills,
       pinnedExtensionIds,
       reviewedModelManifest,
       skillDiscoveryService,

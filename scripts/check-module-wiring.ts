@@ -680,6 +680,10 @@ export function findUnregisteredRouteModules(
  */
 export const KNOWN_UNCALLED_ENDPOINTS: ReadonlyMap<string, string> = new Map([
   [
+    "/api/usage/diagnostics",
+    "The turn diagnostics report, served by the host one stacked change ahead of the Usage page that reads it. Remove once the client runtime's usage client calls it.",
+  ],
+  [
     "/api/code/language/documents",
     "Language services' document sync, served by the host since 2026-10-26 ahead of the editor that calls it (docs/design/language-services.md, delivery plan slice 3). Remove once the Code editor syncs its open documents.",
   ],
@@ -720,6 +724,18 @@ export const KNOWN_UNCALLED_ENDPOINTS: ReadonlyMap<string, string> = new Map([
   ].map((endpoint): [string, string] => [
     endpoint,
     "A delegating spoke signs and sends this over the private listener from apps/server (delegatingSpokeService.ts), which builds the path itself; no window or device calls it. Remove when the checker counts apps/server as a caller of its own listener's routes.",
+  ]),
+  ...[
+    "/api/hub/peer/thread-moves",
+    "/api/hub/peer/thread-moves/chunk",
+    "/api/hub/peer/thread-moves/finish",
+    "/api/hub/peer/thread-moves/commit",
+    "/api/hub/peer/thread-moves/status",
+    "/api/hub/peer/thread-moves/discard",
+    "/api/hub/peer/thread-moves/projects",
+  ].map((endpoint): [string, string] => [
+    endpoint,
+    "The computer a thread is leaving signs and sends each step of a move here over the private listener from apps/server (threadMoveService.ts), which builds the path itself, against a ticket an owner device made on this host; no window or device calls it. Remove when the checker counts apps/server as a caller of its own listener's routes.",
   ]),
   [
     "/api/hub/peer/credentials",

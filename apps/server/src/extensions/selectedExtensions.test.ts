@@ -10,7 +10,7 @@ import {
 import { ExtensionSelection, ExtensionProviderFamily } from "@octant/contracts/extensions";
 import { Schema } from "effect";
 import { describe, expect, it, vi } from "vitest";
-import { createSelectedExtensionResolver } from "./selectedExtensions";
+import { createEffectiveSkillReader, createSelectedExtensionResolver } from "./selectedExtensions";
 import {
   ExtensionActivationService,
   createLocalExtensionActivationPolicy,
@@ -232,6 +232,97 @@ describe("selected skill context", () => {
       kind: "resolved",
       context: [{ kind: "skill-instructions", text: "Use the synthetic checklist." }],
     });
+  });
+});
+
+describe("skills a harness lead reads on demand", () => {
+  function reader(snapshot: ExtensionSnapshot, mode: "work" | "code" = "code") {
+    const activation = new ExtensionActivationService({
+      policy: createLocalExtensionActivationPolicy({
+        project: () => ({ allowed: true, revision: 1 }),
+        thread: () => ({ allowed: true, revision: 1 }),
+      }),
+      compatibility: () => true,
+      catalogStatus: () => "available",
+    });
+    const before = JSON.stringify(snapshot);
+    const read = createEffectiveSkillReader({
+      snapshot: async () => snapshot,
+      resolveEffectiveState: (state, query) => activation.resolve(state, query),
+      providerFamily: () => Schema.decodeUnknownSync(ExtensionProviderFamily)("openai-compatible"),
+      materialLoader: createStoredExtensionMaterialLoader({
+        readVerifiedComponentText: async () => {
+          throw new Error("No installed package");
+        },
+      }),
+    })({
+      mode,
+      threadId: String(thread.id),
+      projectId: thread.projectId,
+      threadVersion: 1,
+      providerInstanceId: thread.providerInstanceId,
+      modelId: thread.modelId,
+    });
+    return { read, unchanged: () => JSON.stringify(snapshot) === before };
+  }
+
+  function withDisabledSkill(snapshot: ExtensionSnapshot): ExtensionSnapshot {
+    const [effective] = snapshot.skills ?? [];
+    if (effective === undefined) throw new Error("fixture has no skill");
+    return decodeExtensionSnapshot({
+      ...snapshot,
+      skills: [
+        { ...effective, description: "Checks a diff against the synthetic checklist." },
+        {
+          ...effective,
+          skill: {
+            ...effective.skill,
+            name: "deploy",
+            qualifiedId: `agents-skills-directory:project:deploy:${digest}`,
+          },
+          displayName: "Deploy",
+          instructions: "Deploy instructions.",
+          desiredEnabled: false,
+          effectiveState: { kind: "blocked", reason: "component-disabled" },
+        },
+      ],
+    });
+  }
+
+  it("lists only the skills effective for the thread, with name and description", async () => {
+    const { read } = reader(withDisabledSkill(fixture("code").snapshot()));
+    await expect(read.list()).resolves.toEqual({
+      status: "listed",
+      skills: [{ name: "review", description: "Checks a diff against the synthetic checklist." }],
+    });
+  });
+
+  it("loads an effective skill's instructions by name", async () => {
+    const { read } = reader(withDisabledSkill(fixture("code").snapshot()));
+    await expect(read.load("review")).resolves.toEqual({
+      status: "loaded",
+      name: "review",
+      instructions: "Use the synthetic checklist.",
+    });
+  });
+
+  it("refuses a skill that is not effective and leaves it as it was", async () => {
+    const { read, unchanged } = reader(withDisabledSkill(fixture("code").snapshot()));
+    await expect(read.load("deploy")).resolves.toMatchObject({
+      status: "refused",
+      reason: "skill-not-effective",
+    });
+    await expect(read.load("missing")).resolves.toMatchObject({
+      status: "refused",
+      reason: "skill-not-found",
+    });
+    expect(unchanged()).toBe(true);
+  });
+
+  it("refuses a skill scoped to another mode's thread", async () => {
+    const { read } = reader(fixture("work").snapshot(), "code");
+    await expect(read.load("review")).resolves.toMatchObject({ status: "refused" });
+    await expect(read.list()).resolves.toEqual({ status: "listed", skills: [] });
   });
 });
 

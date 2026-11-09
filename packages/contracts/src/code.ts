@@ -392,6 +392,14 @@ export const CodeThread = Schema.Struct({
    */
   autoApprove: Schema.optional(Schema.Boolean),
   sandboxOff: RetiredSandboxOffSwitch,
+  /**
+   * Opt-in sandbox at Full access: when the posture is `full-access` and this
+   * is true, the launch stays inside Octant's OS confinement (bound-root
+   * writes, protected-file denies) and network stays proxied to the provider
+   * endpoints, while approval prompts stay off. Optional so a journal written
+   * before the flag existed replays as off (Full access stays fully open).
+   */
+  fullAccessSandbox: Schema.optional(Schema.Boolean),
   version: AggregateVersion,
   createdAt: UtcTimestamp,
   updatedAt: UtcTimestamp,
@@ -470,6 +478,11 @@ export const CodeSettings = Schema.Struct({
    * which is what a store persisted before the question existed did.
    */
   defaultAutoApprove: Schema.optional(Schema.Boolean),
+  /**
+   * New Code threads at Full access keep the sandbox (`fullAccessSandbox`)
+   * unless the thread says otherwise. Absent is off: Full access stays open.
+   */
+  defaultFullAccessSandbox: Schema.optional(Schema.Boolean),
   /**
    * Who answers prompts at Auto, as an account default a Code Project may
    * override. Absent means the provider's own reviewer where it has one and
@@ -702,6 +715,8 @@ export const CodeCommand = Schema.Union(
     bundledLanguageServer: Schema.optional(Schema.Boolean),
     defaultAutoApprove: Schema.optional(Schema.Boolean),
     /** Absent keeps the stored choice. */
+    defaultFullAccessSandbox: Schema.optional(Schema.Boolean),
+    /** Absent keeps the stored choice. */
     autoReviewer: Schema.optional(AutoReviewer),
     /** Absent keeps the stored choice; null returns to each thread's own provider. */
     shieldModel: Schema.optional(Schema.NullOr(ShieldModelChoice)),
@@ -780,6 +795,11 @@ export const CodeCommand = Schema.Union(
     permissionPersistence: PermissionPersistence,
     approvalId: Schema.optional(CodeApprovalId),
     autoApprove: Schema.optional(Schema.Boolean),
+    /**
+     * The opt-in sandbox at Full access, chosen with the mode. Absent keeps
+     * the thread's current choice; the host drops it below Full access.
+     */
+    fullAccessSandbox: Schema.optional(Schema.Boolean),
   }).annotations(strict),
   Schema.Struct({
     kind: Schema.Literal("change-code-thread-provider"),

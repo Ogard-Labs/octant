@@ -57,6 +57,29 @@ export function providerToolTransport(
   }
 }
 
+/**
+ * The capabilities a Settings card reports for an instance: the driver's own,
+ * plus what the host adds for a Harness endpoint. The Harness loop reports a
+ * lead's `todo-write` list as task progress, but only a model that passed
+ * Verify tools is offered Octant's tools, so task progress is supported once
+ * the instance has such a model. The driver's probe keeps its own answer,
+ * because conformance holds a driver that claims task progress to emitting it
+ * in every scripted turn, and those turns call no tool.
+ */
+export function hostedProviderCapabilities(
+  driverKind: ProviderDriverKind,
+  observed: Pick<ProviderObservedState, "capabilities" | "verifiedToolModelIds">,
+): ProviderObservedState["capabilities"] {
+  if (
+    !isNativeHarnessDriverKind(driverKind) ||
+    observed.capabilities.taskProgress === "supported" ||
+    (observed.verifiedToolModelIds?.length ?? 0) === 0
+  ) {
+    return observed.capabilities;
+  }
+  return { ...observed.capabilities, taskProgress: "supported" };
+}
+
 const OBSERVED_ACTIVITY: ReadonlyArray<
   readonly [ProviderObservedActivity, keyof ProviderObservedState["capabilities"]]
 > = [

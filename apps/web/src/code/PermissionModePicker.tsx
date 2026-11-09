@@ -1,11 +1,17 @@
 import type { PermissionMode } from "@octant/contracts/providers";
-import { AUTO_UNSUPPORTED_REASON } from "@octant/domain/guardrail-policy";
+import {
+  AUTO_UNSUPPORTED_REASON,
+  fullAccessSandboxSupported,
+} from "@octant/domain/guardrail-policy";
+import type { ProviderInstanceId } from "@octant/contracts/providers";
+import type { PickerGroup } from "@octant/domain";
 import type { AutoReview } from "./autoReview";
 import { ChevronDown, ShieldCheck } from "lucide-react";
 import { useId } from "react";
 import { OctantButton } from "../ui/base/OctantButton";
 import { useFullAccessWarning, type FullAccessWarningScope } from "./FullAccessWarning";
 import {
+  OctantMenuCheckboxItem,
   OctantMenuGroup,
   OctantMenuGroupLabel,
   OctantMenuPopup,
@@ -26,6 +32,21 @@ export function autoDetail(review: AutoReview | undefined): string {
   return review?.status === "reviewer" && review.reviewer === "octant-shield"
     ? SHIELD_REVIEW_DETAIL
     : PROVIDER_REVIEW_DETAIL;
+}
+
+/**
+ * Whether the thread's runtime can keep the sandbox at Full access, read from
+ * the picker's provider list. A provider the list does not carry reads as no,
+ * so the choice is disabled rather than offered and then refused by the host.
+ */
+export function threadKeepsFullAccessSandbox(
+  groups: ReadonlyArray<PickerGroup>,
+  providerInstanceId: ProviderInstanceId,
+): boolean {
+  const group = groups.find(
+    (candidate) => String(candidate.instance.id) === String(providerInstanceId),
+  );
+  return group !== undefined && fullAccessSandboxSupported(group.instance.driverKind);
 }
 
 /** The modes in picker order, in the words the native apps use. */
@@ -81,7 +102,22 @@ export interface PermissionModePickerProps {
    * Code's levels but have no Plan overlay; absent lists every mode.
    */
   readonly modes?: ReadonlyArray<PermissionMode>;
+  /**
+   * The thread's opt-in sandbox at Full access. With a handler, the picker
+   * offers "Keep the sandbox" under Full access; without one it offers none.
+   */
+  readonly fullAccessSandbox?: boolean;
+  readonly onFullAccessSandboxChange?: (sandboxed: boolean) => void;
+  /**
+   * Whether this thread's runtime can keep the sandbox at Full access. When it
+   * cannot, the choice stays listed but disabled, with the reason.
+   */
+  readonly fullAccessSandboxSupported?: boolean;
 }
+
+const SANDBOX_DETAIL = "No prompts, but writes stay in the folder and secret files stay closed.";
+const SANDBOX_UNSUPPORTED_DETAIL =
+  "This provider can't keep the sandbox at Full access yet. Use Codex or an Octant Harness model.";
 
 /**
  * One click from the composer to any mode. Each choice is the thread's
@@ -95,12 +131,22 @@ export function PermissionModePicker(props: PermissionModePickerProps) {
     props.autoReview?.status === "none" ? props.autoReview.reason : AUTO_UNSUPPORTED_REASON;
   const autoFallsBack = props.value === "auto" && !autoSupported;
   const warning = useFullAccessWarning(props.warningScope ?? "machine");
-  const triggerLabel = autoFallsBack ? "Ask first" : PERMISSION_MODE_LABEL[props.value];
+  const sandboxed = props.value === "full-access" && props.fullAccessSandbox === true;
+  const triggerLabel = autoFallsBack
+    ? "Ask first"
+    : sandboxed
+      ? "Full access · Sandboxed"
+      : PERMISSION_MODE_LABEL[props.value];
   const detailOf = (id: PermissionMode) =>
     id === "auto"
       ? autoDetail(props.autoReview)
       : PERMISSION_MODE_OPTIONS.find((option) => option.id === id)?.detail;
-  const triggerDetail = autoFallsBack ? unsupportedReason : detailOf(props.value);
+  const triggerDetail = autoFallsBack
+    ? unsupportedReason
+    : sandboxed
+      ? SANDBOX_DETAIL
+      : detailOf(props.value);
+  const sandboxSupported = props.fullAccessSandboxSupported !== false;
   const options =
     props.modes === undefined
       ? PERMISSION_MODE_OPTIONS
@@ -161,6 +207,35 @@ export function PermissionModePicker(props: PermissionModePickerProps) {
                   );
                 })}
               </OctantMenuRadioGroup>
+              {props.value === "full-access" && props.onFullAccessSandboxChange !== undefined ? (
+                <OctantMenuGroup>
+                  <OctantMenuCheckboxItem
+                    aria-describedby={`${idPrefix}-sandbox-note`}
+                    checked={props.fullAccessSandbox === true}
+                    // Turning the sandbox on is refused where the runtime can't
+                    // keep it; turning an inherited one off is always allowed,
+                    // because that is what a refused turn asks the person to do.
+                    disabled={
+                      props.disabled === true ||
+                      (!sandboxSupported && props.fullAccessSandbox !== true)
+                    }
+                    onCheckedChange={(checked) => {
+                      if (props.disabled === true) return;
+                      props.onFullAccessSandboxChange?.(checked === true);
+                    }}
+                  >
+                    <span className="flex min-w-0 flex-col">
+                      <span>Keep the sandbox</span>
+                      <span
+                        className="text-xs text-muted-foreground"
+                        id={`${idPrefix}-sandbox-note`}
+                      >
+                        {sandboxSupported ? SANDBOX_DETAIL : SANDBOX_UNSUPPORTED_DETAIL}
+                      </span>
+                    </span>
+                  </OctantMenuCheckboxItem>
+                </OctantMenuGroup>
+              ) : null}
               {props.profileName === undefined ? null : (
                 <OctantMenuGroup>
                   <OctantMenuGroupLabel>Started under {props.profileName}</OctantMenuGroupLabel>

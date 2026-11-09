@@ -12,6 +12,7 @@
 
 import {
   decodeConfirmNewMembersRequest,
+  decodeHubAcceptMovedThreadsRequest,
   decodeHubGrant,
   decodeHubAutoApplyRequest,
   decodeHubDirectPushCredentialRemoveRequest,
@@ -35,6 +36,12 @@ import {
   decodeOwnerMemberRequest,
   decodeOwnerRemovalRequest,
   decodePairedMergeUnlockRequest,
+  decodeShutdownChallengeRequest,
+  decodeShutdownStartRequest,
+  decodeThreadMoveChallengeRequest,
+  decodeThreadMoveControlRequest,
+  decodeThreadMoveStartRequest,
+  decodeThreadMoveThreadRequest,
 } from "@octant/contracts";
 import { Schema } from "effect";
 
@@ -55,6 +62,8 @@ const JoinCodeBody = Schema.Struct({ owner: Schema.Boolean }).annotations({
 const JoinBody = Schema.Struct({ code: Schema.String.pipe(Schema.maxLength(4_096)) }).annotations({
   onExcessProperty: "error",
 });
+
+const EmptyBody = Schema.Struct({}).annotations({ parseOptions: { onExcessProperty: "error" } });
 
 const JoinFinishBody = Schema.Struct({
   unlockPublicKey: Schema.String.pipe(Schema.pattern(/^[A-Za-z0-9_-]{1,512}$/)),
@@ -151,6 +160,11 @@ export const HUB_ADMINISTRATION_OPERATIONS = {
     path: "/api/desktop/hub/wake",
     decodeBody: decodeHubWakeSwitchRequest,
   },
+  "accept-moved-threads": {
+    method: "POST",
+    path: "/api/desktop/hub/accept-moved-threads",
+    decodeBody: decodeHubAcceptMovedThreadsRequest,
+  },
   "wake-hardware-address": {
     method: "POST",
     path: "/api/desktop/hub/wake/hardware-address",
@@ -230,6 +244,69 @@ export const HUB_ADMINISTRATION_OPERATIONS = {
     method: "POST",
     path: "/api/desktop/hub/sign-in/check",
     decodeBody: decodeHubSignInDecisionRequest,
+  },
+  // Moving one thread to another member, from that thread's Environment tool.
+  "thread-move-destinations": {
+    method: "POST",
+    path: "/api/desktop/hub/thread-moves/destinations",
+    decodeBody: decodeThreadMoveThreadRequest,
+  },
+  "thread-move-challenge": {
+    method: "POST",
+    path: "/api/desktop/hub/thread-moves/challenge",
+    decodeBody: decodeThreadMoveChallengeRequest,
+  },
+  "thread-move-start": {
+    method: "POST",
+    path: "/api/desktop/hub/thread-moves/start",
+    decodeBody: decodeThreadMoveStartRequest,
+  },
+  "thread-move-status": {
+    method: "POST",
+    path: "/api/desktop/hub/thread-moves/status",
+    decodeBody: decodeThreadMoveThreadRequest,
+  },
+  "thread-move-stop-waiting": {
+    method: "POST",
+    path: "/api/desktop/hub/thread-moves/stop-waiting",
+    decodeBody: decodeThreadMoveThreadRequest,
+  },
+  "thread-move-cancel": {
+    method: "POST",
+    path: "/api/desktop/hub/thread-moves/cancel",
+    decodeBody: decodeThreadMoveControlRequest,
+  },
+  "thread-move-take-back": {
+    method: "POST",
+    path: "/api/desktop/hub/thread-moves/take-back",
+    decodeBody: decodeThreadMoveControlRequest,
+  },
+  "thread-move-activate": {
+    method: "POST",
+    path: "/api/desktop/hub/thread-moves/activate",
+    decodeBody: decodeThreadMoveControlRequest,
+  },
+  "thread-move-dismiss": {
+    method: "POST",
+    path: "/api/desktop/hub/thread-moves/dismiss",
+    decodeBody: decodeThreadMoveThreadRequest,
+  },
+  // Prepare to shut down: the host's threads, and one unlocked batch per destination.
+  "shutdown-listing": {
+    method: "POST",
+    path: "/api/desktop/hub/thread-moves/shutdown/listing",
+    decodeBody: Schema.decodeUnknownSync(EmptyBody),
+    bodyOptional: true,
+  },
+  "shutdown-challenge": {
+    method: "POST",
+    path: "/api/desktop/hub/thread-moves/shutdown/challenge",
+    decodeBody: decodeShutdownChallengeRequest,
+  },
+  "shutdown-start": {
+    method: "POST",
+    path: "/api/desktop/hub/thread-moves/shutdown/start",
+    decodeBody: decodeShutdownStartRequest,
   },
 } as const satisfies Readonly<Record<string, HubAdministrationRoute>>;
 

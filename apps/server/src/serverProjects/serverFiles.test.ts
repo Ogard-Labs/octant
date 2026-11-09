@@ -130,6 +130,29 @@ describe.skipIf(!canRunThrowawaySshd)("the harness's file tools on a server fold
     );
   });
 
+  it("edits several files there in one call, or none when one replacement is refused", async () => {
+    const tools = files();
+    writeFileSync(join(root, "notes.md"), "alpha\n");
+    writeFileSync(join(root, "todo.md"), "beta\n");
+    await tools.read({ path: "notes.md" });
+    await tools.read({ path: "todo.md" });
+    expect(
+      await tools.editFiles([
+        { path: "notes.md", oldText: "alpha", newText: "gamma" },
+        { path: "todo.md", oldText: "missing", newText: "x" },
+      ]),
+    ).toMatchObject({ kind: "refused", reason: "old-text-not-found", edit: 1 });
+    expect(readFileSync(join(root, "notes.md"), "utf8")).toBe("alpha\n");
+    expect(
+      await tools.editFiles([
+        { path: "notes.md", oldText: "alpha", newText: "gamma" },
+        { path: "todo.md", oldText: "beta", newText: "delta" },
+      ]),
+    ).toMatchObject({ kind: "edited", files: [{ path: "notes.md" }, { path: "todo.md" }] });
+    expect(readFileSync(join(root, "notes.md"), "utf8")).toBe("gamma\n");
+    expect(readFileSync(join(root, "todo.md"), "utf8")).toBe("delta\n");
+  });
+
   it("finds files and lines without entering Git's folder or returning credentials", async () => {
     const tools = files();
     const found = await tools.glob({ pattern: "**/*.ts" });

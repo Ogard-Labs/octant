@@ -106,6 +106,8 @@ import { wireThreadNotifications } from "./wiring/notifications";
 import { wireWorkRequests } from "./wiring/workRequests";
 import { wireRoutes } from "./wiring/routes";
 import { wireRemote } from "./wiring/remote";
+import { createThreadMoveHolds } from "./hub/threadMoveHolds";
+import { createThreadMoveStateStore, heldThreadsOf } from "./hub/threadMoveStateStore";
 import { wireReplica } from "./wiring/replica";
 
 export { MAX_CHAT_ATTACHMENT_BYTES };
@@ -227,6 +229,7 @@ export function startOctantServer(
       conversationInputTransfer,
       browserAuthority,
       codeBoardEventStore,
+      codeSessionConversation,
       codeEvidence,
       hostMemoryGuard,
       isProjectPolicyTargetAllowed,
@@ -262,6 +265,7 @@ export function startOctantServer(
       protectedFilesRoutes,
       processAuthorityNow,
       routineProposalService,
+      imageGenerationOffers,
       simulatorInputGrants,
       unsubscribeMachineChanges,
       windowAuthorityStore,
@@ -355,6 +359,7 @@ export function startOctantServer(
       peekCreateFromIssueFramed,
       siblingThreadsService,
       terminalSessionImports,
+      movedThreadHistory,
       terminalSessionRoutes,
       threadOutsideContentMarks,
       toolEgressRules,
@@ -397,6 +402,8 @@ export function startOctantServer(
       computerUseTools,
       threadDesktopDestination,
       desktopPaneRoutes,
+      desktopLeases,
+      installDesktopPreviewRequest,
       desktopRecipeKeys,
       launchSessionRoutes,
       machineChangeRoutes,
@@ -432,6 +439,7 @@ export function startOctantServer(
       managedCloneService,
       planRoutes,
       projectBindingRoutes,
+      projectMemoryAccess,
       projectRootPort,
       projectService,
       replyDetailRoutes,
@@ -443,6 +451,8 @@ export function startOctantServer(
       workProjectStatusFiles,
       workProjectStatusReader,
     } = yield* wireWorkspace({
+      isPairedDeviceScope,
+      machineChangeFeed,
       onWindowRevoked,
       serverProjectStore,
       bindingReceiptStore,
@@ -459,6 +469,7 @@ export function startOctantServer(
     });
     const {
       runningWorkTurnAccess,
+      runningWorkTurnSandbox,
       runningWorkTurns,
       workRequestRuntime,
       workRequestService,
@@ -505,6 +516,7 @@ export function startOctantServer(
       providerUsageLimitsService,
       refreshStandaloneSkills,
       resolveSelectedExtensions,
+      effectiveSkills,
       pinnedExtensionIds,
       reviewedModelManifest,
       skillDiscoveryService,
@@ -532,6 +544,10 @@ export function startOctantServer(
       windowAuthorityStore,
       workThreadProjection,
     });
+    // Which threads a move holds is shared by every mode's service and the
+    // move routes, and rebuilt from the saved moves so a restart keeps them held.
+    const threadMoveState = createThreadMoveStateStore(providerDataDirectory);
+    const threadMoveHolds = createThreadMoveHolds(heldThreadsOf(threadMoveState.load()));
     const {
       readHarnessProcessReceipts,
       beginGoogleCliChange,
@@ -539,6 +555,7 @@ export function startOctantServer(
       credentialCommandProcess,
       prepareCredentialCommand,
       personMemorySweep,
+      decisionReviewModelPort,
       runtimeForgeChanges,
       followUpCreation,
       restartContinuation,
@@ -555,9 +572,10 @@ export function startOctantServer(
       onHarnessPausedByPerson,
       onHarnessRecoveryLifted,
       researchRouter,
-      sideTaskFirstMessage,
+      sideTaskHost,
       sideTaskRoutes,
       hostShield,
+      observeTurnEnded,
       threadWork,
     } = wireHarness({
       personMemory,
@@ -583,6 +601,7 @@ export function startOctantServer(
       configuredDriverOptions,
       contextHarness,
       contributeChildTools,
+      effectiveSkills,
       externalContentIngestionStore,
       goalService,
       nativeHarnessLeadFallback,
@@ -591,6 +610,7 @@ export function startOctantServer(
       persistence,
       providerDataDirectory,
       runningWorkTurnAccess,
+      runningWorkTurnSandbox,
       sideTasks,
       threadFollowUpSuggestions,
       toolEgressRules,
@@ -621,6 +641,8 @@ export function startOctantServer(
       roots,
       workAttachments,
     } = yield* wireCode({
+      projectMemoryAccess,
+      threadMoveHolds,
       serverConnection,
       serverProjectStore,
       codeBoardEventStore,
@@ -751,6 +773,8 @@ export function startOctantServer(
       routeCodeService,
       terminalProcessPort,
     } = yield* wireCodeRuntime({
+      threadMoveHolds,
+      codeSessionConversation,
       worktreePreparation,
       conversationInputTransfer,
       browserModelBindings,
@@ -759,6 +783,8 @@ export function startOctantServer(
       serverProjectStore,
       shieldServerStore,
       hostShield,
+      imageGenerationOffers,
+      imageJobService,
       runtimeForgeChanges,
       onHarnessQuestionAsked,
       onHarnessQuestionSettled,
@@ -866,6 +892,8 @@ export function startOctantServer(
       remoteServerGrantLocalRoutes,
       remoteServerGrants,
     } = yield* wireCodeTooling({
+      desktopLeases,
+      installDesktopPreviewRequest,
       workThreadProjection,
       agentRunPersistence,
       worktreePreparation,
@@ -909,8 +937,10 @@ export function startOctantServer(
       threadMentionService,
       workspacePresetRoutes,
     } = yield* wireChat({
+      threadMoveHolds,
       conversationInputTransfer,
       personMemoryAccess,
+      projectMemoryAccess,
       workRequestRuntime,
       threadAwaitsHarnessApproval,
       agentMessageProjection,
@@ -934,6 +964,7 @@ export function startOctantServer(
       extensionPackageStore,
       externalContentIngestionStore,
       githubIssueContextService,
+      imageGenerationOffers,
       imageJobService,
       linearIssueContextService,
       liveTurns,
@@ -974,8 +1005,11 @@ export function startOctantServer(
       workTurnService,
       workflowService,
     } = yield* wireWork({
+      threadMoveHolds,
       conversationInputTransfer,
+      codeBoardEventStore,
       personMemoryAccess,
+      projectMemoryAccess,
       runtimeForgeChanges,
       nativeHarnessSessions,
       restartContinuation,
@@ -1013,6 +1047,7 @@ export function startOctantServer(
       followUpCreation,
       githubIssueContextService,
       goalService,
+      imageGenerationOffers,
       imageJobService,
       linearIssueContextService,
       terminalSessionImports,
@@ -1036,7 +1071,7 @@ export function startOctantServer(
       routeCodeService,
       runtimeOutsideContentMarks,
       routineProposalService,
-      sideTaskFirstMessage,
+      sideTaskHost,
       sideTasks,
       siblingThreadsService,
       spendCeiling,
@@ -1086,40 +1121,48 @@ export function startOctantServer(
         workTurnService,
         zenEventStore,
       });
-    const { agentMessageRoutes, browserAutomationRoutes, contextRoutes, windowCanOpenThread } =
-      wireContext({
-        browserCredentialUseService,
-        agentMessageProjection,
-        browserModelBindings,
-        browserAuthority,
-        browserAutomationService,
-        browserCaptures,
-        browserExtensionService,
-        browserFlowService,
-        browserProfileService,
-        canAccessCodeProject,
-        capacityScheduler,
-        chatService,
-        codeOperationRuntime,
-        codeSessionAuthority,
-        configuredDriverOptions,
-        contextHarness,
-        hostShield,
-        liveProjectBrowsers,
-        nativeHarnessHooks,
-        persistence,
-        projectService,
-        providerRuntimeRegistry,
-        browserToolApprovalService,
-        routeCodeService,
-        serverProjectStore,
-        spendCeilingService,
-        windowAuthorityStore,
-        workThreadProjection,
-        workThreadService,
-        workTurnProjection,
-        workTurnService,
-      });
+    const {
+      agentMessageRoutes,
+      browserAutomationRoutes,
+      contextRoutes,
+      idleCompactions,
+      windowCanOpenThread,
+    } = wireContext({
+      browserCredentialUseService,
+      agentMessageProjection,
+      browserModelBindings,
+      browserAuthority,
+      browserAutomationService,
+      browserCaptures,
+      browserExtensionService,
+      browserFlowService,
+      browserProfileService,
+      canAccessCodeProject,
+      capacityScheduler,
+      chatService,
+      codeOperationRuntime,
+      codeSessionAuthority,
+      codeSessionConversation,
+      configuredDriverOptions,
+      contextHarness,
+      hostShield,
+      liveProjectBrowsers,
+      nativeHarnessHooks,
+      observeTurnEnded,
+      persistence,
+      projectService,
+      providerRuntimeRegistry,
+      providerUsageLimitsService,
+      browserToolApprovalService,
+      routeCodeService,
+      serverProjectStore,
+      spendCeilingService,
+      windowAuthorityStore,
+      workThreadProjection,
+      workThreadService,
+      workTurnProjection,
+      workTurnService,
+    });
     const {
       imageRoutes,
       previewHandoffBridgeRoutes,
@@ -1132,6 +1175,7 @@ export function startOctantServer(
       workResearchRoutes,
     } = wireWorkFiles({
       credentialResolver,
+      imageGenerationOffers,
       imageJobService,
       options,
       persistence,
@@ -1203,6 +1247,8 @@ export function startOctantServer(
       workRequestRoutes,
       workThreadRoutes,
     } = wireWorkRequests({
+      decisionReviewModelPort,
+      isProjectPolicyTargetAllowed,
       observeWorkThreadRuntime,
       workRequestService,
       agentRunPersistence,
@@ -1313,6 +1359,20 @@ export function startOctantServer(
         : { resolveLinked: commandBroker.requestCardRead },
     );
     yield* Effect.addFinalizer(() => Effect.sync(() => credentialRequests.close()));
+    yield* Effect.addFinalizer(() => Effect.sync(() => projectMemoryAccess.proposals.close()));
+    // Plan reads Project memory and refuses every write to it.
+    contributeCodeTools(({ windowId, thread, readThread }) =>
+      projectMemoryAccess.toolsFor({
+        windowId,
+        mode: "code",
+        threadId: String(thread.id),
+        projectId: String(thread.projectId),
+        writeRefusal: () =>
+          (readThread()?.executionPolicy ?? thread.executionPolicy) === "plan"
+            ? "Plan mode cannot change Project memory. Leave Plan mode to propose the change."
+            : undefined,
+      }),
+    );
     const credentialRequestRoutes = createCredentialRequestRoutes(
       credentialRequests,
       windowAuthorityStore,
@@ -1590,6 +1650,7 @@ export function startOctantServer(
       hostControlRoutes,
       supportBundleRoutes,
       delegationAdministrationRoutes,
+      threadMoveAdministrationRoutes,
       hubAdministrationRoutes,
       localDeviceAdministrationRoutes,
       privateListenerAdministrationRoutes,
@@ -1599,6 +1660,12 @@ export function startOctantServer(
       secretStoresRoutes,
       remoteHost,
     } = wireRemote({
+      chatService,
+      liveTurns,
+      managedWorktreeReceipts,
+      movedThreadHistory,
+      threadMoveHolds,
+      threadMoveState,
       beginGoogleCliChange,
       onSecretStoreLinkChange: () => commands.linkChanged(),
       browserAutomationService,
@@ -1729,6 +1796,7 @@ export function startOctantServer(
                 (await privateListenerAdministrationRoutes(request)) ??
                 (await hubAdministrationRoutes(request)) ??
                 (await delegationAdministrationRoutes(request)) ??
+                (await threadMoveAdministrationRoutes(request)) ??
                 (await providerCredentialRoutes(request)) ??
                 (await secretStoresRoutes(request)) ??
                 (await commandRoutes(request)) ??
@@ -1775,6 +1843,7 @@ export function startOctantServer(
           // so a host that fails to bind never archives anything on its own,
           // and the stop below is registered before the first pass runs.
           completedThreadArchiveSweep.start();
+          idleCompactions.start();
           personMemorySweep.start();
           // The memory guard reads the last run's state before it overwrites
           // it, so the next-start notice survives a crash.
@@ -1872,6 +1941,7 @@ export function startOctantServer(
             shutdownFailure ??= error;
           }
           completedThreadArchiveSweep.stop();
+          idleCompactions.stop();
           personMemorySweep.stop();
           personMemory.close();
           try {
@@ -1964,6 +2034,7 @@ export function startOctantServer(
             shutdownFailure ??= error;
           }
           browserToolApprovalService?.close();
+          imageGenerationOffers.close();
           try {
             stopComputerSettingsWatch();
             stopDesktopLeases();

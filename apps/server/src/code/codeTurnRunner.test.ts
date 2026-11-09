@@ -1836,6 +1836,34 @@ describe("CodeTurnRunner", () => {
     expect(observed.map((next) => next.providerKind)).toEqual(["completed"]);
   });
 
+  it("refuses to start a sandboxed Full access turn on a runtime that cannot keep the sandbox", async () => {
+    const outcomes: CodeTurnOutcome[] = [];
+    const provider: CodeProviderPort = { acquire: vi.fn() };
+    const sandboxed = {
+      ...thread(),
+      executionPolicy: "full-access" as const,
+      fullAccessSandbox: true,
+    };
+
+    for (const providerDriverKind of ["claude", "opencode", "pi", undefined] as const) {
+      const exit = await Effect.runPromiseExit(
+        Effect.scoped(
+          new CodeTurnRunner().run(
+            input({
+              thread: sandboxed,
+              ...(providerDriverKind === undefined ? {} : { providerDriverKind }),
+              provider,
+              persistOutcome: (next) => Effect.sync(() => outcomes.push(next)),
+            }),
+          ),
+        ),
+      );
+      expect(exit._tag).toBe("Failure");
+    }
+    expect(outcomes).toEqual(["failed", "failed", "failed", "failed"]);
+    expect(provider.acquire).not.toHaveBeenCalled();
+  });
+
   it("records cancellation as interrupted", async () => {
     const controller = new AbortController();
     controller.abort();

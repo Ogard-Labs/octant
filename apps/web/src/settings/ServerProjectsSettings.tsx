@@ -3,7 +3,7 @@ import type { ServerProjectsClient } from "@octant/client-runtime/server-project
 import type { ShieldServersClient } from "@octant/client-runtime/shield-servers-client";
 import type { ServerProjectsCommand, ServerProjectsView } from "@octant/contracts/server-projects";
 import type { ShieldServer } from "@octant/contracts/shield-servers";
-import { useCallback, useEffect, useId, useMemo, useState, type FormEvent } from "react";
+import { useCallback, useEffect, useId, useMemo, useRef, useState, type FormEvent } from "react";
 import { OctantAlert } from "../ui/base/OctantAlert";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantInput } from "../ui/base/OctantInput";
@@ -19,6 +19,7 @@ export interface ServerProjectsSettingsProps {
   readonly servers: Pick<ShieldServersClient, "read"> | undefined;
   /** Bumped when the registry above changes, so the server choices are read again. */
   readonly registryRevision?: number;
+  readonly focusedSetting?: string | undefined;
 }
 
 export const SERVER_PROJECTS_INTRO =
@@ -32,6 +33,7 @@ export const SERVER_PROJECTS_INTRO =
 export function ServerProjectsSettings(props: ServerProjectsSettingsProps) {
   const { client, servers: serversClient } = props;
   const fieldId = useId();
+  const root = useRef<HTMLDivElement>(null);
   const [view, setView] = useState<ServerProjectsView | undefined>(undefined);
   const [servers, setServers] = useState<ReadonlyArray<ShieldServer>>([]);
   const [loadFailed, setLoadFailed] = useState(false);
@@ -59,6 +61,14 @@ export function ServerProjectsSettings(props: ServerProjectsSettingsProps) {
   useEffect(() => {
     void load();
   }, [load, registryRevision]);
+
+  const loaded = view !== undefined;
+  useEffect(() => {
+    if (!loaded || props.focusedSetting !== "server-projects") return;
+    const target = root.current?.querySelector<HTMLInputElement>("form input");
+    (target ?? root.current)?.focus();
+    root.current?.scrollIntoView?.({ block: "center" });
+  }, [loaded, props.focusedSetting]);
 
   async function send(command: ServerProjectsCommand): Promise<boolean> {
     if (client === undefined) return false;
@@ -112,7 +122,7 @@ export function ServerProjectsSettings(props: ServerProjectsSettingsProps) {
   }
 
   return (
-    <div className="shield-servers" data-setting-id="server-projects">
+    <div className="shield-servers" data-setting-id="server-projects" ref={root} tabIndex={-1}>
       <SettingsPanel description={SERVER_PROJECTS_INTRO} title="Projects on your servers">
         {view.projects.length === 0 ? (
           <p className="shield-servers__empty">No folders on a server are bound.</p>
@@ -270,6 +280,7 @@ export function ServerAccessSettings(props: {
       />
       <ServerProjectsSettings
         client={props.projects}
+        focusedSetting={props.focusedSetting}
         registryRevision={registryRevision}
         servers={servers}
       />

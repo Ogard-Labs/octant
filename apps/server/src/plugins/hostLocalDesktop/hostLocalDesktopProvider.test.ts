@@ -168,6 +168,32 @@ async function screenOf(provider: DesktopProvider): Promise<DesktopScreen> {
 }
 
 describe("host-local desktop provider", () => {
+  it("returns cleanup ownership when a refused preview cannot confirm that its guest proxy stopped", async () => {
+    const { port } = fakeLaunchPort({
+      reply: (line) =>
+        line.startsWith("preview-") ? encoder.encode("error preview\n") : undefined,
+    });
+    const provider = createHostLocalDesktopProvider({
+      ...port,
+      preparePreview: async () => ({
+        status: "prepared",
+        socketName: "preview-owned.sock",
+        nonce: "A".repeat(43),
+        close: async () => undefined,
+      }),
+    });
+    const handle = await acquired(provider);
+    const result = await provider.openPreview?.(handle, {
+      grantId: randomUUID(),
+      port: 5173,
+      expiresAt: later,
+      relay: { request: async () => new Response(), upgrade: async () => ({ status: "refused" }) },
+      signal: new AbortController().signal,
+    });
+    expect(result).toMatchObject({ status: "unavailable", close: expect.any(Function) });
+    await provider.release(handle);
+  });
+
   it("keeps the desktop-provider seam's promises over its launch port", async () => {
     await expect(
       runDesktopProviderConformance({
