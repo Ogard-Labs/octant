@@ -1,5 +1,20 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { respondToHostControlLine } from "./ownerControlProtocol";
+
+const bindingLoad = vi.hoisted(() => ({
+  load: vi.fn<(path: string) => unknown>(),
+  mainThread: true,
+}));
+vi.mock("node:module", async (original) => ({
+  ...(await original<typeof import("node:module")>()),
+  createRequire: () => bindingLoad.load,
+}));
+vi.mock("node:worker_threads", async (original) => ({
+  ...(await original<typeof import("node:worker_threads")>()),
+  get isMainThread() {
+    return bindingLoad.mainThread;
+  },
+}));
 
 const receipt = {
   schemaVersion: 1,
@@ -32,6 +47,7 @@ describe("private host control messages", () => {
 import {
   acquireWindowsHostRuntimeOwner,
   attachWindowsHostRuntimeOwner,
+  loadWindowsHostOwnerNative,
   type WindowsHostOwnerNative,
 } from "./windowsHostOwner";
 const scope = "33333333-3333-4333-8333-333333333333";
@@ -97,6 +113,73 @@ const ownerOptions = {
   serviceMode: "foreground",
 } as const;
 
+describe("native Windows binding loading", () => {
+  const ordinary = "C:\\Octant\\resources\\native\\octant-windows-host-owner.node";
+  beforeEach(() => {
+    bindingLoad.load.mockReset();
+    bindingLoad.mainThread = true;
+    vi.stubGlobal("process", { ...process, platform: "win32" });
+  });
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    bindingLoad.mainThread = true;
+  });
+
+  it.each([ordinary, `\\\\?\\${ordinary}`])(
+    "loads the fixed native binding from a canonical absolute Windows resource path: %s",
+    (path) => {
+      const native = nativeFixture().native;
+      bindingLoad.load.mockReturnValue(native);
+      expect(loadWindowsHostOwnerNative(path)).toBe(native);
+      expect(bindingLoad.load).toHaveBeenCalledExactlyOnceWith(path);
+    },
+  );
+
+  it("refuses relative, noncanonical, UNC and device paths before loading native code", () => {
+    for (const path of [
+      "octant-windows-host-owner.node",
+      "C:octant-windows-host-owner.node",
+      "\\\\server\\share\\octant-windows-host-owner.node",
+      "\\\\?\\UNC\\server\\share\\octant-windows-host-owner.node",
+      `\\\\.\\${ordinary}`,
+      "\\\\?\\GLOBALROOT\\native\\octant-windows-host-owner.node",
+      "C:/Octant/resources/native/octant-windows-host-owner.node",
+      "\\\\?\\C:/Octant/resources/native/octant-windows-host-owner.node",
+      "C:\\Octant\\resources\\native\\..\\native\\octant-windows-host-owner.node",
+      "\\\\?\\C:\\Octant\\resources\\native\\.\\octant-windows-host-owner.node",
+      "C:\\Octant\\resources\\native\\another.node",
+      `${ordinary}\0`,
+    ])
+      expect(loadWindowsHostOwnerNative(path)).toBeUndefined();
+    expect(bindingLoad.load).not.toHaveBeenCalled();
+  });
+
+  it("refuses loading host authority outside the Windows main thread", () => {
+    vi.stubGlobal("process", { ...process, platform: "darwin" });
+    expect(loadWindowsHostOwnerNative(ordinary)).toBeUndefined();
+    vi.stubGlobal("process", { ...process, platform: "win32" });
+    bindingLoad.mainThread = false;
+    expect(loadWindowsHostOwnerNative(ordinary)).toBeUndefined();
+    expect(bindingLoad.load).not.toHaveBeenCalled();
+  });
+
+  it("refuses incompatible native exports and failed library loads", () => {
+    const native = nativeFixture().native;
+    for (const value of [
+      { ...native, apiVersion: 2 },
+      { ...native, frameBytes: 1 },
+      { ...native, beginRequest: undefined },
+    ]) {
+      bindingLoad.load.mockReturnValue(value);
+      expect(loadWindowsHostOwnerNative(ordinary)).toBeUndefined();
+    }
+    bindingLoad.load.mockImplementation(() => {
+      throw Error("The synthetic native library is unavailable.");
+    });
+    expect(loadWindowsHostOwnerNative(ordinary)).toBeUndefined();
+  });
+});
+
 describe("native Windows owner admission", () => {
   it("drains a stop acknowledgement on its exact native connection before stopping the owner", async () => {
     const fake = nativeFixture();
@@ -138,14 +221,47 @@ describe("native Windows owner admission", () => {
     for (const status of ["missing", "dead", "unknown"]) {
       vi.spyOn(fake.native, "lookup").mockReturnValue({ status });
       expect(await attachWindowsHostRuntimeOwner({ ...ownerOptions, native: fake.native })).toEqual(
-        {
-          status: status === "unknown" ? "refused" : "missing",
-        },
+        status === "unknown" ? { status: "refused", reason: "lookup" } : { status: "missing" },
       );
     }
     expect(prepare).not.toHaveBeenCalled();
     expect(claim).not.toHaveBeenCalled();
     expect(fake.native.close).not.toHaveBeenCalled();
+  });
+
+  it("distinguishes a verified owner whose pipe never answers from a forged owner record", async () => {
+    const fake = nativeFixture();
+    const nonce = Buffer.alloc(32, 7);
+    const owner = {
+      ...receipt,
+      hostId: ownerOptions.hostId,
+      endpoint,
+      pid: 4242,
+      processStart: "win32:0000000100000002",
+      nonceDigest: createHash("sha256").update(nonce.toString("base64url")).digest("hex"),
+    };
+    const lookup = (record: typeof owner) => ({
+      status: "existing",
+      endpoint,
+      pid: 4242,
+      processStart: "win32:0000000100000002",
+      receipt: Buffer.from(JSON.stringify(record)),
+      secret: Buffer.from(nonce),
+    });
+    vi.spyOn(fake.native, "lookup").mockImplementation(() => lookup(owner));
+    vi.spyOn(fake.native, "beginRequest").mockReturnValue({ status: "pending", id: 9 });
+    vi.spyOn(fake.native, "pollRequest").mockReturnValue({ status: "refused" });
+    expect(await attachWindowsHostRuntimeOwner({ ...ownerOptions, native: fake.native })).toEqual({
+      status: "refused",
+      reason: "unanswered",
+    });
+    vi.spyOn(fake.native, "lookup").mockImplementation(() =>
+      lookup({ ...owner, nonceDigest: "0".repeat(64) }),
+    );
+    expect(await attachWindowsHostRuntimeOwner({ ...ownerOptions, native: fake.native })).toEqual({
+      status: "refused",
+      reason: "owner-record",
+    });
   });
 
   it("records the native process birth and refuses unauthenticated control effects", async () => {
