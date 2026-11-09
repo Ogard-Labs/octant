@@ -699,7 +699,34 @@ const timer = setInterval(() => {
         },
         { timeoutMs: 5000 },
       );
-    await observeUntil("primary-window", (snapshot) => hasText(snapshot, "Welcome to Octant"));
+    try {
+      await observeUntil("primary-window", (snapshot) => hasText(snapshot, "Welcome to Octant"));
+    } catch (error) {
+      // A blank first window leaves no screenshot text; print where the app
+      // got to from its own logs, bounded and with token-like runs hidden.
+      const logRoots = [join(root, "data"), join(process.env.HOME ?? "", "Library/Logs/Octant")];
+      for (const logRoot of logRoots) {
+        const found = spawnSync("/usr/bin/find", [logRoot, "-name", "*.log", "-size", "-2048k"], {
+          encoding: "utf8",
+          timeout: 3000,
+        });
+        for (const file of (found.stdout ?? "").split("\n").filter(Boolean).slice(0, 6)) {
+          const tail = spawnSync("/usr/bin/tail", ["-n", "25", file], {
+            encoding: "utf8",
+            timeout: 3000,
+          });
+          console.log(
+            `OCTANT_APP_LOG ${JSON.stringify({
+              file: file.replace(root, "<root>"),
+              tail: (tail.stdout ?? "")
+                .replace(/[A-Za-z0-9+/=_-]{24,}/g, "<redacted>")
+                .slice(-2500),
+            })}`,
+          );
+        }
+      }
+      throw error;
+    }
     await runBoundedCommand(
       nativeControllerPath,
       ["click", String(ownPid), join(artifacts, "skip-setup-target.png"), "Skip setup"],
