@@ -2139,6 +2139,196 @@ describe("ACP provider driver profile quirks", () => {
     },
   );
 
+  it("answers a gated session form exactly once and cancels only its pending native callback", async () => {
+    const { driver, client } = fixture(
+      { ...vibe, elicitationVersions: ["3.0.3"] },
+      { runtimeVersion: "3.0.3", authentication: "subscription" },
+    );
+    let finishPrompt: ((value: { stopReason: string }) => void) | undefined;
+    client.prompt.mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          finishPrompt = resolve;
+        }),
+    );
+    await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const connection = yield* driver.acquire({ instanceId, projectRoot, mode: "code" });
+          yield* connection.start({ sessionId, modelId, executionPolicy: "approval-gated" });
+          const events: ProviderRuntimeEvent[] = [];
+          yield* Effect.forkScoped(
+            Stream.runForEach(yield* connection.subscribe, (event) =>
+              Effect.sync(() => {
+                events.push(event);
+              }),
+            ),
+          );
+          yield* connection.send({ sessionId, prompt: "Choose", attachments: [], tools: [] });
+          const form = (id: string, sourceSessionId = "agent-session-1") => ({
+            kind: "request" as const,
+            id,
+            method: "elicitation/create" as const,
+            params: {
+              sessionId: sourceSessionId,
+              mode: "form" as const,
+              message: "Choose formats",
+              requestedSchema: {
+                type: "object",
+                required: ["q0"],
+                properties: {
+                  q0: {
+                    type: "array",
+                    description: "Formats?",
+                    items: { anyOf: [{ const: "PDF" }, { const: "Text" }] },
+                  },
+                },
+              },
+            },
+          });
+          client.request(form("foreign", "other-native-session"));
+          client.request(form("native-form"));
+          yield* Effect.sleep("5 millis");
+          const question = events.find((event) => event.kind === "user-input-request");
+          if (question?.kind !== "user-input-request") throw new Error("question missing");
+          expect(question.questionnaire?.questions[0]?.selection).toBe("multiple");
+          expect(client.reject).toHaveBeenCalledWith("foreign", -32602, expect.any(String));
+          const bad = yield* Effect.exit(
+            connection.answerUserInput({
+              sessionId,
+              requestId: question.requestId,
+              answer: "invalid",
+            }),
+          );
+          expect(bad._tag).toBe("Failure");
+          const answer = JSON.stringify({
+            version: 1,
+            answers: [{ questionId: "q0", selectedOptionIds: ["o0", "o1"] }],
+          });
+          yield* connection.answerUserInput({ sessionId, requestId: question.requestId, answer });
+          expect(client.respond).toHaveBeenCalledWith("native-form", {
+            action: "accept",
+            content: { q0: ["PDF", "Text"] },
+          });
+          expect(
+            (yield* Effect.exit(
+              connection.answerUserInput({ sessionId, requestId: question.requestId, answer }),
+            ))._tag,
+          ).toBe("Failure");
+          client.request(form("cancel-form"));
+          yield* connection.interrupt(sessionId);
+          expect(client.respond).toHaveBeenCalledWith("cancel-form", { action: "cancel" });
+          finishPrompt?.({ stopReason: "cancelled" });
+          yield* Effect.sleep("1 millis");
+          client.request(form("late"));
+          expect(client.reject).toHaveBeenCalledWith("late", -32602, expect.any(String));
+          expect(client.respond).toHaveBeenCalledTimes(2);
+        }),
+      ),
+    );
+  });
+
+  it.each(["duplicate callback", "failed write"] as const)(
+    "never replays an uncertain form after a %s",
+    async (scenario) => {
+      const { driver, client } = fixture(
+        { ...vibe, elicitationVersions: ["3.0.3"] },
+        { runtimeVersion: "3.0.3", authentication: "subscription" },
+      );
+      let finishPrompt: ((value: { stopReason: string }) => void) | undefined;
+      client.prompt.mockImplementation(
+        () =>
+          new Promise((resolve) => {
+            finishPrompt = resolve;
+          }),
+      );
+      await Effect.runPromise(
+        Effect.scoped(
+          Effect.gen(function* () {
+            const connection = yield* driver.acquire({ instanceId, projectRoot, mode: "code" });
+            yield* connection.start({ sessionId, modelId, executionPolicy: "approval-gated" });
+            const events: ProviderRuntimeEvent[] = [];
+            yield* Effect.forkScoped(
+              Stream.runForEach(yield* connection.subscribe, (event) =>
+                Effect.sync(() => {
+                  events.push(event);
+                }),
+              ),
+            );
+            yield* connection.send({ sessionId, prompt: "Choose", attachments: [], tools: [] });
+            const form = {
+              kind: "request" as const,
+              id: "native",
+              method: "elicitation/create" as const,
+              params: {
+                sessionId: "agent-session-1",
+                mode: "form" as const,
+                message: "Choose",
+                requestedSchema: {
+                  type: "object",
+                  required: ["q0"],
+                  properties: {
+                    q0: {
+                      type: "string",
+                      description: "Format?",
+                      oneOf: [{ const: "PDF" }, { const: "Text" }],
+                    },
+                  },
+                },
+              },
+            };
+            client.request(form);
+            yield* Effect.sleep("1 millis");
+            const question = events.find((event) => event.kind === "user-input-request");
+            if (question?.kind !== "user-input-request") throw new Error("question missing");
+            if (scenario === "duplicate callback") client.request(form);
+            else client.respond.mockRejectedValueOnce(new Error("write failed"));
+            const input = {
+              sessionId,
+              requestId: question.requestId,
+              answer: JSON.stringify({
+                version: 1,
+                answers: [{ questionId: "q0", selectedOptionIds: ["o0"] }],
+              }),
+            };
+            expect((yield* Effect.exit(connection.answerUserInput(input)))._tag).toBe("Failure");
+            expect((yield* Effect.exit(connection.answerUserInput(input)))._tag).toBe("Failure");
+            yield* Effect.sleep("1 millis");
+            expect(events.filter((event) => event.kind === "failed")).toHaveLength(1);
+            expect(client.respond).toHaveBeenCalledTimes(scenario === "failed write" ? 1 : 0);
+            finishPrompt?.({ stopReason: "end_turn" });
+            yield* Effect.sleep("1 millis");
+            expect(events.some((event) => event.kind === "completed")).toBe(false);
+          }),
+        ),
+      );
+    },
+  );
+
+  it.each([
+    { profile: vibe, version: "3.0.3", expected: "unsupported" },
+    {
+      profile: { ...vibe, elicitationVersions: ["3.0.3"] },
+      version: "3.0.4",
+      expected: "unavailable",
+    },
+    {
+      profile: { ...vibe, elicitationVersions: ["3.0.3"] },
+      version: "3.0.3",
+      expected: "supported",
+    },
+  ])(
+    "reports questions as $expected for the selected verified version",
+    async ({ profile, version, expected }) => {
+      const { driver } = fixture(profile, {
+        runtimeVersion: version,
+        authentication: "subscription",
+      });
+      const result = await Effect.runPromise(Effect.scoped(driver.probe({ instanceId })));
+      expect(result.capabilities.userQuestions).toBe(expected);
+    },
+  );
+
   it("answers single-select questions for agents that support user input", async () => {
     const { driver, client } = fixture(kilo);
     await Effect.runPromise(
