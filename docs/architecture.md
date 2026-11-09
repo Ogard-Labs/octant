@@ -6389,8 +6389,12 @@ state every thread kind answers, Code included; and the Chat, Work and Code turn
 runners journal a runtime's own compactions on the same ledger, which, with the
 requested ones, now decide when a Code window breakdown stops counting Octant's
 per-turn context as held; and the compaction divider on the thread's timeline in
-Chat, Work and Code. No compaction, requested or automatic, has been run against a real
-runtime yet. **Compact session** replaces
+Chat, Work and Code. Requested compactions have run live on the Claude Code
+and Codex runtimes (2026-11-08); automatic ones have not completed live yet. A
+host summary request may fill 85% of the plan's safe input budget: the endpoint
+measures the request as sent, and escaping and multi-byte text make it larger
+than the planner's counts, so a summary picked to the full budget of a nearly
+full small window was refused before it was sent. **Compact session** replaces
 what the model sees from the next turn on with a summary of the earlier
 conversation and a recent tail, when the person asks, outside a turn. It never
 deletes or rewrites the journal: the thread keeps every message, tool call and
