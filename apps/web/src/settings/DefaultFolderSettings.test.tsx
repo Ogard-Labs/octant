@@ -34,9 +34,9 @@ describe("DefaultFolderSettings", () => {
     expect(onFolderChange).toHaveBeenCalledWith("/Users/ada/Documents/Octant/");
   });
 
-  it("refuses Windows-style input as not an absolute folder", async () => {
+  it("sends Windows absolute input unchanged to the host and preserves its refusal", async () => {
     const user = userEvent.setup();
-    const onFolderChange = vi.fn();
+    const onFolderChange = vi.fn(() => false);
     render(
       <DefaultFolderSettings
         folder="/Users/ada/Documents/Octant"
@@ -50,8 +50,11 @@ describe("DefaultFolderSettings", () => {
     await user.type(input, "C:\\Users\\ada\\Documents\\Octant");
     await user.click(screen.getByRole("button", { name: "Save" }));
 
-    expect(onFolderChange).not.toHaveBeenCalled();
-    expect(screen.getByText("Enter an absolute path.")).toBeVisible();
+    expect(onFolderChange).toHaveBeenCalledWith("C:\\Users\\ada\\Documents\\Octant");
+    expect(
+      screen.getByText("The folder must be an absolute path inside your home folder."),
+    ).toBeVisible();
+    expect(input).toHaveValue("C:\\Users\\ada\\Documents\\Octant");
   });
 });
 

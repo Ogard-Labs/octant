@@ -97,7 +97,7 @@ import type { WorkWiring } from "./work";
 
 export type AutomationDependencies = {
   readonly integrationEventSources: IntegrationEventSourceProvider;
-} & Pick<ServerStart, "persistence"> &
+} & Pick<ServerStart, "persistence" | "options"> &
   Pick<
     AuthorityWiring,
     "automationEventStore" | "liveTurns" | "routineProposalService" | "windowAuthorityStore"
@@ -174,7 +174,10 @@ export function wireAutomation(deps: AutomationDependencies) {
   // The key is read once it exists and kept: every send signs with it.
   let pushSigning: HostSigningPort | undefined;
   const signPush = () => {
-    pushSigning ??= existingPrivateListenerSigning(persistence.dataDirectory);
+    pushSigning ??= existingPrivateListenerSigning(
+      persistence.dataDirectory,
+      deps.options.serverIdentityFiles,
+    );
     return pushSigning;
   };
   // Where this host's hub grant ticks Push, sealed envelopes go to the hub to

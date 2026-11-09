@@ -1,4 +1,4 @@
-import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
+import { createHash, randomBytes } from "node:crypto";
 import { execFile } from "node:child_process";
 import type { Stats } from "node:fs";
 import { createConnection, createServer, type Server, type Socket } from "node:net";
@@ -25,7 +25,7 @@ import type { HostRuntimePaths } from "./paths";
 import type { HostLogReadResult } from "./logs";
 import type { HostRuntimeDiagnostics } from "./diagnostics";
 
-const MAX_CONTROL_MESSAGE_BYTES = 16_384;
+import { MAX_CONTROL_MESSAGE_BYTES, respondToHostControlLine } from "./ownerControlProtocol";
 const execFileAsync = promisify(execFile);
 
 export type HostRuntimeOwnershipErrorCode =
@@ -386,135 +386,16 @@ function createControlServer(
       const newline = buffer.indexOf("\n");
       if (newline < 0) return;
       const line = buffer.slice(0, newline);
-      void handleControlLine(socket, line, receipt, secret, onStopRequested, onControlRequest);
+      void respondToHostControlLine(
+        (value) => respond(socket, value),
+        line,
+        receipt,
+        secret,
+        onStopRequested,
+        onControlRequest,
+      );
     });
   });
-}
-
-async function handleControlLine(
-  socket: Socket,
-  line: string,
-  receipt: HostRuntimeOwnerReceipt,
-  secret: string,
-  onStopRequested: (() => void | Promise<void>) | undefined,
-  onControlRequest:
-    | ((
-        request: HostRuntimeLocalControlRequest,
-      ) => HostRuntimeControlPayload | undefined | Promise<HostRuntimeControlPayload | undefined>)
-    | undefined,
-): Promise<void> {
-  let request: {
-    readonly version?: unknown;
-    readonly secret?: unknown;
-    readonly principal?: unknown;
-    readonly type?: unknown;
-    readonly since?: unknown;
-    readonly limit?: unknown;
-    readonly follow?: unknown;
-    readonly label?: unknown;
-  };
-  try {
-    request = JSON.parse(line) as typeof request;
-  } catch {
-    respond(socket, { ok: false, error: "invalid-request" });
-    return;
-  }
-  if (
-    request.version !== 1 ||
-    typeof request.secret !== "string" ||
-    !safeSecretEqual(request.secret, secret) ||
-    request.principal !== "local"
-  ) {
-    respond(socket, { ok: false, error: "unauthorized" });
-    return;
-  }
-  if (request.type === "status") {
-    respond(socket, { ok: true, owner: receipt });
-    return;
-  }
-  if (request.type === "stop") {
-    if (onStopRequested === undefined) {
-      respond(socket, { ok: false, error: "stop-unavailable" });
-      return;
-    }
-    respond(socket, { ok: true });
-    await onStopRequested();
-    return;
-  }
-  if (request.type === "diagnostics") {
-    try {
-      const payload = await onControlRequest?.({ type: "diagnostics", principal: "local" });
-      respond(socket, { ok: true, ...payload });
-    } catch {
-      respond(socket, { ok: false, error: "handler-failed" });
-    }
-    return;
-  }
-  if (request.type === "logs") {
-    if (
-      (request.since !== undefined && typeof request.since !== "string") ||
-      (request.limit !== undefined &&
-        (typeof request.limit !== "number" ||
-          !Number.isSafeInteger(request.limit) ||
-          request.limit < 1 ||
-          request.limit > 1_000)) ||
-      (request.follow !== undefined && typeof request.follow !== "boolean")
-    ) {
-      respond(socket, { ok: false, error: "invalid-request" });
-      return;
-    }
-    try {
-      const payload = await onControlRequest?.({
-        type: "logs",
-        principal: "local",
-        ...(request.since === undefined ? {} : { since: request.since }),
-        ...(request.limit === undefined ? {} : { limit: request.limit }),
-        ...(request.follow === undefined ? {} : { follow: request.follow }),
-      });
-      respond(socket, { ok: true, ...payload });
-    } catch {
-      respond(socket, { ok: false, error: "handler-failed" });
-    }
-    return;
-  }
-  if (request.type === "backup") {
-    if (
-      request.label !== undefined &&
-      (typeof request.label !== "string" || !/^[a-z0-9][a-z0-9-]{0,31}$/.test(request.label))
-    ) {
-      respond(socket, { ok: false, error: "invalid-request" });
-      return;
-    }
-    try {
-      const payload = await onControlRequest?.({
-        type: "backup",
-        principal: "local",
-        ...(request.label === undefined ? {} : { label: request.label }),
-      });
-      if (payload?.backup === undefined) {
-        respond(socket, { ok: false, error: "backup-unavailable" });
-        return;
-      }
-      respond(socket, { ok: true, backup: payload.backup });
-    } catch {
-      respond(socket, { ok: false, error: "handler-failed" });
-    }
-    return;
-  }
-  if (request.type === "restore") {
-    try {
-      const payload = await onControlRequest?.({ type: "restore", principal: "local" });
-      if (payload?.restore === undefined) {
-        respond(socket, { ok: false, error: "restore-unavailable" });
-        return;
-      }
-      respond(socket, { ok: true, restore: payload.restore });
-    } catch {
-      respond(socket, { ok: false, error: "handler-failed" });
-    }
-    return;
-  }
-  respond(socket, { ok: false, error: "unsupported-request" });
 }
 
 function respond(socket: Socket, value: unknown): void {
@@ -911,12 +792,6 @@ function isAddressInUse(error: unknown): boolean {
     "code" in error &&
     (error as { readonly code?: unknown }).code === "EADDRINUSE"
   );
-}
-
-function safeSecretEqual(left: string, right: string): boolean {
-  const a = Buffer.from(left);
-  const b = Buffer.from(right);
-  return a.length === b.length && timingSafeEqual(a, b);
 }
 
 function listen(server: Server, path: string): Promise<void> {

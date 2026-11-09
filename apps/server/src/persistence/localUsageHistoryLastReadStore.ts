@@ -11,9 +11,12 @@ import { openSqlite } from "./sqlitePort";
  * a surface asks for is anchored at "now" and so is never the same request
  * twice.
  */
-export function createLocalUsageHistoryLastReadStore(path: string) {
+export function createLocalUsageHistoryLastReadStore(
+  path: string,
+  openConnection: typeof openSqlite = openSqlite,
+) {
   function withDatabase<T>(run: (connection: ReturnType<typeof openSqlite>) => T): T {
-    const connection = openSqlite(path);
+    const connection = openConnection(path);
     try {
       connection.exec(
         "CREATE TABLE IF NOT EXISTS usage_last_reads (view TEXT PRIMARY KEY, response TEXT NOT NULL, complete INTEGER NOT NULL)",

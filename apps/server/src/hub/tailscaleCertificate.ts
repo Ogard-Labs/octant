@@ -1,3 +1,5 @@
+import type { WindowsAuthorityStateFile } from "@octant/host-runtime";
+import { nativeAuthorityState } from "./nativeAuthorityState";
 // The `*.ts.net` certificate a browser needs to trust the hub's web app. The
 // host asks the local Tailscale daemon for it, keeps it renewed, and does so
 // only after the person turned it on having read the certificate-transparency
@@ -112,7 +114,16 @@ export interface TailscaleCertificateSettingPort {
 
 export function createTailscaleCertificateSetting(
   dataDirectory: string,
+  nativeFile?: WindowsAuthorityStateFile,
 ): TailscaleCertificateSettingPort {
+  const native = nativeAuthorityState(
+    dataDirectory,
+    nativeFile,
+    decodeSetting,
+    Schema.encodeSync(CertificateSetting),
+    () => ({ enabled: false }),
+  );
+  if (native !== undefined) return native;
   const directory = join(dataDirectory, SUBDIR);
   const path = join(directory, FILE);
   return {

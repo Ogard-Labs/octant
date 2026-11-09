@@ -1,0 +1,229 @@
+name: Native Windows host ownership
+
+on:
+  pull_request:
+    paths:
+      - .github/workflows/windows-host-owner.yml
+      - packages/host-runtime/native/windows-host-owner/**
+      - packages/host-runtime/src/windowsHostOwner*
+      - packages/host-runtime/src/windowsHostProfile*
+      - packages/host-runtime/src/windowsServerIdentity*
+      - packages/host-runtime/src/windowsListenerTls*
+      - packages/host-runtime/src/windowsRosterSigningKey*
+      - packages/host-runtime/src/windowsAuthorityState*
+      - apps/server/src/hub/*StateStore*
+      - apps/server/src/hub/nativeAuthorityState*
+      - apps/server/src/hub/tailscaleCertificate*
+      - apps/server/src/remote/privateListenerHostIdentity*
+      - apps/server/src/remote/selfMadeListenerCertificate*
+      - apps/server/src/hub/rosterSigningKey*
+      - packages/host-runtime/src/ownerControlProtocol.ts
+      - packages/host-runtime/src/owner.ts
+      - packages/host-runtime/src/ownerReceipt.ts
+      - scripts/windows-host-owner/**
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: windows-host-owner-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  native:
+    name: Own Windows control endpoints in Bun, Node and Electron
+    runs-on: windows-2025
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        id: bun-setup
+        continue-on-error: true
+        with:
+          bun-version: 1.4.4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 26
+      - name: Recover pinned Bun from its integrity-checked official npm artifact
+        if: steps.bun-setup.outcome == 'failure'
+        run: |
+          $octantBunRoot = Join-Path $env:RUNNER_TEMP 'octant-native-bun-1.4.4'
+          if (Test-Path -LiteralPath $octantBunRoot) { throw 'Pinned Bun fallback directory already exists' }
+          [void](New-Item -ItemType Directory -Path $octantBunRoot)
+          $octantBunArchive = Join-Path $octantBunRoot 'bun-windows-x64-1.4.4.tgz'
+          Invoke-WebRequest 'https://registry.npmjs.org/@oven/bun-windows-x64/-/bun-windows-x64-1.4.4.tgz' -OutFile $octantBunArchive
+          $octantBunExpected = '6b72cd72d0553bc3e378fb0565fc0395e17625761fd817d0d6efcf2d19c10cb9c2d918a697ee3e2e02692a3e31446841f762b0786c902393d769390ff6aca931'
+          $octantBunActual = (Get-FileHash -LiteralPath $octantBunArchive -Algorithm SHA512).Hash.ToLowerInvariant()
+          if ($octantBunActual -ne $octantBunExpected) { throw 'Pinned Bun npm artifact integrity mismatch' }
+          $octantBunEntries = @(& tar -tzf $octantBunArchive)
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          foreach ($octantBunEntry in $octantBunEntries) {
+            if ($octantBunEntry.StartsWith('/') -or $octantBunEntry.Contains('\') -or $octantBunEntry -match '(^|/)\.\.(/|$)' -or $octantBunEntry -match '^[A-Za-z]:') { throw 'Unsafe pinned Bun archive path' }
+          }
+          if (@($octantBunEntries | Where-Object { $_ -ieq 'package/bin/bun.exe' }).Count -ne 1 -or @($octantBunEntries | Where-Object { $_ -ceq 'package/bin/bun.exe' }).Count -ne 1) { throw 'Ambiguous pinned Bun executable entry' }
+          $octantBunListing = @(& tar -tvzf $octantBunArchive package/bin/bun.exe)
+          if ($LASTEXITCODE -ne 0 -or $octantBunListing.Count -ne 1 -or $octantBunListing[0] -notmatch '^-[rwxstST-]{9}\s') { throw 'Pinned Bun executable is not a regular archive entry' }
+          tar -xzf $octantBunArchive -C $octantBunRoot package/bin/bun.exe
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $octantBunBin = Join-Path $octantBunRoot 'package/bin'
+          $octantBunExe = Join-Path $octantBunBin 'bun.exe'
+          foreach ($octantBunNode in @($octantBunRoot, (Join-Path $octantBunRoot 'package'), $octantBunBin, $octantBunExe)) {
+            $octantBunMetadata = Get-Item -LiteralPath $octantBunNode -Force
+            if (($octantBunMetadata.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) { throw 'Pinned Bun extraction contains a reparse point' }
+          }
+          if ((Get-Item -LiteralPath $octantBunExe).PSIsContainer) { throw 'Pinned Bun executable is not a file' }
+          $octantBunVersion = (& $octantBunExe --version).Trim()
+          if ($LASTEXITCODE -ne 0 -or $octantBunVersion -ne '1.4.4') { throw 'Pinned Bun fallback version mismatch' }
+          $octantBunPlatform = & $octantBunExe -e 'console.log(process.platform + "/" + process.arch)'
+          if ($LASTEXITCODE -ne 0 -or $octantBunPlatform.Trim() -ne 'win32/x64') { throw 'Pinned Bun fallback platform mismatch' }
+          Add-Content -LiteralPath $env:GITHUB_PATH -Value $octantBunBin -Encoding utf8
+          Write-Output 'Official npm Bun1.4.4 win32/x64 artifact verified with pinned SHA512; isolated runner binary selected.'
+      - name: Verify the selected pinned Bun runtime
+        run: |
+          $octantSelectedBun = (bun --version).Trim()
+          if ($LASTEXITCODE -ne 0 -or $octantSelectedBun -ne '1.4.4') { throw 'Selected Bun version differs from the pinned runtime' }
+      - run: bun install --frozen-lockfile --ignore-scripts
+      - name: Prepare the public Node-API SDK
+        run: |
+          $octantNodeVersion = (node -p process.version).Trim()
+          if ($octantNodeVersion -notmatch '^v[0-9]+\.[0-9]+\.[0-9]+$') { throw 'Invalid SDK version' }
+          $octantArchive = "node-$octantNodeVersion-headers.tar.gz"
+          $octantBase = "https://nodejs.org/download/release/$octantNodeVersion"
+          Invoke-WebRequest "$octantBase/$octantArchive" -OutFile "$env:RUNNER_TEMP/$octantArchive"
+          Invoke-WebRequest "$octantBase/win-x64/node.lib" -OutFile "$env:RUNNER_TEMP/node.lib"
+          $octantSums = (Invoke-WebRequest "$octantBase/SHASUMS256.txt").Content -split "`n"
+          foreach ($octantEntry in @(@($octantArchive, $octantArchive), @('node.lib', 'win-x64/node.lib'))) {
+            $octantExpected = ($octantSums | Where-Object { $_.Trim().EndsWith("  $($octantEntry[1])") }).Split(' ', [System.StringSplitOptions]::RemoveEmptyEntries)[0]
+            $octantActual = (Get-FileHash "$env:RUNNER_TEMP/$($octantEntry[0])" -Algorithm SHA256).Hash.ToLowerInvariant()
+            if ($octantActual -ne $octantExpected) { throw 'Public SDK checksum mismatch' }
+          }
+          tar -xf "$env:RUNNER_TEMP/$octantArchive" -C "$env:RUNNER_TEMP"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          cmake -S packages/host-runtime/native/windows-host-owner -B "$env:RUNNER_TEMP/owner-build" -A x64 "-DOCTANT_NODE_HEADERS=$env:RUNNER_TEMP/node-$octantNodeVersion/include/node" "-DOCTANT_NODE_IMPORT_LIB=$env:RUNNER_TEMP/node.lib"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          cmake --build "$env:RUNNER_TEMP/owner-build" --config Release
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Bundle the source adapter fixture
+        run: |
+          bun build scripts/windows-host-owner/smoke.ts --target=node --outfile "$env:RUNNER_TEMP/owner-smoke.mjs"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          bun build scripts/windows-host-owner/worker.ts --target=node --outfile "$env:RUNNER_TEMP/owner-worker.mjs"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          Copy-Item scripts/windows-host-owner/fixtures.ps1 "$env:RUNNER_TEMP/owner-fixtures.ps1"
+          bun build scripts/windows-host-owner/profile.ts --target=node --outfile "$env:RUNNER_TEMP/profile-smoke.mjs"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          bun build scripts/windows-host-owner/publication-reader.ts --target=node --outfile "$env:RUNNER_TEMP/publication-reader.mjs"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Bundle the actual server identity consumer
+        run: |
+          bun build scripts/windows-host-owner/server-identity.ts --target=node --outfile "$env:RUNNER_TEMP/server-identity-smoke.mjs"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Bundle the actual listener TLS consumer
+        run: |
+          bun build scripts/windows-host-owner/listener-tls.ts --target=node --outfile "$env:RUNNER_TEMP/listener-tls-smoke.mjs"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Bundle the actual roster signing consumer
+        run: |
+          bun build scripts/windows-host-owner/roster-key.ts --target=node --outfile "$env:RUNNER_TEMP/roster-key-smoke.mjs"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Bundle the actual authority-state consumers
+        run: |
+          bun build scripts/windows-host-owner/authority-state.ts --target=node --outfile "$env:RUNNER_TEMP/authority-state-smoke.mjs"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Bundle the guarded SQLite prototype
+        run: |
+          bun build scripts/windows-host-owner/sqlite-store.ts --target=bun --outfile "$env:RUNNER_TEMP/sqlite-store-smoke.mjs"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Prove native startup storage and generation-safe cleanup in Bun
+        run: |
+          bun scripts/windows-host-owner/profile-run.ts --startup-files "$env:RUNNER_TEMP/owner-build/Release/octant-windows-owner-reader.exe" "$env:RUNNER_TEMP/owner-build/Release/octant-windows-host-owner.node" "$env:RUNNER_TEMP/profile-smoke.mjs" (Get-Command bun).Source
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Stage the actual Windows foreground server layout
+        run: |
+          cmake -S apps/desktop/native/windows-credential-helper -B "$env:RUNNER_TEMP/credential-build" -A x64
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          cmake --build "$env:RUNNER_TEMP/credential-build" --config Release
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          bun run --cwd apps/server build
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $octantForegroundResources = "$env:RUNNER_TEMP/foreground/resources"
+          New-Item -ItemType Directory -Path "$octantForegroundResources/app/apps/server" -Force | Out-Null
+          New-Item -ItemType Directory -Path "$octantForegroundResources/native" -Force | Out-Null
+          Copy-Item apps/server/dist "$octantForegroundResources/app/apps/server/dist" -Recurse
+          New-Item -ItemType Junction -Path "$octantForegroundResources/app/apps/server/node_modules" -Target "$PWD/node_modules" | Out-Null
+          Copy-Item "$env:RUNNER_TEMP/owner-build/Release/octant-windows-host-owner.node" "$octantForegroundResources/native/"
+          Copy-Item "$env:RUNNER_TEMP/credential-build/Release/octant-credential-helper.exe" "$octantForegroundResources/native/"
+          bun build scripts/windows-host-owner/foreground.ts --target=bun --outfile "$env:RUNNER_TEMP/foreground-smoke.mjs"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Prove the actual Windows foreground owner and journal lifecycle
+        run: |
+          $env:OCTANT_FOREGROUND_FIXTURE_ENTRY = "$env:RUNNER_TEMP/foreground/resources/app/apps/server/dist/main.mjs"
+          bun scripts/windows-host-owner/profile-run.ts --foreground "$env:RUNNER_TEMP/owner-build/Release/octant-windows-owner-reader.exe" "$env:RUNNER_TEMP/foreground/resources/native/octant-windows-host-owner.node" "$env:RUNNER_TEMP/foreground-smoke.mjs" (Get-Command bun).Source
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          Remove-Item Env:OCTANT_FOREGROUND_FIXTURE_ENTRY
+      - name: Prove the native Bun owner and client
+        run: |
+          bun scripts/windows-host-owner/run.ts (Get-Command bun).Source "$env:RUNNER_TEMP/owner-smoke.mjs" "$env:RUNNER_TEMP/owner-build/Release/octant-windows-host-owner.node" "$env:RUNNER_TEMP/owner-build/Release/octant-windows-owner-reader.exe"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Prove the native Node owner and client
+        run: |
+          bun scripts/windows-host-owner/run.ts (Get-Command node).Source "$env:RUNNER_TEMP/owner-smoke.mjs" "$env:RUNNER_TEMP/owner-build/Release/octant-windows-host-owner.node" "$env:RUNNER_TEMP/owner-build/Release/octant-windows-owner-reader.exe"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Measure guarded SQLite WAL lifecycle in Bun without admitting startup
+        run: |
+          bun scripts/windows-host-owner/profile-run.ts --sqlite-store "$env:RUNNER_TEMP/owner-build/Release/octant-windows-owner-reader.exe" "$env:RUNNER_TEMP/owner-build/Release/octant-windows-host-owner.node" "$env:RUNNER_TEMP/sqlite-store-smoke.mjs" (Get-Command bun).Source
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Install the pinned Electron runtime with shared verified recovery
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: bun scripts/ensure-ci-electron.ts
+      - name: Prove the shipped Electron runtime without a window
+        env:
+          ELECTRON_RUN_AS_NODE: "1"
+        run: |
+          bun scripts/windows-host-owner/run.ts "$pwd/node_modules/electron/dist/electron.exe" "$env:RUNNER_TEMP/owner-smoke.mjs" "$env:RUNNER_TEMP/owner-build/Release/octant-windows-host-owner.node" "$env:RUNNER_TEMP/owner-build/Release/octant-windows-owner-reader.exe"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Refuse a fixture environment that disagrees with the native known folder
+        run: |
+          $octantNativeLocal = [Environment]::GetFolderPath('LocalApplicationData')
+          foreach ($octantProfile in @('octant', 'nightly-test-data')) {
+            if (Test-Path -LiteralPath (Join-Path $octantNativeLocal "Octant/hosts/$octantProfile")) { throw 'Profile fixture already exists' }
+          }
+          $octantOriginalLocal = $env:LOCALAPPDATA
+          try {
+            $env:LOCALAPPDATA = Join-Path $env:RUNNER_TEMP 'unapproved-profile-location'
+            $octantRefusal = bun scripts/windows-host-owner/profile-run.ts "$env:RUNNER_TEMP/owner-build/Release/octant-windows-owner-reader.exe" "$env:RUNNER_TEMP/owner-build/Release/octant-windows-host-owner.node" "$env:RUNNER_TEMP/profile-smoke.mjs" (Get-Command bun).Source (Get-Command node).Source "$pwd/node_modules/electron/dist/electron.exe"
+            if ($LASTEXITCODE -ne 2 -or ($octantRefusal -join '') -notmatch '"fixtureKnownFolderMismatchRefused":true') { throw 'Mismatched fixture environment was not refused' }
+          } finally { $env:LOCALAPPDATA = $octantOriginalLocal }
+          foreach ($octantProfile in @('octant', 'nightly-test-data')) {
+            if (Test-Path -LiteralPath (Join-Path $octantNativeLocal "Octant/hosts/$octantProfile")) { throw 'Refused fixture changed the actual native profile' }
+          }
+          Write-Output 'Known-folder mismatch refused before profile mutation.'
+          exit 0
+      - name: Prove private persistent profiles and actual scoped owner consumers
+        run: |
+          bun scripts/windows-host-owner/profile-run.ts "$env:RUNNER_TEMP/owner-build/Release/octant-windows-owner-reader.exe" "$env:RUNNER_TEMP/owner-build/Release/octant-windows-host-owner.node" "$env:RUNNER_TEMP/profile-smoke.mjs" (Get-Command bun).Source (Get-Command node).Source "$pwd/node_modules/electron/dist/electron.exe"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Prove fixed private server identity files in all three runtimes
+        run: |
+          bun scripts/windows-host-owner/profile-run.ts --server-identity "$env:RUNNER_TEMP/owner-build/Release/octant-windows-owner-reader.exe" "$env:RUNNER_TEMP/owner-build/Release/octant-windows-host-owner.node" "$env:RUNNER_TEMP/server-identity-smoke.mjs" (Get-Command bun).Source (Get-Command node).Source "$pwd/node_modules/electron/dist/electron.exe"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Prove native listener TLS persistence and renewal in all three runtimes
+        run: |
+          bun scripts/windows-host-owner/profile-run.ts --listener-tls "$env:RUNNER_TEMP/owner-build/Release/octant-windows-owner-reader.exe" "$env:RUNNER_TEMP/owner-build/Release/octant-windows-host-owner.node" "$env:RUNNER_TEMP/listener-tls-smoke.mjs" (Get-Command bun).Source (Get-Command node).Source "$pwd/node_modules/electron/dist/electron.exe"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Prove immutable native roster signing in all three runtimes
+        run: |
+          bun scripts/windows-host-owner/profile-run.ts --roster-key "$env:RUNNER_TEMP/owner-build/Release/octant-windows-owner-reader.exe" "$env:RUNNER_TEMP/owner-build/Release/octant-windows-host-owner.node" "$env:RUNNER_TEMP/roster-key-smoke.mjs" (Get-Command bun).Source (Get-Command node).Source "$pwd/node_modules/electron/dist/electron.exe"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Prove private authority-state commits in all three runtimes
+        run: |
+          bun scripts/windows-host-owner/profile-run.ts --authority-state "$env:RUNNER_TEMP/owner-build/Release/octant-windows-owner-reader.exe" "$env:RUNNER_TEMP/owner-build/Release/octant-windows-host-owner.node" "$env:RUNNER_TEMP/authority-state-smoke.mjs" (Get-Command bun).Source (Get-Command node).Source "$pwd/node_modules/electron/dist/electron.exe"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - uses: actions/upload-artifact@v4
+        with:
+          name: octant-windows-host-owner-prerequisite-qa
+          path: ${{ runner.temp }}/owner-build/Release/octant-windows-host-owner.node
+          if-no-files-found: error
+          retention-days: 3

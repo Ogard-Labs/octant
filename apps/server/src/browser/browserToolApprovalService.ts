@@ -54,6 +54,7 @@ interface BrowserToolApprovalServiceOptions {
   readonly isLocalWindow?: (windowId: WindowId) => boolean;
   /** How many extensions are enabled in a profile, to name in its prompt. */
   readonly extensionsEnabledIn?: (profile: StoredBrowserProfile) => number;
+  readonly profileLabel?: (profile: StoredBrowserProfile) => Promise<string | undefined>;
   /**
    * The waiting set changed: a prompt became listable or left the list for
    * a decision, a cancel, an expiry, a close, or a revocation. Wired only at
@@ -90,7 +91,7 @@ export class BrowserToolApprovalService {
     this.#ttlMs = Math.max(1_000, Math.min(options.ttlMs ?? DEFAULT_TTL_MS, MAX_TTL_MS));
   }
 
-  request(input: {
+  async request(input: {
     readonly windowId: WindowId;
     readonly threadId: string;
     readonly authority: ToolActionAuthority;
@@ -112,6 +113,19 @@ export class BrowserToolApprovalService {
   }): Promise<"approved" | "denied" | "cancelled" | "expired"> {
     if (input.signal?.aborted) return Promise.resolve("cancelled");
     if (this.#pending.size >= MAX_PENDING_APPROVALS) return Promise.resolve("denied");
+    let profileLabel: string | undefined;
+    if (input.profile?.kind === "account") {
+      profileLabel = await this.#options.profileLabel?.(input.profile).catch(() => undefined);
+      if (input.signal?.aborted) return "cancelled";
+      if (
+        profileLabel === undefined ||
+        profileLabel.trim().length === 0 ||
+        profileLabel.length > 256 ||
+        this.#pending.size >= MAX_PENDING_APPROVALS ||
+        !this.#options.authorityIsCurrent(input.threadId, input.authority, input.windowId)
+      )
+        return "denied";
+    }
     const approvalId = decodeToolApprovalId(this.#options.uuid());
     const extensionCount =
       input.profile === undefined
@@ -123,6 +137,7 @@ export class BrowserToolApprovalService {
       mode: input.authority.mode,
       origin: input.origin,
       ...(input.profile === undefined ? {} : { profile: input.profile }),
+      ...(profileLabel === undefined ? {} : { profileLabel }),
       ...(extensionCount > 0 ? { extensionCount } : {}),
       ...(input.upload === undefined
         ? {}
