@@ -3,9 +3,10 @@ import { createHostResourceClient } from "@octant/client-runtime/host-resource-c
 import type { HostResourceSnapshot } from "@octant/contracts/host-resources";
 import type { ThreadUtilityDockContentProps } from "../shell/dockModuleContext";
 import { appendVitalsSample, formatBytes, formatRate, sparklinePoints } from "../shell/vitalsModel";
+import { useServerCodeProjects } from "../projects/serverProjectEntries";
 import { unavailable } from "./moduleState";
 
-type Props = Pick<ThreadUtilityDockContentProps, "serverUrl" | "windowCapability">;
+type Props = Pick<ThreadUtilityDockContentProps, "serverUrl" | "subject" | "windowCapability">;
 
 /** The host caches one snapshot for five seconds; asking faster only repeats it. */
 const POLL_MS = 5_000;
@@ -19,15 +20,31 @@ type VitalsState =
 
 export default function VitalsModule(props: Props) {
   const { serverUrl, windowCapability } = props;
+  // A thread in a server Project works on that server, so its load is read
+  // over the Project's SSH connection; any other thread reads this host.
+  const serverProjects = useServerCodeProjects();
+  const serverProjectId = [...serverProjects.projects, ...serverProjects.workProjects].find(
+    (project) =>
+      props.subject.projectId !== undefined &&
+      String(project.projectId) === String(props.subject.projectId),
+  )?.projectId;
   const [state, setState] = useState<VitalsState>({ status: "waiting", history: [] });
 
   useEffect(() => {
     if (serverUrl === undefined) return undefined;
-    const client = createHostResourceClient({
-      baseUrl: serverUrl,
-      fetch: globalThis.fetch,
-      ...(windowCapability === undefined ? {} : { windowCapability }),
-    });
+    const client =
+      serverProjectId === undefined
+        ? createHostResourceClient({
+            baseUrl: serverUrl,
+            fetch: globalThis.fetch,
+            ...(windowCapability === undefined ? {} : { windowCapability }),
+          })
+        : createHostResourceClient({
+            baseUrl: serverUrl,
+            fetch: globalThis.fetch,
+            path: `/api/server-projects/resources?projectId=${encodeURIComponent(String(serverProjectId))}`,
+            ...(windowCapability === undefined ? {} : { windowCapability }),
+          });
     let stopped = false;
     let inflight: AbortController | undefined;
     const read = async () => {
@@ -56,7 +73,7 @@ export default function VitalsModule(props: Props) {
       clearInterval(interval);
       inflight?.abort();
     };
-  }, [serverUrl, windowCapability]);
+  }, [serverProjectId, serverUrl, windowCapability]);
 
   if (serverUrl === undefined) return unavailable("Vitals", "No host is connected.");
   if (state.status === "refused") {

@@ -590,6 +590,7 @@ export function startOctantServer(
       safeNetworkStore,
       projectService,
       agentRunInteractions,
+      serverConnection,
       serverProjectStore,
       serverRegistry,
       shieldHolder,

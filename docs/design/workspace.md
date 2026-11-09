@@ -699,8 +699,10 @@ samples in the window (nothing is stored), reads about every five seconds only
 while it is mounted and the window is visible, never overlaps reads, abandons one
 after five seconds, and on a failed read drops its figures and history instead
 of showing old ones as current. A window without authority to read the host is
-told so. It is not offered for threads in a server Project until the dock reads
-that server's host. Side
+told so. For a thread in a server Project the tool shows the
+load on that server, read over the Project's SSH connection by
+`GET /api/server-projects/resources` (a local window only; Linux servers only,
+and it says so for any other). Side
 Chat is a Chat conversation about the pane's thread: it reads that thread's
 conversation, current state, files, and subagent results, and changes none of
 them ([authority](../architecture.md#security-and-authority)). Its notice says

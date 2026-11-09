@@ -572,7 +572,11 @@ A paired remote device with an active session receives it under the same
 unauthenticated caller is refused, with no figures in the refusal. The route
 also compares the device's host identity with this host's, but every paired
 device row on a host carries that host's own identity, so the comparison does
-not separate one paired device from another. The Computers card
+not separate one paired device from another. A server Project's server is read by
+`GET /api/server-projects/resources?projectId=`, which runs one fixed
+read-only script over that Project's SSH connection and answers the same
+snapshot; a local window only, never a paired device, and Linux servers only.
+The Computers card
 reads the route only while the card is on screen and the window is visible,
 about every ten seconds, at most one read per host at a time and each abandoned
 after five seconds, and does not poll in the background.

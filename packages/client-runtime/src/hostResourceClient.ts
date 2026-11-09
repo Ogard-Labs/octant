@@ -12,6 +12,8 @@ export interface HostResourceClientOptions {
   readonly baseUrl: string;
   readonly fetch: typeof globalThis.fetch;
   readonly windowCapability?: string;
+  /** The route to read, with its query. Defaults to this host's own load. */
+  readonly path?: string;
 }
 
 export type HostResourceRead =
@@ -34,11 +36,14 @@ export function createHostResourceClient(options: HostResourceClientOptions): Ho
       }
       let response: Response;
       try {
-        response = await fetch(new URL("/api/host/resources", options.baseUrl).toString(), {
-          method: "GET",
-          headers,
-          ...(signal === undefined ? {} : { signal }),
-        });
+        response = await fetch(
+          new URL(options.path ?? "/api/host/resources", options.baseUrl).toString(),
+          {
+            method: "GET",
+            headers,
+            ...(signal === undefined ? {} : { signal }),
+          },
+        );
       } catch {
         return { status: "unavailable" };
       }
