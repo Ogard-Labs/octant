@@ -7714,11 +7714,15 @@ the model at another size.
   two numbers mean the same arithmetic. The note is added to the copy that is
   sent and never joins the conversation or the journal, so the next request
   carries the same earlier messages and its prefix still matches the cache. It
-  is a message of its own because endpoints drop text beside tool results. A
-  session with no compaction point (the rule off, or no window known for the
-  model) and a turn running on a fallback model get no note, since neither has
-  a window Octant can stand behind; `context-remaining` answers as before. A
-  summary request carries none. The Anthropic Messages body marks the
+  is a message of its own because endpoints drop text beside tool results. The
+  window is the compaction point's; with the rule off it is the one the
+  request-fitting rules settle on (`resolveModelContextWindow` over the
+  instance's observed model, read as each request is sent), and the note's
+  second sentence becomes "Octant summarizes earlier turns only when a request
+  no longer fits.", which is what the loop then does. A model whose window
+  nothing names and a turn running on a fallback model get no note, since
+  neither has a window Octant can stand behind; `context-remaining` answers as
+  before. A summary request carries none. The Anthropic Messages body marks the
   message before a trailing note as well as the note itself, since a cache
   entry ending at the note is never read again. Rationale: the lead was told
   to call `context-remaining` before long work, so it learned how full the

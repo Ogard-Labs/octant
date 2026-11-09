@@ -170,6 +170,12 @@ export interface NativeHarnessConnectionOptions {
    * it the turn simply fails once the endpoint's retries are spent.
    */
   readonly leadFallback?: NativeHarnessLeadFallback;
+  /**
+   * The model's window as the request-fitting rules settle on it, read when a
+   * request is sent; undefined when nothing names one. It gives the lead its
+   * window fill when no compaction point carries a window.
+   */
+  readonly contextWindow?: (modelId: ProviderModelId) => number | undefined;
   readonly onSessionCountChange?: (delta: 1 | -1) => void;
   readonly onReleased?: () => void;
   readonly clock: () => string;
@@ -605,10 +611,13 @@ export function createNativeHarnessConnection(
         try {
           state.requestStartedAt = options.clock();
           return await (state.fallback?.endpoint ?? state.endpoint).send(
-            withWindowFill(
-              state.fallback === undefined ? state.compactionPoint : undefined,
-              current,
-            ),
+            state.fallback === undefined
+              ? withWindowFill(
+                  state.compactionPoint?.contextWindow ?? options.contextWindow?.(state.modelId),
+                  state.compactionPoint,
+                  current,
+                )
+              : current,
             stream,
           );
         } catch (error) {
@@ -1901,24 +1910,25 @@ export function passesCompactionPoint(
  * because endpoints drop text beside tool results, and it is never kept in
  * the conversation, so the next request's prefix still matches this one and
  * its cache. The figure is the estimate the compaction point is judged by,
- * so "fills 80%" and "summarizes at 85%" mean the same arithmetic. With no
- * point there is no named window, and a fallback model's window may differ
- * from the lead's: neither gets a figure, as `context-remaining` refuses one
- * it cannot stand behind.
+ * so "fills 80%" and "summarizes at 85%" mean the same arithmetic. With the
+ * rule off the loop still summarizes a request that no longer fits, and the
+ * note says that instead. A window nothing names gets no figure, as
+ * `context-remaining` refuses one it cannot stand behind.
  */
 function withWindowFill(
+  contextWindow: number | undefined,
   point: ProviderCompactionPoint | undefined,
   request: NativeHarnessRequest,
 ): NativeHarnessRequest {
-  if (point === undefined || point.contextWindow <= 0) return request;
-  const filled = Math.min(
-    100,
-    Math.round((requestTokenEstimate(request) * 100) / point.contextWindow),
-  );
-  const share = Math.round((point.tokens * 100) / point.contextWindow);
+  if (contextWindow === undefined || contextWindow <= 0) return request;
+  const filled = Math.min(100, Math.round((requestTokenEstimate(request) * 100) / contextWindow));
+  const summarizes =
+    point === undefined
+      ? "Octant summarizes earlier turns only when a request no longer fits."
+      : `Octant summarizes earlier turns once a request passes ${String(Math.round((point.tokens * 100) / point.contextWindow))}%.`;
   const note: NativeHarnessMessage = {
     role: "user",
-    text: `[Note from Octant, not the user: this request fills about ${String(filled)}% of the model's ${windowSize(point.contextWindow)}-token window. Octant summarizes earlier turns once a request passes ${String(share)}%.]`,
+    text: `[Note from Octant, not the user: this request fills about ${String(filled)}% of the model's ${windowSize(contextWindow)}-token window. ${summarizes}]`,
   };
   return { ...request, history: [...request.history, note] };
 }
