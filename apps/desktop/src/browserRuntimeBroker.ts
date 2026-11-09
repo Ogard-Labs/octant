@@ -58,6 +58,7 @@ const ROUTES = new Set([
   "/v1/contexts/close",
   "/v1/contexts/close-all",
   "/v1/profiles/list",
+  "/v1/profiles/create-account",
   "/v1/profiles/clear",
   "/v1/extensions/sync",
   "/v1/profiles/import-cookies",
@@ -258,9 +259,26 @@ async function handleBrokerRequest(
       const result = await host.humanPresentation(command, body.windowId, signal);
       return signal?.aborted ? failure("unavailable", 409) : Response.json(result);
     }
+    if (url.pathname === "/v1/profiles/create-account") {
+      if (profiles?.createAccount === undefined) return failure("profiles-unavailable", 409);
+      if (
+        typeof body.label !== "string" ||
+        body.label.trim().length === 0 ||
+        body.label.trim().length > 80 ||
+        Object.keys(body).some((key) => key !== "label")
+      )
+        return failure("invalid-request", 400);
+      return Response.json(await profiles.createAccount(body.label));
+    }
     if (url.pathname === "/v1/profiles/list") {
       if (profiles === undefined) return failure("profiles-unavailable", 409);
-      return Response.json({ profiles: await profiles.list() });
+      if (body.includeSizes !== undefined && typeof body.includeSizes !== "boolean")
+        return failure("invalid-request", 400);
+      return Response.json({
+        profiles: await (body.includeSizes === undefined
+          ? profiles.list()
+          : profiles.list(body.includeSizes)),
+      });
     }
     if (url.pathname === "/v1/profiles/clear") {
       if (profiles === undefined) return failure("profiles-unavailable", 409);

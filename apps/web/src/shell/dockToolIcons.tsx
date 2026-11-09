@@ -1,4 +1,5 @@
 import {
+  Activity,
   Bug,
   Bot,
   CircleDashed,
@@ -39,6 +40,7 @@ const ICONS: Readonly<Record<RightUtilityDockSurfaceId, LucideIcon>> = {
   "side-chat": MessageCircle,
   terminal: SquareTerminal,
   tests: FlaskConical,
+  vitals: Activity,
 };
 
 export function DockToolIcon(props: { readonly surface: RightUtilityDockSurfaceId }) {

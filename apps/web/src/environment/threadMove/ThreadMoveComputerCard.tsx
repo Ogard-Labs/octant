@@ -22,7 +22,14 @@ import { OctantSelectField } from "../../ui/base/OctantSelect";
 import { OctantSwitch } from "../../ui/base/OctantSwitch";
 import { EnvironmentCard, EnvironmentTile } from "../EnvironmentGroup";
 import type { ThreadMoveClient } from "./threadMoveClient";
-import { estimateBasis, formatBytes, sizeAndEstimate } from "./threadMoveSize";
+import { partsLeftBehindSentence } from "./ThreadMoveTombstone";
+import {
+  BULK_PART_KINDS,
+  estimateBasis,
+  formatBytes,
+  rowSize,
+  sizeAndEstimate,
+} from "./threadMoveSize";
 import { useThreadMove } from "./useThreadMove";
 
 export interface ThreadMoveComputerCardProps {
@@ -144,6 +151,7 @@ function MovableComputerCard(props: ThreadMoveComputerCardProps & { client: Thre
                   other move. */}
               {status?.sending !== undefined ||
               status?.waiting !== undefined ||
+              status?.waitingForPhone !== undefined ||
               status?.arriving !== undefined ||
               status?.handedOver !== undefined ? null : (
                 <DestinationPicker
@@ -312,6 +320,9 @@ function computerPill(status: ThreadMoveThreadStatus | undefined): {
       tone: "outline",
     };
   }
+  if (status?.waitingForPhone !== undefined) {
+    return { label: "Waiting for your phone", tone: "outline" };
+  }
   if (status?.arriving !== undefined) return { label: "Arriving", tone: "outline" };
   if (status?.handedOver !== undefined) return { label: "Handed over", tone: "outline" };
   if (status?.failure !== undefined) return { label: "Can't move", tone: "warning" };
@@ -329,7 +340,7 @@ const FAILURE_SENTENCES: Readonly<Record<ThreadMoveFailureReason, string>> = {
   busy: "A turn is running or the thread is waiting on you. Try again when it finishes.",
   delegated: "Another computer delegated this thread here, so it stays with that delegation.",
   "unlock-required":
-    "The move wasn't unlocked, or this Mac isn't an owner on that computer. Mark it as an owner there in Settings › Remote access › Hub.",
+    "The move wasn't unlocked or confirmed in time, or the device that unlocked it isn't an owner on that computer. Mark it as an owner there in Settings › Remote access › Hub.",
   refused: "That computer doesn't accept moved threads from this one.",
   "no-eligible-project": "That computer has no Project this thread can move into.",
   "destination-unreachable": "That computer couldn't be reached.",
@@ -455,6 +466,24 @@ function MoveProgress(props: {
   const [working, setWorking] = useState(false);
   const sending = props.status?.sending;
   const waiting = props.status?.waiting;
+  const waitingForPhone = props.status?.waitingForPhone;
+  if (waitingForPhone !== undefined) {
+    return (
+      <div className="environment-move__progress">
+        <p className="environment-move__sentence">
+          Confirm on your phone to move this thread to {waitingForPhone.destinationName}. Open
+          Octant there; it waits until {formatTime(waitingForPhone.expiresAt)}.
+        </p>
+        <OctantButton
+          onClick={() => void props.client.stopWaiting(props.thread).finally(props.onChanged)}
+          size="sm"
+          variant="outline"
+        >
+          Don't move
+        </OctantButton>
+      </div>
+    );
+  }
   if (waiting !== undefined) {
     return (
       <div className="environment-move__progress">
@@ -584,6 +613,7 @@ function MovedNotice(props: {
     hour: "numeric",
     minute: "2-digit",
   });
+  const leftBehind = partsLeftBehindSentence(props.departed);
   return (
     <OctantAlert title={`Moved to ${props.departed.destinationName}`} tone="neutral">
       Moved at {time}.
@@ -592,6 +622,7 @@ function MovedNotice(props: {
           ? " Its changes also remain in this Project's checkout."
           : null
         : ` Its worktree held files that stayed here, so it was kept at ${props.departed.keptWorktree}.`}
+      {leftBehind === undefined ? null : ` ${leftBehind}`}
     </OctantAlert>
   );
 }
@@ -621,6 +652,32 @@ function ThreadMoveSheet(props: {
   const stopsFirst = props.busy && whenBusy === "stop-and-move";
   const sizes = useMoveSizes(props.client, String(member.memberId), props.thread);
   const size = typeof sizes === "string" ? undefined : sizes.rows[0]?.size;
+
+  // A phone on the destination's owner list unlocks there itself; this
+  // computer only holds the move until the phone hands it the ticket.
+  const confirmOnPhone = async () => {
+    setWorking(true);
+    setProblem(undefined);
+    try {
+      const asked = await props.client.askPhone({
+        thread: props.thread,
+        destinationMemberId: member.memberId,
+        ...(props.projectId === undefined
+          ? {}
+          : { destinationProjectId: decodeProjectId(props.projectId) }),
+        timing: props.busy ? whenBusy : "now",
+      });
+      if (asked.status === "refused") {
+        setProblem(FAILURE_SENTENCES[asked.reason]);
+        return;
+      }
+      props.onStarted();
+    } catch {
+      setProblem("This computer could not ask your phone.");
+    } finally {
+      setWorking(false);
+    }
+  };
 
   const moveWithUnlock = async () => {
     if (props.unlock === undefined) return;
@@ -697,12 +754,16 @@ function ThreadMoveSheet(props: {
         <ul className="thread-move-sheet__list">
           <li>
             <span>The conversation</span>
-            <PartSize kind="thread-bundle" sizes={sizes} />
+            <PartSize kinds={["thread-bundle"]} sizes={sizes} />
+          </li>
+          <li>
+            <span>Its attachments, generated images, Browser captures, and Canvases</span>
+            <PartSize kinds={BULK_PART_KINDS} sizes={sizes} />
           </li>
           {props.thread.mode === "code" ? (
             <li>
               <span>The branch, its unpushed commits, and the staged and unstaged changes</span>
-              <PartSize kind="git-bundle" sizes={sizes} />
+              <PartSize kinds={["git-bundle"]} sizes={sizes} />
             </li>
           ) : null}
           {props.thread.mode === "work" ? (
@@ -716,7 +777,7 @@ function ThreadMoveSheet(props: {
               ? "Size unknown"
               : sizeAndEstimate([size], sizes.rate)}
         </p>
-        {typeof sizes === "string" || size?.status !== "measured" ? null : (
+        {typeof sizes === "string" || size === undefined || size.status === "unknown" ? null : (
           <p className="thread-move-sheet__basis">{estimateBasis(sizes.rate, member.name)}</p>
         )}
       </section>
@@ -769,11 +830,11 @@ function ThreadMoveSheet(props: {
           {problem}
         </OctantAlert>
       )}
-      {props.unlock === undefined ? (
-        <p className="thread-move-sheet__consequence">
-          A move is unlocked with Touch ID in the Octant app on this Mac.
-        </p>
-      ) : null}
+      <p className="thread-move-sheet__consequence">
+        {props.unlock === undefined
+          ? `This window has no Touch ID key, so a phone that is an owner on ${member.name} confirms the move.`
+          : `Or confirm on a phone that is an owner on ${member.name}.`}
+      </p>
       <footer className="thread-move-sheet__foot">
         {props.onHandOver === undefined ? null : (
           <OctantButton
@@ -787,17 +848,28 @@ function ThreadMoveSheet(props: {
         <OctantButton onClick={props.onClose} variant="ghost">
           Cancel
         </OctantButton>
-        <OctantButton
-          disabled={props.unlock === undefined || working}
-          onClick={() => void moveWithUnlock()}
-          ref={primary}
-        >
-          {stopsFirst
-            ? "Stop and move with Touch ID"
-            : props.busy
-              ? "Move after this turn with Touch ID"
-              : "Move with Touch ID"}
-        </OctantButton>
+        {props.unlock === undefined ? (
+          <OctantButton disabled={working} onClick={() => void confirmOnPhone()} ref={primary}>
+            Confirm on your phone
+          </OctantButton>
+        ) : (
+          <>
+            <OctantButton
+              disabled={working}
+              onClick={() => void confirmOnPhone()}
+              variant="outline"
+            >
+              Confirm on your phone
+            </OctantButton>
+            <OctantButton disabled={working} onClick={() => void moveWithUnlock()} ref={primary}>
+              {stopsFirst
+                ? "Stop and move with Touch ID"
+                : props.busy
+                  ? "Move after this turn with Touch ID"
+                  : "Move with Touch ID"}
+            </OctantButton>
+          </>
+        )}
       </footer>
     </OctantDialog>
   );
@@ -990,7 +1062,7 @@ function challengeProblem(
   memberName: string,
 ): string {
   if (kind === "unlock-required") {
-    return `This Mac isn't an owner on ${memberName}. Mark it as an owner there in Settings › Remote access › Hub, then try again.`;
+    return `This Mac isn't an owner on ${memberName}. Mark it as an owner there in Settings › Remote access › Hub, then try again, or confirm on a phone that is an owner there.`;
   }
   if (kind === "destination-unreachable") return `${memberName} couldn't be reached.`;
   return `${memberName} doesn't accept moved threads from this computer.`;
@@ -1029,6 +1101,10 @@ function useLiveAnnouncement(status: ThreadMoveThreadStatus | undefined): string
   return said;
 }
 
+function formatTime(at: number): string {
+  return new Date(at).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+}
+
 /**
  * What a move of the thread to the member would send, read when the sheet
  * opens. The sheet opens at once and never waits on it; a failure reads as
@@ -1059,15 +1135,26 @@ function useMoveSizes(
   return sizes;
 }
 
+/**
+ * A What moves row's size: Size unknown when one of its parts could not be
+ * measured, None when the thread carries none of them, nothing while the
+ * thread as a whole is measuring or unknown, which the total line says.
+ */
 function PartSize(props: {
   readonly sizes: ThreadMoveSizes | "measuring" | "unknown";
-  readonly kind: ThreadMovePartKind;
+  readonly kinds: ReadonlyArray<ThreadMovePartKind>;
 }) {
   if (typeof props.sizes === "string") return null;
   const size = props.sizes.rows[0]?.size;
-  const part =
-    size?.status === "measured" ? size.parts.find((entry) => entry.kind === props.kind) : undefined;
-  return part === undefined ? null : (
-    <span className="thread-move-sheet__size">{formatBytes(part.bytes)}</span>
+  const row = size === undefined ? undefined : rowSize(size, props.kinds);
+  if (row === undefined) return null;
+  return (
+    <span className="thread-move-sheet__size">
+      {row.status === "measured"
+        ? formatBytes(row.bytes)
+        : row.status === "none"
+          ? "None"
+          : "Size unknown"}
+    </span>
   );
 }

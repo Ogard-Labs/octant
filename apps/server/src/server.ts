@@ -34,6 +34,7 @@ import { CredentialRequests } from "./credentials/credentialRequests";
 import { createCredentialRequestRoutes } from "./credentials/credentialRequestRoutes";
 import { registeredCredentialOperations } from "./credentials/credentialRequestTools";
 import { createCredentialTool } from "./credentials/credentialTool";
+import { createCodeToolHostPort } from "./credentials/codeToolHost";
 import { OCTANT_CREDENTIAL_TOOL } from "@octant/contracts/credential-request";
 import {
   startupFailedOutput,
@@ -45,6 +46,8 @@ import { WorkFileListingService } from "./work/workFileListingService";
 import { WorkThreadService } from "./work/workThreadService";
 import { WorkTurnService } from "./work/workTurnService";
 import { makePublishedSnapshotSource } from "./publishedSnapshotSource";
+import { assertReadableChatThread } from "./chat/chatService";
+import { createThreadReadAuthority } from "./threadReadAuthority";
 import type { PublishedSnapshotRunRequest, WindowId } from "@octant/contracts";
 import { MAX_CHAT_ATTACHMENT_BYTES } from "./chat/chatAttachmentStore";
 import { MAX_CODE_FILE_BODY_SIZE } from "./codeRoutes";
@@ -490,6 +493,7 @@ export function startOctantServer(
     });
     const {
       agentPluginMcpSessionManager,
+      bindCodeToolHost,
       githubRoutineEventSources,
       chatAttachmentStore,
       chatDataDirectory,
@@ -586,6 +590,7 @@ export function startOctantServer(
       observeTurnEnded,
       threadWork,
     } = wireHarness({
+      serverConnection,
       personMemory,
       safeNetworkStore,
       projectService,
@@ -704,6 +709,14 @@ export function startOctantServer(
             ? {}
             : { codeConversation: routeCodeService.conversation }),
         })(windowId, request),
+      // A paired device reads a thread's Canvases under the same Open check
+      // its own thread routes run: Chat's read rule, Work's and Code's reads.
+      threadReadAuthority: (scopeId, thread) =>
+        createThreadReadAuthority({
+          chat: (threadId) => assertReadableChatThread(persistence, threadId),
+          work: (scope, threadId) => workThreadService.read(scope, threadId),
+          code: async (scope, threadId) => (await routeCodeService.read(scope, threadId)).thread,
+        })(scopeId, thread),
       agentRunPersistence,
       browserCaptures,
       chatDataDirectory,
@@ -726,6 +739,13 @@ export function startOctantServer(
     });
     const {
       browserCredentialUseService,
+      browserSessionGrants,
+      browserUploadPermissions,
+      browserDownloadPermissions,
+      browserDelegatedChildren,
+      bindTerminalBrowserSessions,
+      terminalBrowserTools,
+      routineBrowserTools,
       browserAutomationService,
       browserExtensionService,
       browserFlowService,
@@ -741,6 +761,9 @@ export function startOctantServer(
       windowHoldsProject,
     } = yield* wireBrowser({
       browserAuthority,
+      providerRuntimeRegistry,
+      contributeChildTools,
+      agentRunInteractions,
       codeSessionAuthority,
       machineChangeFeed,
       onWindowRevoked,
@@ -856,6 +879,9 @@ export function startOctantServer(
       providerDataDirectory,
       providerRuntimeRegistry,
       recordAppleEvidence,
+      bindTerminalBrowserSessions,
+      terminalBrowserTools,
+      routineBrowserTools,
       browserAutomationService,
       browserFlows,
       browserToolApprovalService,
@@ -902,6 +928,7 @@ export function startOctantServer(
       remoteServerGrantLocalRoutes,
       remoteServerGrants,
     } = yield* wireCodeTooling({
+      onWindowRevoked,
       desktopLeases,
       installDesktopPreviewRequest,
       workThreadProjection,
@@ -1073,6 +1100,7 @@ export function startOctantServer(
       projectService,
       providerRuntimeRegistry,
       refreshStandaloneSkills,
+      routineBrowserTools,
       browserAutomationService,
       browserFlows,
       browserToolApprovalService,
@@ -1140,8 +1168,13 @@ export function startOctantServer(
       contextRoutes,
       idleCompactions,
       windowCanOpenThread,
+      flowRuns,
     } = wireContext({
+      onWindowRevoked,
       browserCredentialUseService,
+      browserSessionGrants,
+      browserUploadPermissions,
+      browserDownloadPermissions,
       agentMessageProjection,
       browserModelBindings,
       browserAuthority,
@@ -1218,6 +1251,7 @@ export function startOctantServer(
       pushGatewaySetting,
       pushNotificationTokenStore,
     } = wireAutomation({
+      options,
       integrationEventSources: integrationEventSources([
         githubRoutineEventSources,
         linearRoutineEventSources,
@@ -1281,7 +1315,7 @@ export function startOctantServer(
         ? {}
         : { allowedRendererHttpOrigin: options.allowedRendererHttpOrigin }),
     });
-    yield* wireThreadNotifications({
+    const { threadNotifications } = yield* wireThreadNotifications({
       chatHiddenThreadIds,
       hasPushStanding,
       persistence,
@@ -1429,6 +1463,33 @@ export function startOctantServer(
       credentialRequests,
       windowAuthorityStore,
     );
+    bindCodeToolHost(({ windowId, thread, contribution, toolName, current }) => {
+      const providerVersion = persistence.readProviderInstance(thread.providerInstanceId)?.version;
+      return createCodeToolHostPort({
+        windowId: String(windowId),
+        thread,
+        contribution,
+        toolName,
+        credentialRequests,
+        commands,
+        operations: credentialOperations,
+        readThread: () => {
+          const stored = persistence.readCodeThread(thread.id);
+          if (stored === undefined) return undefined;
+          const effective = codeSessionAuthority.effectiveThread(windowId, stored);
+          return codeOperationRuntime?.threadWithActiveTurnPosture?.(effective) ?? effective;
+        },
+        current: () =>
+          current() &&
+          providerVersion !== undefined &&
+          persistence.readProviderInstance(thread.providerInstanceId)?.enabled === true &&
+          persistence.readProviderInstance(thread.providerInstanceId)?.version ===
+            providerVersion &&
+          isCodeProviderModelAllowed(thread) &&
+          canAccessCodeProject(windowId, thread.projectId) &&
+          windowAuthorityStore.listWindowIds().some((id) => String(id) === String(windowId)),
+      });
+    });
     // One credential tool, composed from two sides that each keep their own
     // authority check: registered integration operations and saved commands.
     contributeCodeTools(({ windowId, thread, readThread }) => {
@@ -1715,13 +1776,20 @@ export function startOctantServer(
       threadRetention,
     } = wireRemote({
       chatService,
+      browserCaptures,
+      canvasService,
+      imageJobService,
       liveTurns,
       managedWorktreeReceipts,
       movedThreadHistory,
       threadMoveHolds,
       threadMoveState,
+      threadNotifications,
       beginGoogleCliChange,
+      workThreadService,
       onSecretStoreLinkChange: () => commands.linkChanged(),
+      browserUploadPermissions,
+      browserDownloadPermissions,
       browserAutomationService,
       codeService,
       projectService,
@@ -2109,7 +2177,12 @@ export function startOctantServer(
             shutdownFailure ??= error;
           }
           try {
+            flowRuns.close();
             projectBrowserService?.close();
+            browserSessionGrants.close();
+            browserUploadPermissions.close();
+            browserDownloadPermissions.close();
+            await browserDelegatedChildren.close();
             await browserAutomationService?.close();
           } catch (error) {
             shutdownFailure ??= error;

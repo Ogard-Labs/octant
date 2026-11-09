@@ -1,3 +1,4 @@
+import type { BrowserAccountProfileCreateResult } from "@octant/contracts/browser-profiles";
 import type {
   OwnerBrowserNativeCommand,
   OwnerBrowserNativeResult,
@@ -193,8 +194,13 @@ export class BrowserProfileUnavailableError extends Error {
 
 /** The stores behind the Project and Personal profiles, kept by the desktop app. */
 export interface BrowserProfileStorePort {
-  readonly list: () => Promise<
-    ReadonlyArray<{ readonly profile: StoredBrowserProfile; readonly sizeBytes: number }>
+  readonly createAccount?: (label: string) => Promise<BrowserAccountProfileCreateResult>;
+  readonly list: (includeSizes?: boolean) => Promise<
+    ReadonlyArray<{
+      readonly profile: StoredBrowserProfile;
+      readonly sizeBytes: number;
+      readonly label?: string;
+    }>
   >;
   readonly clear: (profile: StoredBrowserProfile, scope: BrowserProfileClearScope) => Promise<void>;
   /**

@@ -1,11 +1,12 @@
 import { useLayoutEffect, useRef, useState } from "react";
 import { Pressable, Text, View } from "react-native";
-import type { OwnerPostureTarget, ProviderExecutionPolicy } from "@octant/contracts";
+import type { OwnerPostureTarget, OwnerPosture } from "@octant/contracts";
 import {
   readOwnerPostures,
   changeOwnerPosture,
   ownerActionNotice,
   ownerPostureLabel,
+  ownerPostureLevels,
   type OwnerSpoke,
 } from "@octant/client-runtime";
 import { useTheme } from "../../design-system/theme";
@@ -16,7 +17,7 @@ export function OwnerPosturePanel({ spokes }: { readonly spokes: ReadonlyArray<O
   const [hostId, setHostId] = useState(spokes[0]?.memberId ?? "");
   const [targets, setTargets] = useState<ReadonlyArray<OwnerPostureTarget>>([]);
   const [selected, setSelected] = useState<OwnerPostureTarget>();
-  const [requested, setRequested] = useState<ProviderExecutionPolicy>("approval-gated");
+  const [requested, setRequested] = useState<OwnerPosture["posture"]>("approval-gated");
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState("");
   const host = spokes.find((entry) => entry.memberId === hostId) ?? spokes[0];
@@ -49,8 +50,8 @@ export function OwnerPosturePanel({ spokes }: { readonly spokes: ReadonlyArray<O
       setTargets(result.targets);
       setMessage(
         result.targets.length === 0
-          ? "No active Code targets on this host."
-          : "Choose a Code target.",
+          ? "No active Work or Code targets on this host."
+          : "Choose a Work or Code target.",
       );
     } else setMessage(result.message);
     setBusy(false);
@@ -94,7 +95,7 @@ export function OwnerPosturePanel({ spokes }: { readonly spokes: ReadonlyArray<O
   if (spokes.length === 0) return null;
   return (
     <View style={{ gap: mobileSpacing.sm }} testID="mobile-owner-code-recovery">
-      <Text style={{ color: colors.textPrimary, fontWeight: "600" }}>Owner Code recovery</Text>
+      <Text style={{ color: colors.textPrimary, fontWeight: "600" }}>Owner access recovery</Text>
       <Text style={{ color: colors.textSecondary }}>
         Full access needs a fresh unlock for this choice. Running turns keep their level.
       </Text>
@@ -111,11 +112,11 @@ export function OwnerPosturePanel({ spokes }: { readonly spokes: ReadonlyArray<O
           host?.memberId === spoke.memberId,
         ),
       )}
-      {button("refresh", "Refresh Code levels", () => void load())}
+      {button("refresh", "Refresh access levels", () => void load())}
       {targets.map((target) =>
         button(
           `target:${JSON.stringify(target.posture.subject)}`,
-          `${target.posture.subject.kind === "project" ? "Project" : "Thread"}: ${target.title}`,
+          `${target.posture.subject.kind === "project" ? "Project" : target.posture.subject.kind === "work-thread" ? "Work thread" : "Thread"}: ${target.title}`,
           () => {
             setSelected(target);
             setRequested(target.posture.posture);
@@ -132,10 +133,7 @@ export function OwnerPosturePanel({ spokes }: { readonly spokes: ReadonlyArray<O
           <Text style={{ color: colors.textPrimary }}>
             Requested level: {ownerPostureLabel(selected.posture, requested)}
           </Text>
-          {(selected.posture.subject.kind === "project"
-            ? (["approval-gated", "full-access"] as const)
-            : (["approval-gated", "auto-accept-edits", "plan", "full-access"] as const)
-          ).map((policy) =>
+          {ownerPostureLevels(selected.posture).map((policy) =>
             button(
               `policy:${policy}`,
               ownerPostureLabel(selected.posture, policy),
@@ -145,7 +143,7 @@ export function OwnerPosturePanel({ spokes }: { readonly spokes: ReadonlyArray<O
           )}
           {button(
             "apply",
-            "Apply Code level",
+            "Apply level",
             () => void apply(),
             false,
             requested === selected.posture.posture,

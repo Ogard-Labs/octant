@@ -1,3 +1,6 @@
+import { useBrowserAccountProfiles } from "./useBrowserAccountProfiles";
+import { browserProfileFromChoice } from "@octant/domain";
+import { browserProfileLabel } from "./browserProfileCopy";
 import type { BrowserAgentAvailability } from "@octant/contracts";
 import { BrowserAgentStatus } from "./BrowserAgentStatus";
 import { BrowserCredentialBindingControl } from "./BrowserCredentialBindingControl";
@@ -59,7 +62,6 @@ import { readRecentBrowserPages, recordRecentBrowserPage } from "./recentBrowser
 import { BrowserProfileControl } from "./BrowserProfileControl";
 import { BrowserExtensionsButton } from "./BrowserExtensionsButton";
 import {
-  BROWSER_PROFILE_LABELS,
   profileChoiceOf,
   readRememberedProfileChoice,
   writeRememberedProfileChoice,
@@ -144,6 +146,7 @@ export function BrowserWorkspace(props: BrowserWorkspaceProps) {
     props.tab.contextId,
   );
   const [nativeSupported, setNativeSupported] = useState(false);
+  const accounts = useBrowserAccountProfiles(props.client, nativeSupported);
   // Where the next page keeps its site data. A new page opens Private unless the
   // person chose otherwise for this Project, which the control remembers. The
   // Project is the thread's own, asked of the host: not every entry point to a
@@ -383,7 +386,7 @@ export function BrowserWorkspace(props: BrowserWorkspaceProps) {
   const drivenProfile = storedProfileOf(snapshot?.context?.policy.profile);
   const controlLabel =
     drivenProfile !== undefined && nativeState?.control === "agent"
-      ? `${driverLabel} · ${BROWSER_PROFILE_LABELS[drivenProfile.kind]}`
+      ? `${driverLabel} · ${browserProfileLabel(profileChoiceOf(drivenProfile), accounts)}`
       : driverLabel;
 
   useEffect(() => {
@@ -1041,6 +1044,7 @@ export function BrowserWorkspace(props: BrowserWorkspaceProps) {
           </OctantButton>
         </div>
         <BrowserProfileControl
+          accounts={accounts}
           disabled={
             starting ||
             selectingTaskProfile ||
@@ -1600,9 +1604,7 @@ function storedProfileFor(
   choice: BrowserProfileChoice,
   projectId: ProjectId | undefined,
 ): StoredBrowserProfile | undefined {
-  if (choice === "personal") return { kind: "personal" };
-  if (choice === "project" && projectId !== undefined) return { kind: "project", projectId };
-  return undefined;
+  return storedProfileOf(browserProfileFromChoice(choice, projectId));
 }
 
 export function normalizeBrowserUrl(value: string): string {

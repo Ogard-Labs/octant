@@ -31,6 +31,20 @@ export {
   type HostRuntimeRestoreOutcome,
 } from "./owner";
 export {
+  attachWindowsHostRuntimeOwner,
+  type WindowsHostOwnerAttachRefusal,
+} from "./windowsHostOwner";
+export {
+  acquireWindowsHostProfileOwner,
+  resolveWindowsHostProfile,
+  loadWindowsHostProfileNative,
+  type AcquireWindowsHostProfileOptions,
+  type WindowsHostProfile,
+  type WindowsHostProfileNative,
+  type WindowsHostProfileOwnership,
+  type WindowsHostProfilePaths,
+} from "./windowsHostProfile";
+export {
   decodeHeadlessArtifactManifest,
   encodeHeadlessArtifactManifest,
   HEADLESS_ARTIFACT_MANIFEST_FILENAME,
@@ -142,6 +156,7 @@ export {
   WINDOWS_CREDENTIAL_MAX_BYTES,
   makeWindowsCredentialStore,
   type MakeWindowsCredentialStoreOptions,
+  type WindowsCredentialNamespace,
   type WindowsCommandExecutor,
   type WindowsCommandLimits,
   type WindowsCommandResult,
@@ -284,3 +299,47 @@ export {
 } from "./githubActionsSource";
 
 export * from "./browserPointCapture";
+export {
+  createWindowsListenerTlsFiles,
+  type WindowsListenerTlsFiles,
+  type WindowsListenerTlsNative,
+  type ListenerTlsFile,
+  type ListenerTlsFileRead,
+} from "./windowsListenerTls";
+export {
+  createWindowsRosterSigningKeyFile,
+  type WindowsRosterSigningKeyFile,
+  type WindowsRosterSigningKeyNative,
+  type RosterSigningKeyRead,
+} from "./windowsRosterSigningKey";
+export {
+  createWindowsServerIdentityFiles,
+  type WindowsServerIdentityFiles,
+  type WindowsServerIdentityNative,
+  type ServerIdentityFile,
+  type ServerIdentityFileRead,
+} from "./windowsServerIdentity";
+
+export {
+  createWindowsAuthorityStateFiles,
+  createWindowsHostStartupFiles,
+  type WindowsHostStartupFiles,
+  type WindowsHostStartupProjection,
+  type WindowsAuthorityStateFile,
+  type WindowsAuthorityStateFiles,
+  type WindowsAuthorityStateNative,
+} from "./windowsAuthorityState";
+
+export {
+  createWindowsSqliteStores,
+  type WindowsSqliteStoreNative,
+  type WindowsSqliteStores,
+  type WindowsSqliteStoreAdmission,
+} from "./windowsSqliteStore";
+
+export { createWindowsHostStartup } from "./windowsHostStartup";
+
+export {
+  createWindowsDesktopLauncher,
+  type WindowsDesktopLauncher,
+} from "./windowsDesktopLauncher";

@@ -1,8 +1,8 @@
 // The Work side of a thread move, on both computers. A Work thread moves its
-// conversation, not its folder: the files the thread worked on stay where
-// they are, and the destination opens the thread in a Work Project the person
-// picked there. The conversation travels as a moved transcript the new
-// thread's first turn carries once.
+// conversation and its bulk parts, not its folder: the files the thread worked
+// on stay where they are, and the destination opens the thread in a Work
+// Project the person picked there. The conversation travels as a moved
+// transcript the new thread's first turn carries once.
 //
 // A Work thread a peer delegated to this host belongs to that delegation and
 // never moves.
@@ -16,6 +16,15 @@ import {
   type MovedThreadReference,
 } from "@octant/contracts";
 import { Schema } from "effect";
+import {
+  MovedThreadParts,
+  measureThreadParts,
+  packThreadParts,
+  rehomeThreadParts,
+  threadMoveSize,
+  type ThreadPartsDestination,
+  type ThreadPartsSource,
+} from "./movedThreadParts";
 import type { ThreadMoveHolds } from "./threadMoveHolds";
 import type {
   PackedPart,
@@ -34,6 +43,7 @@ const MovedWorkThread = Schema.Struct({
   modelId: ProviderModelId,
   externalContentIngested: Schema.Boolean,
   entries: Schema.Array(MovedHistoryEntry).pipe(Schema.maxItems(10_000)),
+  parts: Schema.optional(MovedThreadParts),
 }).annotations(strict);
 type MovedWorkThread = typeof MovedWorkThread.Type;
 
@@ -77,6 +87,10 @@ export interface WorkThreadMoveHostOptions {
     readonly entries: ReadonlyArray<MovedHistoryEntry>;
   }) => void;
   readonly holds: ThreadMoveHolds;
+  readonly parts: {
+    readonly source: ThreadPartsSource;
+    readonly destination: ThreadPartsDestination;
+  };
 }
 
 export function createWorkThreadMoveHost(options: WorkThreadMoveHostOptions): {
@@ -132,17 +146,29 @@ export function createWorkThreadMoveHost(options: WorkThreadMoveHostOptions): {
     measure: async (thread) => {
       const moved = await movedOf(thread);
       if (moved === undefined) return { status: "unknown" };
-      // The very text pack writes, so the size is exact.
+      // The very text pack writes, short of the lines that list the bulk parts.
       const bytes = Buffer.byteLength(JSON.stringify(moved));
-      return { status: "measured", bytes, parts: [{ kind: "thread-bundle", bytes }] };
+      return threadMoveSize([
+        { status: "measured", kind: "thread-bundle", bytes },
+        ...measureThreadParts(thread, options.parts.source),
+      ]);
     },
     pack: async (thread, folder) => {
-      const moved = await movedOf(thread);
-      if (moved === undefined) return { status: "refused", reason: "refused" };
+      const conversation = await movedOf(thread);
+      if (conversation === undefined) return { status: "refused", reason: "refused" };
+      const bulk = await packThreadParts(thread, folder, options.parts.source);
+      const moved: MovedWorkThread = {
+        ...conversation,
+        ...(bulk.index === undefined ? {} : { parts: bulk.index }),
+      };
       const path = join(folder, "thread.json");
       await writeFile(path, JSON.stringify(moved), { mode: 0o600 });
       const part: PackedPart = { partId: "thread", kind: "thread-bundle", path };
-      return { status: "packed", parts: [part] };
+      return {
+        status: "packed",
+        parts: [part, ...bulk.parts],
+        ...(bulk.partsLeftBehind.length === 0 ? {} : { partsLeftBehind: bulk.partsLeftBehind }),
+      };
     },
     erase: async ({ thread }) => {
       const id = idOf(thread);
@@ -176,15 +202,30 @@ export function createWorkThreadMoveHost(options: WorkThreadMoveHostOptions): {
         moveId: String(offer.moveId),
         entries: moved.entries,
       };
+      // Bulk parts are re-homed under ids the move derives, so a second try
+      // records nothing twice.
+      const rehome = async () =>
+        (
+          await rehomeThreadParts({
+            index: moved.parts,
+            parts,
+            moveId: String(offer.moveId),
+            thread: planned,
+            projectId: String(offer.destinationProjectId),
+            destination: options.parts.destination,
+          })
+        ).status === "carried"
+          ? ({ status: "arrived", thread: planned } as const)
+          : ({ status: "refused", reason: "transfer-failed" } as const);
       // A thread already opened under the planned id was opened by an earlier
       // try that stopped before it was recorded: hold it and open no second.
-      // That try may have stopped before the history was kept, so it is kept
-      // now (a second import keeps the first), before the source is told it
-      // arrived and erases the only other copy.
+      // That try may have stopped before the history was kept or every part
+      // re-homed, so they are now (a second import keeps the first), before
+      // the source is told it arrived and erases the only other copy.
       if (workThreadOf(planned) !== undefined) {
         options.holds.hold(planned);
         options.journalHistory(history);
-        return { status: "arrived", thread: planned };
+        return rehome();
       }
       if (!options.activeWorkProject(String(offer.destinationProjectId))) {
         return { status: "refused", reason: "no-eligible-project" };
@@ -212,7 +253,7 @@ export function createWorkThreadMoveHost(options: WorkThreadMoveHostOptions): {
         return { status: "refused", reason: "transfer-failed" };
       }
       options.journalHistory(history);
-      return { status: "arrived", thread: planned };
+      return rehome();
     },
     activate: async (thread) => options.holds.release(thread),
     discard: async (thread) => {

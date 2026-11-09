@@ -779,6 +779,7 @@ describe("desktop preload bridge", () => {
       "openCodeExternalEditor",
       "openComputerUsePermissionSettings",
       "openInNewWindow",
+      "openMovedThreadThere",
       "openNightly",
       "openRemoteServerPage",
       "ownerUnlockForgetKey",

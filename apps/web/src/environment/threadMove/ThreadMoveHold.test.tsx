@@ -25,6 +25,7 @@ function fakeClient(initial: unknown) {
     destinations: async () => ({ status: "listed", busy: false, destinations: [] }),
     challenge: async () => ({ status: "refused", kind: "refused" }),
     start: async () => ({ status: "refused", reason: "refused" }),
+    askPhone: async () => ({ status: "refused", reason: "refused" }),
     status: async () => status,
     stopWaiting: async () => {
       calls.push("stop-waiting");
@@ -64,6 +65,7 @@ function fakeClient(initial: unknown) {
     shutdownListing: async () => ({ status: "listed", members: [], rows: [] }),
     shutdownChallenge: async () => ({ status: "refused", kind: "refused" }),
     shutdownStart: async () => ({ status: "refused", reason: "refused" }),
+    shutdownAskPhone: async () => ({ status: "refused", reason: "refused" }),
     shutdownHandOver: async () => ({ status: "refused", reason: "refused" }),
     handoverPreview: async () => ({ status: "refused", reason: "refused" }),
     handOver: async () => ({ status: "refused", reason: "refused" }),
@@ -118,6 +120,27 @@ describe("a thread pane while a move holds it", () => {
     await user.click(screen.getByRole("button", { name: "Cancel move" }));
     await user.click(await screen.findByRole("button", { name: "Take back here" }));
     expect(calls).toEqual([`cancel ${MOVE}`, `take-back ${MOVE}`]);
+    expect(await screen.findByRole("textbox", { name: "Message" })).toBeInTheDocument();
+  });
+
+  it("gives the composer's place to Waiting for your phone, and Don't move brings it back", async () => {
+    const user = userEvent.setup();
+    const { client, calls } = fakeClient({
+      status: "read",
+      waitingForPhone: {
+        destinationMemberId: DESKTOP,
+        destinationName: "Desktop",
+        expiresAt: 1_900_000_000_000,
+      },
+    });
+    pane(client);
+
+    expect(await screen.findByText("Waiting for your phone")).toBeInTheDocument();
+    expect(screen.getByText(/Confirm on your phone to move this thread to Desktop/)).toBeVisible();
+    expect(screen.queryByRole("textbox", { name: "Message" })).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Don't move" }));
+    expect(calls).toEqual(["stop-waiting"]);
     expect(await screen.findByRole("textbox", { name: "Message" })).toBeInTheDocument();
   });
 
@@ -188,11 +211,12 @@ describe("a moved thread's pane on the computer it left", () => {
     movedAt: "2026-11-09T09:30:00.000Z",
   };
 
-  it("shows Moved to with Open there, which copies the thread's link on that computer", async () => {
+  it("shows Moved to with Open there, which copies the thread's link and says this window can't open it", async () => {
     const user = userEvent.setup();
     const writeText = vi.fn(async () => {});
     Object.defineProperty(navigator, "clipboard", { configurable: true, value: { writeText } });
-    const { client } = fakeClient({ status: "read", departed });
+    const open = vi.spyOn(window, "open").mockReturnValue(null);
+    const { client, calls } = fakeClient({ status: "read", departed });
     pane(client);
 
     expect(await screen.findByRole("heading", { name: "Moved to Desktop" })).toBeInTheDocument();
@@ -200,7 +224,84 @@ describe("a moved thread's pane on the computer it left", () => {
     expect(screen.queryByRole("button", { name: "Remove worktree" })).not.toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "Open there" }));
     expect(writeText).toHaveBeenCalledWith(`octant://hosts/${DESKTOP}/threads/code/${ARRIVED}`);
-    expect(await screen.findByText(/Link copied/)).toBeInTheDocument();
+    expect(
+      await screen.findByText(
+        "Link copied. This window can't open threads on Desktop; the Octant phone app opens this link.",
+      ),
+    ).toBeInTheDocument();
+    // Copying is all it does: nothing is navigated or handed to the system,
+    // and the move routes are asked nothing that changes anything.
+    expect(open).not.toHaveBeenCalled();
+    expect(calls).toEqual([]);
+    open.mockRestore();
+  });
+
+  it("opens the moved thread on the destination's own web page through the desktop, and copies nothing", async () => {
+    const user = userEvent.setup();
+    const writeText = vi.fn(async () => {});
+    Object.defineProperty(navigator, "clipboard", { configurable: true, value: { writeText } });
+    const { client } = fakeClient({
+      status: "read",
+      departed: { ...departed, destinationWebOrigin: "https://desktop.tail1234.ts.net" },
+    });
+    const openThere = vi.fn(async (_thread: MovedThreadReference) => "opened" as const);
+    pane({ ...client, openThere });
+
+    await user.click(await screen.findByRole("button", { name: "Open there" }));
+    // The window names only the thread that moved; the desktop asks the host
+    // where it went and opens that page.
+    expect(openThere).toHaveBeenCalledWith(THREAD);
+    expect(
+      await screen.findByText("Opened on Desktop's own page in your browser."),
+    ).toBeInTheDocument();
+    expect(writeText).not.toHaveBeenCalled();
+  });
+
+  it("copies the link when the destination serves no web page, even where the desktop could open one", async () => {
+    const user = userEvent.setup();
+    const writeText = vi.fn(async () => {});
+    Object.defineProperty(navigator, "clipboard", { configurable: true, value: { writeText } });
+    const { client } = fakeClient({ status: "read", departed });
+    const openThere = vi.fn(async (_thread: MovedThreadReference) => "opened" as const);
+    pane({ ...client, openThere });
+
+    await user.click(await screen.findByRole("button", { name: "Open there" }));
+    expect(openThere).not.toHaveBeenCalled();
+    expect(writeText).toHaveBeenCalledWith(`octant://hosts/${DESKTOP}/threads/code/${ARRIVED}`);
+    expect(await screen.findByText(/^Link copied\. This window can't open/)).toBeInTheDocument();
+  });
+
+  it("copies the link when the desktop refuses to open the page", async () => {
+    const user = userEvent.setup();
+    const writeText = vi.fn(async () => {});
+    Object.defineProperty(navigator, "clipboard", { configurable: true, value: { writeText } });
+    const { client } = fakeClient({
+      status: "read",
+      departed: { ...departed, destinationWebOrigin: "https://desktop.tail1234.ts.net" },
+    });
+    pane({ ...client, openThere: async () => "refused" as const });
+
+    await user.click(await screen.findByRole("button", { name: "Open there" }));
+    expect(writeText).toHaveBeenCalledWith(`octant://hosts/${DESKTOP}/threads/code/${ARRIVED}`);
+    expect(await screen.findByText(/^Link copied\./)).toBeInTheDocument();
+  });
+
+  it("names the parts that could not be read here and did not move, on the tombstone", async () => {
+    const { client } = fakeClient({
+      status: "read",
+      departed: {
+        ...departed,
+        partsLeftBehind: [{ kind: "attachment", name: "scan.pdf" }],
+        partsLeftBehindCount: 3,
+      },
+    });
+    pane(client);
+
+    expect(
+      await screen.findByText(
+        /3 parts could not be read here, so they did not move: scan\.pdf, and 2 more\./,
+      ),
+    ).toBeInTheDocument();
   });
 
   it("lists the files a kept worktree holds, and removes it only after the person confirms", async () => {

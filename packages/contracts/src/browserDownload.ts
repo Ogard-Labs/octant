@@ -1,5 +1,6 @@
 import { Schema } from "effect";
 import { BrowserThreadId, MAX_BROWSER_UPLOAD_FILE_BYTES } from "./browserAutomation";
+import { ProjectWorkingFolderId } from "./workingDirectory";
 import { UtcTimestamp } from "./events";
 
 const strict = { parseOptions: { onExcessProperty: "error" as const } };
@@ -18,6 +19,7 @@ export const BROWSER_DOWNLOAD_FOLDER = "downloads";
 export const BROWSER_DOWNLOAD_AGGREGATE_TYPE = "browser-download";
 export const BROWSER_DOWNLOAD_EVENT_NAMES = {
   saved: "browser.download-saved@1",
+  selectedSaved: "browser.download-selected-saved@1",
   refused: "browser.download-refused@1",
 } as const;
 
@@ -42,6 +44,22 @@ export const BrowserDownloadSaved = Schema.Struct({
   savedAt: UtcTimestamp,
 }).annotations(strict);
 export type BrowserDownloadSaved = typeof BrowserDownloadSaved.Type;
+
+export const BrowserDownloadDestinationReceipt = Schema.Struct({
+  approvedFolderId: ProjectWorkingFolderId,
+  label: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(4096)),
+  pathBase: Schema.Literal("selected-root"),
+}).annotations(strict);
+export type BrowserDownloadDestinationReceipt = typeof BrowserDownloadDestinationReceipt.Type;
+/** A separate event preserves the legacy workspace-relative saved receipt. */
+export const BrowserDownloadSelectedSaved = Schema.Struct({
+  ...BrowserDownloadSaved.fields,
+  destination: BrowserDownloadDestinationReceipt,
+}).annotations(strict);
+export type BrowserDownloadSelectedSaved = typeof BrowserDownloadSelectedSaved.Type;
+export const decodeBrowserDownloadSelectedSaved = Schema.decodeUnknownSync(
+  BrowserDownloadSelectedSaved,
+);
 
 /** Why a download was not kept. */
 export const BrowserDownloadRefusalReason = Schema.Literal(

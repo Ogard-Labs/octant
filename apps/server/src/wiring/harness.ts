@@ -1,3 +1,5 @@
+import { RemoteSetupChecks } from "../serverProjects/remoteSetupChecks";
+import { createRemoteSetupCheckRoutes } from "../serverProjects/remoteSetupCheckRoutes";
 import { ServerPreviewTunnels } from "../serverProjects/serverPreviewTunnel";
 import { createServerPreviewTunnelRoutes } from "../serverProjects/serverPreviewTunnelRoutes";
 import { readOwnedProcessReceipts } from "../process/nodeOwnedProcessReceipt";
@@ -88,6 +90,11 @@ import type { WorkspaceWiring } from "./workspace";
 import type { HarnessStateWiring } from "./harnessState";
 import type { WorkRequestStateWiring } from "./workRequestState";
 import { createShieldServerRouteHandler } from "../shield/shieldServerRoutes";
+import { createServerResourceRoutes } from "../serverProjects/serverResourceRoutes";
+import {
+  createServerResourceReader,
+  type ServerResourceRead,
+} from "../serverProjects/serverResources";
 import { createServerProjectRouteHandler } from "../serverProjects/serverProjectRoutes";
 import { serverProjectOf } from "../serverProjects/serverProjectThreads";
 import { openServerSshAccessFor } from "../shield/serverSshAccess";
@@ -136,6 +143,7 @@ export type HarnessDependencies = Pick<ServerStart, "options" | "persistence"> &
   Pick<
     HarnessStateWiring,
     | "agentRunInteractions"
+    | "serverConnection"
     | "serverProjectStore"
     | "serverRegistry"
     | "shieldHolder"
@@ -159,6 +167,7 @@ export function wireHarness(deps: HarnessDependencies) {
   const {
     safeNetworkStore,
     agentRunInteractions,
+    serverConnection,
     serverProjectStore,
     serverRegistry,
     codeBoardEventStore,
@@ -269,8 +278,41 @@ export function wireHarness(deps: HarnessDependencies) {
     windowAuthorityStore,
     store: serverProjectStore,
   });
+  const serverResourceReaders = new Map<string, () => Promise<ServerResourceRead>>();
+  const resourceRoutes = createServerResourceRoutes({
+    windows: windowAuthorityStore,
+    readerFor: (projectId) => {
+      if (serverProjectStore.addressOf(projectId).kind !== "address") return undefined;
+      let reader = serverResourceReaders.get(projectId);
+      if (reader === undefined) {
+        reader = createServerResourceReader({
+          connection: serverConnection,
+          // Read each call, so a server removed mid-session refuses the next read.
+          address: () => {
+            const address = serverProjectStore.addressOf(projectId);
+            return address.kind === "address"
+              ? { server: address.server, folder: address.folder }
+              : undefined;
+          },
+        });
+        serverResourceReaders.set(projectId, reader);
+      }
+      return reader;
+    },
+  });
+  const setupCheckRoutes = createRemoteSetupCheckRoutes({
+    windows: windowAuthorityStore,
+    checks: new RemoteSetupChecks({
+      servers: () => shieldServerStore.servers(),
+      agentAvailable: () => sshAgentSocket() !== undefined,
+      connection: serverConnection,
+    }),
+  });
   const serverProjectRoutes = async (request: Request) =>
-    (await previewRoutes(request)) ?? catalogRoutes(request);
+    (await setupCheckRoutes(request)) ??
+    (await previewRoutes(request)) ??
+    (await resourceRoutes(request)) ??
+    catalogRoutes(request);
   const runtimeRemoteCommands = new RuntimeRemoteCommands((input) =>
     shieldServerStore.recordRemoteCommand(input),
   );

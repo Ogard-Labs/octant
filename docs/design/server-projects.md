@@ -46,9 +46,42 @@ unverified host identities require correction through their existing owners.
 The entry explains unsupported server-Project capabilities and uncertain-result
 recovery without implying parity or retrying a command.
 
-This guide is an entry into existing setup, not a connection diagnostic service.
-It does not distinguish transport failures by parsing SSH text or accept a new
-host key. A future structured diagnostic must preserve those trust boundaries.
+**Read-only checks.** Each server journey can check a registered alias and user
+without binding a Project or starting a task. Only an authenticated local window
+may call `/api/remote-setup-check`; paired clients, agents and routines cannot
+borrow that authority. Strict input names only a registered server, an optional
+absolute folder and the runtime choice. No script, credential or SSH setting is
+accepted. At most four checks run concurrently, each with a twelve-second SSH
+deadline, 2 KiB response bound and owned-process cleanup. Stop cancels the check;
+changing the journey or inputs discards its result. Recheck is explicit and runs
+only this fixed read-only probe, never an earlier uncertain command.
+
+The probe requires the host's SSH agent and uses the existing connection encoder
+with `ControlMaster=no`, `ControlPath=none` and `ControlPersist=no`, so a cached
+login cannot stand in for fresh identity/authentication. Strict host checking,
+BatchMode and forwarding refusals remain in force. A fixed POSIX `sh` probe reads
+`pwd -P`, optionally after `cd` to the folder argument. It writes nothing. A
+changed registration invalidates even a successful response. Success proves this
+connection and directory at check time, not future connectivity or task authority.
+
+Unknown and changed/revoked identity, unavailable host, authentication refusal,
+missing agent, unavailable directory, unsupported runtime and incomplete probe
+have separate remedies. Bounded OpenSSH error text selects advisory copy only;
+it is never returned, journaled, accepted as trust or used to edit known hosts.
+The person verifies an unknown fingerprint through their own SSH connection;
+changed identity requires independent administrator verification. A check never
+creates a key: the kept-key workflow is explicitly unavailable to this
+agent-backed probe and points to the existing key controls. Server-Project
+runtime checks report Octant Harness support versus the native-provider refusal;
+they do not claim a provider binary is installed or run a provider request.
+
+Host control can reread the existing private-listener status without enabling or
+restarting it. This reports only host readiness; pairing and a request from the
+other device still establish actual device reachability. A missing host bridge,
+older client/host or failed host request shows unavailable with the appropriate
+host-window/network/awake-state remedy. Pending, reconnecting, connected for the
+check, disconnected and stopped states remain distinct. Results are transient;
+checks never change registry/configuration or journal state.
 
 ## Terms
 
@@ -71,8 +104,9 @@ host key. A future structured diagnostic must preserve those trust boundaries.
   folder, or cannot be reached is refused, and nothing is journaled. The
   resolved path is the one stored.
 - Server Projects live in their own catalog: the `server-projects` aggregate,
-  with `server-projects.bound@1`, `server-projects.renamed@1`, and
-  `server-projects.removed@1`, each journaled whole and journal first, and
+  with `server-projects.bound@1`, `server-projects.renamed@1`,
+  `server-projects.actions-replaced@1`, and `server-projects.removed@1`, each
+  journaled whole and journal first, and
   rebuilt at startup. They are never in the local Project catalog, so no
   service that reads a local Project's folder can be handed a server path.
   _Rationale:_ a Project binding's folder is read as a path on this host in
@@ -256,13 +290,77 @@ host key. A future structured diagnostic must preserve those trust boundaries.
 - **Project terminal.** A Code server Project's own terminal (the one with
   no thread, opened from the dock's quick tools of a new task) is the same SSH
   login shell in the folder, owned by the local window that opened it and
-  journaled as a local Project terminal is. It has no other folder, no saved
-  actions or suggestions (those read a Project's files on this host), and no
+  journaled as a local Project terminal is. It has no extra folder and no
   browser beside it. A server removed from the registry refuses the next
   start; removing the Project ends its shells. Its posture is recorded as
   Full access. _Rationale:_ the posture says what holds the shell, and on a
   server nothing does: Octant has no sandbox there, and the person opening
   their own shell is the approval, as it is for a local Project terminal.
+- **Saved Project actions.** Settings → Access → Servers edits up to
+  twelve saved commands on the server Project's own catalog record. Action
+  saves have an optimistic revision and a journaled `server-projects.actions-replaced@1`
+  event; old records remain valid. Root package scripts and Makefile targets
+  are suggestions from the existing bounded remote file reader, never from
+  this host. Reading or adding a suggestion does not save or run it.
+  The Project header, command palette and Settings open the existing action
+  review. In Settings, a different or unbound Code Project offers an explicit
+  Open Project transition through the existing server-task draft flow; its
+  action editor stays usable, but reads no suggestions and offers no Run until
+  this window holds that Project. Before launch the review shows the exact server login and action profile,
+  canonical folder, branch, current task policy and the absence of OS confinement
+  on the server. A Code task defaults to its actual remote checkout; choosing
+  the server Project folder is explicit. There is no similarly named local
+  folder fallback. Plan and paired-device launches refuse.
+
+  The reviewed placement binds the saved-action revision, registered server
+  identity and profile, Project binding, canonical directory device/inode,
+  Git head/branch and current task/checkout authority. Launch resolves these
+  again and the remote command checks its held working directory before
+  executing. A removed server, changed profile, replaced checkout, changed
+  action or revoked task refuses stale launch. Each accepted run journals its
+  identity before starting a dedicated encoded SSH command, never writes into
+  an existing terminal, and carries no copied host credentials. Its posture is
+  Full access because SSH provides no OS confinement; the explicit local-person
+  Run approves that command without granting an agent more access. Automatic
+  worktree preparation recipes are unavailable here.
+
+  Output and exit status use the existing bounded terminal transcript. An
+  action's exit255 is reported as254, reserving SSH255 for connection loss.
+  Connection loss is interrupted with uncertain remote completion; Stop and
+  revocation stop the owned connection but cannot prove arbitrary remote
+  descendants stopped. An unconfirmed start is recorded distinctly. Closing
+  the review retains its run identity. Lost replies, repeated identities and
+  host restart never replay a command; preparing another run is a fresh person
+  decision after checking the server.
+
+  Work server Projects use the same dedicated saved-action runs, with their
+  own real Work binding rather than a Code checkout or local Project. A Work
+  task's current access, provider/model/options, binding and relative working
+  directory bind the review; changing them, completing the task, disabling Work,
+  closing its window or switching that window to another Work Project retires
+  its admitted action authority. A mixed-mode or stale task is refused before
+  remote reads or effects. Project-level runs still require that live window's
+  persisted Work Project. An explicit local-person Run approves only its saved
+  SSH command; it grants no additional agent, terminal or credential authority.
+  Settings uses this window's Work binding for its suggestions and Run controls;
+  a different or unbound Work Project offers the same explicit Open Project
+  transition as Code, while manual action edits remain available.
+
+  The Work server Project's **Show developer tools** switch is off by default
+  in its existing Settings → Access → Servers row. A local-only
+  `set-server-work-developer-tools` command journals who and when as
+  `server-projects.work-developer-tools-changed@1`. It reveals the action editor,
+  saved-action buttons and active Work header/palette entries; it changes only
+  presentation. It does not enable a general Project terminal, a Developer tools
+  pane or other absent server Work surfaces. A person may turn it off while an
+  already admitted command keeps its separate execution authority. Work actions
+  have closed standard input, refuse interactive terminal writes, and keep their
+  output in the action dialog without a terminal handoff. This is an input/UI
+  boundary, not confinement of the saved command's SSH-user authority.
+  They
+  retain the same honest no-confinement review and uncertain remote completion
+  after connection loss or Stop as Code.
+
 - **Fail closed in a turn.** A file call that cannot reach the server is
   refused `target-unavailable` and a command reports the shell unavailable;
   the next call tries the server again. Nothing a server thread asks for runs
@@ -456,10 +554,9 @@ host key. A future structured diagnostic must preserve those trust boundaries.
 - Work file previews and editing, research sources, the status file and due dates, and the
   Project terminal for a Work Project on a server; its threads are built. A
   local Work Project shows its terminal through its Developer tools switch on
-  its overview, and a Work Project on a server has neither yet.
+  its overview. A Work Project on a server offers a saved-action presentation
+  switch in Settings, but has no general Project terminal or tools pane.
 - Extra folders in a server Project.
-- Saved Project actions and their suggestions for a server Project; its
-  Project terminal is built.
 - A Project-level guardrail level or reviewer for a server Project; the
   thread and account levels apply.
 - Real servers are untested: the connection, folder check, file tools,

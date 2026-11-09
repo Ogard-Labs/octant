@@ -131,6 +131,9 @@ export function ProjectActionRunDialog(props: {
         ...props.target,
         thread: preview.action.thread,
         projectVersion: preview.projectVersion,
+        ...(preview.action.server === undefined
+          ? {}
+          : { placementRevision: preview.action.server.placementRevision }),
         terminalId: id,
         columns: 100,
         rows: 30,
@@ -187,17 +190,39 @@ export function ProjectActionRunDialog(props: {
             Folder: <code>{action.folder}</code>
           </p>
           <p>Branch: {action.branch ?? "Project folder"}</p>
+          {action.server === undefined ? null : (
+            <>
+              <p>
+                Server:{" "}
+                <code>
+                  {action.server.user}@{action.server.alias}
+                </code>{" "}
+                · Profile: {action.server.profile}
+              </p>
+              <p>
+                Authority:{" "}
+                {action.server.taskExecutionPolicy === undefined
+                  ? "Local person run"
+                  : `Task policy ${action.server.taskExecutionPolicy}`}{" "}
+                · No OS confinement on the server.
+              </p>
+            </>
+          )}
         </>
       )}
       {failure === undefined ? null : <OctantAlert tone="danger">{failure}</OctantAlert>}
       {run === undefined ? null : (
         <>
           <p role="status">
-            {run.terminal.state === "running"
-              ? "Running"
-              : run.terminal.state === "interrupted"
-                ? "Interrupted"
-                : `Exited${run.terminal.exitCode === undefined ? "" : ` with code ${run.terminal.exitCode}`}`}
+            {run.terminal.uncertainty === "server-transport-lost"
+              ? "Server connection lost. The command may have run; check the server before preparing another run. Nothing was retried."
+              : run.terminal.uncertainty === "server-stop-unconfirmed"
+                ? "Connection stopped. Remote completion is unconfirmed; check the server before preparing another run."
+                : run.terminal.state === "running"
+                  ? "Running"
+                  : run.terminal.state === "interrupted"
+                    ? "Interrupted"
+                    : `Exited${run.terminal.exitCode === undefined ? "" : ` with code ${run.terminal.exitCode}`}`}
           </p>
           <pre className="project-action-run__output">{output || "No output yet"}</pre>
         </>

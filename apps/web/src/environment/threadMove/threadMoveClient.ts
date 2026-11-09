@@ -7,6 +7,7 @@ import {
   decodeShutdownStartOutcome,
   decodeThreadMoveChallengeOutcome,
   decodeThreadMoveDestinations,
+  decodeThreadMovePhoneAskOutcome,
   decodeThreadMoveSizes,
   decodeThreadMoveStartOutcome,
   decodeThreadMoveThreadStatus,
@@ -16,10 +17,13 @@ import {
   type KeptWorktreeRemoveOutcome,
   type MovedThreadReference,
   type ShutdownListing,
+  type ShutdownPhoneAskRequest,
   type ShutdownStartOutcome,
   type ShutdownStartRequest,
   type ThreadMoveChallengeOutcome,
   type ThreadMoveDestinations,
+  type ThreadMovePhoneAskOutcome,
+  type ThreadMovePhoneAskRequest,
   type ThreadMoveSizes,
   type ThreadMoveStartOutcome,
   type ThreadMoveStartRequest,
@@ -36,6 +40,8 @@ export interface ThreadMoveClient {
   readonly destinations: (thread: MovedThreadReference) => Promise<ThreadMoveDestinations>;
   readonly challenge: (destinationMemberId: string) => Promise<ThreadMoveChallengeOutcome>;
   readonly start: (request: ThreadMoveStartRequest) => Promise<ThreadMoveStartOutcome>;
+  /** Holds the move until an owner phone confirms it with its own unlock on the destination. */
+  readonly askPhone: (request: ThreadMovePhoneAskRequest) => Promise<ThreadMovePhoneAskOutcome>;
   readonly status: (thread: MovedThreadReference) => Promise<ThreadMoveThreadStatus>;
   readonly stopWaiting: (thread: MovedThreadReference) => Promise<void>;
   readonly cancel: (moveId: string) => Promise<ThreadMoveCancelOutcome>;
@@ -44,6 +50,12 @@ export interface ThreadMoveClient {
   readonly dismiss: (thread: MovedThreadReference) => Promise<void>;
   /** Remove worktree on a moved thread's tombstone: the folder its move kept here. */
   readonly removeKeptWorktree: (moveId: string) => Promise<KeptWorktreeRemoveOutcome>;
+  /**
+   * Opens a departed thread on the destination's own web app in the default
+   * browser; absent when this window has no such door, and the tombstone
+   * copies the link instead.
+   */
+  readonly openThere?: (thread: MovedThreadReference) => Promise<"opened" | "refused">;
   /** What moving the thread to a member would send, and how fast; read-only. */
   readonly sizes: (
     destinationMemberId: string,
@@ -56,6 +68,9 @@ export interface ThreadMoveClient {
     threads: ReadonlyArray<MovedThreadReference>,
   ) => Promise<ThreadMoveChallengeOutcome>;
   readonly shutdownStart: (request: ShutdownStartRequest) => Promise<ShutdownStartOutcome>;
+  readonly shutdownAskPhone: (
+    request: ShutdownPhoneAskRequest,
+  ) => Promise<ThreadMovePhoneAskOutcome>;
   /** Hand over for one Prepare to shut down row, naming the head's destination. */
   readonly shutdownHandOver: (
     thread: MovedThreadReference,
@@ -92,6 +107,7 @@ export class ThreadMoveRequestFailure extends Error {
 }
 
 export function threadMoveClientOf(hub: HubAdministrationBridge): ThreadMoveClient {
+  const openThere = hub.openMovedThreadThere;
   const call = async (operation: HubAdministrationOperation, body: unknown): Promise<unknown> => {
     const answer = await hub.hubAdministrationRequest(operation, body);
     // A refusal answers 409 with a body the caller reads; anything else that is
@@ -110,6 +126,8 @@ export function threadMoveClientOf(hub: HubAdministrationBridge): ThreadMoveClie
       ),
     start: async (request) =>
       decodeThreadMoveStartOutcome(await call("thread-move-start", request)),
+    askPhone: async (request) =>
+      decodeThreadMovePhoneAskOutcome(await call("thread-move-phone-ask", request)),
     status: async (thread) =>
       decodeThreadMoveThreadStatus(await call("thread-move-status", { thread })),
     stopWaiting: async (thread) => {
@@ -136,6 +154,9 @@ export function threadMoveClientOf(hub: HubAdministrationBridge): ThreadMoveClie
     },
     removeKeptWorktree: async (moveId) =>
       decodeKeptWorktreeRemoveOutcome(await call("thread-move-remove-kept-worktree", { moveId })),
+    ...(openThere === undefined
+      ? {}
+      : { openThere: async (thread: MovedThreadReference) => (await openThere(thread)).status }),
     sizes: async (destinationMemberId, threads) =>
       decodeThreadMoveSizes(await call("thread-move-sizes", { destinationMemberId, threads })),
     shutdownListing: async () => decodeShutdownListing(await call("shutdown-listing", {})),
@@ -145,6 +166,8 @@ export function threadMoveClientOf(hub: HubAdministrationBridge): ThreadMoveClie
       ),
     shutdownStart: async (request) =>
       decodeShutdownStartOutcome(await call("shutdown-start", request)),
+    shutdownAskPhone: async (request) =>
+      decodeThreadMovePhoneAskOutcome(await call("shutdown-phone-ask", request)),
     shutdownHandOver: async (thread, destinationMemberId) =>
       decodeHandoverOutcome(await call("shutdown-handover", { thread, destinationMemberId })),
     shutdownSizes: async (destinationMemberId, threads) =>

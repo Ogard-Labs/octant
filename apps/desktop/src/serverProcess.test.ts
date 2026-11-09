@@ -280,6 +280,26 @@ describe("resolveStableHostAttachment", () => {
       }),
     ).resolves.toBeUndefined();
   });
+
+  it("awaits native bridge reads and refuses a changed asynchronous secret generation", async () => {
+    const probe = { url: receipt.url, instanceId: receipt.instanceId };
+    const readBridgeSecret = vi.fn().mockResolvedValue("native-secret");
+    await expect(
+      resolveStableHostAttachment({
+        readReceipt: async () => receipt,
+        readBridgeSecret,
+        probeReceipt: async () => probe,
+      }),
+    ).resolves.toEqual({ probe, bridgeSecret: "native-secret" });
+    expect(readBridgeSecret).toHaveBeenCalledTimes(2);
+    await expect(
+      resolveStableHostAttachment({
+        readReceipt: async () => receipt,
+        readBridgeSecret: vi.fn().mockResolvedValueOnce("first").mockResolvedValueOnce("second"),
+        probeReceipt: async () => probe,
+      }),
+    ).resolves.toBeUndefined();
+  });
 });
 
 describe("serverSpawnSpec", () => {
@@ -301,6 +321,8 @@ describe("serverSpawnSpec", () => {
         OCTANT_SIMULATOR_DEVICE_BROKER_TOKEN: "inherited-token",
         OCTANT_SERVE_AVD_BROKER_URL: "http://127.0.0.1:49997/v1/managed-device/serve-avd",
         OCTANT_SERVE_AVD_BROKER_TOKEN: "inherited-token",
+        OCTANT_CREDENTIAL_BROKER_URL: "http://127.0.0.1:49996/v1/credentials",
+        OCTANT_CREDENTIAL_BROKER_TOKEN: "inherited-token",
       },
     });
     expect(spec.env.OCTANT_SIMULATOR_DEVICE_BROKER_URL).toBeUndefined();
@@ -1053,6 +1075,44 @@ describe("createStderrTail", () => {
 });
 
 describe("shutdownManagedServer", () => {
+  it.each([true, false])(
+    "requests native graceful shutdown before choosing a signal fallback (%s)",
+    async (accepted) => {
+      const child = { exitCode: null, signalCode: null, kill: vi.fn() };
+      const requestStop = vi.fn(async () => accepted);
+      await shutdownManagedServer(child, { requestStop, waitForExit: async () => true });
+      expect(requestStop).toHaveBeenCalledOnce();
+      expect(child.kill.mock.calls).toEqual(accepted ? [] : [["SIGTERM"]]);
+    },
+  );
+
+  it("joins its held child through signal fallback when native stop rejects", async () => {
+    const child = { exitCode: null, signalCode: null, kill: vi.fn() };
+    const waitForExit = vi.fn(async () => true);
+    await shutdownManagedServer(child, {
+      requestStop: async () => {
+        throw Error("native transport failed");
+      },
+      waitForExit,
+    });
+    expect(child.kill.mock.calls).toEqual([["SIGTERM"]]);
+    expect(waitForExit).toHaveBeenCalledOnce();
+  });
+
+  it("accepts a held child that exits while its native stop request is pending", async () => {
+    const child = { exitCode: null as number | null, signalCode: null, kill: vi.fn() };
+    const waitForExit = vi.fn(async () => true);
+    await shutdownManagedServer(child, {
+      requestStop: async () => {
+        child.exitCode = 0;
+        return false;
+      },
+      waitForExit,
+    });
+    expect(child.kill).not.toHaveBeenCalled();
+    expect(waitForExit).not.toHaveBeenCalled();
+  });
+
   it("requests graceful termination and does not force-kill an exited child", async () => {
     const child = {
       exitCode: null as number | null,

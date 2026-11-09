@@ -19,6 +19,7 @@ import { AppearanceProvider, useAppearance } from "./appearance/AppearanceContex
 import type { MobileRouteId } from "./copy";
 import { resolveMobileMockScenario, type MobileMockScenario } from "./dev/mobileMockScenarioId";
 import { MobileDeepLinkCapture } from "./navigation/mobileDeepLinkCapture";
+import type { MobileMovesDeepLinkTarget } from "./notifications/deepLinks";
 import { RootNavigator } from "./navigation/RootNavigator";
 import { createInitialNavigationState, selectMobileRoute } from "./navigation/navigationState";
 import { AppVaultGate } from "./security/AppVaultGate";
@@ -32,6 +33,7 @@ function AppShell(props: {
   readonly onLeaveDemo?: () => void;
   readonly onDeepLinkConsumed: () => void;
   readonly pendingDeepLinkRow?: MobileInboxRow | undefined;
+  readonly pendingMovesLink?: MobileMovesDeepLinkTarget | undefined;
 }) {
   const appearance = useAppearance();
   const { colors, scheme } = useTheme();
@@ -103,6 +105,9 @@ function AppShell(props: {
           {...(props.pendingDeepLinkRow === undefined
             ? {}
             : { pendingDeepLinkRow: props.pendingDeepLinkRow })}
+          {...(props.pendingMovesLink === undefined
+            ? {}
+            : { pendingMovesLink: props.pendingMovesLink })}
         />
       </ScreenCanvas>
     </SafeAreaView>
@@ -149,12 +154,13 @@ export default function App() {
   const live = (
     <AppearanceProvider>
       <MobileDeepLinkCapture>
-        {(pendingDeepLinkRow, onDeepLinkConsumed) => (
+        {(pendingDeepLinkRow, onDeepLinkConsumed, pendingMovesLink) => (
           <AppVaultGate authenticator={authenticator}>
             <MobileSessionProvider>
               <AppShell
                 onDeepLinkConsumed={onDeepLinkConsumed}
                 {...(pendingDeepLinkRow === undefined ? {} : { pendingDeepLinkRow })}
+                {...(pendingMovesLink === undefined ? {} : { pendingMovesLink })}
               />
             </MobileSessionProvider>
           </AppVaultGate>

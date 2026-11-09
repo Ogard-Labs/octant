@@ -64,22 +64,40 @@ export function conversationInputSource(
     );
   };
   const current = (reference: ConversationInputReference) => ownerCurrent(reference.source);
+  // A Chat source's attachment must still be the finalized one the reference recorded.
+  const chatAttachmentOf = (reference: ConversationInputReference) =>
+    readChatThreadView(
+      persistence,
+      decodeChatThreadId(reference.source.threadId),
+    )?.attachments.find(
+      (item) =>
+        String(item.id) === reference.source.attachmentId &&
+        item.status === "finalized" &&
+        item.digest === reference.digest &&
+        item.byteLength === reference.byteLength &&
+        item.mediaType === reference.mediaType,
+    );
   return {
     current,
     ownerCurrent,
+    /**
+     * The recorded size of a reference `read` would not refuse by its scope or
+     * its records, without reading the bytes. A file changed under the same
+     * record is found only by `read`, which checks the digest.
+     */
+    size: (reference: ConversationInputReference): number | undefined => {
+      if (!current(reference)) return undefined;
+      if (reference.source.mode === "chat" && chatAttachmentOf(reference) === undefined) {
+        return undefined;
+      }
+      return reference.byteLength;
+    },
     read: async (reference: ConversationInputReference): Promise<Uint8Array | undefined> => {
       if (!current(reference)) return undefined;
       const source = reference.source;
       if (source.mode === "chat") {
         const threadId = decodeChatThreadId(source.threadId);
-        const attachment = readChatThreadView(persistence, threadId)?.attachments.find(
-          (item) =>
-            String(item.id) === source.attachmentId &&
-            item.status === "finalized" &&
-            item.digest === reference.digest &&
-            item.byteLength === reference.byteLength &&
-            item.mediaType === reference.mediaType,
-        );
+        const attachment = chatAttachmentOf(reference);
         if (attachment === undefined) return undefined;
         return chat.read({
           chatThreadId: threadId,

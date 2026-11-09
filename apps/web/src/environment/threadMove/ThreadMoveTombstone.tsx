@@ -19,6 +19,20 @@ export function movedThreadLink(departed: Departed): string {
 }
 
 /**
+ * The sentence that names the parts a move could not read and left behind,
+ * the first ones by name and the rest counted; undefined when every part
+ * travelled. The tombstone and the Moved notice say it the same way.
+ */
+export function partsLeftBehindSentence(departed: Departed): string | undefined {
+  const named = departed.partsLeftBehind ?? [];
+  const count = departed.partsLeftBehindCount ?? named.length;
+  if (count === 0) return undefined;
+  const unnamed = count - named.length;
+  const names = named.map((part) => part.name).join(", ");
+  return `${count === 1 ? "1 part" : `${String(count)} parts`} could not be read here, so ${count === 1 ? "it" : "they"} did not move: ${names}${unnamed > 0 ? `, and ${String(unnamed)} more` : ""}.`;
+}
+
+/**
  * What a moved thread's pane shows on the computer it left, opened from an
  * old link, a notification, or a search: where it went, Open there, and the
  * worktree that stayed when it held files the move did not carry. The
@@ -34,18 +48,37 @@ export function ThreadMoveTombstone(props: {
   readonly writeClipboard?: (text: string) => Promise<void>;
 }) {
   const { departed } = props;
+  const leftBehind = partsLeftBehindSentence(departed);
   const titleId = useId();
-  const [copied, setCopied] = useState<"copied" | "failed" | undefined>(undefined);
+  const [answer, setAnswer] = useState<"opened" | "copied" | "failed" | undefined>(undefined);
   const time = new Date(departed.movedAt).toLocaleString([], {
     dateStyle: "medium",
     timeStyle: "short",
   });
 
-  const openThere = () => {
+  // Open there opens the thread on the destination's own web app in the
+  // person's browser, which admits that browser as it already would, so this
+  // computer grants nothing; the desktop reads where it went from the host and
+  // the window names only the thread. No window shows another member's thread
+  // in place, and the desktop's own `octant://` handler takes only
+  // `octant://code/` links, so when the destination serves no web app, or the
+  // window has no such door, the link is copied for the phone app instead.
+  const copyLink = () => {
     const write = props.writeClipboard ?? ((text: string) => navigator.clipboard.writeText(text));
     write(movedThreadLink(departed)).then(
-      () => setCopied("copied"),
-      () => setCopied("failed"),
+      () => setAnswer("copied"),
+      () => setAnswer("failed"),
+    );
+  };
+  const openThere = () => {
+    const open = props.client.openThere;
+    if (departed.destinationWebOrigin === undefined || open === undefined) {
+      copyLink();
+      return;
+    }
+    open(departed.thread).then(
+      (outcome) => (outcome === "opened" ? setAnswer("opened") : copyLink()),
+      () => copyLink(),
     );
   };
 
@@ -79,15 +112,18 @@ export function ThreadMoveTombstone(props: {
           {departed.changesRemainInCheckout
             ? ". Its changes also remain in this Project's checkout."
             : ""}
+          {leftBehind === undefined ? "" : `. ${leftBehind}`}
         </p>
         <div className="thread-move-tombstone__actions">
           <OctantButton onClick={openThere}>Open there</OctantButton>
           <p aria-live="polite" className="thread-move-tombstone__meta">
-            {copied === "copied"
-              ? `Link copied. Open it on ${departed.destinationName} or your phone.`
-              : copied === "failed"
-                ? "The link couldn't be copied."
-                : ""}
+            {answer === "opened"
+              ? `Opened on ${departed.destinationName}'s own page in your browser.`
+              : answer === "copied"
+                ? `Link copied. This window can't open threads on ${departed.destinationName}; the Octant phone app opens this link.`
+                : answer === "failed"
+                  ? "The link couldn't be copied."
+                  : ""}
           </p>
         </div>
       </div>

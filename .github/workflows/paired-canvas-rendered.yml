@@ -1,0 +1,37 @@
+name: Paired Canvas rendered checks
+on:
+  pull_request:
+    paths:
+      - apps/web/src/remote/**
+      - apps/web/src/canvas/**
+      - packages/client-runtime/src/canvasClient.ts
+      - .github/workflows/paired-canvas-rendered.yml
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: paired-canvas-rendered-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  rendered:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.4
+      - run: bun install --frozen-lockfile --ignore-scripts
+      - name: Exercise the shared read-only Canvas in isolated Chrome
+        env:
+          CI: "true"
+          OCTANT_PAIRED_CANVAS_RENDERED: "1"
+          OCTANT_BROWSER_EXECUTABLE: /usr/bin/google-chrome
+          OCTANT_QA_ARTIFACTS: ${{ runner.temp }}/paired-canvas
+        run: bun run --cwd apps/web test -- src/canvas/pairedCanvas.chromium.test.ts
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: paired-canvas-rendered
+          path: ${{ runner.temp }}/paired-canvas
+          if-no-files-found: ignore

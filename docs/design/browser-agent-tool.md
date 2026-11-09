@@ -268,8 +268,9 @@ the page, the workspace, or the person is reached.
 
 ### Upload
 
-A file leaves this computer through a page only from the thread's workspace and
-only after the person approves it.
+A file leaves this computer through a page only after a person approves its
+file authority. Ordinary uploads use the thread's workspace and a one-use
+answer; a recurring routine may instead use the explicit manifest below.
 
 - `upload` puts files into one file field. `files` names them relative to the
   thread's workspace: the Work thread's Project folder, or the Code thread's
@@ -286,7 +287,7 @@ only after the person approves it.
   a later action, so the copies stay until the page's browsing context closes
   (at most 8 uploads' worth per context, the oldest deleted first), and are
   deleted then, or at once if the upload never reached the page.
-- The person is asked every time, naming each file with its size and the site:
+- For an ordinary upload, the person is asked every time, naming each file with its size and the site:
   "Let the agent upload report.pdf (12 KB) to https://example.com?" The answer
   covers those files to that site once. It is never remembered, so the card has
   no "Always allow", and it is asked at every access level, Full access
@@ -299,14 +300,60 @@ only after the person approves it.
 - Rationale: an upload is the one Browser action that reads a file off this
   computer and sends it to a site, so it keeps the narrowest reach the request
   allowed. The workspace is the folder the thread's own file tools already
-  treat as its root; a Work Project's extra folders are left out until a person
-  asks for them. Asking every time follows the Browser's first-action ask,
+  treat as its root. Broader approved-folder selection belongs only to an
+  explicit recurring manifest. Asking every time follows the Browser's first-action ask,
   which a separate maintainer decision keeps at every access level.
+
+### Recurring upload manifests
+
+Settings › Data & storage › Recurring uploads lets a local person review a
+separate file permission for one enabled local Work/Code routine, its current
+definition/model/authority, stored Browser profile, exact HTTPS origin and one
+approved Project folder. Main and extra folders use their current host-issued
+folder identities; an agent cannot supply an absolute root or choose another
+folder implicitly. The selected files are relative to that folder, which stays
+explicit even when a Code run has its own checkout. The profile's account-use
+permission remains separate and must also be current.
+
+A manifest names up to five plain files, their exact content digests, sizes and
+extensions. The host stages bounded private copies before review and on every
+use, opens without following a link, and compares full file identity and copied
+contents. Hard-linked manifest files refuse. A changed file or root identity
+invalidates the permission; it does not silently approve the replacement.
+Ordinary one-use uploads keep their current behavior.
+
+The person explicitly reviews a total file-use count (at most 100), total file
+bytes (at most 250 MiB) and expiry (seven days by default, at most 30 days).
+Each file stays capped at 25 MiB. Quota counts file contents, not HTTP framing.
+Every admitted file consumes quota before the Browser receives it; later
+cancellation or uncertainty is not automatically refunded. A synchronous
+journal reservation makes concurrent uploads share one remaining budget. An
+audit-write failure refuses the upload. The journal keeps the manifest and use
+metadata, including relative file names, never file bodies or absolute roots.
+A host restart restores no permission. A Project erase removes its manifest
+metadata and active grants without creating replacement audit records. Manifest
+metadata stays out of thread/host data exports and replica sync.
+
+The routine selects the explicit `uploadPermissionId` and exact manifest file
+paths. A missing-permission response lists only that caller/profile/site's
+available manifests and remaining quotas. No file permission starts a run,
+chooses an account, permits another file/site or authorizes downloads. Managed
+children, terminal sessions, paired clients and ordinary task turns do not gain
+recurring file permission from this routine grant. Their existing one-use or
+refusal rules remain.
+
+Expiry, Revoke, profile clear or changed routine authority invalidates pending
+uses. The Browser rechecks authority while an upload waits and on later page
+effects while it retains the attached copies. Revocation closes that affected
+context and releases its copies; data already handed to the page/site cannot be
+recalled. Existing credential, frame, ref, origin, redirect, Plan and native-owner
+checks remain. No native owner means unavailable; source verification alone does
+not establish packaged or personal-account acceptance.
 
 ### Download
 
 A file comes from a page into a thread's workspace only when the person has
-turned on a switch, and then only after they answer for that file.
+turned on a switch, and then only after they answer for that file or separately review the bounded routine download manifest below.
 
 - **The switch.** Settings › Permissions has "Let agents download files", off
   by default. It is a host setting in the shell settings, which only a window
@@ -328,10 +375,22 @@ turned on a switch, and then only after they answer for that file.
   file's own bytes, never from the page's header. A file that was stopped
   (over the cap, unfinished after 10 seconds, or failed) is reported by name
   and reason and holds nothing. Each is reported once.
+  A native runtime may attach `source` with `kind: https-origin-chain` and
+  the complete redirect chain reduced to exact HTTPS origins, at most 32.
+  It comes from that completed native download item, never from the requesting
+  page or an agent argument. URL paths, query values and fragments are removed;
+  a missing, oversized, credential-bearing or non-HTTPS chain is unverified.
+  The headless runtime currently supplies no complete-chain receipt. Omitting
+  it preserves ordinary per-file review and grants no recurring authority.
 - **Saving.** `download-save` names a reported `downloadId`. The server checks
   the file, then asks the person every time: "Let the agent save report.pdf
-  (1.2 MB, PDF) from https://example.com into this thread's workspace?" It
-  names the file, its size, its type, and the site. The answer covers that file
+  (1.2 MB, PDF) into this thread's workspace? Page: https://example.com.
+  Download source: https://example.com → https://files.example.com." It
+  names the file, its size, its type, the requesting page and the attested
+  source origins separately. Without a native receipt, it says "Download
+  source: unverified." A page address is never substituted as source proof.
+  Code refuses a save whose complete review exceeds its approval-summary byte
+  limit; it never offers approval of a truncated source chain. The answer covers that file
   once and is never remembered, so the card has no "Always allow", and it is
   asked at every access level, Full access included. Work asks in the thread's
   Browser approval card ("Save once" or "Deny"); Code asks in the thread's tool
@@ -487,7 +546,10 @@ runs, not when it was recorded.
   authority, model binding, origin approval, Plan mode, the stale check, and the
   credential check. A step that acted by ref first takes a snapshot of the fresh
   page and picks the one element with the recorded role and name; none, or more
-  than one, stops the replay. After each step the server compares the page's
+  than one, stops the replay. An untargeted keypress also takes a fresh snapshot
+  before dispatch, including after a person hands back the page. A hand-back
+  answer that substituted a snapshot is never counted as an executed step.
+  After each step the server compares the page's
   path and title with the recorded ones, and the first step whose outcome
   differs, or that fails or is refused, stops the replay. The answer names that
   step (its number, its operation, and the expected and found path and title, the
@@ -512,8 +574,29 @@ runs, not when it was recorded.
 - **The person's view.** Settings › Data & storage › Browser flows lists every
   Project's flows with step count and first address and deletes one after a
   confirmation, from a local window only (`/api/browser/flows`; a paired device
-  is refused). A person runs a flow by asking the agent to; a run needs a model's
-  authority and approvals, which a Settings button cannot hold.
+  is refused). A person may also select an existing active, idle Work or Code task,
+  review its fixed steps and run-specific text, and start through that task's
+  current model and authority. Settings supplies no authority of its own.
+- **Reviewed run.** The server binds the local window, flow version, task/model,
+  authority and profile to a host-issued review id. A type step's text and a
+  recorded expected title are editable for this run (8,192 text characters,
+  1,024 title characters, existing 256 KiB total). Operations, targets and paths
+  remain fixed. The person must review a changed expected title explicitly;
+  Octant does not infer substitutions or drop outcome checks when text changes.
+  Values stay in finite host memory and never replace the saved flow. Plan,
+  unavailable providers and server Projects refuse rather than fall back to
+  local execution. Each fixed step uses ordinary Browser admission with no
+  provider calls between steps.
+- **Progress and Resume.** A run holds exclusive agent Browser custody for its
+  task, including while paused; the person may still take over and hand back.
+  Only a refusal proving that a human-held operation did not run becomes Paused.
+  Resume is explicit and repeats that unexecuted step with a fresh snapshot.
+  A changed flow, task/model/authority, profile, context or site approval refuses
+  Resume and requires review again. Other failures and uncertain effects stop
+  without retry. Closing or cancelling stops the run; an already dispatched
+  operation may have acted. A review/run expires after 15 minutes, and at most
+  20 runs are retained. Window revocation or host shutdown cancels custody.
+  Progress reads never dispatch or resume a step.
 - Rationale: a stored step is read again with the tool's own parser at replay,
   so a flow can carry nothing a call could not, and a corrupted or edited record
   cannot add an operation. Refs are stored as role and name because a ref
@@ -525,7 +608,7 @@ runs, not when it was recorded.
   (a `type` or `press` into one is refused before any runtime acts), so no
   password, code, or card number reaches a flow through a step, and an address
   that holds a secret ends the recording instead. A step that needs the person
-  ends what can be saved because a replay has nobody to ask. A failed operation is
+  ends what can be saved because a stored step carries no credential or sign-in authority. A failed operation is
   not stored and does not end the run: the page is as it was, and storing it
   would replay a mistake. A routine may run but not save because saving writes a
   Project's data for good, with nobody there to have meant it. A secret in an
@@ -739,6 +822,55 @@ needed.
 
 The page is the person's as much as the agent's. Neither takes it from the
 other without saying so, and the server, not the pane, decides.
+
+### Recurring download manifests
+
+Settings › Data & storage › Recurring downloads lets a local person review a
+separate file permission for one enabled local Work/Code routine, its current
+definition/model/authority, stored Browser profile, exact requesting-page HTTPS
+origin and complete allowed source-origin set. Account access remains a
+separate permission, and the local host's download switch must stay on.
+The routine must explicitly name its `downloadPermissionId`; neither a parent
+nor an account permission lends file authority. Ordinary turns, children,
+terminals, paired clients and Plan gain no recurring download permission.
+The eligible routine's tool schema explains discovery: a `download-save` call
+without that id lists only this routine and current profile's reviewed manifests,
+including their ids, source/page origins, destination, types, remaining quotas
+and expiry. It saves nothing and consumes neither the held file nor quota.
+The agent selects a matching reviewed scope and retries the save with that
+returned `permissionId` as `downloadPermissionId`. The person need not copy an
+id from Settings. No match means a local person must review a new manifest;
+discovery never creates or broadens a grant.
+
+Review names one current approved main or extra Project folder, an existing
+relative directory, allowed sniffed file types, total count and byte limits
+(at most 100 files and 250 MiB), and expiry (seven days by default, at most
+30 days). Each file remains capped at 25 MiB. The complete native download
+receipt must attest every redirect origin as an exact member of the reviewed
+set; absent, unsafe, headless or foreign-origin receipts refuse. The page's
+origin never substitutes for source proof. Paths, queries and fragments are
+not retained as source metadata.
+
+The host pins the approved root and reviewed directory identities independently.
+It resolves no agent-supplied root and falls back to no checkout. Changed or
+linked directories, expired/revoked permission, changed routine/model/authority,
+cleared profiles and unsupported writers refuse. The final source/type/current
+checks and synchronous journal-before-dispatch quota reservation follow complete
+byte reads and directory proofs. Concurrent saves share the remaining quota;
+uncertain effects are not refunded. A held download id is consumed before any
+await, so a retry cannot dispatch that same held file a second time. Native
+creation remains exclusive and never overwrites an existing file.
+
+A selected save returns its opaque approved-folder id, path-free label and
+explicit `selected-root` path base. Its path is relative to that selected root,
+not the thread checkout. A distinct selected-save journal event preserves the
+ordinary workspace receipt unchanged. Grant/use audit keeps no bytes or
+absolute roots; it is erased with the Project. A host restart restores no
+permission. Revocation/expiry interrupts pending uses and closes affected
+contexts; a file already dispatched may have been saved and must be inspected
+before retrying. The journal reports actual owning threads, never a temporary
+routine execution id as their data owner. This is implementation scope, not
+packaged, personal-account or cross-platform acceptance evidence.
 
 ### The person's input is kept
 

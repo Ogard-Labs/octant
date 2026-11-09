@@ -1,9 +1,11 @@
+import { createHash } from "node:crypto";
+import { Transform } from "node:stream";
 import { constants, createWriteStream } from "node:fs";
 import { lstat, mkdir, mkdtemp, open, realpath, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { basename, isAbsolute, join, relative, resolve } from "node:path";
 import { pipeline } from "node:stream/promises";
-import { MAX_BROWSER_UPLOAD_FILE_BYTES } from "@octant/contracts";
+import { MAX_BROWSER_UPLOAD_FILES, MAX_BROWSER_UPLOAD_FILE_BYTES } from "@octant/contracts";
 
 /** One file an upload would send, as the person is asked about it. */
 export interface BrowserUploadFile {
@@ -11,8 +13,11 @@ export interface BrowserUploadFile {
   readonly name: string;
   readonly sizeBytes: number;
   /** The file's identity when it was checked, so a swap afterwards is caught. */
-  readonly device: number;
-  readonly inode: number;
+  readonly device: string;
+  readonly inode: string;
+  readonly linkCount: number;
+  /** Digest of the staged bytes, present only after a bounded private copy. */
+  readonly sha256?: string;
 }
 
 export type BrowserUploadResolution =
@@ -20,6 +25,7 @@ export type BrowserUploadResolution =
   | {
       readonly status: "refused";
       readonly reason:
+        | "upload-invalid-files"
         | "upload-outside-workspace"
         | "upload-symlink"
         | "upload-not-a-file"
@@ -38,6 +44,8 @@ export async function resolveBrowserUploadFiles(
   workspaceRoot: string,
   named: ReadonlyArray<string>,
 ): Promise<BrowserUploadResolution> {
+  if (named.length < 1 || named.length > MAX_BROWSER_UPLOAD_FILES)
+    return { status: "refused", reason: "upload-invalid-files" };
   let root: string;
   try {
     root = await realpath(workspaceRoot);
@@ -56,7 +64,7 @@ export async function resolveBrowserUploadFiles(
     }
     let stats;
     try {
-      stats = await lstat(candidate);
+      stats = await lstat(candidate, { bigint: true });
     } catch {
       return { status: "refused", reason: "upload-not-found" };
     }
@@ -71,16 +79,17 @@ export async function resolveBrowserUploadFiles(
       return { status: "refused", reason: "upload-not-found" };
     }
     if (canonical !== candidate) return { status: "refused", reason: "upload-symlink" };
-    if (stats.size > MAX_BROWSER_UPLOAD_FILE_BYTES) {
+    if (stats.size > BigInt(MAX_BROWSER_UPLOAD_FILE_BYTES)) {
       return { status: "refused", reason: "upload-too-large" };
     }
     if (files.some((file) => file.path === candidate)) continue;
     files.push({
       path: candidate,
       name: basename(candidate),
-      sizeBytes: stats.size,
-      device: stats.dev,
-      inode: stats.ino,
+      sizeBytes: Number(stats.size),
+      device: stats.dev.toString(),
+      inode: stats.ino.toString(),
+      linkCount: Number(stats.nlink),
     });
   }
   return { status: "resolved", files };
@@ -112,62 +121,118 @@ export async function admitBrowserUpload(input: {
     }
   | { readonly status: "refused"; readonly reason: string }
 > {
-  if (input.workspaceRoot === undefined) {
-    return { status: "refused", reason: "upload-unavailable" };
-  }
-  const resolved = await resolveBrowserUploadFiles(input.workspaceRoot, input.files);
-  if (resolved.status === "refused") return resolved;
-  const staging = await mkdtemp(join(tmpdir(), "octant-browser-upload-"));
-  const release = () => rm(staging, { recursive: true, force: true });
+  const prepared = await prepareBrowserUpload(input);
+  if (prepared.status === "refused") return prepared;
   try {
-    const paths: string[] = [];
-    for (const [index, file] of resolved.files.entries()) {
-      // A folder of its own per file keeps each file's name, which is what the
-      // page sees, even when two files share one.
-      const folder = join(staging, String(index));
-      await mkdir(folder, { mode: 0o700 });
-      const copy = join(folder, file.name);
-      if (!(await copyCheckedFile(file, copy))) {
-        await release();
-        return { status: "refused", reason: "upload-changed" };
-      }
-      paths.push(copy);
-    }
-    const outcome = await input.ask(resolved.files);
+    const outcome = await input.ask(prepared.files);
     if (outcome !== "approved") {
-      await release();
+      await prepared.release();
       return { status: "refused", reason: `browser-upload-${outcome}` };
     }
-    return { status: "admitted", paths, release };
+    return { status: "admitted", paths: prepared.paths, release: prepared.release };
   } catch (error) {
-    await release();
+    await prepared.release();
     throw error;
   }
 }
 
+/** Review and execution both identify the same bounded staged bytes. */
+export async function prepareBrowserUpload(input: {
+  readonly workspaceRoot: string | undefined;
+  readonly files: ReadonlyArray<string>;
+}): Promise<
+  | {
+      readonly status: "prepared";
+      readonly files: ReadonlyArray<BrowserUploadFile & { readonly sha256: string }>;
+      readonly paths: ReadonlyArray<string>;
+      readonly release: () => Promise<void>;
+    }
+  | { readonly status: "refused"; readonly reason: string }
+> {
+  if (input.workspaceRoot === undefined) return { status: "refused", reason: "upload-unavailable" };
+  const resolved = await resolveBrowserUploadFiles(input.workspaceRoot, input.files);
+  if (resolved.status === "refused") return resolved;
+  let staging: string;
+  try {
+    staging = await mkdtemp(join(tmpdir(), "octant-browser-upload-"));
+  } catch {
+    return { status: "refused", reason: "upload-unavailable" };
+  }
+  const release = () => rm(staging, { recursive: true, force: true });
+  try {
+    const paths: string[] = [];
+    const files: Array<BrowserUploadFile & { readonly sha256: string }> = [];
+    for (const [index, file] of resolved.files.entries()) {
+      const folder = join(staging, String(index));
+      await mkdir(folder, { mode: 0o700 });
+      const copy = join(folder, file.name);
+      const copied = await copyCheckedFile(file, copy);
+      if (copied === undefined) {
+        await release();
+        return { status: "refused", reason: "upload-changed" };
+      }
+      paths.push(copy);
+      files.push({ ...file, ...copied });
+    }
+    return { status: "prepared", paths, files, release };
+  } catch {
+    await release();
+    return { status: "refused", reason: "upload-unavailable" };
+  }
+}
+
 /** Copy one checked file, refusing it if it is no longer the file that was checked. */
-async function copyCheckedFile(file: BrowserUploadFile, copy: string): Promise<boolean> {
+async function copyCheckedFile(
+  file: BrowserUploadFile,
+  copy: string,
+): Promise<{ readonly sha256: string; readonly linkCount: number } | undefined> {
   let handle;
   try {
     handle = await open(file.path, constants.O_RDONLY | constants.O_NOFOLLOW);
   } catch {
-    return false;
+    return undefined;
   }
   try {
-    const stats = await handle.stat();
+    const stats = await handle.stat({ bigint: true });
     if (
       !stats.isFile() ||
-      stats.dev !== file.device ||
-      stats.ino !== file.inode ||
-      stats.size !== file.sizeBytes
+      stats.dev.toString() !== file.device ||
+      stats.ino.toString() !== file.inode ||
+      stats.size !== BigInt(file.sizeBytes)
     ) {
-      return false;
+      return undefined;
     }
-    await pipeline(
-      handle.createReadStream({ autoClose: false }),
-      createWriteStream(copy, { mode: 0o600 }),
-    );
-    return true;
+    let bytes = 0;
+    const digest = createHash("sha256");
+    const bounded = new Transform({
+      transform(chunk: Buffer, _encoding, callback) {
+        bytes += chunk.byteLength;
+        if (bytes > file.sizeBytes || bytes > MAX_BROWSER_UPLOAD_FILE_BYTES) {
+          callback(new Error("Upload source changed while copying."));
+          return;
+        }
+        digest.update(chunk);
+        callback(null, chunk);
+      },
+    });
+    try {
+      await pipeline(
+        handle.createReadStream({ autoClose: false }),
+        bounded,
+        createWriteStream(copy, { mode: 0o600 }),
+      );
+    } catch {
+      return undefined;
+    }
+    const after = await handle.stat({ bigint: true });
+    if (
+      bytes !== file.sizeBytes ||
+      after.size !== BigInt(file.sizeBytes) ||
+      after.dev.toString() !== file.device ||
+      after.ino.toString() !== file.inode
+    )
+      return undefined;
+    return { sha256: digest.digest("hex"), linkCount: Number(after.nlink) };
   } finally {
     await handle.close();
   }

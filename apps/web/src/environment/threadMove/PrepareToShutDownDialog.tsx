@@ -8,7 +8,9 @@ import {
   type ShutdownListedMember,
   type ShutdownListing,
   type ShutdownPlacement,
+  type ShutdownRowLeftOut,
   type ShutdownThreadRow,
+  type ThreadMoveFailureReason,
   type ThreadMoveSize,
   type ThreadMoveSizes,
   type ThreadMoveThreadStatus,
@@ -28,7 +30,7 @@ import { OctantButton } from "../../ui/base/OctantButton";
 import { OctantDialog } from "../../ui/base/OctantDialog";
 import { OctantSelectField } from "../../ui/base/OctantSelect";
 import type { ThreadMoveClient } from "./threadMoveClient";
-import { estimateBasis, formatBytes, sizeAndEstimate } from "./threadMoveSize";
+import { estimateBasis, sizeAndEstimate, threadSize } from "./threadMoveSize";
 
 /** How far a running batch has come, for the menu bar while the dialog is hidden. */
 export interface ShutdownBatchProgress {
@@ -257,9 +259,15 @@ export function PrepareToShutDownDialog(props: PrepareToShutDownDialogProps) {
     }
   };
 
-  const start = async () => {
+  /**
+   * Starts every destination's batch and the handovers. With Touch ID, each
+   * destination asks for its own unlock in turn; with the phone, each
+   * destination's batch is held here until an owner phone confirms it, one
+   * confirmation per destination on the phone.
+   */
+  const start = async (via: "touch-id" | "phone") => {
     if (pressCount === 0) return;
-    if (batches.length > 0 && props.unlock === undefined) return;
+    if (via === "touch-id" && batches.length > 0 && props.unlock === undefined) return;
     setWorking(true);
     setProblem(undefined);
     const problems: string[] = [];
@@ -282,8 +290,14 @@ export function PrepareToShutDownDialog(props: PrepareToShutDownDialogProps) {
         const name = batch.member.name;
         const threads = batch.rows.map((row) => row.thread);
         let outcome: Awaited<ReturnType<typeof startBatch>>;
+        // Rows the host did not take (gone, or another move already holds
+        // them) end here with their reason, so the batch never waits on them.
+        const leftOut: ShutdownRowLeftOut[] = [];
         try {
-          outcome = await startBatch(batch.member.memberId, batch.rows);
+          outcome =
+            via === "phone"
+              ? await holdBatchForPhone(batch.member.memberId, batch.rows, leftOut)
+              : await startBatch(batch.member.memberId, batch.rows, leftOut);
         } catch {
           // The desktop request or the signing failed; this destination is
           // not known to have started anything, so its rows stay here.
@@ -291,13 +305,18 @@ export function PrepareToShutDownDialog(props: PrepareToShutDownDialogProps) {
         }
         if (outcome === "started") {
           const to = String(batch.member.memberId);
-          started.push(...threads.map((thread) => ({ thread, to })));
+          const left = new Map(leftOut.map((entry) => [rowKey(entry.thread), entry.reason]));
+          for (const thread of threads) {
+            const reason = left.get(rowKey(thread));
+            if (reason === undefined) started.push({ thread, to });
+            else unstarted.set(rowKey(thread), LEFT_OUT_WORDS[reason] ?? "Couldn't start");
+          }
           continue;
         }
         for (const thread of threads) unstarted.set(rowKey(thread), NOT_STARTED_WORDS[outcome]);
         problems.push(
           outcome === "unlock-required"
-            ? `This Mac isn't an owner on ${name}. Mark it as an owner there in Settings › Remote access › Hub.`
+            ? `This Mac isn't an owner on ${name}. Mark it as an owner there in Settings › Remote access › Hub, or confirm on a phone that is an owner there.`
             : outcome === "destination-unreachable"
               ? `${name} couldn't be reached.`
               : outcome === "declined"
@@ -327,9 +346,37 @@ export function PrepareToShutDownDialog(props: PrepareToShutDownDialogProps) {
     if (handingOver.length > 0) void handOverAll(handingOver, destination);
   };
 
+  const batchRequestRows = (memberId: HubMemberId, batchRows: ReadonlyArray<ShutdownThreadRow>) =>
+    batchRows.map((row) => {
+      const placement = placementFor(row, String(memberId));
+      const project = placement === undefined ? undefined : projectFor(row, placement);
+      return {
+        thread: row.thread,
+        ...(project === undefined ? {} : { destinationProjectId: project }),
+        timing: timingOf(pickOf(row).choice),
+      };
+    });
+
+  // The host holds the batch, freezing nothing, until the phone hands it the
+  // destination's ticket; a thread already moving or waiting keeps that move.
+  const holdBatchForPhone = async (
+    memberId: HubMemberId,
+    batchRows: ReadonlyArray<ShutdownThreadRow>,
+    leftOut: ShutdownRowLeftOut[],
+  ): Promise<"started" | "not-started"> => {
+    const asked = await props.client.shutdownAskPhone({
+      destinationMemberId: memberId,
+      rows: batchRequestRows(memberId, batchRows),
+    });
+    if (asked.status === "refused") return "not-started";
+    leftOut.push(...asked.leftOut);
+    return "started";
+  };
+
   const startBatch = async (
     memberId: HubMemberId,
     batchRows: ReadonlyArray<ShutdownThreadRow>,
+    leftOut: ShutdownRowLeftOut[],
   ): Promise<
     | "started"
     | "declined"
@@ -347,18 +394,12 @@ export function PrepareToShutDownDialog(props: PrepareToShutDownDialogProps) {
     if (signed.status !== "done" || signed.signature === undefined) return "declined";
     const started = await props.client.shutdownStart({
       destinationMemberId: memberId,
-      rows: batchRows.map((row) => {
-        const placement = placementFor(row, String(memberId));
-        const project = placement === undefined ? undefined : projectFor(row, placement);
-        return {
-          thread: row.thread,
-          ...(project === undefined ? {} : { destinationProjectId: project }),
-          timing: timingOf(pickOf(row).choice),
-        };
-      }),
+      rows: batchRequestRows(memberId, batchRows),
       unlock: { challengeId: asked.challenge.challengeId, signature: signed.signature },
     });
-    return started.status === "refused" ? "not-started" : "started";
+    if (started.status === "refused") return "not-started";
+    leftOut.push(...(started.leftOut ?? []));
+    return "started";
   };
 
   const moveStates = chosen.map(({ thread, to }) => ({
@@ -440,7 +481,11 @@ export function PrepareToShutDownDialog(props: PrepareToShutDownDialogProps) {
               measured.rate,
             );
     const basis =
-      typeof measured === "object" && group.rows.some((row) => sizeOf(row)?.status === "measured")
+      typeof measured === "object" &&
+      group.rows.some((row) => {
+        const size = sizeOf(row);
+        return size !== undefined && size.status !== "unknown";
+      })
         ? estimateBasis(measured.rate, group.member.name)
         : undefined;
     return { name: group.member.name, text, basis };
@@ -732,15 +777,26 @@ export function PrepareToShutDownDialog(props: PrepareToShutDownDialogProps) {
               <OctantButton onClick={props.onClose} variant="ghost">
                 Cancel
               </OctantButton>
-              <OctantButton
-                disabled={
-                  pressCount === 0 || working || (batches.length > 0 && props.unlock === undefined)
-                }
-                onClick={() => void start()}
-                ref={primary}
-              >
-                {primaryLabel}
-              </OctantButton>
+              {/* A phone on each destination's owner list unlocks there itself;
+                  it is the primary in a window with no Touch ID key. */}
+              {batches.length > 0 ? (
+                <OctantButton
+                  disabled={working}
+                  onClick={() => void start("phone")}
+                  {...(props.unlock === undefined ? { ref: primary } : { variant: "outline" })}
+                >
+                  Confirm on your phone
+                </OctantButton>
+              ) : null}
+              {batches.length > 0 && props.unlock === undefined ? null : (
+                <OctantButton
+                  disabled={pressCount === 0 || working}
+                  onClick={() => void start("touch-id")}
+                  ref={primary}
+                >
+                  {primaryLabel}
+                </OctantButton>
+              )}
             </>
           )}
         </div>
@@ -806,9 +862,7 @@ function ShutdownRow(props: {
         <span className="shutdown-row__project">{row.projectName}</span>
       )}
       {props.size === undefined ? null : (
-        <span className="shutdown-row__size">
-          {props.size.status === "measured" ? formatBytes(props.size.bytes) : "Size unknown"}
-        </span>
+        <span className="shutdown-row__size">{threadSize(props.size)}</span>
       )}
       {props.phase === "running" && props.notStarted !== undefined ? (
         <span className="shutdown-row__reason">
@@ -862,6 +916,13 @@ function ShutdownRow(props: {
 }
 
 /** Why a destination's rows did not start, as each of its rows says it. */
+/** Why the host did not take a row of a batch it started. */
+const LEFT_OUT_WORDS: Readonly<Partial<Record<ThreadMoveFailureReason, string>>> = {
+  busy: "Already moving",
+  refused: "Can't move",
+  delegated: "Delegated here",
+};
+
 const NOT_STARTED_WORDS: Readonly<
   Record<
     "declined" | "unlock-required" | "destination-unreachable" | "refused" | "not-started",
@@ -986,7 +1047,12 @@ function settledState(
   status: ThreadMoveThreadStatus | undefined,
   startedAt: number,
 ): "moved" | "failed" | "stayed" | "running" {
-  if (status === undefined || status.sending !== undefined || status.waiting !== undefined) {
+  if (
+    status === undefined ||
+    status.sending !== undefined ||
+    status.waiting !== undefined ||
+    status.waitingForPhone !== undefined
+  ) {
     return "running";
   }
 
@@ -1016,6 +1082,7 @@ function runningWord(
   if (status?.waiting !== undefined) {
     return status.waiting.stopping === true ? "Stopping" : "After this turn";
   }
+  if (status?.waitingForPhone !== undefined) return "Waiting for your phone";
   if (status?.sending !== undefined) {
     const { bytesSent, bytesTotal } = status.sending;
     const percent = bytesTotal === 0 ? 0 : Math.min(99, Math.floor((bytesSent / bytesTotal) * 100));

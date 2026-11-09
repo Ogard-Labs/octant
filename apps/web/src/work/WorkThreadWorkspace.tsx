@@ -15,6 +15,8 @@ import { useComposerCompacting } from "../context/composerContextMeterScope";
 import { ComposerAttachButton } from "../composer/ComposerAttachButton";
 import {
   decodeWorkAttachmentId,
+  decodeWorkQuestionnaireResponse,
+  type WorkRequestResolution,
   decodeWorkAttachmentMediaType,
   decodeThreadWorkingDirectory,
   decodeWorkMutationRequestId,
@@ -485,6 +487,8 @@ export interface WorkThreadWorkspaceProps {
   readonly onOpenCanvas?: (card: CanvasThreadReferenceCard) => void;
   /** Opens the dock's Canvas tool on this Canvas; a Canvas drawn in the thread offers it. */
   readonly onOpenCanvasInSidebar?: (card: CanvasThreadReferenceCard) => void;
+  /** The remote reader opens the same Canvas without a local sidebar. */
+  readonly canvasOpenLabel?: string;
   /** The Canvas cards the host lists for this thread, each time they are read. */
   readonly onCanvasReferencesObserved?: (
     threadId: string,
@@ -1121,14 +1125,10 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
     }
   }, [props.threadId, props.turnClient, stoppableTurn, forceStop.requestStop]);
   const answerWorkRequest = useCallback(
-    async (
-      request: WorkRequest,
-      resolution:
-        | { readonly kind: "approval"; readonly approved: boolean }
-        | { readonly kind: "user-input"; readonly answer: string },
-    ) => {
+    async (request: WorkRequest, resolution: WorkRequestResolution) => {
       const requestClient = props.requestClient;
-      if (requestClient === undefined) return;
+      if (requestClient === undefined) return false;
+      const threadKey = String(props.threadId);
       try {
         await requestClient.execute({
           kind: "resolve-work-request",
@@ -1136,15 +1136,43 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
           expectedVersion: request.version,
           resolution,
         });
+        if (currentThreadKeyRef.current !== threadKey) return false;
+        setStatus(undefined);
+        setPendingRequests((current) =>
+          current.filter((candidate) => String(candidate.requestId) !== String(request.requestId)),
+        );
+        return true;
+      } catch {
+        if (currentThreadKeyRef.current !== threadKey) return false;
+        setStatus("The answer could not be delivered.");
+        return false;
+      }
+    },
+    [props.requestClient, props.threadId],
+  );
+
+  const dismissWorkRequest = useCallback(
+    async (request: WorkRequest) => {
+      const requestClient = props.requestClient;
+      if (requestClient === undefined) return;
+      const threadKey = String(props.threadId);
+      try {
+        await requestClient.execute({
+          kind: "cancel-work-request",
+          requestId: request.requestId,
+          expectedVersion: request.version,
+        });
+        if (currentThreadKeyRef.current !== threadKey) return;
         setStatus(undefined);
         setPendingRequests((current) =>
           current.filter((candidate) => String(candidate.requestId) !== String(request.requestId)),
         );
       } catch {
-        setStatus("The answer could not be delivered.");
+        if (currentThreadKeyRef.current === threadKey)
+          setStatus("The question could not be dismissed.");
       }
     },
-    [props.requestClient],
+    [props.requestClient, props.threadId],
   );
 
   useEffect(() => {
@@ -2259,6 +2287,9 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
                           cards={canvasPlacement.byRow.get(row.key)}
                           client={canvasClient}
                           {...(openInSidebar === undefined ? {} : { onOpen: openInSidebar })}
+                          {...(props.canvasOpenLabel === undefined
+                            ? {}
+                            : { openLabel: props.canvasOpenLabel })}
                         />
                       )}
                       {imageClient === undefined || imageProfiles === undefined ? null : (
@@ -2496,8 +2527,35 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
                 if (props.requestClient !== undefined && row.request.detail.kind === "user-input") {
                   return (
                     <ProviderQuestionCard
+                      onDismiss={
+                        row.request.detail.questionnaire === undefined
+                          ? undefined
+                          : () => {
+                              void dismissWorkRequest(row.request);
+                            }
+                      }
+                      draftIdentity={{
+                        scope: `work-request:${String(props.threadId)}`,
+                        requestId: String(row.request.requestId),
+                      }}
+                      {...(row.request.detail.questionnaire === undefined
+                        ? {}
+                        : { questionnaire: row.request.detail.questionnaire })}
                       onAnswer={(answer) => {
-                        void answerWorkRequest(row.request, { kind: "user-input", answer });
+                        try {
+                          const detail = row.request.detail;
+                          const value =
+                            detail.kind === "user-input" && detail.questionnaire !== undefined
+                              ? decodeWorkQuestionnaireResponse(JSON.parse(answer))
+                              : answer;
+                          return answerWorkRequest(row.request, {
+                            kind: "user-input",
+                            answer: value,
+                          });
+                        } catch {
+                          setStatus("The answer contains text that Work cannot deliver.");
+                          return false;
+                        }
                       }}
                       options={row.request.detail.options.map((label) => ({ label }))}
                       prompt={row.request.detail.prompt}

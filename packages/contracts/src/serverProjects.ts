@@ -9,8 +9,13 @@
  */
 
 import { Schema } from "effect";
-import { AggregateId, UtcTimestamp } from "./events";
-import { BindingRevisionId, ProjectId } from "./projects";
+import { AggregateId, AggregateVersion, UtcTimestamp } from "./events";
+import {
+  BindingRevisionId,
+  ProjectId,
+  ProjectActions,
+  WorkProjectDeveloperTools,
+} from "./projects";
 
 const strict = { parseOptions: { onExcessProperty: "error" as const } };
 
@@ -21,6 +26,8 @@ export const SERVER_PROJECTS_EVENT_NAMES = {
   bound: "server-projects.bound@1",
   renamed: "server-projects.renamed@1",
   removed: "server-projects.removed@1",
+  actionsReplaced: "server-projects.actions-replaced@1",
+  developerToolsChanged: "server-projects.work-developer-tools-changed@1",
 } as const;
 
 export const MAX_SERVER_PROJECTS = 64;
@@ -51,6 +58,10 @@ export const ServerProject = Schema.Struct({
   folder: ServerFolderPath,
   boundAt: UtcTimestamp,
   mode: Schema.optional(ServerProjectMode),
+  actions: Schema.optional(ProjectActions),
+  /** Revision of this Project's saved list, independent of another catalog edit. */
+  actionsVersion: Schema.optional(AggregateVersion),
+  developerTools: Schema.optional(WorkProjectDeveloperTools),
 }).annotations(strict);
 export type ServerProject = typeof ServerProject.Type;
 
@@ -76,6 +87,25 @@ export const ServerProjectRemovedPayload = Schema.Struct({
 }).annotations(strict);
 export type ServerProjectRemovedPayload = typeof ServerProjectRemovedPayload.Type;
 
+export const ServerProjectActionsReplacedPayload = Schema.Struct({
+  projectId: ProjectId,
+  actions: ProjectActions,
+  actionsVersion: AggregateVersion,
+  principal: localWindow,
+}).annotations(strict);
+export type ServerProjectActionsReplacedPayload = typeof ServerProjectActionsReplacedPayload.Type;
+export const decodeServerProjectActionsReplacedPayload = Schema.decodeUnknownSync(
+  ServerProjectActionsReplacedPayload,
+);
+export const ServerWorkDeveloperToolsChangedPayload = Schema.Struct({
+  projectId: ProjectId,
+  developerTools: WorkProjectDeveloperTools,
+  principal: localWindow,
+}).annotations(strict);
+export const decodeServerWorkDeveloperToolsChangedPayload = Schema.decodeUnknownSync(
+  ServerWorkDeveloperToolsChangedPayload,
+);
+
 /**
  * A server Project as the catalog shows it. A Work Project also names the
  * binding its threads are created against, which the host derives from the
@@ -93,6 +123,17 @@ export const ServerProjectsView = Schema.Struct({
 export type ServerProjectsView = typeof ServerProjectsView.Type;
 
 export const ServerProjectsCommand = Schema.Union(
+  Schema.Struct({
+    kind: Schema.Literal("set-server-work-developer-tools"),
+    projectId: ProjectId,
+    enabled: Schema.Boolean,
+  }).annotations(strict),
+  Schema.Struct({
+    kind: Schema.Literal("set-server-project-actions"),
+    projectId: ProjectId,
+    expectedVersion: AggregateVersion,
+    actions: ProjectActions,
+  }).annotations(strict),
   Schema.Struct({
     kind: Schema.Literal("bind-server-project"),
     name: ServerProjectName,
@@ -119,6 +160,7 @@ export const ServerProjectsRefusalReason = Schema.Literal(
   "folder-not-found",
   "project-not-found",
   "too-many-projects",
+  "actions-changed",
   "unavailable",
 );
 export type ServerProjectsRefusalReason = typeof ServerProjectsRefusalReason.Type;

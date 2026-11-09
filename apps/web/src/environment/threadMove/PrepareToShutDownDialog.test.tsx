@@ -1,6 +1,7 @@
 import type {
   MovedThreadReference,
   ShutdownListing,
+  ShutdownPhoneAskRequest,
   ShutdownStartRequest,
   ThreadMoveSizes,
   ThreadMoveThreadStatus,
@@ -105,6 +106,10 @@ function fakeClient(
       memberId: string,
       threads: ReadonlyArray<MovedThreadReference>,
     ) => Promise<ThreadMoveSizes>;
+    /** A thread archived or deleted after the listing loaded: the phone ask leaves it out. */
+    readonly goneBeforePhone?: MovedThreadReference;
+    /** Once true, the phone never answered and the held moves ended. */
+    readonly phoneWaitEnded?: () => boolean;
   } = {},
 ) {
   const challenged: Array<{
@@ -112,6 +117,7 @@ function fakeClient(
     readonly threads: ReadonlyArray<MovedThreadReference>;
   }> = [];
   const started: ShutdownStartRequest[] = [];
+  const askedPhone: ShutdownPhoneAskRequest[] = [];
   const handedOver: Array<{ readonly thread: MovedThreadReference; readonly notify?: string }> = [];
   const listingsRead = { count: 0 };
   let moved = false;
@@ -120,36 +126,57 @@ function fakeClient(
     destinations: async () => ({ status: "listed", busy: false, destinations: [] }),
     challenge: async () => ({ status: "refused", kind: "refused" }),
     start: async () => ({ status: "refused", reason: "refused" }),
+    askPhone: async () => ({ status: "refused", reason: "refused" }),
     status: async (thread): Promise<ThreadMoveThreadStatus> =>
-      moved && input.settled !== undefined && input.settled.threadId === thread.threadId
-        ? { status: "read", settled: { settledAt: movedAt as never } }
-        : moved && input.arrives?.() === false
-          ? {
-              status: "read",
-              sending: {
-                moveId: "66666666-6666-4666-8666-666666666666" as never,
-                destinationMemberId: MINI as never,
-                destinationName: "Mac mini",
-                state: "offered",
-                bytesSent: 0,
-                bytesTotal: 1,
-                startedAt: new Date().toISOString() as never,
-              },
-            }
-          : moved
+      askedPhone.length > 0 && !moved
+        ? thread.threadId === input.goneBeforePhone?.threadId
+          ? { status: "read" }
+          : input.phoneWaitEnded?.() === true
             ? {
                 status: "read",
-                departed: {
-                  moveId: "66666666-6666-4666-8666-666666666666" as never,
-                  thread,
-                  destinationMemberId: MINI as never,
-                  destinationThread: thread,
-                  changesRemainInCheckout: false,
-                  movedAt: movedAt as never,
-                  destinationName: "Mac mini",
+                failure: {
+                  moveId: "77777777-7777-4777-8777-777777777777" as never,
+                  reason: "unlock-required",
+                  failedAt: new Date().toISOString() as never,
                 },
               }
-            : { status: "read" },
+            : {
+                status: "read",
+                waitingForPhone: {
+                  destinationMemberId: MINI as never,
+                  destinationName: "Mac mini",
+                  expiresAt: 1_900_000_000_000,
+                },
+              }
+        : moved && input.settled !== undefined && input.settled.threadId === thread.threadId
+          ? { status: "read", settled: { settledAt: movedAt as never } }
+          : moved && input.arrives?.() === false
+            ? {
+                status: "read",
+                sending: {
+                  moveId: "66666666-6666-4666-8666-666666666666" as never,
+                  destinationMemberId: MINI as never,
+                  destinationName: "Mac mini",
+                  state: "offered",
+                  bytesSent: 0,
+                  bytesTotal: 1,
+                  startedAt: new Date().toISOString() as never,
+                },
+              }
+            : moved
+              ? {
+                  status: "read",
+                  departed: {
+                    moveId: "66666666-6666-4666-8666-666666666666" as never,
+                    thread,
+                    destinationMemberId: MINI as never,
+                    destinationThread: thread,
+                    changesRemainInCheckout: false,
+                    movedAt: movedAt as never,
+                    destinationName: "Mac mini",
+                  },
+                }
+              : { status: "read" },
     stopWaiting: async () => {},
     cancel: async () => "cancelled",
     takeBack: async () => {},
@@ -189,6 +216,22 @@ function fakeClient(
       }
       return { status: "started" };
     },
+    shutdownAskPhone: async (request) => {
+      askedPhone.push(request);
+      const gone = input.goneBeforePhone;
+      const held = request.rows
+        .map((row) => row.thread)
+        .filter((thread) => thread.threadId !== gone?.threadId);
+      return {
+        status: "waiting-for-phone",
+        expiresAt: 1_900_000_000_000,
+        held,
+        leftOut:
+          gone !== undefined && held.length < request.rows.length
+            ? [{ thread: gone, reason: "refused" }]
+            : [],
+      };
+    },
     handoverPreview: async () => ({ status: "refused", reason: "refused" }),
     handOver: async () => ({ status: "refused", reason: "refused" }),
     shutdownHandOver: async (thread, notify) => {
@@ -206,10 +249,50 @@ function fakeClient(
     handoversList: async () => ({ status: "listed", handovers: [] }),
     handoversContinue: async () => ({ status: "refused", reason: "refused" }),
   };
-  return { client, challenged, started, handedOver, listingsRead };
+  return { client, challenged, started, askedPhone, handedOver, listingsRead };
 }
 
 describe("Prepare to shut down", () => {
+  it("asks an owner phone to confirm the batch when this window has no Touch ID key", async () => {
+    const user = userEvent.setup();
+    const { client, challenged, started, askedPhone } = fakeClient();
+    render(<PrepareToShutDownDialog client={client} onClose={() => {}} open />);
+
+    expect(await screen.findByText("Plan the trip")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /with Touch ID/ })).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Confirm on your phone" }));
+
+    await waitFor(() => expect(askedPhone).toHaveLength(1));
+    expect(askedPhone[0]?.destinationMemberId).toBe(MINI);
+    expect(askedPhone[0]?.rows.map((row) => row.timing)).toEqual(["now", "after-turn"]);
+    expect(challenged).toEqual([]);
+    expect(started).toEqual([]);
+    expect(await screen.findAllByText("Waiting for your phone")).toHaveLength(2);
+  });
+
+  it("names a row whose thread went away before the phone was asked, and finishes once the held row ends", async () => {
+    const user = userEvent.setup();
+    let ended = false;
+    const { client, askedPhone } = fakeClient({
+      goneBeforePhone: TRIP,
+      phoneWaitEnded: () => ended,
+    });
+    render(<PrepareToShutDownDialog client={client} onClose={() => {}} open />);
+    await screen.findByText("Plan the trip");
+    await user.click(screen.getByRole("button", { name: "Confirm on your phone" }));
+
+    await waitFor(() => expect(askedPhone).toHaveLength(1));
+    expect(await screen.findByText("Can't move")).toBeInTheDocument();
+    expect(await screen.findAllByText("Waiting for your phone")).toHaveLength(1);
+
+    // The phone never answered: the held row ends, and the dialog with it.
+    ended = true;
+    expect(
+      await screen.findByRole("heading", { name: /stays? on this computer/ }),
+    ).toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: /Safe to shut down/ })).not.toBeInTheDocument();
+  });
+
   it("starts on the hub with each thread on its own choice, and moves them with one Touch ID", async () => {
     const user = userEvent.setup();
     const { client, challenged, started } = fakeClient();
@@ -297,6 +380,36 @@ describe("Prepare to shut down", () => {
         "Estimated at 1.0 MB a second, because no move to Mac mini has been timed yet.",
       ),
     ).toBeInTheDocument();
+  });
+
+  it("counts what it could measure of a thread whose bulk parts could not be sized, and says so", async () => {
+    const { client } = fakeClient({
+      sizes: async (_memberId, threads) => ({
+        status: "read",
+        rate: { basis: "assumed", bytesPerSecond: 1_048_576 },
+        rows: threads.map((thread) => ({
+          thread,
+          size:
+            thread.threadId === TRIP.threadId
+              ? {
+                  status: "partly-measured",
+                  bytes: 2_048,
+                  parts: [{ kind: "thread-bundle", bytes: 2_048 }],
+                  unknownParts: ["canvas"],
+                }
+              : { status: "measured", bytes: 1_024, parts: [] },
+        })),
+      }),
+    });
+    render(<PrepareToShutDownDialog client={client} onClose={() => {}} open />);
+    await screen.findByText("Plan the trip");
+
+    await waitFor(() =>
+      expect(screen.getByText("· 3 KB, under a minute, 1 size unknown")).toBeInTheDocument(),
+    );
+    const trip = screen.getByText("Plan the trip").closest(".shutdown-row");
+    if (!(trip instanceof HTMLElement)) throw new Error("No row.");
+    expect(within(trip).getByText("At least 2 KB")).toBeInTheDocument();
   });
 
   it("reads a row's size for the computer it moves to, and adds each destination's total at its own rate", async () => {
@@ -549,6 +662,38 @@ describe("Prepare to shut down", () => {
     expect(started.map((request) => request.destinationMemberId)).toEqual([MINI, DESKTOP]);
     expect(await screen.findByRole("heading", { name: /Safe to shut down/ })).toBeInTheDocument();
     expect(screen.getByText("1 moved to Mac mini, 1 to Desktop.")).toBeInTheDocument();
+  });
+
+  it("holds each destination's rows for the phone, one confirmation per destination, when rows go to different computers", async () => {
+    const user = userEvent.setup();
+    const { client, challenged, started, askedPhone } = fakeClient();
+    const sign = vi.fn(async () => ({ status: "done" as const, signature: "c2ln" }));
+    render(
+      <PrepareToShutDownDialog
+        client={client}
+        onClose={() => {}}
+        open
+        unlock={{ ownerUnlockSign: sign }}
+      />,
+    );
+    await screen.findByText("Plan the trip");
+    await user.click(screen.getByRole("combobox", { name: "Choice for Plan the trip" }));
+    await user.click(await screen.findByRole("option", { name: "Move to Desktop" }));
+    await user.click(screen.getByRole("button", { name: "Confirm on your phone" }));
+
+    await waitFor(() => expect(askedPhone).toHaveLength(2));
+    expect(
+      askedPhone.map((request) => [
+        request.destinationMemberId,
+        request.rows.map((row) => row.thread.threadId),
+      ]),
+    ).toEqual([
+      [MINI, [DARK.threadId]],
+      [DESKTOP, [TRIP.threadId]],
+    ]);
+    expect(sign).not.toHaveBeenCalled();
+    expect(challenged).toEqual([]);
+    expect(started).toEqual([]);
   });
 
   it("still moves to the other computers when one destination's unlock is declined", async () => {

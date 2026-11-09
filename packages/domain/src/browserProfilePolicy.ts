@@ -1,3 +1,8 @@
+import {
+  decodeBrowserAccountProfileId,
+  type BrowserProfileChoice,
+  type ProjectId,
+} from "@octant/contracts";
 import type {
   BrowserContextId,
   BrowserProfile,
@@ -10,6 +15,7 @@ import type {
 /** The Electron partition a stored profile keeps its site data in. */
 const PERSONAL_PARTITION = "persist:octant-profile-personal";
 const PROJECT_PARTITION_PREFIX = "persist:octant-profile-project-";
+const ACCOUNT_PARTITION_PREFIX = "persist:octant-profile-account-";
 const PRIVATE_PARTITION_PREFIX = "octant-browser-";
 const PROJECT_ID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -25,6 +31,7 @@ export function storedBrowserProfile(
 export function browserProfileKey(profile: BrowserProfile | undefined): string {
   if (profile === undefined || profile.kind === "private") return "private";
   if (profile.kind === "personal") return "personal";
+  if (profile.kind === "account") return `account:${String(profile.profileId)}`;
   return `project:${String(profile.projectId)}`;
 }
 
@@ -50,6 +57,8 @@ export function browserProfilePartition(
     return `${PRIVATE_PARTITION_PREFIX}${String(contextId)}`;
   }
   if (profile.kind === "personal") return PERSONAL_PARTITION;
+  if (profile.kind === "account")
+    return `${ACCOUNT_PARTITION_PREFIX}${String(profile.profileId).toLowerCase()}`;
   return `${PROJECT_PARTITION_PREFIX}${String(profile.projectId).toLowerCase()}`;
 }
 
@@ -61,10 +70,16 @@ export function browserProfilePartition(
 export function storedBrowserProfileOfPartitionFolder(
   folder: string,
 ):
+  | { readonly kind: "account"; readonly profileId: string }
   | { readonly kind: "personal" }
   | { readonly kind: "project"; readonly projectId: string }
   | undefined {
   if (folder === PERSONAL_PARTITION.slice("persist:".length)) return { kind: "personal" };
+  const accountPrefix = ACCOUNT_PARTITION_PREFIX.slice("persist:".length);
+  if (folder.startsWith(accountPrefix)) {
+    const profileId = folder.slice(accountPrefix.length);
+    return PROJECT_ID_PATTERN.test(profileId) ? { kind: "account", profileId } : undefined;
+  }
   const prefix = PROJECT_PARTITION_PREFIX.slice("persist:".length);
   if (!folder.startsWith(prefix)) return undefined;
   const projectId = folder.slice(prefix.length);
@@ -98,7 +113,7 @@ export type BrowserProfileDecision =
  * Whether a caller may put a page in a profile.
  *
  * A stored profile holds sign-ins, so it opens only for the person at a local
- * window, only in a desktop Browser (a headless copy would hold different
+ * window or an explicitly delegated session, only in a desktop Browser (a headless copy would hold different
  * cookies from the native one), only for a Work or Code Project the thread
  * actually belongs to, and never for Chat, which has no Browser. Private is
  * always allowed here; it carries no sign-in.
@@ -106,6 +121,8 @@ export type BrowserProfileDecision =
 export function evaluateBrowserProfileUse(input: {
   readonly profile: BrowserProfile | undefined;
   readonly caller: BrowserProfileCaller;
+  /** Verified by the host for the exact caller/profile/sites; never a wire request field. */
+  readonly delegatedSession?: boolean;
   /** Whether the desktop app's own Browser can hold this page. */
   readonly nativeBrowserAvailable: boolean;
   readonly authority?: Pick<ToolActionAuthority, "mode" | "projectId">;
@@ -115,7 +132,10 @@ export function evaluateBrowserProfileUse(input: {
   if (input.caller === "remote-device") {
     return refused("profile-not-local", "Signed-in pages open only on this Mac.");
   }
-  if (input.caller === "unattended" || input.caller === "terminal-grant") {
+  if (
+    (input.caller === "unattended" || input.caller === "terminal-grant") &&
+    input.delegatedSession !== true
+  ) {
     return refused(
       "profile-needs-a-person",
       "A signed-in page needs a person at this Mac; this turn has none.",
@@ -178,4 +198,24 @@ export function resolveRememberedBrowserProfileSites(
 
 function refused(reason: BrowserProfileRefusalReason, message: string): BrowserProfileDecision {
   return { kind: "refused", reason, message };
+}
+
+/** Resolve a person's explicit choice; a Project choice always means this Project. */
+export function browserProfileFromChoice(
+  choice: BrowserProfileChoice,
+  projectId: ProjectId | undefined,
+): BrowserProfile | undefined {
+  if (choice === "private") return { kind: "private" };
+  if (choice === "personal") return { kind: "personal" };
+  if (choice === "project")
+    return projectId === undefined ? undefined : { kind: "project", projectId };
+  return {
+    kind: "account",
+    profileId: decodeBrowserAccountProfileId(choice.slice("account:".length)),
+  };
+}
+
+export function browserProfileChoiceOf(profile: BrowserProfile | undefined): BrowserProfileChoice {
+  if (profile === undefined || profile.kind === "private") return "private";
+  return profile.kind === "account" ? `account:${String(profile.profileId)}` : profile.kind;
 }

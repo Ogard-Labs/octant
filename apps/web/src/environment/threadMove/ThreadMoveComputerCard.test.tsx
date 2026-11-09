@@ -1,6 +1,7 @@
 import type {
   MovedThreadReference,
   ThreadMoveDestinations,
+  ThreadMovePhoneAskRequest,
   ThreadMoveSizes,
   ThreadMoveStartRequest,
   ThreadMoveThreadStatus,
@@ -63,6 +64,7 @@ function fakeClient(input: {
   readonly sizes?: () => Promise<ThreadMoveSizes>;
 }) {
   const started: ThreadMoveStartRequest[] = [];
+  const askedPhone: ThreadMovePhoneAskRequest[] = [];
   const dismissed: string[] = [];
   let status: ThreadMoveThreadStatus = input.status ?? { status: "read" };
   const client: ThreadMoveClient = {
@@ -84,8 +86,27 @@ function fakeClient(input: {
       };
       return { status: "started" };
     },
+    askPhone: async (request) => {
+      askedPhone.push(request);
+      status = {
+        status: "read",
+        waitingForPhone: {
+          destinationMemberId: DESKTOP as never,
+          destinationName: "Desktop",
+          expiresAt: 1_900_000_000_000,
+        },
+      };
+      return {
+        status: "waiting-for-phone",
+        expiresAt: 1_900_000_000_000,
+        held: [request.thread],
+        leftOut: [],
+      };
+    },
     status: async () => status,
-    stopWaiting: async () => {},
+    stopWaiting: async () => {
+      status = { status: "read" };
+    },
     cancel: async () => "cancelled",
     takeBack: async () => {},
     activate: async () => true,
@@ -109,6 +130,7 @@ function fakeClient(input: {
     }),
     shutdownChallenge: async () => ({ status: "refused", kind: "refused" }),
     shutdownStart: async () => ({ status: "refused", reason: "refused" }),
+    shutdownAskPhone: async () => ({ status: "refused", reason: "refused" }),
     shutdownHandOver: async () => ({ status: "refused", reason: "refused" }),
     handoverPreview: async () => ({ status: "refused", reason: "refused" }),
     handOver: async () => ({ status: "refused", reason: "refused" }),
@@ -116,7 +138,7 @@ function fakeClient(input: {
     handoversList: async () => ({ status: "listed", handovers: [] }),
     handoversContinue: async () => ({ status: "refused", reason: "refused" }),
   };
-  return { client, started, dismissed };
+  return { client, started, askedPhone, dismissed };
 }
 
 describe("the Computer card", () => {
@@ -154,6 +176,9 @@ describe("the Computer card", () => {
     expect(sheet).toHaveTextContent(
       "This thread is erased from this computer once Desktop has it.",
     );
+    expect(sheet).toHaveTextContent(
+      "Its attachments, generated images, Browser captures, and Canvases",
+    );
     await user.click(screen.getByRole("button", { name: "Move with Touch ID" }));
 
     await waitFor(() => expect(started).toHaveLength(1));
@@ -172,6 +197,44 @@ describe("the Computer card", () => {
     expect(screen.getByText("Moving 25%")).toBeInTheDocument();
   });
 
+  it("names the parts that could not be read here and did not move, on the Moved notice", async () => {
+    const { client } = fakeClient({
+      status: {
+        status: "read",
+        departed: {
+          moveId: "66666666-6666-4666-8666-666666666666" as never,
+          thread: THREAD,
+          destinationMemberId: DESKTOP as never,
+          destinationThread: { mode: "code", threadId: PROJECT },
+          changesRemainInCheckout: false,
+          partsLeftBehind: [
+            { kind: "attachment", name: "scan.pdf" },
+            { kind: "browser-capture", name: "Pricing" },
+          ],
+          // More were left behind than the receipt names.
+          partsLeftBehindCount: 5,
+          movedAt: "2026-11-08T12:00:00.000Z" as never,
+          destinationName: "Desktop",
+        },
+      },
+    });
+    render(
+      <ThreadMoveComputerCard
+        client={client}
+        hostName="Laptop"
+        isThisComputer
+        thread={THREAD}
+        threadTitle="Add dark mode"
+        unlock={{ ownerUnlockSign: vi.fn() }}
+      />,
+    );
+    expect(
+      await screen.findByText(
+        /5 parts could not be read here, so they did not move: scan\.pdf, Pricing, and 3 more\./,
+      ),
+    ).toBeInTheDocument();
+  });
+
   it("shows what the move would send and how long it takes, with what the estimate rests on", async () => {
     const user = userEvent.setup();
     const { client } = fakeClient({
@@ -186,7 +249,9 @@ describe("the Computer card", () => {
               bytes: 12_582_912,
               parts: [
                 { kind: "thread-bundle", bytes: 40_960 },
-                { kind: "git-bundle", bytes: 12_541_952 },
+                { kind: "attachment", bytes: 1_048_576 },
+                { kind: "canvas", bytes: 1_048_576 },
+                { kind: "git-bundle", bytes: 10_444_800 },
               ],
             },
           },
@@ -210,8 +275,70 @@ describe("the Computer card", () => {
     const sheet = await screen.findByRole("dialog");
     await waitFor(() => expect(sheet).toHaveTextContent("12.0 MB, about 3 min"));
     expect(within(sheet).getByText("40 KB")).toBeInTheDocument();
-    expect(within(sheet).getByText("12.0 MB")).toBeInTheDocument();
+    // The attachments and Canvases are one row, counted in the total.
+    expect(
+      within(sheet)
+        .getByText(/Its attachments/)
+        .closest("li"),
+    ).toHaveTextContent("2.0 MB");
+    expect(
+      within(sheet)
+        .getByText(/The branch/)
+        .closest("li"),
+    ).toHaveTextContent("10.0 MB");
     expect(sheet).toHaveTextContent("Estimated from the speed earlier moves to Desktop reached.");
+  });
+
+  it("says Size unknown on the row whose parts could not be measured, totals the rest, and still moves", async () => {
+    const user = userEvent.setup();
+    const { client, started } = fakeClient({
+      sizes: async () => ({
+        status: "read",
+        rate: { basis: "measured", bytesPerSecond: 100_000 },
+        rows: [
+          {
+            thread: THREAD,
+            size: {
+              status: "partly-measured",
+              bytes: 1_089_536,
+              parts: [
+                { kind: "thread-bundle", bytes: 40_960 },
+                { kind: "git-bundle", bytes: 1_048_576 },
+              ],
+              unknownParts: ["canvas"],
+            },
+          },
+        ],
+      }),
+    });
+    render(
+      <ThreadMoveComputerCard
+        client={client}
+        hostName="Laptop"
+        isThisComputer
+        thread={THREAD}
+        threadTitle="Add dark mode"
+        unlock={{ ownerUnlockSign: async () => ({ status: "done", signature: "c2ln" }) }}
+      />,
+    );
+    await user.click(screen.getByRole("button", { name: /Laptop/ }));
+    await user.click(await screen.findByRole("radio", { name: /Desktop/ }));
+    await user.click(screen.getByRole("button", { name: "Review move" }));
+
+    const sheet = await screen.findByRole("dialog");
+    await waitFor(() => expect(sheet).toHaveTextContent("1.0 MB, under a minute, 1 size unknown"));
+    expect(
+      within(sheet)
+        .getByText(/Its attachments/)
+        .closest("li"),
+    ).toHaveTextContent("Size unknown");
+    expect(
+      within(sheet)
+        .getByText(/The branch/)
+        .closest("li"),
+    ).toHaveTextContent("1.0 MB");
+    await user.click(within(sheet).getByRole("button", { name: "Move with Touch ID" }));
+    await waitFor(() => expect(started).toHaveLength(1));
   });
 
   it("says the size is unknown when the thread could not be measured, and still moves it", async () => {
@@ -340,6 +467,43 @@ describe("the Computer card", () => {
     await user.click(await screen.findByRole("button", { name: "Move with Touch ID" }));
     expect(await screen.findByText(/This Mac isn't an owner on Desktop/)).toBeInTheDocument();
     expect(started).toEqual([]);
+  });
+
+  it("asks an owner phone to confirm the move when this window has no Touch ID key, and Don't move ends the wait", async () => {
+    const user = userEvent.setup();
+    const { client, started, askedPhone } = fakeClient({});
+    render(
+      <ThreadMoveComputerCard
+        client={client}
+        hostName="Laptop"
+        isThisComputer
+        thread={THREAD}
+        threadTitle="Add dark mode"
+      />,
+    );
+    await user.click(screen.getByRole("button", { name: /Laptop/ }));
+    await user.click(await screen.findByRole("radio", { name: /Desktop/ }));
+    await user.click(screen.getByRole("button", { name: "Review move" }));
+    expect(screen.queryByRole("button", { name: "Move with Touch ID" })).not.toBeInTheDocument();
+    await user.click(await screen.findByRole("button", { name: "Confirm on your phone" }));
+
+    await waitFor(() =>
+      expect(askedPhone).toEqual([
+        {
+          thread: THREAD,
+          destinationMemberId: DESKTOP,
+          destinationProjectId: PROJECT,
+          timing: "now",
+        },
+      ]),
+    );
+    expect(started).toEqual([]);
+    expect(await screen.findByText("Waiting for your phone")).toBeInTheDocument();
+    expect(screen.getByText(/Confirm on your phone to move this thread to Desktop/)).toBeVisible();
+    await user.click(screen.getByRole("button", { name: "Don't move" }));
+    await waitFor(() =>
+      expect(screen.queryByText("Waiting for your phone")).not.toBeInTheDocument(),
+    );
   });
 
   it("keeps This thread can't move on the thread until the person dismisses it", async () => {
