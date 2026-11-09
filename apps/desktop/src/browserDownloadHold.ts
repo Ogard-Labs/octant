@@ -3,6 +3,7 @@ import { open, rm, stat } from "node:fs/promises";
 import { join } from "node:path";
 import {
   BROWSER_DOWNLOAD_SNIFF_BYTES,
+  browserDownloadSource,
   safeBrowserDownloadName,
   sniffBrowserDownload,
 } from "@octant/domain";
@@ -15,6 +16,8 @@ import {
 /** The part of Electron's `DownloadItem` the hold uses. */
 export interface DesktopDownloadItemPort {
   getFilename(): string;
+  /** Complete native chain including every redirect; absent on an older port. */
+  getURLChain?(): ReadonlyArray<string>;
   /** 0 when the page did not say how large the file is. */
   getTotalBytes(): number;
   getReceivedBytes(): number;
@@ -189,12 +192,19 @@ export class DesktopDownloadHold {
       const oldest = this.#held.shift();
       if (oldest !== undefined) void rm(oldest.folder, { recursive: true, force: true });
     }
+    let source;
+    try {
+      source = browserDownloadSource(entry.item.getURLChain?.() ?? []);
+    } catch {
+      /* A missing native receipt never borrows the page's origin. */
+    }
     this.#reports.push({
       state: "held",
       downloadId: id,
       name,
       sizeBytes,
       mediaType: sniffBrowserDownload(head).mediaType,
+      ...(source === undefined ? {} : { source }),
     });
   }
 }

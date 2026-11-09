@@ -1,3 +1,4 @@
+import { decodeBrowserThreadId } from "@octant/contracts";
 import { browserToolTransport } from "@octant/domain";
 import { threadWorkingDirectoryCurrent } from "../threadWorkingDirectoryAuthority";
 import type { ThreadMoveHolds } from "../hub/threadMoveHolds";
@@ -343,6 +344,9 @@ export type CodeRuntimeDependencies = Pick<ServerStart, "options" | "persistence
   > &
   Pick<
     BrowserWiring,
+    | "bindTerminalBrowserSessions"
+    | "terminalBrowserTools"
+    | "routineBrowserTools"
     | "browserAutomationService"
     | "browserFlows"
     | "browserToolApprovalService"
@@ -390,6 +394,9 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
     bindDeviceApprovals,
     browserAuthority,
     browserModelBindings,
+    bindTerminalBrowserSessions,
+    terminalBrowserTools,
+    routineBrowserTools,
     browserAutomationService,
     browserFlows,
     browserToolApprovalService,
@@ -593,6 +600,7 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
       const grants = new TerminalBrowserGrantService({
         readThread: persistence.readCodeThread,
         canAccessProject: canAccessCodeProject,
+        delegatedBrowserTools: terminalBrowserTools,
         terminalIsRunning: (terminalId) => {
           try {
             return codeOperationRuntime?.terminals?.attach(String(terminalId)).status === "running";
@@ -619,6 +627,11 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
         uuid: randomUUID,
         clock: () => new Date().toISOString(),
       });
+      const unbindTerminalSessions = bindTerminalBrowserSessions({
+        current: (grantId) => grants.currentSessionTarget(grantId),
+        targets: () => grants.sessionTargets(),
+      });
+      yield* Effect.addFinalizer(() => Effect.sync(unbindTerminalSessions));
       onWindowRevoked((windowId) => grants.revokeWindow(windowId));
       onWindowRevoked((windowId) => codeOperationRuntime?.revokeTerminalStreams(windowId));
       const unsubscribeTerminalBrowserGrants = persistence.journal.subscribeCommitted((append) => {
@@ -986,6 +999,21 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
               model.inputModalities.includes("image"),
           );
         },
+        routineBrowserTools: ({ thread, readThread, routineRun }) =>
+          routineBrowserTools({
+            routineRun,
+            threadId: decodeBrowserThreadId(String(thread.id)),
+            currentAuthority: () =>
+              readThread() === undefined
+                ? undefined
+                : browserAuthority.resolve(decodeBrowserThreadId(String(thread.id)), "code"),
+            currentModelId: () => {
+              const current = readThread();
+              return current === undefined || current.executionPolicy !== thread.executionPolicy
+                ? undefined
+                : String(current.modelId);
+            },
+          }),
         browserAutomation: {
           runScript: (input) => browserAutomationService.runScript(input),
           resolveAuthority: (threadId, mode) => browserAuthority.resolve(threadId, mode),

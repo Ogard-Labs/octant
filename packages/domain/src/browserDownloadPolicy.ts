@@ -1,3 +1,4 @@
+import type { BrowserDownloadSource } from "@octant/contracts";
 /**
  * Pure rules for the files an agent's Browser may keep from a page. The page
  * decides nothing here: the name is reduced to a safe one, the type is read
@@ -160,7 +161,37 @@ export function formatBrowserDownloadSize(bytes: number): string {
 /** The question a person answers before a downloaded file enters the workspace. */
 export function browserDownloadQuestion(
   origin: string,
-  file: { readonly name: string; readonly sizeBytes: number; readonly mediaType: string },
+  file: {
+    readonly name: string;
+    readonly sizeBytes: number;
+    readonly mediaType: string;
+    readonly source?: BrowserDownloadSource;
+  },
 ): string {
-  return `Let the agent save ${file.name} (${formatBrowserDownloadSize(file.sizeBytes)}, ${browserDownloadTypeLabel(file.mediaType)}) from ${origin} into this thread's workspace?`;
+  return `Let the agent save ${file.name} (${formatBrowserDownloadSize(file.sizeBytes)}, ${browserDownloadTypeLabel(file.mediaType)}) into this thread's workspace? Page: ${origin}. Download source: ${file.source === undefined ? "unverified" : file.source.origins.join(" → ")}.`;
+}
+
+/** Only a runtime with a complete native chain may call this attestation. */
+export function browserDownloadSource(
+  urls: ReadonlyArray<string>,
+): BrowserDownloadSource | undefined {
+  if (urls.length === 0 || urls.length > 32) return undefined;
+  const origins: string[] = [];
+  for (const value of urls) {
+    if (value.length > 8192) return undefined;
+    try {
+      const url = new URL(value);
+      if (
+        url.protocol !== "https:" ||
+        url.username !== "" ||
+        url.password !== "" ||
+        url.origin.length > 2048
+      )
+        return undefined;
+      origins.push(url.origin);
+    } catch {
+      return undefined;
+    }
+  }
+  return { kind: "https-origin-chain", origins };
 }

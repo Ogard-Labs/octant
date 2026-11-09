@@ -10,7 +10,7 @@ and [Architecture: security and authority](../architecture.md#security-and-autho
 its refusals; the `octant mcp` command that a CLI is pointed at; the launcher the
 macOS app puts on a granted terminal's `PATH`; the switch in a local window, the
 approval card that names the terminal, and the user guide
-(`octant-site/docs/advanced/terminal-browser.md`). The Linux desktop package ships no
+([terminal Browser guide](https://github.com/Ogard-Labs/octant-site/blob/main/docs/advanced/terminal-browser.md)). The Linux desktop package ships no
 launcher, so there the command comes from a headless install.
 
 ## The problem
@@ -67,6 +67,21 @@ it exactly that one tool family, as that thread, and nothing wider.
   ([Browser for agents: Plan mode](browser-agent-tool.md#plan-mode)). An
   approval answered after the thread moved into Plan is treated as cancelled;
   one asked in Plan, which can only be for a read, is the person's answer.
+- **Stored profiles need a separate permission.** The transport switch lends
+  only the existing Private-page workflow. A local person may separately review
+  one running terminal grant, task/model/authority, profile, exact HTTPS origins
+  and bounded expiry in Settings › Data & storage › Browser session permissions.
+  That grant opens an independent native context, not the managed turn's profile
+  page. It ends with this terminal session, including switch-off, task/window
+  revocation and host stop; a replacement terminal inherits nothing. Changed
+  model, binding, posture or tool constraints invalidates it. A stale read
+  refuses instead of falling back to Private. An explicit navigate selecting
+  Private closes the profile context and returns to the existing private route.
+  Cleanup transitions admit no concurrent replacement context. The stored-profile
+  grant authorizes no transfers, scripts, sign-in or credential fill, and never
+  changes the terminal process's ambient authority. The shared
+  [delegated-session rules](browser-profiles.md#delegated-sessions) own review,
+  expiry and native-owner requirements.
 - **No captures.** A screenshot through the endpoint is not kept as a thread
   Browser capture: no journal actor describes a hand-typed CLI, so `capturedBy`
   is never named and the service keeps nothing ([Browser captures](browser-captures.md)).

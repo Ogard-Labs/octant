@@ -730,9 +730,13 @@ level, before creating a new file in `downloads/` of the thread's workspace;
 programs and installers and a symbolic link are refused, and a paired device,
 a terminal grant, and Plan cannot save
 ([Browser for agents: Download](design/browser-agent-tool.md#download)). A
-person's own download in the Browser pane stays blocked. An upload asks every
-time, at every access level, naming each file and the site, and the answer is
-never remembered.
+person's own download in the Browser pane stays blocked. Ordinary uploads ask
+once per use at every access level. A local person may separately review a
+fixed-content routine upload manifest from one approved Project folder, binding
+caller/model/authority, profile/site, exact files, quota and expiry. It grants no
+account access or downloads; revocation and expiry close affected contexts, and
+restart restores none. The [upload specification](design/browser-agent-tool.md#recurring-upload-manifests)
+owns its file, quota and per-operation rules.
 
 Tool definitions carry the agent's usage guidance alongside their argument
 schemas. App-owned tools are capability families: one tool per object —
@@ -12810,8 +12814,12 @@ approval-gated` command that undoes it. The terminal shows no one-time
   opens another browser's profile in place. The Work and Code agent adapters
   accept a stored profile request and the task's journaled default profile;
   neither grants access by itself. An agent reads or acts on an origin in a profile page only after a site approval naming the profile;
-  paired devices, routines, subagents, and terminal Browser grants are refused
-  on profile pages; a paired device sees only that a signed-in page exists. The
+  paired devices are refused on profile pages. A managed child, named routine
+  or selected terminal session may use an existing sign-in only through an
+  explicit local-person host/recipient/model/authority/profile/HTTPS session permission,
+  revalidated before effects and observations; it owns its context and receives
+  no parent authority or transfer permission. See [delegated sessions](design/browser-profiles.md#delegated-sessions).
+  A paired device sees only that a signed-in page exists. The
   person signs out of a profile (closing its pages and removing its storage) at a
   local window, and the host journals that it happened without naming a site or
   a cookie. The person may also import another browser's cookies into one

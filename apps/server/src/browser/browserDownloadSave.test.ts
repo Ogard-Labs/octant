@@ -184,6 +184,33 @@ describe.skipIf(process.platform !== "darwin" && process.platform !== "linux")(
       },
     );
 
+    it("refuses a replaced approved root even when the reviewed child directory is moved into it", async () => {
+      const fixture = await selectedFixture();
+      const rootIdentity = await lstat(fixture.approved, { bigint: true });
+      await rename(fixture.approved, `${fixture.approved}-old`);
+      await mkdir(fixture.approved);
+      await rename(join(`${fixture.approved}-old`, "reports"), fixture.folder);
+      const ask = vi.fn(async () => "approved" as const);
+      const admission = vi.fn(() => "approved" as const);
+      expect(
+        await saveBrowserDownload({
+          workspaceRoot: fixture.workspace,
+          destination: {
+            ...fixture.destination,
+            reviewedRoot: { device: String(rootIdentity.dev), inode: String(rootIdentity.ino) },
+          },
+          name: "report.txt",
+          claim: async () => fixture.held,
+          isHeldPath: async () => true,
+          ask,
+          finalAdmission: admission,
+        }),
+      ).toMatchObject({ status: "refused", error: "download-changed" });
+      expect(ask).not.toHaveBeenCalled();
+      expect(admission).not.toHaveBeenCalled();
+      expect(await readdir(fixture.folder)).toEqual([]);
+    });
+
     it("never falls back to the workspace when a selected folder no longer belongs to the Project", async () => {
       const fixture = await selectedFixture();
       const outcome = await saveBrowserDownload({

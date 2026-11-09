@@ -1,3 +1,19 @@
+import { BrowserDownloadPermissions } from "../browser/browserDownloadPermissions";
+import { browserDownloadPermissionJournal } from "../browser/browserDownloadPermissionJournal";
+import { BrowserUploadPermissions } from "../browser/browserUploadPermissions";
+import { browserUploadPermissionJournal } from "../browser/browserUploadPermissionJournal";
+import { approvedWorkingFolderChoices, approvedWorkingFolderRoot } from "../approvedWorkingFolders";
+import {
+  currentRoutineBrowserTarget,
+  routineBrowserExecutionIsCurrent,
+} from "../browser/browserRoutineSessions";
+import { deriveToolHostId } from "../browser/browserAuthorityResolver";
+import type {
+  AutomationRunReference,
+  AutomationId,
+  ToolActionAuthority,
+  BrowserThreadId,
+} from "@octant/contracts";
 import type { BrowserRuntimePort } from "../browser/browserRuntimePort";
 import { createNativeBrowserPresentationRoutes } from "../browser/nativeBrowserPresentationRoutes";
 import { randomUUID } from "node:crypto";
@@ -44,7 +60,12 @@ import { readThreadExternalContentTaint } from "../context/externalContentTaintP
 import { createPlaywrightBrowserRuntime } from "../browser/playwrightBrowserRuntime";
 import { createDesktopBrowserRuntimeFromEnvironment } from "../browser/desktopBrowserRuntime";
 import { RoutingBrowserRuntime } from "../browser/routingBrowserRuntime";
-import { defaultShellSettings, enabledModes, isBrowserProfileSiteRemembered } from "@octant/domain";
+import {
+  isToolAllowedByAllowlist,
+  defaultShellSettings,
+  enabledModes,
+  isBrowserProfileSiteRemembered,
+} from "@octant/domain";
 import { prepareBrowserDownloadHoldRoot } from "@octant/host-runtime";
 import { createBrowserDownloadJournal } from "../browser/browserDownloadJournal";
 import type { ServerStart } from "./serverShape";
@@ -53,6 +74,19 @@ import type { FoundationsWiring } from "./foundations";
 import type { AgentRunsWiring } from "./agentRuns";
 import type { WorkspaceWiring } from "./workspace";
 import type { ProvidersWiring } from "./providers";
+import type { HarnessStateWiring } from "./harnessState";
+import {
+  BrowserSessionGrants,
+  type CurrentBrowserSessionTarget,
+} from "../browser/browserSessionGrants";
+import {
+  BrowserDelegatedChildren,
+  currentManagedChildBrowserTarget,
+} from "../browser/browserDelegatedChildren";
+import { browserSessionGrantJournal } from "../browser/browserSessionGrantJournal";
+import type { TerminalBrowserGrantId, ProviderExecutionPolicy } from "@octant/contracts";
+import type { BrowserSessionGrantee } from "@octant/contracts/browser-session-grants";
+import { decodeAgentRunId, type AgentRun } from "@octant/contracts";
 
 export type BrowserDependencies = Pick<ServerStart, "options" | "persistence"> &
   Pick<
@@ -63,14 +97,18 @@ export type BrowserDependencies = Pick<ServerStart, "options" | "persistence"> &
     | "windowAuthorityStore"
     | "codeSessionAuthority"
   > &
-  Pick<AgentRunsWiring, "externalContentIngestionStore"> &
+  Pick<AgentRunsWiring, "externalContentIngestionStore" | "contributeChildTools"> &
+  Pick<HarnessStateWiring, "agentRunInteractions"> &
   Pick<WorkspaceWiring, "projectService" | "shellService"> &
   Pick<ProvidersWiring, "localPluginImportReceipts" | "providerDataDirectory"> &
-  Pick<FoundationsWiring, "browserAuthority" | "codeEvidence">;
+  Pick<FoundationsWiring, "browserAuthority" | "codeEvidence" | "providerRuntimeRegistry">;
 
 export function wireBrowser(deps: BrowserDependencies) {
   const {
     browserAuthority,
+    providerRuntimeRegistry,
+    contributeChildTools,
+    agentRunInteractions,
     browserCaptures,
     codeSessionAuthority,
     codeEvidence,
@@ -211,6 +249,327 @@ export function wireBrowser(deps: BrowserDependencies) {
             native: desktopBrowserRuntime,
             headless: headlessBrowserRuntime,
           }));
+    const childSessionTarget = (run: AgentRun): CurrentBrowserSessionTarget | undefined =>
+      currentManagedChildBrowserTarget(run, {
+        canReview: (candidate) => agentRunInteractions.canReviewSession(candidate),
+        resolveParent: (threadId, mode) => browserAuthority.resolve(threadId, mode),
+        supportsTools: (providerInstanceId, modelId) => {
+          const observed = providerRuntimeRegistry.observedState(providerInstanceId);
+          return (
+            observed?.capabilities.appManagedTools === "supported" ||
+            observed?.verifiedToolModelIds?.some((id) => String(id) === String(modelId)) === true
+          );
+        },
+      });
+    const routineSessionTarget = (
+      routineId: AutomationId,
+    ): CurrentBrowserSessionTarget | undefined => {
+      const definition = persistence.automationProjection.getDefinition(routineId);
+      if (definition === undefined) return undefined;
+      const provider = persistence.readProviderInstance(
+        definition.executionProfile.providerInstanceId,
+      );
+      const observed = providerRuntimeRegistry.observedState(
+        definition.executionProfile.providerInstanceId,
+      );
+      const profile = persistence.readAgentProfile(definition.executionProfile.profileId);
+      const binding = definition.binding;
+      const checkout =
+        binding.kind === "code" ? persistence.readCodeCheckout(binding.checkoutId) : undefined;
+      if (
+        binding.kind === "code" &&
+        (checkout?.availability !== "available" ||
+          String(checkout.repositoryId) !== String(binding.repositoryId))
+      )
+        return undefined;
+      return currentRoutineBrowserTarget({
+        definition,
+        project: persistence.readProject(definition.projectId),
+        toolHostId: deriveToolHostId(persistence.dataDirectory),
+        providerEligible:
+          provider?.enabled === true &&
+          (observed?.capabilities.appManagedTools === "supported" ||
+            observed?.verifiedToolModelIds?.some(
+              (id) => String(id) === String(definition.executionProfile.modelId),
+            ) === true),
+        executionProfileCurrent:
+          profile !== undefined &&
+          isToolAllowedByAllowlist(profile.toolConstraints, "octant_browser") &&
+          profile.version === definition.executionProfile.profileVersion &&
+          profile.defaultExecutionPolicy === definition.executionProfile.executionPolicy,
+      });
+    };
+    const transferRecipient = (routineId: AutomationId) => {
+      const recipient = routineSessionTarget(routineId);
+      if (recipient === undefined) return undefined;
+      const projectId = recipient.target.authority.projectId;
+      const project = projectId === undefined ? undefined : persistence.readProject(projectId);
+      if (project === undefined || project.type === "chat") return undefined;
+      return {
+        recipient,
+        folders: approvedWorkingFolderChoices(project),
+        rootFor: (folderId: Parameters<typeof approvedWorkingFolderRoot>[1]) =>
+          approvedWorkingFolderRoot(project, folderId),
+      };
+    };
+    const browserUploadPermissions = new BrowserUploadPermissions({
+      now: Date.now,
+      uuid: randomUUID,
+      isLocalWindow: (windowId) => windowAuthorityStore.listWindowIds().includes(windowId),
+      canReview: (windowId, target) =>
+        target.authority.mode !== "chat" &&
+        windowHoldsProject(windowId, target.authority.projectId, target.authority.mode),
+      current: transferRecipient,
+      targets: () =>
+        persistence.automationProjection.listDefinitions().flatMap((definition) => {
+          const row = transferRecipient(definition.id);
+          return row === undefined ? [] : [row];
+        }),
+      record: browserUploadPermissionJournal({
+        journal: persistence.journal,
+        connection: persistence.connection,
+        uuid: randomUUID,
+        now: Date.now,
+        personActor: { kind: "local-user", actorId: OCTANT_LOCAL_ACTOR_ID },
+        hostActor: { kind: "system", actorId: OCTANT_LOCAL_ACTOR_ID },
+      }),
+    });
+    yield* Effect.addFinalizer(() => Effect.sync(() => browserUploadPermissions.close()));
+    const browserDownloadPermissions = new BrowserDownloadPermissions({
+      now: Date.now,
+      uuid: randomUUID,
+      isLocalWindow: (windowId) => windowAuthorityStore.listWindowIds().includes(windowId),
+      canReview: (windowId, target) =>
+        target.authority.mode !== "chat" &&
+        windowHoldsProject(windowId, target.authority.projectId, target.authority.mode),
+      current: transferRecipient,
+      targets: () =>
+        persistence.automationProjection.listDefinitions().flatMap((definition) => {
+          const row = transferRecipient(definition.id);
+          return row === undefined ? [] : [row];
+        }),
+      record: browserDownloadPermissionJournal({
+        journal: persistence.journal,
+        connection: persistence.connection,
+        uuid: randomUUID,
+        now: Date.now,
+        personActor: { kind: "local-user", actorId: OCTANT_LOCAL_ACTOR_ID },
+        hostActor: { kind: "system", actorId: OCTANT_LOCAL_ACTOR_ID },
+      }),
+    });
+    yield* Effect.addFinalizer(() => Effect.sync(() => browserDownloadPermissions.close()));
+    let terminalSessionSource:
+      | {
+          readonly current: (
+            grantId: TerminalBrowserGrantId,
+          ) => CurrentBrowserSessionTarget | undefined;
+          readonly targets: () => ReadonlyArray<CurrentBrowserSessionTarget>;
+        }
+      | undefined;
+    const currentSessionTarget = (
+      grantee: BrowserSessionGrantee,
+    ): CurrentBrowserSessionTarget | undefined => {
+      if (grantee.kind === "routine") return routineSessionTarget(grantee.routineId);
+      if (grantee.kind === "terminal") return terminalSessionSource?.current(grantee.grantId);
+      if (grantee.kind !== "child") return undefined;
+      const run = persistence.agentRunProjection.getById(grantee.runId);
+      return run === undefined ? undefined : childSessionTarget(run);
+    };
+    let delegatedChildren: BrowserDelegatedChildren | undefined;
+    const browserSessionGrants = new BrowserSessionGrants({
+      now: Date.now,
+      uuid: randomUUID,
+      isLocalWindow: (windowId) => windowAuthorityStore.listWindowIds().includes(windowId),
+      localWindows: () => windowAuthorityStore.listWindowIds(),
+      canReview: (windowId, target) => {
+        if (target.grantee.kind === "routine" || target.grantee.kind === "terminal")
+          return (
+            target.authority.mode !== "chat" &&
+            windowHoldsProject(windowId, target.authority.projectId, target.authority.mode)
+          );
+        if (target.grantee.kind !== "child") return false;
+        const run = persistence.agentRunProjection.getById(target.grantee.runId);
+        return (
+          run !== undefined &&
+          browserAuthority.canAccessWindow(
+            windowId,
+            decodeBrowserThreadId(String(run.parentThreadId)),
+            target.authority.mode,
+          )
+        );
+      },
+      targets: () => [
+        ...(terminalSessionSource?.targets() ?? []),
+        ...persistence.automationProjection.listDefinitions().flatMap((definition) => {
+          const row = routineSessionTarget(definition.id);
+          return row === undefined ? [] : [row];
+        }),
+        ...persistence.agentRunProjection
+          .listCenterCandidates({ status: "all", mode: "all" })
+          .flatMap(({ run }) => {
+            const target = childSessionTarget(run);
+            return target === undefined ? [] : [target];
+          }),
+      ],
+      current: currentSessionTarget,
+      profileLabel: (profile) => browserProfileService.labelOfStoredProfile(profile),
+      record: browserSessionGrantJournal({
+        journal: persistence.journal,
+        connection: persistence.connection,
+        uuid: randomUUID,
+        now: Date.now,
+        personActor: { kind: "local-user", actorId: OCTANT_LOCAL_ACTOR_ID },
+        hostActor: { kind: "system", actorId: OCTANT_LOCAL_ACTOR_ID },
+      }),
+      onRevoked: (grantId) => {
+        void delegatedChildren?.revoke(grantId);
+        machineChangeFeed.publish(["tool-approvals"]);
+      },
+    });
+    delegatedChildren = new BrowserDelegatedChildren({
+      runtime: browserRuntime,
+      grants: browserSessionGrants,
+      recordExternalContentIngestion: (input) => externalContentIngestionStore.record(input),
+      agentDownloadsEnabled: () =>
+        (persistence.readShellSettings()?.settings ?? defaultShellSettings()).agentBrowserDownloads,
+      downloads: createBrowserDownloadJournal({
+        journal: persistence.journal,
+        connection: persistence.connection,
+        uuid: randomUUID,
+        clock: () => new Date().toISOString(),
+      }),
+      uuid: randomUUID,
+      now: Date.now,
+    });
+    const browserDelegatedChildren = delegatedChildren;
+    const bindTerminalBrowserSessions = (source: NonNullable<typeof terminalSessionSource>) => {
+      terminalSessionSource = source;
+      return () => {
+        if (terminalSessionSource === source) terminalSessionSource = undefined;
+        browserSessionGrants.revalidate();
+        browserUploadPermissions.revalidate();
+        browserDownloadPermissions.revalidate();
+        void browserDelegatedChildren.settle();
+      };
+    };
+    const terminalBrowserTools = (input: {
+      readonly grantId: TerminalBrowserGrantId;
+      readonly threadId: BrowserThreadId;
+      readonly executionPolicy: ProviderExecutionPolicy;
+    }) => {
+      const initial = terminalSessionSource?.current(input.grantId);
+      if (initial === undefined) return undefined;
+      return browserDelegatedChildren.tools({
+        target: initial.target,
+        executionId: String(input.grantId),
+        contentThreadId: input.threadId,
+        executionPolicy: input.executionPolicy,
+        current: () => {
+          const row = terminalSessionSource?.current(input.grantId);
+          return row?.revision === initial.revision ? row.target : undefined;
+        },
+      });
+    };
+    const routineBrowserTools = (input: {
+      readonly routineRun: AutomationRunReference;
+      readonly threadId: BrowserThreadId;
+      readonly currentAuthority: () => ToolActionAuthority | undefined;
+      readonly currentModelId: () => string | undefined;
+    }) => {
+      const initial = routineSessionTarget(input.routineRun.automationId);
+      if (initial === undefined) return undefined;
+      const current = () => {
+        const definition = persistence.automationProjection.getDefinition(
+          input.routineRun.automationId,
+        );
+        const target = routineSessionTarget(input.routineRun.automationId);
+        if (String(input.currentModelId()) !== String(target?.target.modelId)) return undefined;
+        return routineBrowserExecutionIsCurrent({
+          run: persistence.automationProjection.getRun(input.routineRun.runId),
+          definition,
+          target,
+          threadId: input.threadId,
+          authority: input.currentAuthority(),
+          codeExecution:
+            definition?.mode === "code"
+              ? (() => {
+                  const thread = persistence.readCodeThread(
+                    decodeCodeThreadId(String(input.threadId)),
+                  );
+                  return {
+                    thread,
+                    checkout:
+                      thread === undefined
+                        ? undefined
+                        : persistence.readCodeCheckout(thread.checkoutId),
+                  };
+                })()
+              : undefined,
+        })
+          ? target?.target
+          : undefined;
+      };
+      return browserDelegatedChildren.tools({
+        target: initial.target,
+        executionAuthority: () => (current() === undefined ? undefined : input.currentAuthority()),
+        uploadPermissions: browserUploadPermissions,
+        downloadPermissions: browserDownloadPermissions,
+        executionId: String(input.routineRun.runId),
+        contentThreadId: input.threadId,
+        executionPolicy:
+          persistence.automationProjection.getDefinition(input.routineRun.automationId)
+            ?.executionProfile.executionPolicy ?? "plan",
+        current,
+      });
+    };
+    contributeChildTools(({ run, authority }) => {
+      const target = childSessionTarget(run)?.target;
+      if (target === undefined || !authority.tools) return undefined;
+      return browserDelegatedChildren.tools({
+        target,
+        executionPolicy: authority.executionPolicy,
+        current: () =>
+          agentRunInteractions.isCurrent(run)
+            ? currentSessionTarget({ kind: "child", runId: decodeAgentRunId(String(run.id)) })
+                ?.target
+            : undefined,
+      });
+    });
+    const unsubscribeSessionAuthority = persistence.journal.subscribeCommitted((append) => {
+      if (
+        !append.events.some((event) =>
+          [
+            "terminal-browser-grant",
+            "automation-definition",
+            "automation-run",
+            "project",
+            "provider-instance",
+            "agent-profile",
+            "code-thread",
+            "work-thread",
+          ].includes(event.aggregateType),
+        )
+      )
+        return;
+      const settle = () => {
+        browserSessionGrants.revalidate();
+        browserUploadPermissions.revalidate();
+        browserDownloadPermissions.revalidate();
+        void browserDelegatedChildren.settle();
+      };
+      // SQLite-backed task authority is current at commit. Inspect it now so
+      // changing a model away and back cannot preserve the earlier permission.
+      settle();
+      // Automation/Work in-memory projections apply after the journal append.
+      queueMicrotask(settle);
+    });
+    yield* Effect.addFinalizer(() => Effect.sync(unsubscribeSessionAuthority));
+    onWindowRevoked((windowId) => {
+      browserSessionGrants.revokeWindow(windowId);
+      browserUploadPermissions.revokeWindow(windowId);
+      browserDownloadPermissions.revokeWindow(windowId);
+      void browserDelegatedChildren.closeWindow(windowId);
+    });
     yield* Effect.promise(() => browserRuntime.reconcile?.() ?? Promise.resolve());
     // A file an earlier run held for an agent has no page and no question left.
     yield* Effect.promise(() =>
@@ -395,6 +754,9 @@ export function wireBrowser(deps: BrowserDependencies) {
       journal: persistence.journal,
       actor: { kind: "local-user", actorId: OCTANT_LOCAL_ACTOR_ID },
       closePages: async (profile) => {
+        browserSessionGrants.invalidateProfile(profile);
+        browserUploadPermissions.invalidateProfile(profile);
+        browserDownloadPermissions.invalidateProfile(profile);
         if (!browserCredentialUseService.invalidateProfile(profile))
           throw new Error("Profile login permission revocations could not be recorded.");
         await Promise.all([
@@ -501,6 +863,13 @@ export function wireBrowser(deps: BrowserDependencies) {
     });
     return {
       nativeBrowserPresentationRoutes,
+      browserSessionGrants,
+      browserUploadPermissions,
+      browserDownloadPermissions,
+      routineBrowserTools,
+      bindTerminalBrowserSessions,
+      terminalBrowserTools,
+      browserDelegatedChildren,
       browserAutomationService,
       browserCredentialUseService,
       browserExtensionService,

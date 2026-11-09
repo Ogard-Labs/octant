@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
   decodeBrowserThreadId,
+  decodeProjectWorkingFolderId,
   type CorrelationId,
   type ProviderInstanceId,
 } from "@octant/contracts";
@@ -63,6 +64,33 @@ function open() {
 }
 
 describe("Browser download journal", () => {
+  it("keeps selected-root receipts distinct from legacy workspace saves", () => {
+    const { recorder, rows } = open();
+    const file = {
+      path: "reports/report.txt",
+      sizeBytes: 12,
+      mediaType: "text/plain",
+      sha256: "a".repeat(64),
+    };
+    recorder.saved(context, file);
+    recorder.saved(context, {
+      ...file,
+      destination: {
+        approvedFolderId: decodeProjectWorkingFolderId(`folder_${"b".repeat(64)}`),
+        label: "Reports",
+        pathBase: "selected-root",
+      },
+    });
+    expect(rows().map((row) => row.event_name)).toEqual([
+      "browser.download-saved@1",
+      "browser.download-selected-saved@1",
+    ]);
+    expect(JSON.parse(rows()[1]?.payload_json ?? "{}")).toMatchObject({
+      path: "reports/report.txt",
+      destination: { pathBase: "selected-root", label: "Reports" },
+    });
+  });
+
   it("records a saved download with its digest and no bytes, as the agent's act", () => {
     const { recorder, rows } = open();
     recorder.saved(context, {

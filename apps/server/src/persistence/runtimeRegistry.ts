@@ -1,7 +1,22 @@
 import {
+  BROWSER_DOWNLOAD_PERMISSION_EVENT,
+  BrowserDownloadPermissionChanged,
+} from "@octant/contracts/browser-download-permissions";
+import {
+  BROWSER_UPLOAD_PERMISSION_EVENT,
+  BrowserUploadPermissionChanged,
+} from "@octant/contracts/browser-upload-permissions";
+import {
   DecisionReviewRecorded,
   PendingQuestionDeferral,
 } from "@octant/contracts/pending-requests";
+import {
+  BROWSER_SESSION_EVENT_NAMES,
+  BrowserSessionGranted,
+  BrowserSessionRevoked,
+  BrowserSessionExpired,
+  BrowserSessionChanged,
+} from "@octant/contracts/browser-session-grants";
 import {
   CHILD_WORKTREE_SOURCE_UPDATED,
   ChildWorktreeSourceUpdated,
@@ -224,6 +239,7 @@ import {
   BROWSER_DOWNLOAD_EVENT_NAMES,
   BrowserDownloadRefused,
   BrowserDownloadSaved,
+  BrowserDownloadSelectedSaved,
   BROWSER_FLOW_EVENT_NAMES,
   BrowserFlowDeleted,
   BrowserFlowSaved,
@@ -729,7 +745,14 @@ export function createPhase1RuntimeRegistries(): Phase1RuntimeRegistries {
     .register(IMAGE_JOB_STATUS_CHANGED, 1, ImageJobStatusChanged)
     .register(BROWSER_CAPTURE_KEPT, 1, BrowserCaptureKept)
     .register(BROWSER_DOWNLOAD_EVENT_NAMES.saved, 1, BrowserDownloadSaved)
+    .register(BROWSER_DOWNLOAD_EVENT_NAMES.selectedSaved, 1, BrowserDownloadSelectedSaved)
     .register(BROWSER_DOWNLOAD_EVENT_NAMES.refused, 1, BrowserDownloadRefused)
+    .register(BROWSER_UPLOAD_PERMISSION_EVENT, 1, BrowserUploadPermissionChanged)
+    .register(BROWSER_DOWNLOAD_PERMISSION_EVENT, 1, BrowserDownloadPermissionChanged)
+    .register(BROWSER_SESSION_EVENT_NAMES.granted, 1, BrowserSessionGranted)
+    .register(BROWSER_SESSION_EVENT_NAMES.revoked, 1, BrowserSessionRevoked)
+    .register(BROWSER_SESSION_EVENT_NAMES.expired, 1, BrowserSessionExpired)
+    .register(BROWSER_SESSION_EVENT_NAMES.changed, 1, BrowserSessionChanged)
     .register(BROWSER_FLOW_EVENT_NAMES.saved, 1, BrowserFlowSaved)
     .register(BROWSER_FLOW_EVENT_NAMES.deleted, 1, BrowserFlowDeleted)
     .register(BROWSER_STEP_RECORDED, 1, BrowserStep)

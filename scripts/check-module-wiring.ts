@@ -82,6 +82,10 @@ const IGNORED_DIRECTORIES = new Set([
  * as its island is wired or deleted is the intended direction of travel.
  */
 export const KNOWN_ISLANDS: ReadonlyMap<string, string> = new Map([
+  [
+    "apps/desktop/src/browserDownloadSource.native-smoke.ts",
+    "Isolated Electron main entry bundled by scripts/smoke-browser-download-source.ts for the CI-only native HTTPS redirect proof. Remove when the smoke is retired or this entry is imported by product code.",
+  ],
   // ── Remaining ──
   [
     "apps/server/src/remote/remoteExitEvidenceADriver.ts",

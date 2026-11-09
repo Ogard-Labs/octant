@@ -522,6 +522,11 @@ export interface CodeOperationRuntimeOptions {
    * reaching the provider with the pictures silently dropped.
    */
   readonly supportsAttachments?: (thread: CodeThread) => boolean;
+  readonly routineBrowserTools?: (input: {
+    readonly thread: CodeThread;
+    readonly readThread: () => CodeThread | undefined;
+    readonly routineRun: AutomationRunReference;
+  }) => AppManagedToolSet | undefined;
   readonly browserAutomation?: CodeAppManagedToolsOptions["browser"];
   readonly browserProfiles?: CodeAppManagedToolsOptions["browserProfiles"];
   /** The Project's Browser flows and the recorder; see the Code Browser tool. */
@@ -4690,6 +4695,14 @@ class RuntimeTurnController implements CodeOperationTurnPort {
     const sets: Array<AppManagedToolSet | undefined> = [];
     const service = this.#service;
     if (supportsAppManagedTools && service !== undefined) {
+      const delegatedBrowserTools =
+        active.routineRun === undefined
+          ? undefined
+          : this.#options.routineBrowserTools?.({
+              thread: active.thread,
+              readThread: () => this.#effectiveThread(active.windowId, active.thread.id),
+              routineRun: active.routineRun,
+            });
       const browserProfiles = this.#options.browserProfiles;
       const pullRequestWatch = this.#options.pullRequestWatch;
       sets.push(
@@ -4707,6 +4720,7 @@ class RuntimeTurnController implements CodeOperationTurnPort {
           },
         }),
         createCodeAppManagedTools({
+          ...(delegatedBrowserTools === undefined ? {} : { delegatedBrowserTools }),
           windowId: active.windowId,
           thread: active.thread,
           readThread: (windowId, threadId) => this.#effectiveThread(windowId, threadId),

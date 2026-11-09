@@ -1,3 +1,4 @@
+import type { BrowserDownloadDestinationReceipt } from "@octant/contracts/browser-download";
 import { Schema } from "effect";
 import { BrowserProfileChoice } from "@octant/contracts/project-browser";
 import type { BrowserPageScriptReceipt } from "@octant/contracts/browser-page-script";
@@ -215,7 +216,11 @@ export type BrowserToolInput = {
       readonly operation: "drag";
       readonly to: { readonly selector: string } | { readonly ref: string };
     } & BrowserToolTarget)
-  | ({ readonly operation: "upload"; readonly files: ReadonlyArray<string> } & BrowserToolTarget)
+  | ({
+      readonly operation: "upload";
+      readonly files: ReadonlyArray<string>;
+      readonly uploadPermissionId?: string;
+    } & BrowserToolTarget)
   | { readonly operation: "tab-list" }
   | { readonly operation: "tab-open"; readonly url?: string }
   | { readonly operation: "tab-switch" | "tab-close"; readonly tabId: string }
@@ -241,7 +246,11 @@ export type BrowserToolInput = {
       readonly expectedObservationRevision: number;
     }
   /** Save a download the page started, named by the id an answer reported. */
-  | { readonly operation: "download-save"; readonly downloadId: string }
+  | {
+      readonly operation: "download-save";
+      readonly downloadId: string;
+      readonly downloadPermissionId?: string;
+    }
   | { readonly operation: "flow-save"; readonly name: string }
   | {
       readonly operation: "flow-run";
@@ -259,7 +268,11 @@ export type BrowserToolInput = {
  */
 export function parseBrowserToolInput(
   value: string,
-  options: { readonly allowProfile: boolean },
+  options: {
+    readonly allowProfile: boolean;
+    readonly allowUploadPermission?: boolean;
+    readonly allowDownloadPermission?: boolean;
+  },
 ): BrowserToolInput | undefined {
   if (Buffer.byteLength(value, "utf8") > MAX_TOOL_INPUT_BYTES) return undefined;
   let parsed: unknown;
@@ -313,7 +326,11 @@ function parseRecord(value: unknown): boolean | null {
 
 function parseBrowserToolRecord(
   record: Record<string, unknown>,
-  options: { readonly allowProfile: boolean },
+  options: {
+    readonly allowProfile: boolean;
+    readonly allowUploadPermission?: boolean;
+    readonly allowDownloadPermission?: boolean;
+  },
 ): BrowserToolInput | undefined {
   const operation = record.operation;
   const revision = record.expectedObservationRevision;
@@ -456,7 +473,7 @@ function parseBrowserToolRecord(
       ? { ...common, operation, ...named, to: { selector: record.toSelector as string } }
       : undefined;
   }
-  if (operation === "upload" && only("selector", "ref", "files")) {
+  if (operation === "upload" && only("selector", "ref", "files", "uploadPermissionId")) {
     const named = target();
     const files = record.files;
     if (
@@ -467,11 +484,38 @@ function parseBrowserToolRecord(
       !files.every((file) => typeof file === "string" && file !== "" && file.length <= 4096)
     )
       return undefined;
-    return { ...common, operation, ...named, files: files as ReadonlyArray<string> };
+    const permissionId = record.uploadPermissionId;
+    if (
+      permissionId !== undefined &&
+      (options.allowUploadPermission !== true ||
+        typeof permissionId !== "string" ||
+        !/^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i.test(permissionId))
+    )
+      return undefined;
+    return {
+      ...common,
+      operation,
+      ...named,
+      files: files as ReadonlyArray<string>,
+      ...(permissionId === undefined ? {} : { uploadPermissionId: permissionId }),
+    };
   }
-  if (operation === "download-save" && only("downloadId")) {
+  if (operation === "download-save" && only("downloadId", "downloadPermissionId")) {
+    const permissionId = record.downloadPermissionId;
+    if (
+      permissionId !== undefined &&
+      (options.allowDownloadPermission !== true ||
+        typeof permissionId !== "string" ||
+        !/^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i.test(permissionId))
+    )
+      return undefined;
     return typeof record.downloadId === "string" && DOWNLOAD_PATTERN.test(record.downloadId)
-      ? { ...common, operation, downloadId: record.downloadId }
+      ? {
+          ...common,
+          operation,
+          downloadId: record.downloadId,
+          ...(permissionId === undefined ? {} : { downloadPermissionId: permissionId }),
+        }
       : undefined;
   }
   if (operation === "tab-list" && only()) return { ...common, operation };
@@ -1122,12 +1166,14 @@ export function browserToolResult(snapshot: BrowserAutomationSnapshot, includeSc
 /** The answer to a `download-save` that saved: where the file is now. */
 export function browserDownloadSavedResult(saved: {
   readonly path: string;
+  readonly destination?: BrowserDownloadDestinationReceipt;
   readonly sizeBytes: number;
   readonly mediaType: string;
 }): BrowserToolAnswer {
   return {
     result: {
       saved: saved.path,
+      ...(saved.destination === undefined ? {} : { destination: saved.destination }),
       sizeBytes: saved.sizeBytes,
       mediaType: saved.mediaType,
     },

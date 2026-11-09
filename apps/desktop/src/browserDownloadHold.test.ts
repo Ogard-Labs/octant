@@ -158,3 +158,49 @@ describe("DesktopDownloadHold", () => {
     expect(hold.takeReports().map((report) => report.name)).toEqual(["running.bin"]);
   });
 });
+
+it("reports only the completed native download's sanitized redirect origins", async () => {
+  const hold = new DesktopDownloadHold(await root());
+  hold.begin();
+  const item = Object.assign(new FakeItem("report.txt"), {
+    getURLChain: () => [
+      "https://start.example/private?token=secret",
+      "https://files.example/report",
+    ],
+  });
+  hold.accept({}, item);
+  await item.complete("report");
+  await hold.finish();
+  expect(hold.takeReports()).toMatchObject([
+    {
+      state: "held",
+      source: {
+        kind: "https-origin-chain",
+        origins: ["https://start.example", "https://files.example"],
+      },
+    },
+  ]);
+  await hold.dispose();
+});
+
+it.each([
+  () => [],
+  () => ["http://example.com/file"],
+  () => {
+    throw Error("native receipt unavailable");
+  },
+])(
+  "holds the file without inventing source evidence when the native receipt is unavailable",
+  async (getURLChain) => {
+    const hold = new DesktopDownloadHold(await root());
+    hold.begin();
+    const item = Object.assign(new FakeItem("report.txt"), { getURLChain });
+    hold.accept({}, item);
+    await item.complete("report");
+    await hold.finish();
+    const reports = hold.takeReports();
+    expect(reports).toMatchObject([{ state: "held" }]);
+    expect(reports[0]).not.toHaveProperty("source");
+    await hold.dispose();
+  },
+);
