@@ -20,6 +20,7 @@ import {
   type McpServerConnectionListing,
   type McpServerReconnectResult,
   type DiscoveredAgentToolingListing,
+  type RuntimeCompactionDefaults,
   type ExtensionProjectPinListing,
   type McpServerSignInView,
   type McpClientSetupInput,
@@ -119,6 +120,7 @@ export function createExtensionRouteHandler(options: {
     server(id: string): UserAddedMcpServerRequest | undefined;
     refusal(id: string): DiscoveredServerRefusal | undefined;
     pluginPath(id: string): string | undefined;
+    compactionDefaults(): Promise<RuntimeCompactionDefaults>;
   };
   /**
    * MCP tool prompts, listed and answered by a local window or a paired
@@ -689,6 +691,17 @@ export function createExtensionRouteHandler(options: {
       } catch {
         return response(failure("invalid", "The request is invalid."), 400, origin);
       }
+      if (discovered.kind === "compaction-defaults") {
+        try {
+          return response(await options.agentToolingDiscovery.compactionDefaults(), 200, origin);
+        } catch {
+          return response(
+            failure("failed", "The other tools' files could not be read."),
+            500,
+            origin,
+          );
+        }
+      }
       if (discovered.kind === "list") {
         try {
           return response(await options.agentToolingDiscovery.list(), 200, origin);
@@ -928,6 +941,7 @@ function response(
     | { readonly accepted: boolean }
     | { readonly revoked: boolean }
     | DiscoveredAgentToolingListing
+    | RuntimeCompactionDefaults
     | McpServerSignInView
     | McpServerConnectionListing
     | McpServerReconnectResult

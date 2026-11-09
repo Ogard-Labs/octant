@@ -13,6 +13,7 @@ import { chosenAutoReviewer } from "@octant/domain/guardrail-policy";
 import { readsSecretsThenEgress } from "@octant/domain/shield-judge-policy";
 import { createAutomaticModelAccountCheck } from "../automaticModels/automaticModelAccount";
 import { createPersonMemorySweep } from "../personMemory/personMemoryWiring";
+import { createDecisionReviewModelPort } from "../turnDecisions/decisionReviewWiring";
 import { isProtectedSecretPath } from "../process/secretGuard";
 import { recordShieldReviewUsage } from "../shield/shieldUsageLedger";
 import { createRuntimeForgeChangeObserver } from "../shield/runtimeForgeChanges";
@@ -58,6 +59,7 @@ import {
   type FollowUpSuggestionActionDependencies,
 } from "../followUps/followUpSuggestionRoutes";
 import { createSideTaskRouteHandler } from "../sideTasks/sideTaskRoutes";
+import type { SideTaskStartDependencies } from "../sideTasks/sideTaskStart";
 import {
   createNativeHarnessSessionRouteHandler,
   type NativeHarnessSessionRouteDependencies,
@@ -124,6 +126,7 @@ export type HarnessDependencies = Pick<ServerStart, "options" | "persistence"> &
   Pick<
     ProvidersWiring,
     | "configuredDriverOptions"
+    | "effectiveSkills"
     | "nativeHarnessLeadFallback"
     | "nativeHarnessTranscripts"
     | "providerDataDirectory"
@@ -139,7 +142,7 @@ export type HarnessDependencies = Pick<ServerStart, "options" | "persistence"> &
     | "nativeHarnessQuestions"
     | "nativeHarnessSessions"
   > &
-  Pick<WorkRequestStateWiring, "runningWorkTurnAccess"> &
+  Pick<WorkRequestStateWiring, "runningWorkTurnAccess" | "runningWorkTurnSandbox"> &
   Pick<
     FoundationsWiring,
     | "codeBoardEventStore"
@@ -181,6 +184,7 @@ export function wireHarness(deps: HarnessDependencies) {
     persistence,
     providerDataDirectory,
     runningWorkTurnAccess,
+    runningWorkTurnSandbox,
     sideTasks,
     threadFollowUpSuggestions,
     toolEgressRules,
@@ -412,15 +416,11 @@ export function wireHarness(deps: HarnessDependencies) {
     store: threadFollowUpSuggestions,
     createFollowUp: createFollowUpOnHost,
   };
-  // Bound once the Chat, Work, and Code turn services exist, like the creator.
-  const sideTaskFirstMessage: {
+  // Bound once the Chat, Work, and Code turn services and the message queue
+  // exist, like the creator.
+  const sideTaskHost: {
     current:
-      | ((input: {
-          readonly windowId: string;
-          readonly mode: OctantMode;
-          readonly threadId: string;
-          readonly prompt: string;
-        }) => Promise<boolean>)
+      | Pick<SideTaskStartDependencies, "fork" | "offeringTurn" | "sendTurn" | "continueHere">
       | undefined;
   } = { current: undefined };
   const authorizeFollowUpThread = ({
@@ -451,7 +451,14 @@ export function wireHarness(deps: HarnessDependencies) {
     windowAuthorityStore,
     authorizeThread: authorizeFollowUpThread,
     create: createFollowUpOnHost,
-    sendFirstMessage: (input) => sideTaskFirstMessage.current?.(input) ?? Promise.resolve(false),
+    fork: (input) =>
+      sideTaskHost.current?.fork(input) ??
+      Promise.resolve({ kind: "refused", message: "Forking is unavailable on this host." }),
+    offeringTurn: (input) => sideTaskHost.current?.offeringTurn(input) ?? "not-found",
+    sendTurn: (input) => sideTaskHost.current?.sendTurn(input) ?? Promise.resolve(false),
+    continueHere: (input) =>
+      sideTaskHost.current?.continueHere(input) ??
+      Promise.resolve({ kind: "refused", message: "This thread cannot take a message now." }),
     clock: () => new Date().toISOString(),
   });
   const nativeHarnessEgressRoutes = createNativeHarnessEgressRouteHandler({
@@ -593,6 +600,22 @@ export function wireHarness(deps: HarnessDependencies) {
   });
   // Every provider's turn passes through these hooks; a harness turn also
   // reaches the observer and the lead fallback.
+  // Services wired after the harness (context's compaction rules) hear every
+  // settled turn here rather than through a hook of their own in each mode.
+  const turnEndedObservers = new Set<
+    (scope: Parameters<NativeHarnessTurnObserver["turnEnded"]>[0], turn: TurnEndSummary) => void
+  >();
+  const observeTurnEnded = (
+    observer: (
+      scope: Parameters<NativeHarnessTurnObserver["turnEnded"]>[0],
+      turn: TurnEndSummary,
+    ) => void,
+  ): (() => void) => {
+    turnEndedObservers.add(observer);
+    return () => {
+      turnEndedObservers.delete(observer);
+    };
+  };
   // Keyed with a host-local key kept in the provider data folder; a host that
   // cannot keep the key records turns without digests.
   const promptDigest = openPromptDigester(
@@ -646,6 +669,13 @@ export function wireHarness(deps: HarnessDependencies) {
         turnMetrics.record(toTurnMetricsRecord(scope, turn));
       } catch {
         // A turn whose figures the journal refused still ended for the user.
+      }
+      for (const observer of turnEndedObservers) {
+        try {
+          observer(scope, turn);
+        } catch {
+          // One observer's failure must not keep the turn's end from the rest.
+        }
       }
     },
     turnCompleted: async (input: Parameters<NativeHarnessTurnObserver["turnCompleted"]>[0]) => {
@@ -789,6 +819,13 @@ export function wireHarness(deps: HarnessDependencies) {
     scratchRoot: harnessWorkDirectory,
     protectedSecretPath: (path) => isProtectedSecretPath(path),
   });
+  const decisionReviewModelPort = createDecisionReviewModelPort({
+    persistence,
+    store: personMemory,
+    resolveDriver: resolveConfiguredDriver,
+    accountUnavailable: automaticModelAccountUnavailable,
+    scratchRoot: harnessWorkDirectory,
+  });
   // A provider runtime's own shell reports a command only as it starts, so
   // its pushes and pull-request changes are recorded, never stopped.
   const runtimeForgeChanges = createRuntimeForgeChangeObserver({
@@ -818,6 +855,7 @@ export function wireHarness(deps: HarnessDependencies) {
         ? shieldServerStore.recordTag({ threadId, tag: "reads-secrets-then-egress", command })
         : "not-tagged",
     goals: goalService,
+    skills: deps.effectiveSkills,
     questions: nativeHarnessQuestions,
     approvals: nativeHarnessApprovals,
     shield: hostShield,
@@ -859,6 +897,11 @@ export function wireHarness(deps: HarnessDependencies) {
       return instance !== undefined && isNativeHarnessDriverKind(instance.driverKind);
     },
     tasks: nativeHarnessSessions,
+    readsImages: ({ providerInstanceId, modelId }) =>
+      providerRuntimeRegistry
+        .observedState(providerInstanceId)
+        ?.models.find((candidate) => String(candidate.id) === modelId)
+        ?.inputModalities.includes("image") === true,
     shell: createNativeHarnessShell({
       process: harnessProcessPort,
       scriptDirectory: harnessScriptDirectory,
@@ -898,6 +941,17 @@ export function wireHarness(deps: HarnessDependencies) {
       codeSessionAuthority,
       codeOperationRuntime: { threadWithActiveTurnPosture: codeParentActiveTurn },
     }),
+    // A running turn keeps the sandbox it started with, so turning it off
+    // never opens commands the turn has not run yet; turning it on applies
+    // at once, since that only narrows.
+    readFullAccessSandbox: (threadId) => {
+      const code = persistence.readCodeThread(threadId as never);
+      if (code !== undefined) {
+        return (codeParentActiveTurn?.(code) ?? code).fullAccessSandbox === true;
+      }
+      const stored = workThreadProjection.read(threadId as never)?.fullAccessSandbox === true;
+      return stored || runningWorkTurnSandbox(threadId) === true;
+    },
     resolveWebSearch: () =>
       searxngHarnessWebSearch({
         readBaseUrl: () => persistence.readChatSettings()?.settings.searxngBaseUrl,
@@ -960,6 +1014,7 @@ export function wireHarness(deps: HarnessDependencies) {
     credentialCommandProcess: harnessFullAccessProcessPort,
     prepareCredentialCommand,
     personMemorySweep,
+    decisionReviewModelPort,
     runtimeForgeChanges,
     followUpCreation,
     restartContinuation,
@@ -972,11 +1027,12 @@ export function wireHarness(deps: HarnessDependencies) {
     serverProjectRoutes,
     serverPreviewTunnels,
     nativeHarnessHooks,
+    observeTurnEnded,
     nativeHarnessSessionRoutes,
     onHarnessPausedByPerson,
     onHarnessRecoveryLifted,
     researchRouter,
-    sideTaskFirstMessage,
+    sideTaskHost,
     sideTaskRoutes,
     hostShield,
     threadWork,

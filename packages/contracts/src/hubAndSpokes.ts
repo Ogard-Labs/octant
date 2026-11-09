@@ -141,6 +141,12 @@ export const PeerGrant = Schema.Struct({
   delegation: Schema.optional(PeerDelegationGrant),
   readStatus: Schema.Boolean,
   answerApprovals: Schema.optional(Schema.Boolean),
+  /**
+   * Move in: the member may move a thread here. Every move also needs an owner
+   * device's own fresh unlock, so this item is the receiving spoke's switch,
+   * not the authority. Absent reads as off.
+   */
+  moveIn: Schema.optional(Schema.Boolean),
 }).annotations(strict);
 export type PeerGrant = typeof PeerGrant.Type;
 

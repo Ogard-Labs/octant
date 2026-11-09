@@ -6,6 +6,7 @@ import {
   type PendingRequest,
   type PendingRequestList,
   type ProductSurfaceSettings,
+  type TurnDecisionReview,
   type WindowId,
 } from "@octant/contracts";
 import { enabledModes } from "@octant/domain";
@@ -14,6 +15,17 @@ export interface PendingRequestSources {
   readonly deferrals?: {
     readonly read: (key: string) => string | undefined;
     readonly record: (change: PendingQuestionDeferral) => void;
+  };
+  /**
+   * The second opinion on a decision, by the decision's identity key. It
+   * reads what is already known and queues a review in the background, so
+   * listing never waits on a model.
+   */
+  readonly reviews?: {
+    readonly reviewFor: (
+      key: string,
+      decision: Extract<PendingRequest, { readonly kind: "decision" }>,
+    ) => TurnDecisionReview | undefined;
   };
   readonly now?: () => number;
   readonly readSettings: () => ProductSurfaceSettings;
@@ -63,7 +75,7 @@ export class PendingRequestService {
       !current() ||
       !list.requests.some(
         (request) =>
-          request.kind === "question" &&
+          (request.kind === "question" || request.kind === "decision") &&
           request.deferralKey === change.key &&
           enabledModes(this.#sources.readSettings()).includes(request.mode),
       )
@@ -93,11 +105,20 @@ export class PendingRequestService {
     );
     return decodePendingRequestList({
       requests: oldestFirst.slice(0, MAX_PENDING_REQUESTS).map((request) => {
-        if (request.kind !== "question" || this.#sources.deferrals === undefined) return request;
-        const deferralKey = questionKey(request);
+        const review =
+          request.kind === "decision"
+            ? this.#sources.reviews?.reviewFor(deferralKeyOf(request), request)
+            : undefined;
+        const reviewed = review === undefined ? request : { ...request, review };
+        if (
+          (request.kind !== "question" && request.kind !== "decision") ||
+          this.#sources.deferrals === undefined
+        )
+          return reviewed;
+        const deferralKey = deferralKeyOf(request);
         const until = this.#sources.deferrals.read(deferralKey);
         return {
-          ...request,
+          ...reviewed,
           deferralKey,
           ...(until !== undefined && Date.parse(until) > (this.#sources.now?.() ?? Date.now())
             ? { deferredUntil: until }
@@ -120,7 +141,17 @@ function requestKey(request: PendingRequest): string {
   return `${request.mode}:${String(request.threadId)}:${handle}`;
 }
 
-function questionKey(request: PendingRequest): string {
+function deferralKeyOf(request: PendingRequest): string {
+  // A decision is the ask of one finished turn and never changes, while its
+  // answer authority follows the thread's current model. So its identity is
+  // the turn that asked, and a later turn's decision starts undeferred.
+  if (request.kind === "decision") {
+    const turn =
+      request.mode === "code" ? String(request.answer.operationId) : String(request.answer.turnId);
+    return createHash("sha256")
+      .update(`decision:${request.mode}:${String(request.threadId)}:${turn}`)
+      .digest("hex");
+  }
   // Identity, choices, version and authority context participate. A changed
   // request cannot inherit a former question's attention preference.
   return createHash("sha256").update(JSON.stringify(request)).digest("hex");

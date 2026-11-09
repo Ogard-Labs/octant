@@ -170,9 +170,10 @@ export function parseChatMessageBody(streamed: string): ReadonlyArray<ChatMessag
                 text: [
                   decision.ask,
                   "",
+                  ...(decision.why === undefined ? [] : [decision.why, ""]),
                   ...decision.options.map(
                     (option, index) =>
-                      `${String(index + 1)}. ${option.label}${option.recommended ? " (recommended)" : ""}`,
+                      `${String(index + 1)}. ${option.label}${option.recommended ? " (recommended)" : ""}${option.detail === undefined ? "" : ` — ${option.detail}`}`,
                   ),
                 ].join("\n"),
               },

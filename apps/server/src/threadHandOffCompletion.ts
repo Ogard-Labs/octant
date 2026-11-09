@@ -23,6 +23,8 @@ export interface ThreadHandOffCompletionOptions {
   readonly resolveDriver: (providerInstanceId: ProviderInstanceId) => ProviderDriver | undefined;
   /** A private, empty root the request runs in; a hand-off reads the transcript, not a folder. */
   readonly scratchRoot: (threadId: string) => string;
+  /** Removes that root once the request ended, so nothing of the thread stays there. */
+  readonly releaseScratchRoot?: (threadId: string) => void;
   readonly uuid: () => string;
 }
 
@@ -56,11 +58,19 @@ export function makeThreadHandOffCompletion(
         state,
       }),
     );
-    return await Effect.runPromise(run, { signal: input.signal }).catch((error: unknown) => {
-      throw error instanceof ThreadHandOffCompletionFailed
-        ? error
-        : new ThreadHandOffCompletionFailed("The hand-off request failed.");
-    });
+    try {
+      return await Effect.runPromise(run, { signal: input.signal }).catch((error: unknown) => {
+        throw error instanceof ThreadHandOffCompletionFailed
+          ? error
+          : new ThreadHandOffCompletionFailed("The hand-off request failed.");
+      });
+    } finally {
+      try {
+        options.releaseScratchRoot?.(input.threadId);
+      } catch {
+        // A folder that cannot be removed now is empty; the next request reuses it.
+      }
+    }
   };
 }
 

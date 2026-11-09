@@ -17,9 +17,23 @@ const CODE_OPTIONS = optionsFor(PERMISSION_MODE_OPTIONS);
 // Work shares Code's levels and has no Plan overlay.
 const WORK_OPTIONS = optionsFor(PERMISSION_MODE_OPTIONS.filter((option) => option.id !== "plan"));
 
+const SANDBOX_OPTIONS = [
+  { id: FOLLOW_SETTINGS, label: "Same as Settings" },
+  { id: "on", label: "Keep the sandbox" },
+  { id: "off", label: "No sandbox" },
+];
+
 export interface ProjectPermissionModeSectionProps {
   readonly project: BoundProjectSummary;
-  readonly onChange: (mode: PermissionMode | undefined) => Promise<boolean>;
+  /**
+   * A mode change, or a sandbox change. The sandbox argument is absent when
+   * only the mode changed (the Project keeps its choice), and a choice or
+   * "settings" when the person changed the sandbox.
+   */
+  readonly onChange: (
+    mode: PermissionMode | undefined,
+    fullAccessSandbox?: boolean | "settings",
+  ) => Promise<boolean>;
   readonly disabled?: boolean;
 }
 
@@ -53,6 +67,28 @@ export function ProjectPermissionModeSection(props: ProjectPermissionModeSection
         }}
         options={props.project.type === "work" ? WORK_OPTIONS : CODE_OPTIONS}
         value={value}
+      />
+      <OctantSelectField
+        aria-label="Sandbox at Full access for this Project"
+        className="window-no-drag"
+        disabled={props.disabled === true || pending}
+        onValueChange={(next) => {
+          if (next !== FOLLOW_SETTINGS && next !== "on" && next !== "off") return;
+          const sandbox = next === FOLLOW_SETTINGS ? undefined : next === "on";
+          if (sandbox === props.project.defaultFullAccessSandbox) return;
+          setPending(true);
+          void props
+            .onChange(props.project.defaultPermissionMode, sandbox ?? "settings")
+            .finally(() => setPending(false));
+        }}
+        options={SANDBOX_OPTIONS}
+        value={
+          props.project.defaultFullAccessSandbox === undefined
+            ? FOLLOW_SETTINGS
+            : props.project.defaultFullAccessSandbox
+              ? "on"
+              : "off"
+        }
       />
       {warning.dialog}
     </>
