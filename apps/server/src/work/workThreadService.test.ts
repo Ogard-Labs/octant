@@ -331,6 +331,35 @@ describe("WorkThreadService", () => {
     await expect(fixture.service.read(ids.window, ids.thread)).resolves.toBeUndefined();
   });
 
+  it("opens a moved-in thread it already holds, and refuses other commands on a held thread", async () => {
+    const fixture = serviceFixture({
+      threads: [],
+      moveHold: (threadId) => threadId === ids.thread,
+    });
+    await expect(
+      fixture.service.execute(ids.window, {
+        kind: "create-work-thread",
+        threadId: ids.thread,
+        projectId: ids.project,
+        title: "Draft brief",
+        providerInstanceId: ids.provider,
+        modelId: "model-a",
+        hostId: "local",
+        bindingRevisionId: ids.binding,
+      }),
+    ).resolves.toEqual({ kind: "thread-created", thread: thread() });
+
+    const held = serviceFixture({ moveHold: () => true });
+    await expect(
+      held.service.execute(ids.window, {
+        kind: "rename-work-thread",
+        threadId: ids.thread,
+        expectedVersion: 1,
+        title: "Renamed while moving",
+      }),
+    ).rejects.toMatchObject({ failure: { category: "unavailable" } });
+  });
+
   it("creates a thread for the active Work Project with a local-user event", async () => {
     const fixture = serviceFixture({ threads: [] });
 
@@ -577,6 +606,54 @@ describe("WorkThreadService", () => {
       kind: "thread-created",
       thread: { access: "auto-accept-edits" },
     });
+  });
+
+  it("starts a new Full access thread with the sandbox its Project or Settings choose, and keeps the Settings choice through a save that does not mention it", async () => {
+    const fixture = serviceFixture({ threads: [] });
+    await fixture.service.execute(ids.window, {
+      kind: "update-work-settings",
+      expectedVersion: 0,
+      defaultAccess: "full-access",
+      defaultFullAccessSandbox: true,
+    });
+    // A later save that does not mention the sandbox keeps it.
+    await expect(
+      fixture.service.execute(ids.window, {
+        kind: "update-work-settings",
+        expectedVersion: 1,
+        defaultAccess: "full-access",
+      }),
+    ).resolves.toMatchObject({ settings: { defaultFullAccessSandbox: true } });
+    const create = {
+      kind: "create-work-thread" as const,
+      projectId: ids.project,
+      title: "Draft brief",
+      providerInstanceId: ids.provider,
+      modelId: "model-a" as never,
+      hostId: "local" as const,
+      bindingRevisionId: ids.binding,
+    };
+    await expect(
+      fixture.service.execute(ids.window, { ...create, threadId: ids.thread }),
+    ).resolves.toMatchObject({
+      thread: { access: "full-access", fullAccessSandbox: true },
+    });
+
+    // A Project that turned the sandbox off wins over Settings.
+    const projectOff = serviceFixture({
+      threads: [],
+      project: {
+        ...workProject(),
+        defaultPermissionMode: "full-access",
+        defaultFullAccessSandbox: false,
+      } as Project,
+    });
+    const created = await projectOff.service.execute(ids.window, {
+      ...create,
+      threadId: ids.thread,
+    });
+    expect(created).toMatchObject({ thread: { access: "full-access" } });
+    expect("thread" in created ? created.thread.fullAccessSandbox : "missing").toBeUndefined();
   });
 
   it("starts a new thread at its Work Project's own mode, over Work's default in Settings", async () => {
@@ -1413,6 +1490,48 @@ describe("WorkThreadService", () => {
     ).rejects.toMatchObject({ failure: { category: "invalid" } });
   });
 
+  it("keeps the sandbox a Work thread asked for at Full access, and drops it at any other level", async () => {
+    const raised = serviceFixture({ threads: [thread()] });
+    const sandboxed = await raised.service.execute(ids.window, {
+      kind: "change-work-thread-access",
+      threadId: ids.thread,
+      expectedVersion: 1,
+      access: "full-access",
+      fullAccessSandbox: true,
+    });
+    expect(sandboxed).toMatchObject({
+      kind: "thread-updated",
+      thread: { access: "full-access", fullAccessSandbox: true },
+    });
+
+    // A level change that does not mention the sandbox keeps it at Full access.
+    const kept = serviceFixture({
+      threads: [thread({ access: "full-access", fullAccessSandbox: true })],
+    });
+    await expect(
+      kept.service.execute(ids.window, {
+        kind: "change-work-thread-access",
+        threadId: ids.thread,
+        expectedVersion: 1,
+        access: "full-access",
+      }),
+    ).resolves.toMatchObject({ thread: { fullAccessSandbox: true } });
+
+    // Lowered below Full access, the choice is dropped, not carried to a later raise.
+    const lowered = serviceFixture({
+      threads: [thread({ access: "full-access", fullAccessSandbox: true })],
+    });
+    const result = await lowered.service.execute(ids.window, {
+      kind: "change-work-thread-access",
+      threadId: ids.thread,
+      expectedVersion: 1,
+      access: "auto",
+      fullAccessSandbox: true,
+    });
+    expect(result).toMatchObject({ thread: { access: "auto" } });
+    expect("thread" in result ? result.thread.fullAccessSandbox : "missing").toBeUndefined();
+  });
+
   it("updates thread metadata with optimistic versions and maps concurrency conflicts", async () => {
     const current = thread();
     const fixture = serviceFixture({ threads: [current] });
@@ -1877,6 +1996,7 @@ it("validates the target before journaling an unavailable provider", async () =>
 
 function serviceFixture(
   options: {
+    readonly moveHold?: (threadId: string) => boolean;
     readonly threads?: ReadonlyArray<ReturnType<typeof thread>>;
     readonly accessibleProjects?: ReadonlyArray<{
       id: string;
@@ -1973,6 +2093,7 @@ function serviceFixture(
   };
   const onWorkingDirectoryChanged = vi.fn(async () => undefined);
   const service = new WorkThreadService({
+    ...(options.moveHold === undefined ? {} : { moveHold: options.moveHold }),
     persistence: persistence as never,
     projects: projects as never,
     projection,

@@ -1,106 +1,220 @@
-import { describe, expect, it } from "vitest";
+import { spawn } from "node:child_process";
+import { describe, expect, it, vi } from "vitest";
+
+vi.mock("node:child_process", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("node:child_process")>();
+  return { ...actual, spawn: vi.fn(actual.spawn) };
+});
 import { CredentialStoreFailure } from "./credentialStore";
 import {
-  CMDKEY_PATH,
-  POWERSHELL_PATH,
   makeWindowsCredentialStore,
-  type WindowsCommandResult,
+  type WindowsCredentialNamespace,
   type WindowsCommandSpec,
 } from "./windowsCredentialStore";
 
 const providerInstanceId = "72000000-0000-4000-8000-000000000005";
-const target = `Octant provider credential ${providerInstanceId}`;
-
-function executor(results: ReadonlyArray<Partial<WindowsCommandResult>>) {
+const storeScope = "72000000-0000-4000-8000-000000000006";
+const helperPath = "C:\\Octant\\native\\octant-credential-helper.exe";
+function reply(status = 0, value = "") {
+  const bytes = Buffer.from(value, "utf8");
+  const result = Buffer.alloc(9 + bytes.length);
+  result.write("OCCR", 0, "ascii");
+  result[4] = status;
+  result.writeUInt32LE(bytes.length, 5);
+  bytes.copy(result, 9);
+  return { exitCode: 0, stdout: result };
+}
+function fixture(response = reply(), namespace?: WindowsCredentialNamespace) {
   const calls: WindowsCommandSpec[] = [];
-  let index = 0;
-  return {
-    calls,
-    execute: async (spec: WindowsCommandSpec): Promise<WindowsCommandResult> => {
-      calls.push(spec);
-      const next = results[index] ?? {};
-      index += 1;
-      return { exitCode: 0, stdout: "", stderr: "", ...next };
+  const store = makeWindowsCredentialStore({
+    helperPath,
+    storeScope,
+    ...(namespace === undefined ? {} : { namespace }),
+    serviceFamily: "octant-nightly-test-data",
+    execute: async (spec) => {
+      calls.push({ ...spec, input: Buffer.from(spec.input) });
+      return { ...response, stdout: Buffer.from(response.stdout) };
     },
-  };
+  });
+  return { calls, store };
 }
 
-describe("makeWindowsCredentialStore", () => {
-  it("stores a credential with cmdkey under a target that names the provider", async () => {
-    const fake = executor([{ exitCode: 0 }]);
-    const store = makeWindowsCredentialStore({ execute: fake.execute });
-
-    await store.set(providerInstanceId, "secret-value");
-
-    expect(fake.calls).toHaveLength(1);
-    expect(fake.calls[0]?.command).toBe(CMDKEY_PATH);
-    expect(fake.calls[0]?.args).toEqual([
-      `/generic:${target}`,
-      "/user:octant",
-      "/pass:secret-value",
-    ]);
+describe("Windows provider credentials", () => {
+  it("keeps the key and scoped identity in the private request pipe", async () => {
+    const { store, calls } = fixture();
+    await store.set(providerInstanceId, "synthetic-λ-key");
+    expect(calls).toHaveLength(1);
+    const call = calls[0];
+    expect(call?.command).toBe(helperPath);
+    expect(call?.args).toEqual([]);
+    expect(call?.environment).toEqual({});
+    const input = Buffer.from(call?.input ?? []);
+    expect(input.toString("ascii", 0, 4)).toBe("OCCR");
+    expect(input[4]).toBe(2);
+    expect(input[5]).toBe(1);
+    expect(input[6]).toBe(1);
+    expect(input.toString("ascii", 7, 43)).toBe(storeScope);
+    expect(input.toString("ascii", 43, 79)).toBe(providerInstanceId);
+    expect(input.readUInt32LE(79)).toBe(Buffer.byteLength("synthetic-λ-key"));
+    expect(input[83]).toBe(0);
+    expect(input.toString("utf8", 84)).toBe("synthetic-λ-key");
   });
 
-  it("reports presence only when the listing names this provider", async () => {
-    const present = executor([{ exitCode: 0, stdout: `${target}\r\n` }]);
-    await expect(
-      makeWindowsCredentialStore({ execute: present.execute }).has(providerInstanceId),
-    ).resolves.toBe(true);
-
-    const absent = executor([{ exitCode: 1, stdout: "" }]);
-    await expect(
-      makeWindowsCredentialStore({ execute: absent.execute }).has(providerInstanceId),
-    ).resolves.toBe(false);
+  it("keeps every auxiliary purpose distinct from the provider and each other", async () => {
+    const namespaces: ReadonlyArray<WindowsCredentialNamespace> = [
+      "provider",
+      "replica-device-key",
+      "replica-store-credential",
+      "canvas-public-share-secret",
+      "mcp-server-credential",
+      "desktop-provider-credential",
+      "push-platform-credential",
+      "ssh-key",
+    ];
+    for (const [purpose, namespace] of namespaces.entries()) {
+      const { store, calls } = fixture(reply(), namespace);
+      await store.set(providerInstanceId, "synthetic");
+      await store.has(providerInstanceId);
+      await store.delete(providerInstanceId);
+      expect(calls.map((call) => Buffer.from(call.input)[83])).toEqual([purpose, purpose, purpose]);
+    }
+    for (const namespace of ["other", null, 0, {}]) {
+      expect(() =>
+        makeWindowsCredentialStore({
+          helperPath,
+          storeScope,
+          ...JSON.parse(JSON.stringify({ namespace })),
+        }),
+      ).toThrow(CredentialStoreFailure);
+    }
   });
 
-  it("reads a credential back through the Win32 API, with the target in the environment", async () => {
-    const fake = executor([{ exitCode: 0, stdout: "secret-value" }]);
-    const store = makeWindowsCredentialStore({ execute: fake.execute });
-
-    await expect(store.resolve(providerInstanceId)).resolves.toBe("secret-value");
-
-    expect(fake.calls[0]?.command).toBe(POWERSHELL_PATH);
-    expect(fake.calls[0]?.args).toContain("-NoProfile");
-    // The target travels in the environment, so a credential id never appears
-    // in a process listing.
-    expect(fake.calls[0]?.args.join(" ")).not.toContain(target);
-    expect(fake.calls[0]?.environment?.OCTANT_CRED_TARGET).toBe(target);
-  });
-
-  it("reports a missing credential as missing rather than failed", async () => {
-    const fake = executor([{ exitCode: 3 }]);
-    const store = makeWindowsCredentialStore({ execute: fake.execute });
-
-    await expect(store.resolve(providerInstanceId)).rejects.toMatchObject({ category: "missing" });
-  });
-
-  it("refuses an identifier that is not a provider instance id", async () => {
-    const fake = executor([]);
-    const store = makeWindowsCredentialStore({ execute: fake.execute });
-
-    await expect(store.set("../../etc/passwd", "value")).rejects.toBeInstanceOf(
-      CredentialStoreFailure,
-    );
-    await expect(store.has("not-a-uuid")).rejects.toMatchObject({ category: "invalid" });
-    expect(fake.calls).toHaveLength(0);
-  });
-
-  it("refuses an empty credential and an unusable timeout", async () => {
-    const fake = executor([]);
-    const store = makeWindowsCredentialStore({ execute: fake.execute });
-
+  it("accepts the exact native byte cap and refuses overflow before invoking the helper", async () => {
+    const { store, calls } = fixture();
+    await store.set(providerInstanceId, "λ".repeat(1280));
+    await expect(store.set(providerInstanceId, "λ".repeat(1280) + "x")).rejects.toMatchObject({
+      category: "invalid",
+    });
+    await expect(store.set(providerInstanceId, "\ud800")).rejects.toMatchObject({
+      category: "invalid",
+    });
     await expect(store.set(providerInstanceId, "")).rejects.toMatchObject({ category: "invalid" });
-    expect(() => makeWindowsCredentialStore({ execute: fake.execute, timeoutMs: 0 })).toThrow(
-      CredentialStoreFailure,
+    expect(calls).toHaveLength(1);
+  });
+
+  it("distinguishes missing from unavailable without returning platform diagnostics", async () => {
+    await expect(fixture(reply(1)).store.has(providerInstanceId)).resolves.toBe(false);
+    await expect(fixture(reply(1)).store.resolve(providerInstanceId)).rejects.toMatchObject({
+      category: "missing",
+    });
+    await expect(fixture(reply(3)).store.has(providerInstanceId)).rejects.toMatchObject({
+      category: "unavailable",
+    });
+    await expect(fixture(reply(4)).store.resolve(providerInstanceId)).rejects.toMatchObject({
+      category: "failed",
+    });
+  });
+
+  it("reads a complete bounded Unicode key and never accepts malformed replies", async () => {
+    await expect(fixture(reply(0, "λ-fixture")).store.resolve(providerInstanceId)).resolves.toBe(
+      "λ-fixture",
+    );
+    for (const response of [
+      { ...reply(), stdout: Buffer.from("not-a-frame") },
+      { ...reply(), stdout: Buffer.concat([reply().stdout, Buffer.from("extra")]) },
+      { ...reply(), stdout: Buffer.from([207, 67, 67, 82, 0, 0, 0, 0, 0]) },
+      reply(0, "x".repeat(2561)),
+      reply(0, ""),
+      { ...reply(0, "x"), exitCode: 1 },
+    ])
+      await expect(fixture(response).store.resolve(providerInstanceId)).rejects.toMatchObject({
+        category: "failed",
+      });
+    await expect(
+      fixture(reply(0, "unexpected-key")).store.has(providerInstanceId),
+    ).rejects.toMatchObject({ category: "failed" });
+    await expect(
+      fixture(reply(0, "unexpected-key")).store.set(providerInstanceId, "key"),
+    ).rejects.toMatchObject({ category: "failed" });
+  });
+
+  it("never dispatches a malformed reference, scope, helper path or service family", async () => {
+    const { store, calls } = fixture();
+    await expect(store.delete("../other")).rejects.toBeInstanceOf(CredentialStoreFailure);
+    expect(calls).toHaveLength(0);
+    for (const options of [
+      { helperPath: "relative.exe", storeScope },
+      { helperPath: "\\\\server\\helper.exe", storeScope },
+      { helperPath, storeScope: "other" },
+      { helperPath, storeScope, timeoutMs: 0 },
+    ])
+      expect(() => makeWindowsCredentialStore(options)).toThrow(CredentialStoreFailure);
+  });
+
+  it("sends distinct scoped remove and presence operations without reading legacy targets", async () => {
+    const { store, calls } = fixture();
+    await expect(store.has(providerInstanceId)).resolves.toBe(true);
+    await store.delete(providerInstanceId);
+    expect(calls.map((call) => Buffer.from(call.input)[5])).toEqual([2, 4]);
+    expect(calls.every((call) => !JSON.stringify(call.args).includes(providerInstanceId))).toBe(
+      true,
     );
   });
+});
 
-  it("deletes by target", async () => {
-    const fake = executor([{ exitCode: 0 }]);
-    const store = makeWindowsCredentialStore({ execute: fake.execute });
-
-    await store.delete(providerInstanceId);
-
-    expect(fake.calls[0]?.args).toEqual([`/delete:${target}`]);
+it("joins a timed-out owned process before reporting credential unavailability", async () => {
+  const actual = await vi.importActual<typeof import("node:child_process")>("node:child_process");
+  let child: ReturnType<typeof spawn> | undefined;
+  let closed = false;
+  vi.mocked(spawn).mockImplementationOnce(() => {
+    child = actual.spawn(process.execPath, ["-e", "setTimeout(() => process.exit(0), 10000)"], {
+      env: {},
+      stdio: ["pipe", "pipe", "ignore"],
+    });
+    child.once("close", () => {
+      closed = true;
+    });
+    return child;
   });
+  const store = makeWindowsCredentialStore({ helperPath, storeScope, timeoutMs: 30 });
+  try {
+    await expect(store.resolve(providerInstanceId)).rejects.toMatchObject({
+      category: "unavailable",
+      cause: "timed-out",
+    });
+    expect(closed).toBe(true);
+    expect(child?.pid).toBeTypeOf("number");
+    const pid = child?.pid;
+    if (pid !== undefined) expect(() => process.kill(pid, 0)).toThrow();
+  } finally {
+    if (child !== undefined && !closed) child.kill();
+  }
+});
+
+it("terminates and joins a helper whose reply exceeds the private pipe limit", async () => {
+  const actual = await vi.importActual<typeof import("node:child_process")>("node:child_process");
+  let child: ReturnType<typeof spawn> | undefined;
+  let closed = false;
+  vi.mocked(spawn).mockImplementationOnce(() => {
+    child = actual.spawn(
+      process.execPath,
+      ["-e", "process.stdout.write(Buffer.alloc(3000)); setTimeout(() => process.exit(0), 10000)"],
+      { env: {}, stdio: ["pipe", "pipe", "ignore"] },
+    );
+    child.once("close", () => {
+      closed = true;
+    });
+    return child;
+  });
+  const store = makeWindowsCredentialStore({ helperPath, storeScope });
+  try {
+    await expect(store.resolve(providerInstanceId)).rejects.toMatchObject({
+      category: "unavailable",
+    });
+    expect(closed).toBe(true);
+    const pid = child?.pid;
+    if (pid !== undefined) expect(() => process.kill(pid, 0)).toThrow();
+  } finally {
+    if (child !== undefined && !closed) child.kill();
+  }
 });

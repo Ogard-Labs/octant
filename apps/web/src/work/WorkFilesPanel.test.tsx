@@ -29,6 +29,37 @@ function client(result: unknown) {
 }
 
 describe("WorkFilesPanel", () => {
+  it("refreshes server names and sizes without offering file actions", async () => {
+    const list = vi
+      .fn()
+      .mockResolvedValueOnce(
+        listing(
+          [{ kind: "file", path: "server-only.md", byteLength: 12, origin: "untouched" }],
+          true,
+        ),
+      )
+      .mockResolvedValueOnce(listing([]));
+    const onOpenFile = vi.fn();
+    const user = userEvent.setup();
+    render(
+      <WorkFilesPanel
+        client={{ list }}
+        projectId={projectId}
+        threadId={threadId}
+        serverLocation="notes:/srv/work"
+        onOpenFile={onOpenFile}
+      />,
+    );
+    expect(await screen.findByTitle("server-only.md")).toBeVisible();
+    expect(screen.getByText(/Names and sizes only/)).toBeVisible();
+    expect(screen.getByText("12 B")).toBeVisible();
+    expect(screen.queryByRole("button", { name: /server-only.md/ })).toBeNull();
+    await user.click(screen.getByRole("button", { name: "Refresh files" }));
+    expect(await screen.findByText("This folder is empty.")).toBeVisible();
+    expect(screen.queryByTitle("server-only.md")).toBeNull();
+    expect(onOpenFile).not.toHaveBeenCalled();
+    expect(list).toHaveBeenCalledTimes(2);
+  });
   it("names what the work produced above the rest of the folder", async () => {
     render(
       <WorkFilesPanel

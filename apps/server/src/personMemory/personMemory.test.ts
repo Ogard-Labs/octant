@@ -20,6 +20,8 @@ import { Journal } from "../persistence/journal";
 import { applyMigrations, MIGRATIONS } from "../persistence/migrations";
 import { ProjectionRegistry } from "../persistence/projection";
 import { openSqlite, type SqliteConnection } from "../persistence/sqlitePort";
+import { BENCHMARKS_PROJECT_ID } from "../benchmarks/benchmarkChatPort";
+import { keepBenchmarksOutOfPersonMemory } from "../benchmarks/benchmarkMemory";
 import { createPersonMemoryAccess } from "./personMemoryAccess";
 import { PersonMemoryStore, registerPersonMemoryEvents } from "./personMemoryStore";
 import {
@@ -466,6 +468,52 @@ describe("who person memory reaches", () => {
     });
     expect(answer?.isError).toBeUndefined();
     expect(JSON.stringify(answer?.result)).toContain('\\"Invoices\\" (Chat, no Project');
+  });
+});
+
+describe("benchmark threads and person memory", () => {
+  const LOCAL = "cccccccc-0000-4000-8000-000000000001" as WindowId;
+  const benchmarkProject = String(BENCHMARKS_PROJECT_ID);
+
+  it("gives a judge or contender thread in the Benchmarks Project no memory block or search tool, and learns nothing from it", async () => {
+    const h = harness([
+      { id: THREAD_1, completedAt: later, title: "Invoices", personMessages: ["CSV"] },
+      {
+        id: THREAD_2,
+        completedAt: later,
+        projectId: benchmarkProject,
+        title: "Smoke · Greeting · model-a",
+        personMessages: ["Say hello."],
+      },
+    ]);
+    h.advance(later);
+    expect(keepBenchmarksOutOfPersonMemory(h.store)).toEqual({ status: "kept-out" });
+    expect(keepBenchmarksOutOfPersonMemory(h.store)).toEqual({ status: "kept-out" });
+    expect(h.store.settings().excludedProjectIds).toEqual([benchmarkProject]);
+
+    const outcomes = await h.sweep.pass();
+
+    expect(outcomes.find((entry) => entry.threadId === THREAD_2)?.outcome).toBe("skipped");
+    expect(h.prompts.join("\n")).not.toContain("Say hello.");
+    const access = createPersonMemoryAccess({
+      store: h.store,
+      isPairedDeviceScope: () => false,
+      isHostScope: () => false,
+      projectLabel: () => undefined,
+    });
+    const scope = {
+      mode: "chat" as const,
+      threadId: THREAD_3,
+      createdAt: "2026-11-02T00:00:00.000Z",
+    };
+    // An ordinary thread from a local window still gets the block; the judge's does not,
+    // even when a window started it.
+    expect(access.blockFor({ ...scope, windowId: LOCAL })).toContain("Prefers CSV");
+    const judge = { ...scope, projectId: benchmarkProject };
+    expect(access.blockFor({ ...judge, windowId: LOCAL })).toBeUndefined();
+    expect(access.toolsFor({ ...judge, windowId: LOCAL })).toBeUndefined();
+    // The runner sends its turns with no window, which memory never serves either.
+    expect(access.blockFor({ ...judge, windowId: undefined })).toBeUndefined();
   });
 });
 

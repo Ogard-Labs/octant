@@ -33,6 +33,8 @@ import {
   decodeOwnerChallengeRequest,
   decodeOwnerCredentialCopyRequest,
   decodeOwnerCredentialReceiveRequest,
+  decodeOwnerThreadMoveConfirmRequest,
+  decodeOwnerThreadMoveTicketRequest,
   decodeOwnerJoinCodeRequest,
   decodeOwnerMemberRequest,
   decodeOwnerPostureChangeRequest,
@@ -65,6 +67,8 @@ import type { SignInService } from "./signInService";
 import type { SpokeLinkService } from "./spokeLinkService";
 import type { SpokeProvisionService } from "./spokeProvisionService";
 import type { SpokeSignInService } from "./spokeSignInService";
+import type { ThreadMoveService } from "./threadMoveService";
+import type { ThreadMovesFromWindow } from "./threadMovesFromWindow";
 
 export const HUB_OWNER_ROUTE_PREFIX = "/api/hub/owner";
 
@@ -100,6 +104,11 @@ export const HUB_OWNER_ROUTES = {
   browserTargets: `${HUB_OWNER_ROUTE_PREFIX}/browser/targets`,
   browserTakeOver: `${HUB_OWNER_ROUTE_PREFIX}/browser/take-over`,
   browserControl: `${HUB_OWNER_ROUTE_PREFIX}/browser/control`,
+  threadMoveTicket: `${HUB_OWNER_ROUTE_PREFIX}/thread-moves/ticket`,
+  // On the source: the moves a window holds for an owner phone, and the phone
+  // handing over the ticket the destination issued it.
+  threadMoveConfirmations: `${HUB_OWNER_ROUTE_PREFIX}/thread-moves/confirmations`,
+  threadMoveConfirm: `${HUB_OWNER_ROUTE_PREFIX}/thread-moves/confirm`,
 } as const;
 
 type OwnerRoute = (typeof HUB_OWNER_ROUTES)[keyof typeof HUB_OWNER_ROUTES];
@@ -110,6 +119,7 @@ const READ_ROUTES: ReadonlySet<string> = new Set([
   HUB_OWNER_ROUTES.alerts,
   HUB_OWNER_ROUTES.heldMembers,
   HUB_OWNER_ROUTES.signInRequests,
+  HUB_OWNER_ROUTES.threadMoveConfirmations,
 ]);
 
 /** The routes an unlock can be asked for: every one that changes something. */
@@ -139,6 +149,7 @@ const EITHER: ReadonlySet<string> = new Set([
   HUB_OWNER_ROUTES.browserTargets,
   HUB_OWNER_ROUTES.browserTakeOver,
   HUB_OWNER_ROUTES.browserControl,
+  HUB_OWNER_ROUTES.threadMoveTicket,
   ...CODE_OWNER_UNLOCKED_MERGE_PATHS,
 ]);
 
@@ -166,6 +177,8 @@ const OWN_UNLOCK_ROUTES: ReadonlySet<string> = new Set([
   HUB_OWNER_ROUTES.credentialReceive,
   HUB_OWNER_ROUTES.credentialCopy,
   HUB_OWNER_ROUTES.browserTakeOver,
+  // A move erases the thread on the source, so it never rides an open session.
+  HUB_OWNER_ROUTES.threadMoveTicket,
 ]);
 
 /** Which unlock this action asks for. A body that does not decode asks for the strictest. */
@@ -205,6 +218,9 @@ export interface HubOwnerRouteOptions {
   readonly unlock: OwnerUnlockService;
   readonly postures: OwnerPostureHost;
   readonly credentials: OwnerCredentialCopyService;
+  readonly threadMoves: ThreadMoveService;
+  /** The moves a window on this host holds until an owner phone confirms them. */
+  readonly phoneMoves: Pick<ThreadMovesFromWindow, "phoneConfirmations" | "confirmOnPhone">;
   readonly provision: SpokeProvisionService;
   readonly signIn: SignInService;
   readonly spokeSignIn: SpokeSignInService;
@@ -670,6 +686,31 @@ export function createHubOwnerRouteHandler(
             ownerMemberId: String(input.senderMemberId),
             sourceMemberId: String(asked.sourceMemberId),
             targetCredentialName: asked.targetCredentialName,
+            principal,
+          }),
+        );
+      }
+      case HUB_OWNER_ROUTES.threadMoveTicket: {
+        const asked = decodeOwnerThreadMoveTicketRequest(json());
+        return outcome(
+          options.threadMoves.issueTicket({
+            ownerMemberId: String(input.senderMemberId),
+            sourceMemberId: String(asked.sourceMemberId),
+            ...(asked.threads === undefined ? {} : { threads: asked.threads }),
+          }),
+        );
+      }
+      case HUB_OWNER_ROUTES.threadMoveConfirmations:
+        return Response.json(options.phoneMoves.phoneConfirmations(), { headers: NO_STORE });
+      case HUB_OWNER_ROUTES.threadMoveConfirm: {
+        // An administration-class unlock here says the person holding this
+        // phone is present on the source; the move itself was authorized on
+        // the destination, whose ticket needed its own fresh unlock there.
+        const confirmed = decodeOwnerThreadMoveConfirmRequest(json());
+        return outcome(
+          options.phoneMoves.confirmOnPhone({
+            confirmationId: confirmed.confirmationId,
+            ticketId: confirmed.ticketId,
             principal,
           }),
         );

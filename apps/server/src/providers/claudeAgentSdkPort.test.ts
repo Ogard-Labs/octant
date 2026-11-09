@@ -405,6 +405,48 @@ describe("Claude Agent SDK port", () => {
     expect(Object.keys(options?.sandbox?.network ?? {})).toEqual(["httpProxyPort"]);
   });
 
+  test("keeps the sandbox when Full access explicitly asks for it", async () => {
+    const harness = makeHarness();
+    await expect(
+      Effect.runPromise(
+        Effect.scoped(
+          harness.port.openQuery({
+            ...openInput,
+            executionPolicy: "full-access",
+            fullAccessSandbox: true,
+          }),
+        ),
+      ),
+    ).resolves.toBeDefined();
+    expect(harness.invocation?.options).toMatchObject({
+      sandbox: openInput.sandbox,
+      permissionMode: "bypassPermissions",
+    });
+  });
+
+  test("keeps exactly the Project and its extra folders in a Full access sandbox", async () => {
+    const harness = makeHarness();
+    const roots = [openInput.projectRoot, "/extra-folder"] as const;
+    const sandbox = {
+      ...openInput.sandbox,
+      filesystem: { denyRead: ["/"] as ["/"], allowRead: roots, allowWrite: roots },
+    };
+    await expect(
+      Effect.runPromise(
+        Effect.scoped(
+          harness.port.openQuery({
+            ...openInput,
+            executionPolicy: "full-access",
+            fullAccessSandbox: true,
+            additionalDirectories: ["/extra-folder"],
+            sandbox,
+          }),
+        ),
+      ),
+    ).resolves.toBeDefined();
+    expect(harness.invocation?.options).toMatchObject({ sandbox });
+  });
+
   test("accepts a structurally valid available output-style catalog without activating it", async () => {
     const harness = makeHarness();
     harness.query.initializationResult.mockResolvedValueOnce({

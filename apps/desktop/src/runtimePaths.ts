@@ -10,6 +10,7 @@ export const CODE_APPROVAL_PRELOAD_FILENAME = "codeOperationApprovalViewPreload.
 export const CANVAS_PROTOTYPE_PRELOAD_FILENAME = "canvasPrototypePreload.cjs" as const;
 export const EXTENSION_BRIDGE_PRELOAD_FILENAME = "extensionBridgePreload.cjs" as const;
 export const CODE_FILE_HELPER_FILENAME = "octant-code-file-helper" as const;
+export const WINDOWS_CREDENTIAL_HELPER_FILENAME = "octant-credential-helper.exe" as const;
 export const KEYCHAIN_HELPER_FILENAME = "octant-keychain-helper" as const;
 export const DEVICE_HELPER_FILENAME = "octant-device-helper" as const;
 export const CUA_DRIVER_FILENAME = "cua-driver" as const;
@@ -31,6 +32,7 @@ export function resolveDesktopNativeHelperPath(
   filename:
     | typeof CODE_FILE_HELPER_FILENAME
     | typeof KEYCHAIN_HELPER_FILENAME
+    | typeof WINDOWS_CREDENTIAL_HELPER_FILENAME
     | typeof DEVICE_HELPER_FILENAME
     | typeof CUA_DRIVER_FILENAME,
 ): string {

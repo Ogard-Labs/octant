@@ -29,6 +29,7 @@ import {
 } from "@octant/contracts";
 import type {
   ProviderAcquireInput,
+  ProviderCompactionPoint,
   ProviderConnection,
   ProviderDriver,
   ProviderSessionCompaction,
@@ -444,8 +445,12 @@ function claudePolicyOptions(
 }
 
 /** Whether this posture runs Claude's commands in its own sandbox. */
-function claudeRunsSandbox(policy: ProviderExecutionPolicy): boolean {
-  return policy === "approval-gated" || policy === "auto-accept-edits";
+function claudeRunsSandbox(policy: ProviderExecutionPolicy, fullAccessSandbox = false): boolean {
+  return (
+    policy === "approval-gated" ||
+    policy === "auto-accept-edits" ||
+    (policy === "full-access" && fullAccessSandbox)
+  );
 }
 
 /**
@@ -459,8 +464,9 @@ export function claudeSandboxSettings(
   projectRoot: string,
   extraFolders: ReadonlyArray<string> = [],
   proxyPort?: number,
+  fullAccessSandbox = false,
 ): ClaudeSandboxSettings | undefined {
-  if (!claudeRunsSandbox(policy)) return undefined;
+  if (!claudeRunsSandbox(policy, fullAccessSandbox)) return undefined;
   return {
     enabled: true,
     failIfUnavailable: true,
@@ -637,6 +643,8 @@ const availableCapabilities: ProviderCapabilities = {
   diffs: "supported",
   taskProgress: "supported",
   nativeChildAgents: "unsupported",
+  // Each query takes the person's compaction point as an `autoCompactWindow` flag setting.
+  compactionPoint: "supported",
   harnessAutoReview: "supported",
   // Claude's reviewer reports a refusal and nothing for a call it approved.
   reviewVerdicts: { allow: "unsupported", deny: "supported" },
@@ -1726,6 +1734,9 @@ function makeConnection(
       ...(state.query.initialization.autoCompactThreshold === undefined
         ? {}
         : { autoCompactThreshold: state.query.initialization.autoCompactThreshold }),
+      ...(state.query.initialization.contextWindow === undefined
+        ? {}
+        : { contextWindow: state.query.initialization.contextWindow }),
       callUsage: new Map(),
       requestIds: new Map(),
       taskIds: new Map(),
@@ -1915,11 +1926,13 @@ function makeConnection(
         readonly sessionId: ProviderSessionId;
         readonly modelId: ProviderModelId;
         readonly executionPolicy: ProviderExecutionPolicy;
+        readonly fullAccessSandbox?: boolean;
         readonly autoApprove?: boolean;
         readonly modelOptionValues?: ProviderModelOptionValues;
         readonly singleUse?: boolean;
         readonly nativeArtifacts?: boolean;
         readonly nativeSetup?: ProviderNativeSetup;
+        readonly compactionPoint?: ProviderCompactionPoint;
       },
       signal: AbortSignal,
       resumeSessionId?: string,
@@ -2003,13 +2016,16 @@ function makeConnection(
           signal,
         );
         const ownClaudeAccountPaths = claudeOwnAccountPaths(environment.environment);
+        const sandboxedFullAccess =
+          input.executionPolicy === "full-access" && input.fullAccessSandbox === true;
+        const networkPolicy = sandboxedFullAccess ? "auto-accept-edits" : input.executionPolicy;
         // Claude's own process: its inference and in-process web fetch. It
         // runs at Auto under the same reviewer as its command sandbox.
         const ownNetwork = await runSetupEffect(
           acquireProviderRuntimeNetwork(options.runtimeNetwork, {
             runtime: "claude",
             root: projectRoot,
-            executionPolicy: input.executionPolicy,
+            executionPolicy: networkPolicy,
             environment: environment.environment,
             autoReview: input.autoApprove === true,
             // Only Plan runs the process in Octant's own capsule; outside it
@@ -2100,12 +2116,12 @@ function makeConnection(
             projectRoot,
             isProjectConfinedPath: options.isProjectConfinedPath,
           });
-        const sandboxNetwork = claudeRunsSandbox(input.executionPolicy)
+        const sandboxNetwork = claudeRunsSandbox(input.executionPolicy, sandboxedFullAccess)
           ? await runSetupEffect(
               acquireProviderRuntimeNetwork(options.runtimeNetwork, {
                 runtime: "claude-sandbox",
                 root: projectRoot,
-                executionPolicy: input.executionPolicy,
+                executionPolicy: networkPolicy,
                 autoReview: input.autoApprove === true,
                 sessionId: String(input.sessionId),
                 ...(workThreadId === undefined ? {} : { threadId: workThreadId }),
@@ -2125,6 +2141,7 @@ function makeConnection(
           projectRoot,
           extraFolders,
           sandboxNetwork?.endpoint.kind === "loopback" ? sandboxNetwork.endpoint.port : undefined,
+          sandboxedFullAccess,
         );
         let callbackState: SessionState | undefined;
         const canUseTool: ClaudeOpenQueryInput["canUseTool"] = async (request) => {
@@ -2450,7 +2467,7 @@ function makeConnection(
                 activeState.publishedSnapshots.set(request.toolUseId, snapshot);
               }
             }
-            return decide();
+            if (!sandboxedFullAccess) return decide();
           }
           // A shell call carries no cwd of its own: Claude Code runs it in the
           // session's working directory, which is the Project root, and the
@@ -2513,6 +2530,7 @@ function makeConnection(
               model: input.modelId,
               ...(effort === undefined ? {} : { effort }),
               executionPolicy: input.executionPolicy,
+              ...(sandboxedFullAccess ? { fullAccessSandbox: true } : {}),
               ...(input.autoApprove === undefined ? {} : { autoApprove: input.autoApprove }),
               ...(resumeSessionId === undefined ? {} : { resumeSessionId }),
               ...(assignedSessionId === undefined ? {} : { sessionId: assignedSessionId }),
@@ -2522,6 +2540,7 @@ function makeConnection(
               ...(input.singleUse === true ? { persistSession: false as const } : {}),
               tools: executionOptions.tools,
               ...(nativeSetup === undefined ? {} : { nativeSetup }),
+              ...claudeAutoCompactWindow(input.compactionPoint),
               ...(sandbox === undefined ? {} : { sandbox }),
               canUseTool,
               preToolUse,
@@ -2761,12 +2780,18 @@ function makeConnection(
               // thread switched to another model carries its conversation on.
               modelId: input.modelId ?? identity.modelId,
               executionPolicy: input.executionPolicy,
+              ...(input.fullAccessSandbox === undefined
+                ? {}
+                : { fullAccessSandbox: input.fullAccessSandbox }),
               ...(input.autoApprove === undefined ? {} : { autoApprove: input.autoApprove }),
               ...(input.modelOptionValues === undefined
                 ? {}
                 : { modelOptionValues: input.modelOptionValues }),
               ...(input.nativeArtifacts === true ? { nativeArtifacts: true } : {}),
               ...(input.nativeSetup === undefined ? {} : { nativeSetup: input.nativeSetup }),
+              ...(input.compactionPoint === undefined
+                ? {}
+                : { compactionPoint: input.compactionPoint }),
             },
             signal,
             input.resumeCursor.value,
@@ -3170,3 +3195,25 @@ function withPublishedSnapshots(
     }),
   };
 }
+
+/**
+ * Claude Code compacts once a session holds its auto-compact window less a
+ * fixed 33,000-token reserve, the window being the smaller of the model's and
+ * the `autoCompactWindow` setting, which it clamps to 100,000 to 1,000,000
+ * (the 2.1.287 runtime that the agent SDK 0.3.211 bundles; measured live on
+ * 2026-11-08: a 1,000,000 window reports its threshold at 967,000). So the
+ * person's point is the setting at point plus the reserve, passed as a flag
+ * setting on this query alone, never written to their settings files. A point
+ * at or past the runtime's own, or below what the clamp allows, leaves the
+ * runtime its own point.
+ */
+export function claudeAutoCompactWindow(point: ProviderCompactionPoint | undefined): {
+  readonly autoCompactWindow?: number;
+} {
+  if (point === undefined) return {};
+  const window = point.tokens + CLAUDE_AUTO_COMPACT_RESERVE_TOKENS;
+  if (window >= point.contextWindow || window < 100_000 || window > 1_000_000) return {};
+  return { autoCompactWindow: window };
+}
+
+const CLAUDE_AUTO_COMPACT_RESERVE_TOKENS = 33_000;

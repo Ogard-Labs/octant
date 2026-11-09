@@ -34,6 +34,24 @@ const response = {
 };
 
 describe("questionnaire answers", () => {
+  it("refuses a comment only when the question explicitly cannot receive one", () => {
+    expect(
+      validateQuestionnaireAnswer(
+        { ...questionnaire, allowComment: false },
+        JSON.stringify(response),
+      ).status,
+    ).toBe("invalid");
+    const { comment: _comment, ...choices } = response;
+    expect(
+      validateQuestionnaireAnswer(
+        { ...questionnaire, allowComment: false },
+        JSON.stringify(choices),
+      ).status,
+    ).toBe("valid");
+    expect(validateQuestionnaireAnswer(questionnaire, JSON.stringify(response)).status).toBe(
+      "valid",
+    );
+  });
   it("accepts a complete selection set and a comment", () => {
     expect(validateQuestionnaireAnswer(questionnaire, JSON.stringify(response))).toEqual({
       status: "valid",

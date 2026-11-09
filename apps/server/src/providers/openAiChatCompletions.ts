@@ -171,6 +171,10 @@ function requestBody(input: ChatCompletionsTurnInput, streaming: boolean): Recor
     stream: streaming,
     ...(streaming ? { stream_options: { include_usage: true } } : {}),
     ...(tools === undefined ? {} : { tools }),
+    // Luna rejects function tools under its default reasoning mode on this protocol.
+    ...(input.modelId === "gpt-6-luna" && (tools?.length ?? 0) > 0
+      ? { reasoning_effort: "none" }
+      : {}),
     ...(input.toolChoice === undefined ? {} : { tool_choice: input.toolChoice }),
   };
 }

@@ -12,13 +12,21 @@ describe("turn decision instructions", () => {
   it("shows a block the host's own parser reads", () => {
     const example = TURN_DECISION_INSTRUCTIONS.text.match(/```octant-decision\n[^\n]*\n```/)?.[0];
     expect(example).toBeDefined();
-    expect(
-      parseTurnDecision(
-        `Done.\n\n${example?.replaceAll("...", "Go ahead") ?? ""}`.replace(
-          '{"label":"Go ahead"}',
-          '{"label":"Wait"}',
-        ),
-      ),
-    ).toMatchObject({ ask: "Go ahead" });
+    const filled = (example ?? "")
+      .replace(
+        '"label":"...","detail":"...","recommended"',
+        '"label":"Ship","detail":"Now","recommended"',
+      )
+      .replace('"label":"...","detail":"..."}', '"label":"Wait","detail":"Later"}')
+      .replaceAll("...", "Go ahead");
+    expect(parseTurnDecision(`Done.\n\n${filled}`)).toMatchObject({
+      ask: "Go ahead",
+      why: "Go ahead",
+      urgent: true,
+      options: [
+        { label: "Ship", detail: "Now", recommended: true },
+        { label: "Wait", detail: "Later", recommended: false },
+      ],
+    });
   });
 });

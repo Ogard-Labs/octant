@@ -5,6 +5,7 @@ import {
   decodeWorkRequest,
   decodeWorkRequestId,
   type WorkRequest,
+  type WorkRequestResolution,
   type WorkRequestCommand,
   type WorkRequestDelivery,
   type WorkRequestFailure,
@@ -18,6 +19,7 @@ import {
   type ProviderSessionId,
 } from "@octant/contracts";
 import {
+  validateQuestionnaireAnswer,
   classifyWorkRequestProviderAuthority,
   classifyWorkRequestTransition,
   workRequestSettledIdempotently,
@@ -307,6 +309,21 @@ export class WorkRequestService {
         "unauthorized",
         "The thread's provider has changed since this request was recorded.",
       );
+    }
+    if (entry.request.detail.kind === "user-input" && command.resolution.kind === "user-input") {
+      const questionnaire = entry.request.detail.questionnaire;
+      const answer = command.resolution.answer;
+      if (
+        questionnaire === undefined
+          ? typeof answer !== "string"
+          : typeof answer === "string" ||
+            validateQuestionnaireAnswer(questionnaire, JSON.stringify(answer)).status !== "valid"
+      ) {
+        return failure(
+          "invalid",
+          "The questionnaire answer is incomplete or contains invalid choices.",
+        );
+      }
     }
     const delivery: WorkRequestDelivery = { kind: "resolve", resolution: command.resolution };
     const prepared = this.#prepareDelivery(entry.request, command.expectedVersion, delivery);
@@ -809,7 +826,11 @@ function sameDelivery(left: WorkRequestDelivery, right: WorkRequestDelivery): bo
   return JSON.stringify(left.resolution) === JSON.stringify(right.resolution);
 }
 
-function providerAnswer(entry: WorkRequestEntry, answer: string): string {
+function providerAnswer(
+  entry: WorkRequestEntry,
+  answer: Extract<WorkRequestResolution, { kind: "user-input" }>["answer"],
+): string {
+  if (typeof answer !== "string") return JSON.stringify(answer);
   if (entry.request.detail.kind !== "user-input") return answer;
   const index = entry.request.detail.options.indexOf(answer);
   return index === -1 ? answer : (entry.providerOptionValues?.[index] ?? answer);

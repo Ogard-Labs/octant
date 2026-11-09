@@ -194,6 +194,8 @@ export function projects(value = projectBootstrap()): ProjectClient {
       throw new Error("Unexpected thread environment request.");
     }),
     executeMemory: vi.fn(),
+    listMemoryProposals: vi.fn(async () => []),
+    decideMemoryProposal: vi.fn(),
   };
 }
 

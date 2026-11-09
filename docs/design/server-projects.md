@@ -46,9 +46,42 @@ unverified host identities require correction through their existing owners.
 The entry explains unsupported server-Project capabilities and uncertain-result
 recovery without implying parity or retrying a command.
 
-This guide is an entry into existing setup, not a connection diagnostic service.
-It does not distinguish transport failures by parsing SSH text or accept a new
-host key. A future structured diagnostic must preserve those trust boundaries.
+**Read-only checks.** Each server journey can check a registered alias and user
+without binding a Project or starting a task. Only an authenticated local window
+may call `/api/remote-setup-check`; paired clients, agents and routines cannot
+borrow that authority. Strict input names only a registered server, an optional
+absolute folder and the runtime choice. No script, credential or SSH setting is
+accepted. At most four checks run concurrently, each with a twelve-second SSH
+deadline, 2 KiB response bound and owned-process cleanup. Stop cancels the check;
+changing the journey or inputs discards its result. Recheck is explicit and runs
+only this fixed read-only probe, never an earlier uncertain command.
+
+The probe requires the host's SSH agent and uses the existing connection encoder
+with `ControlMaster=no`, `ControlPath=none` and `ControlPersist=no`, so a cached
+login cannot stand in for fresh identity/authentication. Strict host checking,
+BatchMode and forwarding refusals remain in force. A fixed POSIX `sh` probe reads
+`pwd -P`, optionally after `cd` to the folder argument. It writes nothing. A
+changed registration invalidates even a successful response. Success proves this
+connection and directory at check time, not future connectivity or task authority.
+
+Unknown and changed/revoked identity, unavailable host, authentication refusal,
+missing agent, unavailable directory, unsupported runtime and incomplete probe
+have separate remedies. Bounded OpenSSH error text selects advisory copy only;
+it is never returned, journaled, accepted as trust or used to edit known hosts.
+The person verifies an unknown fingerprint through their own SSH connection;
+changed identity requires independent administrator verification. A check never
+creates a key: the kept-key workflow is explicitly unavailable to this
+agent-backed probe and points to the existing key controls. Server-Project
+runtime checks report Octant Harness support versus the native-provider refusal;
+they do not claim a provider binary is installed or run a provider request.
+
+Host control can reread the existing private-listener status without enabling or
+restarting it. This reports only host readiness; pairing and a request from the
+other device still establish actual device reachability. A missing host bridge,
+older client/host or failed host request shows unavailable with the appropriate
+host-window/network/awake-state remedy. Pending, reconnecting, connected for the
+check, disconnected and stopped states remain distinct. Results are transient;
+checks never change registry/configuration or journal state.
 
 ## Terms
 
@@ -302,16 +335,31 @@ host key. A future structured diagnostic must preserve those trust boundaries.
   Octant Harness) is refused before it starts, and a call that cannot reach
   the server runs nothing anywhere.
 - **Windows.** A window binds a server Work Project, and its threads, with no
-  folder of this host (`boundRoot: null`), so Work Files, Browser, and every
-  root-backed Work surface fail closed for it.
+  folder of this host (`boundRoot: null`). Its Files panel reads only server
+  metadata through the bound server connection; Browser and other surfaces
+  that need a folder of this host stay unavailable.
+- **Files.** The local window admitted to an active Work thread can list names
+  and byte sizes in that thread's exact server Project folder. Refresh reads
+  again; there is no watcher, preview, download, reveal, editing, or attribution
+  of files to Work output. Rows stay inert. The listing uses the same resolved
+  root and protected-path checks as server Code files, skips links and hidden
+  entries, and is capped at 1,000 entries and eight levels below the requested
+  folder, with an incomplete notice when bounded output is truncated. Sizes
+  come from the server's GNU or BSD `stat`, without reading file contents.
+  Missing metadata makes the list incomplete. Cancellation, loss of the
+  connection, removal of the server or Project, rebinding, or loss of the
+  window's access withholds the result; no local folder is tried instead. The
+  binding, registry and window authority are checked again after the remote
+  read. Paired-device callers are refused.
 - **Views.** Settings › Access › Servers binds one with **Project kind: Work**.
   The Work sidebar lists it under **On your servers** with its threads; the
   Work composer offers it, with only Octant Harness models choosable and no
   extension, issue, or terminal session to start from; and its thread view
   names its server and folder and offers no Browser, extension, image
   generation, or file mention. Its dock keeps only Side chat, Document,
-  Canvas, Plan, and Agents, since Work's Files, terminal, and other tools read
-  a folder of this host and none has a server form yet.
+  Canvas, Plan, Agents, and Files. Files names the server location and explains
+  that it shows names and sizes only; terminal and other host-folder tools
+  have no server form yet.
 
 ### Panels
 
@@ -438,7 +486,7 @@ host key. A future structured diagnostic must preserve those trust boundaries.
 
 ## Not built yet
 
-- Work Files, research sources, the status file and due dates, and the
+- Work file previews and editing, research sources, the status file and due dates, and the
   Project terminal for a Work Project on a server; its threads are built. A
   local Work Project shows its terminal through its Developer tools switch on
   its overview, and a Work Project on a server has neither yet.

@@ -255,10 +255,28 @@ export function createManagedWorktreeNodePorts(): {
     removeWorktree: async (input, signal) => {
       const result = await run(
         "git",
-        ["-C", input.repositoryRoot, "worktree", "remove", "--", input.targetPath],
+        [
+          "-C",
+          input.repositoryRoot,
+          "worktree",
+          "remove",
+          ...(input.force === true ? ["--force"] : []),
+          "--",
+          input.targetPath,
+        ],
         signal,
       );
       return { status: result.exitCode === 0 ? "removed" : "rejected" };
+    },
+    deleteBranch: async (input, signal) => {
+      const validation = await run("git", ["check-ref-format", "--branch", input.branch], signal);
+      if (validation.exitCode !== 0) return { status: "rejected" };
+      const result = await run(
+        "git",
+        ["-C", input.repositoryRoot, "branch", "-D", "--", input.branch],
+        signal,
+      );
+      return { status: result.exitCode === 0 ? "deleted" : "rejected" };
     },
     removeCheckpointRefs: async (input, signal) => {
       const namespace = checkpointRefNamespace(input.checkoutId);

@@ -46,6 +46,48 @@ function setup(store: RemoteDeviceKeyStore, available = true) {
 }
 
 describe("the phone's session fetch", () => {
+  it("persists only the listener trust and refuses a late response after the device key is forgotten", async () => {
+    const store = createInMemoryDeviceKeyStore();
+    const hostId = decodeStableHostId("11111111-1111-4111-8111-111111111111");
+    const pair = await crypto.subtle.generateKey({ name: "ECDSA", namedCurve: "P-256" }, false, [
+      "sign",
+      "verify",
+    ]);
+    const keyId = await store.set(pair, { origin: PINNED_ORIGIN, hostId });
+    const previous: ListenerOriginTrust = { current: { kind: "pinned", pin: PIN } };
+    const next: ListenerOriginTrust = {
+      ...previous,
+      staged: {
+        trust: { kind: "pinned", pin: `sha256-${"B".repeat(43)}` },
+        until: "2026-11-14T10:00:00.000Z",
+      },
+    };
+    await store.updateMetadata(keyId, {
+      deviceId: "device",
+      credentialGeneration: 1,
+      hostKeyFingerprint: "f".repeat(64),
+      listenerTrust: previous,
+    });
+    const phone = setup(store);
+    await phone.fetch(`${PINNED_ORIGIN}/api/remote/hello`);
+    const call = phone.pinnedTransport.mock.calls[0]?.[0];
+    if (call?.onTrust === undefined) throw new Error("expected trust persistence");
+    await store.updateMetadata(keyId, {
+      deviceId: "device",
+      credentialGeneration: 2,
+      hostKeyFingerprint: "f".repeat(64),
+      listenerTrust: previous,
+    });
+    await call.onTrust(previous, next);
+    expect(await store.findByOrigin(PINNED_ORIGIN)).toMatchObject({
+      credentialGeneration: 2,
+      listenerTrust: next,
+    });
+    await store.remove(keyId);
+    await expect(call.onTrust(previous, next)).rejects.toThrow("pairing changed");
+    expect(await store.findByOrigin(PINNED_ORIGIN)).toBeUndefined();
+    expect(phone.platformFetch).not.toHaveBeenCalled();
+  });
   it("reaches a pinned host only through the pinned transport, held to its recorded trust", async () => {
     const trust: ListenerOriginTrust = { current: { kind: "pinned", pin: PIN } };
     const phone = setup(storeWith({ [PINNED_ORIGIN]: trust }));
@@ -53,7 +95,14 @@ describe("the phone's session fetch", () => {
     const response = await phone.fetch(`${PINNED_ORIGIN}/api/remote/session`, { method: "POST" });
 
     await expect(response.text()).resolves.toBe("pinned");
-    expect(phone.pinnedTransport).toHaveBeenCalledWith({ origin: PINNED_ORIGIN, trust });
+    expect(phone.pinnedTransport).toHaveBeenCalledWith(
+      expect.objectContaining({
+        origin: PINNED_ORIGIN,
+        trust,
+        hostId: "11111111-1111-4111-8111-111111111111",
+        onTrust: expect.any(Function),
+      }),
+    );
     expect(phone.platformFetch).not.toHaveBeenCalled();
   });
 

@@ -1,3 +1,7 @@
+import {
+  ProjectMemoryProposalPrompt,
+  type ProjectMemoryProposalClient,
+} from "../projects/ProjectMemoryProposalPrompt";
 import { useDroppedFolderMentions } from "../composer/useDroppedFolderMentions";
 import { ToolCatalogContinuation } from "../providers/ToolCatalogContinuation";
 import { ContinueElsewhere } from "../continuity/ContinueElsewhere";
@@ -11,6 +15,8 @@ import { useComposerCompacting } from "../context/composerContextMeterScope";
 import { ComposerAttachButton } from "../composer/ComposerAttachButton";
 import {
   decodeWorkAttachmentId,
+  decodeWorkQuestionnaireResponse,
+  type WorkRequestResolution,
   decodeWorkAttachmentMediaType,
   decodeThreadWorkingDirectory,
   decodeWorkMutationRequestId,
@@ -35,7 +41,7 @@ import type { ProjectSummary, ProjectId } from "@octant/contracts/projects";
 import type { BrowserToolApproval } from "@octant/contracts/browser-automation-rpc";
 import { WORK_PERMISSION_MODES, workAccessOfMode, workModeOf } from "./workPermissionModes";
 import { ThreadGuardrailLevel } from "../code/GuardrailLevelIndicator";
-import { PermissionModePicker } from "../code/PermissionModePicker";
+import { PermissionModePicker, threadKeepsFullAccessSandbox } from "../code/PermissionModePicker";
 import { ThreadNativeSetupControl } from "../providers/ThreadNativeSetupControl";
 import { browserApprovalDetail, browserApprovalSummary } from "../browser/browserProfileCopy";
 import {
@@ -91,13 +97,14 @@ import { useDelayedForceStop } from "../composer/useDelayedForceStop";
 import { ComposerVoiceButton } from "../voice/ComposerVoiceButton";
 import { appendTranscript } from "../voice/appendTranscript";
 import type { ImageGenerationClient } from "@octant/client-runtime/image-generation-client";
-import type { ImageGenerationProfileView } from "@octant/contracts";
+import type { ImageArtifactRecord, ImageGenerationProfileView, ImageJob } from "@octant/contracts";
 import { decodeBrowserThreadId, decodeImageGenerationScopeId } from "@octant/contracts";
 import { parseAutomationFollowUpTurnPrompt } from "@octant/contracts/automation";
 import { ScheduledFollowUpMark } from "../automation/ScheduledFollowUpMark";
 import { BrowserCaptureList } from "../browser/BrowserCaptureList";
-import { GeneratedImageList } from "../image/GeneratedImageList";
+import { GeneratedImageJobs, useGeneratedImageJobs } from "../image/GeneratedImageList";
 import { ImageGenerationAction } from "../image/ImageGenerationAction";
+import { ImageGenerationOfferPrompt } from "../image/ImageGenerationOfferPrompt";
 import type { CanvasClient } from "@octant/client-runtime/canvas-client";
 import type { CanvasThreadReferenceCard } from "@octant/contracts/canvas-cards";
 import { CanvasThreadReferenceCardList } from "../canvas/CanvasThreadReferenceCardList";
@@ -109,7 +116,7 @@ import {
   threadMayChooseArtifacts,
 } from "../canvas/ThreadArtifactsChoice";
 import { publishedSnapshotRunRuntimeFor } from "../canvas/blocks/designRunningFrame";
-import { placeThreadCanvases, threadTurnSpans } from "../canvas/threadCanvasPlacement";
+import { placeByTurn, placeThreadCanvases, threadTurnSpans } from "../canvas/threadCanvasPlacement";
 import { useThreadCanvasCards } from "../canvas/useThreadCanvasCards";
 import { LOCAL_HOST_ID, type HostId } from "@octant/contracts/host";
 import {
@@ -476,9 +483,12 @@ export interface WorkThreadWorkspaceProps {
   readonly messageQueueClient?: ThreadMessageQueueClient;
   readonly extensionClient?: ExtensionClient;
   readonly automationClient?: AutomationClient;
+  readonly memoryProposalClient?: ProjectMemoryProposalClient;
   readonly onOpenCanvas?: (card: CanvasThreadReferenceCard) => void;
   /** Opens the dock's Canvas tool on this Canvas; a Canvas drawn in the thread offers it. */
   readonly onOpenCanvasInSidebar?: (card: CanvasThreadReferenceCard) => void;
+  /** The remote reader opens the same Canvas without a local sidebar. */
+  readonly canvasOpenLabel?: string;
   /** The Canvas cards the host lists for this thread, each time they are read. */
   readonly onCanvasReferencesObserved?: (
     threadId: string,
@@ -839,8 +849,9 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
   const [accessChanging, setAccessChanging] = useState(false);
   // Work and Code share one set of levels; the composer moves this thread to
   // another one, and its next turn runs at it.
-  const changeAccess = async (access: WorkAccess) => {
-    if (thread === undefined || accessChanging || access === thread.access) return;
+  const changeAccess = async (access: WorkAccess, fullAccessSandbox?: boolean) => {
+    if (thread === undefined || accessChanging) return;
+    if (access === thread.access && fullAccessSandbox === undefined) return;
     setAccessChanging(true);
     setErrorMessage(undefined);
     setToolCatalogHandoffRequired(false);
@@ -850,6 +861,7 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
         threadId: thread.id,
         expectedVersion: thread.version,
         access,
+        ...(fullAccessSandbox === undefined ? {} : { fullAccessSandbox }),
       });
       if (!("kind" in result) || result.kind !== "thread-updated") {
         setErrorMessage("This task’s mode could not be saved.");
@@ -1113,14 +1125,10 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
     }
   }, [props.threadId, props.turnClient, stoppableTurn, forceStop.requestStop]);
   const answerWorkRequest = useCallback(
-    async (
-      request: WorkRequest,
-      resolution:
-        | { readonly kind: "approval"; readonly approved: boolean }
-        | { readonly kind: "user-input"; readonly answer: string },
-    ) => {
+    async (request: WorkRequest, resolution: WorkRequestResolution) => {
       const requestClient = props.requestClient;
-      if (requestClient === undefined) return;
+      if (requestClient === undefined) return false;
+      const threadKey = String(props.threadId);
       try {
         await requestClient.execute({
           kind: "resolve-work-request",
@@ -1128,15 +1136,43 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
           expectedVersion: request.version,
           resolution,
         });
+        if (currentThreadKeyRef.current !== threadKey) return false;
+        setStatus(undefined);
+        setPendingRequests((current) =>
+          current.filter((candidate) => String(candidate.requestId) !== String(request.requestId)),
+        );
+        return true;
+      } catch {
+        if (currentThreadKeyRef.current !== threadKey) return false;
+        setStatus("The answer could not be delivered.");
+        return false;
+      }
+    },
+    [props.requestClient, props.threadId],
+  );
+
+  const dismissWorkRequest = useCallback(
+    async (request: WorkRequest) => {
+      const requestClient = props.requestClient;
+      if (requestClient === undefined) return;
+      const threadKey = String(props.threadId);
+      try {
+        await requestClient.execute({
+          kind: "cancel-work-request",
+          requestId: request.requestId,
+          expectedVersion: request.version,
+        });
+        if (currentThreadKeyRef.current !== threadKey) return;
         setStatus(undefined);
         setPendingRequests((current) =>
           current.filter((candidate) => String(candidate.requestId) !== String(request.requestId)),
         );
       } catch {
-        setStatus("The answer could not be delivered.");
+        if (currentThreadKeyRef.current === threadKey)
+          setStatus("The question could not be dismissed.");
       }
     },
-    [props.requestClient],
+    [props.requestClient, props.threadId],
   );
 
   useEffect(() => {
@@ -2126,6 +2162,13 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
             props.onCanvasReferencesObserved?.(String(props.threadId), cards),
         }),
   });
+  // The transcript draws each image after the turn that made it; the trail
+  // below the transcript shows the rest.
+  const threadImages = useGeneratedImageJobs({
+    client: props.imageGenerationClient,
+    threadKind: "work-thread",
+    scopeId: decodeImageGenerationScopeId(String(props.threadId)),
+  });
   const canvasClient = props.canvasClient;
   const openInSidebar = props.onOpenCanvasInSidebar;
   const canvasPlacement = placeThreadCanvases(
@@ -2136,6 +2179,33 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
     ),
     threadCanvases.cards,
   );
+  const imagePlacement = placeByTurn(
+    threadTurnSpans(
+      transcriptRows,
+      (row) => row.key,
+      (row) => (row.kind === "message" && row.entry.role === "user" ? row.at : undefined),
+    ),
+    threadImages.jobs,
+    (job) => String(job.createdAt),
+    (job) => String(job.id),
+  );
+  const imageClient = props.imageGenerationClient;
+  const imageProfiles = props.imageGenerationProfiles;
+  const saveGeneratedImage = (job: ImageJob, artifact: ImageArtifactRecord) => {
+    void props.imageGenerationClient
+      ?.save({
+        jobId: job.id,
+        attachmentId: artifact.attachmentId,
+        relativePath: `generated/${String(artifact.attachmentId).slice(0, 8)}.png`,
+      })
+      .then((result) => {
+        if (result.status === "saved") setStatus(`Saved ${result.relativePath}.`);
+        else setStatus(result.reason);
+      })
+      .catch(() => {
+        setStatus("The image could not be saved.");
+      });
+  };
 
   // Offered once: an answer either way is the thread's journaled choice.
   const artifactsOfferRow = threadArtifactsOfferRow({
@@ -2206,16 +2276,36 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
               </>
             }
             listClassName="thread-column"
-            {...(canvasClient === undefined
+            {...(canvasClient === undefined &&
+            (imageClient === undefined || imageProfiles === undefined)
               ? {}
               : {
                   afterItem: (row: WorkTranscriptRow) => (
                     <>
-                      <ThreadCanvases
-                        cards={canvasPlacement.byRow.get(row.key)}
-                        client={canvasClient}
-                        {...(openInSidebar === undefined ? {} : { onOpen: openInSidebar })}
-                      />
+                      {canvasClient === undefined ? null : (
+                        <ThreadCanvases
+                          cards={canvasPlacement.byRow.get(row.key)}
+                          client={canvasClient}
+                          {...(openInSidebar === undefined ? {} : { onOpen: openInSidebar })}
+                          {...(props.canvasOpenLabel === undefined
+                            ? {}
+                            : { openLabel: props.canvasOpenLabel })}
+                        />
+                      )}
+                      {imageClient === undefined || imageProfiles === undefined ? null : (
+                        <GeneratedImageJobs
+                          canSaveToProject
+                          client={imageClient}
+                          jobs={imagePlacement.byRow.get(row.key) ?? []}
+                          label="Images from this turn"
+                          onAttach={(file) => images.attach([file])}
+                          onEnqueued={threadImages.refresh}
+                          onSaveToProject={saveGeneratedImage}
+                          profiles={imageProfiles}
+                          scopeId={decodeImageGenerationScopeId(String(props.threadId))}
+                          threadKind="work-thread"
+                        />
+                      )}
                       {row.key === artifactsOfferRow ? (
                         <ThreadArtifactsOffer
                           onChoose={(choice) => void changeDocumentDelivery(choice)}
@@ -2437,8 +2527,35 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
                 if (props.requestClient !== undefined && row.request.detail.kind === "user-input") {
                   return (
                     <ProviderQuestionCard
+                      onDismiss={
+                        row.request.detail.questionnaire === undefined
+                          ? undefined
+                          : () => {
+                              void dismissWorkRequest(row.request);
+                            }
+                      }
+                      draftIdentity={{
+                        scope: `work-request:${String(props.threadId)}`,
+                        requestId: String(row.request.requestId),
+                      }}
+                      {...(row.request.detail.questionnaire === undefined
+                        ? {}
+                        : { questionnaire: row.request.detail.questionnaire })}
                       onAnswer={(answer) => {
-                        void answerWorkRequest(row.request, { kind: "user-input", answer });
+                        try {
+                          const detail = row.request.detail;
+                          const value =
+                            detail.kind === "user-input" && detail.questionnaire !== undefined
+                              ? decodeWorkQuestionnaireResponse(JSON.parse(answer))
+                              : answer;
+                          return answerWorkRequest(row.request, {
+                            kind: "user-input",
+                            answer: value,
+                          });
+                        } catch {
+                          setStatus("The answer contains text that Work cannot deliver.");
+                          return false;
+                        }
                       }}
                       options={row.request.detail.options.map((label) => ({ label }))}
                       prompt={row.request.detail.prompt}
@@ -2471,26 +2588,15 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
                 <div className="work-thread-workspace__transcript-trail">
                   {props.imageGenerationClient === undefined ||
                   props.imageGenerationProfiles === undefined ? null : (
-                    <GeneratedImageList
+                    <GeneratedImageJobs
                       canSaveToProject
                       client={props.imageGenerationClient}
+                      jobs={threadImages.jobs.filter(
+                        (job) => !imagePlacement.placed.has(String(job.id)),
+                      )}
                       onAttach={(file) => images.attach([file])}
-                      onSaveToProject={(job, artifact) => {
-                        void props.imageGenerationClient
-                          ?.save({
-                            jobId: job.id,
-                            attachmentId: artifact.attachmentId,
-                            relativePath: `generated/${String(artifact.attachmentId).slice(0, 8)}.png`,
-                          })
-                          .then((result) => {
-                            if (result.status === "saved")
-                              setStatus(`Saved ${result.relativePath}.`);
-                            else setStatus(result.reason);
-                          })
-                          .catch(() => {
-                            setStatus("The image could not be saved.");
-                          });
-                      }}
+                      onEnqueued={threadImages.refresh}
+                      onSaveToProject={saveGeneratedImage}
                       profiles={props.imageGenerationProfiles}
                       scopeId={decodeImageGenerationScopeId(String(props.threadId))}
                       threadKind="work-thread"
@@ -2547,6 +2653,20 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
           threadId={String(props.threadId)}
           turnActive={turnRunning}
         />
+        <ProjectMemoryProposalPrompt
+          className="thread-column"
+          client={props.memoryProposalClient}
+          threadId={String(props.threadId)}
+          turnActive={turnRunning}
+        />
+        <ImageGenerationOfferPrompt
+          className="thread-column"
+          client={props.imageGenerationClient}
+          profiles={props.imageGenerationProfiles ?? []}
+          scopeId={decodeImageGenerationScopeId(String(props.threadId))}
+          threadKind="work-thread"
+          turnActive={turnRunning}
+        />
         {pendingBrowserApproval === undefined ? null : (
           <OctantApprovalCard
             actions={
@@ -2568,7 +2688,8 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
                 {/* An upload's, a download's, or a sign-in's answer is never remembered. */}
                 {pendingBrowserApproval.upload === undefined &&
                 pendingBrowserApproval.download === undefined &&
-                pendingBrowserApproval.signIn === undefined ? (
+                pendingBrowserApproval.signIn === undefined &&
+                pendingBrowserApproval.script === undefined ? (
                   <OctantButton
                     disabled={browserApprovalBusy}
                     onClick={() => void decideBrowserApproval("approved", true)}
@@ -2882,6 +3003,14 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
                     }}
                     value={workModeOf(thread.access)}
                     warningScope={{ projectId: String(thread.projectId) }}
+                    fullAccessSandbox={thread.fullAccessSandbox === true}
+                    fullAccessSandboxSupported={threadKeepsFullAccessSandbox(
+                      props.providerGroups ?? [],
+                      thread.providerInstanceId,
+                    )}
+                    onFullAccessSandboxChange={(sandboxed) =>
+                      void changeAccess("full-access", sandboxed)
+                    }
                   />
                 )}
                 {thread === undefined ? null : (
@@ -2890,6 +3019,7 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
                     className="work-thread-workspace__bound-model"
                   >
                     <ComposerModelPicker
+                      threadId={String(thread.id)}
                       ariaLabel="Provider and model"
                       disabled={providerChanging || creating || completionLocked}
                       // Once any turn ran, the host checks the latest one

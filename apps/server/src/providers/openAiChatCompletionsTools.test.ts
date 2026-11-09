@@ -141,6 +141,64 @@ const echoTool: ProviderToolDefinition = {
 };
 
 describe("sendChatCompletionsTurn tool calls (streaming)", () => {
+  it.each(["required", undefined] as const)(
+    "uses Luna's supported reasoning mode when sending function tools with choice %s",
+    async (toolChoice) => {
+      const fetch = vi.fn(async (_url: string | URL, init?: RequestInit) => {
+        const body = JSON.parse(String(init?.body));
+        if (body.reasoning_effort !== "none") {
+          return Response.json(
+            {
+              error: {
+                type: "invalid_request_error",
+                message: "Function calling requires reasoning_effort to be none.",
+                param: "reasoning_effort",
+              },
+            },
+            { status: 400 },
+          );
+        }
+        return stream(
+          chunk(toolCallDelta(0, "call_echo", "octant_capability_echo", '{"echo":"ready"}')),
+          chunk({}, "tool_calls"),
+          usageChunk(),
+          "[DONE]",
+        );
+      });
+
+      const result = await Effect.runPromise(
+        sendChatCompletionsTurn(
+          input(fetch, {
+            modelId: "gpt-6-luna",
+            tools: [echoTool],
+            ...(toolChoice === undefined ? {} : { toolChoice }),
+          }),
+        ),
+      );
+
+      expect(fetch).toHaveBeenCalledTimes(1);
+      expect(result.terminal).toBe("tool-calls");
+      expect(result.toolCalls[0]?.toolName).toBe("octant_capability_echo");
+    },
+  );
+
+  it.each([
+    { modelId: "gpt-6-luna", tools: [] },
+    { modelId: "manual-model", tools: [echoTool] },
+  ])(
+    "preserves the reasoning default for $modelId without Luna function tools",
+    async (overrides) => {
+      const fetch = vi.fn(async (_url: string | URL, _init?: RequestInit) =>
+        stream(chunk({ content: "ready" }), chunk({}, "stop"), "[DONE]"),
+      );
+      await Effect.runPromise(sendChatCompletionsTurn(input(fetch, overrides)));
+
+      expect(JSON.parse(String(fetch.mock.calls[0]?.[1]?.body))).not.toHaveProperty(
+        "reasoning_effort",
+      );
+    },
+  );
+
   it("parses a single streamed tool call into a correlated tool-call event and tool-calls terminal", async () => {
     const observed: ProtocolTurnEvent[] = [];
     const fetch = vi.fn(async () =>

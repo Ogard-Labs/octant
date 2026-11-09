@@ -18,6 +18,8 @@ export function developerToolsAllowed(build: {
 export interface ApplicationMenuOptions {
   readonly appName: string;
   readonly onOpenSettings: () => void;
+  /** Prepare to Shut Down…: moves this computer's threads to another before it goes off. */
+  readonly onPrepareToShutDown?: () => void;
   /** `viaShortcut` is true when the ⌘Q accelerator, not a pointer click, chose Quit. */
   readonly onQuit: (request: { readonly viaShortcut: boolean }) => void;
   /**
@@ -50,6 +52,9 @@ export function buildApplicationMenuTemplate(
         { role: "hideOthers" },
         { role: "unhide" },
         { type: "separator" },
+        ...(options.onPrepareToShutDown === undefined
+          ? []
+          : [{ click: options.onPrepareToShutDown, label: "Prepare to Shut Down…" }]),
         // An explicit item (not the `quit` role) marks the quit as interactive
         // so the active-work confirmation can tell it apart from signal- or
         // event-driven termination that nobody can answer.

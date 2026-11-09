@@ -1,3 +1,5 @@
+import { RemoteSetupChecks } from "../serverProjects/remoteSetupChecks";
+import { createRemoteSetupCheckRoutes } from "../serverProjects/remoteSetupCheckRoutes";
 import { ServerPreviewTunnels } from "../serverProjects/serverPreviewTunnel";
 import { createServerPreviewTunnelRoutes } from "../serverProjects/serverPreviewTunnelRoutes";
 import { readOwnedProcessReceipts } from "../process/nodeOwnedProcessReceipt";
@@ -13,6 +15,7 @@ import { chosenAutoReviewer } from "@octant/domain/guardrail-policy";
 import { readsSecretsThenEgress } from "@octant/domain/shield-judge-policy";
 import { createAutomaticModelAccountCheck } from "../automaticModels/automaticModelAccount";
 import { createPersonMemorySweep } from "../personMemory/personMemoryWiring";
+import { createDecisionReviewModelPort } from "../turnDecisions/decisionReviewWiring";
 import { isProtectedSecretPath } from "../process/secretGuard";
 import { recordShieldReviewUsage } from "../shield/shieldUsageLedger";
 import { createRuntimeForgeChangeObserver } from "../shield/runtimeForgeChanges";
@@ -47,6 +50,7 @@ import {
   type HarnessEgressScope,
 } from "../harness/nativeHarnessComposition";
 import { createNativeHarnessSecondOpinionPort } from "../harness/nativeHarnessSecondOpinion";
+import { createBenchmarkCheckCommands } from "../benchmarks/benchmarkCheckCommand";
 import { createNativeHarnessShell } from "../harness/nativeHarnessShell";
 import { createNativeHarnessRoutingRouteHandler } from "../harness/nativeHarnessRoutingRoutes";
 import {
@@ -65,6 +69,7 @@ import {
 } from "../harness/nativeHarnessSessionRoutes";
 import { createNativeHarnessEgressRouteHandler } from "../harness/nativeHarnessEgressRoutes";
 import { NativeHarnessTurnObserver } from "../harness/nativeHarnessTurnObserver";
+import { openPromptDigester } from "../metrics/promptDigest";
 import { toTurnMetricsRecord, type TurnEndSummary } from "../metrics/turnEnd";
 import { FOLLOW_UP_SUGGESTION_INSTRUCTIONS } from "../followUps/followUpSuggestionInstructions";
 import { octantOrientation } from "../orientation/octantOrientation";
@@ -124,6 +129,7 @@ export type HarnessDependencies = Pick<ServerStart, "options" | "persistence"> &
   Pick<
     ProvidersWiring,
     | "configuredDriverOptions"
+    | "effectiveSkills"
     | "nativeHarnessLeadFallback"
     | "nativeHarnessTranscripts"
     | "providerDataDirectory"
@@ -133,13 +139,14 @@ export type HarnessDependencies = Pick<ServerStart, "options" | "persistence"> &
     HarnessStateWiring,
     | "agentRunInteractions"
     | "serverProjectStore"
+    | "serverConnection"
     | "serverRegistry"
     | "shieldHolder"
     | "nativeHarnessApprovals"
     | "nativeHarnessQuestions"
     | "nativeHarnessSessions"
   > &
-  Pick<WorkRequestStateWiring, "runningWorkTurnAccess"> &
+  Pick<WorkRequestStateWiring, "runningWorkTurnAccess" | "runningWorkTurnSandbox"> &
   Pick<
     FoundationsWiring,
     | "codeBoardEventStore"
@@ -156,6 +163,7 @@ export function wireHarness(deps: HarnessDependencies) {
     safeNetworkStore,
     agentRunInteractions,
     serverProjectStore,
+    serverConnection,
     serverRegistry,
     codeBoardEventStore,
     codeEvidence,
@@ -181,6 +189,7 @@ export function wireHarness(deps: HarnessDependencies) {
     persistence,
     providerDataDirectory,
     runningWorkTurnAccess,
+    runningWorkTurnSandbox,
     sideTasks,
     threadFollowUpSuggestions,
     toolEgressRules,
@@ -264,8 +273,16 @@ export function wireHarness(deps: HarnessDependencies) {
     windowAuthorityStore,
     store: serverProjectStore,
   });
+  const setupCheckRoutes = createRemoteSetupCheckRoutes({
+    windows: windowAuthorityStore,
+    checks: new RemoteSetupChecks({
+      servers: () => shieldServerStore.servers(),
+      agentAvailable: () => sshAgentSocket() !== undefined,
+      connection: serverConnection,
+    }),
+  });
   const serverProjectRoutes = async (request: Request) =>
-    (await previewRoutes(request)) ?? catalogRoutes(request);
+    (await setupCheckRoutes(request)) ?? (await previewRoutes(request)) ?? catalogRoutes(request);
   const runtimeRemoteCommands = new RuntimeRemoteCommands((input) =>
     shieldServerStore.recordRemoteCommand(input),
   );
@@ -596,7 +613,29 @@ export function wireHarness(deps: HarnessDependencies) {
   });
   // Every provider's turn passes through these hooks; a harness turn also
   // reaches the observer and the lead fallback.
+  // Services wired after the harness (context's compaction rules) hear every
+  // settled turn here rather than through a hook of their own in each mode.
+  const turnEndedObservers = new Set<
+    (scope: Parameters<NativeHarnessTurnObserver["turnEnded"]>[0], turn: TurnEndSummary) => void
+  >();
+  const observeTurnEnded = (
+    observer: (
+      scope: Parameters<NativeHarnessTurnObserver["turnEnded"]>[0],
+      turn: TurnEndSummary,
+    ) => void,
+  ): (() => void) => {
+    turnEndedObservers.add(observer);
+    return () => {
+      turnEndedObservers.delete(observer);
+    };
+  };
+  // Keyed with a host-local key kept in the provider data folder; a host that
+  // cannot keep the key records turns without digests.
+  const promptDigest = openPromptDigester(
+    join(providerDataDirectory, "metrics", "prompt-digest.key"),
+  );
   const nativeHarnessHooks = {
+    ...(promptDigest === undefined ? {} : { promptDigest }),
     answerQuestion: (threadId: string, questionId: string, answer: string) => {
       return nativeHarnessQuestions.answer(threadId, questionId, answer);
     },
@@ -643,6 +682,13 @@ export function wireHarness(deps: HarnessDependencies) {
         turnMetrics.record(toTurnMetricsRecord(scope, turn));
       } catch {
         // A turn whose figures the journal refused still ended for the user.
+      }
+      for (const observer of turnEndedObservers) {
+        try {
+          observer(scope, turn);
+        } catch {
+          // One observer's failure must not keep the turn's end from the rest.
+        }
       }
     },
     turnCompleted: async (input: Parameters<NativeHarnessTurnObserver["turnCompleted"]>[0]) => {
@@ -786,6 +832,13 @@ export function wireHarness(deps: HarnessDependencies) {
     scratchRoot: harnessWorkDirectory,
     protectedSecretPath: (path) => isProtectedSecretPath(path),
   });
+  const decisionReviewModelPort = createDecisionReviewModelPort({
+    persistence,
+    store: personMemory,
+    resolveDriver: resolveConfiguredDriver,
+    accountUnavailable: automaticModelAccountUnavailable,
+    scratchRoot: harnessWorkDirectory,
+  });
   // A provider runtime's own shell reports a command only as it starts, so
   // its pushes and pull-request changes are recorded, never stopped.
   const runtimeForgeChanges = createRuntimeForgeChangeObserver({
@@ -815,6 +868,7 @@ export function wireHarness(deps: HarnessDependencies) {
         ? shieldServerStore.recordTag({ threadId, tag: "reads-secrets-then-egress", command })
         : "not-tagged",
     goals: goalService,
+    skills: deps.effectiveSkills,
     questions: nativeHarnessQuestions,
     approvals: nativeHarnessApprovals,
     shield: hostShield,
@@ -856,6 +910,11 @@ export function wireHarness(deps: HarnessDependencies) {
       return instance !== undefined && isNativeHarnessDriverKind(instance.driverKind);
     },
     tasks: nativeHarnessSessions,
+    readsImages: ({ providerInstanceId, modelId }) =>
+      providerRuntimeRegistry
+        .observedState(providerInstanceId)
+        ?.models.find((candidate) => String(candidate.id) === modelId)
+        ?.inputModalities.includes("image") === true,
     shell: createNativeHarnessShell({
       process: harnessProcessPort,
       scriptDirectory: harnessScriptDirectory,
@@ -895,6 +954,17 @@ export function wireHarness(deps: HarnessDependencies) {
       codeSessionAuthority,
       codeOperationRuntime: { threadWithActiveTurnPosture: codeParentActiveTurn },
     }),
+    // A running turn keeps the sandbox it started with, so turning it off
+    // never opens commands the turn has not run yet; turning it on applies
+    // at once, since that only narrows.
+    readFullAccessSandbox: (threadId) => {
+      const code = persistence.readCodeThread(threadId as never);
+      if (code !== undefined) {
+        return (codeParentActiveTurn?.(code) ?? code).fullAccessSandbox === true;
+      }
+      const stored = workThreadProjection.read(threadId as never)?.fullAccessSandbox === true;
+      return stored || runningWorkTurnSandbox(threadId) === true;
+    },
     resolveWebSearch: () =>
       searxngHarnessWebSearch({
         readBaseUrl: () => persistence.readChatSettings()?.settings.searxngBaseUrl,
@@ -955,8 +1025,18 @@ export function wireHarness(deps: HarnessDependencies) {
     beginGoogleCliChange: googleCliCommands.beginChange,
     recoverGoogleCliCommands: () => googleCliCommands.recover(() => harnessProcessPort.reconcile()),
     credentialCommandProcess: harnessFullAccessProcessPort,
+    // The Seatbelt-confined, network-less launcher for Benchmarks check commands:
+    // a port of its own that refuses setsid(), no cloud, SSH or Google
+    // credentials, and a fresh private home and temp folder per cell.
+    benchmarkCheckCommands: createBenchmarkCheckCommands({
+      root: join(providerDataDirectory, "benchmarks", "checks"),
+      scriptDirectory: harnessScriptDirectory,
+      // The harness receipts, so a restart reaps a group a crash left.
+      receiptDirectory: join(providerDataDirectory, "harness", "receipts"),
+    }),
     prepareCredentialCommand,
     personMemorySweep,
+    decisionReviewModelPort,
     runtimeForgeChanges,
     followUpCreation,
     restartContinuation,
@@ -969,6 +1049,7 @@ export function wireHarness(deps: HarnessDependencies) {
     serverProjectRoutes,
     serverPreviewTunnels,
     nativeHarnessHooks,
+    observeTurnEnded,
     nativeHarnessSessionRoutes,
     onHarnessPausedByPerson,
     onHarnessRecoveryLifted,

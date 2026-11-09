@@ -16,11 +16,13 @@ import {
   decodeProjectId,
   decodeProjectMemoryView,
   type ActiveMemoryEntry,
+  type AgentAuthoredMemoryProvenance,
   type BoundProject,
   type ConnectedGitHubRepository,
   type DesktopCredentialRef,
   type DesktopRecipe,
   type LeasableDesktopProvider,
+  type MemoryCommand,
   type MemoryCommandResult,
   type MemoryEntry,
   type Project,
@@ -111,6 +113,9 @@ export interface ProjectServiceApi {
   readonly memory: (projectId: unknown) => Promise<ProjectMemoryView>;
   readonly executeMemory: (command: unknown) => Promise<MemoryCommandResult>;
 }
+
+/** The memory commands an agent may propose; transfer between Projects stays the person's. */
+export type AgentMemoryCommand = Exclude<MemoryCommand, { readonly kind: "transfer-memory-entry" }>;
 
 export interface ProjectServiceOptions {
   readonly persistence: PersistenceService;
@@ -366,17 +371,43 @@ export class ProjectService implements ProjectServiceApi {
 
   async executeMemory(input: unknown): Promise<MemoryCommandResult> {
     try {
-      return await this.#executeMemory(input);
+      return await this.#executeMemory(input, undefined);
     } finally {
       this.#bootstrapMemo = undefined;
     }
   }
 
-  async #executeMemory(input: unknown): Promise<MemoryCommandResult> {
+  /**
+   * Applies a memory change a thread's agent proposed and the person at a
+   * window approved, marking the entry with the thread it came from. Only the
+   * host's own approval path calls it; no route accepts agent provenance. The
+   * Project, mode, lifecycle, and version checks are the person's own.
+   */
+  async executeAgentMemory(
+    command: AgentMemoryCommand,
+    origin: AgentAuthoredMemoryProvenance,
+  ): Promise<MemoryCommandResult> {
+    try {
+      return await this.#executeMemory(command, origin);
+    } finally {
+      this.#bootstrapMemo = undefined;
+    }
+  }
+
+  async #executeMemory(
+    input: unknown,
+    agentOrigin: AgentAuthoredMemoryProvenance | undefined,
+  ): Promise<MemoryCommandResult> {
     let command: ReturnType<typeof decodeMemoryCommand>;
     try {
       command = decodeMemoryCommand(input);
     } catch {
+      throw new ProjectServiceError({
+        category: "invalid",
+        message: "Memory command is invalid.",
+      });
+    }
+    if (agentOrigin !== undefined && command.kind === "transfer-memory-entry") {
       throw new ProjectServiceError({
         category: "invalid",
         message: "Memory command is invalid.",
@@ -419,6 +450,7 @@ export class ProjectService implements ProjectServiceApi {
           actor,
           createdAt: timestamp,
           expectedVersion: command.expectedVersion,
+          ...(agentOrigin === undefined ? {} : { agentOrigin }),
         });
         result = { kind: "memory-entry-created", entry };
         eventName = "memory.entry-created@1";
@@ -433,6 +465,7 @@ export class ProjectService implements ProjectServiceApi {
           actor,
           supersededAt: timestamp,
           expectedVersion: command.expectedVersion,
+          ...(agentOrigin === undefined ? {} : { agentOrigin }),
         });
         result = { kind: "memory-entry-superseded", ...changed };
         eventName = "memory.entry-superseded@1";
@@ -794,7 +827,12 @@ export class ProjectService implements ProjectServiceApi {
           kind = "code-project-access-changed";
           eventName = "project.code-access-changed@1";
         } else if (command.kind === "change-code-project-permission-mode") {
-          project = changeCodeProjectPermissionMode(current, command.permissionMode, timestamp);
+          project = changeCodeProjectPermissionMode(
+            current,
+            command.permissionMode,
+            timestamp,
+            command.fullAccessSandbox,
+          );
           kind = "code-project-access-changed";
           eventName = "project.code-permission-mode-changed@1";
         } else if (command.kind === "change-code-project-auto-reviewer") {
@@ -888,7 +926,12 @@ export class ProjectService implements ProjectServiceApi {
           kind = "work-project-developer-tools-changed";
           eventName = "project.work-developer-tools-changed@1";
         } else if (command.kind === "change-work-project-permission-mode") {
-          project = changeWorkProjectPermissionMode(current, command.permissionMode, timestamp);
+          project = changeWorkProjectPermissionMode(
+            current,
+            command.permissionMode,
+            timestamp,
+            command.fullAccessSandbox,
+          );
           kind = "work-project-permission-mode-changed";
           eventName = "project.work-permission-mode-changed@1";
         } else if (command.kind === "change-work-project-actions") {

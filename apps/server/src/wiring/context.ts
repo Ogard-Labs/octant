@@ -1,8 +1,28 @@
-import { rememberModelBinding } from "../browser/browserAppManagedTools";
+import { mkdir, rm } from "node:fs/promises";
+import { join } from "node:path";
+import { browserAgentAvailability, browserToolTransport } from "@octant/domain";
+import {
+  createBrowserAppManagedTools,
+  BROWSER_TOOL_NAME,
+  rememberModelBinding,
+} from "../browser/browserAppManagedTools";
+import { BrowserFlowRuns } from "../browser/browserFlowRuns";
+import type { BrowserFlowCustody } from "../browser/browserAutomationService";
+import type { BrowserFlowTask } from "@octant/contracts/browser-flows";
+import {
+  browserProfileKey,
+  isToolAllowedByAllowlist,
+  storedBrowserProfile,
+  workThreadAccessOf,
+} from "@octant/domain";
+import { createHash } from "node:crypto";
 import { randomUUID } from "node:crypto";
 import { approvedWorkingFolderRoot } from "../approvedWorkingFolders";
 import {
+  decodeContextSubjectRef,
   DEFAULT_WORK_ACCESS,
+  decodeBrowserThreadId,
+  sameToolActionAuthority,
   decodeChatThreadId,
   decodeCodeThreadId,
   decodeProjectId,
@@ -13,6 +33,8 @@ import {
 import { resolveThreadWorkingDirectory } from "../threadWorkingDirectoryAuthority";
 import { chatImageScopeAllowedForWindow } from "../image/imageScopeAuthority";
 import { SessionCompactionService } from "../context/sessionCompaction";
+import { IdleCompactions } from "../context/idleCompaction";
+import { TurnEndCompactions } from "../context/turnEndCompaction";
 import { createContextRouteHandler } from "../contextRoutes";
 import { createTaskAccessFacts } from "../context/taskAccessFacts";
 import { createTaskAccessSubjectReader } from "../context/taskAccessSubject";
@@ -41,15 +63,19 @@ import { serverWorkProjectOf } from "../serverProjects/serverWorkThreads";
 export type ContextDependencies = Pick<ServerStart, "persistence"> &
   Pick<
     AuthorityWiring,
-    "browserCaptures" | "windowAuthorityStore" | "browserModelBindings" | "codeSessionAuthority"
+    | "browserCaptures"
+    | "windowAuthorityStore"
+    | "browserModelBindings"
+    | "codeSessionAuthority"
+    | "onWindowRevoked"
   > &
   Pick<AgentRunsWiring, "capacityScheduler"> &
-  Pick<HarnessWiring, "nativeHarnessHooks" | "hostShield"> &
+  Pick<HarnessWiring, "nativeHarnessHooks" | "hostShield" | "observeTurnEnded"> &
   Pick<HarnessStateWiring, "serverProjectStore"> &
   Pick<IntegrationsWiring, "agentMessageProjection"> &
   Pick<WorkspaceWiring, "contextHarness" | "projectService" | "spendCeilingService"> &
   Pick<CodeWiring, "canAccessCodeProject"> &
-  Pick<ProvidersWiring, "configuredDriverOptions"> &
+  Pick<ProvidersWiring, "configuredDriverOptions" | "providerUsageLimitsService"> &
   Pick<
     BrowserWiring,
     | "browserCredentialUseService"
@@ -65,13 +91,17 @@ export type ContextDependencies = Pick<ServerStart, "persistence"> &
   Pick<WorkWiring, "workThreadService" | "workTurnService"> &
   Pick<
     FoundationsWiring,
-    "providerRuntimeRegistry" | "workThreadProjection" | "workTurnProjection"
+    | "codeSessionConversation"
+    | "providerRuntimeRegistry"
+    | "workThreadProjection"
+    | "workTurnProjection"
   > &
   Pick<FoundationsWiring, "browserAuthority">;
 
 export function wireContext(deps: ContextDependencies) {
   const {
     agentMessageProjection,
+    onWindowRevoked,
     browserAuthority,
     browserAutomationService,
     browserCredentialUseService,
@@ -83,6 +113,7 @@ export function wireContext(deps: ContextDependencies) {
     chatService,
     codeOperationRuntime,
     codeSessionAuthority,
+    codeSessionConversation,
     configuredDriverOptions,
     contextHarness,
     liveProjectBrowsers,
@@ -91,9 +122,11 @@ export function wireContext(deps: ContextDependencies) {
     browserProfileService,
     nativeHarnessHooks,
     hostShield,
+    observeTurnEnded,
     persistence,
     projectService,
     providerRuntimeRegistry,
+    providerUsageLimitsService,
     routeCodeService,
     serverProjectStore,
     spendCeilingService,
@@ -414,6 +447,31 @@ export function wireContext(deps: ContextDependencies) {
                 occupancy: codeCompactionSessions.occupancy,
                 open: codeCompactionSessions.open,
               },
+              // Read only for a limit rule's handover summary; the runtime keeps
+              // the session itself.
+              conversation: (threadId) =>
+                codeSessionConversation(decodeCodeThreadId(threadId)) ?? [],
+              // The summary is one tool-free request, so it runs in a private
+              // host folder, never in the thread's checkout, removed once it ends.
+              scratchRoot: async (threadId) => {
+                const root = join(
+                  persistence.dataDirectory,
+                  "hand-off-scratch",
+                  String(decodeCodeThreadId(threadId)),
+                );
+                await mkdir(root, { recursive: true, mode: 0o700 });
+                return root;
+              },
+              releaseScratchRoot: async (threadId) => {
+                await rm(
+                  join(
+                    persistence.dataDirectory,
+                    "hand-off-scratch",
+                    String(decodeCodeThreadId(threadId)),
+                  ),
+                  { recursive: true, force: true },
+                );
+              },
             },
           }),
     },
@@ -429,6 +487,8 @@ export function wireContext(deps: ContextDependencies) {
       }).kind === "paused"
         ? "paused"
         : "admitted",
+    windowOpen: (windowId) =>
+      windowAuthorityStore.listWindowIds().some((open) => String(open) === String(windowId)),
     conversationOwner: (providerInstanceId) => {
       const instance = persistence.readProviderInstance(providerInstanceId);
       if (instance === undefined) return undefined;
@@ -473,7 +533,73 @@ export function wireContext(deps: ContextDependencies) {
     spendCeiling: spendCeilingService,
     uuid: randomUUID,
   });
+  const idleCompactions = new IdleCompactions({
+    compactions: sessionCompaction,
+    latestCompaction: (subject) => contextHarness.latestCompaction(subject),
+    idleMinutes: () =>
+      (persistence.readShellSettings()?.settings ?? defaultShellSettings()).autoCompactIdleMinutes,
+  });
+  const turnEndCompactions = new TurnEndCompactions({
+    compactions: sessionCompaction,
+    latestCompaction: (subject) => contextHarness.latestCompaction(subject),
+    compactionExists: (subject, compactionId) =>
+      contextHarness.compaction(subject, compactionId) !== undefined,
+    rules: () => {
+      const settings = persistence.readShellSettings()?.settings ?? defaultShellSettings();
+      return {
+        octant: settings.autoCompactOctantWindowPercent,
+        runtime: settings.autoCompactRuntimeWindowPercent,
+        limit: settings.autoCompactLimitPercent,
+      };
+    },
+    // The stored reading the usage page shows; reading it asks no provider.
+    accountWindows: (providerInstanceId) => {
+      const entry = providerUsageLimitsService
+        .snapshot()
+        .entries.find(
+          (candidate) => String(candidate.providerInstanceId) === String(providerInstanceId),
+        );
+      return entry?.status === "available" ? (entry.limits.rateLimitWindows ?? []) : [];
+    },
+  });
+  observeTurnEnded((scope, turn) => {
+    const subject = decodeContextSubjectRef({
+      aggregateType: `${scope.mode}-thread`,
+      aggregateId: scope.threadId,
+    });
+    idleCompactions.turnEnded({ subject, endedAt: turn.endedAt, windowId: scope.windowId });
+    turnEndCompactions.turnEnded({ subject, turnKey: turn.endedAt, windowId: scope.windowId });
+  });
+  const readBrowserAvailability = (windowId: WindowId, threadId: string) => {
+    const code = persistence.readCodeThread(decodeCodeThreadId(threadId));
+    const work = workThreadProjection.read(decodeWorkThreadId(threadId));
+    const chat = persistence.readChatThread(decodeChatThreadId(threadId));
+    const thread = code ?? work ?? chat;
+    const mode = code !== undefined ? "code" : work !== undefined ? "work" : "chat";
+    if (
+      thread === undefined ||
+      !browserAuthority.canAccessWindow(windowId, decodeBrowserThreadId(String(thread.id)), mode)
+    )
+      return { status: "unknown" as const };
+    const effective =
+      code === undefined
+        ? undefined
+        : (codeOperationRuntime?.threadWithActiveTurnPosture?.(
+            codeSessionAuthority.effectiveThread(windowId, code),
+          ) ?? codeSessionAuthority.effectiveThread(windowId, code));
+    const observed = providerRuntimeRegistry.observedState(
+      effective?.providerInstanceId ?? thread.providerInstanceId,
+    );
+    return browserAgentAvailability({
+      toolTransport: browserToolTransport(observed, String(effective?.modelId ?? thread.modelId)),
+      hostLendsBrowser:
+        (code !== undefined && codeOperationRuntime !== undefined) || work !== undefined,
+      toolConstraints: effective?.toolConstraints ?? code?.toolConstraints ?? [],
+      readOnly: effective?.executionPolicy === "plan",
+    });
+  };
   const taskAccessFacts = createTaskAccessFacts({
+    browser: (subject, windowId) => readBrowserAvailability(windowId, String(subject.aggregateId)),
     subject: createTaskAccessSubjectReader({
       code: (id) => persistence.readCodeThread(id),
       work: (id) => workThreadProjection.read(id),
@@ -519,7 +645,235 @@ export function wireContext(deps: ContextDependencies) {
         : persistence.readCodeThread(decodeCodeThreadId(threadId));
     return thread?.lifecycle === "active" ? thread : undefined;
   };
+  const flowTaskFacts = (
+    windowId: WindowId,
+    projectId: import("@octant/contracts").ProjectId,
+    task: Pick<BrowserFlowTask, "threadId" | "mode">,
+  ) => {
+    if (serverProjectStore.project(String(projectId)) !== undefined) return undefined;
+    const thread = taskProfileThread(String(task.threadId), task.mode);
+    if (
+      thread === undefined ||
+      thread.completedAt !== undefined ||
+      thread.snooze !== undefined ||
+      String(thread.projectId) !== String(projectId) ||
+      !browserAuthority.canAccessWindow(windowId, task.threadId, task.mode)
+    )
+      return undefined;
+    if (
+      task.mode === "code"
+        ? codeOperationRuntime?.turnInProgress?.(String(task.threadId)) !== false
+        : workTurnService.isTurnStarting(decodeWorkThreadId(String(task.threadId))) ||
+          workTurnService.isTurnActive(decodeWorkThreadId(String(task.threadId)))
+    )
+      return undefined;
+    const observed = providerRuntimeRegistry.observedState(thread.providerInstanceId);
+    if (
+      observed?.capabilities.appManagedTools !== "supported" &&
+      observed?.verifiedToolModelIds?.some((id) => String(id) === String(thread.modelId)) !== true
+    )
+      return undefined;
+    const authority = browserAuthority.resolve(task.threadId, task.mode);
+    if (authority === undefined) return undefined;
+    const code =
+      task.mode === "code"
+        ? persistence.readCodeThread(decodeCodeThreadId(String(task.threadId)))
+        : undefined;
+    const work =
+      task.mode === "work"
+        ? workThreadProjection.read(decodeWorkThreadId(String(task.threadId)))
+        : undefined;
+    if (code !== undefined) {
+      const checkout = persistence.readCodeCheckout(code.checkoutId);
+      if (
+        checkout === undefined ||
+        checkout.kind === "remote-root" ||
+        checkout.availability !== "available"
+      )
+        return undefined;
+    }
+    if (work?.completionConfirmed === true) return undefined;
+    if (!isToolAllowedByAllowlist(code?.toolConstraints ?? [], BROWSER_TOOL_NAME)) return undefined;
+    const policy =
+      code?.executionPolicy ??
+      workThreadAccessOf(work?.access ?? DEFAULT_WORK_ACCESS).executionPolicy;
+    if (policy === "plan") return undefined;
+    const inspectedContext = browserAutomationService.inspectThread(
+      windowId,
+      task.threadId,
+    ).context;
+    // A stopped/expired page does not choose the profile for a new navigation.
+    const context =
+      inspectedContext?.state === "active" || inspectedContext?.state === "creating"
+        ? inspectedContext
+        : undefined;
+    const choice = thread.browserTaskProfile ?? "private";
+    const profile =
+      context === undefined
+        ? choice === "project"
+          ? `project:${projectId}`
+          : choice
+        : browserProfileKey(storedBrowserProfile(context.policy.profile));
+    const settings = persistence.readShellSettings()?.settings ?? defaultShellSettings();
+    const digest = (value: unknown) =>
+      createHash("sha256").update(JSON.stringify(value)).digest("hex");
+    const accessLabel =
+      policy === "full-access"
+        ? "Full access"
+        : policy === "auto-accept-edits"
+          ? "Accept edits"
+          : code?.autoApprove === true || work?.access === "auto"
+            ? "Auto"
+            : "Ask first";
+    const profileLabel =
+      profile === "private"
+        ? "Private"
+        : profile === "personal"
+          ? "Personal"
+          : profile.startsWith("project:")
+            ? "Project"
+            : `Account ${profile.slice("account:".length, "account:".length + 8)}`;
+    return {
+      thread,
+      authority,
+      policy,
+      accessLabel,
+      profileLabel,
+      constraints: code?.toolConstraints,
+      fingerprint: digest({
+        authority,
+        model: thread.modelId,
+        version: thread.version,
+        profile,
+        policy,
+      }),
+      resumeFingerprint: digest({
+        context: context?.contextId,
+        contextProfile: context?.policy.profile,
+        allowedOrigins: context?.policy.allowedOrigins,
+        binding:
+          context === undefined ? undefined : browserModelBindings.get(String(context.contextId)),
+        origins: settings.rememberedBrowserOrigins,
+        profiles: settings.rememberedBrowserProfileSites,
+      }),
+    };
+  };
+  const flowRuns = new BrowserFlowRuns({
+    readFlow: (projectId, name) => browserFlowService.get(projectId, name),
+    tasks: (windowId, projectId) =>
+      [
+        ...workThreadProjection
+          .list()
+          .filter((thread) => String(thread.projectId) === String(projectId))
+          .map((thread) => ({
+            threadId: decodeBrowserThreadId(String(thread.id)),
+            mode: "work" as const,
+            title: thread.title.slice(0, 512).trim(),
+          })),
+        ...persistence
+          .readCodeThreads()
+          .filter((thread) => String(thread.projectId) === String(projectId))
+          .map((thread) => ({
+            threadId: decodeBrowserThreadId(String(thread.id)),
+            mode: "code" as const,
+            title: thread.title.slice(0, 512).trim(),
+          })),
+      ].flatMap((task) => {
+        const facts = flowTaskFacts(windowId, projectId, task);
+        return facts === undefined
+          ? []
+          : [
+              {
+                ...task,
+                modelId: facts.thread.modelId,
+                accessLabel: facts.accessLabel,
+                profileLabel: facts.profileLabel,
+              },
+            ];
+      }),
+    bindTask: (windowId, projectId, task) => {
+      const facts = flowTaskFacts(windowId, projectId, task);
+      if (facts === undefined) return undefined;
+      let custody: BrowserFlowCustody | undefined;
+      const tools = createBrowserAppManagedTools({
+        windowId,
+        threadId: task.threadId,
+        mode: task.mode,
+        modelId: String(facts.thread.modelId),
+        resolveModelId: () => taskProfileThread(String(task.threadId), task.mode)?.modelId,
+        resolveTaskProfile: () =>
+          taskProfileThread(String(task.threadId), task.mode)?.browserTaskProfile,
+        resolveAuthority: (threadId, mode) => browserAuthority.resolve(threadId, mode),
+        modelBindings: browserModelBindings,
+        executionPolicy: facts.policy,
+        ...(facts.constraints === undefined ? {} : { toolConstraints: facts.constraints }),
+        approvals: browserToolApprovalService,
+        uuid: randomUUID,
+        browser: {
+          inspectThread: (owner, threadId) =>
+            browserAutomationService.inspectThread(owner, threadId),
+          create: (command) =>
+            browserAutomationService.create({
+              ...command,
+              ...(custody === undefined ? {} : { flowRun: custody }),
+            }),
+          act: (command) =>
+            browserAutomationService.act({
+              ...command,
+              ...(custody === undefined ? {} : { flowRun: custody }),
+            }),
+          releaseThread: (owner, threadId) =>
+            browserAutomationService.releaseThread(owner, threadId),
+          snapshotRefs: (owner, threadId) => browserAutomationService.snapshotRefs(owner, threadId),
+        },
+      });
+      return {
+        fingerprint: facts.fingerprint,
+        resumeFingerprint: facts.resumeFingerprint,
+        refs: () => browserAutomationService.snapshotRefs(windowId, task.threadId),
+        execute: async (step, signal) => {
+          const result = await tools.execute({
+            name: BROWSER_TOOL_NAME,
+            inputJson: JSON.stringify(step),
+            signal,
+          });
+          return { ...result, isError: result.isError === true };
+        },
+        claim: (current) => {
+          custody = browserAutomationService.claimFlowRun({
+            windowId,
+            threadId: task.threadId,
+            mode: task.mode,
+            current: (requiresApprovedPage) => {
+              if (!current()) return false;
+              if (!requiresApprovedPage) return true;
+              const context = browserAutomationService.inspectThread(
+                windowId,
+                task.threadId,
+              ).context;
+              const binding =
+                context === undefined
+                  ? undefined
+                  : browserModelBindings.get(String(context.contextId));
+              return (
+                context?.state === "active" &&
+                binding !== undefined &&
+                binding.approval !== "pending" &&
+                String(binding.modelId) === String(facts.thread.modelId) &&
+                sameToolActionAuthority(binding.authority, facts.authority)
+              );
+            },
+          });
+          return custody;
+        },
+      };
+    },
+    uuid: randomUUID,
+    now: Date.now,
+  });
+  onWindowRevoked((windowId) => flowRuns.revokeWindow(windowId));
   const browserAutomationRoutes = createBrowserAutomationRouteHandler({
+    agentAvailability: (windowId, threadId) => readBrowserAvailability(windowId, String(threadId)),
     service: browserAutomationService,
     taskProfiles: {
       read: (threadId, mode) => {
@@ -605,6 +959,7 @@ export function wireContext(deps: ContextDependencies) {
     },
     profiles: browserProfileService,
     flows: browserFlowService,
+    flowRuns,
     extensions: browserExtensionService,
     authority: browserAuthority,
     approvals: browserToolApprovalService,
@@ -619,7 +974,9 @@ export function wireContext(deps: ContextDependencies) {
   return {
     agentMessageRoutes,
     browserAutomationRoutes,
+    flowRuns,
     contextRoutes,
+    idleCompactions,
     windowCanOpenThread,
   };
 }

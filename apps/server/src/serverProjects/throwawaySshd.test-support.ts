@@ -28,6 +28,8 @@ export interface ThrowawaySshd {
   readonly alias: string;
   /** An alias whose host key is not in the known hosts. */
   readonly unknownHostAlias: string;
+  /** An alias with a different recorded key. */
+  readonly changedHostAlias: string;
   /** An alias where nothing listens. */
   readonly closedAlias: string;
   readonly user: string;
@@ -43,7 +45,7 @@ export async function startThrowawaySshd(): Promise<ThrowawaySshd> {
   const root = realpathSync(mkdtempSync(join(tmpdir(), "octant-server-test-")));
   // A Unix socket path has a short length limit, so the agent's lives in /tmp.
   const socketRoot = realpathSync(mkdtempSync("/tmp/octant-sshd-"));
-  for (const name of ["hostkey", "userkey"]) {
+  for (const name of ["hostkey", "userkey", "otherhostkey"]) {
     spawnSync("/usr/bin/ssh-keygen", ["-q", "-t", "ed25519", "-N", "", "-f", join(root, name)]);
   }
   writeFileSync(join(root, "authorized_keys"), readFileSync(join(root, "userkey.pub")), {
@@ -98,6 +100,14 @@ export async function startThrowawaySshd(): Promise<ThrowawaySshd> {
   const hostKey = readFileSync(join(root, "hostkey.pub"), "utf8").split(" ").slice(0, 2).join(" ");
   writeFileSync(join(root, "known_hosts"), `[127.0.0.1]:${String(relayPort)} ${hostKey}\n`);
   writeFileSync(join(root, "empty_known_hosts"), "");
+  const otherHostKey = readFileSync(join(root, "otherhostkey.pub"), "utf8")
+    .split(" ")
+    .slice(0, 2)
+    .join(" ");
+  writeFileSync(
+    join(root, "changed_known_hosts"),
+    `[127.0.0.1]:${String(relayPort)} ${otherHostKey}\n`,
+  );
   const configFile = join(root, "person_config");
   writeFileSync(
     configFile,
@@ -110,6 +120,10 @@ export async function startThrowawaySshd(): Promise<ThrowawaySshd> {
       "  HostName 127.0.0.1",
       `  Port ${String(relayPort)}`,
       `  UserKnownHostsFile ${join(root, "empty_known_hosts")}`,
+      "Host changed",
+      "  HostName 127.0.0.1",
+      `  Port ${String(relayPort)}`,
+      `  UserKnownHostsFile ${join(root, "changed_known_hosts")}`,
       "Host closed",
       "  HostName 127.0.0.1",
       `  Port ${String(closedPort)}`,
@@ -121,6 +135,7 @@ export async function startThrowawaySshd(): Promise<ThrowawaySshd> {
     root,
     alias: "web1",
     unknownHostAlias: "stranger",
+    changedHostAlias: "changed",
     closedAlias: "closed",
     user: userInfo().username,
     configFile,

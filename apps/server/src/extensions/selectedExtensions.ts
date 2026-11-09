@@ -1,4 +1,4 @@
-import { revalidateExtensionSelection } from "@octant/plugin-host";
+import { resolveDraftExtensionReference, revalidateExtensionSelection } from "@octant/plugin-host";
 import type {
   ExtensionSnapshot,
   ExtensionEffectiveSnapshot,
@@ -8,6 +8,7 @@ import type { ExtensionProviderFamily } from "@octant/contracts/extensions";
 import { LOCAL_HOST_ID } from "@octant/contracts/host";
 import {
   buildCatalogs,
+  type ExtensionSelectionSubject,
   type ExtensionMaterialLoaderPort,
   type ExtensionToolExecutionPort,
   type ExtensionToolThread,
@@ -15,6 +16,7 @@ import {
 import { composeSelectedExtensionCapabilities } from "./extensionAddressingService";
 import type {
   CodeThread,
+  ProjectId,
   ProviderContextBlock,
   ProviderToolDefinition,
   WindowId,
@@ -23,6 +25,22 @@ import type {
 import type { ExtensionSelection } from "@octant/contracts/extensions";
 import type { ExtensionAddressingCatalog } from "@octant/plugin-host";
 import type { AppManagedToolSet } from "../providers/appManagedToolSet";
+import { combineAppManagedToolSets } from "../providers/appManagedToolSet";
+import type {
+  CodeToolContribution,
+  CodeToolHostPort,
+  CodeToolSet,
+} from "@octant/plugin-api/code-tools";
+import { contributedCodeToolName, createContributedCodeTool } from "@octant/plugin-host/code-tools";
+
+/** Host-created adapter input; this is never supplied by installed package code. */
+export type CodeToolHostFactory = (input: {
+  readonly windowId: WindowId;
+  readonly thread: CodeThread;
+  readonly contribution: CodeToolContribution;
+  readonly toolName: string;
+  readonly current: () => boolean;
+}) => CodeToolHostPort | undefined;
 
 export type SelectedExtensionResolver = (input: {
   readonly mode: "work" | "code";
@@ -73,9 +91,15 @@ export function createSelectedExtensionResolver(options: {
    * could never call them.
    */
   readonly carriesAppManagedTools?: (thread: WorkThread | CodeThread) => boolean;
+  readonly codeToolHost?: CodeToolHostFactory;
+  readonly currentEffectiveState?: (
+    query: ExtensionEffectiveStateQuery,
+  ) => ExtensionEffectiveSnapshot;
 }): SelectedExtensionResolver {
   return async ({ mode, thread, selections, pinnedExtensionIds, windowId }) => {
     const unavailable = (message: string) => ({ kind: "unavailable" as const, message });
+    const codeSets: CodeToolSet[] = [];
+    let delivered = false;
     try {
       const providerFamily = options.providerFamily(thread);
       if (providerFamily === undefined)
@@ -147,6 +171,48 @@ export function createSelectedExtensionResolver(options: {
       );
       scopedSelections = [...scopedSelections, ...pinned];
       if (scopedSelections.length === 0) return { kind: "resolved", context: [] };
+      const codeBindings = new Map<string, CodeToolSet>();
+      for (const selection of scopedSelections) {
+        if (selection.kind !== "plugin") continue;
+        const pkg = effectiveSnapshot.packages.find(
+          (candidate) => candidate.packageId === selection.packageId,
+        );
+        const component = pkg?.components.find(
+          (candidate) => candidate.component.id === selection.componentId,
+        );
+        const contribution = component?.component.codeTool;
+        if (pkg === undefined || component === undefined || contribution === undefined) continue;
+        if (mode !== "code" || !("executionPolicy" in thread))
+          return unavailable("Code tool contributions are unavailable outside Code.");
+        const scope = effectiveSnapshot.scope;
+        const epoch = effectiveSnapshot.catalogEpoch;
+        const current = () => {
+          const latest = options.currentEffectiveState?.({ scope });
+          const candidate = latest?.packages.find((value) => value.packageId === pkg.packageId);
+          const state = candidate?.components.find(
+            (value) => value.component.id === component.component.id,
+          );
+          return (
+            latest?.catalogEpoch === epoch &&
+            candidate?.digest === pkg.digest &&
+            candidate.version === pkg.version &&
+            candidate.extensionId === pkg.extensionId &&
+            state?.effectiveState.kind === "effective"
+          );
+        };
+        const name = contributedCodeToolName(String(pkg.packageId), contribution.id);
+        const port = options.codeToolHost?.({
+          windowId,
+          thread,
+          contribution,
+          toolName: name,
+          current,
+        });
+        if (port === undefined) return unavailable("The selected Code capability is unavailable.");
+        const set = createContributedCodeTool({ name, contribution, port });
+        codeSets.push(set);
+        codeBindings.set(`${pkg.packageId}/${component.component.id}`, set);
+      }
       const composed = await composeSelectedExtensionCapabilities({
         phase: "provider-handoff",
         selections: scopedSelections,
@@ -154,8 +220,21 @@ export function createSelectedExtensionResolver(options: {
         authoritativeCatalogEpoch: effectiveSnapshot.catalogEpoch,
         capabilityCatalog: catalogs.capabilities,
         capabilityRequest: catalogs.request,
-        loadMaterial: (entry) =>
-          options.materialLoader.load({ entry, effectiveSnapshot, snapshot }),
+        loadMaterial: (entry) => {
+          const key =
+            entry.source.kind === "plugin-package"
+              ? `${entry.source.packageId}/${entry.source.componentId}`
+              : undefined;
+          const code = key === undefined ? undefined : codeBindings.get(key);
+          if (code !== undefined) {
+            if (code.definitions.length === 0)
+              return Promise.reject(
+                new Error("The selected Code capability has no admitted operation."),
+              );
+            return Promise.resolve({ tools: code.definitions });
+          }
+          return options.materialLoader.load({ entry, effectiveSnapshot, snapshot });
+        },
       });
       if (composed.status === "blocked")
         return unavailable(`Selected extension is unavailable (${composed.reasons.join(", ")}).`);
@@ -170,23 +249,42 @@ export function createSelectedExtensionResolver(options: {
           "This provider cannot carry the selected extension's tools. Choose a model that supports Octant's tools, or remove the selection.",
         );
       }
-      const tools = selectedToolSet({
-        execution: options.toolExecution,
-        thread: {
-          id: String(thread.id),
-          projectId: String(thread.projectId),
-          // A Code turn's thread carries the posture that turn runs under.
-          planTurn: "executionPolicy" in thread && thread.executionPolicy === "plan",
-        },
-        definitions: composed.tools,
-        windowId,
-      });
-      if (tools === undefined) {
+      const codeNames = new Set(
+        codeSets.flatMap((set) => set.definitions.map((definition) => definition.name)),
+      );
+      const mcpDefinitions = composed.tools.filter((definition) => !codeNames.has(definition.name));
+      const mcp =
+        mcpDefinitions.length === 0
+          ? undefined
+          : selectedToolSet({
+              execution: options.toolExecution,
+              thread: {
+                id: String(thread.id),
+                projectId: String(thread.projectId),
+                // A Code turn's thread carries the posture that turn runs under.
+                planTurn: "executionPolicy" in thread && thread.executionPolicy === "plan",
+              },
+              definitions: mcpDefinitions,
+              windowId,
+            });
+      if (mcpDefinitions.length > 0 && mcp === undefined) {
         return unavailable("Selected extension tools are not available for execution.");
       }
+      const combined = combineAppManagedToolSets(mcp, ...codeSets);
+      const selectedNames = new Set(composed.tools.map((definition) => definition.name));
+      const tools: AppManagedToolSet = {
+        ...combined,
+        execute: (call) =>
+          selectedNames.has(call.name)
+            ? combined.execute(call)
+            : Promise.resolve({ result: { error: "extension-tool-not-selected" }, isError: true }),
+      };
+      delivered = true;
       return { kind: "resolved", context: composed.providerContext, tools };
     } catch {
       return unavailable("Selected extension could not be verified.");
+    } finally {
+      if (!delivered) await Promise.allSettled(codeSets.map((set) => set.close()));
     }
   };
 }
@@ -248,4 +346,165 @@ function pinnedSelections(
       origin: { kind: "turn" as const, reference: `pin:${projectId}` },
     }));
   });
+}
+
+/** A refusal the reader returns instead of throwing; its message is for the model. */
+interface EffectiveSkillRefusal {
+  readonly status: "refused";
+  readonly reason: string;
+  readonly message: string;
+}
+
+export interface EffectiveSkillReader {
+  readonly list: () => Promise<
+    | {
+        readonly status: "listed";
+        readonly skills: ReadonlyArray<{ readonly name: string; readonly description?: string }>;
+      }
+    | EffectiveSkillRefusal
+  >;
+  readonly load: (
+    name: string,
+  ) => Promise<
+    | { readonly status: "loaded"; readonly name: string; readonly instructions: string }
+    | EffectiveSkillRefusal
+  >;
+}
+
+/**
+ * The skills effective for one thread, read on demand. It resolves the same
+ * catalog a turn's selections are checked against and loads a skill as a `$`
+ * selection of it would, through the activation ladder, so a skill that is
+ * not effective for this thread is refused rather than loaded. It connects no
+ * MCP session and changes no install, trust, enablement, or activation.
+ */
+export function createEffectiveSkillReader(options: {
+  readonly snapshot: () => Promise<ExtensionSnapshot>;
+  readonly resolveEffectiveState: (
+    snapshot: ExtensionSnapshot,
+    query: ExtensionEffectiveStateQuery,
+  ) => ExtensionEffectiveSnapshot;
+  readonly providerFamily: (
+    providerInstanceId: ExtensionSelectionSubject["providerInstanceId"],
+  ) => ExtensionProviderFamily | undefined;
+  readonly materialLoader: ExtensionMaterialLoaderPort;
+}): (
+  subject: ExtensionSelectionSubject & {
+    readonly threadId: string;
+    readonly projectId: ProjectId | null;
+  },
+) => EffectiveSkillReader {
+  return (subject) => {
+    const unavailable: EffectiveSkillRefusal = {
+      status: "refused",
+      reason: "skills-unavailable",
+      message: "Octant could not read this thread's skills.",
+    };
+    const resolve = async () => {
+      const providerFamily = options.providerFamily(subject.providerInstanceId);
+      if (providerFamily === undefined) return undefined;
+      const snapshot = await options.snapshot();
+      const effectiveSnapshot = options.resolveEffectiveState(snapshot, {
+        scope: {
+          hostId: LOCAL_HOST_ID,
+          mode: subject.mode,
+          projectId: subject.projectId,
+          threadId: subject.threadId,
+          providerFamily,
+        },
+      });
+      return {
+        snapshot,
+        effectiveSnapshot,
+        catalogs: buildCatalogs(snapshot, effectiveSnapshot, subject),
+      };
+    };
+    return {
+      list: async () => {
+        try {
+          const resolved = await resolve();
+          if (resolved === undefined) return unavailable;
+          const effective = resolved.catalogs.addressing.skills.filter(
+            (skill) => skill.effectiveState.kind === "effective",
+          );
+          return {
+            status: "listed",
+            skills: effective.map((skill) => {
+              const description = resolved.snapshot.skills?.find(
+                (record) => String(record.skill.qualifiedId) === String(skill.skillId),
+              )?.description;
+              // Two effective skills sharing a name are told apart by the
+              // qualified id, which `load` also accepts.
+              const shared = effective.filter((other) => other.name === skill.name).length > 1;
+              return {
+                name: shared ? String(skill.skillId) : skill.name,
+                ...(description === undefined ? {} : { description }),
+              };
+            }),
+          };
+        } catch {
+          return unavailable;
+        }
+      },
+      load: async (name) => {
+        try {
+          const resolved = await resolve();
+          if (resolved === undefined) return unavailable;
+          const { snapshot, effectiveSnapshot, catalogs } = resolved;
+          const reference = resolveDraftExtensionReference(
+            `$${name}`,
+            catalogs.addressing,
+            "harness-skill-tool",
+          );
+          if (reference.kind === "ambiguous") {
+            return {
+              status: "refused",
+              reason: "skill-ambiguous",
+              message: `More than one skill is named ${name}: ${reference.candidates.join(", ")}. Load one of them by that name.`,
+            };
+          }
+          if (reference.kind !== "selected") {
+            const reason = reference.kind === "blocked" ? reference.reason : "not-found";
+            return reason === "not-found"
+              ? {
+                  status: "refused",
+                  reason: "skill-not-found",
+                  message: `No skill named ${name} is active for this thread. Call skill with operation list to see the ones that are.`,
+                }
+              : {
+                  status: "refused",
+                  reason: "skill-not-effective",
+                  message: `${name} is not active for this thread (${reason}). Loading never turns a skill on; the person decides that in Settings.`,
+                };
+          }
+          const composed = await composeSelectedExtensionCapabilities({
+            phase: "provider-handoff",
+            selections: [reference.selection],
+            addressingCatalog: catalogs.addressing,
+            authoritativeCatalogEpoch: effectiveSnapshot.catalogEpoch,
+            capabilityCatalog: catalogs.capabilities,
+            capabilityRequest: catalogs.request,
+            loadMaterial: (entry) =>
+              options.materialLoader.load({ entry, effectiveSnapshot, snapshot }),
+          });
+          const block =
+            composed.status === "blocked"
+              ? undefined
+              : composed.providerContext.find(
+                  (candidate) => candidate.kind === "skill-instructions",
+                );
+          if (block === undefined) {
+            return {
+              status: "refused",
+              reason: "skill-not-effective",
+              message: `${name} is not active for this thread. Loading never turns a skill on; the person decides that in Settings.`,
+            };
+          }
+          return { status: "loaded", name, instructions: block.text };
+        } catch {
+          return unavailable;
+        }
+      },
+    };
+  };
 }
