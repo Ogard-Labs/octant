@@ -1617,7 +1617,10 @@ shared SSH connection per server; and a thread's own worktree, made with Git on 
 pull request, opened by repository and branch name. A Work Project may be
 bound there too, in the same catalog: its Work threads run on the Octant
 Harness with file tools and commands on the server under the same rules, opened from the
-Work sidebar and composer. Not built: Work Files, research sources, the status
+Work sidebar and composer. A local window's Work Files panel lists names and
+sizes on the server with explicit Refresh and inert rows, without previews,
+editing, watching, or output attribution. Not built: Work file previews and
+editing, research sources, the status
 file and due dates, and the Project terminal for a Work Project on a server;
 extra folders; saved Project actions; a Project-level guardrail level or
 reviewer. It is tested only against a throwaway local `sshd`, never a real
