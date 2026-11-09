@@ -1,8 +1,13 @@
+import { randomUUID } from "node:crypto";
 import { readFileSync } from "node:fs";
-import { readdir, stat } from "node:fs/promises";
+import { readdir, stat, mkdir, writeFile, rename, unlink } from "node:fs/promises";
 import { join } from "node:path";
 import {
   decodeProjectId,
+  decodeBrowserAccountProfileId,
+  decodeNamedBrowserProfiles,
+  type NamedBrowserProfile,
+  type BrowserAccountProfileCreateResult,
   type BrowserProfileClearScope,
   type ImportedCookie,
   type StoredBrowserProfile,
@@ -53,6 +58,7 @@ export interface BrowserProfileStoreOptions {
 export interface StoredBrowserProfileSize {
   readonly profile: StoredBrowserProfile;
   readonly sizeBytes: number;
+  readonly label?: string;
 }
 
 export interface EnabledExtensionFolder {
@@ -62,7 +68,9 @@ export interface EnabledExtensionFolder {
 }
 
 export interface BrowserProfileStore {
-  readonly list: () => Promise<ReadonlyArray<StoredBrowserProfileSize>>;
+  readonly createAccount: (label: string) => Promise<BrowserAccountProfileCreateResult>;
+  readonly hasAccountProfile: (profileId: string) => boolean;
+  readonly list: (includeSizes?: boolean) => Promise<ReadonlyArray<StoredBrowserProfileSize>>;
   readonly clear: (profile: StoredBrowserProfile, scope: BrowserProfileClearScope) => Promise<void>;
   /** Sets each cookie in the profile's own session and counts what the session kept. */
   readonly importCookies: (
@@ -127,6 +135,17 @@ interface LoadedExtension {
 export function createBrowserProfileStore(
   options: BrowserProfileStoreOptions,
 ): BrowserProfileStore {
+  const registryFile = join(options.partitionsDirectory, "octant-account-profiles.json");
+  let accounts = readAccountProfiles(registryFile);
+  let accountWrites = Promise.resolve();
+  const partitionFor = (profile: StoredBrowserProfile): string => {
+    if (
+      profile.kind === "account" &&
+      !accounts?.some((entry) => String(entry.profileId) === String(profile.profileId))
+    )
+      throw new Error("The named Browser profile is unavailable on this host.");
+    return browserProfilePartition(profile, "");
+  };
   // Electron keeps a loaded extension for the life of the app, per session.
   const loaded = new Map<string, Map<string, LoadedExtension>>();
   // One sync at a time per profile: a load that is still pending must finish
@@ -139,7 +158,7 @@ export function createBrowserProfileStore(
     profile: StoredBrowserProfile,
     wanted: ReadonlyArray<EnabledExtensionFolder>,
   ): Promise<void> => {
-    const partition = browserProfilePartition(profile, "");
+    const partition = partitionFor(profile);
     const host = options.sessionFor(partition).extensions;
     if (host === undefined) return;
     if (!attached.has(partition)) {
@@ -173,8 +192,40 @@ export function createBrowserProfileStore(
     }
   };
   return Object.freeze<BrowserProfileStore>({
+    hasAccountProfile: (profileId) =>
+      accounts?.some((entry) => String(entry.profileId) === profileId) === true,
+    createAccount(label) {
+      const work = accountWrites.then(async (): Promise<BrowserAccountProfileCreateResult> => {
+        const name = label.trim();
+        if (name.length === 0 || name.length > 80)
+          return { status: "refused", reason: "invalid-label" };
+        if (accounts === undefined) return { status: "refused", reason: "store-unavailable" };
+        if (accounts.length >= 64) return { status: "refused", reason: "limit-reached" };
+        const profile = {
+          kind: "account" as const,
+          profileId: decodeBrowserAccountProfileId(randomUUID()),
+        };
+        const next = [...accounts, { ...profile, label: name }];
+        const temporary = `${registryFile}.${randomUUID()}.tmp`;
+        try {
+          await mkdir(options.partitionsDirectory, { recursive: true });
+          await writeFile(temporary, JSON.stringify(next), { mode: 0o600, flag: "wx" });
+          await rename(temporary, registryFile);
+        } catch {
+          await unlink(temporary).catch(() => undefined);
+          return { status: "refused", reason: "store-unavailable" };
+        }
+        accounts = next;
+        return { status: "created", profile, label: name };
+      });
+      accountWrites = work.then(
+        () => undefined,
+        () => undefined,
+      );
+      return work;
+    },
     syncExtensions(profile, wanted) {
-      const partition = browserProfilePartition(profile, "");
+      const partition = partitionFor(profile);
       const run = (queues.get(partition) ?? Promise.resolve()).then(() => syncOne(profile, wanted));
       queues.set(
         partition,
@@ -183,14 +234,13 @@ export function createBrowserProfileStore(
       return run;
     },
     extensionPage(profile, extensionId, kind) {
-      const extension = loaded.get(browserProfilePartition(profile, ""))?.get(extensionId);
+      const extension = loaded.get(partitionFor(profile))?.get(extensionId);
       if (extension === undefined) return undefined;
       const page = manifestPage(extension.path, kind);
       return page === undefined ? undefined : `chrome-extension://${extension.electronId}/${page}`;
     },
     extensionOfElectronId(profile, electronId) {
-      for (const [extensionId, extension] of loaded.get(browserProfilePartition(profile, "")) ??
-        []) {
+      for (const [extensionId, extension] of loaded.get(partitionFor(profile)) ?? []) {
         if (extension.electronId !== electronId) continue;
         return {
           extensionId,
@@ -200,44 +250,60 @@ export function createBrowserProfileStore(
       return undefined;
     },
     extensionActionScope(profile, extensionId) {
-      const extension = loaded.get(browserProfilePartition(profile, ""))?.get(extensionId);
+      const extension = loaded.get(partitionFor(profile))?.get(extensionId);
       if (extension === undefined) return undefined;
       const manifest = readManifest(extension.path);
       if (typeof manifest?.action !== "object" || manifest.action === null) return undefined;
       if (manifestPage(extension.path, "popup") !== undefined) return undefined;
       return `chrome-extension://${extension.electronId}/`;
     },
-    async list() {
+    async list(includeSizes = true) {
+      if (accounts === undefined) throw new Error("Named Browser profiles could not be read.");
+      const stored: StoredBrowserProfileSize[] = await Promise.all(
+        accounts.map(async (entry) => ({
+          profile: { kind: "account" as const, profileId: entry.profileId },
+          label: entry.label,
+          sizeBytes: includeSizes
+            ? await directorySize(
+                join(
+                  options.partitionsDirectory,
+                  browserProfilePartition(entry, "").slice("persist:".length),
+                ),
+              )
+            : 0,
+        })),
+      );
       let folders: string[];
       try {
         folders = await readdir(options.partitionsDirectory);
       } catch {
-        return [];
+        return stored;
       }
-      const stored: StoredBrowserProfileSize[] = [];
       for (const folder of folders) {
         const parsed = storedBrowserProfileOfPartitionFolder(folder);
-        if (parsed === undefined) continue;
+        if (parsed === undefined || parsed.kind === "account") continue;
         const profile: StoredBrowserProfile =
           parsed.kind === "personal"
             ? { kind: "personal" }
             : { kind: "project", projectId: decodeProjectId(parsed.projectId) };
         stored.push({
           profile,
-          sizeBytes: await directorySize(join(options.partitionsDirectory, folder)),
+          sizeBytes: includeSizes
+            ? await directorySize(join(options.partitionsDirectory, folder))
+            : 0,
         });
       }
       return stored;
     },
     async clear(profile, scope) {
       await options.closeProfilePages(profile);
-      const session = options.sessionFor(browserProfilePartition(profile, ""));
+      const session = options.sessionFor(partitionFor(profile));
       await session.clearStorageData(scope === "cookies" ? { storages: ["cookies"] } : undefined);
       if (scope === "all") await session.clearCache();
       session.flushStorageData?.();
     },
     async importCookies(profile, cookies) {
-      const session = options.sessionFor(browserProfilePartition(profile, ""));
+      const session = options.sessionFor(partitionFor(profile));
       let imported = 0;
       let skipped = 0;
       for (const cookie of cookies) {
@@ -326,4 +392,21 @@ async function directorySize(directory: string): Promise<number> {
     }
   }
   return total;
+}
+
+/** Metadata only: native account stores and names never enter the journal or artifact sync. */
+function readAccountProfiles(path: string): ReadonlyArray<NamedBrowserProfile> | undefined {
+  try {
+    const data = readFileSync(path);
+    if (data.byteLength > 64 * 1024) return undefined;
+    const profiles = decodeNamedBrowserProfiles(JSON.parse(data.toString("utf8")));
+    return new Set(profiles.map((entry) => String(entry.profileId).toLowerCase())).size ===
+      profiles.length
+      ? profiles
+      : undefined;
+  } catch (error) {
+    return typeof error === "object" && error !== null && "code" in error && error.code === "ENOENT"
+      ? []
+      : undefined;
+  }
 }

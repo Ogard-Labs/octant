@@ -1833,6 +1833,46 @@ describe("createAgentRunSessionRuntime", () => {
     expect(provider.acquired).toHaveLength(1);
   });
 
+  it("closes child-owned tools before publishing a failed acquisition outcome", async () => {
+    let closed = false;
+    const close = vi.fn(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 10));
+      closed = true;
+    });
+    const runtime = createAgentRunSessionRuntime(
+      runtimeOptions(fakeProvider(), {
+        resolveDriver: () =>
+          ({
+            acquire: () =>
+              Effect.fail({ category: "unauthenticated", message: "No credential." } as never),
+          }) as unknown as ProviderDriver,
+        appManagedTools: () => ({ definitions: [], execute: async () => ({ result: {} }), close }),
+      }),
+    );
+    const outcome = await settled(runtime.start(agentRun()));
+    expect(outcome.kind).toBe("failed");
+    expect(closed).toBe(true);
+    expect(close).toHaveBeenCalledTimes(1);
+  });
+  it("settles honestly when child-owned tool cleanup does not finish", async () => {
+    const close = vi.fn(() => new Promise<void>(() => {}));
+    const runtime = createAgentRunSessionRuntime(
+      runtimeOptions(fakeProvider(), {
+        resolveDriver: () =>
+          ({
+            acquire: () =>
+              Effect.fail({ category: "unauthenticated", message: "No credential." } as never),
+          }) as unknown as ProviderDriver,
+        appManagedTools: () => ({ definitions: [], execute: async () => ({ result: {} }), close }),
+      }),
+    );
+    expect(await settled(runtime.start(agentRun()))).toMatchObject({
+      kind: "interrupted",
+      reason: "Child-owned tool cleanup did not finish within three seconds.",
+    });
+    expect(close).toHaveBeenCalledTimes(1);
+  });
+
   it("fails closed when the provider transport cannot carry the child's tools", () => {
     const provider = fakeProvider();
     const runtime = createAgentRunSessionRuntime(

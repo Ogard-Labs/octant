@@ -19,6 +19,7 @@ import type {
   WorkThreadId,
   ProviderToolAnswer,
   ProviderTurnInput,
+  ProviderFileReviewRead,
 } from "@octant/contracts";
 import type { Effect, Scope, Stream } from "effect";
 import type { ProviderContextFactsSource, ProviderLocalUsageHistorySource } from "./contextFacts";
@@ -29,6 +30,7 @@ export type {
   ProviderToolAnswer,
   ProviderToolDefinition,
   ProviderTurnInput,
+  ProviderFileReviewRead,
 } from "@octant/contracts";
 export { ProviderOutputStopReason } from "@octant/contracts";
 
@@ -143,6 +145,8 @@ export interface ProviderSessionHandle {
 }
 
 export interface ProviderSessionResume {
+  /** Current host admission for a short-lived read; never persisted in the cursor. */
+  readonly current?: () => boolean;
   /**
    * Current allowed catalogue. Mutable runtimes reattach it without changing
    * native history; a fixed-catalogue driver refuses new or changed definitions
@@ -229,6 +233,8 @@ export interface ProviderUserInputAnswer {
 }
 
 export interface ProviderDriver {
+  /** A verified read adapter exists; acquiring still checks the exact runtime version. */
+  readonly fileReviewReads?: true;
   readonly cloudSessions?: CloudSessionDriver;
   /**
    * Provider-owned conversations must resume; host-owned APIs receive planned
@@ -296,6 +302,14 @@ export interface ProviderToolVerificationResult {
 }
 
 export interface ProviderConnection {
+  /** Supplementary provider checkpoints, with no approve/revert or Git authority. */
+  readonly readFileReview?: (input: {
+    readonly sessionId: ProviderSessionId;
+    readonly path: string;
+    readonly scopeId?: string;
+    readonly signal?: AbortSignal;
+    readonly current: () => boolean;
+  }) => Effect.Effect<ProviderFileReviewRead, ProviderFailure>;
   /** A transport may cancel one app tool while its session remains alive. */
   readonly toolRequestSignal?: (input: {
     readonly sessionId: ProviderSessionId;

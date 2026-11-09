@@ -1,3 +1,5 @@
+import { browserProfileChoiceOf } from "@octant/domain";
+import { browserProfileLabel } from "./browserProfileCopy";
 import { useEffect, useId, useRef, useState } from "react";
 import type { BrowserAutomationClient } from "@octant/client-runtime/browser-automation-client";
 import {
@@ -313,11 +315,7 @@ export function BrowserCredentialBindingControl(props: BrowserCredentialBindingC
                   <p className="break-all">Item: {fillReview.metadata.item.itemId}</p>
                   <p>
                     Profile:{" "}
-                    {fillReview.target.profile.kind === "project"
-                      ? "Project"
-                      : fillReview.target.profile.kind === "personal"
-                        ? "Personal"
-                        : "Private"}
+                    {browserProfileLabel(browserProfileChoiceOf(fillReview.target.profile))}
                   </p>
                   <p className="break-all">Exact site: {fillReview.target.topOrigin}</p>
                   <p>Top frame only. Iframes are not included.</p>
@@ -393,12 +391,7 @@ export function BrowserCredentialBindingControl(props: BrowserCredentialBindingC
                   <p className="break-all">Exact site: {review.target.topOrigin}</p>
                   <p>Top frame only. Iframes are not included.</p>
                   <p>
-                    Profile:{" "}
-                    {review.target.profile.kind === "private"
-                      ? "Private"
-                      : review.target.profile.kind === "project"
-                        ? "Project"
-                        : "Personal"}
+                    Profile: {browserProfileLabel(browserProfileChoiceOf(review.target.profile))}
                   </p>
                   <OctantSelectField
                     aria-label="Login permission scope"

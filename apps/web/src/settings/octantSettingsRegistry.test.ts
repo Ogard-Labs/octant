@@ -159,7 +159,11 @@ describe("octantSettingsRegistry", () => {
     expect(section("data")?.scope).toBe("host");
     expect(ids("data")).toEqual([
       "data-map",
+      "browser-accounts",
       "browser-profiles",
+      "browser-upload-permissions",
+      "browser-download-permissions",
+      "browser-session-permissions",
       "browser-flows",
       "browser-extensions",
       "thread-retention",

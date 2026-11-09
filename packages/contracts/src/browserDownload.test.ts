@@ -4,6 +4,7 @@ import {
   BROWSER_DOWNLOAD_EVENT_NAMES,
   decodeBrowserDownloadRefused,
   decodeBrowserDownloadSaved,
+  decodeBrowserDownloadSelectedSaved,
   MAX_BROWSER_DOWNLOAD_FILE_BYTES,
 } from "./browserDownload";
 import { Schema } from "effect";
@@ -12,9 +13,10 @@ const threadId = "d0000000-0000-4000-8000-00000000000a";
 const at = "2026-11-01T09:00:00.000Z";
 
 describe("Browser download contracts", () => {
-  it("names the two journal events and keeps the cap the upload cap", () => {
+  it("distinguishes workspace and selected-folder receipts and keeps the upload size cap", () => {
     expect(BROWSER_DOWNLOAD_EVENT_NAMES).toEqual({
       saved: "browser.download-saved@1",
+      selectedSaved: "browser.download-selected-saved@1",
       refused: "browser.download-refused@1",
     });
     expect(MAX_BROWSER_DOWNLOAD_FILE_BYTES).toBe(25 * 1024 * 1024);
@@ -31,6 +33,23 @@ describe("Browser download contracts", () => {
       savedAt: at,
     };
     expect(decodeBrowserDownloadSaved(saved)).toEqual(saved);
+    const selected = {
+      ...saved,
+      destination: {
+        approvedFolderId: `folder_${"a".repeat(64)}`,
+        label: "Project folder",
+        pathBase: "selected-root",
+      },
+    };
+    expect(decodeBrowserDownloadSelectedSaved(selected)).toEqual(selected);
+    expect(() => decodeBrowserDownloadSaved(selected)).toThrow();
+    expect(() => decodeBrowserDownloadSelectedSaved(saved)).toThrow();
+    expect(() =>
+      decodeBrowserDownloadSelectedSaved({
+        ...selected,
+        destination: { ...selected.destination, pathBase: "workspace" },
+      }),
+    ).toThrow();
     expect(() => decodeBrowserDownloadSaved({ ...saved, bytes: "AAAA" })).toThrow();
     expect(() => decodeBrowserDownloadSaved({ ...saved, sha256: "short" })).toThrow();
     expect(() =>

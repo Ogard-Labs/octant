@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { decodeCanvasExportDecideRequest, isCanvasExportImplementedFormat } from "./canvasExport";
 import {
   decodeCanvasPublicShareCreateRequest,
+  decodeCanvasPublicShareIncomingCreateRequest,
   decodeCanvasPublicShareDocument,
   decodeCanvasPublicShareId,
   decodeCanvasPublicShareOwnerSecret,
@@ -61,6 +62,27 @@ describe("a public share service address", () => {
 });
 
 describe("link terms on the wire", () => {
+  it("requires explicit owned-create identity and makes a legacy create decoder refuse it", () => {
+    const owned = {
+      schemaVersion: 1,
+      kind: "canvas-public-share-owned-create",
+      document,
+      shareId: "B".repeat(22),
+      ownerSecret: "k".repeat(43),
+      expiry: { kind: "days", days: 30 },
+    };
+    expect(decodeCanvasPublicShareIncomingCreateRequest(owned).kind).toBe(
+      "canvas-public-share-owned-create",
+    );
+    expect(() => decodeCanvasPublicShareCreateRequest(owned)).toThrow();
+    expect(() =>
+      decodeCanvasPublicShareIncomingCreateRequest({ ...owned, shareId: "short" }),
+    ).toThrow();
+    expect(() =>
+      decodeCanvasPublicShareIncomingCreateRequest({ ...owned, ownerSecret: "short" }),
+    ).toThrow();
+  });
+
   it("bounds the expiry at 365 days and the password at 8 characters", () => {
     const create = { schemaVersion: 1, kind: "canvas-public-share-create", document };
     expect(() =>

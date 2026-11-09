@@ -61,6 +61,9 @@
     "./browser-download": "./src/browserDownload.ts",
     "./browser-flows": "./src/browserFlows.ts",
     "./browser-profiles": "./src/browserProfiles.ts",
+    "./browser-session-grants": "./src/browserSessionGrants.ts",
+    "./browser-upload-permissions": "./src/browserUploadPermissions.ts",
+    "./browser-download-permissions": "./src/browserDownloadPermissions.ts",
     "./browser-extensions": "./src/browserExtensions.ts",
     "./canvas": "./src/canvas.ts",
     "./canvas-actions": "./src/canvasActions.ts",
@@ -167,6 +170,8 @@
     "./browser-page-script": "./src/browserPageScript.ts",
     "./owner-browser": "./src/ownerBrowser.ts",
     "./browser-presentation": "./src/browserPresentation.ts",
+    "./provider-file-review": "./src/providerFileReview.ts",
+    "./code-provider-file-review": "./src/codeProviderFileReview.ts",
     "./code-tool-contribution": "./src/codeToolContribution.ts"
   },
   "scripts": {

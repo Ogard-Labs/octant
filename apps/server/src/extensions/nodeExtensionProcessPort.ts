@@ -296,6 +296,8 @@ async function prepareProcessLaunch(
   sandboxPath: string,
   homeDirectory: string | undefined,
 ): Promise<{ readonly command: string; readonly args: string[] }> {
+  if (platform === "win32")
+    throw new Error("Extension processes require Windows host confinement.");
   if (input.sandbox === undefined) {
     return { command: input.command, args: [...input.args] };
   }

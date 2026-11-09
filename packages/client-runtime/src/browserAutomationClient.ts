@@ -1,4 +1,19 @@
 import {
+  BrowserDownloadPermissionsResult,
+  decodeBrowserDownloadPermissionsCommand,
+  type BrowserDownloadPermissionsCommand,
+} from "@octant/contracts/browser-download-permissions";
+import {
+  BrowserUploadPermissionsResult,
+  decodeBrowserUploadPermissionsCommand,
+  type BrowserUploadPermissionsCommand,
+} from "@octant/contracts/browser-upload-permissions";
+import {
+  BrowserSessionGrantsResult,
+  decodeBrowserSessionGrantsCommand,
+  type BrowserSessionGrantsCommand,
+} from "@octant/contracts/browser-session-grants";
+import {
   BrowserCredentialResult,
   decodeBrowserCredentialCommand,
   type BrowserCredentialCommand,
@@ -70,6 +85,18 @@ export interface BrowserAutomationClientOptions {
 }
 
 export interface BrowserAutomationClient {
+  manageDownloadPermissions?(
+    command: BrowserDownloadPermissionsCommand,
+    signal?: AbortSignal,
+  ): Promise<typeof BrowserDownloadPermissionsResult.Type>;
+  manageUploadPermissions?(
+    command: BrowserUploadPermissionsCommand,
+    signal?: AbortSignal,
+  ): Promise<typeof BrowserUploadPermissionsResult.Type>;
+  manageSessionGrants?(
+    command: BrowserSessionGrantsCommand,
+    signal?: AbortSignal,
+  ): Promise<typeof BrowserSessionGrantsResult.Type>;
   readTaskProfile?(
     input: BrowserTaskProfileReadCommand,
     signal?: AbortSignal,
@@ -313,6 +340,30 @@ export function createBrowserAutomationClient(
         "/api/browser/extensions",
         decodeBrowserExtensionsCommand(command),
         decodeHostAnswer(BrowserExtensionsResult),
+        signal,
+      ),
+    manageDownloadPermissions: (command, signal) =>
+      post(
+        options,
+        "/api/browser/download-permissions",
+        decodeBrowserDownloadPermissionsCommand(command),
+        decodeHostAnswer(BrowserDownloadPermissionsResult),
+        signal,
+      ),
+    manageUploadPermissions: (command, signal) =>
+      post(
+        options,
+        "/api/browser/upload-permissions",
+        decodeBrowserUploadPermissionsCommand(command),
+        decodeHostAnswer(BrowserUploadPermissionsResult),
+        signal,
+      ),
+    manageSessionGrants: (command, signal) =>
+      post(
+        options,
+        "/api/browser/session-grants",
+        decodeBrowserSessionGrantsCommand(command),
+        decodeHostAnswer(BrowserSessionGrantsResult),
         signal,
       ),
     manageProfiles: (command, signal) =>

@@ -3,7 +3,7 @@ import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync } from "node:
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
-import { decodeWindowId } from "@octant/contracts";
+import { decodeWindowId, decodeProjectActions } from "@octant/contracts";
 import { MAX_SERVER_PROJECTS } from "@octant/contracts/server-projects";
 import type { ShieldServer } from "@octant/contracts/shield-servers";
 import { Journal } from "../persistence/journal";
@@ -95,6 +95,120 @@ function storeOn(
 }
 
 describe("server Project catalog", () => {
+  it("keeps Work action presentation off until a local person changes it and replays that choice", async () => {
+    const journal = openJournal(scratch());
+    const store = storeOn(journal, answering(() => resolvedTo("/srv/work")).connection);
+    const bound = await store.bind({
+      name: "Notes",
+      serverId: String(web.serverId),
+      folder: "/srv/work",
+      mode: "work",
+      principal: "local-window",
+    });
+    if (bound.kind !== "changed" || bound.project === undefined)
+      throw Error("Expected fixture Project");
+    const projectId = String(bound.project.id);
+    expect(store.project(projectId)?.developerTools).toBeUndefined();
+    expect(
+      store.setDeveloperTools({ projectId, enabled: true, principal: "remote-device" }),
+    ).toMatchObject({ kind: "refused", reason: "needs-local-window" });
+    expect(
+      store.setDeveloperTools({ projectId, enabled: true, principal: "local-window" }),
+    ).toMatchObject({
+      kind: "changed",
+      project: { developerTools: { enabled: true, changedBy: { kind: "local-user" } } },
+    });
+    expect(
+      store.setActions({
+        projectId,
+        actions: decodeProjectActions([
+          {
+            id: "11111111-1111-4111-8111-111111111111",
+            name: "Check",
+            command: "echo check",
+            directory: ".",
+          },
+        ]),
+        expectedVersion: 0,
+        principal: "local-window",
+      }),
+    ).toMatchObject({ kind: "changed" });
+    const replayed = storeOn(journal, answering(() => resolvedTo("/srv/work")).connection);
+    replayed.load();
+    expect(replayed.project(projectId)).toMatchObject({
+      mode: "work",
+      actionsVersion: 1,
+      actions: [{ command: "echo check" }],
+      developerTools: { enabled: true },
+    });
+    const windowId = decodeWindowId("00000000-0000-4000-8000-000000000470");
+    const capability = "BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBA";
+    const windows = new WindowAuthorityStore();
+    windows.register({ windowId, capability, now: 0 });
+    const route = createServerProjectRouteHandler({
+      store,
+      windowAuthorityStore: windows,
+      now: () => 1,
+    });
+    const body = JSON.stringify({
+      kind: "set-server-work-developer-tools",
+      projectId,
+      enabled: false,
+    });
+    const remote = new Request("http://127.0.0.1/api/server-projects", { method: "POST", body });
+    bindPrincipalRouteContext(remote, {
+      principal: {
+        kind: "remote-device",
+        deviceId: "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee",
+      } as never,
+      scopeId: windowId,
+    });
+    expect(await (await route(remote))?.json()).toMatchObject({ reason: "needs-local-window" });
+    expect(
+      await (
+        await route(
+          new Request("http://127.0.0.1/api/server-projects", {
+            method: "POST",
+            body,
+            headers: { "x-octant-window-capability": capability },
+          }),
+        )
+      )?.json(),
+    ).toMatchObject({
+      kind: "server-projects-updated",
+      view: { projects: [{ developerTools: { enabled: false } }] },
+    });
+  });
+  it("saves only a local person's current server action list and replays it without creating a local Project", async () => {
+    const directory = scratch();
+    const server = answering(() => resolvedTo("/srv/app"));
+    const store = storeOn(openJournal(directory), server.connection);
+    await store.bind({
+      name: "App",
+      serverId: String(web.serverId),
+      folder: "/srv/app",
+      principal: "local-window",
+    });
+    const projectId = String(store.projects()[0]?.id);
+    const actions = decodeProjectActions([
+      { id: randomUUID(), name: "Build", command: "make build", directory: "." },
+    ]);
+    expect(
+      store.setActions({ projectId, actions, expectedVersion: 0, principal: "remote-device" }),
+    ).toMatchObject({ kind: "refused", reason: "needs-local-window" });
+    expect(
+      store.setActions({ projectId, actions, expectedVersion: 0, principal: "local-window" }),
+    ).toMatchObject({ kind: "changed", project: { actions, actionsVersion: 1 } });
+    expect(
+      store.setActions({ projectId, actions: [], expectedVersion: 0, principal: "local-window" }),
+    ).toMatchObject({ kind: "refused", reason: "actions-changed" });
+    const replayed = storeOn(openJournal(directory), server.connection);
+    expect(replayed.codeProject(projectId)).toMatchObject({
+      folder: "/srv/app",
+      actions,
+      actionsVersion: 1,
+    });
+  });
   it("journals the folder's real path on the server and rebuilds the catalog after a restart", async () => {
     const directory = scratch();
     const server = answering(() => resolvedTo("/srv/app"));
@@ -354,6 +468,61 @@ describe("server Project catalog", () => {
       kind: "server-projects-updated",
       view: { projects: [{ name: "App", folder: "/srv/app" }] },
     });
+    const projectId = store.projects()[0]?.id;
+    const actionBody = JSON.stringify({
+      kind: "set-server-project-actions",
+      projectId,
+      expectedVersion: 0,
+      actions: [
+        {
+          id: "11111111-1111-4111-8111-111111111111",
+          name: "Test",
+          command: "npm test",
+          directory: ".",
+        },
+      ],
+    });
+    const actionRemote = new Request(url, { method: "POST", body: actionBody });
+    bindPrincipalRouteContext(actionRemote, {
+      principal: {
+        kind: "remote-device",
+        deviceId: "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee",
+      } as never,
+      scopeId: windowId,
+    });
+    expect(await (await handler(actionRemote))?.json()).toMatchObject({
+      reason: "needs-local-window",
+    });
+    const save = () =>
+      handler(
+        new Request(url, {
+          method: "POST",
+          body: actionBody,
+          headers: { "x-octant-window-capability": capability },
+        }),
+      );
+    expect(await (await save())?.json()).toMatchObject({
+      kind: "server-projects-updated",
+      view: { projects: [{ actionsVersion: 1, actions: [{ command: "npm test" }] }] },
+    });
+    expect(await (await save())?.json()).toMatchObject({ reason: "actions-changed" });
+    expect(
+      (
+        await handler(
+          new Request(url, {
+            method: "POST",
+            body: JSON.stringify({
+              kind: "set-server-project-actions",
+              projectId,
+              expectedVersion: 1,
+              actions: [],
+              executable: "untrusted",
+            }),
+            headers: { "x-octant-window-capability": capability },
+          }),
+        )
+      )?.status,
+    ).toBe(400);
   });
 });
 

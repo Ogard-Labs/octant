@@ -185,6 +185,12 @@ describe("resolving what the right utility dock shows", () => {
         modes: ["code"],
         scope: "thread",
       },
+      {
+        id: "vitals",
+        label: "Vitals",
+        modes: ["work", "code"],
+        scope: "thread",
+      },
     ]);
   });
 

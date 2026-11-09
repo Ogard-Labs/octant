@@ -236,6 +236,152 @@ the CLI. The hub depends on that:
     Credentials held only in a login-bound store, such as a provider app's own
     sign-in, are unavailable until someone logs in, and the hub says which
     ones.
+    The Windows server/member identity prerequisite uses only the native-held
+    closed profile data root and the fixed `remote/private-listener-host-id`
+    and `remote/private-listener-host-key.pem` records. Each read/create
+    revalidates the native known-folder path, profile/control UUID and physical
+    profile/data identities, and exact current-user ownership plus private
+    user-and-SYSTEM DACLs. Reparse points, hardlinks, nonregular files and
+    malformed/oversized records refuse without replacement. The fallback host
+    UUID is separate from the profile/control UUID; an existing journaled host
+    identity and display name retain precedence. The signing contract remains
+    P-256 with SHA-256 over SPKI for its fingerprint and SHA-256/P1363 payload
+    signatures. Private bytes cross only the internal native-storage boundary,
+    never a public signing API, response, error, journal, argument or environment.
+    Key records are capped at 4 KiB; the UUID record is at most 37 UTF-8 bytes.
+    Creation is exclusive and flushed before use; a competing creation refuses
+    or reads the existing winner, never overwrites it. A partial/corrupt record
+    is unavailable and needs explicit recovery; neither restart nor a read
+    silently rotates identity. The remote directory and each admitted record
+    stay held against rename/write until actual process exit. Reading existing
+    push signing never provisions a key or fallback identity. Missing native
+    storage refuses instead of using Windows mode bits as access control.
+    The dependent listener TLS store admits only
+    `remote/private-listener-tls-key.pem` and
+    `remote/private-listener-tls-cert.pem` through the same native profile
+    checks. The P-256 TLS key is distinct from the host signing key, capped
+    at 4 KiB, exclusively created and held against writes or replacement.
+    An existing corrupt, exposed or aliased key refuses without rotation.
+    Certificates are capped at 16 KiB. First use creates the certificate
+    exclusively, like the key: a concurrent first use adopts the winner's
+    certificate rather than replacing one another ensure already returned.
+    Only renewal replaces it. A private regular certificate may be
+    renewed using a flushed, exclusively created private staging file and a
+    native handle rename into the held remote directory; an unsafe certificate
+    entry refuses. The reopened destination must retain the staging file's
+    physical identity. Renewal and restart keep the key's SPKI pin; no private
+    bytes enter arguments, environment, journal, logs or public status.
+    Explicit listener key transitions refuse on this store: their staged key
+    and in-place key replacement are ordinary owner-only files, which native
+    storage does not admit.
+    Missing native TLS storage refuses instead of falling back to ordinary
+    Windows file operations. Certificate reads release their file handles so
+    renewal can replace the public certificate; the key and directory guards
+    remain held until process exit.
+    The roster signer has a separate fixed native operation for
+    `hub/roster-signing-key.pem` under that same profile boundary. Its P-256
+    PKCS#8 key is at most 4 KiB, exclusively created and held with its hub
+    directory until process exit. Reads and creation revalidate native
+    profile/physical-directory identity, ownership and private DACLs.
+    Empty, corrupt, wrong-curve, exposed or aliased keys refuse without
+    replacement or permission repair. The public port retains base64url SPKI
+    and SHA-256/P1363 signatures; transfer buffers are erased after import.
+    Restarts and concurrent first-use preserve the existing key. Missing native
+    roster storage refuses on Windows before ordinary-file operations.
+    The three mutable authority records, `hub/hub-state.json`,
+    `hub/delegations.json` and `hub/tailscale-certificate.json`, use closed native
+    storage ports on this same physical profile. Their domain schemas, history
+    retention and positive-missing defaults stay owned by their existing stores.
+    Corrupt UTF-8, invalid JSON/schema, unsafe records and I/O failures refuse;
+    a save never resets or overwrites such a record. Missing native storage on
+    Windows refuses before ordinary-file access.
+    Native transfers use opaque environment/profile/purpose-bound sessions with
+    sequential offsets and at most 16 KiB per chunk. Safe-integer lengths and
+    exact completion preserve existing state sizes without new product limits.
+    Read sessions hold an immutable snapshot. Only the currently claimed native
+    host owner in that same process, environment and profile may replace state;
+    merely preparing an owner grants nothing. Open and commit revalidate the
+    native owner PID/birth record, private DACLs and physical profile identity.
+    A replacement is exclusively staged and flushed, then renamed into the
+    fixed leaf with native POSIX replacement semantics and checked against the
+    reopened file identity. Existing read snapshots cannot block a newly
+    committed revocation; a new read sees the replacement. The private stage
+    excludes competing writers and deletion, permits snapshot readers, and is
+    fully flushed before publication with no later content writes. Read handles
+    share the publisher's existing write access so its final rename/flush/close
+    interval cannot make a complete visible snapshot temporarily unreadable.
+    This sharing grants no file permissions. Snapshot readers do
+    not erase old lawful bytes. Owner loss aborts writes, environment teardown
+    closes its sessions, and incomplete or invalid transfers discard their stage.
+    The physical hub directory stays held for the process lifetime. Store calls
+    remain synchronous inside the single owner process; services retain their
+    existing reload and cancellation-generation fences across asynchronous work.
+    Foreground host storage trusts the unconfined local account as an owner,
+    as its private control endpoint already does. Private owner-and-SYSTEM
+    ancestors, native owner exclusion and per-open unsafe/reparse/hardlink
+    refusal protect this boundary. A connection's actual main SQLite handle
+    must match its native admission before application SQL. Ordinary SQLite
+    keeps its WAL/SHM/rollback lifecycle and connection sharing; native main-file
+    guards end after actual connection close so migration recovery may replace
+    the store. Foreign read-only consumers, checkpoints, migration snapshots,
+    restore and crash recovery must retain their behavior. The existing bounded
+    backup labels resolve only to the native-owned main database's backup family;
+    its restore stage is fixed to the current process. Native no-create inspection
+    checks main, backup, stage and sidecar aliases before lifecycle operations,
+    and backup verification uses the same actual-handle admission as the live
+    connection. Existing VACUUM and atomic copy/rename recovery run under the
+    held private profile and claimed owner, with inspection before mutation and
+    native admission on reopening. These checks rely on the stated local-owner
+    trust boundary, rather than excluding arbitrary same-account programs.
+    Foreground composition also uses four closed native boot files: bridge and
+    host-info projections in the data directory, service policy in config, and
+    bounded service logs in logs. Existing schemas, limits, redaction and log
+    cursors remain authoritative. Discovery may read without claiming the host;
+    writes and removal require its actual current owner. The child receives the
+    existing bridge-secret launch seed and publishes its projections after
+    acquisition; the desktop never writes on its behalf. Cleanup checks the
+    expected instance and bridge value before removing only those two leaves.
+    UTF-8 failure or unsafe reads refuse instead of becoming empty/default state.
+    Bun connections use immediate close that finalizes all outstanding prepared
+    statements; a failed close retains its native guard. A deferred SQLite close
+    is insufficient because an ordinary cached statement can retain the file
+    past the application connection's lifetime.
+    This boundary does not protect from other unconfined programs running as
+    the same owner. Admitted remote clients, provider replies and plugins must
+    have no store-path mutation route. Work and Code stay refused until their
+    native confinement also denies the entire private profile. The authoritative
+    Work-turn and Code-command/operation entry points refuse Windows before
+    launch or journal mutation, including background routine calls; Full access
+    cannot bypass this gate. Provider process preparation refuses Windows before
+    its unconfined Full-access branch. Native experiments do not admit foreground
+    or desktop startup.
+    The Windows foreground entry resolves the fixed native artifacts from the
+    actual portable resources layout, claims the selected native profile before
+    server/persistence imports, and composes its journal, usage cache, private
+    authority stores, closed credential namespaces, logs and discovery ports.
+    It serves loopback Chat and keeps Work/Code and executable extensions refused.
+    CLI-backed provider construction is unavailable before catalog or session
+    work; only existing in-process API providers are composed. This also keeps
+    catalog/version discovery from launching a third-party executable at boot.
+    Linked secret-store state remains unavailable until it has native private
+    admission. Ready requires real native journal migration; owned local control
+    mediates verified backup and graceful drain. A stop callback waits for its
+    exact authenticated native connection's written-response/closed receipt,
+    so releasing the owner cannot discard a queued acknowledgement. The existing
+    bounded transport retires a peer that never reads; an unwritten or unrelated
+    connection cannot dispatch a stop. Shutdown reports unconfirmed
+    projection cleanup and always attempts native owner release even if broker
+    shutdown fails. Foreground admission needs actual entrypoint ready, authority
+    refusal, verified-backup and joined-listener/process cleanup evidence for
+    both profiles; desktop and Nightly bootstrap have their own additional gates.
+    Hosted native QA keeps the pinned runtime versions. When GitHub release
+    delivery fails, the same Bun version may come from its official npm Windows
+    artifact, verified against a pinned SHA-512 before extracting its sole regular
+    executable into the isolated runner's temporary directory. Version and platform
+    are checked before use; this changes test setup only.
+    Native storage mechanisms alone do not admit Windows desktop/server startup;
+    encrypted-disk setup checks and the boot service
+    remain separate composition and acceptance work.
   - **The machine itself.** The hub's setup turns on starting up after a
     power failure where the platform allows it, and explains what full-disk
     encryption asks at boot. FileVault, and LUKS with a passphrase, ask for a
@@ -244,14 +390,16 @@ the CLI. The hub depends on that:
     restart on macOS), and after a power cut someone unlocks the machine once.
     BitLocker with a TPM, and LUKS unlocked by a TPM, boot unattended. A
     standby keeps the members working meanwhile.
-  - **Windows.** Windows has no Octant design yet. The Windows parts of
-    this design (the Windows service and the access-list key file) are built
-    only when the Windows track starts, after the macOS preview and Linux
-    self-update evidence, as the
-    [release boundary](../architecture.md#current-release-boundary) orders.
-    Even then, a Windows hub runs the hub role, the web app, and the hub's
-    services; running agents on Windows waits for an approved Windows
-    confinement design.
+  - **Windows.** The native track is active. Its private profile, owner/control,
+    identity, credential and storage boundaries compose the foreground host
+    described above. Desktop and Nightly consumers require their own actual
+    bootstrap evidence. Boot-service installation and encrypted-disk setup
+    remain separate from this foreground implementation. Work, Code and
+    executable extensions remain unavailable until native confinement denies
+    the private profile and proves its filesystem, network and process-lifecycle
+    boundaries. The [platform release boundary](../architecture.md#current-release-boundary)
+    owns those admission requirements; storage or packaging evidence alone
+    does not grant them.
 
 - **Serves the web app.** The hub's private listener, on its Tailscale or LAN
   address, serves the same web app the desktop window shows. A phone or
@@ -1087,6 +1235,30 @@ an unlock on the source as well keeps a stolen phone without the person's
 face, finger, or passcode from even spending a confirmation there. The
 waits live in memory only, so a restart ends them and the person asks again.
 
+**Telling the phone a move waits.** When a move starts waiting, the source
+tells its owner phones through the phone notification path it already uses for
+a waiting approval ([Mobile maturity: delivery path](mobile-maturity.md#delivery-path),
+and the [push sender on the hub](#push-sender-on-the-hub) when the spoke ticked
+Push); nothing else is contacted. It sends one notification per wait, never
+one per thread: a Prepare to shut down batch for one destination is one
+notification, and a batch across destinations sends one for each destination,
+since each is its own confirmation. It goes only to the paired devices this
+host made for guests on its own owner list, the phones that can confirm here,
+and only to one whose Approval needed setting is on; a device paired with the
+source some other way hears nothing. The sealed text says only that a move
+waits and the destination's name ("A move is waiting for your phone", "To
+Office iMac"), with no thread title whatever the phone's thread-names
+setting, and tapping it opens the phone's Computers screen, where Moves
+waiting for you reads the held threads from each computer itself. With
+Notifications off, or no phone registered, nothing is sent and nothing fails:
+the list still shows the wait when the person opens the app. Each delivery is
+journaled as a receipt naming the device, the outcome, and the time, but no
+thread and no wait, since the wait lives in memory only. Rationale: an owner
+can already read the held threads' titles from the list, so leaving them out
+of the notification costs nothing and keeps them off a lock screen; and
+reusing the approval path keeps the phone's own Notifications choices, the
+hub's grant, and the rate limit in charge.
+
 **A browser passkey does not confirm a move, and none is planned.** A passkey belongs to the one
 origin that registered it, and the destination checks a passkey owner only on
 its own origin, so a browser on the source's page holds no passkey the
@@ -1213,9 +1385,21 @@ for Move after this turn.
   move would send now: the thread bundle exactly, and for a Code thread
   about its Git bundle, read as the on-disk size of the objects the head
   reaches that no remote-tracking ref holds plus each changed or untracked
-  file Git does not ignore, counted once at its size on disk. Reading it
-  packs, freezes, and writes nothing (not even the index's stat cache), and a
-  thread that cannot be measured shows **Size unknown** and still moves. The
+  file Git does not ignore, counted once at its size on disk. The bulk parts
+  count too, exactly the ones a move would carry: each attachment, admitted
+  original input, generated image, and Browser capture at the byte size its
+  store recorded, and each owned Canvas as the very text its part would hold,
+  read from the versions the Canvas projection already holds (a Canvas records
+  no byte size). An admitted input is sized through the same scope check as
+  the reader that packs it, so one that would stay behind (its source thread
+  moved to another Project, or its attachment is gone or no longer the one the
+  turn recorded) is not counted; a part whose bytes turn out unreadable only
+  when the move reads them is counted and then stays behind as above. Reading
+  it packs, freezes, and writes nothing (not even the index's stat cache), and
+  reads no part's bytes. A thread that cannot be measured shows **Size
+  unknown** and still moves; a kind of part whose sizes cannot be read leaves
+  the rest measured, is left out of the total, and shows its row as **Size
+  unknown**, and it never holds the move back. The
   estimate divides the size by the rate the latest full chunks to that
   member reached (up to the last 32 full 512 KiB chunks, kept while the host
   runs), or by an assumed 1 MiB a second when no full chunk to that member
@@ -1332,12 +1516,43 @@ remove. The thread's local branch and every remote stay. It journals
 `thread.moved-out-worktree-removed@1` on the move and records the removal on
 the departure; a second press answers `removed` without removing or journaling
 again, and a folder already gone counts as removed. No agent, routine, tool,
-peer, or paired device reaches it. **Open there** copies the moved thread's
-link in the form an Octant phone opens
+peer, or paired device reaches it.
+
+**Open there** opens the moved thread on the destination's own web app, in
+the person's default browser, not in this window. The page is the
+destination's web app origin, as its signed roster entry names it (H15:
+`https://`, its first `.ts.net` name, and its listener port), with the
+continue link that member's paired-browser screen reads at load
+(`?continueMode={mode}&continueThread={thread}`), which opens a Chat, Work,
+or Code thread by its id with no Project. That page admits the browser the
+way it already would there (a guest, an owner's passkey) or asks it to pair,
+so this computer grants nothing and the destination judges every action as
+it does for any browser. The status route reports the destination's web
+origin beside its name, read from the roster this host holds when asked, so
+a member that left the hub or lists no Tailscale name has none. The window
+names only the thread to a desktop channel (`thread-move:open-there`); the
+desktop main process asks the host for that thread's status with the
+window's own capability (a window that does not show the thread is refused
+as for every departure route), builds the page from the reported origin and
+destination thread, refuses anything but https on a `.ts.net` name with no
+path, query, or credentials of its own, and hands it to the default browser
+through its validated open-external path. No departure records a
+destination Project, because the page needs none. When there is no web
+origin, the window has no such channel, or the desktop refuses, Open there
+copies the moved thread's link in the form an Octant phone opens
 (`octant://hosts/{member}/threads/{mode}/{thread}`; a member is named by its
-host id). Rationale: no window path yet opens another computer's thread from
-what a departure records, which names no destination Project, so opening it in
-this window when the window already reads that host is not built yet.
+host id), and the line under it says this window can't open threads on that
+member and that the Octant phone app opens the link. Rationale (checked
+2026-11-09): no window shows a thread another member holds in place. A
+pane's content always comes from the window's own host, whose context is
+always this computer; a pane's host id only marks a thread as elsewhere and
+refuses it, and the federated paired computers a desktop window reads carry
+Running services and resources, not threads. Handing the `octant://` link to
+the system does not help either: the desktop app registers the scheme, but
+its handler takes only `octant://code/` links and ignores every other one.
+The destination's own page is the one existing view of its threads, so Open
+there uses it; a view of another member's thread inside this window is not
+built.
 
 **Interruptions.**
 
@@ -2635,9 +2850,13 @@ a numbered slice. Built, with these narrower readings:
     [Erase on the source](#moving-a-thread-to-another-member) describes.
     The shell opens a departed thread's pane again after it closed, so an old
     link, a notification, or a search reaches the tombstone. A remote client,
-    or a window reading another host, shows neither. What it
-    does not do yet: Open there opening the thread in this window, and the
-    estimate in the bar.
+    or a window reading another host, shows neither. Open there opens the
+    thread on the destination's own web app in the default browser, and
+    copies its link when the destination serves no web app, as
+    [the tombstone rules](#moving-a-thread-to-another-member) record. What it
+    does not do yet: Open there opening the thread inside this window, which
+    waits on a window view of another member's thread, and the estimate in
+    the bar.
 
     The eleventh part lets an owner phone unlock a move a window started, as
     [Confirming on a phone](#moving-a-thread-to-another-member) describes.
@@ -2664,9 +2883,19 @@ a numbered slice. Built, with these narrower readings:
     unlock, a challenge bound to another body, an administration session on
     the ticket route, a ticket for other threads, and a phone removed from
     the destination's owner list after the ticket. What it does not do yet:
-    a notification telling the phone a move waits (the person opens the
-    app) and a run on a real phone, which is a maintainer gate. A browser
-    passkey confirming a move is not planned (above).
+    a run on a real phone, which is a maintainer gate. A browser
+    passkey confirming a move is not planned (above). The source now
+    tells its owner phones when a move starts waiting, as
+    [Telling the phone a move waits](#moving-a-thread-to-another-member)
+    describes: a held move is its own sealed notification kind
+    (`move-waiting`, no thread, high urgency) with its own receipt, and the
+    phone's native openers link it to `octant://hosts/<host>/moves`, which
+    opens the Computers screen. Server tests cover one notification per
+    wait for a single thread and a three-thread batch, owner phones only,
+    a phone with approvals off, and nothing sent or failed with
+    Notifications off; a spoke smoke covers which devices count as owner
+    phones; the phone's tests cover the link. Delivery to a real phone is
+    part of the same maintainer gate.
 
     A further part carries each thread's bulk parts with every move, in all
     three modes, as described under **What moves**. The source packs a Chat
@@ -2682,7 +2911,7 @@ a numbered slice. Built, with these narrower readings:
     same journal unit, then records the images, captures, and Canvases under
     ids derived from the move and the part, so a finish asked again records
     each once; a part it cannot record answers `transfer-failed`. The move
-    sheet lists these parts under What moves, without their sizes yet.
+    sheet lists these parts under What moves as one row with their size.
 
     Sizes and an estimate are built for the move sheet and Prepare to shut
     down. Two read-only window routes,
@@ -2692,15 +2921,19 @@ a numbered slice. Built, with these narrower readings:
     threads and answer each thread's size, by part, with the rate to that
     destination as described under
     [What moves](#moving-a-thread-to-another-member); at most four threads
-    are measured at once. The move sheet's What moves rows show the
-    conversation's and the checkout's sizes, with a total line, the
-    estimate, and its basis, and it opens and moves without waiting for
-    them. Prepare to shut down measures the rows its destination can take
-    when the list or the destination changes, shows each row's size, and
-    adds the total and estimate of the rows set to move to its summary,
-    with the basis under it. What it does not do yet: the conversation's
-    turn count and the branch's commit and `+`/`-` counts beside the sizes,
-    and the sizes of bulk parts, which the measure does not count yet.
+    are measured at once. Each answer lists the size of every kind of part
+    the move would carry, bulk parts included, and a thread whose bulk-part
+    sizes could not all be read answers `partly-measured`, naming the kinds
+    left out. The move sheet's What moves rows show the conversation's, the
+    bulk parts', and the checkout's sizes (a row whose parts could not be
+    sized reads Size unknown), with a total line, the estimate, and its
+    basis, and it opens and moves without waiting for them. Prepare to shut
+    down measures the rows its destination can take when the list or the
+    destination changes, shows each row's size ("At least" what was measured
+    for a partly measured thread), and adds the total and estimate of the
+    rows set to move to its summary, with the basis under it. What it does
+    not do yet: the conversation's turn count and the branch's commit and
+    `+`/`-` counts beside the sizes.
 
     The tenth part is Stop and move and the rest of Prepare to shut down's
     choices. The window's start and the batch's start take a `stop-and-move`

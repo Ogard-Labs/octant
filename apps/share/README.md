@@ -84,6 +84,30 @@ app or a third-party service that implements the wire contract published in
 [`@octant/contracts/canvas-public-share`](../../packages/contracts/src/canvasPublicShare.ts):
 `POST /api/v1/shares`, `PUT|DELETE|GET /api/v1/shares/<id>`, and
 `POST /api/v1/shares/<id>/reports`, plus the viewer pages on a separate origin.
+Current Octant hosts use `canvas-public-share-owned-create` on the create
+endpoint, with a host-generated 22-character share id and 43-character owner
+secret committed locally before upload. Update an older service before using
+these hosts: the host refuses unsupported owned-create and never falls back to
+legacy creation. The reference service continues to accept legacy
+`canvas-public-share-create` from older clients.
+
+An owned-create retry must keep the exact id, owner, document, expiry and
+password terms. Identical retries return the original receipt without mutation;
+a different request for that id returns 409 after owner authentication, and a
+wrong owner returns 403. The service persists only an owner hash and an
+owner-keyed request digest, not the secret or plaintext password.
+
+For owned-create, the id is URL-safe base64 of the first 16 bytes of SHA-256 over
+UTF-8 `octant-canvas-public-share-id-v1`, a NUL byte, then the 43-character owner
+secret. The service verifies that proof before accepting a document. A DELETE
+for a missing id may persist a cancellation only when its bearer proves that
+exact id. Its durable owner-hash tombstone fences late uploads, including after
+password hashing or restart; the same owner can repeat DELETE, a wrong owner
+receives 403. New missing-id cancellations consume both existing create and owner
+rate limits. The existing 90-day tombstone retention is unchanged. Clients must
+retain uncertain ownership on generic 403/404; those replies do not acknowledge
+cancellation.
+
 A plain file host or pastebin does not qualify — it must render the Canvas
 document. To share a single Canvas as Markdown instead of a rendered page, use
 the built-in **GitHub Gist** export, which needs no share service.

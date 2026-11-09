@@ -18,6 +18,52 @@ const authority = {
 };
 
 describe("BrowserAutomationClient", () => {
+  it("sends local session-permission commands and rejects malformed permission scope", async () => {
+    const fetch = vi
+      .fn()
+      .mockResolvedValueOnce(Response.json({ kind: "browser-session-grants", grants: [] }))
+      .mockResolvedValueOnce(
+        Response.json({ kind: "browser-session-grants", grants: [{ grantId: "invalid" }] }),
+      );
+    const client = createBrowserAutomationClient({
+      baseUrl: "http://127.0.0.1:13773",
+      fetch,
+      windowCapability: capability,
+    });
+    const manage = client.manageSessionGrants;
+    if (manage === undefined) throw Error("Missing session-permission route");
+    await expect(manage({ kind: "list" })).resolves.toEqual({
+      kind: "browser-session-grants",
+      grants: [],
+    });
+    expect(String(fetch.mock.calls[0]?.[0])).toBe(
+      "http://127.0.0.1:13773/api/browser/session-grants",
+    );
+    await expect(manage({ kind: "list" })).rejects.toMatchObject({ category: "protocol" });
+  });
+  it("sends local upload-manifest commands and rejects malformed permission scope", async () => {
+    const fetch = vi
+      .fn()
+      .mockResolvedValueOnce(Response.json({ kind: "upload-permissions", permissions: [] }))
+      .mockResolvedValueOnce(
+        Response.json({ kind: "upload-permissions", permissions: [{ permissionId: "invalid" }] }),
+      );
+    const client = createBrowserAutomationClient({
+      baseUrl: "http://127.0.0.1:13773",
+      fetch,
+      windowCapability: capability,
+    });
+    const manage = client.manageUploadPermissions;
+    if (manage === undefined) throw Error("Missing session-permission route");
+    await expect(manage({ kind: "list" })).resolves.toEqual({
+      kind: "upload-permissions",
+      permissions: [],
+    });
+    expect(String(fetch.mock.calls[0]?.[0])).toBe(
+      "http://127.0.0.1:13773/api/browser/upload-permissions",
+    );
+    await expect(manage({ kind: "list" })).rejects.toMatchObject({ category: "protocol" });
+  });
   it("strictly decodes task-profile transaction results and preserves host refusals", async () => {
     const selection = { threadId, mode: "code", version: 2, profile: "personal" };
     const fetch = vi
@@ -413,4 +459,24 @@ describe("BrowserAutomationClient", () => {
       }),
     ).resolves.toBe(false);
   });
+});
+
+it("sends a strict download manifest command through authenticated transport and decodes the host result", async () => {
+  const request = vi.fn(async (_url: RequestInfo | URL, init?: RequestInit) => {
+    expect(new Headers(init?.headers).get("x-octant-window-capability")).toBe(capability);
+    expect(JSON.parse(String(init?.body))).toEqual({ kind: "list" });
+    return Response.json({ kind: "download-permissions", permissions: [] });
+  });
+  const client = createBrowserAutomationClient({
+    baseUrl: "http://127.0.0.1:13773",
+    windowCapability: capability,
+    fetch: request,
+  });
+  expect(await client.manageDownloadPermissions?.({ kind: "list" })).toEqual({
+    kind: "download-permissions",
+    permissions: [],
+  });
+  expect(String(request.mock.calls[0]?.[0])).toBe(
+    "http://127.0.0.1:13773/api/browser/download-permissions",
+  );
 });

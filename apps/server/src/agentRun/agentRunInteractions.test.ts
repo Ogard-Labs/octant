@@ -166,6 +166,20 @@ describe("a child under a parent Octant Shield reviews", () => {
 });
 
 describe("managed child interactions", () => {
+  it("allows reviewing a waiting child's session without allowing that child to execute", () => {
+    let live: AgentRun = { ...run, lifecycleStatus: "waiting" };
+    const interactions = createAgentRunInteractions({
+      parentLead,
+      parentAuthority: () => run.authority,
+      getById: () => live,
+      approvals: { ask: vi.fn() },
+      questions: { ask: vi.fn() },
+    });
+    expect(interactions.canReviewSession(run)).toBe(true);
+    expect(interactions.isCurrent(run)).toBe(false);
+    live = { ...live, lifecycleStatus: "completed" };
+    expect(interactions.canReviewSession(run)).toBe(false);
+  });
   it.each(["provider", "octant"])(
     "refuses a pending %s approval after the parent changes to Plan",
     async (harness) => {

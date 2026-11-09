@@ -21,7 +21,7 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { connect, type TLSSocket } from "node:tls";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { nodeServe } from "../nodeServe";
 import { validatePrivateListenerTls } from "../privateListener";
 import { certificatePem, encodeListenerCertificate } from "./listenerCertificateDer";
@@ -144,6 +144,191 @@ function ready(
   if (result.status !== "ready") throw new Error(`expected a certificate, got ${result.code}`);
   return result;
 }
+
+describe("native private listener TLS storage", () => {
+  it("preserves the separate native key and pin across restart and certificate renewal", () => {
+    const directory = dataDirectory();
+    const records = new Map<string, Buffer>();
+    const read = (purpose: "key" | "certificate") => {
+      const bytes = records.get(purpose);
+      return bytes === undefined
+        ? { status: "missing" as const }
+        : { status: "ready" as const, bytes: Buffer.from(bytes) };
+    };
+    const files = {
+      dataDirectory: directory,
+      read,
+      createKey: vi.fn((bytes: Buffer) => {
+        if (!records.has("key")) records.set("key", Buffer.from(bytes));
+        return read("key");
+      }),
+      createCertificate: vi.fn((bytes: Buffer) => {
+        if (!records.has("certificate")) records.set("certificate", Buffer.from(bytes));
+        return read("certificate");
+      }),
+      replaceCertificate: vi.fn((bytes: Buffer) => {
+        records.set("certificate", Buffer.from(bytes));
+        return read("certificate");
+      }),
+    };
+    const first = ready(
+      createSelfMadeListenerCertificateStore({
+        dataDirectory: directory,
+        tlsFiles: files,
+        now: () => START,
+      }).ensure("100.64.0.7"),
+    );
+    expect(files.createKey).toHaveBeenCalledTimes(1);
+    expect(files.createCertificate).toHaveBeenCalledTimes(1);
+    expect(files.replaceCertificate).not.toHaveBeenCalled();
+    const restarted = ready(
+      createSelfMadeListenerCertificateStore({
+        dataDirectory: directory,
+        tlsFiles: files,
+        now: () => START,
+      }).ensure("100.64.0.7"),
+    );
+    expect(restarted.tls.key === first.tls.key).toBe(true);
+    expect(restarted.tls.cert === first.tls.cert).toBe(true);
+    expect(restarted.tlsPin).toBe(first.tlsPin);
+    const renewed = ready(
+      createSelfMadeListenerCertificateStore({
+        dataDirectory: directory,
+        tlsFiles: files,
+        now: () => new Date(START.getTime() + 340 * DAY_MS),
+      }).ensure("100.64.0.7"),
+    );
+    expect(renewed.tls.key === first.tls.key).toBe(true);
+    expect(renewed.tlsPin).toBe(first.tlsPin);
+    expect(renewed.tls.cert).not.toBe(first.tls.cert);
+    expect(files.createKey).toHaveBeenCalledTimes(1);
+    expect(files.replaceCertificate).toHaveBeenCalledTimes(1);
+    expect(readdirSync(directory)).toEqual([]);
+    // Key transitions stage the next key as an ordinary owner-only file under
+    // the remote folder, which the host identity key normally creates. Native
+    // storage has no transition record, so it refuses instead of writing one.
+    mkdirSync(join(directory, "remote"));
+    const native = createSelfMadeListenerCertificateStore({
+      dataDirectory: directory,
+      tlsFiles: files,
+      now: () => new Date(START.getTime() + 340 * DAY_MS),
+    });
+    expect(
+      native.prepareTransition({
+        hostId: "4f751d04-2b47-49e1-aac9-b3e99049a729",
+        origin: "https://100.64.0.7:8443",
+      }),
+    ).toEqual({ status: "refused", code: "invalid-transition" });
+    expect(native.activateTransition(first.tlsPin)).toEqual({
+      status: "refused",
+      code: "invalid-transition",
+    });
+    expect(native.transition()).toBeUndefined();
+    expect(readdirSync(join(directory, "remote"))).toEqual([]);
+    records.set("key", Buffer.from("corrupt private fixture"));
+    expect(
+      createSelfMadeListenerCertificateStore({
+        dataDirectory: directory,
+        tlsFiles: files,
+        now: () => START,
+      }).ensure("100.64.0.7"),
+    ).toEqual({ status: "refused", code: "invalid-tls" });
+    expect(files.createKey).toHaveBeenCalledTimes(1);
+    expect(files.replaceCertificate).toHaveBeenCalledTimes(1);
+  });
+
+  it("returns the same certificate to two first uses that both found none", () => {
+    const directory = dataDirectory();
+    // Models native storage: creation keeps a winner, renewal replaces it.
+    const records = new Map<string, Buffer>();
+    const read = (purpose: "key" | "certificate") => {
+      const bytes = records.get(purpose);
+      return bytes === undefined
+        ? { status: "missing" as const }
+        : { status: "ready" as const, bytes: Buffer.from(bytes) };
+    };
+    const keep = (purpose: "key" | "certificate") => (bytes: Buffer) => {
+      if (!records.has(purpose)) records.set(purpose, Buffer.from(bytes));
+      return read(purpose);
+    };
+    const options = { dataDirectory: directory, now: () => START };
+    const competitors: Array<ReturnType<typeof ready>> = [];
+    let interleaved = false;
+    const files = {
+      dataDirectory: directory,
+      read: (purpose: "key" | "certificate") => {
+        const result = read(purpose);
+        if (purpose === "certificate" && !interleaved && result.status === "missing") {
+          interleaved = true;
+          // The competitor finishes between this read and this ensure's write.
+          competitors.push(
+            ready(
+              createSelfMadeListenerCertificateStore({ ...options, tlsFiles: files }).ensure(
+                "100.64.0.7",
+              ),
+            ),
+          );
+        }
+        return result;
+      },
+      createKey: keep("key"),
+      createCertificate: keep("certificate"),
+      replaceCertificate: (bytes: Buffer) => {
+        records.set("certificate", Buffer.from(bytes));
+        return read("certificate");
+      },
+    };
+    const first = ready(
+      createSelfMadeListenerCertificateStore({ ...options, tlsFiles: files }).ensure("100.64.0.7"),
+    );
+    expect(competitors).toHaveLength(1);
+    expect(first.tls.cert).toBe(competitors[0]?.tls.cert);
+    expect(records.get("certificate")?.toString("utf8")).toBe(first.tls.cert);
+  });
+
+  it("refuses Windows without native storage before creating ordinary files", () => {
+    const directory = dataDirectory();
+    vi.stubGlobal("process", Object.create(process, { platform: { value: "win32" } }));
+    try {
+      const result = createSelfMadeListenerCertificateStore({ dataDirectory: directory }).ensure(
+        "100.64.0.7",
+      );
+      expect(result.status).toBe("refused");
+      if (result.status === "refused") expect(result.code).toBe("invalid-tls");
+      expect(readdirSync(directory)).toEqual([]);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it("refuses a different native root or exposed key without provisioning or certificate replacement", () => {
+    const directory = dataDirectory();
+    const read = vi.fn(() => ({ status: "exposed" as const }));
+    const unavailable = (): never => {
+      throw Error("Unexpected native storage mutation.");
+    };
+    const files = {
+      dataDirectory: directory + "-other",
+      read,
+      createKey: unavailable,
+      createCertificate: unavailable,
+      replaceCertificate: unavailable,
+    };
+    const mismatched = createSelfMadeListenerCertificateStore({
+      dataDirectory: directory,
+      tlsFiles: files,
+    }).ensure("100.64.0.7");
+    expect(mismatched.status).toBe("refused");
+    expect(read).not.toHaveBeenCalled();
+    const exposed = createSelfMadeListenerCertificateStore({
+      dataDirectory: directory,
+      tlsFiles: { ...files, dataDirectory: directory },
+    }).ensure("100.64.0.7");
+    expect(exposed.status).toBe("refused");
+    if (exposed.status === "refused") expect(exposed.code).toBe("tls-key-exposed");
+    expect(readdirSync(directory)).toEqual([]);
+  });
+});
 
 describe("listener certificate DER writer", () => {
   const { privateKey, publicKey } = generateKeyPairSync("ec", { namedCurve: "P-256" });
@@ -361,7 +546,7 @@ describe("self-made listener certificate", () => {
     now = new Date(firstEnd - 29 * DAY_MS);
     const renewed = ready(store.ensure("100.64.0.7"));
     expect(renewed.tls.cert).not.toBe(first.tls.cert);
-    expect(renewed.tls.key).toBe(first.tls.key);
+    expect(renewed.tls.key === first.tls.key).toBe(true);
     expect(renewed.tlsPin).toBe(first.tlsPin);
     const certificate = new X509Certificate(renewed.tls.cert);
     expect(Date.parse(certificate.validFrom)).toBe(Math.floor(now.getTime() / 1_000) * 1_000);

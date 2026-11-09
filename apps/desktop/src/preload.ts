@@ -1220,6 +1220,21 @@ export function createHostBridge(
             }
             return { status: answer.status, body: answer.body };
           },
+          // Open there on a moved thread's tombstone: the window names only the
+          // thread; main reads where it went from the host and opens that
+          // member's own page in the default browser.
+          openMovedThreadThere: async (thread: {
+            readonly mode: string;
+            readonly threadId: string;
+          }) => {
+            const answer = (await ipc.invoke(IPC_CHANNELS.threadMoveOpenThere, {
+              mode: thread.mode,
+              threadId: thread.threadId,
+            })) as { readonly status?: unknown } | null;
+            return answer?.status === "opened"
+              ? ({ status: "opened" } as const)
+              : ({ status: "refused" } as const);
+          },
           // A Mac owner device's unlock key. The bridge can make the key (its public
           // half comes back), sign one owner unlock challenge, and forget the key.
           // It cannot return the private key or sign any other text.
@@ -1401,6 +1416,7 @@ export const OCTANT_ONLY_BRIDGE_MEMBERS: ReadonlySet<string> = new Set([
   "forgetRemoteServerPages",
   "subscribeRemoteServerPageSigning",
   "hubAdministrationRequest",
+  "openMovedThreadThere",
   "subscribePrepareToShutDown",
   "reportShutdownMovesOffered",
   "reportShutdownProgress",

@@ -16,8 +16,11 @@ import type { SkillRootStatus } from "@octant/contracts/extension-rpc";
 import { useDebouncedValue } from "../lib/useDebouncedValue";
 import { ArrowLeft, Check, Menu, Search, X } from "lucide-react";
 import type { ShellSettings } from "@octant/contracts/shell";
+import type { ProjectTerminalClient } from "@octant/client-runtime/project-terminal-client";
+import type { ServerProject } from "@octant/contracts/server-projects";
 import {
   type HostPlatform,
+  type ProjectId,
   type ProviderInstanceId,
   type SettingsDeepLink,
   type SettingsSectionId,
@@ -272,6 +275,11 @@ export interface SettingsViewProps {
   readonly providerToolingClient?: ProviderToolingClient;
   /** Code Projects on a registered server; absent off this computer. */
   readonly serverProjectsClient?: ServerProjectsClient;
+  readonly projectTerminalClient?: ProjectTerminalClient;
+  readonly projectActionStoragePrefix?: string;
+  readonly codeProjectId?: ProjectId | undefined;
+  readonly workProjectId?: ProjectId | undefined;
+  readonly onOpenServerProject?: (project: ServerProject) => void;
   /** Creating, joining, and revoking on this host; absent off it. */
   readonly replicaMembershipClient?: ReplicaMembershipClient;
   /** Read-only sync status, used when this client is not on the host. */
@@ -1397,6 +1405,17 @@ function ActiveSectionContent({
             {...(focusedSetting === undefined ? {} : { focusedSetting })}
           />
           <ServerAccessSettings
+            codeProjectId={props.codeProjectId}
+            workProjectId={props.workProjectId}
+            {...(props.onOpenServerProject === undefined
+              ? {}
+              : { onOpenServerProject: props.onOpenServerProject })}
+            {...(props.projectTerminalClient === undefined
+              ? {}
+              : { terminalClient: props.projectTerminalClient })}
+            {...(props.projectActionStoragePrefix === undefined
+              ? {}
+              : { actionStoragePrefix: props.projectActionStoragePrefix })}
             focusedSetting={focusedSetting}
             projectNames={props.projectNames ?? NO_PROJECT_NAMES}
             projects={props.serverProjectsClient}
@@ -1610,7 +1629,9 @@ function RememberedBrowserOriginsPanel(props: {
             const profileName =
               site.profile.kind === "personal"
                 ? "Personal profile"
-                : `${props.projectNames.get(String(site.profile.projectId)) ?? "Project"} profile`;
+                : site.profile.kind === "account"
+                  ? `Account ${String(site.profile.profileId).slice(0, 8)} profile`
+                  : `${props.projectNames.get(String(site.profile.projectId)) ?? "Project"} profile`;
             return (
               <SettingRow
                 description={`Browser acts as you on this site in the ${profileName}, without asking.`}

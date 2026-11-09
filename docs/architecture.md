@@ -563,15 +563,24 @@ variables, and a debug console, deciding no refusal itself
 **Host resources.** `GET /api/host/resources` is a read-only snapshot of this
 host's load: CPU use averaged over a short sample of the process's CPU times,
 used and total memory, the core count, and used and free space on the volume
-that holds the data directory. The disk figures are omitted when that volume
-cannot be read. The snapshot names no path, no user, and no process. The server
+that holds the data directory. When the host can read them it also reports
+network and block-device throughput (bytes per second between its last two
+samples, so absent on the first), the busiest GPU's utilisation, and battery
+level with charging state; each is omitted when unreadable. Linux reads
+`/proc`, `/sys/class/drm` (AMD `gpu_busy_percent`), `nvidia-smi` for NVIDIA, and `/sys/class/power_supply`;
+macOS reads `netstat`, `ioreg`, and `pmset`; other platforms and GPUs report
+none. The disk figures are omitted when that volume cannot be read. The snapshot names no path, no user, and no process. The server
 keeps one snapshot for about five seconds. The local owner always receives it.
 A paired remote device with an active session receives it under the same
 `project.overview.read` action as the Project overview reads; an
 unauthenticated caller is refused, with no figures in the refusal. The route
 also compares the device's host identity with this host's, but every paired
 device row on a host carries that host's own identity, so the comparison does
-not separate one paired device from another. The Computers card
+not separate one paired device from another. A server Project's server is read by
+`GET /api/server-projects/resources?projectId=`, which runs one fixed
+read-only script over that Project's SSH connection and answers the same
+snapshot; a local window only, never a paired device, and Linux servers only.
+The Computers card
 reads the route only while the card is on screen and the window is visible,
 about every ten seconds, at most one read per host at a time and each abandoned
 after five seconds, and does not poll in the background.
@@ -730,9 +739,13 @@ level, before creating a new file in `downloads/` of the thread's workspace;
 programs and installers and a symbolic link are refused, and a paired device,
 a terminal grant, and Plan cannot save
 ([Browser for agents: Download](design/browser-agent-tool.md#download)). A
-person's own download in the Browser pane stays blocked. An upload asks every
-time, at every access level, naming each file and the site, and the answer is
-never remembered.
+person's own download in the Browser pane stays blocked. Ordinary uploads ask
+once per use at every access level. A local person may separately review a
+fixed-content routine upload manifest from one approved Project folder, binding
+caller/model/authority, profile/site, exact files, quota and expiry. It grants no
+account access or downloads; revocation and expiry close affected contexts, and
+restart restores none. The [upload specification](design/browser-agent-tool.md#recurring-upload-manifests)
+owns its file, quota and per-operation rules.
 
 Tool definitions carry the agent's usage guidance alongside their argument
 schemas. App-owned tools are capability families: one tool per object —
@@ -1328,7 +1341,10 @@ starts a Code session at the same level, and a Work turn journals `shell` and
   `project.work-developer-tools-changed@1` with who and when on the Project)
   is set only from a window on this host; a paired device is refused. It
   shows the Project terminal and Project actions, the developer surfaces Work
-  has today; no thread's authority reads it.
+  has today; no thread's authority reads it. A server Work Project's separately
+  journaled choice exposes saved actions only in Settings and the active
+  header/palette, without enabling a general terminal; [Server Projects](design/server-projects.md#threads)
+  owns that narrower surface.
 
 An ACP agent whose shell runs in-process with no protocol request reports
 `unsupported` at Guarded and Reviewed and runs only at Full access, in Work as
@@ -1579,6 +1595,13 @@ folder that is not a repository on a `plain-folder` checkout whose head is
 `none`, and that includes the Code default Project; every Git-backed feature
 reports itself unavailable there rather than inventing a revision. On, both are
 refused.
+
+The default-folder wire value preserves the host's native absolute spelling:
+POSIX paths or Windows drive-absolute paths. Drive-relative paths, UNC/device
+namespaces and NUL bytes are refused. Decoding a path does not admit filesystem
+access: the host still checks its own native absolute form, resolves the actual
+ancestors and enforces the existing inside-home rule. A Windows value received
+on another platform is not reinterpreted as a local folder.
 
 The default folder used to be `~/Documents/Octant`, and threads without a
 Project in Code had a separate `allowDefaultFolderThreads` switch beside the Git
@@ -12629,7 +12652,11 @@ approval-gated` command that undoes it. The terminal shows no one-time
   stops when its task, checkout or execution authority is revoked.
 
   `start-action` launches a fresh command process under the existing terminal
-  confinement and sanitized environment, not input into a running shell. The
+  confinement and sanitized environment, not input into a running shell.
+  Server Projects instead resolve actions and task identity on their server
+  and use dedicated, explicitly reviewed SSH runs with no OS confinement;
+  see [Server Projects](design/server-projects.md#threads). Their remote completion
+  remains uncertain after connection loss or Stop. The
   request names a saved action and checkout identities, never executable text.
   Its terminal start is journaled before launch; a repeated request identity,
   including after host restart, never starts another process. The legacy
@@ -12803,8 +12830,12 @@ approval-gated` command that undoes it. The terminal shows no one-time
   opens another browser's profile in place. The Work and Code agent adapters
   accept a stored profile request and the task's journaled default profile;
   neither grants access by itself. An agent reads or acts on an origin in a profile page only after a site approval naming the profile;
-  paired devices, routines, subagents, and terminal Browser grants are refused
-  on profile pages; a paired device sees only that a signed-in page exists. The
+  paired devices are refused on profile pages. A managed child, named routine
+  or selected terminal session may use an existing sign-in only through an
+  explicit local-person host/recipient/model/authority/profile/HTTPS session permission,
+  revalidated before effects and observations; it owns its context and receives
+  no parent authority or transfer permission. See [delegated sessions](design/browser-profiles.md#delegated-sessions).
+  A paired device sees only that a signed-in page exists. The
   person signs out of a profile (closing its pages and removing its storage) at a
   local window, and the host journals that it happened without naming a site or
   a cookie. The person may also import another browser's cookies into one
@@ -15443,11 +15474,146 @@ preview had shipped and a Linux self-update from the signed feed had been seen
 on a real image). That ordering was a release-scope choice, not a safety
 rule. The Linux signed-feed update path is still the shared trust root for
 every non-macOS platform, so a Windows feed builds on it and is not trusted
-before the path has been exercised on a real image. Windows Work and Code stay
+before the path has been exercised on a real image. Windows x64 QA packaging uses a matching native build host and emits a portable
+ZIP through `OCTANT_PACKAGE_TARGET=win32-x64`. The hosted Windows job rebuilds
+native dependencies and verifies them inside the packaged Electron runtime.
+The archive builds the existing native Windows owner and credential helper
+from source and includes only `resources/native/octant-windows-host-owner.node`
+and `resources/native/octant-credential-helper.exe`. The build uses the locked
+node-gyp dependency to verify the official Node-API SDK before CMake compilation;
+QA readers and build directories never enter the archive. Packaged Electron
+loads the native owner without acquiring a profile, and the credential fixture
+uses only owned synthetic entries and verifies their removal.
+This unsigned QA archive is not an installer, a usable Windows release, or an
+enabled signed-update channel; native host admission and credentials remain
+separate prerequisites. Windows Work and Code stay
 unavailable until an approved Windows confinement design is documented: the confinement port
 supports only macOS and Linux and refuses every other platform, so Work and
 Code fail closed there. Simulator, the Apple workbench, and vibrancy stay
 macOS-only.
+
+The Windows owned-control prerequisite is an original in-process Node-API
+binding, not a separate owner daemon. Only a host-selected scope UUID reaches
+its fixed per-user `LocalAppData/Octant/runtime` namespace. Native code derives
+the current user, process ID and `GetProcessTimes` birth identity; it holds
+canonical directory ancestors without delete sharing, refuses reparse points
+and unsafe ownership/ACLs, and creates a first-instance named pipe with an
+explicit user-plus-SYSTEM DACL and remote clients refused. A client checks the
+actual pipe server's PID/birth and account before sending host-control data.
+The existing authenticated control schema is shared with the Unix transport;
+16 KiB is the complete wire-frame bound, including its newline, so a Windows
+JSON payload is at most 16,383 UTF-8 bytes. Oversized frames are refused, never
+truncated.
+
+Nonblocking byte-pipe polling has a two-second connection/request deadline and
+retains no overlapped kernel I/O buffer after a call returns. Only an explicitly
+busy connection that has dispatched no bytes may retry within that original
+deadline; a pending, refused or uncertain dispatched request is never replayed. The host strongly
+anchors its owner lease. Closing the endpoint, GC or environment/worker teardown
+cannot remove the native PID/birth record or release its retained directory and
+record guards while that process lives: the first-party module is pinned for
+that process's lifetime. A later claimant refuses a live or unverifiable writer,
+even when the endpoint no longer answers; only an OS-verified dead birth permits
+replacement. Host command callbacks retain their existing host-owned lifecycle;
+a late response cannot dispatch to a closed lease or a different connection.
+Only this control nonce/receipt is stored here, never provider credentials or an
+arbitrary secret selected by a caller.
+
+This prerequisite has no ordinary Windows host-path/startup admission. The
+binding must be proven on native Bun, Node and Electron with synthetic owned
+fixtures; missing or incompatible native code stays unavailable. Full data-path,
+control/lifecycle and credential integration remain separate Windows host
+requirements. It does not enable Chat, Work, Code, a native provider or a release.
+
+The dependent Windows persistent-profile boundary uses the native current user's
+LocalAppData known folder, with closed profiles at `Octant/hosts/octant` and
+`Octant/hosts/nightly-test-data`. Their `data`, `config`, `state` and `logs`
+directories have protected owner-plus-SYSTEM DACLs with object/container
+inheritance, so ordinary descendants do not acquire the process token's broader
+default DACL. The separate transient control namespace retains its existing
+non-inheriting DACLs. Native-held canonical directory handles exclude reparse
+points and prevent rename/replacement for the writer process's lifetime.
+Before any profile mutation the native boundary requires the process token's
+default owner to equal its user SID: inherited ACLs alone do not determine a
+new file's owner. A context whose default owner is an administrator group is
+unsupported and refused; production never changes the host or account token.
+
+A bounded, private native profile record binds a random persistent UUID to its
+profile kind and physical profile/data directory identities. A missing record can be
+created; a malformed, aliased, transplanted or unsafe record is refused rather
+than replaced. That UUID selects the control scope and owner receipt's runtime
+host identifier. It is not the cryptographic remote host/member identity:
+the private-listener signing port, key generation and journaled remote identity
+remain separate and receive no Windows admission from this boundary. The
+profile-aware owner consumer uses only these native facts. Windows external
+`OCTANT_DATA_DIR` and `OCTANT_LOGS_DIR` overrides are not supported and refuse
+explicitly; environment strings never select another profile store. Persistent
+guards and the profile record remain held until actual process exit, including
+owner release or environment teardown. This boundary still admits no Windows
+desktop/server startup, migration/restore path, provider, Chat, Work or Code.
+
+The Windows server/member P-256 identity storage prerequisite consumes that
+native-held profile boundary through the existing private-listener signing port.
+Only its fixed host-id and private-key files are admitted; the native operation
+revalidates current filesystem authority on every read/create, independent of
+JavaScript path facts. The public signer still exposes only SPKI, fingerprint
+and signatures; profile/control UUID, desktop HMAC identity and roster/TLS keys
+remain distinct. See [boot-key storage](design/hub-and-spokes.md#the-hub-is-a-server-first) for the
+owner, format, creation and refusal rules. The existing remote/member and push
+consumers carry a host-internal storage dependency; absence refuses on Windows.
+The dependent listener TLS store carries its own closed native dependency for
+the two fixed TLS key/certificate files. It reuses the profile admission
+boundary, exclusively creates and retains the separate P-256 key, exclusively
+creates the first certificate (a concurrent first use adopts the winner), and
+renews only private regular certificates through a flushed native staging handle and
+atomic rename into the held remote directory. The reopened file identity is
+checked before use. Renewal and restart preserve the SPKI pin; unsafe keys or
+certificate entries refuse without ordinary-file fallback or silent key rotation.
+Explicit listener key transitions refuse on this native store, because their
+staged key and key replacement use ordinary owner-only files.
+The dependent roster signer admits only its fixed `hub/roster-signing-key.pem`
+through a separate closed native operation on the same profile boundary.
+Exclusive creation preserves the existing P-256 key across restart or competing
+first-use. Unsafe, malformed and wrong-curve keys refuse without replacement or
+permission repair. Public SPKI and SHA-256/P1363 signatures retain their format;
+private transfer buffers are erased after import. Windows without this internal
+storage dependency refuses before ordinary-file access.
+The three existing hub, delegation and Tailscale-certificate authority records
+use closed native profile storage with bounded chunk sessions and their existing
+domain schemas and retention rules. Only the active claimed owner in the same
+native environment/profile/current PID-birth may commit a flushed private atomic
+replacement. Stable read snapshots do not block newer authority commits; corrupt
+or unsafe records refuse instead of becoming empty state. Detail and ownership:
+[boot-key and authority storage](design/hub-and-spokes.md#the-hub-is-a-server-first).
+These individual storage prerequisites alone do not admit Windows startup,
+encryption warnings, service integration or execution confinement. The Windows
+foreground entry composes their actual native owner and profile with the journal,
+usage cache, closed credential stores, policy, logs and discovery projections
+before importing server/persistence runtimes. Its loopback Chat lifecycle requires
+actual ready, authority-refusal, verified-backup and joined-shutdown proof for both
+profiles. Executable providers/extensions and Work/Code remain unavailable;
+desktop/Nightly bootstrap and service/encryption integration retain separate gates.
+The owning rules and local-owner trust limits are in
+[foreground storage and lifecycle](design/hub-and-spokes.md#the-hub-is-a-server-first).
+
+Packaged stable Windows desktop resolves that native profile without claiming
+the child server's owner. Its physical profile UUID supplies the runtime host
+identity and credential scope. Only positive native absence permits launching
+the normal server entry; unsafe or unknown discovery refuses. An attachment
+must match the authenticated native owner's instance and pipe endpoint, retain
+one host-info/bridge-secret generation around the health probe, and leave the
+separately managed host running when the desktop closes. Desktop main reads
+native policy but never writes native boot projections: its actual child owner
+publishes and clears those from the existing private launch seed. It passes no
+POSIX data/log override and starts no generic linked-state credential broker.
+Missing native code or closed storage ports stay unavailable. This composition
+requires a native packaged startup, second-attachment and owned-stop smoke;
+normal Nightly native window registration, service integration and effective
+Work/Code confinement remain distinct requirements. Normal owned shutdown authenticates the native
+owner and matches the exact launch instance before requesting its graceful
+control stop, then awaits the held child with bounded force escalation.
+Windows SIGTERM alone force-terminates a Node child and cannot prove projection
+cleanup; borrowed or replacement owners never receive this stop request.
 
 The Windows credential building block uses an Octant native helper
 with `CredWriteW`, `CredReadW` and `CredDeleteW`, never a secret in `cmdkey`
@@ -15500,10 +15666,11 @@ Windows executor uses empty arguments/environment and a five-second joined
 operation lifetime. Missing helper configuration stays recovery-only. macOS
 behavior and the existing Linux recovery-only path are unchanged.
 
-These native building blocks do not admit a Windows host or Chat, package
-a Windows app, supply server/member/roster P-256 identity or owner-presence unlock. A missing trusted helper leaves the store unavailable. Native CI
-exercises synthetic targets on an ephemeral Windows runner; real Windows host
-ownership, private runtime paths and lifecycle remain separate prerequisites.
+These credential building blocks remain distinct from native ownership/profile
+paths and server/member/roster P-256 identity. A missing trusted helper leaves
+the credential store unavailable. Native CI exercises synthetic targets on an
+ephemeral Windows runner. Complete foreground boot and lifecycle composition,
+owner-presence unlock and Windows app packaging remain separate work.
 Work and Code remain refused until their native confinement boundary is proven.
 
 **Updates** (`apps/desktop/src/appUpdateService.ts`, `appUpdateFeed.ts`,
@@ -15574,7 +15741,11 @@ Work and Code remain refused until their native confinement boundary is proven.
   Nightly's own renderer with a short server-enforced lease. It never loads
   the host-owning module, owns a host or migrates shared data; it can ask a
   validated installed Stable to start without a window. Incompatible
-  or unsigned builds refuse. Bounded embedded frames and human input use the
+  builds refuse; macOS additionally requires the signed application identity.
+  Linux and Windows use the explicitly stated local-user kernel trust floor
+  ([Linux](design/nightly-app.md#linux-client-trust),
+  [Windows](design/nightly-app.md#windows-client-trust)), which does not attest
+  application code. Bounded embedded frames and human input use the
   existing native Browser owner; complete Browser parity, other native brokers
   remain unfinished. Current-client retention precedes the existing terminal
   shutdown path; full signed lifecycle acceptance remains separate.
@@ -15783,7 +15954,10 @@ bun run verify     # paths:check, wiring:check, ui:check, style:check, decisions
   A bad signature, a non-writable location, or a
   launch that is not that image fails closed, and the reason is shown in
   Settings. Windows stays out. Override with
-  `OCTANT_PACKAGE_TARGET=darwin-arm64|linux-x64` on a matching host only.
+  `OCTANT_PACKAGE_TARGET=darwin-arm64|linux-x64|win32-x64` on a matching host only;
+  Windows emits only the QA archive described above. Windows PE resource versions
+  use the numeric core; the staged application manifest and archive retain
+  the full preview/candidate version and flavor.
 - Focused checks: `bun run --filter <package> test|typecheck`; the store can be
   inspected with `bun run --cwd apps/server db:verify`.
 - Formatting is `oxfmt`, linting is `oxlint`; Turbo runs the per-package

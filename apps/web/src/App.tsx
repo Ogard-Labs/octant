@@ -6930,10 +6930,25 @@ function LaunchedShell(
       project.lifecycle === "active" &&
       project.id === activeProjectId,
   );
+  const serverActionsProject =
+    activeMode === "code"
+      ? serverCodeProjectFor(serverCodeProjects.projects, activeProjectId)
+      : activeMode === "work"
+        ? serverCodeProjects.workProjects.find(
+            (project) =>
+              project.projectId === activeProjectId && project.developerToolsEnabled === true,
+          )
+        : undefined;
   const activeProjectActions =
     actionsProject?.type === "code" || actionsProject?.type === "work"
       ? (actionsProject.actions ?? NO_PROJECT_ACTIONS)
-      : NO_PROJECT_ACTIONS;
+      : (serverActionsProject?.actions ?? NO_PROJECT_ACTIONS);
+  const actionsRecipient =
+    actionsProject === undefined
+      ? serverActionsProject === undefined
+        ? undefined
+        : { id: serverActionsProject.projectId, name: serverActionsProject.name }
+      : { id: actionsProject.id, name: actionsProject.name };
   // Only a Code Project's extra folders are listed by the Files tool; a Work
   // Project's own Files listing already walks them.
   const activeProjectExtraFolders =
@@ -6998,20 +7013,20 @@ function LaunchedShell(
     skills: commandExtensions.skills,
     pluginServers: commandExtensions.pluginServers,
     appleProjects,
-    ...(actionsProject === undefined || activeProjectActions.length === 0
+    ...(actionsRecipient === undefined || activeProjectActions.length === 0
       ? {}
       : {
           projectActions: activeProjectActions.map((action) => ({
             actionId: String(action.id),
             name: action.name,
             command: action.command,
-            projectName: actionsProject.name,
+            projectName: actionsRecipient.name,
           })),
           onRunProjectAction: (commandAction: { readonly actionId: string }) => {
             const action = activeProjectActions.find(
               (candidate) => String(candidate.id) === commandAction.actionId,
             );
-            if (action !== undefined) void runProjectAction(actionsProject.id, action);
+            if (action !== undefined) void runProjectAction(actionsRecipient.id, action);
           },
         }),
     onOpenAppleProject: (project) => {
@@ -7083,6 +7098,12 @@ function LaunchedShell(
         standaloneSurface={
           controller.settingsOpen || usageOpen ? (
             <SettingsContainer
+              onOpenServerProject={(project) => {
+                controller.closeSettings();
+                void openDraftInKnownProject(project.id, project.mode ?? "code", project.name);
+              }}
+              projectTerminalClient={projectTerminalClient}
+              projectActionStoragePrefix={`octant.action-run:${props.launch.serverUrl}:${props.launch.windowId}:server-settings`}
               actions={actions}
               allProjects={projectController.allProjects}
               {...(props.availableFonts === undefined
@@ -7737,7 +7758,10 @@ function LaunchedShell(
                         current === undefined ? undefined : { ...current, open: false },
                       )
                     }
-                    {...(zen.enabled
+                    {...(zen.enabled &&
+                    !serverCodeProjects.workProjects.some(
+                      (project) => project.projectId === projectActionRun.target.projectId,
+                    )
                       ? {
                           onOpenTerminal: (terminalId: ReturnType<typeof decodeCodeTerminalId>) => {
                             void (async () => {
@@ -7800,6 +7824,20 @@ function LaunchedShell(
                       : {})}
                     onRun={(action, folder) =>
                       void runProjectAction(actionsProject.id, action, folder)
+                    }
+                  />
+                )}
+                {serverActionsProject === undefined ? null : (
+                  <ProjectActionButtons
+                    actions={serverActionsProject.actions ?? NO_PROJECT_ACTIONS}
+                    {...(serverActionsProject.folder === undefined
+                      ? {}
+                      : { mainFolder: serverActionsProject.folder })}
+                    defaultFolderLabel={
+                      activeMode === "work" ? "Task folder" : "Active server checkout"
+                    }
+                    onRun={(action, folder) =>
+                      void runProjectAction(serverActionsProject.projectId, action, folder)
                     }
                   />
                 )}

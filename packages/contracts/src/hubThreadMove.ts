@@ -628,9 +628,16 @@ export const ThreadMoveThreadStatus = Schema.Struct({
   handedOver: Schema.optional(HandedOverThread),
   /** The thread moved away and was erased here: its "Moved to" tombstone. */
   departed: Schema.optional(
-    Schema.Struct({ ...ThreadMoveDeparture.fields, destinationName: bounded(256) }).annotations(
-      strict,
-    ),
+    Schema.Struct({
+      ...ThreadMoveDeparture.fields,
+      destinationName: bounded(256),
+      /**
+       * The destination's own web app, read from its entry in the roster this
+       * host holds when asked; absent when the roster no longer lists it or it
+       * serves no web app. Open there opens the moved thread on it.
+       */
+      destinationWebOrigin: Schema.optional(bounded(512)),
+    }).annotations(strict),
   ),
 }).annotations(strict);
 export type ThreadMoveThreadStatus = typeof ThreadMoveThreadStatus.Type;
@@ -814,18 +821,28 @@ export type OwnerThreadMoveConfirmRequest = typeof OwnerThreadMoveConfirmRequest
 
 // ── Sizes and an estimate ──────────────────────────────────────────────────
 
+const ThreadMovePartSizes = Schema.Array(
+  Schema.Struct({ kind: ThreadMovePartKind, bytes: NonNegativeInt }).annotations(strict),
+).pipe(Schema.maxItems(16));
+
 /**
  * How much a move of one thread would send now, read without packing or
- * freezing it. `unknown` when the thread could not be measured; that never
- * stops a move.
+ * freezing it, one entry per kind of part it carries. `partly-measured` when
+ * the size of some kinds could not be read: `bytes` counts only the rest, and
+ * `unknownParts` names the kinds left out. `unknown` when the thread could not
+ * be measured. Neither ever stops a move.
  */
 export const ThreadMoveSize = Schema.Union(
   Schema.Struct({
     status: Schema.Literal("measured"),
     bytes: NonNegativeInt,
-    parts: Schema.Array(
-      Schema.Struct({ kind: ThreadMovePartKind, bytes: NonNegativeInt }).annotations(strict),
-    ).pipe(Schema.maxItems(16)),
+    parts: ThreadMovePartSizes,
+  }).annotations(strict),
+  Schema.Struct({
+    status: Schema.Literal("partly-measured"),
+    bytes: NonNegativeInt,
+    parts: ThreadMovePartSizes,
+    unknownParts: Schema.Array(ThreadMovePartKind).pipe(Schema.minItems(1), Schema.maxItems(16)),
   }).annotations(strict),
   Schema.Struct({ status: Schema.Literal("unknown") }).annotations(strict),
 );

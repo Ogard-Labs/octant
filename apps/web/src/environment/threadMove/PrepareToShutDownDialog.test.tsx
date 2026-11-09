@@ -382,6 +382,36 @@ describe("Prepare to shut down", () => {
     ).toBeInTheDocument();
   });
 
+  it("counts what it could measure of a thread whose bulk parts could not be sized, and says so", async () => {
+    const { client } = fakeClient({
+      sizes: async (_memberId, threads) => ({
+        status: "read",
+        rate: { basis: "assumed", bytesPerSecond: 1_048_576 },
+        rows: threads.map((thread) => ({
+          thread,
+          size:
+            thread.threadId === TRIP.threadId
+              ? {
+                  status: "partly-measured",
+                  bytes: 2_048,
+                  parts: [{ kind: "thread-bundle", bytes: 2_048 }],
+                  unknownParts: ["canvas"],
+                }
+              : { status: "measured", bytes: 1_024, parts: [] },
+        })),
+      }),
+    });
+    render(<PrepareToShutDownDialog client={client} onClose={() => {}} open />);
+    await screen.findByText("Plan the trip");
+
+    await waitFor(() =>
+      expect(screen.getByText("· 3 KB, under a minute, 1 size unknown")).toBeInTheDocument(),
+    );
+    const trip = screen.getByText("Plan the trip").closest(".shutdown-row");
+    if (!(trip instanceof HTMLElement)) throw new Error("No row.");
+    expect(within(trip).getByText("At least 2 KB")).toBeInTheDocument();
+  });
+
   it("reads a row's size for the computer it moves to, and adds each destination's total at its own rate", async () => {
     const user = userEvent.setup();
     const asked: string[] = [];

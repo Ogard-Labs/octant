@@ -32,12 +32,15 @@ import { useTheme } from "../../design-system";
 import { IconButton } from "../ui/IconButton";
 import { useMobileHardwareBack } from "./useMobileHardwareBack";
 import { mobileThreadReturnRouteForDeepLink } from "./navigationState";
-import { deepLinkRefusal } from "./deepLinkNavigation";
+import { deepLinkRefusal, movesLinkOpening } from "./deepLinkNavigation";
+import type { MobileMovesDeepLinkTarget } from "../notifications/deepLinks";
 
 export interface RootNavigatorProps {
   readonly activeRoute: MobileRouteId;
   readonly onSelectRoute: (route: MobileRouteId) => void;
   readonly pendingDeepLinkRow?: MobileInboxRow | undefined;
+  /** A tapped notification that a move waits for this phone. */
+  readonly pendingMovesLink?: MobileMovesDeepLinkTarget | undefined;
   readonly onDeepLinkConsumed?: (() => void) | undefined;
 }
 
@@ -495,6 +498,29 @@ export function RootNavigator(props: RootNavigatorProps) {
     props.onDeepLinkConsumed,
     props.onSelectRoute,
     setInboxHostFilter,
+    hosts,
+    hostsLoaded,
+    hostsError,
+  ]);
+
+  useEffect(() => {
+    if (props.pendingMovesLink === undefined) return;
+    // As for a thread link, the paired list must be read before a computer
+    // can be called unpaired.
+    if (!hostsLoaded) return;
+    const opening = movesLinkOpening(
+      props.pendingMovesLink,
+      hosts.map((host) => host.hostId),
+      hostsError !== undefined,
+    );
+    setDeepLinkNotice(opening.notice);
+    setHostEntryMode(opening.entryMode);
+    props.onSelectRoute(opening.route);
+    props.onDeepLinkConsumed?.();
+  }, [
+    props.pendingMovesLink,
+    props.onDeepLinkConsumed,
+    props.onSelectRoute,
     hosts,
     hostsLoaded,
     hostsError,

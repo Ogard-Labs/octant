@@ -53,7 +53,7 @@ export async function launchDesktopApplication(
           break;
         case "not-running":
           message =
-            "Open a signed Octant that supports Nightly. Octant may be closed or too old to answer this status check.";
+            "Open Octant that supports Nightly. Octant may be closed or too old to answer this status check.";
           break;
         case "invalid-scope":
           message =
@@ -72,7 +72,7 @@ export async function launchDesktopApplication(
           break;
         default:
           message =
-            "Octant Nightly could not authenticate the matching signed Octant app. A compatible signed release is required.";
+            "Octant Nightly could not authenticate the matching Octant app. Open a compatible Octant and try again.";
       }
     }
     return {

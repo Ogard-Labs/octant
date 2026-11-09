@@ -1,7 +1,7 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
 import type { ServerProjectsClient } from "@octant/client-runtime/server-projects-client";
 import type { ShieldServersClient } from "@octant/client-runtime/shield-servers-client";
-import type { BindingRevisionId, ProjectId } from "@octant/contracts/projects";
+import type { BindingRevisionId, ProjectId, ProjectAction } from "@octant/contracts/projects";
 import type { ComposerProjectEntry } from "./ComposerProjectSelector";
 
 /**
@@ -18,21 +18,35 @@ export interface ServerCodeProject {
   readonly name: string;
   /** `alias:folder`, or the folder alone once the server left the registry. */
   readonly location: string;
+  readonly folder?: string;
+  readonly actions?: ReadonlyArray<ProjectAction>;
 }
 
 /** A Work Project on a server, with the binding its Work threads are created against. */
 export interface ServerWorkProject extends ServerCodeProject {
   readonly bindingRevisionId: BindingRevisionId;
+  readonly developerToolsEnabled?: boolean;
 }
 
 export interface ServerCodeProjects {
+  /**
+   * Whether the catalog above is an answer: `loading` before the first read and
+   * `failed` after a read that did not succeed, when both lists are empty because
+   * nothing is known, not because no Project is on a server. Absent means ready.
+   */
+  readonly catalog?: "loading" | "ready" | "failed";
   readonly projects: ReadonlyArray<ServerCodeProject>;
   readonly workProjects: ReadonlyArray<ServerWorkProject>;
   /** Reads the host again, as after the person binds a folder in Settings. */
   readonly refresh: () => void;
 }
 
-const NONE: ServerCodeProjects = { projects: [], workProjects: [], refresh: () => undefined };
+const NONE: ServerCodeProjects = {
+  catalog: "ready",
+  projects: [],
+  workProjects: [],
+  refresh: () => undefined,
+};
 
 /** What every surface of a window reads; one source per window polls the host. */
 export const ServerCodeProjectsContext = createContext<ServerCodeProjects>(NONE);
@@ -59,12 +73,14 @@ export function useServerCodeProjectsSource(
 ): ServerCodeProjects {
   const [projects, setProjects] = useState<ReadonlyArray<ServerCodeProject>>([]);
   const [workProjects, setWorkProjects] = useState<ReadonlyArray<ServerWorkProject>>([]);
+  const [catalog, setCatalog] = useState<"loading" | "ready" | "failed">("loading");
   const [revision, setRevision] = useState(0);
   const refresh = useCallback(() => setRevision((current) => current + 1), []);
   useEffect(() => {
     if (client === undefined) {
       setProjects([]);
       setWorkProjects([]);
+      setCatalog("ready");
       return;
     }
     const controller = new AbortController();
@@ -86,6 +102,8 @@ export function useServerCodeProjectsSource(
             projectId: project.id,
             name: project.name,
             location: alias === undefined ? project.folder : `${alias}:${project.folder}`,
+            folder: project.folder,
+            ...(project.actions === undefined ? {} : { actions: project.actions }),
           };
         };
         // A Work Project on a server holds Work threads, never Code ones.
@@ -93,7 +111,15 @@ export function useServerCodeProjectsSource(
         const nextWork = view.projects.flatMap(
           (project): ReadonlyArray<ServerWorkProject> =>
             project.mode === "work" && project.workBindingRevisionId !== undefined
-              ? [{ ...entryOf(project), bindingRevisionId: project.workBindingRevisionId }]
+              ? [
+                  {
+                    ...entryOf(project),
+                    bindingRevisionId: project.workBindingRevisionId,
+                    ...(project.developerTools === undefined
+                      ? {}
+                      : { developerToolsEnabled: project.developerTools.enabled }),
+                  },
+                ]
               : [],
         );
         // An unchanged answer keeps its identity, so a poll that found nothing
@@ -104,8 +130,10 @@ export function useServerCodeProjectsSource(
         setWorkProjects((previous) =>
           JSON.stringify(previous) === JSON.stringify(nextWork) ? previous : nextWork,
         );
+        setCatalog("ready");
       } catch {
         if (controller.signal.aborted) return;
+        setCatalog("failed");
         setProjects((previous) => (previous.length === 0 ? previous : []));
         setWorkProjects((previous) => (previous.length === 0 ? previous : []));
       }
@@ -117,7 +145,10 @@ export function useServerCodeProjectsSource(
     const timer = window.setInterval(refresh, SERVER_PROJECT_REFRESH_MS);
     return () => window.clearInterval(timer);
   }, [client, refresh]);
-  return useMemo(() => ({ projects, workProjects, refresh }), [projects, workProjects, refresh]);
+  return useMemo(
+    () => ({ catalog, projects, workProjects, refresh }),
+    [catalog, projects, workProjects, refresh],
+  );
 }
 
 /** The composer's Project picker rows for the server Projects. */

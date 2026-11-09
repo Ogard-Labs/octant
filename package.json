@@ -68,7 +68,9 @@
     "typecheck": "turbo run typecheck",
     "verify": "bun run paths:check && bun run wiring:check && bun run ui:check && bun run style:check && bun run decisions:check && bun run fmt:check && bun run lint && bun run typecheck && bun run test && bun run build",
     "computer-use:prepare": "bun scripts/prepare-computer-use-driver.ts",
-    "docs:theme": "bun scripts/export-docs-theme.ts"
+    "docs:theme": "bun scripts/export-docs-theme.ts",
+    "smoke:browser-download-manifest-ui": "bun scripts/smoke-browser-download-manifest-ui.ts",
+    "smoke:browser-download-source": "bun scripts/smoke-browser-download-source.ts"
   },
   "devDependencies": {
     "@types/node": "catalog:",
