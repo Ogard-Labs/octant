@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import { ActivityIndicator, Pressable, StyleSheet, Text, View } from "react-native";
 import {
   ownerActionNotice,
@@ -6,10 +6,11 @@ import {
   type RemoteDeviceKeyStore,
 } from "@octant/client-runtime";
 import { mobilePinnedListenerTransport } from "../runtime/mobilePinnedListenerTransport";
+import { usePolledResource } from "../runtime/usePolledResource";
 import { useTheme } from "../../design-system";
 import { mobileRadii, mobileSpacing, mobileTypography } from "../theme/tokens";
 import type { GuestHubStore } from "./hubGuestFlow";
-import { phoneThreadMovesOf, type PhoneHeldMove, type PhoneThreadMoves } from "./ownerFlow";
+import { phoneThreadMovesOf, type PhoneHeldMove } from "./ownerFlow";
 import type { PhoneUnlockKey } from "./ownerUnlockKey";
 
 export interface OwnerMovesPanelProps {
@@ -19,48 +20,42 @@ export interface OwnerMovesPanelProps {
 }
 
 /**
+ * How often an open panel asks the computers what waits. A computer holds a
+ * move for only five minutes, and the person usually starts it at the desk
+ * with this screen already open, so a read made only when the panel mounted
+ * would miss it.
+ */
+const WAITING_MOVES_POLL_MS = 5_000;
+
+/**
  * Thread moves a computer's window holds until this phone confirms them. A
  * move is an owner act on the destination, so Confirm asks for the unlock and
  * the destination issues the ticket only after it; nothing moves without it.
+ * The panel is mounted only while the Computers screen shows, so it polls only
+ * then, and only while the app is in front.
  */
 export function OwnerMovesPanel(props: OwnerMovesPanelProps) {
   const { colors } = useTheme();
-  const [moves, setMoves] = useState<PhoneThreadMoves>();
-  const [held, setHeld] = useState<ReadonlyArray<PhoneHeldMove>>([]);
-  const [unanswered, setUnanswered] = useState<ReadonlyArray<string>>([]);
   const [notice, setNotice] = useState<OwnerActionNotice>();
   const [busy, setBusy] = useState(false);
 
   const load = useCallback(async () => {
-    setBusy(true);
-    try {
-      const state = await props.guestHubStore.load();
-      const found =
-        state === undefined
-          ? undefined
-          : await phoneThreadMovesOf({
-              state,
-              deviceKeyStore: props.deviceKeyStore,
-              transport: mobilePinnedListenerTransport,
-              unlockKey: props.unlockKey,
-            });
-      setMoves(found);
-      const reading = await found?.read();
-      setHeld(reading?.moves ?? []);
-      setUnanswered(reading?.unanswered ?? []);
-    } catch {
-      setNotice({
-        tone: "problem",
-        message: "Couldn't read the moves waiting for you. Try again.",
-      });
-    } finally {
-      setBusy(false);
-    }
+    const state = await props.guestHubStore.load();
+    const found =
+      state === undefined
+        ? undefined
+        : await phoneThreadMovesOf({
+            state,
+            deviceKeyStore: props.deviceKeyStore,
+            transport: mobilePinnedListenerTransport,
+            unlockKey: props.unlockKey,
+          });
+    return { moves: found, reading: await found?.read() };
   }, [props.deviceKeyStore, props.guestHubStore, props.unlockKey]);
-
-  useEffect(() => {
-    void load();
-  }, [load]);
+  const waiting = usePolledResource(load, { intervalMs: WAITING_MOVES_POLL_MS });
+  const moves = waiting.value?.moves;
+  const held = waiting.value?.reading?.moves ?? [];
+  const unanswered = waiting.value?.reading?.unanswered ?? [];
 
   const confirm = async (move: PhoneHeldMove) => {
     if (moves === undefined) return;
@@ -79,7 +74,7 @@ export function OwnerMovesPanel(props: OwnerMovesPanelProps) {
     } finally {
       setBusy(false);
     }
-    await load();
+    await waiting.reload();
   };
 
   const styles = useMemo(

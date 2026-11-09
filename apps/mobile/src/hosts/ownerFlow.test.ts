@@ -14,8 +14,9 @@ import {
   type RemoteDeviceKeyPair,
   type RemoteDeviceKeyStore,
 } from "@octant/client-runtime";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import type { GuestHubState } from "./hubGuestFlow";
+import { pollWhileActive, type AppActivity } from "../runtime/pollWhileActive";
 import { ownerSpokesOf, phoneOwnerMergeUnlock, phoneThreadMovesOf } from "./ownerFlow";
 import { createPhoneUnlockKey } from "./ownerUnlockKey";
 
@@ -92,7 +93,12 @@ function joinedState(owner: boolean): GuestHubState {
 }
 
 async function world(
-  options: { presence: "confirmed" | "denied"; down?: string } = { presence: "confirmed" },
+  options: {
+    presence: "confirmed" | "denied";
+    down?: string;
+    /** Whether the spoke holds a move right now; it always does unless this says otherwise. */
+    holdsMove?: () => boolean;
+  } = { presence: "confirmed" },
 ) {
   const keyPair = await crypto.subtle.generateKey({ name: "ECDSA", namedCurve: "P-256" }, true, [
     "sign",
@@ -159,7 +165,8 @@ async function world(
       if (path === "/api/hub/owner/thread-moves/confirmations") {
         return Response.json({
           status: "listed",
-          confirmations: origin.includes("100.101.102.104") ? [heldMove] : [],
+          confirmations:
+            origin.includes("100.101.102.104") && (options.holdsMove?.() ?? true) ? [heldMove] : [],
         });
       }
       if (path === "/api/hub/owner/thread-moves/ticket") {
@@ -373,5 +380,72 @@ describe("a phone confirming a move a window holds for it", () => {
 
     expect(await moves.confirm(held)).toEqual({ status: "not-unlocked", reason: "cancelled" });
     expect(w.sentTo).toEqual([]);
+  });
+});
+
+describe("keeping the phone's waiting moves current while it is open", () => {
+  /** An app whose foreground state the test sets. */
+  function appActivity(active: boolean) {
+    const listeners = new Set<(active: boolean) => void>();
+    const state = { active };
+    const activity: AppActivity = {
+      isActive: () => state.active,
+      onChange: (listener) => {
+        listeners.add(listener);
+        return () => listeners.delete(listener);
+      },
+    };
+    const set = (next: boolean) => {
+      state.active = next;
+      for (const listener of listeners) listener(next);
+    };
+    return { activity, set, listeners };
+  }
+
+  it("lists a move a computer starts holding after the screen opened, without opening it again", async () => {
+    let holds = false;
+    const w = await world({ presence: "confirmed", holdsMove: () => holds });
+    const moves = await phoneThreadMovesOf({ ...w, state: joinedState(true) });
+    if (moves === undefined) throw new Error("expected the phone's moves");
+    const listed: string[][] = [];
+    const read = () =>
+      void moves
+        .read()
+        .then((reading) =>
+          listed.push(reading.moves.map((move) => move.confirmation.confirmationId)),
+        );
+    const app = appActivity(true);
+
+    read();
+    const stop = pollWhileActive({ run: read, intervalMs: 10, activity: app.activity });
+    await vi.waitFor(() => expect(listed[0]).toEqual([]));
+    holds = true;
+
+    await vi.waitFor(() => expect(listed.at(-1)).toEqual([heldMove.confirmationId]));
+    stop();
+    expect(app.listeners.size).toBe(0);
+  });
+
+  it("reads nothing while the app is in the background, and reads at once when it returns", async () => {
+    vi.useFakeTimers();
+    try {
+      const run = vi.fn();
+      const app = appActivity(false);
+      const stop = pollWhileActive({ run, intervalMs: 5_000, activity: app.activity });
+
+      vi.advanceTimersByTime(20_000);
+      expect(run).not.toHaveBeenCalled();
+      app.set(true);
+      expect(run).toHaveBeenCalledOnce();
+      vi.advanceTimersByTime(5_000);
+      expect(run).toHaveBeenCalledTimes(2);
+
+      stop();
+      vi.advanceTimersByTime(20_000);
+      app.set(true);
+      expect(run).toHaveBeenCalledTimes(2);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

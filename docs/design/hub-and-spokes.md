@@ -2394,7 +2394,10 @@ a numbered slice. Built, with these narrower readings:
     ticket route is unchanged: the phone asks it for the ticket as an owner
     there, with its own fresh own-class unlock bound to the route and to the
     body naming the source and the held threads. The phone app lists the
-    waits under Moves waiting for you and confirms one with a single
+    waits under Moves waiting for you, read again every five seconds while
+    the Computers screen shows and the app is in front and at once when the
+    app returns to the front, so a move held after the screen opened
+    appears before its wait runs out. It confirms one with a single
     biometric prompt, asking the destination before telling the source.
     Server smokes cover the move and the batch, a phone that is not an owner
     on the source, a confirmation spent once, a confirmation without an
