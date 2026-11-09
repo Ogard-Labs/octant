@@ -622,12 +622,13 @@ describe("PlaywrightBrowserRuntime", () => {
   });
 
   it("drops a frame whose credential check outlasts the drain bound", async () => {
-    const { checks, recorder, runtime } = await recordingHarness();
+    const { checks, recorder, runtime, starting } = await recordingHarness({ startFrame: false });
     recorder.frame();
     await vi.waitFor(() => expect(checks.pending).toBe(1));
 
     const stopped = await runtime.act(firstId, action("record-stop"), new AbortController().signal);
     checks.settle(false);
+    await starting;
 
     expect(stopped.recording).toEqual({ status: "empty" });
   });
@@ -656,6 +657,17 @@ describe("PlaywrightBrowserRuntime", () => {
     });
   });
 
+  it("ends the screencast when the context closes while a recording waits for its first frame", async () => {
+    const { recorder, runtime, session, starting } = await recordingHarness({ startFrame: false });
+    await runtime.closeAll();
+    await starting;
+
+    expect(session.send).toHaveBeenCalledWith("Page.stopScreencast");
+    expect(session.detach).toHaveBeenCalled();
+    recorder.frame();
+    expect(recorder.looked()).toBe(0);
+  });
+
   it("takes no frame from the recorded tab once another is in front", async () => {
     const { checks, recorder, runtime } = await recordingHarness();
     await runtime.act(
@@ -669,7 +681,12 @@ describe("PlaywrightBrowserRuntime", () => {
     const stopped = await runtime.act(firstId, action("record-stop"), new AbortController().signal);
 
     expect(checks.pending).toBe(0);
-    expect(stopped.recording).toEqual({ status: "empty" });
+    // Only the frame the page sent at the start; the later one was not looked at.
+    expect(stopped.recording).toMatchObject({
+      status: "recorded",
+      frames: 1,
+      truncated: "tab-changed",
+    });
   });
 
   it("keeps a recording a bound cut short under the page it showed, not the one the tab moved to", async () => {
@@ -814,7 +831,7 @@ function harnessWithReceipt(options: {
 }
 
 /** A context recording its page, each frame's credential check held open until a test settles it. */
-async function recordingHarness() {
+async function recordingHarness(options: { readonly startFrame?: boolean } = {}) {
   const { contexts, pages, runtime } = harness();
   const page = pages[0]!;
   const waiting: Array<(sensitive: boolean) => void> = [];
@@ -843,6 +860,13 @@ async function recordingHarness() {
   const session = {
     send: vi.fn(async (method: string) => {
       if (method === "Page.stopScreencast") stopScreencast();
+      // A page that does not repaint sends one frame as the screencast starts,
+      // and starting a recording waits for it to be looked at.
+      if (method === "Page.startScreencast" && options.startFrame !== false) {
+        queueMicrotask(() =>
+          frameListener?.({ data: Buffer.from(onePixelPng()).toString("base64"), sessionId: 0 }),
+        );
+      }
     }),
     on: vi.fn((_event: string, listener: (parameters: unknown) => void) => {
       frameListener = listener;
@@ -862,7 +886,15 @@ async function recordingHarness() {
     action("navigate", "https://example.com/start"),
     new AbortController().signal,
   );
-  await runtime.act(firstId, action("record-start"), new AbortController().signal);
+  const starting = runtime.act(firstId, action("record-start"), new AbortController().signal);
+  if (options.startFrame === false) {
+    // Registered once the screencast is asked for; the wait for a first frame follows.
+    await vi.waitFor(() =>
+      expect(session.send).toHaveBeenCalledWith("Page.startScreencast", expect.anything()),
+    );
+  } else {
+    await starting;
+  }
   const recorder = {
     /** Send a frame `width` pixels wide; a different width is a resized page. */
     frame(width = 1) {
@@ -871,14 +903,17 @@ async function recordingHarness() {
     },
     /** How many frames the runtime has finished looking at. */
     looked() {
-      return session.send.mock.calls.filter(([method]) => method === "Page.screencastFrameAck")
-        .length;
+      // The frame sent at the start is not one a test sent.
+      return (
+        session.send.mock.calls.filter(([method]) => method === "Page.screencastFrameAck").length -
+        (options.startFrame === false ? 0 : 1)
+      );
     },
     onStopScreencast(listener: () => void) {
       stopScreencast = listener;
     },
   };
-  return { checks, recorder, runtime };
+  return { checks, recorder, runtime, session, starting };
 }
 
 /** A one-pixel RGBA PNG, the shape a page's screencast sends. */

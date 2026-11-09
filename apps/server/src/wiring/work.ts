@@ -68,7 +68,7 @@ import {
 } from "../threadExportRoutes";
 import { ThreadExportService } from "../threadExportService";
 import { makeThreadHandOffCompletion } from "../threadHandOffCompletion";
-import { ThreadHandOffService } from "../threadHandOffService";
+import { ThreadHandOffService, type ThreadHandOffProviderPort } from "../threadHandOffService";
 import { createBrowserAppManagedTools } from "../browser/browserAppManagedTools";
 import { readThreadExternalContentTaint } from "../context/externalContentTaintProjection";
 import {
@@ -935,41 +935,44 @@ export function wireWork(deps: WorkDependencies) {
       service: threadExportService,
       windowAuthorityStore,
     });
+    // One bounded, tool-free request to a thread's own provider, shared with
+    // the agent's summary turn in a handover note.
+    const threadHandOffProvider: ThreadHandOffProviderPort = {
+      readiness: (providerInstanceId) => {
+        const instance = persistence.readProviderInstance(providerInstanceId);
+        if (instance === undefined || !instance.enabled) return undefined;
+        return providerRuntimeRegistry.observedState(providerInstanceId)?.readiness;
+      },
+      complete: makeThreadHandOffCompletion({
+        resolveDriver: (providerInstanceId) => {
+          const instance = persistence.readProviderInstance(providerInstanceId);
+          if (instance === undefined || !instance.enabled) return undefined;
+          try {
+            return makeConfiguredProviderDriver(instance, configuredDriverOptions);
+          } catch {
+            return undefined;
+          }
+        },
+        scratchRoot: (threadId) => {
+          const root = join(persistence.dataDirectory, "hand-off-scratch", threadId);
+          mkdirSync(root, { recursive: true, mode: 0o700 });
+          return root;
+        },
+        releaseScratchRoot: (threadId) => {
+          rmSync(join(persistence.dataDirectory, "hand-off-scratch", threadId), {
+            recursive: true,
+            force: true,
+          });
+        },
+        uuid: randomUUID,
+      }),
+    };
     // Hand-off starts from the export cut and keeps its document as a Canvas
     // of the thread, resolved from the thread the way an authoring agent's
     // Canvas is — never from whichever Project the window happens to show.
     const threadHandOffService = new ThreadHandOffService({
       exports: threadExportService,
-      provider: {
-        readiness: (providerInstanceId) => {
-          const instance = persistence.readProviderInstance(providerInstanceId);
-          if (instance === undefined || !instance.enabled) return undefined;
-          return providerRuntimeRegistry.observedState(providerInstanceId)?.readiness;
-        },
-        complete: makeThreadHandOffCompletion({
-          resolveDriver: (providerInstanceId) => {
-            const instance = persistence.readProviderInstance(providerInstanceId);
-            if (instance === undefined || !instance.enabled) return undefined;
-            try {
-              return makeConfiguredProviderDriver(instance, configuredDriverOptions);
-            } catch {
-              return undefined;
-            }
-          },
-          scratchRoot: (threadId) => {
-            const root = join(persistence.dataDirectory, "hand-off-scratch", threadId);
-            mkdirSync(root, { recursive: true, mode: 0o700 });
-            return root;
-          },
-          releaseScratchRoot: (threadId) => {
-            rmSync(join(persistence.dataDirectory, "hand-off-scratch", threadId), {
-              recursive: true,
-              force: true,
-            });
-          },
-          uuid: randomUUID,
-        }),
-      },
+      provider: threadHandOffProvider,
       documents: {
         save: async ({ windowId, mode, threadId, projectId, title, blocks }) => {
           const bootstrap = await projectService.bootstrap(windowId);
@@ -1487,6 +1490,7 @@ export function wireWork(deps: WorkDependencies) {
       goalLoopService,
       threadExportRoutes,
       threadExportService,
+      threadHandOffProvider,
       threadHandOffRoutes,
       threadMessageQueue,
       threadMessageQueueRoutes,

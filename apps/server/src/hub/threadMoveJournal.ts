@@ -18,6 +18,7 @@ import {
   ThreadMovedIn,
   ThreadMovedOut,
   UtcTimestamp,
+  type HandoverAgentSummary,
   type HandoverId,
   type MovedThreadReference,
 } from "@octant/contracts";
@@ -128,5 +129,6 @@ export interface ThreadHandoverRecorder {
     readonly handoverId: HandoverId;
     readonly thread: MovedThreadReference;
     readonly branch: string;
+    readonly agentSummary?: HandoverAgentSummary;
   }) => void;
 }
