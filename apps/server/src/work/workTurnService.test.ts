@@ -2015,6 +2015,50 @@ describe("WorkTurnService", () => {
     expect(turnEnded).toHaveBeenCalledWith(expect.objectContaining({ mode: "work" }), summary);
   });
 
+  it("digests the prompt of a thread's first turn and not its follow-ups", async () => {
+    const summary: TurnEndSummary = {
+      stopReason: "end-of-turn",
+      startedAt: "2026-07-29T12:00:00.000Z",
+      endedAt: "2026-07-29T12:00:10.000Z",
+      metrics: { precision: "unavailable", wallMs: 10_000 },
+    };
+    const run = vi.fn<WorkTurnRuntimePort["run"]>(async (input) => {
+      input.onTurnEnded?.(summary);
+      return { kind: "completed", response: "Provider reply" };
+    });
+    const turnEnded = vi.fn();
+    const fixture = serviceFixture({
+      turnRuntime: { run },
+      nativeHarness: {
+        contextFor: () => [],
+        turnStarted: vi.fn(),
+        turnCompleted: vi.fn(async () => undefined),
+        turnEnded,
+        promptDigest: (text) => `digest:${text}`,
+      },
+    });
+    const runTurn = async (n: number, prompt: string) => {
+      const suffix = n.toString(16).padStart(12, "0");
+      const requestId = decodeWorkTurnRequestId(`aaaaaaaa-aaaa-4aaa-8aaa-${suffix}`);
+      await fixture.service.startFirstTurn(ids.window, {
+        ...startCommand(),
+        requestId,
+        turnId: decodeWorkTurnId(`bbbbbbbb-bbbb-4bbb-8bbb-${suffix}`),
+        prompt,
+      });
+      await fixture.waitForIdle(requestId);
+    };
+
+    await runTurn(1, "Summarize the brief");
+    await runTurn(2, "continue");
+
+    await vi.waitFor(() => expect(turnEnded).toHaveBeenCalledTimes(2));
+    expect(turnEnded.mock.calls[0]?.[1]).toMatchObject({
+      promptDigest: "digest:Summarize the brief",
+    });
+    expect(turnEnded.mock.calls[1]?.[1]).toEqual(summary);
+  });
+
   it.each(["provider", "completion"] as const)(
     "keeps cancellation and usage when it wins during %s settlement",
     async (stage) => {

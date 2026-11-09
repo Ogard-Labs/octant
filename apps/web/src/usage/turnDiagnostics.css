@@ -131,3 +131,18 @@
   font-size: var(--oct-text-sm);
   font-weight: 500;
 }
+
+.turn-diagnostics__same-prompt {
+  display: flex;
+  flex-direction: column;
+  gap: var(--oct-space-2);
+}
+
+.turn-diagnostics__same-prompt-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--oct-space-3);
+  color: var(--oct-muted);
+  font-size: var(--oct-text-xs);
+}

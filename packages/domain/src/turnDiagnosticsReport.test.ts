@@ -1,4 +1,6 @@
 import {
+  MAX_DIAGNOSTICS_SAME_PROMPT_PAIRS,
+  MAX_DIAGNOSTICS_SAME_PROMPTS,
   decodeTurnDiagnosticsReport,
   type TurnDiagnostics,
   type TurnMetricsRecord,
@@ -308,6 +310,68 @@ describe("likely prompt-cache misses", () => {
     expect(
       likelyCacheMisses([turn(0), turn(3, { usage: { inputTokens: 10_000, outputTokens: 1 } })]),
     ).toEqual([]);
+  });
+});
+
+describe("the same-prompt list", () => {
+  const digest = (character: string) => character.repeat(64);
+
+  it("groups turns by digest and keeps only prompts sent to two or more provider and model pairs", () => {
+    const report = buildTurnDiagnosticsReport(
+      [
+        turn(0, { promptDigest: digest("a") }),
+        turn(10, { promptDigest: digest("a"), modelId: "model-b", threadId: threadB }),
+        turn(20, { promptDigest: digest("a"), modelId: "model-b", stopReason: "failed" }),
+        turn(30, { promptDigest: digest("b") }),
+        turn(40, { promptDigest: digest("b") }),
+        turn(50),
+        turn(60, { providerInstanceId: providerB }),
+      ],
+      options,
+    );
+
+    expect(report.samePrompt).toHaveLength(1);
+    const entry = report.samePrompt[0];
+    expect(entry?.promptDigest).toBe(digest("a"));
+    expect(entry?.threadId).toBe(threadA);
+    expect(entry?.lastSentAt).toBe(minute(20));
+    expect(entry?.pairs.map((pair) => [pair.modelId, pair.turns, pair.failedTurns])).toEqual([
+      ["model-b", 2, 1],
+      ["model-a", 1, 0],
+    ]);
+    expect(entry?.pairs[1]?.decodeTokensPerSecondP50).toBe(50);
+    expect(entry?.pairs[1]?.timeToFirstTokenP50Ms).toBe(1_000);
+    expect(entry?.pairs[1]?.outputTokens).toBe(200);
+    expect(decodeTurnDiagnosticsReport(report).samePrompt).toHaveLength(1);
+  });
+
+  it("counts the same model on two provider instances as two pairs", () => {
+    const report = buildTurnDiagnosticsReport(
+      [
+        turn(0, { promptDigest: digest("c") }),
+        turn(5, { promptDigest: digest("c"), providerInstanceId: providerB }),
+      ],
+      options,
+    );
+    expect(report.samePrompt[0]?.pairs).toHaveLength(2);
+  });
+
+  it("lists the newest prompts first and cuts the list and each entry's pairs to their bounds", () => {
+    const hex = (index: number) => index.toString(16).padStart(64, "0");
+    const records: TurnMetricsRecord[] = [];
+    for (let index = 0; index < 55; index += 1) {
+      records.push(turn(index * 2, { promptDigest: hex(index), modelId: "model-a" }));
+      records.push(turn(index * 2 + 1, { promptDigest: hex(index), modelId: "model-b" }));
+    }
+    for (let index = 0; index < 10; index += 1) {
+      records.push(turn(200 + index, { promptDigest: hex(0), modelId: `model-extra-${index}` }));
+    }
+    const report = buildTurnDiagnosticsReport(records, options);
+
+    expect(report.samePrompt).toHaveLength(MAX_DIAGNOSTICS_SAME_PROMPTS);
+    expect(report.samePrompt[0]?.promptDigest).toBe(hex(0));
+    expect(report.samePrompt[0]?.pairs).toHaveLength(MAX_DIAGNOSTICS_SAME_PROMPT_PAIRS);
+    expect(report.samePrompt[1]?.promptDigest).toBe(hex(54));
   });
 });
 

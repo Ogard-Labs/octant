@@ -167,7 +167,7 @@ import type {
   NativeHarnessTurnAdmission,
   NativeHarnessTurnScope,
 } from "../harness/nativeHarnessTurnObserver";
-import type { TurnEndSummary } from "../metrics/turnEnd";
+import { withPromptDigest, type TurnEndSummary } from "../metrics/turnEnd";
 import type { AutomaticCompactionSighting } from "../context/automaticCompaction";
 import type { RuntimeOutsideContentMarking } from "../context/runtimeOutsideContentMark";
 import type { RuntimeForgeChangeObserver } from "../shield/runtimeForgeChanges";
@@ -665,6 +665,8 @@ export interface CodeOperationRuntimeOptions {
     readonly turnStarted: (scope: NativeHarnessTurnScope) => void;
     /** Every turn's end, whatever its outcome, with what the turn cost and how it ran. */
     readonly turnEnded?: (scope: NativeHarnessTurnScope, turn?: TurnEndSummary) => void;
+    /** The host's keyed prompt digest; absent when the host has no key. */
+    readonly promptDigest?: (text: string) => string;
     readonly turnCompleted: (
       input: NativeHarnessTurnScope & {
         readonly text: string;
@@ -2490,6 +2492,11 @@ interface ActiveTurn {
   readonly resumeCursor?: ProviderResumeCursor;
   /** What the provider session held of Octant's per-turn context before this turn. */
   readonly carriedSentContext: CarriedSentContext;
+  /**
+   * Whether this is the thread's first turn on a context of its own: no earlier
+   * turn, and no session, handoff or fork conversation carried in.
+   */
+  readonly firstTurn: boolean;
   /** Which of this turn's context blocks are Octant's instructions and skills. */
   readonly sentContext?: CodeTurnSentContext;
   readonly secrets: readonly string[];
@@ -3369,6 +3376,12 @@ class RuntimeTurnController implements CodeOperationTurnPort {
         ]),
       ].filter((folder) => folder !== (input.providerRoot ?? input.checkoutRoot)),
       driver,
+      firstTurn:
+        !priorTurn &&
+        resumeCursor === undefined &&
+        switchHandoff?.record === undefined &&
+        forkHandoff?.record === undefined &&
+        forkMerges.records.length === 0,
       carriedSentContext: carriedSentContext({
         freshSession: resumeCursor === undefined,
         forkSeeded,
@@ -5129,7 +5142,9 @@ class RuntimeTurnController implements CodeOperationTurnPort {
                 },
               }),
           onTurnEnded: (ended) => {
-            endedTurn = ended;
+            endedTurn = withPromptDigest(ended, this.#options.nativeHarness?.promptDigest, prompt, {
+              firstTurn: active.firstTurn,
+            });
           },
           ...(this.#options.liveTurns === undefined
             ? {}

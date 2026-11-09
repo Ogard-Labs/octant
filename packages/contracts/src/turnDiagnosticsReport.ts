@@ -4,6 +4,7 @@ import { OctantMode } from "./modes";
 import { ProviderInstanceId, ProviderModelId, ProviderProcessDiagnostic } from "./providers";
 import {
   TurnFailureFacts,
+  PromptDigest,
   TurnFailureMessage,
   TurnRetryTally,
   TurnStopReason,
@@ -20,6 +21,8 @@ export const MAX_DIAGNOSTICS_TOOLS = 100;
 export const MAX_DIAGNOSTICS_FAILURE_GROUPS = 50;
 export const MAX_DIAGNOSTICS_RECENT_FAILURES = 50;
 export const MAX_DIAGNOSTICS_CACHE_MISSES = 20;
+export const MAX_DIAGNOSTICS_SAME_PROMPTS = 50;
+export const MAX_DIAGNOSTICS_SAME_PROMPT_PAIRS = 8;
 /** Thirty-one days of hours. */
 export const MAX_DIAGNOSTICS_TREND_BUCKETS = 744;
 
@@ -163,6 +166,44 @@ export const TurnDiagnosticsCacheMiss = Schema.Struct({
 }).annotations(strict);
 export type TurnDiagnosticsCacheMiss = typeof TurnDiagnosticsCacheMiss.Type;
 
+/**
+ * One provider instance and model's turns on one prompt: the figures that
+ * compare it with the other pairs that were sent the same prompt.
+ */
+export const TurnDiagnosticsSamePromptPair = Schema.Struct({
+  providerInstanceId: ProviderInstanceId,
+  modelId: ProviderModelId,
+  turns: PositiveInt,
+  failedTurns: NonNegativeInt,
+  timeToFirstTokenP50Ms: Schema.optional(NonNegativeNumber),
+  decodeTokensPerSecondP50: Schema.optional(NonNegativeNumber),
+  /** Sums over turns that reported usage. */
+  inputTokens: NonNegativeInt,
+  outputTokens: NonNegativeInt,
+  costUsd: Schema.optional(NonNegativeNumber),
+}).annotations(strict);
+export type TurnDiagnosticsSamePromptPair = typeof TurnDiagnosticsSamePromptPair.Type;
+
+/**
+ * A prompt that was sent to two or more provider and model pairs. The digest
+ * is the host's keyed digest, never the prompt; `threadId` is the newest
+ * thread that sent it, so a person reads the prompt in that thread.
+ */
+export const TurnDiagnosticsSamePrompt = Schema.Struct({
+  promptDigest: PromptDigest,
+  threadId: Schema.UUID,
+  /** The newest turn's mode, which says what kind of thread `threadId` is. */
+  mode: OctantMode,
+  /** When the newest turn that sent the prompt started. */
+  lastSentAt: UtcTimestamp,
+  /** Most turns first, cut to `MAX_DIAGNOSTICS_SAME_PROMPT_PAIRS`. */
+  pairs: Schema.Array(TurnDiagnosticsSamePromptPair).pipe(
+    Schema.minItems(2),
+    Schema.maxItems(MAX_DIAGNOSTICS_SAME_PROMPT_PAIRS),
+  ),
+}).annotations(strict);
+export type TurnDiagnosticsSamePrompt = typeof TurnDiagnosticsSamePrompt.Type;
+
 export const TurnDiagnosticsBucket = Schema.Struct({
   /** The bucket's start: an ISO hour in UTC, or a calendar date in the request's time zone. */
   key: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(32)),
@@ -224,6 +265,10 @@ export const TurnDiagnosticsReport = Schema.Struct({
   ),
   cacheMisses: Schema.Array(TurnDiagnosticsCacheMiss).pipe(
     Schema.maxItems(MAX_DIAGNOSTICS_CACHE_MISSES),
+  ),
+  /** Newest first. */
+  samePrompt: Schema.Array(TurnDiagnosticsSamePrompt).pipe(
+    Schema.maxItems(MAX_DIAGNOSTICS_SAME_PROMPTS),
   ),
   trend: Schema.Array(TurnDiagnosticsBucket).pipe(Schema.maxItems(MAX_DIAGNOSTICS_TREND_BUCKETS)),
 }).annotations(strict);

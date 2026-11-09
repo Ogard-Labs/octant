@@ -453,6 +453,10 @@ function ReportSections(props: {
         previousLabel={props.previousLabel}
         report={report}
       />
+      <SamePromptSection
+        report={report}
+        {...(props.onOpenSubject === undefined ? {} : { onOpenSubject: props.onOpenSubject })}
+      />
       <h2 className="diagnostics-dashboard__details-heading">Details</h2>
       <ModelSection report={report} />
       <TrendTableSection report={report} />
@@ -778,6 +782,97 @@ function TroubledTurnSection(props: {
           </tbody>
         </table>
       </div>
+    </SurfaceSection>
+  );
+}
+
+/**
+ * Prompts that were sent to two or more models, each model's figures side by
+ * side. The report holds a keyed digest, never the prompt, so a person reads
+ * the prompt in the newest thread that sent it.
+ */
+function SamePromptSection(props: {
+  readonly report: TurnDiagnosticsReport;
+  readonly onOpenSubject?: (subjectType: string, subjectId: string) => void;
+}) {
+  const when = useWhen();
+  const { samePrompt } = props.report;
+  return (
+    <SurfaceSection label="Same prompt">
+      {samePrompt.length === 0 ? (
+        <p className="usage-workspace__note">
+          No prompt in this range was sent to more than one model. When the same prompt runs on two
+          models, their speed, tokens, and cost appear here side by side.
+        </p>
+      ) : (
+        <>
+          <p className="usage-workspace__note">
+            Prompts sent to two or more models, newest first. Open the thread to read the prompt.
+            Speed and first token are the typical turn (p50).
+          </p>
+          {samePrompt.map((entry) => {
+            const subjectType = SUBJECT_TYPE[entry.mode];
+            return (
+              <div className="turn-diagnostics__same-prompt" key={entry.promptDigest}>
+                <div className="turn-diagnostics__same-prompt-head">
+                  <span>Last sent {when(entry.lastSentAt)}</span>
+                  {props.onOpenSubject === undefined ? null : (
+                    <OctantButton
+                      aria-label={`Open the thread that last sent the prompt of ${when(entry.lastSentAt)}`}
+                      onClick={() => props.onOpenSubject?.(subjectType, entry.threadId)}
+                      size="sm"
+                      type="button"
+                      variant="ghost"
+                    >
+                      Open thread
+                    </OctantButton>
+                  )}
+                </div>
+                <div className="usage-table-scroll">
+                  <table
+                    aria-label={`Models that were sent the prompt of ${when(entry.lastSentAt)}`}
+                    className="usage-table"
+                  >
+                    <thead>
+                      <tr>
+                        <th scope="col">Model</th>
+                        <th scope="col">Provider</th>
+                        <th scope="col">Turns</th>
+                        <th scope="col">Failed</th>
+                        <th scope="col">First token</th>
+                        <th scope="col">Speed</th>
+                        <th scope="col">Tokens in / out</th>
+                        <th scope="col">Cost</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {entry.pairs.map((row) => (
+                        <tr key={`${String(row.providerInstanceId)}/${String(row.modelId)}`}>
+                          <th scope="row">{String(row.modelId)}</th>
+                          <td>
+                            <UsageName id={String(row.providerInstanceId)} kind="provider" />
+                          </td>
+                          <td>{row.turns}</td>
+                          <td>{countAndShare(row.failedTurns, row.turns)}</td>
+                          <td>{milliseconds(row.timeToFirstTokenP50Ms)}</td>
+                          <td>{rate(row.decodeTokensPerSecondP50)}</td>
+                          <td>
+                            {row.inputTokens.toLocaleString("en")} /{" "}
+                            {row.outputTokens.toLocaleString("en")}
+                          </td>
+                          <td>
+                            {row.costUsd === undefined ? "Not reported" : dollars(row.costUsd)}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            );
+          })}
+        </>
+      )}
     </SurfaceSection>
   );
 }
