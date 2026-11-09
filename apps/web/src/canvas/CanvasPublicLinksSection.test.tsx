@@ -3,7 +3,7 @@ import type {
   CanvasPublicShareList,
   CanvasPublicShareRecord,
 } from "@octant/contracts/canvas-public-share";
-import { render, screen, waitFor } from "@testing-library/react";
+import { act, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import { CanvasPublicLinksSection } from "./CanvasPublicLinksSection";
@@ -77,6 +77,25 @@ describe("CanvasPublicLinksSection", () => {
 
     expect(copyText).toHaveBeenCalledWith("https://canvas.octant.sh/s/AAAAAAAAAAAAAAAAAAAAAA");
     expect(await screen.findByText("Link copied.")).toBeVisible();
+  });
+
+  it("lets a paired reader copy links without offering owner actions", async () => {
+    const user = userEvent.setup();
+    const copyText = vi.fn(async () => undefined);
+    const reading = Promise.withResolvers<CanvasPublicShareList>();
+    render(
+      <CanvasPublicLinksSection
+        canvasId={canvasId}
+        copyText={copyText}
+        onList={() => reading.promise}
+      />,
+    );
+    expect(screen.getByRole("status")).toHaveTextContent("Reading public links…");
+    await act(async () => reading.resolve(list([record()])));
+    await user.click(await screen.findByRole("button", { name: "Copy link" }));
+    expect(copyText).toHaveBeenCalledWith(record().url);
+    expect(screen.queryByRole("button", { name: "Update" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Revoke" })).not.toBeInTheDocument();
   });
 
   it("opens the export dialog when the person chooses Update", async () => {

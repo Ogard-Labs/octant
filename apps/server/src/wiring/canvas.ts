@@ -159,6 +159,10 @@ export type CanvasDependencies = Pick<ServerStart, "options" | "persistence"> &
     readonly findPublishedSnapshot?: NonNullable<
       Parameters<typeof createCanvasRouteHandler>[0]["findPublishedSnapshot"]
     >;
+    /** Wired after Chat, Work and Code exist; read only when a paired device asks. */
+    readonly threadReadAuthority?: NonNullable<
+      Parameters<typeof createCanvasRouteHandler>[0]["threadReadAuthority"]
+    >;
   };
 
 export function wireCanvas(deps: CanvasDependencies) {
@@ -1217,6 +1221,9 @@ export function wireCanvas(deps: CanvasDependencies) {
     ...(deps.findPublishedSnapshot === undefined
       ? {}
       : { findPublishedSnapshot: deps.findPublishedSnapshot }),
+    ...(deps.threadReadAuthority === undefined
+      ? {}
+      : { threadReadAuthority: deps.threadReadAuthority }),
     canvasShareService,
     canvasExportService,
     canvasPublicShareService,

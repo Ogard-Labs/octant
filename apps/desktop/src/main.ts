@@ -1,3 +1,4 @@
+import { storedBrowserProfileOfPartitionFolder } from "@octant/domain";
 import { createDesktopBrowserCredentialFill } from "./desktopBrowserCredentialFill";
 import { createDesktopClientLifetime } from "./desktopClientLifetime";
 import {
@@ -1363,6 +1364,8 @@ let browserRuntimeBroker: BrowserRuntimeBroker | undefined;
 let computerUseService: ComputerUseDesktopService | undefined;
 let managedToolService: ManagedToolService | undefined;
 let browserSurfaceHost: ReturnTypeOfBrowserSurfaceHost | undefined;
+// Stores, native sessions and their owner survive a backend restart together.
+let browserProfileStore: ReturnType<typeof createBrowserProfileStore> | undefined;
 let browserExtensionPopupHost: ReturnType<typeof createExtensionPopupHost> | undefined;
 let browserExtensionBridge: ReturnType<typeof createExtensionBridge> | undefined;
 let canvasPrototypeSurface: CanvasPrototypeSurface | undefined;
@@ -1857,6 +1860,11 @@ async function startDesktopOwnedHost(): Promise<LocalHostDescriptor> {
       isEmbeddedOwner: (windowId) => nightlyWindowLeases?.hasWindow(windowId) === true,
       clipboard: { writeText: (text) => clipboard.writeText(text) },
       createView: (options) => {
+        const stored = storedBrowserProfileOfPartitionFolder(
+          options.partition.replace(/^persist:/, ""),
+        );
+        if (stored?.kind === "account" && !profileStore.hasAccountProfile(stored.profileId))
+          throw new Error("The named account profile is not registered on this host.");
         if (nightlyWindowLeases?.hasWindow(options.owner.windowId) === true)
           return createOffscreenBrowserSurface(options);
         return new WebContentsView({
@@ -1865,17 +1873,17 @@ async function startDesktopOwnedHost(): Promise<LocalHostDescriptor> {
       },
     });
     const surfaceHost = browserSurfaceHost;
-    const profileStore = createBrowserProfileStore({
+    const profileStore = (browserProfileStore ??= createBrowserProfileStore({
       partitionsDirectory: browserProfilesDirectory(),
       sessionFor: (partition) => session.fromPartition(partition),
       closeProfilePages: (profile) => surfaceHost.closeProfileContexts(profile),
       onExtensionSession: (profile) => browserExtensionBridge?.attachProfile(profile),
-    });
+    }));
     const extensionPreloadPath = resolve(
       dirname(fileURLToPath(import.meta.url)),
       EXTENSION_BRIDGE_PRELOAD_FILENAME,
     );
-    browserExtensionBridge = createExtensionBridge({
+    browserExtensionBridge ??= createExtensionBridge({
       preloadPath: extensionPreloadPath,
       tabsChannel: IPC_CHANNELS.browserExtensionTabs,
       actionChannel: IPC_CHANNELS.browserExtensionActionClicked,

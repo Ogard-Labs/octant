@@ -282,7 +282,7 @@ Status: Partly built. Since: 2026-10-31. Detail: [Architecture: Provider runtime
 
 ### Server SSH profiles
 
-- Built: Settings › Remote access distinguishes host control, registered-server commands and server-folder work, shows where each runs and routes to the existing setup without starting work. Connection diagnosis and saved server actions remain separate outcomes. Detail: [Server Projects: Setup entry](server-projects.md#setup-entry).
+- Built: Settings › Remote access distinguishes host control, registered-server commands and server-folder work, shows where each runs and routes to the existing setup without starting work. Read-only connection checks distinguish host readiness, fresh SSH trust/authentication, directory access and supported server runtime, without accepting keys or restarting uncertain commands. Saved server actions remain a separate outcome. Detail: [Server Projects: Setup entry](server-projects.md#setup-entry).
 
 The person registers their own servers with an action profile, and SSH to a registered server is judged by that profile in Work and Code alike.
 
@@ -317,7 +317,7 @@ The key providers run inside Octant as they run on their own, with their native 
 - Codex keeps its Project skills and, in Chat, the person's tool servers and plugins; its own subagents run at every level, each shown as a child run, with their approvals and app-tool calls answered through the parent's approval path and their web searches marking the thread.
 - OpenCode loads its own skills, the MCP servers in the person's own configuration, and the permission rules they wrote (over the level, under Plan's denials and the outside-directory refusal; a catch-all rule is ignored), follows each session its `task` tool delegates to as a child run with its requests answered through the parent, and answers a remembered 2.x approval `always`, saying the grant lives in OpenCode's own store; Octant Shield answers its approvals at Auto like every other runtime's.
 - OpenCode reports file changes and compacts its own session on request only from the 2.x release whose server was read for them (2.2.0); an older 2.x release reports no file changes and compaction `unavailable`, 1.x reports compaction `unavailable` and reports no file changes (not built yet), and a change no edit grant names still fails the turn. A compaction request is held open until the run that carried it ends, so the closing idle is never read as a completed turn. Rationale: the narrower choice trusts only a release that was read, since routes and events differ between 2.x releases and the claim adds no authority.
-- Mistral Vibe loads its own skills and Project context, the account's MCP servers, connectors and hooks, and a trusted Project's `.vibe` tools, MCP servers, hooks, plugins and agents under its own folder trust; its own subagents run only at Full access in Work and Code, shown as child runs, because a subagent's permission request names nothing Octant could show; it stays on the ACP bridge, because its `vibe-app-server` is an unversioned surface that ships with its own client; reading usage and context from verified `vibe-acp` 3.0.3 is built ([Provider runtimes](provider-runtimes.md#mistral-vibe-surface)); reading compaction, review and questions from its own extensions is not built yet.
+- Mistral Vibe loads its own skills and Project context, the account's MCP servers, connectors and hooks, and a trusted Project's `.vibe` tools, MCP servers, hooks, plugins and agents under its own folder trust; its own subagents run only at Full access in Work and Code, shown as child runs, because a subagent's permission request names nothing Octant could show; it stays on the ACP bridge, because its `vibe-app-server` is an unversioned surface that ships with its own client; reading usage and context from verified `vibe-acp` 3.0.3 is built ([Provider runtimes](provider-runtimes.md#mistral-vibe-surface)); reading compaction and review from its own extensions is not built yet; session-form questionnaires have a bounded adapter and Chat, Work and Code integration, but remain unavailable in production until exact 3.0.3 signed-in question, answer and cancel verification passes (the verified-version allowlist is empty).
 
 Status: Partly built. Since: 2026-10-31. Detail: [Architecture: Providers](../architecture.md#providers) and [Provider runtimes: Key providers](provider-runtimes.md#key-providers).
 
@@ -1504,6 +1504,7 @@ Status: Built. Since: —. Detail: [Architecture: Extensions and skills](../arch
 New providers and tools reach the system through the published SDK, API and host seams. They take no shortcut a third-party plugin could not take.
 
 - Plugin ports carry no raw filesystem, shell or credential handles, and plugin state holds only opaque references.
+- Installed Code tools may declare bounded existing credential-operation or saved-command ids in `extensions.octant.codeTools`. The public turn-scoped port exposes declaration-scoped names and request/run-saved actions, never commands, paths, credentials or host services. Code-only selection and the activation ladder remain separate from person approval; changed package/catalog/task authority invalidates pending use before effects. The existing core credential composition migrates separately without changing its schema or host policy.
 - Maintainers decided on 2026-11-07 that GitHub, thread boards and Zen are bundled first-party plugins a person can switch off and on, each on by default. Usage, diagnostics, Navigator, the automations UI, browser and computer use, agent hierarchy, remote and mobile access, the Apple workbench, and the marketplace and plugin registry stay integrated core features and are no longer extraction candidates.
 - The first-party manifests have one definition that the server and the renderer share.
 - A bundled plugin's switch is journaled on its own aggregate, apart from the installed-package lifecycle, with a rebuildable projection; a plugin nobody switched is on.
@@ -2447,8 +2448,10 @@ A public Canvas link is off by default and exists only through the person's expl
 
 - Settings holds the switch, off by default. While off, no request reaches the service. Turning it off keeps existing links revocable.
 - A link is published only through the export approval card. No agent tool reaches the flow, and a paired device cannot publish.
+- Paired Chat, Work and Code readers can open an existing Canvas and copy its public links. Their Canvas read grant is thread read authority: the device reads a Canvas when it may open the Canvas's thread, still filed in that Project and mode, never by switching the host's Project. A refusal does not reveal whether the Canvas exists. The shared reader omits creation, editing, export and owner update/revoke controls, which stay refused to a device; every read still travels through the device session.
 - The payload is a frozen copy with no host, Project, thread or source ids, no file contents and no declared images. A Canvas has at most one active link (30-day default expiry, optional password).
 - The service has no accounts. A per-share owner secret lives in the credential broker, separate from provider credentials, and never in the journal.
+- A first-party create commits that secret and a non-secret ownership intent before uploading a document. Owned-create binds a random id, owner and exact approved terms; identical retries do not mutate, conflicting retries refuse, and uncertain publication is withdrawn through durable restart/listing recovery. A host never falls back to legacy create. Key-bound ids and durable authenticated cancellation tombstones fence delayed creates; unauthorized/not-found responses never settle ownership.
 - The service logs no IP address and serves design frames from a separate user-content origin.
 - The reference service lives at `apps/share` in this repository and is self-hosted by each user (Bun or Docker); no service address is set by default, and Ogard Labs operates no instance.
 
@@ -2552,6 +2555,11 @@ Status: Partly built. Since: 2026-11-01. Detail: [Browser for agents: Page snaps
 
 ### Browser profiles and extensions
 
+The shared Browser tool contract advertises bounded named-account selectors
+(`account:<id>`) alongside the existing profile choices. This includes terminal
+MCP discovery; execution still requires the caller's separate current profile
+and site permission.
+
 Browser pages may keep sign-in in a Project or Personal profile. Private is the initial default, and extensions are enabled only per profile.
 
 - Private is the initial default. A local person may journal a Work or Code task’s default Browser profile; it is a default, not a pin or an approval grant. Explicit agent profile requests still follow existing policy, and excluded callers never silently substitute Private.
@@ -2605,6 +2613,8 @@ Browser pages can keep sign-ins in named profiles, and a person may import cooki
 - Octant never opens another browser's profile in place; the person's explicit pick of a browser and one of its profiles is the only way its cookies reach a Project or Personal profile.
 - The person may import every cookie in the chosen browser profile or only one site's and its parent domains'; the journal records only that the import was limited to a site.
 - A Chromium-family browser's cookie key comes through the macOS Keychain prompt; a refusal imports nothing. Cookies are never logged, journaled, returned to a window, or sent off the Mac, and the journal records the source, the profile, and counts.
+
+- Named account profiles have host-assigned identities, native local labels and separate persistent stores. A local person explicitly selects one; task defaults never grant site, Project or credential authority. Approval names come from the native registry, and origin grants/extensions remain isolated per identity. Unknown identities, paired/unattended callers and a missing native owner refuse. Stores and the name registry are not exported or synced; Private, Project and Personal retain their behavior.
 
 Status: Built. Since: 2026-10-31. Detail: [Browser profiles and extensions: Cookie import](browser-profiles.md#cookie-import).
 
@@ -2897,7 +2907,8 @@ One hub is active at a time, with a named standby that stands in only while the 
 - A standby promotes to hub for good only by a local action the person confirms.
 - One unlock (biometrics, passcode or passkey) covers five minutes of administration; Full access, merge, credential copy, owner changes and a thread move's ticket each need their own. An owner phone confirming a move a window holds unlocks once on its own device and answers the destination's challenge itself; only the ticket id reaches the source.
 - Spokes honor owner devices by default, ticked at join and untickable.
-- Code posture recovery is built through the existing owner route, synchronous Code/Project service transactions and Settings/phone controls. Its current-state token binds versions, binding and checkout identity; Full access needs its own fresh proof, and the journal names the owner device. Physical unlock remains a separate unrun check. The [recovery inventory](hub-and-spokes.md#recovery-inventory) separates its approved path from Work levels, approval answers, restores, action launches and browser/profile transfers; an owner unlock adds none of those grants implicitly.
+- Code posture recovery is built through the existing owner route, synchronous Code/Project service transactions and Settings/phone controls. Its current-state token binds versions, binding and checkout identity; Full access needs its own fresh proof, and the journal names the owner device. Physical unlock remains a separate unrun check. The [recovery inventory](hub-and-spokes.md#recovery-inventory) separates its approved path from approval answers, restores, action launches and browser/profile transfers; an owner unlock adds none of those grants implicitly.
+- Local Work thread access recovery uses the same signed owner route, target/current-Project digest and fresh Full access proof, with the Work service journaling the owner principal. Its four levels remain distinct from Code Plan and persistence; neither a running turn nor a waiting approval is resumed or answered by the change. Server Projects retain their separate boundary.
 
 Status: Built. Since: 2026-10-28. Detail: [Hub and spokes: failover](hub-and-spokes.md#failover) and [owner devices](hub-and-spokes.md#owner-devices).
 
