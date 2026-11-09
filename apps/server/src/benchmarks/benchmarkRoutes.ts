@@ -1,5 +1,6 @@
 import {
   BENCHMARK_ROUTE_PATHS,
+  decodeBenchmarkCellRateRequest,
   decodeBenchmarkRunCancelRequest,
   decodeBenchmarkRunPurgeRequest,
   decodeBenchmarkRunReadRequest,
@@ -24,6 +25,8 @@ const READ_PATHS: ReadonlySet<string> = new Set([
   BENCHMARK_ROUTE_PATHS.suitesList,
   BENCHMARK_ROUTE_PATHS.runsList,
   BENCHMARK_ROUTE_PATHS.runsRead,
+  // Stars are a small non-secret write any principal that may read may make.
+  BENCHMARK_ROUTE_PATHS.cellsRate,
 ]);
 const WRITE_PATHS: ReadonlySet<string> = new Set([
   BENCHMARK_ROUTE_PATHS.suitesSave,
@@ -46,13 +49,15 @@ export interface BenchmarkRouteDependencies {
     | "startRun"
     | "cancelRun"
     | "purgeRun"
+    | "rateCell"
   >;
   readonly now?: () => number;
 }
 
 /**
  * Benchmark routes. A local window and an authorized remote device may read
- * suites and runs. Saving or deleting a suite, and starting, cancelling, or
+ * suites and runs and rate a cell with stars (a note on one answer, spending
+ * nothing). Saving or deleting a suite, and starting, cancelling, or
  * purging a run, spend money or erase threads, so they stay with a person at a
  * local window: any other principal is refused before the body is read.
  */
@@ -179,6 +184,12 @@ async function dispatch(
       return request === undefined
         ? invalid()
         : answer(await service.cancelRun(request), (run) => ({ run }));
+    }
+    case BENCHMARK_ROUTE_PATHS.cellsRate: {
+      const request = parse(decodeBenchmarkCellRateRequest);
+      return request === undefined
+        ? invalid()
+        : answer(service.rateCell(request), (value) => value);
     }
     default: {
       const request = parse(decodeBenchmarkRunPurgeRequest);

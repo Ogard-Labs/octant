@@ -70,6 +70,21 @@ export function formatUsd(value: number | undefined): string {
   return `$${value.toFixed(value < 1 ? 4 : 2)}`;
 }
 
+/** The judge's own cost, kept apart from every contender's figures. */
+export function formatOverhead(overhead: {
+  readonly turns: number;
+  readonly tokens: number;
+  readonly costUsd: number;
+}): string {
+  const tokens = new Intl.NumberFormat("en", {
+    notation: "compact",
+    maximumFractionDigits: 1,
+  }).format(overhead.tokens);
+  const cost =
+    overhead.costUsd < 0.01 ? formatUsd(overhead.costUsd) : `$${overhead.costUsd.toFixed(2)}`;
+  return `Judge: ${overhead.turns} ${overhead.turns === 1 ? "turn" : "turns"} · ${tokens} tokens · ${cost}`;
+}
+
 export function formatScore(value: number | undefined): string {
   return value === undefined ? NO_FIGURE : value.toFixed(1);
 }

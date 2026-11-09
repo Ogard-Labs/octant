@@ -294,3 +294,17 @@
   font-size: var(--oct-text-xs);
   overflow-wrap: anywhere;
 }
+
+.benchmark-stars {
+  display: grid;
+  min-width: 0;
+  gap: var(--oct-space-2);
+}
+
+.benchmark-stars__group {
+  display: flex;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  gap: var(--oct-space-1);
+}

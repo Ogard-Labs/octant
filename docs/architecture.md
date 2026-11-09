@@ -6178,12 +6178,65 @@ each cell starts, `benchmarkBudgetDecision` projects spend from the cells that
 settled (tokens and cost read from `TurnMetricsStore` by thread id) and, when the
 next cell would pass the run's token or cost budget, skips the queued cells and
 ends the run `budget-reached`. Code cases are defined and stored, but their cells
-settle `failed` until the Code runner exists; the judge, stars, and exports are
-later work, and their contract fields and events are already in place.
+settle `failed` until the Code runner exists; exports are later work.
+
+**Judge scoring.** When the run's judge snapshot is set, a cell that settles
+`answered` owes a score, and the run stays `running` until every judgement it
+owes has settled. The judge is one more Chat thread in the Benchmarks Project, on
+the judge's provider instance and model, sent through the same `BenchmarkChatPort`
+with a thread and submission id derived from the cell id
+(`"benchmark-judge:" + cellId`), so a restart waits on the judge turn it already
+started instead of starting another. Judge turns count against the same limits
+as contender cells (two per provider instance, four per host), through
+`nextBenchmarkJudgements` and running counts that include the judge turns in
+flight. The prompt is built by the pure `benchmarkJudgePrompt` from the rubric,
+the case prompt, the reference answer if any, and the candidate answer cut at
+50,000 characters. It takes no contender, provider or model, and the judge
+thread's title names none, so the judge is blind to who answered. The reply is
+read by `parseBenchmarkJudgeReply`: the first top-level JSON object in the text,
+a score that is an integer from 1 to 10, and a reason cut to 512 characters.
+Anything else, a refused or failed judge turn, or one still running after 30
+minutes is journaled as `benchmark-cell-judged` with status `failed` and a
+reason, never a guessed score. The judge thread is archived when it settles
+(again at host start) and purged with the run, found by its fixed identity even
+when no event names it.
+
+Benchmark threads, contenders and judges alike, take no part in person memory.
+The runner sends its turns with no window, which person memory never serves, and
+the host also puts the Benchmarks Project on the memory settings' "Projects kept
+out" list before first creating it, so no memory block or past-threads tool is
+offered, nothing a benchmark prompt or answer says is learned, and a person who
+later takes the Project off that list is making that choice. The judge reads the
+candidate answer from the cell's archived thread, which stays readable (only a
+deleted thread is refused).
+
+The judge thread is a plain Chat turn. It selects no extension components, so
+Octant offers it no MCP or connector tools, and Chat has no shell or files. The
+provider's own tools that Chat leaves on for that provider (for example web
+tools where the capability matrix lists them as never switched off) are not
+switched off by the benchmark, so a judge on such a provider can still reach
+them. Octant has no per-turn switch that starts a Chat turn with none, and this
+slice does not add one.
+
+Judge tokens and cost are the run's `overhead` (`turns`, `tokens`, `costUsd`),
+read from the judge threads' turn metrics and returned beside the leaderboard on
+the run read; they never enter a contender's row. `benchmarkBudgetDecision`
+counts overhead as spent and so includes each cell's judging in the mean cell
+cost. Judging of cells already answered is not itself stopped by the budget: the
+budget gates only which contender cells start.
+
+**Stars.** `POST /api/benchmarks/cells/rate` takes `{runId, cellId, stars 1-5,
+note?}` for an answered cell and journals `benchmark-cell-rated`; rating again
+replaces the earlier rating. It is open to the same principals as the reads, a
+local window and a paired remote device (the host owner's devices), and is
+forwarded on the remote list as `benchmark.rate-cell`, a remote-approvable action
+because it is a note on an answer already on screen that spends nothing and
+changes no thread. An anonymous request is refused with 401. The leaderboard's
+mean stars reads these ratings.
 
 The routes are all `POST` JSON. `/api/benchmarks/suites/list`,
-`/runs/list` and `/runs/read` (a run with its leaderboard and each cell's
-figures joined from turn metrics) answer a local window and a remote device
+`/runs/list` and `/runs/read` (a run with its leaderboard, the judge overhead and
+each cell's figures joined from turn metrics) answer a local window and a remote device
 that reaches the loopback handler with a bound principal. `/suites/save`,
 `/suites/delete`, `/runs/start`, `/runs/cancel` and `/runs/purge` spend money or
 erase threads, so a principal other than a local window is refused with 403
@@ -6191,9 +6244,10 @@ before the body is read. Start refuses a missing suite (404), a contender that
 is not an enabled provider model on this host, and a run over 2,000 cells (422),
 and answers a retried run id with the run it already made. Purging a run
 purges each cell's thread, by the fixed identity its cell derives, through the
-ordinary thread purge path and keeps the run if any purge fails. Like usage
-reads, the three read paths are on the remote forward list, classified as
-non-secret reads; no write path is forwarded. A `matches` check runs its pattern
+ordinary thread purge path, judge threads included, and keeps the run if any
+purge fails. Like usage reads, the three read paths are on the remote forward
+list, classified as non-secret reads; the stars route is forwarded as described
+above and no other write path is. A `matches` check runs its pattern
 in a worker thread under a two-second deadline against at most 50,000 characters
 of the answer, so a pattern that never returns fails the check instead of
 stalling the host. Each start of the host archives again the threads of settled

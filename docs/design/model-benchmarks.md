@@ -138,11 +138,11 @@ A **Benchmarks** source joins Diagnostics in the Usage source switch:
 
 ## Delivery, in order
 
-1. Prompt digest and the Same prompt comparison in Diagnostics.
+1. Prompt digest and the Same prompt comparison in Diagnostics. (built)
 2. Suite and run contracts, domain policy (cells, budget, scoring), journal
-   aggregates, routes, and the prompt-case runner with checks.
+   aggregates, routes, and the prompt-case runner with checks. (built)
 3. Benchmarks pages: suites, run builder, live grid, leaderboard, case
    compare.
-4. Judge scoring and stars.
+4. Judge scoring and stars. (in progress)
 5. Code cases: pinned worktrees, check commands, approval handling.
 6. History across runs and export.

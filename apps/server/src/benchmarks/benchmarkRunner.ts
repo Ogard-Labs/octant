@@ -1,5 +1,6 @@
 import {
   BENCHMARK_FAILURE_REASON_CHARS,
+  BENCHMARK_JUDGE_REASON_CHARS,
   decodeUtcTimestamp,
   type BenchmarkCell,
   type BenchmarkRun,
@@ -11,9 +12,14 @@ import {
   BENCHMARK_CONCURRENCY_LIMITS,
   benchmarkBudgetDecision,
   benchmarkCellMetrics,
+  benchmarkCellsOwingJudgement,
+  benchmarkJudgePrompt,
+  benchmarkOverhead,
   benchmarkRunStatusAfter,
   boundedBenchmarkReason,
   nextBenchmarkCells,
+  nextBenchmarkJudgements,
+  parseBenchmarkJudgeReply,
   scoreBenchmarkChecks,
   type BenchmarkPatternMatcher,
 } from "@octant/domain";
@@ -33,7 +39,7 @@ export interface BenchmarkRunnerOptions {
   readonly projection: Pick<BenchmarkProjection, "run" | "runs" | "runningRuns">;
   readonly store: Pick<
     BenchmarkEventStore,
-    "cellStarted" | "cellRequeued" | "cellSettled" | "runEnded"
+    "cellStarted" | "cellRequeued" | "cellSettled" | "cellJudged" | "runEnded"
   >;
   readonly turnMetrics: {
     readonly forThread: (threadId: string) => ReadonlyArray<TurnMetricsRecord>;
@@ -58,6 +64,31 @@ export function benchmarkCellIdentity(cellId: string): {
 }
 
 /**
+ * The deterministic identities of one cell's judge thread and turn submission.
+ * They are derived from the cell id alone, so a restart finds the judge turn it
+ * already started, and a purge finds the thread even when no event names it.
+ */
+export function benchmarkJudgeIdentity(cellId: string): {
+  readonly threadId: string;
+  readonly submissionId: string;
+} {
+  return {
+    threadId: deterministicUuid(`benchmark-judge-thread:${cellId}`),
+    submissionId: deterministicUuid(`benchmark-judge:${cellId}`),
+  };
+}
+
+/** A judge turn that ended, one way or another, has nothing left to wait for. */
+function turnEnded(outcome: string): boolean {
+  return (
+    outcome === "completed" ||
+    outcome === "failed" ||
+    outcome === "interrupted" ||
+    outcome === "cancelled"
+  );
+}
+
+/**
  * Runs the cells of every running benchmark run. Each tick settles the cells
  * whose turns ended, decides whether the budget allows another cell, and
  * starts the cells the concurrency limits allow, as ordinary Chat turns in the
@@ -69,10 +100,18 @@ export function benchmarkCellIdentity(cellId: string): {
  * projection: a cell with a thread keeps waiting on it, and a cell without one
  * is still queued, so starting it again finds the thread and turn it may
  * already have created through their deterministic identities.
+ *
+ * When the run's suite names a judge, an answered cell then owes a score. The
+ * judge is one more Chat turn in the same Project, on the judge's own model,
+ * started under the same concurrency limits and found again after a restart by
+ * its own deterministic identity. The run is not finished until every judgement
+ * it owes has settled.
  */
 export class BenchmarkRunner {
   readonly #options: BenchmarkRunnerOptions;
   readonly #starting = new Set<string>();
+  /** When a judge turn was first seen running, for its time limit; a restart starts the clock again. */
+  readonly #judgeSeen = new Map<string, number>();
   /** Cells put back to queued in this pass; they wait for the next tick to try again. */
   readonly #requeued = new Set<string>();
   #chain: Promise<unknown> = Promise.resolve();
@@ -131,6 +170,14 @@ export class BenchmarkRunner {
         if (this.#stopped) return;
         if (cell.state === "queued" || cell.state === "running") continue;
         await this.#options.chat.archiveThread(benchmarkCellIdentity(String(cell.cellId)).threadId);
+        // A judge still owed (for instance waiting to retry for capacity) stays
+        // active: Chat refuses to retry on an archived thread.
+        const judgeSettled = run.status !== "running" || cell.judge !== undefined;
+        if (run.judge !== undefined && cell.state === "answered" && judgeSettled) {
+          await this.#options.chat.archiveThread(
+            benchmarkJudgeIdentity(String(cell.cellId)).threadId,
+          );
+        }
       }
     }
   }
@@ -155,6 +202,15 @@ export class BenchmarkRunner {
     }
   }
 
+  /** Whether the judge turn of this cell is started and has not ended. */
+  #judgeInFlight(cellId: string): boolean {
+    const reading = this.#options.chat.readTurn(
+      benchmarkJudgeIdentity(cellId).threadId,
+      benchmarkJudgeIdentity(cellId).submissionId,
+    );
+    return reading.status === "turn" && !turnEnded(reading.outcome);
+  }
+
   #runningCounts(runs: ReadonlyArray<BenchmarkRun>): {
     readonly byProvider: Map<string, number>;
     total: number;
@@ -167,6 +223,14 @@ export class BenchmarkRunner {
         const provider = run.contenders[cell.contenderIndex]?.providerInstanceId;
         if (provider === undefined) continue;
         byProvider.set(String(provider), (byProvider.get(String(provider)) ?? 0) + 1);
+        total += 1;
+      }
+      // A judge turn in flight takes the same room a contender's cell does.
+      if (run.judge === undefined) continue;
+      const judgeProvider = String(run.judge.providerInstanceId);
+      for (const cell of benchmarkCellsOwingJudgement(run)) {
+        if (!this.#judgeInFlight(String(cell.cellId))) continue;
+        byProvider.set(judgeProvider, (byProvider.get(judgeProvider) ?? 0) + 1);
         total += 1;
       }
     }
@@ -193,8 +257,191 @@ export class BenchmarkRunner {
         }
       }
     }
+    await this.#judge(runId, counts);
     await this.#startCells(runId, counts);
     this.#endIfDone(runId);
+  }
+
+  /**
+   * Settles the judgements whose turns ended, then starts the owed ones the
+   * limits allow. Each runs on the judge's thread, which the cell's identity
+   * fixes, so a judge turn begun before a restart is waited on, not repeated.
+   */
+  async #judge(
+    runId: string,
+    counts: { readonly byProvider: Map<string, number>; total: number },
+  ): Promise<void> {
+    const run = this.#options.projection.run(runId);
+    if (run?.judge === undefined || run.status !== "running") return;
+    const judgeProvider = String(run.judge.providerInstanceId);
+    const inFlight = new Set<string>();
+    for (const cell of benchmarkCellsOwingJudgement(run)) {
+      const cellId = String(cell.cellId);
+      // Only a turn that was counted as running frees a place when it settles.
+      const counted = this.#judgeInFlight(cellId);
+      const outcome = await this.#reconcileJudge(run, cell);
+      if (outcome === "running") inFlight.add(cellId);
+      if (outcome === "settled" && counted) {
+        counts.byProvider.set(
+          judgeProvider,
+          Math.max(0, (counts.byProvider.get(judgeProvider) ?? 0) - 1),
+        );
+        counts.total = Math.max(0, counts.total - 1);
+      }
+    }
+    const current = this.#options.projection.run(runId);
+    if (current === undefined || current.status !== "running") return;
+    for (const cell of nextBenchmarkJudgements(current, inFlight, counts)) {
+      const outcome = await this.#startJudge(current, cell);
+      if (outcome === "started") {
+        counts.byProvider.set(judgeProvider, (counts.byProvider.get(judgeProvider) ?? 0) + 1);
+        counts.total += 1;
+      } else if (outcome === "waiting") {
+        return;
+      }
+    }
+  }
+
+  /**
+   * Records the judgement of a cell whose judge turn ended. A turn still running
+   * past the time limit is interrupted and judged failed.
+   */
+  async #reconcileJudge(
+    run: BenchmarkRun,
+    cell: BenchmarkCell,
+  ): Promise<"running" | "settled" | "not-started"> {
+    const cellId = String(cell.cellId);
+    const { chat } = this.#options;
+    const { threadId, submissionId } = benchmarkJudgeIdentity(cellId);
+    const reading = chat.readTurn(threadId, submissionId);
+    if (reading.status !== "turn") return "not-started";
+    // Chat had no room for the judge's attempt: ask again on the same turn later
+    // rather than recording a failed judgement for a lack of capacity.
+    if (
+      reading.outcome === "interrupted" &&
+      reading.failureCode === CAPACITY_UNAVAILABLE_FAILURE_CODE
+    ) {
+      return "not-started";
+    }
+    if (reading.outcome === "completed") {
+      const reply = chat.readAnswer(threadId, reading.turnId);
+      const parsed = reply === undefined ? undefined : parseBenchmarkJudgeReply(reply);
+      this.#recordJudgement(
+        run,
+        cell,
+        parsed === undefined || parsed.status === "failed"
+          ? {
+              status: "failed",
+              reason: parsed?.reason ?? "The judge did not answer in the expected form",
+            }
+          : {
+              status: "scored",
+              score: parsed.score,
+              reason: parsed.reason,
+              judgeThreadId: threadId,
+            },
+      );
+      await chat.archiveThread(threadId);
+      return "settled";
+    }
+    if (turnEnded(reading.outcome)) {
+      this.#recordJudgement(run, cell, {
+        status: "failed",
+        reason: boundedBenchmarkReason(
+          reading.failureMessage ?? `The judge's turn ${reading.outcome}.`,
+          BENCHMARK_JUDGE_REASON_CHARS,
+        ),
+      });
+      await chat.archiveThread(threadId);
+      return "settled";
+    }
+    const seen = this.#judgeSeen.get(cellId) ?? Date.parse(this.#options.clock());
+    this.#judgeSeen.set(cellId, seen);
+    if (
+      Date.parse(this.#options.clock()) - seen >
+      (this.#options.turnTimeoutMs ?? BENCHMARK_TURN_TIMEOUT_MS)
+    ) {
+      await chat.interruptTurn(threadId, reading.turnId);
+      this.#recordJudgement(run, cell, { status: "failed", reason: "The judge timed out" });
+      await chat.archiveThread(threadId);
+      return "settled";
+    }
+    return "running";
+  }
+
+  async #startJudge(
+    run: BenchmarkRun,
+    cell: BenchmarkCell,
+  ): Promise<"started" | "waiting" | "settled"> {
+    const { chat } = this.#options;
+    const judge = run.judge;
+    const benchmarkCase = run.cases.find((candidate) => candidate.caseId === cell.caseId);
+    const candidate =
+      cell.threadId === undefined
+        ? undefined
+        : this.#candidateAnswer(cell.threadId, String(cell.cellId));
+    if (judge === undefined || benchmarkCase === undefined || candidate === undefined) {
+      this.#recordJudgement(run, cell, {
+        status: "failed",
+        reason: "The answer to judge could not be read",
+      });
+      return "settled";
+    }
+    const { threadId, submissionId } = benchmarkJudgeIdentity(String(cell.cellId));
+    const started = await chat.startTurn({
+      threadId,
+      // The title never names the contender, so nothing about it reaches the judge.
+      title: boundedBenchmarkReason(`Judge · ${run.suiteName} · ${benchmarkCase.title}`, 200),
+      projectId: this.#options.projectId,
+      providerInstanceId: judge.providerInstanceId,
+      modelId: judge.modelId,
+      prompt: benchmarkJudgePrompt({
+        rubric: judge.rubric,
+        casePrompt: benchmarkCase.prompt,
+        referenceAnswer: benchmarkCase.referenceAnswer,
+        candidateAnswer: candidate,
+      }),
+      submissionId,
+    });
+    if (started.status === "waiting") return "waiting";
+    if (started.status === "refused") {
+      this.#recordJudgement(run, cell, {
+        status: "failed",
+        reason: boundedBenchmarkReason(started.message, BENCHMARK_JUDGE_REASON_CHARS),
+      });
+      await chat.archiveThread(threadId);
+      return "settled";
+    }
+    this.#judgeSeen.set(String(cell.cellId), Date.parse(this.#options.clock()));
+    return "started";
+  }
+
+  /** The cell's answer, read again from its own (archived) thread so a restart can judge it. */
+  #candidateAnswer(cellThreadId: string, cellId: string): string | undefined {
+    const { chat } = this.#options;
+    const reading = chat.readTurn(cellThreadId, benchmarkCellIdentity(cellId).submissionId);
+    return reading.status === "turn" ? chat.readAnswer(cellThreadId, reading.turnId) : undefined;
+  }
+
+  #recordJudgement(
+    run: BenchmarkRun,
+    cell: BenchmarkCell,
+    judge: NonNullable<BenchmarkCell["judge"]>,
+  ): void {
+    this.#judgeSeen.delete(String(cell.cellId));
+    this.#options.store.cellJudged({ runId: run.runId, cellId: cell.cellId, judge });
+  }
+
+  /** Tokens and cost of the judge turns so far, kept apart from every contender. */
+  #overhead(run: BenchmarkRun): { tokens: number; costUsd: number } {
+    if (run.judge === undefined) return { tokens: 0, costUsd: 0 };
+    const turns = run.cells.flatMap((cell) => {
+      const record = this.#options.turnMetrics
+        .forThread(benchmarkJudgeIdentity(String(cell.cellId)).threadId)
+        .at(-1);
+      return record === undefined ? [] : [benchmarkCellMetrics(record)];
+    });
+    return benchmarkOverhead(turns);
   }
 
   /** Settles a running cell whose turn ended. Returns whether the cell settled. */
@@ -280,6 +527,7 @@ export class BenchmarkRunner {
         { tokens: spent.tokens, costUsd: spent.costUsd },
         spent.measured,
         runningInRun,
+        this.#overhead(current),
       );
       if (decision.decision === "stop") {
         this.#skipQueued(current, decision.reason);
@@ -409,6 +657,16 @@ export class BenchmarkRunner {
         await this.#options.chat.archiveThread(live.threadId);
       }
       this.#settle(current, live, "cancelled", "Cancelled by a person.");
+    }
+    // A judge turn in flight for an answered cell keeps spending unless it is stopped.
+    for (const cell of benchmarkCellsOwingJudgement(run)) {
+      const { threadId, submissionId } = benchmarkJudgeIdentity(String(cell.cellId));
+      const reading = this.#options.chat.readTurn(threadId, submissionId);
+      if (reading.status === "turn" && !turnEnded(reading.outcome)) {
+        await this.#options.chat.interruptTurn(threadId, reading.turnId);
+      }
+      await this.#options.chat.archiveThread(threadId);
+      this.#judgeSeen.delete(String(cell.cellId));
     }
     const latest = this.#options.projection.run(runId);
     if (latest !== undefined) {

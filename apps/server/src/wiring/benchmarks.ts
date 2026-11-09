@@ -6,6 +6,7 @@ import {
   type ChatThreadId,
   type WindowId,
 } from "@octant/contracts";
+import { keepBenchmarksOutOfPersonMemory } from "../benchmarks/benchmarkMemory";
 import { BenchmarkEventStore } from "../benchmarks/benchmarkEventStore";
 import {
   BENCHMARKS_PROJECT_ID,
@@ -35,7 +36,7 @@ export interface BenchmarkThreadPurgeSlot {
 }
 
 export type BenchmarksDependencies = Pick<ServerStart, "persistence"> &
-  Pick<AuthorityWiring, "windowAuthorityStore"> &
+  Pick<AuthorityWiring, "windowAuthorityStore" | "personMemory"> &
   Pick<AgentRunsWiring, "turnMetrics"> &
   Pick<WorkspaceWiring, "projectService"> &
   Pick<ChatWiring, "chatService"> & {
@@ -46,6 +47,7 @@ export type BenchmarksDependencies = Pick<ServerStart, "persistence"> &
 export function wireBenchmarks(deps: BenchmarksDependencies) {
   const {
     chatService,
+    personMemory,
     persistence,
     projectService,
     threadPurge,
@@ -97,6 +99,10 @@ export function wireBenchmarks(deps: BenchmarksDependencies) {
           ? { status: "ready" }
           : { status: "refused", message: "The Benchmarks Project is archived or unavailable." };
       }
+      // Before the Project exists, so a crash between the two steps leaves a
+      // list entry for a Project that is simply made on the next start.
+      const kept = keepBenchmarksOutOfPersonMemory(personMemory);
+      if (kept.status === "refused") return kept;
       try {
         await projectService.executeProject(windowId, {
           kind: "create-chat-project",

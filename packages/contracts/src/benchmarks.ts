@@ -386,6 +386,7 @@ export const BENCHMARK_ROUTE_PATHS = {
   runsStart: "/api/benchmarks/runs/start",
   runsCancel: "/api/benchmarks/runs/cancel",
   runsPurge: "/api/benchmarks/runs/purge",
+  cellsRate: "/api/benchmarks/cells/rate",
 } as const;
 
 export const BenchmarkSuitesListRequest = Schema.Struct({}).annotations(strict);
@@ -434,9 +435,23 @@ export type BenchmarkRunsListResponse = typeof BenchmarkRunsListResponse.Type;
 
 export const BenchmarkRunReadRequest = Schema.Struct({ runId: BenchmarkRunId }).annotations(strict);
 export type BenchmarkRunReadRequest = typeof BenchmarkRunReadRequest.Type;
+/**
+ * What the judge turns cost, kept apart from every contender: judging is the
+ * run's own overhead, not a model's. Figures a provider did not report count
+ * as nothing here, so the sum can only understate.
+ */
+export const BenchmarkOverhead = Schema.Struct({
+  turns: NonNegativeInt,
+  tokens: NonNegativeInt,
+  costUsd: NonNegativeNumber,
+}).annotations(strict);
+export type BenchmarkOverhead = typeof BenchmarkOverhead.Type;
+
 export const BenchmarkRunReadResponse = Schema.Struct({
   run: BenchmarkRun,
   leaderboard: Schema.Array(BenchmarkLeaderboardRow),
+  /** Absent from a host that predates judge scoring. */
+  overhead: Schema.optional(BenchmarkOverhead),
   cellMetrics: Schema.Array(
     Schema.Struct({ cellId: BenchmarkCellId, metrics: BenchmarkCellMetrics }).annotations(strict),
   ),
@@ -474,6 +489,21 @@ export const BenchmarkRunPurgeResponse = Schema.Struct({ runId: BenchmarkRunId }
   strict,
 );
 export type BenchmarkRunPurgeResponse = typeof BenchmarkRunPurgeResponse.Type;
+
+/** The person's stars for one cell. Rating again replaces the earlier rating. */
+export const BenchmarkCellRateRequest = Schema.Struct({
+  runId: BenchmarkRunId,
+  cellId: BenchmarkCellId,
+  stars: Schema.Int.pipe(Schema.between(1, 5)),
+  note: Schema.optional(Schema.String.pipe(Schema.maxLength(BENCHMARK_STAR_NOTE_CHARS))),
+}).annotations(strict);
+export type BenchmarkCellRateRequest = typeof BenchmarkCellRateRequest.Type;
+export const BenchmarkCellRateResponse = Schema.Struct({
+  runId: BenchmarkRunId,
+  cellId: BenchmarkCellId,
+  rating: BenchmarkRating,
+}).annotations(strict);
+export type BenchmarkCellRateResponse = typeof BenchmarkCellRateResponse.Type;
 
 // ── Journal events ─────────────────────────────────────────────────────────
 
@@ -591,3 +621,5 @@ export const decodeBenchmarkRunCancelResponse = Schema.decodeUnknownSync(
 );
 export const decodeBenchmarkRunPurgeRequest = Schema.decodeUnknownSync(BenchmarkRunPurgeRequest);
 export const decodeBenchmarkRunPurgeResponse = Schema.decodeUnknownSync(BenchmarkRunPurgeResponse);
+export const decodeBenchmarkCellRateRequest = Schema.decodeUnknownSync(BenchmarkCellRateRequest);
+export const decodeBenchmarkCellRateResponse = Schema.decodeUnknownSync(BenchmarkCellRateResponse);
