@@ -26,6 +26,8 @@ import {
   decodeThreadMoveProjects,
   decodeThreadMoveProjectsRequest,
   THREAD_MOVE_FAILURE_REASONS,
+  THREAD_MOVE_PART_NAME_LENGTH,
+  THREAD_MOVE_PARTS_LEFT_BEHIND_NAMED,
   type AuditActingPrincipal,
   type MovedThreadReference,
   type ThreadMoveDeparture,
@@ -33,6 +35,7 @@ import {
   type ThreadMoveFailureReason,
   type ThreadMoveOffer,
   type ThreadMovePartKind,
+  type ThreadMovePartLeftBehind,
   type ThreadMoveProjectChoice,
   type ThreadMoveProjects,
   type ThreadMoveProjectsRequest,
@@ -119,13 +122,21 @@ export interface ThreadMoveSourceHost {
    * Prepare to shut down. Read-only: it packs, freezes, and writes nothing.
    */
   readonly measure: (thread: MovedThreadReference) => Promise<ThreadMoveSize>;
-  /** Writes the thread's parts into `folder`; exactly one part is the thread bundle. */
+  /**
+   * Writes the thread's parts into `folder`; exactly one part is the thread
+   * bundle. A part the thread owns whose bytes cannot be read is named in
+   * `partsLeftBehind` rather than failing the move, so the receipt says so.
+   */
   readonly pack: (
     thread: MovedThreadReference,
     folder: string,
     moveId: ThreadMoveId,
   ) => Promise<
-    | { readonly status: "packed"; readonly parts: ReadonlyArray<PackedPart> }
+    | {
+        readonly status: "packed";
+        readonly parts: ReadonlyArray<PackedPart>;
+        readonly partsLeftBehind?: ReadonlyArray<ThreadMovePartLeftBehind>;
+      }
     | { readonly status: "refused"; readonly reason: ThreadMoveFailureReason }
   >;
   /** Erases the thread through the ordinary purge once the destination committed. */
@@ -665,6 +676,7 @@ export class ThreadMoveService {
       ...move,
       offer,
       parts: offer.manifest.parts.map((part) => ({ partId: part.partId, acknowledgedChunks: 0 })),
+      ...receiptOf(packed.partsLeftBehind ?? []),
     };
     this.#saveSent(offered);
     const answer = await this.#send(offered, THREAD_MOVE_ROUTES.offer, {
@@ -977,8 +989,10 @@ export class ThreadMoveService {
       worktreeKept: erased.worktreeKept,
     });
     this.#options.source.unfreeze(move.thread);
-    await this.#forgetSent(move);
-    // The tombstone an old link shows, and no notice: the thread moved.
+    // The tombstone an old link shows, and no notice: the thread moved. It is
+    // saved in the same write that forgets the sent move, so a write that
+    // fails leaves the move to resume, and its erase to run again, rather than
+    // losing the receipt; everything in it was bounded when the move packed.
     const state = this.#options.state.load();
     const departure: ThreadMoveDeparture = {
       moveId: move.moveId,
@@ -987,12 +1001,21 @@ export class ThreadMoveService {
       destinationThread: destination,
       ...keptWorktreeOfDeparture(erased),
       changesRemainInCheckout: erased.changesRemainInCheckout === true,
+      ...(move.partsLeftBehind === undefined ? {} : { partsLeftBehind: move.partsLeftBehind }),
+      ...(move.partsLeftBehindCount === undefined
+        ? {}
+        : { partsLeftBehindCount: move.partsLeftBehindCount }),
       movedAt: this.#timestamp(),
     };
     this.#options.state.save({
       ...state,
+      sent: state.sent.filter((entry) => String(entry.moveId) !== String(move.moveId)),
       failures: (state.failures ?? []).filter((notice) => !sameThread(notice.thread, move.thread)),
       departures: [...(state.departures ?? []), departure].slice(-THREAD_MOVE_DEPARTURES_KEPT),
+    });
+    await rm(this.#options.state.partsDirectory(String(move.moveId)), {
+      recursive: true,
+      force: true,
     });
     return { status: "moved", destination, worktreeKept: erased.worktreeKept };
   }
@@ -1240,6 +1263,25 @@ function destinationState(move: ReceivedMove): Record<string, unknown> {
     case "discarded":
       return { state: "discarded", moveId: move.moveId };
   }
+}
+
+/**
+ * The receipt a sent move keeps for its parts left behind: the first ones
+ * named, each name cut to what the receipt holds, and the count of all. It is
+ * bounded here, before the move is offered, so the record saved after the
+ * erase can always be written.
+ */
+function receiptOf(
+  partsLeftBehind: ReadonlyArray<ThreadMovePartLeftBehind>,
+): Pick<SentMove, "partsLeftBehind" | "partsLeftBehindCount"> {
+  if (partsLeftBehind.length === 0) return {};
+  return {
+    partsLeftBehind: partsLeftBehind.slice(0, THREAD_MOVE_PARTS_LEFT_BEHIND_NAMED).map((part) => ({
+      kind: part.kind,
+      name: part.name.trim().slice(0, THREAD_MOVE_PART_NAME_LENGTH).trim() || "Unnamed part",
+    })),
+    partsLeftBehindCount: partsLeftBehind.length,
+  };
 }
 
 function sameThread(left: MovedThreadReference, right: MovedThreadReference): boolean {
