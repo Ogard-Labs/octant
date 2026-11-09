@@ -105,6 +105,59 @@ afterEach(() => {
 });
 
 describe("thread purge sweep", () => {
+  it("erases child Browser permission history with its parent thread and preserves another run's history", async () => {
+    const harness = openHarness();
+    seedCodeProjection(harness, threads.code.id);
+    seedControlThread(harness);
+    const purgedRun = uuidFor("code", "browser-child");
+    const keptRun = uuidFor("chat", "browser-control");
+    for (const [runId, threadId] of [
+      [purgedRun, threads.code.id],
+      [keptRun, controlThreadId],
+    ] as const) {
+      insertEvent(harness.connection, "agent-run", runId, {
+        run: { id: runId, parentThreadId: threadId },
+      });
+      const grantId = uuidFor(runId, "permission");
+      insertEvent(
+        harness.connection,
+        "browser-session-permission",
+        grantId,
+        {
+          kind: "granted",
+          grant: {
+            grantId,
+            target: { grantee: { kind: "child", runId }, label: `Private child task ${runId}` },
+          },
+        },
+        "browser.session-granted@1",
+      );
+      insertEvent(
+        harness.connection,
+        "browser-session-permission",
+        grantId,
+        {
+          kind: "revoked",
+          grant: { grantId },
+        },
+        "browser.session-revoked@1",
+        2,
+      );
+    }
+
+    await purgeThread(harness, "code", threads.code.id);
+
+    const remaining = harness.connection
+      .prepare(
+        "SELECT aggregate_id, aggregate_version FROM event_journal WHERE aggregate_type = 'browser-session-permission' ORDER BY aggregate_version",
+      )
+      .all();
+    expect(remaining).toEqual([
+      { aggregate_id: uuidFor(keptRun, "permission"), aggregate_version: 1 },
+      { aggregate_id: uuidFor(keptRun, "permission"), aggregate_version: 2 },
+    ]);
+  });
+
   it("refuses a remote principal and a purge that was not confirmed", async () => {
     const harness = openHarness();
     const scope = {

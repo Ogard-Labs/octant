@@ -927,6 +927,8 @@ const DEFAULT_AUTHENTICATED_ROUTE_MATCHES = [
     kind: "exact" as const,
     path: "/api/host/resources",
     methods: ["GET"] as const,
+    // `?detail=vitals`; the route refuses every other query itself.
+    allowQuery: true,
     allowedRequestHeaders: REMOTE_REQUEST_HEADERS,
     maxResponseBytes: 4_096,
   },

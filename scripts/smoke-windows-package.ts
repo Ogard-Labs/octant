@@ -12,7 +12,9 @@ if (process.platform !== "win32" || process.arch !== "x64") {
 const root = resolve(fileURLToPath(new URL("..", import.meta.url)));
 const version = resolveReleaseVersion(process.env);
 const identity = desktopIdentity(resolveDesktopPackageFlavor(process.env, version));
-const directory = join(root, "out", `${identity.productName}-win32-x64`);
+const directory = resolve(
+  process.argv[2] ?? join(root, "out", `${identity.productName}-win32-x64`),
+);
 const executable = join(directory, `${identity.productName}.exe`);
 const archive = join(root, "out", `${identity.productName}-${version}-win32-x64.zip`);
 await access(archive);
@@ -35,7 +37,11 @@ const probe = `
   database.close();
   load('node-pty');
   const owner = require(${JSON.stringify(join(nativeDirectory, "octant-windows-host-owner.node"))});
-  if (owner.apiVersion !== 1 || typeof owner.openProfile !== 'function' || typeof owner.prepare !== 'function') process.exit(1);
+  if (owner.apiVersion !== 1 || typeof owner.openProfile !== 'function' || typeof owner.prepare !== 'function' || typeof owner.desktopLauncher !== 'function') process.exit(1);
+  const peer = require(${JSON.stringify(join(nativeDirectory, "octant-desktop-peer-windows.node"))});
+  for (const name of ['bindEndpoint','start','status','close','listenWindows','replyWindow','stopWindows','openWindow','renewWindow','revokeWindow']) {
+    if (typeof peer[name] !== 'function') process.exit(1);
+  }
   console.log('octant-windows-package-native-imports-ok');
 `;
 await new Promise<void>((resolveProbe, reject) => {

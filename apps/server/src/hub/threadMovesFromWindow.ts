@@ -28,6 +28,7 @@ import {
   type ShutdownStartRequest,
   type ShutdownThreadRow,
   type ThreadMoveChallengeOutcome,
+  type ThreadMoveDeparture,
   type ThreadMoveDestination,
   type ThreadMoveDestinations,
   type ThreadMoveFailureReason,
@@ -42,7 +43,7 @@ import {
   type ThreadMoveThreadStatus,
   type UtcTimestamp,
 } from "@octant/contracts";
-import { mayActivateAnyway, shutdownListing } from "@octant/domain";
+import { mayActivateAnyway, rosterMemberWebOrigin, shutdownListing } from "@octant/domain";
 import type { ThreadMoveTicketClient } from "./threadMoveTicketClient";
 import {
   THREAD_MOVE_CHUNK_BYTES,
@@ -99,6 +100,17 @@ export interface ThreadMovesFromWindowOptions {
   readonly now: () => number;
   readonly pollMs?: number;
   readonly stopWaitMs?: number;
+  /**
+   * Tells this host's owner phones that a move waits for one of them, once
+   * per wait: a Prepare to shut down batch for one destination is one wait.
+   * It sends through the phone notification path and never holds up the
+   * wait; with notifications off it sends nothing, and the phone's list
+   * still shows the wait when the person opens it.
+   */
+  readonly tellOwnerPhones?: (wait: {
+    readonly waitId: string;
+    readonly destinationName: string;
+  }) => void;
 }
 
 /** One thread on this host, as Prepare to shut down reads it. */
@@ -532,6 +544,14 @@ export class ThreadMovesFromWindow {
     timer.unref?.();
     for (const row of rows) this.#settledAt.delete(key(row.thread));
     this.#phoneWaits.set(confirmationId, { destinationMemberId, rows, expiresAt, timer });
+    try {
+      this.#options.tellOwnerPhones?.({
+        waitId: confirmationId,
+        destinationName: this.#nameOf(String(destinationMemberId)),
+      });
+    } catch {
+      // A notification is awareness only; the wait stands without it.
+    }
     return {
       status: "waiting-for-phone",
       expiresAt,
@@ -1008,9 +1028,9 @@ export class ThreadMovesFromWindow {
   /** Where one thread stands, for its Environment tool, its bar, and its notice. */
   status(thread: MovedThreadReference): ThreadMoveThreadStatus {
     const state = this.#options.state.load();
-    const nameOf = (memberId: string) =>
-      this.#options.members().find((member) => String(member.memberId) === memberId)?.name ??
-      "another computer";
+    const memberOf = (memberId: string) =>
+      this.#options.members().find((member) => String(member.memberId) === memberId);
+    const nameOf = (memberId: string) => memberOf(memberId)?.name ?? "another computer";
     const sent = state.sent.find((move) => same(move.thread, thread));
     const received = state.received.find(
       (move) => move.state === "arrived" && move.thread !== undefined && same(move.thread, thread),
@@ -1086,10 +1106,7 @@ export class ThreadMovesFromWindow {
       ...(departure === undefined
         ? {}
         : {
-            departed: {
-              ...departure,
-              destinationName: nameOf(String(departure.destinationMemberId)),
-            },
+            departed: departedView(departure, memberOf(String(departure.destinationMemberId))),
           }),
     };
     return status;
@@ -1129,6 +1146,23 @@ function refuse(
 
 function key(thread: MovedThreadReference): string {
   return `${thread.mode}:${thread.threadId}`;
+}
+
+/**
+ * A departure as its tombstone reads it: the destination's name and web app
+ * come from its entry in the roster this host holds now, so a member that
+ * left the hub is "another computer" with nowhere to open the thread.
+ */
+function departedView(
+  departure: ThreadMoveDeparture,
+  destination: RosterMember | undefined,
+): NonNullable<ThreadMoveThreadStatus["departed"]> {
+  const webOrigin = destination === undefined ? undefined : rosterMemberWebOrigin(destination);
+  return {
+    ...departure,
+    destinationName: destination?.name ?? "another computer",
+    ...(webOrigin === undefined ? {} : { destinationWebOrigin: webOrigin }),
+  };
 }
 
 function same(left: MovedThreadReference, right: MovedThreadReference): boolean {

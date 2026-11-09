@@ -6,7 +6,7 @@ import type { KeychainServiceFamily } from "./keychainCredentialStore";
 
 export function isWindowsHostIdentityHelperPath(path: string): boolean {
   return (
-    /^[a-z]:[\\/]/i.test(path) &&
+    /^(?:\\\\\?\\)?[a-z]:\\/i.test(path) &&
     !path.includes("\0") &&
     win32.normalize(path) === path &&
     win32.basename(path) === "octant-credential-helper.exe"

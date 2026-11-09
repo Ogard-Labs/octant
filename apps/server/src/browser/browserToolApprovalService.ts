@@ -1,3 +1,4 @@
+import type { BrowserDownloadSource } from "@octant/contracts";
 import {
   decodeBrowserToolApproval,
   type BrowserToolApproval,
@@ -105,6 +106,7 @@ export class BrowserToolApprovalService {
       readonly name: string;
       readonly sizeBytes: number;
       readonly mediaType: string;
+      readonly source?: BrowserDownloadSource;
     };
     /** The agent asks the person to sign in here; see the contract. */
     readonly signIn?: { readonly reason?: string };
@@ -156,6 +158,7 @@ export class BrowserToolApprovalService {
               name: input.download.name.slice(0, 256),
               sizeBytes: input.download.sizeBytes,
               mediaType: input.download.mediaType.slice(0, 128),
+              ...(input.download.source === undefined ? {} : { source: input.download.source }),
             },
           }),
       ...(input.signIn === undefined

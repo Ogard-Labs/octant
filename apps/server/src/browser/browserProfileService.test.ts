@@ -120,10 +120,58 @@ function harness(
     uuid: randomUUID,
     clock: () => now,
   });
-  return { service, clear, closePages, events, createAccount, journal: live as Journal };
+  return {
+    service,
+    clear,
+    closePages,
+    events,
+    createAccount,
+    stored,
+    runtime,
+    journal: live as Journal,
+  };
 }
 
 describe("Browser profiles service", () => {
+  it("supplies canonical session-review labels for native Personal and Project entries without labels", async () => {
+    const f = harness({ sink: { append: vi.fn() } });
+    f.stored.push({ profile: { kind: "personal" }, sizeBytes: 0 });
+    expect(await f.service.labelOfStoredProfile({ kind: "personal" })).toBe("Personal");
+    expect(await f.service.labelOfStoredProfile({ kind: "project", projectId })).toBe("Research");
+  });
+
+  it("keeps the Settings Personal placeholder unavailable to session review until a native store exists", async () => {
+    const f = harness({ sink: { append: vi.fn() } });
+    expect(await f.service.execute("local-window", { kind: "list" })).toMatchObject({
+      kind: "browser-profiles",
+      profiles: expect.arrayContaining([
+        { profile: { kind: "personal" }, label: "Personal", sizeBytes: 0 },
+      ]),
+    });
+    expect(await f.service.labelOfStoredProfile({ kind: "personal" })).toBeUndefined();
+  });
+
+  it("keeps named labels registry-owned and refuses unreadable or unavailable native stores", async () => {
+    const f = harness({ sink: { append: vi.fn() } });
+    const created = await f.service.execute("local-window", {
+      kind: "create-account",
+      label: "Selected account",
+    });
+    if (created.kind !== "browser-account-profile-created")
+      throw Error("No fixture account profile.");
+    expect(await f.service.labelOfStoredProfile(created.profile)).toBe("Selected account");
+    const store = f.runtime.profiles;
+    if (store === undefined) throw Error("No fixture native store.");
+    vi.spyOn(store, "list").mockRejectedValueOnce(new Error("unreadable"));
+    expect(await f.service.labelOfStoredProfile(created.profile)).toBeUndefined();
+    vi.spyOn(f.runtime, "nativeAvailable").mockResolvedValueOnce(false);
+    expect(await f.service.labelOfStoredProfile(created.profile)).toBeUndefined();
+    const entry = f.stored.find((row) => row.profile.kind === "account");
+    if (entry === undefined) throw Error("No fixture account entry.");
+    delete entry.label;
+    expect(await f.service.labelOfStoredProfile(created.profile)).toBeUndefined();
+  });
+
   it("creates host-local account metadata only for a local person and never journals the registry", async () => {
     const append = vi.fn<Journal["append"]>();
     const f = harness({ sink: { append } });

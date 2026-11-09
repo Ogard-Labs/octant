@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState, type ReactNode } from "react";
 import { Linking } from "react-native";
 import type { MobileInboxRow } from "@octant/client-runtime";
+import type { MobileMovesDeepLinkTarget } from "../notifications/deepLinks";
 import {
   captureMobileDeepLink,
   consumeMobileDeepLink,
@@ -11,6 +12,7 @@ export function MobileDeepLinkCapture(props: {
   readonly children: (
     pendingDeepLinkRow: MobileInboxRow | undefined,
     onDeepLinkConsumed: () => void,
+    pendingMovesLink: MobileMovesDeepLinkTarget | undefined,
   ) => ReactNode;
 }) {
   const [state, setState] = useState<MobileDeepLinkCaptureState>({});
@@ -25,5 +27,9 @@ export function MobileDeepLinkCapture(props: {
     return () => subscription.remove();
   }, [openUrl]);
 
-  return props.children(state.pendingDeepLinkRow, () => setState(consumeMobileDeepLink));
+  return props.children(
+    state.pendingDeepLinkRow,
+    () => setState(consumeMobileDeepLink),
+    state.pendingMovesLink,
+  );
 }

@@ -827,7 +827,9 @@ export function createPackagerOptions(
   resolveDesktopPackageFlavor({ OCTANT_PACKAGE_FLAVOR: identity.flavor }, version);
   return {
     appBundleId: identity.bundleId,
-    appVersion: version,
+    // Windows PE resources require numeric components; the staged manifest
+    // retains the full preview/candidate version used by the application.
+    appVersion: target.platform === "win32" ? version.replace(/-.*/, "") : version,
     arch: target.arch,
     asar:
       target.platform === "darwin" ? { unpack: `**/{${desktopUnpackedFiles().join(",")}}` } : false,
@@ -2221,7 +2223,7 @@ if (import.meta.main) {
   } else if (packaged.target.platform === "win32") {
     console.log(`Packaged Windows QA archive: ${packaged.artifactPath}`);
     console.log(
-      "Windows host admission, credentials, confinement, and self-update remain unavailable.",
+      "Windows portable QA: Work/Code, installers and signed updates remain separately gated.",
     );
   } else {
     // The image is not code-signed. In-app update still refuses unless the

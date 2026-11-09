@@ -1,5 +1,7 @@
+import { Schema } from "effect";
 import { describe, expect, it } from "vitest";
 import {
+  BrowserDownloadSource,
   decodeBrowserContextPolicy,
   decodeBrowserContextRecord,
   decodeBrowserActionRequest,
@@ -298,4 +300,29 @@ describe("BrowserAutomationFailure", () => {
       expect(failure.category).toBe(category);
     }
   });
+});
+
+it("accepts bounded exact HTTPS download origins and refuses URL paths, credentials and unknown fields", () => {
+  const decode = Schema.decodeUnknownSync(BrowserDownloadSource);
+  expect(
+    decode({
+      kind: "https-origin-chain",
+      origins: ["https://example.com", "https://files.example.com"],
+    }).origins,
+  ).toHaveLength(2);
+  for (const origins of [
+    [],
+    ["http://example.com"],
+    ["https://example.com/path?secret=value"],
+    ["https://user:secret@example.com"],
+    Array.from({ length: 33 }, () => "https://example.com"),
+  ])
+    expect(() => decode({ kind: "https-origin-chain", origins })).toThrow();
+  expect(() =>
+    decode({
+      kind: "https-origin-chain",
+      origins: ["https://example.com"],
+      url: "https://example.com/private",
+    }),
+  ).toThrow();
 });

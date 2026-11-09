@@ -10,6 +10,9 @@ export interface WindowsListenerTlsFiles {
   readonly dataDirectory: string;
   readonly read: (purpose: ListenerTlsFile) => ListenerTlsFileRead;
   readonly createKey: (bytes: Buffer) => ListenerTlsFileRead;
+  /** First use: never replaces an existing record; returns a concurrent winner instead. */
+  readonly createCertificate: (bytes: Buffer) => ListenerTlsFileRead;
+  /** Renewal: replaces the existing record with this one. */
   readonly replaceCertificate: (bytes: Buffer) => ListenerTlsFileRead;
 }
 
@@ -18,7 +21,7 @@ export interface WindowsListenerTlsNative extends WindowsHostProfileNative {
     profile: string,
     scope: string,
     dataDirectory: string,
-    purpose: ListenerTlsFile,
+    purpose: ListenerTlsFile | "certificate-renewal",
     candidate: Buffer | null,
   ) => unknown;
 }
@@ -30,8 +33,12 @@ export function createWindowsListenerTlsFiles(
   if (!("listenerTlsFile" in native) || typeof native.listenerTlsFile !== "function")
     return undefined;
   const operation = native.listenerTlsFile.bind(native);
-  const access = (purpose: ListenerTlsFile, candidate: Buffer | null): ListenerTlsFileRead => {
-    if (purpose !== "key" && purpose !== "certificate") return { status: "refused" };
+  const access = (
+    purpose: ListenerTlsFile | "certificate-renewal",
+    candidate: Buffer | null,
+  ): ListenerTlsFileRead => {
+    if (purpose !== "key" && purpose !== "certificate" && purpose !== "certificate-renewal")
+      return { status: "refused" };
     const maximum = purpose === "key" ? 4096 : 16384;
     if (candidate !== null && (candidate.length === 0 || candidate.length > maximum))
       return { status: "refused" };
@@ -65,6 +72,7 @@ export function createWindowsListenerTlsFiles(
     dataDirectory: paths.dataDirectory,
     read: (purpose: ListenerTlsFile) => access(purpose, null),
     createKey: (bytes: Buffer) => access("key", bytes),
-    replaceCertificate: (bytes: Buffer) => access("certificate", bytes),
+    createCertificate: (bytes: Buffer) => access("certificate", bytes),
+    replaceCertificate: (bytes: Buffer) => access("certificate-renewal", bytes),
   });
 }

@@ -5,6 +5,7 @@ import { OctantButton } from "../ui/base/OctantButton";
 export interface UnifiedDiffListProps {
   readonly files: ReadonlyArray<ParsedDiffFile>;
   readonly onOpenFile?: (path: string) => void;
+  readonly onReadProviderFile?: (path: string) => void;
   readonly onSelectLine?: (input: {
     path: string;
     side: "original" | "modified";
@@ -58,6 +59,16 @@ export function UnifiedDiffList(props: UnifiedDiffListProps) {
               <span className="unified-diff__renamed">from {file.previousPath}</span>
             )}
             <span className="unified-diff__change">{CHANGE_LABELS[file.change]}</span>
+            {props.onReadProviderFile === undefined ? null : (
+              <OctantButton
+                type="button"
+                size="sm"
+                variant="ghost"
+                onClick={() => props.onReadProviderFile?.(file.path)}
+              >
+                Provider checkpoint
+              </OctantButton>
+            )}
             {file.binary ? null : (
               <span className="unified-diff__counts">
                 <span className="unified-diff__additions">

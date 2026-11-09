@@ -1,3 +1,4 @@
+import type { BrowserDownloadSource } from "@octant/contracts";
 import { createHash } from "node:crypto";
 import { execFile } from "node:child_process";
 import { constants } from "node:fs";
@@ -30,6 +31,7 @@ export interface BrowserDownloadFacts {
   readonly name: string;
   readonly sizeBytes: number;
   readonly mediaType: string;
+  readonly source?: BrowserDownloadSource;
 }
 
 export type BrowserDownloadSaveDecision = "approved" | "denied" | "cancelled" | "expired";
@@ -45,6 +47,8 @@ export interface BrowserDownloadDestination {
   readonly directory: ThreadWorkingDirectory;
   /** The exact directory the person reviewed, not merely its parent. */
   readonly reviewedDirectory: BrowserDownloadDirectoryIdentity;
+  /** A recurring grant also pins the approved root independently of its child. */
+  readonly reviewedRoot?: BrowserDownloadDirectoryIdentity;
   readonly current: () => boolean;
 }
 
@@ -115,7 +119,10 @@ export async function saveBrowserDownload(input: SaveInput): Promise<BrowserDown
     if (selected !== undefined) {
       Schema.decodeUnknownSync(ApprovedWorkingFolder)(selected.folder);
       decodeThreadWorkingDirectory(selected.directory);
-      if (!validIdentity(selected.reviewedDirectory))
+      if (
+        !validIdentity(selected.reviewedDirectory) ||
+        (selected.reviewedRoot !== undefined && !validIdentity(selected.reviewedRoot))
+      )
         return refused("download-unavailable", "unavailable");
       root = selected.canonicalRoot;
     } else {
@@ -126,7 +133,7 @@ export async function saveBrowserDownload(input: SaveInput): Promise<BrowserDown
     return refused("download-unavailable", "unavailable");
   }
   if (!current(input)) return decisionRefusal("cancelled");
-  const rootProof = await directoryProof(root);
+  const rootProof = await directoryProof(root, selected?.reviewedRoot);
   if (!current(input)) return decisionRefusal("cancelled");
   if (typeof rootProof === "string") return refused(`download-${rootProof}`, rootProof);
   const initialTarget = await destinationProof(root, selected);

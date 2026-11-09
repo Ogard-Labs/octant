@@ -3,6 +3,7 @@ import {
   decodeCodeLanguageReadRequest,
 } from "@octant/contracts/code-language";
 import { describe, expect, it, vi } from "vitest";
+import { decodeCodeProviderFileReviewRequest } from "@octant/contracts/code-provider-file-review";
 import { decodeProjectId } from "@octant/contracts/projects";
 import {
   CodeClientFailure,
@@ -67,6 +68,34 @@ function frame(sequence: number) {
 }
 
 describe("code client", () => {
+  it("authenticates bounded provider checkpoint reads and rejects injected session authority", async () => {
+    const fetch = vi.fn(async () =>
+      Response.json({ status: "refused", reason: "cold-unavailable" }),
+    );
+    const client = createCodeClient({ baseUrl, fetch, windowCapability: capability });
+    const input = decodeCodeProviderFileReviewRequest({
+      kind: "file",
+      threadId: ids.thread,
+      checkoutId: ids.checkout,
+      path: "sample.txt",
+    });
+    expect(await client.readProviderFileReview?.(input)).toEqual({
+      status: "refused",
+      reason: "cold-unavailable",
+    });
+    expect(fetch).toHaveBeenCalledWith(
+      `${baseUrl}/api/code/provider-file-review`,
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify(input),
+        headers: expect.objectContaining({ "x-octant-window-capability": capability }),
+      }),
+    );
+    await expect(
+      client.readProviderFileReview?.({ ...input, sessionId: "forged" } as never),
+    ).rejects.toThrow();
+    expect(fetch).toHaveBeenCalledOnce();
+  });
   it("classifies a fetch rejection as a disconnected transport", async () => {
     const fetch = vi.fn().mockRejectedValue(new Error("socket closed"));
     const client = createCodeClient({ baseUrl, fetch, windowCapability: capability });

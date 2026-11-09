@@ -555,7 +555,10 @@ const timer = setInterval(() => {
       accept: (snapshot: typeof Snapshot.Type) => boolean,
     ) => {
       let lastNativeError = "";
-      const deadline = Date.now() + 20_000;
+      // A cold macOS runner can still show "Connecting to Chat..." well past 20s
+      // (the primary-window stage includes app start), so a stage that is merely
+      // slow must not read as a failed one. Each observation keeps its own 8s bound.
+      const deadline = Date.now() + 60_000;
       while (!controller.signal.aborted && Date.now() < deadline) {
         try {
           const raw = await runBoundedCommand(

@@ -34,6 +34,7 @@ import {
   ownerPostureUnlockClass,
   ownerUnlockSigningPayload,
   reconcileHeldGrants,
+  memberThreadPage,
   rosterMemberWebOrigin,
   type StandInMembershipChanges,
 } from "./hubAndSpokesPolicy";
@@ -1044,6 +1045,43 @@ describe("the web app origin a roster entry gives a browser", () => {
     expect(rosterMemberWebOrigin(named(["evil.ts.net.example.com"]))).toBeUndefined();
     expect(
       rosterMemberWebOrigin(named(["phone.tail1234.ts.net"], { role: "guest" })),
+    ).toBeUndefined();
+  });
+});
+
+describe("the page on a member's own web app that opens one of its threads", () => {
+  const arrived = "0b2c4d6e-8f10-4a12-9b14-c16d18e20f22";
+
+  it("opens each mode's thread on the member's web app, the way its paired browser reads a continue link", () => {
+    for (const mode of ["chat", "work", "code"] as const) {
+      expect(
+        memberThreadPage("https://studio.tail1234.ts.net:8443", { mode, threadId: arrived }),
+      ).toBe(`https://studio.tail1234.ts.net:8443/?continueMode=${mode}&continueThread=${arrived}`);
+    }
+    expect(
+      memberThreadPage("https://studio.tail1234.ts.net", { mode: "work", threadId: arrived }),
+    ).toBe(`https://studio.tail1234.ts.net/?continueMode=work&continueThread=${arrived}`);
+  });
+
+  it("refuses an origin that is not a member's Tailscale web app", () => {
+    for (const origin of [
+      "http://studio.tail1234.ts.net",
+      "https://studio.example.com",
+      "https://evil.ts.net.example.com",
+      "https://100.64.0.1",
+      "https://user:secret@studio.tail1234.ts.net",
+      "https://studio.tail1234.ts.net/elsewhere",
+      "https://studio.tail1234.ts.net/?next=elsewhere",
+      "octant://hosts/studio",
+      "not a url",
+    ]) {
+      expect(memberThreadPage(origin, { mode: "code", threadId: arrived })).toBeUndefined();
+    }
+  });
+
+  it("refuses a thread id that is not one", () => {
+    expect(
+      memberThreadPage("https://studio.tail1234.ts.net", { mode: "code", threadId: "../settings" }),
     ).toBeUndefined();
   });
 });

@@ -1,5 +1,5 @@
-import { browserAgentAvailability } from "@octant/domain";
 import type { BrowserProfileChoice } from "@octant/contracts/project-browser";
+import { browserAgentAvailability } from "@octant/domain";
 import { describe, expect, it, vi } from "vitest";
 import {
   decodeToolActionAuthority,

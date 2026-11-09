@@ -29,8 +29,12 @@ import { Schema } from "effect";
 import type { MovedChatAttachment, MovedChatThreadImport } from "../chat/chatService";
 import {
   MovedThreadParts,
+  measurePartKind,
+  measureThreadParts,
   movedPartUuid,
   packThreadParts,
+  threadMoveSize,
+  type MeasuredPartKind,
   rehomeThreadParts,
   type ThreadPartsDestination,
   type ThreadPartsSource,
@@ -103,6 +107,12 @@ export interface ChatThreadMoveHostOptions {
   readonly readOriginalInput: (
     reference: ConversationInputReference,
   ) => Promise<Uint8Array | undefined>;
+  /**
+   * The recorded size of an input a turn admitted, behind the same scope check
+   * as `readOriginalInput` and without reading its bytes; undefined when that
+   * reader would refuse it, so an input that would stay behind is not counted.
+   */
+  readonly originalInputSize: (reference: ConversationInputReference) => number | undefined;
   /** The bytes of one finalized attachment of the moving thread; undefined when they cannot be read. */
   readonly readAttachment: (
     threadId: string,
@@ -150,9 +160,8 @@ export function createChatThreadMoveHost(options: ChatThreadMoveHostOptions): {
     measure: async (thread) => {
       const view = viewOf(thread);
       if (view === undefined) return { status: "unknown" };
-      // The text pack writes, less the few lines that list the bulk parts:
-      // reading those parts is not something a read-only measure does, and
-      // their bytes are not counted yet.
+      // The text pack writes, less the few lines that list the bulk parts,
+      // which only packing them names.
       const bytes = Buffer.byteLength(
         JSON.stringify(
           conversationOf(view, options.externalContentIngested(thread.threadId), {
@@ -163,7 +172,11 @@ export function createChatThreadMoveHost(options: ChatThreadMoveHostOptions): {
           }),
         ),
       );
-      return { status: "measured", bytes, parts: [{ kind: "thread-bundle", bytes }] };
+      return threadMoveSize([
+        { status: "measured", kind: "thread-bundle", bytes },
+        ...measureAttachments(view, options.originalInputSize),
+        ...measureThreadParts(thread, options.parts.source),
+      ]);
     },
     pack: async (thread, folder) => {
       const view = viewOf(thread);
@@ -329,12 +342,7 @@ async function packAttachments(
     readonly digest: string;
   }): Promise<MovedAttachment | undefined> => {
     const bytes = await input.read().catch(() => undefined);
-    let mediaType: ChatAttachmentMediaType | undefined;
-    try {
-      mediaType = decodeChatAttachmentMediaType(input.mediaType);
-    } catch {
-      mediaType = undefined;
-    }
+    const mediaType = carriedMediaType(input.mediaType);
     if (
       bytes === undefined ||
       mediaType === undefined ||
@@ -349,58 +357,117 @@ async function packAttachments(
     parts.push({ partId, kind: input.kind, path });
     return { partId, displayName: input.displayName.slice(0, 512), mediaType };
   };
+  const byTurn: Array<MovedAttachment[]> = view.turns.map(() => []);
+  const unsent: MovedAttachment[] = [];
+  for (const entry of attachmentsToCarry(view)) {
+    const moved = await carry(
+      entry.kind === "attachment"
+        ? {
+            kind: "attachment",
+            read: () => readers.readAttachment(String(view.thread.id), String(entry.attachment.id)),
+            displayName: entry.attachment.displayName,
+            mediaType: entry.attachment.mediaType,
+            digest: entry.attachment.digest,
+          }
+        : {
+            kind: "original-input",
+            read: () => readers.readOriginalInput(entry.input),
+            displayName: entry.input.displayName,
+            mediaType: entry.input.mediaType,
+            digest: entry.input.digest,
+          },
+    );
+    if (moved === undefined) continue;
+    if (entry.turn === undefined) unsent.push(moved);
+    else byTurn[entry.turn]?.push(moved);
+  }
+  return { byTurn, unsent, parts, partsLeftBehind };
+}
+
+/**
+ * Each attachment and admitted input a move of the thread would try to
+ * carry, in the order it packs them, with the position of the turn that holds
+ * it (none for an attachment added but not sent). Packing and measuring both
+ * read this, so a size counts exactly the parts a move would carry.
+ */
+function attachmentsToCarry(view: ChatThreadView): ReadonlyArray<
+  | {
+      readonly kind: "attachment";
+      readonly turn: number | undefined;
+      readonly attachment: ChatThreadView["attachments"][number];
+    }
+  | {
+      readonly kind: "original-input";
+      readonly turn: number;
+      readonly input: ConversationInputReference;
+    }
+> {
   const finalized = new Map(
     view.attachments
       .filter((attachment) => attachment.status === "finalized")
       .map((attachment) => [String(attachment.id), attachment]),
   );
   const sent = new Set<string>();
-  const byTurn: Array<ReadonlyArray<MovedAttachment>> = [];
-  for (const turn of view.turns) {
-    const carried: MovedAttachment[] = [];
+  const entries: Array<ReturnType<typeof attachmentsToCarry>[number]> = [];
+  view.turns.forEach((turn, position) => {
     for (const attachmentId of turn.attachmentIds) {
       sent.add(String(attachmentId));
       // A purged attachment was removed by the person and has nothing to carry.
       const attachment = finalized.get(String(attachmentId));
-      if (attachment === undefined) continue;
-      const moved = await carry({
-        kind: "attachment",
-        read: () => readers.readAttachment(String(view.thread.id), String(attachment.id)),
-        displayName: attachment.displayName,
-        mediaType: attachment.mediaType,
-        digest: attachment.digest,
-      });
-      if (moved !== undefined) carried.push(moved);
+      if (attachment !== undefined)
+        entries.push({ kind: "attachment", turn: position, attachment });
     }
+    // Each is read with its whole recorded reference through the same reader
+    // a provider turn's inputs pass: one whose source thread left the Project
+    // it was admitted from, or that is gone or changed, is unavailable there,
+    // so it stays behind rather than becoming this thread's own.
     for (const input of turn.originalInputs ?? []) {
-      // Read with the whole recorded reference through the same reader a
-      // provider turn's inputs pass: one whose source thread left the Project
-      // it was admitted from, or that is gone or changed, is unavailable
-      // there, so it stays behind rather than becoming this thread's own.
-      const moved = await carry({
-        kind: "original-input",
-        read: () => readers.readOriginalInput(input),
-        displayName: input.displayName,
-        mediaType: input.mediaType,
-        digest: input.digest,
-      });
-      if (moved !== undefined) carried.push(moved);
+      entries.push({ kind: "original-input", turn: position, input });
     }
-    byTurn.push(carried);
-  }
-  const unsent: MovedAttachment[] = [];
+  });
   for (const attachment of finalized.values()) {
     if (sent.has(String(attachment.id)) || attachment.turnId !== undefined) continue;
-    const moved = await carry({
-      kind: "attachment",
-      read: () => readers.readAttachment(String(view.thread.id), String(attachment.id)),
-      displayName: attachment.displayName,
-      mediaType: attachment.mediaType,
-      digest: attachment.digest,
-    });
-    if (moved !== undefined) unsent.push(moved);
+    entries.push({ kind: "attachment", turn: undefined, attachment });
   }
-  return { byTurn, unsent, parts, partsLeftBehind };
+  return entries;
+}
+
+/**
+ * The sizes of the attachments and admitted inputs a move would carry, from
+ * their recorded byte lengths, without reading any of them. An admitted input
+ * the scope-aware reader would refuse stays behind, so it is not counted.
+ */
+function measureAttachments(
+  view: ChatThreadView,
+  originalInputSize: ChatThreadMoveHostOptions["originalInputSize"],
+): ReadonlyArray<MeasuredPartKind> {
+  const entries = attachmentsToCarry(view);
+  return [
+    ...measurePartKind("attachment", () =>
+      entries.flatMap((entry) =>
+        entry.kind === "attachment" && carriedMediaType(entry.attachment.mediaType) !== undefined
+          ? [entry.attachment.byteLength]
+          : [],
+      ),
+    ),
+    ...measurePartKind("original-input", () =>
+      entries.flatMap((entry) => {
+        if (entry.kind !== "original-input") return [];
+        if (carriedMediaType(entry.input.mediaType) === undefined) return [];
+        const bytes = originalInputSize(entry.input);
+        return bytes === undefined ? [] : [bytes];
+      }),
+    ),
+  ];
+}
+
+/** The media type an attachment travels under; undefined for one a Chat thread cannot hold. */
+function carriedMediaType(mediaType: string): ChatAttachmentMediaType | undefined {
+  try {
+    return decodeChatAttachmentMediaType(mediaType);
+  } catch {
+    return undefined;
+  }
 }
 
 /** An attachment as it arrived, under the id this move gives it here. */

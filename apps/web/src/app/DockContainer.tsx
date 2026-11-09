@@ -622,6 +622,7 @@ export const DockContainer = memo(function DockContainer(props: DockContainerPro
         }
         desktop={threadUtility("desktop")}
         debug={threadUtility("debug")}
+        vitals={threadUtility("vitals")}
         launchableSurfaces={launchableDockSurfaces}
         launchableReferences={launchableDockReferences}
         onClose={actions.closeDock}

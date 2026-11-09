@@ -516,6 +516,21 @@ export class SpokeLinkService {
     };
   }
 
+  /**
+   * The paired devices this spoke made for guests on its owner list: the
+   * phones that can confirm a move held here. A guest's device on a spoke is
+   * the only pairing a hub member holds here, so a phone paired some other way
+   * is never an owner device.
+   */
+  ownerDeviceIds(): ReadonlyArray<string> {
+    const link = this.#options.state.load().link;
+    if (link === undefined || link.removed === true) return [];
+    const owners = new Set((link.owners ?? []).map((owner) => String(owner.memberId)));
+    return (link.guestDevices ?? [])
+      .filter((entry) => owners.has(String(entry.memberId)))
+      .map((entry) => entry.deviceId);
+  }
+
   /** Adds devices to this spoke's owner list; the caller has checked who may ask. */
   addOwners(
     candidates: ReadonlyArray<OwnerCandidate>,

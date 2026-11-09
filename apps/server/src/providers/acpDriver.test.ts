@@ -192,7 +192,9 @@ function permissionRequest(id: string, toolCallId: string) {
 
 function fixture(
   profile: AcpProviderProfile,
-  overrides: Partial<Pick<AcpDriverOptions, "authentication" | "managedToolsBridgeFactory">> & {
+  overrides: Partial<
+    Pick<AcpDriverOptions, "authentication" | "managedToolsBridgeFactory" | "process">
+  > & {
     readonly mcpHttp?: boolean;
     readonly nativeResume?: boolean;
     readonly runtimeVersion?: string;
@@ -305,6 +307,362 @@ async function collectTerminal(
     ).pipe(Effect.map((items) => Array.from(items) as ProviderRuntimeEvent[])),
   );
 }
+
+describe("requested ACP compaction capability", () => {
+  it("keeps production Vibe compaction unadvertised and omits the command port", async () => {
+    const f = fixture(vibe, { runtimeVersion: "3.0.3" });
+    const probed = await Effect.runPromise(Effect.scoped(f.driver.probe({ instanceId })));
+    expect(probed.capabilities.sessionCompaction).toEqual({
+      chat: "unsupported",
+      work: "unsupported",
+      code: "unsupported",
+    });
+    await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const connection = yield* f.driver.acquire({ instanceId, projectRoot, mode: "code" });
+          expect(connection.compact).toBeUndefined();
+        }),
+      ),
+    );
+  });
+  it("keeps structured compaction receipts out of ordinary turn events and emits one requested boundary", async () => {
+    const f = fixture(
+      { ...vibe, compactionVersions: ["3.0.3"], reviewedCommands: ["compact"] },
+      { runtimeVersion: "3.0.3" },
+    );
+    f.client.prompt.mockImplementationOnce(async (nativeSession) => {
+      for (const update of [
+        {
+          sessionUpdate: "tool_call",
+          toolCallId: "compact-receipt",
+          kind: "other",
+          status: "in_progress",
+          title: "Compacting conversation history...",
+        },
+        {
+          sessionUpdate: "tool_call_update",
+          toolCallId: "compact-receipt",
+          status: "completed",
+          title: "Compacted conversation history",
+        },
+      ])
+        f.client.emit({
+          kind: "notification",
+          method: "session/update",
+          params: { sessionId: nativeSession, update },
+        });
+      return { stopReason: "end_turn" };
+    });
+    await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const connection = yield* f.driver.acquire({ instanceId, projectRoot, mode: "code" });
+          const events = yield* connection.subscribe;
+          const boundary = yield* events.pipe(Stream.take(1), Stream.runCollect, Effect.forkScoped);
+          yield* connection.start({ sessionId, modelId, executionPolicy: "plan", tools: [] });
+          const compact = connection.compact;
+          if (compact === undefined) throw new Error("Injected verified compaction missing");
+          expect(yield* compact({ sessionId, compactionId: "host-operation" })).toEqual({
+            kind: "compacted",
+          });
+          const observed = Array.from(yield* Fiber.join(boundary));
+          expect(observed.map((event) => event.kind)).toEqual(["context-compacted"]);
+          expect(observed[0]).toMatchObject({ trigger: "requested", sessionId });
+          expect(f.client.prompt).toHaveBeenCalledWith("agent-session-1", "/compact");
+          const late: ProviderRuntimeEvent[] = [];
+          const after = yield* connection.subscribe;
+          yield* after.pipe(
+            Stream.runForEach((event) =>
+              Effect.sync(() => {
+                late.push(event);
+              }),
+            ),
+            Effect.forkScoped,
+          );
+          f.client.emit({
+            kind: "notification",
+            method: "session/update",
+            params: {
+              sessionId: "agent-session-1",
+              update: {
+                sessionUpdate: "tool_call_update",
+                toolCallId: "compact-receipt",
+                status: "completed",
+                title: "Compacted conversation history",
+              },
+            },
+          });
+          expect(
+            (yield* Effect.either(
+              connection.send({ sessionId, prompt: "competing turn", attachments: [], tools: [] }),
+            ))._tag,
+          ).toBe("Left");
+          yield* Effect.sleep(1);
+          expect(late).toEqual([]);
+          expect(f.client.prompt).toHaveBeenCalledOnce();
+        }),
+      ),
+    );
+  });
+  it.each(["3.0.4", "2.25.0"])(
+    "refuses an unverified %s runtime before sending the command",
+    async (runtimeVersion) => {
+      const f = fixture(
+        { ...vibe, compactionVersions: ["3.0.3"], reviewedCommands: ["compact"] },
+        { runtimeVersion },
+      );
+      await Effect.runPromise(
+        Effect.scoped(
+          Effect.gen(function* () {
+            const connection = yield* f.driver.acquire({ instanceId, projectRoot, mode: "code" });
+            yield* connection.start({ sessionId, modelId, executionPolicy: "plan", tools: [] });
+            const compact = connection.compact;
+            if (compact === undefined) throw new Error("Missing injected port");
+            expect(yield* compact({ sessionId, compactionId: "host-operation" })).toEqual({
+              kind: "refused",
+              reason: "runtime-version-unsupported",
+            });
+            expect(f.client.prompt).not.toHaveBeenCalled();
+          }),
+        ),
+      );
+    },
+  );
+  it("refuses absent sessions, missing observed commands and simultaneous native turns", async () => {
+    const f = fixture({ ...vibe, compactionVersions: ["3.0.3"] }, { runtimeVersion: "3.0.3" });
+    await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const connection = yield* f.driver.acquire({ instanceId, projectRoot, mode: "code" });
+          const compact = connection.compact;
+          if (compact === undefined) throw new Error("Missing injected port");
+          expect(yield* compact({ sessionId, compactionId: "host-operation" })).toEqual({
+            kind: "refused",
+            reason: "no-session",
+          });
+          yield* connection.start({ sessionId, modelId, executionPolicy: "plan", tools: [] });
+          expect(yield* compact({ sessionId, compactionId: "host-operation" })).toEqual({
+            kind: "refused",
+            reason: "runtime-version-unsupported",
+          });
+          f.client.emit({
+            kind: "notification",
+            method: "session/update",
+            params: {
+              sessionId: "agent-session-1",
+              update: {
+                sessionUpdate: "available_commands_update",
+                availableCommands: [{ name: "compact" }],
+              },
+            },
+          });
+          f.client.prompt.mockImplementationOnce(() => new Promise(() => {}));
+          yield* connection.send({ sessionId, prompt: "user turn", tools: [], attachments: [] });
+          expect(yield* compact({ sessionId, compactionId: "host-operation" })).toEqual({
+            kind: "refused",
+            reason: "turn-running",
+          });
+          expect(f.client.prompt).toHaveBeenCalledOnce();
+        }),
+      ),
+    );
+  });
+});
+
+describe("supplementary file review capability", () => {
+  it("checks current host admission after a cold load before changing native settings", async () => {
+    const f = fixture({ ...vibe, fileReviewVersions: ["3.0.3"] }, { runtimeVersion: "3.0.3" });
+    let current = true;
+    f.client.loadSession.mockImplementationOnce(async () => {
+      current = false;
+      return { sessionId: "native-saved", configOptions: f.client.configOptions };
+    });
+    const outcome = Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const connection = yield* f.driver.acquire({ instanceId, projectRoot, mode: "code" });
+          return yield* connection.resume({
+            sessionId,
+            resumeCursor: {
+              driverKind: "mistral-vibe",
+              value: "native-saved",
+              binding: { instanceId, sessionId, projectRoot, mode: "code", modelId },
+            },
+            modelId,
+            executionPolicy: "plan",
+            tools: [],
+            current: () => current,
+          });
+        }),
+      ),
+    );
+    await expect(outcome).rejects.toThrow();
+    expect(f.client.setConfigOption).not.toHaveBeenCalled();
+    expect(f.active()).toBe(0);
+    expect(f.released()).toBe(1);
+  });
+
+  it("bounds the owned session-close handshake and joins process release", async () => {
+    vi.useFakeTimers();
+    try {
+      const f = fixture({ ...vibe, fileReviewVersions: ["3.0.3"] }, { runtimeVersion: "3.0.3" });
+      f.client.closeSession.mockImplementationOnce(() => new Promise(() => {}));
+      const pending = Effect.runPromise(
+        Effect.scoped(
+          Effect.gen(function* () {
+            const connection = yield* f.driver.acquire({ instanceId, projectRoot, mode: "code" });
+            yield* connection.resume({
+              sessionId,
+              resumeCursor: {
+                driverKind: "mistral-vibe",
+                value: "native-saved",
+                binding: { instanceId, sessionId, projectRoot, mode: "code", modelId },
+              },
+              modelId,
+              executionPolicy: "plan",
+              tools: [],
+            });
+            yield* connection.stop(sessionId);
+          }),
+        ),
+      );
+      await vi.waitFor(() => expect(f.client.closeSession).toHaveBeenCalledOnce());
+      await vi.advanceTimersByTimeAsync(501);
+      await pending;
+      expect(f.active()).toBe(0);
+      expect(f.released()).toBe(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+  it("aborts an owned partial initialization and releases its scope before returning", async () => {
+    let entered: (() => void) | undefined;
+    const initialized = new Promise<void>((resolve) => {
+      entered = resolve;
+    });
+    let released = 0;
+    const f = fixture(
+      { ...vibe, fileReviewVersions: ["3.0.3"] },
+      {
+        runtimeVersion: "3.0.3",
+        process: {
+          start: () =>
+            Effect.gen(function* () {
+              yield* Effect.addFinalizer(() =>
+                Effect.sync(() => {
+                  released += 1;
+                }),
+              );
+              entered?.();
+              return yield* Effect.never;
+            }),
+        },
+      },
+    );
+    const controller = new AbortController();
+    const pending = Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const connection = yield* f.driver.acquire({ instanceId, projectRoot, mode: "code" });
+          return yield* connection.resume({
+            sessionId,
+            resumeCursor: {
+              driverKind: "mistral-vibe",
+              value: "native-saved",
+              binding: { instanceId, sessionId, projectRoot, mode: "code", modelId },
+            },
+            modelId,
+            executionPolicy: "plan",
+            tools: [],
+          });
+        }),
+      ),
+      { signal: controller.signal },
+    );
+    await initialized;
+    controller.abort();
+    await expect(pending).rejects.toThrow();
+    expect(released).toBe(1);
+    expect(f.client.loadSession).not.toHaveBeenCalled();
+    expect(f.registry.activeSessionCount(instanceId)).toBe(0);
+  });
+  it("cancels a suspended cold load, closes its process and ignores a late native reply", async () => {
+    const f = fixture({ ...vibe, fileReviewVersions: ["3.0.3"] }, { runtimeVersion: "3.0.3" });
+    let finish: (() => void) | undefined;
+    f.client.loadSession.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          finish = () =>
+            resolve({ sessionId: "native-saved", configOptions: f.client.configOptions });
+        }),
+    );
+    const controller = new AbortController();
+    const pending = Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const connection = yield* f.driver.acquire({ instanceId, projectRoot, mode: "code" });
+          return yield* connection.resume({
+            sessionId,
+            resumeCursor: {
+              driverKind: "mistral-vibe",
+              value: "native-saved",
+              binding: { instanceId, sessionId, projectRoot, mode: "code", modelId },
+            },
+            modelId,
+            executionPolicy: "plan",
+            tools: [],
+          });
+        }),
+      ),
+      { signal: controller.signal },
+    );
+    await vi.waitFor(() => expect(f.client.loadSession).toHaveBeenCalledOnce());
+    controller.abort();
+    await expect(pending).rejects.toThrow();
+    expect(f.active()).toBe(0);
+    expect(f.released()).toBe(1);
+    expect(f.registry.activeSessionCount(instanceId)).toBe(0);
+    finish?.();
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(f.client.setConfigOption).not.toHaveBeenCalled();
+    expect(f.client.newSession).not.toHaveBeenCalled();
+    expect(f.client.prompt).not.toHaveBeenCalled();
+  });
+  it("leaves the production Vibe reader unadvertised before signed-in cold-resume evidence", async () => {
+    const f = fixture(vibe, { runtimeVersion: "3.0.3" });
+    expect(f.driver.fileReviewReads).toBeUndefined();
+    await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const connection = yield* f.driver.acquire({ instanceId, projectRoot, mode: "code" });
+          expect(connection.readFileReview).toBeUndefined();
+        }),
+      ),
+    );
+  });
+
+  it("allows a source-injected verified profile to refuse an absent session without native calls", async () => {
+    const f = fixture({ ...vibe, fileReviewVersions: ["3.0.3"] }, { runtimeVersion: "3.0.3" });
+    expect(f.driver.fileReviewReads).toBe(true);
+    await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const connection = yield* f.driver.acquire({ instanceId, projectRoot, mode: "code" });
+          const read = connection.readFileReview;
+          if (read === undefined) throw new Error("Expected the injected read port");
+          expect(yield* read({ sessionId, path: "sample.txt", current: () => true })).toEqual({
+            status: "refused",
+            reason: "no-session",
+          });
+          expect(f.client.call).not.toHaveBeenCalled();
+          expect(f.client.newSession).not.toHaveBeenCalled();
+        }),
+      ),
+    );
+  });
+});
 
 describe("verified ACP usage", () => {
   it.each([

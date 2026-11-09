@@ -3,6 +3,11 @@ import { validateQuestionnaireAnswer } from "@octant/domain";
 import { MAX_PROVIDER_ATTACHMENTS } from "@octant/contracts";
 import { THREAD_MOVING_REFUSAL } from "../hub/threadMoveHolds";
 import type {
+  CodeProviderFileReviewRequest,
+  CodeProviderFileReviewRead,
+} from "@octant/contracts/code-provider-file-review";
+import { createCodeProviderFileReview } from "./codeProviderFileReview";
+import type {
   ConversationInputReceipt,
   ConversationInputPurpose,
   ConversationInputPolicy,
@@ -517,6 +522,11 @@ export interface CodeOperationRuntimeOptions {
    * reaching the provider with the pictures silently dropped.
    */
   readonly supportsAttachments?: (thread: CodeThread) => boolean;
+  readonly routineBrowserTools?: (input: {
+    readonly thread: CodeThread;
+    readonly readThread: () => CodeThread | undefined;
+    readonly routineRun: AutomationRunReference;
+  }) => AppManagedToolSet | undefined;
   readonly browserAutomation?: CodeAppManagedToolsOptions["browser"];
   readonly browserProfiles?: CodeAppManagedToolsOptions["browserProfiles"];
   /** The Project's Browser flows and the recorder; see the Code Browser tool. */
@@ -783,6 +793,12 @@ export interface CodeOperationRuntimeOptions {
 }
 
 export interface CodeOperationRuntime {
+  readProviderFileReview?(
+    windowId: WindowId,
+    request: CodeProviderFileReviewRequest,
+    current: () => boolean,
+    signal?: AbortSignal,
+  ): Promise<CodeProviderFileReviewRead>;
   execute(
     windowId: WindowId,
     command: unknown,
@@ -1358,8 +1374,20 @@ export function createCodeOperationRuntime(
     return { thread, sessionId: session.sessionId, resumeCursor };
   };
 
+  const fileReviewLeases = new Set<string>();
+  const readProviderFileReview = createCodeProviderFileReview({
+    host: options,
+    source: compactableSession,
+    busy: (threadId) =>
+      startingTurns.has(threadId) ||
+      turns.holdsTurn(threadId) ||
+      options.compactionRunning?.(threadId) === true,
+    leases: fileReviewLeases,
+  });
+
   return {
     terminals: terminal,
+    readProviderFileReview,
     prepareApproval: async (windowId, rawRequest) => {
       if (approvalStore === undefined) return undefined;
       const request = decodeCodeOperationApprovalRequest(rawRequest);
@@ -1630,11 +1658,18 @@ export function createCodeOperationRuntime(
               }),
             );
           }
-          if (thread !== undefined && options.compactionRunning?.(thread.id) === true) {
+          if (
+            thread !== undefined &&
+            (options.compactionRunning?.(thread.id) === true ||
+              fileReviewLeases.has(String(thread.id)))
+          ) {
             throw new CodeServiceError(
               decodeCodeFailure({
                 category: "waiting",
-                message: "This session is being compacted. Send again when it finishes.",
+                message:
+                  options.compactionRunning?.(thread.id) === true
+                    ? "This session is being compacted. Send again when it finishes."
+                    : "This session's checkpoint is being read. Send again when it finishes.",
               }),
             );
           }
@@ -1805,7 +1840,8 @@ export function createCodeOperationRuntime(
     recordShieldReview: (input) => turns.recordShieldReview(input),
     settleCutOffTurns: (threadId) => turns.settleCutOffTurns(threadId),
     threadWithActiveTurnPosture: (thread) => turns.threadWithActiveTurnPosture(thread),
-    turnInProgress: (threadId) => startingTurns.has(threadId) || turns.holdsTurn(threadId),
+    turnInProgress: (threadId) =>
+      startingTurns.has(threadId) || turns.holdsTurn(threadId) || fileReviewLeases.has(threadId),
     compactionSessions: {
       exists: (threadId) => compactableSession(decodeCodeThreadId(threadId)) !== undefined,
       occupancy: (threadId) => {
@@ -1815,6 +1851,7 @@ export function createCodeOperationRuntime(
           : events.latestWindowOccupancy(found.thread.id, found.sessionId);
       },
       open: async (threadId, windowId) => {
+        if (fileReviewLeases.has(threadId)) return undefined;
         if (windowId === undefined) return undefined;
         const found = compactableSession(decodeCodeThreadId(threadId));
         if (found === undefined) return undefined;
@@ -4658,6 +4695,14 @@ class RuntimeTurnController implements CodeOperationTurnPort {
     const sets: Array<AppManagedToolSet | undefined> = [];
     const service = this.#service;
     if (supportsAppManagedTools && service !== undefined) {
+      const delegatedBrowserTools =
+        active.routineRun === undefined
+          ? undefined
+          : this.#options.routineBrowserTools?.({
+              thread: active.thread,
+              readThread: () => this.#effectiveThread(active.windowId, active.thread.id),
+              routineRun: active.routineRun,
+            });
       const browserProfiles = this.#options.browserProfiles;
       const pullRequestWatch = this.#options.pullRequestWatch;
       sets.push(
@@ -4675,6 +4720,7 @@ class RuntimeTurnController implements CodeOperationTurnPort {
           },
         }),
         createCodeAppManagedTools({
+          ...(delegatedBrowserTools === undefined ? {} : { delegatedBrowserTools }),
           windowId: active.windowId,
           thread: active.thread,
           readThread: (windowId, threadId) => this.#effectiveThread(windowId, threadId),
