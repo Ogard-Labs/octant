@@ -212,7 +212,8 @@ export class ServerFileSystem implements NativeHarnessFileSystemPort {
     }
     if (kind === "b") return refusedWith("file-too-large");
     if (kind !== "f") return refusedWith("not-a-file");
-    if (input.marksRead !== false) this.#readMarks.set(resolved.path, digest(payload.toString("utf8")));
+    if (input.marksRead !== false)
+      this.#readMarks.set(resolved.path, digest(payload.toString("utf8")));
     return readFileContent(display, payload, input);
   }
 
