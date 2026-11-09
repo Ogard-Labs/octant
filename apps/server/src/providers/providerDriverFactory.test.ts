@@ -104,6 +104,20 @@ describe("driver runtime registries", () => {
 });
 
 describe("makeProviderDriver", () => {
+  it.each(["opencode", "codex", "claude", "pi", "kilo", "devin"] as const)(
+    "refuses a Windows %s process before a catalog probe or session can be constructed",
+    (kind) => {
+      vi.stubGlobal("process", Object.create(process, { platform: { value: "win32" } }));
+      try {
+        expect(() => makeProviderDriver(provider(kind), factoryFixture().options)).toThrow(
+          /Windows.*confinement/,
+        );
+      } finally {
+        vi.unstubAllGlobals();
+      }
+    },
+  );
+
   it("selects the OpenCode process only for an OpenCode instance", async () => {
     const fixture = factoryFixture();
     const driver = makeProviderDriver(provider("opencode"), fixture.options);

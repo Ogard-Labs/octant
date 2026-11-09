@@ -1,4 +1,6 @@
 import type {
+  WindowsAuthorityStateFiles,
+  WindowsSqliteStores,
   WindowsListenerTlsFiles,
   WindowsRosterSigningKeyFile,
   WindowsServerIdentityFiles,
@@ -126,7 +128,9 @@ export interface StartOctantServerOptions {
   /** Internal native-profile storage; absent until Windows host composition supplies it. */
   readonly serverIdentityFiles?: WindowsServerIdentityFiles;
   readonly listenerTlsFiles?: WindowsListenerTlsFiles;
+  readonly authorityStateFiles?: WindowsAuthorityStateFiles;
   readonly rosterSigningKeyFile?: WindowsRosterSigningKeyFile;
+  readonly usageCacheFile?: WindowsSqliteStores["usageCache"];
   readonly instanceId?: string;
   readonly hostId?: string;
   readonly controlEndpoint?: string;

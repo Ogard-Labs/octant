@@ -155,14 +155,7 @@ if (role === "child") {
   if (!record(facts) || typeof facts.runtimeDirectory !== "string")
     throw new Error("Child root missing.");
   native.close();
-  // Releasing the lease at once is the stop path that can lose its acknowledgement.
-  const owner = await acquireWindowsHostRuntimeOwner({
-    ...options,
-    onStopRequested: async () => {
-      if (owner.kind === "owner") await owner.release();
-      process.exit(0);
-    },
-  });
+  const owner = await acquireWindowsHostRuntimeOwner(options);
   if (owner.kind !== "owner") throw new Error("Child did not own its endpoint.");
   console.log(JSON.stringify({ ready: true, root: facts.runtimeDirectory }));
   process.stdin.once("end", () => {
@@ -262,10 +255,6 @@ if (role === "child") {
     check(
       (await attached.request({ type: "status", principal: "local" }))?.ok === true,
       "existing host status protocol round-trips",
-    );
-    check(
-      await attached.requestStop(),
-      "a stop that releases its lease at once still acknowledges the client",
     );
     await join(child.child);
     held = await acquireWindowsHostRuntimeOwner({

@@ -4,6 +4,7 @@ import type {
 } from "@octant/contracts/project-browser";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
+import userEvent from "@testing-library/user-event";
 import { ZenProjectResearchDock } from "./ZenProjectResearchDock";
 
 const projectId = "00000000-0000-4000-8000-000000000071" as never;
@@ -205,6 +206,53 @@ describe("ZenProjectResearchDock", () => {
     expect(
       await screen.findByRole("button", { name: "Browser profile: Personal" }),
     ).toBeInTheDocument();
+  });
+
+  it("signs out only the named account shown in the Project dock", async () => {
+    const user = userEvent.setup();
+    const profileId = "00000000-0000-4000-8000-000000000074" as never;
+    const manageProfiles = vi.fn(async () => ({
+      kind: "browser-profile-cleared" as const,
+      profile: { kind: "account" as const, profileId },
+      scope: "all" as const,
+    }));
+    const pages = {
+      ...client(() => ({
+        kind: "project-browser",
+        browser: {
+          projectId,
+          mode: "work",
+          subjectId,
+          context: {
+            contextId,
+            state: "active",
+            presentation: "headless",
+            profile: `account:${profileId}`,
+          },
+          page: { title: "Example", url: "https://example.com/" },
+        },
+      })),
+      manageProfiles,
+    };
+    render(
+      <ZenProjectResearchDock
+        client={pages}
+        dock={dock}
+        onCollapse={() => undefined}
+        onUndock={() => undefined}
+      />,
+    );
+    await user.click(await screen.findByRole("button", { name: /Browser profile: Account/ }));
+    await user.click(await screen.findByRole("menuitem", { name: "Sign out of this profile…" }));
+    expect(manageProfiles).not.toHaveBeenCalled();
+    await user.click(screen.getByRole("button", { name: "Sign out" }));
+    await waitFor(() =>
+      expect(manageProfiles).toHaveBeenCalledWith({
+        kind: "clear",
+        profile: { kind: "account", profileId },
+        scope: "all",
+      }),
+    );
   });
 
   it("lists the Project's agent pages beside the person's and shows one read-only", async () => {

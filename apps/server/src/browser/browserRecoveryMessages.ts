@@ -22,6 +22,11 @@ export function browserSignInOriginRefusal(): BrowserAutomationFailure {
 export function browserExpiryFailure(
   profile: BrowserContextPolicy["profile"],
 ): BrowserAutomationFailure {
+  if (profile?.kind === "account")
+    return {
+      category: "context-expired",
+      message: `The Browser page expired in the selected named account profile. Call navigate without changing the task profile to reuse it; approval may be required. No page has been reopened.`,
+    };
   const stored =
     profile?.kind === "project" || profile?.kind === "personal" ? profile.kind : undefined;
   return {

@@ -1,12 +1,21 @@
+import type { WindowsSqliteStoreAdmission } from "@octant/host-runtime";
 import { chmodSync } from "node:fs";
 import Database from "better-sqlite3";
 import type { ReadOnlySqliteConnection, SqliteConnection, SqliteStatement } from "./sqlitePort.ts";
 
-export function openNodeSqlite(path: string): SqliteConnection {
+export function openNodeSqlite(
+  path: string,
+  admission?: Extract<WindowsSqliteStoreAdmission, { readonly status: "ready" }>,
+): SqliteConnection {
   const database = new Database(path);
 
   try {
-    chmodSync(path, 0o600);
+    if (admission !== undefined) {
+      if (admission.databasePath !== path || admission.initialize(database).status !== "ready")
+        throw new Error("The SQLite native admission was refused.");
+    } else {
+      chmodSync(path, 0o600);
+    }
     database.exec(`
       PRAGMA journal_mode = WAL;
       PRAGMA foreign_keys = ON;
@@ -19,12 +28,18 @@ export function openNodeSqlite(path: string): SqliteConnection {
     throw error;
   }
 
+  let closed = false;
   return {
     exec: (sql) => database.exec(sql),
     prepare: (sql) => database.prepare(sql) as unknown as SqliteStatement,
     pragma: (source, options) => database.pragma(source, options),
     transaction: (body) => database.transaction(body),
-    close: () => database.close(),
+    close: () => {
+      if (closed) return;
+      database.close();
+      closed = true;
+      admission?.close();
+    },
   };
 }
 

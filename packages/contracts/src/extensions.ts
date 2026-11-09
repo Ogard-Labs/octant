@@ -1,4 +1,5 @@
 import { Schema } from "effect";
+import { CodeToolContribution } from "./codeToolContribution";
 import { AggregateVersion, UtcTimestamp } from "./events";
 import { HostId } from "./host";
 import { OctantMode } from "./modes";
@@ -277,6 +278,7 @@ export const ExtensionCapability = Schema.Literal(
 export type ExtensionCapability = typeof ExtensionCapability.Type;
 
 export const ExtensionComponentKind = Schema.Literal(
+  "code-tool",
   "skill-instructions",
   "mcp-server",
   "mcp-tool",
@@ -509,6 +511,8 @@ export const ExtensionComponent = Schema.Struct({
   languageServer: Schema.optional(ExtensionLanguageServerDeclaration),
   /** Present exactly when `kind` is `debug-adapter`. */
   debugAdapter: Schema.optional(ExtensionDebugAdapterDeclaration),
+  /** A data-only Code capability, with no executable module. */
+  codeTool: Schema.optional(CodeToolContribution),
 }).annotations(strict);
 export type ExtensionComponent = typeof ExtensionComponent.Type;
 
@@ -707,6 +711,13 @@ export const ExtensionPackageManifest = Schema.Struct({
         if ((component.kind === "debug-adapter") !== (component.debugAdapter !== undefined)) {
           return false;
         }
+        if ((component.kind === "code-tool") !== (component.codeTool !== undefined)) return false;
+        if (
+          component.kind === "code-tool" &&
+          (component.declaredCapabilities.length !== 1 ||
+            component.declaredCapabilities[0] !== "credentials")
+        )
+          return false;
         if (mcpChild !== (component.parentComponentId !== undefined)) return false;
         if (!mcpChild) return true;
         return components.get(component.parentComponentId!)?.kind === "mcp-server";

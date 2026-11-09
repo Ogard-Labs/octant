@@ -1,4 +1,5 @@
 import type { AgentPluginsDiagnostic } from "./constants";
+import type { CodeToolContribution } from "@octant/contracts/code-tool-contribution";
 import { AGENT_PLUGINS_PLUGIN_SCHEMA } from "./constants";
 import { AgentPluginsError, fail } from "./errors";
 import { type AgentPluginsManifest, validateAgentPluginsManifest } from "./manifest";
@@ -21,6 +22,7 @@ export interface LoadedAgentPlugin {
   readonly skills: ReadonlyArray<DiscoveredAgentSkill>;
   readonly mcp: AgentPluginsMcpDocument | undefined;
   readonly servers: ReadonlyArray<AgentPluginsMcpServer>;
+  readonly codeTools: ReadonlyArray<CodeToolContribution>;
   readonly diagnostics: ReadonlyArray<AgentPluginsDiagnostic>;
   readonly entries: ReadonlyArray<AgentPluginsPackageEntry>;
 }
@@ -104,13 +106,14 @@ export function loadAgentPluginFromEntries(
   const skills = skillResult.componentInvalid ? [] : skillResult.skills;
   const servers = mcp === undefined || mcp.topLevelInvalid ? [] : mcp.servers;
 
-  if (skills.length === 0 && servers.length === 0) {
+  const codeTools = manifestResult.manifest.codeTools ?? [];
+  if (skills.length === 0 && servers.length === 0 && codeTools.length === 0) {
     // A plugin with no loadable components is still a valid package structurally,
     // but Octant requires at least one supported component to install.
     diagnostics.push({
       code: "component-missing",
       severity: "warning",
-      message: "Plugin does not contribute a loadable skill or MCP server.",
+      message: "Plugin does not contribute a loadable skill, MCP server or Code tool.",
     });
   }
 
@@ -121,6 +124,7 @@ export function loadAgentPluginFromEntries(
     skills,
     mcp,
     servers,
+    codeTools,
     diagnostics,
     entries,
   };

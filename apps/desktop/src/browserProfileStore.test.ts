@@ -57,6 +57,52 @@ describe("browser profile store", () => {
       ]),
     );
     expect(listed).toHaveLength(2);
+    expect((await store.list(false)).every((entry) => entry.sizeBytes === 0)).toBe(true);
+  });
+
+  it("keeps named account identities and labels on this host across restart without reading cookies", async () => {
+    const root = partitions();
+    const options = {
+      partitionsDirectory: root,
+      sessionFor: vi.fn(() => session()),
+      closeProfilePages: async () => undefined,
+    };
+    const store = createBrowserProfileStore(options);
+    const first = await store.createAccount("Work account");
+    const second = await store.createAccount("Other account");
+    if (first.status !== "created" || second.status !== "created")
+      throw Error("Expected named accounts");
+    expect(first.profile.profileId).not.toBe(second.profile.profileId);
+    expect(options.sessionFor).not.toHaveBeenCalled();
+    const restarted = createBrowserProfileStore(options);
+    expect(await restarted.list()).toEqual(
+      expect.arrayContaining([
+        { profile: first.profile, label: "Work account", sizeBytes: 0 },
+        { profile: second.profile, label: "Other account", sizeBytes: 0 },
+      ]),
+    );
+    expect(restarted.hasAccountProfile(String(first.profile.profileId))).toBe(true);
+    expect(restarted.hasAccountProfile("00000000-0000-4000-8000-000000000000")).toBe(false);
+    expect(await restarted.createAccount(" ")).toEqual({
+      status: "refused",
+      reason: "invalid-label",
+    });
+  });
+
+  it("refuses an unreadable account registry without resetting existing stores", async () => {
+    const root = partitions();
+    writeFileSync(join(root, "octant-account-profiles.json"), "not valid metadata");
+    const store = createBrowserProfileStore({
+      partitionsDirectory: root,
+      sessionFor: () => session(),
+      closeProfilePages: async () => undefined,
+    });
+    expect(await store.createAccount("Work account")).toEqual({
+      status: "refused",
+      reason: "store-unavailable",
+    });
+    await expect(store.list()).rejects.toThrow("could not be read");
+    expect(store.hasAccountProfile("40000000-0000-4000-8000-000000000002")).toBe(false);
   });
 
   it("lists nothing when no profile was ever used", async () => {

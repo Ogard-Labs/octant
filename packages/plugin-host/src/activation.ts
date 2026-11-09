@@ -33,6 +33,7 @@ const modeKinds: Readonly<Record<OctantMode, ReadonlySet<ExtensionComponent["kin
     ...desktopProviderKind,
   ]),
   code: new Set([
+    "code-tool",
     "skill-instructions",
     "mcp-server",
     "mcp-tool",

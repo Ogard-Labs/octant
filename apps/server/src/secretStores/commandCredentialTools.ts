@@ -57,6 +57,7 @@ export function savedCredentialCommands(options: {
         options.threadId,
         bindingId,
         randomUUID(),
+        options.current,
       );
       if (review.kind !== "command-credential-view") return { result: review, isError: true };
       const request = review.requests.find(

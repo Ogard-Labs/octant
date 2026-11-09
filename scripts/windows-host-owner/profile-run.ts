@@ -15,14 +15,32 @@ import {
 import { win32 } from "node:path";
 import { fileURLToPath } from "node:url";
 
+const startupMode = process.argv[2] === "--startup-files";
+const foregroundMode = process.argv[2] === "--foreground";
 const identityMode = process.argv[2] === "--server-identity";
 const tlsMode = process.argv[2] === "--listener-tls";
+const sqliteMode = process.argv[2] === "--sqlite-store";
+const authorityMode = process.argv[2] === "--authority-state";
 const rosterMode = process.argv[2] === "--roster-key";
 const [launcher, binding, fixture, ...runtimes] = process.argv.slice(
-  identityMode || tlsMode || rosterMode ? 3 : 2,
+  identityMode ||
+    tlsMode ||
+    rosterMode ||
+    authorityMode ||
+    sqliteMode ||
+    foregroundMode ||
+    startupMode
+    ? 3
+    : 2,
 );
-if (process.platform !== "win32" || !launcher || !binding || !fixture || runtimes.length !== 3)
-  throw new Error("Supply the owned launcher, binding, fixture and three runtimes.");
+if (
+  process.platform !== "win32" ||
+  !launcher ||
+  !binding ||
+  !fixture ||
+  runtimes.length !== (sqliteMode || foregroundMode || startupMode ? 1 : 3)
+)
+  throw new Error("Supply the owned launcher, binding, fixture and required runtimes.");
 const children = new Set<ChildProcess>();
 const queryExecutable = win32.join(
   process.env.SystemRoot ?? "C:\\Windows",
@@ -98,12 +116,13 @@ async function absent(path: string): Promise<boolean> {
   }
 }
 // Never inspect or remove a pre-existing host profile, even on disposable CI.
-// Cleanup deletes every registered path recursively, so a saved sibling such as
-// `octant.original` must refuse the run rather than be registered for removal.
-const owned = roots.flatMap((root) => [root, root + ".original", root + ".moved"]);
-for (const path of owned)
-  if (!(await absent(path))) throw new Error("The owned profile fixture is not empty.");
-for (const path of owned) cleanup.add(path);
+for (const root of roots)
+  if (!(await absent(root))) throw new Error("The owned profile fixture is not empty.");
+for (const root of roots) {
+  cleanup.add(root);
+  cleanup.add(root + ".original");
+  cleanup.add(root + ".moved");
+}
 const deadline = setTimeout(() => {
   for (const child of children) child.kill();
 }, 240_000);
@@ -265,7 +284,86 @@ async function acl(profile: string, mode: string) {
 }
 let runFailure: unknown;
 try {
-  if (rosterMode) {
+  if (startupMode) {
+    for (const profile of profiles) await probe(first, profile);
+    checks.push(
+      "both isolated profile consumers prove policy, logs and generation-safe native discovery cleanup",
+    );
+  } else if (foregroundMode) {
+    for (const profile of profiles) await probe(first, profile);
+    await probe(first, "octant", "unresponsive-stop");
+    checks.push(
+      "both isolated profiles run the actual foreground entry through ready, authenticated backup and scoped shutdown",
+    );
+  } else if (sqliteMode) {
+    for (const profile of profiles) await probe(first, profile);
+    console.log(
+      JSON.stringify({
+        sqlitePrototypeLifecycleChecks: [
+          "both isolated native profiles commit, checkpoint, reopen and retain foreign read-only consumers",
+        ],
+        startupAdmitted: false,
+        workCodeEnabled: false,
+      }),
+    );
+  } else if (authorityMode) {
+    for (const profile of profiles) await probe(first, profile, "missing");
+    checks.push("missing reads create nothing and prepare-only processes cannot write");
+    for (const runtime of runtimes) await probe(runtime, "octant", "environment-loss");
+    checks.push(
+      "worker environment loss closes incomplete sessions and refuses cross-environment access",
+    );
+    for (const runtime of runtimes)
+      for (const profile of profiles) {
+        await probe(runtime, profile);
+        await acl(profile, "authority-inspect");
+      }
+    checks.push("all three runtime consumers retain private schema-valid authority records");
+    const selected = roots[0];
+    if (selected === undefined) throw Error("Missing owned state root.");
+    const hub = win32.join(selected, "data", "hub");
+    const file = win32.join(hub, "hub-state.json");
+    const original = await readFile(file);
+    try {
+      for (const malformed of [
+        Buffer.alloc(0),
+        Buffer.from("{"),
+        Buffer.from([0xff]),
+        Buffer.from('{"unexpected":true}'),
+      ]) {
+        await writeFile(file, malformed);
+        await probe(first, "octant", "refuse");
+        if (!(await readFile(file)).equals(malformed))
+          throw Error("Corrupt authority record was overwritten.");
+      }
+    } finally {
+      await writeFile(file, original);
+    }
+    checks.push("empty, malformed, invalid UTF-8 and invalid schema records refuse without reset");
+    const alias = file + ".alias";
+    try {
+      await link(file, alias);
+      await probe(first, "octant", "refuse");
+    } finally {
+      await unlink(alias);
+    }
+    checks.push("hardlinked state refuses");
+    await acl("octant", "authority-unsafe");
+    try {
+      await probe(first, "octant", "refuse");
+    } finally {
+      await acl("octant", "authority-restore");
+    }
+    checks.push("exposed state refuses without DACL repair");
+    await probe(first, "octant");
+    console.log(
+      JSON.stringify({
+        authorityStateLifecycleChecks: checks,
+        startupAdmitted: false,
+        workCodeEnabled: false,
+      }),
+    );
+  } else if (rosterMode) {
     const selected = roots[0];
     if (selected === undefined) throw Error("Missing owned roster root.");
     for (const profile of profiles) await probe(first, profile, "missing");

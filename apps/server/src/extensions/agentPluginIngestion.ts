@@ -110,6 +110,18 @@ export function normalizeAgentPluginPackage(
     packageCapabilities.add("instructions");
   }
 
+  for (const tool of loaded.codeTools) {
+    components.push({
+      id: `code-${tool.id}`,
+      kind: "code-tool",
+      displayName: tool.label,
+      description: tool.description,
+      declaredCapabilities: ["credentials"],
+      codeTool: tool,
+    });
+    packageCapabilities.add("credentials");
+  }
+
   if (servers.length > 0) {
     // Persist a normalized mcp.json snapshot so configuration references stay
     // stable even when the package also carries diagnostics about skipped entries.
@@ -179,7 +191,7 @@ export function normalizeAgentPluginPackage(
   if (components.length === 0) {
     throw new AgentPluginIngestionError(
       "component-missing",
-      "Agent Plugin does not contribute a supported skill or MCP server.",
+      "Agent Plugin does not contribute a supported skill, MCP server or Code tool.",
     );
   }
 

@@ -1,3 +1,5 @@
+import { browserProfileChoiceOf } from "@octant/domain";
+import { browserProfileLabel } from "./browserProfileCopy";
 import {
   BrowserAutomationClientFailure,
   type BrowserAutomationClient,
@@ -167,7 +169,7 @@ export function BrowserCaptureList(props: BrowserCaptureListProps) {
                   {capture.origin}
                   {capture.profile === undefined
                     ? ""
-                    : ` · ${capture.profile.kind === "personal" ? "Personal" : "Project"} profile`}
+                    : ` · ${browserProfileLabel(browserProfileChoiceOf(capture.profile))} profile`}
                 </span>
               </span>
             </li>

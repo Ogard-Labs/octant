@@ -31,6 +31,26 @@ describe("BrowserProfileControl", () => {
     expect(screen.getByRole("menuitemradio", { name: "Personal" })).toBeInTheDocument();
   });
 
+  it("selects the exact named account without changing the three built-in choices", async () => {
+    const user = userEvent.setup();
+    const onChange = vi.fn();
+    const profileId = "40000000-0000-4000-8000-000000000002" as never;
+    render(
+      <BrowserProfileControl
+        profile="private"
+        accounts={[
+          { profile: { kind: "account", profileId }, label: "Work account", sizeBytes: 0 },
+        ]}
+        projectProfileAvailable
+        signedInPagesAvailable
+        onChange={onChange}
+      />,
+    );
+    await user.click(screen.getByRole("button", { name: "Browser profile: Private" }));
+    await user.click(await screen.findByRole("menuitemradio", { name: "Work account" }));
+    expect(onChange).toHaveBeenCalledWith(`account:${profileId}`);
+  });
+
   it("reports the choice the person made", async () => {
     const user = userEvent.setup();
     const onChange = vi.fn();
