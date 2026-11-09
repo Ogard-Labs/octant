@@ -11,6 +11,8 @@ import { createThreadMoveHolds } from "./threadMoveHolds";
 
 const THREAD = "77777777-7777-4777-8777-777777777777";
 const BRANCH_SOURCE = "66666666-6666-4666-8666-666666666666";
+const SOURCE_PROJECT = "55555555-5555-4555-8555-555555555555";
+const OTHER_PROJECT = "44444444-4444-4444-8444-444444444444";
 const ARRIVING = "88888888-8888-4888-8888-888888888888";
 const MOVE = "99999999-9999-4999-8999-999999999999" as ThreadMoveId;
 const SENT = "aaaaaaaa-0000-4000-8000-000000000001";
@@ -52,7 +54,12 @@ const view = {
       attachmentIds: [SENT, GONE],
       originalInputs: [
         {
-          source: { mode: "chat", threadId: BRANCH_SOURCE, attachmentId: ADMITTED },
+          source: {
+            mode: "chat",
+            threadId: BRANCH_SOURCE,
+            attachmentId: ADMITTED,
+            projectId: SOURCE_PROJECT,
+          },
           displayName: "map.txt",
           mediaType: "text/plain",
           byteLength: 17,
@@ -69,8 +76,10 @@ const view = {
   ],
 } as unknown as ChatThreadView;
 
-function host() {
+/** The Project the branch's source thread is in now; an input is readable only from its recorded one. */
+function host(sourceThreadProject = SOURCE_PROJECT) {
   const imports: MovedChatThreadImport[] = [];
+  const asked: string[] = [];
   const moveHost = createChatThreadMoveHost({
     readView: (threadId) => (String(threadId) === THREAD ? view : undefined),
     isBusy: () => false,
@@ -80,7 +89,15 @@ function host() {
       return { id: input.threadId } as unknown as ChatThread;
     },
     readAttachment: async (threadId, attachmentId) => {
+      // Only the moving thread's own attachments are read this way.
+      asked.push(threadId);
       const text = files[`${threadId}/${attachmentId}`];
+      return text === undefined ? undefined : new TextEncoder().encode(text);
+    },
+    // As the conversation-input reader does: the recorded Project must still be the source's.
+    readOriginalInput: async (reference) => {
+      if (reference.source.projectId !== sourceThreadProject) return undefined;
+      const text = files[`${reference.source.threadId}/${reference.source.attachmentId}`];
       return text === undefined ? undefined : new TextEncoder().encode(text);
     },
     parts: noThreadParts(),
@@ -88,12 +105,12 @@ function host() {
     purge: async () => {},
     holds: createThreadMoveHolds(),
   });
-  return { moveHost, imports };
+  return { moveHost, imports, asked };
 }
 
 describe("moving a Chat thread", () => {
   it("carries the attachments its turns sent, the inputs they admitted, and the unsent ones, and names the unreadable one", async () => {
-    const { moveHost, imports } = host();
+    const { moveHost, imports, asked } = host();
     const folder = mkdtempSync(join(tmpdir(), "octant-chat-move-"));
     folders.push(folder);
     const packed = await moveHost.source.pack({ mode: "chat", threadId: THREAD }, folder, MOVE);
@@ -140,5 +157,20 @@ describe("moving a Chat thread", () => {
       ...(imported?.unsentAttachments ?? []),
     ].map((carried) => String(carried.attachmentId));
     expect(ids.some((id) => [SENT, DRAFT, ADMITTED].includes(id))).toBe(false);
+    expect(asked.every((threadId) => threadId === THREAD)).toBe(true);
+  });
+
+  it("leaves behind, and names, an admitted input whose source thread has moved to another Project", async () => {
+    const { moveHost } = host(OTHER_PROJECT);
+    const folder = mkdtempSync(join(tmpdir(), "octant-chat-move-"));
+    folders.push(folder);
+    const packed = await moveHost.source.pack({ mode: "chat", threadId: THREAD }, folder, MOVE);
+    if (packed.status !== "packed") throw new Error("Nothing was packed.");
+    // The input is no longer readable where it was admitted from, so nothing of it travels.
+    expect(packed.parts.map((part) => part.kind)).not.toContain("original-input");
+    expect(packed.partsLeftBehind).toEqual([
+      { kind: "attachment", name: "scan.txt" },
+      { kind: "original-input", name: "map.txt" },
+    ]);
   });
 });

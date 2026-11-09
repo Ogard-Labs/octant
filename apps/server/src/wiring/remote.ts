@@ -29,6 +29,7 @@ import {
   decodeBrowserThreadId,
 } from "@octant/contracts/browser-automation";
 import { canvasOutsideContentWriters } from "../canvas/canvasOutsideContentMark";
+import { conversationInputSource } from "./conversationInputs";
 import type { ThreadPartsDestination, ThreadPartsSource } from "../hub/movedThreadParts";
 import { managedWorktreeRoot } from "../code/managedWorktreeService";
 import { purgeThreadArtifacts, removeMirrorFiles } from "../persistence/threadArtifactPurge";
@@ -1066,6 +1067,9 @@ export function wireRemote(deps: RemoteDependencies) {
         }),
     },
   };
+  // The reader provider turns use for admitted inputs, so a move carries only
+  // what a turn here could still be given.
+  const movedInputSource = conversationInputSource(persistence, workThreadProjection);
   const chatThreadMoveHost = createChatThreadMoveHost({
     readView: (threadId) => persistence.readChatThreadView(threadId),
     isBusy: (view) =>
@@ -1080,6 +1084,7 @@ export function wireRemote(deps: RemoteDependencies) {
     externalContentIngested: (threadId) =>
       readThreadExternalContentTaint(persistence.connection, threadId).externalContentIngested,
     importMovedThread: (input) => deps.chatService.importMovedThread(input),
+    readOriginalInput: (reference) => movedInputSource.read(reference).catch(() => undefined),
     readAttachment: async (threadId, attachmentId) => {
       try {
         return await deps.chatService.readAttachment(

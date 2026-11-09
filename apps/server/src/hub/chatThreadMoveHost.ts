@@ -24,6 +24,7 @@ import {
   type MovedThreadReference,
   type ThreadMovePartLeftBehind,
 } from "@octant/contracts";
+import type { ConversationInputReference } from "@octant/contracts/conversation-inputs";
 import { Schema } from "effect";
 import type { MovedChatAttachment, MovedChatThreadImport } from "../chat/chatService";
 import {
@@ -93,7 +94,16 @@ export interface ChatThreadMoveHostOptions {
   readonly isBusy: (view: ChatThreadView) => boolean;
   readonly externalContentIngested: (threadId: string) => boolean;
   readonly importMovedThread: (input: MovedChatThreadImport) => Promise<ChatThread>;
-  /** The bytes of one finalized attachment of a Chat thread; undefined when they cannot be read. */
+  /**
+   * The bytes of an input a turn admitted from another thread, read with its
+   * whole recorded reference by the reader provider turns use, which refuses a
+   * source no longer in the Project it was admitted from; undefined when it
+   * cannot be read.
+   */
+  readonly readOriginalInput: (
+    reference: ConversationInputReference,
+  ) => Promise<Uint8Array | undefined>;
+  /** The bytes of one finalized attachment of the moving thread; undefined when they cannot be read. */
   readonly readAttachment: (
     threadId: string,
     attachmentId: string,
@@ -158,7 +168,7 @@ export function createChatThreadMoveHost(options: ChatThreadMoveHostOptions): {
     pack: async (thread, folder) => {
       const view = viewOf(thread);
       if (view === undefined) return { status: "refused", reason: "refused" };
-      const attachments = await packAttachments(view, folder, options.readAttachment);
+      const attachments = await packAttachments(view, folder, options);
       const bulk = await packThreadParts(thread, folder, options.parts.source);
       const conversation: MovedChatConversation = {
         ...conversationOf(view, options.externalContentIngested(thread.threadId), attachments),
@@ -307,19 +317,18 @@ interface PackedAttachments {
 async function packAttachments(
   view: ChatThreadView,
   folder: string,
-  read: ChatThreadMoveHostOptions["readAttachment"],
+  readers: Pick<ChatThreadMoveHostOptions, "readAttachment" | "readOriginalInput">,
 ): Promise<PackedAttachments> {
   const parts: PackedPart[] = [];
   const partsLeftBehind: ThreadMovePartLeftBehind[] = [];
   const carry = async (input: {
     readonly kind: "attachment" | "original-input";
-    readonly threadId: string;
-    readonly attachmentId: string;
+    readonly read: () => Promise<Uint8Array | undefined>;
     readonly displayName: string;
     readonly mediaType: string;
     readonly digest: string;
   }): Promise<MovedAttachment | undefined> => {
-    const bytes = await read(input.threadId, input.attachmentId).catch(() => undefined);
+    const bytes = await input.read().catch(() => undefined);
     let mediaType: ChatAttachmentMediaType | undefined;
     try {
       mediaType = decodeChatAttachmentMediaType(input.mediaType);
@@ -356,8 +365,7 @@ async function packAttachments(
       if (attachment === undefined) continue;
       const moved = await carry({
         kind: "attachment",
-        threadId: String(view.thread.id),
-        attachmentId: String(attachment.id),
+        read: () => readers.readAttachment(String(view.thread.id), String(attachment.id)),
         displayName: attachment.displayName,
         mediaType: attachment.mediaType,
         digest: attachment.digest,
@@ -365,14 +373,13 @@ async function packAttachments(
       if (moved !== undefined) carried.push(moved);
     }
     for (const input of turn.originalInputs ?? []) {
-      if (input.source.mode !== "chat") {
-        partsLeftBehind.push({ kind: "original-input", name: input.displayName });
-        continue;
-      }
+      // Read with the whole recorded reference through the same reader a
+      // provider turn's inputs pass: one whose source thread left the Project
+      // it was admitted from, or that is gone or changed, is unavailable
+      // there, so it stays behind rather than becoming this thread's own.
       const moved = await carry({
         kind: "original-input",
-        threadId: input.source.threadId,
-        attachmentId: input.source.attachmentId,
+        read: () => readers.readOriginalInput(input),
         displayName: input.displayName,
         mediaType: input.mediaType,
         digest: input.digest,
@@ -386,8 +393,7 @@ async function packAttachments(
     if (sent.has(String(attachment.id)) || attachment.turnId !== undefined) continue;
     const moved = await carry({
       kind: "attachment",
-      threadId: String(view.thread.id),
-      attachmentId: String(attachment.id),
+      read: () => readers.readAttachment(String(view.thread.id), String(attachment.id)),
       displayName: attachment.displayName,
       mediaType: attachment.mediaType,
       digest: attachment.digest,

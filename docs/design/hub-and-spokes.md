@@ -1023,7 +1023,14 @@ and questions.
   - An attachment arrives on the turn that sent it, and one added but not
     sent arrives unsent. An original input a turn admitted from another
     thread arrives as an attachment of the moved turn, because that thread
-    stays on the source.
+    stays on the source. The source reads it with its whole recorded
+    reference (thread, Project, attachment, and digest) through the same
+    reader a provider turn's inputs pass, so an input a turn could no longer
+    be given (its source thread moved to another Project, or the attachment
+    is gone or changed) stays behind and is named, and a move never makes it
+    available again. The other bulk parts are the moving thread's own: its
+    attachments, the images generated in its scope, the captures kept for
+    it, and the Canvases whose provenance names it.
   - A generated image arrives as a completed image of the new thread. It
     records no usage on the destination: it ran, and was billed, on the
     source, whose accounting keeps it.
