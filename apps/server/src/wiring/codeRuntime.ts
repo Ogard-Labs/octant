@@ -677,6 +677,8 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
             createdAt: thread.createdAt,
             windowId,
           }),
+        projectMemoryEntries: (thread) =>
+          persistence.readProjectMemory(thread.projectId).active.map((entry) => entry.content),
         chosenAutoReviewer: (thread) => {
           const project = persistence.readProject(thread.projectId);
           return chosenAutoReviewer({

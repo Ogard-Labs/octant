@@ -1,4 +1,5 @@
 import { ConversationInputTransfer } from "../attachments/conversationInputTransfer";
+import { OCTANT_LOCAL_ACTOR_ID } from "../shellService";
 import { randomUUID } from "node:crypto";
 import { approvedWorkingFolderChoices } from "../approvedWorkingFolders";
 import { workExternalInputReceipt } from "./workExternalInput";
@@ -24,6 +25,7 @@ import {
   decodeProjectExtraFolder,
   decodeContextCompactionId,
   decodeContextSubjectRef,
+  decodeProjectMemoryView,
   decodeProviderRuntimeEvent,
   decodeNativeHarnessSlotCandidate,
   EventActor,
@@ -2492,6 +2494,57 @@ describe("WorkTurnService", () => {
     await fixture.waitForIdle();
     expect(JSON.stringify(contexts.flat())).not.toContain("octant_browser");
   });
+  it("carries the Project's active memory in a Work turn's context, as a Chat turn does", async () => {
+    const contexts: Array<ReadonlyArray<ProviderContextBlock>> = [];
+    const entry = (id: string, content: string) => ({
+      id,
+      projectId: ids.project,
+      kind: "decision",
+      content,
+      provenance: { kind: "user-authored" },
+      author: { kind: "local-user", actorId: OCTANT_LOCAL_ACTOR_ID },
+      version: 1,
+      createdAt: "2026-07-14T10:00:00.000Z",
+      updatedAt: "2026-07-14T10:00:00.000Z",
+    });
+    const memory = decodeProjectMemoryView({
+      projectId: ids.project,
+      active: [
+        {
+          ...entry("00000000-0000-4000-8000-000000000a01", "Invoices go out on the 1st."),
+          status: "active",
+        },
+      ],
+      history: [
+        {
+          ...entry("00000000-0000-4000-8000-000000000a02", "Invoices go out on the 15th."),
+          status: "superseded",
+          supersededBy: "00000000-0000-4000-8000-000000000a01",
+        },
+      ],
+    });
+    const readProjectMemory = vi.fn(() => memory);
+    const fixture = serviceFixture({
+      readProjectMemory,
+      turnRuntime: {
+        run: async (input) => {
+          contexts.push(input.context ?? []);
+          return { kind: "completed", response: "Provider reply" };
+        },
+      },
+    });
+
+    expect((await fixture.service.startFirstTurn(ids.window, startCommand())).kind).toBe(
+      "accepted",
+    );
+    await fixture.waitForIdle();
+
+    const sent = contexts.flat();
+    expect(sent).toContainEqual({ kind: "project-memory", text: "Invoices go out on the 1st." });
+    expect(JSON.stringify(sent)).not.toContain("on the 15th");
+    expect(readProjectMemory).toHaveBeenCalledWith(ids.project);
+  });
+
   it("opens every task with the Project's status, and takes stock when the status is stale unless the request is unrelated", async () => {
     const contexts: Array<ReadonlyArray<ProviderContextBlock>> = [];
     const disk = new Map<string, string>([
@@ -5242,6 +5295,7 @@ function serviceFixture(
     readonly projectStatusFiles?: WorkProjectStatusFiles;
     readonly turnFileObserver?: WorkTurnServiceDependencies["turnFileObserver"];
     readonly readProviderModel?: WorkTurnServiceDependencies["persistence"]["readProviderModel"];
+    readonly readProjectMemory?: WorkTurnServiceDependencies["persistence"]["readProjectMemory"];
     readonly threadAccess?: WorkAccess;
     readonly fullAccessSandbox?: boolean;
     readonly documentDelivery?: "canvas" | "native-artifacts";
@@ -5316,6 +5370,9 @@ function serviceFixture(
   const persistence = {
     status: () => ({ state: "current", integrity: "ok" }),
     readProject: vi.fn(() => options.project ?? workProject()),
+    ...(options.readProjectMemory === undefined
+      ? {}
+      : { readProjectMemory: options.readProjectMemory }),
     ...(options.readProviderModel === undefined
       ? {}
       : { readProviderModel: options.readProviderModel }),

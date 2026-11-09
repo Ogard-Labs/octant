@@ -11,6 +11,7 @@ import {
   decodeMemoryEntrySuperseded,
   decodeMemoryEntryTransferred,
   decodeMemoryEntryId,
+  decodeProjectMemoryProposal,
   decodeProject,
   decodeProjectAvailability,
   decodeProjectBindingRelinked,
@@ -438,6 +439,57 @@ describe("Project memory contracts", () => {
     expect(decodeMemoryEntry({ ...userMemory, provenance })).toMatchObject({ provenance });
     const { transferredAt: _, ...missingTimestamp } = provenance;
     expect(() => decodeMemoryEntry({ ...userMemory, provenance: missingTimestamp })).toThrow();
+  });
+
+  it("keeps an agent-written entry's mode and thread, and decodes it once a purge removed the thread", () => {
+    const provenance = { kind: "agent-authored", mode: "code", threadId: ids.successor } as const;
+    const created = decodeMemoryEntryCreated({ entry: { ...userMemory, provenance } });
+    expect(created.entry.provenance).toEqual(provenance);
+    expect(
+      decodeMemoryEntry({ ...userMemory, provenance: { kind: "agent-authored", mode: "work" } })
+        .provenance,
+    ).toEqual({ kind: "agent-authored", mode: "work" });
+    expect(() =>
+      decodeMemoryEntry({ ...userMemory, provenance: { ...provenance, mode: "plan" } }),
+    ).toThrow();
+    expect(() =>
+      decodeMemoryEntry({ ...userMemory, provenance: { ...provenance, approvedBy: actor } }),
+    ).toThrow();
+  });
+
+  it("replays memory events journaled before agents could write memory unchanged", () => {
+    expect(decodeMemoryEntryCreated({ entry: userMemory }).entry).toEqual(userMemory);
+    expect(decodeMemoryEntryTransferred({ entry: transferredMemory }).entry).toEqual(
+      transferredMemory,
+    );
+    const previousEntry = {
+      ...userMemory,
+      status: "superseded",
+      supersededBy: ids.successor,
+      version: 2,
+    } as const;
+    const entry = { ...userMemory, id: ids.successor, version: 2 } as const;
+    expect(decodeMemoryEntrySuperseded({ previousEntry, entry })).toEqual({ previousEntry, entry });
+  });
+
+  it("carries an agent's proposed change for the person without letting it name an author", () => {
+    const proposal = {
+      proposalId: ids.otherProject,
+      projectId: ids.project,
+      mode: "chat",
+      threadId: ids.successor,
+      change: { kind: "create", memoryKind: "fact", content: "The API is versioned." },
+      expectedVersion: 0,
+      requestedAt: createdAt,
+    } as const;
+    expect(decodeProjectMemoryProposal(proposal)).toEqual(proposal);
+    expect(() =>
+      decodeProjectMemoryProposal({
+        ...proposal,
+        change: { ...proposal.change, content: "x".repeat(2_001) },
+      }),
+    ).toThrow();
+    expect(() => decodeProjectMemoryProposal({ ...proposal, author: actor })).toThrow();
   });
 
   const commands = [

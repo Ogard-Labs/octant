@@ -593,7 +593,11 @@ export type CodeDependencies = Pick<ServerStart, "options" | "persistence"> &
   > &
   Pick<
     WorkspaceWiring,
-    "gitEnvironmentPort" | "gitObservationPort" | "projectRootPort" | "projectService"
+    | "gitEnvironmentPort"
+    | "gitObservationPort"
+    | "projectMemoryAccess"
+    | "projectRootPort"
+    | "projectService"
   > &
   Pick<
     FoundationsWiring,
@@ -760,6 +764,7 @@ export function wireCode(deps: CodeDependencies) {
       service: projectService,
       environmentService,
       windowAuthorityStore,
+      memoryProposals: deps.projectMemoryAccess.proposals,
       maxRequestBodySize: MAX_JSON_REQUEST_BODY_SIZE,
     });
     const agentProfileService = new AgentProfileService({
