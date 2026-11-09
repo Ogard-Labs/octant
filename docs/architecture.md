@@ -7853,7 +7853,11 @@ the model at another size.
   after `--- Sheet: Name ---`; the text comes from the preview's own bounded
   parsers, pages with `offset` and `limit` like any file, and carries
   `extractedFrom` and, when a parser stopped at one of its limits, a
-  `parserNote` saying so. Extracted text is not the file's bytes, so such a
+  `parserNote` saying so. The text is built piece by piece against one budget
+  of 4 MiB per file (`MAX_EXTRACTED_TEXT_BYTES`) and stops there with the same
+  note: the parsers bound each part, not what the parts add up to, and a
+  workbook whose cells all name one large shared string would otherwise
+  expand to hundreds of megabytes before any paging. Extracted text is not the file's bytes, so such a
   read never counts as the read an `edit` needs, and an edit of the file
   refuses as `not-read-first`. Any other file whose first 4,096 bytes hold a
   NUL or are not UTF-8 (an archive, an old `.doc`, `.xls`, or `.ppt`, audio,

@@ -12,7 +12,11 @@ import { DEFAULT_DOCUMENT_BUDGET, parseDocument } from "../preview/previewDocume
 import { DEFAULT_PDF_BUDGET, parsePdf } from "../preview/previewPdfChunker";
 import { sniffPreviewKind } from "../preview/previewSniffer";
 import { DEFAULT_SLIDES_BUDGET, parseSlides } from "../preview/previewSlidesChunker";
-import { DEFAULT_WORKBOOK_BUDGET, parseWorkbook } from "../preview/previewWorkbookChunker";
+import {
+  DEFAULT_WORKBOOK_BUDGET,
+  parseWorkbook,
+  type WorkbookWorksheet,
+} from "../preview/previewWorkbookChunker";
 
 /** Directories a search never descends into unless the pattern names them. */
 export const SKIPPED_DIRECTORY_NAMES = new Set([".git", "node_modules"]);
@@ -638,7 +642,7 @@ export function readFileContent(
       extractedFrom: EXTRACTED_FORMATS[kind],
       ...(extracted.truncated
         ? {
-            parserNote: `The ${EXTRACTED_FORMAT_NAMES[EXTRACTED_FORMATS[kind]]} parser stopped at one of its limits, so some of the file's content is not shown.`,
+            parserNote: `Reading ${EXTRACTED_FORMAT_NAMES[EXTRACTED_FORMATS[kind]]} stopped at one of its limits (at most ${MAX_EXTRACTED_TEXT_BYTES} bytes of text per file), so some of the file's content is not shown.`,
           }
         : {}),
     };
@@ -677,59 +681,123 @@ export function countsAsTextRead(result: NativeHarnessReadResult): boolean {
 }
 
 /**
+ * The most text a read extracts from one file, sixty-four pages of a read
+ * result. A format's parser bounds what it keeps of each part, not what the
+ * parts add up to: a workbook whose 20,000 cells name one 32,767-character
+ * shared string would render to about 625 MB from a small file. The text is
+ * built against this budget and stops there, so that expansion never exists.
+ */
+export const MAX_EXTRACTED_TEXT_BYTES = 64 * MAX_READ_RESULT_BYTES;
+
+/** Text appended piece by piece until it reaches {@link MAX_EXTRACTED_TEXT_BYTES}. */
+function extractionBudget() {
+  const parts: string[] = [];
+  let bytes = 0;
+  let full = false;
+  return {
+    /** Adds a piece, cut to the room left; false once the budget is spent. */
+    append(piece: string): boolean {
+      if (full) return false;
+      const room = MAX_EXTRACTED_TEXT_BYTES - bytes;
+      // A character is at least one byte, so a piece longer in characters
+      // than the room left is cut before it is measured.
+      const head = piece.length > room ? piece.slice(0, room) : piece;
+      const size = Buffer.byteLength(head, "utf8");
+      if (size <= room && head.length === piece.length) {
+        parts.push(head);
+        bytes += size;
+        return true;
+      }
+      const cut = Buffer.from(head, "utf8")
+        .subarray(0, room)
+        .toString("utf8")
+        .replace(/\uFFFD$/, "");
+      parts.push(cut);
+      bytes += Buffer.byteLength(cut, "utf8");
+      full = true;
+      return false;
+    },
+    get full(): boolean {
+      return full;
+    },
+    text(): string {
+      return parts.join("");
+    },
+  };
+}
+
+/**
  * A format's content as plain text, with a marker line before each slide,
- * page, and worksheet, under the preview parsers' own limits.
+ * page, and worksheet, under the preview parsers' own limits and the
+ * extraction budget. `truncated` says either one cut it.
  */
 function extractedText(
   kind: keyof typeof EXTRACTED_FORMATS,
   content: Buffer,
 ): { readonly text: string; readonly truncated: boolean } | undefined {
+  const budget = extractionBudget();
+  const lines = (parts: ReadonlyArray<string>) => {
+    for (const [index, part] of parts.entries()) {
+      if (index > 0 && !budget.append("\n")) return;
+      if (!budget.append(part)) return;
+    }
+  };
+  const sections = (marker: string, parts: ReadonlyArray<string>) => {
+    for (const [index, part] of parts.entries()) {
+      if (index > 0 && !budget.append("\n")) return;
+      if (!budget.append(`--- ${marker} ${index + 1} ---\n`) || !budget.append(part)) return;
+    }
+  };
+  let truncated: boolean;
   switch (kind) {
     case "document": {
       const parsed = parseDocument(content, DEFAULT_DOCUMENT_BUDGET);
-      return parsed && { text: parsed.blocks.join("\n"), truncated: parsed.truncated };
+      if (parsed === undefined) return undefined;
+      lines(parsed.blocks);
+      truncated = parsed.truncated;
+      break;
     }
     case "slides": {
       const parsed = parseSlides(content, DEFAULT_SLIDES_BUDGET);
-      return (
-        parsed && {
-          text: parsed.slides
-            .map((slide, index) => `--- Slide ${index + 1} ---\n${slide}`)
-            .join("\n"),
-          truncated: parsed.truncated,
-        }
-      );
+      if (parsed === undefined) return undefined;
+      sections("Slide", parsed.slides);
+      truncated = parsed.truncated;
+      break;
     }
     case "pdf": {
       const parsed = parsePdf(content, DEFAULT_PDF_BUDGET);
-      return (
-        parsed && {
-          text: parsed.pages.map((page, index) => `--- Page ${index + 1} ---\n${page}`).join("\n"),
-          truncated: parsed.truncated,
-        }
-      );
+      if (parsed === undefined) return undefined;
+      sections("Page", parsed.pages);
+      truncated = parsed.truncated;
+      break;
     }
     case "workbook": {
       const parsed = parseWorkbook(content, DEFAULT_WORKBOOK_BUDGET);
-      return (
-        parsed && {
-          text: parsed.worksheets
-            .map((sheet) =>
-              [
-                `--- Sheet: ${sheet.name} ---`,
-                ...sheet.rows.map((row) =>
-                  row
-                    // A tab or line break inside a cell would read as a new
-                    // cell or row, so it becomes a space.
-                    .map((cell) => (cell === null ? "" : String(cell).replace(/[\t\r\n]+/g, " ")))
-                    .join("\t"),
-                ),
-              ].join("\n"),
-            )
-            .join("\n"),
-          truncated: parsed.truncated,
-        }
-      );
+      if (parsed === undefined) return undefined;
+      appendWorksheets(budget, parsed.worksheets);
+      truncated = parsed.truncated;
+      break;
+    }
+  }
+  return { text: budget.text(), truncated: truncated || budget.full };
+}
+
+function appendWorksheets(
+  budget: ReturnType<typeof extractionBudget>,
+  worksheets: ReadonlyArray<WorkbookWorksheet>,
+): void {
+  for (const [sheetIndex, sheet] of worksheets.entries()) {
+    if (sheetIndex > 0 && !budget.append("\n")) return;
+    if (!budget.append(`--- Sheet: ${sheet.name} ---`)) return;
+    for (const row of sheet.rows) {
+      if (!budget.append("\n")) return;
+      for (const [cellIndex, cell] of row.entries()) {
+        if (cellIndex > 0 && !budget.append("\t")) return;
+        // A tab or line break inside a cell would read as a new cell or
+        // row, so it becomes a space. Only what can still fit is copied.
+        const value = cell === null ? "" : String(cell).slice(0, MAX_EXTRACTED_TEXT_BYTES);
+        if (!budget.append(value.replace(/[\t\r\n]+/g, " "))) return;
+      }
     }
   }
 }

@@ -18,7 +18,11 @@ import {
   buildPptxFixture,
   buildXlsxFixture,
 } from "../preview/previewTestFixtures";
-import { NativeHarnessFileSystem } from "./nativeHarnessFileSystem";
+import {
+  MAX_EXTRACTED_TEXT_BYTES,
+  NativeHarnessFileSystem,
+  readFileContent,
+} from "./nativeHarnessFileSystem";
 
 async function fixture(): Promise<{ readonly root: string; readonly fs: NativeHarnessFileSystem }> {
   const root = await realpath(await mkdtemp(join(tmpdir(), "octant-harness-fs-")));
@@ -370,6 +374,27 @@ describe("native harness file system", () => {
       const outcome = await fs.read({ path: "cut.docx" });
       expect(outcome).toMatchObject({ kind: "file", extractedFrom: "docx" });
       expect(outcome.kind === "file" && outcome.parserNote).toContain("limit");
+    });
+
+    it("stops a workbook's text at the extraction budget when one large shared string repeats", async () => {
+      // 2,000 rows that each name the same 32,767-character string expand to
+      // about 64 MB of text from a file the size of one copy of it.
+      const big = "x".repeat(32_767);
+      const content = Buffer.from(
+        buildXlsxFixture(
+          Array.from({ length: 2_000 }, () => [big]),
+          { sharedStrings: true },
+        ),
+      );
+      const started = Date.now();
+      const outcome = readFileContent("big.xlsx", content, {});
+      expect(Date.now() - started).toBeLessThan(2_000);
+      expect(outcome).toMatchObject({ kind: "file", extractedFrom: "xlsx" });
+      if (outcome.kind !== "file") return;
+      expect(outcome.parserNote).toContain("limit");
+      // A read counts a newline after every line, the last one included.
+      const pagedBytes = outcome.bounds.returnedBytes + (outcome.bounds.omittedBytes ?? 0);
+      expect(pagedBytes).toBeLessThanOrEqual(MAX_EXTRACTED_TEXT_BYTES + 1);
     });
 
     it("refuses an archive or other binary file and says what it can read", async () => {
