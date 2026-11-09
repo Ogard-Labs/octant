@@ -521,6 +521,73 @@ describe("WorkRequestService.resolve", () => {
     expect(calls).toEqual([`answer:${ids.session}:provider-input-1:PDF`]);
   });
 
+  it("validates the full questionnaire before delivery and preserves the exact durable answer", async () => {
+    const delivered: string[] = [];
+    const { service, projection } = createService({
+      providerSessions: {
+        answerUserInput: async ({ answer }) => {
+          delivered.push(answer);
+        },
+      },
+    });
+    const questionnaire = {
+      allowComment: false,
+      questions: [
+        {
+          id: "q0",
+          prompt: "Formats?",
+          selection: "multiple" as const,
+          options: [
+            { id: "pdf", label: "PDF" },
+            { id: "text", label: "Text" },
+          ],
+        },
+      ],
+    };
+    const result = service.record({
+      requestId: ids.request,
+      projectId: ids.project,
+      threadId: ids.thread,
+      providerInstanceId: ids.provider,
+      providerSessionId: ids.session,
+      providerCallbackId: "native-form",
+      detail: { kind: "user-input", prompt: "Choose", options: [], questionnaire },
+    });
+    if (result.status !== "ok") throw new Error("setup failed");
+    const command = {
+      kind: "resolve-work-request" as const,
+      requestId: ids.request,
+      expectedVersion: result.request.version,
+    };
+    expect(
+      await service.resolve({
+        ...command,
+        resolution: {
+          kind: "user-input",
+          answer: { version: 1, answers: [{ questionId: "q0", selectedOptionIds: ["unknown"] }] },
+        },
+      }),
+    ).toMatchObject({ status: "failure", failure: { code: "invalid" } });
+    expect(delivered).toEqual([]);
+    expect(projection.lookup(ids.request)?.request.status).toBe("pending");
+    const answer = {
+      version: 1 as const,
+      answers: [{ questionId: "q0", selectedOptionIds: ["pdf", "text"] }],
+    };
+    expect(
+      await service.resolve({ ...command, resolution: { kind: "user-input", answer } }),
+    ).toMatchObject({
+      status: "ok",
+      request: { status: "resolved", resolution: { kind: "user-input", answer } },
+    });
+    expect(delivered).toEqual([JSON.stringify(answer)]);
+    service.hydrate();
+    expect(projection.lookup(ids.request)?.request.resolution).toEqual({
+      kind: "user-input",
+      answer,
+    });
+  });
+
   it("keeps both questions independently answerable in the same provider session", async () => {
     const delivered: Array<string> = [];
     const { service } = createService({
