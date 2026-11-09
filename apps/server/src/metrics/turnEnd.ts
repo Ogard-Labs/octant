@@ -2,8 +2,10 @@ import type {
   NativeHarnessTurnStopReason,
   OctantMode,
   ProjectId,
+  PromptDigest,
   ProviderInstanceId,
   ProviderModelId,
+  TurnDiagnostics,
   TurnMetrics,
   TurnMetricsRecord,
   TurnStopReason,
@@ -25,6 +27,30 @@ export interface TurnEndSummary {
   /** Absent when the provider reported no usage. */
   readonly usage?: TurnUsage | undefined;
   readonly metrics: TurnMetrics;
+  /** Tool, retry, limit, and failure counts from the same events as the timing. */
+  readonly diagnostics?: TurnDiagnostics | undefined;
+  /** The keyed digest of the prompt this turn sent; absent when the host has no digest key. */
+  readonly promptDigest?: string | undefined;
+}
+
+/**
+ * The turn with the digest of the prompt it sent, set by whoever knows that
+ * prompt (the runner's caller). Only a thread's first turn is digested: it is
+ * the one prompt that stands alone as a task. A later turn such as "continue"
+ * or "yes" means something only inside its conversation, and grouping it with
+ * the same words elsewhere would compare unrelated work. `firstTurn` is
+ * required so no caller can forget the question. Without a digest function the
+ * turn is returned as it is.
+ */
+export function withPromptDigest(
+  turn: TurnEndSummary,
+  digest: ((text: string) => string) | undefined,
+  prompt: string,
+  scope: { readonly firstTurn: boolean },
+): TurnEndSummary {
+  return digest === undefined || !scope.firstTurn
+    ? turn
+    : { ...turn, promptDigest: digest(prompt) };
 }
 
 export function summarizeTurnEnd(input: {
@@ -40,6 +66,7 @@ export function summarizeTurnEnd(input: {
     endedAt: input.endedAt,
     ...(finished.usage === undefined ? {} : { usage: finished.usage }),
     metrics: finished.metrics,
+    diagnostics: finished.diagnostics,
   };
 }
 
@@ -61,6 +88,8 @@ export function toTurnMetricsRecord(scope: TurnEndScope, turn: TurnEndSummary): 
     stopReason: turn.stopReason,
     ...(turn.usage === undefined ? {} : { usage: turn.usage }),
     metrics: turn.metrics,
+    ...(turn.diagnostics === undefined ? {} : { diagnostics: turn.diagnostics }),
+    ...(turn.promptDigest === undefined ? {} : { promptDigest: turn.promptDigest as PromptDigest }),
     startedAt: turn.startedAt as UtcTimestamp,
     endedAt: turn.endedAt as UtcTimestamp,
   };

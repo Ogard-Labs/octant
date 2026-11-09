@@ -1,3 +1,5 @@
+import { createHandoversCard } from "../home/HandoversCard";
+import type { ThreadMoveClient } from "../environment/threadMove/threadMoveClient";
 import type { AgentRunClient } from "@octant/client-runtime/agent-run-client";
 import type { BrowserAutomationClient } from "@octant/client-runtime/browser-automation-client";
 import type { ChatClient } from "@octant/client-runtime/chat-client";
@@ -43,6 +45,8 @@ type LaunchedShellClients = ReturnType<typeof createLaunchedShellClients>;
 export interface HomeStartInput {
   readonly routineClient?: import("@octant/client-runtime").AutomationClient;
   readonly onOpenRoutine?: (automationId: string) => void;
+  /** The move routes, for Handovers; absent outside a local desktop window. */
+  readonly threadMoveClient?: ThreadMoveClient;
   readonly actions: Pick<
     ShellActions,
     | "closeWorkspaceReaders"
@@ -342,6 +346,13 @@ function buildHomeStart(input: HomeStartInput): DraftThreadWorkspaceProps["homeS
         actions.setPendingDraftBranch(fix.branch);
         actions.setDraftProjectSelection((current) => ({ ...current, code: fix.projectId }));
         void actions.openDraftThread("code", fix.projectId);
+      },
+    }),
+    createHandoversCard({
+      client: input.threadMoveClient,
+      onOpenThread: (threadId) => {
+        actions.closeWorkspaceReaders();
+        actions.selectCodeThread(threadId);
       },
     }),
     createComputersCard({

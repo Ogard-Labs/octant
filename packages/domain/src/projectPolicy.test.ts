@@ -204,6 +204,24 @@ describe("Project creation and lifecycle", () => {
     expect(() => changeCodeProjectAutoReviewer(back, undefined, updatedAt)).toThrow();
   });
 
+  it("sets a Project's sandbox at Full access beside its mode, and returns it to Settings when not named", () => {
+    const project = makeProject(ids.code, "0/1", { type: "code" });
+    const sandboxed = changeCodeProjectPermissionMode(project, "full-access", updatedAt, true);
+    expect(sandboxed).toMatchObject({
+      defaultPermissionMode: "full-access",
+      defaultFullAccessSandbox: true,
+    });
+    // Only the sandbox changing is still a change.
+    const open = changeCodeProjectPermissionMode(sandboxed, "full-access", updatedAt, false);
+    expect(open.defaultFullAccessSandbox).toBe(false);
+    expect(changeCodeProjectPermissionMode(open, "full-access", updatedAt)).not.toHaveProperty(
+      "defaultFullAccessSandbox",
+    );
+    expect(() => changeCodeProjectPermissionMode(open, "full-access", updatedAt, false)).toThrow(
+      ProjectPolicyRejected,
+    );
+  });
+
   it("sets a Code Project's default mode and keeps its remembered Full access in step", () => {
     const project = makeProject(ids.code, "0/1", { type: "code" });
     const full = changeCodeProjectPermissionMode(project, "full-access", updatedAt);

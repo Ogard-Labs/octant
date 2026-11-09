@@ -711,6 +711,35 @@ describe("page popups in Nightly's embedded Browser", () => {
     return { main, calls };
   }
 
+  it("releases a held page button before the native popup and refuses its later physical release", async () => {
+    let offer = () => {};
+    const heldPoll = new Promise<void>((done) => {
+      offer = done;
+    });
+    const shown = vi.fn(async () => undefined);
+    const { main, calls } = await presented(shown, undefined, { beforePopup: () => heldPoll });
+    const pointer = (type: "mouseDown" | "mouseUp") => ({
+      ...owner,
+      presentationId: id,
+      kind: "input",
+      frameSequence: 1,
+      input: { type, x: 120, y: 120, button: "left", clickCount: 1 },
+    });
+    try {
+      expect(await main.invoke(pointer("mouseDown"))).toEqual({ status: "accepted" });
+      offer();
+      await vi.waitFor(() => expect(shown).toHaveBeenCalledTimes(1));
+      const releases = () =>
+        calls.filter((request) => request.kind === "input" && request.input.type === "mouseUp");
+      expect(releases()).toHaveLength(1);
+      expect(await main.invoke(pointer("mouseUp"))).toEqual({ status: "refused" });
+      expect(releases()).toHaveLength(1);
+    } finally {
+      offer();
+      await main.close();
+    }
+  });
+
   it("shows a captured dialog natively and returns the person's answer once", async () => {
     const shown = vi.fn(async () => ({ kind: "dialog" as const, accept: true }));
     const { main, calls } = await presented(shown);

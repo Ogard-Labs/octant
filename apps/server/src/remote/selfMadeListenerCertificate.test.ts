@@ -30,6 +30,7 @@ import {
   listenerTlsPin,
   SELF_MADE_LISTENER_CERTIFICATE_FILE,
   SELF_MADE_LISTENER_KEY_FILE,
+  LISTENER_KEY_TRANSITION_FILE,
 } from "./selfMadeListenerCertificate";
 
 const directories: string[] = [];
@@ -47,6 +48,95 @@ function dataDirectory(): string {
 
 const DAY_MS = 24 * 60 * 60 * 1_000;
 const START = new Date("2026-10-14T09:30:15.250Z");
+
+describe("explicit listener key transition", () => {
+  it("keeps the staged key owner-only and refuses exposed or corrupted state without replacing the serving key", () => {
+    const directory = dataDirectory();
+    const store = createSelfMadeListenerCertificateStore({
+      dataDirectory: directory,
+      now: () => START,
+    });
+    const before = ready(store.ensure("100.64.0.7"));
+    const prepared = store.prepareTransition({
+      hostId: "4f751d04-2b47-49e1-aac9-b3e99049a729",
+      origin: "https://100.64.0.7:8443",
+    });
+    if (prepared.status !== "prepared") throw new Error("expected prepared transition");
+    const path = join(directory, "remote", LISTENER_KEY_TRANSITION_FILE);
+    expect(statSync(path).mode & 0o777).toBe(0o600);
+    expect(JSON.stringify(prepared)).not.toContain("PRIVATE KEY");
+    chmodSync(path, 0o644);
+    expect(store.activateTransition(prepared.transition.newPin).status).toBe("refused");
+    chmodSync(path, 0o600);
+    writeFileSync(path, "damaged");
+    expect(store.activateTransition(prepared.transition.newPin).status).toBe("refused");
+    expect(
+      store.prepareTransition({
+        hostId: "4f751d04-2b47-49e1-aac9-b3e99049a729",
+        origin: "https://100.64.0.7:8443",
+      }).status,
+    ).toBe("refused");
+    expect(ready(store.ensure("100.64.0.7")).tlsPin).toBe(before.tlsPin);
+  });
+  it("keeps serving the old key until activation and retains the signed window across restart", () => {
+    const directory = dataDirectory();
+    const store = createSelfMadeListenerCertificateStore({
+      dataDirectory: directory,
+      now: () => START,
+    });
+    const before = ready(store.ensure("100.64.0.7"));
+    const prepared = store.prepareTransition({
+      hostId: "4f751d04-2b47-49e1-aac9-b3e99049a729",
+      origin: "https://100.64.0.7:8443",
+    });
+    if (prepared.status !== "prepared") throw new Error("expected prepared transition");
+    expect(prepared.transition.oldPin).toBe(before.tlsPin);
+    expect(
+      Date.parse(prepared.transition.expiresAt) - Date.parse(prepared.transition.preparedAt),
+    ).toBe(7 * DAY_MS);
+    expect(ready(store.ensure("100.64.0.7")).tlsPin).toBe(before.tlsPin);
+    const reopened = createSelfMadeListenerCertificateStore({
+      dataDirectory: directory,
+      now: () => START,
+    });
+    expect(reopened.transition()).toEqual(prepared.transition);
+    expect(reopened.activateTransition(prepared.transition.newPin)).toEqual({
+      status: "activated",
+    });
+    expect(ready(reopened.ensure("100.64.0.7")).tlsPin).toBe(prepared.transition.newPin);
+    expect(reopened.activateTransition(prepared.transition.newPin)).toEqual({
+      status: "activated",
+    });
+    expect(reopened.transition()).toEqual(prepared.transition);
+  });
+
+  it("refuses expired or replaced activation without changing the serving key", () => {
+    const directory = dataDirectory();
+    const store = createSelfMadeListenerCertificateStore({
+      dataDirectory: directory,
+      now: () => START,
+    });
+    const before = ready(store.ensure("100.64.0.7"));
+    const prepared = store.prepareTransition({
+      hostId: "4f751d04-2b47-49e1-aac9-b3e99049a729",
+      origin: "https://100.64.0.7:8443",
+    });
+    if (prepared.status !== "prepared") throw new Error("expected prepared transition");
+    expect(store.activateTransition(before.tlsPin)).toEqual({
+      status: "refused",
+      code: "invalid-transition",
+    });
+    const expired = createSelfMadeListenerCertificateStore({
+      dataDirectory: directory,
+      now: () => new Date(START.getTime() + 7 * DAY_MS),
+    });
+    expect(expired.activateTransition(prepared.transition.newPin)).toEqual({
+      status: "refused",
+      code: "invalid-transition",
+    });
+    expect(ready(expired.ensure("100.64.0.7")).tlsPin).toBe(before.tlsPin);
+  });
+});
 
 function ready(
   result: ReturnType<ReturnType<typeof createSelfMadeListenerCertificateStore>["ensure"]>,
@@ -109,6 +199,27 @@ describe("native private listener TLS storage", () => {
     expect(files.createKey).toHaveBeenCalledTimes(1);
     expect(files.replaceCertificate).toHaveBeenCalledTimes(2);
     expect(readdirSync(directory)).toEqual([]);
+    // Key transitions stage the next key as an ordinary owner-only file under
+    // the remote folder, which the host identity key normally creates. Native
+    // storage has no transition record, so it refuses instead of writing one.
+    mkdirSync(join(directory, "remote"));
+    const native = createSelfMadeListenerCertificateStore({
+      dataDirectory: directory,
+      tlsFiles: files,
+      now: () => new Date(START.getTime() + 340 * DAY_MS),
+    });
+    expect(
+      native.prepareTransition({
+        hostId: "4f751d04-2b47-49e1-aac9-b3e99049a729",
+        origin: "https://100.64.0.7:8443",
+      }),
+    ).toEqual({ status: "refused", code: "invalid-transition" });
+    expect(native.activateTransition(first.tlsPin)).toEqual({
+      status: "refused",
+      code: "invalid-transition",
+    });
+    expect(native.transition()).toBeUndefined();
+    expect(readdirSync(join(directory, "remote"))).toEqual([]);
     records.set("key", Buffer.from("corrupt private fixture"));
     expect(
       createSelfMadeListenerCertificateStore({

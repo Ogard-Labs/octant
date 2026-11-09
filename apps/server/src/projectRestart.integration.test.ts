@@ -441,6 +441,7 @@ describe("Project restart recovery", () => {
       { projection_name: "agent-runs", reason: "unknown-event-name" },
       { projection_name: "aggregate-heads", reason: "unknown-event-name" },
       { projection_name: "automations", reason: "unknown-event-name" },
+      { projection_name: "benchmarks", reason: "unknown-event-name" },
       { projection_name: "bundled-plugin-switches", reason: "unknown-event-name" },
       { projection_name: "canvas", reason: "unknown-event-name" },
       { projection_name: "chat", reason: "unknown-event-name" },

@@ -1,5 +1,6 @@
 import {
   decodeToolActionRequest,
+  MAX_TOOL_ACTION_INTENT_BYTES,
   nativeHarnessToolCapabilityId,
   type NativeHarnessToolName,
   type ToolActionRequest,
@@ -38,7 +39,7 @@ export async function admitNativeHarnessTool(
       correlationId: options.uuid(),
       capability: { id: capabilityId, version: 1 },
       authority,
-      intent,
+      intent: requestIntent(intent),
       approval: { kind: "not-required" },
     });
   } catch {
@@ -95,6 +96,27 @@ export async function admitNativeHarnessTool(
   }
   return { status: "admitted", request } as const;
 }
+const encoder = new TextEncoder();
+
+/**
+ * Fits a summary to the request's intent, which refuses surrounding space and
+ * more than its byte bound. Callers cut a long command to 2,048 characters for
+ * the approval summary; a cut landing on a space, or 2,048 wide characters,
+ * otherwise failed the call as tool-authority-stale before anyone was asked.
+ */
+function requestIntent(summary: string): string {
+  const text = summary.trim();
+  if (encoder.encode(text).byteLength <= MAX_TOOL_ACTION_INTENT_BYTES) return text;
+  let bytes = 0;
+  let end = 0;
+  for (const character of text) {
+    bytes += encoder.encode(character).byteLength;
+    if (bytes > MAX_TOOL_ACTION_INTENT_BYTES) break;
+    end += character.length;
+  }
+  return text.slice(0, end).trimEnd();
+}
+
 function refused(error: string, message?: string) {
   return {
     status: "refused",

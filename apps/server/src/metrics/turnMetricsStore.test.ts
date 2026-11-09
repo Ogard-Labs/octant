@@ -122,6 +122,70 @@ describe("turn metrics store", () => {
     });
   });
 
+  it("reads back a failed turn's tool, retry, and failure counts after a restart", () => {
+    const connection = openConnection();
+    const diagnostics = {
+      toolCalls: 3,
+      toolFailures: 1,
+      tools: [
+        { toolName: "Bash", calls: 3, failed: 1, unfinished: 1, totalMs: 4_000, maxMs: 3_000 },
+      ],
+      retries: [{ reason: "rate-limited", count: 2, waitMs: 6_000 }],
+      rateLimitWarnings: 1,
+      failure: {
+        category: "rate-limited",
+        usageLimit: "temporary",
+        retryAfterMs: 60_000,
+        message: "Rate limit reached.",
+      },
+    };
+    storeOn(connection).record(turn({ stopReason: "failed", diagnostics }));
+
+    const restarted = storeOn(connection).summarize({ subjectAggregateId: threadA }, everything);
+
+    expect(restarted?.turns[0]?.diagnostics).toEqual(diagnostics);
+  });
+
+  it("lists a prompt sent to two models as one comparison after a restart", () => {
+    const connection = openConnection();
+    const live = storeOn(connection);
+    const promptDigest = "cd".repeat(32);
+    live.record(turn({ promptDigest }));
+    live.record(
+      turn({
+        promptDigest,
+        modelId: "model-b",
+        threadId: threadB,
+        startedAt: "2026-10-06T12:02:00.000Z",
+        endedAt: "2026-10-06T12:02:10.000Z",
+      }),
+    );
+    const options = { generatedAt: now, bucket: "day", timeZone: "UTC" } as const;
+
+    const samePrompt = storeOn(connection).report({}, everything, options).samePrompt;
+
+    expect(samePrompt).toHaveLength(1);
+    expect(samePrompt[0]).toMatchObject({ promptDigest, threadId: threadB });
+    expect(samePrompt[0]?.pairs.map((pair) => pair.modelId).sort()).toEqual(["model-a", "model-b"]);
+  });
+
+  it("refuses a turn whose failure line spans more than one line", () => {
+    const store = storeOn(openConnection());
+
+    expect(() =>
+      store.record(
+        turn({
+          stopReason: "failed",
+          diagnostics: {
+            toolCalls: 0,
+            toolFailures: 0,
+            failure: { category: "protocol", message: "first\nsecond" },
+          },
+        }),
+      ),
+    ).toThrow();
+  });
+
   it("keeps writing on the thread's own aggregate after a restart", () => {
     const connection = openConnection();
     storeOn(connection).record(turn());

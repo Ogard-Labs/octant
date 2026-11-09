@@ -80,6 +80,10 @@ export const NIGHTLY_CLIENT_CHANNELS = {
   openInNewWindow: "brokered",
   openSettings: "local",
   quitShortcutHint: "local",
+  // Prepare to shut down moves threads through Octant's hub administration.
+  prepareToShutDown: "octant-only",
+  shutdownMovesOffered: "octant-only",
+  requestQuit: "octant-only",
   previewHandoff: "local",
   requestCodeOperationApproval: "local",
   updateCodeOperationApprovalAnchor: "local",

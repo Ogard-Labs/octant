@@ -21,6 +21,7 @@ import {
   claudeOffersTool,
   decodeAccount,
   decodeAutoCompactThreshold,
+  decodeContextUsageWindow,
   decodeContextBreakdown,
   decodeInitialization,
   type ClaudeDecodePhase,
@@ -116,6 +117,7 @@ export interface ClaudeOpenQueryInput {
   /** Agent SDK `effort` for the session; absent means the SDK default. */
   readonly effort?: ClaudeEffortLevel;
   readonly executionPolicy: ProviderExecutionPolicy;
+  readonly fullAccessSandbox?: boolean;
   /**
    * Whether the harness may answer approval prompts via its native `auto`
    * permission mode. The driver only sends `auto` when this is true and the
@@ -144,6 +146,11 @@ export interface ClaudeOpenQueryInput {
    * servers but Octant's own.
    */
   readonly nativeSetup?: ProviderNativeSetup;
+  /**
+   * The auto-compact window for this query alone, from the person's
+   * compaction point; absent leaves the runtime its own.
+   */
+  readonly autoCompactWindow?: number;
   /** Decoder attestation for the one in-process server owned by this adapter. */
   readonly managedToolServer?: boolean;
   readonly sandbox?: ClaudeSandboxSettings;
@@ -185,6 +192,8 @@ export interface ClaudeInitialization {
    * compaction is on. Absent when it said nothing usable.
    */
   readonly autoCompactThreshold?: number;
+  /** The session's window in tokens, as the runtime reported it. */
+  readonly contextWindow?: number;
 }
 
 export interface ClaudeSessionMetadata {
@@ -587,6 +596,7 @@ export interface ClaudeFlagSettings {
   readonly availableModels?: readonly string[];
   readonly disableAllHooks?: true;
   readonly autoMemoryEnabled?: false;
+  readonly autoCompactWindow?: number;
 }
 
 export interface ClaudeNativeQueryOptions {
@@ -753,8 +763,16 @@ const CONTEXT_USAGE_TIMEOUT_MS = 3_000;
  */
 const TURN_CONTEXT_USAGE_TIMEOUT_MS = 1_500;
 
-function compactionPoint(autoCompactThreshold: number | undefined) {
-  return autoCompactThreshold === undefined ? {} : { autoCompactThreshold };
+function compactionPoint(usage: {
+  readonly autoCompactThreshold: number | undefined;
+  readonly contextWindow: number | undefined;
+}) {
+  return {
+    ...(usage.autoCompactThreshold === undefined
+      ? {}
+      : { autoCompactThreshold: usage.autoCompactThreshold }),
+    ...(usage.contextWindow === undefined ? {} : { contextWindow: usage.contextWindow }),
+  };
 }
 
 /**
@@ -782,11 +800,16 @@ async function askContextUsage(
   }
 }
 
-/** Where the runtime compacts the session, or nothing when it did not say. */
-async function askAutoCompactThreshold(
-  query: ClaudeAgentSdkQueryLike,
-): Promise<number | undefined> {
-  return decodeAutoCompactThreshold(await askContextUsage(query, CONTEXT_USAGE_TIMEOUT_MS));
+/** Where the runtime compacts the session and its window, or nothing it did not say. */
+async function askAutoCompactThreshold(query: ClaudeAgentSdkQueryLike): Promise<{
+  readonly autoCompactThreshold: number | undefined;
+  readonly contextWindow: number | undefined;
+}> {
+  const usage = await askContextUsage(query, CONTEXT_USAGE_TIMEOUT_MS);
+  return {
+    autoCompactThreshold: decodeAutoCompactThreshold(usage),
+    contextWindow: decodeContextUsageWindow(usage),
+  };
 }
 
 const PLAN_USAGE_TIMEOUT_MS = 5_000;
@@ -845,7 +868,8 @@ function hasValidSandbox(input: ClaudeOpenQueryInput): boolean {
   try {
     if (
       input.executionPolicy !== "approval-gated" &&
-      input.executionPolicy !== "auto-accept-edits"
+      input.executionPolicy !== "auto-accept-edits" &&
+      !(input.executionPolicy === "full-access" && input.fullAccessSandbox === true)
     ) {
       return input.sandbox === undefined;
     }
@@ -873,10 +897,13 @@ function hasValidSandbox(input: ClaudeOpenQueryInput): boolean {
     ) {
       return false;
     }
+    const roots = [input.projectRoot, ...(input.additionalDirectories ?? [])];
+    const matchesRoots = (paths: ReadonlyArray<string>) =>
+      paths.length === roots.length && paths.every((path, index) => path === roots[index]);
     return (
       isExactPathTuple(sandbox.filesystem.denyRead, "/") &&
-      isExactPathTuple(sandbox.filesystem.allowRead, input.projectRoot) &&
-      isExactPathTuple(sandbox.filesystem.allowWrite, input.projectRoot)
+      matchesRoots(sandbox.filesystem.allowRead) &&
+      matchesRoots(sandbox.filesystem.allowWrite)
     );
   } catch {
     return false;
@@ -911,6 +938,9 @@ function liveBridge(): ClaudeAgentSdkBridge {
                   : { availableModels: [...settings.availableModels] }),
                 ...(settings.disableAllHooks === undefined ? {} : { disableAllHooks: true }),
                 ...(settings.autoMemoryEnabled === undefined ? {} : { autoMemoryEnabled: false }),
+                ...(settings.autoCompactWindow === undefined
+                  ? {}
+                  : { autoCompactWindow: settings.autoCompactWindow }),
               },
             }),
         settingSources: [...invocation.options.settingSources],
@@ -1214,6 +1244,9 @@ export function makeClaudeAgentSdkPort(options: ClaudeAgentSdkPortOptions): Clau
               (input.model === "haiku" || input.model.startsWith("claude-haiku-"))
                 ? { availableModels: [input.model] }
                 : {}),
+              ...(input.autoCompactWindow === undefined
+                ? {}
+                : { autoCompactWindow: input.autoCompactWindow }),
             };
             const invocationOptions: ClaudeAgentSdkInvocationOptions = {
               cwd: input.projectRoot,

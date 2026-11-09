@@ -217,6 +217,112 @@ describe("native harness loop", () => {
     },
   );
 
+  it("reports each task list the lead writes as task progress, keeping a row's id by its place", async () => {
+    const todo = (items: ReadonlyArray<{ title: string; status: string }>) =>
+      JSON.stringify({ items });
+    const scripted = scriptedTransport([
+      {
+        text: "Planning",
+        toolCalls: [
+          {
+            toolCallId: "todo-1",
+            toolName: "todo-write",
+            argumentsJson: todo([
+              { title: "Read the parser", status: "in-progress" },
+              { title: "Fix the bug", status: "pending" },
+            ]),
+          },
+        ],
+      },
+      {
+        text: "Refused",
+        toolCalls: [
+          {
+            toolCallId: "todo-2",
+            toolName: "todo-write",
+            argumentsJson: todo([{ title: "Never recorded", status: "done" }]),
+          },
+        ],
+      },
+      {
+        text: "Narrowed",
+        toolCalls: [
+          {
+            toolCallId: "todo-3",
+            toolName: "todo-write",
+            argumentsJson: todo([{ title: "Read the parser", status: "done" }]),
+          },
+        ],
+      },
+      { text: "Done", toolCalls: [] },
+    ]);
+    const offered = [...tools, tool("todo-write")];
+    await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const connection = yield* connect(
+            scripted.transport,
+            new MemoryNativeHarnessTranscriptStore(),
+          );
+          yield* connection.start({ sessionId, modelId, executionPolicy: "plan", tools: offered });
+          const all = yield* Effect.fork(
+            Stream.runCollect((yield* connection.subscribe).pipe(Stream.takeUntil(isTerminal))),
+          );
+          const requested = (requestId: string) =>
+            Effect.gen(function* () {
+              yield* Effect.yieldNow();
+              yield* connection.answerTool({
+                sessionId,
+                requestId,
+                resultJson: requestId === "todo-2" ? '{"error":"refused"}' : "{}",
+                isError: requestId === "todo-2",
+              });
+            });
+          yield* connection.send({ sessionId, prompt: "Fix it", attachments: [], tools: offered });
+          for (const requestId of ["todo-1", "todo-2", "todo-3"]) {
+            yield* Effect.promise(() =>
+              vi.waitFor(() =>
+                expect(scripted.requests.length).toBeGreaterThanOrEqual(
+                  ["todo-1", "todo-2", "todo-3"].indexOf(requestId) + 1,
+                ),
+              ),
+            );
+            yield* requested(requestId);
+          }
+          const events = Array.from(yield* Fiber.join(all));
+          const tasks = events.filter(
+            (event) => event.kind === "task-progress" || event.kind === "task-list",
+          );
+          const ids = tasks.flatMap((event) =>
+            event.kind === "task-progress" ? [event.taskId] : [],
+          );
+          const firstId = ids[0];
+          const secondId = ids[1];
+          if (firstId === undefined || secondId === undefined) {
+            throw new Error("The first list did not report its tasks.");
+          }
+          expect(
+            tasks.map((event) =>
+              event.kind === "task-progress"
+                ? [event.taskId, event.status, event.summary]
+                : event.kind === "task-list"
+                  ? event.taskIds
+                  : [],
+            ),
+          ).toEqual([
+            [firstId, "in-progress", "Read the parser"],
+            [secondId, "pending", "Fix the bug"],
+            [firstId, secondId],
+            [firstId, "completed", "Read the parser"],
+            [firstId],
+          ]);
+          expect(firstId).not.toBe(secondId);
+          expect(events.at(-1)?.kind).toBe("completed");
+        }),
+      ),
+    );
+  });
+
   it("does not acknowledge a steering note that cancellation prevents from reaching the model", async () => {
     const scripted = scriptedTransport([
       {
@@ -289,6 +395,102 @@ describe("native harness loop", () => {
             { role: "assistant", text: "Initial review" },
             { role: "user", text: "Recheck the parser" },
           ]);
+        }),
+      ),
+    );
+  });
+
+  it("refuses a tool image the endpoint's request cannot carry and continues the turn", async () => {
+    const image = { mimeType: "image/png" as const, data: "A".repeat(4_000) };
+    const scripted = scriptedTransport(
+      [
+        {
+          text: "Looking",
+          toolCalls: [{ toolCallId: "read-1", toolName: "read", argumentsJson: "{}" }],
+        },
+        { text: "Could not see it", toolCalls: [] },
+      ],
+      (request) => JSON.stringify(request.history).length <= 2_000,
+    );
+    const transcripts = new MemoryNativeHarnessTranscriptStore();
+    await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const connection = yield* connect(scripted.transport, transcripts);
+          yield* connection.start({ sessionId, modelId, executionPolicy: "plan", tools });
+          yield* sendAndCollect(connection, "Look at it", (event) => event.kind === "tool-request");
+          const terminal = yield* Effect.fork(
+            Stream.runCollect((yield* connection.subscribe).pipe(Stream.takeUntil(isTerminal))),
+          );
+          yield* connection.answerTool({
+            sessionId,
+            requestId: "read-1",
+            resultJson: '{"kind":"image","path":"big.png"}',
+            isError: false,
+            images: [image],
+          });
+          expect(Array.from(yield* Fiber.join(terminal)).at(-1)?.kind).toBe("completed");
+          const result = scripted.requests[1]?.history.at(-1)?.toolResults?.[0];
+          expect(result?.images).toBeUndefined();
+          expect(result?.isError).toBe(true);
+          expect(JSON.parse(result?.resultJson ?? "{}")).toMatchObject({
+            error: "image-too-large-for-endpoint",
+          });
+          expect(JSON.parse(result?.resultJson ?? "{}").message).toContain(
+            "4000 base64 characters",
+          );
+        }),
+      ),
+    );
+  });
+
+  it("refuses an image once a later result in the same step leaves no room for it", async () => {
+    const image = { mimeType: "image/png" as const, data: "A".repeat(1_000) };
+    const scripted = scriptedTransport(
+      [
+        {
+          text: "Looking",
+          toolCalls: [
+            { toolCallId: "read-1", toolName: "read", argumentsJson: "{}" },
+            { toolCallId: "grep-1", toolName: "grep", argumentsJson: "{}" },
+          ],
+        },
+        { text: "Used the matches", toolCalls: [] },
+      ],
+      (request) => JSON.stringify(request.history).length <= 2_000,
+    );
+    const transcripts = new MemoryNativeHarnessTranscriptStore();
+    await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const connection = yield* connect(scripted.transport, transcripts);
+          yield* connection.start({ sessionId, modelId, executionPolicy: "plan", tools });
+          yield* sendAndCollect(connection, "Look at it", (event) => event.kind === "tool-request");
+          const terminal = yield* Effect.fork(
+            Stream.runCollect((yield* connection.subscribe).pipe(Stream.takeUntil(isTerminal))),
+          );
+          yield* connection.answerTool({
+            sessionId,
+            requestId: "read-1",
+            resultJson: '{"kind":"image","path":"shot.png"}',
+            isError: false,
+            images: [image],
+          });
+          yield* connection.answerTool({
+            sessionId,
+            requestId: "grep-1",
+            resultJson: JSON.stringify({ matches: "m".repeat(1_200) }),
+            isError: false,
+          });
+          expect(Array.from(yield* Fiber.join(terminal)).at(-1)?.kind).toBe("completed");
+          const [read, grep] = scripted.requests[1]?.history.at(-1)?.toolResults ?? [];
+          expect(read?.images).toBeUndefined();
+          expect(JSON.parse(read?.resultJson ?? "{}")).toMatchObject({
+            error: "image-too-large-for-endpoint",
+          });
+          expect(grep?.isError).toBe(false);
+          const journaled = transcripts.load(sessionId)?.messages.at(-2)?.toolResults?.[0];
+          expect(journaled?.resultJson).toBe(read?.resultJson);
         }),
       ),
     );
@@ -747,6 +949,63 @@ describe("a lead whose model keeps failing", () => {
     expect(second?.at(-1)?.kind).toBe("completed");
     expect(down.requests.map((request) => request.modelId)).toEqual([modelId, modelId]);
     expect(backup.released()).toBe(true);
+  });
+
+  it("refuses an image the fallback model's smaller request cannot carry", async () => {
+    const down = downEndpoint();
+    const sent: NativeHarnessRequest[] = [];
+    const script: NativeHarnessResponse[] = [
+      {
+        text: "Looking",
+        toolCalls: [{ toolCallId: "read-1", toolName: "read", argumentsJson: "{}" }],
+      },
+      { text: "Could not see it", toolCalls: [] },
+    ];
+    const smaller: NativeHarnessTransportSession = {
+      // The endpoint sizes a request by the model it names.
+      fits: (request) =>
+        String(request.modelId) !== "backup-model" ||
+        JSON.stringify(request.history).length <= 2_000,
+      release: () => undefined,
+      send: async (request) => {
+        sent.push(request);
+        const next = script.shift();
+        if (next === undefined) throw new Error("The script ran out of responses.");
+        return next;
+      },
+    };
+    const events = await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const connection = yield* connect(
+            { open: async () => down.session },
+            new MemoryNativeHarnessTranscriptStore(),
+            { next: async () => ({ status: "switched", target: backupTarget, endpoint: smaller }) },
+          );
+          yield* connection.start({ sessionId, modelId, executionPolicy: "approval-gated", tools });
+          yield* sendAndCollect(connection, "Look at it", (event) => event.kind === "tool-request");
+          const terminal = yield* Effect.fork(
+            Stream.runCollect((yield* connection.subscribe).pipe(Stream.takeUntil(isTerminal))),
+          );
+          yield* connection.answerTool({
+            sessionId,
+            requestId: "read-1",
+            resultJson: '{"kind":"image","path":"shot.png"}',
+            isError: false,
+            images: [{ mimeType: "image/png", data: "A".repeat(4_000) }],
+          });
+          return Array.from(yield* Fiber.join(terminal));
+        }),
+      ),
+    );
+
+    expect(events.at(-1)?.kind).toBe("completed");
+    const result = sent[1]?.history.at(-1)?.toolResults?.[0];
+    expect(sent[1]?.modelId).toBe("backup-model");
+    expect(result?.images).toBeUndefined();
+    expect(JSON.parse(result?.resultJson ?? "{}")).toMatchObject({
+      error: "image-too-large-for-endpoint",
+    });
   });
 
   it("fails with the endpoint's own failure and says why when no other model is configured", async () => {
@@ -1213,6 +1472,8 @@ describe("fitting a request to the endpoint", () => {
         cacheReadInputTokens: 60,
         cacheWriteInputTokens: 60,
         reasoningTokens: 3,
+        // What the window holds is the last request's input, cache included.
+        contextTokens: 220,
       });
 
       // The same event is what the usage dashboard reads for cache coverage.
@@ -1898,6 +2159,125 @@ describe("compacting an Octant Harness session", () => {
         afterTurns: 3,
       },
     ]);
+  });
+
+  it("summarizes earlier turns inside a turn once its request passes the person's point", async () => {
+    const transcripts = new MemoryNativeHarnessTranscriptStore();
+    const { transport, requests } = scriptedTransport([
+      ...answers(2),
+      { text: "Earlier: chose the queue design.", toolCalls: [] },
+      { text: "answer 3", toolCalls: [] },
+    ]);
+    const long = "x".repeat(20_000);
+    const events = await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const connection = yield* connect(transport, transcripts);
+          yield* connection.start({
+            sessionId,
+            modelId,
+            executionPolicy: "approval-gated",
+            // Short turns stay under it; the long third prompt passes it.
+            compactionPoint: { tokens: 4_000, contextWindow: 100_000 },
+          });
+          yield* sendAndCollect(connection, "first", isTerminal);
+          yield* sendAndCollect(connection, "second", isTerminal);
+          return yield* sendAndCollect(connection, long, isTerminal);
+        }),
+      ),
+    );
+    expect(requests).toHaveLength(4);
+    expect(requests[2]?.tools).toEqual([]);
+    // The summary request reads the conversation alone, with no fill note.
+    expect(requests[2]?.history).toHaveLength(1);
+    expect(requests[2]?.history[0]?.text).toContain("User: first");
+    expect(requests[3]?.history[0]?.text).toContain("Earlier: chose the queue design.");
+    expect(requests[3]?.history.at(-2)?.text).toBe(long);
+    expect(events.some((event) => event.kind === "context-compacted")).toBe(true);
+  });
+
+  it("ends every request with how full the window is, and never keeps that note", async () => {
+    const transcripts = new MemoryNativeHarnessTranscriptStore();
+    const { transport, requests } = scriptedTransport([
+      {
+        text: "Looking",
+        toolCalls: [{ toolCallId: "read-1", toolName: "read", argumentsJson: "{}" }],
+      },
+      { text: "answer 1", toolCalls: [] },
+      { text: "answer 2", toolCalls: [] },
+    ]);
+    const isNote = (message: { readonly text: string }) =>
+      message.text.startsWith("[Note from Octant, not the user:");
+    // The figure is the estimate of the request as fitted, before its note.
+    const expectedNote = (request: (typeof requests)[number]) => {
+      const fitted = { ...request, history: request.history.filter((m) => !isNote(m)) };
+      const filled = Math.round((Math.ceil(JSON.stringify(fitted).length / 4) * 100) / 200_000);
+      return `[Note from Octant, not the user: this request fills about ${String(filled)}% of the model's 200K-token window. Octant summarizes earlier turns once a request passes 85%.]`;
+    };
+    await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const connection = yield* connect(transport, transcripts);
+          yield* connection.start({
+            sessionId,
+            modelId,
+            executionPolicy: "plan",
+            tools,
+            compactionPoint: { tokens: 170_000, contextWindow: 200_000 },
+          });
+          yield* sendAndCollect(connection, "first", (event) => event.kind === "tool-request");
+          const terminal = yield* Effect.fork(
+            Stream.runCollect((yield* connection.subscribe).pipe(Stream.takeUntil(isTerminal))),
+          );
+          yield* connection.answerTool({
+            sessionId,
+            requestId: "read-1",
+            resultJson: '{"text":"hello"}',
+            isError: false,
+          });
+          yield* Fiber.join(terminal);
+          yield* sendAndCollect(connection, "second", isTerminal);
+        }),
+      ),
+    );
+    expect(requests).toHaveLength(3);
+    // The prompt, the tool step and the next turn each end with their own fill.
+    for (const request of requests) {
+      expect(request.history.at(-1)).toEqual({ role: "user", text: expectedNote(request) });
+      expect(request.history.filter(isNote)).toHaveLength(1);
+    }
+    // A later request carries the earlier messages without their notes, so its
+    // prefix matches what was sent before.
+    expect(requests[1]?.history[0]).toEqual(requests[0]?.history[0]);
+    expect(requests[1]?.history.at(-2)?.toolResults?.[0]?.toolCallId).toBe("read-1");
+    expect(transcripts.load(sessionId)?.messages.some(isNote)).toBe(false);
+  });
+
+  it("sends a request at the edge of the endpoint's limit without its window note", async () => {
+    const isNote = (message: { readonly text: string }) =>
+      message.text.startsWith("[Note from Octant, not the user:");
+    // The endpoint takes the fitted request but not one byte more.
+    const { transport, requests } = scriptedTransport(
+      [{ text: "answer 1", toolCalls: [] }],
+      (request) => !request.history.some(isNote),
+    );
+    const events = await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const connection = yield* connect(transport, new MemoryNativeHarnessTranscriptStore());
+          yield* connection.start({
+            sessionId,
+            modelId,
+            executionPolicy: "approval-gated",
+            compactionPoint: { tokens: 170_000, contextWindow: 200_000 },
+          });
+          return yield* sendAndCollect(connection, "first", isTerminal);
+        }),
+      ),
+    );
+    expect(events.at(-1)?.kind).toBe("completed");
+    expect(requests).toHaveLength(1);
+    expect(requests[0]?.history.map((message) => message.text)).toEqual(["first"]);
   });
 
   it("resumes a compacted session from its summary and the turns after it", async () => {

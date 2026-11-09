@@ -1084,7 +1084,7 @@ function pathsOf(input: Record<string, unknown>): ReadonlyArray<string> {
     const value = stringOf(input[key]);
     if (value !== undefined) paths.push(value);
   }
-  for (const key of ["paths", "files"]) {
+  for (const key of ["paths", "files", "edits"]) {
     const value = input[key];
     if (Array.isArray(value)) {
       for (const entry of value) {

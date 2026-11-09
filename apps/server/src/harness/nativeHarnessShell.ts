@@ -21,6 +21,13 @@ export interface SandboxedProcessPort {
 export interface NativeHarnessShellOptions {
   readonly process: SandboxedProcessPort;
   /**
+   * Variables every command gets, laid over the rest. A shell given neither the
+   * cloud, SSH nor Google options starts commands with these and the process
+   * port's own small inherited set (PATH, HOME, temp folders, locale) and
+   * nothing else.
+   */
+  readonly environment?: Readonly<Record<string, string>>;
+  /**
    * The process port's script directory: it runs only a script in its own
    * subdirectory there, which no confined command can write.
    */
@@ -160,6 +167,7 @@ async function runScript(
           ...(await options.cloudCliEnvironment?.().catch(() => ({}))),
           ...credentials?.environment,
           ...commandEnvironment(options.sshAgentSocket?.()),
+          ...options.environment,
         },
         timeoutMs: input.timeoutMs,
         ...(egressProxy === undefined ? {} : { egressProxy }),
@@ -199,18 +207,19 @@ async function runScript(
 
 function shellRunOf(result: RepositoryTestProcessResult): NativeHarnessShellRun {
   const output = decodeOutput(result);
+  const truncated = result.outputTruncated === true;
   switch (result.termination) {
     case "exited":
       return {
         status: "ran",
         ...(result.exitCode === null ? {} : { exitCode: result.exitCode }),
         output,
-        truncated: false,
+        truncated,
       };
     case "timed-out":
-      return { status: "timed-out", output, truncated: false };
+      return { status: "timed-out", output, truncated };
     case "cancelled":
-      return { status: "cancelled", output, truncated: false };
+      return { status: "cancelled", output, truncated };
     case "unavailable":
       return { status: "unavailable", output: "", truncated: false };
   }

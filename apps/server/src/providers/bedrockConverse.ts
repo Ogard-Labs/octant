@@ -167,7 +167,7 @@ function imageBlocks(
 ): Array<Record<string, unknown>> {
   return (images ?? []).map((image) => ({
     image: {
-      format: image.mimeType === "image/png" ? "png" : "jpeg",
+      format: image.mimeType.slice("image/".length),
       source: { bytes: image.data },
     },
   }));

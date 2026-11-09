@@ -1578,6 +1578,39 @@ describe("CodeService commands", () => {
     ).resolves.toMatchObject({ thread: { executionPolicy: "full-access" } });
   });
 
+  it("starts a new Full access thread with its Project's sandbox choice unless the request says otherwise", async () => {
+    const sandboxedProject = {
+      ...(rememberedFullAccessProject as Project),
+      defaultFullAccessSandbox: true,
+    } as Project;
+    const fixture = serviceFixture({ threads: [], project: sandboxedProject });
+    await expect(
+      fixture.service.execute(ids.window, {
+        kind: "create-code-thread",
+        thread: thread({
+          executionPolicy: "full-access",
+          permissionPersistence: "project-default",
+        }),
+      }),
+    ).resolves.toMatchObject({ thread: { fullAccessSandbox: true } });
+
+    // An explicit "off" in the request wins over the Project's default.
+    const explicit = serviceFixture({ threads: [], project: sandboxedProject });
+    const created = await explicit.service.execute(ids.window, {
+      kind: "create-code-thread",
+      thread: thread({
+        executionPolicy: "full-access",
+        permissionPersistence: "project-default",
+        fullAccessSandbox: false,
+      }),
+    });
+    expect(
+      "thread" in created && created.thread !== undefined
+        ? (created.thread as { fullAccessSandbox?: boolean }).fullAccessSandbox
+        : "missing",
+    ).toBeUndefined();
+  });
+
   it("snapshots the profile's instructions and skill allowlist onto the thread", async () => {
     const created = thread({
       executionPolicy: "approval-gated",
@@ -1857,6 +1890,39 @@ describe("CodeService commands", () => {
           threadId: ids.thread,
         },
       });
+    });
+
+    it("keeps a Code thread's sandbox at Full access, takes a new choice with the mode, and drops it below Full access", async () => {
+      const raised = serviceFixture({
+        threads: [thread({ executionPolicy: "full-access" })],
+        approve: false,
+      });
+      const sandboxed = await raised.service.execute(ids.window, {
+        kind: "change-code-thread-access",
+        threadId: ids.thread,
+        expectedVersion: 1 as never,
+        executionPolicy: "full-access",
+        permissionPersistence: "project-default",
+        fullAccessSandbox: true,
+      });
+      expect(sandboxed).toMatchObject({ thread: { fullAccessSandbox: true } });
+
+      const lowered = serviceFixture({
+        threads: [thread({ executionPolicy: "full-access", fullAccessSandbox: true })],
+        approve: false,
+      });
+      const result = await lowered.service.execute(ids.window, {
+        kind: "change-code-thread-access",
+        threadId: ids.thread,
+        expectedVersion: 1 as never,
+        executionPolicy: "approval-gated",
+        permissionPersistence: "current-session",
+      });
+      expect(
+        "thread" in result && result.thread !== undefined
+          ? (result.thread as { fullAccessSandbox?: boolean }).fullAccessSandbox
+          : "missing",
+      ).toBeUndefined();
     });
 
     it("journals a lowered default in Settings at the global scope", async () => {
@@ -2991,6 +3057,37 @@ describe("CodeService managed thread creation", () => {
     expect(port.prepare).not.toHaveBeenCalled();
     expect(port.commit).not.toHaveBeenCalled();
   });
+  it("opens a moved-in thread it already holds, from the files the move carried", async () => {
+    const port = mockCreationPort();
+    const fixture = serviceFixture({
+      threads: [],
+      managedThreadCreation: port as never,
+      moveHold: (threadId) => threadId === String(managedThreadId),
+    });
+
+    const result = await fixture.service.execute(ids.window, managedCommand, undefined, {
+      movedFiles: { worktree: "b".repeat(40), index: "c".repeat(40) },
+    });
+
+    expect(result.kind).toBe("managed-thread-created");
+    expect(port.prepare).toHaveBeenCalledWith(
+      expect.objectContaining({ sourceFiles: { worktree: "b".repeat(40), index: "c".repeat(40) } }),
+      expect.anything(),
+    );
+  });
+
+  it("refuses any other command on a thread a move holds", async () => {
+    const fixture = serviceFixture({ moveHold: () => true });
+    await expect(
+      fixture.service.execute(ids.window, {
+        kind: "rename-code-thread",
+        threadId: ids.thread,
+        expectedVersion: 1,
+        title: "Renamed while moving",
+      }),
+    ).rejects.toMatchObject({ failure: { category: "conflict" } });
+  });
+
   it("creates the managed worktree on the delivery branch, journals checkout + thread, and returns exact provenance", async () => {
     const port = mockCreationPort();
     const fixture = serviceFixture({ threads: [], managedThreadCreation: port as never });
@@ -4930,6 +5027,7 @@ describe("CodeService.listTests", () => {
 function serviceFixture(
   options: {
     readonly workingFolderAllowed?: boolean;
+    readonly moveHold?: (threadId: string) => boolean;
     readonly threads?: ReturnType<typeof thread>[];
     readonly watcher?: {
       readonly watch: (input: { readonly signal?: AbortSignal }) => AsyncIterable<never>;
@@ -5046,6 +5144,7 @@ function serviceFixture(
     ...options.content,
   });
   const service = new CodeService({
+    ...(options.moveHold === undefined ? {} : { moveHold: options.moveHold }),
     persistence: persistence as unknown as CodePersistencePort,
     access,
     checkouts,

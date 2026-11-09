@@ -4,6 +4,8 @@ import { decodeCodeProjectPullRequestView } from "@octant/contracts";
 import { decodeProjectId } from "@octant/contracts/projects";
 import { describe, expect, it, vi } from "vitest";
 import { ThreadUtilityDockContent } from "./ThreadUtilityDockContent";
+import { ServerCodeProjectsContext } from "../projects/serverProjectEntries";
+import { decodeBindingRevisionId } from "@octant/contracts/projects";
 
 vi.mock("../code/CodeWorkspaceTab", () => ({
   default: (props: { readonly tab: { readonly kind: string; readonly projectPath?: string } }) => (
@@ -45,6 +47,51 @@ function props() {
 }
 
 describe("thread utility dock content", () => {
+  it("opens server Work Files with its server location and read-only rows", async () => {
+    const projectId = decodeProjectId("10000000-0000-4000-8000-000000000002");
+    render(
+      <ServerCodeProjectsContext.Provider
+        value={{
+          projects: [],
+          workProjects: [
+            {
+              projectId,
+              name: "Notes",
+              location: "notes:/srv/notes",
+              bindingRevisionId: decodeBindingRevisionId("10000000-0000-4000-8000-000000000003"),
+            },
+          ],
+          refresh: vi.fn(),
+        }}
+      >
+        <ThreadUtilityDockContent
+          {...props()}
+          surface="files"
+          subject={{ mode: "work", threadId, projectId }}
+          workFileListingClient={
+            {
+              list: vi.fn(async () => ({
+                status: "listed",
+                listing: {
+                  kind: "work-file-listing",
+                  threadId,
+                  projectId,
+                  entries: [
+                    { kind: "file", path: "server.md", byteLength: 12, origin: "untouched" },
+                  ],
+                  truncated: false,
+                  observedAt: "2026-11-08T12:00:00.000Z",
+                },
+              })),
+            } as never
+          }
+        />
+      </ServerCodeProjectsContext.Provider>,
+    );
+    expect(await screen.findByTitle("server.md")).toBeVisible();
+    expect(screen.getByText(/Files on notes:\/srv\/notes/)).toBeVisible();
+    expect(screen.queryByRole("button", { name: /server.md/ })).toBeNull();
+  });
   it("remounts the AgentRun hierarchy as the Agents dock tool", async () => {
     render(
       <ThreadUtilityDockContent

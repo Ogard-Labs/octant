@@ -13,6 +13,7 @@ import type {
   WorkRequestFrame,
   WorkTurnUpdated,
 } from "@octant/contracts";
+import { decodeRemotePushEnvelopeV1, REMOTE_PUSH_PLACEHOLDER_ALERT } from "@octant/contracts";
 import { REMOTE_PUSH_RATE_LIMIT } from "@octant/domain/push-notification-policy";
 import type { PushDeliverySendResult } from "../automation/pushDeliveryTransport";
 import { createRecordingPushDeliveryTransport } from "../automation/pushDeliveryTransport.test-support";
@@ -278,11 +279,21 @@ describe("ordinary-thread notifications", () => {
         platform: "ios",
         token: `apns-token-${phone}`,
       });
-      const wire = JSON.stringify(send.envelope);
+      const envelope = send.envelope;
+      if (envelope === undefined) throw new Error("expected a sealed envelope");
+      // The envelope holds exactly the placeholder alert, an urgency, and two
+      // opaque base64url parts. Only the plaintext parts are scanned for thread
+      // content: random ciphertext can spell a word such as "Acme" by chance,
+      // which once failed this test in CI. What the sealed parts hold is
+      // checked by opening them above, and by the wrong key failing below.
+      expect(decodeRemotePushEnvelopeV1(envelope)).toEqual(envelope);
+      const { collapseId: _collapseId, sealed: _sealed, ...plaintext } = envelope;
+      expect(plaintext.alert).toEqual(REMOTE_PUSH_PLACEHOLDER_ALERT);
+      const wire = JSON.stringify(plaintext);
       for (const revealing of [hostId, chatThread, workThread, codeThread, "Acme", "Studio"]) {
         expect(wire).not.toContain(revealing);
       }
-      expect(() => open(send.envelope, tablet)).toThrow();
+      expect(() => open(envelope, tablet)).toThrow();
     }
 
     expect(receipts()).toEqual([

@@ -1,4 +1,5 @@
 import {
+  DEFAULT_AUTO_COMPACT_OCTANT_WINDOW_PERCENT,
   DEFAULT_COMPLETED_THREAD_ARCHIVE_AFTER_DAYS,
   DEFAULT_OPEN_IN_APPLICATIONS,
   DEFAULT_ENVIRONMENT_PRESENTATION_BY_MODE,
@@ -171,6 +172,10 @@ export function defaultShellSettings(): ShellSettings {
     computerUse: { enabled: true, automaticUpdates: false },
     marketplaceFetchesEnabled: true,
     completedThreadArchiveAfterDays: DEFAULT_COMPLETED_THREAD_ARCHIVE_AFTER_DAYS,
+    autoCompactOctantWindowPercent: DEFAULT_AUTO_COMPACT_OCTANT_WINDOW_PERCENT,
+    autoCompactRuntimeWindowPercent: null,
+    autoCompactIdleMinutes: null,
+    autoCompactLimitPercent: null,
     openInApplications: [...DEFAULT_OPEN_IN_APPLICATIONS],
     transcriptTextSize: "small",
     transcriptWidth: "narrow",
@@ -928,6 +933,13 @@ export function reconcileWorkspaceWithSettings(
 
 export interface WorkspaceContextResolves {
   readonly tabContext: (tab: WorkspaceTab) => WorkspaceContextKey | undefined;
+  /**
+   * Whether a thread tab names a thread that moved to another computer and
+   * was erased here, which the host recorded as a departure. Such a tab opens
+   * as the thread's tombstone and binds no Project: the thread's record is
+   * gone, so it resolves no context and carries no thread authority.
+   */
+  readonly departedThread?: (tab: WorkspaceTab) => boolean;
 }
 
 export class WorkspaceContextRejected extends Error {
@@ -1002,6 +1014,18 @@ function restoreDestinationLayout(
   return next;
 }
 
+/**
+ * A thread tab whose thread resolved no context and moved away from this
+ * host. Only a thread's own pane opens as a tombstone; its files, terminal,
+ * and other surfaces stay refused with the thread's record gone.
+ */
+function opensAsTombstone(tab: WorkspaceTab, resolves: WorkspaceContextResolves): boolean {
+  return (
+    (tab.kind === "chat-thread" || tab.kind === "code-overview" || tab.kind === "work-thread") &&
+    resolves.departedThread?.(tab) === true
+  );
+}
+
 export function resolveWorkspaceContext(
   workspace: WindowWorkspace,
   operation: WorkspaceOperation,
@@ -1009,6 +1033,11 @@ export function resolveWorkspaceContext(
 ): WindowWorkspace {
   if (operation.kind === "switch-project-surface") {
     const candidate = resolves.tabContext(operation.surface);
+    if (candidate === undefined && opensAsTombstone(operation.surface, resolves)) {
+      // The moved thread's Project is no longer its own: the tombstone opens
+      // in the active pane and the window keeps the Project it reads.
+      return workspace;
+    }
     if (
       candidate === undefined ||
       (candidate.projectId === null && operation.mode !== "chat") ||
@@ -1128,6 +1157,11 @@ export function resolveWorkspaceContext(
   }
 
   const candidate = resolves.tabContext(tab);
+  if (candidate === undefined && opensAsTombstone(tab, resolves)) {
+    // A moved thread's old link opens its tombstone. Binding no Project, it
+    // leaves the window's context as it was, as a context-free tab does.
+    return workspace;
+  }
   if (candidate === undefined) {
     // Context-free tabs (welcome, settings, side-chat) carry no Project binding
     // and are always acceptable. Thread/project tabs that fail to resolve a

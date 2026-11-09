@@ -53,6 +53,67 @@ describe("Project default mode", () => {
     ).toHaveTextContent("Accept edits");
   });
 
+  it("sets the Project's sandbox at Full access apart from its mode, and returns it to Settings", async () => {
+    const onChange = vi.fn(async () => true);
+    const { rerender } = render(
+      <ProjectPermissionModeSection
+        onChange={onChange}
+        project={project("code", { defaultPermissionMode: "full-access" })}
+      />,
+    );
+    await userEvent.click(
+      screen.getByRole("combobox", { name: "Sandbox at Full access for this Project" }),
+    );
+    await userEvent.click(await screen.findByRole("option", { name: "Keep the sandbox" }));
+    expect(onChange).toHaveBeenLastCalledWith("full-access", true);
+
+    rerender(
+      <ProjectPermissionModeSection
+        onChange={onChange}
+        project={project("code", {
+          defaultPermissionMode: "full-access",
+          defaultFullAccessSandbox: true,
+          version: 4,
+        })}
+      />,
+    );
+    await userEvent.click(
+      screen.getByRole("combobox", { name: "Sandbox at Full access for this Project" }),
+    );
+    await userEvent.click(await screen.findByRole("option", { name: "Same as Settings" }));
+    expect(onChange).toHaveBeenLastCalledWith("full-access", "settings");
+  });
+
+  it("keeps a Project's remembered Full access when only its sandbox changes", async () => {
+    const onChange = vi.fn(async () => true);
+    render(
+      <ProjectPermissionModeSection
+        onChange={onChange}
+        project={project("code", { codeAccessPersistence: "project-default" })}
+      />,
+    );
+    await userEvent.click(
+      screen.getByRole("combobox", { name: "Sandbox at Full access for this Project" }),
+    );
+    await userEvent.click(await screen.findByRole("option", { name: "Keep the sandbox" }));
+    // The Project remembered Full access before modes existed, so it has no mode
+    // of its own; sending none would read as "follow Settings" and drop it.
+    expect(onChange).toHaveBeenLastCalledWith("full-access", true);
+  });
+
+  it("changes only the mode when the mode is picked, so the Project keeps its sandbox choice", async () => {
+    const onChange = vi.fn(async () => true);
+    render(
+      <ProjectPermissionModeSection
+        onChange={onChange}
+        project={project("work", { defaultFullAccessSandbox: true })}
+      />,
+    );
+    await userEvent.click(screen.getByRole("combobox", { name: "Default mode for this Project" }));
+    await userEvent.click(await screen.findByRole("option", { name: "Auto" }));
+    expect(onChange).toHaveBeenCalledWith("auto");
+  });
+
   it("offers Plan for a Code Project", async () => {
     render(<ProjectPermissionModeSection onChange={async () => true} project={project("code")} />);
     await userEvent.click(screen.getByRole("combobox", { name: "Default mode for this Project" }));

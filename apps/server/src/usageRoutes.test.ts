@@ -1,7 +1,7 @@
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { createRemoteDevicePrincipal } from "./clientPrincipal";
 import { bindPrincipalRouteContext } from "./principalRouteContext";
 import { createUsageRouteHandler } from "./usageRoutes";
@@ -14,7 +14,7 @@ import { USAGE_PROJECTION_SCHEMA_VERSION } from "./persistence/usagePersistenceS
 import { WindowAuthorityStore } from "./windowAuthorityStore";
 import { TurnMetricsStore } from "./metrics/turnMetricsStore";
 import type { UsageQueryResponse } from "@octant/contracts/usage-rpc";
-import type { WindowWorkspace } from "@octant/contracts";
+import { decodeTurnDiagnosticsReport, type WindowWorkspace } from "@octant/contracts";
 
 const directories: Array<string> = [];
 const now = "2026-07-24T12:00:00.000Z";
@@ -934,5 +934,137 @@ describe("usage route turn metrics", () => {
     const { body } = await query(fixture);
 
     expect(body.turnMetrics).toBeUndefined();
+  });
+});
+
+describe("usage route turn diagnostics", () => {
+  const turn = (overrides: Record<string, unknown> = {}) =>
+    ({
+      threadId: ids.threadA,
+      mode: "code",
+      projectId: ids.projectA,
+      providerInstanceId: ids.provider,
+      modelId: "model-1",
+      stopReason: "failed",
+      metrics: { precision: "unavailable", wallMs: 3_000 },
+      diagnostics: {
+        toolCalls: 2,
+        toolFailures: 1,
+        tools: [{ toolName: "Bash", calls: 2, failed: 1, unfinished: 0, totalMs: 900, maxMs: 600 }],
+        failure: { category: "provider-failed", message: "Provider stopped." },
+      },
+      startedAt: "2026-07-24T11:59:00.000Z",
+      endedAt: "2026-07-24T11:59:10.000Z",
+      ...overrides,
+    }) as never;
+
+  const diagnose = (setupResult: ReturnType<typeof setup>, body: unknown, capability?: string) =>
+    setupResult.handler(
+      makeRequest("/api/usage/diagnostics", {
+        body,
+        ...(capability === undefined ? {} : { capability }),
+      }),
+    );
+
+  it("reports failures and tools for the Projects the window is in, and nothing else", async () => {
+    const fixture = setup({ kind: "projects", projectIds: [ids.projectA] });
+    fixture.turnMetrics.record(turn());
+    fixture.turnMetrics.record(
+      turn({ threadId: ids.threadB, projectId: ids.projectB, modelId: "model-2" }),
+    );
+
+    const response = await diagnose(fixture, { bucket: "hour" }, fixture.capability);
+    expect(response?.status).toBe(200);
+    const text = await response!.clone().text();
+    const report = decodeTurnDiagnosticsReport(await response!.json());
+
+    expect(report.turns).toBe(1);
+    expect(report.totals.stopReasons.failed).toBe(1);
+    expect(report.tools[0]).toMatchObject({ toolName: "Bash", failed: 1 });
+    expect(report.failureGroups[0]).toMatchObject({
+      category: "provider-failed",
+      lastMessage: "Provider stopped.",
+    });
+    expect(report.trend[0]?.key).toBe("2026-07-24T11:00:00Z");
+    expect(text).not.toContain(ids.projectB);
+    expect(text).not.toContain("model-2");
+  });
+
+  it("refuses a Project outside the window's scope", async () => {
+    const fixture = setup({ kind: "projects", projectIds: [ids.projectA] });
+
+    const response = await diagnose(
+      fixture,
+      { filter: { projectId: ids.projectB } },
+      fixture.capability,
+    );
+
+    expect(response?.status).toBe(403);
+  });
+
+  it("refuses a filter on a dimension turns do not carry", async () => {
+    const fixture = setup({ kind: "projects", projectIds: [ids.projectA] });
+
+    const response = await diagnose(
+      fixture,
+      { filter: { requestShape: "chat-turn" } },
+      fixture.capability,
+    );
+
+    expect(response?.status).toBe(400);
+  });
+
+  it("refuses an unknown time zone and a request without a window capability", async () => {
+    const fixture = setup({ kind: "projects", projectIds: [ids.projectA] });
+
+    expect(
+      (await diagnose(fixture, { timeZone: "Mars/Olympus" }, fixture.capability))?.status,
+    ).toBe(400);
+    expect((await diagnose(fixture, {}))?.status).toBe(401);
+  });
+});
+
+describe("usage route host health", () => {
+  it("answers the host's health over time to any authenticated window, and refuses a bad span", async () => {
+    const fixture = setup({ kind: "projects", projectIds: [ids.projectA] });
+    const read = vi.fn(() => ({
+      generatedAt: "2026-11-07T12:00:00.000Z",
+      resolution: "minute",
+      retentionDays: 14,
+      samples: [],
+    }));
+    const windowAuthorityStore = new WindowAuthorityStore();
+    windowAuthorityStore.register({
+      windowId: ids.window as never,
+      capability: fixture.capability,
+      now: nowMs,
+    });
+    const handler = createUsageRouteHandler({
+      connection: fixture.connection,
+      windowAuthorityStore,
+      readWindowProjectScope: () => ({ kind: "projects", projectIds: [ids.projectA] }),
+      now: () => nowMs,
+      hostHealth: { read } as never,
+    });
+    const ask = (body: unknown, capability?: string) =>
+      handler(
+        makeRequest("/api/usage/host-health", {
+          body,
+          ...(capability === undefined ? {} : { capability }),
+        }),
+      );
+
+    const ok = await ask({ resolution: "hour" }, fixture.capability);
+    expect(ok?.status).toBe(200);
+    expect(read).toHaveBeenCalledWith({ resolution: "hour" });
+    expect(
+      (
+        await ask(
+          { from: "2026-11-07T12:00:00.000Z", to: "2026-11-06T12:00:00.000Z" },
+          fixture.capability,
+        )
+      )?.status,
+    ).toBe(400);
+    expect((await ask({}))?.status).toBe(401);
   });
 });

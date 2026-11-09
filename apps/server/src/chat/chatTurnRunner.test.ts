@@ -2963,6 +2963,7 @@ describe("ChatTurnRunner", () => {
           toolMs: 0,
           modelCalls: 1,
         },
+        diagnostics: { toolCalls: 0, toolFailures: 0 },
       });
       expect(ended).toEqual(completed);
     });
