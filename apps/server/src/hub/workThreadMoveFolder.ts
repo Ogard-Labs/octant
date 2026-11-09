@@ -613,25 +613,35 @@ export async function landWorkFolderFromMove(input: {
   /** The arrived `work-files` part; undefined when no file travels. */
   readonly partPath: string | undefined;
   readonly moveId: string;
+  /**
+   * Called after a path is judged free and before anything is written: the
+   * moment an outside writer could swap a folder on the way for a link.
+   * Tests use it to do so.
+   */
+  readonly beforePlacing?: (candidate: string) => Promise<void>;
 }): Promise<LandedWorkFolder> {
   const { index } = input;
   if (index.files.length > 0 && input.partPath === undefined) return { status: "refused" };
-  const rootEntry = await lstat(input.root).catch(() => undefined);
-  if (rootEntry === undefined || !rootEntry.isDirectory()) return { status: "refused" };
+  // Every write is made under the root's real path and checked against it,
+  // so a folder swapped for a link never carries the files outside it.
+  const root = await realpath(input.root).catch(() => undefined);
+  if (root === undefined || !(await folderIsItself(root))) return { status: "refused" };
   const fresh = Schema.decodeUnknownOption(MovedWorkPath)(
     `${index.workingDirectory}-moved-${input.moveId.slice(0, 8)}`,
   );
   const candidates = [index.workingDirectory, ...Option.toArray(fresh)];
   for (const candidate of candidates) {
-    const state = await landingState(input.root, candidate, index);
+    const state = await landingState(root, candidate, index);
     // Used as it is: a folder that only looks like an earlier landing may be
     // the person's own, and its permission bits are theirs.
     if (state === "ours") return { status: "landed", workingDirectory: candidate };
     if (state === "taken") continue;
-    const target = join(input.root, candidate);
-    const staging = join(dirname(target), `.octant-move-${input.moveId}`);
+    await input.beforePlacing?.(candidate);
+    const target = join(root, candidate);
+    // Staged directly in the root, never under a folder on the way that
+    // could have become a link since it was checked.
+    const staging = join(root, `.octant-move-${input.moveId}`);
     try {
-      await mkdir(dirname(target), { recursive: true });
       // The staging folder is this move's own, so an earlier try's is restarted.
       await rm(staging, { recursive: true, force: true });
       // Private while the files are written; each folder takes its own bits
@@ -644,6 +654,14 @@ export async function landWorkFolderFromMove(input: {
       // The folder takes its own bits before it lands, so a landing found
       // later already has them and nothing changes an existing folder's.
       await chmod(staging, index.rootMode);
+      // The folders on the way are made one at a time and must each be a
+      // plain folder, so the landing stays inside the root.
+      if (
+        !(await plainFoldersOnTheWay(root, String(candidate), { create: true })) ||
+        !(await folderIsItself(dirname(target)))
+      ) {
+        throw new Error("A folder on the way is no longer a plain folder inside the root.");
+      }
       // Rename replaces only an empty folder; one that gained an entry
       // since the check refuses, and nothing of the person's is touched.
       await rename(staging, target);

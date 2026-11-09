@@ -1392,7 +1392,11 @@ for Move after this turn.
     `<folder>-moved-<move>`, and the thread works there. When that is taken
     too, the arrival is refused with `transfer-failed` and nothing is written,
     so the source keeps the thread. The files are written into a staging
-    folder of the move's own and renamed into place in one step, before the
+    folder of the move's own, directly in the Project's main folder (by its
+    real path), and renamed into place in one step once every folder on the
+    way has been made or found as a plain folder inside it, so a folder
+    swapped for a link meanwhile refuses the arrival rather than carry the
+    files outside the Project, before the
     thread opens, so a stop leaves either nothing or the whole folder, and a
     file lands with its own permission bits: it is created with them, which
     the umask can only narrow, and then set to exactly them, so a private

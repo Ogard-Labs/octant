@@ -17,6 +17,7 @@ import { decodeThreadWorkingDirectory } from "@octant/contracts";
 import { Schema } from "effect";
 import {
   captureWorkFolderForMove,
+  landWorkFolderFromMove,
   MOVED_WORK_FOLDER_ENTRIES_MAX,
   realFolderOrAsWritten,
   MovedWorkFolder as MovedWorkFolderSchema,
@@ -157,6 +158,40 @@ describe("how much of a Work folder a move carries", () => {
     expect(captured.index.files.length).toBe(Math.floor(MOVED_WORK_FOLDER_ENTRIES_MAX / 3));
     expect(captured.left.length).toBe(count - captured.index.files.length);
   }, 60_000);
+});
+
+describe("landing a Work folder's files on the destination", () => {
+  it("writes nothing outside the Project when a folder on the way becomes a link", async () => {
+    const source = realpathSync(mkdtempSync(join(tmpdir(), "octant-work-land-source-")));
+    const destination = realpathSync(mkdtempSync(join(tmpdir(), "octant-work-land-dest-")));
+    const outside = realpathSync(mkdtempSync(join(tmpdir(), "octant-work-land-outside-")));
+    parents.push(source, destination, outside);
+    mkdirSync(join(source, "parent", "report"), { recursive: true });
+    writeFileSync(join(source, "parent", "report", "agenda.md"), "# Offsite\n");
+    const partPath = join(source, "work-files.part");
+    const captured = await captureWorkFolderForMove({
+      folder: join(source, "parent", "report"),
+      workingDirectory: decodeThreadWorkingDirectory("parent/report"),
+      partId: "work-files",
+      partPath,
+    });
+    mkdirSync(join(destination, "parent"));
+
+    const landed = await landWorkFolderFromMove({
+      root: destination,
+      index: captured.index,
+      partPath,
+      moveId: MOVE,
+      beforePlacing: async () => {
+        rmSync(join(destination, "parent"), { recursive: true });
+        symlinkSync(outside, join(destination, "parent"));
+      },
+    });
+
+    expect(landed).toEqual({ status: "refused" });
+    expect(readdirSync(outside)).toEqual([]);
+    expect(readdirSync(destination)).toEqual(["parent"]);
+  });
 });
 
 describe("clearing a Work folder whose files moved", () => {
