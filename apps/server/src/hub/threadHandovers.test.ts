@@ -4,7 +4,12 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { MovedThreadReference } from "@octant/contracts";
-import { HANDOVER_NOTE_MAX_BYTES, ThreadHandovers, composeHandoverNote } from "./threadHandovers";
+import {
+  HANDOVER_NOTE_MAX_BYTES,
+  ThreadHandovers,
+  composeHandoverNote,
+  type HandoverCodeHost,
+} from "./threadHandovers";
 import { createThreadMoveStateStore, heldThreadsOf } from "./threadMoveStateStore";
 
 const THREAD: MovedThreadReference = {
@@ -25,6 +30,9 @@ function world(
     readonly busy?: boolean;
     /** Runs while the handover plans, before anything is written. */
     readonly whilePlanning?: () => void;
+    /** The agent's summary turn; absent when this host offers none. */
+    readonly summarize?: HandoverCodeHost["summarize"];
+    readonly summaryTimeoutMs?: number;
   } = {},
 ) {
   const base = mkdtempSync(join(tmpdir(), "octant-handover-"));
@@ -41,6 +49,7 @@ function world(
   git(laptop, "push", "-q", "origin", "main");
   const frozen = new Set<string>();
   const recorded: string[] = [];
+  const journaled: Array<{ readonly branch: string; readonly agentSummary?: string }> = [];
   const state = createThreadMoveStateStore(join(base, "data"));
   const handovers = new ThreadHandovers({
     source: {
@@ -65,14 +74,23 @@ function world(
           answer: `The retry now waits on the clock. See ${laptop}/app.ts.`,
         };
       },
+      ...(options.summarize === undefined ? {} : { summarize: options.summarize }),
     },
-    record: { handoverStarted: (input) => recorded.push(input.branch) },
+    record: {
+      handoverStarted: (input) => {
+        recorded.push(input.branch);
+        journaled.push(input);
+      },
+    },
     state,
     originName: () => "Laptop",
     clock: () => "2026-11-08T12:00:00.000Z",
     uuid: () => HANDOVER,
+    ...(options.summaryTimeoutMs === undefined
+      ? {}
+      : { summaryTimeoutMs: options.summaryTimeoutMs }),
   });
-  return { base, origin, laptop, frozen, recorded, state, handovers };
+  return { base, origin, laptop, frozen, recorded, journaled, state, handovers };
 }
 
 describe("handing over a Code thread that cannot move", () => {
@@ -116,6 +134,8 @@ describe("handing over a Code thread that cannot move", () => {
     expect(handovers.takeBack(HANDOVER)).toEqual({ status: "taken-back" });
     expect(frozen.size).toBe(0);
     expect(heldThreadsOf(state.load())).toEqual([]);
+    // Its branch still names it, so it is remembered and not offered back here.
+    expect(state.load().settledHandoverIds).toEqual([HANDOVER]);
   });
 
   it("refuses a thread with a running turn, and one with nothing to hand over, leaving it unfrozen", async () => {
@@ -129,6 +149,115 @@ describe("handing over a Code thread that cannot move", () => {
       reason: "nothing-to-hand-over",
     });
     expect(idle.frozen.size).toBe(0);
+  });
+});
+
+describe("the agent's own summary in a handover note", () => {
+  const BRANCH = "octant/handover/fix-the-flaky-test-77777777";
+  const SUMMARY =
+    "### Where the work stands\n\nThe retry is deterministic.\n\n### What comes next\n\nRun the suite twice.";
+
+  it("adds one turn's summary under its own heading when the person left it on", async () => {
+    const asked: string[] = [];
+    const frozenWhileAsked: boolean[] = [];
+    const handing = world({
+      summarize: async (threadId) => {
+        asked.push(threadId);
+        frozenWhileAsked.push(handing.frozen.has(THREAD.threadId));
+        return { status: "summarized", text: SUMMARY };
+      },
+    });
+    writeFileSync(join(handing.laptop, "app.ts"), "export const version = 2;\n");
+
+    // The preview spends no turn: only Commit and push asks the agent.
+    expect(await handing.handovers.preview(THREAD)).toMatchObject({ status: "preview" });
+    expect(asked).toEqual([]);
+
+    expect(await handing.handovers.handOver(THREAD, undefined, { summarize: true })).toMatchObject({
+      status: "handed-over",
+      pushed: true,
+    });
+    expect(asked).toEqual([THREAD.threadId]);
+    // The thread is frozen while its agent writes, so the summary describes work that is not moving.
+    expect(frozenWhileAsked).toEqual([true]);
+    expect(handing.journaled).toEqual([
+      { handoverId: HANDOVER, thread: THREAD, branch: BRANCH, agentSummary: "added" },
+    ]);
+    const message = git(handing.origin, "log", "-1", "--format=%B", BRANCH);
+    expect(message).toContain(`## The agent's summary\n\n${SUMMARY}`);
+  });
+
+  it("spends no turn when the person turned it off", async () => {
+    const summarize = vi.fn<NonNullable<HandoverCodeHost["summarize"]>>();
+    const handing = world({ summarize });
+    writeFileSync(join(handing.laptop, "app.ts"), "export const version = 2;\n");
+
+    expect(await handing.handovers.handOver(THREAD, undefined, { summarize: false })).toMatchObject(
+      { status: "handed-over" },
+    );
+    expect(summarize).not.toHaveBeenCalled();
+    expect(handing.journaled).toEqual([{ handoverId: HANDOVER, thread: THREAD, branch: BRANCH }]);
+    expect(git(handing.origin, "log", "-1", "--format=%B", BRANCH)).not.toContain(
+      "The agent's summary",
+    );
+  });
+
+  it("hands over without the summary when the turn fails or the provider is not ready", async () => {
+    const answers: ReadonlyArray<
+      readonly [NonNullable<HandoverCodeHost["summarize"]>, "failed" | "unavailable"]
+    > = [
+      [async () => Promise.reject(new Error("provider exited")), "failed"],
+      [async () => ({ status: "failed" }), "failed"],
+      [async () => ({ status: "summarized", text: "   " }), "failed"],
+      [async () => ({ status: "unavailable" }), "unavailable"],
+    ];
+    for (const [summarize, agentSummary] of answers) {
+      const handing = world({ summarize });
+      writeFileSync(join(handing.laptop, "app.ts"), "export const version = 2;\n");
+
+      expect(
+        await handing.handovers.handOver(THREAD, undefined, { summarize: true }),
+      ).toMatchObject({ status: "handed-over", pushed: true });
+      expect(handing.journaled.map((entry) => entry.agentSummary)).toEqual([agentSummary]);
+      const message = git(handing.origin, "log", "-1", "--format=%B", BRANCH);
+      expect(message).not.toContain("The agent's summary");
+      expect(message).toContain(`Octant-Handover: ${HANDOVER}`);
+    }
+  });
+
+  it("cancels a turn that runs past its bound and hands over without it", async () => {
+    let cancelled = false;
+    const handing = world({
+      summaryTimeoutMs: 50,
+      // A provider that never answers, even once cancelled.
+      summarize: (_threadId, signal) =>
+        new Promise(() => {
+          signal.addEventListener("abort", () => {
+            cancelled = true;
+          });
+        }),
+    });
+    writeFileSync(join(handing.laptop, "app.ts"), "export const version = 2;\n");
+
+    expect(await handing.handovers.handOver(THREAD, undefined, { summarize: true })).toMatchObject({
+      status: "handed-over",
+      pushed: true,
+    });
+    expect(cancelled).toBe(true);
+    expect(handing.journaled.map((entry) => entry.agentSummary)).toEqual(["timed-out"]);
+    expect(git(handing.origin, "log", "-1", "--format=%B", BRANCH)).not.toContain(
+      "The agent's summary",
+    );
+  });
+
+  it("asks nothing of a thread it refuses as busy", async () => {
+    const summarize = vi.fn<NonNullable<HandoverCodeHost["summarize"]>>();
+    const busy = world({ busy: true, summarize });
+    expect(await busy.handovers.handOver(THREAD, undefined, { summarize: true })).toEqual({
+      status: "refused",
+      reason: "busy",
+    });
+    expect(summarize).not.toHaveBeenCalled();
   });
 });
 
@@ -285,5 +414,30 @@ describe("the handover note", () => {
     expect(note.trimEnd().endsWith(`Octant-Handover: ${HANDOVER}\nOctant-Origin: Laptop`)).toBe(
       true,
     );
+  });
+
+  it("redacts the agent's summary and strips every folder on this computer from it", () => {
+    const note = composeHandoverNote({
+      title: "Fix it",
+      originName: "Laptop",
+      branch: "feature/fix",
+      checkout,
+      checkoutRoot: "/Users/person/code/octant",
+      agentSummary: [
+        `The token is sk-ant-api03-${"b".repeat(90)}.`,
+        "Edited /Users/person/code/octant/app.ts and the scratch file /Users/person/Desktop/notes.txt.",
+        "The log is at /tmp/octant-run/out.log; also see C:\\Users\\person\\notes.md.",
+        "y".repeat(100_000),
+      ].join("\n"),
+      handoverId: HANDOVER,
+    });
+    expect(note).toContain("## The agent's summary");
+    expect(note).toContain("Edited ./app.ts");
+    expect(note).not.toContain("sk-ant-api03");
+    expect(note).not.toContain("/Users/person");
+    expect(note).not.toContain("/tmp/octant-run");
+    expect(note).not.toContain("C:\\Users");
+    expect(Buffer.byteLength(note, "utf8")).toBeLessThanOrEqual(HANDOVER_NOTE_MAX_BYTES);
+    expect(note).toContain(`Octant-Handover: ${HANDOVER}`);
   });
 });

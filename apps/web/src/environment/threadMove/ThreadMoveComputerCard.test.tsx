@@ -382,8 +382,8 @@ describe("the Computer card", () => {
         remote: "origin",
         note: "Hand over: Add dark mode",
       }),
-      handOver: async (thread) => {
-        handedOver.push(thread.threadId);
+      handOver: async (thread, _destination, choices) => {
+        handedOver.push(`${thread.threadId}:${String(choices.summarize)}`);
         status = {
           status: "read",
           handedOver: {
@@ -425,9 +425,11 @@ describe("the Computer card", () => {
     const sheet = await screen.findByRole("dialog");
     expect(sheet).toHaveTextContent("feature/dark-mode");
     expect(sheet).toHaveTextContent("Then pushes it to origin, never forced.");
+    // The agent's summary is asked for unless the person turns it off.
+    expect(await screen.findByRole("switch", { name: "Ask the agent to summarize" })).toBeChecked();
     await user.click(await screen.findByRole("button", { name: "Commit and push" }));
 
-    await waitFor(() => expect(handedOver).toEqual([THREAD.threadId]));
+    await waitFor(() => expect(handedOver).toEqual([`${THREAD.threadId}:true`]));
     expect(
       await screen.findByText(/committed and pushed on feature\/dark-mode/),
     ).toBeInTheDocument();

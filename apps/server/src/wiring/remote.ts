@@ -48,7 +48,12 @@ import {
 import { ExternalContentClearStore } from "../context/externalContentClearStore";
 import { readThreadExternalContentTaint } from "../context/externalContentTaintProjection";
 import { ROUTINE_HOST_SCOPE_ID } from "../routineHostScope";
-import { defaultShellSettings, enabledModes, rosterMemberWebOrigin } from "@octant/domain";
+import {
+  buildHandoverSummaryPrompt,
+  defaultShellSettings,
+  enabledModes,
+  rosterMemberWebOrigin,
+} from "@octant/domain";
 import {
   createRemoteGateway,
   type RemoteGateway,
@@ -99,7 +104,11 @@ import { ThreadMoveService } from "../hub/threadMoveService";
 import { HandoverClaims, ThreadHandovers } from "../hub/threadHandovers";
 import { HandoverExchange } from "../hub/handoverExchange";
 import { createHandoverRouteHandler } from "../hub/handoverRoutes";
-import { readHandoverNote, remoteNamedFor } from "../hub/codeThreadHandoverGit";
+import {
+  findHandoverBranches,
+  readHandoverNote,
+  remoteNamedFor,
+} from "../hub/codeThreadHandoverGit";
 import { branchExists } from "../hub/codeThreadMoveGit";
 import { createThreadMoveSenders } from "../hub/threadMoveSenders";
 import { createThreadMoveTicketClient } from "../hub/threadMoveTicketClient";
@@ -222,6 +231,7 @@ export type RemoteDependencies = { readonly onSecretStoreLinkChange?: () => void
   Pick<
     WorkWiring,
     | "threadExportService"
+    | "threadHandOffProvider"
     | "threadMessageQueue"
     | "onWorkTurnCancelled"
     | "workThreadServiceWithWorkflows"
@@ -305,6 +315,7 @@ export function wireRemote(deps: RemoteDependencies) {
     shellService,
     startedAt,
     threadExportService,
+    threadHandOffProvider,
     threadMessageQueue,
     toolEgressRules,
     version,
@@ -1286,8 +1297,58 @@ export function wireRemote(deps: RemoteDependencies) {
   // Continue handover there, which tells this host to erase its copy.
   // One set of claims for every step that acts on a handover's thread here.
   const handoverClaims = new HandoverClaims();
+  // The members this host knows, as a spoke or as the hub, for naming a found
+  // handover's source by the computer name its branch gives.
+  const rosterMembers = () => {
+    const spoke = spokeLinkService.status();
+    if (spoke.membership === "member") return spoke.roster.roster.members;
+    const hub = hubService.status();
+    return hub.enabled ? (hub.roster?.roster.members ?? []) : [];
+  };
   const handoverExchange = new HandoverExchange({
     claims: handoverClaims,
+    // A branch whose tip names a handover is offered once this host's Code
+    // Projects have fetched it, whoever ran the fetch; nothing fetches here.
+    findHandovers: async () => {
+      const roots = persistence
+        .readProjects()
+        .flatMap((project) =>
+          project.type === "code" && project.lifecycle === "active"
+            ? [project.binding.canonicalRoot]
+            : [],
+        );
+      return (await Promise.all(roots.map((root) => findHandoverBranches(root)))).flat();
+    },
+    // A found branch names no provider: it continues on this host's own
+    // default model, the one delegated Work runs on.
+    defaultProvider: () => {
+      const settings = workThreadProjection.settings();
+      if (
+        settings?.defaultProviderInstanceId === undefined ||
+        settings.defaultModelId === undefined
+      ) {
+        return undefined;
+      }
+      const enabled = persistence
+        .readProviderInstances()
+        .some(
+          (instance) =>
+            instance.enabled && String(instance.id) === String(settings.defaultProviderInstanceId),
+        );
+      return enabled
+        ? {
+            providerInstanceId: String(settings.defaultProviderInstanceId),
+            modelId: String(settings.defaultModelId),
+          }
+        : undefined;
+    },
+    memberNamed: (name) => {
+      const self = hubService.hubMemberId();
+      const named = rosterMembers().filter(
+        (member) => member.name === name && String(member.memberId) !== self,
+      );
+      return named.length === 1 ? String(named[0]?.memberId) : undefined;
+    },
     state: deps.threadMoveState,
     authenticate: threadMoveSenders.authenticate,
     send: (targetMemberId, path, body) => threadMoves.sendSigned(targetMemberId, path, body),
@@ -1418,6 +1479,31 @@ export function wireRemote(deps: RemoteDependencies) {
           ...(instruction === undefined ? {} : { instruction }),
           ...(answer === undefined ? {} : { answer }),
         };
+      },
+      // The person's own request in their own thread, sent the way a hand-off
+      // document is: a fresh single-use session on the thread's provider and
+      // model, in plan mode with no tools and an empty scratch folder, so the
+      // agent reads the transcript in the prompt and can change nothing.
+      summarize: async (threadId, signal) => {
+        const exported = await threadExportService.exportThread(
+          ROUTINE_HOST_SCOPE_ID,
+          "local-window",
+          { mode: "code", threadId },
+        );
+        if (exported.kind !== "exported") return { status: "failed" };
+        const { providerInstanceId, modelId } = exported.bundle.provenance;
+        if (threadHandOffProvider.readiness(providerInstanceId) !== "ready") {
+          return { status: "unavailable" };
+        }
+        const text = await threadHandOffProvider.complete({
+          providerInstanceId,
+          modelId,
+          mode: "code",
+          threadId,
+          prompt: buildHandoverSummaryPrompt(exported.bundle),
+          signal,
+        });
+        return { status: "summarized", text };
       },
     },
     record: threadMoveJournal,

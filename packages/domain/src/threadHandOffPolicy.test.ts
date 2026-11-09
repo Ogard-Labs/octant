@@ -2,6 +2,7 @@ import { decodeCanvasBlock } from "@octant/contracts/canvas";
 import { THREAD_EXPORT_FORMAT, type ThreadExportBundle } from "@octant/contracts/thread-export";
 import { describe, expect, it } from "vitest";
 import {
+  buildHandoverSummaryPrompt,
   buildThreadHandOffPrompt,
   decideThreadHandOff,
   threadHandOffDocumentBlocks,
@@ -83,6 +84,14 @@ describe("handing off a thread", () => {
     expect(prompt).toContain("Ship the transcript first.");
     expect(prompt).toContain("Thread: Launch plan (chat mode)");
     expect(threadHandOffTitle(bundle())).toBe("Hand-off: Launch plan");
+  });
+
+  it("asks the agent of a handed-over thread where the work stands and what comes next, under the note's heading level", () => {
+    const prompt = buildHandoverSummaryPrompt(bundle());
+    expect(prompt).toContain("### Where the work stands");
+    expect(prompt).toContain("### What comes next");
+    expect(prompt).not.toMatch(/^## /m);
+    expect(prompt).toContain("Agreed; evidence next.");
   });
 
   it("keeps the most recent turns when the transcript is longer than the prompt allows", () => {

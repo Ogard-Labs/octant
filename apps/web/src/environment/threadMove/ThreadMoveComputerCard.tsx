@@ -19,6 +19,7 @@ import { OctantBadge } from "../../ui/base/OctantBadge";
 import { OctantButton } from "../../ui/base/OctantButton";
 import { OctantDialog } from "../../ui/base/OctantDialog";
 import { OctantSelectField } from "../../ui/base/OctantSelect";
+import { OctantSwitch } from "../../ui/base/OctantSwitch";
 import { EnvironmentCard, EnvironmentTile } from "../EnvironmentGroup";
 import type { ThreadMoveClient } from "./threadMoveClient";
 import { estimateBasis, formatBytes, sizeAndEstimate } from "./threadMoveSize";
@@ -803,7 +804,9 @@ function HandoverSheet(props: {
   readonly onHandedOver: () => void;
 }) {
   const titleId = useId();
+  const summarizeHintId = useId();
   const primary = useRef<HTMLButtonElement>(null);
+  const [summarize, setSummarize] = useState(true);
   const [preview, setPreview] = useState<
     Extract<HandoverOutcome, { readonly status: "preview" }> | undefined
   >(undefined);
@@ -833,7 +836,9 @@ function HandoverSheet(props: {
     setWorking(true);
     setProblem(undefined);
     try {
-      const answer = await props.client.handOver(props.thread, props.destination?.memberId);
+      const answer = await props.client.handOver(props.thread, props.destination?.memberId, {
+        summarize,
+      });
       if (answer.status === "refused") {
         setProblem(HANDOVER_REFUSALS[answer.reason]);
         return;
@@ -882,11 +887,32 @@ function HandoverSheet(props: {
             <summary className="thread-move-sheet__heading">The note</summary>
             <pre className="thread-move-sheet__note">{preview.note}</pre>
           </details>
+          <div className="thread-move-sheet__choice">
+            <div className="thread-move-sheet__choice-text">
+              <span className="thread-move-sheet__choice-label">Ask the agent to summarize</span>
+              <span className="thread-move-sheet__choice-hint" id={summarizeHintId}>
+                One turn of the thread's agent adds where the work stands and what comes next. If it
+                fails or takes over two minutes, the note goes without it.
+              </span>
+            </div>
+            <OctantSwitch
+              checked={summarize}
+              describedBy={summarizeHintId}
+              disabled={working}
+              label="Ask the agent to summarize"
+              onCheckedChange={setSummarize}
+            />
+          </div>
           <p className="thread-move-sheet__consequence">
             The thread stays here, frozen, until it is continued elsewhere or you take it back.
           </p>
         </>
       )}
+      {working && summarize ? (
+        <p className="thread-move-sheet__consequence" role="status">
+          Asking the agent to summarize…
+        </p>
+      ) : null}
       {problem === undefined ? null : (
         <OctantAlert title="This thread can't be handed over" tone="warning">
           {problem}

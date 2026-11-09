@@ -1001,6 +1001,31 @@ details.thread-move-sheet__section > summary {
   margin-inline-end: auto;
 }
 
+/* Ask the agent to summarize: the label and its consequence, switch at the end. */
+.thread-move-sheet__choice {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--oct-space-3);
+}
+
+.thread-move-sheet__choice-text {
+  display: grid;
+  gap: var(--oct-space-1);
+  min-width: 0;
+}
+
+.thread-move-sheet__choice-label {
+  color: var(--oct-fg);
+  font-size: var(--oct-text-sm);
+}
+
+.thread-move-sheet__choice-hint {
+  color: var(--oct-muted);
+  font-size: var(--oct-text-xs);
+  line-height: 1.5;
+}
+
 .thread-move-sheet__branch {
   overflow-wrap: anywhere;
   font-family: var(--oct-font-mono);

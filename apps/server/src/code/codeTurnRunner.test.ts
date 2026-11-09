@@ -1845,7 +1845,7 @@ describe("CodeTurnRunner", () => {
       fullAccessSandbox: true,
     };
 
-    for (const providerDriverKind of ["claude", "opencode", "pi", undefined] as const) {
+    for (const providerDriverKind of ["mistral-vibe", "opencode", "pi", undefined] as const) {
       const exit = await Effect.runPromiseExit(
         Effect.scoped(
           new CodeTurnRunner().run(

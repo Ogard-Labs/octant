@@ -1,8 +1,8 @@
 # Model benchmarks
 
 Status: current approved design (approved by a maintainer on 2026-11-07),
-building in six phases in the order under [Delivery](#delivery-in-order). Phase 1,
-the prompt digest and the Same prompt comparison, is in progress. This page owns
+built in six phases in the order under [Delivery](#delivery-in-order); all six
+landed on 2026-11-09. This page owns
 the rules for model benchmarks and is linked from the [design index](README.md).
 
 ## Why
@@ -146,4 +146,4 @@ A **Benchmarks** source joins Diagnostics in the Usage source switch:
    compare. (built)
 4. Judge scoring and stars. (built)
 5. Code cases: pinned worktrees, check commands, approval handling. (built)
-6. History across runs and export. (in progress)
+6. History across runs and export. (built)

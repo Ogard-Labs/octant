@@ -94,12 +94,12 @@ describe("the sandbox at Full access in the mode picker", () => {
     expect(screen.queryByRole("menuitemcheckbox", { name: /Keep the sandbox/ })).toBeNull();
   });
 
-  it("reads Codex and Octant Harness models as able to keep the sandbox, and others or unknowns as not", () => {
+  it("reads Claude, Codex and Octant Harness models as able to keep the sandbox, and others or unknowns as not", () => {
     const groups = [group("codex", "codex"), group("claude", "claude"), group("local", "ollama")];
     const keeps = (id: string) => threadKeepsFullAccessSandbox(groups, id as ProviderInstanceId);
     expect(keeps("codex")).toBe(true);
     expect(keeps("local")).toBe(true);
-    expect(keeps("claude")).toBe(false);
+    expect(keeps("claude")).toBe(true);
     expect(keeps("missing")).toBe(false);
   });
 });

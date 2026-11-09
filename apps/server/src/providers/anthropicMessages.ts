@@ -247,21 +247,38 @@ export function buildAnthropicMessagesBody(
  * everything up to it. Each turn the breakpoint moves to the newest stable
  * message and later requests read the earlier prefix from cache; the new
  * prompt or tool answers that follow it stay unmarked. Anthropic allows four
- * breakpoints per request, so the system block plus this one is well inside
+ * breakpoints per request, so the system block plus these is well inside
  * the limit.
+ *
+ * A request that ends with two user messages ends with a note that rides that
+ * one request only (Octant Harness's window fill) after the newest stable
+ * message. The next request never carries the note, so an entry ending at it
+ * is never read again; the message before it is marked too, and that entry is
+ * the one the next step reads.
  */
 function markCacheBreakpoint(messages: AnthropicWireMessage[]): void {
   const last = messages.at(-1);
   if (last === undefined) return;
-  if (typeof last.content === "string") {
+  markMessage(last);
+  const before = messages.at(-2);
+  if (before !== undefined && before.role === "user" && last.role === "user") markMessage(before);
+}
+
+function markMessage(message: AnthropicWireMessage): void {
+  if (typeof message.content === "string") {
     // A plain-text message must become a block to carry the breakpoint.
-    if (last.content.length === 0) return;
-    last.content = [{ type: "text", text: last.content, cache_control: EPHEMERAL_CACHE_CONTROL }];
+    if (message.content.length === 0) return;
+    message.content = [
+      { type: "text", text: message.content, cache_control: EPHEMERAL_CACHE_CONTROL },
+    ];
     return;
   }
-  const block = last.content.at(-1);
+  const block = message.content.at(-1);
   if (block === undefined) return;
-  last.content[last.content.length - 1] = { ...block, cache_control: EPHEMERAL_CACHE_CONTROL };
+  message.content[message.content.length - 1] = {
+    ...block,
+    cache_control: EPHEMERAL_CACHE_CONTROL,
+  };
 }
 
 function parseArguments(argumentsJson: string): unknown {

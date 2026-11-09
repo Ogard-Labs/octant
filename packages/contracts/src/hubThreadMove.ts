@@ -26,6 +26,9 @@ export type ThreadMoveId = typeof ThreadMoveId.Type;
 export const HandoverId = Schema.UUID.pipe(Schema.brand("HandoverId"));
 export type HandoverId = typeof HandoverId.Type;
 
+/** A Git commit id, SHA-1 or SHA-256. */
+const CommitId = Schema.String.pipe(Schema.pattern(/^(?:[0-9a-f]{40}|[0-9a-f]{64})$/));
+
 /** A thread named by its mode and its id; each mode brands its own id. */
 export const MovedThreadReference = Schema.Struct({
   mode: OctantMode,
@@ -56,6 +59,14 @@ export type ThreadMoveFailureReason = typeof ThreadMoveFailureReason.Type;
 /** Why a handover finished without reaching any other computer. */
 export const HandoverShortfall = Schema.Literal("push-failed", "no-remote");
 export type HandoverShortfall = typeof HandoverShortfall.Type;
+
+/**
+ * What became of the agent's own summary turn the person asked for: added to
+ * the note, or the note went without it because the provider was not ready,
+ * the turn failed, or it ran past its bound and was cancelled.
+ */
+export const HandoverAgentSummary = Schema.Literal("added", "unavailable", "failed", "timed-out");
+export type HandoverAgentSummary = typeof HandoverAgentSummary.Type;
 
 /**
  * What a move carries. `index-snapshot` and `working-tree-snapshot` travel
@@ -277,6 +288,8 @@ export const ThreadHandoverStarted = Schema.Struct({
   handoverId: HandoverId,
   thread: MovedThreadReference,
   branch: bounded(255),
+  /** Absent when the person did not ask for the agent's summary, and on handovers recorded before it existed. */
+  agentSummary: Schema.optional(HandoverAgentSummary),
   startedAt: UtcTimestamp,
 }).annotations(strict);
 export type ThreadHandoverStarted = typeof ThreadHandoverStarted.Type;
@@ -467,6 +480,13 @@ export const HandedOverThread = Schema.Struct({
   branch: bounded(255),
   pushed: Schema.Boolean,
   shortfall: Schema.optional(HandoverShortfall),
+  /**
+   * The commit carrying this handover's note. A continued report must name
+   * it: anyone who can push to the repository can write another branch whose
+   * tip claims this handover's id, and continuing that one must not erase
+   * this thread. Absent in a record written before it was kept.
+   */
+  commit: Schema.optional(CommitId),
   refusedFiles: Schema.Array(bounded(4_096)).pipe(Schema.maxItems(1_000)),
   handedOverAt: UtcTimestamp,
 }).annotations(strict);
@@ -696,6 +716,12 @@ export const HandoverRequest = Schema.Struct({
   thread: MovedThreadReference,
   /** The member to tell, so the handover shows under its Handovers before its next fetch. */
   destinationMemberId: Schema.optional(HubMemberId),
+  /**
+   * Ask the agent to summarize: one bounded turn of the thread's own agent adds
+   * where the work stands and what comes next. Only `true` asks; a request
+   * without it spends no provider turn.
+   */
+  summarize: Schema.optional(Schema.Boolean),
 }).annotations(strict);
 export type HandoverRequest = typeof HandoverRequest.Type;
 
@@ -743,6 +769,8 @@ export type HandoverControlRequest = typeof HandoverControlRequest.Type;
 export const HandoverContinuedReport = Schema.Struct({
   handoverId: HandoverId,
   thread: MovedThreadReference,
+  /** The commit the destination continued from, whose note named this handover. */
+  commit: Schema.optional(CommitId),
 }).annotations(strict);
 export type HandoverContinuedReport = typeof HandoverContinuedReport.Type;
 
@@ -752,7 +780,11 @@ export const ReceivedHandoverView = Schema.Struct({
   title: bounded(256),
   branch: bounded(255),
   repositoryRemote: bounded(2_048),
-  originMemberId: HubMemberId,
+  /**
+   * The member that sent the notice. Absent for a handover found on a fetched
+   * branch whose `Octant-Origin` trailer names no single member.
+   */
+  originMemberId: Schema.optional(HubMemberId),
   originName: bounded(256),
   /** Code Projects here bound to a clone of the same repository. */
   projects: Schema.Array(ThreadMoveProjectChoice).pipe(Schema.maxItems(256)),
