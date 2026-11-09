@@ -1854,6 +1854,7 @@ export class BrowserAutomationService {
     readonly threadId: BrowserThreadId;
     readonly downloadId: string;
     readonly workspaceRoot: string | undefined;
+    readonly signal?: AbortSignal;
     readonly ask: (
       facts: BrowserDownloadFacts,
       origin: string,
@@ -1881,20 +1882,26 @@ export class BrowserAutomationService {
     const downloadId = input.downloadId;
     const claim = this.#runtime.claimDownload.bind(this.#runtime);
     const context = this.#downloadContext(owned);
+    const signal =
+      input.signal === undefined
+        ? owned.abort.signal
+        : AbortSignal.any([owned.abort.signal, input.signal]);
+    const current = () =>
+      !signal.aborted &&
+      owned.record.state === "active" &&
+      this.#current(input.windowId, input.threadId) === owned &&
+      this.#authorityIsActive(owned);
     const outcome = await saveBrowserDownload({
       workspaceRoot: input.workspaceRoot,
       name: held.name,
+      signal,
+      finalAdmission: () => (current() ? "approved" : "cancelled"),
       claim: () => claim(contextId, downloadId),
       ask: async (facts) => {
         const answer = await input.ask(facts, context.origin);
         // A question can wait minutes: the page and the thread's authority
         // must still be there when it is answered.
-        if (
-          answer === "approved" &&
-          (owned.record.state !== "active" ||
-            owned.abort.signal.aborted ||
-            !this.#authorityIsActive(owned))
-        ) {
+        if (answer === "approved" && !current()) {
           return "cancelled";
         }
         return answer;

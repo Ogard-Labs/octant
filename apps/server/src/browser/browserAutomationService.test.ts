@@ -1,3 +1,4 @@
+import * as downloadSave from "./browserDownloadSave";
 import { decodeBrowserPageScriptPreparation } from "@octant/contracts/browser-page-script";
 import { Schema } from "effect";
 import { HubMemberId, UtcTimestamp } from "@octant/contracts";
@@ -96,6 +97,8 @@ function harness(
   options: {
     readonly authority?: ToolActionAuthority;
     readonly ownerControl?: BrowserRuntimePort["ownerControl"];
+    readonly claimDownload?: BrowserRuntimePort["claimDownload"];
+    readonly discardDownload?: BrowserRuntimePort["discardDownload"];
     readonly access?: boolean;
     readonly pageScriptPolicy?: ConstructorParameters<
       typeof BrowserAutomationService
@@ -120,6 +123,8 @@ function harness(
   let now = Date.parse("2026-07-27T20:00:00.000Z");
   const runtime: BrowserRuntimePort = {
     ...(options.ownerControl === undefined ? {} : { ownerControl: options.ownerControl }),
+    ...(options.claimDownload === undefined ? {} : { claimDownload: options.claimDownload }),
+    ...(options.discardDownload === undefined ? {} : { discardDownload: options.discardDownload }),
     available: vi.fn(async () => true),
     nativeAvailable: vi.fn(async () => true),
     createContext: vi.fn(async (contextId) => void contexts.add(contextId)),
@@ -1412,6 +1417,69 @@ describe("BrowserAutomationService", () => {
         expect.anything(),
       );
     });
+
+    it.each(["revoked", "cancelled"])(
+      "refuses the final save after approval when the caller is %s",
+      async (change) => {
+        const fixture = harness({
+          agentDownloadsEnabled: true,
+          claimDownload: vi.fn(async () => "/private/held-fixture"),
+          discardDownload: vi.fn(async () => undefined),
+          observed: {
+            downloads: [
+              {
+                state: "held",
+                downloadId: "d1",
+                name: "report.txt",
+                sizeBytes: 4,
+                mediaType: "text/plain",
+              },
+            ],
+          },
+        });
+        await fixture.service.create({ windowId, threadId: threadOne, action: action(), policy });
+        await fixture.service.act({
+          windowId,
+          request: click(),
+          capturedBy: "agent",
+          holdDownloads: true,
+        });
+        const abort = new AbortController();
+        const facts = { name: "report.txt", sizeBytes: 4, mediaType: "text/plain" };
+        const save = vi
+          .spyOn(downloadSave, "saveBrowserDownload")
+          .mockImplementationOnce(async (input) => {
+            expect(input).not.toHaveProperty("destination");
+            expect(await input.ask(facts)).toBe("approved");
+            if (change === "revoked") fixture.revoke(threadOne);
+            else abort.abort();
+            expect(input.finalAdmission?.(facts)).toBe("cancelled");
+            if (change === "cancelled") expect(input.signal?.aborted).toBe(true);
+            return {
+              status: "refused",
+              error: "browser-download-cancelled",
+              reason: "cancelled",
+              facts,
+            };
+          });
+        try {
+          expect(
+            await fixture.service.saveDownload({
+              windowId,
+              threadId: threadOne,
+              downloadId: "d1",
+              workspaceRoot: "/workspace",
+              signal: abort.signal,
+              ask: async () => "approved",
+            }),
+          ).toEqual({ status: "refused", error: "browser-download-cancelled" });
+          expect(fixture.runtime.discardDownload).toHaveBeenCalledWith(contextOne, "d1");
+        } finally {
+          save.mockRestore();
+          await fixture.service.close();
+        }
+      },
+    );
 
     it("reports what the runtime holds, journals a stopped file, and saves only an id it reported", async () => {
       const refused = vi.fn();

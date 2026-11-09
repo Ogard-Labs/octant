@@ -148,6 +148,13 @@ export class PlaywrightDownloadHold {
       return;
     }
     this.#watch.finished(path);
+    // A native cancellation can race a completed path. The refusal already
+    // won; completing afterward must not turn that file into a held download.
+    if (entry.cancelledFor !== undefined) {
+      await entry.download.delete().catch(() => undefined);
+      this.#reports.push({ state: "refused", name, reason: entry.cancelledFor });
+      return;
+    }
     let sizeBytes: number;
     let head: Uint8Array;
     try {
@@ -161,6 +168,13 @@ export class PlaywrightDownloadHold {
     if (sizeBytes > MAX_BROWSER_DOWNLOAD_FILE_BYTES) {
       await entry.download.delete().catch(() => undefined);
       this.#reports.push({ state: "refused", name, reason: "too-large" });
+      return;
+    }
+    // The watcher can cancel while stat or the header read awaits I/O. Check
+    // again at publication, with no asynchronous gap before committing the hold.
+    if (entry.cancelledFor !== undefined) {
+      await entry.download.delete().catch(() => undefined);
+      this.#reports.push({ state: "refused", name, reason: entry.cancelledFor });
       return;
     }
     const id = `d${String(this.#nextOrdinal)}`;
@@ -198,13 +212,11 @@ interface WatchedDownload {
  * Watches the browser's one download folder, shared by every headless context,
  * so a file is stopped at the cap while it is still arriving.
  *
- * A file is measured only for the download it belongs to. The folder holds one
- * unfinished file per running download and cannot name its owner, so a file is
- * attributed only when exactly one running download has none yet and exactly
- * one new file has appeared; with more than one candidate it waits for the
- * next look. A file that is never attributed is still measured when its
- * download finishes. One context's oversize file therefore never cancels
- * another context's download.
+ * A uniquely attributable file is measured against its own download. When
+ * concurrent arrivals cannot be attributed and any candidate file exceeds
+ * the cap, all still-running candidates are cancelled: waiting until their
+ * completion would leave that entire transfer unbounded. Already attributed
+ * downloads are not part of that ambiguous set.
  */
 export class DownloadFolderWatch {
   readonly #folder: string | undefined;
@@ -242,6 +254,7 @@ export class DownloadFolderWatch {
     const folder = this.#folder;
     if (this.#reading || folder === undefined) return;
     this.#reading = true;
+    const observed = [...this.#running];
     try {
       const sizes = new Map<string, { readonly entry: string; readonly size: number }>();
       for (const entry of await readdir(folder)) {
@@ -249,13 +262,16 @@ export class DownloadFolderWatch {
           (stats) => stats.size,
           () => 0,
         );
-        sizes.set(stripPartial(entry), { entry, size });
+        const name = stripPartial(entry);
+        if (size > (sizes.get(name)?.size ?? -1)) sizes.set(name, { entry, size });
       }
       const claimed = new Set<string>();
       for (const download of this.#running) {
         if (download.file !== undefined) claimed.add(download.file);
       }
-      const unattributed = [...this.#running].filter((download) => download.file === undefined);
+      const unattributed = observed.filter(
+        (download) => this.#running.has(download) && download.file === undefined,
+      );
       const fresh = [...sizes.keys()].filter(
         (name) => !claimed.has(name) && !this.#finished.has(name),
       );
@@ -269,8 +285,11 @@ export class DownloadFolderWatch {
       ) {
         only.file = file;
       }
-      for (const download of this.#running) {
-        if (download.file === undefined) continue;
+      if (fresh.some((name) => (sizes.get(name)?.size ?? 0) > MAX_BROWSER_DOWNLOAD_FILE_BYTES)) {
+        for (const download of unattributed) download.cancelForSize();
+      }
+      for (const download of observed) {
+        if (!this.#running.has(download) || download.file === undefined) continue;
         const seen = sizes.get(download.file);
         if (seen !== undefined && seen.size > MAX_BROWSER_DOWNLOAD_FILE_BYTES) {
           download.cancelForSize();
