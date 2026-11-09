@@ -9,7 +9,7 @@
 // A Work thread a peer delegated to this host belongs to that delegation and
 // never moves.
 
-import { readFile, writeFile } from "node:fs/promises";
+import { readFile, rename, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import {
   MovedHistoryEntry,
@@ -190,14 +190,20 @@ export function createWorkThreadMoveHost(options: WorkThreadMoveHostOptions): {
     moveId: string,
   ): Promise<Pick<ErasedThread, "keptFolder" | "keptFiles">> => {
     const path = join(options.partsDirectory(moveId), WORK_FOLDER_ON_SOURCE);
-    let onSource: WorkFolderOnSource;
+    let text: string;
     try {
-      onSource = decodeWorkFolderOnSource(JSON.parse(await readFile(path, "utf8")));
-    } catch {
-      return {};
+      text = await readFile(path, "utf8");
+    } catch (error) {
+      // No note means no folder travelled with this move.
+      if (isMissingFile(error)) return {};
+      throw error;
     }
+    // Thrown, not read as "nothing travelled": a note that can't be read may
+    // hold a started clean-up, and finishing the erase without it would hide
+    // files still set aside. The erase fails and runs again.
+    const onSource = decodeWorkFolderOnSource(JSON.parse(text));
     const save = (note: WorkFolderOnSource) =>
-      writeFile(path, JSON.stringify(encodeWorkFolderOnSource(note)), { mode: 0o600 });
+      writeNoteAtomically(path, JSON.stringify(encodeWorkFolderOnSource(note)));
     let settled = onSource.settled;
     if (settled === undefined) {
       const own = options.ownFolder(id);
@@ -305,10 +311,9 @@ export function createWorkThreadMoveHost(options: WorkThreadMoveHostOptions): {
           filesParts.push({ partId: files.partId, kind: "work-files", path: partPath });
         }
         // Kept here before anything is sent, so the erase always finds it.
-        await writeFile(
+        await writeNoteAtomically(
           join(folder, WORK_FOLDER_ON_SOURCE),
           JSON.stringify(encodeWorkFolderOnSource({ folder: own.folder, index: files })),
-          { mode: 0o600 },
         );
       }
       const moved: MovedWorkThread = {
@@ -450,4 +455,19 @@ export function createWorkThreadMoveHost(options: WorkThreadMoveHostOptions): {
   };
 
   return { source, destination };
+}
+
+/**
+ * Replaces the source's folder note whole: written beside it, then renamed
+ * over it. Written in place, a host that stops mid-write would leave the note
+ * empty and lose the record of a clean-up that had set files aside.
+ */
+async function writeNoteAtomically(path: string, text: string): Promise<void> {
+  const staging = `${path}.${process.pid}.tmp`;
+  await writeFile(staging, text, { mode: 0o600 });
+  await rename(staging, path);
+}
+
+function isMissingFile(error: unknown): boolean {
+  return typeof error === "object" && error !== null && "code" in error && error.code === "ENOENT";
 }

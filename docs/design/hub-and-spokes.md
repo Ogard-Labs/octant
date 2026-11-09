@@ -1526,7 +1526,10 @@ and nothing is ever removed recursively. A clean-up can stop after setting a
 file aside and before settling it (the host stops, or a step fails), and that
 file may be the only copy of an edit made after the move packed. So the
 source records that the clean-up started, and where it sets files aside,
-before it sets aside the first one; a failed clean-up records no outcome, so
+before it sets aside the first one, replacing that note whole (written
+beside it, then renamed over it) so a stop mid-write cannot empty it, and an
+erase that finds the note unreadable fails rather than finishing without it;
+a failed clean-up records no outcome, so
 the erase runs again; and every clean-up first settles whatever the
 set-aside folder already holds the same way (deleted when it matches what
 travelled, otherwise put back or kept as `-kept`), before setting anything

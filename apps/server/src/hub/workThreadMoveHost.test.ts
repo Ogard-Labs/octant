@@ -357,6 +357,18 @@ describe("moving a Work thread's own folder", () => {
     expect(readFileSync(join(moved.sourceFolder, "agenda.md"), "utf8")).toContain("edited");
   });
 
+  it("refuses to finish the erase, removing nothing, when the folder note can't be read", async () => {
+    const moved = filesHost();
+    writeFileSync(join(moved.sourceFolder, "agenda.md"), "# Offsite\n");
+    const { offer, parts } = await packAndOffer(moved.moveHost, moved.partsFolder);
+    await arriveWith(moved.moveHost, offer, parts);
+    // A host that stopped mid-write would have left a broken note.
+    writeFileSync(join(moved.partsFolder, "work-folder.json"), "");
+
+    await expect(moved.moveHost.source.erase({ thread: SOURCE, moveId: MOVE })).rejects.toThrow();
+    expect(readFileSync(join(moved.sourceFolder, "agenda.md"), "utf8")).toBe("# Offsite\n");
+  });
+
   it("never overwrites a file already at the destination path and lands beside it instead", async () => {
     const moved = filesHost();
     writeFileSync(join(moved.sourceFolder, "agenda.md"), "# Offsite\n");
