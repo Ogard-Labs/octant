@@ -628,6 +628,7 @@ const timer = setInterval(() => {
       accept: (snapshot: typeof Snapshot.Type) => boolean,
     ) => {
       let lastNativeError = "";
+      let lastTexts: ReadonlyArray<string> = [];
       const deadline = Date.now() + 20_000;
       while (!controller.signal.aborted && Date.now() < deadline) {
         try {
@@ -647,6 +648,7 @@ const timer = setInterval(() => {
           await writeFile(join(artifacts, `${stage}.json`), raw);
           const snapshot = decodeSnapshot(JSON.parse(raw));
           if (snapshot.pid !== ownPid) throw Error("The observation belongs to another process.");
+          lastTexts = snapshot.texts.map((row) => row.text);
           lastNativeError = "";
           if (accept(snapshot)) {
             console.log(`Observed native stage: ${stage}`);
@@ -661,6 +663,17 @@ const timer = setInterval(() => {
       await writeFile(
         join(artifacts, "native-controller-diagnostic.txt"),
         lastNativeError || `The latest owned image did not contain the expected ${stage} state.`,
+      );
+      // Artifacts are not always readable where the run is reviewed. Print
+      // the last observed window text, hiding long key- or token-like runs.
+      console.log(
+        `OCTANT_NATIVE_LAST_TEXT ${JSON.stringify({
+          stage,
+          texts: lastTexts
+            .slice(0, 80)
+            .map((text) => text.replace(/[A-Za-z0-9+/=_-]{24,}/g, "<redacted>").slice(0, 120)),
+          error: lastNativeError.slice(-400),
+        })}`,
       );
       throw Error(`The real packaged ${stage} state was not observed.`);
     };
