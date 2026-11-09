@@ -105,4 +105,16 @@ describe("desktop quit guard", () => {
       cancelId: 0,
     });
   });
+
+  it("offers Move threads first only when another member can take threads, keeping Cancel the default", () => {
+    expect(buildQuitConfirmation(snapshot(1), { offerMove: true })).toMatchObject({
+      buttons: ["Cancel", "Quit and stop work", "Move threads first…"],
+      defaultId: 0,
+      cancelId: 0,
+    });
+    expect(buildQuitConfirmation(snapshot(1), { offerMove: false }).buttons).toEqual([
+      "Cancel",
+      "Quit and stop work",
+    ]);
+  });
 });

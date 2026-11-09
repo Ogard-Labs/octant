@@ -1,3 +1,4 @@
+import { decodePendingRequest } from "@octant/contracts";
 import { describe, expect, it, vi } from "vitest";
 import { filterOctantCommands, groupOctantCommands, type OctantCommand } from "./commandModel";
 import { buildNeedsYouCommands, type NeedsYouSources } from "./needsYouCommands";
@@ -121,6 +122,22 @@ describe("the Needs you commands", () => {
     );
     run(commands.find((command) => command.title === "Open it: Fix the parser"));
     expect(onAnswerDecision).toHaveBeenCalledExactlyOnceWith(decision, "Open it");
+  });
+
+  it("says each option's consequence in its command detail", () => {
+    const commands = buildNeedsYouCommands(
+      sources({
+        requests: [
+          decodePendingRequest({
+            ...codeDecision(),
+            options: [{ label: "Open it", recommended: true, detail: "Rollback is ready" }],
+          }),
+        ],
+      }),
+    );
+    expect(commands.find((command) => command.title.startsWith("Open it"))?.detail).toBe(
+      "Recommended · Rollback is ready · Code · The fix is ready. Should I open the pull request now?",
+    );
   });
 
   it("lists a waiting subagent as one Review request that opens it, with no Approve or Deny", () => {

@@ -1,4 +1,5 @@
 import { decodeThreadWorkingDirectory } from "@octant/contracts";
+import type { ThreadMoveHolds } from "../hub/threadMoveHolds";
 import { approvedWorkingFolderRoot } from "../approvedWorkingFolders";
 import { GitHistoryPort } from "../code/gitHistoryPort";
 import {
@@ -592,7 +593,11 @@ export type CodeDependencies = Pick<ServerStart, "options" | "persistence"> &
   > &
   Pick<
     WorkspaceWiring,
-    "gitEnvironmentPort" | "gitObservationPort" | "projectRootPort" | "projectService"
+    | "gitEnvironmentPort"
+    | "gitObservationPort"
+    | "projectMemoryAccess"
+    | "projectRootPort"
+    | "projectService"
   > &
   Pick<
     FoundationsWiring,
@@ -608,7 +613,10 @@ export type CodeDependencies = Pick<ServerStart, "options" | "persistence"> &
     | "managedWorktreeSourcePreview"
     | "probeProviderForThreads"
     | "refreshStandaloneSkills"
-  >;
+  > & {
+    /** Threads a move holds: frozen here while leaving, or arriving and not yet committed. */
+    readonly threadMoveHolds: ThreadMoveHolds;
+  };
 
 export function wireCode(deps: CodeDependencies) {
   const {
@@ -756,6 +764,7 @@ export function wireCode(deps: CodeDependencies) {
       service: projectService,
       environmentService,
       windowAuthorityStore,
+      memoryProposals: deps.projectMemoryAccess.proposals,
       maxRequestBodySize: MAX_JSON_REQUEST_BODY_SIZE,
     });
     const agentProfileService = new AgentProfileService({
@@ -809,6 +818,7 @@ export function wireCode(deps: CodeDependencies) {
       const codeService =
         options.codeService ??
         new CodeService({
+          moveHold: (threadId) => deps.threadMoveHolds.isHeld({ mode: "code", threadId }),
           liveTurns,
           awaitsHarnessApproval: threadAwaitsHarnessApproval,
           gitHistory: new GitHistoryPort(),

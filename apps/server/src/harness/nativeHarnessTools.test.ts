@@ -1,8 +1,9 @@
-import { mkdtemp, realpath, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, realpath, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import {
+  MAX_NATIVE_HARNESS_SKILL_CHARACTERS,
   decodeNativeHarnessContextRemaining,
   type ProviderExecutionPolicy,
   type ToolActionAuthority,
@@ -97,6 +98,7 @@ describe("native harness tools", () => {
       "bash",
       "edit",
       "write",
+      "diagnostics",
     ]);
   });
 
@@ -127,6 +129,42 @@ describe("native harness tools", () => {
     expect((write.result as { error: string }).error).toBe("approval-required");
   });
 
+  describe("reading images and PDFs", () => {
+    const png = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 0]);
+
+    it("hands an image to a model that takes images, beside a result that holds no pixels", async () => {
+      const { root, tools } = await fixture({}, { readsImages: () => true });
+      await writeFile(join(root, "shot.png"), png);
+      expect(await call(tools, "read", { path: "shot.png" })).toEqual({
+        result: { kind: "image", path: "shot.png", mimeType: "image/png", bytes: png.length },
+        isError: false,
+        images: [{ mimeType: "image/png", data: png.toString("base64") }],
+      });
+    });
+
+    it("refuses an image when the model cannot take images", async () => {
+      for (const ports of [{ readsImages: () => false }, {}]) {
+        const { root, tools } = await fixture({}, ports);
+        await writeFile(join(root, "shot.png"), png);
+        const outcome = await call(tools, "read", { path: "shot.png" });
+        expect(outcome).toMatchObject({
+          result: { error: "image-input-unsupported" },
+          isError: true,
+        });
+        expect(outcome).not.toHaveProperty("images");
+      }
+    });
+
+    it("refuses a PDF, since no harness endpoint takes a document in a tool result", async () => {
+      const { root, tools } = await fixture({}, { readsImages: () => true });
+      await writeFile(join(root, "paper.pdf"), "%PDF-1.7\n");
+      expect(await call(tools, "read", { path: "paper.pdf" })).toMatchObject({
+        result: { error: "document-input-unsupported" },
+        isError: true,
+      });
+    });
+  });
+
   it("refuses edits, writes, and the shell in Plan mode by policy", async () => {
     const { tools } = await fixture(
       { executionPolicy: "plan", approvalSatisfied: false },
@@ -137,6 +175,7 @@ describe("native harness tools", () => {
     for (const [name, input] of [
       ["write", { path: "b.ts", content: "x" }],
       ["edit", { path: "a.ts", oldText: "hello", newText: "bye" }],
+      ["edit", { edits: [{ path: "a.ts", oldText: "hello", newText: "bye" }] }],
       ["bash", { command: "echo hi" }],
     ] as const) {
       const outcome = await call(tools, name, input);
@@ -342,6 +381,52 @@ describe("native harness tools", () => {
     const denied = await call(gated.tools, "write", { path: "c.ts", content: "x" });
     expect(denied.result).toMatchObject({ error: "approval-denied" });
     expect(decisions).toEqual(["write:project-file-writes", "write:project-file-writes"]);
+  });
+
+  it("asks once for an edit of several files, naming each, and applies them all", async () => {
+    const summaries: string[] = [];
+    const { root, tools } = await fixture(
+      { executionPolicy: "approval-gated", approvalSatisfied: false },
+      {
+        approvals: async (input) => {
+          summaries.push(`${input.approvalClass} ${input.summary}`);
+          return "approved";
+        },
+      },
+    );
+    await writeFile(join(root, "b.ts"), "world\n");
+    await call(tools, "read", { path: "a.ts" });
+    await call(tools, "read", { path: "b.ts" });
+    const edited = await call(tools, "edit", {
+      edits: [
+        { path: "a.ts", oldText: "hello", newText: "hi" },
+        { path: "b.ts", oldText: "world", newText: "there" },
+      ],
+    });
+    expect(edited).toMatchObject({ isError: false, result: { kind: "edited" } });
+    expect(summaries).toEqual(["project-file-writes edit (2 files): a.ts, b.ts"]);
+    expect(await readFile(join(root, "a.ts"), "utf8")).toBe("hi\n");
+    expect(await readFile(join(root, "b.ts"), "utf8")).toBe("there\n");
+  });
+
+  it("tells the model which replacement stopped an edit and that no file changed", async () => {
+    const { root, tools } = await fixture();
+    await call(tools, "read", { path: "a.ts" });
+    const refusedEdit = await call(tools, "edit", {
+      edits: [
+        { path: "a.ts", oldText: "hello", newText: "hi" },
+        { path: "a.ts", oldText: "missing", newText: "x" },
+      ],
+    });
+    expect(refusedEdit).toEqual({
+      isError: true,
+      result: {
+        error: "old-text-not-found",
+        edit: 1,
+        message: "edits[1] (a.ts) was refused: old-text-not-found. No file was changed.",
+      },
+    });
+    expect(await readFile(join(root, "a.ts"), "utf8")).toBe("hello\n");
   });
 
   it("hands a queued note to the lead inside the next tool result", async () => {
@@ -579,6 +664,58 @@ describe("native harness tools", () => {
       });
       expect(asked).toEqual(["shell-commands|goal-check: bun run test parser"]);
       expect(commands).toEqual([]);
+    });
+  });
+
+  describe("skills", () => {
+    const longInstructions = "x".repeat(MAX_NATIVE_HARNESS_SKILL_CHARACTERS + 10);
+    const skills: NonNullable<NativeHarnessToolPorts["skills"]> = {
+      list: async () => ({ status: "listed", skills: [{ name: "review", description: "Review" }] }),
+      load: async (name) =>
+        name === "long"
+          ? { status: "loaded", name, instructions: longInstructions }
+          : name === "review"
+            ? { status: "loaded", name, instructions: "Use the checklist." }
+            : { status: "refused", reason: "skill-not-effective", message: `${name} is off.` },
+    };
+
+    it("offers skill in Chat and in a Plan turn, because it only reads", async () => {
+      const chat = await fixture({}, { skills }, "chat");
+      expect(chat.tools.definitions.map((definition) => definition.name)).toEqual(["skill"]);
+      const plan = await fixture({ executionPolicy: "plan", approvalSatisfied: false }, { skills });
+      expect(await call(plan.tools, "skill", { operation: "list" })).toEqual({
+        result: { skills: [{ name: "review", description: "Review" }] },
+        isError: false,
+      });
+    });
+
+    it("returns a skill's instructions and passes a refusal through with its reason", async () => {
+      const { tools } = await fixture({}, { skills });
+      expect(await call(tools, "skill", { operation: "load", name: "review" })).toEqual({
+        result: { name: "review", instructions: "Use the checklist.", truncated: false },
+        isError: false,
+      });
+      expect(await call(tools, "skill", { operation: "load", name: "deploy" })).toEqual({
+        result: { error: "skill-not-effective", message: "deploy is off." },
+        isError: true,
+      });
+    });
+
+    it("cuts long instructions, says how much was left out, and continues from the offset it names", async () => {
+      const { tools } = await fixture({}, { skills });
+      const first = await call(tools, "skill", { operation: "load", name: "long" });
+      expect(first.result).toMatchObject({
+        truncated: true,
+        omittedCharacters: 10,
+        nextOffset: MAX_NATIVE_HARNESS_SKILL_CHARACTERS,
+        note: expect.stringContaining(`offset ${MAX_NATIVE_HARNESS_SKILL_CHARACTERS}`),
+      });
+      const rest = await call(tools, "skill", {
+        operation: "load",
+        name: "long",
+        offset: MAX_NATIVE_HARNESS_SKILL_CHARACTERS,
+      });
+      expect(rest.result).toEqual({ name: "long", instructions: "x".repeat(10), truncated: false });
     });
   });
 });

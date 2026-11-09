@@ -487,6 +487,7 @@ export function fullMemberPeerGrant(member: RosterMember): PeerGrant {
   return {
     memberId: member.memberId,
     readStatus: true,
+    moveIn: true,
     delegation: {
       projects: "all",
       modes: ["work", "code"],
@@ -737,7 +738,7 @@ export function newMemberConfirmationSigningPayload(
 
 /** A grant that lets the member read status and nothing else: what a new member holds until confirmed. */
 export function holdsOnlyStatusGrant(grant: PeerGrant): boolean {
-  return grant.delegation === undefined && grant.answerApprovals !== true;
+  return grant.delegation === undefined && grant.answerApprovals !== true && grant.moveIn !== true;
 }
 
 export type OwnerRequestAuthorization =

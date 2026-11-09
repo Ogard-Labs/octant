@@ -52,6 +52,11 @@ export interface ResolveDefaultThreadEgressPolicyInput {
   readonly mode: ThreadEgressMode;
   readonly executionPolicy: ThreadExecutionPolicy;
   readonly explicitNetworkApproval?: boolean;
+  /**
+   * The thread's opt-in sandbox at Full access: network stays proxied instead
+   * of unrestricted, so a Full access command still runs on the confined shell.
+   */
+  readonly fullAccessSandbox?: boolean | undefined;
 }
 
 export interface ClampChildThreadEgressPolicyInput {
@@ -69,8 +74,11 @@ const EGRESS_RANK: Record<ThreadEgressPolicy, number> = {
 export function resolveDefaultThreadEgressPolicy(
   input: ResolveDefaultThreadEgressPolicyInput,
 ): ThreadEgressPolicy {
-  if (input.explicitNetworkApproval === true || input.executionPolicy === "full-access") {
-    return "unrestricted";
+  if (input.explicitNetworkApproval === true) return "unrestricted";
+  if (input.executionPolicy === "full-access") {
+    // The opt-in sandbox at Full access keeps the guarded levels' proxied
+    // egress; only a fully open Full access is unrestricted.
+    return input.fullAccessSandbox === true ? "provider-endpoints-only" : "unrestricted";
   }
   if (input.executionPolicy === "plan") return "none";
   if (
@@ -143,8 +151,9 @@ export function resolveProbeEgressPolicy(): ThreadEgressPolicy {
 export function resolveProviderRuntimeEgressPolicy(
   input: ResolveDefaultThreadEgressPolicyInput,
 ): ThreadEgressPolicy {
-  if (input.explicitNetworkApproval === true || input.executionPolicy === "full-access") {
-    return "unrestricted";
+  if (input.explicitNetworkApproval === true) return "unrestricted";
+  if (input.executionPolicy === "full-access") {
+    return input.fullAccessSandbox === true ? "provider-endpoints-only" : "unrestricted";
   }
   return "provider-endpoints-only";
 }

@@ -1983,6 +1983,152 @@ Environment, and hiding one never stops its session. Computer-use approval and
 stop controls stay with its card. It does not duplicate the Agents dock. Missing checkout context
 is neutral explanatory text rather than a warning callout.
 
+**Moving a thread starts in Environment and nowhere else in the thread.** The
+behavior and its rules are in
+[Hub and spokes: moving a thread](docs/design/hub-and-spokes.md#moving-a-thread-to-another-member);
+this is how it looks.
+
+- **Computer card.** Above the header card sits one captioned card, Computer,
+  with one row in the row grammar: the environment mark's own glyph in the tile
+  (a laptop for this computer, a cloud for another host), the host's name, a
+  pill (This computer, or the host's name when the window shows another host's
+  thread), and a chevron. It is the first thing Environment says, because where
+  a thread runs is what a move changes. On a host that is not in a hub, the row
+  opens to one neutral sentence, "Join a hub to move threads between your
+  computers", with **Set up** opening Settings › Remote access › Hub. A paired
+  screen without owner powers on the source sees the row without its move
+  content.
+- **Choosing a destination.** Opening the row lists the person's other
+  computers from the roster under **Move to**, guests excluded, each a 36px row:
+  its glyph, its name, and one pill for its state. Eligible members come first
+  (Online, or Asleep when the hub's wake service could wake it). Members that
+  cannot take this thread stay listed and disabled, with the reason as the pill
+  (No matching repository, or No matching Project for Chat and Work; Not
+  accepting moves; Offline), so the person learns why rather than wondering
+  where a computer went. A member answers Move in off, Owners off, and a
+  source it no longer lists in the same words, so they share one pill; a Mac
+  that is not an owner there is told so at the unlock, in the move sheet. Choosing a
+  member shows its Project under it: chosen for the person when exactly one
+  Project fits, otherwise a compact picker listing only Projects that fit (for
+  Code, each with its repository in mono). **Review move** is the row's own
+  action, a full-width secondary button, disabled until a member and Project
+  are chosen.
+- **The move sheet.** Review move opens a dialog, 480px wide, a full-height
+  sheet at phone width. Its title is "Move to" and the member's name, with the
+  thread title under it in meta ink. A route line reads from the source to the
+  destination: each host's glyph tile and name, an arrow between them, and the
+  destination Project after a slash. **What moves** follows as rows with their
+  sizes in tabular figures at the right: Conversation (the turn count),
+  Attachments and inputs, the branch name in mono with its commit count and
+  uncommitted `+`/`-` counts (Code), and Canvases. A total line gives the size
+  and an estimate. **Stays here** is a closed disclosure naming each part that
+  applies (terminals, previews, Browser pages, ignored files with their count,
+  Full access and grants, sign-ins). When the worktree holds files that stay
+  behind (refused by the Secret guard, or ignored), the disclosure opens by
+  itself, lists them, and says the worktree folder stays on this computer
+  with them. One sentence states the consequence in
+  plain words, never a warning colour: "This thread is erased from this
+  computer once" and the member's name "has it." A busy thread adds a two-way
+  choice above the buttons, Move after this turn (selected) and Stop and move.
+  The primary button names the unlock it asks for (**Move with Touch ID**,
+  **Move with passkey**, or **Confirm on your phone**); Cancel sits beside it,
+  and a Code thread has **Hand over instead** as a quiet text button at the
+  sheet's start edge. Focus lands on the primary button, Escape cancels, and
+  the unlock prompt is the platform's own.
+- **While it moves.** The sheet closes when the unlock succeeds. The composer is
+  replaced by a frozen bar in its place and height: a determinate progress
+  line, "Moving to" and the member's name, the moved and total sizes with the
+  estimate in tabular figures, and **Cancel move** at the end. The transcript
+  stays readable and every control that would change the thread is disabled
+  with "Moving" as its reason. The Computer row's pill reads Moving with the
+  percentage, and the title row's environment mark carries a small arrow
+  badge. Assistive technology hears the start, every quarter, and the end
+  through one polite live region, never each chunk.
+- **Moved.** On `committed` the pane becomes the tombstone: the source and
+  destination route line, "Moved to" and the member's name with the time, and
+  **Open there**, which opens the thread on that host in this window when the
+  window already reads that host, and copies its link otherwise. The thread's
+  sidebar row leaves this host's list; a window that reads both hosts shows it
+  under the destination with the cloud glyph, so it appears to travel rather
+  than vanish. One notification says the move finished. When the worktree was
+  kept, the tombstone adds one row under the route line: the files that stayed
+  with it, and **Remove worktree** as a quiet button that asks once before
+  removing it.
+- **This thread can't move.** A failed move unfreezes the composer and puts an
+  inline notice above it and in the Computer row's open content: the title
+  "This thread can't move", the reason in one sentence, and its recovery as
+  buttons (**Try again**, **Choose another computer**, and for Code **Hand over
+  instead**). It uses the warning ink, because the person is about to switch
+  this computer off and must not mistake the thread for moved; it stays until
+  dismissed or the thread moves.
+- **Arriving.** On the destination the thread's row and pane show an Arriving
+  pill, a neutral wash, with the source's name. When the source has been
+  unreachable for five minutes, the pane's notice offers **Activate anyway**
+  with one sentence saying the source froze before it went away.
+- **Handover sheet.** Hand over instead opens the same dialog shape titled
+  "Hand over through Git": the branch in mono (or the new
+  `octant/handover/` branch it will create), the remote it pushes to, a
+  read-only note preview closed to its first lines, the Ask the agent to
+  summarize switch (on), and **Commit and push** as the primary button, or
+  **Commit** when there is no remote, with a sentence saying the work then
+  stays on this computer.
+- **Prepare to shut down.** One dialog, 640px wide and at most 80% of the
+  window's height, with its list scrolling between a fixed head and foot. It
+  reads as a decision already made for the person, which they can glance at
+  and confirm:
+  - **Head.** The title "Prepare to shut down", one meta sentence ("Move your
+    threads to another computer before this one goes off."), and the **Move
+    to** control: a compact menu button with the destination's glyph, name,
+    and state pill, listing every member with its own pill (eligible ones
+    first, ineligible ones disabled with their reason).
+  - **Rows.** One 44px row per thread in the list's order (running and waiting
+    threads first, then newest activity): the mode glyph, the title (truncating
+    first), the Project in meta ink, the size in tabular figures, and the row's
+    choice as a trailing menu button showing its current word (Move, After this
+    turn, Hand over, Leave here). A row moving somewhere other than the head's
+    destination names that member in the button. A row that cannot move shows
+    its reason as a small neutral pill before the button. A running thread
+    carries the spinner the sidebar uses; a waiting one, the warning dot.
+    "Older threads" is one closed disclosure row with its count.
+  - **Foot.** One summary line that updates as choices change, in plain words
+    with tabular figures ("8 move to Mac mini · 1 hands over · 2 stay here ·
+    1.4 GB, about 2 min"), then the buttons: Cancel, and the primary, which
+    names the count and the unlock (**Move 9 threads with Touch ID**; **Move 9
+    threads** when more than one destination needs its own unlock, asked in
+    turn). With nothing set to move, the primary is disabled and the summary
+    says why.
+  - **While it runs.** The dialog stays and becomes the progress view: a
+    determinate bar under the head for the whole batch, and on each row a thin
+    progress line and a state word in place of its choice (Waiting, Moving with
+    its percentage, After this turn, Moved with a check, Handed over, Can't
+    move). Escape or closing hides the dialog without stopping anything; the
+    menu bar icon shows the batch's progress, and Prepare to Shut Down… brings
+    the dialog back. Each moving thread also shows the single-move frozen bar
+    in its own pane. Assistive technology hears the start, each thread that
+    finishes or fails, and the end, through one polite live region.
+  - **Done.** The head becomes a success check and **Safe to shut down**, with
+    the count moved and where. Opened from Quit, the primary is **Quit Octant**;
+    otherwise **Done**. With failures, the head instead reads how many threads
+    stay on this computer in the warning ink, failed rows rise to the top with
+    their reason and recovery buttons (Try again, Hand over for Code), and the
+    buttons are **Done** and, from Quit, **Quit anyway**.
+  - **Nothing to decide.** With no listed threads the dialog says "Nothing to
+    move" and Safe to shut down at once. On a host outside a hub it says
+    "Join a hub to move threads between your computers" with Set up. With no
+    member able to take any thread, every row reads Leave here with its reason,
+    and Code rows still offer Hand over.
+  - **Keyboard.** Focus opens on the primary button, so Return accepts the
+    defaults; Tab reaches Move to, then each row's choice, then the foot. Each
+    row's choice is named for its thread ("Choice for" and the title), and its
+    menu opens on Space or Return.
+
+Rationale: Environment already answers "where does this thread run", so the
+control that changes the answer belongs beside it, and a person looking for
+it in a menu finds the one place that also shows what will and will not
+travel. The dialog is where the consequence is stated, because a move erases
+the source, and the frozen bar keeps that state on screen where the composer
+was, the first place the person would try to type.
+
 The Board is an operational reading surface with four fixed,
 server-authoritative statuses: Ready, In Progress, Waiting, and Done. All
 four lanes show by default as soft wells: a faint tint of the text ink (3%)
@@ -2361,7 +2507,8 @@ account and model). The rules behind them are in
 [Octant Shield](docs/architecture.md#octant-shield). Built for Code: Auto
 reviewer in Settings › Code › Access, **Automatic model calls** in Settings ›
 Providers & Models (a section with one select per job, a plain note of where the
-work goes, and the account's problem when it has one), and the reviewer
+work goes, and the account's problem when it has one; the second opinion on
+decisions starts at **Off** and is the only job with no default account), and the reviewer
 override as a select on a Code Project's overview; **Servers** is built below
 Safe networks in Settings › Access as an account list and a **Project**
 picker that says whether the chosen Project uses the account's servers or
@@ -2536,6 +2683,9 @@ request from the person.
   desktop-owned host and its child resources. Cancellation leaves both app and
   host running. The session count can include idle sessions kept for another turn;
   the warning names open sessions without claiming they are executing turns.
+  When this host is in a hub and another member can take one of its threads,
+  the confirmation adds **Move threads first…**, which opens Prepare to shut
+  down (above) instead of quitting; Cancel stays the default.
   Once the person confirms, quitting never waits on a person: a
   failed or stalled window-state save or host stop is logged rather than shown
   in an alert, and a fixed deadline ends the app (after force-stopping the

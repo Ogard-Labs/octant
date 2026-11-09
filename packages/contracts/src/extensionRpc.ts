@@ -468,8 +468,27 @@ export const decodeExtensionProjectPinRequest = Schema.decodeUnknownSync(
   ExtensionProjectPinRequest,
 );
 
+/**
+ * What the person's own Claude Code and Codex files say about compacting, read
+ * from those files and never written: whether Claude Code compacts by itself
+ * and the window it was given, and the token limit Codex was given. A value
+ * the file does not set is absent, which means the runtime's own default.
+ */
+export const RuntimeCompactionDefaults = Schema.Struct({
+  claude: Schema.Struct({
+    /** `false` when `autoCompactEnabled` is off, or `DISABLE_AUTO_COMPACT` is set in its settings. */
+    autoCompact: Schema.Boolean,
+    autoCompactWindow: Schema.optional(Schema.Int.pipe(Schema.positive())),
+  }).annotations(strict),
+  codex: Schema.Struct({
+    autoCompactTokenLimit: Schema.optional(Schema.Int.pipe(Schema.positive())),
+  }).annotations(strict),
+}).annotations(strict);
+export type RuntimeCompactionDefaults = typeof RuntimeCompactionDefaults.Type;
+
 export const DiscoveredAgentToolingRequest = Schema.Union(
   Schema.Struct({ kind: Schema.Literal("list") }).annotations(strict),
+  Schema.Struct({ kind: Schema.Literal("compaction-defaults") }).annotations(strict),
   Schema.Struct({ kind: Schema.Literal("add-server"), id: discoveredId }).annotations(strict),
   Schema.Struct({ kind: Schema.Literal("import-plugin"), id: discoveredId }).annotations(strict),
 );

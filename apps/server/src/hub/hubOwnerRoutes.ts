@@ -31,6 +31,7 @@ import {
   decodeOwnerChallengeRequest,
   decodeOwnerCredentialCopyRequest,
   decodeOwnerCredentialReceiveRequest,
+  decodeOwnerThreadMoveTicketRequest,
   decodeOwnerJoinCodeRequest,
   decodeOwnerMemberRequest,
   decodeOwnerPostureChangeRequest,
@@ -63,6 +64,7 @@ import type { SignInService } from "./signInService";
 import type { SpokeLinkService } from "./spokeLinkService";
 import type { SpokeProvisionService } from "./spokeProvisionService";
 import type { SpokeSignInService } from "./spokeSignInService";
+import type { ThreadMoveService } from "./threadMoveService";
 
 export const HUB_OWNER_ROUTE_PREFIX = "/api/hub/owner";
 
@@ -96,6 +98,7 @@ export const HUB_OWNER_ROUTES = {
   browserTargets: `${HUB_OWNER_ROUTE_PREFIX}/browser/targets`,
   browserTakeOver: `${HUB_OWNER_ROUTE_PREFIX}/browser/take-over`,
   browserControl: `${HUB_OWNER_ROUTE_PREFIX}/browser/control`,
+  threadMoveTicket: `${HUB_OWNER_ROUTE_PREFIX}/thread-moves/ticket`,
 } as const;
 
 type OwnerRoute = (typeof HUB_OWNER_ROUTES)[keyof typeof HUB_OWNER_ROUTES];
@@ -133,6 +136,7 @@ const EITHER: ReadonlySet<string> = new Set([
   HUB_OWNER_ROUTES.browserTargets,
   HUB_OWNER_ROUTES.browserTakeOver,
   HUB_OWNER_ROUTES.browserControl,
+  HUB_OWNER_ROUTES.threadMoveTicket,
   ...CODE_OWNER_UNLOCKED_MERGE_PATHS,
 ]);
 
@@ -158,6 +162,8 @@ const OWN_UNLOCK_ROUTES: ReadonlySet<string> = new Set([
   HUB_OWNER_ROUTES.credentialReceive,
   HUB_OWNER_ROUTES.credentialCopy,
   HUB_OWNER_ROUTES.browserTakeOver,
+  // A move erases the thread on the source, so it never rides an open session.
+  HUB_OWNER_ROUTES.threadMoveTicket,
 ]);
 
 /** Which unlock this action asks for. A body that does not decode asks for the strictest. */
@@ -196,6 +202,7 @@ export interface HubOwnerRouteOptions {
   readonly unlock: OwnerUnlockService;
   readonly postures: OwnerPostureHost;
   readonly credentials: OwnerCredentialCopyService;
+  readonly threadMoves: ThreadMoveService;
   readonly provision: SpokeProvisionService;
   readonly signIn: SignInService;
   readonly spokeSignIn: SpokeSignInService;
@@ -607,6 +614,16 @@ export function createHubOwnerRouteHandler(
             sourceMemberId: String(asked.sourceMemberId),
             targetCredentialName: asked.targetCredentialName,
             principal,
+          }),
+        );
+      }
+      case HUB_OWNER_ROUTES.threadMoveTicket: {
+        const asked = decodeOwnerThreadMoveTicketRequest(json());
+        return outcome(
+          options.threadMoves.issueTicket({
+            ownerMemberId: String(input.senderMemberId),
+            sourceMemberId: String(asked.sourceMemberId),
+            ...(asked.threads === undefined ? {} : { threads: asked.threads }),
           }),
         );
       }

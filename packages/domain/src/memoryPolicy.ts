@@ -1,6 +1,7 @@
 import type { AggregateVersion, UtcTimestamp } from "@octant/contracts/events";
 import type {
   ActiveMemoryEntry,
+  AgentAuthoredMemoryProvenance,
   MemoryEntry,
   MemoryEntryId,
   MemoryKind,
@@ -74,6 +75,7 @@ function nextVersion(version: AggregateVersion): AggregateVersion {
 
 function cloneProvenance(provenance: MemoryProvenance): MemoryProvenance {
   if (provenance.kind === "user-authored") return { kind: "user-authored" };
+  if (provenance.kind === "agent-authored") return agentProvenance(provenance);
   return {
     kind: "transferred",
     sourceProjectId: provenance.sourceProjectId,
@@ -88,6 +90,14 @@ function cloneProvenance(provenance: MemoryProvenance): MemoryProvenance {
   };
 }
 
+function agentProvenance(origin: AgentAuthoredMemoryProvenance): AgentAuthoredMemoryProvenance {
+  return {
+    kind: "agent-authored",
+    mode: origin.mode,
+    ...(origin.threadId === undefined ? {} : { threadId: origin.threadId }),
+  };
+}
+
 export interface CreateMemoryEntryInput {
   readonly id: MemoryEntryId;
   readonly projectId: ProjectId;
@@ -96,6 +106,11 @@ export interface CreateMemoryEntryInput {
   readonly actor: ProjectActor;
   readonly createdAt: UtcTimestamp;
   readonly expectedVersion: AggregateVersion;
+  /**
+   * The thread whose agent proposed the text. The approving person stays the
+   * author; absent means the person wrote it.
+   */
+  readonly agentOrigin?: AgentAuthoredMemoryProvenance;
 }
 
 export function createMemoryEntry(input: CreateMemoryEntryInput): ActiveMemoryEntry {
@@ -104,7 +119,10 @@ export function createMemoryEntry(input: CreateMemoryEntryInput): ActiveMemoryEn
     projectId: input.projectId,
     kind: requireKind(input.kind),
     content: normalizeContent(input.content),
-    provenance: { kind: "user-authored" },
+    provenance:
+      input.agentOrigin === undefined
+        ? { kind: "user-authored" }
+        : agentProvenance(input.agentOrigin),
     author: requireUserActor(input.actor),
     status: "active",
     version: nextVersion(input.expectedVersion),
@@ -119,6 +137,8 @@ export interface SupersedeMemoryEntryInput {
   readonly actor: ProjectActor;
   readonly supersededAt: UtcTimestamp;
   readonly expectedVersion: AggregateVersion;
+  /** As for a new entry: the thread whose agent proposed the replacement text. */
+  readonly agentOrigin?: AgentAuthoredMemoryProvenance;
 }
 
 export interface SupersedeMemoryEntryResult {
@@ -150,7 +170,10 @@ export function supersedeMemoryEntry(
     projectId: predecessor.projectId,
     kind: predecessor.kind,
     content: normalizeContent(input.content),
-    provenance: cloneProvenance(predecessor.provenance),
+    provenance:
+      input.agentOrigin === undefined
+        ? cloneProvenance(predecessor.provenance)
+        : agentProvenance(input.agentOrigin),
     author: changedBy,
     status: "active",
     version,
