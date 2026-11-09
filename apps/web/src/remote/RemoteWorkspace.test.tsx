@@ -43,6 +43,7 @@ function workClients(
 ): RemoteProductClients {
   return {
     chat: unused<ChatClient>("chat"),
+    canvas: unused<RemoteProductClients["canvas"]>("canvas"),
     code: unused<CodeClient>("code"),
     syncStatus: unused<ReplicaSyncStatusClient>("syncStatus"),
     project: unused<ProjectClient>("project"),

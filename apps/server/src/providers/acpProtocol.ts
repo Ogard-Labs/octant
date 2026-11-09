@@ -279,12 +279,31 @@ export type AcpClientCapabilityRequest =
       readonly params: typeof AcpClientTerminalReleaseParams.Type;
     };
 
-export type AcpServerRequestMessage = AcpServerRequest | AcpClientCapabilityRequest;
+const AcpElicitationParams = Schema.Struct({
+  sessionId: Schema.NonEmptyTrimmedString,
+  mode: Schema.Literal("form"),
+  message: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(2_000)),
+  requestedSchema: Schema.Unknown,
+  toolCallId: Schema.optional(
+    Schema.NullOr(Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(256))),
+  ),
+});
+export interface AcpElicitationRequest {
+  readonly kind: "request";
+  readonly id: RpcId;
+  readonly method: "elicitation/create";
+  readonly params: typeof AcpElicitationParams.Type;
+}
+export type AcpServerRequestMessage =
+  | AcpServerRequest
+  | AcpClientCapabilityRequest
+  | AcpElicitationRequest;
 
 export interface AcpClientCapabilities {
   readonly readTextFile: boolean;
   readonly writeTextFile: boolean;
   readonly terminal: boolean;
+  readonly elicitationForm?: boolean;
 }
 
 type FailureKind = "capacity" | "closed" | "protocol" | "remote" | "timeout";
@@ -445,8 +464,9 @@ type QueuedMessage = AcpServerNotification | AcpServerRequestMessage;
 export function makeAcpClient(options: AcpClientOptions): AcpClient {
   const limits = { ...DEFAULT_LIMITS, ...options.limits };
   const pending = new Map<RpcId, PendingRequest>();
+  const pendingWrites = new Set<{ readonly reject: (failure: AcpFailure) => void }>();
   const notificationListeners = new Set<(message: AcpServerNotification) => void>();
-  const requestListeners = new Set<(message: AcpServerRequest) => void>();
+  const requestListeners = new Set<(message: AcpServerRequestMessage) => void>();
   const queue: QueuedMessage[] = [];
   let input = Buffer.alloc(0);
   let nextId = 1;
@@ -496,6 +516,14 @@ export function makeAcpClient(options: AcpClientOptions): AcpClient {
   const finish = (failure?: AcpFailure) => {
     if (terminal) return;
     terminal = true;
+    if (pendingWrites.size > 0 && !options.stdin.destroyed) {
+      // A timed-out pipe cannot carry a later answer. Drain its final error
+      // until close, while the owning process scope performs termination.
+      const drainError = () => undefined;
+      options.stdin.once("error", drainError);
+      options.stdin.once("close", () => options.stdin.off("error", drainError));
+      options.stdin.destroy();
+    }
     deliverStderr();
     removeListeners();
     input = Buffer.alloc(0);
@@ -508,6 +536,8 @@ export function makeAcpClient(options: AcpClientOptions): AcpClient {
       request.reject(failure ?? new AcpFailure("closed", "ACP transport closed."));
     }
     pending.clear();
+    for (const write of pendingWrites)
+      write.reject(failure ?? new AcpFailure("closed", "ACP transport closed."));
     if (failure === undefined) resolveExited();
     else rejectExited(failure);
   };
@@ -559,27 +589,46 @@ export function makeAcpClient(options: AcpClientOptions): AcpClient {
     }
   };
 
-  const writeNow = (payload: unknown): Promise<void> =>
-    new Promise((resolve, reject) => {
-      if (terminal || options.stdin.destroyed || options.stdin.writableEnded) {
-        reject(new AcpFailure("closed", "ACP transport closed."));
-        return;
-      }
-      let line: string;
-      try {
-        line = `${JSON.stringify(payload)}\n`;
-      } catch {
-        reject(new AcpFailure("protocol", "ACP message could not be encoded."));
-        return;
-      }
-      options.stdin.write(line, (error) => {
-        if (error) reject(new AcpFailure("closed", "ACP transport failed."));
-        else resolve();
+  const write = (payload: unknown): Promise<void> => {
+    const previous = writeChain;
+    const operation = new Promise<void>((resolve, reject) => {
+      let settled = false;
+      const entry = { reject: (failure: AcpFailure) => settle(failure) };
+      const timeout = setTimeout(
+        () => finish(new AcpFailure("timeout", "ACP transport write timed out.")),
+        limits.requestTimeoutMs,
+      );
+      const settle = (failure?: AcpFailure) => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timeout);
+        pendingWrites.delete(entry);
+        if (failure === undefined) resolve();
+        else reject(failure);
+      };
+      pendingWrites.add(entry);
+      void previous.then(() => {
+        if (settled) return;
+        if (terminal || options.stdin.destroyed || options.stdin.writableEnded) {
+          settle(new AcpFailure("closed", "ACP transport closed."));
+          return;
+        }
+        let line: string;
+        try {
+          line = `${JSON.stringify(payload)}\n`;
+        } catch {
+          settle(new AcpFailure("protocol", "ACP message could not be encoded."));
+          return;
+        }
+        try {
+          options.stdin.write(line, (error) =>
+            settle(error ? new AcpFailure("closed", "ACP transport failed.") : undefined),
+          );
+        } catch {
+          settle(new AcpFailure("closed", "ACP transport failed."));
+        }
       });
     });
-
-  const write = (payload: unknown): Promise<void> => {
-    const operation = writeChain.then(() => writeNow(payload));
     writeChain = operation.catch(() => undefined);
     return operation;
   };
@@ -654,6 +703,23 @@ export function makeAcpClient(options: AcpClientOptions): AcpClient {
       }
       return;
     }
+    if (envelope.method === "elicitation/create") {
+      try {
+        enqueue({
+          kind: "request",
+          id: envelope.id,
+          method: "elicitation/create",
+          params: decode(AcpElicitationParams)(envelope.params),
+        });
+      } catch {
+        void write({
+          jsonrpc: "2.0",
+          id: envelope.id,
+          error: { code: -32602, message: "Invalid params" },
+        }).catch(() => undefined);
+      }
+      return;
+    }
     if (envelope.method === "session/request_permission") {
       try {
         enqueue({
@@ -667,7 +733,7 @@ export function makeAcpClient(options: AcpClientOptions): AcpClient {
           jsonrpc: "2.0",
           id: envelope.id,
           error: { code: -32602, message: "Invalid params" },
-        });
+        }).catch(() => undefined);
       }
       return;
     }
@@ -739,7 +805,7 @@ export function makeAcpClient(options: AcpClientOptions): AcpClient {
         jsonrpc: "2.0",
         id: envelope.id,
         error: { code: -32602, message: "Invalid params" },
-      });
+      }).catch(() => undefined);
       return;
     }
     if (capabilityRequest !== undefined) {
@@ -750,7 +816,7 @@ export function makeAcpClient(options: AcpClientOptions): AcpClient {
       jsonrpc: "2.0",
       id: envelope.id,
       error: { code: -32601, message: "Method not found" },
-    });
+    }).catch(() => undefined);
   };
 
   const processLine = (line: Buffer) => {
@@ -867,6 +933,7 @@ export function makeAcpClient(options: AcpClientOptions): AcpClient {
               writeTextFile: capabilities.writeTextFile,
             },
             terminal: capabilities.terminal,
+            ...(capabilities.elicitationForm === true ? { elicitation: { form: {} } } : {}),
             ...(resolvedMetadata === undefined ? {} : { _meta: resolvedMetadata }),
           },
           clientInfo: { name: "Octant", version: "1" },

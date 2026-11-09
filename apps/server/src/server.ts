@@ -45,6 +45,8 @@ import { WorkFileListingService } from "./work/workFileListingService";
 import { WorkThreadService } from "./work/workThreadService";
 import { WorkTurnService } from "./work/workTurnService";
 import { makePublishedSnapshotSource } from "./publishedSnapshotSource";
+import { assertReadableChatThread } from "./chat/chatService";
+import { createThreadReadAuthority } from "./threadReadAuthority";
 import type { PublishedSnapshotRunRequest, WindowId } from "@octant/contracts";
 import { MAX_CHAT_ATTACHMENT_BYTES } from "./chat/chatAttachmentStore";
 import { MAX_CODE_FILE_BODY_SIZE } from "./codeRoutes";
@@ -704,6 +706,14 @@ export function startOctantServer(
             ? {}
             : { codeConversation: routeCodeService.conversation }),
         })(windowId, request),
+      // A paired device reads a thread's Canvases under the same Open check
+      // its own thread routes run: Chat's read rule, Work's and Code's reads.
+      threadReadAuthority: (scopeId, thread) =>
+        createThreadReadAuthority({
+          chat: (threadId) => assertReadableChatThread(persistence, threadId),
+          work: (scope, threadId) => workThreadService.read(scope, threadId),
+          code: async (scope, threadId) => (await routeCodeService.read(scope, threadId)).thread,
+        })(scopeId, thread),
       agentRunPersistence,
       browserCaptures,
       chatDataDirectory,
