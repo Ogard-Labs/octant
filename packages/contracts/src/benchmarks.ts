@@ -270,6 +270,16 @@ export const BenchmarkRunEndStatus = Schema.Literal(
 export type BenchmarkRunEndStatus = typeof BenchmarkRunEndStatus.Type;
 
 /**
+ * The commit a Code case's ref resolved to when the run started, so every cell
+ * of that case starts from the same files even if the branch moves meanwhile.
+ */
+export const BenchmarkCodeCommit = Schema.Struct({
+  caseId: BenchmarkCaseId,
+  commit: Schema.String.pipe(Schema.pattern(/^[a-f0-9]{40}$/)),
+}).annotations(strict);
+export type BenchmarkCodeCommit = typeof BenchmarkCodeCommit.Type;
+
+/**
  * One execution of a suite. It snapshots the suite's cases and judge at start,
  * so editing or deleting the suite later never rewrites what a finished run
  * measured. Every cell is planned at start, so the count is exact.
@@ -288,6 +298,10 @@ export const BenchmarkRun = Schema.Struct({
   repetitions: Schema.Int.pipe(Schema.between(1, MAX_BENCHMARK_REPETITIONS)),
   budget: BenchmarkBudget,
   executionLevel: Schema.optional(BenchmarkExecutionLevel),
+  /** Absent on a run started before refs were pinned; its cells then resolve the ref each time. */
+  codeCommits: Schema.optional(
+    Schema.Array(BenchmarkCodeCommit).pipe(Schema.maxItems(MAX_BENCHMARK_CASES)),
+  ),
   status: BenchmarkRunStatus,
   startedAt: UtcTimestamp,
   endedAt: Schema.optional(UtcTimestamp),
@@ -309,7 +323,20 @@ export const BenchmarkRun = Schema.Struct({
           cell.contenderIndex >= run.contenders.length ||
           cell.repetition > run.repetitions,
       );
-      return outside ? "A cell must name a case, contender, and repetition of its run." : true;
+      if (outside) return "A cell must name a case, contender, and repetition of its run.";
+      const codeCaseIds = new Set(
+        run.cases
+          .filter((candidate) => candidate.kind === "code")
+          .map((candidate) => String(candidate.caseId)),
+      );
+      const pinned = run.codeCommits ?? [];
+      if (
+        new Set(pinned.map((pin) => String(pin.caseId))).size !== pinned.length ||
+        pinned.some((pin) => !codeCaseIds.has(String(pin.caseId)))
+      ) {
+        return "A pinned commit names each Code case of the run at most once.";
+      }
+      return true;
     }),
   );
 export type BenchmarkRun = typeof BenchmarkRun.Type;
@@ -469,6 +496,12 @@ export const BenchmarkRunStartRequest = Schema.Struct({
   repetitions: Schema.Int.pipe(Schema.between(1, MAX_BENCHMARK_REPETITIONS)),
   budget: BenchmarkBudget,
   executionLevel: Schema.optional(BenchmarkExecutionLevel),
+  /**
+   * The suite revision whose check commands a person read before starting. A
+   * suite with a `command-exits-zero` check is refused unless this equals the
+   * suite's current revision, so an edit after reading needs a new confirmation.
+   */
+  confirmedSuiteRevision: Schema.optional(PositiveInt),
 }).annotations(strict);
 export type BenchmarkRunStartRequest = typeof BenchmarkRunStartRequest.Type;
 export const BenchmarkRunStartResponse = Schema.Struct({ run: BenchmarkRun }).annotations(strict);

@@ -14,7 +14,10 @@ import { decodeWindowId, type WindowId } from "@octant/contracts";
  * Minted per process and never registered with window authority, so no route
  * resolves to it and no renderer or paired device can claim it. Reaching this
  * scope grants nothing a routine's dispatcher has not already revalidated
- * against the routine's captured Project and authority.
+ * against the routine's captured Project and authority. A benchmark run's Code
+ * cells act under it too, so a run revalidates at start instead: the starting
+ * window must be able to reach every Code Project its suite names, and a run
+ * that asks for more than a Project allows is refused whole.
  */
 export const ROUTINE_HOST_SCOPE_ID: WindowId = decodeWindowId(randomUUID());
 

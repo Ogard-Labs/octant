@@ -4,14 +4,24 @@ import {
   decodeUtcTimestamp,
   type BenchmarkCell,
   type BenchmarkRun,
+  type BenchmarkCheckResult,
   type BenchmarkSettledCellState,
+  type PermissionMode,
   type ProjectId,
   type TurnMetricsRecord,
 } from "@octant/contracts";
 import {
+  BENCHMARK_APPROVAL_WAIT_MS,
+  BENCHMARK_COMMAND_MAX_SECONDS,
   BENCHMARK_CONCURRENCY_LIMITS,
   benchmarkBudgetDecision,
   benchmarkCellMetrics,
+  benchmarkCheckDescription,
+  benchmarkCodeBranch,
+  benchmarkCommandResult,
+  benchmarkExecutionLevel,
+  benchmarkFilesChangedResult,
+  isBenchmarkCodeOnlyCheck,
   benchmarkCellsOwingJudgement,
   benchmarkJudgePrompt,
   benchmarkOverhead,
@@ -25,14 +35,18 @@ import {
 } from "@octant/domain";
 import { deterministicUuid } from "../deterministicUuid";
 import { CAPACITY_UNAVAILABLE_FAILURE_CODE, type BenchmarkChatPort } from "./benchmarkChatPort";
+import type { BenchmarkCheckCommandPort, BenchmarkCheckSession } from "./benchmarkCheckCommand";
+import type { BenchmarkCodePort, BenchmarkCodeResult } from "./benchmarkCodePort";
 import type { BenchmarkEventStore } from "./benchmarkEventStore";
 import type { BenchmarkProjection } from "./benchmarkProjection";
 
 export const BENCHMARK_TICK_MS = 2_000;
+/** How long stopping waits for aborted check commands to end. */
+export const BENCHMARK_STOP_WAIT_MS = 5_000;
 /** A turn still running after this long is interrupted and settles failed. */
 export const BENCHMARK_TURN_TIMEOUT_MS = 30 * 60_000;
 
-const CODE_CASES_LATER = "Code cases arrive in a later version";
+const CODE_UNAVAILABLE = "Code cases cannot run on this host.";
 
 export interface BenchmarkRunnerOptions {
   readonly chat: BenchmarkChatPort;
@@ -45,11 +59,20 @@ export interface BenchmarkRunnerOptions {
     readonly forThread: (threadId: string) => ReadonlyArray<TurnMetricsRecord>;
   };
   readonly projectId: ProjectId;
+  /** Code cells; absent where the host cannot run them, and they then fail with a sentence. */
+  readonly code?: BenchmarkCodePort;
+  /** Runs a Code case's check commands in the cell's worktree, confined. */
+  readonly checkCommand?: BenchmarkCheckCommandPort;
+  /** The mode a new thread in this Code Project starts in; absent when it is not an active Code Project. */
+  readonly projectMode?: (projectId: ProjectId) => PermissionMode | undefined;
+  /** How long a turn may wait on an approval before its cell is blocked. */
+  readonly approvalWaitMs?: number;
   /** Tests a hand-written pattern under a deadline; the runner never matches one itself. */
   readonly matchPattern: BenchmarkPatternMatcher;
   readonly clock: () => string;
   readonly tickMs?: number;
   readonly turnTimeoutMs?: number;
+  readonly stopWaitMs?: number;
 }
 
 /** The deterministic identities of one cell's thread and turn submission. */
@@ -114,6 +137,21 @@ export class BenchmarkRunner {
   readonly #judgeSeen = new Map<string, number>();
   /** Cells put back to queued in this pass; they wait for the next tick to try again. */
   readonly #requeued = new Set<string>();
+  /** When this process first saw a Code turn park on an approval nothing journaled dated. */
+  readonly #approvalSince = new Map<string, number>();
+  /** What a Code turn was last seen waiting on, so a turn that ends while parked ends the cell as blocked. */
+  readonly #approvalSeen = new Map<string, string>();
+  /** Code cells this process has already read once; a first sight says nothing about how long a wait has lasted. */
+  readonly #sighted = new Set<string>();
+  /** Check commands running in the background for Code cells whose turns finished. */
+  readonly #checking = new Map<
+    string,
+    {
+      readonly controller: AbortController;
+      done: Promise<void>;
+      result?: { readonly checks: ReadonlyArray<BenchmarkCheckResult> };
+    }
+  >();
   #chain: Promise<unknown> = Promise.resolve();
   #tickPending = false;
   #stopped = false;
@@ -122,16 +160,42 @@ export class BenchmarkRunner {
     this.#options = options;
   }
 
-  /** Starts ticking and resumes any running run now; the returned function stops it. */
-  start(): () => void {
+  /**
+   * Starts ticking and resumes any running run now. The returned function stops
+   * it: it aborts every check command still running, which makes the confined
+   * port end each command's process group, waits a bounded time for them to end,
+   * and resolves. No further command of a check sequence starts after the abort.
+   */
+  start(): () => Promise<void> {
     this.#stopped = false;
     const timer = setInterval(() => void this.tick(), this.#options.tickMs ?? BENCHMARK_TICK_MS);
     timer.unref();
-    void this.#exclusive(() => this.#archiveSettled()).catch(() => undefined);
+    void this.#exclusive(async () => {
+      // No check is running when the host starts, so any private folder a crash
+      // left behind is stale.
+      const checks = this.#options.checkCommand;
+      if (checks?.sweep !== undefined) await checks.sweep().catch(() => undefined);
+      await this.#archiveSettled();
+    }).catch(() => undefined);
     void this.tick();
-    return () => {
+    return async () => {
       this.#stopped = true;
       clearInterval(timer);
+      const running = [...this.#checking.values()];
+      for (const entry of running) entry.controller.abort();
+      if (running.length > 0) {
+        let deadline: ReturnType<typeof setTimeout> | undefined;
+        await Promise.race([
+          Promise.allSettled(running.map((entry) => entry.done)),
+          new Promise<void>((resolve) => {
+            deadline = setTimeout(resolve, this.#options.stopWaitMs ?? BENCHMARK_STOP_WAIT_MS);
+            deadline.unref();
+          }),
+        ]);
+        if (deadline !== undefined) clearTimeout(deadline);
+      }
+      // Whatever those commands reported was cut short; a later start checks again.
+      this.#checking.clear();
     };
   }
 
@@ -169,7 +233,7 @@ export class BenchmarkRunner {
       for (const cell of run.cells) {
         if (this.#stopped) return;
         if (cell.state === "queued" || cell.state === "running") continue;
-        await this.#options.chat.archiveThread(benchmarkCellIdentity(String(cell.cellId)).threadId);
+        await this.#archiveCell(run, cell);
         // A judge still owed (for instance waiting to retry for capacity) stays
         // active: Chat refuses to retry on an archived thread.
         const judgeSettled = run.status !== "running" || cell.judge !== undefined;
@@ -180,6 +244,14 @@ export class BenchmarkRunner {
         }
       }
     }
+  }
+
+  /** Archives a settled cell's thread through the port of its own mode. */
+  async #archiveCell(run: BenchmarkRun, cell: BenchmarkCell): Promise<void> {
+    const threadId = benchmarkCellIdentity(String(cell.cellId)).threadId;
+    const benchmarkCase = run.cases.find((candidate) => candidate.caseId === cell.caseId);
+    if (benchmarkCase?.kind === "code") await this.#options.code?.archiveThread(threadId);
+    else await this.#options.chat.archiveThread(threadId);
   }
 
   #exclusive<T>(work: () => Promise<T>): Promise<T> {
@@ -376,11 +448,23 @@ export class BenchmarkRunner {
     const { chat } = this.#options;
     const judge = run.judge;
     const benchmarkCase = run.cases.find((candidate) => candidate.caseId === cell.caseId);
+    const isCode = benchmarkCase?.kind === "code";
     const candidate =
-      cell.threadId === undefined
+      cell.threadId === undefined || isCode
         ? undefined
         : this.#candidateAnswer(cell.threadId, String(cell.cellId));
-    if (judge === undefined || benchmarkCase === undefined || candidate === undefined) {
+    const codeResult =
+      cell.threadId === undefined || !isCode || this.#options.code === undefined
+        ? undefined
+        : await this.#options.code.readResult(
+            cell.threadId,
+            benchmarkCellIdentity(String(cell.cellId)).submissionId,
+          );
+    if (
+      judge === undefined ||
+      benchmarkCase === undefined ||
+      (isCode ? codeResult === undefined : candidate === undefined)
+    ) {
       this.#recordJudgement(run, cell, {
         status: "failed",
         reason: "The answer to judge could not be read",
@@ -399,7 +483,26 @@ export class BenchmarkRunner {
         rubric: judge.rubric,
         casePrompt: benchmarkCase.prompt,
         referenceAnswer: benchmarkCase.referenceAnswer,
-        candidateAnswer: candidate,
+        // A Code cell has no answer to read: the judge gets the change and the checks.
+        ...(codeResult === undefined
+          ? { candidateAnswer: candidate }
+          : {
+              code: {
+                diff: codeResult.diff,
+                checks: cell.checks.flatMap((result) => {
+                  const check = benchmarkCase.checks[result.index];
+                  return check === undefined
+                    ? []
+                    : [
+                        {
+                          description: benchmarkCheckDescription(check),
+                          passed: result.passed,
+                          detail: result.detail,
+                        },
+                      ];
+                }),
+              },
+            }),
       }),
       submissionId,
     });
@@ -450,6 +553,8 @@ export class BenchmarkRunner {
     const cell = run?.cells.find((candidate) => String(candidate.cellId) === cellId);
     if (run === undefined || cell === undefined || cell.state !== "running") return false;
     if (cell.threadId === undefined) return false;
+    const reconcileCase = run.cases.find((candidate) => candidate.caseId === cell.caseId);
+    if (reconcileCase?.kind === "code") return this.#reconcileCode(run, cell, reconcileCase);
     const { chat } = this.#options;
     const reading = chat.readTurn(cell.threadId, benchmarkCellIdentity(cellId).submissionId);
     if (reading.status === "gone") {
@@ -565,8 +670,7 @@ export class BenchmarkRunner {
         return "settled";
       }
       if (benchmarkCase.kind === "code") {
-        this.#settle(run, cell, "failed", CODE_CASES_LATER);
-        return "settled";
+        return await this.#startCodeCell(run, cell, contender, benchmarkCase);
       }
       const { threadId, submissionId } = benchmarkCellIdentity(cellId);
       const started = await this.#options.chat.startTurn({
@@ -596,6 +700,277 @@ export class BenchmarkRunner {
     } finally {
       this.#starting.delete(cellId);
     }
+  }
+
+  async #startCodeCell(
+    run: BenchmarkRun,
+    cell: BenchmarkCell,
+    contender: BenchmarkRun["contenders"][number],
+    benchmarkCase: BenchmarkRun["cases"][number],
+  ): Promise<"started" | "waiting" | "settled"> {
+    const { code } = this.#options;
+    const target = benchmarkCase.code;
+    if (code === undefined || target === undefined || this.#options.projectMode === undefined) {
+      this.#settle(run, cell, "failed", CODE_UNAVAILABLE);
+      return "settled";
+    }
+    const projectMode = this.#options.projectMode(target.codeProjectId);
+    if (projectMode === undefined) {
+      this.#settle(run, cell, "failed", "The Code Project is gone or is no longer a Code Project.");
+      return "settled";
+    }
+    // The Project's own level is a ceiling, as for a routine, and Full access
+    // is never reached by a pick alone; start already refused such a run.
+    const level = benchmarkExecutionLevel(run.executionLevel, projectMode);
+    if (level.status === "refused") {
+      this.#settle(run, cell, "failed", level.message);
+      return "settled";
+    }
+    const cellId = String(cell.cellId);
+    const { threadId, submissionId } = benchmarkCellIdentity(cellId);
+    const pinnedCommit = run.codeCommits?.find(
+      (pin) => pin.caseId === benchmarkCase.caseId,
+    )?.commit;
+    const started = await code.startTurn({
+      threadId,
+      title: threadTitle(run.suiteName, benchmarkCase.title, String(contender.modelId)),
+      codeProjectId: target.codeProjectId,
+      ref: target.ref,
+      // Every cell of the case starts from the commit the run pinned at start.
+      ...(pinnedCommit === undefined ? {} : { commit: pinnedCommit }),
+      branch: benchmarkCodeBranch(String(run.runId), cellId),
+      providerInstanceId: contender.providerInstanceId,
+      modelId: contender.modelId,
+      ...(contender.effort === undefined ? {} : { effort: contender.effort }),
+      prompt: benchmarkCase.prompt,
+      submissionId,
+      executionPolicy: level.executionPolicy,
+      autoApprove: level.autoApprove,
+    });
+    if (started.status === "waiting") return "waiting";
+    if (started.status === "refused") {
+      this.#settle(run, cell, "failed", started.message);
+      await code.archiveThread(threadId);
+      return "settled";
+    }
+    this.#options.store.cellStarted({
+      runId: run.runId,
+      cellId: cell.cellId,
+      threadId,
+      turnId: started.turnId,
+      startedAt: decodeUtcTimestamp(this.#options.clock()),
+    });
+    return "started";
+  }
+
+  /**
+   * Settles a running Code cell. A finished turn hands its checks to a
+   * background run, because a check command may take minutes and must not hold
+   * the other cells; the cell settles on a later pass once they are done. A
+   * turn parked on an approval past the limit is interrupted and blocked.
+   */
+  async #reconcileCode(
+    run: BenchmarkRun,
+    cell: BenchmarkCell,
+    benchmarkCase: BenchmarkRun["cases"][number],
+  ): Promise<boolean> {
+    const { code } = this.#options;
+    const threadId = cell.threadId;
+    if (code === undefined || threadId === undefined) return false;
+    const cellId = String(cell.cellId);
+    const submissionId = benchmarkCellIdentity(cellId).submissionId;
+    const pending = this.#checking.get(cellId);
+    if (pending !== undefined) {
+      if (pending.result === undefined) return false;
+      this.#checking.delete(cellId);
+      this.#settle(run, cell, "answered", undefined, pending.result.checks);
+      await code.archiveThread(threadId);
+      return true;
+    }
+    const reading = await code.readTurn(threadId, submissionId);
+    if (reading.status === "gone") {
+      this.#settle(run, cell, "failed", "The cell's thread is gone.");
+      return true;
+    }
+    if (reading.status === "no-turn") {
+      this.#settle(run, cell, "failed", "The cell's turn was lost.");
+      await code.archiveThread(threadId);
+      return true;
+    }
+    if (reading.state === "completed") {
+      this.#approvalSince.delete(cellId);
+      const controller = new AbortController();
+      const entry: {
+        readonly controller: AbortController;
+        done: Promise<void>;
+        result?: { readonly checks: ReadonlyArray<BenchmarkCheckResult> };
+      } = { controller, done: Promise.resolve() };
+      this.#checking.set(cellId, entry);
+      entry.done = this.#codeChecks(cell, benchmarkCase, controller.signal).then(
+        (checks) => {
+          entry.result = { checks };
+        },
+        () => {
+          entry.result = {
+            checks: [{ index: 0, passed: false, detail: "The checks could not be run." }],
+          };
+        },
+      );
+      return false;
+    }
+    if (reading.state === "interrupted" || reading.state === "failed") {
+      this.#approvalSince.delete(cellId);
+      // A turn that ends while an approval waits (a provider-inactivity timeout,
+      // an interrupt) was blocked by it, not broken: say so, with what it asked.
+      const waitedOn = this.#approvalSeen.get(cellId);
+      this.#approvalSeen.delete(cellId);
+      if (waitedOn !== undefined) {
+        this.#settle(
+          run,
+          cell,
+          "blocked-on-approval",
+          `The turn ended while waiting for an approval nobody gave: ${waitedOn}`,
+        );
+      } else {
+        this.#settle(run, cell, "failed", reading.failureMessage ?? `The turn ${reading.state}.`);
+      }
+      await code.archiveThread(threadId);
+      return true;
+    }
+    const now = Date.parse(this.#options.clock());
+    const startedMs = cell.startedAt === undefined ? Number.NaN : Date.parse(cell.startedAt);
+    if (reading.awaitingApproval) {
+      this.#approvalSeen.set(cellId, reading.approvalSummary ?? "a request for approval");
+      // The wait began when the journal says the approval was asked. Without
+      // that, a turn this process saw run and then park is timed from the
+      // moment it parked; one first met already parked (after a restart) is
+      // timed from the cell's start, an upper bound, so a restart never grants
+      // another ten minutes.
+      const journaled =
+        reading.waitingSince === undefined ? Number.NaN : Date.parse(reading.waitingSince);
+      const since = Number.isNaN(journaled)
+        ? (this.#approvalSince.get(cellId) ?? (this.#sighted.has(cellId) ? now : startedMs))
+        : journaled;
+      if (Number.isNaN(journaled)) this.#approvalSince.set(cellId, since);
+      if (now - since >= (this.#options.approvalWaitMs ?? BENCHMARK_APPROVAL_WAIT_MS)) {
+        this.#approvalSince.delete(cellId);
+        const asked = this.#approvalSeen.get(cellId);
+        this.#approvalSeen.delete(cellId);
+        await code.interruptTurn(threadId, submissionId);
+        this.#settle(
+          run,
+          cell,
+          "blocked-on-approval",
+          `The turn waited 10 minutes for an approval nobody gave${asked === undefined ? "." : `: ${asked}`}`,
+        );
+        await code.archiveThread(threadId);
+        return true;
+      }
+    } else {
+      this.#approvalSince.delete(cellId);
+      this.#approvalSeen.delete(cellId);
+    }
+    this.#sighted.add(cellId);
+    if (now - startedMs > (this.#options.turnTimeoutMs ?? BENCHMARK_TURN_TIMEOUT_MS)) {
+      await code.interruptTurn(threadId, submissionId);
+      this.#settle(run, cell, "failed", "timed out");
+      await code.archiveThread(threadId);
+      return true;
+    }
+    return false;
+  }
+
+  /**
+   * Scores a finished Code turn: the answer-text checks on its reply, the file
+   * count from what the host observed, and each command in the cell's worktree
+   * through the confined shell. Results keep the case's own order.
+   */
+  async #codeChecks(
+    cell: BenchmarkCell,
+    benchmarkCase: BenchmarkRun["cases"][number],
+    signal: AbortSignal,
+  ): Promise<ReadonlyArray<BenchmarkCheckResult>> {
+    const { code, checkCommand } = this.#options;
+    const result: BenchmarkCodeResult =
+      code === undefined || cell.threadId === undefined
+        ? { reply: undefined, diff: undefined }
+        : await code.readResult(
+            cell.threadId,
+            benchmarkCellIdentity(String(cell.cellId)).submissionId,
+          );
+    const results: BenchmarkCheckResult[] = [
+      ...(await scoreBenchmarkChecks(
+        benchmarkCase.checks,
+        result.reply ?? "",
+        this.#options.matchPattern,
+      )),
+    ];
+    // One private folder serves the whole sequence and is removed after it,
+    // however it ends: finished, aborted by a stop or a cancel, or failed.
+    let session: BenchmarkCheckSession | undefined;
+    try {
+      for (const [index, check] of benchmarkCase.checks.entries()) {
+        if (!isBenchmarkCodeOnlyCheck(check)) continue;
+        if (check.kind === "max-files-changed") {
+          results.push(benchmarkFilesChangedResult(index, check.count, result.diff?.total));
+          continue;
+        }
+        if (check.kind !== "command-exits-zero") continue;
+        // Once stopped or cancelled, no further command of the sequence starts.
+        if (signal.aborted) {
+          results.push(
+            benchmarkCommandResult(index, {
+              status: "unavailable",
+              message: "The check was cancelled.",
+            }),
+          );
+          continue;
+        }
+        const root =
+          code === undefined || cell.threadId === undefined
+            ? undefined
+            : await code.worktreeRoot(cell.threadId);
+        if (checkCommand === undefined || root === undefined) {
+          results.push(
+            benchmarkCommandResult(index, {
+              status: "unavailable",
+              message:
+                checkCommand === undefined
+                  ? "Check commands cannot run on this host."
+                  : "The cell's worktree is not available.",
+            }),
+          );
+          continue;
+        }
+        if (session === undefined) {
+          try {
+            session = await checkCommand.open();
+          } catch {
+            results.push(
+              benchmarkCommandResult(index, {
+                status: "unavailable",
+                message: "The check's private folder could not be made.",
+              }),
+            );
+            continue;
+          }
+        }
+        results.push(
+          benchmarkCommandResult(
+            index,
+            await session.run({
+              command: check.command,
+              cwd: root,
+              timeoutMs: Math.min(check.timeoutSeconds, BENCHMARK_COMMAND_MAX_SECONDS) * 1_000,
+              signal,
+            }),
+          ),
+        );
+      }
+    } finally {
+      await session?.close().catch(() => undefined);
+    }
+    return results.sort((a, b) => a.index - b.index);
   }
 
   /** Tokens and cost of the cells that settled, and how many of them reported usage. */
@@ -646,7 +1021,18 @@ export class BenchmarkRunner {
       const current = this.#options.projection.run(runId);
       const live = current?.cells.find((candidate) => candidate.cellId === cell.cellId);
       if (current === undefined || live === undefined || live.state !== "running") continue;
-      if (live.threadId !== undefined) {
+      const liveCase = current.cases.find((candidate) => candidate.caseId === live.caseId);
+      if (live.threadId !== undefined && liveCase?.kind === "code") {
+        this.#checking.get(String(live.cellId))?.controller.abort();
+        this.#checking.delete(String(live.cellId));
+        this.#approvalSince.delete(String(live.cellId));
+        this.#approvalSeen.delete(String(live.cellId));
+        await this.#options.code?.interruptTurn(
+          live.threadId,
+          benchmarkCellIdentity(String(live.cellId)).submissionId,
+        );
+        await this.#options.code?.archiveThread(live.threadId);
+      } else if (live.threadId !== undefined) {
         const reading = this.#options.chat.readTurn(
           live.threadId,
           benchmarkCellIdentity(String(live.cellId)).submissionId,

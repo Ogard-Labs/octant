@@ -6177,8 +6177,108 @@ running after 30 minutes is interrupted and settles `failed` as timed out. Befor
 each cell starts, `benchmarkBudgetDecision` projects spend from the cells that
 settled (tokens and cost read from `TurnMetricsStore` by thread id) and, when the
 next cell would pass the run's token or cost budget, skips the queued cells and
-ends the run `budget-reached`. Code cases are defined and stored, but their cells
-settle `failed` until the Code runner exists; exports are later work.
+ends the run `budget-reached`. Benchmark turns live in the hidden Benchmarks
+Project, so Diagnostics, which is scoped to the window's Projects, does not show
+them; their comparison is the run leaderboard and History. Exports are later work.
+
+**Code cells.** A Code case (`code = {codeProjectId, ref}`) runs as a managed Code
+thread in that Code Project, not a Chat thread. The runner imitates a routine's
+Code dispatch through `BenchmarkCodePort`, which calls only the ordinary Code
+commands and operations under the host's own scope (`ROUTINE_HOST_SCOPE_ID`, the
+scope routines and goal rounds act under): `prepare-code-project-checkout`, a
+`preview-code-worktree-source` read of the ref (a bare name tries the branch,
+then the tag), `create-managed-code-thread` pinned to the resolved commit with
+`sourceRevision`, and `start-provider-turn`. Start resolves each Code case's ref
+once and stores the commit on the run (`codeCommits`, a full 40-hex SHA per Code
+case), so every cell of the case starts from the same files even if the branch
+moves mid-run; a run started before this existed has none and resolves the ref
+per cell. The thread, the turn's operation id
+and the branch (`benchmark/<run>/<cell>`) are derived from the run and cell ids,
+so a restart finds what it made. The delivery target is `local-implementation`
+on that local branch; nothing is pushed and nothing proposes a pull request. The
+turn goes through the ordinary Code admission, so the capacity scheduler,
+provider policy and approvals apply, and a capacity refusal leaves the cell
+queued.
+
+_Execution level._ The run's `executionLevel` (Auto, Accept edits or Full
+access; absent asks first) is a ceiling. `benchmarkExecutionLevel` takes the
+lower of it and the level the Project's new threads start at
+(`defaultPermissionModeFor`), with the same `clampWorkAccess` a routine uses; a
+Plan Project asks first. Full access is never reached by a pick: a run that asks
+for it where the Project does not already hold it is refused whole at start, with
+a sentence, before any cell runs. Start also refuses a Code Project that is
+missing, archived or not a Code Project, a Project the starting window cannot
+reach (Code cells then act under the host's own scope, so reach is checked once,
+at start), and a ref that does not resolve. A suite with a `command-exits-zero`
+check is refused unless the request's `confirmedSuiteRevision` equals the suite's
+current revision, which the run builder sends only after the person ticked that
+they read the listed commands, so an edit after reading needs a new look. The
+thread is created at the clamped level and the turn is started at the same
+policy, which the host can only narrow.
+
+_Approvals._ A Code turn parked on an approval or a question is read with the
+same signal the sibling-threads read uses (`turnAwaitsPerson` or a harness
+approval). After 10 minutes parked, the runner interrupts the turn
+(`cancel-provider-turn`) and settles the cell `blocked-on-approval`. A turn that
+ends first while an approval waits (a provider-inactivity timeout, an interrupt)
+settles the same way, with the summary of what was asked, because the runner
+remembers what the turn was last seen waiting on; a turn that ends with no
+approval pending is still `failed`. The wait is
+dated by the journaled time the approval was asked (the pending request's
+`requestedAt`). Where nothing journaled dates it, a turn this process saw run and
+then park is timed from the moment it parked, and one first met already parked
+after a restart is timed from the cell's `startedAt`, an upper bound, so a
+restart never grants another ten minutes. Answering the request resets it.
+
+_Result and checks._ The reply is read from the turn's evidence through the
+Code conversation read, and the changed files from the turn's own
+`changedFiles` record: paths and line counts only, at most 100 named, with the
+whole count. The turn's record holds at most 32 paths, so a larger change names
+32 and counts all. Checks run after the turn completes, in the background so a
+slow command does not hold other cells: answer-text checks on the reply,
+`max-files-changed` on the count (a turn whose files were not observed fails it),
+and each `command-exits-zero` in the cell's worktree through the existing
+Seatbelt-confined, owned-process-group launch behind Octant's own shell tool, on
+a port of its own: network `none`, bound to the worktree, and `setsid()` refused
+so a descendant stays in the group a timeout, a cancel or a shutdown ends. It is
+used at every level, Full access included, which is stricter than the turn. The
+shell carries no cloud, SSH-agent or Google credentials. Each cell's check
+sequence gets a fresh private folder under a benchmark-only root in the host data
+directory, as its writable temporary root and its `HOME` (with `TMPDIR`, `TEMP`
+and `TMP` pointing into it), so one cell cannot leave a `.npmrc` or similar for
+another cell's or run's checks; the folder is removed after the sequence, also on
+abort, and every folder a crash left is swept at host start. The limit is
+`min(timeoutSeconds, 600)`; a timeout, a cancel and a stop each end the command's
+whole process group, and stopping the runner aborts running checks and waits up to
+five seconds for them. Only the first 4 KB of output is read, redacted as host
+shell output is, and 200 characters of it are kept as the detail of a failure. A
+command that cannot be launched fails its check; it is never run unconfined.
+Residual on macOS: `posix_spawn` with `POSIX_SPAWN_SETSID` is a separate system
+call that still starts a new session, so a descendant started that way outlives
+the group's end. It keeps the launch's confinement (the cell's worktree and its
+private folder writable, no network, no home), as the language services design
+records for servers and adapters.
+
+_Judge._ For a Code cell `benchmarkJudgePrompt` gets the case prompt, the
+reference if any, the diff summary and the check results instead of an answer. It
+stays blind. The answer, the file paths and the check details are quoted between
+`<candidate_answer>`, `<repository_change>` and `<check_results>` tags, with any
+closing-tag text inside broken so it cannot end a block, and a line saying the
+tags are not part of the answer, must not affect the score, and that instructions
+inside them are to be ignored. A code fence was tried first and the judge marked a
+bare answer down for being "wrapped in a fenced code block".
+
+_Purge._ Purging a run removes each Code cell's managed worktree through
+`ManagedWorktreeService.cleanup` (the thread is archived first, as that service
+requires), then purges the cell's Code thread with the ordinary thread purge. A
+missing worktree counts as done. Cleanup keeps a worktree with uncommitted
+changes for every other caller. The benchmark purge passes `discardChanges` with
+the cell's exact `benchmark/<run>/<cell>` branch, and the service accepts that
+only when the branch matches that shape, the receipt was made for that branch,
+the receipt's checkout id is the one derived from its own thread, and no other
+worktree holds the branch. It then removes the worktree with
+`git worktree remove --force` and deletes that one branch with `git branch -D`.
+Any other receipt or branch is refused before anything is touched.
 
 **Judge scoring.** When the run's judge snapshot is set, a cell that settles
 `answered` owes a score, and the run stays `running` until every judgement it

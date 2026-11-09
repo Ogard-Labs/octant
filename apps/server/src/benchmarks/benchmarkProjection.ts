@@ -88,8 +88,9 @@ export class BenchmarkProjection implements Projection {
       .sort((left, right) => right.startedAt.localeCompare(left.startedAt));
   }
 
+  /** A run id is a UUID in either case; runs are held and found by the lower-case form. */
   run(runId: string): BenchmarkRun | undefined {
-    return this.#runs.get(runId)?.value;
+    return this.#runs.get(runId.toLowerCase())?.value;
   }
 
   /** Runs still working, oldest first, so an earlier run is served first. */
@@ -115,7 +116,9 @@ export class BenchmarkProjection implements Projection {
   }
 
   #applyRun(event: EventEnvelope): void {
-    const runId = String(event.aggregateId);
+    // A run journaled with an upper-case id is the same run as its lower-case
+    // form, so replay keys on one canonical case; the journal keeps its own.
+    const runId = String(event.aggregateId).toLowerCase();
     const current = this.#runs.get(runId);
     if (current !== undefined && current.version >= event.aggregateVersion) return;
     const version = event.aggregateVersion;

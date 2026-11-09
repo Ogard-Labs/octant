@@ -48,6 +48,7 @@ import {
   type HarnessEgressScope,
 } from "../harness/nativeHarnessComposition";
 import { createNativeHarnessSecondOpinionPort } from "../harness/nativeHarnessSecondOpinion";
+import { createBenchmarkCheckCommands } from "../benchmarks/benchmarkCheckCommand";
 import { createNativeHarnessShell } from "../harness/nativeHarnessShell";
 import { createNativeHarnessRoutingRouteHandler } from "../harness/nativeHarnessRoutingRoutes";
 import {
@@ -1012,6 +1013,15 @@ export function wireHarness(deps: HarnessDependencies) {
     beginGoogleCliChange: googleCliCommands.beginChange,
     recoverGoogleCliCommands: () => googleCliCommands.recover(() => harnessProcessPort.reconcile()),
     credentialCommandProcess: harnessFullAccessProcessPort,
+    // The Seatbelt-confined, network-less launcher for Benchmarks check commands:
+    // a port of its own that refuses setsid(), no cloud, SSH or Google
+    // credentials, and a fresh private home and temp folder per cell.
+    benchmarkCheckCommands: createBenchmarkCheckCommands({
+      root: join(providerDataDirectory, "benchmarks", "checks"),
+      scriptDirectory: harnessScriptDirectory,
+      // The harness receipts, so a restart reaps a group a crash left.
+      receiptDirectory: join(providerDataDirectory, "harness", "receipts"),
+    }),
     prepareCredentialCommand,
     personMemorySweep,
     decisionReviewModelPort,

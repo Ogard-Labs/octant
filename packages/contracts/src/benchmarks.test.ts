@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   MAX_BENCHMARK_CELLS,
   decodeBenchmarkRun,
+  decodeBenchmarkRunStartRequest,
   decodeBenchmarkSuite,
   decodeBenchmarkSuiteSaveRequest,
 } from "./benchmarks";
@@ -99,5 +100,67 @@ describe("benchmark contracts", () => {
 
   it("refuses a run without a budget", () => {
     expect(() => decodeBenchmarkRun({ ...run, budget: {} })).toThrow();
+  });
+
+  describe("pinned commits", () => {
+    const codeCase = {
+      caseId: id(11),
+      kind: "code",
+      title: "Fix",
+      prompt: "Fix it.",
+      checks: [],
+      code: { codeProjectId: id(30), ref: "main" },
+    } as const;
+    const codeRun = { ...run, cases: [codeCase], cells: [cell(1, id(11))] } as const;
+    const commit = "a".repeat(40);
+
+    it("keeps the commit each Code case was pinned to, and decodes an old run without any", () => {
+      const pinned = { ...codeRun, codeCommits: [{ caseId: id(11), commit }] };
+      expect(decodeBenchmarkRun(pinned)).toEqual(pinned);
+      expect(decodeBenchmarkRun(codeRun).codeCommits).toBeUndefined();
+    });
+
+    it.each([
+      ["a short hash", [{ caseId: id(11), commit: "abc123" }]],
+      ["capital letters", [{ caseId: id(11), commit: "A".repeat(40) }]],
+      ["a prompt case", [{ caseId: id(10), commit }]],
+      [
+        "the same case twice",
+        [
+          { caseId: id(11), commit },
+          { caseId: id(11), commit },
+        ],
+      ],
+    ])("refuses %s", (_label, codeCommits) => {
+      const source =
+        _label === "a prompt case"
+          ? { ...codeRun, cases: [promptCase, codeCase], cells: [cell(1, id(10)), cell(2, id(11))] }
+          : codeRun;
+      expect(() => decodeBenchmarkRun({ ...source, codeCommits })).toThrow();
+    });
+  });
+
+  describe("the start request's command confirmation", () => {
+    const start = {
+      runId: id(2),
+      suiteId: id(1),
+      contenders: [contender],
+      repetitions: 1,
+      budget: { maxTokens: 10_000 },
+    } as const;
+
+    it("carries the suite revision the person read, and stays optional", () => {
+      expect(decodeBenchmarkRunStartRequest(start).confirmedSuiteRevision).toBeUndefined();
+      expect(
+        decodeBenchmarkRunStartRequest({ ...start, confirmedSuiteRevision: 3 })
+          .confirmedSuiteRevision,
+      ).toBe(3);
+    });
+
+    it.each([0, -1, 1.5, "2", true])("refuses %s as a revision", (value) => {
+      expect(() =>
+        decodeBenchmarkRunStartRequest({ ...start, confirmedSuiteRevision: value }),
+      ).toThrow();
+    });
   });
 });

@@ -102,6 +102,7 @@ import { wireWorkFiles } from "./wiring/workFiles";
 import { wireProviderCloudSessions } from "./wiring/providerCloudSessions";
 import { wireCanvas } from "./wiring/canvas";
 import { wireAutomation } from "./wiring/automation";
+import { ROUTINE_HOST_SCOPE_ID } from "./routineHostScope";
 import { wireBenchmarks, type BenchmarkThreadPurgeSlot } from "./wiring/benchmarks";
 import { integrationEventSources } from "./integration/integrationEventSources";
 import { wireThreadNotifications } from "./wiring/notifications";
@@ -521,6 +522,7 @@ export function startOctantServer(
       effectiveSkills,
       pinnedExtensionIds,
       reviewedModelManifest,
+      managedWorktreeService,
       skillDiscoveryService,
     } = yield* wireProviders({
       serverRegistry,
@@ -555,6 +557,7 @@ export function startOctantServer(
       beginGoogleCliChange,
       recoverGoogleCliCommands,
       credentialCommandProcess,
+      benchmarkCheckCommands,
       prepareCredentialCommand,
       personMemorySweep,
       decisionReviewModelPort,
@@ -1233,6 +1236,30 @@ export function startOctantServer(
     });
     const benchmarkThreadPurge: BenchmarkThreadPurgeSlot = {};
     const { benchmarkRoutes, benchmarkRunner } = wireBenchmarks({
+      canAccessCodeProject,
+      awaitsPerson: (threadId) =>
+        codeOperationRuntime?.turnAwaitsPerson?.(threadId) === true ||
+        threadAwaitsHarnessApproval(threadId),
+      // The oldest approval or question the thread's turn waits on: when it was
+      // asked, from the journal, so a restart keeps counting from then, and what
+      // it asks, for a cell that ends blocked.
+      pendingApproval: async (threadId) => {
+        const pending = await codeOperationRuntime?.pendingRequests?.(ROUTINE_HOST_SCOPE_ID);
+        const oldest = (pending ?? [])
+          .filter((request) => String(request.threadId) === threadId)
+          .sort((left, right) =>
+            String(left.requestedAt).localeCompare(String(right.requestedAt)),
+          )[0];
+        return oldest === undefined
+          ? undefined
+          : { since: String(oldest.requestedAt), summary: oldest.text };
+      },
+      codeEvidence,
+      benchmarkCheckCommands,
+      managedWorktreeReceipts,
+      managedWorktreeService,
+      roots,
+      routeCodeService,
       chatService,
       personMemory,
       persistence,
@@ -1740,12 +1767,12 @@ export function startOctantServer(
       workTurnService,
       agentRunAdmission,
     });
-    benchmarkThreadPurge.purge = async (threadId) => {
+    benchmarkThreadPurge.purge = async (threadId, mode) => {
       const outcome = await threadRetention.purge(
         {
           scope: {
             kind: "thread",
-            mode: "chat",
+            mode,
             threadId: decodeThreadRetentionThreadId(threadId),
           },
           confirm: true,
@@ -1765,7 +1792,7 @@ export function startOctantServer(
     // runtime alive on its idle lease with nothing left to close it.
     let warmingProviders: Promise<void> = Promise.resolve();
     let stopArtifactSync: () => void = () => undefined;
-    let stopBenchmarkRunner: () => void = () => undefined;
+    let stopBenchmarkRunner: () => Promise<void> = () => Promise.resolve();
     let stopPublicShareSweep: () => void = () => undefined;
     return yield* Effect.acquireRelease(
       Effect.tryPromise({
@@ -1976,7 +2003,12 @@ export function startOctantServer(
           } catch (error) {
             shutdownFailure ??= error;
           }
-          stopBenchmarkRunner();
+          // Aborts any check command still running, which ends its process group.
+          try {
+            await stopBenchmarkRunner();
+          } catch (error) {
+            shutdownFailure ??= error;
+          }
           completedThreadArchiveSweep.stop();
           idleCompactions.stop();
           personMemorySweep.stop();
