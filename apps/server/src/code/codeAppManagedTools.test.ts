@@ -1,3 +1,4 @@
+import { browserAgentAvailability } from "@octant/domain";
 import type { BrowserModelBinding } from "../browser/browserAppManagedTools";
 import type {
   BrowserAutomationSnapshot,
@@ -3287,8 +3288,14 @@ describe("Code tool families", () => {
       terminal: { read: vi.fn() },
     });
 
-    expect(tools.definitions.map((definition) => definition.name)).not.toContain(
-      CODE_BROWSER_TOOL_NAME,
+    const reported = browserAgentAvailability({
+      toolTransport: true,
+      hostLendsBrowser: false,
+      readOnly: false,
+    });
+    expect(reported).toEqual({ status: "omitted", reason: "host-lends-no-browser" });
+    expect(tools.definitions.some((definition) => definition.name === CODE_BROWSER_TOOL_NAME)).toBe(
+      reported.status === "available",
     );
     const outcome = await tools.execute({
       name: CODE_BROWSER_TOOL_NAME,
