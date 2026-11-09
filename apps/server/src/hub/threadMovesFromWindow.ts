@@ -28,6 +28,7 @@ import {
   type ShutdownStartRequest,
   type ShutdownThreadRow,
   type ThreadMoveChallengeOutcome,
+  type ThreadMoveDeparture,
   type ThreadMoveDestination,
   type ThreadMoveDestinations,
   type ThreadMoveFailureReason,
@@ -42,7 +43,7 @@ import {
   type ThreadMoveThreadStatus,
   type UtcTimestamp,
 } from "@octant/contracts";
-import { mayActivateAnyway, shutdownListing } from "@octant/domain";
+import { mayActivateAnyway, rosterMemberWebOrigin, shutdownListing } from "@octant/domain";
 import type { ThreadMoveTicketClient } from "./threadMoveTicketClient";
 import {
   THREAD_MOVE_CHUNK_BYTES,
@@ -1008,9 +1009,9 @@ export class ThreadMovesFromWindow {
   /** Where one thread stands, for its Environment tool, its bar, and its notice. */
   status(thread: MovedThreadReference): ThreadMoveThreadStatus {
     const state = this.#options.state.load();
-    const nameOf = (memberId: string) =>
-      this.#options.members().find((member) => String(member.memberId) === memberId)?.name ??
-      "another computer";
+    const memberOf = (memberId: string) =>
+      this.#options.members().find((member) => String(member.memberId) === memberId);
+    const nameOf = (memberId: string) => memberOf(memberId)?.name ?? "another computer";
     const sent = state.sent.find((move) => same(move.thread, thread));
     const received = state.received.find(
       (move) => move.state === "arrived" && move.thread !== undefined && same(move.thread, thread),
@@ -1086,10 +1087,7 @@ export class ThreadMovesFromWindow {
       ...(departure === undefined
         ? {}
         : {
-            departed: {
-              ...departure,
-              destinationName: nameOf(String(departure.destinationMemberId)),
-            },
+            departed: departedView(departure, memberOf(String(departure.destinationMemberId))),
           }),
     };
     return status;
@@ -1129,6 +1127,23 @@ function refuse(
 
 function key(thread: MovedThreadReference): string {
   return `${thread.mode}:${thread.threadId}`;
+}
+
+/**
+ * A departure as its tombstone reads it: the destination's name and web app
+ * come from its entry in the roster this host holds now, so a member that
+ * left the hub is "another computer" with nowhere to open the thread.
+ */
+function departedView(
+  departure: ThreadMoveDeparture,
+  destination: RosterMember | undefined,
+): NonNullable<ThreadMoveThreadStatus["departed"]> {
+  const webOrigin = destination === undefined ? undefined : rosterMemberWebOrigin(destination);
+  return {
+    ...departure,
+    destinationName: destination?.name ?? "another computer",
+    ...(webOrigin === undefined ? {} : { destinationWebOrigin: webOrigin }),
+  };
 }
 
 function same(left: MovedThreadReference, right: MovedThreadReference): boolean {

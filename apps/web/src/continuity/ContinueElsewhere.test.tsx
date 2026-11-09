@@ -7,7 +7,7 @@ import {
   decodeProviderModel,
   decodeProviderModelId,
 } from "@octant/contracts";
-import type { PickerGroup } from "@octant/domain";
+import { memberThreadPage, type PickerGroup } from "@octant/domain";
 import { ContinueElsewhere, ContinuityScreenContext } from "./ContinueElsewhere";
 import { continuationLink, readContinuationLink } from "./continuationLink";
 import { useContinuationInputPolicy } from "./useContinuationInputPolicy";
@@ -132,5 +132,12 @@ describe("continuing the same task elsewhere", () => {
     expect(
       readContinuationLink("https://host.example/?continueMode=code&continueThread=/private/file"),
     ).toBeUndefined();
+  });
+  it("opens a moved thread's page on the member it moved to as that member's screen reads a continue link", () => {
+    for (const mode of ["chat", "work", "code"] as const) {
+      const page = memberThreadPage("https://studio.tail1234.ts.net:8443", { mode, threadId: id });
+      expect(page).toBe(continuationLink("https://studio.tail1234.ts.net:8443", mode, id));
+      expect(readContinuationLink(String(page))).toEqual({ mode, threadId: id });
+    }
   });
 });

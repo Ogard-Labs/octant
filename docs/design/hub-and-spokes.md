@@ -1439,12 +1439,43 @@ remove. The thread's local branch and every remote stay. It journals
 `thread.moved-out-worktree-removed@1` on the move and records the removal on
 the departure; a second press answers `removed` without removing or journaling
 again, and a folder already gone counts as removed. No agent, routine, tool,
-peer, or paired device reaches it. **Open there** copies the moved thread's
-link in the form an Octant phone opens
+peer, or paired device reaches it.
+
+**Open there** opens the moved thread on the destination's own web app, in
+the person's default browser, not in this window. The page is the
+destination's web app origin, as its signed roster entry names it (H15:
+`https://`, its first `.ts.net` name, and its listener port), with the
+continue link that member's paired-browser screen reads at load
+(`?continueMode={mode}&continueThread={thread}`), which opens a Chat, Work,
+or Code thread by its id with no Project. That page admits the browser the
+way it already would there (a guest, an owner's passkey) or asks it to pair,
+so this computer grants nothing and the destination judges every action as
+it does for any browser. The status route reports the destination's web
+origin beside its name, read from the roster this host holds when asked, so
+a member that left the hub or lists no Tailscale name has none. The window
+names only the thread to a desktop channel (`thread-move:open-there`); the
+desktop main process asks the host for that thread's status with the
+window's own capability (a window that does not show the thread is refused
+as for every departure route), builds the page from the reported origin and
+destination thread, refuses anything but https on a `.ts.net` name with no
+path, query, or credentials of its own, and hands it to the default browser
+through its validated open-external path. No departure records a
+destination Project, because the page needs none. When there is no web
+origin, the window has no such channel, or the desktop refuses, Open there
+copies the moved thread's link in the form an Octant phone opens
 (`octant://hosts/{member}/threads/{mode}/{thread}`; a member is named by its
-host id). Rationale: no window path yet opens another computer's thread from
-what a departure records, which names no destination Project, so opening it in
-this window when the window already reads that host is not built yet.
+host id), and the line under it says this window can't open threads on that
+member and that the Octant phone app opens the link. Rationale (checked
+2026-11-09): no window shows a thread another member holds in place. A
+pane's content always comes from the window's own host, whose context is
+always this computer; a pane's host id only marks a thread as elsewhere and
+refuses it, and the federated paired computers a desktop window reads carry
+Running services and resources, not threads. Handing the `octant://` link to
+the system does not help either: the desktop app registers the scheme, but
+its handler takes only `octant://code/` links and ignores every other one.
+The destination's own page is the one existing view of its threads, so Open
+there uses it; a view of another member's thread inside this window is not
+built.
 
 **Interruptions.**
 
@@ -2742,9 +2773,13 @@ a numbered slice. Built, with these narrower readings:
     [Erase on the source](#moving-a-thread-to-another-member) describes.
     The shell opens a departed thread's pane again after it closed, so an old
     link, a notification, or a search reaches the tombstone. A remote client,
-    or a window reading another host, shows neither. What it
-    does not do yet: Open there opening the thread in this window, and the
-    estimate in the bar.
+    or a window reading another host, shows neither. Open there opens the
+    thread on the destination's own web app in the default browser, and
+    copies its link when the destination serves no web app, as
+    [the tombstone rules](#moving-a-thread-to-another-member) record. What it
+    does not do yet: Open there opening the thread inside this window, which
+    waits on a window view of another member's thread, and the estimate in
+    the bar.
 
     The eleventh part lets an owner phone unlock a move a window started, as
     [Confirming on a phone](#moving-a-thread-to-another-member) describes.

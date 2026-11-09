@@ -628,9 +628,16 @@ export const ThreadMoveThreadStatus = Schema.Struct({
   handedOver: Schema.optional(HandedOverThread),
   /** The thread moved away and was erased here: its "Moved to" tombstone. */
   departed: Schema.optional(
-    Schema.Struct({ ...ThreadMoveDeparture.fields, destinationName: bounded(256) }).annotations(
-      strict,
-    ),
+    Schema.Struct({
+      ...ThreadMoveDeparture.fields,
+      destinationName: bounded(256),
+      /**
+       * The destination's own web app, read from its entry in the roster this
+       * host holds when asked; absent when the roster no longer lists it or it
+       * serves no web app. Open there opens the moved thread on it.
+       */
+      destinationWebOrigin: Schema.optional(bounded(512)),
+    }).annotations(strict),
   ),
 }).annotations(strict);
 export type ThreadMoveThreadStatus = typeof ThreadMoveThreadStatus.Type;
