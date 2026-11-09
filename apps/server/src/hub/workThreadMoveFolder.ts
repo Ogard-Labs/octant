@@ -437,6 +437,28 @@ export interface CapturedWorkFolder {
   readonly left: ReadonlyArray<string>;
 }
 
+async function writeAllBytes(
+  handle: FileHandle,
+  bytes: Uint8Array,
+  position?: number,
+): Promise<void> {
+  let written = 0;
+  while (written < bytes.byteLength) {
+    const { bytesWritten } = await handle.write(
+      bytes,
+      written,
+      bytes.byteLength - written,
+      position === undefined ? null : position + written,
+    );
+    // A successful write can still be short. A stalled write must not turn
+    // into an acknowledged move whose source can then be erased.
+    if (bytesWritten <= 0 || bytesWritten > bytes.byteLength - written) {
+      throw new Error("A moved file write made no valid progress.");
+    }
+    written += bytesWritten;
+  }
+}
+
 /**
  * Writes every file that travels into one part at `partPath`, back to back
  * in list order, and lists each with the size and digest of exactly the bytes
@@ -486,7 +508,7 @@ export async function captureWorkFolderForMove(input: {
           }
           part ??= await open(input.partPath, "w", 0o600);
           hash.update(content);
-          await part.write(content, 0, content.byteLength, offset);
+          await writeAllBytes(part, content, offset);
           bytes = content.byteLength;
         } else {
           part ??= await open(input.partPath, "w", 0o600);
@@ -496,7 +518,7 @@ export async function captureWorkFolderForMove(input: {
             if (bytesRead === 0) break;
             const chunk = buffer.subarray(0, bytesRead);
             hash.update(chunk);
-            await part.write(chunk, 0, bytesRead, offset + bytes);
+            await writeAllBytes(part, chunk, offset + bytes);
             bytes += bytesRead;
           }
         }
@@ -718,10 +740,12 @@ async function writeLandedFiles(
           if (bytesRead === 0) throw new Error("The files part ended early.");
           const chunk = buffer.subarray(0, bytesRead);
           hash.update(chunk);
-          await out.write(chunk);
+          await writeAllBytes(out, chunk);
           offset += bytesRead;
           remaining -= bytesRead;
         }
+        if ((await out.stat()).size !== file.bytes)
+          throw new Error("A moved file write is incomplete.");
         // Exactly its bits, which the umask may have narrowed on open.
         await out.chmod(file.mode);
       } finally {

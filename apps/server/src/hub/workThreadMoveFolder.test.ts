@@ -12,10 +12,12 @@ import {
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
+import { open } from "node:fs/promises";
 import { join } from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { decodeThreadWorkingDirectory } from "@octant/contracts";
 import { Schema } from "effect";
+import { SECRET_SCAN_LIMIT_BYTES } from "./codeThreadMoveGit";
 import {
   captureWorkFolderForMove,
   landWorkFolderFromMove,
@@ -28,13 +30,116 @@ import {
   type PackedFileIdentity,
 } from "./workThreadMoveFolder";
 
+vi.mock("node:fs/promises", async (original) => {
+  const fs = await original<typeof import("node:fs/promises")>();
+  return { ...fs, open: vi.fn(fs.open) };
+});
+
 const main = { kind: "main", root: "/Users/person/Offsite" } as const;
 const report = decodeThreadWorkingDirectory("report");
 const MOVE = "99999999-9999-4999-8999-999999999999";
 
 const parents: string[] = [];
-afterEach(() => {
+afterEach(async () => {
+  vi.restoreAllMocks();
+  const fs = await vi.importActual<typeof import("node:fs/promises")>("node:fs/promises");
+  vi.mocked(open).mockImplementation(fs.open);
   for (const parent of parents.splice(0)) rmSync(parent, { recursive: true, force: true });
+});
+
+describe("moving files when the filesystem only writes part of a buffer", () => {
+  it.each(["small", "streamed", "landing"] as const)(
+    "keeps every byte before clearing the source after a partial %s write",
+    async (stage) => {
+      const { open: realOpen } =
+        await vi.importActual<typeof import("node:fs/promises")>("node:fs/promises");
+      const content =
+        stage === "streamed"
+          ? "x".repeat(SECRET_SCAN_LIMIT_BYTES + 1)
+          : "A document that must arrive with every byte intact.";
+      const { parent, folder } = travelledFolder({ "document.txt": content });
+      const destination = join(parent, "destination");
+      mkdirSync(destination);
+      const partPath = join(parent, "files.part");
+      vi.mocked(open).mockImplementation(async (...args) => {
+        const handle = await realOpen(...args);
+        if (args[1] === (stage === "landing" ? "wx" : "w")) {
+          const write = handle.write.bind(handle);
+          vi.spyOn(handle, "write").mockImplementationOnce(() => write(content.slice(0, 7)));
+        }
+        return handle;
+      });
+      const captured = await captureWorkFolderForMove({
+        folder,
+        workingDirectory: report,
+        partId: "work-files",
+        partPath,
+      });
+      const landed = await landWorkFolderFromMove({
+        root: destination,
+        index: captured.index,
+        partPath,
+        moveId: MOVE,
+      });
+      expect(landed).toEqual({ status: "landed", workingDirectory: report });
+      expect(readFileSync(join(destination, "report", "document.txt"), "utf8")).toBe(content);
+      expect(
+        await settleMovedWorkFolder({
+          folder,
+          index: captured.index,
+          identities: captured.identities,
+          moveId: MOVE,
+        }),
+      ).toEqual({ status: "removed" });
+      expect(existsSync(folder)).toBe(false);
+      vi.mocked(open).mockImplementation(realOpen);
+    },
+  );
+
+  it.each([
+    ["packing", "stalls"],
+    ["landing", "stalls"],
+    ["packing", "fails"],
+    ["landing", "fails"],
+  ] as const)("keeps the original when a %s write %s", async (stage, failure) => {
+    const { open: realOpen } =
+      await vi.importActual<typeof import("node:fs/promises")>("node:fs/promises");
+    const content = "A document that must not be lost.";
+    const { parent, folder } = travelledFolder({ "document.txt": content });
+    const destination = join(parent, "destination");
+    mkdirSync(destination);
+    const partPath = join(parent, "files.part");
+    vi.mocked(open).mockImplementation(async (...args) => {
+      const handle = await realOpen(...args);
+      if (args[1] === (stage === "packing" ? "w" : "wx")) {
+        const write = vi.spyOn(handle, "write");
+        if (failure === "fails") write.mockRejectedValueOnce(new Error("Filesystem write failed."));
+        else write.mockResolvedValueOnce({ bytesWritten: 0, buffer: "" });
+      }
+      return handle;
+    });
+    const captured = await captureWorkFolderForMove({
+      folder,
+      workingDirectory: report,
+      partId: "work-files",
+      partPath,
+    });
+    if (stage === "packing") {
+      expect(captured.index.files).toEqual([]);
+      expect(captured.left).toEqual(["document.txt"]);
+    } else {
+      expect(
+        await landWorkFolderFromMove({
+          root: destination,
+          index: captured.index,
+          partPath,
+          moveId: MOVE,
+        }),
+      ).toEqual({ status: "refused" });
+    }
+    expect(readFileSync(join(folder, "document.txt"), "utf8")).toBe(content);
+    vi.mocked(open).mockImplementation(realOpen);
+  });
 });
 
 /** Each travelled folder's file identities as packed, the way the source keeps them. */
