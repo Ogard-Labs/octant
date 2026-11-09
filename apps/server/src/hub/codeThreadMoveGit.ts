@@ -17,8 +17,8 @@ import { promisify } from "node:util";
 import { redactSecrets } from "@octant/domain";
 
 const run = promisify(execFile);
-/** A changed file larger than this is not read for secrets; it travels as it is. */
-const SECRET_SCAN_LIMIT_BYTES = 2 * 1024 * 1024;
+/** A file a move carries that is larger than this is not read for secrets; it travels as it is. */
+export const SECRET_SCAN_LIMIT_BYTES = 2 * 1024 * 1024;
 const GIT_MAX_BUFFER = 64 * 1024 * 1024;
 
 async function git(

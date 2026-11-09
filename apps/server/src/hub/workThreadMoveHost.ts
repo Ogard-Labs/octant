@@ -1,8 +1,10 @@
 // The Work side of a thread move, on both computers. A Work thread moves its
-// conversation and its bulk parts, not its folder: the files the thread worked
-// on stay where they are, and the destination opens the thread in a Work
-// Project the person picked there. The conversation travels as a moved
-// transcript the new thread's first turn carries once.
+// conversation, its bulk parts, and the files of the folder it works in when
+// that folder is its own (workThreadMoveFolder.ts says which folder that is
+// and what in it stays). The destination opens the thread in a Work Project
+// the person picked there, working in the folder its files landed in. The
+// conversation travels as a moved transcript the new thread's first turn
+// carries once.
 //
 // A Work thread a peer delegated to this host belongs to that delegation and
 // never moves.
@@ -14,6 +16,7 @@ import {
   ProviderModelId,
   WorkThreadId,
   type MovedThreadReference,
+  type ThreadWorkingDirectory,
 } from "@octant/contracts";
 import { Schema } from "effect";
 import {
@@ -25,10 +28,19 @@ import {
 } from "./movedThreadParts";
 import type { ThreadMoveHolds } from "./threadMoveHolds";
 import type {
+  ErasedThread,
   PackedPart,
   ThreadMoveDestinationHost,
   ThreadMoveSourceHost,
 } from "./threadMoveService";
+import {
+  captureWorkFolderForMove,
+  landWorkFolderFromMove,
+  measureWorkFolderForMove,
+  MovedWorkFolder,
+  settleMovedWorkFolder,
+  type WorkThreadFolder,
+} from "./workThreadMoveFolder";
 
 export const MOVED_WORK_THREAD_FORMAT = "octant.thread-move.work/1" as const;
 
@@ -42,11 +54,38 @@ const MovedWorkThread = Schema.Struct({
   externalContentIngested: Schema.Boolean,
   entries: Schema.Array(MovedHistoryEntry).pipe(Schema.maxItems(10_000)),
   parts: Schema.optional(MovedThreadParts),
+  /** The files of the thread's own folder; absent when its folder stays where it is. */
+  folder: Schema.optional(MovedWorkFolder),
 }).annotations(strict);
 type MovedWorkThread = typeof MovedWorkThread.Type;
 
 const decodeMovedWorkThread = Schema.decodeUnknownSync(MovedWorkThread);
 const decodeWorkThreadId = Schema.decodeUnknownSync(WorkThreadId);
+
+/**
+ * What the source keeps beside a move's parts and never sends: the folder the
+ * files came from and what travelled, so the erase can compare the folder
+ * with it, and what that erase decided, so an erase run again after a stop
+ * reports the same and removes nothing twice.
+ */
+const WorkFolderOnSource = Schema.Struct({
+  folder: Schema.NonEmptyString,
+  index: MovedWorkFolder,
+  settled: Schema.optional(
+    Schema.Union(
+      Schema.Struct({ status: Schema.Literal("removed") }).annotations(strict),
+      Schema.Struct({
+        status: Schema.Literal("kept"),
+        keptFiles: Schema.Array(Schema.String),
+      }).annotations(strict),
+    ),
+  ),
+}).annotations(strict);
+type WorkFolderOnSource = typeof WorkFolderOnSource.Type;
+const encodeWorkFolderOnSource = Schema.encodeSync(WorkFolderOnSource);
+const decodeWorkFolderOnSource = Schema.decodeUnknownSync(WorkFolderOnSource);
+const WORK_FOLDER_ON_SOURCE = "work-folder.json";
+const WORK_FILES_PART = "work-files";
 
 /** A Work thread as far as a move reads it. */
 export interface MovableWorkThread {
@@ -61,11 +100,17 @@ export interface WorkThreadMoveHostOptions {
   readonly isBusy: (threadId: WorkThreadId) => boolean;
   /** Whether a peer delegated the thread to this host. */
   readonly isDelegated: (threadId: WorkThreadId) => boolean;
+  /** Whether the thread is the only user of the folder it works in, judged now. */
+  readonly ownFolder: (threadId: WorkThreadId) => WorkThreadFolder;
+  /** Where this host keeps a move's parts: the folder `pack` is given. */
+  readonly partsDirectory: (moveId: string) => string;
   readonly providerDriverKind: (providerInstanceId: string) => string | undefined;
   readonly transcript: (threadId: WorkThreadId) => Promise<ReadonlyArray<MovedHistoryEntry>>;
   readonly externalContentIngested: (threadId: string) => boolean;
   readonly purge: (threadId: WorkThreadId) => Promise<void>;
   readonly activeWorkProject: (projectId: string) => boolean;
+  /** The main folder of an active Work Project here, where moved files land. */
+  readonly landingRoot: (projectId: string) => string | undefined;
   readonly resolveProvider: (
     driverKind: string,
     modelId: string,
@@ -76,6 +121,8 @@ export interface WorkThreadMoveHostOptions {
     readonly projectId: string;
     readonly title: string;
     readonly provider: { readonly providerInstanceId: string; readonly modelId: string };
+    /** Where the moved files landed, under the Project's main folder; absent for the folder itself. */
+    readonly workingDirectory?: ThreadWorkingDirectory;
     /** Set when the source thread had read outside content; the new thread starts marked too. */
     readonly inheritedMark?: { readonly sourceLabel: string; readonly contentReference: string };
   }) => Promise<void>;
@@ -108,7 +155,7 @@ export function createWorkThreadMoveHost(options: WorkThreadMoveHostOptions): {
     return id === undefined ? undefined : options.readThread(id);
   };
 
-  /** The thread as its part carries it; undefined when it cannot move. */
+  /** The thread as its part carries it, short of its files; undefined when it cannot move. */
   const movedOf = async (thread: MovedThreadReference): Promise<MovedWorkThread | undefined> => {
     const id = idOf(thread);
     const work = id === undefined ? undefined : options.readThread(id);
@@ -123,6 +170,41 @@ export function createWorkThreadMoveHost(options: WorkThreadMoveHostOptions): {
       externalContentIngested: options.externalContentIngested(thread.threadId),
       entries: await options.transcript(id),
     };
+  };
+
+  /**
+   * Removes the folder the files came from when it still holds exactly what
+   * travelled, or keeps it and lists what it holds that did not. A folder
+   * another thread has started working in since the move packed is kept
+   * as it is. Nothing is reported when no folder travelled.
+   */
+  const settleFolder = async (
+    id: WorkThreadId,
+    moveId: string,
+  ): Promise<Pick<ErasedThread, "keptFolder" | "keptFiles">> => {
+    const path = join(options.partsDirectory(moveId), WORK_FOLDER_ON_SOURCE);
+    let onSource: WorkFolderOnSource;
+    try {
+      onSource = decodeWorkFolderOnSource(JSON.parse(await readFile(path, "utf8")));
+    } catch {
+      return {};
+    }
+    let settled = onSource.settled;
+    if (settled === undefined) {
+      const own = options.ownFolder(id);
+      settled =
+        own.status === "own" && own.folder === onSource.folder
+          ? await settleMovedWorkFolder({ folder: onSource.folder, index: onSource.index }).catch(
+              () => ({ status: "kept" as const, keptFiles: [] }),
+            )
+          : { status: "kept", keptFiles: [] };
+      await writeFile(path, JSON.stringify(encodeWorkFolderOnSource({ ...onSource, settled })), {
+        mode: 0o600,
+      });
+    }
+    return settled.status === "kept"
+      ? { keptFolder: onSource.folder, keptFiles: settled.keptFiles }
+      : {};
   };
 
   const source: ThreadMoveSourceHost = {
@@ -143,33 +225,86 @@ export function createWorkThreadMoveHost(options: WorkThreadMoveHostOptions): {
     isFrozen: (thread) => options.holds.isHeld(thread),
     measure: async (thread) => {
       const moved = await movedOf(thread);
-      if (moved === undefined) return { status: "unknown" };
-      // The very text pack writes, so the size is exact.
+      const id = idOf(thread);
+      if (moved === undefined || id === undefined) return { status: "unknown" };
+      // The very text pack writes, short of the folder's file list, so the
+      // size is exact for a thread whose folder stays.
       const bytes = Buffer.byteLength(JSON.stringify(moved));
-      return { status: "measured", bytes, parts: [{ kind: "thread-bundle", bytes }] };
+      const own = options.ownFolder(id);
+      if (own.status !== "own") {
+        return { status: "measured", bytes, parts: [{ kind: "thread-bundle", bytes }] };
+      }
+      let files: number;
+      try {
+        files = await measureWorkFolderForMove(own.folder);
+      } catch {
+        return { status: "unknown" };
+      }
+      return {
+        status: "measured",
+        bytes: bytes + files,
+        parts: [
+          { kind: "thread-bundle", bytes },
+          { kind: "work-files", bytes: files },
+        ],
+      };
     },
     pack: async (thread, folder) => {
       const conversation = await movedOf(thread);
-      if (conversation === undefined) return { status: "refused", reason: "refused" };
+      const id = idOf(thread);
+      if (conversation === undefined || id === undefined) {
+        return { status: "refused", reason: "refused" };
+      }
       const bulk = await packThreadParts(thread, folder, options.parts.source);
+      const own = options.ownFolder(id);
+      let files: MovedWorkFolder | undefined;
+      const filesParts: PackedPart[] = [];
+      if (own.status === "own") {
+        const partPath = join(folder, `${WORK_FILES_PART}.part`);
+        try {
+          files = (
+            await captureWorkFolderForMove({
+              folder: own.folder,
+              workingDirectory: own.workingDirectory,
+              partId: WORK_FILES_PART,
+              partPath,
+            })
+          ).index;
+        } catch {
+          return { status: "refused", reason: "transfer-failed" };
+        }
+        if (files.partId !== undefined) {
+          filesParts.push({ partId: files.partId, kind: "work-files", path: partPath });
+        }
+        // Kept here before anything is sent, so the erase always finds it.
+        await writeFile(
+          join(folder, WORK_FOLDER_ON_SOURCE),
+          JSON.stringify(encodeWorkFolderOnSource({ folder: own.folder, index: files })),
+          { mode: 0o600 },
+        );
+      }
       const moved: MovedWorkThread = {
         ...conversation,
         ...(bulk.index === undefined ? {} : { parts: bulk.index }),
+        ...(files === undefined ? {} : { folder: files }),
       };
       const path = join(folder, "thread.json");
       await writeFile(path, JSON.stringify(moved), { mode: 0o600 });
       const part: PackedPart = { partId: "thread", kind: "thread-bundle", path };
       return {
         status: "packed",
-        parts: [part, ...bulk.parts],
+        parts: [part, ...filesParts, ...bulk.parts],
         ...(bulk.partsLeftBehind.length === 0 ? {} : { partsLeftBehind: bulk.partsLeftBehind }),
       };
     },
-    erase: async ({ thread }) => {
+    erase: async ({ thread, moveId }) => {
       const id = idOf(thread);
-      if (id !== undefined) await options.purge(id);
-      // A Work thread owns no worktree; its folder is the person's.
-      return { worktreeKept: false };
+      if (id === undefined) return { worktreeKept: false };
+      // Settled before the purge, because judging the folder reads the thread.
+      const kept = await settleFolder(id, String(moveId));
+      await options.purge(id);
+      // A Work thread owns no managed worktree; a kept folder is its own record.
+      return { worktreeKept: false, ...kept };
     },
   };
 
@@ -214,9 +349,10 @@ export function createWorkThreadMoveHost(options: WorkThreadMoveHostOptions): {
           : ({ status: "refused", reason: "transfer-failed" } as const);
       // A thread already opened under the planned id was opened by an earlier
       // try that stopped before it was recorded: hold it and open no second.
-      // That try may have stopped before the history was kept or every part
-      // re-homed, so they are now (a second import keeps the first), before
-      // the source is told it arrived and erases the only other copy.
+      // That try landed the files before opening the thread, and may have
+      // stopped before the history was kept or every part re-homed, so they
+      // are now (a second import keeps the first), before the source is told
+      // it arrived and erases the only other copy.
       if (workThreadOf(planned) !== undefined) {
         options.holds.hold(planned);
         options.journalHistory(history);
@@ -227,6 +363,32 @@ export function createWorkThreadMoveHost(options: WorkThreadMoveHostOptions): {
       }
       const provider = options.resolveProvider(moved.providerDriverKind, String(moved.modelId));
       if (provider === undefined) return { status: "refused", reason: "no-matching-provider" };
+      let workingDirectory: ThreadWorkingDirectory | undefined;
+      if (moved.folder !== undefined) {
+        const filesPartId = moved.folder.partId;
+        const filesPart =
+          filesPartId === undefined
+            ? undefined
+            : offer.manifest.parts.find(
+                (part) => part.partId === filesPartId && part.kind === "work-files",
+              );
+        const root = options.landingRoot(String(offer.destinationProjectId));
+        if (root === undefined) return { status: "refused", reason: "no-eligible-project" };
+        if (filesPartId !== undefined && filesPart === undefined) {
+          return { status: "refused", reason: "transfer-failed" };
+        }
+        // Landed before the thread opens: a retry that finds the thread
+        // knows its files are in place, and one that does not finds this
+        // landing and uses it rather than landing a second copy.
+        const landed = await landWorkFolderFromMove({
+          root,
+          index: moved.folder,
+          partPath: filesPart === undefined ? undefined : parts.get(filesPart.partId),
+          moveId: String(offer.moveId),
+        }).catch(() => ({ status: "refused" as const }));
+        if (landed.status === "refused") return { status: "refused", reason: "transfer-failed" };
+        workingDirectory = landed.workingDirectory;
+      }
       options.holds.hold(planned);
       try {
         await options.createThread({
@@ -234,6 +396,7 @@ export function createWorkThreadMoveHost(options: WorkThreadMoveHostOptions): {
           projectId: String(offer.destinationProjectId),
           title: moved.title,
           provider,
+          ...(workingDirectory === undefined ? {} : { workingDirectory }),
           ...(moved.externalContentIngested
             ? {
                 inheritedMark: {

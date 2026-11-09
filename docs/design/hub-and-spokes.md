@@ -1061,8 +1061,9 @@ move without the person's presence on an owner device is refused.
 its kind never converts:
 
 - a Chat thread into a Chat Project, or into no Project;
-- a Work thread into a Work Project the person picks; the files in its source
-  folder do not move, only the thread; and
+- a Work thread into a Work Project the person picks, bringing the files of
+  its own folder when it has one ([What moves](#moving-a-thread-to-another-member),
+  below); and
 - a Code thread only into a Code Project bound to a clone of the same
   repository: a remote the source checkout also has, and a base commit the
   destination holds or fetches with its own Git identity.
@@ -1140,7 +1141,8 @@ for Move after this turn.
     always fits. The erase removes the part with the thread. A part the
     destination cannot record refuses the arrival with `transfer-failed`, so
     the source keeps the thread.
-  - The Secret guard reads the checkout, not these parts. Rationale: they are
+  - The Secret guard reads a Code thread's checkout and a Work thread's
+    folder files, not these parts. Rationale: they are
     content the thread already holds and handed its provider, sent to the
     person's own computer over the pinned member link, and a part the guard
     kept back would be destroyed by the erase rather than kept the way a
@@ -1157,13 +1159,63 @@ for Move after this turn.
   guard checks every file that travels; a file it refuses stays behind and is
   listed. Ignored files (build output, installed dependencies, `.env` files)
   never travel.
+- For a Work thread, the files of its own folder, landing where the thread
+  works on the destination (maintainer request, 2026-11-09):
+  - **Which folder.** Work threads in a Project share its folder, and a turn
+    writes files through its shell and the provider's own tools as well as
+    through Octant, so which files one thread made cannot be told reliably. A
+    move therefore carries a folder only when the thread is its sole user: the
+    subfolder of the Project's main folder the thread was started in, when no
+    other Work thread on the source that is not deleted works in it or below
+    it and no Project's folder is it or inside it. A thread working in a
+    folder above it (the Project folder itself, usually) does not count,
+    because the subfolder was the one this thread was started in. A thread
+    working in the Project folder itself, or in an extra folder (shared by
+    definition), moves only itself, and its files stay where they are.
+    Rationale: carrying or removing files another thread or the Project still
+    uses would take work from under it, and a guess at which files are this
+    thread's could do that silently.
+  - **What stays.** The folder is read as a worktree is: ignored files (by the
+    Git rules of the repository the folder sits in, when it sits in one), the
+    `.git` folder, symbolic links, anything that is not a plain file or
+    folder, a path a working directory could not name, and a file the Secret
+    guard refuses stay behind. The source walks the folder without following
+    a link, so nothing outside it is read, and a folder that is itself a link
+    is not carried. A move carries at most 10,000 files and empty folders from
+    one folder, the bound the moved transcript holds its entries to; the rest
+    stay behind.
+  - **How it travels.** Every file that travels goes back to back in one
+    `work-files` part, with the part's size and digest in the manifest and
+    each file's path, size, and digest in the thread bundle's file list, so
+    the offer stays one manifest row however many files the folder holds. A
+    file up to the Secret guard's read limit (2 MiB) is read once, checked,
+    and written from that same read; a larger one travels unread, as a large
+    Code file does. An older destination that does not know the part refuses
+    the move rather than dropping the files.
+  - **Where it lands.** In the same subfolder of the destination Project's
+    main folder, and the new thread works there. A path that holds anything
+    (a file, a link, or a folder with anything in it) is never written into;
+    the files land instead in a fresh folder beside it,
+    `<folder>-moved-<move>`, and the thread works there. When that is taken
+    too, the arrival is refused with `transfer-failed` and nothing is written,
+    so the source keeps the thread. The files are written into a staging
+    folder of the move's own and renamed into place in one step, before the
+    thread opens, so a stop leaves either nothing or the whole folder, and a
+    retried arrival that finds a folder holding exactly these files uses it
+    rather than landing a second copy. A move that is discarded after landing
+    leaves that copy where it is; the source still holds its own.
 - There is no size limit ([decision H22](#decisions)). A large thread or
   worktree takes longer; the move sheet and Prepare to shut down show the
   size and an estimate, read before anything freezes. The size is what a
   move would send now: the thread bundle exactly, and for a Code thread
   about its Git bundle, read as the on-disk size of the objects the head
   reaches that no remote-tracking ref holds plus each changed or untracked
-  file Git does not ignore, counted once at its size on disk. Reading it
+  file Git does not ignore, counted once at its size on disk, and for a Work
+  thread with its own folder the size on disk of every file in it that is
+  not ignored or a link (a file the Secret guard would refuse is still
+  counted, since telling would mean reading every file now; the thread
+  bundle is then exact short of the folder's file list). A Work thread whose
+  folder stays shows no files row with a size. Reading it
   packs, freezes, and writes nothing (not even the index's stat cache), and a
   thread that cannot be measured shows **Size unknown** and still moves. The
   estimate divides the size by the rate the latest full chunks to that
@@ -1216,7 +1268,9 @@ unreachable.
    read-only, and unable to start a turn. For Code it makes a managed
    worktree, checks out the branch (keeping its name when that is free there,
    otherwise adding a suffix), and restores the index and the working tree
-   from their two snapshots. It answers
+   from their two snapshots. For a Work thread with its own folder it lands
+   the files first, as [What moves](#moving-a-thread-to-another-member)
+   says, and opens the thread working where they landed. It answers
    `arrived` with the new thread's reference.
 5. **Commit.** The source sends
    `POST /api/hub/peer/thread-moves/commit`. The destination journals
@@ -1251,7 +1305,17 @@ removing the folder would destroy work the move never carried. Nothing is
 pushed or deleted on a remote. A thread that worked
 in the Project's current checkout leaves that folder as it is, because Octant
 never resets the person's own checkout, and the receipt says the changes also
-remain there. The purge also starts the existing withdrawals: messages the
+remain there. A Work thread's own folder that travelled is removed only when
+it still holds exactly what the move carried, compared at erase time for the
+same reason (a frozen Work thread stops its turns, not an editor or terminal
+the person has open there). When it holds anything that stayed behind (an
+ignored file, a link, a file the Secret guard refused, one past the bound, or
+a file added or changed since the move packed), the folder stays where it
+is, and the tombstone names it and those files. It is the person's folder,
+so nothing offers to remove it. A folder another thread has started working
+in since the move packed is kept as it is. The source keeps what travelled
+and what the erase decided beside the move's parts, never sent, so an erase
+run again after a stop reports the same and removes nothing twice. The purge also starts the existing withdrawals: messages the
 thread sent that are not yet delivered are withdrawn, and messages waiting for
 it are refused.
 
@@ -1272,6 +1336,9 @@ files it lists are the ones the erase-time comparison found: every path whose
 content differs from the snapshot, and every ignored entry (Git names a wholly
 ignored folder by the folder). The departure records the first 200 by name
 and counts the rest, because the snapshot is forgotten once the move settles.
+A Work thread's kept folder is listed the same way (the first 200 entries that
+stayed, then the rest counted, a wholly ignored folder named by the folder),
+with no Remove worktree, because the folder is the person's own.
 Remove worktree is a window action on this host: the window must show the
 thread's pane in a mode it reads on this computer, and the request names the
 move, never a folder. The host removes only the folder that move's departure

@@ -35,7 +35,8 @@ export function partsLeftBehindSentence(departed: Departed): string | undefined 
 /**
  * What a moved thread's pane shows on the computer it left, opened from an
  * old link, a notification, or a search: where it went, Open there, and the
- * worktree that stayed when it held files the move did not carry. The
+ * worktree or Work folder that stayed when it held files the move did not
+ * carry. The
  * thread itself was erased here through the ordinary purge. Canonical:
  * DESIGN.md "Moved" and docs/design/hub-and-spokes.md "Erase on the source".
  */
@@ -86,6 +87,9 @@ export function ThreadMoveTombstone(props: {
             onChanged={props.onChanged}
           />
         )}
+        {departed.keptWorktree !== undefined || departed.keptFolder === undefined ? null : (
+          <KeptFolder departed={departed} folder={departed.keptFolder} />
+        )}
         <h2 className="thread-move-tombstone__title" id={titleId}>
           Moved to {departed.destinationName}
         </h2>
@@ -134,9 +138,7 @@ function KeptWorktree(props: {
       </p>
     );
   }
-  const files = departed.keptFiles ?? [];
-  const count = departed.keptFileCount ?? files.length;
-  const more = count - files.length;
+  const count = departed.keptFileCount ?? departed.keptFiles?.length ?? 0;
 
   const remove = () => {
     setRemoving(true);
@@ -161,16 +163,7 @@ function KeptWorktree(props: {
         <code className="thread-move-tombstone__mono">{props.folder}</code>
         {count === 0 ? "." : ", with what the move didn't carry:"}
       </p>
-      {files.length === 0 ? null : (
-        <ul aria-label="Files that stayed" className="thread-move-tombstone__files">
-          {files.map((file) => (
-            <li className="thread-move-tombstone__mono" key={file}>
-              {file}
-            </li>
-          ))}
-        </ul>
-      )}
-      {more > 0 ? <p>and {String(more)} more</p> : null}
+      <KeptFiles departed={departed} />
       {failed ? (
         <OctantAlert title="The worktree couldn't be removed" tone="warning">
           It is still at that folder, with everything in it.
@@ -201,5 +194,43 @@ function KeptWorktree(props: {
         </OctantConfirmDialog>
       ) : null}
     </div>
+  );
+}
+
+/**
+ * The row a Work thread's kept folder adds: where it is and what in it the
+ * move didn't carry. The folder is the person's own, so nothing removes it.
+ */
+function KeptFolder(props: { readonly departed: Departed; readonly folder: string }) {
+  const count = props.departed.keptFileCount ?? props.departed.keptFiles?.length ?? 0;
+  return (
+    <div className="thread-move-tombstone__kept">
+      <p>
+        Its folder stayed on this computer at{" "}
+        <code className="thread-move-tombstone__mono">{props.folder}</code>
+        {count === 0 ? "." : ", with what the move didn't carry:"}
+      </p>
+      <KeptFiles departed={props.departed} />
+    </div>
+  );
+}
+
+/** What a kept worktree or folder holds that did not move: the first files named, the rest counted. */
+function KeptFiles(props: { readonly departed: Departed }) {
+  const files = props.departed.keptFiles ?? [];
+  const more = (props.departed.keptFileCount ?? files.length) - files.length;
+  return (
+    <>
+      {files.length === 0 ? null : (
+        <ul aria-label="Files that stayed" className="thread-move-tombstone__files">
+          {files.map((file) => (
+            <li className="thread-move-tombstone__mono" key={file}>
+              {file}
+            </li>
+          ))}
+        </ul>
+      )}
+      {more > 0 ? <p>and {String(more)} more</p> : null}
+    </>
   );
 }

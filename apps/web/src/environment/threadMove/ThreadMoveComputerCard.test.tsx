@@ -277,6 +277,51 @@ describe("the Computer card", () => {
     expect(sheet).toHaveTextContent("Estimated from the speed earlier moves to Desktop reached.");
   });
 
+  it("says whether a Work thread's folder files move, from what the host measured", async () => {
+    const user = userEvent.setup();
+    const WORK: MovedThreadReference = { mode: "work", threadId: THREAD.threadId };
+    const sheetFor = async (
+      parts: ReadonlyArray<{ kind: "thread-bundle" | "work-files"; bytes: number }>,
+    ) => {
+      const { client } = fakeClient({
+        sizes: async () => ({
+          status: "read",
+          rate: { basis: "assumed", bytesPerSecond: 1_048_576 },
+          rows: [{ thread: WORK, size: { status: "measured", bytes: 2_048, parts: [...parts] } }],
+        }),
+      });
+      const view = render(
+        <ThreadMoveComputerCard
+          client={client}
+          hostName="Laptop"
+          isThisComputer
+          thread={WORK}
+          threadTitle="Plan the offsite"
+          unlock={{ ownerUnlockSign: async () => ({ status: "done", signature: "c2ln" }) }}
+        />,
+      );
+      await user.click(screen.getByRole("button", { name: /Laptop/ }));
+      await user.click(await screen.findByRole("radio", { name: /Desktop/ }));
+      await user.click(screen.getByRole("button", { name: "Review move" }));
+      return { sheet: await screen.findByRole("dialog"), view };
+    };
+
+    const own = await sheetFor([
+      { kind: "thread-bundle", bytes: 1_024 },
+      { kind: "work-files", bytes: 3_072 },
+    ]);
+    await waitFor(() => expect(own.sheet).toHaveTextContent("The files in its own folder"));
+    expect(within(own.sheet).getByText("3 KB")).toBeInTheDocument();
+    own.view.unmount();
+
+    const shared = await sheetFor([{ kind: "thread-bundle", bytes: 1_024 }]);
+    await waitFor(() =>
+      expect(shared.sheet).toHaveTextContent(
+        "its folder is shared with the Project or another thread, so the files stay on this computer",
+      ),
+    );
+  });
+
   it("says the size is unknown when the thread could not be measured, and still moves it", async () => {
     const user = userEvent.setup();
     const { client, started } = fakeClient({

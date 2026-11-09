@@ -151,29 +151,32 @@ export interface ErasedThread {
   readonly worktreeKept: boolean;
   /** The worktree moved out of the managed folder, because it held what the move did not carry. */
   readonly keptWorktree?: string;
-  /** What the kept worktree holds that the move did not carry, relative to it. */
+  /** A Work thread's own folder, left in place because it held what the move did not carry. */
+  readonly keptFolder?: string;
+  /** What the kept worktree or folder holds that the move did not carry, relative to it. */
   readonly keptFiles?: ReadonlyArray<string>;
   /** The thread worked in the Project's own checkout, which keeps its changes. */
   readonly changesRemainInCheckout?: boolean;
 }
 
 /**
- * The tombstone's record of a kept worktree: its folder and the files it
- * holds, the first `KEPT_FILES_LISTED` by name and the rest counted. A path
- * the departure cannot hold (empty, or longer than 4,096 characters) is
- * counted and not named.
+ * The tombstone's record of a kept worktree or Work folder: the folder and
+ * the files it holds, the first `KEPT_FILES_LISTED` by name and the rest
+ * counted. A path the departure cannot hold (empty, or longer than 4,096
+ * characters) is counted and not named.
  */
 export function keptWorktreeOfDeparture(
   erased: ErasedThread,
-): Pick<ThreadMoveDeparture, "keptWorktree" | "keptFiles" | "keptFileCount"> {
-  if (erased.keptWorktree === undefined) return {};
+): Pick<ThreadMoveDeparture, "keptWorktree" | "keptFolder" | "keptFiles" | "keptFileCount"> {
   const files = erased.keptFiles ?? [];
   const nameable = files.filter((path) => path.length > 0 && path.length <= 4_096);
-  return {
-    keptWorktree: erased.keptWorktree,
-    keptFiles: nameable.slice(0, KEPT_FILES_LISTED),
-    keptFileCount: files.length,
-  };
+  const listed = { keptFiles: nameable.slice(0, KEPT_FILES_LISTED), keptFileCount: files.length };
+  if (erased.keptWorktree !== undefined) return { keptWorktree: erased.keptWorktree, ...listed };
+  // A folder path the record cannot hold still leaves the folder in place;
+  // only its name is missing from the tombstone.
+  const folder = erased.keptFolder;
+  if (folder === undefined || folder.trim() !== folder || folder.length > 4_096) return {};
+  return folder.length === 0 ? {} : { keptFolder: folder, ...listed };
 }
 
 /** Where an offer would put the thread on the destination. */
