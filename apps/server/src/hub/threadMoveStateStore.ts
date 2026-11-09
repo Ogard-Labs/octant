@@ -11,6 +11,7 @@ import { join } from "node:path";
 import {
   HandedOverThread,
   HandoverContinuedReport,
+  HandoverId,
   HandoverNotice,
   HubMemberId,
   MovedThreadReference,
@@ -105,6 +106,31 @@ export const PendingContinuedReport = Schema.Struct({
 }).annotations(strict);
 export type PendingContinuedReport = typeof PendingContinuedReport.Type;
 
+/**
+ * How many settled handovers a host remembers. A settled branch's tip still
+ * names its handover, so without this it would be listed again.
+ */
+export const SETTLED_HANDOVERS_KEPT = 500;
+
+/**
+ * The state with one handover remembered as settled: continued here, or made
+ * here and since continued elsewhere or taken back. Its branch may still be
+ * fetched, and only its id, never the origin name a trailer claims, tells
+ * that it is not one to offer.
+ */
+export function withSettledHandover(
+  state: ThreadMoveState,
+  handoverId: HandoverId,
+): ThreadMoveState {
+  return {
+    ...state,
+    settledHandoverIds: [
+      ...(state.settledHandoverIds ?? []).filter((entry) => String(entry) !== String(handoverId)),
+      handoverId,
+    ].slice(-SETTLED_HANDOVERS_KEPT),
+  };
+}
+
 /** How many departures a host keeps for "Moved to" tombstones; the oldest go first. */
 export const THREAD_MOVE_DEPARTURES_KEPT = 500;
 
@@ -120,6 +146,8 @@ export const ThreadMoveState = Schema.Struct({
   receivedHandovers: Schema.optional(Schema.Array(ReceivedHandover)),
   /** Continued reports the source has not acknowledged yet. */
   pendingContinuedReports: Schema.optional(Schema.Array(PendingContinuedReport)),
+  /** Handovers settled here, so a branch found later is not offered again. */
+  settledHandoverIds: Schema.optional(Schema.Array(HandoverId)),
 }).annotations(strict);
 export type ThreadMoveState = typeof ThreadMoveState.Type;
 
