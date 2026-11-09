@@ -477,13 +477,23 @@ async function stopped(url: string) {
       (await host.startup.readBridgeSecret()) === undefined,
     4000,
   );
-  const found = await attachWindowsHostRuntimeOwner({
-    native: host.native,
-    scope: host.paths.profileId,
-    hostId: host.paths.profileId,
-    wireVersion: "1",
-  });
-  check(found.status === "missing", "native discovery confirms the owner stopped");
+  // Host shutdown clears projections before it closes the broker and releases
+  // the native owner. A cold-launched host is not joined through the client
+  // tree, so package run 42586256278 checked once inside that window.
+  await until(
+    "native discovery confirms the owner stopped",
+    async () =>
+      (
+        await attachWindowsHostRuntimeOwner({
+          native: host.native,
+          scope: host.paths.profileId,
+          hostId: host.paths.profileId,
+          wireVersion: "1",
+        })
+      ).status === "missing",
+    4000,
+  );
+  check(true, "native discovery confirms the owner stopped");
   const listening = await fetch(new URL("/health", url), { signal: AbortSignal.timeout(500) })
     .then(() => true)
     .catch(() => false);

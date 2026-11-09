@@ -52,248 +52,43 @@ try {
     $octantCommand = [string](Get-Item -LiteralPath "$octantProtocol\shell\open\command").GetValue('')
     $octantPathSpellings = @($octantExecutable)
     if ($octantExecutable -match '^[A-Za-z]:\\') { $octantPathSpellings += '\\?\' + $octantExecutable }
-    $octantExpected = @()
-    $octantExpectedImageArgument = @()
-    $octantQuotedUrlPattern = [regex]::Escape('"%1"')
-    foreach ($octantPath in $octantPathSpellings) {
-      foreach ($octantImage in @($octantPath, '"' + $octantPath + '"')) {
-        $octantExpected += $octantImage + ' "%1"'
-        $octantExpected += $octantImage + ' -- "%1"'
-        # Electron may repeat its staged image as one explicit argument.
-        foreach ($octantArgumentPath in $octantPathSpellings) {
-          foreach ($octantArgumentImage in @($octantArgumentPath, '"' + $octantArgumentPath + '"')) {
-            $octantExpectedImageArgument += '\A' + [regex]::Escape($octantImage) + '[ \t]+' + [regex]::Escape($octantArgumentImage) + '(?:[ \t]+--)?[ \t]+' + $octantQuotedUrlPattern + '\z'
-            if ($octantImage.StartsWith('"') -and $octantImage.EndsWith('"')) {
-              $octantExpectedImageArgument += '\A' + [regex]::Escape($octantImage) + [regex]::Escape($octantArgumentImage) + '[ \t]+' + $octantQuotedUrlPattern + '\z'
-            }
-          }
-        }
-      }
-    }
+    # Electron's registered command repeated this scheme's own staged image in
+    # several layouts across runs (quoted, unquoted, adjacent without a
+    # delimiter, twice), and Nightly's image contains a space, which defeated
+    # token-based matching. Remove only exact spellings of this scheme's staged
+    # image, longest first, then require the remainder to be nothing but those
+    # images, an optional Electron separator and the quoted URL placeholder.
+    $octantImages = @()
+    foreach ($octantPath in $octantPathSpellings) { $octantImages += '"' + $octantPath + '"'; $octantImages += $octantPath }
+    $octantImages = @($octantImages | Sort-Object -Property Length -Descending)
     $octantTrimmedCommand = $octantCommand.Trim()
-    $octantOwnedCommand = $octantExpected -icontains $octantTrimmedCommand
-    if (-not $octantOwnedCommand) {
-      $octantRegexOptions = [System.Text.RegularExpressions.RegexOptions]::IgnoreCase -bor [System.Text.RegularExpressions.RegexOptions]::CultureInvariant
-      foreach ($octantPattern in $octantExpectedImageArgument) {
-        if ([regex]::IsMatch($octantTrimmedCommand, $octantPattern, $octantRegexOptions)) {
-          $octantOwnedCommand = $true
-          break
-        }
-      }
+    $octantRegexOptions = [System.Text.RegularExpressions.RegexOptions]::IgnoreCase -bor [System.Text.RegularExpressions.RegexOptions]::CultureInvariant
+    $octantImageAtStart = $false
+    foreach ($octantImage in $octantImages) {
+      if ($octantTrimmedCommand.StartsWith($octantImage, [StringComparison]::OrdinalIgnoreCase)) { $octantImageAtStart = $true; break }
     }
-    if (-not $octantOwnedCommand) {
-      foreach ($octantPath in $octantPathSpellings) {
-        foreach ($octantImage in @($octantPath, '"' + $octantPath + '"')) {
-          if (-not $octantTrimmedCommand.StartsWith($octantImage, [StringComparison]::OrdinalIgnoreCase)) { continue }
-          $octantArguments = $octantTrimmedCommand.Substring($octantImage.Length)
-          if (
-            $octantArguments -match '^\s+"%1"\s*$' -or
-            $octantArguments -match '^\s+--\s+"%1"\s*$'
-          ) {
-            $octantOwnedCommand = $true
-            break
-          }
-          $octantArgumentTokens = [System.Collections.Generic.List[string]]::new()
-          foreach ($octantArgumentMatch in [regex]::Matches($octantArguments, '"[^"]*"|\S+')) {
-            [void]$octantArgumentTokens.Add([string]$octantArgumentMatch.Value)
-          }
-          if ($octantArgumentTokens.Count -eq 4) {
-            $octantArgumentPathOne = [string]$octantArgumentTokens[0]
-            $octantArgumentPathTwo = [string]$octantArgumentTokens[2]
-            if ($octantArgumentPathOne.StartsWith('"') -and $octantArgumentPathOne.EndsWith('"')) {
-              $octantArgumentPathOne = $octantArgumentPathOne.Substring(1, $octantArgumentPathOne.Length - 2)
-            }
-            if ($octantArgumentPathTwo.StartsWith('"') -and $octantArgumentPathTwo.EndsWith('"')) {
-              $octantArgumentPathTwo = $octantArgumentPathTwo.Substring(1, $octantArgumentPathTwo.Length - 2)
-            }
-            $octantArgumentPathOneIsOwned = $false
-            $octantArgumentPathTwoIsOwned = $false
-            foreach ($octantArgumentPath in $octantPathSpellings) {
-              if ([string]::Equals($octantArgumentPath, $octantArgumentPathOne, [StringComparison]::OrdinalIgnoreCase)) {
-                $octantArgumentPathOneIsOwned = $true
-              }
-              if ([string]::Equals($octantArgumentPath, $octantArgumentPathTwo, [StringComparison]::OrdinalIgnoreCase)) {
-                $octantArgumentPathTwoIsOwned = $true
-              }
-            }
-            if (
-              $octantArgumentPathOneIsOwned -and
-              $octantArgumentTokens[1] -ceq '"%1"' -and
-              $octantArgumentPathTwoIsOwned -and
-              $octantArgumentTokens[3] -ceq '"%1"'
-            ) {
-              $octantOwnedCommand = $true
-              break
-            }
-          }
-        }
-        if ($octantOwnedCommand) { break }
-      }
+    $octantResidual = $octantTrimmedCommand
+    foreach ($octantImage in $octantImages) {
+      $octantResidual = [regex]::Replace($octantResidual, [regex]::Escape($octantImage), ' <staged> ', $octantRegexOptions)
     }
+    $octantOwnedCommand =
+      $octantImageAtStart -and
+      -not $octantCommand.Contains('<staged>') -and
+      [regex]::IsMatch($octantResidual, '\A(?:\s*<staged>(?:\s+<staged>)?(?:\s+--)?\s+"%1"){1,2}\s*\z')
     if (-not $octantOwnedCommand) {
-      $octantImageShape = 'other'
-      $octantImageAtStart = $false
-      $octantArgumentLayout = 'image-not-leading'
-      $octantArgumentTokenShapes = @()
-      $octantArgumentPathShapes = @()
-      $octantArgumentPathKinds = @()
-      $octantArgumentQuotedUrlMatches = @()
-      $octantArgumentTokenCount = 0
-      $octantExactStagedImageUrlSequence = $false
-      $octantLeadingSeparatorKind = 'image-not-leading'
-      $octantInternalSeparatorKinds = @()
-      $octantTrimmedCommand = $octantCommand.Trim()
-      $octantPackageAppRoot = [IO.Path]::GetFullPath((Join-Path $PackageDirectory 'resources/app'))
-      $octantPackageAppEntry = [IO.Path]::GetFullPath((Join-Path $octantPackageAppRoot 'apps/desktop/dist/entry.mjs'))
-      $octantPackageRoot = [IO.Path]::GetFullPath($PackageDirectory).TrimEnd([char]92, [char]47) + [IO.Path]::DirectorySeparatorChar
-      foreach ($octantPath in $octantPathSpellings) {
-        if ($octantCommand.IndexOf($octantPath, [StringComparison]::OrdinalIgnoreCase) -ge 0) {
-          $octantImageShape = if ($octantPath.StartsWith('\\?\')) { 'staged-namespaced' } else { 'staged-ordinary' }
-        }
-        foreach ($octantImage in @($octantPath, '"' + $octantPath + '"')) {
-          if (-not $octantTrimmedCommand.StartsWith($octantImage, [StringComparison]::OrdinalIgnoreCase)) { continue }
-          $octantImageAtStart = $true
-          $octantArgumentTail = $octantTrimmedCommand.Substring($octantImage.Length)
-          $octantLeadingSeparatorLength = $octantArgumentTail.Length - $octantArgumentTail.TrimStart().Length
-          $octantLeadingSeparatorText = $octantArgumentTail.Substring(0, $octantLeadingSeparatorLength)
-          $octantLeadingSeparatorKind = if ($octantLeadingSeparatorText.Length -eq 0) {
-            'none'
-          } elseif ($octantLeadingSeparatorText -match '^ +$') {
-            'space'
-          } elseif ($octantLeadingSeparatorText -match '^\t+$') {
-            'tab'
-          } elseif ($octantLeadingSeparatorText -match '^\s+$') {
-            'other-whitespace'
-          } else {
-            'non-whitespace'
-          }
-          $octantArguments = $octantArgumentTail.Trim()
-          $octantArgumentLayout = if ($octantArguments -eq '"%1"') {
-            'url-only'
-          } elseif ($octantArguments -match '^--\s+"%1"$') {
-            'electron-url'
-          } else {
-            'extra-or-other-argument'
-          }
-          $octantDiagnosticTokens = [System.Collections.Generic.List[string]]::new()
-          $octantDiagnosticMatches = [regex]::Matches($octantArguments, '"[^"]*"|\S+')
-          foreach ($octantDiagnosticMatch in $octantDiagnosticMatches) {
-            [void]$octantDiagnosticTokens.Add([string]$octantDiagnosticMatch.Value)
-          }
-          $octantArgumentTokenCount = $octantDiagnosticTokens.Count
-          $octantInternalSeparatorKinds = @()
-          for ($octantSeparatorIndex = 1; $octantSeparatorIndex -lt $octantDiagnosticMatches.Count; $octantSeparatorIndex++) {
-            $octantPreviousMatch = $octantDiagnosticMatches[$octantSeparatorIndex - 1]
-            $octantCurrentMatch = $octantDiagnosticMatches[$octantSeparatorIndex]
-            $octantSeparatorStart = $octantPreviousMatch.Index + $octantPreviousMatch.Length
-            $octantSeparatorText = $octantArguments.Substring($octantSeparatorStart, $octantCurrentMatch.Index - $octantSeparatorStart)
-            $octantInternalSeparatorKind = if ($octantSeparatorText.Length -eq 0) {
-              'none'
-            } elseif ($octantSeparatorText -match '^ +$') {
-              'space'
-            } elseif ($octantSeparatorText -match '^\t+$') {
-              'tab'
-            } elseif ($octantSeparatorText -match '^\s+$') {
-              'other-whitespace'
-            } else {
-              'non-whitespace'
-            }
-            $octantInternalSeparatorKinds += $octantInternalSeparatorKind
-          }
-          $octantArgumentQuotedUrlMatches = @($octantDiagnosticTokens | ForEach-Object {
-            [string]::Equals([string]$_, '"%1"', [StringComparison]::Ordinal)
-          })
-          foreach ($octantToken in $octantDiagnosticTokens) {
-            $octantUnquotedToken = $octantToken.Trim('"')
-            $octantTokenShape = if ($octantToken -ceq '"%1"') {
-              'quoted-url'
-            } elseif ($octantUnquotedToken -ceq '--') {
-              'electron-separator'
-            } elseif ($octantUnquotedToken.Equals($octantPackageAppEntry, [StringComparison]::OrdinalIgnoreCase)) {
-              'owned-app-entry'
-            } elseif ($octantUnquotedToken.Equals($octantPackageAppRoot, [StringComparison]::OrdinalIgnoreCase)) {
-              'owned-app-root'
-            } elseif ($octantUnquotedToken -match '^--[A-Za-z0-9][A-Za-z0-9_-]*(?:=.*)?$') {
-              'option'
-            } elseif ($octantUnquotedToken -match '^[A-Za-z]:\\' -or $octantUnquotedToken.StartsWith('\\?\')) {
-              $octantCandidatePath = $octantUnquotedToken
-              if ($octantCandidatePath.StartsWith('\\?\')) { $octantCandidatePath = $octantCandidatePath.Substring(4) }
-              $octantCandidatePath = [IO.Path]::GetFullPath($octantCandidatePath)
-              if ($octantCandidatePath.StartsWith($octantPackageRoot, [StringComparison]::OrdinalIgnoreCase)) {
-                if ($octantArgumentPathShapes.Count -lt 8) {
-                  $octantArgumentPathShapes += [IO.Path]::GetRelativePath($octantPackageRoot, $octantCandidatePath)
-                }
-              } elseif ($octantArgumentPathShapes.Count -lt 8) {
-                $octantArgumentPathShapes += 'outside-staged-package'
-              }
-              'path-argument'
-            } elseif ($octantToken.StartsWith('"') -and $octantToken.EndsWith('"')) {
-              'quoted-argument'
-            } else {
-              'other-argument'
-            }
-            if ($octantArgumentTokenShapes.Count -lt 8) { $octantArgumentTokenShapes += $octantTokenShape }
-            if ($octantTokenShape -eq 'path-argument' -and $octantArgumentPathKinds.Count -lt 8) {
-              $octantPathIsExactStagedImage = $false
-              foreach ($octantPathSpelling in $octantPathSpellings) {
-                if ([string]::Equals($octantPathSpelling, $octantUnquotedToken, [StringComparison]::OrdinalIgnoreCase)) {
-                  $octantPathIsExactStagedImage = $true
-                  break
-                }
-              }
-              $octantPathKind = if ($octantPathIsExactStagedImage) { 'staged-executable' } else { 'other-path' }
-              $octantArgumentPathKinds += $octantPathKind
-            }
-          }
-          $octantArgumentTokenCount = $octantArgumentTokenShapes.Count
-          $octantExactStagedImageUrlSequence =
-            $octantArgumentPathKinds.Count -eq 1 -and
-            $octantArgumentPathKinds[0] -eq 'staged-executable' -and
-            (
-              ($octantDiagnosticTokens.Count -eq 2 -and $octantDiagnosticTokens[1] -ceq '"%1"') -or
-              ($octantDiagnosticTokens.Count -eq 3 -and $octantDiagnosticTokens[1] -ceq '--' -and $octantDiagnosticTokens[2] -ceq '"%1"')
-            )
-      $octantAdjacentImageArgumentMatched =
-        $octantImage.StartsWith('"') -and
-        $octantImage.EndsWith('"') -and
-        $octantLeadingSeparatorKind -eq 'none' -and
-        $octantInternalSeparatorKinds.Count -eq 1 -and
-        $octantInternalSeparatorKinds[0] -in @('space', 'tab') -and
-        $octantDiagnosticTokens.Count -eq 2 -and
-        $octantArgumentPathKinds.Count -eq 1 -and
-        $octantArgumentPathKinds[0] -eq 'staged-executable' -and
-        $octantDiagnosticTokens[1] -ceq '"%1"' -and
-        $octantExactStagedImageUrlSequence -and
-        $octantCommand -ceq $octantTrimmedCommand
-      if ($octantAdjacentImageArgumentMatched) { $octantOwnedCommand = $true }
-          break
-        }
-        if ($octantImageAtStart) { break }
-      }
-      if (-not $octantOwnedCommand) {
-        $octantArgumentShape = if ($octantCommand.EndsWith('"%1"', [StringComparison]::OrdinalIgnoreCase)) { 'quoted-url' } else { 'other' }
-        $octantSeparator = $octantCommand.Contains(' -- ')
-        Write-Output (@{
-          protocolCleanup = 'refused'
-          executable = $octantImageShape
-          executableAtStart = $octantImageAtStart
-          argumentLayout = $octantArgumentLayout
-          argumentTokenShapes = $octantArgumentTokenShapes
-          argumentPathShapes = $octantArgumentPathShapes
-          argumentPathKinds = $octantArgumentPathKinds
-          argumentQuotedUrlMatches = $octantArgumentQuotedUrlMatches
-          argumentTokenCount = $octantArgumentTokenCount
-          exactStagedImageUrlSequence = $octantExactStagedImageUrlSequence
-          exactAdjacentStagedImageArgument = $octantAdjacentImageArgumentMatched
-          imageQuoted = $octantImage.StartsWith('"') -and $octantImage.EndsWith('"')
-          imageToArgumentsSeparator = $octantLeadingSeparatorKind
-          argumentInternalSeparators = $octantInternalSeparatorKinds
-          commandHadOuterWhitespace = $octantCommand -cne $octantCommand.Trim()
-          argument = $octantArgumentShape
-          electronSeparator = $octantSeparator
-        } | ConvertTo-Json -Compress)
-        throw 'Refusing removal of another protocol command'
-      }
+      # Only staged images are replaced; the remaining text is this runner's
+      # registry value with the profile prefix hidden, bounded for the log.
+      $octantProfilePrefix = [Environment]::GetFolderPath('UserProfile')
+      $octantSanitized = $octantResidual
+      if ($octantProfilePrefix) { $octantSanitized = $octantSanitized.Replace($octantProfilePrefix, '<profile>', [StringComparison]::OrdinalIgnoreCase) }
+      if ($octantSanitized.Length -gt 512) { $octantSanitized = $octantSanitized.Substring(0, 512) }
+      Write-Output (@{
+        protocolCleanup = 'refused'
+        scheme = $octantScheme
+        executableAtStart = $octantImageAtStart
+        sanitizedCommand = $octantSanitized
+      } | ConvertTo-Json -Compress)
+      throw 'Refusing removal of another protocol command'
     }
     Remove-Item -LiteralPath $octantProtocol -Recurse -Force
     if (Test-Path -LiteralPath $octantProtocol) { throw 'Owned protocol cleanup was not confirmed' }
