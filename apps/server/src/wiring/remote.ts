@@ -48,7 +48,12 @@ import {
 import { ExternalContentClearStore } from "../context/externalContentClearStore";
 import { readThreadExternalContentTaint } from "../context/externalContentTaintProjection";
 import { ROUTINE_HOST_SCOPE_ID } from "../routineHostScope";
-import { defaultShellSettings, enabledModes, rosterMemberWebOrigin } from "@octant/domain";
+import {
+  buildHandoverSummaryPrompt,
+  defaultShellSettings,
+  enabledModes,
+  rosterMemberWebOrigin,
+} from "@octant/domain";
 import {
   createRemoteGateway,
   type RemoteGateway,
@@ -222,6 +227,7 @@ export type RemoteDependencies = { readonly onSecretStoreLinkChange?: () => void
   Pick<
     WorkWiring,
     | "threadExportService"
+    | "threadHandOffProvider"
     | "threadMessageQueue"
     | "onWorkTurnCancelled"
     | "workThreadServiceWithWorkflows"
@@ -305,6 +311,7 @@ export function wireRemote(deps: RemoteDependencies) {
     shellService,
     startedAt,
     threadExportService,
+    threadHandOffProvider,
     threadMessageQueue,
     toolEgressRules,
     version,
@@ -1418,6 +1425,31 @@ export function wireRemote(deps: RemoteDependencies) {
           ...(instruction === undefined ? {} : { instruction }),
           ...(answer === undefined ? {} : { answer }),
         };
+      },
+      // The person's own request in their own thread, sent the way a hand-off
+      // document is: a fresh single-use session on the thread's provider and
+      // model, in plan mode with no tools and an empty scratch folder, so the
+      // agent reads the transcript in the prompt and can change nothing.
+      summarize: async (threadId, signal) => {
+        const exported = await threadExportService.exportThread(
+          ROUTINE_HOST_SCOPE_ID,
+          "local-window",
+          { mode: "code", threadId },
+        );
+        if (exported.kind !== "exported") return { status: "failed" };
+        const { providerInstanceId, modelId } = exported.bundle.provenance;
+        if (threadHandOffProvider.readiness(providerInstanceId) !== "ready") {
+          return { status: "unavailable" };
+        }
+        const text = await threadHandOffProvider.complete({
+          providerInstanceId,
+          modelId,
+          mode: "code",
+          threadId,
+          prompt: buildHandoverSummaryPrompt(exported.bundle),
+          signal,
+        });
+        return { status: "summarized", text };
       },
     },
     record: threadMoveJournal,

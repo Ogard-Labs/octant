@@ -49,7 +49,8 @@ export interface ThreadMoveClient {
   readonly handoverPreview: (thread: MovedThreadReference) => Promise<HandoverOutcome>;
   readonly handOver: (
     thread: MovedThreadReference,
-    destinationMemberId?: string,
+    destinationMemberId: string | undefined,
+    choices: { readonly summarize: boolean },
   ) => Promise<HandoverOutcome>;
   readonly handoverTakeBack: (handoverId: string) => Promise<void>;
   /** Handovers other computers told this one about, and continuing one here. */
@@ -121,11 +122,12 @@ export function threadMoveClientOf(hub: HubAdministrationBridge): ThreadMoveClie
       decodeShutdownStartOutcome(await call("shutdown-start", request)),
     handoverPreview: async (thread) =>
       decodeHandoverOutcome(await call("handover-preview", { thread })),
-    handOver: async (thread, destinationMemberId) =>
+    handOver: async (thread, destinationMemberId, choices) =>
       decodeHandoverOutcome(
         await call("handover", {
           thread,
           ...(destinationMemberId === undefined ? {} : { destinationMemberId }),
+          summarize: choices.summarize,
         }),
       ),
     handoverTakeBack: async (handoverId) => {

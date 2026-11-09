@@ -157,6 +157,7 @@ export function createThreadMoveAdministrationRouteHandler(
                   asked.destinationMemberId === undefined
                     ? undefined
                     : String(asked.destinationMemberId),
+                  { summarize: asked.summarize === true },
                 )
               : await options.handovers.preview(asked.thread),
           );
