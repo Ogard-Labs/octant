@@ -163,7 +163,24 @@ async function readLinuxGpu(): Promise<HostResourceGpu | undefined> {
     const value = text === undefined ? Number.NaN : Number(text.trim());
     if (Number.isFinite(value)) busiest = Math.max(busiest ?? 0, value);
   }
-  return busiest === undefined ? undefined : { percent: clampPercent(busiest) };
+  if (busiest === undefined) {
+    // NVIDIA exposes no sysfs counter; its own tool reports one line per GPU.
+    const smi = await run("nvidia-smi", [
+      "--query-gpu=utilization.gpu",
+      "--format=csv,noheader,nounits",
+    ]).catch(() => "");
+    return parseNvidiaSmiUtilization(smi);
+  }
+  return { percent: clampPercent(busiest) };
+}
+
+export function parseNvidiaSmiUtilization(text: string): HostResourceGpu | undefined {
+  const values = text
+    .split("\n")
+    .map((line) => line.trim())
+    .filter((line) => /^\d+$/.test(line))
+    .map(Number);
+  return values.length === 0 ? undefined : { percent: clampPercent(Math.max(...values)) };
 }
 
 async function readLinuxBattery(): Promise<HostResourceEnergy | undefined> {

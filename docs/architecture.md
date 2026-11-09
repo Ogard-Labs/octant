@@ -563,7 +563,7 @@ that holds the data directory. When the host can read them it also reports
 network and block-device throughput (bytes per second between its last two
 samples, so absent on the first), the busiest GPU's utilisation, and battery
 level with charging state; each is omitted when unreadable. Linux reads
-`/proc`, `/sys/class/drm` (AMD `gpu_busy_percent`), and `/sys/class/power_supply`;
+`/proc`, `/sys/class/drm` (AMD `gpu_busy_percent`), `nvidia-smi` for NVIDIA, and `/sys/class/power_supply`;
 macOS reads `netstat`, `ioreg`, and `pmset`; other platforms and GPUs report
 none. The disk figures are omitted when that volume cannot be read. The snapshot names no path, no user, and no process. The server
 keeps one snapshot for about five seconds. The local owner always receives it.

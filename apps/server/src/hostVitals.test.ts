@@ -3,6 +3,7 @@ import {
   createHostVitalsSampler,
   parseIoregGpu,
   parseNetstatInterfaces,
+  parseNvidiaSmiUtilization,
   parsePmsetBattery,
   parseProcDiskstats,
   parseProcNetDev,
@@ -46,6 +47,11 @@ describe("host vitals", () => {
       charging: true,
     });
     expect(parsePmsetBattery("Now drawing from 'AC Power'")).toBeUndefined();
+  });
+
+  it("reads the busiest NVIDIA GPU and ignores an error message", () => {
+    expect(parseNvidiaSmiUtilization("12\n87\n")).toEqual({ percent: 87 });
+    expect(parseNvidiaSmiUtilization("NVIDIA-SMI has failed")).toBeUndefined();
   });
 
   it("reports throughput only once two readings exist and ignores a reset counter", async () => {

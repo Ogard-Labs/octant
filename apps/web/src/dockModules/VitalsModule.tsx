@@ -81,7 +81,7 @@ export default function VitalsModule(props: Props) {
     return unavailable("Vitals", "This window may not read this host's load.");
   }
   if (state.status === "unavailable") {
-    return unavailable("Vitals", "The host did not answer. Trying again.");
+    return unavailable("Vitals", "This host did not report its load. Trying again.");
   }
   return <VitalsView history={state.history} />;
 }
