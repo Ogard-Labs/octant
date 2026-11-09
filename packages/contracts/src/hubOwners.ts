@@ -4,6 +4,7 @@ import { UtcTimestamp } from "./events";
 import { HubMemberId, HubMemberRole } from "./hubAndSpokes";
 import { ProjectId } from "./projects";
 import { PermissionPersistence, ProviderExecutionPolicy } from "./providers";
+import { WorkAccess, WorkThreadId } from "./workThreads";
 
 const strict = { parseOptions: { onExcessProperty: "error" as const } };
 const digest = Schema.String.pipe(Schema.pattern(/^[0-9a-f]{64}$/));
@@ -160,14 +161,19 @@ export const decodeOwnerAdministrationSession = Schema.decodeUnknownSync(
 
 /**
  * What a posture belongs to: a Code Project's remembered default, or one Code
- * thread's own posture. Work asks first and has no posture to set.
+ * thread's own posture, or a Work thread's access level.
  */
-export const OwnerPostureSubject = Schema.Union(
+const CodeOwnerPostureSubject = Schema.Union(
   Schema.Struct({ kind: Schema.Literal("project"), projectId: ProjectId }).annotations(strict),
   Schema.Struct({ kind: Schema.Literal("code-thread"), threadId: CodeThreadId }).annotations(
     strict,
   ),
 );
+const WorkOwnerPostureSubject = Schema.Struct({
+  kind: Schema.Literal("work-thread"),
+  threadId: WorkThreadId,
+}).annotations(strict);
+export const OwnerPostureSubject = Schema.Union(CodeOwnerPostureSubject, WorkOwnerPostureSubject);
 export type OwnerPostureSubject = typeof OwnerPostureSubject.Type;
 
 export const OwnerPostureReadRequest = Schema.Struct({
@@ -177,13 +183,20 @@ export type OwnerPostureReadRequest = typeof OwnerPostureReadRequest.Type;
 export const decodeOwnerPostureReadRequest = Schema.decodeUnknownSync(OwnerPostureReadRequest);
 
 /** A posture as a host reports it. `persistence` is absent where the host has none to report. */
-export const OwnerPosture = Schema.Struct({
-  subject: OwnerPostureSubject,
-  posture: ProviderExecutionPolicy,
-  version: digest,
-  autoApprove: Schema.optional(Schema.Boolean),
-  persistence: Schema.optional(PermissionPersistence),
-}).annotations(strict);
+export const OwnerPosture = Schema.Union(
+  Schema.Struct({
+    subject: CodeOwnerPostureSubject,
+    posture: ProviderExecutionPolicy,
+    version: digest,
+    autoApprove: Schema.optional(Schema.Boolean),
+    persistence: Schema.optional(PermissionPersistence),
+  }).annotations(strict),
+  Schema.Struct({
+    subject: WorkOwnerPostureSubject,
+    posture: WorkAccess,
+    version: digest,
+  }).annotations(strict),
+);
 export type OwnerPosture = typeof OwnerPosture.Type;
 
 export const decodeOwnerPosture = Schema.decodeUnknownSync(OwnerPosture);
@@ -194,12 +207,19 @@ export const OwnerPostureTarget = Schema.Struct({
 export type OwnerPostureTarget = typeof OwnerPostureTarget.Type;
 export const decodeOwnerPostureTargets = Schema.decodeUnknownSync(Schema.Array(OwnerPostureTarget));
 
-export const OwnerPostureChangeRequest = Schema.Struct({
-  expectedVersion: digest,
-  subject: OwnerPostureSubject,
-  posture: ProviderExecutionPolicy,
-  persistence: PermissionPersistence,
-}).annotations(strict);
+export const OwnerPostureChangeRequest = Schema.Union(
+  Schema.Struct({
+    expectedVersion: digest,
+    subject: CodeOwnerPostureSubject,
+    posture: ProviderExecutionPolicy,
+    persistence: PermissionPersistence,
+  }).annotations(strict),
+  Schema.Struct({
+    expectedVersion: digest,
+    subject: WorkOwnerPostureSubject,
+    posture: WorkAccess,
+  }).annotations(strict),
+);
 export type OwnerPostureChangeRequest = typeof OwnerPostureChangeRequest.Type;
 export const decodeOwnerPostureChangeRequest = Schema.decodeUnknownSync(OwnerPostureChangeRequest);
 

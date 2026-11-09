@@ -199,6 +199,7 @@ function toContextSourceKind(
 
 function toContextEntryCategory(componentKind: CapabilityComponentKind): ContextEntryCategory {
   switch (componentKind) {
+    case "plugin-tool":
     case "octant-tool":
       return "octant-tools";
     case "mcp-tool":

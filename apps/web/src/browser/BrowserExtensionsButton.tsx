@@ -65,7 +65,9 @@ export function BrowserExtensionsButton(props: BrowserExtensionsButtonProps) {
       profile:
         profile.kind === "personal"
           ? { kind: "personal" }
-          : { kind: "project", projectId: String(profile.projectId) },
+          : profile.kind === "account"
+            ? { kind: "account", profileId: String(profile.profileId) }
+            : { kind: "project", projectId: String(profile.projectId) },
       extensionId,
       kind,
       anchor: { x: rect.left, y: rect.top, width: rect.width, height: rect.height },

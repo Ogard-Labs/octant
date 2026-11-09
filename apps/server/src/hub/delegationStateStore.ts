@@ -1,3 +1,5 @@
+import type { WindowsAuthorityStateFile } from "@octant/host-runtime";
+import { nativeAuthorityState } from "./nativeAuthorityState";
 // What a host remembers about delegations: the ones it received from a peer
 // (which thread each became here) and the ones it sent (where each child runs
 // and whether its result is recorded). The journal records every change with
@@ -145,7 +147,29 @@ export interface DelegationStatePort {
   readonly save: (state: DelegationState) => void;
 }
 
-export function createDelegationStateStore(dataDirectory: string): DelegationStatePort {
+function keptDelegationState(state: DelegationState): DelegationState {
+  return {
+    // A received entry carries no state of its own (the thread it became
+    // does), so the peer service prunes those; the store never drops one.
+    received: state.received,
+    sent: dropOldestSettled(state.sent, isSettledSent),
+    // An owed cancel is a promise to stop a child; it expires by age, not by count.
+    ...(state.owedCancels === undefined ? {} : { owedCancels: state.owedCancels }),
+  };
+}
+
+export function createDelegationStateStore(
+  dataDirectory: string,
+  nativeFile?: WindowsAuthorityStateFile,
+): DelegationStatePort {
+  const native = nativeAuthorityState(
+    dataDirectory,
+    nativeFile,
+    decodeState,
+    (state) => Schema.encodeSync(DelegationState)(keptDelegationState(state)),
+    () => EMPTY_DELEGATION_STATE,
+  );
+  if (native !== undefined) return native;
   const directory = join(dataDirectory, SUBDIR);
   const path = join(directory, FILE);
   return {
@@ -160,14 +184,7 @@ export function createDelegationStateStore(dataDirectory: string): DelegationSta
       mkdirSync(directory, { recursive: true, mode: 0o700 });
       chmodSync(directory, 0o700);
       const staging = `${path}.${process.pid}.tmp`;
-      const kept: DelegationState = {
-        // A received entry carries no state of its own (the thread it became
-        // does), so the peer service prunes those; the store never drops one.
-        received: state.received,
-        sent: dropOldestSettled(state.sent, isSettledSent),
-        // An owed cancel is a promise to stop a child; it expires by age, not by count.
-        ...(state.owedCancels === undefined ? {} : { owedCancels: state.owedCancels }),
-      };
+      const kept = keptDelegationState(state);
       writeFileSync(staging, JSON.stringify(Schema.encodeSync(DelegationState)(kept)), {
         mode: 0o600,
       });

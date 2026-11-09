@@ -30,8 +30,10 @@ export {
   type HostRuntimeOwnershipErrorCode,
   type HostRuntimeRestoreOutcome,
 } from "./owner";
+export { attachWindowsHostRuntimeOwner } from "./windowsHostOwner";
 export {
   acquireWindowsHostProfileOwner,
+  resolveWindowsHostProfile,
   loadWindowsHostProfileNative,
   type AcquireWindowsHostProfileOptions,
   type WindowsHostProfile,
@@ -292,3 +294,43 @@ export {
   type GithubActionsRepository,
   type GithubActionsCompletedRun,
 } from "./githubActionsSource";
+
+export {
+  createWindowsListenerTlsFiles,
+  type WindowsListenerTlsFiles,
+  type WindowsListenerTlsNative,
+  type ListenerTlsFile,
+  type ListenerTlsFileRead,
+} from "./windowsListenerTls";
+export {
+  createWindowsRosterSigningKeyFile,
+  type WindowsRosterSigningKeyFile,
+  type WindowsRosterSigningKeyNative,
+  type RosterSigningKeyRead,
+} from "./windowsRosterSigningKey";
+export {
+  createWindowsServerIdentityFiles,
+  type WindowsServerIdentityFiles,
+  type WindowsServerIdentityNative,
+  type ServerIdentityFile,
+  type ServerIdentityFileRead,
+} from "./windowsServerIdentity";
+
+export {
+  createWindowsAuthorityStateFiles,
+  createWindowsHostStartupFiles,
+  type WindowsHostStartupFiles,
+  type WindowsHostStartupProjection,
+  type WindowsAuthorityStateFile,
+  type WindowsAuthorityStateFiles,
+  type WindowsAuthorityStateNative,
+} from "./windowsAuthorityState";
+
+export {
+  createWindowsSqliteStores,
+  type WindowsSqliteStoreNative,
+  type WindowsSqliteStores,
+  type WindowsSqliteStoreAdmission,
+} from "./windowsSqliteStore";
+
+export { createWindowsHostStartup } from "./windowsHostStartup";

@@ -90,168 +90,174 @@ try {
     );
     process.exit(1);
   }
-  const paths = resolveHostRuntimePaths({
-    env: process.env,
-    platform: process.platform,
-    home: homedir(),
-    temporaryDirectory: canonicalTemporaryDirectory(),
-    uid: process.getuid?.() ?? 0,
-  });
-  ownerPaths = paths;
-  await prepareHostRuntimePaths(paths);
-  // The secret guard keeps the bridge and control secrets out of every
-  // runtime's reach; it learns where they live before anything launches.
-  configureSecretGuardLocations({
-    dataDirectory: paths.dataDirectory,
-    runtimeDirectory: paths.runtimeDirectory,
-  });
-  const serviceLogStore = new BoundedHostLogStore({ path: paths.serviceLogPath });
-  // Every service log line passes the secret redaction on its way to disk.
-  const hostLogs = {
-    read: serviceLogStore.read.bind(serviceLogStore),
-    append: (entry: Parameters<BoundedHostLogStore["append"]>[0]) =>
-      serviceLogStore.append({
-        ...entry,
-        message: redactHostSecrets(entry.message),
-        ...(entry.details === undefined
-          ? {}
-          : { details: redactHostSecretsInValue(entry.details) }),
-      }),
-  };
-  serviceLogs = hostLogs;
-  process.env.OCTANT_DATA_DIR = paths.dataDirectory;
-  const instanceId = launchConfig.instanceId ?? randomUUID();
-  const hostId = deriveHostRuntimeHostId(paths.dataDirectory);
-  const serverVersion = resolveReportedHostVersion(process.env);
-  const ownership = await acquireHostRuntimeOwner({
-    paths,
-    hostId,
-    instanceId,
-    serverVersion,
-    wireVersion: "1",
-    serviceMode: launchConfig.hostServiceMode,
-    processStart: await readHostRuntimeProcessStart(process.pid),
-    onStopRequested: stop,
-    onControlRequest: async (
-      request: HostRuntimeLocalControlRequest,
-    ): Promise<HostRuntimeControlPayload | undefined> => {
-      if (request.type === "diagnostics") {
-        return diagnostics === undefined ? undefined : { diagnostics: diagnostics() };
-      }
-      if (request.type === "logs") {
-        return {
-          logs: await hostLogs.read({
-            ...(request.since === undefined ? {} : { since: request.since }),
-            ...(request.limit === undefined ? {} : { limit: request.limit }),
-            ...(request.follow === undefined ? {} : { follow: request.follow }),
-          }),
-        };
-      }
-      if (request.type === "backup") {
-        return ownerBackup === undefined ? undefined : { backup: ownerBackup(request.label) };
-      }
-      if (request.type === "restore") {
-        // Destructive restore never runs against a live store: it requires an
-        // offline exclusive owner lease with typed confirmation.
-        return {
-          restore: {
-            outcome: "refused-online",
-            guidance: "Stop the Octant host, then run the offline restore command with --confirm.",
-          },
-        };
-      }
-      return undefined;
-    },
-  });
-
-  if (ownership.kind === "attached") {
-    console.info(
-      `Octant attached to ${ownership.owner.serviceMode} owner ${ownership.owner.instanceId}.`,
-    );
+  if (process.platform === "win32") {
+    const { runWindowsForeground } = await import("./windowsForeground");
+    await runWindowsForeground(launchConfig, abortController.signal, stop);
   } else {
-    owner = ownership;
-    if (launchConfig.desktopBridgeSecret !== undefined) {
-      await writeBridgeSecretProjection(paths, launchConfig.desktopBridgeSecret);
-    }
-    // Dynamically import server and persistence modules only after the control socket is bound.
-    // Native dependencies and SQLite therefore cannot initialize before runtime ownership.
-    const [{ PersistenceLive }, { fatalStartupOutput, startOctantServer }, { loadRuntimeServe }] =
-      await Promise.all([
-        import("./persistence/persistenceService"),
-        import("./server"),
-        import("./serveRuntime"),
-      ]);
-    const serve = await loadRuntimeServe();
-    // Honest platform capability observation: only tools whose probe succeeded
-    // are reported; unavailable native tools fail closed out of the report.
-    const platformCapabilityReport = await probeHostPlatformCapabilities({
+    const paths = resolveHostRuntimePaths({
+      env: process.env,
       platform: process.platform,
-      uid: paths.uid,
+      home: homedir(),
+      temporaryDirectory: canonicalTemporaryDirectory(),
+      uid: process.getuid?.() ?? 0,
     });
-    // Persistence must outlive the server's scoped cancellation and finalizers.
-    const program = Effect.scoped(
-      Effect.gen(function* () {
-        const server = yield* startOctantServer({
-          hostname: "127.0.0.1",
-          ...launchConfig,
-          version: serverVersion,
-          instanceId,
-          hostId,
-          controlEndpoint: paths.socketPath,
-          serviceMode: launchConfig.hostServiceMode,
-          platformCapabilities: availablePlatformCapabilityNames(platformCapabilityReport).map(
-            (name) => `platform:${name}`,
-          ),
-          // The web Settings host card acts through the same authority as the
-          // owner control socket: policy writes go to the shared service
-          // policy store and stop/restart request this owner's graceful drain.
-          hostControl: {
-            servicePolicy: new ServicePolicyStore({ path: paths.servicePolicyPath }),
-            requestOwnerStop: stop,
-            readServiceLog: async () => (await hostLogs.read({ limit: 200 })).entries,
-          },
-          serve,
-        });
-        diagnostics = server.diagnostics;
-        const serverBackup = server.backup;
-        ownerBackup =
-          serverBackup === undefined
-            ? undefined
-            : (label) => ({ outcome: "created", ...serverBackup(label) });
-        yield* Effect.promise(() =>
-          writeHostInfoReceipt(paths, {
-            schemaVersion: 1,
-            hostId,
+    ownerPaths = paths;
+    await prepareHostRuntimePaths(paths);
+    // The secret guard keeps the bridge and control secrets out of every
+    // runtime's reach; it learns where they live before anything launches.
+    configureSecretGuardLocations({
+      dataDirectory: paths.dataDirectory,
+      runtimeDirectory: paths.runtimeDirectory,
+    });
+    const serviceLogStore = new BoundedHostLogStore({ path: paths.serviceLogPath });
+    // Every service log line passes the secret redaction on its way to disk.
+    const hostLogs = {
+      read: serviceLogStore.read.bind(serviceLogStore),
+      append: (entry: Parameters<BoundedHostLogStore["append"]>[0]) =>
+        serviceLogStore.append({
+          ...entry,
+          message: redactHostSecrets(entry.message),
+          ...(entry.details === undefined
+            ? {}
+            : { details: redactHostSecretsInValue(entry.details) }),
+        }),
+    };
+    serviceLogs = hostLogs;
+    process.env.OCTANT_DATA_DIR = paths.dataDirectory;
+    const instanceId = launchConfig.instanceId ?? randomUUID();
+    const hostId = deriveHostRuntimeHostId(paths.dataDirectory);
+    const serverVersion = resolveReportedHostVersion(process.env);
+    const ownership = await acquireHostRuntimeOwner({
+      paths,
+      hostId,
+      instanceId,
+      serverVersion,
+      wireVersion: "1",
+      serviceMode: launchConfig.hostServiceMode,
+      processStart: await readHostRuntimeProcessStart(process.pid),
+      onStopRequested: stop,
+      onControlRequest: async (
+        request: HostRuntimeLocalControlRequest,
+      ): Promise<HostRuntimeControlPayload | undefined> => {
+        if (request.type === "diagnostics") {
+          return diagnostics === undefined ? undefined : { diagnostics: diagnostics() };
+        }
+        if (request.type === "logs") {
+          return {
+            logs: await hostLogs.read({
+              ...(request.since === undefined ? {} : { since: request.since }),
+              ...(request.limit === undefined ? {} : { limit: request.limit }),
+              ...(request.follow === undefined ? {} : { follow: request.follow }),
+            }),
+          };
+        }
+        if (request.type === "backup") {
+          return ownerBackup === undefined ? undefined : { backup: ownerBackup(request.label) };
+        }
+        if (request.type === "restore") {
+          // Destructive restore never runs against a live store: it requires an
+          // offline exclusive owner lease with typed confirmation.
+          return {
+            restore: {
+              outcome: "refused-online",
+              guidance:
+                "Stop the Octant host, then run the offline restore command with --confirm.",
+            },
+          };
+        }
+        return undefined;
+      },
+    });
+
+    if (ownership.kind === "attached") {
+      console.info(
+        `Octant attached to ${ownership.owner.serviceMode} owner ${ownership.owner.instanceId}.`,
+      );
+    } else {
+      owner = ownership;
+      if (launchConfig.desktopBridgeSecret !== undefined) {
+        await writeBridgeSecretProjection(paths, launchConfig.desktopBridgeSecret);
+      }
+      // Dynamically import server and persistence modules only after the control socket is bound.
+      // Native dependencies and SQLite therefore cannot initialize before runtime ownership.
+      const [{ PersistenceLive }, { fatalStartupOutput, startOctantServer }, { loadRuntimeServe }] =
+        await Promise.all([
+          import("./persistence/persistenceService"),
+          import("./server"),
+          import("./serveRuntime"),
+        ]);
+      const serve = await loadRuntimeServe();
+      // Honest platform capability observation: only tools whose probe succeeded
+      // are reported; unavailable native tools fail closed out of the report.
+      const platformCapabilityReport = await probeHostPlatformCapabilities({
+        platform: process.platform,
+        uid: paths.uid,
+      });
+      // Persistence must outlive the server's scoped cancellation and finalizers.
+      const program = Effect.scoped(
+        Effect.gen(function* () {
+          const server = yield* startOctantServer({
+            hostname: "127.0.0.1",
+            ...launchConfig,
+            version: serverVersion,
             instanceId,
-            url: server.url.toString(),
+            hostId,
             controlEndpoint: paths.socketPath,
             serviceMode: launchConfig.hostServiceMode,
-            serverVersion,
-            wireVersion: "1",
-            updatedAt: new Date().toISOString(),
-          }),
-        );
-        yield* Effect.promise(() =>
-          hostLogs.append({
-            timestamp: new Date().toISOString(),
-            level: "info",
-            event: "server.ready",
-            message: "Octant service owner is ready.",
-          }),
-        );
-        console.info(`Octant server listening on ${server.url}`);
-        return yield* Effect.never;
-      }),
-    ).pipe(Effect.provide(PersistenceLive));
-    const exit = await Effect.runPromiseExit(program, { signal: abortController.signal });
-    if (Exit.isFailure(exit) && !Cause.isInterruptedOnly(exit.cause)) {
-      // A defect (a failed listen, an fs error) has no typed failure; squash
-      // keeps it so the report can name the cause category.
-      const failure =
-        Option.getOrUndefined(Cause.failureOption(exit.cause)) ?? Cause.squash(exit.cause);
-      console.error(fatalStartupOutput(failure));
-      failedStartup = true;
-      process.exitCode = 1;
+            platformCapabilities: availablePlatformCapabilityNames(platformCapabilityReport).map(
+              (name) => `platform:${name}`,
+            ),
+            // The web Settings host card acts through the same authority as the
+            // owner control socket: policy writes go to the shared service
+            // policy store and stop/restart request this owner's graceful drain.
+            hostControl: {
+              servicePolicy: new ServicePolicyStore({ path: paths.servicePolicyPath }),
+              requestOwnerStop: stop,
+              readServiceLog: async () => (await hostLogs.read({ limit: 200 })).entries,
+            },
+            serve,
+          });
+          diagnostics = server.diagnostics;
+          const serverBackup = server.backup;
+          ownerBackup =
+            serverBackup === undefined
+              ? undefined
+              : (label) => ({ outcome: "created", ...serverBackup(label) });
+          yield* Effect.promise(() =>
+            writeHostInfoReceipt(paths, {
+              schemaVersion: 1,
+              hostId,
+              instanceId,
+              url: server.url.toString(),
+              controlEndpoint: paths.socketPath,
+              serviceMode: launchConfig.hostServiceMode,
+              serverVersion,
+              wireVersion: "1",
+              updatedAt: new Date().toISOString(),
+            }),
+          );
+          yield* Effect.promise(() =>
+            hostLogs.append({
+              timestamp: new Date().toISOString(),
+              level: "info",
+              event: "server.ready",
+              message: "Octant service owner is ready.",
+            }),
+          );
+          console.info(`Octant server listening on ${server.url}`);
+          return yield* Effect.never;
+        }),
+      ).pipe(Effect.provide(PersistenceLive));
+      const exit = await Effect.runPromiseExit(program, { signal: abortController.signal });
+      if (Exit.isFailure(exit) && !Cause.isInterruptedOnly(exit.cause)) {
+        // A defect (a failed listen, an fs error) has no typed failure; squash
+        // keeps it so the report can name the cause category.
+        const failure =
+          Option.getOrUndefined(Cause.failureOption(exit.cause)) ?? Cause.squash(exit.cause);
+        console.error(fatalStartupOutput(failure));
+        failedStartup = true;
+        process.exitCode = 1;
+      }
     }
   }
 } catch (error) {

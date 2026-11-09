@@ -78,6 +78,55 @@ if (
   result.status !== "owned"
 )
   throw new Error("Native worker did not own its fixture.");
+let authoritySession: number | undefined;
+if ("authorityProfile" in input) {
+  if (
+    (input.authorityProfile !== "octant" && input.authorityProfile !== "nightly-test-data") ||
+    !("authorityDataDirectory" in input) ||
+    typeof input.authorityDataDirectory !== "string" ||
+    !("openProfile" in native) ||
+    typeof native.openProfile !== "function" ||
+    !("beginAuthorityState" in native) ||
+    typeof native.beginAuthorityState !== "function" ||
+    !("writeAuthorityState" in native) ||
+    typeof native.writeAuthorityState !== "function"
+  )
+    throw Error("Missing owned authority worker ABI.");
+  const profile: unknown = native.openProfile(input.authorityProfile);
+  if (
+    typeof profile !== "object" ||
+    profile === null ||
+    !("profileId" in profile) ||
+    profile.profileId !== input.scope
+  )
+    throw Error("Authority worker profile mismatch.");
+  const started: unknown = native.beginAuthorityState(
+    input.authorityProfile,
+    input.scope,
+    input.authorityDataDirectory,
+    "hub-state",
+    "replace",
+    2,
+  );
+  if (
+    typeof started !== "object" ||
+    started === null ||
+    !("status" in started) ||
+    started.status !== "opened" ||
+    !("session" in started) ||
+    typeof started.session !== "number"
+  )
+    throw Error("Authority worker session refused.");
+  authoritySession = started.session;
+  const partial: unknown = native.writeAuthorityState(authoritySession, 0, Buffer.from("{"));
+  if (
+    typeof partial !== "object" ||
+    partial === null ||
+    !("status" in partial) ||
+    partial.status !== "written"
+  )
+    throw Error("Authority worker partial write refused.");
+}
 const poll = native.poll;
 const close = native.close;
 const timer = setInterval(() => poll(), 10);
@@ -88,6 +137,7 @@ setTimeout(() => {
 }, 10_000);
 parentPort?.postMessage({
   ready: true,
+  ...(authoritySession === undefined ? {} : { authoritySession }),
   root: facts.runtimeDirectory,
   productionWorkerRefused: true,
 });

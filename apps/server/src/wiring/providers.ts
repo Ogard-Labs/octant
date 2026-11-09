@@ -1,3 +1,4 @@
+import { openAdmittedSqlite, openSqlite } from "../persistence/sqlitePort";
 import { ChildWorktreeSourceService } from "../code/childWorktreeSourceService";
 import { GitObservationPort } from "../code/gitObservationPort";
 import { WorktreePreparationService } from "../code/worktreePreparationService";
@@ -7,6 +8,7 @@ import { createLocalUsageHistoryLastReadStore } from "../persistence/localUsageH
 import {
   createEffectiveSkillReader,
   createSelectedExtensionResolver,
+  type CodeToolHostFactory,
 } from "../extensions/selectedExtensions";
 import { randomUUID } from "node:crypto";
 import { bindGeneratedMcpSignInPolicy } from "../extensions/generatedMcpSignInPolicy";
@@ -1104,7 +1106,15 @@ export function wireProviders(deps: ProvidersDependencies) {
         },
       },
     });
+    let codeToolHost: CodeToolHostFactory | undefined;
+    const bindCodeToolHost = (factory: CodeToolHostFactory): void => {
+      if (codeToolHost !== undefined) throw new Error("The Code capability host is already bound.");
+      codeToolHost = factory;
+    };
     const resolveSelectedExtensions = createSelectedExtensionResolver({
+      codeToolHost: (input) => codeToolHost?.(input),
+      currentEffectiveState: (query) =>
+        extensionActivationService.resolve(extensionApiService.snapshot(), query),
       snapshot: async () => {
         await standaloneSkillService.reconcile();
         return extensionApiService.snapshot();
@@ -1923,6 +1933,21 @@ export function wireProviders(deps: ProvidersDependencies) {
     });
     const chatDataDirectory = join(providerDataDirectory, "chat");
     const chatAttachmentStore = new ChatAttachmentStore(chatDataDirectory);
+    const openUsageCache: typeof openSqlite = (path) => {
+      if (options.usageCacheFile === undefined) {
+        if (process.platform === "win32")
+          throw new Error("Native Windows usage storage is unavailable.");
+        return openSqlite(path);
+      }
+      const admission = options.usageCacheFile();
+      if (admission.status !== "ready")
+        throw new Error("Native Windows usage storage is unavailable.");
+      if (admission.databasePath !== path) {
+        admission.close();
+        throw new Error("Native Windows usage storage was refused.");
+      }
+      return openAdmittedSqlite(admission);
+    };
     const configuredDriverOptions: ConfiguredProviderDriverOptions = {
       compactionShare: (keeper) => {
         const settings = persistence.readShellSettings()?.settings ?? defaultShellSettings();
@@ -1968,6 +1993,7 @@ export function wireProviders(deps: ProvidersDependencies) {
             : {}),
           checkpointStore: createLocalUsageHistoryCheckpointStore(
             join(persistence.dataDirectory, "local-usage-cache.sqlite3"),
+            openUsageCache,
           ),
         });
       },
@@ -2008,6 +2034,7 @@ export function wireProviders(deps: ProvidersDependencies) {
       // while it reads again.
       lastReadStore: createLocalUsageHistoryLastReadStore(
         join(persistence.dataDirectory, "local-usage-cache.sqlite3"),
+        openUsageCache,
       ),
       sources: () => {
         const seen = new Set<string>();
@@ -2159,6 +2186,7 @@ export function wireProviders(deps: ProvidersDependencies) {
     });
     yield* Effect.promise(() => imageJobService.reconcileInterruptedJobs());
     return {
+      bindCodeToolHost,
       agentPluginMcpSessionManager,
       githubRoutineEventSources: githubRoutineEventSources(() => mcpServerSignInHolder.current),
       chatAttachmentStore,

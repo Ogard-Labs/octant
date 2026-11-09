@@ -2,6 +2,8 @@ import { mkdtempSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
+import { createDelegationStateStore } from "./delegationStateStore";
+import { createTailscaleCertificateSetting } from "./tailscaleCertificate";
 import { createHubStateStore } from "./hubStateStore";
 
 const directories: string[] = [];
@@ -77,4 +79,67 @@ describe("the stored hub state", () => {
 
     expect(loaded.hub?.provision?.offers[0]?.mirrorFeed?.release.product).toBe("octant");
   });
+});
+
+describe("private native authority records", () => {
+  for (const [name, create, empty] of [
+    ["hub", createHubStateStore, {}],
+    ["delegations", createDelegationStateStore, { received: [], sent: [] }],
+    ["certificate", createTailscaleCertificateSetting, { enabled: false }],
+  ] as const) {
+    it(`refuses an unsafe ${name} record instead of resetting authority`, () => {
+      const store = create("native-only", {
+        dataDirectory: "native-only",
+        read: () => ({ status: "refused" as const }),
+        replace: () => ({ status: "committed" as const }),
+      });
+      expect(() => store.load()).toThrow("authority state");
+    });
+    it(`uses the existing ${name} default only for a positively missing native record`, () => {
+      const store = create("native-only", {
+        dataDirectory: "native-only",
+        read: () => ({ status: "missing" as const }),
+        replace: () => ({ status: "committed" as const }),
+      });
+      expect(store.load()).toEqual(empty);
+    });
+  }
+});
+
+it("refuses corrupt UTF-8 and schema data without replacing the native record", () => {
+  for (const bytes of [Buffer.from([0xff]), Buffer.from("{"), Buffer.from('{"unexpected":true}')]) {
+    let replaced = false;
+    const store = createHubStateStore("native-only", {
+      dataDirectory: "native-only",
+      read: () => ({ status: "ready", bytes: Buffer.from(bytes) }),
+      replace: () => {
+        replaced = true;
+        return { status: "committed" };
+      },
+    });
+    expect(() => store.load()).toThrow("authority state");
+    expect(() => store.save({})).toThrow("authority state");
+    expect(replaced).toBe(false);
+  }
+});
+it("round-trips native revocations and erases each owned encoded transfer", () => {
+  let saved: Buffer | undefined;
+  const transfers: Buffer[] = [];
+  const store = createHubStateStore("native-only", {
+    dataDirectory: "native-only",
+    read: () =>
+      saved === undefined ? { status: "missing" } : { status: "ready", bytes: Buffer.from(saved) },
+    replace: (bytes) => {
+      saved = Buffer.from(bytes);
+      transfers.push(bytes);
+      return { status: "committed" };
+    },
+  });
+  const state = {
+    pendingDeviceRevocations: ["11111111-1111-4111-8111-111111111111"],
+    ownerUnlockBeforePairedMerge: true,
+  } as const;
+  store.save(state);
+  expect(store.load()).toEqual(state);
+  expect(transfers.every((bytes) => bytes.every((byte) => byte === 0))).toBe(true);
 });
