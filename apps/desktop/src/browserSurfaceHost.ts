@@ -2,6 +2,7 @@ import {
   captureBrowserFeedbackPoint,
   type BrowserFeedbackPointObservation,
 } from "@octant/host-runtime";
+import { createPersistentBrowserOwner, type BrowserExecutionOwner } from "./persistentBrowserOwner";
 import { BrowserPageScript, type PageScriptTarget } from "./browserPageScript";
 import { BrowserOwnerControl } from "./browserOwnerControl";
 import {
@@ -120,10 +121,13 @@ export interface BrowserSurfaceBounds {
   readonly height: number;
 }
 
-export interface BrowserSurfaceOwner {
-  readonly windowId: string;
-  readonly threadId: BrowserThreadId | string;
-}
+export type BrowserSurfaceOwner =
+  | {
+      readonly kind?: "window";
+      readonly windowId: string;
+      readonly threadId: BrowserThreadId | string;
+    }
+  | (BrowserExecutionOwner & { readonly windowId?: never });
 
 /** One tab as the rail shows it. */
 export interface BrowserSurfaceTabState {
@@ -697,6 +701,21 @@ export function createBrowserSurfaceHost(options: BrowserSurfaceHostOptions) {
   const goneListeners = new Set<(contextId: string) => void>();
   const personInputListeners = new Set<(contextId: string) => void>();
   const stateChannel = options.stateChannel ?? DESKTOP_IPC_CHANNELS.browserSurfaceState;
+  const persistentOwner = createPersistentBrowserOwner({
+    exists: (contextId) => surfaces.has(contextId),
+    open: async (contextId, policy, owner) => createContext({ contextId, policy, owner }),
+    close: async (contextId) => {
+      await closeContext(contextId);
+      for (const listener of goneListeners) listener(String(contextId));
+    },
+  });
+  const embeddedOwner = (owner: BrowserSurfaceOwner) =>
+    owner.kind !== "execution" && options.isEmbeddedOwner?.(owner.windowId) === true;
+  const ownerAvailable = (owner: BrowserSurfaceOwner) =>
+    owner.kind === "execution"
+      ? persistentOwner.admits(owner)
+      : options.isOwnerWindowAvailable?.(owner.windowId) !== false;
+
   const pageScripts = new BrowserPageScript();
   const scriptHolds = new WeakMap<OwnedSurface, object>();
   const scriptEpochs = new WeakMap<OwnedSurface, number>();
@@ -909,7 +928,7 @@ export function createBrowserSurfaceHost(options: BrowserSurfaceHostOptions) {
         ownerControls.holdsPage(owned) ||
         owned.owner.windowId !== owner.windowId ||
         String(owned.owner.threadId) !== String(owner.threadId) ||
-        options.isOwnerWindowAvailable?.(owner.windowId) === false ||
+        !ownerAvailable(owner) ||
         owned.tabs.length === 0
       )
         return undefined;
@@ -936,9 +955,13 @@ export function createBrowserSurfaceHost(options: BrowserSurfaceHostOptions) {
     return check;
   };
   const observation = (owned: OwnedSurface) => {
+    if (owned.owner.kind === "execution" && !persistentOwner.admits(owned.owner))
+      throw new Error("Browser execution owner is no longer available.");
     const privateCheck = privateObservation(owned);
     const ownerCheck = ownerControls.observation(owned);
     return () => {
+      if (owned.owner.kind === "execution" && !persistentOwner.admits(owned.owner))
+        throw new Error("Browser execution owner is no longer available.");
       privateCheck();
       ownerCheck();
     };
@@ -956,7 +979,7 @@ export function createBrowserSurfaceHost(options: BrowserSurfaceHostOptions) {
       owned === undefined ||
       owned.owner.windowId !== command.owner.windowId ||
       String(owned.owner.threadId) !== String(command.owner.threadId) ||
-      options.isOwnerWindowAvailable?.(owned.owner.windowId) === false
+      !ownerAvailable(owned.owner)
     )
       return { status: "refused", effect: "none", reason: "stale" };
     return queueSurfaceAction(owned, async () => {
@@ -974,7 +997,7 @@ export function createBrowserSurfaceHost(options: BrowserSurfaceHostOptions) {
       const expectedUrl = contents.getURL();
       const current = () =>
         surfaces.get(command.contextId) === owned &&
-        options.isOwnerWindowAvailable?.(owned.owner.windowId) !== false &&
+        ownerAvailable(owned.owner) &&
         !contents.isDestroyed() &&
         contentsView(owned) === view &&
         (scriptGenerations.get(view) ?? 0) === generation &&
@@ -1101,6 +1124,10 @@ export function createBrowserSurfaceHost(options: BrowserSurfaceHostOptions) {
     }
     owned.shellWindow = undefined;
     void owned.downloads.dispose();
+    // The server forgets its lease mapping when it learns the context is gone,
+    // so the native reservation must end here or it outlives the page until
+    // grant expiry and refuses a replacement for the same execution.
+    persistentOwner.contextEnded(contextId);
     for (const listener of goneListeners) {
       try {
         listener(contextId);
@@ -1190,7 +1217,12 @@ export function createBrowserSurfaceHost(options: BrowserSurfaceHostOptions) {
         webSecurity: true,
       },
     });
-
+    const execution = owned.owner;
+    if (execution.kind === "execution")
+      executionViewCurrent.set(
+        view,
+        () => surfaces.get(contextId) === owned && persistentOwner.admits(execution),
+      );
     view.setVisible(false);
     const popups = new BrowserPagePopups();
     const tab: OwnedTab = {
@@ -1489,7 +1521,7 @@ export function createBrowserSurfaceHost(options: BrowserSurfaceHostOptions) {
     Date.now() - owned.lastHumanPress < HUMAN_POPUP_PRESS_MS &&
     owned.control !== "agent" &&
     owned.presentation.visible &&
-    options.isEmbeddedOwner?.(owned.owner.windowId) === true;
+    embeddedOwner(owned.owner);
 
   const openLinkInTab = (
     contextId: BrowserContextId | string,
@@ -1950,130 +1982,8 @@ export function createBrowserSurfaceHost(options: BrowserSurfaceHostOptions) {
       goneListeners.add(listener);
       return () => goneListeners.delete(listener);
     },
-    createContext: async (input: {
-      readonly contextId: BrowserContextId | string;
-      readonly owner: BrowserSurfaceOwner;
-      readonly policy: BrowserContextPolicy;
-    }): Promise<void> => {
-      if (input.policy.profileMode !== "isolated") {
-        throw new Error("Octant Browser supports isolated profiles only.");
-      }
-      if (surfaces.has(input.contextId)) throw new Error("Browser context already exists.");
-      if (options.isOwnerWindowAvailable?.(input.owner.windowId) === false) {
-        throw new Error("Octant Browser owner is not a native Project window.");
-      }
-      const firstTabId = `${String(input.contextId)}:1`;
-      const owned: OwnedSurface = {
-        keyboardMenu: undefined,
-        pageEditMenu: new BrowserPageEditMenu(),
-        presentation: new BrowserPresentation(),
-        textComposition: new BrowserTextComposition({
-          current: () =>
-            surfaces.get(input.contextId) === owned &&
-            options.isEmbeddedOwner?.(owned.owner.windowId) === true &&
-            owned.presentation.visible,
-          source: () => {
-            const view = contentsView(owned);
-            const source: BrowserTextSource = {
-              editor: async () => {
-                const observed = await humanEditor(view);
-                return observed === undefined ? undefined : presentedEditor(observed);
-              },
-              apply: async (editorId, edit, authorized) => {
-                if (view.webContents.isDestroyed()) return false;
-                // A password field never composes: its candidate would pass
-                // through a local input context the secure field must not use.
-                const editable = (target: BrowserEditableTarget | undefined) =>
-                  target !== undefined &&
-                  String(target.id) === String(editorId) &&
-                  target.kind !== "secure";
-                const target = await humanTarget(view);
-                if (!editable(target) || view.webContents.isDestroyed() || !authorized())
-                  return false;
-                // Input commands go to the page, which delivers them to its
-                // focused frame, on the same site or another.
-                return withDebugger(view, async (send) => {
-                  const latest = await humanTarget(view);
-                  if (!editable(latest) || view.webContents.isDestroyed() || !authorized())
-                    return false;
-                  // Only cancellation may outlive visibility. The captured view
-                  // and document-start field incarnation still have to match.
-                  // An agent action that began while this edit awaited its field
-                  // owns the surface now; only cancellation still reaches it.
-                  if (
-                    edit.phase !== "cancel" &&
-                    (owned.control === "agent" ||
-                      surfaces.get(input.contextId) !== owned ||
-                      !owned.presentation.visible ||
-                      options.isEmbeddedOwner?.(owned.owner.windowId) !== true ||
-                      contentsView(owned) !== view)
-                  )
-                    return false;
-                  if (edit.phase !== "cancel") {
-                    owned.control = "user";
-                    owned.personInputs++;
-                    for (const listener of personInputListeners) {
-                      try {
-                        listener(input.contextId);
-                      } catch {
-                        /* Isolate observers. */
-                      }
-                    }
-                  }
-                  if (edit.phase === "update")
-                    await send("Input.imeSetComposition", {
-                      text: edit.text,
-                      selectionStart: edit.selectionStart,
-                      selectionEnd: edit.selectionEnd,
-                    });
-                  else if (edit.phase === "commit")
-                    await send("Input.insertText", { text: edit.text });
-                  else
-                    await send("Input.imeSetComposition", {
-                      text: "",
-                      selectionStart: 0,
-                      selectionEnd: 0,
-                    });
-                  return true;
-                });
-              },
-            };
-            return source;
-          },
-        }),
-        owner: input.owner,
-        policy: input.policy,
-        tabs: [],
-        activeTabId: firstTabId,
-        nextTabOrdinal: 2,
-        pointSelection: undefined,
-        lifetime: new AbortController(),
-        pointSelectionTimer: undefined,
-        selectionRelease: undefined,
-        lastBounds: undefined,
-        userGrantedOrigins: [],
-        credentialSubmitOrigins: undefined,
-        extensionLoads: 0,
-        actionTail: Promise.resolve(),
-        humanInputTail: Promise.resolve(),
-        control: "idle",
-        ownerNavigationRestricted: false,
-        shellWindow: undefined,
-        blockedNavigationUrl: undefined,
-        unreportedDialogs: [],
-        consoleErrors: [],
-        consoleWarnings: [],
-        failedRequests: [],
-        httpErrors: [],
-        diagnosticSeq: 0,
-        downloads: new DesktopDownloadHold(options.downloadRoot),
-        personInputs: 0,
-        snapshotPersonInputs: 0,
-        lastHumanPress: 0,
-      };
-      openTabView(input.contextId, owned, firstTabId);
-      surfaces.set(input.contextId, owned);
-    },
+    createContext,
+    persistentOwner,
     setPointSelection: (
       contextId: BrowserContextId | string,
       owner: BrowserSurfaceOwner,
@@ -2734,6 +2644,11 @@ export function createBrowserSurfaceHost(options: BrowserSurfaceHostOptions) {
       signal?: AbortSignal,
     ): Promise<BrowserSurfaceRuntimeObservation> => {
       const owned = surface(contextId);
+      if (
+        owned.owner.kind === "execution" &&
+        (request.kind === "upload" || request.downloads !== undefined)
+      )
+        throw new Error("Browser execution does not grant file transfers.");
       const checkObservation = observation(owned);
       return queueSurfaceAction(owned, async () => {
         checkObservation();
@@ -2756,6 +2671,8 @@ export function createBrowserSurfaceHost(options: BrowserSurfaceHostOptions) {
         const releaseDialogs = await guardDialogs(contentsView(owned), dialogs);
         if (request.downloads === "hold") owned.downloads.begin();
         try {
+          checkObservation();
+          throwIfAborted(signal);
           const observed = await (async (): Promise<BrowserSurfaceRuntimeObservation> => {
             const contents = contentsView(owned).webContents;
             // Ended before any check that can refuse, so a stop that is refused
@@ -2787,6 +2704,8 @@ export function createBrowserSurfaceHost(options: BrowserSurfaceHostOptions) {
               request.destination,
               request.destinationExpected,
             );
+            checkObservation();
+            throwIfAborted(signal);
             switch (request.kind) {
               case "navigate": {
                 if (
@@ -2890,6 +2809,8 @@ export function createBrowserSurfaceHost(options: BrowserSurfaceHostOptions) {
                 // The new tab's own load can raise a dialog too.
                 const releaseTabDialogs = await guardDialogs(opened.view, dialogs);
                 try {
+                  checkObservation();
+                  throwIfAborted(signal);
                   await opened.view.webContents.loadURL(
                     request.target === undefined ? "about:blank" : normalizeUrl(request.target),
                   );
@@ -3252,6 +3173,7 @@ export function createBrowserSurfaceHost(options: BrowserSurfaceHostOptions) {
       );
     },
     closeAll: async (): Promise<void> => {
+      await persistentOwner.restart();
       await Promise.all([...surfaces.keys()].map(closeContext));
     },
     /**
@@ -3326,6 +3248,134 @@ export function createBrowserSurfaceHost(options: BrowserSurfaceHostOptions) {
     return tabs;
   }
 
+  async function createContext(input: {
+    readonly contextId: BrowserContextId | string;
+    readonly owner: BrowserSurfaceOwner;
+    readonly policy: BrowserContextPolicy;
+  }): Promise<void> {
+    if (input.policy.profileMode !== "isolated") {
+      throw new Error("Octant Browser supports isolated profiles only.");
+    }
+    if (surfaces.has(input.contextId)) throw new Error("Browser context already exists.");
+    if (
+      !ownerAvailable(input.owner) ||
+      (input.owner.kind !== "execution" && persistentOwner.reserves(String(input.contextId)))
+    ) {
+      throw new Error("Octant Browser owner is not a native Project window.");
+    }
+    const firstTabId = `${String(input.contextId)}:1`;
+    const owned: OwnedSurface = {
+      pointSelection: undefined,
+      lifetime: new AbortController(),
+      pointSelectionTimer: undefined,
+      selectionRelease: undefined,
+      keyboardMenu: undefined,
+      pageEditMenu: new BrowserPageEditMenu(),
+      presentation: new BrowserPresentation(),
+      textComposition: new BrowserTextComposition({
+        current: () =>
+          surfaces.get(input.contextId) === owned &&
+          embeddedOwner(owned.owner) &&
+          owned.presentation.visible,
+        source: () => {
+          const view = contentsView(owned);
+          const source: BrowserTextSource = {
+            editor: async () => {
+              const observed = await humanEditor(view);
+              return observed === undefined ? undefined : presentedEditor(observed);
+            },
+            apply: async (editorId, edit, authorized) => {
+              if (view.webContents.isDestroyed()) return false;
+              // A password field never composes: its candidate would pass
+              // through a local input context the secure field must not use.
+              const editable = (target: BrowserEditableTarget | undefined) =>
+                target !== undefined &&
+                String(target.id) === String(editorId) &&
+                target.kind !== "secure";
+              const target = await humanTarget(view);
+              if (!editable(target) || view.webContents.isDestroyed() || !authorized())
+                return false;
+              // Input commands go to the page, which delivers them to its
+              // focused frame, on the same site or another.
+              return withDebugger(view, async (send) => {
+                const latest = await humanTarget(view);
+                if (!editable(latest) || view.webContents.isDestroyed() || !authorized())
+                  return false;
+                // Only cancellation may outlive visibility. The captured view
+                // and document-start field incarnation still have to match.
+                // An agent action that began while this edit awaited its field
+                // owns the surface now; only cancellation still reaches it.
+                if (
+                  edit.phase !== "cancel" &&
+                  (owned.control === "agent" ||
+                    surfaces.get(input.contextId) !== owned ||
+                    !owned.presentation.visible ||
+                    !embeddedOwner(owned.owner) ||
+                    contentsView(owned) !== view)
+                )
+                  return false;
+                if (edit.phase !== "cancel") {
+                  owned.control = "user";
+                  owned.personInputs++;
+                  for (const listener of personInputListeners) {
+                    try {
+                      listener(input.contextId);
+                    } catch {
+                      /* Isolate observers. */
+                    }
+                  }
+                }
+                if (edit.phase === "update")
+                  await send("Input.imeSetComposition", {
+                    text: edit.text,
+                    selectionStart: edit.selectionStart,
+                    selectionEnd: edit.selectionEnd,
+                  });
+                else if (edit.phase === "commit")
+                  await send("Input.insertText", { text: edit.text });
+                else
+                  await send("Input.imeSetComposition", {
+                    text: "",
+                    selectionStart: 0,
+                    selectionEnd: 0,
+                  });
+                return true;
+              });
+            },
+          };
+          return source;
+        },
+      }),
+      owner: input.owner,
+      policy: input.policy,
+      tabs: [],
+      activeTabId: firstTabId,
+      nextTabOrdinal: 2,
+      lastBounds: undefined,
+      userGrantedOrigins: [],
+      credentialSubmitOrigins: undefined,
+      extensionLoads: 0,
+      actionTail: Promise.resolve(),
+      humanInputTail: Promise.resolve(),
+      control: "idle",
+      ownerNavigationRestricted: false,
+      shellWindow: undefined,
+      blockedNavigationUrl: undefined,
+      unreportedDialogs: [],
+      consoleErrors: [],
+      consoleWarnings: [],
+      failedRequests: [],
+      httpErrors: [],
+      diagnosticSeq: 0,
+      downloads: new DesktopDownloadHold(options.downloadRoot),
+      personInputs: 0,
+      snapshotPersonInputs: 0,
+      lastHumanPress: 0,
+    };
+    openTabView(input.contextId, owned, firstTabId);
+    surfaces.set(input.contextId, owned);
+  }
+
   async function closeContext(contextId: BrowserContextId | string): Promise<void> {
     const owned = surfaces.get(contextId);
     if (owned === undefined) return;
@@ -3348,6 +3398,7 @@ export function createBrowserSurfaceHost(options: BrowserSurfaceHostOptions) {
       closeSurfaceView(tab.view, tab.contents);
     }
     await owned.downloads.dispose();
+    persistentOwner.contextEnded(String(contextId));
   }
 }
 
@@ -3561,11 +3612,19 @@ function navigationUrl(event: unknown, details: readonly unknown[]): unknown {
   return undefined;
 }
 
+const executionViewCurrent = new WeakMap<BrowserSurfaceViewPort, () => boolean>();
+function checkExecutionView(view: BrowserSurfaceViewPort): void {
+  if (executionViewCurrent.get(view)?.() === false)
+    throw new Error("Browser execution owner is no longer available.");
+}
+
 function execute(
   view: BrowserSurfaceViewPort,
   code: string,
   userGesture = false,
 ): Promise<unknown> {
+  if (executionViewCurrent.get(view)?.() === false)
+    return Promise.reject(new Error("Browser execution owner is no longer available."));
   // A WebContentsView that has never committed a document queues script
   // evaluations without ever settling them: the call hangs and, because the
   // broker serializes a surface's actions, every later action waits behind it.
@@ -4276,6 +4335,7 @@ async function emulateDevice(
   view: BrowserSurfaceViewPort,
   request: BrowserSurfaceAction,
 ): Promise<void> {
+  checkExecutionView(view);
   const contents = view.webContents;
   const client = contents.debugger;
   const restoring =
@@ -4317,6 +4377,7 @@ async function emulateDevice(
   state.held = true;
   try {
     if (touch !== state.touch) {
+      checkExecutionView(view);
       await client.sendCommand("Emulation.setTouchEmulationEnabled", {
         enabled: touch,
         maxTouchPoints: 1,
@@ -4324,6 +4385,7 @@ async function emulateDevice(
       state.touch = touch;
     }
     if (colorScheme !== state.colorScheme) {
+      checkExecutionView(view);
       await client.sendCommand("Emulation.setEmulatedMedia", {
         features: [
           {
@@ -4924,11 +4986,14 @@ async function withDebugger<T>(
   view: BrowserSurfaceViewPort,
   action: (send: SurfaceProtocolSend) => Promise<T>,
 ): Promise<T> {
+  checkExecutionView(view);
   const client = view.webContents.debugger;
-  const send: SurfaceProtocolSend = (method, parameters, sessionId) =>
-    sessionId === undefined
+  const send: SurfaceProtocolSend = (method, parameters, sessionId) => {
+    checkExecutionView(view);
+    return sessionId === undefined
       ? client.sendCommand(method, parameters)
       : client.sendCommand(method, parameters, sessionId);
+  };
   if (client.isAttached() && agentDebuggers.has(client)) return action(send);
   if (client.isAttached()) throw new Error("Browser automation control is already in use.");
   client.attach("1.3");

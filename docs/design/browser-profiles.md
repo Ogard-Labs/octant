@@ -71,9 +71,10 @@ a missing registry entry cannot mint a profile or an approval. A newly created
 profile opens no page and changes no default. Fork/import rules for task defaults
 remain unchanged. The shared Browser tool schema advertises `account:<id>`
 alongside Private, Project and Personal, including on terminal MCP endpoints;
-the selector itself grants no profile or site authority. The agent uses a named account only through an explicitly
-selected task default; its existing explicit Private/Project/Personal arguments
-retain their behavior.
+the selector itself grants no profile or site authority. The agent may select a
+named account explicitly or through its selected task default; both paths retain
+the same profile and site checks. Existing Private, Project and Personal
+arguments retain their behavior.
 
 Sign out and Clear cookies retain the account's identity and label while removing
 the confirmed data scope. Existing cookie import and extension enablement are
@@ -414,11 +415,64 @@ The child's managed-tool schema accepts an explicitly granted Project, Personal
 or named-account profile. A missing-profile refusal lists only that child's
 current granted profile choices, sites and expiry so it can retry explicitly.
 Permission never chooses an account or navigates automatically. The context
-uses the execution host's single native profile store and a real local owner
-window able to open the Project, preferring the review window. No owner means
-unavailable; no headless copy or parent page is substituted. Closing an owner
-window closes its child contexts. A new context may use another eligible local
-window without changing the permission's execution-host or child identity.
+uses the execution host's single native profile store. By default it needs a
+real local owner window able to open the Project, preferring the review window;
+closing that window closes its child contexts. A new context may use another
+eligible local window without changing the permission's execution-host or child
+identity. The explicit background-owner option below admits a separate native
+execution principal instead. No owner means unavailable; no headless copy or
+parent page is substituted.
+
+### Background native ownership
+
+Settings > Data & storage > **Keep Browser available without windows** is a
+local-person host preference, off by default. Enabling it starts no task and
+upgrades no existing permission. A subsequent local session review states
+whether the permission can continue when windows close. Review and confirmation
+bind the native owner's exact generation; a changed generation requires a fresh
+review. A renderer can select neither the generation nor an execution lease.
+
+Managed children and dispatcher-proven local Work/Code routine runs may use that
+reviewed generation. The server binds every native lease to the current grant,
+execution/task, Project, model/provider, authority revision, stored profile,
+exact HTTPS sites and grant expiry. It checks the current run and grant before
+each queued effect and before returning observations; the native host checks its
+own generation, lease cancellation and expiry at input/observation boundaries.
+An unavailable owner refuses with no headless fallback or window impersonation.
+The real review window ID is retained only as private provenance and a tool
+service routing key; it grants no native or human authority after closing.
+
+The same desktop process and profile partition own these pages, through hidden
+native views rather than another engine or copied cookies. Closing the last
+renderer closes ordinary window contexts and retains only opted-in execution
+ownership. Reopening a window does not replay a task, recover a grant or adopt a
+background page. These execution pages admit no renderer attach, human handoff,
+file transfers, sign-in, credential fill or page scripts. A workload explicitly
+requesting sign-in receives `browser-needs-login` and needs a local person on
+the execution host; authentication is never inferred from cookies or page contents.
+Terminal profile grants remain window-bound.
+
+Cancellation/run end, grant revocation/expiry, changed task/model/authority,
+profile clear and switch-off end the affected leases. Turning the preference off
+invalidates background-bound permissions. A backend or broker restart rotates
+the native generation and restores no workload authority, even if the same
+profile store survives; a confirmed replacement generation invalidates old
+permissions. Explicit accepted Quit closes all execution views and prevents
+re-enabling that stopped native owner. Native admission retires synchronously
+before the accepted quit awaits window-state flushing; later host shutdown joins
+the same bounded cleanup. Lost replies, late creates and failed
+cleanup retain their own reservations until cleanup is confirmed; they never
+close a foreign context or report uncertain cleanup as complete. An already
+dispatched external action may have happened and is never automatically replayed.
+
+The native owner admits at most 64 live or uncertain execution reservations.
+Create settles within ten seconds, individual cleanup is bounded to two seconds,
+and the broker sweeps expired leases every second. Grant expiry has a 30-day
+ceiling; normal active-page idle limits remain independent. Transport fixtures
+exercise the production broker/runtime with synthetic native views. Actual
+packaged last-window-close/reopen, host restart and explicit-Quit acceptance
+still require the separately approved native test Space; fixture passes do not
+claim that evidence.
 
 If permission, caller or owner ends during an operation, the result withholds
 both new and cached observations. An already dispatched site action may have

@@ -69,6 +69,13 @@ export interface AcpConfinementInput {
   readonly managedHome: string;
   readonly mode: AcpSessionMode;
   readonly executionPolicy: ProviderExecutionPolicy;
+  /**
+   * A Full access thread that keeps the sandbox: the agent's own mode and
+   * managed files stay Full access's, but the launch takes the wall,
+   * protected-file denials, network and server access Accept edits has.
+   * Absent, Full access launches unwrapped.
+   */
+  readonly fullAccessSandbox?: boolean;
   /** A non-mutating readiness check may contact the provider without a thread. */
   readonly purpose?: "probe" | "session";
   readonly environment: NodeJS.ProcessEnv;
@@ -114,6 +121,13 @@ export interface AcpProcessStartInput {
   readonly managedHome: string;
   readonly mode: AcpSessionMode;
   readonly executionPolicy: ProviderExecutionPolicy;
+  /**
+   * A Full access thread that keeps the sandbox: the agent's own mode and
+   * managed files stay Full access's, but the launch takes the wall,
+   * protected-file denials, network and server access Accept edits has.
+   * Absent, Full access launches unwrapped.
+   */
+  readonly fullAccessSandbox?: boolean;
   /** A non-mutating readiness check may contact the provider without a thread. */
   readonly purpose?: "probe" | "session";
   readonly apiKey?: string;
@@ -392,6 +406,21 @@ function hostExtensionDenyPaths(
   ];
 }
 
+/**
+ * The posture an ACP agent's wall is built for. A Full access thread that
+ * keeps the sandbox is confined as Accept edits is (writes held to the
+ * Project, shell allowed, protected files denied, guarded network); the
+ * agent's own mode stays Full access's, so it asks nothing it would not.
+ */
+function acpWallPolicy(input: {
+  readonly executionPolicy: ProviderExecutionPolicy;
+  readonly fullAccessSandbox?: boolean;
+}): ProviderExecutionPolicy {
+  return input.executionPolicy === "full-access" && input.fullAccessSandbox === true
+    ? "auto-accept-edits"
+    : input.executionPolicy;
+}
+
 export function makeAcpConfinementLive(options: AcpConfinementOptions = {}): AcpConfinementPort {
   const platform = options.platform ?? process.platform;
   const sandboxPath =
@@ -453,7 +482,9 @@ export function makeAcpConfinementLive(options: AcpConfinementOptions = {}): Acp
         // Full access runs the agent as its own app does: no sandbox, no
         // credential-file or extension denials. Octant's own file tools still
         // refuse protected paths, and secrets are redacted from what it records.
-        if (input.executionPolicy === "full-access") {
+        // A thread that keeps the sandbox takes the Accept edits wall instead.
+        const wall = acpWallPolicy(input);
+        if (wall === "full-access") {
           return {
             command: input.binaryPath,
             args,
@@ -474,7 +505,7 @@ export function makeAcpConfinementLive(options: AcpConfinementOptions = {}): Acp
                   ? resolveProbeEgressPolicy()
                   : resolveProviderRuntimeEgressPolicy({
                       mode: input.mode,
-                      executionPolicy: input.executionPolicy,
+                      executionPolicy: wall,
                     }),
               )
             : ({ kind: "proxied", endpoint: input.network.endpoint } as const);
@@ -1233,14 +1264,15 @@ export function makeAcpProcessLive(options: AcpProcessOptions = {}): AcpProcessP
           ...(input.apiKey === undefined ? {} : { apiKey: input.apiKey }),
           ...(input.nativeSetup === undefined ? {} : { nativeSetup: input.nativeSetup }),
         });
+        const wall = acpWallPolicy(input);
         const network =
-          input.executionPolicy === "full-access"
+          wall === "full-access"
             ? undefined
             : yield* acquireProviderRuntimeNetwork(options.runtimeNetwork, {
                 runtime: "acp",
                 profileId: profile.kind,
                 root: input.root,
-                executionPolicy: input.executionPolicy,
+                executionPolicy: wall,
                 loopbackPorts: input.loopbackPorts ?? [],
                 environment,
               });
@@ -1249,7 +1281,7 @@ export function makeAcpProcessLive(options: AcpProcessOptions = {}): AcpProcessP
             ? undefined
             : yield* acquireProviderServerAccess(options.serverAccess, {
                 root: input.root,
-                executionPolicy: input.executionPolicy,
+                executionPolicy: wall,
               });
         const launch = yield* confinement.prepare({
           profile,
@@ -1259,6 +1291,7 @@ export function makeAcpProcessLive(options: AcpProcessOptions = {}): AcpProcessP
           managedHome: input.managedHome,
           mode: input.mode,
           executionPolicy: input.executionPolicy,
+          ...(input.fullAccessSandbox === true ? { fullAccessSandbox: true } : {}),
           ...(input.purpose === undefined ? {} : { purpose: input.purpose }),
           environment,
           ...(input.loopbackPorts === undefined ? {} : { loopbackPorts: input.loopbackPorts }),

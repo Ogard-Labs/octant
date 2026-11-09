@@ -274,6 +274,13 @@ entries are excluded.
 
 ## Process topology
 
+The desktop's single native Browser owner may explicitly retain host-owned
+execution pages after its last renderer closes, using the same native profile
+store. These pages carry native execution leases rather than renderer window
+authority; restart rotates their generation and accepted Quit closes them.
+The default-off preference, fresh local review and exact grant/task scope are
+owned by [Background native ownership](design/browser-profiles.md#background-native-ownership).
+
 On macOS, both trusted desktop executables use sealed ASAR entries and fixed
 launch roles. Each app's separately identified, same-version bundled runtime runs
 its host, managed tools and executable extensions as Node (Stable's also runs its
@@ -9227,7 +9234,8 @@ Settings › Access, and nothing else. `provider-endpoints-only` finally means
 that for the runtime process too. Full access stays open network, except a
 thread that keeps the sandbox, which is held as the guarded levels are
 (Codex, whose app-server takes the proxy inside Octant's profile, Claude
-Code's own process and command sandbox, and Pi inside the Accept edits wall;
+Code's own process and command sandbox, and Pi, OpenCode and ACP agents
+inside the Accept edits wall;
 the runtimes that cannot keep the sandbox refuse such a thread). A refused request gets a 403 whose
 first body line stays the machine-readable `octant-egress-refused: <reason>
 <host>:<port>`; for a refusal a person can lift (`no-rule`, `expired`,
@@ -11040,8 +11048,11 @@ trust, replacement, changed authority or turn teardown invalidates pending use;
 a saved-command review retains that host fence before execution. An effect
 already started cannot be undone, and a changed caller receives no stale result.
 Credential-operation registration and its trusted response predicates remain in
-the host. The unified core credential composition remains host-owned until its
-separate migration through this port; its existing behavior is unchanged here.
+the host. The unified core `octant_credential` uses the same public capability
+port and family composer as installed declarations. Its existing name, help,
+schema, offered-side rules and task-owned command presentation are unchanged.
+The core's additional command presentation stays in a private server adapter;
+it is not added to the installed-plugin port's fixed metadata types.
 
 Preserve the sequence: establish a provider-neutral port and renderer seam
 before moving a feature behind them, and keep that work separate from unrelated
@@ -11198,15 +11209,37 @@ mechanisms are:
       serves a sandboxed session, nor the reverse. Verified by a process test
       that the sandboxed launch is wrapped and the open one is not; a real
       Seatbelt run and a live Pi turn are maintainer checks.
-      ACP agents and OpenCode launch unwrapped at Full access, so a sandboxed thread on one of
+      OpenCode's server launches inside the wall Accept edits has (writes
+      held to the Project and its extra folders, shell allowed, guarded
+      network and server access) under Full access's permission rules, so
+      nothing prompts (`openCodeWallPolicy`); the sandbox choice is part of
+      the connection's process authority, so a server started open never
+      serves a sandboxed session, nor the reverse. Verified by process and
+      driver tests; a real Seatbelt run and a live OpenCode turn are
+      maintainer checks.
+      An ACP agent launches inside the wall Accept edits has (writes held
+      to the Project and its extra folders, shell allowed, the profile's
+      credential-file and extension denials, guarded network and server
+      access) while its own session mode and managed files stay Full
+      access's, so it asks nothing and Octant answers anything it does ask
+      allow (`acpWallPolicy`). Each profile's guards against handing the
+      session to a process outside the sandbox (Grok's leader, Cline's hub
+      daemon) hold at every level. The sandbox choice is part of the key for
+      reusing a running agent, so one started open never serves a sandboxed
+      session, nor the reverse. Verified by a process test that the
+      sandboxed launch is wrapped and the open one is not; a real Seatbelt
+      run and a live turn on an ACP agent are maintainer checks; an agent
+      whose own Full access mode starts a sandbox of its own would fail
+      inside Octant's rather than run open.
+      Any other runtime launches unwrapped at Full access, so a sandboxed thread on one of
       them refuses to start with a plain message
       (`refusesFullAccessSandbox`, checked before each Code and Work turn)
       rather than running open.
     - **Network.** The thread resolves the egress the guarded levels resolve
       (`provider-endpoints-only`). Commands are held to the provider
       endpoints and approved hosts where the host routes them through its
-      egress proxy: Codex's app-server, Claude Code and Pi ask for the
-      runtime proxy with the Accept edits posture, and Harness commands run
+      egress proxy: Codex's app-server, Claude Code, Pi, OpenCode and ACP
+      agents ask for the runtime proxy with the Accept edits posture, and Harness commands run
       on their own proxy. The runtime's proxy follows the Network limits switch, which
       ships on ([provider runtime network](#provider-runtime-network)); with
       the switch off the OS rule is `allow`, as at the guarded levels.
@@ -11901,7 +11934,7 @@ approval-gated` command that undoes it. The terminal shows no one-time
   - **ACP, OpenCode, Pi:** wrapped at Guarded and Reviewed, with
     process exec and fork allowed and writes held to the Project root, so the
     shell runs confined; unwrapped at Full access, with no sandbox, except
-    Pi for a thread that keeps the sandbox, which takes the Accept edits wall. Egress at Guarded and Reviewed is
+    Pi, OpenCode and an ACP agent for a thread that keeps the sandbox, which takes the Accept edits wall. Egress at Guarded and Reviewed is
     the provider's endpoints, the Project's egress rules, and the person's
     safe networks rather than a blanket `allow` (built on macOS, behind the
     Network limits switch, which ships on;

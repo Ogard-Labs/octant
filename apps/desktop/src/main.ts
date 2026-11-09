@@ -1410,6 +1410,7 @@ let hostStatusPoll: ReturnType<typeof setInterval> | undefined;
 const pendingCodeDeepLinks: CodeDeepLink[] = [];
 let quitPrepared = false;
 let quitAccepted = false;
+let browserQuitCleanup: Promise<"closed" | "unconfirmed"> | undefined;
 let preparingQuit = false;
 // The active-work confirmation only applies to quits the user starts inside
 // the app (menu, Cmd+Q). Signal- or event-driven termination (SIGTERM,
@@ -1883,7 +1884,10 @@ async function startDesktopOwnedHost(): Promise<LocalHostDescriptor> {
         );
         if (stored?.kind === "account" && !profileStore.hasAccountProfile(stored.profileId))
           throw new Error("The named account profile is not registered on this host.");
-        if (nightlyWindowLeases?.hasWindow(options.owner.windowId) === true)
+        if (
+          options.owner.kind === "execution" ||
+          nightlyWindowLeases?.hasWindow(options.owner.windowId) === true
+        )
           return createOffscreenBrowserSurface(options);
         return new WebContentsView({
           webPreferences: { partition: options.partition, ...options.webPreferences },
@@ -4626,7 +4630,16 @@ async function quitHostAfterLastClient(
   return quitAccepted ? "accepted" : "cancelled";
 }
 
+function closeBrowserAdmissionForQuit(): void {
+  browserQuitCleanup ??= browserSurfaceHost?.persistentOwner?.close();
+  // The flush can outlast native cleanup. Join this same result below without
+  // leaving a rejected cleanup unobserved while window state is being saved.
+  void browserQuitCleanup?.catch(() => undefined);
+}
+
 async function stopHostForQuit(): Promise<void> {
+  closeBrowserAdmissionForQuit();
+  const browserStopped = browserQuitCleanup;
   const prototypesStopped = canvasPrototypeSurface?.stop();
   const hostStopped = (async () => {
     await shutdownSecondaryProjectWindows();
@@ -4639,12 +4652,8 @@ async function stopHostForQuit(): Promise<void> {
   })();
   const native = desktopPeerStatusOwner?.close();
   const windows = nightlyWindowLeases?.close();
-  const [hostResult, prototypeResult, nativeResult, windowsResult] = await Promise.allSettled([
-    hostStopped,
-    prototypesStopped,
-    native,
-    windows,
-  ]);
+  const [hostResult, prototypeResult, nativeResult, windowsResult, browserResult] =
+    await Promise.allSettled([hostStopped, prototypesStopped, native, windows, browserStopped]);
   const windowsFailed =
     windowsResult.status === "rejected" || windowsResult.value?.kind === "failed";
   const nativeFailed = nativeResult.status === "rejected" || nativeResult.value?.kind === "failed";
@@ -4657,7 +4666,12 @@ async function stopHostForQuit(): Promise<void> {
   }
   // Native close can retain an OS launch after its deadline. Report failure
   // only after every sibling has settled, so quit never records it as clean.
-  if (windowsFailed || nativeFailed)
+  if (
+    windowsFailed ||
+    nativeFailed ||
+    browserResult.status === "rejected" ||
+    browserResult.value === "unconfirmed"
+  )
     throw new Error("Octant could not finish closing its native desktop owners.");
 }
 
@@ -4711,6 +4725,7 @@ async function prepareToQuit(stillRequested?: () => boolean): Promise<void> {
     forceExit: forceExitAfterStalledQuit(),
   });
   await shutDownForQuit({
+    closeAdmission: closeBrowserAdmissionForQuit,
     flushWindowState,
     stopHost: stopHostForQuit,
     log: logQuitProblem,
@@ -4728,6 +4743,7 @@ async function handleFatalStartup(error: unknown): Promise<void> {
     forceExit: forceExitAfterStalledQuit(),
   });
   await shutDownForQuit({
+    closeAdmission: closeBrowserAdmissionForQuit,
     flushWindowState: async () => undefined,
     stopHost: stopHostForQuit,
     log: logQuitProblem,
@@ -4959,7 +4975,10 @@ else {
   }).then(startDesktopInstance, handleFatalStartup);
 }
 app.on("window-all-closed", () => {
-  if (process.platform !== "darwin") {
+  if (
+    process.platform !== "darwin" &&
+    browserSurfaceHost?.persistentOwner?.retainsProcess() !== true
+  ) {
     quitCanPrompt = true;
     app.quit();
   }

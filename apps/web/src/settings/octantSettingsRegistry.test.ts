@@ -164,6 +164,7 @@ describe("octantSettingsRegistry", () => {
       "browser-upload-permissions",
       "browser-download-permissions",
       "browser-session-permissions",
+      "persistent-browser-owner",
       "browser-flows",
       "browser-extensions",
       "thread-retention",

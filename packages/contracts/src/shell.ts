@@ -861,6 +861,8 @@ export const ShellSettings = Schema.Struct({
    * decodes to off.
    */
   agentBrowserDownloads: Schema.optionalWith(Schema.Boolean, { default: () => false }),
+  /** Local opt-in; old grants never inherit a newly enabled native owner. */
+  persistentBrowserOwner: Schema.optionalWith(Schema.Boolean, { default: () => false }),
 }).annotations(strict);
 export type ShellSettings = typeof ShellSettings.Type;
 

@@ -770,7 +770,10 @@ describe("createPhase1RuntimeRegistries", () => {
       EventPayloadInvalid,
     );
     expect(registry.decodePersisted("shell.settings-replaced", 1, legacyPayload)).toEqual({
-      settings: decodePersistedShellSettings(legacyPayload.settings),
+      settings: {
+        ...decodePersistedShellSettings(legacyPayload.settings),
+        persistentBrowserOwner: false,
+      },
     });
     for (const [contextSidebarWidth, lastContextSurface, modeSwitcherPresentation] of [
       [280, null, "buttons"],
@@ -800,6 +803,7 @@ describe("createPhase1RuntimeRegistries", () => {
           rememberedBrowserOrigins: [],
           rememberedBrowserProfileSites: [],
           agentBrowserDownloads: false,
+          persistentBrowserOwner: false,
           computerUse: { enabled: false, automaticUpdates: false },
           projectViewSwitcherPresentation: "dropdown",
           transcriptTextSize: "medium",
@@ -1046,6 +1050,7 @@ function validSettingsPayload() {
       rememberedBrowserOrigins: [],
       rememberedBrowserProfileSites: [],
       agentBrowserDownloads: false,
+      persistentBrowserOwner: false,
       computerUse: { enabled: true, automaticUpdates: true },
       projectViewSwitcherPresentation: "dropdown",
       transcriptTextSize: "medium",

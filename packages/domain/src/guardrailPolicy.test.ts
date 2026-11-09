@@ -118,15 +118,17 @@ describe("guardrail levels", () => {
     ).toMatchObject({ sandbox: "none", egress: "unrestricted" });
   });
 
-  it("keeps the sandbox at Full access on Codex, Claude, Pi and the Octant Harness, and refuses it elsewhere or on an unknown runtime", () => {
+  it("keeps the sandbox at Full access on Codex, Claude, Pi, OpenCode, ACP agents and the Octant Harness, and refuses it elsewhere or on an unknown runtime", () => {
     const sandboxed = { executionPolicy: "full-access", fullAccessSandbox: true } as const;
     expect(refusesFullAccessSandbox({ access: sandboxed, driverKind: "codex" })).toBe(false);
     expect(refusesFullAccessSandbox({ access: sandboxed, driverKind: "claude" })).toBe(false);
     expect(refusesFullAccessSandbox({ access: sandboxed, driverKind: "pi" })).toBe(false);
+    expect(refusesFullAccessSandbox({ access: sandboxed, driverKind: "opencode" })).toBe(false);
+    expect(refusesFullAccessSandbox({ access: sandboxed, driverKind: "mistral-vibe" })).toBe(false);
     expect(refusesFullAccessSandbox({ access: sandboxed, driverKind: "openai-compatible" })).toBe(
       false,
     );
-    for (const driverKind of ["opencode", "mistral-vibe", undefined] as const) {
+    for (const driverKind of ["oh-my-pi", undefined] as const) {
       expect(refusesFullAccessSandbox({ access: sandboxed, driverKind })).toBe(true);
     }
     // Without the choice, or below Full access, nothing refuses.

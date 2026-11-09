@@ -18,6 +18,10 @@ import type {
   BrowserSessionTarget,
 } from "@octant/contracts/browser-session-grants";
 import { browserProfileKey } from "@octant/domain";
+import type {
+  PersistentBrowserOwnerId,
+  PersistentBrowserOwnerStatus,
+} from "@octant/contracts/persistent-browser-owner";
 import {
   decodeBrowserSessionGrantId,
   decodeBrowserSessionReviewId,
@@ -34,9 +38,12 @@ interface SavedPermission {
   readonly grant: BrowserSessionGrant;
   readonly revision: string;
   readonly windowId: WindowId;
+  readonly executionOwnerId?: PersistentBrowserOwnerId;
 }
 
 interface BrowserSessionGrantsOptions {
+  /** Reads a native generation only during local review; never supplied by a client. */
+  readonly persistentOwnerStatus?: () => Promise<PersistentBrowserOwnerStatus>;
   readonly now: () => number;
   readonly uuid: () => string;
   readonly isLocalWindow: (windowId: WindowId) => boolean;
@@ -166,6 +173,7 @@ export class BrowserSessionGrants {
       const label = await this.#options.profileLabel(command.profile);
       if (label === undefined)
         return refused("unavailable", "That profile is unavailable on this host.");
+      const nativeOwner = await this.#options.persistentOwnerStatus?.();
       const refreshed = this.#options.current(command.grantee);
       if (
         !this.#options.isLocalWindow(windowId) ||
@@ -199,6 +207,7 @@ export class BrowserSessionGrants {
         recipientRevisionDigest: recipientDigest(current.revision),
         grantedAt: decodeUtcTimestamp(new Date(now).toISOString()),
         expiresAt: decodeUtcTimestamp(new Date(expires).toISOString()),
+        ...(nativeOwner?.status === "ready" ? { continuesWithoutWindow: true } : {}),
       };
       if (this.#reviews.size >= MAX_PERMISSIONS)
         return refused("limit", "Finish or wait for an existing review before opening another.");
@@ -207,6 +216,7 @@ export class BrowserSessionGrants {
         grant,
         revision: current.revision,
         windowId,
+        ...(nativeOwner?.status === "ready" ? { executionOwnerId: nativeOwner.ownerId } : {}),
         expires: now + REVIEW_MS,
       });
       return { kind: "browser-session-review", reviewId, grant };
@@ -222,6 +232,7 @@ export class BrowserSessionGrants {
       );
     }
     const label = await this.#options.profileLabel(review.grant.profile);
+    const nativeOwner = await this.#options.persistentOwnerStatus?.();
     // Keep the review cancellable across native reads, then consume it once.
     const retained = this.#reviews.get(command.reviewId) === review;
     if (retained) this.#reviews.delete(command.reviewId);
@@ -229,6 +240,8 @@ export class BrowserSessionGrants {
       !retained ||
       review.expires <= this.#options.now() ||
       label !== review.grant.profileLabel ||
+      (review.executionOwnerId !== undefined &&
+        (nativeOwner?.status !== "ready" || nativeOwner.ownerId !== review.executionOwnerId)) ||
       !this.#current(review) ||
       !this.#options.isLocalWindow(windowId) ||
       !this.#options.canReview(windowId, review.grant.target)
@@ -290,6 +303,34 @@ export class BrowserSessionGrants {
         this.#options.isLocalWindow(windowId) &&
         this.#options.canReview(windowId, row.grant.target),
     );
+  }
+
+  /** Private host receipt; a new owner never upgrades an earlier permission. */
+  executionFor(grantId: string):
+    | {
+        readonly grant: BrowserSessionGrant;
+        readonly ownerId: PersistentBrowserOwnerId;
+        readonly reviewerWindowId: WindowId;
+      }
+    | undefined {
+    this.#prune();
+    const row = this.#grants.get(grantId);
+    return row?.executionOwnerId === undefined
+      ? undefined
+      : {
+          grant: row.grant,
+          ownerId: row.executionOwnerId,
+          reviewerWindowId: row.windowId,
+        };
+  }
+
+  invalidateExecutionOwners(current: PersistentBrowserOwnerId | undefined): void {
+    for (const row of this.#grants.values())
+      if (row.executionOwnerId !== undefined && row.executionOwnerId !== current)
+        this.#remove(row, "changed");
+    for (const [id, row] of this.#reviews)
+      if (row.executionOwnerId !== undefined && row.executionOwnerId !== current)
+        this.#reviews.delete(id);
   }
 
   forTarget(target: BrowserSessionTarget): ReadonlyArray<BrowserSessionGrant> {

@@ -30,6 +30,7 @@ it.each(["child", "routine"] as const)(
   async (kind) => {
     const grant = {
       ...seedGrant,
+      continuesWithoutWindow: kind === "routine",
       target: {
         ...seedGrant.target,
         grantee:
@@ -80,6 +81,13 @@ it.each(["child", "routine"] as const)(
       manageSessionGrants.mock.calls.find(([command]) => command.kind === "review")?.[0],
     ).toMatchObject({ durationMinutes: kind === "routine" ? 10080 : 15 });
     expect(screen.getByText("https://example.com")).toBeVisible();
+    expect(
+      screen.getByText(
+        kind === "routine"
+          ? /This permission can keep using the native Browser when all windows close/
+          : /This permission requires an open local window/,
+      ),
+    ).toBeVisible();
     expect(manageSessionGrants.mock.calls.some(([command]) => command.kind === "grant")).toBe(
       false,
     );

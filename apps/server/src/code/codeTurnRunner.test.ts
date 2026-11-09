@@ -1860,7 +1860,7 @@ describe("CodeTurnRunner", () => {
       fullAccessSandbox: true,
     };
 
-    for (const providerDriverKind of ["mistral-vibe", "opencode", undefined] as const) {
+    for (const providerDriverKind of ["oh-my-pi", undefined] as const) {
       const exit = await Effect.runPromiseExit(
         Effect.scoped(
           new CodeTurnRunner().run(
@@ -1875,7 +1875,7 @@ describe("CodeTurnRunner", () => {
       );
       expect(exit._tag).toBe("Failure");
     }
-    expect(outcomes).toEqual(["failed", "failed", "failed"]);
+    expect(outcomes).toEqual(["failed", "failed"]);
     expect(provider.acquire).not.toHaveBeenCalled();
   });
 

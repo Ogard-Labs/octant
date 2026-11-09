@@ -997,3 +997,41 @@ describe("BrowserRuntimeBroker profiles", () => {
     }
   });
 });
+
+it("keeps background owner configuration behind native broker authentication and strict local requests", async () => {
+  const native = createBrowserSurfaceHost({
+    createView: () => {
+      throw Error("This status fixture opens no page");
+    },
+  });
+  const broker = await startBrowserRuntimeBroker(native);
+  const call = (path: string, body: unknown, token = broker.token) =>
+    fetch(new URL(path, broker.url), {
+      method: "POST",
+      headers: { "content-type": "application/json", "x-octant-browser-broker-token": token },
+      body: JSON.stringify(body),
+    });
+  try {
+    expect(await (await call("/v1/persistent-owner/status", {})).json()).toEqual({
+      status: "disabled",
+    });
+    expect((await call("/v1/persistent-owner/configure", { enabled: true }, "wrong")).status).toBe(
+      401,
+    );
+    expect(
+      (await call("/v1/persistent-owner/configure", { enabled: true, windowId: contextId })).status,
+    ).toBe(400);
+    expect(await (await call("/v1/persistent-owner/status", {})).json()).toEqual({
+      status: "disabled",
+    });
+    const ready = await (await call("/v1/persistent-owner/configure", { enabled: true })).json();
+    expect(ready).toMatchObject({ status: "ready", ownerId: expect.any(String) });
+    await call("/v1/persistent-owner/configure", { enabled: false });
+    const replacement = await (
+      await call("/v1/persistent-owner/configure", { enabled: true })
+    ).json();
+    expect(replacement.ownerId).not.toBe(ready.ownerId);
+  } finally {
+    await broker.close();
+  }
+});

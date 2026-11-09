@@ -126,8 +126,10 @@ export const FULL_ACCESS_SANDBOX_UNSUPPORTED =
  * Runtimes that honor the opt-in sandbox at Full access: Codex, whose process
  * stays inside Octant's profile, Claude, whose commands keep its own sandbox
  * and whose file tools keep Octant's path gate, Pi, which launches inside the
- * wall Accept edits has with its approvals off, and the Octant Harness, whose
- * commands run on the confined shell. Every other runtime launches unwrapped at Full
+ * wall Accept edits has with its approvals off, OpenCode, whose server runs
+ * inside that wall under Full access's permission rules, ACP agents, which
+ * launch inside it in their own Full access mode, and the Octant Harness,
+ * whose commands run on the confined shell. Every other runtime launches unwrapped at Full
  * access, so a sandboxed thread on one of them is refused rather than run
  * open while it says it is sandboxed.
  */
@@ -136,6 +138,8 @@ export function fullAccessSandboxSupported(driverKind: ProviderDriverKind): bool
     driverKind === "codex" ||
     driverKind === "claude" ||
     driverKind === "pi" ||
+    driverKind === "opencode" ||
+    isAcpAgentKind(driverKind) ||
     isNativeHarnessDriverKind(driverKind)
   );
 }

@@ -9,6 +9,7 @@ import {
   type BrowserSessionTarget,
 } from "@octant/contracts/browser-session-grants";
 import { BrowserSessionGrants, type CurrentBrowserSessionTarget } from "./browserSessionGrants";
+import { decodePersistentBrowserOwnerStatus } from "@octant/contracts/persistent-browser-owner";
 
 const windowId = decodeWindowId("10000000-0000-4000-8000-000000000001");
 const otherWindow = decodeWindowId("10000000-0000-4000-8000-000000000002");
@@ -35,6 +36,7 @@ const target: BrowserSessionTarget = {
 };
 
 function fixture(clock?: () => number) {
+  let nativeOwner = decodePersistentBrowserOwnerStatus({ status: "disabled" });
   let now = Date.parse("2026-11-07T10:00:00Z");
   let current: CurrentBrowserSessionTarget | undefined = { target, revision: "child-workspace-1" };
   let local = true;
@@ -42,6 +44,7 @@ function fixture(clock?: () => number) {
   const profileLabel = vi.fn(async () => "Personal");
   const onRevoked = vi.fn();
   const service = new BrowserSessionGrants({
+    persistentOwnerStatus: async () => nativeOwner,
     now: () => clock?.() ?? now,
     uuid: () => crypto.randomUUID(),
     isLocalWindow: () => local,
@@ -54,6 +57,9 @@ function fixture(clock?: () => number) {
   });
   return {
     service,
+    setNativeOwner: (value: ReturnType<typeof decodePersistentBrowserOwnerStatus>) => {
+      nativeOwner = value;
+    },
     record,
     profileLabel,
     onRevoked,
@@ -79,6 +85,54 @@ async function grant(f: ReturnType<typeof fixture>) {
 }
 
 describe("explicit Browser session permissions", () => {
+  it("binds only a locally reviewed native generation and never upgrades an older grant", async () => {
+    const f = fixture();
+    try {
+      const windowOnly = await grant(f);
+      f.setNativeOwner(
+        decodePersistentBrowserOwnerStatus({
+          status: "ready",
+          ownerId: "a0000000-0000-4000-8000-000000000001",
+        }),
+      );
+      expect(f.service.executionFor(windowOnly.grantId)).toBeUndefined();
+      await f.service.execute(windowId, { kind: "revoke", grantId: windowOnly.grantId });
+      const persistent = await grant(f);
+      expect(persistent.continuesWithoutWindow).toBe(true);
+      f.setLocal(false);
+      expect(f.service.ownerWindowFor(persistent.grantId)).toBeUndefined();
+      expect(f.service.executionFor(persistent.grantId)).toMatchObject({
+        grant: persistent,
+        ownerId: "a0000000-0000-4000-8000-000000000001",
+        reviewerWindowId: windowId,
+      });
+      f.setLocal(true);
+      const review = await f.service.execute(windowId, command);
+      if (review.kind !== "browser-session-review") throw Error("Expected native review");
+      f.setNativeOwner(
+        decodePersistentBrowserOwnerStatus({
+          status: "ready",
+          ownerId: "a0000000-0000-4000-8000-000000000002",
+        }),
+      );
+      expect(
+        await f.service.execute(windowId, { kind: "grant", reviewId: review.reviewId }),
+      ).toMatchObject({ kind: "browser-session-refused", reason: "stale" });
+      expect(f.service.executionFor(persistent.grantId)?.ownerId).toBe(
+        "a0000000-0000-4000-8000-000000000001",
+      );
+      const replacement = decodePersistentBrowserOwnerStatus({
+        status: "ready",
+        ownerId: "a0000000-0000-4000-8000-000000000002",
+      });
+      if (replacement.status !== "ready") throw Error("Expected owner");
+      f.service.invalidateExecutionOwners(replacement.ownerId);
+      expect(f.service.executionFor(persistent.grantId)).toBeUndefined();
+      expect(f.onRevoked).toHaveBeenCalledWith(persistent.grantId);
+    } finally {
+      f.service.close();
+    }
+  });
   it("withholds a review when its window is revoked while profile metadata is being read", async () => {
     const f = fixture();
     f.profileLabel.mockImplementationOnce(async () => {

@@ -47,10 +47,17 @@ export interface QuitShutdownOutcome {
  * quits whatever the outcome.
  */
 export async function shutDownForQuit(options: {
+  /** Retires native admission synchronously before any window-state await. */
+  readonly closeAdmission?: () => void;
   readonly flushWindowState: () => Promise<void>;
   readonly stopHost: () => Promise<void>;
   readonly log: (message: string) => void;
 }): Promise<QuitShutdownOutcome> {
+  try {
+    options.closeAdmission?.();
+  } catch {
+    options.log("Octant could not close native admission at quit.");
+  }
   const windowState = await runBounded(options.flushWindowState, WINDOW_STATE_FLUSH_BOUND_MS);
   if (windowState !== "completed") {
     options.log(`Octant could not save window state at quit (${windowState}).`);

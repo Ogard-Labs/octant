@@ -20,6 +20,12 @@ describe("Browser session permission commands", () => {
       decodeBrowserSessionGrantsCommand({ ...review, authority: { mode: "code" } }),
     ).toThrow();
     expect(() =>
+      decodeBrowserSessionGrantsCommand({ ...review, continuesWithoutWindow: true }),
+    ).toThrow();
+    expect(() =>
+      decodeBrowserSessionGrantsCommand({ ...review, ownerId: review.grantee.runId }),
+    ).toThrow();
+    expect(() =>
       decodeBrowserSessionGrantsCommand({
         ...review,
         grantee: { ...review.grantee, parentRunId: review.grantee.runId },

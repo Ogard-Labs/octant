@@ -253,6 +253,28 @@ export function wireBrowser(deps: BrowserDependencies) {
             native: desktopBrowserRuntime,
             headless: headlessBrowserRuntime,
           }));
+    const persistentOwnerEnabled = () =>
+      (persistence.readShellSettings()?.settings ?? defaultShellSettings()).persistentBrowserOwner;
+    let persistentSessionPermissions: BrowserSessionGrants | undefined;
+    let ownerConfiguration = Promise.resolve();
+    const configurePersistentOwner = () => {
+      ownerConfiguration = ownerConfiguration
+        .then(async () => {
+          const state = await browserRuntime.persistentOwner?.configure(persistentOwnerEnabled());
+          if (state?.status === "ready" || !persistentOwnerEnabled())
+            persistentSessionPermissions?.invalidateExecutionOwners(
+              state?.status === "ready" ? state.ownerId : undefined,
+            );
+        })
+        .catch(() => undefined);
+      return ownerConfiguration;
+    };
+    yield* Effect.promise(configurePersistentOwner);
+    const unsubscribePersistentOwner = persistence.journal.subscribeCommitted((append) => {
+      if (append.events.some((event) => event.eventName === "shell.settings-replaced"))
+        void configurePersistentOwner();
+    });
+    yield* Effect.addFinalizer(() => Effect.sync(unsubscribePersistentOwner));
     const childSessionTarget = (run: AgentRun): CurrentBrowserSessionTarget | undefined =>
       currentManagedChildBrowserTarget(run, {
         canReview: (candidate) => agentRunInteractions.canReviewSession(candidate),
@@ -381,6 +403,10 @@ export function wireBrowser(deps: BrowserDependencies) {
     };
     let delegatedChildren: BrowserDelegatedChildren | undefined;
     const browserSessionGrants = new BrowserSessionGrants({
+      persistentOwnerStatus: async () =>
+        persistentOwnerEnabled()
+          ? ((await browserRuntime.persistentOwner?.status()) ?? { status: "unavailable" })
+          : { status: "disabled" },
       now: Date.now,
       uuid: randomUUID,
       isLocalWindow: (windowId) => windowAuthorityStore.listWindowIds().includes(windowId),
@@ -431,6 +457,7 @@ export function wireBrowser(deps: BrowserDependencies) {
       },
     });
     delegatedChildren = new BrowserDelegatedChildren({
+      persistentOwnerEnabled,
       runtime: browserRuntime,
       grants: browserSessionGrants,
       recordExternalContentIngestion: (input) => externalContentIngestionStore.record(input),
@@ -445,6 +472,7 @@ export function wireBrowser(deps: BrowserDependencies) {
       uuid: randomUUID,
       now: Date.now,
     });
+    persistentSessionPermissions = browserSessionGrants;
     const browserDelegatedChildren = delegatedChildren;
     const bindTerminalBrowserSessions = (source: NonNullable<typeof terminalSessionSource>) => {
       terminalSessionSource = source;
