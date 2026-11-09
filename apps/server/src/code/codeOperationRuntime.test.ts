@@ -8207,6 +8207,7 @@ function runtimeFixture(options: {
   holdsServerThread?: Parameters<typeof createCodeOperationRuntime>[0]["holdsServerThread"];
   canvas?: Parameters<typeof createCodeOperationRuntime>[0]["canvas"];
   carryAgentMessages?: Parameters<typeof createCodeOperationRuntime>[0]["carryAgentMessages"];
+  projectMemoryEntries?: Parameters<typeof createCodeOperationRuntime>[0]["projectMemoryEntries"];
   confirmAgentMessagesDelivered?: Parameters<
     typeof createCodeOperationRuntime
   >[0]["confirmAgentMessagesDelivered"];
@@ -8590,6 +8591,9 @@ function runtimeFixture(options: {
     ...(options.carryAgentMessages === undefined
       ? {}
       : { carryAgentMessages: options.carryAgentMessages }),
+    ...(options.projectMemoryEntries === undefined
+      ? {}
+      : { projectMemoryEntries: options.projectMemoryEntries }),
     ...(options.confirmAgentMessagesDelivered === undefined
       ? {}
       : { confirmAgentMessagesDelivered: options.confirmAgentMessagesDelivered }),
@@ -10200,6 +10204,37 @@ it("records an agent message delivered once the provider accepted the turn that 
   await vi.waitFor(() => expect(lost.fixture.runtimeWorks().at(-1)?.state).toBe("failed"));
   expect(lost.confirmAgentMessagesDelivered).not.toHaveBeenCalled();
   lost.fixture.close();
+});
+
+it("carries the Project's active memory in a Code turn's context, as a Chat turn does", async () => {
+  const queue = Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>());
+  const connection = providerConnection(queue);
+  const projectMemoryEntries = vi.fn(() => ["Releases ship from main only."]);
+  const fixture = runtimeFixture({ provider: providerDriver(connection), projectMemoryEntries });
+  try {
+    await expect(
+      fixture.runtime.execute(windowId, {
+        kind: "start-provider-turn",
+        operationId: operationId(87),
+        threadId,
+        checkoutId,
+        sessionId,
+        prompt: fixture.prompt,
+      }),
+    ).resolves.toMatchObject({ state: "running" });
+    await vi.waitFor(() => expect(connection.send).toHaveBeenCalledOnce());
+    expect(connection.send).toHaveBeenCalledWith(
+      expect.objectContaining({
+        context: expect.arrayContaining([
+          { kind: "project-memory", text: "Releases ship from main only." },
+        ]),
+      }),
+    );
+    expect(projectMemoryEntries).toHaveBeenCalledWith(expect.objectContaining({ id: threadId }));
+  } finally {
+    await fixture.runtime.close();
+    fixture.close();
+  }
 });
 
 it("binds the Computer tool to the thread's running desktop when the send names none", async () => {

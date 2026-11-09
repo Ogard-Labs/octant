@@ -65,6 +65,8 @@ export function nativeHarnessInstructions(mode: OctantMode): ReadonlyArray<Provi
  * for the first time cannot infer from a parameter list.
  */
 const OCTANT_TOOL_PURPOSE: Readonly<Record<string, string>> = {
+  diagnostics:
+    "run the checkout's typecheck and lint and get the problems back as a short list of file, line, and message; use it after edits instead of reading raw command output",
   octant_agents: "start, watch, and stop helper agents that work beside you",
   octant_ask_thread: "ask a Chat thread the user mentioned something and wait for its reply",
   octant_android:
@@ -81,6 +83,8 @@ const OCTANT_TOOL_PURPOSE: Readonly<Record<string, string>> = {
     "have the person authorize a credential for a registered operation or saved command; not a command runner",
   octant_github:
     "read the repository's issues, pull requests, and projects, one issue in full, or search them",
+  octant_memory:
+    "read this Project's memory and propose an entry to add, replace, or retract; the user confirms each change",
   octant_offer_side_task: "offer the user a separate task for work outside this request",
   octant_past_threads: "search what Octant remembers of the user's earlier threads",
   octant_propose_routine: "propose a scheduled routine; the user confirms it before it exists",
@@ -95,6 +99,8 @@ const OCTANT_TOOL_PURPOSE: Readonly<Record<string, string>> = {
   octant_threads:
     "see this Project's other threads (list, read, wait); its operation list names anything more this turn may do",
   octant_zen: "read and arrange this Zen space: pin threads, add widgets, move elements",
+  skill:
+    "list the skills active for this thread and load one's instructions when the task matches it; skills the person selected for this turn are already in your context",
 };
 
 /**

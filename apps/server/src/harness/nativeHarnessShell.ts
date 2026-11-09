@@ -199,18 +199,19 @@ async function runScript(
 
 function shellRunOf(result: RepositoryTestProcessResult): NativeHarnessShellRun {
   const output = decodeOutput(result);
+  const truncated = result.outputTruncated === true;
   switch (result.termination) {
     case "exited":
       return {
         status: "ran",
         ...(result.exitCode === null ? {} : { exitCode: result.exitCode }),
         output,
-        truncated: false,
+        truncated,
       };
     case "timed-out":
-      return { status: "timed-out", output, truncated: false };
+      return { status: "timed-out", output, truncated };
     case "cancelled":
-      return { status: "cancelled", output, truncated: false };
+      return { status: "cancelled", output, truncated };
     case "unavailable":
       return { status: "unavailable", output: "", truncated: false };
   }

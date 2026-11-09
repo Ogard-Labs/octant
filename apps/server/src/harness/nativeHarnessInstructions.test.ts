@@ -54,11 +54,13 @@ describe("native harness instructions", () => {
   });
 
   it.each([
+    "diagnostics",
     "octant_past_threads",
     "octant_side_chat_list_files",
     "octant_side_chat_read_file",
     "octant_side_chat_search_files",
     "octant_zen",
+    "skill",
   ])("says what %s is for only in a turn that offers it", (name) => {
     expect(nativeHarnessToolGuide([name])).toMatch(new RegExp(`^- ${name}: \\S`, "m"));
     expect(nativeHarnessToolGuide(["octant_canvas"])).not.toContain(name);

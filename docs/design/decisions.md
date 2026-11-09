@@ -554,6 +554,7 @@ Modes are server-enforced domain policy, not renderer flags. The shell shows two
 - A new-thread composer chooses Chat (no folder) or In a folder (a Work thread bound to a Project root). The choice only selects the create command, and nothing converts a thread between Chat and Work.
 - Chat binds a virtual, memory-scoped Project or none; Work binds exactly one OS-confined root; Code binds exactly one directory and selects a checkout inside it.
 - Project memory is scoped to one Project and keeps source, kind, timestamps and supersession; moving it across Projects or modes is explicit and keeps provenance. Person memory, beside it, crosses Projects ([Person memory across Projects](#person-memory-across-projects)). _Here only._
+- Every Chat, Work and Code turn in a Project carries its active Project memory. Agents read it and propose changes through `octant_memory`; every write waits for the person's confirmation in the thread, no answer is remembered, Plan refuses writes, and a confirmed write is marked as agent-written with its thread. Built 2026-11-08 ([Architecture: Project memory](../architecture.md#project-memory)).
 - Move to Project: a No-project Chat can be filed into a Chat Project, and a Work or Code thread into another Project of its own mode. The thread keeps its kind, history and guardrail level and gains no filesystem reach: a Work or Code thread moves only into an active Project whose folder is its own folder or contains it, and is refused while a turn runs or the thread waits on the person. A Code thread also needs its checkout to stay valid, so only a Project bound to the same repository folder is accepted. The server checks authority before the move, only a person can make it, and it is journaled with who and when.
 
 Status: Built. Since: —. Detail: [Architecture: Modes: Chat, Work, and Code](../architecture.md#modes-chat-work-and-code).
@@ -1286,14 +1287,17 @@ Status: Built. Since: —. Detail: [Architecture: Native harness](../architectur
 Every harness tool call is authorized under the thread's current authority before any port runs, and outside content taints the thread.
 
 - The offered tools follow the mode. A call is judged by the narrower of the thread's stored posture and the running turn's posture, so a turn narrowed to Plan refuses writes and commands.
+- A tool that runs commands for the lead, such as Code's typecheck-and-lint `diagnostics`, authorizes and runs each command as a shell call, so it is never looser than the shell.
 - A direct-endpoint request goes only to the configured base URL and follows no redirect. Web fetches refuse private destinations and carry no credential.
 - Only harness results that bring in outside content taint the thread. On a tainted thread, shell, edit, write, check and web-fetch need a single-use confirmation, and remembered approvals stop covering them.
 - A tainted thread's search query is refused when it looks like it carries data, before any request leaves; it is a guard the person lowers with the outside-content gate, so at Full access in Work and Code the refusal does not apply.
 - At Full access in Code a tainted thread records the taint and asks no confirmation.
 - An `edit` call may make several replacements across files. It is one call under one approval that names every file, and it is all or nothing: every replacement is checked first, a refusal names the one that failed and changes nothing, and a write that fails afterwards puts the call's earlier writes back.
 - Every tool result is hard-capped with a truncation marker and paging, and nothing variable enters the stable request prefix. _Here only._
+- `read` hands the model a PNG, JPEG, GIF or WebP image, recognized by its bytes and capped at one tool image, only when the session's model takes image input, and otherwise refuses with the reason. A PDF is refused until a harness endpoint carries documents in a tool result.
+- A lead's `skill` tool lists and loads only the skills effective for its thread under the activation ladder, refuses any other, and never installs, trusts, enables or activates one; it only reads, so Plan keeps it.
 
-Status: Built. Since: —. Detail: [Architecture: Native harness](../architecture.md#native-harness) and [Search queries on a tainted thread](search-query-taint.md).
+Status: Built. Since: —. Detail: [Architecture: Native harness](../architecture.md#native-harness), [On-demand skills](../architecture.md#extensions-and-skills), and [Search queries on a tainted thread](search-query-taint.md).
 
 ### Harness retries, routing and fallback
 

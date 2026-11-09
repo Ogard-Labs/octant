@@ -1,3 +1,7 @@
+import {
+  ProjectMemoryProposalPrompt,
+  type ProjectMemoryProposalClient,
+} from "../projects/ProjectMemoryProposalPrompt";
 import { useDroppedFolderMentions } from "../composer/useDroppedFolderMentions";
 import { ToolCatalogContinuation } from "../providers/ToolCatalogContinuation";
 import { ContinueElsewhere } from "../continuity/ContinueElsewhere";
@@ -477,6 +481,7 @@ export interface WorkThreadWorkspaceProps {
   readonly messageQueueClient?: ThreadMessageQueueClient;
   readonly extensionClient?: ExtensionClient;
   readonly automationClient?: AutomationClient;
+  readonly memoryProposalClient?: ProjectMemoryProposalClient;
   readonly onOpenCanvas?: (card: CanvasThreadReferenceCard) => void;
   /** Opens the dock's Canvas tool on this Canvas; a Canvas drawn in the thread offers it. */
   readonly onOpenCanvasInSidebar?: (card: CanvasThreadReferenceCard) => void;
@@ -2587,6 +2592,12 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
         <RoutineProposalPrompt
           className="thread-column"
           client={props.automationClient}
+          threadId={String(props.threadId)}
+          turnActive={turnRunning}
+        />
+        <ProjectMemoryProposalPrompt
+          className="thread-column"
+          client={props.memoryProposalClient}
           threadId={String(props.threadId)}
           turnActive={turnRunning}
         />

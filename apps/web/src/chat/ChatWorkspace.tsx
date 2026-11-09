@@ -1,3 +1,7 @@
+import {
+  ProjectMemoryProposalPrompt,
+  type ProjectMemoryProposalClient,
+} from "../projects/ProjectMemoryProposalPrompt";
 import { ToolCatalogContinuation } from "../providers/ToolCatalogContinuation";
 import { ContinueElsewhere } from "../continuity/ContinueElsewhere";
 import { useContinuationInputPolicy } from "../continuity/useContinuationInputPolicy";
@@ -108,6 +112,7 @@ export interface ChatWorkspaceProps {
   readonly onReturnSideChatReply?: import("./ChatTranscript").ChatTranscriptProps["onReturnSideChatReply"];
   readonly sideChatReturnPending?: boolean;
   readonly extensionClient?: ExtensionClient;
+  readonly memoryProposalClient?: ProjectMemoryProposalClient;
   readonly browserAutomationClient?: BrowserAutomationClient;
   readonly narrow?: boolean;
   readonly onAttachCanvasContext?: (selection: CanvasContextSelection) => void;
@@ -1409,6 +1414,12 @@ export function ChatWorkspace(props: ChatWorkspaceProps) {
           <ExtensionToolApprovalPrompt
             className="chat-workspace__tool-approval thread-column"
             client={props.extensionClient}
+            threadId={activeThreadId === undefined ? undefined : String(activeThreadId)}
+            turnActive={turnActive}
+          />
+          <ProjectMemoryProposalPrompt
+            className="chat-workspace__tool-approval thread-column"
+            client={props.memoryProposalClient}
             threadId={activeThreadId === undefined ? undefined : String(activeThreadId)}
             turnActive={turnActive}
           />

@@ -1,13 +1,20 @@
 import { mkdir, readdir, readFile, realpath, lstat, stat, writeFile } from "node:fs/promises";
 import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { classifyPathContainment } from "@octant/domain";
-import type { NativeHarnessReplacement, NativeHarnessToolResultBounds } from "@octant/contracts";
+import {
+  MAX_PROVIDER_TOOL_IMAGE_BASE64_LENGTH,
+  type NativeHarnessReplacement,
+  type NativeHarnessToolResultBounds,
+  type ProviderToolImage,
+} from "@octant/contracts";
 import { secretGuardRefusal } from "../process/secretGuard";
 
 /** Directories a search never descends into unless the pattern names them. */
 export const SKIPPED_DIRECTORY_NAMES = new Set([".git", "node_modules"]);
 const MAX_READ_RESULT_BYTES = 64 * 1024;
 export const MAX_GREP_RESULT_BYTES = 64 * 1024;
+/** The largest image a read returns: what one tool image may carry once base64-encoded. */
+export const MAX_READ_IMAGE_BYTES = (MAX_PROVIDER_TOOL_IMAGE_BASE64_LENGTH / 4) * 3;
 export const MAX_GREP_SCANNED_FILE_BYTES = 4 * 1024 * 1024;
 export const MAX_GREP_PATTERN_LENGTH = 512;
 /** A scan the model asked for never holds the event loop longer than this. */
@@ -49,6 +56,24 @@ export type NativeHarnessReadResult =
       readonly totalLines: number;
       readonly nextLine?: number;
       readonly bounds: NativeHarnessToolResultBounds;
+    }
+  /**
+   * An image, recognized by its bytes. `data` is the base64 the model is
+   * handed; whether it may be is the tool's decision, not the files'.
+   */
+  | {
+      readonly kind: "image";
+      readonly path: string;
+      readonly mimeType: ProviderToolImage["mimeType"];
+      readonly bytes: number;
+      readonly data: string;
+    }
+  /** A PDF, recognized by its bytes; its content is not decoded as text. */
+  | {
+      readonly kind: "document";
+      readonly path: string;
+      readonly mimeType: "application/pdf";
+      readonly bytes: number;
     }
   | {
       readonly kind: "directory";
@@ -215,6 +240,11 @@ export class NativeHarnessFileSystem {
     readonly path: string;
     readonly offset?: number | undefined;
     readonly limit?: number | undefined;
+    /**
+     * Whether this read lets a later edit of the file through. A read Octant
+     * makes for itself, not one the model asked for, passes false.
+     */
+    readonly marksRead?: boolean;
   }): Promise<NativeHarnessReadResult> {
     const resolved = await this.#contained(input.path);
     if (resolved === undefined) return { kind: "refused", reason: "path-escapes-root" };
@@ -247,9 +277,9 @@ export class NativeHarnessFileSystem {
     }
     if (!info.isFile()) return { kind: "refused", reason: "not-a-file" };
     if (info.size > this.#maxFileBytes) return { kind: "refused", reason: "file-too-large" };
-    const content = await readFile(resolved, "utf8");
-    this.#readMarks.set(resolved, info.mtime.toISOString());
-    return readSlice(display, content, input);
+    const content = await readFile(resolved);
+    if (input.marksRead !== false) this.#readMarks.set(resolved, info.mtime.toISOString());
+    return readFileContent(display, content, input);
   }
 
   async write(input: {
@@ -543,6 +573,44 @@ export class NativeHarnessFileSystem {
     const rel = relative(this.#root, canonical);
     return rel === "" ? "." : rel.split(sep).join("/");
   }
+}
+
+/**
+ * What a read of one file returns: an image or a PDF when its first bytes say
+ * so, whatever the file is named, and otherwise its text as numbered lines.
+ */
+export function readFileContent(
+  path: string,
+  content: Buffer,
+  input: { readonly offset?: number | undefined; readonly limit?: number | undefined },
+): NativeHarnessReadResult {
+  if (startsWith(content, "%PDF-")) {
+    return { kind: "document", path, mimeType: "application/pdf", bytes: content.length };
+  }
+  const mimeType = imageMimeType(content);
+  if (mimeType === undefined) return readSlice(path, content.toString("utf8"), input);
+  if (content.length > MAX_READ_IMAGE_BYTES) {
+    return {
+      kind: "refused",
+      reason: "file-too-large",
+      message: `This image is ${content.length} bytes; a read returns images up to ${MAX_READ_IMAGE_BYTES} bytes.`,
+    };
+  }
+  return { kind: "image", path, mimeType, bytes: content.length, data: content.toString("base64") };
+}
+
+function imageMimeType(content: Buffer): ProviderToolImage["mimeType"] | undefined {
+  if (startsWith(content, "\x89PNG\r\n\x1a\n")) return "image/png";
+  if (startsWith(content, "\xff\xd8\xff")) return "image/jpeg";
+  if (startsWith(content, "GIF87a") || startsWith(content, "GIF89a")) return "image/gif";
+  if (startsWith(content, "RIFF") && content.subarray(8, 12).toString("latin1") === "WEBP") {
+    return "image/webp";
+  }
+  return undefined;
+}
+
+function startsWith(content: Buffer, signature: string): boolean {
+  return content.subarray(0, signature.length).toString("latin1") === signature;
 }
 
 /** The lines of a file a read returns, from `offset`, at most `limit` and the result's byte bound. */

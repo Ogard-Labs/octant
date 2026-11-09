@@ -1,3 +1,4 @@
+import type { ProjectMemoryProposalClient } from "../projects/ProjectMemoryProposalPrompt";
 import type { CodeReviewFileRequest } from "./codeReviewNavigation";
 import type { CodeClient, CodeFileOpenResult } from "@octant/client-runtime/code-client";
 import type { AutoReview } from "./autoReview";
@@ -33,6 +34,7 @@ export default function CodeWorkspaceTab(props: {
   readonly appleToolchainClient?: AppleToolchainClient;
   readonly extensionClient?: ExtensionClient;
   readonly automationClient?: AutomationClient;
+  readonly memoryProposalClient?: ProjectMemoryProposalClient;
   readonly tab: CodeWorkspaceTab;
   readonly hostBridge?: OctantHostBridge;
   readonly onOpenBrowser?: () => void;
@@ -147,6 +149,9 @@ export default function CodeWorkspaceTab(props: {
           ? {}
           : { appleToolchainClient: props.appleToolchainClient })}
         {...(props.extensionClient === undefined ? {} : { extensionClient: props.extensionClient })}
+        {...(props.memoryProposalClient === undefined
+          ? {}
+          : { memoryProposalClient: props.memoryProposalClient })}
         {...(props.automationClient === undefined
           ? {}
           : { automationClient: props.automationClient })}

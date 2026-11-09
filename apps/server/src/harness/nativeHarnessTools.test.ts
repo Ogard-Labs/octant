@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import {
+  MAX_NATIVE_HARNESS_SKILL_CHARACTERS,
   decodeNativeHarnessContextRemaining,
   type ProviderExecutionPolicy,
   type ToolActionAuthority,
@@ -97,6 +98,7 @@ describe("native harness tools", () => {
       "bash",
       "edit",
       "write",
+      "diagnostics",
     ]);
   });
 
@@ -125,6 +127,42 @@ describe("native harness tools", () => {
     const write = await call(tools, "write", { path: "b.ts", content: "x" });
     expect(write.isError).toBe(true);
     expect((write.result as { error: string }).error).toBe("approval-required");
+  });
+
+  describe("reading images and PDFs", () => {
+    const png = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 0]);
+
+    it("hands an image to a model that takes images, beside a result that holds no pixels", async () => {
+      const { root, tools } = await fixture({}, { readsImages: () => true });
+      await writeFile(join(root, "shot.png"), png);
+      expect(await call(tools, "read", { path: "shot.png" })).toEqual({
+        result: { kind: "image", path: "shot.png", mimeType: "image/png", bytes: png.length },
+        isError: false,
+        images: [{ mimeType: "image/png", data: png.toString("base64") }],
+      });
+    });
+
+    it("refuses an image when the model cannot take images", async () => {
+      for (const ports of [{ readsImages: () => false }, {}]) {
+        const { root, tools } = await fixture({}, ports);
+        await writeFile(join(root, "shot.png"), png);
+        const outcome = await call(tools, "read", { path: "shot.png" });
+        expect(outcome).toMatchObject({
+          result: { error: "image-input-unsupported" },
+          isError: true,
+        });
+        expect(outcome).not.toHaveProperty("images");
+      }
+    });
+
+    it("refuses a PDF, since no harness endpoint takes a document in a tool result", async () => {
+      const { root, tools } = await fixture({}, { readsImages: () => true });
+      await writeFile(join(root, "paper.pdf"), "%PDF-1.7\n");
+      expect(await call(tools, "read", { path: "paper.pdf" })).toMatchObject({
+        result: { error: "document-input-unsupported" },
+        isError: true,
+      });
+    });
   });
 
   it("refuses edits, writes, and the shell in Plan mode by policy", async () => {
@@ -626,6 +664,58 @@ describe("native harness tools", () => {
       });
       expect(asked).toEqual(["shell-commands|goal-check: bun run test parser"]);
       expect(commands).toEqual([]);
+    });
+  });
+
+  describe("skills", () => {
+    const longInstructions = "x".repeat(MAX_NATIVE_HARNESS_SKILL_CHARACTERS + 10);
+    const skills: NonNullable<NativeHarnessToolPorts["skills"]> = {
+      list: async () => ({ status: "listed", skills: [{ name: "review", description: "Review" }] }),
+      load: async (name) =>
+        name === "long"
+          ? { status: "loaded", name, instructions: longInstructions }
+          : name === "review"
+            ? { status: "loaded", name, instructions: "Use the checklist." }
+            : { status: "refused", reason: "skill-not-effective", message: `${name} is off.` },
+    };
+
+    it("offers skill in Chat and in a Plan turn, because it only reads", async () => {
+      const chat = await fixture({}, { skills }, "chat");
+      expect(chat.tools.definitions.map((definition) => definition.name)).toEqual(["skill"]);
+      const plan = await fixture({ executionPolicy: "plan", approvalSatisfied: false }, { skills });
+      expect(await call(plan.tools, "skill", { operation: "list" })).toEqual({
+        result: { skills: [{ name: "review", description: "Review" }] },
+        isError: false,
+      });
+    });
+
+    it("returns a skill's instructions and passes a refusal through with its reason", async () => {
+      const { tools } = await fixture({}, { skills });
+      expect(await call(tools, "skill", { operation: "load", name: "review" })).toEqual({
+        result: { name: "review", instructions: "Use the checklist.", truncated: false },
+        isError: false,
+      });
+      expect(await call(tools, "skill", { operation: "load", name: "deploy" })).toEqual({
+        result: { error: "skill-not-effective", message: "deploy is off." },
+        isError: true,
+      });
+    });
+
+    it("cuts long instructions, says how much was left out, and continues from the offset it names", async () => {
+      const { tools } = await fixture({}, { skills });
+      const first = await call(tools, "skill", { operation: "load", name: "long" });
+      expect(first.result).toMatchObject({
+        truncated: true,
+        omittedCharacters: 10,
+        nextOffset: MAX_NATIVE_HARNESS_SKILL_CHARACTERS,
+        note: expect.stringContaining(`offset ${MAX_NATIVE_HARNESS_SKILL_CHARACTERS}`),
+      });
+      const rest = await call(tools, "skill", {
+        operation: "load",
+        name: "long",
+        offset: MAX_NATIVE_HARNESS_SKILL_CHARACTERS,
+      });
+      expect(rest.result).toEqual({ name: "long", instructions: "x".repeat(10), truncated: false });
     });
   });
 });
