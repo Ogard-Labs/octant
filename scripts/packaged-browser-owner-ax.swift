@@ -1000,23 +1000,33 @@ if mode == "picker-metadata" || mode == "picker-location-prompt" || (fixesOwnedF
                             }
                             if mode == "picker-fill-owned-location", let focus = focusInSheet(), nestedLocation(focus), fieldReady(focus.node),
                                let selectDown = CGEvent(keyboardEventSource: nil, virtualKey: 0, keyDown: true),
-                               let selectUp = CGEvent(keyboardEventSource: nil, virtualKey: 0, keyDown: false),
-                               let textDown = CGEvent(keyboardEventSource: nil, virtualKey: 0, keyDown: true),
-                               let textUp = CGEvent(keyboardEventSource: nil, virtualKey: 0, keyDown: false) {
+                               let selectUp = CGEvent(keyboardEventSource: nil, virtualKey: 0, keyDown: false) {
                                 selectDown.flags = .maskCommand; selectUp.flags = .maskCommand
-                                let utf16 = Array(fixturePath.utf16)
-                                utf16.withUnsafeBufferPointer { buffer in
-                                    if let base = buffer.baseAddress {
-                                        textDown.keyboardSetUnicodeString(stringLength: buffer.count, unicodeString: base)
-                                        textUp.keyboardSetUnicodeString(stringLength: buffer.count, unicodeString: base)
-                                    }
-                                }
                                 if fieldReady(focus.node) {
                                     selectDown.postToPid(processId); selectUp.postToPid(processId)
                                     fixedFolder["status"] = "select-all-dispatched-no-text"
                                     if fieldReady(focus.node) {
-                                        textDown.postToPid(processId); textUp.postToPid(processId)
-                                        fixedFolder["typingDispatched"] = true
+                                        // A Unicode keyboard event has a bounded payload.
+                                        // Send one complete Character per pair so long paths
+                                        // are not dropped and surrogate pairs stay together.
+                                        var sent = 0
+                                        for character in fixturePath {
+                                            guard fieldReady(focus.node),
+                                                  let textDown = CGEvent(keyboardEventSource: nil, virtualKey: 0, keyDown: true),
+                                                  let textUp = CGEvent(keyboardEventSource: nil, virtualKey: 0, keyDown: false) else { break }
+                                            textDown.flags = []; textUp.flags = []
+                                            let utf16 = Array(String(character).utf16)
+                                            utf16.withUnsafeBufferPointer { buffer in
+                                                if let base = buffer.baseAddress {
+                                                    textDown.keyboardSetUnicodeString(stringLength: buffer.count, unicodeString: base)
+                                                    textUp.keyboardSetUnicodeString(stringLength: buffer.count, unicodeString: base)
+                                                }
+                                            }
+                                            textDown.postToPid(processId); textUp.postToPid(processId)
+                                            sent += 1
+                                        }
+                                        fixedFolder["charactersDispatched"] = sent
+                                        fixedFolder["typingDispatched"] = sent > 0
                                         fixedFolder["status"] = "typed-value-unconfirmed"
                                         // Posting a key pair does not mean AppKit
                                         // has consumed it. Observe under the same
