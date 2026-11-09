@@ -15554,8 +15554,9 @@ owner, format, creation and refusal rules. The existing remote/member and push
 consumers carry a host-internal storage dependency; absence refuses on Windows.
 The dependent listener TLS store carries its own closed native dependency for
 the two fixed TLS key/certificate files. It reuses the profile admission
-boundary, exclusively creates and retains the separate P-256 key, and renews
-only private regular certificates through a flushed native staging handle and
+boundary, exclusively creates and retains the separate P-256 key, exclusively
+creates the first certificate (a concurrent first use adopts the winner), and
+renews only private regular certificates through a flushed native staging handle and
 atomic rename into the held remote directory. The reopened file identity is
 checked before use. Renewal and restart preserve the SPKI pin; unsafe keys or
 certificate entries refuse without ordinary-file fallback or silent key rotation.

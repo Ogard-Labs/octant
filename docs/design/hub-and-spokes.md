@@ -262,7 +262,10 @@ the CLI. The hub depends on that:
     checks. The P-256 TLS key is distinct from the host signing key, capped
     at 4 KiB, exclusively created and held against writes or replacement.
     An existing corrupt, exposed or aliased key refuses without rotation.
-    Certificates are capped at 16 KiB. A private regular certificate may be
+    Certificates are capped at 16 KiB. First use creates the certificate
+    exclusively, like the key: a concurrent first use adopts the winner's
+    certificate rather than replacing one another ensure already returned.
+    Only renewal replaces it. A private regular certificate may be
     renewed using a flushed, exclusively created private staging file and a
     native handle rename into the held remote directory; an unsafe certificate
     entry refuses. The reopened destination must retain the staging file's

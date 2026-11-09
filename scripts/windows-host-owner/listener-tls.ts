@@ -88,12 +88,8 @@ try {
         repeated.status === "ready" &&
           repeated.tlsPin === result.tlsPin &&
           repeated.tls.key === result.tls.key &&
-          (mode === "concurrent"
-            ? listenerTlsPin(repeated.tls.cert) === result.tlsPin
-            : repeated.tls.cert === result.tls.cert),
-        mode === "concurrent"
-          ? "concurrent ensure preserves the native key and certificate SPKI pin"
-          : "repeated ensure preserves the native key and current certificate",
+          repeated.tls.cert === result.tls.cert,
+        "repeated ensure preserves the native key and current certificate",
       );
       const winner = files.createKey(Buffer.alloc(32, 7));
       try {
@@ -137,6 +133,7 @@ try {
         [paths.profileId, paths.dataDirectory, "host-key", null],
         [paths.profileId, paths.dataDirectory, "key", Buffer.alloc(4097)],
         [paths.profileId, paths.dataDirectory, "certificate", Buffer.alloc(16385)],
+        [paths.profileId, paths.dataDirectory, "certificate-renewal", null],
       ] as const) {
         const refusal: unknown = native.listenerTlsFile(
           profile,
