@@ -2070,9 +2070,13 @@ this is how it looks.
   "Hand over through Git": the branch in mono (or the new
   `octant/handover/` branch it will create), the remote it pushes to, a
   read-only note preview closed to its first lines, the Ask the agent to
-  summarize switch (on), and **Commit and push** as the primary button, or
-  **Commit** when there is no remote, with a sentence saying the work then
-  stays on this computer.
+  summarize switch (on) with one muted sentence saying one turn of the
+  thread's agent adds where the work stands and what comes next and that the
+  note goes without it if the turn fails or takes over two minutes, and
+  **Commit and push** as the primary button, or **Commit** when there is no
+  remote, with a sentence saying the work then stays on this computer. While
+  the summary turn runs, a status line reads "Asking the agent to
+  summarize…" and the switch is disabled.
 - **Prepare to shut down.** One dialog, 640px wide and at most 80% of the
   window's height, with its list scrolling between a fixed head and foot. It
   reads as a decision already made for the person, which they can glance at
