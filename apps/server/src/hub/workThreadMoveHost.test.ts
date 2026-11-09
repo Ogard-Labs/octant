@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import type { MovedThreadReference, ThreadMoveId, ThreadMoveOffer } from "@octant/contracts";
+import { noThreadParts, oneCaptureThreadParts } from "./movedThreadParts.test-support";
 import { createThreadMoveHolds } from "./threadMoveHolds";
 import { createWorkThreadMoveHost, type WorkThreadMoveHostOptions } from "./workThreadMoveHost";
 
@@ -49,6 +50,7 @@ function host(overrides: Partial<WorkThreadMoveHostOptions> = {}) {
     },
     journalHistory: (input) => histories.push(input.threadId),
     holds,
+    parts: noThreadParts(),
     ...overrides,
   });
   return { moveHost, created, histories, holds, marks };
@@ -103,6 +105,21 @@ describe("moving a Work thread", () => {
     // A retried arrival after a stop opens no second thread.
     await arriveWith(moveHost, offer, parts);
     expect(created).toEqual([ARRIVING]);
+  });
+
+  it("carries the thread's bulk parts and keeps them under the arriving thread once", async () => {
+    const carried = oneCaptureThreadParts();
+    const { moveHost } = host({ parts: carried.parts });
+    const { offer, parts } = await packAndOffer(moveHost);
+    expect([...parts.keys()]).toEqual(["thread", "capture-1"]);
+
+    expect((await arriveWith(moveHost, offer, parts)).status).toBe("arrived");
+    expect(carried.kept.map((capture) => [capture.threadId, capture.facts.url])).toEqual([
+      [ARRIVING, "https://example.com/agenda"],
+    ]);
+    // A retried arrival keeps the same capture under the same id.
+    await arriveWith(moveHost, offer, parts);
+    expect(new Set(carried.kept.map((capture) => capture.captureId)).size).toBe(1);
   });
 
   it("opens the thread marked when the source thread had read outside content", async () => {

@@ -2,6 +2,7 @@
 // moves from one spoke to the other over the real member routes, against a
 // ticket the phone made on the destination with a fresh unlock.
 
+import { createHash } from "node:crypto";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { HubMemberId, type MovedThreadReference } from "@octant/contracts";
@@ -38,12 +39,17 @@ const SECOND: MovedThreadReference = {
   threadId: "99999999-9999-4999-8999-999999999999",
 };
 const CONVERSATION = JSON.stringify({ title: "Plan the trip", turns: ["Where should we go?"] });
+/** An attachment larger than one chunk, so it crosses several chunk requests. */
+const ATTACHMENT = Buffer.alloc(1_300_000, "itinerary ");
+const sha256 = (bytes: Buffer) => createHash("sha256").update(bytes).digest("hex");
 
 /** A computer holding one Chat thread it can move away, and nothing it can receive. */
 function leavingThreads(folder: string) {
   const frozen = new Set<string>();
   const erased: string[] = [];
   const turn = { running: false };
+  /** Set when the thread owns an attachment beside its conversation, and one that cannot be read. */
+  const bulk = { carried: false };
   const source: ThreadMoveSourceHost = {
     read: async (thread) =>
       (thread.threadId === THREAD.threadId || thread.threadId === SECOND.threadId) &&
@@ -64,7 +70,19 @@ function leavingThreads(folder: string) {
       mkdirSync(partsFolder, { recursive: true });
       const path = join(partsFolder, "thread.json");
       writeFileSync(path, CONVERSATION);
-      return { status: "packed", parts: [{ partId: "thread", kind: "thread-bundle", path }] };
+      if (!bulk.carried) {
+        return { status: "packed", parts: [{ partId: "thread", kind: "thread-bundle", path }] };
+      }
+      const attachmentPath = join(partsFolder, "attachment-1.part");
+      writeFileSync(attachmentPath, ATTACHMENT);
+      return {
+        status: "packed",
+        parts: [
+          { partId: "thread", kind: "thread-bundle", path },
+          { partId: "attachment-1", kind: "attachment", path: attachmentPath },
+        ],
+        partsLeftBehind: [{ kind: "attachment", name: "scan.pdf" }],
+      };
     },
     erase: async ({ thread }) => {
       erased.push(thread.threadId);
@@ -90,18 +108,22 @@ function leavingThreads(folder: string) {
         lastActivityAt: Date.now(),
         repositoryRemotes: [],
       }));
-  return { hosts: { source, destination, listThreads }, frozen, erased, turn };
+  return { hosts: { source, destination, listThreads }, frozen, erased, turn, bulk };
 }
 
 /** A computer that opens Chat threads moved to it. */
 function arrivingThreads() {
   const opened: string[] = [];
+  const received = new Map<string, string>();
   const active: string[] = [];
   const destination: ThreadMoveDestinationHost = {
     acceptsProject: (placement) => placement.mode === "chat",
     arrive: async ({ parts }) => {
       const { readFile } = await import("node:fs/promises");
-      for (const path of parts.values()) opened.push(await readFile(path, "utf8"));
+      for (const [partId, path] of parts) {
+        if (partId === "thread") opened.push(await readFile(path, "utf8"));
+        received.set(partId, sha256(await readFile(path)));
+      }
       return { status: "arrived", thread: ARRIVED };
     },
     activate: async (thread) => {
@@ -118,7 +140,7 @@ function arrivingThreads() {
     pack: async () => ({ status: "refused", reason: "refused" }),
     erase: async () => ({ worktreeKept: false }),
   };
-  return { hosts: { source, destination }, opened, active };
+  return { hosts: { source, destination }, opened, received, active };
 }
 
 async function joinHub(
@@ -254,6 +276,26 @@ describe("moving a thread between two of the person's computers", () => {
     expect(leaving.frozen.size).toBe(0);
     expect(laptop.threadMoveRecords).toEqual(["move-started", "moved-out"]);
     expect(desktop.threadMoveRecords).toEqual(["moved-in", "move-committed"]);
+  }, 60_000);
+
+  it("carries the thread's bulk parts over the member routes byte for byte and names the one left behind", async () => {
+    const { laptop, desktop, leaving, arriving, ticket } = await startWorld();
+    leaving.bulk.carried = true;
+    const issued = await ticket();
+    const ticketId = (issued.json as { ticketId: string }).ticketId;
+
+    const outcome = await laptop.threadMoves.start({
+      thread: THREAD,
+      targetMemberId: desktop.hostId,
+      ticketId,
+      principal: window,
+    });
+
+    expect(outcome.status).toBe("moved");
+    expect(arriving.received.get("attachment-1")).toBe(sha256(ATTACHMENT));
+    expect(laptop.threadMovesFromWindow.status(THREAD).departed?.partsLeftBehind).toEqual([
+      { kind: "attachment", name: "scan.pdf" },
+    ]);
   }, 60_000);
 
   it("issues no ticket without the owner's own fresh unlock, so nothing can move", async () => {

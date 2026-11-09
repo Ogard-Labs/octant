@@ -2082,7 +2082,10 @@ this is how it looks.
   thread again after its pane closed (an old link, a notification, or a
   search) opens the same tombstone in the active pane without changing the
   window's Project; a window that cannot read this computer's moves (a remote
-  client) shows the pane without the tombstone.
+  client) shows the pane without the tombstone. When a part of the thread
+  could not be read and stayed, the tombstone and the Moved notice name each
+  one in a sentence after the time (the first 1,000, then "and" the rest
+  counted).
 - **This thread can't move.** A failed move unfreezes the composer and puts an
   inline notice above it and in the Computer row's open content: the title
   "This thread can't move", the reason in one sentence, and its recovery as

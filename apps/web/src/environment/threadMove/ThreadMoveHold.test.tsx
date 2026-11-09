@@ -203,6 +203,24 @@ describe("a moved thread's pane on the computer it left", () => {
     expect(await screen.findByText(/Link copied/)).toBeInTheDocument();
   });
 
+  it("names the parts that could not be read here and did not move, on the tombstone", async () => {
+    const { client } = fakeClient({
+      status: "read",
+      departed: {
+        ...departed,
+        partsLeftBehind: [{ kind: "attachment", name: "scan.pdf" }],
+        partsLeftBehindCount: 3,
+      },
+    });
+    pane(client);
+
+    expect(
+      await screen.findByText(
+        /3 parts could not be read here, so they did not move: scan\.pdf, and 2 more\./,
+      ),
+    ).toBeInTheDocument();
+  });
+
   it("lists the files a kept worktree holds, and removes it only after the person confirms", async () => {
     const user = userEvent.setup();
     const { client, calls } = fakeClient({
