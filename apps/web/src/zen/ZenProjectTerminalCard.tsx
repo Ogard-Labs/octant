@@ -22,6 +22,8 @@ export interface ZenProjectTerminalCardProps {
    */
   readonly live: boolean;
   readonly loadRuntime?: () => Promise<XtermAdapterRuntime>;
+  /** This person's shell is an SSH session; stopping it cannot prove remote processes ended. */
+  readonly serverConnection?: boolean;
 }
 
 /**
@@ -69,7 +71,11 @@ export function ZenProjectTerminalCard(props: ZenProjectTerminalCardProps) {
               );
         } catch {
           if (controller.signal.aborted) return;
-          setFailure("This terminal is unavailable. Reconnecting…");
+          setFailure(
+            props.serverConnection
+              ? "SSH status is unavailable. No input was retried."
+              : "This terminal is unavailable. Reconnecting…",
+          );
           await wait(controller.signal, 2_000);
           continue;
         }
@@ -107,7 +113,7 @@ export function ZenProjectTerminalCard(props: ZenProjectTerminalCardProps) {
       }
     })();
     return () => controller.abort();
-  }, [live, projectId, send, terminalId]);
+  }, [live, projectId, send, terminalId, props.serverConnection]);
 
   const write = (data: string) => {
     if (data === "") return;
@@ -121,7 +127,11 @@ export function ZenProjectTerminalCard(props: ZenProjectTerminalCardProps) {
         if (result.kind === "project-terminal-refused") setFailure(result.message);
         wakeReader.current?.();
       } catch {
-        setFailure("Terminal input failed. Reconnect and retry.");
+        setFailure(
+          props.serverConnection
+            ? "Terminal input could not be confirmed. Nothing was retried."
+            : "Terminal input failed. Reconnect and retry.",
+        );
       }
     };
     writes.current = writes.current.then(flush, flush);
@@ -145,7 +155,11 @@ export function ZenProjectTerminalCard(props: ZenProjectTerminalCardProps) {
         setTerminal(result.terminal);
       }
     } catch {
-      setFailure("The terminal could not be stopped. Reconnect and retry.");
+      setFailure(
+        props.serverConnection
+          ? "The SSH close could not be confirmed. Check the server."
+          : "The terminal could not be stopped. Reconnect and retry.",
+      );
     }
   };
 
@@ -190,13 +204,17 @@ export function ZenProjectTerminalCard(props: ZenProjectTerminalCardProps) {
         </div>
       ) : (
         <p className="code-delivery-pane__notice" role="status">
-          {stopped
-            ? "Stopped"
-            : terminal.state === "exited"
-              ? terminal.exitCode === undefined
-                ? "Exited without a reported code"
-                : `Exited with code ${terminal.exitCode}`
-              : "Stopped"}
+          {props.serverConnection
+            ? terminal.uncertainty === "server-stop-unconfirmed"
+              ? "SSH session close requested. Programs may still be running on the server."
+              : "SSH connection ended. Programs may still be running on the server."
+            : stopped
+              ? "Stopped"
+              : terminal.state === "exited"
+                ? terminal.exitCode === undefined
+                  ? "Exited without a reported code"
+                  : `Exited with code ${terminal.exitCode}`
+                : "Stopped"}
         </p>
       )}
       <XtermTerminalAdapter

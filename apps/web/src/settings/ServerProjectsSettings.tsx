@@ -1,4 +1,5 @@
 import { ServerProjectPreviewTunnel } from "./ServerProjectPreviewTunnel";
+import { ServerWorkProjectTerminal } from "./ServerWorkProjectTerminal";
 import type { ServerProjectsClient } from "@octant/client-runtime/server-projects-client";
 import type { ProjectTerminalClient } from "@octant/client-runtime/project-terminal-client";
 import { AggregateVersion, type ProjectId } from "@octant/contracts";
@@ -208,8 +209,8 @@ export function ServerProjectsSettings(props: ServerProjectsSettingsProps) {
                       <div>
                         <h3>Developer tools</h3>
                         <p id={`${fieldId}-${project.id}-actions`}>
-                          Show saved actions. Tasks keep their existing access; this does not enable
-                          a general Project terminal.
+                          Show saved actions and your Project terminal. Tasks keep their existing
+                          access.
                         </p>
                       </div>
                       <OctantSwitch
@@ -227,6 +228,18 @@ export function ServerProjectsSettings(props: ServerProjectsSettingsProps) {
                       />
                     </div>
                   </div>
+                ) : null}
+                {project.mode === "work" &&
+                project.developerTools?.enabled === true &&
+                String(props.workProjectId) === String(project.id) &&
+                props.terminalClient !== undefined ? (
+                  <ServerWorkProjectTerminal
+                    key={String(project.id)}
+                    client={props.terminalClient}
+                    projectId={project.id}
+                    login={`${servers.find((server) => String(server.serverId) === String(project.serverId))?.user ?? "unavailable"}@${aliasOf(String(project.serverId))}`}
+                    folder={project.folder}
+                  />
                 ) : null}
                 {(project.mode === "work" && project.developerTools?.enabled !== true) ||
                 props.terminalClient === undefined ? null : (

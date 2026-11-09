@@ -237,9 +237,55 @@ describe("provider runtime network", () => {
     ]);
   });
 
-  it("leaves every runtime on open network while Network limits are off, the default", async () => {
+  it("puts sandboxed runtimes behind the proxy by default, with no switch ever recorded", async () => {
     const host = runtimeHost({ limitsOn: "store" });
-    expect(host.store.limitsOn()).toBe(false);
+    expect(host.store.limitsOn()).toBe(true);
+    const launch = await started(
+      host.network.start({
+        runtime: "codex",
+        root: "/projects/app",
+        executionPolicy: "approval-gated",
+      }),
+    );
+    expect(launch.status).toBe("proxied");
+    expect(host.events(SAFE_NETWORKS_AGGREGATE)).toEqual([]);
+  });
+
+  it("keeps open Full access on open network, and tells a refused request where to trust the host", async () => {
+    const host = runtimeHost({ limitsOn: "store" });
+    expect(
+      await host.network.start({
+        runtime: "codex",
+        root: "/projects/app",
+        executionPolicy: "full-access",
+      }),
+    ).toEqual({ status: "open" });
+    const guarded = await started(
+      host.network.start({
+        runtime: "codex",
+        root: "/projects/app",
+        executionPolicy: "auto-accept-edits",
+      }),
+    );
+    const refused = await openTunnel(
+      proxyOf(guarded.endpoint),
+      "registry.example.com:443",
+      basicAuthorization(tokenOf(guarded.environment)),
+    );
+    expect(refused.answer).toContain("octant-egress-refused: no-rule registry.example.com:443");
+    expect(refused.answer).toContain("choose Trust beside it under Recently refused");
+  });
+
+  it("leaves every runtime on open network once a person turns Network limits off, and journals the switch", async () => {
+    const host = runtimeHost({ limitsOn: "store" });
+    expect(host.store.setLimits({ enabled: false, principal: "remote-device" })).toEqual({
+      kind: "refused",
+      reason: "needs-local-window",
+    });
+    expect(host.store.limitsOn()).toBe(true);
+    expect(host.store.setLimits({ enabled: false, principal: "local-window" })).toEqual({
+      kind: "changed",
+    });
     for (const runtime of ["codex", "opencode", "acp", "pi", "claude-sandbox"] as const) {
       expect(
         await host.network.start({
@@ -250,39 +296,19 @@ describe("provider runtime network", () => {
       ).toEqual({ status: "open" });
     }
     expect(host.events(RUNTIME_NETWORK_AGGREGATE)).toEqual([]);
-  });
-
-  it("puts runtimes launched after Network limits are turned on behind the proxy, and journals the switch", async () => {
-    const host = runtimeHost({ limitsOn: "store" });
-    expect(host.store.setLimits({ enabled: true, principal: "remote-device" })).toEqual({
-      kind: "refused",
-      reason: "needs-local-window",
-    });
-    expect(host.store.limitsOn()).toBe(false);
-    expect(host.store.setLimits({ enabled: true, principal: "local-window" })).toEqual({
-      kind: "changed",
-    });
-    const launch = await started(
-      host.network.start({
-        runtime: "codex",
-        root: "/projects/app",
-        executionPolicy: "approval-gated",
-      }),
-    );
-    expect(launch.status).toBe("proxied");
     expect(host.events(SAFE_NETWORKS_AGGREGATE).map((event) => event.eventName)).toEqual([
       "safe-networks.limits-set@1",
     ]);
   });
 
-  it("replays the Network limits switch at startup", async () => {
+  it("replays the Network limits switch at startup, so a host that turned it off stays off", async () => {
     const first = runtimeHost({ limitsOn: "store" });
-    first.store.setLimits({ enabled: true, principal: "local-window" });
+    first.store.setLimits({ enabled: false, principal: "local-window" });
     const restarted = runtimeHost({ directory: first.directory, limitsOn: "store" });
-    expect(restarted.store.limitsOn()).toBe(true);
-    restarted.store.setLimits({ enabled: false, principal: "local-window" });
+    expect(restarted.store.limitsOn()).toBe(false);
+    restarted.store.setLimits({ enabled: true, principal: "local-window" });
     const again = runtimeHost({ directory: first.directory, limitsOn: "store" });
-    expect(again.store.limitsOn()).toBe(false);
+    expect(again.store.limitsOn()).toBe(true);
   });
 
   it("refuses a request without the launch token, and names no host for it", async () => {
@@ -821,7 +847,7 @@ describe("provider runtime network", () => {
       view: {
         account: [{ kind: "private-network", tag: "local-network" }],
         enforced: true,
-        limitsOn: false,
+        limitsOn: true,
       },
     });
     const read = await handler(
@@ -839,14 +865,14 @@ describe("provider runtime network", () => {
     const limits = await handler(
       new Request(url, {
         method: "POST",
-        body: JSON.stringify({ kind: "set-limits", enabled: true }),
+        body: JSON.stringify({ kind: "set-limits", enabled: false }),
         headers: { "x-octant-window-capability": capability },
       }),
     );
     expect(limits?.status).toBe(200);
     expect(await limits?.json()).toMatchObject({
       kind: "safe-networks-updated",
-      view: { limitsOn: true },
+      view: { limitsOn: false },
     });
   });
 });

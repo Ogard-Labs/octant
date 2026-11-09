@@ -601,6 +601,23 @@ describe("RemoteConnection state machine", () => {
     expect(connection.state()).toBe("unavailable");
   });
 
+  it("reports a rate limited hello as unavailable with the host's wait", async () => {
+    const { store } = createTestDeviceKeyStore();
+    const connection = createRemoteConnection({
+      origin: ORIGIN,
+      webBuildVersion: WEB_BUILD_VERSION,
+      fetch: async () => new Response(null, { status: 429, headers: { "retry-after": "30" } }),
+      deviceKey: store,
+      pairing: { ticketId: TICKET_ID, ticketProof: TICKET_PROOF, deviceLabel: DEVICE_LABEL },
+    });
+
+    await expect(connection.connect()).rejects.toMatchObject({
+      category: "unavailable",
+      retryAfterMs: 30_000,
+    });
+    expect(connection.state()).toBe("unavailable");
+  });
+
   it("reports unauthorized when the device is revoked", async () => {
     const server = createFakeServer({ revoked: true });
     const { store } = createTestDeviceKeyStore();

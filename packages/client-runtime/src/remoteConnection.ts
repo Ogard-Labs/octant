@@ -194,17 +194,46 @@ export type RemoteConnectionReason = RemoteReauthReason | "host-changed";
 export class RemoteConnectionError extends Error {
   readonly category: RemoteConnectionErrorCategory;
   readonly reasonCode: RemoteConnectionReason | undefined;
+  /** Set when the host asked this device to wait; the device is still paired. */
+  readonly retryAfterMs: number | undefined;
 
   constructor(
     category: RemoteConnectionErrorCategory,
     message: string,
     reasonCode?: RemoteConnectionReason,
+    retryAfterMs?: number,
   ) {
     super(message);
     this.name = "RemoteConnectionError";
     this.category = category;
     this.reasonCode = reasonCode;
+    this.retryAfterMs = retryAfterMs;
   }
+}
+
+/** The host's own pairing window is one minute, so that is the wait when it names none. */
+const DEFAULT_RATE_LIMIT_RETRY_MS = 60_000;
+const MAX_RATE_LIMIT_RETRY_MS = 5 * 60_000;
+
+/**
+ * A host that answered 429 has rate limited this device; it has not rejected
+ * it. The pre-auth hello shares the pairing budget, so a paired browser that
+ * reloads a few times in a minute is refused here while its credential is
+ * still good. The error stays `unavailable` so nothing clears the pairing, and
+ * carries the wait the host named.
+ */
+export function rateLimitedConnectionError(retryAfter: string | null): RemoteConnectionError {
+  const seconds = retryAfter === null ? Number.NaN : Number(retryAfter);
+  const retryAfterMs =
+    Number.isFinite(seconds) && seconds > 0
+      ? Math.min(Math.ceil(seconds) * 1000, MAX_RATE_LIMIT_RETRY_MS)
+      : DEFAULT_RATE_LIMIT_RETRY_MS;
+  return new RemoteConnectionError(
+    "unavailable",
+    "The host is busy. Octant will try again shortly.",
+    undefined,
+    retryAfterMs,
+  );
 }
 
 // ── Connection ──────────────────────────────────────────────────────────────
@@ -810,7 +839,11 @@ function mapConnectionError(error: unknown, clearAuthority: () => void): RemoteC
   return new RemoteConnectionError("unavailable", "Remote host is unavailable.");
 }
 
-async function protocolStatusError(response: Response): Promise<RemoteProtocolStatusError> {
+async function protocolStatusError(
+  response: Response,
+): Promise<RemoteProtocolStatusError | RemoteConnectionError> {
+  if (response.status === 429)
+    return rateLimitedConnectionError(response.headers.get("retry-after"));
   let reasonCode: RemoteReauthReason | undefined;
   try {
     const body = (await response.clone().json()) as { reasonCode?: unknown };

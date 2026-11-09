@@ -81,6 +81,37 @@ function setup(options: {
 }
 
 describe("ServerProjectsSettings", () => {
+  it.each([
+    { enabled: false, bound: true },
+    { enabled: true, bound: false },
+    { enabled: true, bound: true },
+  ])(
+    "shows a Work terminal only for the current bound Project with tools enabled (%j)",
+    async ({ enabled, bound }) => {
+      const work = Schema.decodeUnknownSync(ServerProjectSchema)({
+        ...SITE,
+        mode: "work",
+        developerTools: {
+          enabled,
+          changedAt: SITE.boundAt,
+          changedBy: { kind: "local-user", actorId: "11111111-1111-4111-8111-111111111111" },
+        },
+      });
+      const execute = vi.fn(async () => {
+        throw Error("No launch without a person action");
+      });
+      setup({
+        initial: { projects: [work] },
+        ...(bound ? { workProjectId: work.id } : {}),
+        terminalClient: { execute },
+      });
+      await screen.findByText("Website");
+      expect(screen.queryByRole("button", { name: "Open terminal" }) !== null).toBe(
+        enabled && bound,
+      );
+      expect(execute).not.toHaveBeenCalled();
+    },
+  );
   it.each([undefined, decodeProjectId("11111111-1111-4111-8111-222222222222")])(
     "offers an explicit Project open before requesting actions outside the window binding",
     async (codeProjectId) => {
@@ -226,7 +257,7 @@ describe("ServerProjectsSettings", () => {
       enabled: true,
     });
     expect(await screen.findByRole("button", { name: "Actions" })).toBeVisible();
-    expect(screen.getByText(/does not enable a general Project terminal/)).toBeVisible();
+    expect(screen.getByText(/Show saved actions and your Project terminal/)).toBeVisible();
   });
   it("retains a refused action draft until the person reloads the current saved list", async () => {
     let current: ServerProjectsView = { projects: [SITE] };

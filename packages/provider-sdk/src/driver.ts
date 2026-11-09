@@ -370,7 +370,10 @@ export interface ProviderConnection {
    * has not had answered, for an automatic reviewer on the host: its tool, the
    * argument fields a reviewer judges with credentials redacted, and where it
    * runs. Never put on an event, journaled, or shown. Absent, or answering
-   * nothing, when the runtime cannot say; the reviewer then judges by the
+   * nothing, when the runtime cannot say. Optional ownerAction carries complete
+   * file-operation facts only: no truncation, redaction, unknown fields or secret
+   * content. Hosts expose those facts only after a fresh owner unlock and never
+   * journal them; a separate fresh exact proof answers once. The reviewer judges by the
    * request's description alone.
    */
   readonly approvalCall?: (input: {

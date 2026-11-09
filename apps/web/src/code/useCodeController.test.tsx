@@ -1863,6 +1863,70 @@ describe("useCodeController", () => {
     },
   );
 
+  it("withdraws only the approval an owner answered on another device", async () => {
+    const operationId = "70000000-0000-4000-8000-000000000033";
+    const answered = "70000000-0000-4000-8000-000000000034",
+      other = "70000000-0000-4000-8000-000000000035";
+    async function* waitingFrames() {
+      for (const [cursor, approvalId] of [
+        [1, answered],
+        [2, other],
+      ] as const)
+        yield {
+          threadId: ids.thread,
+          operationId,
+          cursor,
+          occurredAt: now,
+          event: {
+            kind: "approval-requested",
+            approvalId,
+            action: "provider-tool",
+            summary: "Write file",
+          },
+        };
+      yield {
+        threadId: ids.thread,
+        operationId,
+        cursor: 3,
+        occurredAt: now,
+        event: {
+          kind: "owner-approval-settled",
+          approvalId: answered,
+          outcome: "approved",
+          actingPrincipal: {
+            kind: "owner-unlock",
+            memberId: "70000000-0000-4000-8000-000000000036",
+          },
+        },
+      };
+      yield {
+        threadId: ids.thread,
+        operationId,
+        cursor: 4,
+        occurredAt: now,
+        event: { kind: "operation-state", state: "waiting" },
+      };
+    }
+    const client = fakeClient({
+      executeOperation: vi.fn(async () => ({
+        kind: "provider-turn-state",
+        operationId,
+        state: "running",
+      })) as never,
+      subscribeOperation: vi.fn(() => waitingFrames()) as never,
+    });
+    const { result } = renderHook(() =>
+      useCodeController({ activeThreadId: ids.thread, client, reconnectDelayMs: 60_000 }),
+    );
+    await waitFor(() => expect(result.current.activeView?.thread.id).toBe(ids.thread));
+    await act(async () => {
+      await result.current.sendFollowUp("update files");
+    });
+    expect(result.current.providerRequests).toEqual([
+      expect.objectContaining({ approvalId: other }),
+    ]);
+  });
+
   it("keeps a refused approval's reason after a different request is answered", async () => {
     const operationId = "70000000-0000-4000-8000-000000000036";
     const refusedId = "70000000-0000-4000-8000-000000000037";

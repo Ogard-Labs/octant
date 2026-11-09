@@ -162,7 +162,10 @@ has the same shell, Git, and tools as a Code thread at the same level either
 way ([Modes](../architecture.md#modes-chat-work-and-code)). Built today it
 shows the Project terminal and Project actions. On a server Work Project its
 existing Settings → Access → Servers row instead offers the same default-off
-presentation choice for saved actions only; no general server Work terminal or
+presentation choice for saved actions and the person's Project terminal.
+Only this window's bound Work Project offers **Open terminal** in that row;
+the shell has Full remote SSH access and closes when the panel or that
+presentation closes. Saved action authority remains separate. No general
 tools pane is enabled ([Server Projects](server-projects.md#threads)).
 Code Projects have no such row, since Code always shows them. Over an application ground the cards keep the
 opaque card step even under Glass, and the header's text takes the start

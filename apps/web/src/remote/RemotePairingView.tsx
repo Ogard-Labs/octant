@@ -352,7 +352,9 @@ function RemotePairingFailed(props: RemotePairingFailedProps) {
                     ? "Host incompatible"
                     : props.category === "recovery-required"
                       ? "Remote access requires re-pairing"
-                      : "Pairing failed"
+                      : props.category === "rate-limited"
+                        ? "Too many requests"
+                        : "Pairing failed"
       }
     />
   );
