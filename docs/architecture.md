@@ -150,9 +150,13 @@ The design rests on a small set of invariants that every package obeys:
 - **Dependencies point inward.** Apps consume packages; contracts and domain
   never import apps. Provider-specific payloads stop at the provider adapter.
 - **A provider question has one answer identity.** Each question in a provider
-  question set reaches Chat, Work, and Code with a distinct request id. The
+  flat question set reaches Chat, Work, and Code with a distinct request id. The
   adapter collects answers in the provider's original question order, rejects
   duplicate answers, and settles the underlying callback only when complete.
+  A native grouped form instead carries the shared bounded questionnaire under
+  one request identity, with its entire structural response validated before
+  settling the one-use callback. Provider wire shapes stay in the adapter;
+  Work keeps its sanitized text and no-path/no-URL response boundary.
 - **App-owned questionnaires stay in their thread.** The provider-neutral
   `ask-user` tool can collect a bounded group of single- or multiple-choice
   answers and an optional comment. The host validates the complete response

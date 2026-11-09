@@ -1474,6 +1474,9 @@ export class ChatTurnRunner {
                     decodeChatAttemptQuestion({
                       requestId: event.requestId,
                       prompt: boundedQuestionText(event.prompt),
+                      ...(event.questionnaire === undefined
+                        ? {}
+                        : { questionnaire: event.questionnaire }),
                       options: event.options
                         .slice(0, MAX_ATTEMPT_QUESTION_OPTIONS)
                         .map((option) => ({
