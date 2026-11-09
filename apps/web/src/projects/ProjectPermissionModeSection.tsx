@@ -68,6 +68,7 @@ export function ProjectPermissionModeSection(props: ProjectPermissionModeSection
         options={props.project.type === "work" ? WORK_OPTIONS : CODE_OPTIONS}
         value={value}
       />
+      <span className="text-xs text-muted-foreground">Sandbox at Full access</span>
       <OctantSelectField
         aria-label="Sandbox at Full access for this Project"
         className="window-no-drag"
@@ -77,8 +78,12 @@ export function ProjectPermissionModeSection(props: ProjectPermissionModeSection
           const sandbox = next === FOLLOW_SETTINGS ? undefined : next === "on";
           if (sandbox === props.project.defaultFullAccessSandbox) return;
           setPending(true);
+          // Send the mode the Project is in, not only its stored field: a
+          // Project that remembered Full access before modes existed has no
+          // mode of its own, and sending none reads as "follow Settings",
+          // which drops that remembered Full access.
           void props
-            .onChange(props.project.defaultPermissionMode, sandbox ?? "settings")
+            .onChange(value === FOLLOW_SETTINGS ? undefined : value, sandbox ?? "settings")
             .finally(() => setPending(false));
         }}
         options={SANDBOX_OPTIONS}
