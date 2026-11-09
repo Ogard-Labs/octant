@@ -2,7 +2,6 @@ import { mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "nod
 import { dirname, join } from "node:path";
 import { NO_PROTECTED_FILES_CHANGES } from "@octant/domain/secret-guard-policy";
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
-import { buildDocxFixture } from "../preview/previewTestFixtures";
 import { applyProtectedFilesChoice } from "../process/secretGuard";
 import { ServerConnection } from "./serverConnection";
 import { ServerFileSystem } from "./serverFiles";
@@ -66,23 +65,6 @@ describe.skipIf(!canRunThrowawaySshd)("the harness's file tools on a server fold
         { name: "link-out.txt", kind: "other" },
       ]),
     );
-  });
-
-  it("reads a Word file there as its text and refuses an archive as binary", async () => {
-    writeFileSync(join(root, "brief.docx"), buildDocxFixture(["Scope", "Timeline"]));
-    writeFileSync(join(root, "bundle.zip"), Buffer.from("PK\x03\x04\x14\x00\x00\x00", "latin1"));
-    const tools = files();
-    expect(await tools.read({ path: "brief.docx" })).toMatchObject({
-      kind: "file",
-      format: "docx",
-      lines: ["Scope", "Timeline"],
-    });
-    expect(await tools.read({ path: "bundle.zip" })).toMatchObject({
-      kind: "refused",
-      reason: "binary-file",
-    });
-    rmSync(join(root, "brief.docx"));
-    rmSync(join(root, "bundle.zip"));
   });
 
   it("refuses a link out of the folder and a credential location, at any depth", async () => {

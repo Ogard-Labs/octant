@@ -8,7 +8,6 @@ import {
   type ProviderToolImage,
 } from "@octant/contracts";
 import { secretGuardRefusal } from "../process/secretGuard";
-import { nativeHarnessFileText, type NativeHarnessReadFormat } from "./nativeHarnessFileFormats";
 
 /** Directories a search never descends into unless the pattern names them. */
 export const SKIPPED_DIRECTORY_NAMES = new Set([".git", "node_modules"]);
@@ -40,9 +39,7 @@ export type NativeHarnessFileRefusal =
    */
   | "target-unavailable"
   /** The secret guard's list names the file; `message` says which rule and channel. */
-  | "protected-file"
-  /** Not text, an image, a PDF or an Office file `read` returns; `message` says so. */
-  | "binary-file";
+  | "protected-file";
 
 export interface NativeHarnessFileRefused {
   readonly kind: "refused";
@@ -59,10 +56,6 @@ export type NativeHarnessReadResult =
       readonly totalLines: number;
       readonly nextLine?: number;
       readonly bounds: NativeHarnessToolResultBounds;
-      /** A PDF or Office file, whose lines are the text its reader extracted. */
-      readonly format?: NativeHarnessReadFormat;
-      /** Why the extracted text is incomplete or empty. */
-      readonly note?: string;
     }
   /**
    * An image, recognized by its bytes. `data` is the base64 the model is
@@ -74,6 +67,13 @@ export type NativeHarnessReadResult =
       readonly mimeType: ProviderToolImage["mimeType"];
       readonly bytes: number;
       readonly data: string;
+    }
+  /** A PDF, recognized by its bytes; its content is not decoded as text. */
+  | {
+      readonly kind: "document";
+      readonly path: string;
+      readonly mimeType: "application/pdf";
+      readonly bytes: number;
     }
   | {
       readonly kind: "directory";
@@ -576,32 +576,19 @@ export class NativeHarnessFileSystem {
 }
 
 /**
- * What a read of one file returns, recognized by its bytes whatever the file
- * is named: an image, a PDF or an Office file as numbered lines of its text,
- * a refusal for any other binary file, and otherwise its text.
+ * What a read of one file returns: an image or a PDF when its first bytes say
+ * so, whatever the file is named, and otherwise its text as numbered lines.
  */
 export function readFileContent(
   path: string,
   content: Buffer,
   input: { readonly offset?: number | undefined; readonly limit?: number | undefined },
 ): NativeHarnessReadResult {
-  const mimeType = imageMimeType(content);
-  if (mimeType === undefined) {
-    const text = nativeHarnessFileText(content, path);
-    if (text.kind === "binary")
-      return { kind: "refused", reason: "binary-file", message: text.message };
-    if (text.kind === "text") return readSlice(path, content.toString("utf8"), input);
-    const note = text.truncated
-      ? `The ${text.format} reader's limits cut this file, so its end is missing.`
-      : text.empty
-        ? `This ${text.format} file holds no text the reader can extract${text.format === "pdf" ? "; it may be scanned images" : ""}.`
-        : undefined;
-    return {
-      ...readSlice(path, text.text, input),
-      format: text.format,
-      ...(note === undefined ? {} : { note }),
-    };
+  if (startsWith(content, "%PDF-")) {
+    return { kind: "document", path, mimeType: "application/pdf", bytes: content.length };
   }
+  const mimeType = imageMimeType(content);
+  if (mimeType === undefined) return readSlice(path, content.toString("utf8"), input);
   if (content.length > MAX_READ_IMAGE_BYTES) {
     return {
       kind: "refused",

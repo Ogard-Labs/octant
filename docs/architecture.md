@@ -7845,7 +7845,7 @@ the model at another size.
   not. Per-file approvals were rejected: a person would answer one call
   several times, and a denial halfway would leave a partial change.
   `read` recognizes a PNG, JPEG, GIF,
-  or WebP image by its first bytes, whatever the file is named. An
+  or WebP image and a PDF by its first bytes, whatever the file is named. An
   image of at most 1,572,864 bytes (the most one tool image carries once
   base64-encoded) goes to the model beside a result that names only its path,
   type, and size, and only when the provider reports that the session's model
@@ -7859,20 +7859,8 @@ the model at another size.
   fit even without images fails as before. An answer with images is journaled
   only after that check, so the journal holds what the model was sent. Like the text a read
   returns, the image is local and does not taint the thread, and its pixels are
-  never journaled. Any other file is recognized by its content with the file
-  preview sniffer, and a PDF, Word (`.docx`), PowerPoint (`.pptx`) or Excel
-  (`.xlsx`) file is returned as numbered lines of the text the preview parsers
-  extract, under the parsers' own page, block, row, column, and sheet limits:
-  page text under `[Page N]`, paragraphs one per line, slide text under
-  `[Slide N]` in slide order, and each worksheet under `[Sheet: name]` as
-  tab-separated rows. Such a result names its `format`, pages with `offset` and
-  `limit` like text, and carries a `note` when the limits cut it or it holds no
-  text. Any other file whose first 4 KiB hold a NUL byte (archives, databases,
-  audio, video, executables, and the older `.doc`, `.xls`, and `.ppt`) refuses
-  as `binary-file` with a short reason; a file without one reads as text,
-  decoded leniently, so text in another encoding still reads. Extracted text is
-  local like any read, so it does not taint the thread. The same rules apply in
-  local folders and on server Projects. `bash` writes the command to a
+  never journaled. A PDF refuses as `document-input-unsupported`: no harness
+  endpoint carries a document in a tool result yet. `bash` writes the command to a
   script in its own subdirectory of `harness/scripts` and runs it through the
   same confined owned-process-group port as repository tests (Seatbelt on
   macOS, the bubblewrap sandbox on Linux), so a timeout or cancel ends the

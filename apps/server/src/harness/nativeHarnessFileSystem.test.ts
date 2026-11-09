@@ -11,13 +11,6 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { MAX_PREVIEW_PDF_PAGES } from "../preview/previewFormatBudget";
-import {
-  buildDocxFixture,
-  buildPdfFixture,
-  buildPptxFixture,
-  buildXlsxFixture,
-} from "../preview/previewTestFixtures";
 import { secretGuardRefusal } from "../process/secretGuard";
 import { NativeHarnessFileSystem } from "./nativeHarnessFileSystem";
 
@@ -289,10 +282,11 @@ describe("native harness file system", () => {
     ]);
   });
 
-  it("reads an image by its content, whatever the file is named", async () => {
+  it("reads an image or a PDF by its content, whatever the file is named", async () => {
     const { root, fs } = await fixture();
     const gif = Buffer.from("GIF89a\x01\x00\x01\x00\x00\x00\x00;", "latin1");
     await writeFile(join(root, "pixel.dat"), gif);
+    await writeFile(join(root, "paper.pdf"), "%PDF-1.7\n%\xe2\xe3\n");
     expect(await fs.read({ path: "pixel.dat" })).toEqual({
       kind: "image",
       path: "pixel.dat",
@@ -300,90 +294,11 @@ describe("native harness file system", () => {
       bytes: gif.length,
       data: gif.toString("base64"),
     });
-  });
-
-  it("reads a PDF, Word, PowerPoint or Excel file as its text, recognized by content rather than name", async () => {
-    const { root, fs } = await fixture();
-    await writeFile(
-      join(root, "paper.bin"),
-      buildPdfFixture([["Abstract", "Results"], ["Appendix"]]),
-    );
-    await writeFile(join(root, "letter"), buildDocxFixture(["Dear Ada,", "Thanks & regards"]));
-    await writeFile(
-      join(root, "deck.dat"),
-      buildPptxFixture([
-        { title: "Plan", bullets: ["Ship"] },
-        { title: "Risks", bullets: [] },
-      ]),
-    );
-    await writeFile(
-      join(root, "budget.zip"),
-      buildXlsxFixture([
-        ["Item", "Cost"],
-        ["Rent", "1200"],
-      ]),
-    );
-    expect(await fs.read({ path: "paper.bin" })).toMatchObject({
-      kind: "file",
-      format: "pdf",
-      lines: ["[Page 1]", "Abstract", "Results", "", "[Page 2]", "Appendix"],
+    expect(await fs.read({ path: "paper.pdf" })).toMatchObject({
+      kind: "document",
+      path: "paper.pdf",
+      mimeType: "application/pdf",
     });
-    expect(await fs.read({ path: "letter" })).toMatchObject({
-      format: "docx",
-      lines: ["Dear Ada,", "Thanks & regards"],
-    });
-    const deck = await fs.read({ path: "deck.dat" });
-    expect(deck).toMatchObject({ format: "pptx" });
-    const deckText = deck.kind === "file" ? deck.lines.join("\n") : "";
-    expect(deckText.indexOf("[Slide 1]\nPlan")).toBe(0);
-    expect(deckText.indexOf("Ship")).toBeLessThan(deckText.indexOf("[Slide 2]\nRisks"));
-    const sheet = await fs.read({ path: "budget.zip" });
-    expect(sheet).toMatchObject({ format: "xlsx" });
-    expect(sheet.kind === "file" && sheet.lines.slice(1)).toEqual(["Item\tCost", "Rent\t1200"]);
-    expect(sheet.kind === "file" && sheet.lines[0]).toMatch(/^\[Sheet: .+\]$/);
-  });
-
-  it("pages a long document with offset and limit, and says when the reader's limits cut it", async () => {
-    const { root, fs } = await fixture();
-    const paragraphs = Array.from({ length: 30 }, (_, index) => `Paragraph ${index + 1}`);
-    await writeFile(join(root, "long.docx"), buildDocxFixture(paragraphs));
-    expect(await fs.read({ path: "long.docx", offset: 10, limit: 5 })).toMatchObject({
-      format: "docx",
-      startLine: 10,
-      lines: paragraphs.slice(10, 15),
-      nextLine: 15,
-      bounds: { truncated: true, nextOffset: 15 },
-    });
-    expect(await fs.read({ path: "long.docx" })).not.toHaveProperty("note");
-    const pages = Array.from({ length: MAX_PREVIEW_PDF_PAGES + 1 }, () => ["x"]);
-    await writeFile(join(root, "huge.pdf"), buildPdfFixture(pages));
-    expect(await fs.read({ path: "huge.pdf", limit: 1 })).toMatchObject({
-      format: "pdf",
-      note: expect.stringContaining("cut"),
-    });
-  });
-
-  it("refuses an archive, a database, media, an executable or an old Office file as binary", async () => {
-    const { root, fs } = await fixture();
-    const binaries: Record<string, Buffer> = {
-      "bundle.zip": Buffer.from("PK\x03\x04\x14\x00\x00\x00\x08\x00", "latin1"),
-      "notes.txt": Buffer.from("SQLite format 3\x00\x10\x00", "latin1"),
-      "song.mp3": Buffer.from("ID3\x04\x00\x00\x00\x00\x00\x00", "latin1"),
-      "clip.mp4": Buffer.from("\x00\x00\x00\x18ftypmp42", "latin1"),
-      tool: Buffer.from("\x7fELF\x02\x01\x01\x00\x00\x00", "latin1"),
-      "old.doc": Buffer.from("\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1\x00\x00", "latin1"),
-    };
-    for (const [name, bytes] of Object.entries(binaries)) {
-      await writeFile(join(root, name), bytes);
-      expect(await fs.read({ path: name })).toMatchObject({
-        kind: "refused",
-        reason: "binary-file",
-        message: expect.stringContaining("binary"),
-      });
-    }
-    // Text in another encoding still reads, as it did before.
-    await writeFile(join(root, "latin1.txt"), Buffer.from("caf\xe9\n", "latin1"));
-    expect(await fs.read({ path: "latin1.txt" })).toMatchObject({ kind: "file" });
   });
 
   it("refuses an image larger than one tool image may carry and names the limit", async () => {
