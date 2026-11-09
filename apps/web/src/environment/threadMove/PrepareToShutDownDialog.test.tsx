@@ -94,6 +94,10 @@ function fakeClient(
     readonly arrives?: () => boolean;
     /** A thread whose move ended with nothing to show: Don't move, or its notice put away. */
     readonly settled?: MovedThreadReference;
+    /** The desktop request to start this destination's batch fails outright. */
+    readonly startThrowsFor?: string;
+    /** Every handover request fails outright. */
+    readonly handOverThrows?: boolean;
   } = {},
 ) {
   const challenged: Array<{
@@ -153,6 +157,9 @@ function fakeClient(
       return { status: "challenge", challenge: CHALLENGE as never };
     },
     shutdownStart: async (request) => {
+      if (String(request.destinationMemberId) === input.startThrowsFor) {
+        throw new Error("This computer could not answer.");
+      }
       started.push(request);
       // The server starts the first moves before it answers.
       movedAt = new Date().toISOString();
@@ -164,6 +171,7 @@ function fakeClient(
     },
     handoverPreview: async () => ({ status: "refused", reason: "refused" }),
     handOver: async (thread, notify) => {
+      if (input.handOverThrows === true) throw new Error("This computer could not answer.");
       handedOver.push({ thread, ...(notify === undefined ? {} : { notify }) });
       return {
         status: "handed-over",
@@ -504,6 +512,65 @@ describe("Prepare to shut down", () => {
     await waitFor(() => expect(handedOver).toEqual([{ thread: DARK, notify: DESKTOP }]));
     expect(await screen.findByRole("heading", { name: /Safe to shut down/ })).toBeInTheDocument();
     expect(screen.getByText("1 moved to Desktop, 1 handed over.")).toBeInTheDocument();
+  });
+
+  it("keeps the rows of a destination whose start fails here, says why, and never says it is safe", async () => {
+    const user = userEvent.setup();
+    const { client, started } = fakeClient({ startThrowsFor: DESKTOP });
+    render(
+      <PrepareToShutDownDialog
+        client={client}
+        onClose={() => {}}
+        onQuit={() => {}}
+        open
+        unlock={{ ownerUnlockSign: async () => ({ status: "done", signature: "c2ln" }) }}
+      />,
+    );
+    await screen.findByText("Plan the trip");
+    await user.click(screen.getByRole("combobox", { name: "Choice for Plan the trip" }));
+    await user.click(await screen.findByRole("option", { name: "Move to Desktop" }));
+    await user.click(screen.getByRole("button", { name: "Move 2 threads" }));
+
+    // The hub's batch started and moved; the Desktop's request failed.
+    await waitFor(() =>
+      expect(started.map((request) => request.destinationMemberId)).toEqual([MINI]),
+    );
+    expect(
+      await screen.findByRole("heading", { name: "1 thread stays on this computer" }),
+    ).toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: /Safe to shut down/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Quit Octant" })).not.toBeInTheDocument();
+    const trip = screen.getByText("Plan the trip").closest(".shutdown-row");
+    if (!(trip instanceof HTMLElement)) throw new Error("No row.");
+    expect(within(trip).getByText("Couldn't start")).toBeInTheDocument();
+    expect(within(trip).getByText("Stays here")).toBeInTheDocument();
+    expect(screen.getByRole("alert")).toHaveTextContent("The moves to Desktop couldn't start.");
+    expect(screen.getByRole("button", { name: "Move the last thread" })).toBeInTheDocument();
+  });
+
+  it("keeps a thread whose handover request fails here, says so, and never says it is safe", async () => {
+    const user = userEvent.setup();
+    const { client } = fakeClient({ handOverThrows: true });
+    render(
+      <PrepareToShutDownDialog
+        client={client}
+        onClose={() => {}}
+        open
+        unlock={{ ownerUnlockSign: async () => ({ status: "done", signature: "c2ln" }) }}
+      />,
+    );
+    await screen.findByText("Add dark mode");
+    await user.click(screen.getByRole("combobox", { name: "Move to" }));
+    await user.click(await screen.findByRole("option", { name: /Desktop/ }));
+    await user.click(screen.getByRole("combobox", { name: "Choice for Add dark mode" }));
+    await user.click(await screen.findByRole("option", { name: "Hand over" }));
+    await user.click(screen.getByRole("button", { name: "Move 2 threads with Touch ID" }));
+
+    expect(
+      await screen.findByRole("heading", { name: "1 thread stays on this computer" }),
+    ).toBeInTheDocument();
+    expect(screen.getByText("Can't hand over")).toBeInTheDocument();
+    expect(screen.getByRole("alert")).toHaveTextContent("Add dark mode couldn't be handed over.");
   });
 
   it("tells the menu bar how far the batch has come while it runs, and nothing once it ends", async () => {

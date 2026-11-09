@@ -2105,8 +2105,11 @@ this is how it looks.
     threads** when more than one destination needs its own unlock, asked in
     turn; **Hand over 2 threads** when only handovers are set, which need no
     unlock). With nothing set to move, the primary is disabled and the summary
-    says why. When a destination's unlock is declined, the foot's alert names
-    it, and the other destinations still move.
+    says why. When a destination's unlock is declined or its request fails,
+    the foot's alert names it, the other destinations still move, and each of
+    its rows reads Stays here with a small neutral pill saying why (Not
+    unlocked, Not an owner there, Offline, Not accepting moves, Couldn't
+    start, or Moves next past one unlock's limit).
   - **While it runs.** The dialog stays and becomes the progress view: a
     determinate bar under the head for the whole batch, and on each row a thin
     progress line and a state word in place of its choice (Waiting, Moving with

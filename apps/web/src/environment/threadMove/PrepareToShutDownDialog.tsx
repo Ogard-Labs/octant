@@ -105,6 +105,10 @@ export function PrepareToShutDownDialog(props: PrepareToShutDownDialogProps) {
     [],
   );
   const [handovers, setHandovers] = useState<ReadonlyMap<string, HandoverEnd>>(new Map());
+  // Rows set to move that this batch did not start, each with why: shown on
+  // the row, and counted as staying here so the screen never says Safe to
+  // shut down while one of them is still on this computer.
+  const [notStarted, setNotStarted] = useState<ReadonlyMap<string, string>>(new Map());
   const [statuses, setStatuses] = useState<ReadonlyMap<string, ThreadMoveThreadStatus>>(new Map());
   const [working, setWorking] = useState(false);
   // A notice or record older than this batch belongs to an earlier move.
@@ -142,6 +146,7 @@ export function PrepareToShutDownDialog(props: PrepareToShutDownDialogProps) {
     setStatuses(new Map());
     setChosen([]);
     setHandovers(new Map());
+    setNotStarted(new Map());
     setLeftOver(0);
     load();
   }, [load]);
@@ -203,17 +208,23 @@ export function PrepareToShutDownDialog(props: PrepareToShutDownDialogProps) {
   const staying = rows.length - moving.length - handingOver.length;
   const overflow = moving.length - batchCount;
 
-  const handOverAll = async (threads: ReadonlyArray<MovedThreadReference>, notify?: string) => {
-    // One after another: each commits and pushes on this computer's own disk and network.
-    for (const thread of threads) {
+  const handOverAll = async (handRows: ReadonlyArray<ShutdownThreadRow>, notify?: string) => {
+    // One after another: each commits and pushes on this computer's own disk
+    // and network. One that is refused or whose request fails stays here, says
+    // so on its row and in the alert, and the rest still go.
+    for (const row of handRows) {
       let end: HandoverEnd = "refused";
       try {
-        const outcome = await props.client.handOver(thread, notify);
+        const outcome = await props.client.handOver(row.thread, notify);
         if (outcome.status === "handed-over") end = outcome.pushed ? "pushed" : "not-pushed";
       } catch {
         end = "refused";
       }
-      setHandovers((current) => new Map(current).set(rowKey(thread), end));
+      setHandovers((current) => new Map(current).set(rowKey(row.thread), end));
+      if (end === "refused") {
+        const sentence = `${row.title} couldn't be handed over.`;
+        setProblem((current) => (current === undefined ? sentence : `${current} ${sentence}`));
+      }
     }
   };
 
@@ -224,24 +235,37 @@ export function PrepareToShutDownDialog(props: PrepareToShutDownDialogProps) {
     setProblem(undefined);
     const problems: string[] = [];
     const started: Array<{ thread: MovedThreadReference; to: string }> = [];
-    let skipped = overflow;
+    const unstarted = new Map<string, string>();
+    for (const group of groups) {
+      for (const row of group.rows.slice(SHUTDOWN_BATCH_MAX)) {
+        unstarted.set(rowKey(row.thread), "Moves next");
+      }
+    }
     // The server starts the first moves before it answers, so the cutoff
     // that tells this batch's results from an earlier move's is taken now.
     const cutoff = Date.now() - 1_000;
     try {
       // One owner challenge and one Touch ID per destination, asked in turn.
-      // A destination whose unlock is declined or refused moves nothing; the
-      // others still move, and its rows count as staying here.
+      // A destination whose unlock is declined or refused, or whose request
+      // fails outright, moves nothing; the others still move, and its rows
+      // count as staying here with the reason on each.
       for (const batch of batches) {
         const name = batch.member.name;
         const threads = batch.rows.map((row) => row.thread);
-        const outcome = await startBatch(batch.member.memberId, batch.rows);
+        let outcome: Awaited<ReturnType<typeof startBatch>>;
+        try {
+          outcome = await startBatch(batch.member.memberId, batch.rows);
+        } catch {
+          // The desktop request or the signing failed; this destination is
+          // not known to have started anything, so its rows stay here.
+          outcome = "not-started";
+        }
         if (outcome === "started") {
           const to = String(batch.member.memberId);
           started.push(...threads.map((thread) => ({ thread, to })));
           continue;
         }
-        skipped += threads.length;
+        for (const thread of threads) unstarted.set(rowKey(thread), NOT_STARTED_WORDS[outcome]);
         problems.push(
           outcome === "unlock-required"
             ? `This Mac isn't an owner on ${name}. Mark it as an owner there in Settings › Remote access › Hub.`
@@ -254,8 +278,6 @@ export function PrepareToShutDownDialog(props: PrepareToShutDownDialogProps) {
                   : `The moves to ${name} couldn't start.`,
         );
       }
-    } catch {
-      problems.push("This computer could not start the moves.");
     } finally {
       setWorking(false);
     }
@@ -267,12 +289,13 @@ export function PrepareToShutDownDialog(props: PrepareToShutDownDialogProps) {
     setProblem(problems.length === 0 ? undefined : problems.join(" "));
     setChosen(started);
     setHandovers(new Map(handed.map((thread) => [rowKey(thread), "handing-over" as const])));
+    setNotStarted(unstarted);
     setStartedAt(cutoff);
-    setLeftOver(skipped);
+    setLeftOver(unstarted.size);
     batchUnsettled.current = true;
     setPhase("running");
     // A handover tells the head's destination, so it shows under Handovers there.
-    if (handed.length > 0) void handOverAll(handed, destination);
+    if (handingOver.length > 0) void handOverAll(handingOver, destination);
   };
 
   const startBatch = async (
@@ -425,6 +448,7 @@ export function PrepareToShutDownDialog(props: PrepareToShutDownDialogProps) {
         destination={destination}
         handover={handovers.get(id)}
         inBatch={chosen.some((entry) => rowKey(entry.thread) === id)}
+        notStarted={notStarted.get(id)}
         key={id}
         members={members}
         onChoose={(pick) => choose(row.thread, pick)}
@@ -612,6 +636,8 @@ function ShutdownRow(props: {
   readonly handover: HandoverEnd | undefined;
   /** The running batch moves this row; one it left out stays here. */
   readonly inBatch: boolean;
+  /** Why this row, set to move, did not start: it stays here. */
+  readonly notStarted: string | undefined;
   readonly startedAt: number;
   readonly onChoose: (pick: RowPick) => void;
 }) {
@@ -652,6 +678,11 @@ function ShutdownRow(props: {
       {row.projectName === undefined ? null : (
         <span className="shutdown-row__project">{row.projectName}</span>
       )}
+      {props.phase === "running" && props.notStarted !== undefined ? (
+        <span className="shutdown-row__reason">
+          <OctantBadge variant="secondary">{props.notStarted}</OctantBadge>
+        </span>
+      ) : null}
       {props.phase === "running" ? (
         <span className="shutdown-row__state">
           {props.handover !== undefined
@@ -691,6 +722,20 @@ function ShutdownRow(props: {
     </div>
   );
 }
+
+/** Why a destination's rows did not start, as each of its rows says it. */
+const NOT_STARTED_WORDS: Readonly<
+  Record<
+    "declined" | "unlock-required" | "destination-unreachable" | "refused" | "not-started",
+    string
+  >
+> = {
+  declined: "Not unlocked",
+  "unlock-required": "Not an owner there",
+  "destination-unreachable": "Offline",
+  refused: "Not accepting moves",
+  "not-started": "Couldn't start",
+};
 
 const HANDOVER_WORDS: Readonly<Record<HandoverEnd, string>> = {
   "handing-over": "Handing over",

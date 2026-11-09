@@ -1217,11 +1217,15 @@ the usual case is one press and one unlock.
   one after another, so most are done early, and a thread set to move after
   its turn starts when that turn ends. When rows move to more than one member,
   the press asks each destination's owner challenge and Touch ID in turn, the
-  head's first. A destination whose unlock is declined, or whose challenge is
-  refused, moves nothing; the others still move, its rows count as staying
-  here, and the screen says which destination did not unlock. Rows set to hand
-  over are handed over one after another once the unlocks are asked, each
-  telling the head's destination so it shows under its Handovers.
+  head's first. A destination whose unlock is declined, whose challenge is
+  refused, or whose request fails outright moves nothing; the others still
+  move, its rows count as staying here with the reason on each row, and the
+  screen names that destination. Rows set to hand over are handed over one
+  after another once the unlocks are asked, each telling the head's
+  destination so it shows under its Handovers; one that is refused or whose
+  request fails stays here, named on its row and in the screen's alert. A row
+  set to move or hand over that did not is never counted toward Safe to shut
+  down.
 - **Progress in the menu bar.** While the batch runs, the menu bar shows how
   many of its threads have ended out of how many (`3/9` beside the glyph,
   after only the host's own `!`) and a **Moving threads** line in its menu,
