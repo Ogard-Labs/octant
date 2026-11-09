@@ -306,6 +306,9 @@ interface OwnedRuntimeContext {
   recording?: PlaywrightRecording | undefined;
 }
 
+/** How long starting a recording waits for the page's first frame. */
+const FIRST_FRAME_WAIT_MS = 2_000;
+
 /**
  * One recording: the page's own screencast on a protocol session of its own,
  * the frames it kept, and the timer that stops it at the duration bound.
@@ -884,6 +887,10 @@ export class PlaywrightBrowserRuntime implements BrowserRuntimePort {
     let tail: Promise<void> = Promise.resolve();
     let receiving = true;
     let ended: RecordingEnd | undefined;
+    let firstFrameLooked = (): void => undefined;
+    const firstFrame = new Promise<void>((resolve) => {
+      firstFrameLooked = resolve;
+    });
     const endCollection = (atMs: number, reason?: "tab-changed"): RecordingEnd => {
       ended ??= {
         atMs,
@@ -923,6 +930,7 @@ export class PlaywrightBrowserRuntime implements BrowserRuntimePort {
         } catch {
           frames.leaveOut();
         } finally {
+          firstFrameLooked();
           // Acknowledged after it was looked at: the page sends the next
           // frame only then, so a busy page cannot queue frames without bound.
           await session
@@ -942,6 +950,16 @@ export class PlaywrightBrowserRuntime implements BrowserRuntimePort {
       await session.detach?.().catch(() => undefined);
       throw new BrowserRecordingUnavailableError();
     }
+    // A page that does not repaint sends one frame at the start, and looking
+    // at it takes a credential check. Starting returns once it was looked at,
+    // so a click in the first step cannot move the page on before the
+    // recording holds the page it started on (a slow runner lost that frame
+    // and kept an empty recording). A page that sends none does not hold the
+    // call beyond the bound.
+    await Promise.race([
+      firstFrame,
+      new Promise((resolve) => setTimeout(resolve, FIRST_FRAME_WAIT_MS).unref?.()),
+    ]);
     const timer = setTimeout(() => {
       frames.stop(frames.deadlineMs, "duration-limit");
       endCollection(frames.deadlineMs);
