@@ -1,3 +1,4 @@
+import { openAdmittedSqlite, openSqlite } from "../persistence/sqlitePort";
 import { ChildWorktreeSourceService } from "../code/childWorktreeSourceService";
 import { GitObservationPort } from "../code/gitObservationPort";
 import { WorktreePreparationService } from "../code/worktreePreparationService";
@@ -1932,6 +1933,21 @@ export function wireProviders(deps: ProvidersDependencies) {
     });
     const chatDataDirectory = join(providerDataDirectory, "chat");
     const chatAttachmentStore = new ChatAttachmentStore(chatDataDirectory);
+    const openUsageCache: typeof openSqlite = (path) => {
+      if (options.usageCacheFile === undefined) {
+        if (process.platform === "win32")
+          throw new Error("Native Windows usage storage is unavailable.");
+        return openSqlite(path);
+      }
+      const admission = options.usageCacheFile();
+      if (admission.status !== "ready")
+        throw new Error("Native Windows usage storage is unavailable.");
+      if (admission.databasePath !== path) {
+        admission.close();
+        throw new Error("Native Windows usage storage was refused.");
+      }
+      return openAdmittedSqlite(admission);
+    };
     const configuredDriverOptions: ConfiguredProviderDriverOptions = {
       compactionShare: (keeper) => {
         const settings = persistence.readShellSettings()?.settings ?? defaultShellSettings();
@@ -1977,6 +1993,7 @@ export function wireProviders(deps: ProvidersDependencies) {
             : {}),
           checkpointStore: createLocalUsageHistoryCheckpointStore(
             join(persistence.dataDirectory, "local-usage-cache.sqlite3"),
+            openUsageCache,
           ),
         });
       },
@@ -2017,6 +2034,7 @@ export function wireProviders(deps: ProvidersDependencies) {
       // while it reads again.
       lastReadStore: createLocalUsageHistoryLastReadStore(
         join(persistence.dataDirectory, "local-usage-cache.sqlite3"),
+        openUsageCache,
       ),
       sources: () => {
         const seen = new Set<string>();

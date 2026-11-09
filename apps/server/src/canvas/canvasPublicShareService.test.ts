@@ -8,6 +8,7 @@ import { decodeCanvasExportPrepareRequest } from "@octant/contracts/canvas-expor
 import {
   decodeCanvasPublicShareDocument,
   decodeCanvasPublicShareServiceUrl,
+  decodeCanvasPublicShareCreated,
   type CanvasPublicShareDocument,
   type CanvasPublicShareId,
 } from "@octant/contracts/canvas-public-share";
@@ -86,23 +87,26 @@ const sourcedCanvas = canvas([
 /** A stand-in for the share service that records each call and answers as told. */
 function fakeService() {
   const calls: Array<{ readonly kind: string; readonly input: Record<string, unknown> }> = [];
-  let revokeAnswer: CanvasPublicShareCallOutcome<{ readonly shareId: CanvasPublicShareId }> = {
-    kind: "ok",
-    value: { shareId },
-  };
+  let revokeAnswer:
+    | CanvasPublicShareCallOutcome<{ readonly shareId: CanvasPublicShareId }>
+    | undefined;
+  let createdId = shareId;
+  let createdSecret = ownerSecret;
   const port: CanvasPublicShareServicePort = {
     create: async (input) => {
       calls.push({ kind: "create", input: { ...input } });
+      createdId = input.shareId;
+      createdSecret = input.ownerSecret;
       return {
         kind: "ok",
-        value: {
+        value: decodeCanvasPublicShareCreated({
           schemaVersion: 1,
           kind: "canvas-public-share-created",
-          shareId,
-          url: decodeCanvasPublicShareServiceUrl(`https://canvas.octant.sh/s/${shareId}`),
-          ownerSecret: ownerSecret as never,
-          expiresAt: decodeUtcTimestamp("2026-11-19T10:00:00.000Z"),
-        },
+          shareId: input.shareId,
+          url: `https://canvas.octant.sh/s/${input.shareId}`,
+          ownerSecret: input.ownerSecret,
+          expiresAt: "2026-11-19T10:00:00.000Z",
+        }),
       };
     },
     update: async (input) => {
@@ -112,8 +116,8 @@ function fakeService() {
         value: {
           schemaVersion: 1,
           kind: "canvas-public-share-updated",
-          shareId,
-          url: decodeCanvasPublicShareServiceUrl(`https://canvas.octant.sh/s/${shareId}`),
+          shareId: input.shareId,
+          url: decodeCanvasPublicShareServiceUrl(`https://canvas.octant.sh/s/${input.shareId}`),
           expiresAt: null,
           updatedAt: decodeUtcTimestamp(now),
           passwordProtected: false,
@@ -122,12 +126,18 @@ function fakeService() {
     },
     revoke: async (input) => {
       calls.push({ kind: "revoke", input: { ...input } });
-      return revokeAnswer;
+      return revokeAnswer ?? { kind: "ok", value: { shareId: input.shareId } };
     },
   };
   return {
     port,
     calls,
+    get shareId() {
+      return createdId;
+    },
+    get ownerSecret() {
+      return createdSecret;
+    },
     answerRevokeWith: (answer: typeof revokeAnswer) => {
       revokeAnswer = answer;
     },
@@ -370,9 +380,9 @@ describe("public links", () => {
     const h = harness();
     h.turnOn();
     await publish(h, { expiry: { kind: "never" }, password: "correct horse" });
-    expect([...h.secrets.held.values()]).toEqual([ownerSecret]);
+    expect([...h.secrets.held.values()]).toEqual([h.service.ownerSecret]);
     const journal = h.journalText();
-    expect(journal).not.toContain(ownerSecret);
+    expect(journal).not.toContain(h.service.ownerSecret);
     expect(journal).not.toContain("correct horse");
     expect(h.service.calls[0]?.input).toMatchObject({
       expiry: { kind: "never" },
@@ -389,10 +399,12 @@ describe("public links", () => {
     h.turnOn();
     await publish(h);
     const { card, decided } = await publish(h);
-    expect(card.destinationLinkTerms?.updatesLink).toBe(`https://canvas.octant.sh/s/${shareId}`);
+    expect(card.destinationLinkTerms?.updatesLink).toBe(
+      `https://canvas.octant.sh/s/${h.service.shareId}`,
+    );
     expect(decided.kind).toBe("exported");
     expect(h.service.calls.map((call) => call.kind)).toEqual(["create", "update"]);
-    expect(h.service.calls[1]?.input.ownerSecret).toBe(ownerSecret);
+    expect(h.service.calls[1]?.input.ownerSecret).toBe(h.service.ownerSecret);
     expect(h.links.list(canvasId).shares).toHaveLength(1);
   });
 
@@ -400,11 +412,11 @@ describe("public links", () => {
     const h = harness();
     h.turnOn();
     await publish(h);
-    const revoked = await h.links.revoke(canvasId, shareId);
+    const revoked = await h.links.revoke(canvasId, h.service.shareId);
     expect(revoked.kind).toBe("revoked");
     expect(h.service.calls.at(-1)).toMatchObject({
       kind: "revoke",
-      input: { shareId, ownerSecret },
+      input: { shareId: h.service.shareId, ownerSecret: h.service.ownerSecret },
     });
     expect(h.secrets.held.size).toBe(0);
     expect(h.links.list(canvasId).shares[0]?.status).toBe("revoked");
@@ -418,7 +430,7 @@ describe("public links", () => {
     first.turnOn();
     await publish(first);
     service.answerRevokeWith({ kind: "unreachable" });
-    const revoking = await first.links.revoke(canvasId, shareId);
+    const revoking = await first.links.revoke(canvasId, service.shareId);
     expect(revoking.kind).toBe("revoking");
     expect(first.links.list(canvasId).shares[0]?.status).toBe("revoking");
 
@@ -443,9 +455,26 @@ describe("public links", () => {
     expect(service.calls.filter((call) => call.kind === "revoke")).not.toHaveLength(0);
     expect(secrets.held.size).toBe(1);
 
-    service.answerRevokeWith({ kind: "ok", value: { shareId } });
+    service.answerRevokeWith({ kind: "ok", value: { shareId: service.shareId } });
     const restarted = harness({ connection, service, secrets });
     await restarted.links.retryPendingRevocations();
+    expect(secrets.held.size).toBe(0);
+  });
+
+  it("refuses to send a document when its owner secret cannot be stored, even when withdrawal is unavailable", async () => {
+    const secrets = {
+      ...memorySecrets(),
+      set: async () => {
+        throw Error("vault unavailable");
+      },
+    };
+    const h = harness({ secrets });
+    h.turnOn();
+    h.service.answerRevokeWith({ kind: "unreachable" });
+    const outcome = await h.links.publish(await approvedInput(h));
+    expect(outcome).toMatchObject({ kind: "refused", code: "unavailable" });
+    expect(h.service.calls).toEqual([]);
+    expect(outcome).not.toMatchObject({ message: expect.stringContaining("was withdrawn") });
     expect(secrets.held.size).toBe(0);
   });
 
@@ -456,7 +485,10 @@ describe("public links", () => {
     const outcome = await h.links.publish(await approvedInput(h));
     expect(outcome).toMatchObject({ kind: "refused", code: "unavailable" });
     expect(h.service.calls.map((call) => call.kind)).toEqual(["create", "revoke"]);
-    expect(h.service.calls[1]?.input).toMatchObject({ shareId, ownerSecret });
+    expect(h.service.calls[1]?.input).toMatchObject({
+      shareId: h.service.shareId,
+      ownerSecret: h.service.ownerSecret,
+    });
     expect(h.secrets.held.size).toBe(0);
   });
 
@@ -469,9 +501,149 @@ describe("public links", () => {
     expect(outcome).toMatchObject({ kind: "refused", code: "unavailable" });
     expect(h.secrets.held.size).toBe(1);
 
-    h.service.answerRevokeWith({ kind: "ok", value: { shareId } });
+    h.service.answerRevokeWith({ kind: "ok", value: { shareId: h.service.shareId } });
     await h.links.retryPendingRevocations();
     expect(h.service.calls.filter((call) => call.kind === "revoke")).toHaveLength(2);
+    expect(h.secrets.held.size).toBe(0);
+  });
+
+  it("commits ownership before upload and keeps listing retries out of an active create", async () => {
+    const connection = openConnection();
+    const base = fakeService();
+    const secrets = memorySecrets();
+    let entered = () => {};
+    const started = new Promise<void>((resolve) => {
+      entered = resolve;
+    });
+    let release = () => {};
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const service = {
+      ...base,
+      port: {
+        ...base.port,
+        create: async (input: Parameters<CanvasPublicShareServicePort["create"]>[0]) => {
+          expect([...secrets.held.values()].includes(input.ownerSecret)).toBe(true);
+          expect(h.journalText()).toContain("canvas.public-share-publication-pending@1");
+          const response = await base.port.create(input);
+          entered();
+          await gate;
+          return response;
+        },
+      },
+    };
+    const h = harness({ connection, service, secrets });
+    h.turnOn();
+    const publishing = h.links.publish(await approvedInput(h));
+    await started;
+    h.links.list(canvasId);
+    await h.links.retryPendingRevocations();
+    expect(base.calls.map((call) => call.kind)).toEqual(["create"]);
+    release();
+    expect((await publishing).kind).toBe("published");
+    const restarted = harness({ connection, service: base, secrets });
+    await restarted.links.retryPendingRevocations();
+    expect(base.calls.map((call) => call.kind)).toEqual(["create"]);
+    expect(restarted.links.list(canvasId).shares[0]?.status).toBe("active");
+  });
+
+  it.each(["unreachable", "unauthorized", "not-found"] as const)(
+    "keeps an uncertain create owned after %s and recovers after restart",
+    async (failure) => {
+      const connection = openConnection();
+      const base = fakeService();
+      const secrets = memorySecrets();
+      const service = {
+        ...base,
+        port: {
+          ...base.port,
+          create: async (input: Parameters<CanvasPublicShareServicePort["create"]>[0]) => {
+            await base.port.create(input);
+            return { kind: "unreachable" as const };
+          },
+        },
+      };
+      base.answerRevokeWith(
+        failure === "unreachable"
+          ? { kind: "unreachable" }
+          : { kind: "refused", code: failure, message: "Cancellation is not confirmed." },
+      );
+      const first = harness({ connection, service, secrets });
+      first.turnOn();
+      const outcome = await first.links.publish(await approvedInput(first));
+      expect(outcome).toMatchObject({
+        kind: "refused",
+        message: expect.stringContaining("keeps trying"),
+      });
+      expect(secrets.held.size).toBe(1);
+      expect(first.journalText().includes(base.ownerSecret)).toBe(false);
+      base.answerRevokeWith({ kind: "ok", value: { shareId: base.shareId } });
+      const restarted = harness({ connection, service: base, secrets });
+      await restarted.links.retryPendingRevocations();
+      expect(base.calls.at(-1)?.input.shareId).toBe(base.shareId);
+      expect(secrets.held.size).toBe(0);
+      expect(restarted.links.list(canvasId).shares).toEqual([]);
+    },
+  );
+
+  it("retains ownership when the journal cannot confirm a withdrawal", async () => {
+    const h = harness();
+    h.turnOn();
+    h.refusedEvents.add("canvas.public-share-published@1");
+    h.refusedEvents.add("canvas.public-share-revocation-settled@1");
+    await h.links.publish(await approvedInput(h));
+    expect(h.secrets.held.size).toBe(1);
+    await expect(h.links.retryPendingRevocations()).resolves.toBeUndefined();
+    expect(h.secrets.held.size).toBe(1);
+    h.refusedEvents.clear();
+    const restarted = harness({ connection: h.connection, service: h.service, secrets: h.secrets });
+    await restarted.links.retryPendingRevocations();
+    expect(h.secrets.held.size).toBe(0);
+  });
+
+  it("rechecks the settings after vault persistence before sending a document", async () => {
+    let entered = () => {};
+    const started = new Promise<void>((resolve) => {
+      entered = resolve;
+    });
+    let release = () => {};
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const held = memorySecrets();
+    const secrets = {
+      ...held,
+      set: async (ref: string, secret: string) => {
+        await held.set(ref, secret);
+        entered();
+        await gate;
+      },
+    };
+    const h = harness({ secrets });
+    h.turnOn();
+    const publishing = h.links.publish(await approvedInput(h));
+    await started;
+    h.links.changeSettings({
+      schemaVersion: 1,
+      kind: "set-canvas-public-link-settings",
+      enabled: false,
+      serviceUrl,
+      expectedVersion: h.links.settings().version,
+    });
+    release();
+    expect((await publishing).kind).toBe("refused");
+    expect(h.service.calls).toEqual([]);
+    expect(secrets.held.size).toBe(0);
+  });
+
+  it("sends nothing when ownership intent cannot be committed", async () => {
+    const h = harness();
+    h.turnOn();
+    h.refusedEvents.add("canvas.public-share-publication-pending@1");
+    const result = await h.links.publish(await approvedInput(h));
+    expect(result).toMatchObject({ kind: "refused", code: "unavailable" });
+    expect(h.service.calls).toEqual([]);
     expect(h.secrets.held.size).toBe(0);
   });
 

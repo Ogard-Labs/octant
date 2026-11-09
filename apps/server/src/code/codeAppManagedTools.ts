@@ -1,5 +1,4 @@
-import { browserProfileFromChoice } from "@octant/domain";
-import { browserAgentAvailability } from "@octant/domain";
+import { browserAgentAvailability, browserProfileFromChoice } from "@octant/domain";
 import { browserProfileKey, storedBrowserProfile } from "@octant/domain";
 import type { StoredBrowserProfile, BrowserDownloadSource } from "@octant/contracts";
 import type {

@@ -7,8 +7,7 @@ import type {
 import type { BrowserDownloadDestinationReceipt } from "@octant/contracts/browser-download";
 import type { BrowserUploadPermissions } from "./browserUploadPermissions";
 import type { BrowserProfileChoice } from "@octant/contracts/project-browser";
-import { browserProfileFromChoice } from "@octant/domain";
-import { browserAgentAvailability } from "@octant/domain";
+import { browserAgentAvailability, browserProfileFromChoice } from "@octant/domain";
 import { browserSignInOriginRefusal } from "./browserRecoveryMessages";
 import { browserToolImage } from "./browserToolImage";
 import { admitBrowserUpload } from "./browserUploadFiles";

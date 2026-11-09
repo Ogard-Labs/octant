@@ -74,7 +74,8 @@ function validateReceipt(value: unknown): asserts value is HostRuntimeOwnerRecei
   if (typeof receipt.instanceId !== "string" || !UUID.test(receipt.instanceId)) invalid();
   if (
     typeof receipt.endpoint !== "string" ||
-    !isAbsolute(receipt.endpoint) ||
+    (!isAbsolute(receipt.endpoint) &&
+      !/^\\\\\.\\pipe\\Octant-host-[0-9a-f]{64}$/.test(receipt.endpoint)) ||
     Buffer.byteLength(receipt.endpoint) > 255
   ) {
     invalid();
