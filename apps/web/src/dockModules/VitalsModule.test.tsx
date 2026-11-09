@@ -39,6 +39,7 @@ it("reads a thread's server over its Project's route and tells a refused window 
   render(
     <ServerCodeProjectsContext.Provider
       value={{
+        catalog: "ready",
         projects: [{ projectId: "p1" as never, name: "Box", location: "box:/srv" }],
         workProjects: [],
         refresh: () => undefined,
@@ -56,4 +57,48 @@ it("reads a thread's server over its Project's route and tells a refused window 
   expect(String(fetchMock.mock.calls[0]?.[0])).toBe(
     "http://127.0.0.1:4000/api/server-projects/resources?projectId=p1",
   );
+});
+
+it("says a server that is not Linux does not report load and stops asking", async () => {
+  const fetchMock = vi.fn(async (_input: RequestInfo | URL) => new Response("{}", { status: 501 }));
+  vi.stubGlobal("fetch", fetchMock);
+  render(
+    <ServerCodeProjectsContext.Provider
+      value={{
+        catalog: "ready",
+        projects: [{ projectId: "p1" as never, name: "Box", location: "box:/srv" }],
+        workProjects: [],
+        refresh: () => undefined,
+      }}
+    >
+      <VitalsModule
+        serverUrl="http://127.0.0.1:4000"
+        subject={{ mode: "code", threadId: "t", projectId: "p1" as never }}
+      />
+    </ServerCodeProjectsContext.Provider>,
+  );
+  await waitFor(() =>
+    expect(
+      screen.getByText("This server does not report load. Vitals works on Linux servers."),
+    ).toBeVisible(),
+  );
+});
+
+it("reads no host while the server Project catalog has not answered, instead of showing this computer's load", async () => {
+  const fetchMock = vi.fn(async (_input: RequestInfo | URL) => Response.json(snapshot()));
+  vi.stubGlobal("fetch", fetchMock);
+  render(
+    <ServerCodeProjectsContext.Provider
+      value={{ catalog: "failed", projects: [], workProjects: [], refresh: () => undefined }}
+    >
+      <VitalsModule
+        serverUrl="http://127.0.0.1:4000"
+        subject={{ mode: "code", threadId: "t", projectId: "p1" as never }}
+      />
+    </ServerCodeProjectsContext.Provider>,
+  );
+  expect(
+    await screen.findByText("Server Projects could not be read, so this thread's host is unknown."),
+  ).toBeVisible();
+  expect(fetchMock).not.toHaveBeenCalled();
 });

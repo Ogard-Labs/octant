@@ -19,6 +19,8 @@ export interface HostResourceClientOptions {
 export type HostResourceRead =
   | { readonly status: "ready"; readonly snapshot: HostResourceSnapshot }
   | { readonly status: "refused" }
+  /** The host answered that it cannot report load (a server that is not Linux): permanent, not a retry. */
+  | { readonly status: "unsupported" }
   | { readonly status: "unavailable" };
 
 export interface HostResourceClient {
@@ -48,6 +50,7 @@ export function createHostResourceClient(options: HostResourceClientOptions): Ho
         return { status: "unavailable" };
       }
       if (response.status === 401 || response.status === 403) return { status: "refused" };
+      if (response.status === 501) return { status: "unsupported" };
       if (!response.ok) return { status: "unavailable" };
       try {
         return {

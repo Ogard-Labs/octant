@@ -702,7 +702,10 @@ of showing old ones as current. A window without authority to read the host is
 told so. For a thread in a server Project the tool shows the
 load on that server, read over the Project's SSH connection by
 `GET /api/server-projects/resources` (a local window only; Linux servers only,
-and it says so for any other). Side
+and it says so for any other, and stops asking). The tool reads no
+host until the server Project catalog has answered, so it never shows this
+computer's load under a server thread's name, and a new target starts a new
+history. Side
 Chat is a Chat conversation about the pane's thread: it reads that thread's
 conversation, current state, files, and subagent results, and changes none of
 them ([authority](../architecture.md#security-and-authority)). Its notice says

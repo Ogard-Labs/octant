@@ -4,7 +4,7 @@ import type { HostResourceSnapshot } from "@octant/contracts/host-resources";
 import type { ThreadUtilityDockContentProps } from "../shell/dockModuleContext";
 import { appendVitalsSample, formatBytes, formatRate, sparklinePoints } from "../shell/vitalsModel";
 import { useServerCodeProjects } from "../projects/serverProjectEntries";
-import { unavailable } from "./moduleState";
+import { loading, unavailable } from "./moduleState";
 
 type Props = Pick<ThreadUtilityDockContentProps, "serverUrl" | "subject" | "windowCapability">;
 
@@ -18,6 +18,7 @@ type VitalsState =
   | { readonly status: "waiting"; readonly history: ReadonlyArray<HostResourceSnapshot> }
   | { readonly status: "live"; readonly history: ReadonlyArray<HostResourceSnapshot> }
   | { readonly status: "refused" }
+  | { readonly status: "unsupported" }
   | { readonly status: "unavailable"; readonly history: ReadonlyArray<HostResourceSnapshot> };
 
 export default function VitalsModule(props: Props) {
@@ -30,10 +31,19 @@ export default function VitalsModule(props: Props) {
       props.subject.projectId !== undefined &&
       String(project.projectId) === String(props.subject.projectId),
   )?.projectId;
+  // While the catalog is not an answer, a thread's Project may be on a server
+  // that is not yet known to be one; reading this host then would show the
+  // wrong machine, so nothing is read until the catalog says.
+  const catalogUnknown =
+    serverProjectId === undefined &&
+    props.subject.projectId !== undefined &&
+    (serverProjects.catalog ?? "ready") !== "ready";
   const [state, setState] = useState<VitalsState>({ status: "waiting", history: [] });
 
   useEffect(() => {
-    if (serverUrl === undefined) return undefined;
+    if (serverUrl === undefined || catalogUnknown) return undefined;
+    // A new target starts a new history: samples of one machine never join another's.
+    setState({ status: "waiting", history: [] });
     const client =
       serverProjectId === undefined
         ? createHostResourceClient({
@@ -61,24 +71,35 @@ export default function VitalsModule(props: Props) {
       clearTimeout(timer);
       inflight = undefined;
       if (stopped) return;
+      // A platform the host cannot read will not change by asking again.
+      if (result.status === "unsupported") clearInterval(interval);
       setState((current) => {
         const history = "history" in current ? current.history : [];
         if (result.status === "refused") return { status: "refused" };
+        if (result.status === "unsupported") return { status: "unsupported" };
         // A failed read drops the figures rather than showing old ones as current.
         if (result.status === "unavailable") return { status: "unavailable", history: [] };
         return { status: "live", history: appendVitalsSample(history, result.snapshot) };
       });
     };
-    void read();
     const interval = setInterval(() => void read(), POLL_MS);
+    void read();
     return () => {
       stopped = true;
       clearInterval(interval);
       inflight?.abort();
     };
-  }, [serverProjectId, serverUrl, windowCapability]);
+  }, [catalogUnknown, serverProjectId, serverUrl, windowCapability]);
 
   if (serverUrl === undefined) return unavailable("Vitals", "No host is connected.");
+  if (catalogUnknown) {
+    return serverProjects.catalog === "failed"
+      ? unavailable("Vitals", "Server Projects could not be read, so this thread's host is unknown.")
+      : loading("Vitals");
+  }
+  if (state.status === "unsupported") {
+    return unavailable("Vitals", "This server does not report load. Vitals works on Linux servers.");
+  }
   if (state.status === "refused") {
     return unavailable("Vitals", "This window may not read this host's load.");
   }
