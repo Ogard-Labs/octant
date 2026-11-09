@@ -1256,7 +1256,10 @@ the usual case is one press and one unlock.
   after only the host's own `!`) and a **Moving threads** line in its menu,
   so hiding the dialog leaves the progress in sight. **Prepare to Shut Down…**
   sits in the menu bar while the window last saw this host in a hub with
-  another member, or a batch runs, and brings the dialog back.
+  another member, or a batch runs, and brings the dialog back in the window
+  that runs the batch. Only that window's dialog changes the menu bar's
+  progress, so another window's dialog with nothing running cannot clear it;
+  closing that window lets the batch's progress go.
 - **Finishing.** The screen says **Safe to shut down** only when every chosen
   thread is committed, or handed over and pushed. A thread whose move cannot
   finish shows [This thread can't move](#a-thread-that-cannot-move) with its

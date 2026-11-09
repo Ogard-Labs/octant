@@ -2128,7 +2128,8 @@ this is how it looks.
     Escape or closing hides the dialog without stopping anything; the menu bar
     shows the batch's progress as the ended and total counts beside its glyph
     ("3/9") and a disabled "Moving threads · 3 of 9" line above **Prepare to
-    Shut Down…**, which brings the dialog back. The menu bar lists Prepare to
+    Shut Down…**, which brings the dialog back in the window that runs the
+    batch. The menu bar lists Prepare to
     Shut Down… while the window last saw this host in a hub with another
     member, or while a batch runs. Each moving thread also shows the single-move frozen bar
     in its own pane. Assistive technology hears the start, each thread that
