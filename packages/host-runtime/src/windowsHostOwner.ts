@@ -178,7 +178,7 @@ async function requestControl(
 
 function previousOwner(
   value: Readonly<Record<string, unknown>>,
-  expected: AcquireWindowsHostOwnerOptions,
+  expected: Pick<AcquireWindowsHostOwnerOptions, "hostId" | "wireVersion">,
   expectedEndpoint: string,
 ): { readonly receipt: HostRuntimeOwnerReceipt; readonly secret: string } | undefined {
   const raw = bytes(value.receipt, 4096);
@@ -214,6 +214,65 @@ function previousOwner(
  * Independent Windows owner prerequisite; ordinary platform startup still
  * refuses Windows. No path, PID, token or endpoint is accepted from a client.
  */
+/** Discover a live owner without preparing or claiming an endpoint. */
+export async function attachWindowsHostRuntimeOwner(
+  options: Pick<AcquireWindowsHostOwnerOptions, "native" | "scope" | "hostId" | "wireVersion">,
+): Promise<
+  | { readonly status: "attached"; readonly attachment: HostRuntimeAttachment }
+  | { readonly status: "missing" | "refused" }
+> {
+  const { native } = options;
+  if (
+    !isMainThread ||
+    !UUID.test(options.scope) ||
+    native.apiVersion !== 1 ||
+    native.frameBytes !== MAX_CONTROL_MESSAGE_BYTES
+  )
+    return { status: "refused" };
+  try {
+    const found = native.lookup(options.scope);
+    if (!record(found)) return { status: "refused" };
+    if (found.status === "missing" || found.status === "dead") return { status: "missing" };
+    if (
+      found.status !== "existing" ||
+      typeof found.endpoint !== "string" ||
+      !ENDPOINT.test(found.endpoint)
+    )
+      return { status: "refused" };
+    const existing = previousOwner(found, options, found.endpoint);
+    if (existing === undefined) return { status: "refused" };
+    const status = await requestControl(native, options.scope, existing.secret, {
+      type: "status",
+      principal: "local",
+    });
+    if (
+      status?.ok !== true ||
+      !record(status.owner) ||
+      status.owner.instanceId !== existing.receipt.instanceId ||
+      status.owner.pid !== existing.receipt.pid ||
+      status.owner.processStart !== existing.receipt.processStart
+    )
+      return { status: "refused" };
+    return {
+      status: "attached",
+      attachment: {
+        kind: "attached",
+        owner: existing.receipt,
+        request: (request) => requestControl(native, options.scope, existing.secret, request),
+        requestStop: async () =>
+          (
+            await requestControl(native, options.scope, existing.secret, {
+              type: "stop",
+              principal: "local",
+            })
+          )?.ok === true,
+      },
+    };
+  } catch {
+    return { status: "refused" };
+  }
+}
+
 export async function acquireWindowsHostRuntimeOwner(
   options: AcquireWindowsHostOwnerOptions,
 ): Promise<HostRuntimeOwnerResult> {
@@ -226,10 +285,10 @@ export async function acquireWindowsHostRuntimeOwner(
   )
     refused();
   let active = false;
+  let pendingStop: number | undefined;
   let preparedForCall = false;
   let ownedLease: HostRuntimeOwner | undefined;
   let timer: ReturnType<typeof setTimeout> | undefined;
-  const awaitingDelivery = new Map<number, () => void>();
   const nonce = randomBytes(32);
   const secret = nonce.toString("base64url");
   try {
@@ -307,10 +366,10 @@ export async function acquireWindowsHostRuntimeOwner(
       release: async () => {
         if (!active) return;
         active = false;
+        pendingStop = undefined;
         clearTimeout(timer);
         native.close();
         anchored.delete(owner);
-        for (const delivered of awaitingDelivery.values()) delivered();
         // The native PID/birth tombstone stays until the writer exits. A
         // missing endpoint is never permission to replace a live process.
       },
@@ -319,11 +378,26 @@ export async function acquireWindowsHostRuntimeOwner(
       if (!active) return;
       try {
         const event = native.poll();
-        if (!record(event) || (event.status !== "idle" && event.status !== "request")) {
+        if (
+          !record(event) ||
+          (event.status !== "idle" &&
+            event.status !== "request" &&
+            event.status !== "connection-closed")
+        ) {
           void owner.release();
           return;
         }
-        if (typeof event.delivered === "number") awaitingDelivery.get(event.delivered)?.();
+        if (
+          pendingStop !== undefined &&
+          event.status === "connection-closed" &&
+          event.id === pendingStop
+        ) {
+          pendingStop = undefined;
+          if (event.responseWritten === true)
+            void Promise.resolve()
+              .then(() => options.onStopRequested?.())
+              .catch(() => owner.release());
+        }
         if (
           event.status === "request" &&
           typeof event.id === "number" &&
@@ -344,26 +418,6 @@ export async function acquireWindowsHostRuntimeOwner(
               encoded.fill(0);
             }
           };
-          // native.reply only queues the acknowledgement for a later poll, and
-          // a stop callback that releases the lease closes the pipe. Stop runs
-          // once this client has read its reply, or after the control bound.
-          const onStopRequested = options.onStopRequested;
-          const stopAfterDelivery =
-            onStopRequested === undefined
-              ? undefined
-              : async () => {
-                  await new Promise<void>((resolve) => {
-                    const delivered = () => {
-                      clearTimeout(bound);
-                      awaitingDelivery.delete(id);
-                      resolve();
-                    };
-                    const bound = setTimeout(delivered, CONTROL_BOUND_MS);
-                    if (active) awaitingDelivery.set(id, delivered);
-                    else delivered();
-                  });
-                  await onStopRequested();
-                };
           // Host command callbacks retain the same host-owned lifecycle as
           // Unix control. Only replies to this exact live connection dispatch.
           const line = frame.toString("utf8");
@@ -373,7 +427,11 @@ export async function acquireWindowsHostRuntimeOwner(
             line,
             receipt,
             secret,
-            stopAfterDelivery,
+            options.onStopRequested === undefined
+              ? undefined
+              : () => {
+                  pendingStop = id;
+                },
             options.onControlRequest,
           ).catch(() => reply({ ok: false, error: "handler-failed" }));
         }

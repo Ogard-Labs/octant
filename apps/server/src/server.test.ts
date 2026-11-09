@@ -3550,6 +3550,17 @@ describe("startOctantServer", () => {
     expect(output).not.toContain("sqlite");
   });
 
+  it("reports the Windows startup boundary without exposing its underlying dependency details", () => {
+    const output = fatalStartupOutput(
+      Object.assign(new Error("private dependency diagnostic"), { code: "OCTANT_WINDOWS_IMPORTS" }),
+    );
+    expect(JSON.parse(output)).toMatchObject({
+      category: "startup-failed",
+      message: expect.stringContaining("runtime dependency could not be loaded"),
+    });
+    expect(output).not.toContain("private dependency diagnostic");
+  });
+
   it("names a port that is already in use in an otherwise generic startup failure", () => {
     const output = fatalStartupOutput(
       Object.assign(new Error("listen EADDRINUSE: address already in use 127.0.0.1:13773"), {

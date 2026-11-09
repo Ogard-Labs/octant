@@ -1,3 +1,4 @@
+import type { WindowsSqliteStores } from "@octant/host-runtime";
 import { planMigrationBackup } from "@octant/domain";
 import { existsSync, rmSync } from "node:fs";
 import { MigrationDowngradeRefused, MigrationInterruptedRestored } from "./dataLifecycleErrors";
@@ -22,6 +23,7 @@ import { backupPathFor, createStoreBackup, restoreStoreBackup } from "./storeBac
 // downgrade is refused without touching the source store.
 
 export interface MigrateStoreWithBackupInput {
+  readonly windowsFiles?: WindowsSqliteStores;
   readonly databasePath: string;
   readonly dataDirectory: string;
   readonly migrations: ReadonlyArray<Migration>;
@@ -95,10 +97,11 @@ export function migrateStoreWithBackup(
       connection,
       dataDirectory: input.dataDirectory,
       backupPath,
+      ...(input.windowsFiles === undefined ? {} : { windowsFiles: input.windowsFiles }),
     });
   } catch (error) {
     connection.close();
-    removeQuietly(backupPath);
+    removeQuietly(backupPath, input.windowsFiles);
     throw error;
   }
 
@@ -110,7 +113,7 @@ export function migrateStoreWithBackup(
     if (refusesWithoutModifying(error)) {
       // applyMigrations validates existing history before applying anything, so
       // an incompatible store is refused with the source left untouched.
-      removeQuietly(backupPath);
+      removeQuietly(backupPath, input.windowsFiles);
       throw error;
     }
     // A migration failed mid-sequence: roll the store back to its verified
@@ -120,7 +123,7 @@ export function migrateStoreWithBackup(
     // rollback itself failed, the verified pre-migration backup is the only copy
     // of the good store, so it is kept on disk for a later recovery attempt; the
     // next start will detect it and recover before migrating again.
-    if (restored) removeQuietly(backupPath);
+    if (restored) removeQuietly(backupPath, input.windowsFiles);
     throw new MigrationInterruptedRestored({
       fromVersion: plan.fromVersion,
       attemptedVersion: plan.toVersion,
@@ -128,7 +131,7 @@ export function migrateStoreWithBackup(
     });
   }
 
-  removeQuietly(backupPath);
+  removeQuietly(backupPath, input.windowsFiles);
   return { connection, status, outcome: "upgraded", backupProtected: true };
 }
 
@@ -145,8 +148,9 @@ function recoverInterruptedMigration(input: MigrateStoreWithBackupInput, backupP
     dataDirectory: input.dataDirectory,
     databasePath: input.databasePath,
     backupPath,
+    ...(input.windowsFiles === undefined ? {} : { windowsFiles: input.windowsFiles }),
   });
-  removeQuietly(backupPath);
+  removeQuietly(backupPath, input.windowsFiles);
 }
 
 function tryRestore(input: MigrateStoreWithBackupInput, backupPath: string): boolean {
@@ -155,6 +159,7 @@ function tryRestore(input: MigrateStoreWithBackupInput, backupPath: string): boo
       dataDirectory: input.dataDirectory,
       databasePath: input.databasePath,
       backupPath,
+      ...(input.windowsFiles === undefined ? {} : { windowsFiles: input.windowsFiles }),
     });
     return true;
   } catch {
@@ -183,7 +188,12 @@ function readDatabaseVersion(connection: SqliteConnection): number {
   ).value;
 }
 
-function removeQuietly(path: string): void {
+function removeQuietly(path: string, files?: WindowsSqliteStores): void {
+  if (
+    (process.platform === "win32" && files === undefined) ||
+    files?.inspect(path).status === "refused"
+  )
+    return;
   try {
     rmSync(path, { force: true });
   } catch {

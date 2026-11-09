@@ -76,10 +76,18 @@ function harness(
     readonly sink?: Pick<Journal, "append">;
   } = {},
 ) {
-  const stored: Array<{ profile: StoredBrowserProfile; sizeBytes: number }> = [
+  const stored: Array<{ profile: StoredBrowserProfile; sizeBytes: number; label?: string }> = [
     { profile: { kind: "project", projectId }, sizeBytes: 2048 },
     { profile: { kind: "project", projectId: removedProjectId }, sizeBytes: 12 },
   ];
+  const createAccount = vi.fn(async (label: string) => {
+    const profile = {
+      kind: "account" as const,
+      profileId: "a0000000-0000-4000-8000-000000000008" as never,
+    };
+    stored.push({ profile, label, sizeBytes: 0 });
+    return { status: "created" as const, profile, label };
+  });
   const events: string[] = [];
   const clear = vi.fn(async () => {
     events.push("store-cleared");
@@ -89,6 +97,7 @@ function harness(
     available: async () => true,
     nativeAvailable: async () => options.native ?? true,
     profiles: {
+      createAccount,
       list: async () => stored,
       clear,
       syncExtensions: async () => undefined,
@@ -111,10 +120,36 @@ function harness(
     uuid: randomUUID,
     clock: () => now,
   });
-  return { service, clear, closePages, events, journal: live as Journal };
+  return { service, clear, closePages, events, createAccount, journal: live as Journal };
 }
 
 describe("Browser profiles service", () => {
+  it("creates host-local account metadata only for a local person and never journals the registry", async () => {
+    const append = vi.fn<Journal["append"]>();
+    const f = harness({ sink: { append } });
+    expect(
+      await f.service.execute("remote-device", { kind: "create-account", label: "Work account" }),
+    ).toMatchObject({ kind: "browser-profiles-refused", reason: "profile-not-local" });
+    expect(f.createAccount).not.toHaveBeenCalled();
+    expect(
+      await f.service.execute("local-window", { kind: "create-account", label: "Work account" }),
+    ).toMatchObject({
+      kind: "browser-account-profile-created",
+      label: "Work account",
+      profile: { kind: "account" },
+    });
+    expect(await f.service.execute("local-window", { kind: "list" })).toMatchObject({
+      profiles: expect.arrayContaining([
+        expect.objectContaining({
+          label: "Work account",
+          profile: expect.objectContaining({ kind: "account" }),
+        }),
+      ]),
+    });
+    expect(append).not.toHaveBeenCalled();
+    expect(f.closePages).not.toHaveBeenCalled();
+  });
+
   it("lists Personal even before anything is signed in, and each stored Project profile by its name", async () => {
     const { service } = harness();
 

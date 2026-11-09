@@ -33,6 +33,17 @@ describe("remote setup", () => {
     expect(open).toHaveBeenCalledTimes(3);
   });
 
+  it("focuses the real journey choices from the searchable checks setting", () => {
+    render(
+      <RemoteSetupGuide
+        canConfigureHost={true}
+        onContinue={() => {}}
+        focusedSetting="remote-setup-checks"
+      />,
+    );
+    expect(screen.getByRole("button", { name: "Control my Octant host" })).toHaveFocus();
+  });
+
   it("directs a client without host controls to the host instead of offering an inert continuation", async () => {
     const open = vi.fn();
     const user = userEvent.setup();

@@ -1,3 +1,6 @@
+import { browserProfileChoiceOf } from "@octant/domain";
+import { decodeBrowserProfileChoice } from "@octant/contracts/project-browser";
+import type { BrowserProfileSummary } from "@octant/contracts/browser-profiles";
 import type { StoredBrowserProfile } from "@octant/contracts/browser-profiles";
 import type { BrowserProfileChoice } from "@octant/contracts/project-browser";
 import { browserDownloadQuestion, browserProfileKey } from "@octant/domain";
@@ -15,20 +18,35 @@ interface BrowserUploadRequest {
 }
 
 /** The words a person sees for a profile choice. */
-export const BROWSER_PROFILE_LABELS: Readonly<Record<BrowserProfileChoice, string>> = {
-  private: "Private",
-  project: "Project",
-  personal: "Personal",
-};
+export const BROWSER_PROFILE_LABELS: Readonly<Record<"private" | "project" | "personal", string>> =
+  {
+    private: "Private",
+    project: "Project",
+    personal: "Personal",
+  };
 
-export const BROWSER_PROFILE_DESCRIPTIONS: Readonly<Record<BrowserProfileChoice, string>> = {
+export const BROWSER_PROFILE_DESCRIPTIONS: Readonly<
+  Record<"private" | "project" | "personal", string>
+> = {
   private: "Forgotten when the page closes. Nothing is signed in.",
   project: "Shared by every page of this Project. Sign in once.",
   personal: "Shared by every Project that chooses it. Kept on this Mac.",
 };
 
 export function profileChoiceOf(profile: StoredBrowserProfile | undefined): BrowserProfileChoice {
-  return profile === undefined ? "private" : profile.kind;
+  return browserProfileChoiceOf(profile);
+}
+
+export function browserProfileLabel(
+  choice: BrowserProfileChoice,
+  accounts: ReadonlyArray<BrowserProfileSummary> = [],
+): string {
+  if (choice === "private" || choice === "project" || choice === "personal")
+    return BROWSER_PROFILE_LABELS[choice];
+  return (
+    accounts.find((entry) => profileChoiceOf(entry.profile) === choice)?.label ??
+    `Account ${choice.slice("account:".length, "account:".length + 8)}`
+  );
 }
 
 /**
@@ -38,6 +56,7 @@ export function profileChoiceOf(profile: StoredBrowserProfile | undefined): Brow
 export function browserApprovalSummary(approval: {
   readonly origin: string;
   readonly profile?: StoredBrowserProfile | undefined;
+  readonly profileLabel?: string | undefined;
   readonly upload?: BrowserUploadRequest | undefined;
   readonly download?: BrowserDownloadRequest | undefined;
   readonly signIn?: { readonly reason?: string | undefined } | undefined;
@@ -57,7 +76,7 @@ export function browserApprovalSummary(approval: {
     return `Let the agent upload ${named} to ${approval.origin}?`;
   }
   if (approval.profile === undefined) return `Allow Browser to open ${approval.origin}?`;
-  return `Let the agent use ${approval.origin} in the ${BROWSER_PROFILE_LABELS[approval.profile.kind]} profile?`;
+  return `Let the agent use ${approval.origin} in the ${approval.profile.kind === "account" ? `${approval.profileLabel ?? "Account"} (${String(approval.profile.profileId).slice(0, 8)})` : BROWSER_PROFILE_LABELS[approval.profile.kind]} profile?`;
 }
 
 export function browserApprovalDetail(approval: {
@@ -112,7 +131,7 @@ const STORAGE_PREFIX = "octant.browser.profile.";
 export function readRememberedProfileChoice(projectKey: string): BrowserProfileChoice {
   try {
     const stored = globalThis.localStorage?.getItem(`${STORAGE_PREFIX}${projectKey}`);
-    return stored === "project" || stored === "personal" ? stored : "private";
+    return stored === null || stored === undefined ? "private" : decodeBrowserProfileChoice(stored);
   } catch {
     return "private";
   }
