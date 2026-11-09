@@ -12640,7 +12640,11 @@ approval-gated` command that undoes it. The terminal shows no one-time
   stops when its task, checkout or execution authority is revoked.
 
   `start-action` launches a fresh command process under the existing terminal
-  confinement and sanitized environment, not input into a running shell. The
+  confinement and sanitized environment, not input into a running shell. Code
+  server Projects instead resolve actions and checkout identity on their server
+  and use dedicated, explicitly reviewed SSH runs with no OS confinement;
+  see [Server Projects](design/server-projects.md#threads). Their remote completion
+  remains uncertain after connection loss or Stop. The
   request names a saved action and checkout identities, never executable text.
   Its terminal start is journaled before launch; a repeated request identity,
   including after host restart, never starts another process. The legacy

@@ -1,7 +1,19 @@
 import { ServerProjectPreviewTunnel } from "./ServerProjectPreviewTunnel";
 import type { ServerProjectsClient } from "@octant/client-runtime/server-projects-client";
+import type { ProjectTerminalClient } from "@octant/client-runtime/project-terminal-client";
+import { AggregateVersion, type ProjectId } from "@octant/contracts";
+import { Schema } from "effect";
+import { ProjectActionsSection } from "../projects/ProjectActionsSection";
+import {
+  ProjectActionRunDialog,
+  type ProjectActionTarget,
+} from "../projects/ProjectActionRunDialog";
 import type { ShieldServersClient } from "@octant/client-runtime/shield-servers-client";
-import type { ServerProjectsCommand, ServerProjectsView } from "@octant/contracts/server-projects";
+import type {
+  ServerProject,
+  ServerProjectsCommand,
+  ServerProjectsView,
+} from "@octant/contracts/server-projects";
 import type { ShieldServer } from "@octant/contracts/shield-servers";
 import { useCallback, useEffect, useId, useMemo, useRef, useState, type FormEvent } from "react";
 import { OctantAlert } from "../ui/base/OctantAlert";
@@ -20,6 +32,10 @@ export interface ServerProjectsSettingsProps {
   /** Bumped when the registry above changes, so the server choices are read again. */
   readonly registryRevision?: number;
   readonly focusedSetting?: string | undefined;
+  readonly terminalClient?: ProjectTerminalClient;
+  readonly actionStoragePrefix?: string;
+  readonly codeProjectId?: ProjectId | undefined;
+  readonly onOpenServerProject?: (project: ServerProject) => void;
 }
 
 export const SERVER_PROJECTS_INTRO =
@@ -39,10 +55,14 @@ export function ServerProjectsSettings(props: ServerProjectsSettingsProps) {
   const [loadFailed, setLoadFailed] = useState(false);
   const [busy, setBusy] = useState(false);
   const [problem, setProblem] = useState<string | undefined>(undefined);
+  const [actionProblem, setActionProblem] = useState<string | undefined>(undefined);
+  const [actionsChanged, setActionsChanged] = useState(false);
   const [name, setName] = useState("");
   const [serverId, setServerId] = useState("");
   const [folder, setFolder] = useState("");
   const [mode, setMode] = useState<"code" | "work">("code");
+  const [editingActions, setEditingActions] = useState<string>();
+  const [actionTarget, setActionTarget] = useState<ProjectActionTarget>();
 
   const registryRevision = props.registryRevision ?? 0;
   const load = useCallback(async () => {
@@ -50,10 +70,17 @@ export function ServerProjectsSettings(props: ServerProjectsSettingsProps) {
     try {
       const [projects, registry] = await Promise.all([client.read(), serversClient?.read()]);
       setView(projects);
+      setEditingActions((current) =>
+        projects.projects.some((project) => String(project.id) === current) ? current : undefined,
+      );
       setServers(registry?.servers ?? []);
       setLoadFailed(false);
+      setProblem(undefined);
+      setActionProblem(undefined);
+      setActionsChanged(false);
     } catch {
       setLoadFailed(true);
+      setProblem("Server Projects could not be read from this host.");
     }
   }, [client, serversClient]);
 
@@ -72,18 +99,27 @@ export function ServerProjectsSettings(props: ServerProjectsSettingsProps) {
 
   async function send(command: ServerProjectsCommand): Promise<boolean> {
     if (client === undefined) return false;
-    setProblem(undefined);
+    const actionSave = command.kind === "set-server-project-actions";
+    const reportProblem = actionSave ? setActionProblem : setProblem;
+    reportProblem(undefined);
+    if (actionSave) setActionsChanged(false);
     setBusy(true);
     try {
       const result = await client.command(command);
       if (result.kind === "server-projects-updated") {
         setView(result.view);
+        setEditingActions((current) =>
+          result.view.projects.some((project) => String(project.id) === current)
+            ? current
+            : undefined,
+        );
         return true;
       }
-      setProblem(result.message);
+      reportProblem(result.message);
+      if (actionSave) setActionsChanged(result.reason === "actions-changed");
       return false;
     } catch {
-      setProblem("The server Project could not be saved.");
+      reportProblem("The server Project could not be saved.");
       return false;
     } finally {
       setBusy(false);
@@ -136,6 +172,21 @@ export function ServerProjectsSettings(props: ServerProjectsSettingsProps) {
                   {aliasOf(String(project.serverId))}:{project.folder}
                 </span>
                 <span className="shield-servers__row-actions">
+                  {project.mode === "work" ? null : (
+                    <OctantButton
+                      aria-expanded={editingActions === String(project.id)}
+                      onClick={() =>
+                        setEditingActions((current) =>
+                          current === String(project.id) ? undefined : String(project.id),
+                        )
+                      }
+                      size="sm"
+                      type="button"
+                      variant="ghost"
+                    >
+                      Actions
+                    </OctantButton>
+                  )}
                   <OctantButton
                     aria-label={`Remove ${project.name}`}
                     disabled={busy}
@@ -149,12 +200,96 @@ export function ServerProjectsSettings(props: ServerProjectsSettingsProps) {
                     Remove
                   </OctantButton>
                 </span>
+                {project.mode === "work" || props.terminalClient === undefined ? null : (
+                  <span className="shield-servers__row-actions min-w-0 max-w-full flex-wrap">
+                    {String(props.codeProjectId) !== String(project.id) ? (
+                      <>
+                        <span>Open this Project to run actions and read suggestions.</span>
+                        {props.onOpenServerProject === undefined ? null : (
+                          <OctantButton
+                            size="sm"
+                            type="button"
+                            variant="ghost"
+                            onClick={() => props.onOpenServerProject?.(project)}
+                          >
+                            Open {project.name}
+                          </OctantButton>
+                        )}
+                      </>
+                    ) : (
+                      (project.actions ?? []).map((action) => (
+                        <OctantButton
+                          key={String(action.id)}
+                          size="sm"
+                          type="button"
+                          variant="ghost"
+                          onClick={() =>
+                            setActionTarget({ projectId: project.id, actionId: action.id })
+                          }
+                        >
+                          Run {action.name}
+                        </OctantButton>
+                      ))
+                    )}
+                  </span>
+                )}
+                {project.mode === "work" || editingActions !== String(project.id) ? null : (
+                  <div className="basis-full min-w-0">
+                    <ProjectActionsSection
+                      key={`${project.id}:${project.actionsVersion ?? 0}`}
+                      project={project}
+                      {...(props.terminalClient === undefined ||
+                      String(props.codeProjectId) !== String(project.id)
+                        ? {}
+                        : { client: props.terminalClient })}
+                      disabled={busy}
+                      onChange={(actions) =>
+                        send({
+                          kind: "set-server-project-actions",
+                          projectId: project.id,
+                          expectedVersion: Schema.decodeUnknownSync(AggregateVersion)(
+                            project.actionsVersion ?? 0,
+                          ),
+                          actions,
+                        })
+                      }
+                    />
+                    {actionProblem === undefined ? null : (
+                      <OctantAlert tone="danger">{actionProblem}</OctantAlert>
+                    )}
+                    {actionsChanged ? (
+                      <>
+                        <p className="project-provider-policy__hint">
+                          Reloading replaces this action draft with the current saved list.
+                        </p>
+                        <OctantButton
+                          size="sm"
+                          type="button"
+                          variant="ghost"
+                          onClick={() => void load()}
+                        >
+                          Reload current actions
+                        </OctantButton>
+                      </>
+                    ) : null}
+                  </div>
+                )}
                 <ServerProjectPreviewTunnel client={client} project={project} />
               </li>
             ))}
           </ul>
         )}
       </SettingsPanel>
+      {actionTarget === undefined || props.terminalClient === undefined ? null : (
+        <ProjectActionRunDialog
+          key={`${actionTarget.projectId}:${actionTarget.actionId}`}
+          client={props.terminalClient}
+          target={actionTarget}
+          open={true}
+          storageKey={`${props.actionStoragePrefix ?? "octant.server-action-run"}:${actionTarget.projectId}:${actionTarget.actionId}`}
+          onClose={() => setActionTarget(undefined)}
+        />
+      )}
       <SettingsPanel
         description="Octant checks the folder on the server before it binds it."
         title="Bind a folder on a server"
@@ -247,6 +382,10 @@ export function ServerProjectsSettings(props: ServerProjectsSettingsProps) {
  * which read the registry again whenever it changes above.
  */
 export function ServerAccessSettings(props: {
+  readonly terminalClient?: ProjectTerminalClient;
+  readonly actionStoragePrefix?: string;
+  readonly codeProjectId?: ProjectId | undefined;
+  readonly onOpenServerProject?: (project: ServerProject) => void;
   readonly servers: ShieldServersClient | undefined;
   readonly projects:
     | Pick<ServerProjectsClient, "read" | "command" | "previewRead" | "previewCommand">
@@ -279,6 +418,14 @@ export function ServerAccessSettings(props: {
         projectNames={props.projectNames}
       />
       <ServerProjectsSettings
+        codeProjectId={props.codeProjectId}
+        {...(props.onOpenServerProject === undefined
+          ? {}
+          : { onOpenServerProject: props.onOpenServerProject })}
+        {...(props.terminalClient === undefined ? {} : { terminalClient: props.terminalClient })}
+        {...(props.actionStoragePrefix === undefined
+          ? {}
+          : { actionStoragePrefix: props.actionStoragePrefix })}
         client={props.projects}
         focusedSetting={props.focusedSetting}
         registryRevision={registryRevision}

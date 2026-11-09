@@ -90,7 +90,8 @@ import { stableCodeFileId, type CodeWiring } from "./code";
 import { withProjectExtraFolders } from "../code/codeProjectFolderRoot";
 import type { CodeRuntimeWiring } from "./codeRuntime";
 import type { HarnessStateWiring } from "./harnessState";
-import { serverCodeCheckout } from "../serverProjects/serverProjectThreads";
+import { serverCodeCheckout, serverThreadOf } from "../serverProjects/serverProjectThreads";
+import { createServerProjectActions } from "../serverProjects/serverProjectActions";
 import { serverTerminalLogin } from "../serverProjects/serverTerminal";
 import {
   decodeServerProjectRemovedPayload,
@@ -181,10 +182,62 @@ export function wireCodeTooling(deps: CodeToolingDependencies) {
     // It shares the Code runtime's terminals, so one receipt store, reconcile,
     // and shutdown cover it; the journal records its start and end.
     const sharedTerminals = codeOperationRuntime?.terminals;
+    const serverActions = createServerProjectActions({
+      store: serverProjectStore,
+      connection: serverConnection,
+      task: async (windowId, projectId, requested) => {
+        const view = await routeCodeService.read(windowId, requested.threadId);
+        if (
+          view === undefined ||
+          view.thread.lifecycle !== "active" ||
+          String(view.thread.projectId) !== String(projectId) ||
+          String(view.checkout.id) !== String(requested.checkoutId) ||
+          view.checkout.kind !== "remote-root" ||
+          view.checkout.availability !== "available"
+        )
+          return undefined;
+        const place = serverThreadOf(serverProjectStore, view.thread);
+        if (place === undefined) return undefined;
+        const authorityOf = (thread: typeof view.thread) =>
+          JSON.stringify({
+            executionPolicy: thread.executionPolicy,
+            permissionPersistence: thread.permissionPersistence,
+            provider: thread.providerInstanceId,
+            model: thread.modelId,
+            toolConstraints: thread.toolConstraints,
+          });
+        const authorityRevision = authorityOf(view.thread);
+        return {
+          threadId: view.thread.id,
+          checkoutId: view.checkout.id,
+          root: place.folder,
+          executionPolicy: view.thread.executionPolicy,
+          authorityRevision,
+          current: () => {
+            const fresh = persistence.readCodeThread(view.thread.id);
+            const checkout = persistence.readCodeCheckout(view.checkout.id);
+            const placed =
+              fresh === undefined ? undefined : serverThreadOf(serverProjectStore, fresh);
+            return (
+              fresh !== undefined &&
+              fresh.lifecycle === "active" &&
+              checkout?.kind === "remote-root" &&
+              checkout.availability === "available" &&
+              placed?.folder === place.folder &&
+              String(fresh.checkoutId) === String(view.checkout.id) &&
+              canAccessCodeProject(windowId, projectId) &&
+              authorityOf(codeSessionAuthority.effectiveThread(windowId, fresh)) ===
+                authorityRevision
+            );
+          },
+        };
+      },
+    });
     const projectTerminals =
       sharedTerminals === undefined
         ? undefined
         : new ProjectTerminalService({
+            ...serverActions,
             terminals: sharedTerminals,
             worktreePreparation,
             childWorktreeSources,
@@ -420,6 +473,8 @@ export function wireCodeTooling(deps: CodeToolingDependencies) {
     const unsubscribeProjectTerminalAuthority = persistence.journal.subscribeCommitted((append) => {
       if (projectTerminals === undefined) return;
       for (const event of append.events) {
+        if (event.aggregateType === "server-projects" || event.aggregateType === "shield-servers")
+          void projectTerminals.settleActionAuthorities();
         if (event.aggregateType === "code-thread" || event.aggregateType === "code-checkout")
           void projectTerminals.settleActionAuthorities();
         if (

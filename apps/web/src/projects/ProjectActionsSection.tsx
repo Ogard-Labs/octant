@@ -16,7 +16,9 @@ import { OctantInput } from "../ui/base/OctantInput";
 type BoundProjectSummary = Extract<ProjectSummary, { readonly type: "work" | "code" }>;
 
 export interface ProjectActionsSectionProps {
-  readonly project: BoundProjectSummary;
+  readonly project: Pick<BoundProjectSummary, "id" | "actions"> & {
+    readonly type?: "work" | "code";
+  };
   /** Asks the host what the Project's files suggest; absent when this window has no route to it. */
   readonly client?: Pick<ProjectTerminalClient, "execute">;
   readonly onChange: (actions: ReadonlyArray<ProjectAction>) => Promise<boolean>;

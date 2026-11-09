@@ -3,7 +3,9 @@ import { Schema } from "effect";
 import { WorkThreadId } from "./workThreads";
 import { CodeTerminalId, CodeThreadId, CodeCheckoutId, WorktreeReceiptId } from "./code";
 import { CodeOperationId, MAX_CODE_OPERATION_TERMINAL_INPUT_BYTES } from "./codeOperations";
-import { UtcTimestamp, AggregateVersion } from "./events";
+import { UtcTimestamp, AggregateVersion, AggregateId } from "./events";
+import { ShieldServerAlias, ShieldServerUser, ShieldServerProfile } from "./shieldServers";
+import { ProviderExecutionPolicy } from "./providers";
 import {
   BindingRevisionId,
   ProjectAction,
@@ -78,6 +80,17 @@ const ActionRun = Schema.Struct({
   branch: Schema.optional(Schema.String.pipe(Schema.maxLength(256))),
   thread: Schema.optional(ActionThread),
   workThreadId: Schema.optional(WorkThreadId),
+  server: Schema.optional(
+    Schema.Struct({
+      serverId: AggregateId,
+      alias: ShieldServerAlias,
+      user: ShieldServerUser,
+      profile: ShieldServerProfile,
+      placementRevision: Schema.String.pipe(Schema.pattern(/^sha256:[a-f0-9]{64}$/)),
+      taskExecutionPolicy: Schema.optional(ProviderExecutionPolicy),
+      confinement: Schema.Literal("none"),
+    }).annotations(strict),
+  ),
 }).annotations(strict);
 
 export const WorktreePreparation = Schema.Struct({
@@ -150,6 +163,7 @@ export const ProjectTerminalCommand = Schema.Union(
     thread: Schema.optional(ActionThread),
     workThreadId: Schema.optional(WorkThreadId),
     projectVersion: Schema.optional(AggregateVersion),
+    placementRevision: Schema.optional(Schema.String.pipe(Schema.pattern(/^sha256:[a-f0-9]{64}$/))),
   }).annotations(strict),
 
   Schema.Struct({
@@ -211,6 +225,7 @@ export const ProjectTerminalView = Schema.Struct({
   state: Schema.Literal("running", "exited", "interrupted"),
   exitCode: Schema.optional(Schema.Int),
   posture: ProjectTerminalPosture,
+  uncertainty: Schema.optional(Schema.Literal("server-transport-lost", "server-stop-unconfirmed")),
 }).annotations(strict);
 export type ProjectTerminalView = typeof ProjectTerminalView.Type;
 
@@ -309,6 +324,9 @@ export const ProjectTerminalEndReason = Schema.Literal(
   "exited",
   "authority-revoked",
   "host-restarted",
+  "transport-lost",
+  "start-unconfirmed",
+  "server-stop-unconfirmed",
 );
 export type ProjectTerminalEndReason = typeof ProjectTerminalEndReason.Type;
 
