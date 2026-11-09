@@ -395,6 +395,69 @@ export class CanvasService {
       : { workspace, refreshSkills };
   }
 
+  /**
+   * Record a Canvas carried here with a thread that moved from another of the
+   * person's computers: every version, oldest first, under the ids the move
+   * gave them, bound to the moved thread and the Project it moved into (none
+   * for a Chat thread in none). The content is kept as written, so a source
+   * reference still names the computer it was read on. A Canvas that held
+   * outside content there carries that mark from its first version here.
+   *
+   * A finish asked again after a stop carries the same Canvas again: the
+   * versions already recorded are kept and only the rest are appended. A
+   * failure throws, so the move never arrives without a part it promised.
+   */
+  carryMovedCanvas(input: {
+    readonly canvasId: CanvasId;
+    readonly versions: ReadonlyArray<{
+      readonly versionId: CanvasVersionId;
+      readonly source: CanvasVersion;
+    }>;
+    readonly provenance: {
+      readonly hostId: CanvasVersion["definition"]["provenance"]["hostId"];
+      readonly projectId: string | null;
+      readonly threadId: string;
+    };
+    readonly carriesOutsideContent: boolean;
+  }): void {
+    let current = this.#projection.getById(input.canvasId)?.currentVersion;
+    for (const [index, carried] of input.versions.entries()) {
+      const sequence = index + 1;
+      if (current !== undefined && current.sequence >= sequence) continue;
+      const version = decodeCanvasVersion({
+        schemaVersion: carried.source.schemaVersion,
+        canvasId: input.canvasId,
+        versionId: carried.versionId,
+        sequence,
+        definition: {
+          ...carried.source.definition,
+          provenance: { ...carried.source.definition.provenance, ...input.provenance },
+        },
+        createdBy: carried.source.createdBy,
+        createdAt: carried.source.createdAt,
+      });
+      if (current === undefined) {
+        this.#eventStore.appendCreate({
+          canvasId: input.canvasId,
+          version,
+          occurredAt: version.createdAt,
+          ...(input.carriesOutsideContent ? { movedWithOutsideContent: true } : {}),
+        });
+        this.#projection.applyCreated({ canvasId: input.canvasId, version });
+      } else {
+        this.#eventStore.appendVersion({
+          canvasId: input.canvasId,
+          current,
+          next: version,
+          occurredAt: version.createdAt,
+        });
+        this.#projection.applyVersionAppended({ canvasId: input.canvasId, version });
+      }
+      this.#announceVersion(version);
+      current = version;
+    }
+  }
+
   history(
     canvasId: CanvasId,
     context: CanvasAuthorizationContext,

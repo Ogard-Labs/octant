@@ -77,6 +77,7 @@ export * from "./ownerBrowser";
 export * from "./ownerMergeUnlock";
 export * from "./desktopOwnerUnlock";
 export * from "./ownerAlerts";
+export * from "./ownerThreadMove";
 export { base64UrlEncode } from "./hubLinkSigning";
 export * from "./remoteListenerTrust";
 export * from "./pinnedListenerExchange";

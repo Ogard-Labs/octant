@@ -41,6 +41,7 @@ import {
   CANVAS_OUTSIDE_CONTENT_CARRIED,
   canvasOutsideContentWriters,
   importedPageWriter,
+  movedCanvasWriter,
   isReplicaWriter,
   canvasVersionWriters,
   decodeCanvasOutsideContentCarried,
@@ -97,6 +98,11 @@ export interface AppendCanvasCreateInput {
    * Canvas's record of that commits with the version, or neither does.
    */
   readonly importedPage?: true;
+  /**
+   * The Canvas was carried in with a moved thread and held outside content
+   * where it came from. Its record of that commits with the version.
+   */
+  readonly movedWithOutsideContent?: true;
 }
 
 export interface AppendCanvasVersionInput {
@@ -205,7 +211,10 @@ export class CanvasEventStore {
               },
             ],
           }),
-        input.importedPage === true ? [importedPageWriter(version.versionId)] : [],
+        [
+          ...(input.importedPage === true ? [importedPageWriter(version.versionId)] : []),
+          ...(input.movedWithOutsideContent === true ? [movedCanvasWriter(version.versionId)] : []),
+        ],
       );
     } catch (error) {
       throw this.#wrapConcurrency(error);

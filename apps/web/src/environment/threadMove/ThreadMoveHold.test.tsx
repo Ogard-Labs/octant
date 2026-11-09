@@ -25,6 +25,7 @@ function fakeClient(initial: unknown) {
     destinations: async () => ({ status: "listed", busy: false, destinations: [] }),
     challenge: async () => ({ status: "refused", kind: "refused" }),
     start: async () => ({ status: "refused", reason: "refused" }),
+    askPhone: async () => ({ status: "refused", reason: "refused" }),
     status: async () => status,
     stopWaiting: async () => {
       calls.push("stop-waiting");
@@ -64,6 +65,7 @@ function fakeClient(initial: unknown) {
     shutdownListing: async () => ({ status: "listed", members: [], rows: [] }),
     shutdownChallenge: async () => ({ status: "refused", kind: "refused" }),
     shutdownStart: async () => ({ status: "refused", reason: "refused" }),
+    shutdownAskPhone: async () => ({ status: "refused", reason: "refused" }),
     shutdownHandOver: async () => ({ status: "refused", reason: "refused" }),
     handoverPreview: async () => ({ status: "refused", reason: "refused" }),
     handOver: async () => ({ status: "refused", reason: "refused" }),
@@ -118,6 +120,27 @@ describe("a thread pane while a move holds it", () => {
     await user.click(screen.getByRole("button", { name: "Cancel move" }));
     await user.click(await screen.findByRole("button", { name: "Take back here" }));
     expect(calls).toEqual([`cancel ${MOVE}`, `take-back ${MOVE}`]);
+    expect(await screen.findByRole("textbox", { name: "Message" })).toBeInTheDocument();
+  });
+
+  it("gives the composer's place to Waiting for your phone, and Don't move brings it back", async () => {
+    const user = userEvent.setup();
+    const { client, calls } = fakeClient({
+      status: "read",
+      waitingForPhone: {
+        destinationMemberId: DESKTOP,
+        destinationName: "Desktop",
+        expiresAt: 1_900_000_000_000,
+      },
+    });
+    pane(client);
+
+    expect(await screen.findByText("Waiting for your phone")).toBeInTheDocument();
+    expect(screen.getByText(/Confirm on your phone to move this thread to Desktop/)).toBeVisible();
+    expect(screen.queryByRole("textbox", { name: "Message" })).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Don't move" }));
+    expect(calls).toEqual(["stop-waiting"]);
     expect(await screen.findByRole("textbox", { name: "Message" })).toBeInTheDocument();
   });
 
@@ -201,6 +224,24 @@ describe("a moved thread's pane on the computer it left", () => {
     await user.click(screen.getByRole("button", { name: "Open there" }));
     expect(writeText).toHaveBeenCalledWith(`octant://hosts/${DESKTOP}/threads/code/${ARRIVED}`);
     expect(await screen.findByText(/Link copied/)).toBeInTheDocument();
+  });
+
+  it("names the parts that could not be read here and did not move, on the tombstone", async () => {
+    const { client } = fakeClient({
+      status: "read",
+      departed: {
+        ...departed,
+        partsLeftBehind: [{ kind: "attachment", name: "scan.pdf" }],
+        partsLeftBehindCount: 3,
+      },
+    });
+    pane(client);
+
+    expect(
+      await screen.findByText(
+        /3 parts could not be read here, so they did not move: scan\.pdf, and 2 more\./,
+      ),
+    ).toBeInTheDocument();
   });
 
   it("lists the files a kept worktree holds, and removes it only after the person confirms", async () => {
