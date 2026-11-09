@@ -1118,6 +1118,7 @@ export function wireRemote(deps: RemoteDependencies) {
       readThreadExternalContentTaint(persistence.connection, threadId).externalContentIngested,
     importMovedThread: (input) => deps.chatService.importMovedThread(input),
     readOriginalInput: (reference) => movedInputSource.read(reference).catch(() => undefined),
+    originalInputSize: (reference) => movedInputSource.size(reference),
     readAttachment: async (threadId, attachmentId) => {
       try {
         return await deps.chatService.readAttachment(

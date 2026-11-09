@@ -164,6 +164,26 @@ describe("sizes before a move", () => {
     ).toEqual({ status: "unknown" });
     expect(() => decodeThreadMoveSizes(sizes({ basis: "measured", bytesPerSecond: 0 }))).toThrow();
   });
+
+  it("refuses a partly measured size that names no part it could not read", () => {
+    const partly = (unknownParts: ReadonlyArray<string>) => ({
+      status: "read",
+      rate: { basis: "assumed", bytesPerSecond: 1_048_576 },
+      rows: [
+        {
+          thread: { mode: "chat", threadId: uuid(3) },
+          size: {
+            status: "partly-measured",
+            bytes: 1_200,
+            parts: [{ kind: "thread-bundle", bytes: 1_200 }],
+            unknownParts,
+          },
+        },
+      ],
+    });
+    expect(decodeThreadMoveSizes(partly(["canvas"])).rows[0]?.size.status).toBe("partly-measured");
+    expect(() => decodeThreadMoveSizes(partly([]))).toThrow();
+  });
 });
 
 describe("the Move in grant item", () => {
