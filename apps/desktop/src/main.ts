@@ -258,12 +258,15 @@ import {
   buildMenuBarItems,
   formatRedactedHostDiagnostics,
   decodeMenuBarOpenThread,
+  decodeMenuBarShutdownProgress,
   MenuBarFleet,
   menuBarTitle,
   type MenuBarOpenThread,
+  type MenuBarShutdownProgress,
 } from "./menuBar";
 import { createMenuBarFleetReader } from "./menuBarFleetRead";
 import { createHostTrayImage, shouldPresentHostTray } from "./menuBarIcon";
+import { ShutdownBatchOwner } from "./shutdownBatchOwner";
 import {
   MOVE_THREADS_FIRST_RESPONSE,
   buildQuitConfirmation,
@@ -576,9 +579,10 @@ export function installHubAdministrationIpcHandlers(options: {
 }
 
 /**
- * Prepare to shut down's two requests from an owned window: whether this host
- * can offer Move threads first… at Quit, and Quit Octant at the end of the
- * dialog, which goes through the same guarded quit as the menu's.
+ * Prepare to shut down's requests from an owned window: whether this host can
+ * offer Move threads first… at Quit, how far a running batch has come for the
+ * menu bar, and Quit Octant at the end of the dialog, which goes through the
+ * same guarded quit as the menu's.
  */
 export function installShutdownIpcHandlers(options: {
   readonly handle: (
@@ -586,12 +590,18 @@ export function installShutdownIpcHandlers(options: {
     handler: (event: unknown, ...args: readonly unknown[]) => unknown,
   ) => void;
   readonly resolveOwnedWindow: (event: unknown) => void;
+  /** The id of the owned window that sent a request. */
+  readonly senderWindowId: (event: unknown) => number;
   readonly onMovesOffered: (offered: boolean) => void;
+  readonly onProgress: (windowId: number, progress: MenuBarShutdownProgress | undefined) => void;
   readonly onRequestQuit: () => void;
 }): void {
   options.handle(IPC_CHANNELS.shutdownMovesOffered, (event, offered) => {
     options.resolveOwnedWindow(event);
     options.onMovesOffered(offered === true);
+  });
+  options.handle(IPC_CHANNELS.shutdownProgress, (event, progress) => {
+    options.onProgress(options.senderWindowId(event), decodeMenuBarShutdownProgress(progress));
   });
   options.handle(IPC_CHANNELS.requestQuit, (event) => {
     options.resolveOwnedWindow(event);
@@ -2818,7 +2828,11 @@ function updateHostTray(): void {
   if (hostTray === undefined) return;
   const snapshot = hostLifecycle.snapshot();
   const fleet = snapshot.state === "stopped" ? [] : menuBarFleet.threads();
-  const items = buildMenuBarItems(snapshot, fleet);
+  const shutdownProgress = shutdownBatch.progress();
+  const items = buildMenuBarItems(snapshot, fleet, {
+    offered: shutdownMovesOffered,
+    ...(shutdownProgress === undefined ? {} : { progress: shutdownProgress }),
+  });
   const toTemplate = (item: (typeof items)[number]): MenuItemConstructorOptions => {
     if (item.id === "separator") return { type: "separator" };
     const thread = item.thread;
@@ -2847,7 +2861,7 @@ function updateHostTray(): void {
   const template = items.map(toTemplate);
   hostTray.setContextMenu(Menu.buildFromTemplate(template));
   hostTray.setToolTip(`Octant — ${hostStatusLabel()}`);
-  hostTray.setTitle?.(menuBarTitle(snapshot, fleet));
+  hostTray.setTitle?.(menuBarTitle(snapshot, fleet, shutdownProgress));
 }
 
 function ensureHostTray(): void {
@@ -3030,6 +3044,19 @@ async function runMenuBarAction(
         title: "Octant host diagnostics",
         message: formatRedactedHostDiagnostics(hostLifecycle.snapshot()),
       });
+    } else if (action === "prepare-to-shut-down") {
+      // Brings back a hidden dialog's running batch in its own window, or
+      // opens a new one in the main window when no batch runs.
+      const owner = shutdownBatchWindow();
+      if (owner === undefined) {
+        await ensureMenuWindow();
+        mainWindow?.show();
+        mainWindow?.focus();
+      } else {
+        owner.show();
+        owner.focus();
+      }
+      openPrepareToShutDown({ fromQuit: false });
     } else if (action === "fully-quit") {
       requestInteractiveQuit();
     }
@@ -3213,8 +3240,22 @@ function installIpcHandlers(): void {
   installShutdownIpcHandlers({
     handle: (channel, handler) => ipcMain.handle(channel, handler),
     resolveOwnedWindow: (event) => void ownedWindowContext(event as IpcMainInvokeEvent),
+    senderWindowId: (event) => ownedWindowContext(event as IpcMainInvokeEvent).window.id,
     onMovesOffered: (offered) => {
+      if (shutdownMovesOffered === offered) return;
       shutdownMovesOffered = offered;
+      updateHostTray();
+    },
+    onProgress: (windowId, progress) => {
+      const owned = shutdownBatch.windowToOpen() !== undefined;
+      if (!shutdownBatch.report(windowId, progress)) return;
+      // The window that starts owning a batch lets go of it when it closes.
+      if (!owned && shutdownBatch.windowToOpen() === windowId) {
+        BrowserWindow.fromId(windowId)?.once("closed", () => {
+          if (shutdownBatch.windowClosed(windowId)) updateHostTray();
+        });
+      }
+      updateHostTray();
     },
     onRequestQuit: requestInteractiveQuit,
   });
@@ -4409,11 +4450,26 @@ async function confirmQuitWithActiveWork(
  */
 let shutdownMovesOffered = false;
 
-/** Opens Prepare to shut down in the focused Octant window, or the main one. */
+/** The running Prepare to shut down batch, the window whose dialog runs it, and its progress. */
+const shutdownBatch = new ShutdownBatchOwner();
+
+/** The window whose dialog runs the batch, while that window is still open. */
+function shutdownBatchWindow(): BrowserWindow | undefined {
+  const windowId = shutdownBatch.windowToOpen();
+  const window = windowId === undefined ? null : BrowserWindow.fromId(windowId);
+  return window === null || window.isDestroyed() ? undefined : window;
+}
+
+/**
+ * Opens Prepare to shut down in the window whose dialog runs the batch, so a
+ * hidden running batch comes back rather than a fresh dialog in another
+ * window; with no batch running, in the focused Octant window or the main one.
+ */
 function openPrepareToShutDown(request: { readonly fromQuit: boolean }): void {
   const focused = BrowserWindow.getFocusedWindow();
   const window =
-    focused !== null && trustedRendererWebContentsIds.has(focused) ? focused : mainWindow;
+    shutdownBatchWindow() ??
+    (focused !== null && trustedRendererWebContentsIds.has(focused) ? focused : mainWindow);
   if (window === undefined || window.isDestroyed()) return;
   window.webContents.send(IPC_CHANNELS.prepareToShutDown, request);
 }

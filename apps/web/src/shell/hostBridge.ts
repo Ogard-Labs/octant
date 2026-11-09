@@ -292,6 +292,7 @@ export type HubAdministrationOperation =
   | "shutdown-listing"
   | "shutdown-challenge"
   | "shutdown-start"
+  | "shutdown-handover"
   | "shutdown-sizes"
   | "handover-preview"
   | "handover"
@@ -625,6 +626,13 @@ export interface OctantHostBridge
   readonly requestQuit?: () => void;
   /** Tells the desktop whether Quit may offer Move threads first…. */
   readonly reportShutdownMovesOffered?: (offered: boolean) => void;
+  /**
+   * Tells the desktop how far a running Prepare to shut down batch has come,
+   * so the menu bar shows it while the dialog is hidden; `undefined` when none runs.
+   */
+  readonly reportShutdownProgress?: (
+    progress: { readonly ended: number; readonly total: number } | undefined,
+  ) => void;
   /** The first ⌘Q press: the window shows "press again to quit". */
   readonly subscribeQuitShortcutHint?: (listener: () => void) => () => void;
   readonly subscribeStartNewAgent?: (listener: () => void) => () => void;
