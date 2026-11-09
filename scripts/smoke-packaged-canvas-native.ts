@@ -1317,6 +1317,22 @@ const timer = setInterval(() => {
     const browserPage = await browserContext.newPage();
     const browserFailures: string[] = [];
     browserPage.on("pageerror", (error) => browserFailures.push(error.message.slice(0, 300)));
+    const canvasResponses: string[] = [];
+    browserPage.on("response", (response) => {
+      const path = new URL(response.url()).pathname;
+      if (!path.startsWith("/api/canvas/") && !path.startsWith("/api/remote/")) return;
+      void response
+        .text()
+        .catch(() => "")
+        .then((body) => {
+          if (canvasResponses.length < 40)
+            canvasResponses.push(
+              `${response.request().method()} ${path} ${response.status()} ${body
+                .replace(/[A-Za-z0-9+/=_-]{24,}/g, "<redacted>")
+                .slice(0, 200)}`,
+            );
+        });
+    });
     const browserReceipt = async (stage: string) =>
       console.log(
         `OCTANT_PAIRED_READER ${JSON.stringify({
@@ -1328,6 +1344,7 @@ const timer = setInterval(() => {
               .innerText()
               .catch(() => "")
           ).slice(0, 600),
+          responses: canvasResponses.slice(-20),
         })}`,
       );
     const deviceLabel = "Canvas acceptance browser";
