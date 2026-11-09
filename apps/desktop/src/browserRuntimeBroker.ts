@@ -14,7 +14,6 @@ import {
 import { decodeHumanBrowserRequest } from "@octant/contracts/browser-presentation";
 import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
-import type { AddressInfo } from "node:net";
 import type { BrowserContextPolicy, BrowserProfileClearScope } from "@octant/contracts";
 import {
   BROWSER_RESIZE_BOUNDS,
@@ -58,6 +57,7 @@ const ROUTES = new Set([
   "/v1/contexts/close",
   "/v1/contexts/close-all",
   "/v1/profiles/list",
+  "/v1/profiles/create-account",
   "/v1/profiles/clear",
   "/v1/extensions/sync",
   "/v1/profiles/import-cookies",
@@ -105,33 +105,67 @@ export async function startBrowserRuntimeBroker(
       },
     );
   });
-  await new Promise<void>((resolve, reject) => {
-    server.once("error", reject);
-    server.listen(0, "127.0.0.1", () => {
-      server.off("error", reject);
-      resolve();
-    });
-  });
-  const address = server.address() as AddressInfo | null;
-  if (address === null) throw new Error("Octant Browser runtime broker is unavailable.");
-  brokerUrl = `http://127.0.0.1:${address.port}/`;
   let closing: Promise<void> | undefined;
-  return Object.freeze({
-    url: brokerUrl,
-    token,
-    close: () => {
-      closing ??= (async () => {
-        removeGoneListener();
-        removePersonInputListener();
+  const close = () => {
+    closing ??= Promise.resolve().then(async () => {
+      const failures: Array<unknown> = [];
+      for (const unsubscribe of [removeGoneListener, removePersonInputListener]) {
+        try {
+          unsubscribe();
+        } catch (error) {
+          failures.push(error);
+        }
+      }
+      try {
         await host.closeAll();
+      } catch (error) {
+        failures.push(error);
+      }
+      try {
         await new Promise<void>((resolve, reject) => {
-          if (!server.listening) return resolve();
+          if (!server.listening) {
+            server.closeAllConnections();
+            resolve();
+            return;
+          }
           server.close((error) => (error === undefined ? resolve() : reject(error)));
           server.closeAllConnections();
         });
-      })();
-      return closing;
-    },
+      } catch (error) {
+        failures.push(error);
+      }
+      if (failures.length > 0)
+        throw new AggregateError(failures, "Octant Browser runtime broker cleanup failed.");
+    });
+    return closing;
+  };
+  try {
+    await new Promise<void>((resolve, reject) => {
+      server.once("error", reject);
+      server.listen(0, "127.0.0.1", () => {
+        server.off("error", reject);
+        resolve();
+      });
+    });
+    const address = server.address();
+    if (address === null || typeof address === "string")
+      throw new Error("Octant Browser runtime broker is unavailable.");
+    brokerUrl = `http://127.0.0.1:${address.port}/`;
+  } catch (error) {
+    try {
+      await close();
+    } catch (cleanup) {
+      throw new AggregateError(
+        [error, cleanup],
+        "Octant Browser runtime broker startup and cleanup failed.",
+      );
+    }
+    throw error;
+  }
+  return Object.freeze({
+    url: brokerUrl,
+    token,
+    close,
     fetchForTest: (request: Request, peerAddress = "127.0.0.1") =>
       handleBrokerRequest(request, peerAddress, token, host, events, profiles),
   });
@@ -224,9 +258,26 @@ async function handleBrokerRequest(
       const result = await host.humanPresentation(command, body.windowId, signal);
       return signal?.aborted ? failure("unavailable", 409) : Response.json(result);
     }
+    if (url.pathname === "/v1/profiles/create-account") {
+      if (profiles?.createAccount === undefined) return failure("profiles-unavailable", 409);
+      if (
+        typeof body.label !== "string" ||
+        body.label.trim().length === 0 ||
+        body.label.trim().length > 80 ||
+        Object.keys(body).some((key) => key !== "label")
+      )
+        return failure("invalid-request", 400);
+      return Response.json(await profiles.createAccount(body.label));
+    }
     if (url.pathname === "/v1/profiles/list") {
       if (profiles === undefined) return failure("profiles-unavailable", 409);
-      return Response.json({ profiles: await profiles.list() });
+      if (body.includeSizes !== undefined && typeof body.includeSizes !== "boolean")
+        return failure("invalid-request", 400);
+      return Response.json({
+        profiles: await (body.includeSizes === undefined
+          ? profiles.list()
+          : profiles.list(body.includeSizes)),
+      });
     }
     if (url.pathname === "/v1/profiles/clear") {
       if (profiles === undefined) return failure("profiles-unavailable", 409);

@@ -13,11 +13,11 @@ import { OctantConfirmDialog } from "../ui/base/OctantConfirmDialog";
 export interface CanvasPublicLinksSectionProps {
   readonly canvasId: CanvasId;
   readonly onList: (canvasId: CanvasId) => Promise<CanvasPublicShareList>;
-  readonly onRevoke: (
+  readonly onRevoke?: (
     request: CanvasPublicShareRevokeRequest,
   ) => Promise<CanvasPublicShareRevokeResult>;
   /** Opens the export dialog on the Public link destination to replace a link's content. */
-  readonly onUpdate: () => void;
+  readonly onUpdate?: () => void;
   /** Changes when the list should be read again, such as after an export. */
   readonly revision?: number;
   /** Writes text to the clipboard; defaults to the browser's. */
@@ -67,6 +67,7 @@ export function CanvasPublicLinksSection(props: CanvasPublicLinksSectionProps) {
   }
 
   async function revoke(share: CanvasPublicShareRecord) {
+    if (props.onRevoke === undefined) return;
     setBusy(true);
     try {
       const result = await props.onRevoke({
@@ -99,11 +100,19 @@ export function CanvasPublicLinksSection(props: CanvasPublicLinksSectionProps) {
       </p>
     );
   }
-  if (list === undefined) return null;
+  if (list === undefined) {
+    return (
+      <p className="canvas-share__note" role="status">
+        Reading public links…
+      </p>
+    );
+  }
   if (!list.enabled && list.shares.length === 0) {
     return (
       <p className="canvas-share__note" data-testid="canvas-public-links-off">
-        Public links are off. Turn them on in Settings › Data & privacy › Public links.
+        {props.onRevoke === undefined && props.onUpdate === undefined
+          ? "Public links are off on this host."
+          : "Public links are off. Turn them on in Settings › Data & privacy › Public links."}
       </p>
     );
   }
@@ -148,12 +157,12 @@ export function CanvasPublicLinksSection(props: CanvasPublicLinksSectionProps) {
                   >
                     Copy link
                   </OctantButton>
-                  {share.status === "active" ? (
+                  {share.status === "active" && props.onUpdate !== undefined ? (
                     <OctantButton onClick={props.onUpdate} size="sm" type="button" variant="ghost">
                       Update
                     </OctantButton>
                   ) : null}
-                  {share.status === "revoking" ? null : (
+                  {share.status === "revoking" || props.onRevoke === undefined ? null : (
                     <OctantButton
                       disabled={busy}
                       onClick={() => setRevoking(share)}

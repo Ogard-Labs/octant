@@ -53,7 +53,17 @@ export type BrowserProfileMode = typeof BrowserProfileMode.Type;
  * Personal profile is on disk and shared by every page that chooses it. Chat
  * has no Browser, so no profile names a Chat Project.
  */
+export const BrowserAccountProfileId = Schema.UUID.pipe(Schema.brand("BrowserAccountProfileId"));
+export type BrowserAccountProfileId = typeof BrowserAccountProfileId.Type;
+export const AccountBrowserProfile = Schema.Struct({
+  kind: Schema.Literal("account"),
+  profileId: BrowserAccountProfileId,
+}).annotations(strict);
+export type AccountBrowserProfile = typeof AccountBrowserProfile.Type;
+export const decodeBrowserAccountProfileId = Schema.decodeUnknownSync(BrowserAccountProfileId);
+
 export const BrowserProfile = Schema.Union(
+  AccountBrowserProfile,
   Schema.Struct({ kind: Schema.Literal("private") }).annotations(strict),
   Schema.Struct({ kind: Schema.Literal("project"), projectId: ProjectId }).annotations(strict),
   Schema.Struct({ kind: Schema.Literal("personal") }).annotations(strict),

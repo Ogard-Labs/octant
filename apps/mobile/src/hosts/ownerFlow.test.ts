@@ -14,9 +14,10 @@ import {
   type RemoteDeviceKeyPair,
   type RemoteDeviceKeyStore,
 } from "@octant/client-runtime";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import type { GuestHubState } from "./hubGuestFlow";
-import { ownerSpokesOf, phoneOwnerMergeUnlock } from "./ownerFlow";
+import { pollWhileActive, type AppActivity } from "../runtime/pollWhileActive";
+import { ownerSpokesOf, phoneOwnerMergeUnlock, phoneThreadMovesOf } from "./ownerFlow";
 import { createPhoneUnlockKey } from "./ownerUnlockKey";
 
 const id = (suffix: string) => `00000000-0000-4000-8000-${suffix.padStart(12, "0")}` as HubMemberId;
@@ -27,6 +28,20 @@ const alert: NewMemberAlert = {
   role: "spoke",
   identityKeyFingerprint: "c".repeat(64),
   raisedAt: "2026-10-29T10:00:00.000Z" as NewMemberAlert["raisedAt"],
+};
+
+const TICKET = "00000000-0000-4000-8000-0000000000d1";
+const heldMove = {
+  confirmationId: "00000000-0000-4000-8000-0000000000e1",
+  destinationMemberId: "00000000-0000-4000-8000-000000000003",
+  destinationName: "member 3",
+  threads: [
+    {
+      thread: { mode: "chat", threadId: "00000000-0000-4000-8000-0000000000f1" },
+      title: "Plan the trip",
+    },
+  ],
+  expiresAt: 1_900_000_000_000,
 };
 
 const member = (suffix: string, role: RosterMember["role"], address: string): RosterMember => ({
@@ -78,7 +93,14 @@ function joinedState(owner: boolean): GuestHubState {
 }
 
 async function world(
-  options: { presence: "confirmed" | "denied"; down?: string } = { presence: "confirmed" },
+  options: {
+    presence: "confirmed" | "denied";
+    down?: string;
+    /** Whether the spoke holds a move right now; it always does unless this says otherwise. */
+    holdsMove?: () => boolean;
+    /** The address of the computer that holds the move; member 2 unless this says otherwise. */
+    holdingAddress?: string;
+  } = { presence: "confirmed" },
 ) {
   const keyPair = await crypto.subtle.generateKey({ name: "ECDSA", namedCurve: "P-256" }, true, [
     "sign",
@@ -94,6 +116,7 @@ async function world(
     remove: async () => {},
   };
   const order: string[] = [];
+  const sentTo: Array<{ readonly origin: string; readonly path: string }> = [];
   let storedPrivate: string | undefined;
   let storedPublic: string | null = null;
   const unlockKey = createPhoneUnlockKey({
@@ -129,6 +152,7 @@ async function world(
     fetch: (async (input: string | URL | Request) => {
       const path = new URL(String(input)).pathname;
       order.push(path);
+      sentTo.push({ origin, path });
       if (options.down !== undefined && origin.includes(options.down)) throw new Error("down");
       if (path === "/api/hub/owner/challenge") {
         return Response.json({
@@ -140,6 +164,22 @@ async function world(
         });
       }
       if (path === "/api/hub/owner/alerts") return Response.json({ alerts: [alert] });
+      if (path === "/api/hub/owner/thread-moves/confirmations") {
+        return Response.json({
+          status: "listed",
+          confirmations:
+            origin.includes(options.holdingAddress ?? "100.101.102.104") &&
+            (options.holdsMove?.() ?? true)
+              ? [heldMove]
+              : [],
+        });
+      }
+      if (path === "/api/hub/owner/thread-moves/ticket") {
+        return Response.json({ status: "issued", ticketId: TICKET, expiresAt: 1 });
+      }
+      if (path === "/api/hub/owner/thread-moves/confirm") {
+        return Response.json({ status: "started" });
+      }
       if (path === "/api/hub/owner/held-members") {
         return Response.json({
           members: [
@@ -155,7 +195,7 @@ async function world(
       return Response.json({ status: "removed", alertId: String(alert.alertId) });
     }) as typeof globalThis.fetch,
   });
-  return { deviceKeyStore, unlockKey, transport, order };
+  return { deviceKeyStore, unlockKey, transport, order, sentTo };
 }
 
 describe("a phone that is an owner of its hub", () => {
@@ -303,5 +343,147 @@ describe("a phone's unlock for a merge its paired host asks for", () => {
       status: "not-unlocked",
     });
     expect(w.order).not.toContain("/api/hub/owner/challenge");
+  });
+});
+
+describe("a phone confirming a move a window holds for it", () => {
+  it("lists the moves each spoke holds and confirms one with a single unlock, asking the destination for the ticket first", async () => {
+    const w = await world();
+    const moves = await phoneThreadMovesOf({ ...w, state: joinedState(true) });
+    if (moves === undefined) throw new Error("expected the phone's moves");
+
+    const reading = await moves.read();
+    expect(
+      reading.moves.map((move) => [move.source.name, move.confirmation.destinationName]),
+    ).toEqual([["member 2", "member 3"]]);
+    const [held] = reading.moves;
+    if (held === undefined) throw new Error("expected a held move");
+    w.order.length = 0;
+    w.sentTo.length = 0;
+
+    const result = await moves.confirm(held);
+
+    expect(result.status).toBe("done");
+    expect(w.order.filter((entry) => entry === "unlock-asked")).toHaveLength(1);
+    expect(w.sentTo.filter((entry) => entry.path !== "/api/hub/owner/challenge")).toEqual([
+      { origin: "https://100.101.102.105:8443", path: "/api/hub/owner/thread-moves/ticket" },
+      { origin: "https://100.101.102.104:8443", path: "/api/hub/owner/thread-moves/confirm" },
+    ]);
+  });
+
+  it("lists a move a standby computer holds, and never asks the hub, which moves nothing away", async () => {
+    const w = await world({ presence: "confirmed", holdingAddress: "100.101.102.106" });
+    const joined = joinedState(true);
+    const state: GuestHubState = {
+      ...joined,
+      record: {
+        ...joined.record,
+        roster: {
+          ...joined.record.roster,
+          roster: {
+            ...joined.record.roster.roster,
+            members: [
+              ...joined.record.roster.roster.members,
+              member("4", "standby-hub", "100.101.102.106"),
+            ],
+          },
+        },
+      },
+    };
+    const moves = await phoneThreadMovesOf({ ...w, state });
+    if (moves === undefined) throw new Error("expected the phone's moves");
+    w.sentTo.length = 0;
+
+    const reading = await moves.read();
+
+    expect(reading.moves.map((move) => move.source.name)).toEqual(["member 4"]);
+    const asked = w.sentTo
+      .filter((entry) => entry.path === "/api/hub/owner/thread-moves/confirmations")
+      .map((entry) => entry.origin);
+    expect(asked).toContain("https://100.101.102.106:8443");
+    expect(asked).not.toContain("https://100.101.102.103:8443");
+  });
+
+  it("offers nothing to a phone that did not join with an owner code", async () => {
+    const w = await world();
+    expect(await phoneThreadMovesOf({ ...w, state: joinedState(false) })).toBeUndefined();
+  });
+
+  it("tells the source nothing when the person declines the unlock", async () => {
+    const w = await world({ presence: "denied" });
+    const moves = await phoneThreadMovesOf({ ...w, state: joinedState(true) });
+    const [held] = (await moves?.read())?.moves ?? [];
+    if (moves === undefined || held === undefined) throw new Error("expected a held move");
+    w.sentTo.length = 0;
+
+    expect(await moves.confirm(held)).toEqual({ status: "not-unlocked", reason: "cancelled" });
+    expect(w.sentTo).toEqual([]);
+  });
+});
+
+describe("keeping the phone's waiting moves current while it is open", () => {
+  /** An app whose foreground state the test sets. */
+  function appActivity(active: boolean) {
+    const listeners = new Set<(active: boolean) => void>();
+    const state = { active };
+    const activity: AppActivity = {
+      isActive: () => state.active,
+      onChange: (listener) => {
+        listeners.add(listener);
+        return () => listeners.delete(listener);
+      },
+    };
+    const set = (next: boolean) => {
+      state.active = next;
+      for (const listener of listeners) listener(next);
+    };
+    return { activity, set, listeners };
+  }
+
+  it("lists a move a computer starts holding after the screen opened, without opening it again", async () => {
+    let holds = false;
+    const w = await world({ presence: "confirmed", holdsMove: () => holds });
+    const moves = await phoneThreadMovesOf({ ...w, state: joinedState(true) });
+    if (moves === undefined) throw new Error("expected the phone's moves");
+    const listed: string[][] = [];
+    const read = () =>
+      void moves
+        .read()
+        .then((reading) =>
+          listed.push(reading.moves.map((move) => move.confirmation.confirmationId)),
+        );
+    const app = appActivity(true);
+
+    read();
+    const stop = pollWhileActive({ run: read, intervalMs: 10, activity: app.activity });
+    await vi.waitFor(() => expect(listed[0]).toEqual([]));
+    holds = true;
+
+    await vi.waitFor(() => expect(listed.at(-1)).toEqual([heldMove.confirmationId]));
+    stop();
+    expect(app.listeners.size).toBe(0);
+  });
+
+  it("reads nothing while the app is in the background, and reads at once when it returns", async () => {
+    vi.useFakeTimers();
+    try {
+      const run = vi.fn();
+      const app = appActivity(false);
+      const stop = pollWhileActive({ run, intervalMs: 5_000, activity: app.activity });
+
+      vi.advanceTimersByTime(20_000);
+      expect(run).not.toHaveBeenCalled();
+      app.set(true);
+      expect(run).toHaveBeenCalledOnce();
+      vi.advanceTimersByTime(5_000);
+      expect(run).toHaveBeenCalledTimes(2);
+
+      stop();
+      vi.advanceTimersByTime(20_000);
+      app.set(true);
+      expect(run).toHaveBeenCalledTimes(2);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

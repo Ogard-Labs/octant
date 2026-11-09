@@ -182,6 +182,15 @@ export function wireBrowser(deps: BrowserDependencies) {
       isHostScope: isRoutineHostScope,
       isLocalWindow: (windowId) => windowAuthorityStore.listWindowIds().includes(windowId),
       extensionsEnabledIn: (profile) => extensionFoldersFor(profile).length,
+      profileLabel: async (profile) => {
+        if (profile.kind !== "account") return undefined;
+        const rows = await browserRuntime.profiles?.list(false);
+        return rows?.find(
+          (entry) =>
+            entry.profile.kind === "account" &&
+            String(entry.profile.profileId) === String(profile.profileId),
+        )?.label;
+      },
       onChanged: () => machineChangeFeed.publish(["tool-approvals"]),
     });
     onWindowRevoked((windowId) => browserToolApprovalService.revokeWindow(windowId));

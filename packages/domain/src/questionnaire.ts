@@ -25,6 +25,7 @@ export function validateQuestionnaireAnswer(
     return invalid;
   }
   if (
+    (questionnaire.allowComment === false && response.comment !== undefined) ||
     response.answers.length !== questionnaire.questions.length ||
     new Set(response.answers.map((answer) => answer.questionId)).size !== response.answers.length
   )

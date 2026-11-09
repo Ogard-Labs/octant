@@ -1,0 +1,43 @@
+name: Mobile (iOS offline native acceptance)
+
+on:
+  pull_request:
+    paths:
+      - apps/mobile/**
+      - scripts/mobile-ios-native/**
+      - .github/workflows/mobile-ios-native-acceptance.yml
+      - bun.lock
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: mobile-ios-native-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  acceptance:
+    name: Exercise the offline demo on an owned iOS Simulator
+    runs-on: macos-26
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 26
+      - run: bun install --frozen-lockfile
+      - name: Build and exercise the Release app without accounts or store signing
+        run: python3 scripts/mobile-ios-native/run.py
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: octant-ios-offline-native-acceptance
+          path: ${{ runner.temp }}/octant-ios-native-acceptance
+          if-no-files-found: warn
+          retention-days: 7

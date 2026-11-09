@@ -1,3 +1,5 @@
+import { browserAgentAvailability } from "@octant/domain";
+import type { BrowserProfileChoice } from "@octant/contracts/project-browser";
 import { describe, expect, it, vi } from "vitest";
 import {
   decodeToolActionAuthority,
@@ -29,6 +31,38 @@ function snapshot(overrides: Partial<BrowserAutomationSnapshot> = {}): BrowserAu
 }
 
 describe("createBrowserAppManagedTools", () => {
+  it.each([[], ["octant_browser"], ["octant_terminal"]])(
+    "offers Browser exactly when its reported constraints admit it: %j",
+    (...toolConstraints) => {
+      const tools = createBrowserAppManagedTools({
+        windowId,
+        threadId,
+        mode: "work",
+        modelId,
+        resolveModelId: () => modelId,
+        modelBindings: new Map(),
+        executionPolicy: "approval-gated",
+        toolConstraints,
+        resolveAuthority: () => authority,
+        browser: {
+          inspectThread: () => snapshot(),
+          create: vi.fn(),
+          act: vi.fn(),
+          releaseThread: vi.fn(),
+        },
+        uuid: () => "80000000-0000-4000-8000-000000000001",
+      });
+      const reported = browserAgentAvailability({
+        toolTransport: true,
+        hostLendsBrowser: true,
+        toolConstraints,
+        readOnly: false,
+      });
+      expect(tools.definitions.some((definition) => definition.name === "octant_browser")).toBe(
+        reported.status === "available",
+      );
+    },
+  );
   it("offers Chat browser on demand and keeps approval separate from filesystem tools", async () => {
     const create = vi.fn(async () =>
       snapshot({
@@ -535,6 +569,57 @@ describe("browser diagnostics reach the provider-facing result", () => {
     });
   }
 
+  it("keeps the Work turn cancellation signal through the download port", async () => {
+    const workAuthority = decodeToolActionAuthority({
+      ...authority,
+      mode: "work",
+      projectId: "80000000-0000-4000-8000-000000000022",
+    });
+    const context = { ...activeContext(), authority: workAuthority };
+    const running = snapshot({ status: "running", context });
+    const saveDownload = vi.fn(async () => ({
+      status: "saved" as const,
+      path: "downloads/report.txt",
+      sizeBytes: 4,
+      mediaType: "text/plain",
+    }));
+    const tools = createBrowserAppManagedTools({
+      windowId,
+      threadId,
+      mode: "work",
+      modelId,
+      resolveModelId: () => modelId,
+      modelBindings: new Map([[String(context.contextId), { modelId, authority: workAuthority }]]),
+      executionPolicy: "approval-gated",
+      resolveAuthority: () => workAuthority,
+      uploadRoot: () => "/workspace",
+      browser: {
+        inspectThread: () => running,
+        create: vi.fn(async () => running),
+        act: vi.fn(async () => running),
+        releaseThread: vi.fn(async () => running),
+        saveDownload,
+      },
+      approvals: { request: vi.fn(async () => "approved" as const) } as never,
+      uuid: () => "80000000-0000-4000-8000-000000000001",
+    });
+    const abort = new AbortController();
+    expect(
+      await tools.execute({
+        name: "octant_browser",
+        inputJson: JSON.stringify({ operation: "download-save", downloadId: "d1" }),
+        signal: abort.signal,
+      }),
+    ).toMatchObject({ isError: false });
+    expect(saveDownload).toHaveBeenCalledWith(
+      expect.objectContaining({
+        signal: abort.signal,
+        workspaceRoot: "/workspace",
+        downloadId: "d1",
+      }),
+    );
+  });
+
   it("refuses every call while the person has the page, but still lets stop release it", async () => {
     const act = vi.fn(async () => snapshot());
     const releaseThread = vi.fn(async () => snapshot());
@@ -940,7 +1025,7 @@ describe("octant_browser profile argument", () => {
 
   function fixture(
     options: {
-      readonly defaultProfile?: "private" | "project" | "personal";
+      readonly defaultProfile?: BrowserProfileChoice;
       readonly paired?: boolean;
       readonly remembered?: (origin: string, profile: unknown) => boolean;
       readonly unattended?: boolean;
@@ -995,6 +1080,29 @@ describe("octant_browser profile argument", () => {
     expect(create.mock.calls[0]?.[0].policy.profile).toBeUndefined();
     expect(request.mock.calls[0]?.[0]).not.toHaveProperty("profile");
   });
+
+  it.each(["task default", "explicit selector"] as const)(
+    "keeps a named account separate from Personal through its %s",
+    async (source) => {
+      const profileId = "40000000-0000-4000-8000-000000000002";
+      const f = fixture(
+        source === "task default" ? { defaultProfile: `account:${profileId}` } : {},
+      );
+      expect(
+        (
+          await f.run({
+            operation: "navigate",
+            url: "https://example.com",
+            ...(source === "explicit selector" ? { profile: `account:${profileId}` } : {}),
+          })
+        ).isError,
+      ).toBe(false);
+      expect(f.request).toHaveBeenCalledWith(
+        expect.objectContaining({ profile: { kind: "account", profileId } }),
+      );
+      expect(f.create.mock.calls[0]?.[0].policy.profile).toEqual({ kind: "account", profileId });
+    },
+  );
 
   it("uses the task default without granting it, and lets an explicit Private override it", async () => {
     const selected = fixture({ defaultProfile: "personal" });
@@ -1984,4 +2092,40 @@ describe("octant_browser in Plan mode", () => {
     });
     expect(act).not.toHaveBeenCalled();
   });
+});
+
+it("advertises the named account selectors that the Browser parser accepts", () => {
+  const schema: Readonly<Record<string, unknown>> =
+    BROWSER_TOOL_DEFINITION.inputSchema.properties.profile;
+  const accepts = (choice: string) =>
+    (!Array.isArray(schema.enum) || schema.enum.includes(choice)) &&
+    (typeof schema.pattern !== "string" || new RegExp(schema.pattern).test(choice));
+  for (const choice of [
+    "private",
+    "project",
+    "personal",
+    "account:40000000-0000-4000-8000-000000000002",
+    "account:ABCDEF00-ABCD-4ABC-8ABC-ABCDEF000002",
+  ]) {
+    expect(accepts(choice)).toBe(true);
+    expect(
+      parseBrowserToolInput(
+        JSON.stringify({ operation: "navigate", url: "https://example.com", profile: choice }),
+        { allowProfile: true },
+      ),
+    ).toMatchObject({ profile: choice });
+  }
+  for (const choice of [
+    "account:invalid",
+    "account:40000000-0000-4000-8000-000000000002/extra",
+    "other",
+  ]) {
+    expect(accepts(choice)).toBe(false);
+    expect(
+      parseBrowserToolInput(
+        JSON.stringify({ operation: "navigate", url: "https://example.com", profile: choice }),
+        { allowProfile: true },
+      ),
+    ).toBeUndefined();
+  }
 });

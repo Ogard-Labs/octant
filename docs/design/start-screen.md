@@ -8,6 +8,36 @@ and the composer are in [DESIGN.md](../../DESIGN.md#welcome-and-composer).
 Update this specification with an approved change, following the
 [design workflow](README.md#changing-the-design).
 
+## Optional capability card in Your first task
+
+The existing first-run readiness view, **Your first task**, includes an optional
+**Explore capabilities** card. It adds no setup step, progress count or readiness
+requirement, and appears on no New task or Code Home surface by itself.
+
+The card explains Browser, Computer use, helper agents and person memory. Browser
+names tool-transport support from the selected model's current host observation,
+including model-specific verification; it does not promise a future task's grants.
+Computer use reports the existing host setting and desktop support/permission
+facts when reported. Helper agents and memory read their current host settings.
+Missing, refused or failed reads say Not reported instead of assuming a default.
+The existing defaults remain unchanged.
+
+Each capability is a compact disclosure row showing its current state, with a static, labelled example when expanded. Viewing it starts no provider call,
+agent, Browser, desktop session, driver installation or permission request.
+**Review** links open the existing owning Settings surfaces, whose controls,
+server checks and refusal handling own every change. The card has no setting
+switch or new write path. A read-only surface omits those links; paired clients
+have no first-run capability card and acquire no local settings authority.
+Installation, package trust, enablement and task access remain separate.
+
+**Dismiss capability card** hides only this card for the current setup session.
+It records no setting or first-run outcome. Skip setup and Start a task retain
+their existing behavior and never depend on visiting or dismissing the card.
+Returning from Settings rereads current host facts and preserves the first-task
+draft. The card uses the shared card recipe, stacks at narrow widths and keeps
+all actions keyboard accessible. Its explanatory memory copy never claims that
+a host whose setting is off has memory on.
+
 ## Presentation
 
 ### Layout

@@ -1,0 +1,8 @@
+cmake_minimum_required(VERSION 3.24)
+project(octant_windows_credentials LANGUAGES CXX)
+add_executable(octant-credential-helper main.cpp)
+target_compile_features(octant-credential-helper PRIVATE cxx_std_17)
+target_compile_definitions(octant-credential-helper PRIVATE UNICODE _UNICODE WIN32_LEAN_AND_MEAN NOMINMAX _WIN32_WINNT=0x0A00)
+set_property(TARGET octant-credential-helper PROPERTY MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
+target_compile_options(octant-credential-helper PRIVATE /W4 /WX /EHsc /utf-8)
+target_link_libraries(octant-credential-helper PRIVATE advapi32 bcrypt crypt32)

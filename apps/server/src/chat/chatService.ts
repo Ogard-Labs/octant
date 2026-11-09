@@ -63,6 +63,7 @@ import {
   decodeChatThread,
   decodeChatTurn,
   type ChatAttachment,
+  type ChatAttachmentMediaType,
   type ChatAttempt,
   type ChatAttemptHandoff,
   type ChatAttemptOutcome,
@@ -898,6 +899,18 @@ function threadIdNamedBy(input: unknown): string | undefined {
   return typeof threadId === "string" ? threadId : undefined;
 }
 
+/**
+ * An attachment carried by a move, under the id the destination gave it. An
+ * original input a turn admitted from another thread arrives as one of these
+ * too: that thread stays on the other computer, so the moved turn owns it.
+ */
+export interface MovedChatAttachment {
+  readonly attachmentId: ChatAttachmentId;
+  readonly displayName: string;
+  readonly mediaType: ChatAttachmentMediaType;
+  readonly bytes: Uint8Array;
+}
+
 /** A Chat conversation carried by a move, as the destination opens it. */
 export interface MovedChatThreadImport {
   readonly moveId: string;
@@ -909,6 +922,7 @@ export interface MovedChatThreadImport {
   readonly turns: ReadonlyArray<{
     readonly userText: string;
     readonly createdAt: ChatTurn["createdAt"];
+    readonly attachments?: ReadonlyArray<MovedChatAttachment>;
     readonly attempts: ReadonlyArray<{
       readonly providerInstanceId: ChatAttempt["providerInstanceId"];
       readonly providerSessionId: ChatAttempt["providerSessionId"];
@@ -919,6 +933,8 @@ export interface MovedChatThreadImport {
       readonly updatedAt: ChatAttempt["updatedAt"];
     }>;
   }>;
+  /** Attachments the person had added to the thread and not sent yet. */
+  readonly unsentAttachments?: ReadonlyArray<MovedChatAttachment>;
 }
 
 export class ChatServiceError extends Error {
@@ -953,10 +969,15 @@ export function readChatThreadView(
   };
 }
 
-function assertReadableChatThread(
+/**
+ * The Chat thread read rule every Open of a Chat thread applies, exported so
+ * a reader that serves something a thread owns asks this same rule rather
+ * than a copy of it. Returns the thread it admitted.
+ */
+export function assertReadableChatThread(
   persistence: Pick<PersistenceService, "readChatThread">,
   threadId: ChatThreadId,
-): void {
+): NonNullable<ReturnType<PersistenceService["readChatThread"]>> {
   const thread = persistence.readChatThread(threadId);
   if (thread === undefined || thread.lifecycle === "deleted") {
     throw new ChatServiceError({
@@ -970,6 +991,7 @@ function assertReadableChatThread(
       message: "Chat thread is being deleted.",
     });
   }
+  return thread;
 }
 
 function withChatThreadHeadVersion(
@@ -3285,8 +3307,13 @@ export class ChatService {
     const timestamp = decodeTimestamp(this.#clock());
     const copiedContent: PreparedChatContent[] = [];
     const turns: ChatTurn[] = [];
+    const carried: Array<{
+      readonly turnId?: ChatTurn["id"];
+      readonly moved: MovedChatAttachment;
+    }> = (input.unsentAttachments ?? []).map((moved) => ({ moved }));
     for (const moved of input.turns) {
       const turnId = this.#uuid() as ChatTurn["id"];
+      for (const attachment of moved.attachments ?? []) carried.push({ turnId, moved: attachment });
       const userMessage = this.#prepareContent(threadId, "user", moved.userText);
       copiedContent.push(userMessage);
       const attempts = moved.attempts.map((attempt) => {
@@ -3317,11 +3344,42 @@ export class ChatService {
           threadId,
           sequence: turns.length + 1,
           userMessageRef: userMessage.reference,
-          attachmentIds: [],
+          attachmentIds: (moved.attachments ?? []).map((attachment) => attachment.attachmentId),
           attempts,
           createdAt: moved.createdAt,
         }),
       );
+    }
+    // The bytes are finalized before the thread is journaled, and removed if
+    // it is not, so no attachment exists here without the thread naming it.
+    const attachments: ChatAttachment[] = [];
+    try {
+      for (const { turnId, moved } of carried) {
+        const finalized = await this.#attachmentStore.finalize(
+          await this.#attachmentStore.stage({
+            chatThreadId: threadId,
+            chatAttachmentId: moved.attachmentId,
+            displayName: moved.displayName,
+            bytes: moved.bytes,
+          }),
+        );
+        attachments.push(
+          decodeChatAttachment({
+            id: finalized.chatAttachmentId,
+            threadId,
+            ...(turnId === undefined ? {} : { turnId }),
+            displayName: finalized.displayName,
+            mediaType: moved.mediaType,
+            byteLength: finalized.size,
+            digest: finalized.hash,
+            status: "finalized",
+            createdAt: timestamp,
+          }),
+        );
+      }
+    } catch (error) {
+      await this.#attachmentStore.purgeThread(threadId).catch(() => undefined);
+      throw error;
     }
     const created = createChatThread({
       id: threadId,
@@ -3336,7 +3394,7 @@ export class ChatService {
     });
     const settled = decodeChatThread({
       ...created,
-      version: (turns.length + 2) as AggregateVersion,
+      version: (turns.length + attachments.length + 2) as AggregateVersion,
       updatedAt: timestamp,
     });
     // What the thread read on its source is in its context from the first
@@ -3344,27 +3402,40 @@ export class ChatService {
     const inheritedMark: InheritedExternalContentMark | undefined = input.externalContentIngested
       ? { sourceLabel: "moved-thread", contentReference: `moved-thread-${input.moveId}` }
       : undefined;
-    await this.#scratchStore.acquire(threadId);
-    this.#journalNewThread(threadId, inheritedMark, () =>
-      this.#persistence.journal.append(
-        {
-          aggregate: { aggregateType: "chat-thread", aggregateId: threadId },
-          expectedVersion: 0,
-          events: [
-            this.#pending("chat.thread-created@1", { kind: "thread-created", thread: created }),
-            ...turns.map((turn) =>
-              this.#pending("chat.turn-created@1", { kind: "turn-created", turn }),
-            ),
-            this.#pending("chat.thread-updated@1", { kind: "thread-updated", thread: settled }),
-          ],
-        },
-        {
-          beforeEvents: (connection) => {
-            for (const content of copiedContent) this.#writePreparedContent(connection, content);
+    try {
+      await this.#scratchStore.acquire(threadId);
+      this.#journalNewThread(threadId, inheritedMark, () =>
+        this.#persistence.journal.append(
+          {
+            aggregate: { aggregateType: "chat-thread", aggregateId: threadId },
+            expectedVersion: 0,
+            events: [
+              this.#pending("chat.thread-created@1", { kind: "thread-created", thread: created }),
+              ...turns.map((turn) =>
+                this.#pending("chat.turn-created@1", { kind: "turn-created", turn }),
+              ),
+              ...attachments.map((attachment) =>
+                this.#pending("chat.attachment-updated@1", {
+                  kind: "attachment-updated",
+                  attachment,
+                }),
+              ),
+              this.#pending("chat.thread-updated@1", { kind: "thread-updated", thread: settled }),
+            ],
           },
-        },
-      ),
-    );
+          {
+            beforeEvents: (connection) => {
+              for (const content of copiedContent) this.#writePreparedContent(connection, content);
+            },
+          },
+        ),
+      );
+    } catch (error) {
+      if (attachments.length > 0) {
+        await this.#attachmentStore.purgeThread(threadId).catch(() => undefined);
+      }
+      throw error;
+    }
     return settled;
   }
 

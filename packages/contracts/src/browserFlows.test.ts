@@ -31,10 +31,36 @@ describe("a saved Browser flow", () => {
     expect(() => decode(flow({ steps: [{ ...step, ref: "e4" }] }))).toThrow();
   });
 
-  it("lets the person list and delete and nothing else", () => {
+  it("requires a host-issued review identity before a person can start a fixed run", () => {
     expect(decodeBrowserFlowsCommand({ kind: "list" })).toEqual({ kind: "list" });
     expect(() =>
       Schema.decodeUnknownSync(BrowserFlowsCommand)({ kind: "run", name: "x" }),
     ).toThrow();
+    expect(() =>
+      decodeBrowserFlowsCommand({ kind: "start-run", runId: "not-a-review", values: [] }),
+    ).toThrow();
+    expect(() =>
+      decodeBrowserFlowsCommand({
+        kind: "start-run",
+        runId: "10000000-0000-4000-8000-000000000001",
+        values: [{ step: 50, text: "outside" }],
+      }),
+    ).toThrow();
+    expect(() =>
+      decodeBrowserFlowsCommand({
+        kind: "review-run",
+        projectId: "10000000-0000-4000-8000-000000000001",
+        threadId: "10000000-0000-4000-8000-000000000002",
+        name: "Check",
+        mode: "chat",
+      }),
+    ).toThrow();
+    expect(
+      decodeBrowserFlowsCommand({
+        kind: "start-run",
+        runId: "10000000-0000-4000-8000-000000000001",
+        values: [{ step: 0, text: "run only" }],
+      }),
+    ).toMatchObject({ kind: "start-run" });
   });
 });

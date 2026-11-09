@@ -68,7 +68,7 @@ function modeIcon(
 
 export function InboxHomeScreen(props: InboxHomeScreenProps) {
   const { colors } = useTheme();
-  const { transports, hosts, hostsLoaded, health, refreshHosts } = useMobileSession();
+  const { environment, transports, hosts, hostsLoaded, health, refreshHosts } = useMobileSession();
   const emptyState =
     props.homeMode === "inbox" ? inboxEmptyState({ hosts, hostsLoaded }) : undefined;
   const [rows, setRows] = useState<ReadonlyArray<MobileInboxRow>>([]);
@@ -140,7 +140,8 @@ export function InboxHomeScreen(props: InboxHomeScreenProps) {
     setCodeRetry(undefined);
   }, []);
   const voice = useVoiceDictation({
-    transport: placementTransport,
+    transport:
+      environment.kind === "mock" && environment.offlineDemo ? undefined : placementTransport,
     editable: composerEditable && !creating,
     appendToDraft,
   });

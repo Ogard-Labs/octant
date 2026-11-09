@@ -1,6 +1,7 @@
 // Loopback routes a window on this host uses to move one of its threads to
 // another member: list the member computers and their Projects, fetch the
-// destination's owner challenge for this Mac's Touch ID, start the move, read
+// destination's owner challenge for this Mac's Touch ID or hold the move for an
+// owner phone to confirm, start the move, read
 // where it stands, and cancel, take back, activate, or dismiss. Like the rest
 // of hub administration these answer only the loopback desktop bridge with an
 // authenticated window capability and refuse a request that carries an Origin
@@ -14,12 +15,16 @@ import {
   decodeHandoverControlRequest,
   decodeHandoverRequest,
   decodeShutdownChallengeRequest,
+  decodeShutdownPhoneAskRequest,
+  decodeShutdownHandoverRequest,
   decodeShutdownStartRequest,
   decodeThreadMoveChallengeRequest,
   decodeThreadMoveControlRequest,
+  decodeThreadMovePhoneAskRequest,
   decodeThreadMoveSizesRequest,
   decodeThreadMoveStartRequest,
   decodeThreadMoveThreadRequest,
+  type HandoverOutcome,
   type MovedThreadReference,
 } from "@octant/contracts";
 import { isLoopbackHostname } from "../shellRoutes";
@@ -37,6 +42,8 @@ export const THREAD_MOVE_ADMINISTRATION_ROUTES = {
   destinations: "/api/desktop/hub/thread-moves/destinations",
   challenge: "/api/desktop/hub/thread-moves/challenge",
   start: "/api/desktop/hub/thread-moves/start",
+  // Held until an owner phone confirms it with its own unlock on the destination.
+  phoneAsk: "/api/desktop/hub/thread-moves/phone-ask",
   status: "/api/desktop/hub/thread-moves/status",
   stopWaiting: "/api/desktop/hub/thread-moves/stop-waiting",
   cancel: "/api/desktop/hub/thread-moves/cancel",
@@ -51,6 +58,8 @@ export const THREAD_MOVE_ADMINISTRATION_ROUTES = {
   shutdownListing: "/api/desktop/hub/thread-moves/shutdown/listing",
   shutdownChallenge: "/api/desktop/hub/thread-moves/shutdown/challenge",
   shutdownStart: "/api/desktop/hub/thread-moves/shutdown/start",
+  shutdownPhoneAsk: "/api/desktop/hub/thread-moves/shutdown/phone-ask",
+  shutdownHandover: "/api/desktop/hub/thread-moves/shutdown/handover",
   shutdownSizes: "/api/desktop/hub/thread-moves/shutdown/sizes",
   // A Code thread that cannot move hands over through its branch.
   handoverPreview: "/api/desktop/hub/thread-moves/handover/preview",
@@ -163,6 +172,24 @@ export function createThreadMoveAdministrationRouteHandler(
           );
         case THREAD_MOVE_ADMINISTRATION_ROUTES.shutdownStart:
           return outcome(await options.moves.shutdownStart(decodeShutdownStartRequest(value)));
+        case THREAD_MOVE_ADMINISTRATION_ROUTES.shutdownPhoneAsk:
+          return outcome(
+            await options.moves.shutdownAskPhone(decodeShutdownPhoneAskRequest(value)),
+          );
+        // Prepare to shut down hands over for the whole host, as its batch
+        // moves do, so it is not limited to threads this window shows; it
+        // hands over only what the listing offers Hand over for.
+        case THREAD_MOVE_ADMINISTRATION_ROUTES.shutdownHandover: {
+          const asked = decodeShutdownHandoverRequest(value);
+          const refusal = await options.moves.shutdownHandoverRefusal(asked);
+          if (refusal !== undefined) {
+            const refused: HandoverOutcome = { status: "refused", reason: refusal };
+            return outcome(refused);
+          }
+          return outcome(
+            await options.handovers.handOver(asked.thread, String(asked.destinationMemberId)),
+          );
+        }
         case THREAD_MOVE_ADMINISTRATION_ROUTES.shutdownSizes:
           return outcome(await options.moves.sizes(decodeThreadMoveSizesRequest(value)));
         case THREAD_MOVE_ADMINISTRATION_ROUTES.handoverPreview:
@@ -217,6 +244,11 @@ export function createThreadMoveAdministrationRouteHandler(
           const started = decodeThreadMoveStartRequest(value);
           if (!holds(started.thread)) return unavailable();
           return outcome(await options.moves.start(started));
+        }
+        case THREAD_MOVE_ADMINISTRATION_ROUTES.phoneAsk: {
+          const asked = decodeThreadMovePhoneAskRequest(value);
+          if (!holds(asked.thread)) return unavailable();
+          return outcome(await options.moves.askPhone(asked));
         }
         case THREAD_MOVE_ADMINISTRATION_ROUTES.stopWaiting: {
           const { thread } = decodeThreadMoveThreadRequest(value);

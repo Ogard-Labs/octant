@@ -254,6 +254,18 @@ describe("extension popup request", () => {
   it("accepts exactly the shapes the renderer may send", () => {
     expect(validateExtensionPopupRequest(valid)).toEqual(valid);
     expect(
+      validateExtensionPopupRequest({
+        ...valid,
+        profile: { kind: "account", profileId: projectId },
+      }),
+    ).toMatchObject({ profile: { kind: "account", profileId: projectId } });
+    expect(() =>
+      validateExtensionPopupRequest({
+        ...valid,
+        profile: { kind: "account", profileId: "../../another-profile" },
+      }),
+    ).toThrow(TypeError);
+    expect(
       validateExtensionPopupRequest({ ...valid, profile: { kind: "personal" }, kind: "popup" }),
     ).toMatchObject({ profile: { kind: "personal" }, kind: "popup" });
   });

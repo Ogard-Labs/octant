@@ -6,6 +6,7 @@ import { join } from "node:path";
 import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import { inflateSync } from "node:zlib";
+import { decodeBrowserFlow } from "@octant/contracts";
 import type {
   BrowserAccessibilityAudit,
   BrowserContextId,
@@ -18,7 +19,8 @@ import type {
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { createBrowserAppManagedTools } from "./browserAppManagedTools";
 import { BrowserFlowRecorder, type BrowserFlowToolPort } from "./browserFlows";
-import { BrowserAutomationService } from "./browserAutomationService";
+import { BrowserAutomationService, type BrowserFlowCustody } from "./browserAutomationService";
+import { BrowserFlowRuns } from "./browserFlowRuns";
 import { createPlaywrightBrowserRuntime } from "./playwrightBrowserRuntime";
 
 /**
@@ -28,6 +30,7 @@ import { createPlaywrightBrowserRuntime } from "./playwrightBrowserRuntime";
  */
 
 const pages: Record<string, string> = {
+  "/flow-key": `<!doctype html><title>Key page</title><input aria-label="Message" autofocus><p id="count">Key presses: 0</p><script>let count=0;document.addEventListener('keydown',event=>{if(event.key==='Enter')document.getElementById('count').textContent='Key presses: '+(++count);});</script>`,
   "/login": `<!doctype html><title>Sign in</title>
     <h1>Sign in</h1>
     <form id="f">
@@ -318,6 +321,7 @@ function agentTool(
     readonly captures?: ConstructorParameters<typeof BrowserAutomationService>[0]["captures"];
   } = {},
 ) {
+  let flowCustody: BrowserFlowCustody | undefined;
   const asked: Array<Record<string, unknown>> = [];
   const journal = { saved: vi.fn(), refused: vi.fn() };
   const service = new BrowserAutomationService({
@@ -363,8 +367,13 @@ function agentTool(
             }
           : inspected;
       },
-      create: (input) => service.create(input),
-      act: (input) => service.act(input),
+      create: (input) =>
+        service.create({
+          ...input,
+          ...(flowCustody === undefined ? {} : { flowRun: flowCustody }),
+        }),
+      act: (input) =>
+        service.act({ ...input, ...(flowCustody === undefined ? {} : { flowRun: flowCustody }) }),
       saveDownload: (input) => service.saveDownload(input),
       releaseThread: (window, thread) => service.releaseThread(window, thread),
       holdForPerson: (window, thread) => service.holdForPerson(window, thread),
@@ -402,7 +411,25 @@ function agentTool(
       };
     };
   };
-  return { asked, call, service, journal, stop: () => call({ operation: "stop" }) };
+  return {
+    asked,
+    call,
+    service,
+    journal,
+    claimFlow: (current: () => boolean) => {
+      const custody = service.claimFlowRun({ windowId, threadId, mode: "work", current });
+      flowCustody = custody;
+      return custody === undefined
+        ? undefined
+        : {
+            release: () => {
+              custody.release();
+              flowCustody = undefined;
+            },
+          };
+    },
+    stop: () => call({ operation: "stop" }),
+  };
 }
 
 function refFor(outline: string | undefined, line: RegExp): string {
@@ -1519,6 +1546,37 @@ describe.skipIf(!available)("the agent's Browser tool on a real page", () => {
       await rm(workspace, { recursive: true, force: true });
     });
 
+    it("stops simultaneous downloads in separate contexts before their streams finish", async () => {
+      const firstRoot = await mkdtemp(join(tmpdir(), "octant-download-concurrent-a-"));
+      const secondRoot = await mkdtemp(join(tmpdir(), "octant-download-concurrent-b-"));
+      const first = agentTool({ uploadRoot: firstRoot, downloads: true });
+      const second = agentTool({ uploadRoot: secondRoot, downloads: true });
+      try {
+        const [firstRef, secondRef] = await Promise.all([
+          openDownloadsPage(first),
+          openDownloadsPage(second),
+        ]);
+        const answers = await Promise.all([
+          first.call({ operation: "click", ref: firstRef(/"Big"/) }),
+          second.call({ operation: "click", ref: secondRef(/"Big"/) }),
+        ]);
+        for (const answer of answers)
+          expect(downloadsOf(answer)).toEqual([
+            { state: "refused", name: "big.bin", reason: "too-large" },
+          ]);
+        await new Promise((resolve) => setTimeout(resolve, 300));
+        expect(bigChunksSent).toBeLessThan(BIG_CHUNKS);
+        expect(existsSync(join(firstRoot, "downloads"))).toBe(false);
+        expect(existsSync(join(secondRoot, "downloads"))).toBe(false);
+      } finally {
+        await Promise.all([first.stop(), second.stop()]);
+        await Promise.all([
+          rm(firstRoot, { recursive: true, force: true }),
+          rm(secondRoot, { recursive: true, force: true }),
+        ]);
+      }
+    });
+
     it("never overwrites: a second file of the same name gets a number", async () => {
       const workspace = await mkdtemp(join(tmpdir(), "octant-download-"));
       const tool = agentTool({ uploadRoot: workspace, downloads: true });
@@ -1630,6 +1688,128 @@ describe.skipIf(!available)("recording and replaying a Browser flow on a real pa
       ],
     });
     await fresh.stop();
+  });
+
+  it("runs reviewed text and title values through the real page without changing the saved flow", async () => {
+    const flows = flowPort();
+    await recordOrderCheck(flows);
+    const fresh = agentTool();
+    const projectId = authority.projectId;
+    if (projectId === undefined) throw Error("Project fixture missing");
+    const task = {
+      threadId,
+      mode: "work" as const,
+      title: "Check form",
+      modelId: "model" as never,
+      accessLabel: "Ask first",
+      profileLabel: "Private",
+    };
+    const runs = new BrowserFlowRuns({
+      readFlow: (_project, name) => flows.saved.get(name),
+      tasks: () => [task],
+      bindTask: () => ({
+        fingerprint: "reviewed-task-model-profile",
+        refs: () => fresh.service.snapshotRefs(windowId, threadId),
+        execute: async (step) => {
+          const answer = await fresh.call({ ...step });
+          return { result: answer.result, isError: answer.isError };
+        },
+        claim: fresh.claimFlow,
+      }),
+      uuid: randomUUID,
+      now: Date.now,
+    });
+    try {
+      const review = runs.review(windowId, projectId, "Order check", task);
+      if (review.kind !== "browser-flow-run") throw Error("Review refused");
+      expect(fresh.service.inspectThread(windowId, threadId).context).toBeUndefined();
+      await runs.start(windowId, review.run.id, [
+        { step: 1, text: "Grace" },
+        { step: 2, expectedTitle: "Saved Grace" },
+      ]);
+      await vi.waitFor(
+        () =>
+          expect(runs.inspect(windowId, review.run.id)).toMatchObject({
+            run: { state: "completed", completed: 3 },
+          }),
+        { timeout: 15_000 },
+      );
+      expect(fresh.service.inspectThread(windowId, threadId).observation?.title).toBe(
+        "Saved Grace",
+      );
+      expect(flows.saved.get("Order check")?.steps[1]?.input.text).toBe("Ada");
+      expect(flows.saved.get("Order check")?.steps[2]?.expect.title).toBe("Saved Ada");
+    } finally {
+      runs.close();
+      await fresh.stop();
+    }
+  });
+
+  it("sends an untargeted reviewed keypress after a person hands the page back", async () => {
+    const fresh = agentTool();
+    await fresh.call({ operation: "navigate", url: `${origin}/flow-key` });
+    const projectId = authority.projectId;
+    if (projectId === undefined) throw Error("Project fixture missing");
+    const task = {
+      threadId,
+      mode: "work" as const,
+      title: "Send key",
+      modelId: "model" as never,
+      accessLabel: "Ask first",
+      profileLabel: "Private",
+    };
+    const flow = decodeBrowserFlow({
+      name: "Send key",
+      savedAt: new Date().toISOString(),
+      steps: [
+        {
+          operation: "press",
+          input: { operation: "press", key: "Enter" },
+          expect: { path: "/flow-key", title: "Key page" },
+        },
+      ],
+    });
+    const runs = new BrowserFlowRuns({
+      readFlow: () => flow,
+      tasks: () => [task],
+      bindTask: () => ({
+        fingerprint: "current",
+        refs: () => fresh.service.snapshotRefs(windowId, threadId),
+        execute: async (step) => {
+          const answer = await fresh.call({ ...step });
+          return { result: answer.result, isError: answer.isError };
+        },
+        claim: fresh.claimFlow,
+      }),
+      uuid: randomUUID,
+      now: Date.now,
+    });
+    try {
+      const review = runs.review(windowId, projectId, flow.name, task);
+      if (review.kind !== "browser-flow-run") throw Error("Review refused");
+      fresh.service.takeOver(windowId, threadId);
+      await runs.start(windowId, review.run.id, []);
+      await vi.waitFor(() =>
+        expect(runs.inspect(windowId, review.run.id)).toMatchObject({
+          run: { state: "paused", completed: 0 },
+        }),
+      );
+      fresh.service.handBack(windowId, threadId);
+      await runs.resume(windowId, review.run.id);
+      await vi.waitFor(
+        () =>
+          expect(runs.inspect(windowId, review.run.id)).toMatchObject({
+            run: { state: "completed", completed: 1 },
+          }),
+        { timeout: 10_000 },
+      );
+      expect((await fresh.call({ operation: "read-page" })).result.page?.text).toContain(
+        "Key presses: 1",
+      );
+    } finally {
+      runs.close();
+      await fresh.stop();
+    }
   });
 
   it("stops at the step whose button changed its name, and names it", async () => {

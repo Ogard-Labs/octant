@@ -43,7 +43,7 @@ real hub or a real Tailscale certificate. Nothing here has been run on a real ph
 passkey, or Android. An owner device's one unlock covers five minutes of
 administration (the host keeps the session in memory), copies an API-key
 sign-in between two spokes, reads a Code posture, and applies or dismisses a
-provisioning proposal, read narrowly as slice 5 and slice 10 record; an owner can change an active Code thread or Code Project posture through the existing owner route, with host-local current-state checks and owner-device journal attribution. A Mac's Touch ID unlock key is built
+provisioning proposal, read narrowly as slice 5 and slice 10 record; an owner can change an active local Work thread, Code thread or Code Project posture through the existing owner route, with host-local current-state checks and owner-device journal attribution. A Mac's Touch ID unlock key is built
 (a Secure Enclave key made through the desktop's native helper and registered
 when the Mac joins a hub, read narrowly as slice 5 records); the real Touch ID
 prompt has not been run. The wake service is built (the hub's own
@@ -590,19 +590,19 @@ from their phone or laptop what they could do sitting at any of them. An
 
 #### Recovery inventory
 
-Code posture recovery is the bounded owner-device path. It does not grant an
+Work and Code access recovery is the bounded owner-device path. It does not grant an
 owner device every action that can unblock a task. The inventory below keeps
 those decisions separate. A refused request has no effect; retry requires a
 new authoritative reading and the proof required for that action.
 
-| Request                                  | Eligible responder and current boundary                                                                                                                                                                     | Queue and resume                                                                                     | Additional authority needed                                                                                  |
-| ---------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------ |
-| Code thread or Code Project posture      | An owner on this host's current owner list; Full access needs its own fresh unlock. The existing owner route applies the change through the Code or Project service after checking its current-state token. | Changing a level affects subsequent launches; it does not answer a waiting prompt or restart a turn. | Built through the existing posture routes and Settings/phone controls; no other grant follows.               |
-| Work level                               | The existing host-local controls; the Code posture routes do not accept Work subjects.                                                                                                                      | No owner recovery queue or automatic resume is added.                                                | A separate Work posture decision and route.                                                                  |
-| Approval answer                          | A paired device may approve once or deny prompts its own turns raised. A prompt raised by a local window stays local. The existing approval service checks the recorded turn and Project.                   | Existing prompt expiry and settlement apply; an owner unlock does not transfer a prompt.             | A separate decision for any additional eligible responder; no general owner approval route is granted.       |
-| File restore                             | The existing restore command and its approval, checkout freshness and live-writer checks.                                                                                                                   | An owner posture change neither approves nor retries a restore.                                      | Any owner recovery path must reuse those checks and define its own proof.                                    |
-| Saved-action launch                      | Existing action-launch authority on the selected host and checkout.                                                                                                                                         | No automatic relaunch after a lost reply or posture change.                                          | Server action delivery remains a separate slice; posture recovery adds no launch grant.                      |
-| Browser interaction, profile or transfer | Existing host-local take-over, profile and transfer rules. Owner posture recovery adds no remote controller or profile access.                                                                              | Preserve the existing pause, hand-back and disconnect rules.                                         | A separate owner browser decision must name permitted operations, controller arbitration and local recovery. |
+| Request                                  | Eligible responder and current boundary                                                                                                                                                                     | Queue and resume                                                                                     | Additional authority needed                                                                                               |
+| ---------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------- |
+| Code thread or Code Project posture      | An owner on this host's current owner list; Full access needs its own fresh unlock. The existing owner route applies the change through the Code or Project service after checking its current-state token. | Changing a level affects subsequent launches; it does not answer a waiting prompt or restart a turn. | Built through the existing posture routes and Settings/phone controls; no other grant follows.                            |
+| Work level                               | An enrolled owner uses the existing signed posture route for an active local Work thread and Project. The exact target/current-state digest is required; Full access needs its own fresh unlock.            | The next turn uses the chosen level; a running turn keeps its admitted level. No automatic resume.   | Built in the Work service and Settings/phone controls. No Plan, remembered Project default or approval answer is granted. |
+| Approval answer                          | A paired device may approve once or deny prompts its own turns raised. A prompt raised by a local window stays local. The existing approval service checks the recorded turn and Project.                   | Existing prompt expiry and settlement apply; an owner unlock does not transfer a prompt.             | A separate decision for any additional eligible responder; no general owner approval route is granted.                    |
+| File restore                             | The existing restore command and its approval, checkout freshness and live-writer checks.                                                                                                                   | An owner posture change neither approves nor retries a restore.                                      | Any owner recovery path must reuse those checks and define its own proof.                                                 |
+| Saved-action launch                      | Existing action-launch authority on the selected host and checkout.                                                                                                                                         | No automatic relaunch after a lost reply or posture change.                                          | Server action delivery remains a separate slice; posture recovery adds no launch grant.                                   |
+| Browser interaction, profile or transfer | Existing host-local take-over, profile and transfer rules. Owner posture recovery adds no remote controller or profile access.                                                                              | Preserve the existing pause, hand-back and disconnect rules.                                         | A separate owner browser decision must name permitted operations, controller arbitration and local recovery.              |
 
 Rationale: the earlier rule, that only a window on the host may administer it
 or hold its most sensitive powers, assumed every other device might belong to
@@ -955,8 +955,10 @@ peer grant for the source has the **Move in** item. Move in is in the
 full-member grant ([decision H2](#decisions)); a destination with Owners
 unticked refuses every move. Usually the source is itself an owner device, so
 the person touches Touch ID on the laptop they are leaving; a phone that is an
-owner on both hosts can start the move instead. A source that is not an owner
-on the destination is told so, with how to mark it.
+owner on both hosts can unlock the move instead, from a move the person started
+in the source's window ([Confirming on a phone](#moving-a-thread-to-another-member),
+below). A source that is not an owner on the destination is told so, with how
+to mark it, and offered the phone.
 
 A full member's grant stored before Move in existed has no such item. It
 reads as on while the rest of it is still exactly the full-member grant, and
@@ -986,6 +988,66 @@ fifteen minutes and opens one move from that source. Rationale: Move after
 this turn waits for the turn to end without asking the person again, and a
 turn that outlasts the ticket ends the move with `unlock-required`.
 
+**Confirming on a phone.** A window with no Touch ID key, or a person who
+would rather use their phone, presses **Confirm on your phone** instead. The
+source then holds the move, freezing and sending nothing, for at most five
+minutes. A phone that is an owner on the source reads what waits there (an
+owner read that asks for no unlock, `GET /api/hub/owner/thread-moves/confirmations`),
+showing each held move's threads by title and its destination by name. On
+**Confirm move**, the phone asks the destination for the move ticket itself, as
+an owner on the destination's own list: the destination's owner challenge
+names the ticket route and that exact body (the source the phone read the wait
+from, never one the listing names, and exactly the held threads), the phone's
+own unlock key signs it after Face ID, Touch ID, or the passcode, and the
+destination issues the ticket only after that fresh own-class unlock. The phone
+then hands the source only the ticket id
+(`POST /api/hub/owner/thread-moves/confirm`, an administration-class owner
+action on the source). The source spends the confirmation whatever the ticket
+turns out to be and moves the threads, destination, and Projects it holds;
+the phone cannot change them. A ticket the destination did not issue, or
+issued for another source or other threads, is refused at the offer, and that
+move ends in This thread can't move with `refused`. A thread that can no
+longer be read when the confirmed move launches (a Code thread whose managed
+worktree receipt became unreadable) ends with `transfer-failed` and the rest
+of its batch carries on. A wait no phone answers ends with `unlock-required`,
+and Don't move in the window ends it sooner. Each thread has one claim, from
+the moment a window asks to move it until its move starts or its wait ends,
+shared by Move with Touch ID, Stop and move, Prepare to shut down, and the
+phone: a second way to move a thread already claimed is refused as `busy`
+rather than started twice. A phone-held row set to Stop and move stops its
+turn only once the phone confirms and the thread is read again, never while
+it waits. In Prepare to shut down, Confirm on your phone holds every
+destination's rows at once, one confirmation per destination on the phone;
+one press uses one way to unlock, so Touch ID for one destination and the
+phone for another in the same press is not offered. Every row a batch asks
+for, by phone or Touch ID, either starts or comes back named as left out with
+its reason: a thread already gone ends as `refused` with its own failure, and
+one another move or wait already holds comes back as `busy` with no failure
+of its own, since that move says how it ends. The window waits only on the
+rows the host took. The phone asks every spoke and
+standby computer it can reach for what waits there, since a standby is a spoke
+that can move threads away; it never asks the hub, which moves nothing away.
+Holding the phone's raw unlock key open for the one confirmation lets the
+person authenticate once for both computers; the key is dropped afterwards.
+Rationale: the destination's own owner check, with its challenge bound to the
+ticket route and body, is unchanged and stays the only thing that authorizes
+the move; the source learns nothing it could replay, because a ticket opens
+moves only from that source and only of the threads it names; and asking for
+an unlock on the source as well keeps a stolen phone without the person's
+face, finger, or passcode from even spending a confirmation there. The
+waits live in memory only, so a restart ends them and the person asks again.
+
+**A browser passkey does not confirm a move, and none is planned.** A passkey belongs to the one
+origin that registered it, and the destination checks a passkey owner only on
+its own origin, so a browser on the source's page holds no passkey the
+destination would accept. Confirming from a browser would need the person to
+open the destination's own page, which would then have to read what the source
+holds and hand the source the ticket: a cross-origin read and a cross-origin
+write to the source. Every request that changes something stays same-origin
+(see [Delivery plan](#delivery-plan), Guests and client views). Touch ID and
+an owner phone cover the move, so no new credential, origin allowance, or
+related-origin passkey is added for it.
+
 **The person is the same everywhere.** A host has one person, and every member
 is that person's own device, so a moved thread arrives as the person's own
 thread, as if they had made it in a window on the destination. It is journaled
@@ -1012,13 +1074,77 @@ The move sheet offers **Move after this turn**, which waits for the turn to
 end, and **Stop and move**, which stops it and cancels its pending approvals
 and questions.
 
+**Stop and move** is only ever the person's own choice in a window, and the
+source checks it per thread on the server: the window route acts only on a
+thread that window shows, and Prepare to shut down only on a thread its
+redeemed batch ticket names that is on this host and not delegated to it.
+The destination's unlock is redeemed first, so a declined or expired unlock
+stops nothing. The source then stops the thread's work through each mode's
+own Stop, the one the person presses in the thread: the running Chat
+attempt, the Code provider turn, or the Work turn, which ends the approvals
+and questions that turn was waiting on. It also cancels every child run the
+thread started here, with its own children, and asks each member running a
+child the thread delegated there to stop it. The move starts once the thread
+reads as idle; the thread's status says it is stopping meanwhile. A turn
+still running two minutes after the stop did not take it, and the move ends
+with `busy` rather than waiting on a turn the person asked to end.
+Rationale: a runtime that can be force-stopped keeps its turn streaming until
+it really ends, so the stop is not instant, but the person is about to switch
+the computer off and needs a clear answer. A thread already idle moves at
+once without anything being stopped. Nothing freezes the thread between the
+stop and the move: a new turn that starts in that moment (a delivered child
+result, a message from another member) makes the move end with `busy`, as
+for Move after this turn.
+
 **What moves.**
 
 - The thread's journal cut in the `octant.thread-bundle/1` form (transcript,
   evidence, provenance, and taint), plus each thread-owned part that export
   lists as an omission: attachment bytes, admitted original inputs, generated
   images, retained Browser captures, and the Canvases the thread owns with
-  their versions.
+  their versions. Each is its own manifest part with its size and digest, and
+  the destination records it under the new thread with new ids:
+  - An attachment arrives on the turn that sent it, and one added but not
+    sent arrives unsent. An original input a turn admitted from another
+    thread arrives as an attachment of the moved turn, because that thread
+    stays on the source. The source reads it with its whole recorded
+    reference (thread, Project, attachment, and digest) through the same
+    reader a provider turn's inputs pass, so an input a turn could no longer
+    be given (its source thread moved to another Project, or the attachment
+    is gone or changed) stays behind and is named, and a move never makes it
+    available again. The other bulk parts are the moving thread's own: its
+    attachments, the images generated in its scope, the captures kept for
+    it, and the Canvases whose provenance names it.
+  - A generated image arrives as a completed image of the new thread. It
+    records no usage on the destination: it ran, and was billed, on the
+    source, whose accounting keeps it.
+  - A Browser capture arrives without the name of the Browser profile its
+    page lived in, because profiles never move.
+  - The Canvases the thread owns are every Canvas whose provenance names it,
+    the ones its erase would remove. Each arrives with every version, in
+    order, in the Project the thread moves into (none for a Chat thread moved
+    into none). Its content is unchanged, so a source reference in it still
+    names the computer it was read on, with one exception: a design asset
+    that names a generated image or Browser capture which travelled with the
+    thread is pointed at the copy that arrived, because the destination draws
+    a design from its own stores. An asset naming one that stayed behind
+    keeps its old reference and draws as missing; the receipt names the part. A Canvas that recorded outside content
+    on the source carries that mark from its first version, and marks every
+    agent that reads it.
+  - A part whose bytes cannot be read on the source, or no longer match the
+    digest a turn admitted, stays behind. The move goes on, because the person
+    is about to shut the computer down, and the "Moved to" record names each
+    part that stayed, up to the first 1,000 (each name cut to 512
+    characters), and counts them all. The source bounds the list when it
+    packs, before anything is erased, so the record it writes after the erase
+    always fits. The erase removes the part with the thread. A part the
+    destination cannot record refuses the arrival with `transfer-failed`, so
+    the source keeps the thread.
+  - The Secret guard reads the checkout, not these parts. Rationale: they are
+    content the thread already holds and handed its provider, sent to the
+    person's own computer over the pinned member link, and a part the guard
+    kept back would be destroyed by the erase rather than kept the way a
+    refused worktree file is.
 - For a Code thread, a Git bundle of its checkout: the commits on the thread's
   branch that the source's remote-tracking refs do not hold, and the
   uncommitted work as two snapshot commits that never join the branch: an
@@ -1222,14 +1348,20 @@ the usual case is one press and one unlock.
 - **The destination.** One **Move to** choice applies to every row set to
   move: the member the person last moved a thread to, otherwise the hub when it
   can take threads, otherwise the first eligible member that is online. A row
-  may name another member through its own choice.
+  may name another member through its own choice: its menu lists, after its
+  own choices, **Move to** each other member that can take it (after this
+  turn when it is busy), and the row then moves there whatever the head
+  names. Changing the head leaves such a row alone, as it does every row the
+  person set.
 - **Each row's starting choice.** A thread the destination can take starts on
   **Move**. One with a running turn or a waiting question starts on **Move
   after this turn**; nothing is stopped unless the person picks Stop and move.
   One the destination cannot take starts on **Leave here** with its
   [reason](#a-thread-that-cannot-move) shown, and when it is a Code thread its
   choice also offers **Hand over**. A handover writes a commit and may push, so
-  it is never preselected. Changing the destination re-evaluates every row that
+  it is never preselected. Only a Code thread that cannot move offers it: one
+  that can moves with its whole history, which a handover would leave behind.
+  Changing the destination re-evaluates every row that
   still holds its starting choice and leaves the person's own choices alone.
 - **One press, one unlock per destination.** The primary action moves every
   row set to move or hand over. A batch is one ticket per destination naming
@@ -1237,7 +1369,40 @@ the usual case is one press and one unlock.
   the ticket then opens one move of each named thread and nothing else, so
   one unlock covers the batch it names and nothing else. The batch's moves run
   one after another, so most are done early, and a thread set to move after
-  its turn starts when that turn ends.
+  its turn starts when that turn ends. When rows move to more than one member,
+  the press asks each destination's owner challenge and Touch ID in turn, the
+  head's first. A destination whose unlock is declined, whose challenge is
+  refused, or whose request fails outright moves nothing; the others still
+  move, its rows count as staying here with the reason on each row, and the
+  screen names that destination. Rows set to hand over are handed over one
+  after another once the unlocks are asked, each telling the head's
+  destination so it shows under its Handovers; one that is refused or whose
+  request fails stays here, named on its row and in the screen's alert. A row
+  set to move or hand over that did not is never counted toward Safe to shut
+  down. A handover that pushes but leaves files out, because the Secret guard
+  refused them, counts as handed over, yet those files have no other copy:
+  its row names them, and the screen never says a plain Safe to shut down
+  while any are left, saying instead how many files stay on this computer
+  and naming them, as a move's tombstone names the files its kept worktree
+  holds. Like the listing and the batch, a row's handover acts for the whole
+  host, so it reaches a Code thread in any Project, open in this window or
+  not; the window route for one thread's handover still acts only on a
+  thread that window shows. The source hands over that way only what the
+  listing offers Hand over for: a Code thread on this host, not delegated to
+  it and not waiting to move, that the head's destination cannot take. The
+  handover itself is the same as from the move sheet, so it still refuses a
+  held or frozen thread. It never runs the agent's summary turn, since the
+  dialog has no switch to ask for one, and no tool, agent, or routine
+  reaches it.
+- **Progress in the menu bar.** While the batch runs, the menu bar shows how
+  many of its threads have ended out of how many (`3/9` beside the glyph,
+  after only the host's own `!`) and a **Moving threads** line in its menu,
+  so hiding the dialog leaves the progress in sight. **Prepare to Shut Down…**
+  sits in the menu bar while the window last saw this host in a hub with
+  another member, or a batch runs, and brings the dialog back in the window
+  that runs the batch. Only that window's dialog changes the menu bar's
+  progress, so another window's dialog with nothing running cannot clear it;
+  closing that window lets the batch's progress go.
 - **Finishing.** The screen says **Safe to shut down** only when every chosen
   thread is committed, or handed over and pushed. A thread whose move cannot
   finish shows [This thread can't move](#a-thread-that-cannot-move) with its
@@ -1339,16 +1504,16 @@ reason, unfreezes the thread, and shows **This thread can't move** with that
 reason in the move sheet and as a notice on the thread itself, which stays until
 the person dismisses it or the thread moves. The reasons are:
 
-| Reason                    | Meaning                                                                                                                                              |
-| ------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `busy`                    | A turn runs, the thread waits on the person, or a child run or remote child run is still going, and the person did not choose Stop and move          |
-| `delegated`               | The thread was delegated to this host by a peer and belongs to that delegation                                                                       |
-| `unlock-required`         | The person declined the unlock, it expired, or this device is not an owner on the destination                                                        |
-| `refused`                 | The destination refused: no Move in item, Owners unticked, or the source is no longer in its roster. It answers every one of these in the same words |
-| `no-eligible-project`     | The destination has no Project of the thread's mode that accepts it (for Code, none bound to the same repository)                                    |
-| `destination-unreachable` | The destination could not be reached before the offer, or stopped answering during the transfer and the person gave up waiting                       |
-| `transfer-failed`         | A part failed its digest check twice, or the destination could not unpack it                                                                         |
-| `no-matching-provider`    | The destination has no provider of the kind the thread ran on, so it cannot continue it                                                              |
+| Reason                    | Meaning                                                                                                                                                                                                   |
+| ------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `busy`                    | A turn runs, the thread waits on the person, or a child run or remote child run is still going, and the person did not choose Stop and move, or the turn did not stop within two minutes of Stop and move |
+| `delegated`               | The thread was delegated to this host by a peer and belongs to that delegation                                                                                                                            |
+| `unlock-required`         | The person declined the unlock, it expired, or this device is not an owner on the destination                                                                                                             |
+| `refused`                 | The destination refused: no Move in item, Owners unticked, or the source is no longer in its roster. It answers every one of these in the same words                                                      |
+| `no-eligible-project`     | The destination has no Project of the thread's mode that accepts it (for Code, none bound to the same repository)                                                                                         |
+| `destination-unreachable` | The destination could not be reached before the offer, or stopped answering during the transfer and the person gave up waiting                                                                            |
+| `transfer-failed`         | A part failed its digest check twice, or the destination could not unpack it                                                                                                                              |
+| `no-matching-provider`    | The destination has no provider of the kind the thread ran on, so it cannot continue it                                                                                                                   |
 
 For a Code thread the same error offers **Hand over instead**. A handover that
 cannot finish its push says so as its own error (`push-failed`, or `no-remote`
@@ -1698,17 +1863,20 @@ maintainer's hardware, or names the maintainer gate.
      compares a counter of owner-list changes (kept in memory, raised on every
      add and remove) with the one the session opened against, so a window that
      removes a device and lists it again ends the session too.
-   - **Postures are a Code Project's and a Code thread's.** A Project's posture is
-     whether it remembers Full access for its threads. Work threads take the shared
-     guardrail levels ([Modes](../architecture.md#modes-chat-work-and-code)), but the
-     owner routes read and change only a Code posture; reading a Work thread's level
-     is not built. Reading one asks for an unlock or an open session, which is stricter
-     than reading an alert. The same read route lists active Code targets by name.
+   - **Postures belong to a Code Project, Code thread or local Work thread.** A
+     Code Project's posture is whether it remembers Full access for its threads.
+     Work retains its four exact levels: Ask first, Accept folder edits, Auto and
+     Full access. It has no Plan overlay or remembered Project access default.
+     Reading one asks for an unlock or open administration session, stricter than
+     reading an alert. The same read route lists active eligible targets by name.
      Every reading carries a digest of the current thread, Project, binding and
      checkout records. The signed change names that digest, the target and the
-     requested posture and persistence. The host re-reads these records and
+     requested posture and Code persistence where applicable. The host re-reads these records and
      refuses a changed version or target before calling the synchronous Code or
-     Project service transaction. Full access requires this action's own fresh
+     Project service transaction, or the Work service transaction for a Work
+     thread. Its digest binds that thread and its entire current Project and
+     binding; a removed, archived or rebound target is refused. Server Projects
+     are not admitted through this local-Project recovery path. Full access requires this action's own fresh
      unlock; an administration session cannot satisfy it. The services journal
      the actual `owner-unlock` member, including any lowered guardrail, and
      never mint a window or cache a grant. A thread change discards legacy
@@ -1721,7 +1889,7 @@ maintainer's hardware, or names the maintainer gate.
      command against the replacement host. A
      running turn keeps the posture it launched with. The Project path changes
      its remembered Full access default; it does not change existing threads.
-     Actual signed routes, Code/Project services and SQLite readback/replay are
+     Actual signed routes, Work/Code/Project services and SQLite readback/replay are
      proved with deterministic unlocks. Physical-device unlock remains unrun.
    - **A sign-in copy is two unlocks on two hosts.** Each host keeps its own owner
      list, so the owner device unlocks on the receiving host first, which makes
@@ -2259,10 +2427,9 @@ a numbered slice. Built, with these narrower readings:
     destination (the folder's files stay where they are), the thread opened
     under the host's own scope on a provider of the same kind, the freeze
     on Work commands and turn admission, and a delegated Work thread read
-    as one that cannot move. What it does not do yet: carry attachments and
-    other bulk parts, accept moves on the hub (which keeps no peer grants
-    and needs its own Accept moved threads setting), offer a window route
-    to start a move, or show any screen.
+    as one that cannot move. What it does not do yet: accept moves on the
+    hub (which keeps no peer grants and needs its own Accept moved threads
+    setting), offer a window route to start a move, or show any screen.
 
     The fifth part lets a person start a move from the thread's Environment.
     The window route, under `/api/desktop/hub/thread-moves/`, is
@@ -2286,16 +2453,16 @@ a numbered slice. Built, with these narrower readings:
     turn for a busy thread), and shows the progress line with Cancel move,
     Take back here, the This thread can't move notice with Choose another
     computer and Dismiss, the Arriving notice with Activate anyway, and the
-    Moved notice. What it does not do yet: Stop and move, Hand over instead,
-    an unlock other than this Mac's Touch ID, carry bulk parts, accept
-    moves on the hub, or Prepare to shut down.
+    Moved notice. What it does not do yet: Hand over instead, accept moves
+    on the hub, or Prepare to shut down. The eleventh part adds the owner
+    phone.
 
     The sixth part lets the hub take moved threads: its Accept moved
     threads setting (on by default, a window on the hub only, journaled),
     the hub checking a move's sender against the key that member joined
     with, the hub's own owner list for the unlock, and the hub listed in the
-    Computer card like any member. What it does not do yet: carry bulk
-    parts or Prepare to shut down.
+    Computer card like any member. What it does not do yet: Prepare to shut
+    down.
 
     The seventh part is Prepare to shut down. The window route lists every
     thread on this host with its last journaled activity: a busy one (a turn
@@ -2321,10 +2488,7 @@ a numbered slice. Built, with these narrower readings:
     Quit. The quit confirmation gains **Move threads
     first…** while the window last saw this host in a hub with another
     member, and the dialog then ends with Quit Octant through the guarded
-    quit. What it does not do yet: Hand over and Stop and move as row
-    choices, a row moving to a member other than the head's, the menu bar
-    entry and progress, more than one destination's
-    unlock in turn, and carrying bulk parts.
+    quit.
 
     The eighth part is the handover's source side. **Hand over instead**, in
     the move sheet and in This thread can't move for a Code thread, opens
@@ -2425,6 +2589,51 @@ a numbered slice. Built, with these narrower readings:
     does not do yet: Open there opening the thread in this window, and the
     estimate in the bar.
 
+    The eleventh part lets an owner phone unlock a move a window started, as
+    [Confirming on a phone](#moving-a-thread-to-another-member) describes.
+    The move sheet offers **Confirm on your phone** beside Move with Touch
+    ID, and as its primary button in a window with no Touch ID key; Prepare
+    to shut down offers it for the batch the same way. The window route
+    (`phone-ask`, and `shutdown/phone-ask` for a batch) holds the move on
+    the source for five minutes and runs the checks Move with Touch ID runs
+    first; the thread's status reads Waiting for your phone with Don't move,
+    in the Computer card and in the frozen bar in the composer's place,
+    and a wait no phone answers journals `unlock-required`. Two owner routes
+    on the source list what waits (a read) and take the ticket id (an
+    administration-class action, so a session covers it). The destination's
+    ticket route is unchanged: the phone asks it for the ticket as an owner
+    there, with its own fresh own-class unlock bound to the route and to the
+    body naming the source and the held threads. The phone app lists the
+    waits under Moves waiting for you, read again every five seconds while
+    the Computers screen shows and the app is in front and at once when the
+    app returns to the front, so a move held after the screen opened
+    appears before its wait runs out. It confirms one with a single
+    biometric prompt, asking the destination before telling the source.
+    Server smokes cover the move and the batch, a phone that is not an owner
+    on the source, a confirmation spent once, a confirmation without an
+    unlock, a challenge bound to another body, an administration session on
+    the ticket route, a ticket for other threads, and a phone removed from
+    the destination's owner list after the ticket. What it does not do yet:
+    a notification telling the phone a move waits (the person opens the
+    app) and a run on a real phone, which is a maintainer gate. A browser
+    passkey confirming a move is not planned (above).
+
+    A further part carries each thread's bulk parts with every move, in all
+    three modes, as described under **What moves**. The source packs a Chat
+    thread's sent and unsent attachments and the inputs its turns admitted
+    from another Chat thread, and in every mode the thread's completed
+    generated images, its retained Browser captures (oldest first, so the
+    newest stay newest), and every version of each Canvas whose provenance
+    names it. Each becomes a manifest part beside the conversation, which
+    lists them, and crosses the existing chunked transfer. A part it cannot
+    read, or whose bytes no longer match the digest a turn admitted, is kept
+    on the sent move and named on the "Moved to" record and its notice. The
+    destination opens a Chat thread with each attachment on its turn in the
+    same journal unit, then records the images, captures, and Canvases under
+    ids derived from the move and the part, so a finish asked again records
+    each once; a part it cannot record answers `transfer-failed`. The move
+    sheet lists these parts under What moves, without their sizes yet.
+
     Sizes and an estimate are built for the move sheet and Prepare to shut
     down. Two read-only window routes,
     `/api/desktop/hub/thread-moves/sizes` (only for threads the window
@@ -2441,7 +2650,37 @@ a numbered slice. Built, with these narrower readings:
     adds the total and estimate of the rows set to move to its summary,
     with the basis under it. What it does not do yet: the conversation's
     turn count and the branch's commit and `+`/`-` counts beside the sizes,
-    and sizes for bulk parts, which no move carries yet.
+    and the sizes of bulk parts, which the measure does not count yet.
+
+    The tenth part is Stop and move and the rest of Prepare to shut down's
+    choices. The window's start and the batch's start take a `stop-and-move`
+    timing; after the destination's ticket is redeemed, the source stops the
+    thread through each mode's own Stop (the Chat attempt's interrupt, the
+    Code provider turn's cancel, the Work turn's cancel), cancels its child
+    runs here with their children and the children it delegated to other
+    members, and moves it once it reads idle, ending with `busy` when it is
+    still running two minutes later. A batch row on a delegated thread is
+    refused as `delegated` and never stopped. A thread with a child run still
+    going here, or a delegated child that has not reported back, now reads as
+    busy in every mode, so Move refuses it and Prepare to shut down starts it
+    on Move after this turn. The move sheet's busy thread gets the two-way
+    choice, with **Stop and move with Touch ID**, and the Computer card and
+    the dialog read Stopping until the turn has stopped. In Prepare to shut
+    down, Stop and move and Hand over are row choices, Hand over only for a
+    Code thread that cannot move to the head's destination, never
+    preselected; a row can name **Move to** another member that can take it;
+    the press asks each destination's challenge and Touch ID in turn and goes
+    on past one that is declined; rows set to hand over go, after the
+    unlocks, through a host-wide `shutdown/handover` window route that
+    hands over only a Code thread the head's destination cannot take,
+    telling that destination, and count as done only when pushed. The dialog reports its
+    batch's progress to the desktop, which shows it beside the menu bar glyph
+    and as a Moving threads line, and the menu bar offers Prepare to Shut
+    Down… while the window last saw this host in a hub with another member or
+    a batch runs. The dialog keeps reading its batch while hidden so the
+    progress stays current. Sizes are read per destination, the head's and
+    each member a row names, and each destination's total and estimate show
+    at the rate to that member, with one basis line each.
 
 Any slice that would deploy an Octant-operated service, create an account, or
 spend money stops for a separate maintainer action.

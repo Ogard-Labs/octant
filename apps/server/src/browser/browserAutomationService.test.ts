@@ -1,3 +1,4 @@
+import * as downloadSave from "./browserDownloadSave";
 import { decodeBrowserPageScriptPreparation } from "@octant/contracts/browser-page-script";
 import { Schema } from "effect";
 import { HubMemberId, UtcTimestamp } from "@octant/contracts";
@@ -96,6 +97,8 @@ function harness(
   options: {
     readonly authority?: ToolActionAuthority;
     readonly ownerControl?: BrowserRuntimePort["ownerControl"];
+    readonly claimDownload?: BrowserRuntimePort["claimDownload"];
+    readonly discardDownload?: BrowserRuntimePort["discardDownload"];
     readonly access?: boolean;
     readonly pageScriptPolicy?: ConstructorParameters<
       typeof BrowserAutomationService
@@ -120,6 +123,8 @@ function harness(
   let now = Date.parse("2026-07-27T20:00:00.000Z");
   const runtime: BrowserRuntimePort = {
     ...(options.ownerControl === undefined ? {} : { ownerControl: options.ownerControl }),
+    ...(options.claimDownload === undefined ? {} : { claimDownload: options.claimDownload }),
+    ...(options.discardDownload === undefined ? {} : { discardDownload: options.discardDownload }),
     available: vi.fn(async () => true),
     nativeAvailable: vi.fn(async () => true),
     createContext: vi.fn(async (contextId) => void contexts.add(contextId)),
@@ -215,6 +220,139 @@ function harness(
 }
 
 describe("BrowserAutomationService", () => {
+  it("gives a reviewed flow exclusive agent custody while the person can still use the page", async () => {
+    const f = harness();
+    await f.service.create({ windowId, threadId: threadOne, action: action(), policy });
+    let current = true;
+    const custody = f.service.claimFlowRun({
+      windowId,
+      threadId: threadOne,
+      mode: "work",
+      current: () => current,
+    });
+    expect(custody).toBeDefined();
+    if (custody === undefined) throw Error("custody refused");
+    expect(
+      (
+        await f.service.act({
+          windowId,
+          threadId: threadOne,
+          request: request(),
+          capturedBy: "agent",
+        })
+      ).failure?.category,
+    ).toBe("unavailable");
+    expect(f.runtime.act).not.toHaveBeenCalled();
+    expect(
+      (await f.service.create({ windowId, threadId: threadOne, action: action(), policy })).failure
+        ?.category,
+    ).toBe("unavailable");
+    await f.service.act({
+      windowId,
+      threadId: threadOne,
+      request: request(),
+      capturedBy: "person",
+    });
+    expect(f.runtime.act).toHaveBeenCalledOnce();
+    await f.service.act({
+      windowId,
+      threadId: threadOne,
+      request: request(),
+      capturedBy: "agent",
+      flowRun: custody,
+    });
+    expect(f.runtime.act).toHaveBeenCalledTimes(2);
+    current = false;
+    await f.service.act({
+      windowId,
+      threadId: threadOne,
+      request: request(),
+      capturedBy: "agent",
+      flowRun: custody,
+    });
+    expect(f.runtime.act).toHaveBeenCalledTimes(2);
+    custody.release();
+    await f.service.act({
+      windowId,
+      threadId: threadOne,
+      request: request(),
+      capturedBy: "agent",
+      flowRun: custody,
+    });
+    expect(f.runtime.act).toHaveBeenCalledTimes(2);
+    await f.service.close();
+  });
+
+  it("rechecks reviewed flow admission after target inspection and withholds a revoked observation", async () => {
+    const f = harness();
+    await f.service.create({ windowId, threadId: threadOne, action: action(), policy });
+    let current = true;
+    const custody = f.service.claimFlowRun({
+      windowId,
+      threadId: threadOne,
+      mode: "work",
+      current: () => current,
+    });
+    if (custody === undefined) throw Error("custody refused");
+    vi.mocked(f.runtime.inspectTarget).mockImplementationOnce(async () => {
+      current = false;
+      return { sensitive: false };
+    });
+    const refused = await f.service.act({
+      windowId,
+      threadId: threadOne,
+      request: request({ kind: "press", target: undefined, value: "Enter" }),
+      capturedBy: "agent",
+      flowRun: custody,
+    });
+    expect(refused.failure?.category).toBe("stale");
+    expect(f.runtime.act).not.toHaveBeenCalled();
+    current = true;
+    vi.mocked(f.runtime.act).mockImplementationOnce(async () => {
+      current = false;
+      return { url: "https://example.com/start", extractedText: "withheld" };
+    });
+    const withheld = await f.service.act({
+      windowId,
+      threadId: threadOne,
+      request: request(),
+      capturedBy: "agent",
+      flowRun: custody,
+    });
+    expect(withheld.failure?.category).toBe("stale");
+    expect(withheld.observation?.extractedText).not.toBe("withheld");
+    custody.release();
+    await f.service.close();
+  });
+
+  it("refuses flow custody while another agent call is in flight and rechecks before dispatch", async () => {
+    const f = harness();
+    await f.service.create({ windowId, threadId: threadOne, action: action(), policy });
+    const entered = Promise.withResolvers<void>();
+    const finish = Promise.withResolvers<void>();
+    vi.mocked(f.runtime.act).mockImplementationOnce(async () => {
+      entered.resolve();
+      await finish.promise;
+      return { url: "https://example.com/start" };
+    });
+    const running = f.service.act({
+      windowId,
+      threadId: threadOne,
+      request: request(),
+      capturedBy: "agent",
+    });
+    await entered.promise;
+    expect(
+      f.service.claimFlowRun({ windowId, threadId: threadOne, mode: "work", current: () => true }),
+    ).toBeUndefined();
+    finish.resolve();
+    await running;
+    expect(
+      f.service.claimFlowRun({ windowId, threadId: threadOne, mode: "work", current: () => true }),
+    ).toBeDefined();
+    await f.service.close();
+  });
+
   it.each([
     { mode: "work" as const, unattended: false, dedicated: false },
     { mode: "code" as const, unattended: true, dedicated: false },
@@ -443,6 +581,42 @@ describe("BrowserAutomationService", () => {
     settle.resolve();
     await pending;
   });
+  it("refuses an unknown account identity before opening a native page", async () => {
+    const f = harness();
+    const account = {
+      kind: "account" as const,
+      profileId: "40000000-0000-4000-8000-000000000002" as never,
+    };
+    const list = vi.fn(
+      async (): Promise<
+        ReadonlyArray<{ profile: typeof account; label: string; sizeBytes: number }>
+      > => [],
+    );
+    Object.defineProperty(f.runtime, "profiles", {
+      value: { list, clear: async () => undefined, syncExtensions: async () => undefined },
+      configurable: true,
+    });
+    expect(
+      await f.service.create({
+        windowId,
+        threadId: threadOne,
+        action: action(),
+        policy: { ...policy, profile: account },
+      }),
+    ).toMatchObject({ failure: { reason: "profile-unavailable" } });
+    expect(f.runtime.createContext).not.toHaveBeenCalled();
+    list.mockResolvedValue([{ profile: account, label: "Work account", sizeBytes: 0 }]);
+    expect(
+      await f.service.create({
+        windowId,
+        threadId: threadOne,
+        action: action(),
+        policy: { ...policy, profile: account },
+      }),
+    ).toMatchObject({ status: "running", context: { policy: { profile: account } } });
+    await f.service.close();
+  });
+
   it("rechecks Full access after native realm preparation and cancels the unstarted script when revoked", async () => {
     let full = true;
     const f = harness({ pageScriptPolicy: () => (full ? "full-access" : "approval-gated") });
@@ -481,6 +655,59 @@ describe("BrowserAutomationService", () => {
       source: "document.body.dataset.effect='ran'",
       expectedObservationRevision: observed.observation?.revision ?? 0,
       turnExecutionPolicy: "full-access",
+      callerIsCurrent: () => true,
+    });
+    await vi.waitFor(() => expect(calls).toEqual(["prepare"]));
+    full = false;
+    finishPrepare?.({ status: "prepared", planId });
+    expect(await run).toMatchObject({
+      status: "refused",
+      effect: "none",
+      reason: "full-access-required",
+    });
+    expect(calls).toEqual(["prepare", "cancel"]);
+    await f.service.close();
+  });
+
+  it("rechecks scoped script permission after native preparation and cancels on revocation", async () => {
+    let full = true;
+    const f = harness({ pageScriptPolicy: () => "approval-gated" });
+    let finishPrepare:
+      | ((value: {
+          readonly status: "prepared";
+          readonly planId: import("@octant/contracts/browser-page-script").BrowserPageScriptPlanId;
+        }) => void)
+      | undefined;
+    const prepared = new Promise<{
+      readonly status: "prepared";
+      readonly planId: import("@octant/contracts/browser-page-script").BrowserPageScriptPlanId;
+    }>((resolve) => {
+      finishPrepare = resolve;
+    });
+    const planId = importPlanId();
+    const calls: string[] = [];
+    if (f.runtime.runPageScript === undefined) throw new Error("native script fake missing");
+    vi.mocked(f.runtime.runPageScript).mockImplementation(async (command) => {
+      calls.push(command.operation);
+      return command.operation === "prepare" ? prepared : { status: "cancelled", effect: "none" };
+    });
+    await f.service.create({ windowId, threadId: threadOne, action: action(), policy });
+    const observed = await f.service.act({
+      windowId,
+      threadId: threadOne,
+      capturedBy: "agent",
+      request: request(),
+    });
+    expect(observed.failure).toBeUndefined();
+    expect(observed.observation).toBeDefined();
+    const run = f.service.runScript({
+      windowId,
+      threadId: threadOne,
+      contextId: contextOne,
+      source: "document.body.dataset.effect='ran'",
+      expectedObservationRevision: observed.observation?.revision ?? 0,
+      turnExecutionPolicy: "approval-gated",
+      scriptPermissionIsCurrent: () => full,
       callerIsCurrent: () => true,
     });
     await vi.waitFor(() => expect(calls).toEqual(["prepare"]));
@@ -1359,6 +1586,69 @@ describe("BrowserAutomationService", () => {
         expect.anything(),
       );
     });
+
+    it.each(["revoked", "cancelled"])(
+      "refuses the final save after approval when the caller is %s",
+      async (change) => {
+        const fixture = harness({
+          agentDownloadsEnabled: true,
+          claimDownload: vi.fn(async () => "/private/held-fixture"),
+          discardDownload: vi.fn(async () => undefined),
+          observed: {
+            downloads: [
+              {
+                state: "held",
+                downloadId: "d1",
+                name: "report.txt",
+                sizeBytes: 4,
+                mediaType: "text/plain",
+              },
+            ],
+          },
+        });
+        await fixture.service.create({ windowId, threadId: threadOne, action: action(), policy });
+        await fixture.service.act({
+          windowId,
+          request: click(),
+          capturedBy: "agent",
+          holdDownloads: true,
+        });
+        const abort = new AbortController();
+        const facts = { name: "report.txt", sizeBytes: 4, mediaType: "text/plain" };
+        const save = vi
+          .spyOn(downloadSave, "saveBrowserDownload")
+          .mockImplementationOnce(async (input) => {
+            expect(input).not.toHaveProperty("destination");
+            expect(await input.ask(facts)).toBe("approved");
+            if (change === "revoked") fixture.revoke(threadOne);
+            else abort.abort();
+            expect(input.finalAdmission?.(facts)).toBe("cancelled");
+            if (change === "cancelled") expect(input.signal?.aborted).toBe(true);
+            return {
+              status: "refused",
+              error: "browser-download-cancelled",
+              reason: "cancelled",
+              facts,
+            };
+          });
+        try {
+          expect(
+            await fixture.service.saveDownload({
+              windowId,
+              threadId: threadOne,
+              downloadId: "d1",
+              workspaceRoot: "/workspace",
+              signal: abort.signal,
+              ask: async () => "approved",
+            }),
+          ).toEqual({ status: "refused", error: "browser-download-cancelled" });
+          expect(fixture.runtime.discardDownload).toHaveBeenCalledWith(contextOne, "d1");
+        } finally {
+          save.mockRestore();
+          await fixture.service.close();
+        }
+      },
+    );
 
     it("reports what the runtime holds, journals a stopped file, and saves only an id it reported", async () => {
       const refused = vi.fn();

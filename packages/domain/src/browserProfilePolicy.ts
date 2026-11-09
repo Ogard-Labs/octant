@@ -1,3 +1,8 @@
+import {
+  decodeBrowserAccountProfileId,
+  type BrowserProfileChoice,
+  type ProjectId,
+} from "@octant/contracts";
 import type {
   BrowserContextId,
   BrowserProfile,
@@ -10,6 +15,7 @@ import type {
 /** The Electron partition a stored profile keeps its site data in. */
 const PERSONAL_PARTITION = "persist:octant-profile-personal";
 const PROJECT_PARTITION_PREFIX = "persist:octant-profile-project-";
+const ACCOUNT_PARTITION_PREFIX = "persist:octant-profile-account-";
 const PRIVATE_PARTITION_PREFIX = "octant-browser-";
 const PROJECT_ID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -25,6 +31,7 @@ export function storedBrowserProfile(
 export function browserProfileKey(profile: BrowserProfile | undefined): string {
   if (profile === undefined || profile.kind === "private") return "private";
   if (profile.kind === "personal") return "personal";
+  if (profile.kind === "account") return `account:${String(profile.profileId)}`;
   return `project:${String(profile.projectId)}`;
 }
 
@@ -50,6 +57,8 @@ export function browserProfilePartition(
     return `${PRIVATE_PARTITION_PREFIX}${String(contextId)}`;
   }
   if (profile.kind === "personal") return PERSONAL_PARTITION;
+  if (profile.kind === "account")
+    return `${ACCOUNT_PARTITION_PREFIX}${String(profile.profileId).toLowerCase()}`;
   return `${PROJECT_PARTITION_PREFIX}${String(profile.projectId).toLowerCase()}`;
 }
 
@@ -61,10 +70,16 @@ export function browserProfilePartition(
 export function storedBrowserProfileOfPartitionFolder(
   folder: string,
 ):
+  | { readonly kind: "account"; readonly profileId: string }
   | { readonly kind: "personal" }
   | { readonly kind: "project"; readonly projectId: string }
   | undefined {
   if (folder === PERSONAL_PARTITION.slice("persist:".length)) return { kind: "personal" };
+  const accountPrefix = ACCOUNT_PARTITION_PREFIX.slice("persist:".length);
+  if (folder.startsWith(accountPrefix)) {
+    const profileId = folder.slice(accountPrefix.length);
+    return PROJECT_ID_PATTERN.test(profileId) ? { kind: "account", profileId } : undefined;
+  }
   const prefix = PROJECT_PARTITION_PREFIX.slice("persist:".length);
   if (!folder.startsWith(prefix)) return undefined;
   const projectId = folder.slice(prefix.length);
@@ -178,4 +193,24 @@ export function resolveRememberedBrowserProfileSites(
 
 function refused(reason: BrowserProfileRefusalReason, message: string): BrowserProfileDecision {
   return { kind: "refused", reason, message };
+}
+
+/** Resolve a person's explicit choice; a Project choice always means this Project. */
+export function browserProfileFromChoice(
+  choice: BrowserProfileChoice,
+  projectId: ProjectId | undefined,
+): BrowserProfile | undefined {
+  if (choice === "private") return { kind: "private" };
+  if (choice === "personal") return { kind: "personal" };
+  if (choice === "project")
+    return projectId === undefined ? undefined : { kind: "project", projectId };
+  return {
+    kind: "account",
+    profileId: decodeBrowserAccountProfileId(choice.slice("account:".length)),
+  };
+}
+
+export function browserProfileChoiceOf(profile: BrowserProfile | undefined): BrowserProfileChoice {
+  if (profile === undefined || profile.kind === "private") return "private";
+  return profile.kind === "account" ? `account:${String(profile.profileId)}` : profile.kind;
 }

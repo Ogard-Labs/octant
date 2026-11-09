@@ -281,6 +281,7 @@ export type HubAdministrationOperation =
   | "thread-move-destinations"
   | "thread-move-challenge"
   | "thread-move-start"
+  | "thread-move-phone-ask"
   | "thread-move-status"
   | "thread-move-stop-waiting"
   | "thread-move-cancel"
@@ -292,6 +293,8 @@ export type HubAdministrationOperation =
   | "shutdown-listing"
   | "shutdown-challenge"
   | "shutdown-start"
+  | "shutdown-phone-ask"
+  | "shutdown-handover"
   | "shutdown-sizes"
   | "handover-preview"
   | "handover"
@@ -422,6 +425,7 @@ export interface OctantHostBridge
   /** Shows an extension's popup or options page beside the Browser toolbar's extensions button. */
   readonly openBrowserExtensionPopup?: (request: {
     readonly profile:
+      | { readonly kind: "account"; readonly profileId: string }
       | { readonly kind: "personal" }
       | { readonly kind: "project"; readonly projectId: string };
     readonly extensionId: string;
@@ -625,6 +629,13 @@ export interface OctantHostBridge
   readonly requestQuit?: () => void;
   /** Tells the desktop whether Quit may offer Move threads first…. */
   readonly reportShutdownMovesOffered?: (offered: boolean) => void;
+  /**
+   * Tells the desktop how far a running Prepare to shut down batch has come,
+   * so the menu bar shows it while the dialog is hidden; `undefined` when none runs.
+   */
+  readonly reportShutdownProgress?: (
+    progress: { readonly ended: number; readonly total: number } | undefined,
+  ) => void;
   /** The first ⌘Q press: the window shows "press again to quit". */
   readonly subscribeQuitShortcutHint?: (listener: () => void) => () => void;
   readonly subscribeStartNewAgent?: (listener: () => void) => () => void;

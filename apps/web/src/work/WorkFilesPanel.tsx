@@ -29,6 +29,8 @@ export interface WorkFileOpenRequest {
 type PanelStatus = "loading" | "ready" | "error";
 
 export interface WorkFilesPanelProps {
+  /** A server folder has metadata only; it never supplies local preview actions. */
+  readonly serverLocation?: string;
   readonly threadId: WorkThreadId;
   readonly projectId?: ProjectId | undefined;
   /** Injected in tests; otherwise built from the server URL and capability. */
@@ -128,7 +130,12 @@ export function WorkFilesPanel(props: WorkFilesPanelProps) {
   // that carries neither leaves the rows readable and inert rather than letting
   // the renderer assemble a target of its own.
   const open = useMemo(() => {
-    if (onOpenFile === undefined || previewHostId === undefined || projectId === undefined) {
+    if (
+      props.serverLocation !== undefined ||
+      onOpenFile === undefined ||
+      previewHostId === undefined ||
+      projectId === undefined
+    ) {
       return undefined;
     }
     return (entry: FileEntry) => {
@@ -141,7 +148,7 @@ export function WorkFilesPanel(props: WorkFilesPanelProps) {
         displayName: pathBasename(entry.path),
       });
     };
-  }, [onOpenFile, previewHostId, projectId]);
+  }, [onOpenFile, previewHostId, projectId, props.serverLocation]);
 
   const authored = entries.filter(
     (entry): entry is FileEntry => entry.kind === "file" && entry.origin === "authored",
@@ -150,6 +157,12 @@ export function WorkFilesPanel(props: WorkFilesPanelProps) {
 
   return (
     <div className="work-files-panel">
+      {props.serverLocation === undefined ? null : (
+        <p className="work-files-panel__status">
+          Files on {props.serverLocation}. Names and sizes only; opening files is unavailable here.
+          Use Refresh to check for changes.
+        </p>
+      )}
       <div className="work-files-panel__toolbar">
         <OctantIconButton
           disabled={status === "loading"}
