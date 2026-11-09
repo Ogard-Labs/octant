@@ -281,6 +281,20 @@ describe("native harness diagnostics", () => {
     );
   });
 
+  it("never calls a run clean when the shell cut its output, and says so", async () => {
+    const { call } = await fixture({
+      output: () => ({ exitCode: 0, output: "lots of log lines", truncated: true }),
+    });
+    const outcome = await call({ command: "bun run lint" });
+    expect(outcome.result).toMatchObject({
+      clean: false,
+      runs: [{ exitCode: 0, outputTruncated: true }],
+    });
+    expect((outcome.result as { notes: ReadonlyArray<string> }).notes[0]).toContain(
+      "output was cut",
+    );
+  });
+
   it("narrows problems to the files asked about and caps the list with a note", async () => {
     const lines = Array.from({ length: 150 }, (_, index) => `src/many.ts:${index + 1}:1: problem`);
     const { call } = await fixture({

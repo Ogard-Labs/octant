@@ -7644,7 +7644,9 @@ the model at another size.
   100 with a note saying how many were left out. `clean` holds only when every
   command that ran exited zero and printed no problem; a run that exits
   non-zero with nothing parsed carries its output tail and a note that it is
-  not clean, and a requested script that was missing is named.
+  not clean, a run whose output the shell cut (local or server shell) is
+  marked `outputTruncated`, noted, and never clean, and a requested script
+  that was missing is named.
 - **Routing.** `NativeHarnessRoutingStore` journals a host default and
   Project overrides of slot tables; `resolveNativeHarnessRoute` in
   `@octant/domain` is the pure resolver; `NativeHarnessRouter` adds cooldowns

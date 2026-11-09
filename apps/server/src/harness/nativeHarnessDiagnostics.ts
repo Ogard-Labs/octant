@@ -288,6 +288,8 @@ interface DiagnosticsRun {
   readonly exitCode?: number;
   readonly problemsFound?: number;
   readonly outputTail?: string;
+  /** The shell kept only part of what the command printed, so problems may be missing. */
+  readonly outputTruncated?: true;
   readonly error?: string;
   readonly message?: string;
 }
@@ -376,6 +378,7 @@ export async function runNativeHarnessDiagnostics(
       status: run.status,
       ...(run.exitCode === undefined ? {} : { exitCode: run.exitCode }),
       problemsFound: found.length,
+      ...(run.truncated ? { outputTruncated: true } : {}),
       ...(found.length === 0 && run.output.trim().length > 0
         ? { outputTail: tail(run.output.replace(ANSI, ""), MAX_OUTPUT_TAIL_BYTES) }
         : {}),
@@ -391,11 +394,23 @@ export async function runNativeHarnessDiagnostics(
       ? problems
       : problems.filter((problem) => matchesDiagnosticsFile(problem.file, wanted));
   // Clean means every command that ran exited zero and printed no problem it
-  // could read; a failing exit with nothing parsed is reported, never clean.
+  // could read in output the shell kept whole; a failing exit with nothing
+  // parsed, or output the shell cut, is reported, never clean.
   const clean = runs.every(
-    (run) => run.status === "ran" && run.exitCode === 0 && run.problemsFound === 0,
+    (run) =>
+      run.status === "ran" &&
+      run.exitCode === 0 &&
+      run.problemsFound === 0 &&
+      run.outputTruncated !== true,
   );
   const notes = [
+    ...runs.flatMap((run) =>
+      run.outputTruncated === true
+        ? [
+            `${run.command}'s output was cut at the shell's limit, so problems may be missing; this is not a complete or clean result. Narrow the command to fewer files.`,
+          ]
+        : [],
+    ),
     ...runs.flatMap((run) =>
       run.status === "refused"
         ? [`${run.command} did not run: ${run.message ?? run.error ?? "refused"}.`]
