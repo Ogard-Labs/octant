@@ -293,3 +293,98 @@ export async function unusedHandoverBranch(root: string, wanted: string): Promis
   }
   return `${wanted}-${String(Date.now())}`;
 }
+
+/** A handover found on a branch this clone has already fetched, with no notice. */
+export interface FoundHandover {
+  readonly handoverId: string;
+  /** The thread title the note's subject line names. */
+  readonly title: string;
+  /** The computer name the `Octant-Origin` trailer gives; a claim, never verified. */
+  readonly originName: string;
+  readonly remote: string;
+  /** The repository the remote names, for matching Projects and the report. */
+  readonly repositoryRemote: string;
+  readonly branch: string;
+  readonly commit: string;
+  readonly committedAt: string;
+}
+
+/** The most handovers one clone lists; a repository full of them shows the newest. */
+const FOUND_HANDOVERS_MAX = 64;
+const HANDOVER_SUBJECT = "Hand over: ";
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/**
+ * Handovers on the branches a clone has already fetched: every remote-tracking
+ * tip whose message carries an `Octant-Handover` trailer. Nothing is fetched
+ * here, so a branch shows up after the clone's next fetch, whoever runs it.
+ * Anyone who can push to the repository can write such a branch, so what this
+ * returns is only offered; continuing it is a person's act, and its note stays
+ * outside content.
+ */
+export async function findHandoverBranches(
+  repositoryRoot: string,
+): Promise<ReadonlyArray<FoundHandover>> {
+  // One record per tip, fields split by NUL and records by RS; only the
+  // subject and the trailers are read, never a whole message. The trailers
+  // are parsed here: older Git ignores a key filter in for-each-ref.
+  const format = [
+    "%(refname)",
+    "%(objectname)",
+    "%(committerdate:iso-strict)",
+    "%(contents:subject)",
+    "%(contents:trailers:unfold)",
+  ].join("%00");
+  const listed = await git(repositoryRoot, [
+    "for-each-ref",
+    "--sort=-committerdate",
+    `--format=${format}%1e`,
+    "refs/remotes",
+  ]).catch(() => "");
+  const urls = new Map<string, string>();
+  const found: FoundHandover[] = [];
+  for (const record of listed.split("\x1e")) {
+    const [ref, commit, committedAt, subject, trailers] = record.replace(/^\n/, "").split("\0");
+    if (ref === undefined || commit === undefined || committedAt === undefined) continue;
+    const handoverId = trailerValue(trailers ?? "", "Octant-Handover");
+    if (!UUID.test(handoverId)) continue;
+    const match = /^refs\/remotes\/([^/]+)\/(.+)$/.exec(ref);
+    const remote = match?.[1];
+    const branch = match?.[2];
+    if (remote === undefined || branch === undefined || branch === "HEAD") continue;
+    let repositoryRemote = urls.get(remote);
+    if (repositoryRemote === undefined) {
+      repositoryRemote = await git(repositoryRoot, ["remote", "get-url", remote]).catch(() => "");
+      urls.set(remote, repositoryRemote);
+    }
+    if (repositoryRemote.length === 0) continue;
+    const line = (subject ?? "").trim();
+    found.push({
+      handoverId: handoverId.toLowerCase(),
+      title:
+        (line.startsWith(HANDOVER_SUBJECT) ? line.slice(HANDOVER_SUBJECT.length) : line)
+          .trim()
+          .slice(0, 256) || "Untitled thread",
+      originName: trailerValue(trailers ?? "", "Octant-Origin").slice(0, 256) || "Unknown",
+      remote,
+      repositoryRemote,
+      branch,
+      commit,
+      committedAt,
+    });
+    if (found.length >= FOUND_HANDOVERS_MAX) break;
+  }
+  return found;
+}
+
+/** The first value of one trailer, matched as Git does: key case ignored. */
+function trailerValue(trailers: string, key: string): string {
+  const wanted = key.toLowerCase();
+  for (const line of trailers.split("\n")) {
+    const colon = line.indexOf(":");
+    if (colon > 0 && line.slice(0, colon).trim().toLowerCase() === wanted) {
+      return line.slice(colon + 1).trim();
+    }
+  }
+  return "";
+}

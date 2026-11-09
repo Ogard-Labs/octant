@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import {
   commitHandover,
+  findHandoverBranches,
   pushHandover,
   readHandoverCheckout,
   readHandoverNote,
@@ -205,5 +206,44 @@ describe("which remote and default branch a handover uses", () => {
     // The commit whose note was checked, named by id for the thread to start from.
     expect(verified?.commit).toBe(git(origin, "rev-parse", "feature/flaky"));
     expect(await remoteNamedFor(desktop, "git@github.com:someone/else.git")).toBeUndefined();
+  });
+});
+
+describe("finding a handover on a fetched branch", () => {
+  it("lists a fetched tip that names a handover, and nothing else", async () => {
+    const { origin, laptop } = repository();
+    git(laptop, "checkout", "-q", "-b", "octant/handover/fix-the-flaky-test-77777777");
+    writeFileSync(join(laptop, "app.ts"), "export const version = 2;\n");
+    const committed = await commitHandover({
+      checkoutRoot: laptop,
+      branch: "octant/handover/fix-the-flaky-test-77777777",
+      message:
+        "Hand over: Fix the flaky test\n\nWhere it stands.\n\n" +
+        "Octant-Handover: 12345678-1234-4234-8234-123456789012\nOctant-Origin: Laptop\n",
+    });
+    git(laptop, "push", "-q", "origin", "octant/handover/fix-the-flaky-test-77777777");
+    // An ordinary branch, which names no handover.
+    git(laptop, "checkout", "-q", "-b", "feature/other", "main");
+    writeFileSync(join(laptop, "other.ts"), "export const other = 1;\n");
+    git(laptop, "add", ".");
+    git(laptop, "commit", "-q", "-m", "other work");
+    git(laptop, "push", "-q", "origin", "feature/other");
+    const desktop = join(laptop, "..", "desktop");
+    git(join(laptop, ".."), "clone", "-q", origin, desktop);
+
+    const found = await findHandoverBranches(desktop);
+
+    expect(found).toEqual([
+      {
+        handoverId: "12345678-1234-4234-8234-123456789012",
+        title: "Fix the flaky test",
+        originName: "Laptop",
+        remote: "origin",
+        repositoryRemote: origin,
+        branch: "octant/handover/fix-the-flaky-test-77777777",
+        commit: committed.status === "committed" ? committed.commit : "",
+        committedAt: expect.any(String),
+      },
+    ]);
   });
 });

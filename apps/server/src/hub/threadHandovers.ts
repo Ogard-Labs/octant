@@ -25,7 +25,7 @@ import {
 } from "./codeThreadHandoverGit";
 import type { ThreadHandoverRecorder } from "./threadMoveJournal";
 import type { ThreadMoveSourceHost } from "./threadMoveService";
-import type { ThreadMoveStatePort } from "./threadMoveStateStore";
+import { type ThreadMoveStatePort, withSettledHandover } from "./threadMoveStateStore";
 
 /** The note is at most this long, trailers included. */
 export const HANDOVER_NOTE_MAX_BYTES = 32 * 1024;
@@ -214,6 +214,7 @@ export class ThreadHandovers {
       pushed: pushed.status === "pushed",
       ...(pushed.status === "pushed" ? {} : { shortfall: pushed.shortfall }),
       refusedFiles: committed.status === "committed" ? committed.refusedFiles : [],
+      ...(committed.status === "committed" ? { commit: committed.commit } : {}),
       handedOverAt,
     };
     this.#saveHandover(record);
@@ -245,8 +246,10 @@ export class ThreadHandovers {
     }
     if (handover !== undefined) {
       this.#options.source.unfreeze(handover.thread);
+      // The branch stays where it is and still names this handover; settled,
+      // it is not offered back here as one to continue.
       this.#options.state.save({
-        ...state,
+        ...withSettledHandover(state, handover.handoverId),
         handovers: (state.handovers ?? []).filter(
           (entry) => String(entry.handoverId) !== handoverId,
         ),
