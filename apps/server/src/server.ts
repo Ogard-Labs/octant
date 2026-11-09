@@ -739,6 +739,13 @@ export function startOctantServer(
     });
     const {
       browserCredentialUseService,
+      browserSessionGrants,
+      browserUploadPermissions,
+      browserDownloadPermissions,
+      browserDelegatedChildren,
+      bindTerminalBrowserSessions,
+      terminalBrowserTools,
+      routineBrowserTools,
       browserAutomationService,
       browserExtensionService,
       browserFlowService,
@@ -753,6 +760,9 @@ export function startOctantServer(
       windowHoldsProject,
     } = yield* wireBrowser({
       browserAuthority,
+      providerRuntimeRegistry,
+      contributeChildTools,
+      agentRunInteractions,
       codeSessionAuthority,
       machineChangeFeed,
       onWindowRevoked,
@@ -867,6 +877,9 @@ export function startOctantServer(
       providerDataDirectory,
       providerRuntimeRegistry,
       recordAppleEvidence,
+      bindTerminalBrowserSessions,
+      terminalBrowserTools,
+      routineBrowserTools,
       browserAutomationService,
       browserFlows,
       browserToolApprovalService,
@@ -913,6 +926,7 @@ export function startOctantServer(
       remoteServerGrantLocalRoutes,
       remoteServerGrants,
     } = yield* wireCodeTooling({
+      onWindowRevoked,
       desktopLeases,
       installDesktopPreviewRequest,
       workThreadProjection,
@@ -1083,6 +1097,7 @@ export function startOctantServer(
       projectService,
       providerRuntimeRegistry,
       refreshStandaloneSkills,
+      routineBrowserTools,
       browserAutomationService,
       browserFlows,
       browserToolApprovalService,
@@ -1153,6 +1168,9 @@ export function startOctantServer(
     } = wireContext({
       onWindowRevoked,
       browserCredentialUseService,
+      browserSessionGrants,
+      browserUploadPermissions,
+      browserDownloadPermissions,
       agentMessageProjection,
       browserModelBindings,
       browserAuthority,
@@ -1766,6 +1784,8 @@ export function startOctantServer(
       beginGoogleCliChange,
       workThreadService,
       onSecretStoreLinkChange: () => commands.linkChanged(),
+      browserUploadPermissions,
+      browserDownloadPermissions,
       browserAutomationService,
       codeService,
       projectService,
@@ -2155,6 +2175,10 @@ export function startOctantServer(
           try {
             flowRuns.close();
             projectBrowserService?.close();
+            browserSessionGrants.close();
+            browserUploadPermissions.close();
+            browserDownloadPermissions.close();
+            await browserDelegatedChildren.close();
             await browserAutomationService?.close();
           } catch (error) {
             shutdownFailure ??= error;

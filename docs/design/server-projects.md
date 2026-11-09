@@ -104,8 +104,9 @@ checks never change registry/configuration or journal state.
   folder, or cannot be reached is refused, and nothing is journaled. The
   resolved path is the one stored.
 - Server Projects live in their own catalog: the `server-projects` aggregate,
-  with `server-projects.bound@1`, `server-projects.renamed@1`, and
-  `server-projects.removed@1`, each journaled whole and journal first, and
+  with `server-projects.bound@1`, `server-projects.renamed@1`,
+  `server-projects.actions-replaced@1`, and `server-projects.removed@1`, each
+  journaled whole and journal first, and
   rebuilt at startup. They are never in the local Project catalog, so no
   service that reads a local Project's folder can be handed a server path.
   _Rationale:_ a Project binding's folder is read as a path on this host in
@@ -289,13 +290,77 @@ checks never change registry/configuration or journal state.
 - **Project terminal.** A Code server Project's own terminal (the one with
   no thread, opened from the dock's quick tools of a new task) is the same SSH
   login shell in the folder, owned by the local window that opened it and
-  journaled as a local Project terminal is. It has no other folder, no saved
-  actions or suggestions (those read a Project's files on this host), and no
+  journaled as a local Project terminal is. It has no extra folder and no
   browser beside it. A server removed from the registry refuses the next
   start; removing the Project ends its shells. Its posture is recorded as
   Full access. _Rationale:_ the posture says what holds the shell, and on a
   server nothing does: Octant has no sandbox there, and the person opening
   their own shell is the approval, as it is for a local Project terminal.
+- **Saved Project actions.** Settings → Access → Servers edits up to
+  twelve saved commands on the server Project's own catalog record. Action
+  saves have an optimistic revision and a journaled `server-projects.actions-replaced@1`
+  event; old records remain valid. Root package scripts and Makefile targets
+  are suggestions from the existing bounded remote file reader, never from
+  this host. Reading or adding a suggestion does not save or run it.
+  The Project header, command palette and Settings open the existing action
+  review. In Settings, a different or unbound Code Project offers an explicit
+  Open Project transition through the existing server-task draft flow; its
+  action editor stays usable, but reads no suggestions and offers no Run until
+  this window holds that Project. Before launch the review shows the exact server login and action profile,
+  canonical folder, branch, current task policy and the absence of OS confinement
+  on the server. A Code task defaults to its actual remote checkout; choosing
+  the server Project folder is explicit. There is no similarly named local
+  folder fallback. Plan and paired-device launches refuse.
+
+  The reviewed placement binds the saved-action revision, registered server
+  identity and profile, Project binding, canonical directory device/inode,
+  Git head/branch and current task/checkout authority. Launch resolves these
+  again and the remote command checks its held working directory before
+  executing. A removed server, changed profile, replaced checkout, changed
+  action or revoked task refuses stale launch. Each accepted run journals its
+  identity before starting a dedicated encoded SSH command, never writes into
+  an existing terminal, and carries no copied host credentials. Its posture is
+  Full access because SSH provides no OS confinement; the explicit local-person
+  Run approves that command without granting an agent more access. Automatic
+  worktree preparation recipes are unavailable here.
+
+  Output and exit status use the existing bounded terminal transcript. An
+  action's exit255 is reported as254, reserving SSH255 for connection loss.
+  Connection loss is interrupted with uncertain remote completion; Stop and
+  revocation stop the owned connection but cannot prove arbitrary remote
+  descendants stopped. An unconfirmed start is recorded distinctly. Closing
+  the review retains its run identity. Lost replies, repeated identities and
+  host restart never replay a command; preparing another run is a fresh person
+  decision after checking the server.
+
+  Work server Projects use the same dedicated saved-action runs, with their
+  own real Work binding rather than a Code checkout or local Project. A Work
+  task's current access, provider/model/options, binding and relative working
+  directory bind the review; changing them, completing the task, disabling Work,
+  closing its window or switching that window to another Work Project retires
+  its admitted action authority. A mixed-mode or stale task is refused before
+  remote reads or effects. Project-level runs still require that live window's
+  persisted Work Project. An explicit local-person Run approves only its saved
+  SSH command; it grants no additional agent, terminal or credential authority.
+  Settings uses this window's Work binding for its suggestions and Run controls;
+  a different or unbound Work Project offers the same explicit Open Project
+  transition as Code, while manual action edits remain available.
+
+  The Work server Project's **Show developer tools** switch is off by default
+  in its existing Settings → Access → Servers row. A local-only
+  `set-server-work-developer-tools` command journals who and when as
+  `server-projects.work-developer-tools-changed@1`. It reveals the action editor,
+  saved-action buttons and active Work header/palette entries; it changes only
+  presentation. It does not enable a general Project terminal, a Developer tools
+  pane or other absent server Work surfaces. A person may turn it off while an
+  already admitted command keeps its separate execution authority. Work actions
+  have closed standard input, refuse interactive terminal writes, and keep their
+  output in the action dialog without a terminal handoff. This is an input/UI
+  boundary, not confinement of the saved command's SSH-user authority.
+  They
+  retain the same honest no-confinement review and uncertain remote completion
+  after connection loss or Stop as Code.
+
 - **Fail closed in a turn.** A file call that cannot reach the server is
   refused `target-unavailable` and a command reports the shell unavailable;
   the next call tries the server again. Nothing a server thread asks for runs
@@ -489,10 +554,9 @@ checks never change registry/configuration or journal state.
 - Work file previews and editing, research sources, the status file and due dates, and the
   Project terminal for a Work Project on a server; its threads are built. A
   local Work Project shows its terminal through its Developer tools switch on
-  its overview, and a Work Project on a server has neither yet.
+  its overview. A Work Project on a server offers a saved-action presentation
+  switch in Settings, but has no general Project terminal or tools pane.
 - Extra folders in a server Project.
-- Saved Project actions and their suggestions for a server Project; its
-  Project terminal is built.
 - A Project-level guardrail level or reviewer for a server Project; the
   thread and account levels apply.
 - Real servers are untested: the connection, folder check, file tools,

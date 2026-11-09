@@ -73,6 +73,7 @@ describe("useServerCodeProjectsSource", () => {
         projectId: "77777777-7777-4777-8777-777777777778",
         name: "Notes",
         location: "/home/build/notes",
+        folder: "/home/build/notes",
         bindingRevisionId: "77777777-7777-4777-8777-777777777779",
       },
     ]);

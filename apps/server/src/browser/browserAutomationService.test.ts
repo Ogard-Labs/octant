@@ -1,3 +1,7 @@
+import { mkdtemp, mkdir, writeFile, rm } from "node:fs/promises";
+import { join } from "node:path";
+import { tmpdir } from "node:os";
+import { browserDownloadHoldRoot } from "@octant/host-runtime";
 import * as downloadSave from "./browserDownloadSave";
 import { decodeBrowserPageScriptPreparation } from "@octant/contracts/browser-page-script";
 import { Schema } from "effect";
@@ -111,6 +115,8 @@ function harness(
     readonly downloads?: ConstructorParameters<typeof BrowserAutomationService>[0]["downloads"];
     readonly observed?: Partial<Awaited<ReturnType<BrowserRuntimePort["act"]>>>;
     readonly unattended?: boolean;
+    readonly delegatedProfileIsCurrent?: () => boolean;
+    readonly sharedRuntime?: boolean;
     readonly describePoint?: BrowserRuntimePort["describePoint"];
   } = {},
 ) {
@@ -193,6 +199,10 @@ function harness(
       : { agentDownloadsEnabled: () => options.agentDownloadsEnabled === true }),
     ...(options.downloads === undefined ? {} : { downloads: options.downloads }),
     ...(options.unattended === true ? { isUnattendedScope: () => true } : {}),
+    ...(options.delegatedProfileIsCurrent === undefined
+      ? {}
+      : { delegatedProfileIsCurrent: options.delegatedProfileIsCurrent }),
+    ...(options.sharedRuntime === true ? { sharedRuntime: true } : {}),
     uuid: () => ids.shift() ?? crypto.randomUUID(),
     clock: () => new Date(now).toISOString(),
     now: () => now,
@@ -220,6 +230,39 @@ function harness(
 }
 
 describe("BrowserAutomationService", () => {
+  it("opens an explicitly delegated signed-in context and withholds a revoked in-flight observation", async () => {
+    let current = true;
+    const f = harness({ unattended: true, delegatedProfileIsCurrent: () => current });
+    const opened = await f.service.create({
+      windowId,
+      threadId: threadOne,
+      action: action(),
+      policy: { ...policy, profile: { kind: "personal" } },
+    });
+    expect(opened.context?.state).toBe("active");
+    vi.mocked(f.runtime.act).mockImplementation(async () => {
+      current = false;
+      return { url: "https://example.com", extractedText: "must be withheld" };
+    });
+    const result = await f.service.act({
+      windowId,
+      threadId: threadOne,
+      request: request(),
+      capturedBy: "agent",
+    });
+    expect(result.observation).toBeUndefined();
+    expect(result.failure?.category).toBe("unauthorized");
+    await f.service.close();
+  });
+
+  it("closes only its own contexts when a delegated service borrows the native runtime", async () => {
+    const f = harness({ sharedRuntime: true });
+    await f.service.create({ windowId, threadId: threadOne, action: action(), policy });
+    await f.service.close();
+    expect(f.runtime.closeAll).not.toHaveBeenCalled();
+    expect(f.runtime.closeContext).toHaveBeenCalledWith(contextOne);
+  });
+
   it("gives a reviewed flow exclusive agent custody while the person can still use the page", async () => {
     const f = harness();
     await f.service.create({ windowId, threadId: threadOne, action: action(), policy });
@@ -1547,6 +1590,38 @@ describe("BrowserAutomationService", () => {
     await service.stop(windowId, threadOne, contextOne);
     expect(release).toHaveBeenCalledOnce();
   });
+
+  it.each(["revoked", "stale"] as const)(
+    "withholds further page effects after attached upload permission becomes %s",
+    async (reason) => {
+      const { runtime, service } = harness();
+      await service.create({ windowId, threadId: threadOne, action: action(), policy });
+      const stop = new AbortController();
+      let current = true;
+      const release = vi.fn(async () => undefined);
+      await service.act({
+        windowId,
+        request: request({ kind: "upload", target: "#file", files: ["report.txt"] }),
+        uploadFiles: ["/staging/report.txt"],
+        releaseUpload: release,
+        uploadSignal: stop.signal,
+        uploadIsCurrent: () => current,
+      });
+      expect(runtime.act).toHaveBeenCalledOnce();
+      current = false;
+      if (reason === "revoked") stop.abort();
+      const refused = await service.act({
+        windowId,
+        request: request({ kind: "click", target: "#send" }),
+      });
+      expect(refused.failure).toBeDefined();
+      expect(refused.observation).toBeUndefined();
+      expect(runtime.act).toHaveBeenCalledOnce();
+      await vi.waitFor(() => expect(runtime.closeContext).toHaveBeenCalledOnce());
+      expect(release).toHaveBeenCalledOnce();
+      await service.close();
+    },
+  );
 
   describe("downloads", () => {
     const click = () => request({ kind: "click", target: "#get" });
@@ -3661,4 +3736,57 @@ describe("BrowserAutomationService", () => {
     expect(snapshot.contexts?.length).toBe(MAX_BROWSER_THREAD_CONTEXTS);
     release();
   });
+});
+
+it("carries the held download's source receipt to its per-file review without substituting the page", async () => {
+  const workspace = await mkdtemp(join(tmpdir(), "octant-download-source-"));
+  const holdRoot = browserDownloadHoldRoot("headless");
+  await mkdir(holdRoot, { recursive: true, mode: 0o700 });
+  const heldFolder = await mkdtemp(join(holdRoot, "source-test-"));
+  const path = join(heldFolder, "file");
+  await writeFile(path, "report");
+  const source = {
+    kind: "https-origin-chain" as const,
+    origins: ["https://start.example", "https://files.example"],
+  };
+  const f = harness({
+    agentDownloadsEnabled: true,
+    observed: {
+      downloads: [
+        {
+          state: "held",
+          downloadId: "d1",
+          name: "report.txt",
+          sizeBytes: 6,
+          mediaType: "text/plain",
+          source,
+        },
+      ],
+    },
+  });
+  Object.assign(f.runtime, { claimDownload: async () => path, discardDownload: async () => {} });
+  try {
+    await f.service.create({ windowId, threadId: threadOne, action: action(), policy });
+    await f.service.act({
+      windowId,
+      request: request({ kind: "click", target: "#get" }),
+      capturedBy: "agent",
+      holdDownloads: true,
+    });
+    const ask = vi.fn(async () => "denied" as const);
+    expect(
+      await f.service.saveDownload({
+        windowId,
+        threadId: threadOne,
+        downloadId: "d1",
+        workspaceRoot: workspace,
+        ask,
+      }),
+    ).toMatchObject({ status: "refused", error: "browser-download-denied" });
+    expect(ask).toHaveBeenCalledWith(expect.objectContaining({ source }), "https://example.com");
+  } finally {
+    await f.service.close();
+    await rm(heldFolder, { recursive: true, force: true });
+    await rm(workspace, { recursive: true, force: true });
+  }
 });

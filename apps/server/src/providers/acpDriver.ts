@@ -1,3 +1,4 @@
+import { compactAcpConversation } from "./acpCompaction";
 import { readAcpFileReview } from "./acpFileReview";
 import { isAbsolute, resolve } from "node:path";
 import {
@@ -166,6 +167,7 @@ interface AcpRetainedRuntime {
   readonly managedTools: AcpManagedToolsLease | undefined;
   readonly appManagedTools: ProviderCapabilitySupport;
   readonly version: string;
+  readonly commands: Set<string>;
   readonly compatibility: string;
   readonly history: AcpEventContext["tools"];
   readonly close: () => Promise<void>;
@@ -196,6 +198,7 @@ interface SessionState {
   readonly appManagedTools: ProviderCapabilitySupport;
   managedTools: AcpManagedToolsLease | undefined;
   promptActive: boolean;
+  compacting: boolean;
   closed: boolean;
 }
 
@@ -216,11 +219,20 @@ interface Factories {
   readonly makeRequestId: () => string;
 }
 
+function hasVerifiedCompaction(profile: AcpProviderProfile): boolean {
+  return profile.kind === "mistral-vibe" && profile.compactionVersions?.includes("3.0.3") === true;
+}
+
 function baseCapabilities(
   profile: AcpProviderProfile,
   appManagedTools: ProviderCapabilitySupport = "unsupported",
   version?: string,
 ) {
+  const compaction: ProviderCapabilitySupport = !hasVerifiedCompaction(profile)
+    ? "unsupported"
+    : version === "3.0.3"
+      ? "supported"
+      : "unavailable";
   return {
     streaming: "supported",
     resume: "supported",
@@ -241,6 +253,7 @@ function baseCapabilities(
     fileChanges: "unavailable",
     diffs: "unavailable",
     taskProgress: "supported",
+    sessionCompaction: { chat: compaction, work: compaction, code: compaction },
     nativeChildAgents: "unavailable",
     // Only an agent whose own mode answers its prompts (Mistral Vibe's
     // auto-approve) can be Reviewed's reviewer.
@@ -517,14 +530,16 @@ function makeClient(connection: AcpAgentConnection): AcpClientPort {
 function commandInventory(notification: AcpServerNotification): ReadonlyArray<string> | undefined {
   const update = notification.params.update;
   if (update.sessionUpdate !== "available_commands_update") return undefined;
-  if (!Array.isArray(update.availableCommands)) return [];
+  if (!Array.isArray(update.availableCommands) || update.availableCommands.length > 128) return [];
   const names: string[] = [];
   for (const candidate of update.availableCommands) {
     if (
       typeof candidate !== "object" ||
       candidate === null ||
       !("name" in candidate) ||
-      typeof candidate.name !== "string"
+      typeof candidate.name !== "string" ||
+      candidate.name.length === 0 ||
+      candidate.name.length > 128
     ) {
       return [];
     }
@@ -1026,6 +1041,12 @@ function makeConnection(
     };
 
     const handleNotification = (state: SessionState, notification: AcpServerNotification) => {
+      const commands = commandInventory(notification);
+      if (notification.params.sessionId === state.sourceSessionId && commands !== undefined) {
+        state.runtime.commands.clear();
+        for (const command of commands) state.runtime.commands.add(command);
+        return;
+      }
       if (
         state.runtime.usage !== undefined &&
         notification.params.sessionId === state.sourceSessionId &&
@@ -1034,6 +1055,7 @@ function makeConnection(
         observeAcpUsage(state.runtime.usage, notification.params.update);
         return;
       }
+      if (state.compacting) return;
       for (const mapped of mapAcpNotification(state.context, notification)) {
         if (mapped.kind === "event") offer(mapped.event);
         else if (mapped.kind === "protocol-failure") {
@@ -1070,6 +1092,12 @@ function makeConnection(
       );
     };
     const handleRequest = (state: SessionState, requestMessage: AcpServerRequestMessage) => {
+      if (state.compacting) {
+        void state.client
+          .reject(requestMessage.id, -32601, "Context compaction offers no client tools.")
+          .catch(() => undefined);
+        return;
+      }
       if (requestMessage.method === "elicitation/create") {
         const enabled =
           profile.kind === "mistral-vibe" &&
@@ -1224,6 +1252,7 @@ function makeConnection(
         appManagedTools,
         managedTools,
         promptActive: false,
+        compacting: false,
         closed: false,
       };
       managedTools?.bridge.bind((toolName, inputJson, signal, metadata) =>
@@ -1393,6 +1422,7 @@ function makeConnection(
           let managedTools: AcpManagedToolsLease | undefined;
           let registered: SessionState | undefined;
           let removeUsage = () => {};
+          let removeCommands = () => {};
           let runtime: AcpRetainedRuntime | undefined;
           const compatibility = JSON.stringify([
             profile.kind,
@@ -1482,6 +1512,16 @@ function makeConnection(
             scope = started.scope;
             assertCurrent();
             const { client, connection } = started;
+            let commandSessionId: string | undefined;
+            let startupCommands: ReadonlyArray<string> = [];
+            let commandsMismatch = false;
+            removeCommands = client.onNotification((notification) => {
+              const commands = commandInventory(notification);
+              if (commands === undefined) return;
+              commandSessionId ??= notification.params.sessionId;
+              if (commandSessionId !== notification.params.sessionId) commandsMismatch = true;
+              startupCommands = commands;
+            });
             const appManagedTools = negotiatedAppManagedTools(
               connection.initialized,
               profile,
@@ -1711,6 +1751,9 @@ function makeConnection(
               managedTools: runtimeTools,
               appManagedTools,
               version: connection.version,
+              commands: new Set(
+                !commandsMismatch && commandSessionId === source.sessionId ? startupCommands : [],
+              ),
               compatibility,
               history: new Map(),
               close,
@@ -1761,6 +1804,7 @@ function makeConnection(
             throw error;
           } finally {
             removeUsage();
+            removeCommands();
             finishStartup();
           }
         })();
@@ -1776,6 +1820,52 @@ function makeConnection(
       });
 
     return {
+      ...(hasVerifiedCompaction(profile)
+        ? {
+            compact: (input: Parameters<NonNullable<ProviderConnection["compact"]>>[0]) =>
+              Effect.tryPromise({
+                try: async (signal) => {
+                  const state = sessions.get(input.sessionId);
+                  if (state === undefined || state.closed)
+                    return { kind: "refused", reason: "no-session" } as const;
+                  if (state.promptActive || state.compacting)
+                    return { kind: "refused", reason: "turn-running" } as const;
+                  if (
+                    state.runtime.version !== "3.0.3" ||
+                    profile.compactionVersions?.includes(state.runtime.version) !== true ||
+                    !state.runtime.commands.has("compact")
+                  )
+                    return { kind: "refused", reason: "runtime-version-unsupported" } as const;
+                  // This private connection stays quarantined until the host
+                  // closes its scope; later turns resume the saved history.
+                  state.compacting = true;
+                  state.promptActive = true;
+                  const answer = await compactAcpConversation(
+                    state.client,
+                    state.sourceSessionId,
+                    signal,
+                  );
+                  if (state.closed || state.runtime.isClosed())
+                    return {
+                      kind: "failed",
+                      message: "The owned compaction session closed before its result.",
+                      sessionMayHaveChanged: true,
+                    } as const;
+                  if (answer.kind === "compacted") {
+                    state.promptActive = false;
+                    offer(
+                      eventFor(state, factories.clock, {
+                        kind: "context-compacted",
+                        trigger: "requested",
+                      }),
+                    );
+                  }
+                  return answer;
+                },
+                catch: (error) => providerFailure(profile, error),
+              }),
+          }
+        : {}),
       ...(hasVerifiedFileReview(profile)
         ? {
             readFileReview: (
@@ -1785,7 +1875,7 @@ function makeConnection(
                 const state = sessions.get(input.sessionId);
                 if (state === undefined || state.closed)
                   return { status: "refused", reason: "no-session" } as const;
-                if (state.promptActive)
+                if (state.promptActive || state.compacting)
                   return { status: "refused", reason: "turn-running" } as const;
                 if (profile.fileReviewVersions?.includes(state.runtime.version) !== true)
                   return { status: "refused", reason: "unsupported" } as const;
@@ -1904,7 +1994,7 @@ function makeConnection(
                 if (state.context.terminal) {
                   return Effect.fail(failure("protocol", `${name} session is already terminal.`));
                 }
-                if (state.promptActive) {
+                if (state.promptActive || state.compacting) {
                   return Effect.fail(failure("protocol", `${name} already has an active turn.`));
                 }
                 const catalogKey = JSON.stringify(bridgeTools);

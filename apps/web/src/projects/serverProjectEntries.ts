@@ -1,7 +1,7 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
 import type { ServerProjectsClient } from "@octant/client-runtime/server-projects-client";
 import type { ShieldServersClient } from "@octant/client-runtime/shield-servers-client";
-import type { BindingRevisionId, ProjectId } from "@octant/contracts/projects";
+import type { BindingRevisionId, ProjectId, ProjectAction } from "@octant/contracts/projects";
 import type { ComposerProjectEntry } from "./ComposerProjectSelector";
 
 /**
@@ -18,11 +18,14 @@ export interface ServerCodeProject {
   readonly name: string;
   /** `alias:folder`, or the folder alone once the server left the registry. */
   readonly location: string;
+  readonly folder?: string;
+  readonly actions?: ReadonlyArray<ProjectAction>;
 }
 
 /** A Work Project on a server, with the binding its Work threads are created against. */
 export interface ServerWorkProject extends ServerCodeProject {
   readonly bindingRevisionId: BindingRevisionId;
+  readonly developerToolsEnabled?: boolean;
 }
 
 export interface ServerCodeProjects {
@@ -86,6 +89,8 @@ export function useServerCodeProjectsSource(
             projectId: project.id,
             name: project.name,
             location: alias === undefined ? project.folder : `${alias}:${project.folder}`,
+            folder: project.folder,
+            ...(project.actions === undefined ? {} : { actions: project.actions }),
           };
         };
         // A Work Project on a server holds Work threads, never Code ones.
@@ -93,7 +98,15 @@ export function useServerCodeProjectsSource(
         const nextWork = view.projects.flatMap(
           (project): ReadonlyArray<ServerWorkProject> =>
             project.mode === "work" && project.workBindingRevisionId !== undefined
-              ? [{ ...entryOf(project), bindingRevisionId: project.workBindingRevisionId }]
+              ? [
+                  {
+                    ...entryOf(project),
+                    bindingRevisionId: project.workBindingRevisionId,
+                    ...(project.developerTools === undefined
+                      ? {}
+                      : { developerToolsEnabled: project.developerTools.enabled }),
+                  },
+                ]
               : [],
         );
         // An unchanged answer keeps its identity, so a poll that found nothing

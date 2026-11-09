@@ -223,7 +223,13 @@ const CANVAS_LINK_PATHS = [
   "$.record.document.canvasId",
   "$.event.canvasId",
 ] as const;
-const RUN_LINK_PATHS = ["$.parentRunId", "$.run.parentRunId"] as const;
+const RUN_LINK_PATHS = [
+  "$.parentRunId",
+  "$.run.parentRunId",
+  // Child Browser permissions keep their private task label under the grant;
+  // erasing the parent thread must take the permission's complete history too.
+  "$.grant.target.grantee.runId",
+] as const;
 
 /** Aggregates a purge must not take, even when a payload names the thread. */
 // A Project's egress rules name the thread they were granted from, but they
@@ -390,6 +396,22 @@ export function erasePurgedProjectData(input: {
   ]) {
     aggregates.set(`${aggregate.aggregateType}:${aggregate.aggregateId}`, aggregate);
   }
+  for (const aggregate of projectOwnedAggregates(
+    connection,
+    "browser-upload-permission",
+    "$.permission.target.authority.projectId",
+    projectId,
+  )) {
+    aggregates.set(`${aggregate.aggregateType}:${aggregate.aggregateId}`, aggregate);
+  }
+  for (const aggregate of projectOwnedAggregates(
+    connection,
+    "browser-download-permission",
+    "$.permission.target.authority.projectId",
+    projectId,
+  )) {
+    aggregates.set(`${aggregate.aggregateType}:${aggregate.aggregateId}`, aggregate);
+  }
   for (const canvasId of input.canvasIds) {
     for (const aggregate of collectCanvasFamilyAggregates(connection, canvasId)) {
       aggregates.set(`${aggregate.aggregateType}:${aggregate.aggregateId}`, aggregate);
@@ -498,7 +520,7 @@ function languageServerEgressAggregates(
 function projectOwnedAggregates(
   connection: SqliteConnection,
   aggregateType: string,
-  projectPath: "$.projectId" | "$.launch.projectId",
+  projectPath: "$.projectId" | "$.launch.projectId" | "$.permission.target.authority.projectId",
   projectId: string,
 ): ReadonlyArray<AggregateKey> {
   const rows = connection

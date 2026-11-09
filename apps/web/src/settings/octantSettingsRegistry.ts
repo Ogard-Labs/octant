@@ -1325,6 +1325,27 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
             "browser profiles sign out signed in cookies project personal private site data clear sign-in",
         },
         {
+          id: settingId("browser-upload-permissions"),
+          label: "Recurring Browser uploads",
+          scope: "host",
+          keywords:
+            "browser upload manifest recurring routine approved folder exact files content count bytes quota revoke expiry",
+        },
+        {
+          id: settingId("browser-download-permissions"),
+          label: "Recurring Browser downloads",
+          scope: "host",
+          keywords:
+            "browser download manifest recurring routine approved folder directory source origins file types count bytes quota revoke expiry",
+        },
+        {
+          id: settingId("browser-session-permissions"),
+          label: "Browser session permissions",
+          scope: "host",
+          keywords:
+            "browser delegated child routine terminal session permission grant revoke expiry signed in account",
+        },
+        {
           id: settingId("browser-flows"),
           label: "Browser flows",
           scope: "host",

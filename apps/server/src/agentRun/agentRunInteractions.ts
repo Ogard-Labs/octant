@@ -72,7 +72,7 @@ function harnessShieldCall(input: {
 
 /** Both provider prompts and Octant tools ask the same person on the parent thread. */
 export function createAgentRunInteractions(options: AgentRunInteractionOptions) {
-  const authorized = (run: AgentRun): boolean => {
+  const authorized = (run: AgentRun, forSessionReview = false): boolean => {
     const parentAuthority = options.parentAuthority(run);
     if (parentAuthority === undefined) return false;
     try {
@@ -83,7 +83,10 @@ export function createAgentRunInteractions(options: AgentRunInteractionOptions) 
     const live = options.getById(run.id);
     return (
       live !== undefined &&
-      (live.lifecycleStatus === "starting" || live.lifecycleStatus === "running") &&
+      (live.lifecycleStatus === "starting" ||
+        live.lifecycleStatus === "running" ||
+        (forSessionReview &&
+          (live.lifecycleStatus === "queued" || live.lifecycleStatus === "waiting"))) &&
       String(live.requestId) === String(run.requestId) &&
       String(live.parentThreadId) === String(run.parentThreadId) &&
       live.routingReceipt.effectiveAuthorityDigest ===
@@ -223,7 +226,8 @@ export function createAgentRunInteractions(options: AgentRunInteractionOptions) 
     return current(input.run, input.signal) ? outcome : { status: "cancelled" as const };
   };
   return {
-    isCurrent: authorized,
+    isCurrent: (run: AgentRun) => authorized(run),
+    canReviewSession: (run: AgentRun) => authorized(run, true),
     approve: async (input: {
       readonly run: AgentRun;
       readonly event: Extract<ProviderRuntimeEvent, { readonly kind: "approval-request" }>;

@@ -246,6 +246,8 @@ export type RemoteDependencies = { readonly onSecretStoreLinkChange?: () => void
   Pick<WorkspaceWiring, "shellService" | "projectService"> &
   Pick<
     BrowserWiring,
+    | "browserUploadPermissions"
+    | "browserDownloadPermissions"
     | "browserAutomationService"
     | "browserExtensionService"
     | "browserFlowService"
@@ -307,6 +309,8 @@ function deviceIsActive(
 
 export function wireRemote(deps: RemoteDependencies) {
   const {
+    browserUploadPermissions,
+    browserDownloadPermissions,
     browserAutomationService,
     browserExtensionService,
     browserFlowService,
@@ -2044,6 +2048,8 @@ export function wireRemote(deps: RemoteDependencies) {
     },
     purgeCanvasFiles: (canvasIds) => removeMirrorFiles(persistence.connection, canvasIds),
     forgetProjectData: (projectId) => {
+      browserUploadPermissions.forgetProject(projectId);
+      browserDownloadPermissions.forgetProject(projectId);
       // The Project's Browser profile goes with its other data: its extensions
       // turn off, then its store is cleared.
       const profile = { kind: "project" as const, projectId: decodeProjectId(projectId) };

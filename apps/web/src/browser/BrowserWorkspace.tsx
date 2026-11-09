@@ -1,8 +1,8 @@
-import type { BrowserAgentAvailability } from "@octant/contracts";
-import { BrowserAgentStatus } from "./BrowserAgentStatus";
 import { useBrowserAccountProfiles } from "./useBrowserAccountProfiles";
 import { browserProfileFromChoice } from "@octant/domain";
 import { browserProfileLabel } from "./browserProfileCopy";
+import type { BrowserAgentAvailability } from "@octant/contracts";
+import { BrowserAgentStatus } from "./BrowserAgentStatus";
 import { BrowserCredentialBindingControl } from "./BrowserCredentialBindingControl";
 import {
   BrowserAutomationClientFailure,
