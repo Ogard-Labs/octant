@@ -261,6 +261,40 @@ describe("continuing a handover on another computer", () => {
     expect(laptopState.load().handovers).toEqual([]);
   });
 
+  it("keeps the continued report until a source that was offline confirms the erase", async () => {
+    let online = false;
+    const holder: { source?: HandoverExchange } = {};
+    const { desktop, desktopState, laptop, laptopState, erased, signed } = world({
+      send: async (_target, path, body) => {
+        if (!online || holder.source === undefined || path !== HANDOVER_ROUTES.continued) {
+          return { status: "unreachable" };
+        }
+        const answer = await holder.source.receiveContinued(signed(body));
+        return { status: "answered", body: answer.body };
+      },
+    });
+    holder.source = laptop;
+    await desktop.receiveNotice(signed(notice));
+
+    expect(
+      await desktop.continueHandover({
+        handoverId: HANDOVER as never,
+        projectId: PROJECT as never,
+      }),
+    ).toMatchObject({ status: "continued" });
+    await desktop.deliverPendingReports();
+    expect(erased).toEqual([]);
+    expect(desktopState.load().pendingContinuedReports).toHaveLength(1);
+    expect(laptopState.load().handovers).toHaveLength(1);
+
+    online = true;
+    await desktop.deliverPendingReports();
+
+    expect(erased).toEqual([THREAD.threadId]);
+    expect(desktopState.load().pendingContinuedReports).toEqual([]);
+    expect(laptopState.load().handovers).toEqual([]);
+  });
+
   it("refuses to continue without the provider kind the thread ran on, or without the branch's note", async () => {
     const noProvider = world({ resolveProvider: () => undefined });
     await noProvider.desktop.receiveNotice(noProvider.signed(notice));

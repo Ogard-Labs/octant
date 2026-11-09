@@ -114,6 +114,7 @@ export class HandoverExchange {
   // another, waits for the first and gets its answer, and a continued
   // handover keeps its answer, so no request makes a second thread.
   readonly #continuations = new Map<string, Promise<HandoverContinueOutcome>>();
+  #delivering = false;
 
   constructor(options: HandoverExchangeOptions) {
     this.#options = options;
@@ -257,20 +258,56 @@ export class HandoverExchange {
       note: verified.note,
     });
     const thread: MovedThreadReference = { mode: "code", threadId: String(threadId) };
+    // The notice goes and the report to the source is kept in one write, so
+    // the source learns of the continuation even if it is offline now.
     const state = this.#options.state.load();
     this.#options.state.save({
       ...state,
       receivedHandovers: (state.receivedHandovers ?? []).filter(
         (entry) => String(entry.notice.handoverId) !== String(notice.handoverId),
       ),
+      pendingContinuedReports: [
+        ...(state.pendingContinuedReports ?? []),
+        {
+          sourceMemberId: received.senderMemberId,
+          report: { handoverId: notice.handoverId, thread },
+          continuedAt: decodeTimestamp(this.#options.clock()),
+        },
+      ],
     });
-    void this.#options
-      .send(String(received.senderMemberId), HANDOVER_ROUTES.continued, {
-        handoverId: notice.handoverId,
-        thread,
-      })
-      .catch(() => undefined);
+    void this.deliverPendingReports();
     return { status: "continued", thread };
+  }
+
+  /**
+   * Sends every continued report the source has not acknowledged. A report
+   * goes once the source answers that it erased its copy or no longer holds
+   * the handover; an unreachable or busy source is asked again on the next
+   * call. Called when a handover is continued, at startup, and now and then.
+   */
+  async deliverPendingReports(): Promise<void> {
+    if (this.#delivering) return;
+    this.#delivering = true;
+    try {
+      for (const pending of this.#options.state.load().pendingContinuedReports ?? []) {
+        const answer = await this.#options
+          .send(String(pending.sourceMemberId), HANDOVER_ROUTES.continued, pending.report)
+          .catch(() => ({ status: "unreachable" as const }));
+        const settled =
+          answer.status === "answered" &&
+          (answer.body.status === "erased" || answer.body.status === "unknown");
+        if (!settled) continue;
+        const now = this.#options.state.load();
+        this.#options.state.save({
+          ...now,
+          pendingContinuedReports: (now.pendingContinuedReports ?? []).filter(
+            (entry) => String(entry.report.handoverId) !== String(pending.report.handoverId),
+          ),
+        });
+      }
+    } finally {
+      this.#delivering = false;
+    }
   }
 
   // ── Source ─────────────────────────────────────────────────────────────

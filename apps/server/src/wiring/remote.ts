@@ -169,6 +169,8 @@ import type { RoutesWiring } from "./routes";
 const FAILOVER_LOOK_MS = 15_000;
 /** How often the hub looks for an occurrence to wake a spoke for, and a spoke for a changed routine time to report. */
 const WAKE_LOOK_MS = 15_000;
+/** How often a continued handover's report is sent again until its source confirms the erase. */
+const HANDOVER_REPORT_RETRY_MS = 60_000;
 const WAKE_REPORT_MS = 30_000;
 /** How often the push sender forgets old rate marks and hands standbys its switch. */
 const PUSH_LOOK_MS = 60_000;
@@ -1442,6 +1444,13 @@ export function wireRemote(deps: RemoteDependencies) {
   // A move that was under way when this host stopped resumes from what its
   // destination holds; only a committed move erases the thread here.
   void threadMoves.recover().catch(() => undefined);
+  // A continued handover's report waits here until its source confirms the
+  // erase, so a source that was offline still lets go of its frozen copy.
+  void handoverExchange.deliverPendingReports().catch(() => undefined);
+  setInterval(
+    () => void handoverExchange.deliverPendingReports().catch(() => undefined),
+    HANDOVER_REPORT_RETRY_MS,
+  ).unref();
   const ownerBrowserControlService = new OwnerBrowserControlService({
     host: browserAutomationService.ownerBrowserHost({
       hostMemberId: () => Schema.decodeUnknownSync(HubMemberId)(hubService.hubMemberId()),

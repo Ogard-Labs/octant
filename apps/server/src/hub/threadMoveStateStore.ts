@@ -10,6 +10,7 @@ import { chmodSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "n
 import { join } from "node:path";
 import {
   HandedOverThread,
+  HandoverContinuedReport,
   HandoverNotice,
   HubMemberId,
   MovedThreadReference,
@@ -92,6 +93,18 @@ export const ReceivedHandover = Schema.Struct({
 }).annotations(strict);
 export type ReceivedHandover = typeof ReceivedHandover.Type;
 
+/**
+ * A handover continued here whose source has not yet confirmed it erased its
+ * copy, kept and sent again until it does: an unreachable source would
+ * otherwise keep its frozen copy for good.
+ */
+export const PendingContinuedReport = Schema.Struct({
+  sourceMemberId: HubMemberId,
+  report: HandoverContinuedReport,
+  continuedAt: UtcTimestamp,
+}).annotations(strict);
+export type PendingContinuedReport = typeof PendingContinuedReport.Type;
+
 /** How many departures a host keeps for "Moved to" tombstones; the oldest go first. */
 export const THREAD_MOVE_DEPARTURES_KEPT = 500;
 
@@ -105,6 +118,8 @@ export const ThreadMoveState = Schema.Struct({
   handovers: Schema.optional(Schema.Array(HandedOverThread)),
   /** Handovers other members told this computer about, for the Handovers card. */
   receivedHandovers: Schema.optional(Schema.Array(ReceivedHandover)),
+  /** Continued reports the source has not acknowledged yet. */
+  pendingContinuedReports: Schema.optional(Schema.Array(PendingContinuedReport)),
 }).annotations(strict);
 export type ThreadMoveState = typeof ThreadMoveState.Type;
 

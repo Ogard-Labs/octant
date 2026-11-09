@@ -2313,9 +2313,11 @@ a numbered slice. Built, with these narrower readings:
     its frozen copy the way a moved thread is erased, claiming the thread
     first so Take back here is refused until the erase ends, keeping a
     worktree that holds anything the handover did not carry, and records
-    "Moved to" for old links. What it does not do yet: a branch found by
-    fetching without a notice, the agent's own summary turn, and the report
-    retried when the source was unreachable.
+    "Moved to" for old links. The destination keeps the continued report and
+    sends it again at startup and every minute until the source answers that
+    it erased its copy or no longer holds the handover, so a source that was
+    offline still lets its frozen copy go. What it does not do yet: a branch
+    found by fetching without a notice, and the agent's own summary turn.
 
 Any slice that would deploy an Octant-operated service, create an account, or
 spend money stops for a separate maintainer action.
