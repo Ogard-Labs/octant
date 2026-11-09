@@ -1,3 +1,4 @@
+import { useThreadControlNavigation } from "../composer/threadControlNavigation";
 import type { ContextClient } from "@octant/client-runtime/context-client";
 import type {
   ContextSubjectRef,
@@ -96,6 +97,14 @@ const CAPABILITY = {
 /** Expands the existing indicator; every recovery uses an existing person action. */
 export function TaskAccessDetails({ read }: { readonly read: AccessRead }) {
   const [open, setOpen] = useState(false);
+  useThreadControlNavigation(
+    read.context === undefined ? undefined : String(read.context.subject.aggregateId),
+    "access",
+    () => {
+      read.refresh();
+      setOpen(true);
+    },
+  );
   const trigger = useRef<HTMLButtonElement>(null);
   const panel = useRef<HTMLElement>(null);
   const { facts, context } = read;
@@ -283,6 +292,13 @@ export function TaskAccessDetails({ read }: { readonly read: AccessRead }) {
                 >
                   Protected file guidance
                 </OctantButton>
+              ) : null}
+              {facts.browser?.status === "omitted" &&
+              facts.browser.reason === "excluded-by-thread-constraints" ? (
+                <p>
+                  This task's saved tool constraints exclude Browser. Changing its access level does
+                  not remove those constraints. Start a task with a profile that permits Browser.
+                </p>
               ) : null}
               <p className="text-xs">
                 Reported {absoluteTimeFormatter.format(new Date(facts.observedAt))}. Current

@@ -1,3 +1,4 @@
+import { BrowserAgentAvailability } from "./taskAccess";
 import { personDecides } from "./hostAnswer";
 import { Schema } from "effect";
 import {
@@ -184,6 +185,7 @@ export const BrowserContextObservation = Schema.Struct({
 export type BrowserContextObservation = typeof BrowserContextObservation.Type;
 
 export const BrowserAutomationSnapshot = Schema.Struct({
+  agentAvailability: Schema.optional(BrowserAgentAvailability),
   status: BrowserWorkspaceStatus,
   threadId: BrowserThreadId,
   context: Schema.optional(BrowserContextRecord),
