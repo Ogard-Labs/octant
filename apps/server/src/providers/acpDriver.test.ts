@@ -308,6 +308,168 @@ async function collectTerminal(
   );
 }
 
+describe("requested ACP compaction capability", () => {
+  it("keeps production Vibe compaction unadvertised and omits the command port", async () => {
+    const f = fixture(vibe, { runtimeVersion: "3.0.3" });
+    const probed = await Effect.runPromise(Effect.scoped(f.driver.probe({ instanceId })));
+    expect(probed.capabilities.sessionCompaction).toEqual({
+      chat: "unsupported",
+      work: "unsupported",
+      code: "unsupported",
+    });
+    await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const connection = yield* f.driver.acquire({ instanceId, projectRoot, mode: "code" });
+          expect(connection.compact).toBeUndefined();
+        }),
+      ),
+    );
+  });
+  it("keeps structured compaction receipts out of ordinary turn events and emits one requested boundary", async () => {
+    const f = fixture(
+      { ...vibe, compactionVersions: ["3.0.3"], reviewedCommands: ["compact"] },
+      { runtimeVersion: "3.0.3" },
+    );
+    f.client.prompt.mockImplementationOnce(async (nativeSession) => {
+      for (const update of [
+        {
+          sessionUpdate: "tool_call",
+          toolCallId: "compact-receipt",
+          kind: "other",
+          status: "in_progress",
+          title: "Compacting conversation history...",
+        },
+        {
+          sessionUpdate: "tool_call_update",
+          toolCallId: "compact-receipt",
+          status: "completed",
+          title: "Compacted conversation history",
+        },
+      ])
+        f.client.emit({
+          kind: "notification",
+          method: "session/update",
+          params: { sessionId: nativeSession, update },
+        });
+      return { stopReason: "end_turn" };
+    });
+    await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const connection = yield* f.driver.acquire({ instanceId, projectRoot, mode: "code" });
+          const events = yield* connection.subscribe;
+          const boundary = yield* events.pipe(Stream.take(1), Stream.runCollect, Effect.forkScoped);
+          yield* connection.start({ sessionId, modelId, executionPolicy: "plan", tools: [] });
+          const compact = connection.compact;
+          if (compact === undefined) throw new Error("Injected verified compaction missing");
+          expect(yield* compact({ sessionId, compactionId: "host-operation" })).toEqual({
+            kind: "compacted",
+          });
+          const observed = Array.from(yield* Fiber.join(boundary));
+          expect(observed.map((event) => event.kind)).toEqual(["context-compacted"]);
+          expect(observed[0]).toMatchObject({ trigger: "requested", sessionId });
+          expect(f.client.prompt).toHaveBeenCalledWith("agent-session-1", "/compact");
+          const late: ProviderRuntimeEvent[] = [];
+          const after = yield* connection.subscribe;
+          yield* after.pipe(
+            Stream.runForEach((event) =>
+              Effect.sync(() => {
+                late.push(event);
+              }),
+            ),
+            Effect.forkScoped,
+          );
+          f.client.emit({
+            kind: "notification",
+            method: "session/update",
+            params: {
+              sessionId: "agent-session-1",
+              update: {
+                sessionUpdate: "tool_call_update",
+                toolCallId: "compact-receipt",
+                status: "completed",
+                title: "Compacted conversation history",
+              },
+            },
+          });
+          expect(
+            (yield* Effect.either(
+              connection.send({ sessionId, prompt: "competing turn", attachments: [], tools: [] }),
+            ))._tag,
+          ).toBe("Left");
+          yield* Effect.sleep(1);
+          expect(late).toEqual([]);
+          expect(f.client.prompt).toHaveBeenCalledOnce();
+        }),
+      ),
+    );
+  });
+  it.each(["3.0.4", "2.25.0"])(
+    "refuses an unverified %s runtime before sending the command",
+    async (runtimeVersion) => {
+      const f = fixture(
+        { ...vibe, compactionVersions: ["3.0.3"], reviewedCommands: ["compact"] },
+        { runtimeVersion },
+      );
+      await Effect.runPromise(
+        Effect.scoped(
+          Effect.gen(function* () {
+            const connection = yield* f.driver.acquire({ instanceId, projectRoot, mode: "code" });
+            yield* connection.start({ sessionId, modelId, executionPolicy: "plan", tools: [] });
+            const compact = connection.compact;
+            if (compact === undefined) throw new Error("Missing injected port");
+            expect(yield* compact({ sessionId, compactionId: "host-operation" })).toEqual({
+              kind: "refused",
+              reason: "runtime-version-unsupported",
+            });
+            expect(f.client.prompt).not.toHaveBeenCalled();
+          }),
+        ),
+      );
+    },
+  );
+  it("refuses absent sessions, missing observed commands and simultaneous native turns", async () => {
+    const f = fixture({ ...vibe, compactionVersions: ["3.0.3"] }, { runtimeVersion: "3.0.3" });
+    await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const connection = yield* f.driver.acquire({ instanceId, projectRoot, mode: "code" });
+          const compact = connection.compact;
+          if (compact === undefined) throw new Error("Missing injected port");
+          expect(yield* compact({ sessionId, compactionId: "host-operation" })).toEqual({
+            kind: "refused",
+            reason: "no-session",
+          });
+          yield* connection.start({ sessionId, modelId, executionPolicy: "plan", tools: [] });
+          expect(yield* compact({ sessionId, compactionId: "host-operation" })).toEqual({
+            kind: "refused",
+            reason: "runtime-version-unsupported",
+          });
+          f.client.emit({
+            kind: "notification",
+            method: "session/update",
+            params: {
+              sessionId: "agent-session-1",
+              update: {
+                sessionUpdate: "available_commands_update",
+                availableCommands: [{ name: "compact" }],
+              },
+            },
+          });
+          f.client.prompt.mockImplementationOnce(() => new Promise(() => {}));
+          yield* connection.send({ sessionId, prompt: "user turn", tools: [], attachments: [] });
+          expect(yield* compact({ sessionId, compactionId: "host-operation" })).toEqual({
+            kind: "refused",
+            reason: "turn-running",
+          });
+          expect(f.client.prompt).toHaveBeenCalledOnce();
+        }),
+      ),
+    );
+  });
+});
+
 describe("supplementary file review capability", () => {
   it("checks current host admission after a cold load before changing native settings", async () => {
     const f = fixture({ ...vibe, fileReviewVersions: ["3.0.3"] }, { runtimeVersion: "3.0.3" });

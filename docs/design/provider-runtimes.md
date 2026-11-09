@@ -112,14 +112,11 @@ in-process host, so it loses no capability by comparison: the 3.0.3 source
 sends ACP usage updates with context size and cost, a `/compact` command,
 `review/*` extension methods, and questions as elicitation. Usage and context
 updates are consumed for the verified 3.0.3 release, as specified below.
-Compaction and native review remain unimplemented and need their own signed-in runtime
-evidence before any capability is declared. Supplementary file-review reads have a
-candidate integration behind an empty verified-version allowlist: no production profile
-declares the read capability until signed-in 3.0.3 read and genuine same-task
-cold-resume evidence pass. A session-form elicitation candidate
-is implemented but unavailable in production: its verified-version allowlist is
-empty until signed-in 3.0.3 question, answer and cancellation evidence passes. Revisit `vibe-app-server` when it negotiates a
-version or is documented.
+Native review remains unimplemented. Supplementary file-review
+reads have a candidate integration behind an empty verified-version allowlist:
+no production profile declares the read capability until signed-in 3.0.3
+read and genuine same-task cold-resume evidence pass. Revisit `vibe-app-server` when it negotiates a
+version or is documented. A session-form elicitation candidate is implemented but unavailable in production: its verified-version allowlist is empty until signed-in 3.0.3 question, answer and cancellation evidence passes.
 
 The candidate advertises only ACP `elicitation.form`, never URL elicitation,
 for an explicitly verified exact 3.0.3 release. Only an active originating
@@ -137,6 +134,29 @@ Chat, Work and Code use their existing questionnaire surface. Work additionally
 sanitizes displayed text and accepts a structural response under its existing
 no-path/no-URL boundary before private SDK serialization. No account call,
 source fixture or empty-history probe constitutes signed-in acceptance.
+
+Requested compaction has a separate gated ACP adapter through the existing
+provider SDK `compact` port and host compaction service. Its verified-version
+allowlist is empty: production remains unsupported until signed-in nonempty
+3.0.3 compaction and same-task cold-resume semantics pass. The installed
+command must also advertise `compact` for the exact native session. The host
+never replaces the chosen ACP driver or sends ordinary history as a workaround.
+
+The command runs only while the session is idle, exclusively from ordinary
+turn traffic. Its private connection stays quarantined until the owning host
+closes it; a later turn resumes the saved native history on a fresh connection.
+It sends `/compact` once and requires one structured start and
+one completed update with the same native tool-call identity. `end_turn`,
+English progress/refusal text, duplicate or mismatched receipts, another
+session's updates, failed status and unexpected client requests cannot prove
+compaction or prove that history was unchanged. Ambiguous outcomes fail with
+`sessionMayHaveChanged`; the owning host service closes the runtime. A proved
+completion emits one requested `context-compacted` boundary, with no invented
+turn/tool activity, token figures, cost or command exit status. Native usage
+updates retain their existing accounting rules. The command has the host's
+five-minute operation bound; cancellation addresses only its owned native
+session and removes the temporary observers before scoped process cleanup.
+This request adapter does not implement an automatic-compaction policy.
 
 The provider SDK's optional file-review read port returns bounded checkpoint
 text, observed edit scopes, per-scope text comparisons and line anchors. It
