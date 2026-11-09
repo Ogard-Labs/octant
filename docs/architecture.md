@@ -7722,7 +7722,10 @@ the model at another size.
   no longer fits.", which is what the loop then does. A model whose window
   nothing names and a turn running on a fallback model get no note, since
   neither has a window Octant can stand behind; `context-remaining` answers as
-  before. A summary request carries none. The Anthropic Messages body marks the
+  before. A summary request carries none, and a request the endpoint's own
+  size check would refuse only because of the note goes without it, since a
+  body over the limit fails as a configuration error that is never retried or
+  compacted. The Anthropic Messages body marks the
   message before a trailing note as well as the note itself, since a cache
   entry ending at the note is never read again. Rationale: the lead was told
   to call `context-remaining` before long work, so it learned how full the

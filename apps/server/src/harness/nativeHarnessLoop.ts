@@ -611,13 +611,7 @@ export function createNativeHarnessConnection(
         try {
           state.requestStartedAt = options.clock();
           return await (state.fallback?.endpoint ?? state.endpoint).send(
-            state.fallback === undefined
-              ? withWindowFill(
-                  state.compactionPoint?.contextWindow ?? options.contextWindow?.(state.modelId),
-                  state.compactionPoint,
-                  current,
-                )
-              : current,
+            state.fallback === undefined ? withFitWindowFill(state, current) : current,
             stream,
           );
         } catch (error) {
@@ -1201,6 +1195,24 @@ export function createNativeHarnessConnection(
         });
       }
       pending.unsettled.clear();
+    };
+
+    /**
+     * The request with its window note, when the note still fits. Fitting
+     * measured the request without it, and an endpoint refuses a body over its
+     * limit as a configuration failure that is neither retried nor compacted,
+     * so a request at the very edge goes without the note rather than fail.
+     */
+    const withFitWindowFill = (
+      state: SessionState,
+      request: NativeHarnessRequest,
+    ): NativeHarnessRequest => {
+      const noted = withWindowFill(
+        state.compactionPoint?.contextWindow ?? options.contextWindow?.(state.modelId),
+        state.compactionPoint,
+        request,
+      );
+      return noted === request || state.endpoint.fits(noted) ? noted : request;
     };
 
     const requestFor = (state: SessionState, history: ReadonlyArray<NativeHarnessMessage>) =>

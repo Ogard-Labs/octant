@@ -2253,6 +2253,33 @@ describe("compacting an Octant Harness session", () => {
     expect(transcripts.load(sessionId)?.messages.some(isNote)).toBe(false);
   });
 
+  it("sends a request at the edge of the endpoint's limit without its window note", async () => {
+    const isNote = (message: { readonly text: string }) =>
+      message.text.startsWith("[Note from Octant, not the user:");
+    // The endpoint takes the fitted request but not one byte more.
+    const { transport, requests } = scriptedTransport(
+      [{ text: "answer 1", toolCalls: [] }],
+      (request) => !request.history.some(isNote),
+    );
+    const events = await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const connection = yield* connect(transport, new MemoryNativeHarnessTranscriptStore());
+          yield* connection.start({
+            sessionId,
+            modelId,
+            executionPolicy: "approval-gated",
+            compactionPoint: { tokens: 170_000, contextWindow: 200_000 },
+          });
+          return yield* sendAndCollect(connection, "first", isTerminal);
+        }),
+      ),
+    );
+    expect(events.at(-1)?.kind).toBe("completed");
+    expect(requests).toHaveLength(1);
+    expect(requests[0]?.history.map((message) => message.text)).toEqual(["first"]);
+  });
+
   it("resumes a compacted session from its summary and the turns after it", async () => {
     const transcripts = new MemoryNativeHarnessTranscriptStore();
     const { transport, requests } = scriptedTransport([
