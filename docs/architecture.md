@@ -7705,6 +7705,24 @@ the model at another size.
   step are answered as not run, so the conversation stays valid for the next
   send. An unknown stream event type is
   ignored and logged, never fatal.
+- **Window fill on every request.** Every request a lead sends ends with one
+  user message from Octant saying how full the window is: "[Note from Octant,
+  not the user: this request fills about 62% of the model's 200K-token window.
+  Octant summarizes earlier turns once a request passes 85%.]" The figure is
+  the four-characters-a-token estimate the session's compaction point is
+  judged by, taken from the request as fitted and after any compaction, so the
+  two numbers mean the same arithmetic. The note is added to the copy that is
+  sent and never joins the conversation or the journal, so the next request
+  carries the same earlier messages and its prefix still matches the cache. It
+  is a message of its own because endpoints drop text beside tool results. A
+  session with no compaction point (the rule off, or no window known for the
+  model) and a turn running on a fallback model get no note, since neither has
+  a window Octant can stand behind; `context-remaining` answers as before. A
+  summary request carries none. The Anthropic Messages body marks the
+  message before a trailing note as well as the note itself, since a cache
+  entry ending at the note is never read again. Rationale: the lead was told
+  to call `context-remaining` before long work, so it learned how full the
+  window was only when it remembered to ask.
 - **Endpoint port.** A direct endpoint reaches the harness through the
   provider-sdk harness endpoint port (`@octant/provider-sdk/harness-endpoint`),
   the same seam a third-party driver would use. The port is types only: the

@@ -604,7 +604,13 @@ export function createNativeHarnessConnection(
       for (;;) {
         try {
           state.requestStartedAt = options.clock();
-          return await (state.fallback?.endpoint ?? state.endpoint).send(current, stream);
+          return await (state.fallback?.endpoint ?? state.endpoint).send(
+            withWindowFill(
+              state.fallback === undefined ? state.compactionPoint : undefined,
+              current,
+            ),
+            stream,
+          );
         } catch (error) {
           if (!signal.aborted && isContextOverflowFailure(sanitizeFailure(error))) {
             const compacted = compactionTried ? undefined : await compactToFit(state, signal);
@@ -1885,7 +1891,46 @@ export function passesCompactionPoint(
   request: NativeHarnessRequest,
 ): boolean {
   if (point === undefined) return false;
-  return Math.ceil(JSON.stringify(request).length / 4) >= point.tokens;
+  return requestTokenEstimate(request) >= point.tokens;
+}
+
+/**
+ * The request as sent, ending with a note from Octant on how full the window
+ * is, so the lead can checkpoint before a compaction without calling
+ * `context-remaining` first. The note goes last, in its own user message,
+ * because endpoints drop text beside tool results, and it is never kept in
+ * the conversation, so the next request's prefix still matches this one and
+ * its cache. The figure is the estimate the compaction point is judged by,
+ * so "fills 80%" and "summarizes at 85%" mean the same arithmetic. With no
+ * point there is no named window, and a fallback model's window may differ
+ * from the lead's: neither gets a figure, as `context-remaining` refuses one
+ * it cannot stand behind.
+ */
+function withWindowFill(
+  point: ProviderCompactionPoint | undefined,
+  request: NativeHarnessRequest,
+): NativeHarnessRequest {
+  if (point === undefined || point.contextWindow <= 0) return request;
+  const filled = Math.min(
+    100,
+    Math.round((requestTokenEstimate(request) * 100) / point.contextWindow),
+  );
+  const share = Math.round((point.tokens * 100) / point.contextWindow);
+  const note: NativeHarnessMessage = {
+    role: "user",
+    text: `[Note from Octant, not the user: this request fills about ${String(filled)}% of the model's ${windowSize(point.contextWindow)}-token window. Octant summarizes earlier turns once a request passes ${String(share)}%.]`,
+  };
+  return { ...request, history: [...request.history, note] };
+}
+
+/** Four characters a token, as the endpoints estimate fit. */
+function requestTokenEstimate(request: NativeHarnessRequest): number {
+  return Math.ceil(JSON.stringify(request).length / 4);
+}
+
+function windowSize(tokens: number): string {
+  if (tokens >= 1_000_000) return `${String(Math.round(tokens / 100_000) / 10)}M`;
+  return `${String(Math.round(tokens / 1_000))}K`;
 }
 
 /** How much of the window one request filled: its input, cached reads and writes included. */

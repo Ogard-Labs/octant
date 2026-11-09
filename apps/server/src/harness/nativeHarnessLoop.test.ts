@@ -2188,10 +2188,69 @@ describe("compacting an Octant Harness session", () => {
     );
     expect(requests).toHaveLength(4);
     expect(requests[2]?.tools).toEqual([]);
+    // The summary request reads the conversation alone, with no fill note.
+    expect(requests[2]?.history).toHaveLength(1);
     expect(requests[2]?.history[0]?.text).toContain("User: first");
     expect(requests[3]?.history[0]?.text).toContain("Earlier: chose the queue design.");
-    expect(requests[3]?.history.at(-1)?.text).toBe(long);
+    expect(requests[3]?.history.at(-2)?.text).toBe(long);
     expect(events.some((event) => event.kind === "context-compacted")).toBe(true);
+  });
+
+  it("ends every request with how full the window is, and never keeps that note", async () => {
+    const transcripts = new MemoryNativeHarnessTranscriptStore();
+    const { transport, requests } = scriptedTransport([
+      {
+        text: "Looking",
+        toolCalls: [{ toolCallId: "read-1", toolName: "read", argumentsJson: "{}" }],
+      },
+      { text: "answer 1", toolCalls: [] },
+      { text: "answer 2", toolCalls: [] },
+    ]);
+    const isNote = (message: { readonly text: string }) =>
+      message.text.startsWith("[Note from Octant, not the user:");
+    // The figure is the estimate of the request as fitted, before its note.
+    const expectedNote = (request: (typeof requests)[number]) => {
+      const fitted = { ...request, history: request.history.filter((m) => !isNote(m)) };
+      const filled = Math.round((Math.ceil(JSON.stringify(fitted).length / 4) * 100) / 200_000);
+      return `[Note from Octant, not the user: this request fills about ${String(filled)}% of the model's 200K-token window. Octant summarizes earlier turns once a request passes 85%.]`;
+    };
+    await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const connection = yield* connect(transport, transcripts);
+          yield* connection.start({
+            sessionId,
+            modelId,
+            executionPolicy: "plan",
+            tools,
+            compactionPoint: { tokens: 170_000, contextWindow: 200_000 },
+          });
+          yield* sendAndCollect(connection, "first", (event) => event.kind === "tool-request");
+          const terminal = yield* Effect.fork(
+            Stream.runCollect((yield* connection.subscribe).pipe(Stream.takeUntil(isTerminal))),
+          );
+          yield* connection.answerTool({
+            sessionId,
+            requestId: "read-1",
+            resultJson: '{"text":"hello"}',
+            isError: false,
+          });
+          yield* Fiber.join(terminal);
+          yield* sendAndCollect(connection, "second", isTerminal);
+        }),
+      ),
+    );
+    expect(requests).toHaveLength(3);
+    // The prompt, the tool step and the next turn each end with their own fill.
+    for (const request of requests) {
+      expect(request.history.at(-1)).toEqual({ role: "user", text: expectedNote(request) });
+      expect(request.history.filter(isNote)).toHaveLength(1);
+    }
+    // A later request carries the earlier messages without their notes, so its
+    // prefix matches what was sent before.
+    expect(requests[1]?.history[0]).toEqual(requests[0]?.history[0]);
+    expect(requests[1]?.history.at(-2)?.toolResults?.[0]?.toolCallId).toBe("read-1");
+    expect(transcripts.load(sessionId)?.messages.some(isNote)).toBe(false);
   });
 
   it("resumes a compacted session from its summary and the turns after it", async () => {

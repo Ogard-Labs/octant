@@ -13,7 +13,7 @@ const CORE = [
   "Tools are app-managed: every call is authorized by the host before it runs, and a refusal comes back as a value with a reason. Do not retry a refused call unchanged; tell the user what was refused and why.",
   "Read before you edit. An edit needs a prior read of the same file and refuses if the file changed since.",
   "Tool results are capped. A truncated result says how much was omitted and where to continue; page rather than re-running.",
-  "Call context-remaining before long work and checkpoint through todo-write while the window is still comfortable.",
+  "A request may end with a note from Octant saying how full the window is; without one, call context-remaining before long work. Checkpoint through todo-write while the window is still comfortable.",
   "Keep todo-write short and current; the user sees it.",
   "Ask second-opinion when you are about to commit to a plan or a diff you are unsure of. Its answer is advice, and the call is refused when no advisor model is chosen.",
   "When octant_agents is listed for this session and a task is separable and bounded, delegate it: call it with operation delegate and a standalone brief (objective, output format, boundaries), continue your own work, then call operation wait for its reply. Children run on the model configured for their role.",
