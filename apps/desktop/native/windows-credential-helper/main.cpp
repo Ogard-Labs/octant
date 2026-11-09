@@ -1,7 +1,10 @@
 #include <windows.h>
 #include <wincred.h>
+#include <sddl.h>
+#include <aclapi.h>
 #include <array>
 #include <cstdint>
+#include <cstddef>
 #include <string>
 
 namespace {
@@ -56,14 +59,95 @@ bool reply(HANDLE output, Status status, unsigned char* secret = nullptr, DWORD 
     (size == 0 || transfer(output, secret, size, true));
 }
 
+// Every helper process coordinates the user's entire persistent vault, not
+// just one purpose/store. Native concurrent deletes were observed to return
+// success while other owned entries remained present on Windows Server 2025.
+class VaultAccess {
+  HANDLE mutex_ = nullptr;
+  bool held_ = false;
+
+  bool private_security(PSID user) {
+    PSID owner = nullptr;
+    PACL dacl = nullptr;
+    PSECURITY_DESCRIPTOR descriptor = nullptr;
+    const DWORD result = GetSecurityInfo(mutex_, SE_KERNEL_OBJECT,
+      OWNER_SECURITY_INFORMATION | DACL_SECURITY_INFORMATION,
+      &owner, nullptr, &dacl, nullptr, &descriptor);
+    if (result != ERROR_SUCCESS) return false;
+    alignas(SID) std::array<unsigned char, SECURITY_MAX_SID_SIZE> system{};
+    DWORD system_size = static_cast<DWORD>(system.size());
+    SECURITY_DESCRIPTOR_CONTROL control = 0;
+    DWORD revision = 0;
+    bool valid = owner != nullptr && EqualSid(owner, user) && dacl != nullptr &&
+      GetSecurityDescriptorControl(descriptor, &control, &revision) &&
+      (control & SE_DACL_PROTECTED) != 0 && IsValidAcl(dacl) && dacl->AceCount == 2 &&
+      CreateWellKnownSid(WinLocalSystemSid, nullptr, system.data(), &system_size);
+    bool user_seen = false;
+    bool system_seen = false;
+    for (DWORD i = 0; valid && i < dacl->AceCount; ++i) {
+      void* entry = nullptr;
+      valid = GetAce(dacl, i, &entry) != FALSE;
+      if (!valid) break;
+      const auto* ace = static_cast<ACCESS_ALLOWED_ACE*>(entry);
+      valid = ace->Header.AceType == ACCESS_ALLOWED_ACE_TYPE && ace->Header.AceFlags == 0 &&
+        ace->Header.AceSize >= offsetof(ACCESS_ALLOWED_ACE, SidStart) + 8 && ace->Mask == MUTEX_ALL_ACCESS &&
+        GetLengthSid(const_cast<DWORD*>(&ace->SidStart)) <= ace->Header.AceSize - offsetof(ACCESS_ALLOWED_ACE, SidStart) &&
+        IsValidSid(const_cast<DWORD*>(&ace->SidStart));
+      if (!valid) break;
+      if (EqualSid(const_cast<DWORD*>(&ace->SidStart), user) && !user_seen) user_seen = true;
+      else if (EqualSid(const_cast<DWORD*>(&ace->SidStart), system.data()) && !system_seen) system_seen = true;
+      else valid = false;
+    }
+    LocalFree(descriptor);
+    return valid && user_seen && system_seen;
+  }
+
+public:
+  ~VaultAccess() {
+    if (held_) ReleaseMutex(mutex_);
+    if (mutex_ != nullptr) CloseHandle(mutex_);
+  }
+  bool acquire() {
+    HANDLE token = nullptr;
+    if (!OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &token)) return false;
+    alignas(TOKEN_USER) std::array<unsigned char, sizeof(TOKEN_USER) + SECURITY_MAX_SID_SIZE> token_data{};
+    DWORD length = 0;
+    const bool found = GetTokenInformation(token, TokenUser, token_data.data(),
+      static_cast<DWORD>(token_data.size()), &length) != FALSE;
+    CloseHandle(token);
+    if (!found) return false;
+    const auto* token_user = reinterpret_cast<const TOKEN_USER*>(token_data.data());
+    wchar_t* sid = nullptr;
+    if (!ConvertSidToStringSidW(token_user->User.Sid, &sid)) return false;
+    const std::wstring sid_text(sid);
+    LocalFree(sid);
+    // Global names cover different logon sessions of this same user. Mutexes
+    // need no global-object creation privilege (unlike file mappings).
+    const std::wstring name = L"Global\\Octant.credentials.v1." + sid_text;
+    const std::wstring policy = L"O:" + sid_text + L"D:P(A;;0x001f0001;;;" + sid_text + L")(A;;0x001f0001;;;SY)";
+    PSECURITY_DESCRIPTOR descriptor = nullptr;
+    if (!ConvertStringSecurityDescriptorToSecurityDescriptorW(policy.c_str(), SDDL_REVISION_1,
+        &descriptor, nullptr)) return false;
+    SECURITY_ATTRIBUTES security{sizeof(SECURITY_ATTRIBUTES), descriptor, FALSE};
+    mutex_ = CreateMutexExW(&security, name.c_str(), 0, MUTEX_ALL_ACCESS);
+    LocalFree(descriptor);
+    // Existing named objects are just as untrusted as newly-created ones.
+    if (mutex_ == nullptr || !private_security(token_user->User.Sid)) return false;
+    const DWORD wait = WaitForSingleObject(mutex_, 3000);
+    held_ = wait == WAIT_OBJECT_0 || wait == WAIT_ABANDONED;
+    // Abandonment is uncertain, never a reason to replay a prior mutation.
+    return wait == WAIT_OBJECT_0 && private_security(token_user->User.Sid);
+  }
+};
+
 int run(HANDLE input, HANDLE output) {
-  std::array<unsigned char, 83> header{};
+  std::array<unsigned char, 84> header{};
   Secret secret;
   if (!transfer(input, header.data(), static_cast<DWORD>(header.size()), false))
     return reply(output, Status::invalid) ? 0 : 1;
   const DWORD size = little_endian(header.data() + 79);
   const auto operation = header[5];
-  bool valid = header[4] == 1 && operation >= 1 && operation <= 4 && header[6] <= 1 &&
+  bool valid = header[4] == 2 && operation >= 1 && operation <= 4 && header[6] <= 1 && header[83] < 8 &&
     uuid(header.data() + 7) && uuid(header.data() + 43) && size <= max_secret &&
     (operation == 1 ? size > 0 : size == 0);
   for (size_t i = 0; i < magic.size(); ++i) valid = valid && header[i] == magic[i];
@@ -78,7 +162,19 @@ int run(HANDLE input, HANDLE output) {
       reinterpret_cast<const char*>(secret.bytes.data()), static_cast<int>(size), nullptr, 0) == 0)
     return reply(output, Status::invalid) ? 0 : 1;
 
-  std::wstring target = header[6] == 0 ? L"Octant/provider/v1/octant/" : L"Octant/provider/v1/octant-nightly-test-data/";
+  VaultAccess access;
+  if (!access.acquire()) return reply(output, Status::unavailable) ? 0 : 1;
+
+  // The purpose is closed in both peers. In particular the existing provider
+  // prefix is unchanged; auxiliary requests can never name that target.
+  constexpr std::array<const wchar_t*, 8> purposes{
+    L"provider", L"replica-device-key", L"replica-store-credential",
+    L"canvas-public-share-secret", L"mcp-server-credential",
+    L"desktop-provider-credential", L"push-platform-credential", L"ssh-key"
+  };
+  std::wstring target = L"Octant/";
+  target += purposes[header[83]];
+  target += header[6] == 0 ? L"/v1/octant/" : L"/v1/octant-nightly-test-data/";
   for (size_t i = 7; i < 43; ++i) target += static_cast<wchar_t>(header[i]);
   target += L"/";
   for (size_t i = 43; i < 79; ++i) target += static_cast<wchar_t>(header[i]);
