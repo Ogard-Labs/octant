@@ -136,6 +136,27 @@ describe("owner unlock contracts", () => {
 });
 
 describe("owner administration session, posture, and sign-in copy contracts", () => {
+  it.each(["ask-first", "auto-accept-edits", "auto", "full-access"])(
+    "accepts the Work level %s without inventing Code persistence or Plan authority",
+    (posture) => {
+      const change = {
+        subject: { kind: "work-thread", threadId: uuid },
+        expectedVersion: "a".repeat(64),
+        posture,
+      };
+      expect(decodeOwnerPostureChangeRequest(change)).toEqual(change);
+      expect(() => decodeOwnerPostureChangeRequest({ ...change, posture: "plan" })).toThrow();
+      expect(() =>
+        decodeOwnerPostureChangeRequest({ ...change, persistence: "project-default" }),
+      ).toThrow();
+      expect(() =>
+        decodeOwnerPostureChangeRequest({
+          ...change,
+          subject: { kind: "code-thread", threadId: uuid },
+        }),
+      ).toThrow();
+    },
+  );
   it("decodes a session and refuses a field it does not know", () => {
     expect(decodeOwnerAdministrationSession({ sessionId: "c2Vzc2lvbg", expiresAt: 5 })).toEqual({
       sessionId: "c2Vzc2lvbg",

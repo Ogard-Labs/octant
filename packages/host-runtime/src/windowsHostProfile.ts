@@ -90,10 +90,12 @@ function profilePaths(
   });
 }
 
-/** Acquire control from native persistent profile facts without admitting host startup. */
-export async function acquireWindowsHostProfileOwner(
-  options: AcquireWindowsHostProfileOptions,
-): Promise<WindowsHostProfileOwnership> {
+/** Resolve only the native profile; never prepare or claim a control endpoint. */
+export function resolveWindowsHostProfile(
+  options: Pick<AcquireWindowsHostProfileOptions, "native" | "profile" | "env">,
+):
+  | { readonly status: "ready"; readonly paths: WindowsHostProfilePaths }
+  | { readonly status: "refused"; readonly reason: "path-override" | "profile-unavailable" } {
   const env = options.env ?? process.env;
   if (env.OCTANT_DATA_DIR !== undefined || env.OCTANT_LOGS_DIR !== undefined)
     return { status: "refused", reason: "path-override" };
@@ -106,6 +108,16 @@ export async function acquireWindowsHostProfileOwner(
     return { status: "refused", reason: "profile-unavailable" };
   }
   if (paths === undefined) return { status: "refused", reason: "profile-unavailable" };
+  return { status: "ready", paths };
+}
+
+/** Acquire control from native persistent profile facts without admitting host startup. */
+export async function acquireWindowsHostProfileOwner(
+  options: AcquireWindowsHostProfileOptions,
+): Promise<WindowsHostProfileOwnership> {
+  const resolved = resolveWindowsHostProfile(options);
+  if (resolved.status !== "ready") return resolved;
+  const paths = resolved.paths;
   try {
     const ownership = await acquireWindowsHostRuntimeOwner({
       native: options.native,

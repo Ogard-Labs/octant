@@ -112,6 +112,7 @@
     "./providers": "./src/providers.ts",
     "./shield": "./src/shield.ts",
     "./shield-servers": "./src/shieldServers.ts",
+    "./remote-setup": "./src/remoteSetup.ts",
     "./server-projects": "./src/serverProjects.ts",
     "./provider-discovery": "./src/providerDiscovery.ts",
     "./provider-driver-catalog": "./src/providerDriverCatalog.ts",
@@ -164,7 +165,8 @@
     "./command-credentials": "./src/commandCredentials.ts",
     "./browser-page-script": "./src/browserPageScript.ts",
     "./owner-browser": "./src/ownerBrowser.ts",
-    "./browser-presentation": "./src/browserPresentation.ts"
+    "./browser-presentation": "./src/browserPresentation.ts",
+    "./code-tool-contribution": "./src/codeToolContribution.ts"
   },
   "scripts": {
     "build": "tsdown src/index.ts --format esm --dts",

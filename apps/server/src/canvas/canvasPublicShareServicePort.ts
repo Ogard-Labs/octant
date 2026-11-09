@@ -33,6 +33,8 @@ export type CanvasPublicShareCallOutcome<T> =
 export interface CanvasPublicShareServicePort {
   readonly create: (input: {
     readonly serviceUrl: CanvasPublicShareServiceUrl;
+    readonly shareId: CanvasPublicShareId;
+    readonly ownerSecret: string;
     readonly document: CanvasPublicShareDocument;
     readonly expiry: CanvasExportLinkExpiry;
     readonly password?: string;
@@ -112,7 +114,9 @@ export function createHttpCanvasPublicShareServicePort(
           method: "POST",
           body: {
             schemaVersion: CANVAS_PUBLIC_SHARE_WIRE_VERSION,
-            kind: "canvas-public-share-create",
+            kind: "canvas-public-share-owned-create",
+            shareId: input.shareId,
+            ownerSecret: input.ownerSecret,
             document: input.document,
             expiry: input.expiry,
             ...(input.password === undefined ? {} : { password: input.password }),
