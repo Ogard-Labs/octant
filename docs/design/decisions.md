@@ -111,6 +111,17 @@ Everything a person cares about stays on the host; Octant makes only a short, sw
 
 Status: Built. Detail: [Architecture: Overview and principles](../architecture.md#overview-and-principles).
 
+### Desktop-owned broker cleanup
+
+A desktop-owned launch retains acquired native resources through failure and
+shutdown. The Browser runtime broker shares one close completion for failed
+listen and ordinary shutdown, attempts every acquired cleanup stage even after
+an earlier failure, awaits its HTTP listener and closes held connections.
+Startup and cleanup failures are reported without widening the existing quit
+deadline or taking ownership of borrowed hosts.
+
+Status: Built. Detail: [Architecture: Process topology](../architecture.md#process-topology).
+
 ### Server authority, an authoritative journal, and strict host reads
 
 The server decides every authority question, the event journal is the record, and the host reads every input strictly.
