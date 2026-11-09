@@ -4,6 +4,7 @@ import { ProjectId } from "./projects";
 import { AggregateVersion, UtcTimestamp } from "./events";
 import { ProviderInstanceId, ProviderSessionId } from "./providers";
 import { WorkThreadId } from "./workThreads";
+import { Questionnaire, QuestionnaireResponse } from "./questionnaire";
 
 const strict = { parseOptions: { onExcessProperty: "error" as const } };
 const brandedUuid = <B extends string>(brand: B) => Schema.UUID.pipe(Schema.brand(brand));
@@ -79,6 +80,37 @@ export type WorkRequestStatus = typeof WorkRequestStatus.Type;
 
 export const MAX_WORK_REQUEST_OPTIONS = 8;
 
+const safeQuestionId = (id: string) => /^[A-Za-z0-9_-]{1,64}$/.test(id);
+const safeRequestText = Schema.is(WorkRequestSanitizedText);
+export const WorkQuestionnaire = Questionnaire.pipe(
+  Schema.filter(({ questions }) =>
+    questions.every(
+      (question) =>
+        safeQuestionId(question.id) &&
+        safeRequestText(question.prompt) &&
+        question.options.every(
+          (option) =>
+            safeQuestionId(option.id) &&
+            safeRequestText(option.label) &&
+            (option.description === undefined || safeRequestText(option.description)),
+        ),
+    ),
+  ),
+);
+export const WorkQuestionnaireResponse = QuestionnaireResponse.pipe(
+  Schema.filter(
+    (response) =>
+      (response.comment === undefined || safeRequestText(response.comment)) &&
+      response.answers.every(
+        (answer) =>
+          safeQuestionId(answer.questionId) &&
+          answer.selectedOptionIds.every(safeQuestionId) &&
+          (answer.customAnswer === undefined || safeRequestText(answer.customAnswer)),
+      ),
+  ),
+);
+export const decodeWorkQuestionnaireResponse = Schema.decodeUnknownSync(WorkQuestionnaireResponse);
+
 /**
  * Sanitized request detail. `approval` carries the action/description a
  * provider tool call wants to perform; `user-input` carries the prompt and
@@ -95,6 +127,7 @@ export const WorkRequestDetail = Schema.Union(
     kind: Schema.Literal("user-input"),
     prompt: WorkRequestSanitizedText,
     options: Schema.Array(WorkRequestSanitizedText).pipe(Schema.maxItems(MAX_WORK_REQUEST_OPTIONS)),
+    questionnaire: Schema.optional(WorkQuestionnaire),
   }).annotations(strict),
 );
 export type WorkRequestDetail = typeof WorkRequestDetail.Type;
@@ -108,7 +141,7 @@ export const WorkRequestResolution = Schema.Union(
   Schema.Struct({ kind: Schema.Literal("approval"), approved: Schema.Boolean }).annotations(strict),
   Schema.Struct({
     kind: Schema.Literal("user-input"),
-    answer: WorkRequestSanitizedText,
+    answer: Schema.Union(WorkRequestSanitizedText, WorkQuestionnaireResponse),
   }).annotations(strict),
 );
 export type WorkRequestResolution = typeof WorkRequestResolution.Type;

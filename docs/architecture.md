@@ -150,9 +150,13 @@ The design rests on a small set of invariants that every package obeys:
 - **Dependencies point inward.** Apps consume packages; contracts and domain
   never import apps. Provider-specific payloads stop at the provider adapter.
 - **A provider question has one answer identity.** Each question in a provider
-  question set reaches Chat, Work, and Code with a distinct request id. The
+  flat question set reaches Chat, Work, and Code with a distinct request id. The
   adapter collects answers in the provider's original question order, rejects
   duplicate answers, and settles the underlying callback only when complete.
+  A native grouped form instead carries the shared bounded questionnaire under
+  one request identity, with its entire structural response validated before
+  settling the one-use callback. Provider wire shapes stay in the adapter;
+  Work keeps its sanitized text and no-path/no-URL response boundary.
 - **App-owned questionnaires stay in their thread.** The provider-neutral
   `ask-user` tool can collect a bounded group of single- or multiple-choice
   answers and an optional comment. The host validates the complete response
@@ -10865,20 +10869,21 @@ feature: usage, diagnostics, Navigator, the automations UI, browser and
 computer use, agent hierarchy, remote and mobile access, the Apple workbench,
 and the marketplace and plugin registry are no longer extraction candidates.
 
-| Surface                                                               | Status and boundary to preserve                                                                                         |
-| --------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------- |
-| GitHub                                                                | Switchable bundled plugin; integration ports and contributed views, no direct host-service wiring                       |
-| Thread boards                                                         | Switchable bundled plugin; separable projection and UI, Work/Code status policy stays host-owned, and Chat has no board |
-| Zen                                                                   | Switchable bundled plugin; appearance contributions and their scoped state                                              |
-| Linear, Azure Resource Manager reads                                  | Bundled Integration plugins with no switch; integration ports and contributed views                                     |
-| Canvas, preview viewers, backgrounds, theme presets                   | Core; scoped artifact contracts, registered viewers, and appearance contributions                                       |
-| Usage, diagnostics, Navigator, automations UI                         | Core; underlying authority stays in the host                                                                            |
-| Project memory and its agent tool                                     | Core; the journal, the person's confirmation, and purge stay host-owned                                                 |
-| Octant Harness built-in tools (`read`, `edit`, `bash`, `diagnostics`) | Core; part of the harness loop's closed catalog, judged by the same authority path                                      |
-| Browser/computer use, agent hierarchy, remote/mobile, Apple workbench | Core; capability, lifecycle, and security remain app-managed                                                            |
-| Marketplace and plugin registry                                       | Core; they stay in the host because they admit and activate other components                                            |
-| Provider drivers                                                      | Bundled vendor plugins through provider-sdk; generic ACP transport and honest-capability enforcement stay host-owned    |
-| Image adapters (OpenAI, Gemini, BFL, Ideogram)                        | All four extracted behind the provider-sdk image seam and bundled in-tree; image jobs stay host-owned                   |
+| Surface                                                               | Status and boundary to preserve                                                                                            |
+| --------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------- |
+| GitHub                                                                | Switchable bundled plugin; integration ports and contributed views, no direct host-service wiring                          |
+| Thread boards                                                         | Switchable bundled plugin; separable projection and UI, Work/Code status policy stays host-owned, and Chat has no board    |
+| Zen                                                                   | Switchable bundled plugin; appearance contributions and their scoped state                                                 |
+| Linear, Azure Resource Manager reads                                  | Bundled Integration plugins with no switch; integration ports and contributed views                                        |
+| Declarative Code tools                                                | Installed package declarations through the public Code-tool port; credential policy, consent and execution stay host-owned |
+| Canvas, preview viewers, backgrounds, theme presets                   | Core; scoped artifact contracts, registered viewers, and appearance contributions                                          |
+| Usage, diagnostics, Navigator, automations UI                         | Core; underlying authority stays in the host                                                                               |
+| Project memory and its agent tool                                     | Core; the journal, the person's confirmation, and purge stay host-owned                                                    |
+| Octant Harness built-in tools (`read`, `edit`, `bash`, `diagnostics`) | Core; part of the harness loop's closed catalog, judged by the same authority path                                         |
+| Browser/computer use, agent hierarchy, remote/mobile, Apple workbench | Core; capability, lifecycle, and security remain app-managed                                                               |
+| Marketplace and plugin registry                                       | Core; they stay in the host because they admit and activate other components                                               |
+| Provider drivers                                                      | Bundled vendor plugins through provider-sdk; generic ACP transport and honest-capability enforcement stay host-owned       |
+| Image adapters (OpenAI, Gemini, BFL, Ideogram)                        | All four extracted behind the provider-sdk image seam and bundled in-tree; image jobs stay host-owned                      |
 
 The first-party manifests have one definition,
 `@octant/plugin-host/first-party-plugins`, which the server and the renderer
@@ -10950,6 +10955,38 @@ Integration port, and plugin-module Settings/sidebar seams exist. The API is a
 curated re-export of contracts, preserving the contracts package's dependency
 direction. Some Settings rows remain host-compiled. Linear uses the Integration
 port as a bundled plugin.
+
+**Declarative Code tools.** An Agent Plugins package may declare up to sixteen
+bounded tools in `plugin.json` under `extensions.octant.codeTools`. Each declares
+an id (a lowercase slug of at most sixteen characters), label, description, up
+to sixteen unique registered credential operation ids and up to sixteen unique
+saved command binding UUIDs, with at least one selector. These are data-only
+`code-tool` components declaring the `credentials` capability; they have no
+entry point and are unavailable in Chat and Work. No package supplies a URL,
+command, secret reference, environment, acceptance callback or process handle.
+Installation uses the existing package inspection, trust, enablement and
+explicit selection or Project-pin ladder; none approves a credential operation.
+The host derives a qualified provider tool name from its package identity and
+declaration id, so packages cannot shadow `octant_credential` or one another.
+
+`@octant/plugin-api/code-tools` publishes a turn-scoped `CodeToolHostPort` with
+declaration-scoped metadata and only `request(id)` and `runSaved(id)` actions.
+The installed tool lists permitted operation ids, labels and static reasons,
+and saved-command ids and labels; it receives no account, path, argument,
+environment or binding configuration. An ordinary private card or saved-command
+review remains required. The existing host services keep local-window,
+provider/profile allowlists, active Code task, Project/checkout and Plan checks,
+command confinement, cancellation and uncertainty. The turn's offered action
+families are fixed at composition; unavailable or undeclared ids refuse.
+
+The host checks the exact package, digest, catalog epoch, scope, window, task,
+model, profile and posture before calls and after waits. Disablement, revoked
+trust, replacement, changed authority or turn teardown invalidates pending use;
+a saved-command review retains that host fence before execution. An effect
+already started cannot be undone, and a changed caller receives no stale result.
+Credential-operation registration and its trusted response predicates remain in
+the host. The unified core credential composition remains host-owned until its
+separate migration through this port; its existing behavior is unchanged here.
 
 Preserve the sequence: establish a provider-neutral port and renderer seam
 before moving a feature behind them, and keep that work separate from unrelated
@@ -15617,6 +15654,21 @@ bun run dev        # Vite renderer + Electron with hot reload; server spawned fr
 bun run verify     # paths:check, wiring:check, ui:check, style:check, decisions:check, fmt:check, lint, typecheck, test, build
 ```
 
+- Native CI checks first use Electron's unchanged installer. If its upstream
+  release download fails, the CI-only recovery fetches the same installed
+  version, platform and architecture through the official GitHub release API,
+  verifies its archive against the installed package's checksums, and populates
+  the ordinary public Electron download cache, including the checksum manifest.
+  The normal installer then verifies and installs it. Its bounded installer
+  process control uses an owned process group on macOS and Linux, and the held
+  Node child process on Windows. The pinned Windows installer and native
+  extractor do not spawn helper processes; cancellation joins that process
+  after bounded termination, without selecting a numeric PID or process group.
+  Unsupported hosts refuse before spawning. Windows CI checks real cancellation,
+  the shared recovery boundaries and the installed pinned Electron runtime in
+  an isolated runner dependency folder. Recovery refuses custom
+  targets or mirrors, forwards API authorization to GitHub's API only, and
+  changes no runtime trust, packaging or release behavior.
 - Two stalls are logged once per occurrence so the next one is visible: a
   SQLite statement slower than `OCTANT_SLOW_STATEMENT_MS` (default 20) logs
   its SQL shape and duration, never bound values, and an event-loop lag over

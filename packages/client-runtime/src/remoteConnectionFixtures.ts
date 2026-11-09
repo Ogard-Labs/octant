@@ -249,7 +249,7 @@ export function createFakeRemoteServer(config: FakeRemoteServerConfig): FakeRemo
     nonces.delete(key);
   };
 
-  const verifyProductProof = (init?: RequestInit): boolean => {
+  const verifyProductProof = (init: RequestInit | undefined, url: URL): boolean => {
     const proofHeader =
       init?.headers && (init.headers as Record<string, string>)["x-octant-device-proof"];
     if (proofHeader === undefined) return false;
@@ -264,6 +264,9 @@ export function createFakeRemoteServer(config: FakeRemoteServerConfig): FakeRemo
     }
     const canonical = canonicalizeRemotePathQuery(proof.canonicalPathQuery);
     if (canonical !== proof.canonicalPathQuery) return false;
+    // Like the real gateway, the request itself must arrive in the canonical
+    // form the proof signed, not merely sign that form.
+    if (`${url.pathname}${url.search}` !== canonical) return false;
     const payload = buildRemoteRequestProofPayload({ sessionId, proof });
     if (!verifyIeeeP1363(device.publicKey, payload, proof.signature)) return false;
     productProofVerified = true;
@@ -478,7 +481,7 @@ export function createFakeRemoteServer(config: FakeRemoteServerConfig): FakeRemo
     }
 
     if (path === "/api/remote/auth/device" && method === "GET") {
-      if (!verifyProductProof(init) || device === undefined) {
+      if (!verifyProductProof(init, url) || device === undefined) {
         return Response.json({ category: "unauthorized" }, { status: 401 });
       }
       const sessionFacts = sessionExpiry(now());
@@ -500,7 +503,7 @@ export function createFakeRemoteServer(config: FakeRemoteServerConfig): FakeRemo
       // The request proof already established old-key possession; the body must
       // additionally prove the new key signed the canonical rotation
       // transcript, exactly as the host verifies it.
-      if (!verifyProductProof(init) || device === undefined) {
+      if (!verifyProductProof(init, url) || device === undefined) {
         return Response.json({ category: "unauthorized" }, { status: 401 });
       }
       if (config.rotateKeyStatus !== undefined) {
@@ -542,7 +545,7 @@ export function createFakeRemoteServer(config: FakeRemoteServerConfig): FakeRemo
       (path === "/api/remote/auth/sign-out" || path === "/api/remote/auth/revoke-self") &&
       method === "POST"
     ) {
-      if (!verifyProductProof(init)) {
+      if (!verifyProductProof(init, url)) {
         return Response.json({ category: "unauthorized" }, { status: 401 });
       }
       if (path === "/api/remote/auth/revoke-self") {
@@ -557,7 +560,8 @@ export function createFakeRemoteServer(config: FakeRemoteServerConfig): FakeRemo
     }
 
     if (
-      (path.startsWith("/api/chat/") ||
+      (path.startsWith("/api/canvas/") ||
+        path.startsWith("/api/chat/") ||
         path.startsWith("/api/work/") ||
         path.startsWith("/api/code/") ||
         path.startsWith("/api/preview/") ||
@@ -568,7 +572,7 @@ export function createFakeRemoteServer(config: FakeRemoteServerConfig): FakeRemo
         path.startsWith("/api/agent-profiles")) &&
       (method === "POST" || method === "GET")
     ) {
-      if (!verifyProductProof(init)) {
+      if (!verifyProductProof(init, url)) {
         return Response.json({ category: "unauthorized" }, { status: 401 });
       }
       if (config.handleProductRequest !== undefined) {
