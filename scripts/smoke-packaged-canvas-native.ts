@@ -626,10 +626,11 @@ const timer = setInterval(() => {
     const observeUntil = async (
       stage: string,
       accept: (snapshot: typeof Snapshot.Type) => boolean,
+      timeoutMs = 20_000,
     ) => {
       let lastNativeError = "";
       let lastTexts: ReadonlyArray<string> = [];
-      const deadline = Date.now() + 20_000;
+      const deadline = Date.now() + timeoutMs;
       while (!controller.signal.aborted && Date.now() < deadline) {
         try {
           const raw = await runBoundedCommand(
@@ -700,7 +701,14 @@ const timer = setInterval(() => {
         { timeoutMs: 5000 },
       );
     try {
-      await observeUntil("primary-window", (snapshot) => hasText(snapshot, "Welcome to Octant"));
+      // A cold first launch was seen still "Connecting to Chat..." with no
+      // onboarding after 20 seconds on two of four hosted runs, then passing
+      // on a rerun, so the first window alone gets a longer wait.
+      await observeUntil(
+        "primary-window",
+        (snapshot) => hasText(snapshot, "Welcome to Octant"),
+        60_000,
+      );
     } catch (error) {
       // A blank first window leaves no screenshot text; print where the app
       // got to from its own logs, bounded and with token-like runs hidden.
