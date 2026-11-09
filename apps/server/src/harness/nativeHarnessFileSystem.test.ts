@@ -397,6 +397,14 @@ describe("native harness file system", () => {
       expect(pagedBytes).toBeLessThanOrEqual(MAX_EXTRACTED_TEXT_BYTES + 1);
     });
 
+    it("says when one PDF page held more text than the parser keeps of a page", async () => {
+      const { root, fs } = await fixture();
+      await writeFile(join(root, "long.pdf"), buildPdfFixture([["y".repeat(300 * 1024)]]));
+      const outcome = await fs.read({ path: "long.pdf" });
+      expect(outcome).toMatchObject({ kind: "file", extractedFrom: "pdf" });
+      expect(outcome.kind === "file" && outcome.parserNote).toContain("limit");
+    });
+
     it("refuses an archive or other binary file and says what it can read", async () => {
       const { root, fs } = await fixture();
       await writeFile(join(root, "bundle.zip"), Buffer.from([0x50, 0x4b, 0x03, 0x04, 0, 0, 0, 0]));
