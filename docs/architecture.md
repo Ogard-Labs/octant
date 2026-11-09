@@ -11021,8 +11021,14 @@ mechanisms are:
       `HOME` denied) and is told the sandbox is external (thread `read-only`,
       each turn `externalSandbox`, approval `never`), because macOS refuses a
       second Seatbelt inside the first; and the Octant Harness, whose
-      commands run on the confined shell. Claude Code, ACP agents, OpenCode,
-      and Pi launch unwrapped at Full access, so a sandboxed thread on one of
+      commands run on the confined shell. Claude Code keeps its own command
+      sandbox with `failIfUnavailable` and no unsandboxed-command retry;
+      Octant checks file tools against the Project and extra folders before
+      answering allow. Its permission mode stays `bypassPermissions`, and
+      both its process and command sandbox resolve guarded egress when Network
+      limits are on. The admitted session keeps this choice until it ends,
+      including when resumed. Plan and credential confirmation are unchanged.
+      ACP agents, OpenCode, and Pi launch unwrapped at Full access, so a sandboxed thread on one of
       them refuses to start with a plain message
       (`refusesFullAccessSandbox`, checked before each Code and Work turn)
       rather than running open.
