@@ -544,9 +544,9 @@ const timer = setInterval(() => {
     };
     const hasOwnedStaticPayload = (snapshot: typeof Snapshot.Type) => {
       const rows = snapshot.texts.map((row) => row.text.trim());
-      const titleKey = rows.findIndex((row) => /^["']title["']\s*:\s*$/.test(row));
+      const titleKey = rows.findIndex((row) => /^["']?title["']\s*:\s*$/.test(row));
       const title =
-        rows.some((row) => /^["']title["']\s*:\s*["']Weekly signups brief["'][,.]?$/.test(row)) ||
+        rows.some((row) => /^["']?title["']\s*:\s*["']Weekly signups brief["'][,.]?$/.test(row)) ||
         (titleKey >= 0 && /^["']Weekly signups brief["'][,.]?$/.test(rows[titleKey + 1] ?? ""));
       return rows.some((row) => /"kind"\s*:\s*"canvas-public-share-document"/.test(row)) && title;
     };
