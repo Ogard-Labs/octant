@@ -1175,6 +1175,7 @@ const timer = setInterval(() => {
     );
     await pairedInput("listener-hostname", "fill", "Hostname", listenerHost);
     await pairedInput("listener-port", "fill", "Port", String(listenerPort));
+    await logWindowText("listener-address-filled");
     // The window shows only the first listener fields, so the certificate,
     // key and Move listener button are reached from Port with Tab.
     setPasteboard(pastedListener.certificatePem);
