@@ -1,4 +1,4 @@
-import { PassThrough } from "node:stream";
+import { PassThrough, Writable } from "node:stream";
 import { describe, expect, it, vi } from "vitest";
 import {
   AcpFailure,
@@ -305,6 +305,90 @@ describe("ACP protocol boundary", () => {
         method: "session/request_permission",
       }),
     ]);
+    await client.close();
+  });
+
+  it("bounds a blocked response write and rejects queued writes without replaying after a late callback", async () => {
+    let complete: ((error?: Error) => void) | undefined;
+    let writes = 0;
+    const stdin = new Writable({
+      write(_chunk, _encoding, callback) {
+        writes += 1;
+        complete = (error) => callback(error);
+      },
+    });
+    const { client } = transport({ stdin, limits: { requestTimeoutMs: 10 } });
+    const first = client.respond("form", { action: "accept", content: { q0: ["PDF"] } });
+    const queued = client.respond("cancel", { action: "cancel" });
+    const outcomes = await Promise.allSettled([first, queued]);
+    expect(outcomes.map((outcome) => outcome.status)).toEqual(["rejected", "rejected"]);
+    expect(await failureOf(client.exited)).toMatchObject({ kind: "timeout" });
+    expect(writes).toBe(1);
+    complete?.(new Error("late pipe failure"));
+    await tick();
+    expect(writes).toBe(1);
+    expect(stdin.destroyed).toBe(true);
+    expect(stdin.listenerCount("error")).toBe(0);
+    expect(await failureOf(client.respond("late", { action: "cancel" }))).toMatchObject({
+      kind: "closed",
+    });
+    await client.close();
+    stdin.destroy();
+  });
+
+  it("closing the transport settles a blocked active response and every queued response", async () => {
+    const stdin = new Writable({ write() {} });
+    const { client } = transport({ stdin });
+    const outcomes = Promise.allSettled([
+      client.respond("first", {}),
+      client.respond("second", {}),
+    ]);
+    await tick();
+    await client.close();
+    expect((await outcomes).map((outcome) => outcome.status)).toEqual(["rejected", "rejected"]);
+    stdin.destroy();
+  });
+
+  it("advertises only session forms when enabled and refuses URL or request-scoped elicitation", async () => {
+    const { client, stdin, stdout } = transport();
+    const written = lines(stdin);
+    const initialized = client.initialize({ ...noClientCapabilities, elicitationForm: true });
+    await tick();
+    expect(written.values[0]).toMatchObject({
+      params: { clientCapabilities: { elicitation: { form: {} } } },
+    });
+    stdout.write(`${JSON.stringify({ jsonrpc: "2.0", id: 1, result: initializeResult })}\n`);
+    await initialized;
+    const requests: AcpServerRequestMessage[] = [];
+    client.onRequest((request) => requests.push(request));
+    const params = {
+      sessionId: "native-session",
+      mode: "form",
+      message: "Choose",
+      requestedSchema: { type: "object" },
+    };
+    for (const [id, value] of [
+      ["form", params],
+      ["url", { ...params, mode: "url" }],
+      ["unscoped", { mode: "form", message: "Choose", requestedSchema: {} }],
+    ] as const) {
+      stdout.write(
+        `${JSON.stringify({ jsonrpc: "2.0", id, method: "elicitation/create", params: value })}\n`,
+      );
+    }
+    await tick();
+    expect(requests).toHaveLength(1);
+    expect(requests[0]).toMatchObject({ id: "form", method: "elicitation/create" });
+    expect(written.values).toContainEqual({
+      jsonrpc: "2.0",
+      id: "url",
+      error: { code: -32602, message: "Invalid params" },
+    });
+    expect(written.values).toContainEqual({
+      jsonrpc: "2.0",
+      id: "unscoped",
+      error: { code: -32602, message: "Invalid params" },
+    });
     await client.close();
   });
 

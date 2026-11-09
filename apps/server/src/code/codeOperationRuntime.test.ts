@@ -171,6 +171,27 @@ afterEach(() => {
 });
 
 describe("CodeOperationRuntime", () => {
+  it("refuses a Windows operation before a terminal or provider can start", async () => {
+    const fixture = runtimeFixture({});
+    vi.stubGlobal("process", Object.create(process, { platform: { value: "win32" } }));
+    try {
+      await expect(
+        fixture.runtime.execute(windowId, {
+          kind: "start-terminal",
+          threadId,
+          checkoutId,
+          operationId: operationId(1),
+          terminalId: operationId(2),
+          columns: 100,
+          rows: 30,
+          credentialRefs: [],
+        }),
+      ).rejects.toMatchObject({ failure: { category: "unavailable" } });
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
   it("prepares and confirms native approval only for the authoritative active scope", async () => {
     const fixture = runtimeFixture({ approvalValidator: false });
     const request = {
@@ -3580,6 +3601,87 @@ describe("CodeOperationRuntime", () => {
       checkoutId,
     });
     await vi.waitFor(() => expect(activeTurns.has(String(threadId))).toBe(false));
+    fixture.close();
+  });
+
+  it("journals the provider questionnaire and refuses invalid choices without consuming its request", async () => {
+    const queue = Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>());
+    const connection = providerConnection(queue);
+    const fixture = runtimeFixture({ provider: providerDriver(connection) });
+    const operation = operationId(910);
+    await fixture.runtime.execute(windowId, {
+      kind: "start-provider-turn",
+      operationId: operation,
+      threadId,
+      checkoutId,
+      sessionId,
+      prompt: fixture.prompt,
+    });
+    await vi.waitFor(() => expect(connection.send).toHaveBeenCalledOnce());
+    const questionnaire = {
+      allowComment: false,
+      questions: [
+        {
+          id: "q0",
+          prompt: "Formats?",
+          selection: "multiple" as const,
+          options: [
+            { id: "pdf", label: "PDF" },
+            { id: "text", label: "Text" },
+          ],
+        },
+      ],
+    };
+    await Effect.runPromise(
+      Queue.offer(
+        queue,
+        providerEvent({
+          kind: "user-input-request",
+          requestId: "native-form",
+          prompt: "Choose",
+          options: [],
+          questionnaire,
+        }),
+      ),
+    );
+    await vi.waitFor(async () => {
+      const frames = await fixture.runtime.subscribe(windowId, threadId, operation, 0, 20);
+      expect(frames.find((frame) => frame.event.kind === "input-requested")?.event).toMatchObject({
+        questionnaire,
+      });
+    });
+    const command = {
+      kind: "answer-provider-input" as const,
+      threadId,
+      checkoutId,
+      requestId: "native-form",
+    };
+    expect(
+      await fixture.runtime.execute(windowId, {
+        ...command,
+        operationId: operationId(911),
+        response: fixture.response,
+      }),
+    ).toMatchObject({ kind: "provider-turn-state", failure: { category: "invalid" } });
+    expect(connection.answerUserInput).not.toHaveBeenCalled();
+    expect(fixture.runtime.turnAwaitsPerson?.(String(threadId))).toBe(true);
+    const response = JSON.stringify({
+      version: 1,
+      answers: [{ questionId: "q0", selectedOptionIds: ["pdf", "text"] }],
+    });
+    fixture.evidenceValues.set(fixture.response.contentId, response);
+    await fixture.runtime.execute(windowId, {
+      ...command,
+      operationId: operationId(912),
+      response: fixture.response,
+    });
+    expect(connection.answerUserInput).toHaveBeenCalledWith({
+      sessionId,
+      requestId: "native-form",
+      answer: response,
+    });
+    expect(fixture.runtime.turnAwaitsPerson?.(String(threadId))).toBe(false);
+    await fixture.runtime.close();
     fixture.close();
   });
 

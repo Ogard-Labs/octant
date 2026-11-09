@@ -4,6 +4,16 @@
  * credentials, so only the error code selects one of these phrases.
  */
 const REASON_BY_CODE: Readonly<Record<string, string>> = {
+  OCTANT_WINDOWS_ARTIFACTS: "native Windows runtime artifacts are unavailable or incompatible",
+  OCTANT_WINDOWS_OWNER: "native Windows profile ownership could not be acquired",
+  OCTANT_WINDOWS_STORAGE: "native Windows host storage could not be composed",
+  OCTANT_WINDOWS_BROKER: "the Windows credential broker could not start",
+  OCTANT_WINDOWS_IMPORTS: "a Windows server runtime dependency could not be loaded",
+  OCTANT_WINDOWS_PERSISTENCE: "native Windows persistence could not initialize",
+  OCTANT_WINDOWS_SERVER: "the Windows server services could not initialize",
+  OCTANT_WINDOWS_RECEIPT: "native Windows readiness projections could not be published",
+  OCTANT_WINDOWS_READY: "the Windows server could not complete its scoped lifecycle",
+
   EACCES: "a file or directory Octant needs is not accessible by this user",
   EPERM: "a file or directory Octant needs is not accessible by this user",
   EROFS: "the data directory is on a read-only filesystem",

@@ -26,6 +26,30 @@ export interface WindowsAuthorityStateNative extends WindowsHostProfileNative {
   readonly commitAuthorityState: (session: number) => unknown;
   readonly closeAuthorityState: (session: number) => unknown;
 }
+export interface WindowsHostStartupProjection extends WindowsAuthorityStateFile {
+  readonly remove: () => { readonly status: "removed" | "refused" };
+}
+export interface WindowsHostStartupFiles {
+  readonly bridgeSecret: WindowsHostStartupProjection;
+  readonly hostInfo: WindowsHostStartupProjection;
+  readonly servicePolicy: WindowsAuthorityStateFile;
+  readonly serviceLog: WindowsAuthorityStateFile;
+}
+interface WindowsHostStartupNative extends WindowsAuthorityStateNative {
+  readonly removeStartupFile: (
+    profile: string,
+    scope: string,
+    dataDirectory: string,
+    purpose: "bridge-secret" | "host-info",
+  ) => unknown;
+}
+function startupNative(native: WindowsHostProfileNative): native is WindowsHostStartupNative {
+  return (
+    authorityNative(native) &&
+    "removeStartupFile" in native &&
+    typeof native.removeStartupFile === "function"
+  );
+}
 type AuthorityResult =
   | { readonly status: "ready"; readonly bytes: Buffer }
   | { readonly status: "missing" }
@@ -47,13 +71,27 @@ function authorityNative(native: WindowsHostProfileNative): native is WindowsAut
     "closeAuthorityState",
   ].every((key) => key in native && typeof Reflect.get(native, key) === "function");
 }
-export function createWindowsAuthorityStateFiles(
+function createProfileFiles(
   native: WindowsHostProfileNative,
   paths: WindowsHostProfilePaths,
-): WindowsAuthorityStateFiles | undefined {
+):
+  | (WindowsAuthorityStateFiles & {
+      readonly bridgeSecret: WindowsAuthorityStateFile;
+      readonly hostInfo: WindowsAuthorityStateFile;
+      readonly servicePolicy: WindowsAuthorityStateFile;
+      readonly serviceLog: WindowsAuthorityStateFile;
+    })
+  | undefined {
   if (!authorityNative(native)) return undefined;
   const file = (
-    purpose: "hub-state" | "delegations" | "tailscale-certificate",
+    purpose:
+      | "hub-state"
+      | "delegations"
+      | "tailscale-certificate"
+      | "bridge-secret"
+      | "host-info"
+      | "service-policy"
+      | "service-log",
   ): WindowsAuthorityStateFile => {
     const access = (input: Buffer | null): AuthorityResult => {
       let session: number | undefined;
@@ -142,5 +180,56 @@ export function createWindowsAuthorityStateFiles(
     hub: file("hub-state"),
     delegations: file("delegations"),
     certificate: file("tailscale-certificate"),
+    bridgeSecret: file("bridge-secret"),
+    hostInfo: file("host-info"),
+    servicePolicy: file("service-policy"),
+    serviceLog: file("service-log"),
+  });
+}
+
+export function createWindowsAuthorityStateFiles(
+  native: WindowsHostProfileNative,
+  paths: WindowsHostProfilePaths,
+): WindowsAuthorityStateFiles | undefined {
+  const files = createProfileFiles(native, paths);
+  return files === undefined
+    ? undefined
+    : Object.freeze({
+        hub: files.hub,
+        delegations: files.delegations,
+        certificate: files.certificate,
+      });
+}
+export function createWindowsHostStartupFiles(
+  native: WindowsHostProfileNative,
+  paths: WindowsHostProfilePaths,
+): WindowsHostStartupFiles | undefined {
+  if (!startupNative(native)) return undefined;
+  const files = createProfileFiles(native, paths);
+  if (files === undefined) return undefined;
+  const projection = (
+    file: WindowsAuthorityStateFile,
+    purpose: "bridge-secret" | "host-info",
+  ): WindowsHostStartupProjection => ({
+    ...file,
+    remove: () => {
+      try {
+        const result = native.removeStartupFile(
+          paths.profile,
+          paths.profileId,
+          paths.dataDirectory,
+          purpose,
+        );
+        return { status: record(result) && result.status === "removed" ? "removed" : "refused" };
+      } catch {
+        return { status: "refused" };
+      }
+    },
+  });
+  return Object.freeze({
+    bridgeSecret: projection(files.bridgeSecret, "bridge-secret"),
+    hostInfo: projection(files.hostInfo, "host-info"),
+    servicePolicy: files.servicePolicy,
+    serviceLog: files.serviceLog,
   });
 }

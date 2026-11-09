@@ -12,7 +12,7 @@ const target = {
     version: "a".repeat(64),
   },
 };
-function fixture(answer: OwnerActionResult, automatic = false) {
+function fixture(answer: OwnerActionResult, automatic = false, work = false) {
   const refused = async () => ({ status: "refused", kind: "unsupported" }) as const;
   const changePosture = vi.fn(async () => answer);
   const listPostures = vi.fn(
@@ -21,7 +21,18 @@ function fixture(answer: OwnerActionResult, automatic = false) {
         status: "done",
         body: {
           status: "read",
-          targets: [{ ...target, posture: { ...target.posture, autoApprove: automatic } }],
+          targets: [
+            work
+              ? {
+                  title: "Work task",
+                  posture: {
+                    subject: { kind: "work-thread", threadId: target.posture.subject.threadId },
+                    posture: "ask-first",
+                    version: target.posture.version,
+                  },
+                }
+              : { ...target, posture: { ...target.posture, autoApprove: automatic } },
+          ],
         },
       }) as const,
   );
@@ -42,35 +53,55 @@ function fixture(answer: OwnerActionResult, automatic = false) {
   return { spoke, changePosture, listPostures };
 }
 describe("owner Code recovery controls", () => {
+  it("offers only Work's four levels and sends its exact target and version without Code persistence", async () => {
+    const { spoke, changePosture } = fixture({ status: "done", body: {} }, false, true);
+    const user = userEvent.setup();
+    render(<OwnerPostureSection spokes={[spoke]} />);
+    await user.click(screen.getByRole("button", { name: "Refresh access levels" }));
+    await user.click(screen.getByLabelText("Recovery target"));
+    await user.click(await screen.findByRole("option", { name: "Work thread: Work task" }));
+    await user.click(screen.getByLabelText("Requested level"));
+    await screen.findByRole("option", { name: "Auto" });
+    expect(screen.queryByRole("option", { name: "Plan (read only)" })).toBeNull();
+    expect(screen.getAllByRole("option")).toHaveLength(4);
+    await user.click(screen.getByRole("option", { name: "Auto" }));
+    await user.click(screen.getByRole("button", { name: "Apply level" }));
+    expect(changePosture).toHaveBeenCalledWith({
+      subject: { kind: "work-thread", threadId: target.posture.subject.threadId },
+      expectedVersion: target.posture.version,
+      posture: "auto",
+    });
+    expect(screen.queryByRole("button", { name: "Apply level" })).toBeNull();
+  });
   it("shows the current automatic reviewer without granting a new one", async () => {
     const { spoke } = fixture({ status: "done", body: {} }, true);
     const user = userEvent.setup();
     render(<OwnerPostureSection spokes={[spoke]} />);
-    await user.click(screen.getByRole("button", { name: "Refresh Code levels" }));
-    await user.click(screen.getByLabelText("Code recovery target"));
+    await user.click(screen.getByRole("button", { name: "Refresh access levels" }));
+    await user.click(screen.getByLabelText("Recovery target"));
     await user.click(await screen.findByRole("option", { name: "Thread: Release task" }));
     expect(screen.getByText("Current level: Auto")).toBeVisible();
-    expect(screen.getByLabelText("Requested Code level")).toHaveTextContent("Auto");
+    expect(screen.getByLabelText("Requested level")).toHaveTextContent("Auto");
   });
 
   it("shows current and requested levels and sends the authoritative version, then requires a fresh reading", async () => {
     const { spoke, changePosture, listPostures } = fixture({ status: "done", body: {} });
     const user = userEvent.setup();
     render(<OwnerPostureSection spokes={[spoke]} />);
-    await user.click(screen.getByRole("button", { name: "Refresh Code levels" }));
-    await user.click(screen.getByLabelText("Code recovery target"));
+    await user.click(screen.getByRole("button", { name: "Refresh access levels" }));
+    await user.click(screen.getByLabelText("Recovery target"));
     await user.click(await screen.findByRole("option", { name: "Thread: Release task" }));
     expect(screen.getByText("Current level: Ask first")).toBeVisible();
-    await user.click(screen.getByLabelText("Requested Code level"));
+    await user.click(screen.getByLabelText("Requested level"));
     await user.click(await screen.findByRole("option", { name: "Full access" }));
-    await user.click(screen.getByRole("button", { name: "Apply Code level" }));
+    await user.click(screen.getByRole("button", { name: "Apply level" }));
     expect(changePosture).toHaveBeenCalledWith({
       subject: target.posture.subject,
       expectedVersion: target.posture.version,
       posture: "full-access",
       persistence: "project-default",
     });
-    expect(screen.queryByRole("button", { name: "Apply Code level" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Apply level" })).toBeNull();
     expect(listPostures).toHaveBeenCalledTimes(1);
     expect(screen.getByRole("status")).toHaveTextContent("Level changed");
   });
@@ -78,15 +109,15 @@ describe("owner Code recovery controls", () => {
     const { spoke, changePosture } = fixture({ status: "refused", kind: "posture-stale" });
     const user = userEvent.setup();
     render(<OwnerPostureSection spokes={[spoke]} />);
-    await user.click(screen.getByRole("button", { name: "Refresh Code levels" }));
-    await user.click(screen.getByLabelText("Code recovery target"));
+    await user.click(screen.getByRole("button", { name: "Refresh access levels" }));
+    await user.click(screen.getByLabelText("Recovery target"));
     await user.click(await screen.findByRole("option", { name: "Thread: Release task" }));
-    await user.click(screen.getByLabelText("Requested Code level"));
+    await user.click(screen.getByLabelText("Requested level"));
     await user.click(await screen.findByRole("option", { name: "Plan (read only)" }));
-    await user.click(screen.getByRole("button", { name: "Apply Code level" }));
+    await user.click(screen.getByRole("button", { name: "Apply level" }));
     expect(screen.getByRole("status")).toHaveTextContent("Refresh its level");
     expect(changePosture).toHaveBeenCalledTimes(1);
-    expect(screen.queryByLabelText("Code recovery target")).toBeNull();
+    expect(screen.queryByLabelText("Recovery target")).toBeNull();
   });
 });
 
@@ -118,9 +149,9 @@ function currentHost(memberId = "host") {
 }
 
 async function chooseCurrent(user: ReturnType<typeof userEvent.setup>) {
-  await user.click(screen.getByLabelText("Code recovery target"));
+  await user.click(screen.getByLabelText("Recovery target"));
   await user.click(await screen.findByRole("option", { name: "Thread: Current task" }));
-  await user.click(screen.getByLabelText("Requested Code level"));
+  await user.click(screen.getByLabelText("Requested level"));
   await user.click(await screen.findByRole("option", { name: "Full access" }));
 }
 
@@ -130,7 +161,7 @@ describe("owner recovery across host changes", () => {
     const user = userEvent.setup();
     const view = render(<OwnerPostureSection spokes={[]} />);
     view.rerender(<OwnerPostureSection spokes={[spoke]} />);
-    const refresh = screen.getByRole("button", { name: "Refresh Code levels" });
+    const refresh = screen.getByRole("button", { name: "Refresh access levels" });
     expect(refresh).toBeEnabled();
     await user.click(refresh);
     expect(listPostures).toHaveBeenCalledTimes(1);
@@ -145,11 +176,11 @@ describe("owner recovery across host changes", () => {
       const next = currentHost(replacement === "member" ? "other-host" : old.spoke.memberId);
       const user = userEvent.setup();
       const view = render(<OwnerPostureSection spokes={[old.spoke]} />);
-      await user.click(screen.getByRole("button", { name: "Refresh Code levels" }));
+      await user.click(screen.getByRole("button", { name: "Refresh access levels" }));
       if (replacement === "member") view.rerender(<OwnerPostureSection spokes={[]} />);
       view.rerender(<OwnerPostureSection spokes={[next.spoke]} />);
-      expect(screen.getByRole("button", { name: "Refresh Code levels" })).toBeEnabled();
-      await user.click(screen.getByRole("button", { name: "Refresh Code levels" }));
+      expect(screen.getByRole("button", { name: "Refresh access levels" })).toBeEnabled();
+      await user.click(screen.getByRole("button", { name: "Refresh access levels" }));
       await act(async () => {
         pending.resolve({
           status: "done",
@@ -160,7 +191,7 @@ describe("owner recovery across host changes", () => {
         });
       });
       await chooseCurrent(user);
-      await user.click(screen.getByRole("button", { name: "Apply Code level" }));
+      await user.click(screen.getByRole("button", { name: "Apply level" }));
       expect(old.changePosture).not.toHaveBeenCalled();
       expect(next.changePosture).toHaveBeenCalledWith(
         expect.objectContaining({ expectedVersion: "b".repeat(64) }),
@@ -173,12 +204,12 @@ describe("owner recovery across host changes", () => {
     const next = currentHost();
     const user = userEvent.setup();
     const view = render(<OwnerPostureSection spokes={[old.spoke]} />);
-    await user.click(screen.getByRole("button", { name: "Refresh Code levels" }));
-    await user.click(screen.getByLabelText("Code recovery target"));
+    await user.click(screen.getByRole("button", { name: "Refresh access levels" }));
+    await user.click(screen.getByLabelText("Recovery target"));
     await user.click(await screen.findByRole("option", { name: "Thread: Release task" }));
     view.rerender(<OwnerPostureSection spokes={[next.spoke]} />);
     expect(screen.queryByText("Current level: Ask first")).toBeNull();
-    expect(screen.queryByRole("button", { name: "Apply Code level" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Apply level" })).toBeNull();
     expect(old.changePosture).not.toHaveBeenCalled();
     expect(next.changePosture).not.toHaveBeenCalled();
   });
@@ -190,19 +221,19 @@ describe("owner recovery across host changes", () => {
     old.changePosture.mockImplementationOnce(() => pending.promise);
     const user = userEvent.setup();
     const view = render(<OwnerPostureSection spokes={[old.spoke]} />);
-    await user.click(screen.getByRole("button", { name: "Refresh Code levels" }));
+    await user.click(screen.getByRole("button", { name: "Refresh access levels" }));
     await chooseCurrent(user);
-    await user.click(screen.getByRole("button", { name: "Apply Code level" }));
+    await user.click(screen.getByRole("button", { name: "Apply level" }));
     view.rerender(<OwnerPostureSection spokes={[next.spoke]} />);
-    expect(screen.getByRole("button", { name: "Refresh Code levels" })).toBeEnabled();
-    await user.click(screen.getByRole("button", { name: "Refresh Code levels" }));
+    expect(screen.getByRole("button", { name: "Refresh access levels" })).toBeEnabled();
+    await user.click(screen.getByRole("button", { name: "Refresh access levels" }));
     await chooseCurrent(user);
     await act(async () => {
       pending.resolve({ status: "done", body: {} });
     });
-    expect(screen.getByRole("button", { name: "Apply Code level" })).toBeEnabled();
+    expect(screen.getByRole("button", { name: "Apply level" })).toBeEnabled();
     expect(screen.queryByText(/Level changed/)).toBeNull();
-    await user.click(screen.getByRole("button", { name: "Apply Code level" }));
+    await user.click(screen.getByRole("button", { name: "Apply level" }));
     expect(next.changePosture).toHaveBeenCalledWith(
       expect.objectContaining({ expectedVersion: "b".repeat(64) }),
     );

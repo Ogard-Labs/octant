@@ -1,3 +1,5 @@
+import { Schema } from "effect";
+import { BrowserProfileChoice } from "@octant/contracts/project-browser";
 import type { BrowserPageScriptReceipt } from "@octant/contracts/browser-page-script";
 import type {
   BrowserActionRequest,
@@ -187,7 +189,7 @@ export type BrowserToolInput = {
       readonly operation: "navigate";
       readonly url: string;
       /** Ask for a page in the Project's or the Personal profile; absent is Private. */
-      readonly profile?: "private" | "project" | "personal";
+      readonly profile?: BrowserProfileChoice;
     }
   | ({ readonly operation: "read-page" } & Partial<BrowserToolTarget>)
   | { readonly operation: "snapshot" | "screenshot" | "stop" }
@@ -361,12 +363,7 @@ function parseBrowserToolRecord(
   if (operation === "navigate" && only("url", "profile") && text("url", 4096)) {
     if (record.profile !== undefined) {
       if (!options.allowProfile) return undefined;
-      if (
-        record.profile !== "private" &&
-        record.profile !== "project" &&
-        record.profile !== "personal"
-      )
-        return undefined;
+      if (!Schema.is(BrowserProfileChoice)(record.profile)) return undefined;
     }
     return {
       ...common,

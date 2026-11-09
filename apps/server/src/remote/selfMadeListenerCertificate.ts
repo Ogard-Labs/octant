@@ -292,6 +292,7 @@ export function createSelfMadeListenerCertificateStore(
       };
     },
     transition: () => {
+      if (options.tlsFiles !== undefined) return undefined;
       try {
         const stage = readStage();
         if (stage === undefined || Date.parse(stage.transition.expiresAt) <= now().getTime())
@@ -305,6 +306,11 @@ export function createSelfMadeListenerCertificateStore(
       }
     },
     prepareTransition: (input) => {
+      // A transition stages the next key as an ordinary owner-only file and
+      // replaces the key file in place. Native listener storage keeps its key
+      // behind its own protected records, which hold no staged key, so it
+      // refuses rather than writing private key material outside them.
+      if (options.tlsFiles !== undefined) return { status: "refused", code: "invalid-transition" };
       try {
         const origin = new URL(input.origin);
         if (origin.protocol !== "https:" || origin.origin !== input.origin)
@@ -357,6 +363,7 @@ export function createSelfMadeListenerCertificateStore(
       }
     },
     activateTransition: (newPin) => {
+      if (options.tlsFiles !== undefined) return { status: "refused", code: "invalid-transition" };
       try {
         const stage = readStage();
         if (stage === undefined || stage.transition.newPin !== newPin)
@@ -379,6 +386,7 @@ export function createSelfMadeListenerCertificateStore(
       }
     },
     cancelTransition: () => {
+      if (options.tlsFiles !== undefined) return true;
       try {
         const stage = readStage();
         if (stage === undefined) return true;

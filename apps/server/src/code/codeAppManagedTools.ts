@@ -1,4 +1,4 @@
-import { browserAgentAvailability } from "@octant/domain";
+import { browserAgentAvailability, browserProfileFromChoice } from "@octant/domain";
 import { browserProfileKey, storedBrowserProfile } from "@octant/domain";
 import type { StoredBrowserProfile } from "@octant/contracts";
 import type {
@@ -1405,7 +1405,7 @@ async function browserToolOne(
     ) {
       return failure("browser-navigation-required");
     }
-    if (context.policy.profile?.kind === "project" || context.policy.profile?.kind === "personal") {
+    if (storedBrowserProfile(context.policy.profile) !== undefined) {
       const callerRefusal = options.browserSignIn?.refusal(options.windowId);
       if (options.browserSignIn === undefined || callerRefusal !== undefined) {
         return failure(
@@ -1445,12 +1445,10 @@ async function browserToolOne(
       ? (input.profile ??
         options.readThread(options.windowId, options.thread.id)?.browserTaskProfile)
       : undefined;
-  const requested: StoredBrowserProfile | undefined =
-    choice === "personal"
-      ? { kind: "personal" }
-      : choice === "project" && authority.projectId !== undefined
-        ? { kind: "project", projectId: authority.projectId }
-        : undefined;
+  const requested =
+    choice === undefined
+      ? undefined
+      : storedBrowserProfile(browserProfileFromChoice(choice, authority.projectId));
   if (choice === "project" && requested === undefined) return failure("profile-unavailable");
   if (
     existing !== undefined &&

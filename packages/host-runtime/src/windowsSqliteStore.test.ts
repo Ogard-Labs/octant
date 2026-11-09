@@ -35,10 +35,23 @@ function fixture(
       extensionPath: extension,
       lease: 1,
     })),
+    inspectSqliteStore: vi.fn(),
     closeSqliteStore: vi.fn(() => ({ status: "closed" })),
   };
 }
 describe("Windows SQLite connection admission", () => {
+  it("keeps lifecycle admission to native-derived backup labels and its own restore stage", () => {
+    const native = fixture();
+    const files = createWindowsSqliteStores(native, paths);
+    expect(files?.backup("../outside")).toEqual({ status: "refused" });
+    expect(files?.inspect(paths.dataDirectory + "\\other.sqlite3")).toEqual({ status: "refused" });
+    expect(
+      files?.inspect(paths.dataDirectory + `\\octant.sqlite3.restore-${process.pid + 1}.tmp`),
+    ).toEqual({ status: "refused" });
+    expect(native.openSqliteStore).not.toHaveBeenCalled();
+    expect(native.inspectSqliteStore).not.toHaveBeenCalled();
+  });
+
   it("binds the actual SQLite initializer and retires its opaque native lease exactly once", () => {
     const native = fixture();
     const file = createWindowsSqliteStores(native, paths)?.main();

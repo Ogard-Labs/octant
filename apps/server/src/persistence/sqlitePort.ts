@@ -1,3 +1,4 @@
+import type { WindowsSqliteStoreAdmission } from "@octant/host-runtime";
 import { instrumentSqlite } from "./slowStatementLog";
 
 export interface SqliteRunResult {
@@ -52,6 +53,18 @@ const DEFAULT_STATEMENT_CACHE_CAPACITY = 1024;
 
 export function openSqlite(path: string): SqliteConnection {
   return instrumentSqlite(cacheStatements(openRuntimeSqlite(path)));
+}
+
+/** Native admission owns the exact file and remains held until SQLite closes. */
+export function openAdmittedSqlite(
+  admission: Extract<WindowsSqliteStoreAdmission, { readonly status: "ready" }>,
+): SqliteConnection {
+  try {
+    return instrumentSqlite(cacheStatements(openRuntimeSqlite(admission.databasePath, admission)));
+  } catch (error) {
+    admission.close();
+    throw error;
+  }
 }
 
 /**

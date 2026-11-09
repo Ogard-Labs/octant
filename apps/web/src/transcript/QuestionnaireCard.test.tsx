@@ -36,6 +36,29 @@ const questionnaire = {
 };
 
 describe("inline questionnaires", () => {
+  it("omits the global comment input when the form cannot receive a comment", async () => {
+    const submit = vi.fn(async () => true);
+    render(
+      <QuestionnaireCard
+        prompt="Provider form"
+        questionnaire={{ ...questionnaire, allowComment: false }}
+        onAnswer={submit}
+      />,
+    );
+    expect(screen.queryByRole("textbox", { name: /Anything to add/ })).not.toBeInTheDocument();
+    await userEvent.setup().click(screen.getByRole("checkbox", { name: "Markdown" }));
+    await userEvent.setup().click(screen.getByRole("radio", { name: "Save only" }));
+    await userEvent.setup().click(screen.getByRole("button", { name: "Send answers" }));
+    expect(submit).toHaveBeenCalledExactlyOnceWith(
+      JSON.stringify({
+        version: 1,
+        answers: [
+          { questionId: "formats", selectedOptionIds: ["md"] },
+          { questionId: "open", selectedOptionIds: ["save"] },
+        ],
+      }),
+    );
+  });
   it("keeps choices unselected, submits one complete set with a comment, and shows the submitted summary", async () => {
     const user = userEvent.setup();
     const submit = vi.fn(async () => true);

@@ -199,6 +199,27 @@ describe("native private listener TLS storage", () => {
     expect(files.createKey).toHaveBeenCalledTimes(1);
     expect(files.replaceCertificate).toHaveBeenCalledTimes(2);
     expect(readdirSync(directory)).toEqual([]);
+    // Key transitions stage the next key as an ordinary owner-only file under
+    // the remote folder, which the host identity key normally creates. Native
+    // storage has no transition record, so it refuses instead of writing one.
+    mkdirSync(join(directory, "remote"));
+    const native = createSelfMadeListenerCertificateStore({
+      dataDirectory: directory,
+      tlsFiles: files,
+      now: () => new Date(START.getTime() + 340 * DAY_MS),
+    });
+    expect(
+      native.prepareTransition({
+        hostId: "4f751d04-2b47-49e1-aac9-b3e99049a729",
+        origin: "https://100.64.0.7:8443",
+      }),
+    ).toEqual({ status: "refused", code: "invalid-transition" });
+    expect(native.activateTransition(first.tlsPin)).toEqual({
+      status: "refused",
+      code: "invalid-transition",
+    });
+    expect(native.transition()).toBeUndefined();
+    expect(readdirSync(join(directory, "remote"))).toEqual([]);
     records.set("key", Buffer.from("corrupt private fixture"));
     expect(
       createSelfMadeListenerCertificateStore({

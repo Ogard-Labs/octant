@@ -29,7 +29,11 @@ describe("private host control messages", () => {
   });
 });
 
-import { acquireWindowsHostRuntimeOwner, type WindowsHostOwnerNative } from "./windowsHostOwner";
+import {
+  acquireWindowsHostRuntimeOwner,
+  attachWindowsHostRuntimeOwner,
+  type WindowsHostOwnerNative,
+} from "./windowsHostOwner";
 const scope = "33333333-3333-4333-8333-333333333333";
 const endpoint = "\\\\.\\pipe\\Octant-host-" + "a".repeat(64);
 function nativeFixture(claimStatus = "owned") {
@@ -94,6 +98,56 @@ const ownerOptions = {
 } as const;
 
 describe("native Windows owner admission", () => {
+  it("drains a stop acknowledgement on its exact native connection before stopping the owner", async () => {
+    const fake = nativeFixture();
+    const stop = vi.fn();
+    const owner = await acquireWindowsHostRuntimeOwner({
+      ...ownerOptions,
+      native: fake.native,
+      onStopRequested: stop,
+    });
+    if (owner.kind !== "owner") throw Error("Expected owned fixture.");
+    try {
+      fake.events.push({ status: "connection-closed", responseWritten: true });
+      await vi.waitFor(() => expect(fake.events).toHaveLength(0));
+      expect(stop).not.toHaveBeenCalled();
+      fake.events.push(fake.frame("stop"));
+      await vi.waitFor(() => expect(fake.responses).toHaveLength(1));
+      expect(fake.responses[0]).toEqual({ ok: true });
+      expect(stop).not.toHaveBeenCalled();
+      fake.events.push({ status: "connection-closed", id: 2, responseWritten: true });
+      await vi.waitFor(() => expect(fake.events).toHaveLength(0));
+      expect(stop).not.toHaveBeenCalled();
+      fake.events.push({ status: "connection-closed", id: 1, responseWritten: false });
+      await vi.waitFor(() => expect(fake.events).toHaveLength(0));
+      expect(stop).not.toHaveBeenCalled();
+      fake.events.push({ ...fake.frame("stop"), id: 3 });
+      await vi.waitFor(() => expect(fake.responses).toHaveLength(2));
+      expect(stop).not.toHaveBeenCalled();
+      fake.events.push({ status: "connection-closed", id: 3, responseWritten: true });
+      await vi.waitFor(() => expect(stop).toHaveBeenCalledOnce());
+    } finally {
+      await owner.release();
+    }
+  });
+
+  it("discovers absence or refuses uncertain ownership without preparing or claiming", async () => {
+    const fake = nativeFixture();
+    const prepare = vi.spyOn(fake.native, "prepare");
+    const claim = vi.spyOn(fake.native, "claim");
+    for (const status of ["missing", "dead", "unknown"]) {
+      vi.spyOn(fake.native, "lookup").mockReturnValue({ status });
+      expect(await attachWindowsHostRuntimeOwner({ ...ownerOptions, native: fake.native })).toEqual(
+        {
+          status: status === "unknown" ? "refused" : "missing",
+        },
+      );
+    }
+    expect(prepare).not.toHaveBeenCalled();
+    expect(claim).not.toHaveBeenCalled();
+    expect(fake.native.close).not.toHaveBeenCalled();
+  });
+
   it("records the native process birth and refuses unauthenticated control effects", async () => {
     const fake = nativeFixture();
     const stop = vi.fn();

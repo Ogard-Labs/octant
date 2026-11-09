@@ -30,8 +30,10 @@ export {
   type HostRuntimeOwnershipErrorCode,
   type HostRuntimeRestoreOutcome,
 } from "./owner";
+export { attachWindowsHostRuntimeOwner } from "./windowsHostOwner";
 export {
   acquireWindowsHostProfileOwner,
+  resolveWindowsHostProfile,
   loadWindowsHostProfileNative,
   type AcquireWindowsHostProfileOptions,
   type WindowsHostProfile,
@@ -316,6 +318,9 @@ export {
 
 export {
   createWindowsAuthorityStateFiles,
+  createWindowsHostStartupFiles,
+  type WindowsHostStartupFiles,
+  type WindowsHostStartupProjection,
   type WindowsAuthorityStateFile,
   type WindowsAuthorityStateFiles,
   type WindowsAuthorityStateNative,
@@ -327,3 +332,5 @@ export {
   type WindowsSqliteStores,
   type WindowsSqliteStoreAdmission,
 } from "./windowsSqliteStore";
+
+export { createWindowsHostStartup } from "./windowsHostStartup";
