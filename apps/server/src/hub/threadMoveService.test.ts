@@ -424,4 +424,28 @@ describe("moving a thread", () => {
     const refused = harness({ grant: { moveIn: false } });
     expect(await refused.laptop.askProjects(miniId, { mode: "chat" })).toBe("refused");
   });
+
+  it("lets a batch ticket open one move of each thread it names, and no other", async () => {
+    const other: MovedThreadReference = { mode: "chat", threadId: id(4) };
+    const elsewhere = harness();
+    const notNamed = elsewhere.mini.issueTicket({
+      ownerMemberId: ownerId,
+      sourceMemberId: laptopId,
+      threads: [other],
+    });
+    if (notNamed.status !== "issued") throw new Error("ticket refused");
+    expect(await start(elsewhere, notNamed.ticketId)).toEqual({
+      status: "failed",
+      reason: "refused",
+    });
+
+    const h = harness();
+    const batch = h.mini.issueTicket({
+      ownerMemberId: ownerId,
+      sourceMemberId: laptopId,
+      threads: [other, chatThread],
+    });
+    if (batch.status !== "issued") throw new Error("ticket refused");
+    expect((await start(h, batch.ticketId)).status).toBe("moved");
+  });
 });

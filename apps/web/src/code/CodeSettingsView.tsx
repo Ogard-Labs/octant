@@ -17,6 +17,8 @@ export interface CodeSettingsUpdate {
   readonly defaultExecutionPolicy: CodeSettings["defaultExecutionPolicy"];
   readonly defaultPermissionPersistence: CodeSettings["defaultPermissionPersistence"];
   readonly defaultAutoApprove?: boolean;
+  /** Absent keeps the stored choice. */
+  readonly defaultFullAccessSandbox?: boolean;
   readonly autoReviewer?: AutoReviewer;
   /** Null returns Octant Shield to each thread's own provider. */
   readonly shieldModel?: ShieldModelChoice | null;
@@ -76,6 +78,9 @@ function permissionModeOfSettings(settings: CodeSettings): PermissionMode {
 
 export function CodeSettingsView(props: CodeSettingsViewProps) {
   const [permissionMode, setPermissionMode] = useState(permissionModeOfSettings(props.settings));
+  const [fullAccessSandbox, setFullAccessSandbox] = useState(
+    props.settings.defaultFullAccessSandbox === true,
+  );
   const [autoReviewer, setAutoReviewer] = useState<AutoReviewer>(
     props.settings.autoReviewer ?? "provider",
   );
@@ -116,6 +121,11 @@ export function CodeSettingsView(props: CodeSettingsViewProps) {
         ? props.settings.bundledLanguageServer !== false
         : current,
     );
+    setFullAccessSandbox((current) =>
+      current === (previousSettings.defaultFullAccessSandbox === true)
+        ? props.settings.defaultFullAccessSandbox === true
+        : current,
+    );
     setExecutable((current) =>
       current === (previousSettings.externalEditor?.executable ?? "")
         ? (props.settings.externalEditor?.executable ?? "")
@@ -144,9 +154,13 @@ export function CodeSettingsView(props: CodeSettingsViewProps) {
     change: Partial<CodeSettingsDraft> & {
       readonly bundledLanguageServer?: boolean;
       readonly autoReviewer?: AutoReviewer;
+      readonly fullAccessSandbox?: boolean;
     },
   ) {
     const host = hostSettings.current;
+    if (change.fullAccessSandbox !== undefined) {
+      setFullAccessSandbox(host.defaultFullAccessSandbox === true);
+    }
     if (change.autoReviewer !== undefined) {
       setAutoReviewer(host.autoReviewer ?? "provider");
     }
@@ -175,6 +189,7 @@ export function CodeSettingsView(props: CodeSettingsViewProps) {
     change: Partial<CodeSettingsDraft> & {
       readonly bundledLanguageServer?: boolean;
       readonly autoReviewer?: AutoReviewer;
+      readonly fullAccessSandbox?: boolean;
     },
   ) {
     const draft: CodeSettingsDraft = {
@@ -216,6 +231,9 @@ export function CodeSettingsView(props: CodeSettingsViewProps) {
         // only an Access change carries them.
         ...(change.permissionMode === undefined ? {} : { defaultAutoApprove: access.autoApprove }),
         ...(change.autoReviewer === undefined ? {} : { autoReviewer: change.autoReviewer }),
+        ...(change.fullAccessSandbox === undefined
+          ? {}
+          : { defaultFullAccessSandbox: change.fullAccessSandbox }),
         requireGitRepository: draft.requireGitRepository,
         defaultDiffLayout: draft.defaultDiffLayout,
         // The host keeps the stored switch when a change leaves it out, so
@@ -286,6 +304,22 @@ export function CodeSettingsView(props: CodeSettingsViewProps) {
               }}
               options={AUTO_REVIEWER_OPTIONS}
               value={autoReviewer}
+            />
+          </SettingRow>
+          <SettingRow
+            description="New threads at Full access run without prompts but keep writes in the Project folder and secret files closed. Works with Codex and Octant Harness models; a thread can turn it off from its mode picker."
+            focused={props.focusedSetting === "code-full-access-sandbox"}
+            label="Keep the sandbox at Full access"
+            scope="mode"
+            settingId="code-full-access-sandbox"
+          >
+            <OctantSwitch
+              checked={fullAccessSandbox}
+              label="Keep the sandbox at Full access"
+              onCheckedChange={(checked) => {
+                setFullAccessSandbox(checked);
+                void commit("access", { fullAccessSandbox: checked });
+              }}
             />
           </SettingRow>
         </div>

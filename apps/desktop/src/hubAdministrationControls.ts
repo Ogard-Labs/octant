@@ -36,6 +36,8 @@ import {
   decodeOwnerMemberRequest,
   decodeOwnerRemovalRequest,
   decodePairedMergeUnlockRequest,
+  decodeShutdownChallengeRequest,
+  decodeShutdownStartRequest,
   decodeThreadMoveChallengeRequest,
   decodeThreadMoveControlRequest,
   decodeThreadMoveStartRequest,
@@ -60,6 +62,8 @@ const JoinCodeBody = Schema.Struct({ owner: Schema.Boolean }).annotations({
 const JoinBody = Schema.Struct({ code: Schema.String.pipe(Schema.maxLength(4_096)) }).annotations({
   onExcessProperty: "error",
 });
+
+const EmptyBody = Schema.Struct({}).annotations({ parseOptions: { onExcessProperty: "error" } });
 
 const JoinFinishBody = Schema.Struct({
   unlockPublicKey: Schema.String.pipe(Schema.pattern(/^[A-Za-z0-9_-]{1,512}$/)),
@@ -286,6 +290,23 @@ export const HUB_ADMINISTRATION_OPERATIONS = {
     method: "POST",
     path: "/api/desktop/hub/thread-moves/dismiss",
     decodeBody: decodeThreadMoveThreadRequest,
+  },
+  // Prepare to shut down: the host's threads, and one unlocked batch per destination.
+  "shutdown-listing": {
+    method: "POST",
+    path: "/api/desktop/hub/thread-moves/shutdown/listing",
+    decodeBody: Schema.decodeUnknownSync(EmptyBody),
+    bodyOptional: true,
+  },
+  "shutdown-challenge": {
+    method: "POST",
+    path: "/api/desktop/hub/thread-moves/shutdown/challenge",
+    decodeBody: decodeShutdownChallengeRequest,
+  },
+  "shutdown-start": {
+    method: "POST",
+    path: "/api/desktop/hub/thread-moves/shutdown/start",
+    decodeBody: decodeShutdownStartRequest,
   },
 } as const satisfies Readonly<Record<string, HubAdministrationRoute>>;
 

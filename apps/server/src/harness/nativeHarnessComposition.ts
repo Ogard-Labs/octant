@@ -185,6 +185,12 @@ export interface NativeHarnessCompositionOptions {
    */
   readonly readWorkExecutionPolicy?: (threadId: string) => ProviderExecutionPolicy | undefined;
   /**
+   * Whether a thread opted into the sandbox at Full access: with it, a Full
+   * access thread's egress stays proxied, so its commands run on the confined
+   * shell while approvals stay answered allow.
+   */
+  readonly readFullAccessSandbox?: (threadId: string) => boolean;
+  /**
    * The web search a turn may use, resolved each time a turn's tools are
    * composed: its backing endpoint is a live setting, not a startup fact.
    */
@@ -822,7 +828,11 @@ export function createNativeHarnessComposition(
     const executionPolicy = options.readCodeExecutionPolicy?.(threadId, windowId);
     return executionPolicy === undefined
       ? "none"
-      : resolveDefaultThreadEgressPolicy({ mode: "code", executionPolicy });
+      : resolveDefaultThreadEgressPolicy({
+          mode: "code",
+          executionPolicy,
+          fullAccessSandbox: options.readFullAccessSandbox?.(threadId),
+        });
   };
   const codeShell = (
     scope: HarnessEgressScope,
@@ -848,7 +858,11 @@ export function createNativeHarnessComposition(
     const executionPolicy = options.readWorkExecutionPolicy?.(threadId);
     return executionPolicy === undefined
       ? "none"
-      : resolveDefaultThreadEgressPolicy({ mode: "work", executionPolicy });
+      : resolveDefaultThreadEgressPolicy({
+          mode: "work",
+          executionPolicy,
+          fullAccessSandbox: options.readFullAccessSandbox?.(threadId),
+        });
   };
   // Work and Code share the shell at the thread's level, so a Work thread's
   // commands run on the shell a Code thread at that level gets.

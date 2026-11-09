@@ -2796,6 +2796,18 @@ describe("Codex execution authority and approvals", () => {
       sandbox: "danger-full-access",
       approvalsReviewer: "user",
     });
+    // The opt-in sandbox at Full access: no prompts, and Codex is told the
+    // sandbox is Octant's (external) rather than starting a nested Seatbelt.
+    expect(codexExecutionSettings("full-access", false, true)).toEqual({
+      approvalPolicy: "never",
+      sandbox: "read-only",
+      approvalsReviewer: "user",
+    });
+    expect(codexTurnExecutionSettings("full-access", false, true)).toEqual({
+      approvalPolicy: "never",
+      sandboxPolicy: { type: "externalSandbox", networkAccess: "restricted" },
+      approvalsReviewer: "user",
+    });
     expect(codexExecutionSettings("approval-gated")).toEqual({
       approvalPolicy: "untrusted",
       sandbox: "read-only",

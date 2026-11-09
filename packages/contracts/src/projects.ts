@@ -374,6 +374,8 @@ export const WorkProject = Schema.Struct({
    * default in Settings. Absent follows Settings.
    */
   defaultPermissionMode: Schema.optional(WorkProjectPermissionMode),
+  /** New threads here at Full access keep the sandbox; absent follows Settings. */
+  defaultFullAccessSandbox: Schema.optional(Schema.Boolean),
   /** Named commands for the Project terminal. Absent means none were defined. */
   actions: Schema.optional(ProjectActions),
 }).annotations(strict);
@@ -400,6 +402,8 @@ export const CodeProject = Schema.Struct({
    * starts in Full access, as it always did.
    */
   defaultPermissionMode: Schema.optional(PermissionMode),
+  /** New threads here at Full access keep the sandbox; absent follows Settings. */
+  defaultFullAccessSandbox: Schema.optional(Schema.Boolean),
   /**
    * Who answers this Project's prompts at Auto, overriding Settings. Absent
    * follows Settings.
@@ -435,6 +439,8 @@ const WorkProjectSummary = Schema.Struct({
   statusFile: Schema.optional(WorkProjectStatusFile),
   developerTools: Schema.optional(WorkProjectDeveloperTools),
   defaultPermissionMode: Schema.optional(WorkProjectPermissionMode),
+  /** New threads here at Full access keep the sandbox; absent follows Settings. */
+  defaultFullAccessSandbox: Schema.optional(Schema.Boolean),
   actions: Schema.optional(ProjectActions),
 }).annotations(strict);
 
@@ -450,6 +456,8 @@ const CodeProjectSummary = Schema.Struct({
   pullRequestBackgroundRefresh: Schema.optional(CodeProjectPullRequestBackgroundRefresh),
   agentMerge: Schema.optional(CodeProjectAgentMerge),
   defaultPermissionMode: Schema.optional(PermissionMode),
+  /** New threads here at Full access keep the sandbox; absent follows Settings. */
+  defaultFullAccessSandbox: Schema.optional(Schema.Boolean),
   autoReviewer: Schema.optional(AutoReviewer),
   desktopRecipe: Schema.optional(DesktopRecipe),
   actions: Schema.optional(ProjectActions),
@@ -665,6 +673,8 @@ export const ProjectCommand = Schema.Union(
     ...ProjectCommandFields,
     /** Absent returns the Project to the Settings default. */
     permissionMode: Schema.optional(PermissionMode),
+    /** The sandbox at Full access for new threads; absent returns it to Settings. */
+    fullAccessSandbox: Schema.optional(Schema.Boolean),
   }).annotations(strict),
   Schema.Struct({
     kind: Schema.Literal("change-code-project-auto-reviewer"),
@@ -720,6 +730,8 @@ export const ProjectCommand = Schema.Union(
     ...ProjectCommandFields,
     /** Absent returns the Project to Work's default in Settings. */
     permissionMode: Schema.optional(WorkProjectPermissionMode),
+    /** The sandbox at Full access for new threads; absent returns it to Settings. */
+    fullAccessSandbox: Schema.optional(Schema.Boolean),
   }).annotations(strict),
   Schema.Struct({
     kind: Schema.Literal("change-work-project-actions"),

@@ -14,6 +14,7 @@ import {
   OWNER_IDENTITY_KEY_HEADER,
   OWNER_UNLOCK_HEADER,
   decodeOwnerChallenge,
+  type MovedThreadReference,
   type OwnerThreadMoveTicketRequest,
   type OwnerUnlockProof,
   type ThreadMoveChallengeOutcome,
@@ -46,13 +47,20 @@ export interface ThreadMoveTicketClientOptions {
 }
 
 export interface ThreadMoveTicketClient {
-  /** The destination's challenge for the one ticket request this host will send. */
-  readonly challenge: (destinationMemberId: string) => Promise<ThreadMoveChallengeOutcome>;
-  /** Sends the ticket request with the signature the person's unlock made. */
+  /**
+   * The destination's challenge for the one ticket request this host will
+   * send. Naming threads asks for a batch ticket covering only those.
+   */
+  readonly challenge: (
+    destinationMemberId: string,
+    threads?: ReadonlyArray<MovedThreadReference>,
+  ) => Promise<ThreadMoveChallengeOutcome>;
+  /** Sends the ticket request with the signature the person's unlock made, naming the same threads. */
   readonly redeem: (input: {
     readonly destinationMemberId: string;
     readonly challengeId: string;
     readonly signature: string;
+    readonly threads?: ReadonlyArray<MovedThreadReference>;
   }) => Promise<TicketRedemption>;
 }
 
@@ -92,16 +100,22 @@ export function createThreadMoveTicketClient(
   };
 
   // The body is the same for the challenge's hash and the request it covers.
-  const ticketBody = (destinationMemberId: string): string | undefined => {
+  const ticketBody = (
+    destinationMemberId: string,
+    threads: ReadonlyArray<MovedThreadReference> | undefined,
+  ): string | undefined => {
     const target = options.target(destinationMemberId);
     if (target.status === "refused") return undefined;
-    const request: OwnerThreadMoveTicketRequest = { sourceMemberId: target.self };
+    const request: OwnerThreadMoveTicketRequest = {
+      sourceMemberId: target.self,
+      ...(threads === undefined ? {} : { threads }),
+    };
     return JSON.stringify(request);
   };
 
   return {
-    challenge: async (destinationMemberId) => {
-      const body = ticketBody(destinationMemberId);
+    challenge: async (destinationMemberId, threads) => {
+      const body = ticketBody(destinationMemberId, threads);
       if (body === undefined) return { status: "refused", kind: "destination-unreachable" };
       const bodyHash = createHash("sha256").update(body, "utf8").digest("hex");
       const answered = await send(
@@ -133,8 +147,8 @@ export function createThreadMoveTicketClient(
         },
       };
     },
-    redeem: async ({ destinationMemberId, challengeId, signature }) => {
-      const body = ticketBody(destinationMemberId);
+    redeem: async ({ destinationMemberId, challengeId, signature, threads }) => {
+      const body = ticketBody(destinationMemberId, threads);
       if (body === undefined) return { status: "refused", reason: "destination-unreachable" };
       const proof: OwnerUnlockProof = { shape: "raw", challengeId, signature };
       const answered = await send(destinationMemberId, TICKET_PATH, body, {

@@ -175,6 +175,12 @@ export type TurnRetryTally = typeof TurnRetryTally.Type;
  * `MAX_TURN_FAILURE_MESSAGE_LENGTH`; it is what a person investigating the
  * failure reads first.
  */
+/** One redacted line of a provider's failure message. */
+export const TurnFailureMessage = Schema.NonEmptyTrimmedString.pipe(
+  Schema.maxLength(MAX_TURN_FAILURE_MESSAGE_LENGTH),
+  Schema.pattern(/^[^\n\r]*$/),
+);
+
 export const TurnFailureFacts = Schema.Struct({
   category: ProviderFailureCategory,
   reason: Schema.optional(ProviderRefusalReason),
@@ -188,12 +194,7 @@ export const TurnFailureFacts = Schema.Struct({
   ),
   usageLimit: Schema.optional(ProviderUsageLimit.fields.kind),
   retryAfterMs: Schema.optional(PositiveInt),
-  message: Schema.optional(
-    Schema.NonEmptyTrimmedString.pipe(
-      Schema.maxLength(MAX_TURN_FAILURE_MESSAGE_LENGTH),
-      Schema.pattern(/^[^\n\r]*$/),
-    ),
-  ),
+  message: Schema.optional(TurnFailureMessage),
 }).annotations(strict);
 export type TurnFailureFacts = typeof TurnFailureFacts.Type;
 

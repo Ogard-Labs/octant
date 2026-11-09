@@ -132,6 +132,52 @@ describe("settings access", () => {
     });
   });
 
+  it("sets whether new Full access threads keep the sandbox, keeping every other stored default", async () => {
+    expect(resolveSettingsCliCommand(["sandbox", "on"], {})).toEqual({
+      action: "sandbox",
+      sandboxed: true,
+      work: false,
+    });
+    expect(resolveSettingsCliCommand(["sandbox", "maybe"], {})).toBeUndefined();
+
+    const code = host();
+    expect(
+      await runSettingsCliCommand({
+        command: { action: "sandbox", sandboxed: true, work: false },
+        session: code.session,
+        stdout: code.stdout,
+        stderr: code.stderr,
+      }),
+    ).toBe(0);
+    expect(code.seen.find((request) => request.path === "/api/code/commands")?.body).toEqual({
+      kind: "update-code-settings",
+      expectedVersion: 3,
+      defaultExecutionPolicy: "approval-gated",
+      defaultPermissionPersistence: "current-session",
+      defaultFullAccessSandbox: true,
+    });
+
+    const work = host();
+    expect(
+      await runSettingsCliCommand({
+        command: { action: "sandbox", sandboxed: false, work: true },
+        session: work.session,
+        stdout: work.stdout,
+        stderr: work.stderr,
+      }),
+    ).toBe(0);
+    expect(
+      work.seen.find((request) => request.path === "/api/work/threads/commands")?.body,
+    ).toEqual({
+      kind: "update-work-settings",
+      expectedVersion: 2,
+      defaultProviderInstanceId: "50000000-0000-4000-8000-000000000001",
+      defaultModelId: "loopback-model",
+      defaultAccess: "ask-first",
+      defaultFullAccessSandbox: false,
+    });
+  });
+
   it("reports a refused change and exits nonzero", async () => {
     const fake = host({ refuse: true });
     const code = await runSettingsCliCommand({

@@ -1,9 +1,14 @@
 import {
+  decodeShutdownListing,
+  decodeShutdownStartOutcome,
   decodeThreadMoveChallengeOutcome,
   decodeThreadMoveDestinations,
   decodeThreadMoveStartOutcome,
   decodeThreadMoveThreadStatus,
   type MovedThreadReference,
+  type ShutdownListing,
+  type ShutdownStartOutcome,
+  type ShutdownStartRequest,
   type ThreadMoveChallengeOutcome,
   type ThreadMoveDestinations,
   type ThreadMoveStartOutcome,
@@ -27,6 +32,13 @@ export interface ThreadMoveClient {
   readonly takeBack: (moveId: string) => Promise<void>;
   readonly activate: (moveId: string) => Promise<boolean>;
   readonly dismiss: (thread: MovedThreadReference) => Promise<void>;
+  /** Prepare to shut down: every thread here, and one unlocked batch per destination. */
+  readonly shutdownListing: () => Promise<ShutdownListing>;
+  readonly shutdownChallenge: (
+    destinationMemberId: string,
+    threads: ReadonlyArray<MovedThreadReference>,
+  ) => Promise<ThreadMoveChallengeOutcome>;
+  readonly shutdownStart: (request: ShutdownStartRequest) => Promise<ShutdownStartOutcome>;
 }
 
 export type ThreadMoveCancelOutcome = "cancelled" | "already-moved" | "destination-unreachable";
@@ -81,6 +93,13 @@ export function threadMoveClientOf(hub: HubAdministrationBridge): ThreadMoveClie
     dismiss: async (thread) => {
       await call("thread-move-dismiss", { thread });
     },
+    shutdownListing: async () => decodeShutdownListing(await call("shutdown-listing", {})),
+    shutdownChallenge: async (destinationMemberId, threads) =>
+      decodeThreadMoveChallengeOutcome(
+        await call("shutdown-challenge", { destinationMemberId, threads }),
+      ),
+    shutdownStart: async (request) =>
+      decodeShutdownStartOutcome(await call("shutdown-start", request)),
   };
 }
 

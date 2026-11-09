@@ -311,11 +311,28 @@ export const MovedHistoryDelivered = Schema.Struct({
 export type MovedHistoryDelivered = typeof MovedHistoryDelivered.Type;
 
 /**
+ * The most threads one unlock moves. The batch's thread list rides inside the
+ * destination's owner challenge, whose body the owner routes cap at 16 KiB, so
+ * a longer list moves in further batches, each with its own unlock.
+ */
+export const SHUTDOWN_BATCH_MAX = 64;
+
+/**
  * What an owner device asks the destination for after a fresh own-class
  * unlock: a one-use ticket letting one named computer move one thread here.
  */
 export const OwnerThreadMoveTicketRequest = Schema.Struct({
   sourceMemberId: HubMemberId,
+  /**
+   * Prepare to shut down's batch: the threads this one unlock may move, each
+   * once. Absent, the ticket opens one move of any thread from that source.
+   */
+  threads: Schema.optional(
+    Schema.Array(MovedThreadReference).pipe(
+      Schema.minItems(1),
+      Schema.maxItems(SHUTDOWN_BATCH_MAX),
+    ),
+  ),
 }).annotations(strict);
 export type OwnerThreadMoveTicketRequest = typeof OwnerThreadMoveTicketRequest.Type;
 
@@ -471,6 +488,13 @@ export const ThreadMoveThreadStatus = Schema.Struct({
       destinationName: bounded(256),
     }).annotations(strict),
   ),
+  /**
+   * The last move or wait a window started for this thread has ended: it
+   * moved, could not move, or the person pressed Don't move. Kept until the
+   * thread starts another move and never dismissed, so a batch that named the
+   * thread reads that it ended even after its failure notice is put away.
+   */
+  settled: Schema.optional(Schema.Struct({ settledAt: UtcTimestamp }).annotations(strict)),
   /** Arrived here and not yet committed by its source. */
   arriving: Schema.optional(
     Schema.Struct({
@@ -511,6 +535,87 @@ export const decodeHubAcceptMovedThreadsRequest = Schema.decodeUnknownSync(
   HubAcceptMovedThreadsRequest,
 );
 
+// ── Prepare to shut down ───────────────────────────────────────────────────
+
+/** One member computer as Prepare to shut down lists it. */
+export const ShutdownListedMember = Schema.Struct({
+  memberId: HubMemberId,
+  name: bounded(256),
+  role: Schema.Literal("hub", "spoke"),
+  reachable: Schema.Boolean,
+  refusal: Schema.optional(Schema.Literal("refused")),
+}).annotations(strict);
+export type ShutdownListedMember = typeof ShutdownListedMember.Type;
+
+/** Whether one member can take one listed thread, and into which Projects. */
+export const ShutdownPlacement = Schema.Struct({
+  memberId: HubMemberId,
+  reason: Schema.optional(ThreadMoveFailureReason),
+  projects: Schema.Array(ThreadMoveProjectChoice).pipe(Schema.maxItems(256)),
+  noProjectAllowed: Schema.Boolean,
+}).annotations(strict);
+export type ShutdownPlacement = typeof ShutdownPlacement.Type;
+
+export const ShutdownThreadRow = Schema.Struct({
+  thread: MovedThreadReference,
+  title: bounded(256),
+  projectName: Schema.optional(bounded(256)),
+  /** A turn runs or the thread waits on the person. */
+  busy: Schema.Boolean,
+  /** Open, but with no turn in the last 14 days: folded under Older threads. */
+  older: Schema.Boolean,
+  placements: Schema.Array(ShutdownPlacement).pipe(Schema.maxItems(64)),
+}).annotations(strict);
+export type ShutdownThreadRow = typeof ShutdownThreadRow.Type;
+
+export const ShutdownListing = Schema.Struct({
+  status: Schema.Literal("listed"),
+  members: Schema.Array(ShutdownListedMember).pipe(Schema.maxItems(64)),
+  rows: Schema.Array(ShutdownThreadRow).pipe(Schema.maxItems(2_000)),
+  /** The member the person last moved a thread to, for the starting destination. */
+  lastMovedTo: Schema.optional(HubMemberId),
+}).annotations(strict);
+export type ShutdownListing = typeof ShutdownListing.Type;
+
+const BatchThreads = Schema.Array(MovedThreadReference).pipe(
+  Schema.minItems(1),
+  Schema.maxItems(SHUTDOWN_BATCH_MAX),
+);
+
+/** The challenge for one destination's batch: one unlock covers exactly these threads. */
+export const ShutdownChallengeRequest = Schema.Struct({
+  destinationMemberId: HubMemberId,
+  threads: BatchThreads,
+}).annotations(strict);
+export type ShutdownChallengeRequest = typeof ShutdownChallengeRequest.Type;
+
+export const ShutdownBatchRow = Schema.Struct({
+  thread: MovedThreadReference,
+  destinationProjectId: Schema.optional(ProjectId),
+  timing: ThreadMoveTiming,
+}).annotations(strict);
+export type ShutdownBatchRow = typeof ShutdownBatchRow.Type;
+
+/** One destination's batch, unlocked once; the rows must name exactly the challenged threads. */
+export const ShutdownStartRequest = Schema.Struct({
+  destinationMemberId: HubMemberId,
+  rows: Schema.Array(ShutdownBatchRow).pipe(
+    Schema.minItems(1),
+    Schema.maxItems(SHUTDOWN_BATCH_MAX),
+  ),
+  unlock: Schema.Struct({
+    challengeId: Schema.UUID,
+    signature: Schema.String.pipe(Schema.pattern(/^[A-Za-z0-9_-]{1,512}$/)),
+  }).annotations(strict),
+}).annotations(strict);
+export type ShutdownStartRequest = typeof ShutdownStartRequest.Type;
+
+export const ShutdownStartOutcome = Schema.Union(
+  Schema.Struct({ status: Schema.Literal("started") }),
+  Schema.Struct({ status: Schema.Literal("refused"), reason: ThreadMoveFailureReason }),
+);
+export type ShutdownStartOutcome = typeof ShutdownStartOutcome.Type;
+
 export const decodeOwnerThreadMoveTicketRequest = Schema.decodeUnknownSync(
   OwnerThreadMoveTicketRequest,
 );
@@ -533,3 +638,7 @@ export const decodeThreadMoveChallengeOutcome = Schema.decodeUnknownSync(
 );
 export const decodeThreadMoveStartOutcome = Schema.decodeUnknownSync(ThreadMoveStartOutcome);
 export const decodeThreadMoveThreadStatus = Schema.decodeUnknownSync(ThreadMoveThreadStatus);
+export const decodeShutdownListing = Schema.decodeUnknownSync(ShutdownListing);
+export const decodeShutdownChallengeRequest = Schema.decodeUnknownSync(ShutdownChallengeRequest);
+export const decodeShutdownStartRequest = Schema.decodeUnknownSync(ShutdownStartRequest);
+export const decodeShutdownStartOutcome = Schema.decodeUnknownSync(ShutdownStartOutcome);

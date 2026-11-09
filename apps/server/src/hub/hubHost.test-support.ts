@@ -73,7 +73,7 @@ import { WakeService } from "./wakeService";
 import { createThreadMoveRouteHandler } from "./threadMoveRoutes";
 import { createThreadMoveSenders } from "./threadMoveSenders";
 import { createThreadMoveTicketClient } from "./threadMoveTicketClient";
-import { ThreadMovesFromWindow } from "./threadMovesFromWindow";
+import { ThreadMovesFromWindow, type ThreadMovesFromWindowOptions } from "./threadMovesFromWindow";
 import {
   ThreadMoveService,
   type ThreadMoveDestinationHost,
@@ -256,6 +256,8 @@ export async function startHubTestHost(input: {
     readonly destination: ThreadMoveDestinationHost;
     /** The Projects a move may name here; absent, none. */
     readonly projects?: ThreadMoveServiceOptions["projects"];
+    /** Every thread here as Prepare to shut down reads it; absent, none. */
+    readonly listThreads?: ThreadMovesFromWindowOptions["listThreads"];
   };
   /** This host's own rules for a parent thread; absent, it has no parent thread to delegate for. */
   readonly parent?: DelegatingParentPort;
@@ -763,6 +765,7 @@ export async function startHubTestHost(input: {
       return status.membership === "member" ? status.roster.roster.members : [];
     },
     selfMemberId: () => hub.hubMemberId(),
+    listThreads: input.threadMoveHosts?.listThreads ?? (async () => []),
     now: Date.now,
     pollMs: 50,
   });

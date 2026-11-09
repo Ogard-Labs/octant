@@ -415,6 +415,12 @@ describe("octant agent command line", () => {
       quiet: false,
       mode: "auto",
     });
+    expect(
+      resolveAgentCliCommand("agent", [], { access: "full-access", sandbox: true }),
+    ).toMatchObject({ access: "full-access", sandbox: true });
+    // The sandbox is refused without Full access rather than ignored.
+    expect(resolveAgentCliCommand("agent", [], { sandbox: true })).toBeUndefined();
+    expect(resolveAgentCliCommand("agent", [], { access: "auto", sandbox: true })).toBeUndefined();
     expect(resolveAgentCliCommand("agent", [], { theme: "neon" })).toBeUndefined();
     expect(resolveAgentCliCommand("agent", [], { theme: "octant", plain: true })).toMatchObject({
       theme: "octant",

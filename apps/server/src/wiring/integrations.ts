@@ -158,6 +158,7 @@ export function wireIntegrations(deps: IntegrationsDependencies) {
               typeof resolveDefaultThreadEgressPolicy
             >[0]["executionPolicy"],
             mode: "work" | "code",
+            fullAccessSandbox?: boolean,
           ) => {
             const instance = persistence.readProviderInstance(providerInstanceId);
             return (
@@ -165,7 +166,7 @@ export function wireIntegrations(deps: IntegrationsDependencies) {
               instance !== undefined &&
               isNativeHarnessDriverKind(instance.driverKind) &&
               materializeHarnessToolNetwork(
-                resolveDefaultThreadEgressPolicy({ mode, executionPolicy }),
+                resolveDefaultThreadEgressPolicy({ mode, executionPolicy, fullAccessSandbox }),
               ) === "proxied"
             );
           };
@@ -179,6 +180,7 @@ export function wireIntegrations(deps: IntegrationsDependencies) {
                 thread.providerInstanceId,
                 thread.executionPolicy,
                 "code",
+                thread.fullAccessSandbox,
               ),
             };
           }
@@ -192,6 +194,7 @@ export function wireIntegrations(deps: IntegrationsDependencies) {
               work.providerInstanceId,
               workThreadAccessOf(work.access).executionPolicy,
               "work",
+              work.fullAccessSandbox,
             ),
           };
         } catch {
