@@ -18,6 +18,8 @@ import { join } from "node:path";
 import {
   BrowserRecordingFacts,
   CanvasVersion,
+  decodeBrowserCaptureId,
+  decodeImageArtifactId,
   ProviderInstanceId,
   ProviderModelId,
   UtcTimestamp,
@@ -41,14 +43,20 @@ export const MovedThreadParts = Schema.Struct({
       promptHash: Schema.String.pipe(Schema.pattern(/^[a-f0-9]{64}$/)),
       createdAt: UtcTimestamp,
       updatedAt: UtcTimestamp,
-      images: Schema.Array(Schema.Struct({ partId: PartId }).annotations(strict)).pipe(
-        Schema.minItems(1),
-      ),
+      images: Schema.Array(
+        Schema.Struct({
+          partId: PartId,
+          /** The image's id on the source, which a carried design's assets may name. */
+          sourceImageId: Schema.UUID,
+        }).annotations(strict),
+      ).pipe(Schema.minItems(1)),
     }).annotations(strict),
   ),
   browserCaptures: Schema.Array(
     Schema.Struct({
       partId: PartId,
+      /** The capture's id on the source, which a carried design's assets may name. */
+      sourceCaptureId: Schema.UUID,
       origin: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(2048)),
       url: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(4096)),
       title: Schema.optional(Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(1024))),
@@ -109,7 +117,7 @@ export interface ThreadPartsDestination {
     readonly threadId: string;
     readonly captureId: string;
     readonly bytes: Uint8Array;
-    readonly facts: Omit<MovedThreadParts["browserCaptures"][number], "partId">;
+    readonly facts: Omit<MovedThreadParts["browserCaptures"][number], "partId" | "sourceCaptureId">;
   }) => Promise<void>;
   readonly carryCanvas: (input: {
     readonly canvasId: string;
@@ -152,7 +160,7 @@ export async function packThreadParts(
   const generatedImages: Array<MovedThreadParts["generatedImages"][number]> = [];
   for (const job of source.generatedImages(thread.threadId)) {
     if (job.status !== "completed") continue;
-    const images: Array<{ readonly partId: string }> = [];
+    const images: Array<MovedThreadParts["generatedImages"][number]["images"][number]> = [];
     for (const artifact of job.artifacts) {
       const bytes = await source
         .readGeneratedImage(job, artifact.attachmentId)
@@ -163,7 +171,7 @@ export async function packThreadParts(
       }
       const partId = `image-${parts.length + 1}`;
       await write(partId, "generated-image", bytes);
-      images.push({ partId });
+      images.push({ partId, sourceImageId: String(artifact.attachmentId) });
     }
     if (images.length === 0) continue;
     generatedImages.push({
@@ -188,6 +196,7 @@ export async function packThreadParts(
     await write(partId, "browser-capture", bytes);
     browserCaptures.push({
       partId,
+      sourceCaptureId: String(capture.captureId),
       origin: capture.origin,
       url: capture.url,
       ...(capture.title === undefined ? {} : { title: capture.title }),
@@ -228,6 +237,20 @@ export async function rehomeThreadParts(input: {
     return new Uint8Array(await readFile(path));
   };
   const idFor = (...names: ReadonlyArray<string>) => movedPartUuid(input.moveId, ...names);
+  // What each carried image and capture is called here, so a carried design
+  // that names one by its source id can be pointed at the copy that arrived.
+  const arrivedIds = {
+    images: new Map(
+      index.generatedImages.flatMap((job) =>
+        job.images.map((image) => [image.sourceImageId, idFor(image.partId)] as const),
+      ),
+    ),
+    captures: new Map(
+      index.browserCaptures.map(
+        (capture) => [capture.sourceCaptureId, idFor(capture.partId)] as const,
+      ),
+    ),
+  };
   try {
     for (const job of index.generatedImages) {
       const first = job.images[0]?.partId ?? "";
@@ -249,7 +272,7 @@ export async function rehomeThreadParts(input: {
       });
     }
     for (const capture of index.browserCaptures) {
-      const { partId, ...facts } = capture;
+      const { partId, sourceCaptureId: _sourceId, ...facts } = capture;
       await destination.carryBrowserCapture({
         threadId: thread.threadId,
         captureId: idFor(partId),
@@ -265,7 +288,7 @@ export async function rehomeThreadParts(input: {
         canvasId: idFor(canvas.partId),
         versions: moved.versions.map((source, position) => ({
           versionId: idFor(canvas.partId, `version-${position + 1}`),
-          source,
+          source: rehomeDesignAssets(source, arrivedIds),
         })),
         projectId: input.projectId,
         threadId: thread.threadId,
@@ -276,6 +299,53 @@ export async function rehomeThreadParts(input: {
     return { status: "refused" };
   }
   return { status: "carried" };
+}
+
+/**
+ * Points each design asset that names a carried generated image or Browser
+ * capture at the id that part was recorded under here. Design assets are
+ * resolved against this computer's own stores each time the design is drawn,
+ * so without this a moved design loses images whose bytes did arrive. Only
+ * those references change: an asset naming something that did not travel
+ * stays as it was (the receipt names what stayed), and the source manifest,
+ * provenance, and every other block keep what they recorded on the source.
+ * A version with nothing to rewrite is returned as it is.
+ */
+export function rehomeDesignAssets(
+  version: CanvasVersion,
+  arrived: {
+    readonly images: ReadonlyMap<string, string>;
+    readonly captures: ReadonlyMap<string, string>;
+  },
+): CanvasVersion {
+  let changed = false;
+  const blocks = version.definition.blocks.map((block) => {
+    if (block.kind !== "design" || block.assets === undefined) return block;
+    let blockChanged = false;
+    const assets = block.assets.map((asset) => {
+      const source = asset.source;
+      if (source.kind === "generated-image") {
+        const imageId = arrived.images.get(String(source.imageId));
+        if (imageId === undefined) return asset;
+        blockChanged = true;
+        return { ...asset, source: { kind: source.kind, imageId: decodeImageArtifactId(imageId) } };
+      }
+      if (source.kind === "browser-capture") {
+        const captureId = arrived.captures.get(String(source.captureId));
+        if (captureId === undefined) return asset;
+        blockChanged = true;
+        return {
+          ...asset,
+          source: { kind: source.kind, captureId: decodeBrowserCaptureId(captureId) },
+        };
+      }
+      return asset;
+    });
+    if (!blockChanged) return block;
+    changed = true;
+    return { ...block, assets };
+  });
+  return changed ? { ...version, definition: { ...version.definition, blocks } } : version;
 }
 
 /**

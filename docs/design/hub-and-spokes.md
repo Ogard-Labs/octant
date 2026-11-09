@@ -1033,7 +1033,11 @@ and questions.
     the ones its erase would remove. Each arrives with every version, in
     order, in the Project the thread moves into (none for a Chat thread moved
     into none). Its content is unchanged, so a source reference in it still
-    names the computer it was read on. A Canvas that recorded outside content
+    names the computer it was read on, with one exception: a design asset
+    that names a generated image or Browser capture which travelled with the
+    thread is pointed at the copy that arrived, because the destination draws
+    a design from its own stores. An asset naming one that stayed behind
+    keeps its old reference and draws as missing; the receipt names the part. A Canvas that recorded outside content
     on the source carries that mark from its first version, and marks every
     agent that reads it.
   - A part whose bytes cannot be read on the source, or no longer match the
