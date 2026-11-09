@@ -7845,7 +7845,20 @@ the model at another size.
   not. Per-file approvals were rejected: a person would answer one call
   several times, and a denial halfway would leave a partial change.
   `read` recognizes a PNG, JPEG, GIF,
-  or WebP image and a PDF by its first bytes, whatever the file is named. An
+  or WebP image, a Word, PowerPoint, or Excel file, and a PDF by its bytes,
+  whatever the file is named (the preview's sniffer reads the OOXML container's
+  declared parts). A Word document reads as its paragraphs, a presentation as
+  its slides in order and a PDF as its pages, each after a `--- Slide N ---` or
+  `--- Page N ---` line, and a workbook as each sheet's rows, tab-separated,
+  after `--- Sheet: Name ---`; the text comes from the preview's own bounded
+  parsers, pages with `offset` and `limit` like any file, and carries
+  `extractedFrom` and, when a parser stopped at one of its limits, a
+  `parserNote` saying so. Extracted text is not the file's bytes, so such a
+  read never counts as the read an `edit` needs, and an edit of the file
+  refuses as `not-read-first`. Any other file whose first 4,096 bytes hold a
+  NUL or are not UTF-8 (an archive, an old `.doc`, `.xls`, or `.ppt`, audio,
+  video, an executable) refuses as `binary-file`, naming what a read opens,
+  and a recognized file its parser cannot read as `document-unreadable`. An
   image of at most 1,572,864 bytes (the most one tool image carries once
   base64-encoded) goes to the model beside a result that names only its path,
   type, and size, and only when the provider reports that the session's model
@@ -7859,8 +7872,7 @@ the model at another size.
   fit even without images fails as before. An answer with images is journaled
   only after that check, so the journal holds what the model was sent. Like the text a read
   returns, the image is local and does not taint the thread, and its pixels are
-  never journaled. A PDF refuses as `document-input-unsupported`: no harness
-  endpoint carries a document in a tool result yet. `bash` writes the command to a
+  never journaled. `bash` writes the command to a
   script in its own subdirectory of `harness/scripts` and runs it through the
   same confined owned-process-group port as repository tests (Seatbelt on
   macOS, the bubblewrap sandbox on Linux), so a timeout or cancel ends the

@@ -11,6 +11,7 @@ import {
 import { ToolCallAuthorityService, type ToolCallLiveFacts } from "../toolCallAuthorityService";
 import { GoalService } from "../goal/goalService";
 import { InMemoryGoalStore } from "../goal/goalService.test-support";
+import { buildPdfFixture } from "../preview/previewTestFixtures";
 import { NativeHarnessFileSystem } from "./nativeHarnessFileSystem";
 import { createNativeHarnessGoalPort } from "./nativeHarnessGoal";
 import { createNativeHarnessTools, type NativeHarnessToolPorts } from "./nativeHarnessTools";
@@ -155,13 +156,15 @@ describe("native harness tools", () => {
       }
     });
 
-    it("refuses a PDF, since no harness endpoint takes a document in a tool result", async () => {
-      const { root, tools } = await fixture({}, { readsImages: () => true });
-      await writeFile(join(root, "paper.pdf"), "%PDF-1.7\n");
-      expect(await call(tools, "read", { path: "paper.pdf" })).toMatchObject({
-        result: { error: "document-input-unsupported" },
-        isError: true,
+    it("returns a PDF's page text, without marking the read as outside content", async () => {
+      const { root, tools } = await fixture();
+      await writeFile(join(root, "paper.pdf"), buildPdfFixture([["Abstract"]]));
+      const outcome = await call(tools, "read", { path: "paper.pdf" });
+      expect(outcome).toMatchObject({
+        result: { kind: "file", extractedFrom: "pdf" },
+        isError: false,
       });
+      expect(outcome).not.toHaveProperty("outsideContent");
     });
   });
 

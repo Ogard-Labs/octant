@@ -8,6 +8,11 @@ import {
   type ProviderToolImage,
 } from "@octant/contracts";
 import { secretGuardRefusal } from "../process/secretGuard";
+import { DEFAULT_DOCUMENT_BUDGET, parseDocument } from "../preview/previewDocumentChunker";
+import { DEFAULT_PDF_BUDGET, parsePdf } from "../preview/previewPdfChunker";
+import { sniffPreviewKind } from "../preview/previewSniffer";
+import { DEFAULT_SLIDES_BUDGET, parseSlides } from "../preview/previewSlidesChunker";
+import { DEFAULT_WORKBOOK_BUDGET, parseWorkbook } from "../preview/previewWorkbookChunker";
 
 /** Directories a search never descends into unless the pattern names them. */
 export const SKIPPED_DIRECTORY_NAMES = new Set([".git", "node_modules"]);
@@ -39,13 +44,20 @@ export type NativeHarnessFileRefusal =
    */
   | "target-unavailable"
   /** The secret guard's list names the file; `message` says which rule and channel. */
-  | "protected-file";
+  | "protected-file"
+  /** Not text and not a format a read extracts; `message` names what a read can open. */
+  | "binary-file"
+  /** Recognized as a Word, PowerPoint, Excel, or PDF file, but its parser could not read it. */
+  | "document-unreadable";
 
 export interface NativeHarnessFileRefused {
   readonly kind: "refused";
   readonly reason: NativeHarnessFileRefusal;
   readonly message?: string;
 }
+
+/** The formats a read extracts text from, named by their usual extension. */
+export type NativeHarnessExtractedFormat = "docx" | "pptx" | "xlsx" | "pdf";
 
 export type NativeHarnessReadResult =
   | {
@@ -56,6 +68,14 @@ export type NativeHarnessReadResult =
       readonly totalLines: number;
       readonly nextLine?: number;
       readonly bounds: NativeHarnessToolResultBounds;
+      /**
+       * The format the lines were extracted from; absent for a text file.
+       * Extracted lines are not the file's bytes, so such a read never
+       * counts as the read an edit needs.
+       */
+      readonly extractedFrom?: NativeHarnessExtractedFormat;
+      /** Set when the format's parser stopped at one of its limits; says what was left out. */
+      readonly parserNote?: string;
     }
   /**
    * An image, recognized by its bytes. `data` is the base64 the model is
@@ -67,13 +87,6 @@ export type NativeHarnessReadResult =
       readonly mimeType: ProviderToolImage["mimeType"];
       readonly bytes: number;
       readonly data: string;
-    }
-  /** A PDF, recognized by its bytes; its content is not decoded as text. */
-  | {
-      readonly kind: "document";
-      readonly path: string;
-      readonly mimeType: "application/pdf";
-      readonly bytes: number;
     }
   | {
       readonly kind: "directory";
@@ -278,8 +291,11 @@ export class NativeHarnessFileSystem {
     if (!info.isFile()) return { kind: "refused", reason: "not-a-file" };
     if (info.size > this.#maxFileBytes) return { kind: "refused", reason: "file-too-large" };
     const content = await readFile(resolved);
-    if (input.marksRead !== false) this.#readMarks.set(resolved, info.mtime.toISOString());
-    return readFileContent(display, content, input);
+    const result = readFileContent(display, content, input);
+    if (input.marksRead !== false && countsAsTextRead(result)) {
+      this.#readMarks.set(resolved, info.mtime.toISOString());
+    }
+    return result;
   }
 
   async write(input: {
@@ -576,27 +592,146 @@ export class NativeHarnessFileSystem {
 }
 
 /**
- * What a read of one file returns: an image or a PDF when its first bytes say
- * so, whatever the file is named, and otherwise its text as numbered lines.
+ * What a read of one file returns, decided by its bytes, whatever the file is
+ * named: an image; a Word, PowerPoint, or Excel file or a PDF as extracted
+ * text, through the same bounded parsers the preview uses; a text file as
+ * numbered lines; and a refusal for anything else that is not text.
  */
 export function readFileContent(
   path: string,
   content: Buffer,
   input: { readonly offset?: number | undefined; readonly limit?: number | undefined },
 ): NativeHarnessReadResult {
-  if (startsWith(content, "%PDF-")) {
-    return { kind: "document", path, mimeType: "application/pdf", bytes: content.length };
-  }
   const mimeType = imageMimeType(content);
-  if (mimeType === undefined) return readSlice(path, content.toString("utf8"), input);
-  if (content.length > MAX_READ_IMAGE_BYTES) {
+  if (mimeType !== undefined) {
+    if (content.length > MAX_READ_IMAGE_BYTES) {
+      return {
+        kind: "refused",
+        reason: "file-too-large",
+        message: `This image is ${content.length} bytes; a read returns images up to ${MAX_READ_IMAGE_BYTES} bytes.`,
+      };
+    }
     return {
-      kind: "refused",
-      reason: "file-too-large",
-      message: `This image is ${content.length} bytes; a read returns images up to ${MAX_READ_IMAGE_BYTES} bytes.`,
+      kind: "image",
+      path,
+      mimeType,
+      bytes: content.length,
+      data: content.toString("base64"),
     };
   }
-  return { kind: "image", path, mimeType, bytes: content.length, data: content.toString("base64") };
+  const sniffed = sniffPreviewKind(content, "", "application/octet-stream", {
+    maxSniffBytes: SNIFFED_HEAD_BYTES,
+    maxByteSize: content.length,
+  });
+  const kind = sniffed.ok ? sniffed.kind : "unsupported";
+  if (kind === "document" || kind === "slides" || kind === "workbook" || kind === "pdf") {
+    const extracted = extractedText(kind, content);
+    if (extracted === undefined) {
+      return {
+        kind: "refused",
+        reason: "document-unreadable",
+        message: `This looks like ${EXTRACTED_FORMAT_NAMES[EXTRACTED_FORMATS[kind]]}, but it could not be parsed.`,
+      };
+    }
+    return {
+      ...readSlice(path, extracted.text, input),
+      extractedFrom: EXTRACTED_FORMATS[kind],
+      ...(extracted.truncated
+        ? {
+            parserNote: `The ${EXTRACTED_FORMAT_NAMES[EXTRACTED_FORMATS[kind]]} parser stopped at one of its limits, so some of the file's content is not shown.`,
+          }
+        : {}),
+    };
+  }
+  if (kind === "unsupported" || kind === "image") {
+    return {
+      kind: "refused",
+      reason: "binary-file",
+      message:
+        "This is a binary file. A read opens text, PNG, JPEG, GIF, and WebP images, Word (.docx), PowerPoint (.pptx), and Excel (.xlsx) files, and PDFs.",
+    };
+  }
+  return readSlice(path, content.toString("utf8"), input);
+}
+
+/** How much of a file's start decides whether it is text, as the preview sniffs it. */
+const SNIFFED_HEAD_BYTES = 4096;
+
+const EXTRACTED_FORMATS = {
+  document: "docx",
+  slides: "pptx",
+  workbook: "xlsx",
+  pdf: "pdf",
+} as const satisfies Record<string, NativeHarnessExtractedFormat>;
+
+const EXTRACTED_FORMAT_NAMES: Readonly<Record<NativeHarnessExtractedFormat, string>> = {
+  docx: "a Word document",
+  pptx: "a PowerPoint presentation",
+  xlsx: "an Excel workbook",
+  pdf: "a PDF",
+};
+
+/** Whether a read saw the file's own text, the only read an edit may follow. */
+export function countsAsTextRead(result: NativeHarnessReadResult): boolean {
+  return result.kind === "file" && result.extractedFrom === undefined;
+}
+
+/**
+ * A format's content as plain text, with a marker line before each slide,
+ * page, and worksheet, under the preview parsers' own limits.
+ */
+function extractedText(
+  kind: keyof typeof EXTRACTED_FORMATS,
+  content: Buffer,
+): { readonly text: string; readonly truncated: boolean } | undefined {
+  switch (kind) {
+    case "document": {
+      const parsed = parseDocument(content, DEFAULT_DOCUMENT_BUDGET);
+      return parsed && { text: parsed.blocks.join("\n"), truncated: parsed.truncated };
+    }
+    case "slides": {
+      const parsed = parseSlides(content, DEFAULT_SLIDES_BUDGET);
+      return (
+        parsed && {
+          text: parsed.slides
+            .map((slide, index) => `--- Slide ${index + 1} ---\n${slide}`)
+            .join("\n"),
+          truncated: parsed.truncated,
+        }
+      );
+    }
+    case "pdf": {
+      const parsed = parsePdf(content, DEFAULT_PDF_BUDGET);
+      return (
+        parsed && {
+          text: parsed.pages.map((page, index) => `--- Page ${index + 1} ---\n${page}`).join("\n"),
+          truncated: parsed.truncated,
+        }
+      );
+    }
+    case "workbook": {
+      const parsed = parseWorkbook(content, DEFAULT_WORKBOOK_BUDGET);
+      return (
+        parsed && {
+          text: parsed.worksheets
+            .map((sheet) =>
+              [
+                `--- Sheet: ${sheet.name} ---`,
+                ...sheet.rows.map((row) =>
+                  row
+                    // A tab or line break inside a cell would read as a new
+                    // cell or row, so it becomes a space.
+                    .map((cell) => (cell === null ? "" : String(cell).replace(/[\t\r\n]+/g, " ")))
+                    .join("\t"),
+                ),
+              ].join("\n"),
+            )
+            .join("\n"),
+          truncated: parsed.truncated,
+        }
+      );
+    }
+  }
 }
 
 function imageMimeType(content: Buffer): ProviderToolImage["mimeType"] | undefined {
