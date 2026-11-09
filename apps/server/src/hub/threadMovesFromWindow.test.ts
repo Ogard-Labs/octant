@@ -96,6 +96,7 @@ describe("holding a move for an owner phone", () => {
       readonly read?: (thread: MovedThreadReference) => Promise<MovableThreadReading>;
     } = {},
   ) {
+    const told: Array<{ readonly waitId: string; readonly destinationName: string }> = [];
     const folder = mkdtempSync(join(tmpdir(), "octant-move-phone-"));
     folders.push(folder);
     const clock = { now: 1_000_000 };
@@ -122,16 +123,63 @@ describe("holding a move for an owner phone", () => {
         measure: async () => ({ status: "unknown" }),
       },
       stopWork: async () => ({ status: "stopped" }),
-      members: () => [],
+      members: () => [
+        {
+          memberId: DESKTOP as never,
+          name: "Office iMac",
+          role: "spoke",
+          identityKeyFingerprint: "a".repeat(64),
+          listenerPin: "a".repeat(64),
+          privateNames: [],
+          addresses: ["100.64.0.1"],
+          owner: false,
+        },
+      ],
       selfMemberId: () => "self",
       listThreads: async () => [],
       now: () => clock.now,
       pollMs: 5,
+      tellOwnerPhones: (wait) => told.push(wait),
     });
-    return { moves, clock, refused, start };
+    return { moves, clock, refused, start, told };
   }
   const ask = { thread: THREAD, destinationMemberId: DESKTOP as never, timing: "now" } as const;
   const phone = { kind: "owner-unlock", memberId: DESKTOP as never } as const;
+
+  it("tells the owner phones once per wait, for a single thread and for a whole batch", async () => {
+    const OTHER: MovedThreadReference = {
+      mode: "chat",
+      threadId: "88888888-8888-4888-8888-888888888888",
+    };
+    const THIRD: MovedThreadReference = {
+      mode: "work",
+      threadId: "99999999-9999-4999-8999-999999999999",
+    };
+    const single = heldMoves();
+    await single.moves.askPhone(ask);
+    const [held] = single.moves.phoneConfirmations().confirmations;
+    expect(single.told).toEqual([{ waitId: held?.confirmationId, destinationName: "Office iMac" }]);
+    // A thread already held is refused as busy and tells the phone nothing new.
+    expect(await single.moves.askPhone(ask)).toEqual({ status: "refused", reason: "busy" });
+    expect(single.told).toHaveLength(1);
+    single.moves.close();
+
+    const batch = heldMoves();
+    await batch.moves.shutdownAskPhone({
+      destinationMemberId: DESKTOP as never,
+      rows: [
+        { thread: THREAD, timing: "now" },
+        { thread: OTHER, timing: "now" },
+        { thread: THIRD, timing: "after-turn" },
+      ],
+    });
+    const [batched] = batch.moves.phoneConfirmations().confirmations;
+    expect(batched?.threads).toHaveLength(3);
+    expect(batch.told).toEqual([
+      { waitId: batched?.confirmationId, destinationName: "Office iMac" },
+    ]);
+    batch.moves.close();
+  });
 
   it("ends the wait as an unlock that never came once five minutes pass without the phone", async () => {
     const { moves, clock, refused, start } = heldMoves();

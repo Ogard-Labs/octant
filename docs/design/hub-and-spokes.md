@@ -1037,6 +1037,30 @@ an unlock on the source as well keeps a stolen phone without the person's
 face, finger, or passcode from even spending a confirmation there. The
 waits live in memory only, so a restart ends them and the person asks again.
 
+**Telling the phone a move waits.** When a move starts waiting, the source
+tells its owner phones through the phone notification path it already uses for
+a waiting approval ([Mobile maturity: delivery path](mobile-maturity.md#delivery-path),
+and the [push sender on the hub](#push-sender-on-the-hub) when the spoke ticked
+Push); nothing else is contacted. It sends one notification per wait, never
+one per thread: a Prepare to shut down batch for one destination is one
+notification, and a batch across destinations sends one for each destination,
+since each is its own confirmation. It goes only to the paired devices this
+host made for guests on its own owner list, the phones that can confirm here,
+and only to one whose Approval needed setting is on; a device paired with the
+source some other way hears nothing. The sealed text says only that a move
+waits and the destination's name ("A move is waiting for your phone", "To
+Office iMac"), with no thread title whatever the phone's thread-names
+setting, and tapping it opens the phone's Computers screen, where Moves
+waiting for you reads the held threads from each computer itself. With
+Notifications off, or no phone registered, nothing is sent and nothing fails:
+the list still shows the wait when the person opens the app. Each delivery is
+journaled as a receipt naming the device, the outcome, and the time, but no
+thread and no wait, since the wait lives in memory only. Rationale: an owner
+can already read the held threads' titles from the list, so leaving them out
+of the notification costs nothing and keeps them off a lock screen; and
+reusing the approval path keeps the phone's own Notifications choices, the
+hub's grant, and the rate limit in charge.
+
 **A browser passkey does not confirm a move, and none is planned.** A passkey belongs to the one
 origin that registered it, and the destination checks a passkey owner only on
 its own origin, so a browser on the source's page holds no passkey the
@@ -2611,9 +2635,19 @@ a numbered slice. Built, with these narrower readings:
     unlock, a challenge bound to another body, an administration session on
     the ticket route, a ticket for other threads, and a phone removed from
     the destination's owner list after the ticket. What it does not do yet:
-    a notification telling the phone a move waits (the person opens the
-    app) and a run on a real phone, which is a maintainer gate. A browser
-    passkey confirming a move is not planned (above).
+    a run on a real phone, which is a maintainer gate. A browser
+    passkey confirming a move is not planned (above). The source now
+    tells its owner phones when a move starts waiting, as
+    [Telling the phone a move waits](#moving-a-thread-to-another-member)
+    describes: a held move is its own sealed notification kind
+    (`move-waiting`, no thread, high urgency) with its own receipt, and the
+    phone's native openers link it to `octant://hosts/<host>/moves`, which
+    opens the Computers screen. Server tests cover one notification per
+    wait for a single thread and a three-thread batch, owner phones only,
+    a phone with approvals off, and nothing sent or failed with
+    Notifications off; a spoke smoke covers which devices count as owner
+    phones; the phone's tests cover the link. Delivery to a real phone is
+    part of the same maintainer gate.
 
     A further part carries each thread's bulk parts with every move, in all
     three modes, as described under **What moves**. The source packs a Chat
