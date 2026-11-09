@@ -128,7 +128,7 @@ describe("guardrail levels", () => {
     expect(refusesFullAccessSandbox({ access: sandboxed, driverKind: "openai-compatible" })).toBe(
       false,
     );
-    for (const driverKind of [undefined] as const) {
+    for (const driverKind of ["oh-my-pi", undefined] as const) {
       expect(refusesFullAccessSandbox({ access: sandboxed, driverKind })).toBe(true);
     }
     // Without the choice, or below Full access, nothing refuses.

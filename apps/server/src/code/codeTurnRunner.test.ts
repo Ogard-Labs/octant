@@ -1860,7 +1860,7 @@ describe("CodeTurnRunner", () => {
       fullAccessSandbox: true,
     };
 
-    for (const providerDriverKind of ["mistral-vibe", undefined] as const) {
+    for (const providerDriverKind of ["oh-my-pi", undefined] as const) {
       const exit = await Effect.runPromiseExit(
         Effect.scoped(
           new CodeTurnRunner().run(
