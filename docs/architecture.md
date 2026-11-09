@@ -7740,7 +7740,10 @@ the model at another size.
   inside the checkout is made relative, `.` or the checkout's own path is the
   whole checkout); a path outside the checkout keeps its raw form and matches
   only exactly. These reads never count as the model's read before an edit. The list is capped at
-  100 with a note saying how many were left out. `clean` holds only when every
+  100 problems and the whole serialized result at three quarters of
+  `MAX_PROVIDER_TOOL_RESULT_BYTES` (messages clipped to 500 characters,
+  echoed commands to 256, then only whole problems that fit), with a note
+  saying how many were left out and to narrow with `files`. `clean` holds only when every
   command that ran exited zero and printed no problem; a run that exits
   non-zero with nothing parsed carries its output tail and a note that it is
   not clean, a run whose output the shell cut (local or server shell) is

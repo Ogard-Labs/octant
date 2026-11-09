@@ -2,7 +2,11 @@ import { mkdir, mkdtemp, realpath, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { describe, expect, it } from "vitest";
-import type { ProviderExecutionPolicy, ToolActionAuthority } from "@octant/contracts";
+import {
+  MAX_PROVIDER_TOOL_RESULT_BYTES,
+  type ProviderExecutionPolicy,
+  type ToolActionAuthority,
+} from "@octant/contracts";
 import { ToolCallAuthorityService, type ToolCallLiveFacts } from "../toolCallAuthorityService";
 import {
   matchesDiagnosticsFile,
@@ -533,6 +537,27 @@ describe("native harness diagnostics", () => {
     expect((outcome.result as { notes: ReadonlyArray<string> }).notes[0]).toContain(
       "output was cut",
     );
+  });
+
+  it("keeps the whole result under the tool-result limit when many problems carry long messages", async () => {
+    const long = "x".repeat(3_000);
+    const lines = Array.from({ length: 150 }, (_, index) => `src/m${index}.ts:1:1: ${long}`);
+    const { call } = await fixture({
+      output: () => ({ exitCode: 1, output: lines.join("\n") }),
+    });
+    const outcome = await call({ command: `lint ${"--flag ".repeat(2_000)}`.trimEnd() });
+    const result = outcome.result as {
+      problems: ReadonlyArray<{ message: string }>;
+      totalProblems: number;
+      truncated: string;
+    };
+    expect(Buffer.byteLength(JSON.stringify(result), "utf8")).toBeLessThanOrEqual(
+      (MAX_PROVIDER_TOOL_RESULT_BYTES * 3) / 4,
+    );
+    expect(result.problems.length).toBeGreaterThan(10);
+    expect(result.totalProblems).toBe(150);
+    expect(result.truncated).toContain(`${150 - result.problems.length} were left out`);
+    expect(result.truncated).toContain("pass files");
   });
 
   it("narrows problems to the files asked about and caps the list with a note", async () => {

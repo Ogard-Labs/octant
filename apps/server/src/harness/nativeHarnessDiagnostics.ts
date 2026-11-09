@@ -1,5 +1,6 @@
 import {
   MAX_NATIVE_HARNESS_COMMAND_TIMEOUT_MS,
+  MAX_PROVIDER_TOOL_RESULT_BYTES,
   type NativeHarnessDiagnosticsArguments,
 } from "@octant/contracts";
 import { posix } from "node:path";
@@ -10,7 +11,18 @@ import type { CreateNativeHarnessToolsOptions } from "./nativeHarnessTools";
 /** A typecheck can take as long as a test suite; it gets the longest a command may run. */
 const DIAGNOSTICS_TIMEOUT_MS = MAX_NATIVE_HARNESS_COMMAND_TIMEOUT_MS;
 export const MAX_DIAGNOSTICS_PROBLEMS = 100;
-const MAX_PROBLEM_MESSAGE_LENGTH = 1_000;
+/**
+ * The most bytes the whole serialized result may take. A provider tool result
+ * over MAX_PROVIDER_TOOL_RESULT_BYTES (64 KiB; a Code turn enforces the same
+ * bound) is replaced by a bare `tool-result-too-large`, which tells the lead
+ * nothing. A quarter is left for what rides on the result after it is built,
+ * such as a person's steering note.
+ */
+const MAX_DIAGNOSTICS_RESULT_BYTES = (MAX_PROVIDER_TOOL_RESULT_BYTES * 3) / 4;
+const MAX_PROBLEM_MESSAGE_LENGTH = 500;
+const MAX_PROBLEM_FILE_LENGTH = 1_024;
+/** A command is echoed in the result only this long; the lead knows the rest. */
+const MAX_ECHOED_COMMAND_LENGTH = 256;
 const MAX_OUTPUT_TAIL_BYTES = 4 * 1024;
 
 export type DiagnosticsCheck = "typecheck" | "lint" | "check" | "both";
@@ -512,11 +524,17 @@ export async function runNativeHarnessDiagnostics(
     const admission = await admitNativeHarnessTool(options, {
       name: "bash",
       args: { command },
-      intent: `bash: ${command}`.slice(0, 2_048),
+      // The request refuses an intent with trailing space, which a cut can leave.
+      intent: `bash: ${command}`.slice(0, 2_048).trimEnd(),
       ...(signal === undefined ? {} : { signal }),
     });
     if (admission.status === "refused") {
-      runs.push({ check, command, status: "refused", ...admission.outcome.result });
+      runs.push({
+        check,
+        command: clipTo(command, MAX_ECHOED_COMMAND_LENGTH),
+        status: "refused",
+        ...admission.outcome.result,
+      });
       continue;
     }
     const callId = String(admission.request.actionId);
@@ -539,7 +557,7 @@ export async function runNativeHarnessDiagnostics(
     if (run.status === "unavailable") {
       runs.push({
         check,
-        command,
+        command: clipTo(command, MAX_ECHOED_COMMAND_LENGTH),
         status: "refused",
         error: run.refusal?.reason ?? "shell-unavailable",
         ...(run.refusal === undefined ? {} : { message: run.refusal.message }),
@@ -550,7 +568,7 @@ export async function runNativeHarnessDiagnostics(
     problems.push(...found);
     runs.push({
       check,
-      command,
+      command: clipTo(command, MAX_ECHOED_COMMAND_LENGTH),
       status: run.status,
       ...(run.exitCode === undefined ? {} : { exitCode: run.exitCode }),
       problemsFound: found.length,
@@ -604,21 +622,40 @@ export async function runNativeHarnessDiagnostics(
     ),
     ...notFound.map((check) => `No ${check} script was found, so no ${check} ran.`),
   ];
+  const base = {
+    clean,
+    runs,
+    totalProblems: shown.length,
+    ...(wanted === undefined || wanted.length === 0
+      ? {}
+      : { outsideFiles: problems.length - shown.length }),
+    ...(notes.length === 0 ? {} : { notes }),
+  };
+  // Whole problems are kept in order while the complete result, with room for
+  // the truncation note, stays under the byte budget.
+  const reserved = sizeOf(base) + sizeOf({ problems: [], truncated: "x".repeat(240) });
+  const kept: NativeHarnessDiagnostic[] = [];
+  let used = reserved;
+  for (const problem of shown.slice(0, MAX_DIAGNOSTICS_PROBLEMS)) {
+    const bounded = {
+      ...problem,
+      file: clipTo(problem.file, MAX_PROBLEM_FILE_LENGTH),
+      message: clipTo(problem.message, MAX_PROBLEM_MESSAGE_LENGTH),
+    };
+    const size = sizeOf(bounded) + 1;
+    if (used + size > MAX_DIAGNOSTICS_RESULT_BYTES) break;
+    kept.push(bounded);
+    used += size;
+  }
   return {
     result: {
-      clean,
-      runs,
-      problems: shown.slice(0, MAX_DIAGNOSTICS_PROBLEMS),
-      totalProblems: shown.length,
-      ...(wanted === undefined || wanted.length === 0
-        ? {}
-        : { outsideFiles: problems.length - shown.length }),
-      ...(shown.length > MAX_DIAGNOSTICS_PROBLEMS
+      ...base,
+      problems: kept,
+      ...(kept.length < shown.length
         ? {
-            truncated: `Showing ${MAX_DIAGNOSTICS_PROBLEMS} of ${shown.length} problems; ${shown.length - MAX_DIAGNOSTICS_PROBLEMS} were left out. Fix these, or pass files to narrow the list.`,
+            truncated: `Showing ${kept.length} of ${shown.length} problems; ${shown.length - kept.length} were left out to keep the result within its size and count limits. Fix these, or pass files to narrow the list.`,
           }
         : {}),
-      ...(notes.length === 0 ? {} : { notes }),
     },
     isError: runs.some(
       (run) =>
@@ -640,6 +677,14 @@ function severityOf(word: string): NativeHarnessDiagnostic["severity"] {
     : lower === "info" || lower === "note"
       ? "info"
       : "error";
+}
+
+function sizeOf(value: unknown): number {
+  return Buffer.byteLength(JSON.stringify(value), "utf8");
+}
+
+function clipTo(text: string, length: number): string {
+  return text.length > length ? `${text.slice(0, length - 1)}…` : text;
 }
 
 function clip(message: string): string {
