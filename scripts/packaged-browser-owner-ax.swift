@@ -1002,8 +1002,11 @@ if mode == "picker-metadata" || mode == "picker-location-prompt" || (fixesOwnedF
                                let selectDown = CGEvent(keyboardEventSource: nil, virtualKey: 0, keyDown: true),
                                let selectUp = CGEvent(keyboardEventSource: nil, virtualKey: 0, keyDown: false) {
                                 selectDown.flags = .maskCommand; selectUp.flags = .maskCommand
+                                // Like the prompt-opening chord, route through the
+                                // focused native session. PID posting to the app can
+                                // bypass its out-of-process open-panel text input.
                                 if fieldReady(focus.node) {
-                                    selectDown.postToPid(processId); selectUp.postToPid(processId)
+                                    selectDown.post(tap: .cghidEventTap); selectUp.post(tap: .cghidEventTap)
                                     fixedFolder["status"] = "select-all-dispatched-no-text"
                                     if fieldReady(focus.node) {
                                         // A Unicode keyboard event has a bounded payload.
@@ -1027,7 +1030,7 @@ if mode == "picker-metadata" || mode == "picker-location-prompt" || (fixesOwnedF
                                                     textUp.keyboardSetUnicodeString(stringLength: buffer.count, unicodeString: base)
                                                 }
                                             }
-                                            textDown.postToPid(processId); textUp.postToPid(processId)
+                                            textDown.post(tap: .cghidEventTap); textUp.post(tap: .cghidEventTap)
                                             sent += utf16.count
                                         }
                                         fixedFolder["utf16UnitsDispatched"] = sent
@@ -1050,7 +1053,7 @@ if mode == "picker-metadata" || mode == "picker-location-prompt" || (fixesOwnedF
                                let down = CGEvent(keyboardEventSource: nil, virtualKey: 36, keyDown: true),
                                let up = CGEvent(keyboardEventSource: nil, virtualKey: 36, keyDown: false) {
                                 if fieldReady(focus.node) {
-                                    down.postToPid(processId); up.postToPid(processId)
+                                    down.post(tap: .cghidEventTap); up.post(tap: .cghidEventTap)
                                     fixedFolder["goDispatched"] = true
                                     fixedFolder["status"] = "go-dispatched-shape-unconfirmed"
                                     while Date() < deadline, errors == priorErrors, identitiesUnchanged() {
