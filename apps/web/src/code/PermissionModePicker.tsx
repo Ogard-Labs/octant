@@ -117,7 +117,7 @@ export interface PermissionModePickerProps {
 
 const SANDBOX_DETAIL = "No prompts, but writes stay in the folder and secret files stay closed.";
 const SANDBOX_UNSUPPORTED_DETAIL =
-  "This provider can't keep the sandbox at Full access yet. Use Codex or an Octant Harness model.";
+  "This provider can't keep the sandbox at Full access yet. Use Claude, Codex or an Octant Harness model.";
 
 /**
  * One click from the composer to any mode. Each choice is the thread's

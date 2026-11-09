@@ -134,6 +134,8 @@ describe("handing over a Code thread that cannot move", () => {
     expect(handovers.takeBack(HANDOVER)).toEqual({ status: "taken-back" });
     expect(frozen.size).toBe(0);
     expect(heldThreadsOf(state.load())).toEqual([]);
+    // Its branch still names it, so it is remembered and not offered back here.
+    expect(state.load().settledHandoverIds).toEqual([HANDOVER]);
   });
 
   it("refuses a thread with a running turn, and one with nothing to hand over, leaving it unfrozen", async () => {

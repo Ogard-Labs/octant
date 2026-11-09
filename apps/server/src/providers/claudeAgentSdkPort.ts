@@ -117,6 +117,7 @@ export interface ClaudeOpenQueryInput {
   /** Agent SDK `effort` for the session; absent means the SDK default. */
   readonly effort?: ClaudeEffortLevel;
   readonly executionPolicy: ProviderExecutionPolicy;
+  readonly fullAccessSandbox?: boolean;
   /**
    * Whether the harness may answer approval prompts via its native `auto`
    * permission mode. The driver only sends `auto` when this is true and the
@@ -867,7 +868,8 @@ function hasValidSandbox(input: ClaudeOpenQueryInput): boolean {
   try {
     if (
       input.executionPolicy !== "approval-gated" &&
-      input.executionPolicy !== "auto-accept-edits"
+      input.executionPolicy !== "auto-accept-edits" &&
+      !(input.executionPolicy === "full-access" && input.fullAccessSandbox === true)
     ) {
       return input.sandbox === undefined;
     }
@@ -895,10 +897,13 @@ function hasValidSandbox(input: ClaudeOpenQueryInput): boolean {
     ) {
       return false;
     }
+    const roots = [input.projectRoot, ...(input.additionalDirectories ?? [])];
+    const matchesRoots = (paths: ReadonlyArray<string>) =>
+      paths.length === roots.length && paths.every((path, index) => path === roots[index]);
     return (
       isExactPathTuple(sandbox.filesystem.denyRead, "/") &&
-      isExactPathTuple(sandbox.filesystem.allowRead, input.projectRoot) &&
-      isExactPathTuple(sandbox.filesystem.allowWrite, input.projectRoot)
+      matchesRoots(sandbox.filesystem.allowRead) &&
+      matchesRoots(sandbox.filesystem.allowWrite)
     );
   } catch {
     return false;
