@@ -451,7 +451,8 @@ export async function captureWorkFolderForMove(input: {
       emptyFolders: walked.emptyFolders.map((path) => Schema.decodeSync(MovedWorkPath)(path)),
       rootMode: walked.rootMode,
       folderModes: carriedFolderModes(
-        [...files.map((entry) => String(entry.path)), ...walked.emptyFolders],
+        files.map((entry) => String(entry.path)),
+        walked.emptyFolders,
         walked.folderModes,
       ),
     },
@@ -465,11 +466,14 @@ export async function captureWorkFolderForMove(input: {
  * private (`0o700`), the narrowest a person can still open.
  */
 function carriedFolderModes(
-  paths: ReadonlyArray<string>,
+  files: ReadonlyArray<string>,
+  emptyFolders: ReadonlyArray<string>,
   modes: ReadonlyMap<string, number>,
 ): MovedWorkFolder["folderModes"] {
-  const folders = new Set<string>();
-  for (const path of paths) {
+  // An empty folder is itself carried, so it keeps its own bits too, not only
+  // the bits of the folders above it.
+  const folders = new Set<string>(emptyFolders);
+  for (const path of [...files, ...emptyFolders]) {
     const parts = path.split("/");
     for (let depth = 1; depth < parts.length; depth += 1) {
       folders.add(parts.slice(0, depth).join("/"));
