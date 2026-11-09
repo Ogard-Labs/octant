@@ -2034,7 +2034,7 @@ this is how it looks.
   **Confirm on your phone** in a window with no Touch ID key. Beside Move with
   Touch ID, **Confirm on your phone** is an outline button, and one sentence
   above the buttons names the phone it means (one that is an owner on the
-  destination). A browser passkey does not unlock a move yet, so no **Move with
+  destination). A browser passkey does not unlock a move, so no **Move with
   passkey** button is offered. Cancel sits beside them, and a Code thread has
   **Hand over instead** as a quiet text button at the sheet's start edge. Focus
   lands on the primary button, Escape cancels, and the unlock prompt is the

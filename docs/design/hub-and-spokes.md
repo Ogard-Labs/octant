@@ -1018,15 +1018,16 @@ an unlock on the source as well keeps a stolen phone without the person's
 face, finger, or passcode from even spending a confirmation there. The
 waits live in memory only, so a restart ends them and the person asks again.
 
-**A browser passkey cannot confirm a move yet.** A passkey belongs to the one
+**A browser passkey does not confirm a move, and none is planned.** A passkey belongs to the one
 origin that registered it, and the destination checks a passkey owner only on
 its own origin, so a browser on the source's page holds no passkey the
 destination would accept. Confirming from a browser would need the person to
 open the destination's own page, which would then have to read what the source
 holds and hand the source the ticket: a cross-origin read and a cross-origin
 write to the source. Every request that changes something stays same-origin
-(see [Delivery plan](#delivery-plan), Guests and client views), so this is not built, and no new
-credential, origin allowance, or related-origin passkey is added for it.
+(see [Delivery plan](#delivery-plan), Guests and client views). Touch ID and
+an owner phone cover the move, so no new credential, origin allowance, or
+related-origin passkey is added for it.
 
 **The person is the same everywhere.** A host has one person, and every member
 is that person's own device, so a moved thread arrives as the person's own
@@ -2255,7 +2256,7 @@ a numbered slice. Built, with these narrower readings:
     frozen bar (the held thread still refuses every command with the
     moving reason), the pane tombstone with Open there and Remove worktree,
     sizes and an estimate in the sheet, Stop and move, Hand over instead,
-    a browser passkey unlock, carry bulk parts, accept moves on the hub,
+    carry bulk parts, accept moves on the hub,
     or Prepare to shut down. The tenth part adds the owner phone.
 
     The sixth part lets the hub take moved threads: its Accept moved
@@ -2383,9 +2384,8 @@ a numbered slice. Built, with these narrower readings:
     the ticket route, a ticket for other threads, and a phone removed from
     the destination's owner list after the ticket. What it does not do yet:
     a notification telling the phone a move waits (the person opens the
-    app), a browser passkey confirming a move (not buildable on today's
-    same-origin passkey rule, above), and a run on a real phone, which is a
-    maintainer gate.
+    app) and a run on a real phone, which is a maintainer gate. A browser
+    passkey confirming a move is not planned (above).
 
 Any slice that would deploy an Octant-operated service, create an account, or
 spend money stops for a separate maintainer action.
