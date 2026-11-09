@@ -1,4 +1,5 @@
 import { browserAgentAvailability } from "@octant/domain";
+import type { BrowserProfileChoice } from "@octant/contracts/project-browser";
 import { describe, expect, it, vi } from "vitest";
 import {
   decodeToolActionAuthority,
@@ -1024,7 +1025,7 @@ describe("octant_browser profile argument", () => {
 
   function fixture(
     options: {
-      readonly defaultProfile?: "private" | "project" | "personal";
+      readonly defaultProfile?: BrowserProfileChoice;
       readonly paired?: boolean;
       readonly remembered?: (origin: string, profile: unknown) => boolean;
       readonly unattended?: boolean;
@@ -1079,6 +1080,29 @@ describe("octant_browser profile argument", () => {
     expect(create.mock.calls[0]?.[0].policy.profile).toBeUndefined();
     expect(request.mock.calls[0]?.[0]).not.toHaveProperty("profile");
   });
+
+  it.each(["task default", "explicit selector"] as const)(
+    "keeps a named account separate from Personal through its %s",
+    async (source) => {
+      const profileId = "40000000-0000-4000-8000-000000000002";
+      const f = fixture(
+        source === "task default" ? { defaultProfile: `account:${profileId}` } : {},
+      );
+      expect(
+        (
+          await f.run({
+            operation: "navigate",
+            url: "https://example.com",
+            ...(source === "explicit selector" ? { profile: `account:${profileId}` } : {}),
+          })
+        ).isError,
+      ).toBe(false);
+      expect(f.request).toHaveBeenCalledWith(
+        expect.objectContaining({ profile: { kind: "account", profileId } }),
+      );
+      expect(f.create.mock.calls[0]?.[0].policy.profile).toEqual({ kind: "account", profileId });
+    },
+  );
 
   it("uses the task default without granting it, and lets an explicit Private override it", async () => {
     const selected = fixture({ defaultProfile: "personal" });
@@ -2068,4 +2092,40 @@ describe("octant_browser in Plan mode", () => {
     });
     expect(act).not.toHaveBeenCalled();
   });
+});
+
+it("advertises the named account selectors that the Browser parser accepts", () => {
+  const schema: Readonly<Record<string, unknown>> =
+    BROWSER_TOOL_DEFINITION.inputSchema.properties.profile;
+  const accepts = (choice: string) =>
+    (!Array.isArray(schema.enum) || schema.enum.includes(choice)) &&
+    (typeof schema.pattern !== "string" || new RegExp(schema.pattern).test(choice));
+  for (const choice of [
+    "private",
+    "project",
+    "personal",
+    "account:40000000-0000-4000-8000-000000000002",
+    "account:ABCDEF00-ABCD-4ABC-8ABC-ABCDEF000002",
+  ]) {
+    expect(accepts(choice)).toBe(true);
+    expect(
+      parseBrowserToolInput(
+        JSON.stringify({ operation: "navigate", url: "https://example.com", profile: choice }),
+        { allowProfile: true },
+      ),
+    ).toMatchObject({ profile: choice });
+  }
+  for (const choice of [
+    "account:invalid",
+    "account:40000000-0000-4000-8000-000000000002/extra",
+    "other",
+  ]) {
+    expect(accepts(choice)).toBe(false);
+    expect(
+      parseBrowserToolInput(
+        JSON.stringify({ operation: "navigate", url: "https://example.com", profile: choice }),
+        { allowProfile: true },
+      ),
+    ).toBeUndefined();
+  }
 });
