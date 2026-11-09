@@ -323,3 +323,167 @@ describe("continuing a handover on another computer", () => {
     expect(noNote.created).toEqual([]);
   });
 });
+
+describe("a handover found on a fetched branch, with no notice", () => {
+  const COMMIT = "c".repeat(40);
+  const found = {
+    handoverId: HANDOVER,
+    title: "Fix the flaky test",
+    originName: "Laptop",
+    repositoryRemote: REMOTE,
+    branch: "octant/handover/fix-the-flaky-test-77777777",
+    committedAt: "2026-11-08T12:00:00+00:00",
+  };
+  const finding = (
+    overrides: Partial<HandoverExchangeOptions> = {},
+    laptopOverrides: Partial<HandoverExchangeOptions> = {},
+  ) => {
+    const reported: unknown[] = [];
+    const holder: { source?: HandoverExchange } = {};
+    const made = world(
+      {
+        findHandovers: async () => [found],
+        defaultProvider: () => ({ providerInstanceId: "provider-default", modelId: "model-d" }),
+        memberNamed: (name) => (name === "Laptop" ? LAPTOP : undefined),
+        send: async (target, path, body) => {
+          reported.push({ target, path, body });
+          if (holder.source === undefined || path !== HANDOVER_ROUTES.continued) {
+            return { status: "unreachable" };
+          }
+          const answer = await holder.source.receiveContinued(made.signed(body));
+          return { status: "answered", body: answer.body };
+        },
+        ...overrides,
+      },
+      laptopOverrides,
+    );
+    holder.source = made.laptop;
+    // The source made the handover at this commit.
+    const record = made.laptopState.load().handovers?.[0];
+    if (record !== undefined) {
+      made.laptopState.save({
+        ...made.laptopState.load(),
+        handovers: [{ ...record, commit: COMMIT }],
+      });
+    }
+    return { ...made, reported };
+  };
+
+  it("offers it, continues it on this host's default model, and tells the computer its branch names", async () => {
+    const opened: Array<{ readonly provider: unknown; readonly commit: string }> = [];
+    const { desktop, desktopState, laptopState, erased, reported } = finding({
+      createThread: async (input) => {
+        opened.push({ provider: input.provider, commit: input.commit });
+      },
+    });
+
+    expect((await desktop.list()).handovers).toEqual([
+      expect.objectContaining({
+        handoverId: HANDOVER,
+        title: "Fix the flaky test",
+        originMemberId: LAPTOP,
+        originName: "Laptop",
+        projects: [{ projectId: PROJECT, title: "octant" }],
+      }),
+    ]);
+    expect(
+      await desktop.continueHandover({
+        handoverId: HANDOVER as never,
+        projectId: PROJECT as never,
+      }),
+    ).toMatchObject({ status: "continued" });
+    await desktop.deliverPendingReports();
+
+    expect(opened).toEqual([
+      { provider: { providerInstanceId: "provider-default", modelId: "model-d" }, commit: COMMIT },
+    ]);
+    expect(reported).toContainEqual(
+      expect.objectContaining({
+        target: LAPTOP,
+        body: expect.objectContaining({ commit: COMMIT }),
+      }),
+    );
+    expect(erased).toEqual([THREAD.threadId]);
+    expect(laptopState.load().handovers).toEqual([]);
+    // Its branch still names it, but it is never offered here again.
+    expect(desktopState.load().settledHandoverIds).toEqual([HANDOVER]);
+    expect((await desktop.list()).handovers).toEqual([]);
+  });
+
+  it("never offers back this host's own handovers, before or after they settle, or one a notice already lists", async () => {
+    // The computer that made it fetches its own branch too; its id, not its
+    // name, tells it apart, so another computer with the same name still sees it.
+    const own = finding({}, { findHandovers: async () => [found] });
+    expect((await own.laptop.list()).handovers).toEqual([]);
+    expect((await own.desktop.list()).handovers).toHaveLength(1);
+    await own.desktop.continueHandover({
+      handoverId: HANDOVER as never,
+      projectId: PROJECT as never,
+    });
+    await own.desktop.deliverPendingReports();
+    expect(own.laptopState.load().handovers).toEqual([]);
+    expect((await own.laptop.list()).handovers).toEqual([]);
+
+    const noticed = finding();
+    await noticed.desktop.receiveNotice(noticed.signed(notice));
+    expect((await noticed.desktop.list()).handovers).toHaveLength(1);
+    expect((await noticed.desktop.list()).handovers[0]?.branch).toBe("feature/flaky");
+  });
+
+  it("does not list or continue again a handover whose notice comes after it was continued from its branch", async () => {
+    const { desktop, desktopState, signed } = finding();
+    const request = { handoverId: HANDOVER as never, projectId: PROJECT as never };
+    expect(await desktop.continueHandover(request)).toMatchObject({ status: "continued" });
+
+    // A host restarted since, so only its saved state remembers the continue.
+    const restarted = finding({ state: desktopState });
+    expect((await restarted.desktop.receiveNotice(signed(notice))).httpStatus).toBe(200);
+    expect(desktopState.load().receivedHandovers ?? []).toEqual([]);
+    expect((await restarted.desktop.list()).handovers).toEqual([]);
+    expect(await restarted.desktop.continueHandover(request)).toEqual({
+      status: "refused",
+      reason: "refused",
+    });
+  });
+
+  it("refuses without a default model, and continues without a report when no one member has its name", async () => {
+    const noDefault = finding({ defaultProvider: () => undefined });
+    expect(
+      await noDefault.desktop.continueHandover({
+        handoverId: HANDOVER as never,
+        projectId: PROJECT as never,
+      }),
+    ).toEqual({ status: "refused", reason: "no-matching-provider" });
+
+    const unnamed = finding({ memberNamed: () => undefined });
+    expect((await unnamed.desktop.list()).handovers[0]?.originMemberId).toBeUndefined();
+    expect(
+      await unnamed.desktop.continueHandover({
+        handoverId: HANDOVER as never,
+        projectId: PROJECT as never,
+      }),
+    ).toMatchObject({ status: "continued" });
+    expect(unnamed.desktopState.load().pendingContinuedReports ?? []).toEqual([]);
+    expect(unnamed.erased).toEqual([]);
+  });
+
+  it("keeps the source's copy when the continued commit is not the one it made", async () => {
+    const { desktop, laptopState, erased } = finding({
+      readNote: async ({ handoverId }) => ({
+        note: `Hand over: Fix the flaky test\n\nOctant-Handover: ${handoverId}`,
+        commit: "d".repeat(40),
+      }),
+    });
+
+    expect(
+      await desktop.continueHandover({
+        handoverId: HANDOVER as never,
+        projectId: PROJECT as never,
+      }),
+    ).toMatchObject({ status: "continued" });
+    await desktop.deliverPendingReports();
+
+    expect(erased).toEqual([]);
+    expect(laptopState.load().handovers).toHaveLength(1);
+  });
+});

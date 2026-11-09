@@ -702,6 +702,62 @@ describe("Claude execution policy", () => {
     await acquired.close();
   });
 
+  it.each(["code", "work"] as const)(
+    "keeps Full access commands sandboxed and file tools inside the Project in %s",
+    async (mode) => {
+      const f = harness();
+      const acquired = await acquire(f.driver, mode);
+      try {
+        await Effect.runPromise(
+          acquired.connection.start({
+            sessionId,
+            modelId,
+            executionPolicy: "full-access",
+            fullAccessSandbox: true,
+          }),
+        );
+        const open = f.opens[0]!;
+        expect(open.sandbox).toMatchObject({
+          enabled: true,
+          failIfUnavailable: true,
+          allowUnsandboxedCommands: false,
+          filesystem: { denyRead: ["/"], allowRead: [projectRoot], allowWrite: [projectRoot] },
+        });
+        const tool = (
+          toolName: string,
+          input: Readonly<Record<string, unknown>>,
+          toolUseId: string,
+        ) =>
+          open.preToolUse({
+            sessionId: "sdk-session-1",
+            projectRoot,
+            toolName,
+            input,
+            toolUseId,
+            signal: new AbortController().signal,
+          });
+        await expect(tool("Bash", { command: "git status" }, "bash")).resolves.toEqual({
+          behavior: "allow",
+        });
+        await expect(
+          tool(
+            "Edit",
+            { file_path: `${projectRoot}/file.ts`, old_string: "old", new_string: "new" },
+            "edit",
+          ),
+        ).resolves.toEqual({ behavior: "allow" });
+        await expect(
+          tool("Write", { file_path: "/outside/project/file.ts", content: "no" }, "outside-write"),
+        ).resolves.toMatchObject({ behavior: "deny" });
+        await expect(
+          tool("Read", { file_path: "/outside/project/file.ts" }, "outside-read"),
+        ).resolves.toMatchObject({ behavior: "deny" });
+      } finally {
+        await acquired.close();
+      }
+    },
+  );
+
   it("configures the strict exact-root sandbox only for approval-gated sessions", async () => {
     for (const executionPolicy of ["full-access", "approval-gated", "plan"] as const) {
       const f = harness();
@@ -758,32 +814,43 @@ describe("Claude execution policy", () => {
         };
       },
     };
-    for (const executionPolicy of [
-      "approval-gated",
-      "auto-accept-edits",
-      "plan",
-      "full-access",
+    for (const [executionPolicy, fullAccessSandbox] of [
+      ["approval-gated", false],
+      ["auto-accept-edits", false],
+      ["plan", false],
+      ["full-access", false],
+      ["full-access", true],
     ] as const) {
       const f = harness("subscription", "current-session", { runtimeNetwork });
       const acquired = await acquire(f.driver);
       await Effect.runPromise(
-        acquired.connection.start({ sessionId, modelId, executionPolicy, autoApprove: true }),
+        acquired.connection.start({
+          sessionId,
+          modelId,
+          executionPolicy,
+          fullAccessSandbox,
+          autoApprove: true,
+        }),
       );
       expect(f.opens[0]?.sandbox?.network).toEqual(
-        executionPolicy === "approval-gated" || executionPolicy === "auto-accept-edits"
+        executionPolicy === "approval-gated" ||
+          executionPolicy === "auto-accept-edits" ||
+          fullAccessSandbox
           ? { httpProxyPort: ports["claude-sandbox"] }
           : undefined,
       );
       expect(f.opens[0]?.network?.endpoint).toEqual(
-        executionPolicy === "full-access" ? undefined : { kind: "loopback", port: ports.claude },
+        executionPolicy === "full-access" && !fullAccessSandbox
+          ? undefined
+          : { kind: "loopback", port: ports.claude },
       );
       await Effect.runPromise(acquired.connection.stop(sessionId));
       await acquired.close();
     }
     const own = { runtime: "claude", autoReview: true, sessionId: String(sessionId) };
     const sandbox = { runtime: "claude-sandbox", autoReview: true, sessionId: String(sessionId) };
-    expect(started).toEqual([own, sandbox, own, sandbox, own]);
-    expect(released).toBe(5);
+    expect(started).toEqual([own, sandbox, own, sandbox, own, own, sandbox]);
+    expect(released).toBe(7);
   });
 
   it("grants a Project's extra folder what the root gets, in its sandbox and its tool gate", async () => {
@@ -5469,6 +5536,44 @@ describe("Claude exact resume", () => {
     await acquired.close();
     expect(f.queries).toHaveLength(2);
     expect(f.queries.every((query) => query.close.mock.calls.length === 1)).toBe(true);
+  });
+
+  it("resumes Full access with the requested sandbox and drops it only on the next launch", async () => {
+    const f = harness();
+    const acquired = await acquire(f.driver);
+    try {
+      const started = await Effect.runPromise(
+        acquired.connection.start({
+          sessionId,
+          modelId,
+          executionPolicy: "full-access",
+          fullAccessSandbox: true,
+        }),
+      );
+      if (started.resumeCursor === undefined) throw new Error("Missing resume cursor");
+      await Effect.runPromise(acquired.connection.stop(sessionId));
+      await Effect.runPromise(
+        acquired.connection.resume({
+          sessionId,
+          resumeCursor: started.resumeCursor,
+          executionPolicy: "full-access",
+          fullAccessSandbox: true,
+        }),
+      );
+      expect(f.opens[1]?.sandbox?.enabled).toBe(true);
+      await Effect.runPromise(acquired.connection.stop(sessionId));
+      await Effect.runPromise(
+        acquired.connection.resume({
+          sessionId,
+          resumeCursor: started.resumeCursor,
+          executionPolicy: "full-access",
+          fullAccessSandbox: false,
+        }),
+      );
+      expect(f.opens[2]?.sandbox).toBeUndefined();
+    } finally {
+      await acquired.close();
+    }
   });
 
   it("resumes after driver recreation using injected identity, exact SDK root, and explicit ID", async () => {

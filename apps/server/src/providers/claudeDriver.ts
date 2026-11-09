@@ -445,8 +445,12 @@ function claudePolicyOptions(
 }
 
 /** Whether this posture runs Claude's commands in its own sandbox. */
-function claudeRunsSandbox(policy: ProviderExecutionPolicy): boolean {
-  return policy === "approval-gated" || policy === "auto-accept-edits";
+function claudeRunsSandbox(policy: ProviderExecutionPolicy, fullAccessSandbox = false): boolean {
+  return (
+    policy === "approval-gated" ||
+    policy === "auto-accept-edits" ||
+    (policy === "full-access" && fullAccessSandbox)
+  );
 }
 
 /**
@@ -460,8 +464,9 @@ export function claudeSandboxSettings(
   projectRoot: string,
   extraFolders: ReadonlyArray<string> = [],
   proxyPort?: number,
+  fullAccessSandbox = false,
 ): ClaudeSandboxSettings | undefined {
-  if (!claudeRunsSandbox(policy)) return undefined;
+  if (!claudeRunsSandbox(policy, fullAccessSandbox)) return undefined;
   return {
     enabled: true,
     failIfUnavailable: true,
@@ -1920,6 +1925,7 @@ function makeConnection(
         readonly sessionId: ProviderSessionId;
         readonly modelId: ProviderModelId;
         readonly executionPolicy: ProviderExecutionPolicy;
+        readonly fullAccessSandbox?: boolean;
         readonly autoApprove?: boolean;
         readonly modelOptionValues?: ProviderModelOptionValues;
         readonly singleUse?: boolean;
@@ -2009,13 +2015,16 @@ function makeConnection(
           signal,
         );
         const ownClaudeAccountPaths = claudeOwnAccountPaths(environment.environment);
+        const sandboxedFullAccess =
+          input.executionPolicy === "full-access" && input.fullAccessSandbox === true;
+        const networkPolicy = sandboxedFullAccess ? "auto-accept-edits" : input.executionPolicy;
         // Claude's own process: its inference and in-process web fetch. It
         // runs at Auto under the same reviewer as its command sandbox.
         const ownNetwork = await runSetupEffect(
           acquireProviderRuntimeNetwork(options.runtimeNetwork, {
             runtime: "claude",
             root: projectRoot,
-            executionPolicy: input.executionPolicy,
+            executionPolicy: networkPolicy,
             environment: environment.environment,
             autoReview: input.autoApprove === true,
             // Only Plan runs the process in Octant's own capsule; outside it
@@ -2106,12 +2115,12 @@ function makeConnection(
             projectRoot,
             isProjectConfinedPath: options.isProjectConfinedPath,
           });
-        const sandboxNetwork = claudeRunsSandbox(input.executionPolicy)
+        const sandboxNetwork = claudeRunsSandbox(input.executionPolicy, sandboxedFullAccess)
           ? await runSetupEffect(
               acquireProviderRuntimeNetwork(options.runtimeNetwork, {
                 runtime: "claude-sandbox",
                 root: projectRoot,
-                executionPolicy: input.executionPolicy,
+                executionPolicy: networkPolicy,
                 autoReview: input.autoApprove === true,
                 sessionId: String(input.sessionId),
                 ...(workThreadId === undefined ? {} : { threadId: workThreadId }),
@@ -2131,6 +2140,7 @@ function makeConnection(
           projectRoot,
           extraFolders,
           sandboxNetwork?.endpoint.kind === "loopback" ? sandboxNetwork.endpoint.port : undefined,
+          sandboxedFullAccess,
         );
         let callbackState: SessionState | undefined;
         const canUseTool: ClaudeOpenQueryInput["canUseTool"] = async (request) => {
@@ -2453,7 +2463,7 @@ function makeConnection(
                 activeState.publishedSnapshots.set(request.toolUseId, snapshot);
               }
             }
-            return decide();
+            if (!sandboxedFullAccess) return decide();
           }
           // A shell call carries no cwd of its own: Claude Code runs it in the
           // session's working directory, which is the Project root, and the
@@ -2516,6 +2526,7 @@ function makeConnection(
               model: input.modelId,
               ...(effort === undefined ? {} : { effort }),
               executionPolicy: input.executionPolicy,
+              ...(sandboxedFullAccess ? { fullAccessSandbox: true } : {}),
               ...(input.autoApprove === undefined ? {} : { autoApprove: input.autoApprove }),
               ...(resumeSessionId === undefined ? {} : { resumeSessionId }),
               ...(assignedSessionId === undefined ? {} : { sessionId: assignedSessionId }),
@@ -2765,6 +2776,9 @@ function makeConnection(
               // thread switched to another model carries its conversation on.
               modelId: input.modelId ?? identity.modelId,
               executionPolicy: input.executionPolicy,
+              ...(input.fullAccessSandbox === undefined
+                ? {}
+                : { fullAccessSandbox: input.fullAccessSandbox }),
               ...(input.autoApprove === undefined ? {} : { autoApprove: input.autoApprove }),
               ...(input.modelOptionValues === undefined
                 ? {}
