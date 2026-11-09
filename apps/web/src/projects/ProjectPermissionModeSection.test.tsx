@@ -84,6 +84,23 @@ describe("Project default mode", () => {
     expect(onChange).toHaveBeenLastCalledWith("full-access", "settings");
   });
 
+  it("keeps a Project's remembered Full access when only its sandbox changes", async () => {
+    const onChange = vi.fn(async () => true);
+    render(
+      <ProjectPermissionModeSection
+        onChange={onChange}
+        project={project("code", { codeAccessPersistence: "project-default" })}
+      />,
+    );
+    await userEvent.click(
+      screen.getByRole("combobox", { name: "Sandbox at Full access for this Project" }),
+    );
+    await userEvent.click(await screen.findByRole("option", { name: "Keep the sandbox" }));
+    // The Project remembered Full access before modes existed, so it has no mode
+    // of its own; sending none would read as "follow Settings" and drop it.
+    expect(onChange).toHaveBeenLastCalledWith("full-access", true);
+  });
+
   it("changes only the mode when the mode is picked, so the Project keeps its sandbox choice", async () => {
     const onChange = vi.fn(async () => true);
     render(
