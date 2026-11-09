@@ -2374,6 +2374,7 @@ A public Canvas link is off by default and exists only through the person's expl
 
 - Settings holds the switch, off by default. While off, no request reaches the service. Turning it off keeps existing links revocable.
 - A link is published only through the export approval card. No agent tool reaches the flow, and a paired device cannot publish.
+- Paired Chat, Work and Code readers can open an existing Canvas and copy its public links under the current Canvas read grant. The shared reader omits creation, editing, export and owner update/revoke controls; every read still travels through the device session.
 - The payload is a frozen copy with no host, Project, thread or source ids, no file contents and no declared images. A Canvas has at most one active link (30-day default expiry, optional password).
 - The service has no accounts. A per-share owner secret lives in the credential broker, separate from provider credentials, and never in the journal.
 - A first-party create commits that secret and a non-secret ownership intent before uploading a document. Owned-create binds a random id, owner and exact approved terms; identical retries do not mutate, conflicting retries refuse, and uncertain publication is withdrawn through durable restart/listing recovery. A host never falls back to legacy create. Key-bound ids and durable authenticated cancellation tombstones fence delayed creates; unauthorized/not-found responses never settle ownership.

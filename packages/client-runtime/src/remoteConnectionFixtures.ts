@@ -557,7 +557,8 @@ export function createFakeRemoteServer(config: FakeRemoteServerConfig): FakeRemo
     }
 
     if (
-      (path.startsWith("/api/chat/") ||
+      (path.startsWith("/api/canvas/") ||
+        path.startsWith("/api/chat/") ||
         path.startsWith("/api/work/") ||
         path.startsWith("/api/code/") ||
         path.startsWith("/api/preview/") ||

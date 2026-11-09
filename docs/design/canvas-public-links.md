@@ -48,6 +48,11 @@ moved into this repository for one-command deploys (see
   the export approval card in a local window. A paired device may see the
   links and copy one, but prepare, approve, update, and revoke are refused for
   it, as minting an authenticated share already is.
+  Paired Chat, Work and Code threads use the same Canvas reader and link list
+  as the host. Opening a Canvas exposes its existing public links and Copy link
+  through the authenticated device session and current Canvas read grant. Its
+  client omits creation, editing, export and owner-management methods; their
+  controls are absent. Changing thread, mode or host client closes the reader.
 - No agent tool reaches the export flow or the service, and none is added:
   the Canvas agent tools create, revise, and preview, and the host's own
   service port is reached only from the export destination and the revoke
