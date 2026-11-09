@@ -257,11 +257,7 @@ try {
       overlayReport.productionReady === false;
     overlayUnmounted = overlayReport?.unmounted === true;
     overlayWriteRefused = ended.status === "exited" && ended.code === 0;
-    result =
-      ready &&
-      overlayCopyupBeforeTransition &&
-      overlayWriteRefused &&
-      overlayVerified;
+    result = ready && overlayCopyupBeforeTransition && overlayWriteRefused && overlayVerified;
   } else {
     metadataVerified =
       runtime !== undefined ||
