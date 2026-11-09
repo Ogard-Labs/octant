@@ -1,13 +1,29 @@
 import { mkdir, readdir, readFile, realpath, lstat, stat, writeFile } from "node:fs/promises";
 import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { classifyPathContainment } from "@octant/domain";
-import type { NativeHarnessToolResultBounds } from "@octant/contracts";
+import {
+  MAX_PROVIDER_TOOL_IMAGE_BASE64_LENGTH,
+  type NativeHarnessReplacement,
+  type NativeHarnessToolResultBounds,
+  type ProviderToolImage,
+} from "@octant/contracts";
 import { secretGuardRefusal } from "../process/secretGuard";
+import { DEFAULT_DOCUMENT_BUDGET, parseDocument } from "../preview/previewDocumentChunker";
+import { DEFAULT_PDF_BUDGET, parsePdf } from "../preview/previewPdfChunker";
+import { sniffPreviewKind } from "../preview/previewSniffer";
+import { DEFAULT_SLIDES_BUDGET, parseSlides } from "../preview/previewSlidesChunker";
+import {
+  DEFAULT_WORKBOOK_BUDGET,
+  parseWorkbook,
+  type WorkbookWorksheet,
+} from "../preview/previewWorkbookChunker";
 
 /** Directories a search never descends into unless the pattern names them. */
 export const SKIPPED_DIRECTORY_NAMES = new Set([".git", "node_modules"]);
 const MAX_READ_RESULT_BYTES = 64 * 1024;
 export const MAX_GREP_RESULT_BYTES = 64 * 1024;
+/** The largest image a read returns: what one tool image may carry once base64-encoded. */
+export const MAX_READ_IMAGE_BYTES = (MAX_PROVIDER_TOOL_IMAGE_BASE64_LENGTH / 4) * 3;
 export const MAX_GREP_SCANNED_FILE_BYTES = 4 * 1024 * 1024;
 export const MAX_GREP_PATTERN_LENGTH = 512;
 /** A scan the model asked for never holds the event loop longer than this. */
@@ -32,13 +48,20 @@ export type NativeHarnessFileRefusal =
    */
   | "target-unavailable"
   /** The secret guard's list names the file; `message` says which rule and channel. */
-  | "protected-file";
+  | "protected-file"
+  /** Not text and not a format a read extracts; `message` names what a read can open. */
+  | "binary-file"
+  /** Recognized as a Word, PowerPoint, Excel, or PDF file, but its parser could not read it. */
+  | "document-unreadable";
 
 export interface NativeHarnessFileRefused {
   readonly kind: "refused";
   readonly reason: NativeHarnessFileRefusal;
   readonly message?: string;
 }
+
+/** The formats a read extracts text from, named by their usual extension. */
+export type NativeHarnessExtractedFormat = "docx" | "pptx" | "xlsx" | "pdf";
 
 export type NativeHarnessReadResult =
   | {
@@ -49,6 +72,25 @@ export type NativeHarnessReadResult =
       readonly totalLines: number;
       readonly nextLine?: number;
       readonly bounds: NativeHarnessToolResultBounds;
+      /**
+       * The format the lines were extracted from; absent for a text file.
+       * Extracted lines are not the file's bytes, so such a read never
+       * counts as the read an edit needs.
+       */
+      readonly extractedFrom?: NativeHarnessExtractedFormat;
+      /** Set when the format's parser stopped at one of its limits; says what was left out. */
+      readonly parserNote?: string;
+    }
+  /**
+   * An image, recognized by its bytes. `data` is the base64 the model is
+   * handed; whether it may be is the tool's decision, not the files'.
+   */
+  | {
+      readonly kind: "image";
+      readonly path: string;
+      readonly mimeType: ProviderToolImage["mimeType"];
+      readonly bytes: number;
+      readonly data: string;
     }
   | {
       readonly kind: "directory";
@@ -68,6 +110,37 @@ export type NativeHarnessEditResult =
       readonly fuzzy: boolean;
     }
   | NativeHarnessFileRefused;
+
+/**
+ * Several replacements in one call. A refusal names the replacement that
+ * failed, by its index in the call, and means no file changed. A write that
+ * fails after every check passed puts back the files the call had written;
+ * `unrestored` lists any that could not be put back.
+ */
+export type NativeHarnessEditFilesResult =
+  | {
+      readonly kind: "edited";
+      readonly files: ReadonlyArray<{
+        readonly path: string;
+        readonly replacements: number;
+        readonly fuzzy: boolean;
+      }>;
+    }
+  | (NativeHarnessFileRefused & { readonly edit: number })
+  | {
+      readonly kind: "write-failed";
+      readonly path: string;
+      readonly unrestored: ReadonlyArray<string>;
+    };
+
+/** A file an edit may rewrite: checked against its read, with the content that read saw. */
+export interface NativeHarnessEditTarget {
+  readonly kind: "loaded";
+  /** What the port writes to: the real path. */
+  readonly key: string;
+  readonly path: string;
+  readonly content: string;
+}
 
 export type NativeHarnessWriteResult =
   | {
@@ -103,7 +176,7 @@ export type NativeHarnessGlobResult =
  */
 export type NativeHarnessFileSystemPort = Pick<
   NativeHarnessFileSystem,
-  "root" | "read" | "write" | "edit" | "glob" | "grep"
+  "root" | "read" | "write" | "edit" | "editFiles" | "glob" | "grep"
 > & {
   /** The Project's extra folders; the shell reaches them as it reaches `root`. */
   readonly extraRoots?: ReadonlyArray<string>;
@@ -184,6 +257,11 @@ export class NativeHarnessFileSystem {
     readonly path: string;
     readonly offset?: number | undefined;
     readonly limit?: number | undefined;
+    /**
+     * Whether this read lets a later edit of the file through. A read Octant
+     * makes for itself, not one the model asked for, passes false.
+     */
+    readonly marksRead?: boolean;
   }): Promise<NativeHarnessReadResult> {
     const resolved = await this.#contained(input.path);
     if (resolved === undefined) return { kind: "refused", reason: "path-escapes-root" };
@@ -216,9 +294,12 @@ export class NativeHarnessFileSystem {
     }
     if (!info.isFile()) return { kind: "refused", reason: "not-a-file" };
     if (info.size > this.#maxFileBytes) return { kind: "refused", reason: "file-too-large" };
-    const content = await readFile(resolved, "utf8");
-    this.#readMarks.set(resolved, info.mtime.toISOString());
-    return readSlice(display, content, input);
+    const content = await readFile(resolved);
+    const result = readFileContent(display, content, input);
+    if (input.marksRead !== false && countsAsTextRead(result)) {
+      this.#readMarks.set(resolved, info.mtime.toISOString());
+    }
+    return result;
   }
 
   async write(input: {
@@ -254,9 +335,30 @@ export class NativeHarnessFileSystem {
     readonly newText: string;
     readonly replaceAll?: boolean | undefined;
   }): Promise<NativeHarnessEditResult> {
-    const resolved = await this.#contained(input.path);
+    const target = await this.#loadForEdit(input.path);
+    if (target.kind === "refused") return target;
+    const edited = editedText(target.content, input);
+    if (edited.kind === "refused") return edited;
+    await this.#put(target.key, edited.text);
+    return {
+      kind: "edited",
+      path: target.path,
+      replacements: edited.count,
+      fuzzy: edited.fuzzy,
+    };
+  }
+
+  editFiles(edits: ReadonlyArray<NativeHarnessReplacement>): Promise<NativeHarnessEditFilesResult> {
+    return editFiles(edits, {
+      load: (path) => this.#loadForEdit(path),
+      put: (key, text) => this.#put(key, text),
+    });
+  }
+
+  async #loadForEdit(path: string): Promise<NativeHarnessEditTarget | NativeHarnessFileRefused> {
+    const resolved = await this.#contained(path);
     if (resolved === undefined) return { kind: "refused", reason: "path-escapes-root" };
-    const guarded = this.#protected(this.#lexical(input.path), resolved);
+    const guarded = this.#protected(this.#lexical(path), resolved);
     if (guarded !== undefined) return guarded;
     const mark = this.#readMarks.get(resolved);
     if (mark === undefined) return { kind: "refused", reason: "not-read-first" };
@@ -271,17 +373,14 @@ export class NativeHarnessFileSystem {
       return { kind: "refused", reason: "file-changed-since-read" };
     }
     const content = await readFile(resolved, "utf8");
-    const edited = editedText(content, input);
-    if (edited.kind === "refused") return edited;
-    await writeFile(resolved, edited.text, "utf8");
-    const after = await stat(resolved);
-    this.#readMarks.set(resolved, after.mtime.toISOString());
-    return {
-      kind: "edited",
-      path: this.#display(resolved),
-      replacements: edited.count,
-      fuzzy: edited.fuzzy,
-    };
+    return { kind: "loaded", key: resolved, path: this.#display(resolved), content };
+  }
+
+  async #put(key: string, text: string): Promise<undefined> {
+    await writeFile(key, text, "utf8");
+    const after = await stat(key);
+    this.#readMarks.set(key, after.mtime.toISOString());
+    return undefined;
   }
 
   async glob(input: {
@@ -496,6 +595,227 @@ export class NativeHarnessFileSystem {
   }
 }
 
+/**
+ * What a read of one file returns, decided by its bytes, whatever the file is
+ * named: an image; a Word, PowerPoint, or Excel file or a PDF as extracted
+ * text, through the same bounded parsers the preview uses; a text file as
+ * numbered lines; and a refusal for anything else that is not text.
+ */
+export function readFileContent(
+  path: string,
+  content: Buffer,
+  input: { readonly offset?: number | undefined; readonly limit?: number | undefined },
+): NativeHarnessReadResult {
+  const mimeType = imageMimeType(content);
+  if (mimeType !== undefined) {
+    if (content.length > MAX_READ_IMAGE_BYTES) {
+      return {
+        kind: "refused",
+        reason: "file-too-large",
+        message: `This image is ${content.length} bytes; a read returns images up to ${MAX_READ_IMAGE_BYTES} bytes.`,
+      };
+    }
+    return {
+      kind: "image",
+      path,
+      mimeType,
+      bytes: content.length,
+      data: content.toString("base64"),
+    };
+  }
+  const sniffed = sniffPreviewKind(content, "", "application/octet-stream", {
+    maxSniffBytes: SNIFFED_HEAD_BYTES,
+    maxByteSize: content.length,
+  });
+  const kind = sniffed.ok ? sniffed.kind : "unsupported";
+  if (kind === "document" || kind === "slides" || kind === "workbook" || kind === "pdf") {
+    const extracted = extractedText(kind, content);
+    if (extracted === undefined) {
+      return {
+        kind: "refused",
+        reason: "document-unreadable",
+        message: `This looks like ${EXTRACTED_FORMAT_NAMES[EXTRACTED_FORMATS[kind]]}, but it could not be parsed.`,
+      };
+    }
+    return {
+      ...readSlice(path, extracted.text, input),
+      extractedFrom: EXTRACTED_FORMATS[kind],
+      ...(extracted.truncated
+        ? {
+            parserNote: `Reading ${EXTRACTED_FORMAT_NAMES[EXTRACTED_FORMATS[kind]]} stopped at one of its limits (at most ${MAX_EXTRACTED_TEXT_BYTES} bytes of text per file), so some of the file's content is not shown.`,
+          }
+        : {}),
+    };
+  }
+  if (kind === "unsupported" || kind === "image") {
+    return {
+      kind: "refused",
+      reason: "binary-file",
+      message:
+        "This is a binary file. A read opens text, PNG, JPEG, GIF, and WebP images, Word (.docx), PowerPoint (.pptx), and Excel (.xlsx) files, and PDFs.",
+    };
+  }
+  return readSlice(path, content.toString("utf8"), input);
+}
+
+/** How much of a file's start decides whether it is text, as the preview sniffs it. */
+const SNIFFED_HEAD_BYTES = 4096;
+
+const EXTRACTED_FORMATS = {
+  document: "docx",
+  slides: "pptx",
+  workbook: "xlsx",
+  pdf: "pdf",
+} as const satisfies Record<string, NativeHarnessExtractedFormat>;
+
+const EXTRACTED_FORMAT_NAMES: Readonly<Record<NativeHarnessExtractedFormat, string>> = {
+  docx: "a Word document",
+  pptx: "a PowerPoint presentation",
+  xlsx: "an Excel workbook",
+  pdf: "a PDF",
+};
+
+/** Whether a read saw the file's own text, the only read an edit may follow. */
+export function countsAsTextRead(result: NativeHarnessReadResult): boolean {
+  return result.kind === "file" && result.extractedFrom === undefined;
+}
+
+/**
+ * The most text a read extracts from one file, sixty-four pages of a read
+ * result. A format's parser bounds what it keeps of each part, not what the
+ * parts add up to: a workbook whose 20,000 cells name one 32,767-character
+ * shared string would render to about 625 MB from a small file. The text is
+ * built against this budget and stops there, so that expansion never exists.
+ */
+export const MAX_EXTRACTED_TEXT_BYTES = 64 * MAX_READ_RESULT_BYTES;
+
+/** Text appended piece by piece until it reaches {@link MAX_EXTRACTED_TEXT_BYTES}. */
+function extractionBudget() {
+  const parts: string[] = [];
+  let bytes = 0;
+  let full = false;
+  return {
+    /** Adds a piece, cut to the room left; false once the budget is spent. */
+    append(piece: string): boolean {
+      if (full) return false;
+      const room = MAX_EXTRACTED_TEXT_BYTES - bytes;
+      // A character is at least one byte, so a piece longer in characters
+      // than the room left is cut before it is measured.
+      const head = piece.length > room ? piece.slice(0, room) : piece;
+      const size = Buffer.byteLength(head, "utf8");
+      if (size <= room && head.length === piece.length) {
+        parts.push(head);
+        bytes += size;
+        return true;
+      }
+      const cut = Buffer.from(head, "utf8")
+        .subarray(0, room)
+        .toString("utf8")
+        .replace(/\uFFFD$/, "");
+      parts.push(cut);
+      bytes += Buffer.byteLength(cut, "utf8");
+      full = true;
+      return false;
+    },
+    get full(): boolean {
+      return full;
+    },
+    text(): string {
+      return parts.join("");
+    },
+  };
+}
+
+/**
+ * A format's content as plain text, with a marker line before each slide,
+ * page, and worksheet, under the preview parsers' own limits and the
+ * extraction budget. `truncated` says either one cut it.
+ */
+function extractedText(
+  kind: keyof typeof EXTRACTED_FORMATS,
+  content: Buffer,
+): { readonly text: string; readonly truncated: boolean } | undefined {
+  const budget = extractionBudget();
+  const lines = (parts: ReadonlyArray<string>) => {
+    for (const [index, part] of parts.entries()) {
+      if (index > 0 && !budget.append("\n")) return;
+      if (!budget.append(part)) return;
+    }
+  };
+  const sections = (marker: string, parts: ReadonlyArray<string>) => {
+    for (const [index, part] of parts.entries()) {
+      if (index > 0 && !budget.append("\n")) return;
+      if (!budget.append(`--- ${marker} ${index + 1} ---\n`) || !budget.append(part)) return;
+    }
+  };
+  let truncated: boolean;
+  switch (kind) {
+    case "document": {
+      const parsed = parseDocument(content, DEFAULT_DOCUMENT_BUDGET);
+      if (parsed === undefined) return undefined;
+      lines(parsed.blocks);
+      truncated = parsed.truncated;
+      break;
+    }
+    case "slides": {
+      const parsed = parseSlides(content, DEFAULT_SLIDES_BUDGET);
+      if (parsed === undefined) return undefined;
+      sections("Slide", parsed.slides);
+      truncated = parsed.truncated;
+      break;
+    }
+    case "pdf": {
+      const parsed = parsePdf(content, DEFAULT_PDF_BUDGET);
+      if (parsed === undefined) return undefined;
+      sections("Page", parsed.pages);
+      truncated = parsed.truncated;
+      break;
+    }
+    case "workbook": {
+      const parsed = parseWorkbook(content, DEFAULT_WORKBOOK_BUDGET);
+      if (parsed === undefined) return undefined;
+      appendWorksheets(budget, parsed.worksheets);
+      truncated = parsed.truncated;
+      break;
+    }
+  }
+  return { text: budget.text(), truncated: truncated || budget.full };
+}
+
+function appendWorksheets(
+  budget: ReturnType<typeof extractionBudget>,
+  worksheets: ReadonlyArray<WorkbookWorksheet>,
+): void {
+  for (const [sheetIndex, sheet] of worksheets.entries()) {
+    if (sheetIndex > 0 && !budget.append("\n")) return;
+    if (!budget.append(`--- Sheet: ${sheet.name} ---`)) return;
+    for (const row of sheet.rows) {
+      if (!budget.append("\n")) return;
+      for (const [cellIndex, cell] of row.entries()) {
+        if (cellIndex > 0 && !budget.append("\t")) return;
+        // A tab or line break inside a cell would read as a new cell or
+        // row, so it becomes a space. Only what can still fit is copied.
+        const value = cell === null ? "" : String(cell).slice(0, MAX_EXTRACTED_TEXT_BYTES);
+        if (!budget.append(value.replace(/[\t\r\n]+/g, " "))) return;
+      }
+    }
+  }
+}
+
+function imageMimeType(content: Buffer): ProviderToolImage["mimeType"] | undefined {
+  if (startsWith(content, "\x89PNG\r\n\x1a\n")) return "image/png";
+  if (startsWith(content, "\xff\xd8\xff")) return "image/jpeg";
+  if (startsWith(content, "GIF87a") || startsWith(content, "GIF89a")) return "image/gif";
+  if (startsWith(content, "RIFF") && content.subarray(8, 12).toString("latin1") === "WEBP") {
+    return "image/webp";
+  }
+  return undefined;
+}
+
+function startsWith(content: Buffer, signature: string): boolean {
+  return content.subarray(0, signature.length).toString("latin1") === signature;
+}
+
 /** The lines of a file a read returns, from `offset`, at most `limit` and the result's byte bound. */
 export function readSlice(
   path: string,
@@ -580,6 +900,83 @@ export function editedText(
     text = text.slice(0, span.start) + input.newText + text.slice(span.end);
   }
   return { kind: "edited", text, count: chosen.length, fuzzy: true };
+}
+
+/**
+ * Applies several replacements all or nothing, wherever the files live.
+ * Every replacement is checked against its file's read, and against the text
+ * the earlier replacements in the same file leave, before any file is
+ * written. `put` refuses or throws on a failed write; the files written
+ * before it are then written back as they were read.
+ */
+export async function editFiles(
+  edits: ReadonlyArray<NativeHarnessReplacement>,
+  port: {
+    readonly load: (path: string) => Promise<NativeHarnessEditTarget | NativeHarnessFileRefused>;
+    readonly put: (key: string, text: string) => Promise<NativeHarnessFileRefused | undefined>;
+  },
+): Promise<NativeHarnessEditFilesResult> {
+  const planned = new Map<
+    string,
+    {
+      readonly target: NativeHarnessEditTarget;
+      text: string;
+      replacements: number;
+      fuzzy: boolean;
+    }
+  >();
+  for (const [index, edit] of edits.entries()) {
+    const target = await port.load(edit.path);
+    if (target.kind === "refused") return { ...target, edit: index };
+    const file = planned.get(target.key) ?? {
+      target,
+      text: target.content,
+      replacements: 0,
+      fuzzy: false,
+    };
+    const edited = editedText(file.text, edit);
+    if (edited.kind === "refused") return { ...edited, edit: index };
+    file.text = edited.text;
+    file.replacements += edited.count;
+    file.fuzzy ||= edited.fuzzy;
+    planned.set(target.key, file);
+  }
+  const written: NativeHarnessEditTarget[] = [];
+  for (const file of planned.values()) {
+    if (await wrote(port, file.target.key, file.text)) {
+      written.push(file.target);
+      continue;
+    }
+    // A failed write can leave its file half written; it is put back too
+    // unless it still reads exactly as it was read.
+    const failed = await port.load(file.target.key).catch(() => undefined);
+    const untouched = failed?.kind === "loaded" && failed.content === file.target.content;
+    const unrestored: string[] = [];
+    for (const target of [...(untouched ? [] : [file.target]), ...[...written].reverse()]) {
+      if (!(await wrote(port, target.key, target.content))) unrestored.push(target.path);
+    }
+    return { kind: "write-failed", path: file.target.path, unrestored };
+  }
+  return {
+    kind: "edited",
+    files: [...planned.values()].map((file) => ({
+      path: file.target.path,
+      replacements: file.replacements,
+      fuzzy: file.fuzzy,
+    })),
+  };
+}
+
+async function wrote(
+  port: { readonly put: (key: string, text: string) => Promise<unknown> },
+  key: string,
+  text: string,
+): Promise<boolean> {
+  try {
+    return (await port.put(key, text)) === undefined;
+  } catch {
+    return false;
+  }
 }
 
 function countOccurrences(haystack: string, needle: string): number {

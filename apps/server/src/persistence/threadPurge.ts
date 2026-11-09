@@ -1,4 +1,5 @@
 import {
+  BENCHMARK_RUN_AGGREGATE_TYPE,
   BROWSER_FLOW_AGGREGATE_TYPE,
   NATIVE_HARNESS_TRANSCRIPT_AGGREGATE_TYPE,
   TOOL_EGRESS_PROJECT_AGGREGATE,
@@ -234,10 +235,16 @@ const RUN_LINK_PATHS = [
 // A Project's egress rules name the thread they were granted from, but they
 // are the Project's: purging that thread must not take them away. A Project
 // erase removes them.
+// A benchmark run's cell events name the cell's thread, but the run is the
+// benchmark's: purging a cell thread must not delete the run's journal history.
+// Observed: it did, the run's head went with it, and the run's later purge
+// event restarted at version 1, below the version the projection had reached,
+// so the projection skipped it and kept listing the run.
 const RETAINED_AGGREGATE_TYPES = new Set<string>([
   THREAD_RETENTION_AGGREGATE,
   "context-ledger",
   TOOL_EGRESS_PROJECT_AGGREGATE,
+  BENCHMARK_RUN_AGGREGATE_TYPE,
 ]);
 
 const USAGE_EVENT_NAME = "context.usage-reconciled@1";
@@ -680,11 +687,14 @@ function delinkUsageRecords(
 
 /**
  * Project memory is Project data and survives a thread purge, but an
- * entry's provenance no longer names the purged thread.
- * The entry's text stays; only the thread reference is removed.
+ * entry's provenance no longer names the purged thread. The entry's text
+ * stays; only the thread reference is removed, from the projection and from
+ * the journaled memory events it is rebuilt from, so a replay cannot bring the
+ * reference back. An agent-written entry is the only provenance that names a
+ * thread; a superseded event carries it on both of its entries.
  */
 function delinkProjectMemoryProvenance(connection: SqliteConnection, threadId: string): void {
-  const update = connection.prepare(
+  const updateRow = connection.prepare(
     `UPDATE project_memory_projection
      SET entry_json = ?
      WHERE project_id = ? AND entry_id = ?`,
@@ -700,18 +710,53 @@ function delinkProjectMemoryProvenance(connection: SqliteConnection, threadId: s
     readonly entry_json: string;
   }>;
   for (const row of rows) {
-    let parsed: Record<string, unknown>;
-    try {
-      parsed = JSON.parse(row.entry_json) as Record<string, unknown>;
-    } catch {
-      continue;
+    const entry = parseObject(row.entry_json);
+    if (entry !== undefined && withoutThread(entry, threadId)) {
+      updateRow.run(JSON.stringify(entry), row.project_id, row.entry_id);
     }
-    if (parsed.provenance === undefined || typeof parsed.provenance !== "object") continue;
-    const provenance = parsed.provenance as Record<string, unknown>;
-    if (provenance.threadId !== threadId) continue;
-    delete provenance.threadId;
-    update.run(JSON.stringify(parsed), row.project_id, row.entry_id);
   }
+  const updateEvent = connection.prepare(
+    `UPDATE event_journal SET payload_json = ? WHERE global_sequence = ?`,
+  );
+  const events = connection
+    .prepare(
+      `SELECT global_sequence, payload_json FROM event_journal
+       WHERE aggregate_type = 'project-memory' AND instr(payload_json, ?) > 0`,
+    )
+    .all(threadId) as ReadonlyArray<{
+    readonly global_sequence: number;
+    readonly payload_json: string;
+  }>;
+  for (const event of events) {
+    const payload = parseObject(event.payload_json);
+    if (payload === undefined) continue;
+    let changed = false;
+    for (const entry of [payload.entry, payload.previousEntry]) {
+      if (isObject(entry) && withoutThread(entry, threadId)) changed = true;
+    }
+    if (changed) updateEvent.run(JSON.stringify(payload), event.global_sequence);
+  }
+}
+
+/** Removes `provenance.threadId` when it names the thread; says whether it did. */
+function withoutThread(entry: Record<string, unknown>, threadId: string): boolean {
+  const provenance = entry.provenance;
+  if (!isObject(provenance) || provenance.threadId !== threadId) return false;
+  delete provenance.threadId;
+  return true;
+}
+
+function parseObject(text: string): Record<string, unknown> | undefined {
+  try {
+    const value: unknown = JSON.parse(text);
+    return isObject(value) ? value : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function isObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 function purgeDerivedContent(

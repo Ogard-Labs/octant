@@ -12,6 +12,8 @@ export interface WorkSettingsChange {
     | { readonly providerInstanceId: ProviderInstanceId; readonly modelId: ProviderModelId }
     | undefined;
   readonly defaultAccess?: WorkAccess;
+  /** Absent keeps the stored choice. */
+  readonly defaultFullAccessSandbox?: boolean;
 }
 
 export interface WorkSettingsController {
@@ -115,6 +117,9 @@ export function useWorkSettings(
                 defaultModelId: model.modelId,
               }),
           defaultAccess: change.defaultAccess ?? saved.defaultAccess,
+          ...(change.defaultFullAccessSandbox === undefined
+            ? {}
+            : { defaultFullAccessSandbox: change.defaultFullAccessSandbox }),
         });
         if ("kind" in result && result.kind === "settings-updated") {
           setSettings(result.settings);

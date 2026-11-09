@@ -299,11 +299,11 @@ thread made.
   including a valid remembered pair; its pending identity alone grants nothing.
 - **Fixed readers protect credential fields.** Fixed actions never type into
   or return password/one-time-code values, and a screenshot of a frame that
-  holds one is withheld. Explicit Full-access page scripts have ordinary
-  DOM/account authority and can read populated or reflected values; see
-  [bounded page scripts](browser-agent-tool.md#bounded-page-scripts). Private
-  storage does not prove a page is signed out, so unknown session eligibility
-  refuses scripts below Full access.
+  holds one is withheld. Explicit page scripts have ordinary DOM/account
+  authority; see [bounded page scripts](browser-agent-tool.md#bounded-page-scripts).
+  Below Full access, a local Code task needs exact-source one-use permission
+  naming that account authority, plus native credential/coverage checks. Private
+  describes storage lifetime and never proves that a page is signed out.
 - **Plan mode** admits on every profile only the reads of the page already
   open and stopping the thread's own Browser, and refuses every other
   operation ([Browser for agents: Plan mode](browser-agent-tool.md#plan-mode));

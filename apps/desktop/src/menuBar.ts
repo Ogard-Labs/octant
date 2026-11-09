@@ -120,6 +120,8 @@ export interface MenuBarItem {
     | "open-app"
     | "open-web"
     | "start-new-agent"
+    | "shutdown-progress"
+    | "prepare-to-shut-down"
     | "start-host"
     | "stop-host"
     | "restart-host"
@@ -158,16 +160,59 @@ function threadToolTip(thread: MenuBarFleetThread): string {
   return `Finished since you last opened it · read from ${source}`;
 }
 
+/** How far a Prepare to shut down batch has come, as its window last reported. */
+export interface MenuBarShutdownProgress {
+  readonly ended: number;
+  readonly total: number;
+}
+
+/**
+ * Prepare to shut down in the menu bar: offered while the window last saw this
+ * host in a hub with another member, and the progress of a batch it runs.
+ */
+export interface MenuBarShutdown {
+  readonly offered: boolean;
+  readonly progress?: MenuBarShutdownProgress;
+}
+
+/** A window's progress report; `undefined` when no batch runs. */
+export function decodeMenuBarShutdownProgress(value: unknown): MenuBarShutdownProgress | undefined {
+  if (value === null || value === undefined) return undefined;
+  if (typeof value !== "object" || Object.keys(value).length !== 2) {
+    throw new TypeError("Invalid shutdown progress");
+  }
+  const ended = Reflect.get(value, "ended");
+  const total = Reflect.get(value, "total");
+  if (
+    typeof ended !== "number" ||
+    typeof total !== "number" ||
+    !Number.isSafeInteger(ended) ||
+    !Number.isSafeInteger(total) ||
+    ended < 0 ||
+    total < 1 ||
+    ended > total ||
+    total > 10_000
+  ) {
+    throw new TypeError("Invalid shutdown progress");
+  }
+  return { ended, total };
+}
+
 /**
  * The text beside the menu-bar glyph: `!` while the host itself needs
- * attention, otherwise how many threads wait on the person. A state seen only
- * on screen never counts.
+ * attention, then a running Prepare to shut down batch's progress, because
+ * the person is waiting on it to switch the computer off, otherwise how many
+ * threads wait on the person. A state seen only on screen never counts.
  */
 export function menuBarTitle(
   snapshot: LocalHostSnapshot,
   fleet: ReadonlyArray<MenuBarFleetThread>,
+  shutdownProgress?: MenuBarShutdownProgress,
 ): string {
   if (snapshot.attentionRequired) return "!";
+  if (shutdownProgress !== undefined) {
+    return `${String(shutdownProgress.ended)}/${String(shutdownProgress.total)}`;
+  }
   const waiting = fleet.filter(
     (thread) => thread.state === "needs-you" && thread.activitySource !== "screen",
   ).length;
@@ -188,6 +233,7 @@ function actionEnabled(snapshot: LocalHostSnapshot, action: HostAction): boolean
 export function buildMenuBarItems(
   snapshot: LocalHostSnapshot,
   fleet: ReadonlyArray<MenuBarFleetThread> = [],
+  shutdown: MenuBarShutdown = { offered: false },
 ): ReadonlyArray<MenuBarItem> {
   const separator: MenuBarItem = { id: "separator", label: "", enabled: false };
   const taskItems: MenuBarItem[] = [];
@@ -215,10 +261,27 @@ export function buildMenuBarItems(
       }
     }
   }
+  const shutdownItems: MenuBarItem[] = [];
+  if (shutdown.offered || shutdown.progress !== undefined) {
+    shutdownItems.push(separator);
+    if (shutdown.progress !== undefined) {
+      shutdownItems.push({
+        id: "shutdown-progress",
+        label: `Moving threads · ${String(shutdown.progress.ended)} of ${String(shutdown.progress.total)}`,
+        enabled: false,
+      });
+    }
+    shutdownItems.push({
+      id: "prepare-to-shut-down",
+      label: "Prepare to Shut Down…",
+      enabled: snapshot.state !== "stopped",
+    });
+  }
   return [
     { id: "open-app", label: "Open Octant", enabled: true },
     { id: "start-new-agent", label: "New task…", enabled: snapshot.state !== "stopped" },
     ...taskItems,
+    ...shutdownItems,
     separator,
     {
       id: "local-host",

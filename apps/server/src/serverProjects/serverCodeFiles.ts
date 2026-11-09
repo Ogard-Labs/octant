@@ -25,6 +25,7 @@ import {
 } from "../code/codeFileService";
 import type { ServerAddress, ServerCall, ServerConnection } from "./serverConnection";
 import { RESOLVE_INSIDE, serverCredentialPathRefusal, withProtectedPaths } from "./serverFiles";
+import { listServerDirectory } from "./serverDirectoryListing";
 
 /**
  * The Code file browser and editor on a server Project's folder. Canonical:
@@ -42,7 +43,6 @@ import { RESOLVE_INSIDE, serverCredentialPathRefusal, withProtectedPaths } from 
  */
 
 const CALL_TIMEOUT_MS = 30_000;
-const MAX_LISTING_BYTES = 8 * 1024 * 1024;
 const SERVER_DEVICE = "server";
 /** File times are not compared on a server, so every file reports the same one. */
 const SERVER_MODIFIED = "0";
@@ -54,27 +54,6 @@ s=$(wc -c < "$r" | tr -d ' ')
 printf 's%s\\0' "$s"
 [ "$s" -gt "$3" ] && exit 0
 cat -- "$r"`;
-
-/**
- * After the resolved folder: `o` for not a folder, or `d` then each real
- * folder and file below it, to depth `$3`, as `d<path>\0` or `f<path>\0`.
- * Links are never named.
- */
-const BROWSE_SCRIPT = `${RESOLVE_INSIDE}
-[ -d "$r" ] || { printf 'o'; exit 0; }
-printf 'd'
-cd -- "$r" || exit 0
-find . -mindepth 1 -maxdepth "$3" \\( -name .git -o -name node_modules \\) -type d -prune \\
-  -o -type d -exec printf 'd%s\\0' {} + -o -type f -exec printf 'f%s\\0' {} +`;
-
-/** One line per argument: its byte size, or empty when it cannot be read. */
-const SIZES_SCRIPT = `exec 2>/dev/null
-cd -- "$1" || exit 3
-shift
-for f; do
-  s=$(wc -c < "$f" | tr -d ' ')
-  printf '%s\\n' "$s"
-done`;
 
 /** The copy keeps the file's mode, so a save neither drops an executable bit nor widens a private file. */
 const PUT_SCRIPT = `exec 2>/dev/null
@@ -122,87 +101,35 @@ export class ServerCodeFiles {
     readonly directory?: CodeRelativePath | undefined;
     readonly signal?: AbortSignal | undefined;
   }): Promise<CodeFileListingResult> {
-    const start =
-      request.directory === undefined ? this.#root : posix.join(this.#root, request.directory);
-    const call = await this.#call(
-      BROWSE_SCRIPT,
-      [start, this.#root, String(MAX_CODE_FILE_LISTING_DEPTH + 1)],
-      undefined,
-      MAX_LISTING_BYTES,
-      request.signal,
+    const listed = await listServerDirectory(
+      {
+        ...this.#options,
+        root: this.#root,
+        maxDepth: MAX_CODE_FILE_LISTING_DEPTH,
+        maxEntries: MAX_CODE_FILE_LISTING_ENTRIES,
+      },
+      request,
     );
-    if (call.status !== "ran") return failedListing("unavailable", unreachableMessage(call));
-    const resolved = this.#resolved(call.output);
-    if (resolved === undefined || resolved.rest[0] !== 0x64 /* d */) {
-      return failedListing("not-found", "That folder is not in this Project on the server.");
-    }
-    const base = posix.relative(this.#root, resolved.path);
-    const found: Array<{
-      readonly kind: "d" | "f";
-      readonly path: string;
-      readonly depth: number;
-    }> = [];
-    for (const raw of resolved.rest.subarray(1).toString("utf8").split("\0")) {
-      const kind = raw[0];
-      if ((kind !== "d" && kind !== "f") || !raw.startsWith(`${kind}./`)) continue;
-      const below = raw.slice(3);
-      const path = base === "" ? below : `${base}/${below}`;
-      if (serverCredentialPathRefusal(posix.join(this.#root, path)) !== undefined) continue;
-      found.push({ kind, path, depth: below.split("/").length });
-    }
-    // The local listing names a folder's entries before descending, so a
-    // large first folder cannot spend the whole budget; this keeps that order.
-    found.sort((left, right) =>
-      left.depth === right.depth ? left.path.localeCompare(right.path) : left.depth - right.depth,
-    );
-    let truncated = call.truncated || found.length > MAX_CODE_FILE_LISTING_ENTRIES;
-    const kept: Array<{ readonly kind: "d" | "f"; readonly path: CodeRelativePath }> = [];
-    for (const entry of found) {
-      if (kept.length >= MAX_CODE_FILE_LISTING_ENTRIES) break;
-      if (entry.depth > MAX_CODE_FILE_LISTING_DEPTH) {
-        truncated = true;
-        continue;
-      }
-      try {
-        kept.push({ kind: entry.kind, path: decodeCodeRelativePath(entry.path) });
-      } catch {
-        // A name the relative-path contract rejects is skipped, as locally.
-      }
-    }
-    const files = kept.filter((entry) => entry.kind === "f");
-    const sizes = new Map<string, number>();
-    if (files.length > 0) {
-      const sized = await this.#call(
-        SIZES_SCRIPT,
-        [this.#root, ...files.map((entry) => entry.path)],
-        undefined,
-        1024 * 1024,
-        request.signal,
-      );
-      if (sized.status !== "ran") return failedListing("unavailable", unreachableMessage(sized));
-      const lines = sized.output.toString("utf8").split("\n");
-      files.forEach((entry, index) => {
-        const size = Number(lines[index]);
-        if (lines[index] !== "" && Number.isSafeInteger(size) && size >= 0) {
-          sizes.set(entry.path, size);
-        }
-      });
-    }
+    if (listed.status === "failed") return failedListing(listed.category, listed.message);
     const entries: CodeFileListingEntry[] = [];
-    for (const entry of kept) {
-      if (entry.kind === "d") {
-        entries.push({ kind: "directory", path: entry.path });
+    for (const entry of listed.entries) {
+      let path: CodeRelativePath;
+      try {
+        path = decodeCodeRelativePath(entry.path);
+      } catch {
         continue;
       }
-      const byteLength = sizes.get(entry.path);
-      if (byteLength === undefined) continue;
+      if (entry.kind === "directory") {
+        entries.push({ kind: "directory", path });
+        continue;
+      }
       entries.push({
         kind: "file",
-        fileId: deriveCodeFileId(String(request.threadId), String(request.checkoutId), entry.path),
-        path: entry.path,
-        byteLength,
+        fileId: deriveCodeFileId(String(request.threadId), String(request.checkoutId), path),
+        path,
+        byteLength: entry.byteLength,
         availability:
-          byteLength > MAX_EDITABLE_CODE_FILE_BYTES
+          entry.byteLength > MAX_EDITABLE_CODE_FILE_BYTES
             ? { status: "read-only", reason: "oversized" }
             : { status: "available" },
       });
@@ -215,7 +142,7 @@ export class ServerCodeFiles {
         checkoutId: request.checkoutId,
         ...(request.directory === undefined ? {} : { directory: request.directory }),
         entries,
-        truncated,
+        truncated: listed.truncated,
         observedAt: this.#options.clock(),
       }),
     };
@@ -435,10 +362,4 @@ function failedListing(
   message: string,
 ): CodeFileListingResult {
   return { status: "failed", failure: { category, message } };
-}
-
-function unreachableMessage(call: Exclude<ServerCall, { readonly status: "ran" }>): string {
-  return call.status === "unreachable"
-    ? `The server could not be reached (${call.message}), so nothing was listed.`
-    : "The server did not answer in time, so nothing was listed.";
 }

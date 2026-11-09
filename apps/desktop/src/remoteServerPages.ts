@@ -165,6 +165,11 @@ export interface RemoteServerPagesPorts {
    * window never names the trust; it names only the origin.
    */
   readonly pairedTrust: (listenerOrigin: string) => ListenerOriginTrust | undefined;
+  readonly rememberTrust?: (
+    listenerOrigin: string,
+    previous: ListenerOriginTrust,
+    next: ListenerOriginTrust,
+  ) => void;
   /** The transport to a paired host's listener; production uses {@link sendThroughListener}. */
   readonly sendToHost?: (
     target: { readonly listenerOrigin: string; readonly trust: ListenerOriginTrust },
@@ -308,12 +313,36 @@ export function createRemoteServerPages(ports: RemoteServerPagesPorts): RemoteSe
       sendToHost: (target, request) => {
         const trust = ports.pairedTrust(target.listenerOrigin);
         if (trust === undefined) return Promise.reject(new Error("No trust for this host."));
-        return sendToHost({ listenerOrigin: target.listenerOrigin, trust }, request);
+        return sendToHost(
+          {
+            listenerOrigin: target.listenerOrigin,
+            trust,
+            ...(ports.rememberTrust === undefined
+              ? {}
+              : {
+                  onTrust: (previous: ListenerOriginTrust, next: ListenerOriginTrust) =>
+                    ports.rememberTrust?.(target.listenerOrigin, previous, next),
+                }),
+          },
+          request,
+        );
       },
       upgradeToHost: (target, request) => {
         const trust = ports.pairedTrust(target.listenerOrigin);
         if (trust === undefined) return Promise.reject(new Error("No trust for this host."));
-        return upgradeToHost({ listenerOrigin: target.listenerOrigin, trust }, request);
+        return upgradeToHost(
+          {
+            listenerOrigin: target.listenerOrigin,
+            trust,
+            ...(ports.rememberTrust === undefined
+              ? {}
+              : {
+                  onTrust: (previous: ListenerOriginTrust, next: ListenerOriginTrust) =>
+                    ports.rememberTrust?.(target.listenerOrigin, previous, next),
+                }),
+          },
+          request,
+        );
       },
     });
     const started = await created.start();
@@ -533,6 +562,10 @@ export function pageNavigation(url: string, pageOrigin: string): "stay" | "exter
 export type ListenerConnect = (options: {
   readonly origin: string;
   readonly trust: ListenerOriginTrust;
+  readonly onTrust?: (
+    previous: ListenerOriginTrust,
+    next: ListenerOriginTrust,
+  ) => Promise<void> | void;
 }) => Promise<
   | { readonly status: "connected"; readonly socket: Duplex }
   | { readonly status: "refused"; readonly reason: ListenerTrustRefusal }
@@ -546,11 +579,22 @@ export type ListenerConnect = (options: {
  * server sets is stored under the listener's origin.
  */
 export async function sendThroughListener(
-  target: { readonly listenerOrigin: string; readonly trust: ListenerOriginTrust },
+  target: {
+    readonly listenerOrigin: string;
+    readonly trust: ListenerOriginTrust;
+    readonly onTrust?: (
+      previous: ListenerOriginTrust,
+      next: ListenerOriginTrust,
+    ) => Promise<void> | void;
+  },
   request: RemoteServerHostRequest,
   connect: ListenerConnect = connectListener,
 ): Promise<Response> {
-  const connection = await connect({ origin: target.listenerOrigin, trust: target.trust });
+  const connection = await connect({
+    origin: target.listenerOrigin,
+    trust: target.trust,
+    ...(target.onTrust === undefined ? {} : { onTrust: target.onTrust }),
+  });
   if (connection.status === "refused") {
     throw new Error(LISTENER_TRUST_REFUSAL_COPY[connection.reason]);
   }
@@ -592,11 +636,22 @@ export async function sendThroughListener(
  * pass bytes through, or answers as it does to refuse.
  */
 export async function upgradeThroughListener(
-  target: { readonly listenerOrigin: string; readonly trust: ListenerOriginTrust },
+  target: {
+    readonly listenerOrigin: string;
+    readonly trust: ListenerOriginTrust;
+    readonly onTrust?: (
+      previous: ListenerOriginTrust,
+      next: ListenerOriginTrust,
+    ) => Promise<void> | void;
+  },
   request: RemoteServerHostUpgradeRequest,
   connect: ListenerConnect = connectListener,
 ): Promise<RemoteServerHostUpgrade> {
-  const connection = await connect({ origin: target.listenerOrigin, trust: target.trust });
+  const connection = await connect({
+    origin: target.listenerOrigin,
+    trust: target.trust,
+    ...(target.onTrust === undefined ? {} : { onTrust: target.onTrust }),
+  });
   if (connection.status === "refused") {
     throw new Error(LISTENER_TRUST_REFUSAL_COPY[connection.reason]);
   }

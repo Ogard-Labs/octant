@@ -7,6 +7,10 @@ import { FolderOpen, Repeat } from "lucide-react";
 import { EnvironmentCard, EnvironmentGroup } from "./EnvironmentGroup";
 import { EnvironmentExtraFolders } from "./EnvironmentExtraFolders";
 import { ThreadEnvironmentPanel } from "./ThreadEnvironmentPanel";
+import {
+  ThreadMoveComputerCard,
+  type ThreadMoveEnvironment,
+} from "./threadMove/ThreadMoveComputerCard";
 import { ChangeWorkingFolder, workingFolderLabel } from "./WorkingDirectoryControl";
 import { EnvironmentSubagents } from "./EnvironmentSubagents";
 import { EnvironmentRoutines } from "./EnvironmentRoutines";
@@ -24,6 +28,8 @@ type WorkThreadWorkspaceTab = Extract<WorkspaceTab, { readonly kind: "work-threa
 type WorkProject = Extract<ProjectSummary, { readonly type: "work" }>;
 
 export interface WorkThreadEnvironmentProps {
+  /** Where the thread runs and how it moves to another computer; absent, no Computer card. */
+  readonly threadMove?: ThreadMoveEnvironment;
   readonly tab: WorkThreadWorkspaceTab;
   readonly active?: boolean;
   readonly projects: ReadonlyArray<ProjectSummary>;
@@ -101,6 +107,17 @@ export function WorkThreadEnvironment(props: WorkThreadEnvironmentProps) {
     <div className="code-thread-environment">
       <ThreadEnvironmentPanel
         {...(props.active === undefined ? {} : { active: props.active })}
+        {...(props.threadMove === undefined
+          ? {}
+          : {
+              computer: (
+                <ThreadMoveComputerCard
+                  {...props.threadMove}
+                  thread={{ mode: "work", threadId: String(props.tab.threadId) }}
+                  threadTitle={props.tab.title}
+                />
+              ),
+            })}
         open={environmentOpen}
         summary={{
           identity: projection.identity,

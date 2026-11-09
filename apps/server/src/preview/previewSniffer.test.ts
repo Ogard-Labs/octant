@@ -71,6 +71,14 @@ describe("sniffPreviewKind", () => {
     });
   });
 
+  it("sniffs plain text whose sniffed head ends partway through a character", () => {
+    const bytes = Buffer.from(`${"a".repeat(4_095)}ø and more`, "utf-8");
+    expect(sniffPreviewKind(bytes, "notes.txt", "text/plain", budget)).toMatchObject({
+      ok: true,
+      kind: "text",
+    });
+  });
+
   it("returns unsupported for an Office OOXML zip container (no native parser here)", () => {
     // ZIP local file header signature followed by garbage: not a valid
     // OOXML container, so classification falls back to unsupported.

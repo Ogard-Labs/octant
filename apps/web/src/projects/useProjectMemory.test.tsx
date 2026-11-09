@@ -37,6 +37,8 @@ function client() {
     environment: vi.fn(),
     environmentForThread: vi.fn(),
     executeMemory: vi.fn(),
+    listMemoryProposals: vi.fn(async () => []),
+    decideMemoryProposal: vi.fn(),
   };
   return api;
 }

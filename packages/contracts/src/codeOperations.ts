@@ -1978,6 +1978,11 @@ const ProviderSwitchHandoff = Schema.Struct({
       externalContentIngested: Schema.Boolean,
     }).annotations(strict),
   ),
+  /**
+   * Present when the handoff led with the summary the limit rule wrote with
+   * the earlier provider before it compacted the thread.
+   */
+  handoverSummary: Schema.optional(Schema.Literal(true)),
 }).annotations(strict);
 
 /**

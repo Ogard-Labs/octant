@@ -74,11 +74,11 @@ const SERVER_CHECKOUT_TOOLS: ReadonlySet<RightUtilityDockSurfaceId> = new Set([
 ]);
 
 /**
- * The tools a Work thread in a server Project keeps. Work's Files, terminal,
- * and other tools read a folder of this host, and none has a server form
- * yet, so only the tools that act on nothing of this host stay.
+ * Work Files lists metadata on the server. Other root-backed Work tools
+ * still act on this host and have no server form.
  */
 const SERVER_WORK_TOOLS: ReadonlySet<RightUtilityDockSurfaceId> = new Set([
+  "files",
   "side-chat",
   "document",
   "canvas",

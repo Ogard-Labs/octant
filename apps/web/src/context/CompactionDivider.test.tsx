@@ -2,6 +2,7 @@ import type { ContextClient } from "@octant/client-runtime/context-client";
 import {
   decodeContextCompactionReceipt,
   decodeContextSubjectRef,
+  type ContextCompactionCause,
   type ContextSubjectRef,
 } from "@octant/contracts/context";
 import { render, screen, waitFor, within } from "@testing-library/react";
@@ -21,6 +22,7 @@ function receipt(options: {
   readonly id: string;
   readonly trigger: "requested" | "automatic";
   readonly completedAt: string;
+  readonly cause?: ContextCompactionCause;
 }) {
   return decodeContextCompactionReceipt({
     compactionId: options.id,
@@ -31,6 +33,7 @@ function receipt(options: {
       providerInstanceId: contextFixture().modelLimits.providerInstanceId,
     },
     trigger: options.trigger,
+    ...(options.cause === undefined ? {} : { cause: options.cause }),
     tokensBefore: { kind: "known", tokens: 52_000, accuracy: "provider-reported" },
     tokensAfter: { kind: "known", tokens: 10_800, accuracy: "provider-reported" },
     tokensFreed: { kind: "measured", tokens: 41_200, accuracy: "provider-reported" },
@@ -183,6 +186,38 @@ describe("compaction divider in a transcript", () => {
     expect(first.compareDocumentPosition(pane.getByText("Row b"))).toBe(
       Node.DOCUMENT_POSITION_FOLLOWING,
     );
+  });
+
+  it("says which rule compacted the thread and how full the window was", async () => {
+    const ruled = receipt({
+      id: "60000000-0000-4000-8000-000000000003",
+      trigger: "requested",
+      completedAt: "2026-07-18T11:30:00.000Z",
+      cause: { kind: "window-fill", filledPercent: 91, thresholdPercent: 85 },
+    });
+    renderPanes(clientFor(new Map([[String(subject.aggregateId), [ruled]]])));
+
+    const pane = within(screen.getByRole("region", { name: "Active pane" }));
+    const dividers = await pane.findAllByRole("separator");
+    expect(dividers.map((divider) => divider.textContent)).toEqual([
+      "Compacted automatically · window 91% full · 41.2K freed · summary by Codex",
+    ]);
+  });
+
+  it("says how long the thread was quiet when the idle rule compacted it", async () => {
+    const quiet = receipt({
+      id: "60000000-0000-4000-8000-000000000004",
+      trigger: "requested",
+      completedAt: "2026-07-18T11:30:00.000Z",
+      cause: { kind: "idle", idleMinutes: 31, thresholdMinutes: 30 },
+    });
+    renderPanes(clientFor(new Map([[String(subject.aggregateId), [quiet]]])));
+
+    const pane = within(screen.getByRole("region", { name: "Active pane" }));
+    const dividers = await pane.findAllByRole("separator");
+    expect(dividers.map((divider) => divider.textContent)).toEqual([
+      "Compacted automatically · idle 31 min · 41.2K freed · summary by Codex",
+    ]);
   });
 
   it("shows each pane the compactions of its own thread, active or not", async () => {

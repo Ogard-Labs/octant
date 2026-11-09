@@ -171,6 +171,51 @@ function readyHandoff(): Partial<FirstRunOnboardingProps> {
 }
 
 describe("FirstRunOnboarding", () => {
+  it("keeps capability discovery inside readiness and dismissal independent of starting", async () => {
+    const user = userEvent.setup();
+    const helpers = {
+      current: vi.fn(async () => {
+        throw new Error("not reported");
+      }),
+      update: vi.fn(),
+    };
+    const memory = {
+      read: vi.fn(async () => {
+        throw new Error("not reported");
+      }),
+      change: vi.fn(),
+    };
+    const openSettings = vi.fn();
+    const view = mount({
+      ...readyHandoff(),
+      capabilities: {
+        helpers,
+        memory,
+        computerUse: { enabled: true, automaticUpdates: false },
+        onOpenSettings: openSettings,
+      },
+    });
+    expect(screen.queryByLabelText("Explore capabilities")).toBeNull();
+    expect(helpers.current).not.toHaveBeenCalled();
+    expect(memory.read).not.toHaveBeenCalled();
+    await openHandoff(user);
+    expect(screen.getByLabelText("Explore capabilities")).toBeVisible();
+    expect(screen.getByRole("heading", { name: "Your first task" })).toBeVisible();
+    expect(screen.queryByText(/^Step \d of \d$/)).toBeNull();
+    await user.click(screen.getByRole("button", { name: "Person memory" }));
+    await user.click(screen.getByRole("button", { name: "Review memory settings" }));
+    expect(openSettings).toHaveBeenCalledWith({ section: "memory", setting: "person-memory" });
+    await user.click(screen.getByRole("button", { name: "Dismiss capability card" }));
+    expect(view.controller.complete).not.toHaveBeenCalled();
+    expect(view.controller.skip).not.toHaveBeenCalled();
+    expect(screen.queryByLabelText("Explore capabilities")).toBeNull();
+    expect(screen.getByRole("heading", { name: "Your first task" })).toHaveFocus();
+    await user.click(screen.getByRole("button", { name: "Start a task" }));
+    await waitFor(() => expect(view.controller.complete).toHaveBeenCalledOnce());
+    expect(helpers.update).not.toHaveBeenCalled();
+    expect(memory.change).not.toHaveBeenCalled();
+  });
+
   it("stays out of the way once the host has recorded an answer", () => {
     mount({ controller: controller({ visible: false }) });
 

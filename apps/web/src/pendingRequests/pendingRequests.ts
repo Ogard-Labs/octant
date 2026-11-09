@@ -23,7 +23,16 @@ export const NEEDS_YOU_ROW_LIMIT = 5;
 export type PendingRequestResponse =
   | { readonly kind: "approve" }
   | { readonly kind: "deny" }
-  | { readonly kind: "choice"; readonly label: string };
+  | { readonly kind: "choice"; readonly label: string; readonly note?: string };
+
+/** A note rides in the next turn's prompt, so it is bounded like a short message. */
+export const MAX_DECISION_NOTE_LENGTH = 2_000;
+
+/** The words a decision answer sends: the label, then the note when there is one. */
+function decisionPrompt(response: { readonly label: string; readonly note?: string }): string {
+  const note = (response.note ?? "").trim().slice(0, MAX_DECISION_NOTE_LENGTH).trim();
+  return note.length === 0 ? response.label : `${response.label}\n\n${note}`;
+}
 
 /**
  * `refused` covers every way the host did not take the answer: stale, ended,
@@ -177,6 +186,7 @@ export function pendingRequestsForModes(
 export function pendingRequestChoices(request: PendingRequest): ReadonlyArray<{
   readonly label: string;
   readonly description?: string | undefined;
+  readonly detail?: string | undefined;
   readonly recommended?: boolean;
 }> {
   if (request.kind === "question") return request.options;
@@ -215,7 +225,10 @@ export async function answerPendingRequest(
           threadId: request.answer.threadId,
           checkoutId: request.answer.checkoutId,
           sessionId: decodeProviderSessionId(globalThis.crypto.randomUUID()),
-          prompt: await clients.codeClient.putEvidence(request.answer.threadId, response.label),
+          prompt: await clients.codeClient.putEvidence(
+            request.answer.threadId,
+            decisionPrompt(response),
+          ),
         });
         if (started.kind === "provider-turn-state" && started.state === "running") {
           return { status: "answered" };
@@ -233,7 +246,7 @@ export async function answerPendingRequest(
         requestId: decodeWorkTurnRequestId(globalThis.crypto.randomUUID()),
         threadId: request.answer.threadId,
         turnId: decodeWorkTurnId(globalThis.crypto.randomUUID()),
-        prompt: response.label,
+        prompt: decisionPrompt(response),
         authority: request.answer.authority,
       });
       return started.kind === "accepted" ? { status: "answered" } : NOT_SENT;

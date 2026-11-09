@@ -22,6 +22,16 @@ describe("appToolHostLines", () => {
     expect(appToolHostLines(offered("octant_canvas"))).toEqual([]);
   });
 
+  it("points every provider at the image model instead of an SVG drawing only while the image tool is offered", () => {
+    const [line] = appToolHostLines(offered("octant_create_image"));
+    expect(line?.tool).toBe("octant_create_image");
+    expect(line?.text).toMatch(/instead of drawing it as SVG/);
+    expect(line?.text).toMatch(/confirm/);
+    expect(appToolHostLines(offered("octant_browser")).map((entry) => entry.tool)).not.toContain(
+      "octant_create_image",
+    );
+  });
+
   it("keeps every line short, so offering a tool costs the cached prefix little", () => {
     const all = appToolHostLines(
       offered(
@@ -32,10 +42,11 @@ describe("appToolHostLines", () => {
         "octant_terminal",
         "octant_pull_request",
         "octant_github",
+        "octant_create_image",
         "octant_agents",
       ),
     );
-    expect(all).toHaveLength(8);
+    expect(all).toHaveLength(9);
     for (const line of all) expect(line.text.length).toBeLessThanOrEqual(240);
     expect(all.reduce((total, line) => total + line.text.length, 0)).toBeLessThanOrEqual(1_500);
   });

@@ -6,7 +6,10 @@ import {
   BROWSER_UPLOAD_PERMISSION_EVENT,
   BrowserUploadPermissionChanged,
 } from "@octant/contracts/browser-upload-permissions";
-import { PendingQuestionDeferral } from "@octant/contracts/pending-requests";
+import {
+  DecisionReviewRecorded,
+  PendingQuestionDeferral,
+} from "@octant/contracts/pending-requests";
 import {
   BROWSER_SESSION_EVENT_NAMES,
   BrowserSessionGranted,
@@ -397,6 +400,8 @@ import { registerArtifactMirrorEvents } from "../canvas/artifactMirrorEventStore
 import { registerGoalLoopEvents } from "../goal/goalLoopEventStore";
 import { registerFollowUpSuggestionEvents } from "../followUps/threadFollowUpSuggestionStore";
 import { registerTerminalSessionEvents } from "../terminalSessions/terminalSessionImports";
+import { registerThreadMoveEvents } from "../hub/threadMoveJournal";
+import { registerMovedHistoryEvents } from "../hub/movedThreadHistory";
 import { registerNativeHarnessEvents } from "../harness/nativeHarnessEvents";
 import { registerTurnMetricsEvents } from "../metrics/turnMetricsStore";
 import { registerSideTaskEvents } from "../sideTasks/sideTaskStore";
@@ -418,6 +423,8 @@ import {
   GithubCloneProjection,
 } from "./githubCloneProjection";
 import { ImageJobProjection } from "../image/imageJobProjection";
+import { registerBenchmarkEvents } from "../benchmarks/benchmarkEventStore";
+import { BenchmarkProjection } from "../benchmarks/benchmarkProjection";
 import {
   DesktopLeaseProjection,
   registerDesktopLeaseEvents,
@@ -439,6 +446,7 @@ export interface Phase1RuntimeRegistries {
   readonly automationProjection: AutomationProjection;
   readonly githubCloneProjection: GithubCloneProjection;
   readonly imageJobProjection: ImageJobProjection;
+  readonly benchmarkProjection: BenchmarkProjection;
   readonly desktopLeaseProjection: DesktopLeaseProjection;
   readonly replicaMembershipProjection: ReplicaMembershipProjection;
   readonly replicaArtifactProjection: ReplicaArtifactProjection;
@@ -516,6 +524,7 @@ export function createPhase1RuntimeRegistries(): Phase1RuntimeRegistries {
     .register("host-oauth.recorded@1", 1, HostOAuthJournalRecord)
     .register("provider-key.recorded@1", 1, ProviderKeyJournalRecord)
     .register("pending-question.deferred@1", 1, PendingQuestionDeferral)
+    .register("decision-review.recorded@1", 1, DecisionReviewRecorded)
     .register("secret-store.recorded@1", 1, SecretStoreJournalRecord)
     .register("ollama.history-recorded@1", 1, OllamaHistoryRecorded)
     .register("claude.resume-identity-recorded@1", 1, ClaudeResumeIdentityRecorded)
@@ -770,6 +779,8 @@ export function createPhase1RuntimeRegistries(): Phase1RuntimeRegistries {
   registerTurnMetricsEvents(events);
   registerFollowUpSuggestionEvents(events);
   registerTerminalSessionEvents(events);
+  registerThreadMoveEvents(events);
+  registerMovedHistoryEvents(events);
   registerSideTaskEvents(events);
   registerShipEvents(events);
   registerThreadMessageQueueEvents(events);
@@ -777,6 +788,7 @@ export function createPhase1RuntimeRegistries(): Phase1RuntimeRegistries {
   registerReplicaMembershipEvents(events);
   registerReplicaStoreSettingsEvents(events);
   registerDesktopLeaseEvents(events);
+  registerBenchmarkEvents(events);
 
   const hostIdentityMigrations = createRuntimeHostIdentityMigrationRegistry(events);
   const agentRunProjection = new AgentRunProjection();
@@ -784,6 +796,7 @@ export function createPhase1RuntimeRegistries(): Phase1RuntimeRegistries {
   const automationProjection = new AutomationProjection();
   const githubCloneProjection = new GithubCloneProjection();
   const imageJobProjection = new ImageJobProjection();
+  const benchmarkProjection = new BenchmarkProjection();
   const desktopLeaseProjection = new DesktopLeaseProjection();
   const replicaMembershipProjection = new ReplicaMembershipProjection();
   const replicaArtifactProjection = new ReplicaArtifactProjection();
@@ -796,6 +809,7 @@ export function createPhase1RuntimeRegistries(): Phase1RuntimeRegistries {
     automationProjection,
     githubCloneProjection,
     imageJobProjection,
+    benchmarkProjection,
     desktopLeaseProjection,
     replicaMembershipProjection,
     replicaArtifactProjection,
@@ -815,6 +829,7 @@ export function createPhase1RuntimeRegistries(): Phase1RuntimeRegistries {
       .register(automationProjection)
       .register(githubCloneProjection)
       .register(imageJobProjection)
+      .register(benchmarkProjection)
       .register(desktopLeaseProjection)
       .register(new ZenProjection())
       .register(new AgentProfileProjection())

@@ -30,6 +30,26 @@ approvals, and journal as a Project on this computer. Inference, approvals,
 every authority check, and the journal stay on this host; only the thread's
 hands are on the server.
 
+## Setup entry
+
+Settings › Remote access begins with three explicit journeys: control an Octant
+host, run a command on a registered server, or work in a server folder. Selecting
+one shows execution/data locations, prerequisites and a read-only first task;
+Continue opens the existing pairing, server registry or server-Project binding
+controls. Continuing to local listener setup focuses its real form. A client
+without local administration instead directs the person to Settings on the
+Octant host; it offers no inert pairing continuation. Selection starts no
+connection, command, key creation or listener.
+Registration alone proves no connectivity. The folder journey uses the existing
+SSH folder check and focuses its binding form; missing folders, SSH keys and
+unverified host identities require correction through their existing owners.
+The entry explains unsupported server-Project capabilities and uncertain-result
+recovery without implying parity or retrying a command.
+
+This guide is an entry into existing setup, not a connection diagnostic service.
+It does not distinguish transport failures by parsing SSH text or accept a new
+host key. A future structured diagnostic must preserve those trust boundaries.
+
 ## Terms
 
 - **Registered server.** A server in the person's Octant Shield registry
@@ -282,16 +302,31 @@ hands are on the server.
   Octant Harness) is refused before it starts, and a call that cannot reach
   the server runs nothing anywhere.
 - **Windows.** A window binds a server Work Project, and its threads, with no
-  folder of this host (`boundRoot: null`), so Work Files, Browser, and every
-  root-backed Work surface fail closed for it.
+  folder of this host (`boundRoot: null`). Its Files panel reads only server
+  metadata through the bound server connection; Browser and other surfaces
+  that need a folder of this host stay unavailable.
+- **Files.** The local window admitted to an active Work thread can list names
+  and byte sizes in that thread's exact server Project folder. Refresh reads
+  again; there is no watcher, preview, download, reveal, editing, or attribution
+  of files to Work output. Rows stay inert. The listing uses the same resolved
+  root and protected-path checks as server Code files, skips links and hidden
+  entries, and is capped at 1,000 entries and eight levels below the requested
+  folder, with an incomplete notice when bounded output is truncated. Sizes
+  come from the server's GNU or BSD `stat`, without reading file contents.
+  Missing metadata makes the list incomplete. Cancellation, loss of the
+  connection, removal of the server or Project, rebinding, or loss of the
+  window's access withholds the result; no local folder is tried instead. The
+  binding, registry and window authority are checked again after the remote
+  read. Paired-device callers are refused.
 - **Views.** Settings › Access › Servers binds one with **Project kind: Work**.
   The Work sidebar lists it under **On your servers** with its threads; the
   Work composer offers it, with only Octant Harness models choosable and no
   extension, issue, or terminal session to start from; and its thread view
   names its server and folder and offers no Browser, extension, image
   generation, or file mention. Its dock keeps only Side chat, Document,
-  Canvas, Plan, and Agents, since Work's Files, terminal, and other tools read
-  a folder of this host and none has a server form yet.
+  Canvas, Plan, Agents, and Files. Files names the server location and explains
+  that it shows names and sizes only; terminal and other host-folder tools
+  have no server form yet.
 
 ### Panels
 
@@ -418,7 +453,7 @@ hands are on the server.
 
 ## Not built yet
 
-- Work Files, research sources, the status file and due dates, and the
+- Work file previews and editing, research sources, the status file and due dates, and the
   Project terminal for a Work Project on a server; its threads are built. A
   local Work Project shows its terminal through its Developer tools switch on
   its overview, and a Work Project on a server has neither yet.

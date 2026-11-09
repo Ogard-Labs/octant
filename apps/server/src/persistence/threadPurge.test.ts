@@ -60,6 +60,7 @@ import { applyMigrations, MIGRATIONS } from "./migrations";
 import { createPhase1RuntimeRegistries } from "./runtimeRegistry";
 import { recordAgentRunTurnUsage } from "../agentRun/agentRunUsageLedger";
 import { rebuildProjection } from "./projection";
+import { readProjectMemory } from "./projectProjection";
 import { toSafeExportRow } from "./usageExport";
 import { queryUsageRecords, readAllUsageRecords } from "./usageProjection";
 import { openSqlite, type SqliteConnection } from "./sqlitePort";
@@ -544,6 +545,102 @@ describe("thread purge sweep", () => {
     expect(
       await harness.service.purge({ scope: { kind: "host" }, confirm: true }, "local-window"),
     ).toMatchObject({ purged: [], delinked: [], deleted: [] });
+  });
+
+  it("keeps an agent-written memory entry but not its purged thread, even after the memory view is rebuilt from the journal", async () => {
+    const harness = openHarness();
+    const thread = threads.code;
+    seedCodeProjection(harness, thread.id);
+    const entryId = "c3630000-0000-4000-8000-0000000000e1";
+    const successorId = "c3630000-0000-4000-8000-0000000000e2";
+    const otherEntryId = "c3630000-0000-4000-8000-0000000000e3";
+    const author = { kind: "local-user", actorId };
+    const entry = (id: string, content: string, provenance: unknown, version: number) => ({
+      id,
+      projectId,
+      kind: "decision",
+      content,
+      provenance,
+      author,
+      version,
+      createdAt: now,
+      updatedAt: now,
+    });
+    const fromPurged = { kind: "agent-authored", mode: "code", threadId: thread.id };
+    const fromKept = { kind: "agent-authored", mode: "chat", threadId: controlThreadId };
+    insertEvent(
+      harness.connection,
+      "project-memory",
+      projectId,
+      { entry: { ...entry(entryId, "Ship from main.", fromPurged, 1), status: "active" } },
+      "memory.entry-created@1",
+      1,
+    );
+    insertEvent(
+      harness.connection,
+      "project-memory",
+      projectId,
+      {
+        previousEntry: {
+          ...entry(entryId, "Ship from main.", fromPurged, 2),
+          status: "superseded",
+          supersededBy: successorId,
+        },
+        entry: { ...entry(successorId, "Ship from main only.", fromPurged, 2), status: "active" },
+      },
+      "memory.entry-superseded@1",
+      2,
+    );
+    insertEvent(
+      harness.connection,
+      "project-memory",
+      projectId,
+      { entry: { ...entry(otherEntryId, "Kept thread.", fromKept, 3), status: "active" } },
+      "memory.entry-created@1",
+      3,
+    );
+    const projects = createPhase1RuntimeRegistries().projections.get("projects");
+    if (projects === undefined) throw new Error("project projection is not registered");
+    const rebuild = () =>
+      rebuildProjection({
+        connection: harness.connection,
+        journal: harness.journal,
+        projection: projects,
+        clock: () => now,
+      });
+    rebuild();
+    expect(JSON.stringify(readProjectMemory(harness.connection, projectId as never))).toContain(
+      thread.id,
+    );
+
+    await harness.service.purge(
+      {
+        scope: {
+          kind: "thread",
+          mode: thread.mode,
+          threadId: decodeThreadRetentionThreadId(thread.id),
+        },
+        confirm: true,
+      },
+      "local-window",
+    );
+    rebuild();
+
+    const memory = readProjectMemory(harness.connection, projectId as never);
+    expect(memory.active.map((active) => active.provenance)).toEqual([
+      { kind: "agent-authored", mode: "code" },
+      fromKept,
+    ]);
+    expect(memory.history.map((old) => old.provenance)).toEqual([
+      { kind: "agent-authored", mode: "code" },
+    ]);
+    const journaled = harness.connection
+      .prepare(
+        `SELECT COUNT(*) AS count FROM event_journal
+         WHERE aggregate_type = 'project-memory' AND instr(payload_json, ?) > 0`,
+      )
+      .get(thread.id) as { readonly count: number };
+    expect(journaled.count).toBe(0);
   });
 
   it("de-links a purged thread's child-run usage and keeps it de-linked through a usage rebuild", async () => {

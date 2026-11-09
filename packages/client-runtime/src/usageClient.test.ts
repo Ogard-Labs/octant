@@ -144,3 +144,91 @@ describe("UsageClient.retain", () => {
     ).rejects.toBeInstanceOf(UsageClientError);
   });
 });
+
+describe("UsageClient.diagnostics", () => {
+  const stopReasons = { "end-of-turn": 1, "max-tokens": 0, cancelled: 0, failed: 0, waiting: 0 };
+  const report = {
+    generatedAt: "2026-11-07T12:00:00.000Z",
+    bucket: "day",
+    turns: 1,
+    diagnosedTurns: 1,
+    totals: {
+      stopReasons,
+      contentFilterStops: 0,
+      toolCalls: 0,
+      toolFailures: 0,
+      unfinishedToolCalls: 0,
+      retries: [],
+      approvalRequests: 0,
+      inputRequests: 0,
+      rateLimitWarnings: 0,
+      rateLimitExhaustedTurns: 0,
+      compactions: 0,
+      likelyCacheMisses: 0,
+    },
+    models: [],
+    tools: [],
+    failureGroups: [],
+    troubledTurns: [],
+    cacheMisses: [],
+    samePrompt: [],
+    trend: [
+      {
+        key: "2026-11-07",
+        turns: 1,
+        finished: 1,
+        failed: 0,
+        cancelled: 0,
+        toolCalls: 0,
+        toolFailures: 0,
+        retries: 0,
+      },
+    ],
+    // A newer host may add a field; the window still reads the report.
+    addedLater: true,
+  };
+
+  it("posts the request to the diagnostics route and reads the report", async () => {
+    const fetch = vi.fn(async () => Response.json(report));
+    const client = createUsageClient({ baseUrl, fetch, windowCapability: capability });
+
+    const result = await client.diagnostics({ bucket: "day", timeZone: "Europe/Oslo" });
+
+    expect(result.turns).toBe(1);
+    expect(result.trend[0]?.key).toBe("2026-11-07");
+    expect(fetch).toHaveBeenCalledWith(
+      `${baseUrl}/api/usage/diagnostics`,
+      expect.objectContaining({ method: "POST" }),
+    );
+  });
+
+  it("says a refused read failed rather than returning an empty report", async () => {
+    const fetch = vi.fn(async () => Response.json({ error: "no" }, { status: 403 }));
+    const client = createUsageClient({ baseUrl, fetch, windowCapability: capability });
+
+    await expect(client.diagnostics({})).rejects.toBeInstanceOf(UsageClientError);
+  });
+});
+
+describe("UsageClient.hostHealth", () => {
+  it("reads the host's health history", async () => {
+    const fetch = vi.fn(async () =>
+      Response.json({
+        generatedAt: "2026-11-07T12:00:00.000Z",
+        resolution: "minute",
+        retentionDays: 14,
+        restarts: [],
+        samples: [],
+      }),
+    );
+    const client = createUsageClient({ baseUrl, fetch, windowCapability: capability });
+
+    const history = await client.hostHealth({ resolution: "minute" });
+
+    expect(history.retentionDays).toBe(14);
+    expect(fetch).toHaveBeenCalledWith(
+      `${baseUrl}/api/usage/host-health`,
+      expect.objectContaining({ method: "POST" }),
+    );
+  });
+});

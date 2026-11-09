@@ -8,6 +8,36 @@ and the composer are in [DESIGN.md](../../DESIGN.md#welcome-and-composer).
 Update this specification with an approved change, following the
 [design workflow](README.md#changing-the-design).
 
+## Optional capability card in Your first task
+
+The existing first-run readiness view, **Your first task**, includes an optional
+**Explore capabilities** card. It adds no setup step, progress count or readiness
+requirement, and appears on no New task or Code Home surface by itself.
+
+The card explains Browser, Computer use, helper agents and person memory. Browser
+names tool-transport support from the selected model's current host observation,
+including model-specific verification; it does not promise a future task's grants.
+Computer use reports the existing host setting and desktop support/permission
+facts when reported. Helper agents and memory read their current host settings.
+Missing, refused or failed reads say Not reported instead of assuming a default.
+The existing defaults remain unchanged.
+
+Each capability is a compact disclosure row showing its current state, with a static, labelled example when expanded. Viewing it starts no provider call,
+agent, Browser, desktop session, driver installation or permission request.
+**Review** links open the existing owning Settings surfaces, whose controls,
+server checks and refusal handling own every change. The card has no setting
+switch or new write path. A read-only surface omits those links; paired clients
+have no first-run capability card and acquire no local settings authority.
+Installation, package trust, enablement and task access remain separate.
+
+**Dismiss capability card** hides only this card for the current setup session.
+It records no setting or first-run outcome. Skip setup and Start a task retain
+their existing behavior and never depend on visiting or dismissing the card.
+Returning from Settings rereads current host facts and preserves the first-task
+draft. The card uses the shared card recipe, stacks at narrow widths and keeps
+all actions keyboard accessible. Its explanatory memory copy never claims that
+a host whose setting is off has memory on.
+
 ## Presentation
 
 ### Layout
@@ -45,8 +75,15 @@ mark (or the mode's glyph), the thread title, "Waiting 4m" with a pause glyph
 at the 12px step, the Project as meta text, and the request text clamped to two
 lines, with small buttons below (Approve filled, Deny ghost; a question's
 choices as outline buttons with a leading number, then a ghost Reply…; a
-decision's options the same way, the recommended one first with a trailing
-"Recommended" in meta text rather than a hue). Rows
+decision's options as full-width buttons with the recommended one first, a
+trailing "Recommended" in meta text rather than a hue, and the option's detail
+as a second meta line; a decision also shows its why as a meta paragraph under
+the ask, an "Urgent" tag in the warning role beside the wait when the agent
+marked it urgent, and an **Add note** control; when a second opinion exists, a meta line inside the recommended
+option's button naming the asking model and, inside the option the reviewer backs, a line naming the
+reviewer's model and its one-sentence reason, each led by a 12px provider mark, and a
+"Second opinion differs" tag in the warning role beside Urgent when the two options differ).
+Rows
 are told apart by a hairline, never a tinted fill, and the waiting state is a
 glyph and words with no hue. **Working now**
 lists up to five rows of threads and agent runs in progress, each with the
@@ -146,9 +183,29 @@ once-a-minute clock), and the text clamped to two lines. An approval offers
 matching number key picks it while the row has focus) and **Reply…**, which
 opens the thread so the answer is typed in its composer; a question without
 choices offers Reply… alone. A decision is the ask a finished turn closed with:
-its row shows the ask clamped to two lines, one numbered button per option with
-the recommended option first (first number, first in focus order) and marked
-"Recommended" in words, and **Reply…**. A subagent waiting on an approval or question is a row too, headed "Research
+its row shows the ask clamped to two lines and, when the agent gave one, the
+why beneath it (clamped to three lines inside a card that already names the
+thread, whole elsewhere). Each option is one full-width numbered button with the
+recommended option first (first number, first in focus order) and marked
+"Recommended" in words, and with its detail, when given, as a second line. An
+"Urgent" tag beside the wait appears when the agent marked the decision urgent;
+it is the agent's claim and changes no order. **Add note** (outside an embedding
+card) reveals a short text field: picking an option while it has text sends the
+option's words and the note, and Escape closes it; number keys type into the
+field rather than pick. **Reply…** opens the thread. When the person has chosen a second-opinion
+model (Settings › Providers & Models › Automatic model calls, off by default), a decision also
+shows who asked and who reviewed: inside the recommended option's button, under its detail, a small muted line with the asking
+thread's provider mark and model and "· asking thread", and inside the option the reviewer backs a
+line with the reviewer's mark and model and "· Second opinion: " and its reason (both inside one
+option when they agree, so each backer reads as part of the option it backs). A "Second opinion differs" tag sits beside Urgent when the reviewer backs
+another option. While the review is queued one muted line under the options says "Getting a second
+opinion…"; when none will come (the reviewer's answer could not be read, it read outside content,
+or the Project does not allow the chosen provider) it says "No second opinion" with the reason as
+its tooltip; with no model chosen, or while the chosen account cannot be asked, nothing shows.
+Inside an embedding card these lines stay to one line each. The opinion is advice: it never picks
+an option or changes the order. A decision can also be
+deferred with the same controls as a question, so it drops below the active
+requests until the chosen time or **Bring back now**. A subagent waiting on an approval or question is a row too, headed "Research
 subagent needs your approval" or "Review subagent asked a question" (the
 child's role), under the parent thread's title, with the child's task and the
 request text. It has one action, **Review request**, which opens the parent
@@ -165,8 +222,9 @@ this window has no reader (a remote window).
 The card holds no authority. An answer goes through the mode's own command with
 the handle the host listed, the same calls the open thread makes; a provider
 input response is kept as evidence first. A decision's option is the thread's
-ordinary next turn: its words go through the mode's own send command, kept as
-prompt evidence, with the authority the composer has in this window. An option
+ordinary next turn: its words, followed by the note when the person added one, go through the
+mode's own send command, kept as prompt evidence, with the authority the
+composer has in this window. An option
 is words, never an action: "merge it" is sent to the agent and merges nothing.
 The commands each mode uses are listed in
 [Host reads and commands](host-reads-and-commands.md#answering-a-waiting-request).
@@ -367,9 +425,23 @@ from the host's next list. The Inbox lists each decision, each waiting subagent,
 harness approval as the same row (a decision answered in place, a subagent
 request reviewed in its Agents tab, an approval reviewed in its thread, where
 the approval card decides it), above its other waiting threads, and a thread
-with a listed approval is not listed again as waiting for approval. A finished
-turn is never listed in the Inbox or counted by its tile or the dock badge; it
-belongs to To review, and its one-shot banner is unchanged. The list is read at a local
+with a listed approval is not listed again as waiting for approval. The Inbox
+is a triage view: a line under its title reads "N waiting", with "· M urgent" in
+the warning colour when any decision is marked urgent, and a single-choice group
+of chips (**All**, **Urgent**, **Decide**, **Stuck**, **Finished**, each with its
+count) narrows it. Urgent is the decisions marked urgent, Decide every decision,
+Stuck every approval, question and waiting subagent, and Finished the threads
+whose turn ended and wait for what is next. A chip with nothing stays in place
+with a count of 0, and its list says so in one line. Only All also shows the
+assigned GitHub and Linear work, and a due follow-up shows under All only. The
+waiting items are grouped under their Project (a folder mark, the Project name,
+its count, and "N urgent" when any), with waits that belong to no Project under
+"No Project". A group holding an urgent item that is not deferred comes first, then the group that
+has waited longest; inside a group urgent items lead, then the oldest, then
+deferred ones, urgent or not. The choice lives in the open Inbox and is not remembered. A
+finished turn is never counted by the Inbox's tile or the dock badge, and All
+does not list it; it belongs to To review (the Finished chip is the one place the
+Inbox lists it), and its one-shot banner is unchanged. The list is read at a local
 window only, so a remote window has no Needs you source. What it includes and leaves out is in
 [Architecture: pending requests across modes](../architecture.md#security-and-authority).
 With every window closed, the desktop menu bar carries the same waiting threads
@@ -389,7 +461,8 @@ without opening the thread,
 and a refusal shows as a notice. A question's choices are not listed, so its row
 opens the thread. A decision has one row (Enter opens the thread) and one
 command per option, titled with the option's words and the thread, so typing an
-option finds it; running one sends those words as the thread's next turn, the
+option finds it (its detail is part of the command's detail text, and there is
+no note here); running one sends those words as the thread's next turn, the
 same send the card makes. The palette reads the list each time it opens and never on a
 timer. With nothing waiting, or at a remote window, the group is absent, and the
 composer `/` list never carries it.

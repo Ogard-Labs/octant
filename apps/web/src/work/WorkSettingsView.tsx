@@ -6,6 +6,7 @@ import { SettingRow, SettingsSection } from "../settings/primitives";
 import { OctantToggleGroup, OctantToggleGroupItem } from "../ui/base/OctantToggleGroup";
 import type { WorkSettingsController } from "./useWorkSettings";
 import { OctantAlert } from "../ui/base/OctantAlert";
+import { OctantSwitch } from "../ui/base/OctantSwitch";
 import { FULL_ACCESS_WARNING, useFullAccessWarning } from "../code/FullAccessWarning";
 
 const ACCESS_NOTES: Readonly<Record<WorkAccess, string>> = {
@@ -124,6 +125,22 @@ export function WorkSettingsView(props: {
             <OctantToggleGroupItem value="full-access">Full access</OctantToggleGroupItem>
           </OctantToggleGroup>
           {warning.dialog}
+        </SettingRow>
+        <SettingRow
+          description="New Work threads at Full access run without prompts but keep writes in the Project folder and secret files closed. Works with Codex and Octant Harness models; a task can turn it off from its mode picker."
+          focused={props.focusedSetting === "work-full-access-sandbox"}
+          label="Keep the sandbox at Full access"
+          scope="host"
+          settingId="work-full-access-sandbox"
+        >
+          <OctantSwitch
+            checked={settings.defaultFullAccessSandbox === true}
+            disabled={props.controller.busy}
+            label="Keep the sandbox at Full access"
+            onCheckedChange={(checked) =>
+              void props.controller.update({ defaultFullAccessSandbox: checked })
+            }
+          />
         </SettingRow>
       </div>
     </SettingsSection>

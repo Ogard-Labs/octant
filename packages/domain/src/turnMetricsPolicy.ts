@@ -2,8 +2,15 @@ import type {
   ProviderRuntimeEvent,
   SessionMetrics,
   TurnMetrics,
+  TurnDiagnostics,
   TurnUsage,
 } from "@octant/contracts";
+import {
+  finishTurnDiagnostics,
+  observeTurnDiagnostics,
+  startTurnDiagnostics,
+  type TurnDiagnosticsState,
+} from "./turnDiagnosticsPolicy";
 
 /**
  * How fast a turn ran, derived once from the normalized runtime events every
@@ -59,6 +66,8 @@ export interface TurnMetricsState {
   readonly waitingSinceMs: number | undefined;
   /** Whether any tool call or wait happened inside the turn. */
   readonly sawToolTime: boolean;
+  /** What went wrong inside the turn, folded from the same events. */
+  readonly diagnostics: TurnDiagnosticsState;
 }
 
 interface ModelCall {
@@ -74,6 +83,7 @@ export interface TurnMetricsOutcome {
   readonly metrics: TurnMetrics;
   /** Absent when the provider reported no usage, which is not the same as zero. */
   readonly usage: TurnUsage | undefined;
+  readonly diagnostics: TurnDiagnostics;
 }
 
 export function startTurnMetrics(startedAt: string): TurnMetricsState {
@@ -91,6 +101,7 @@ export function startTurnMetrics(startedAt: string): TurnMetricsState {
     spans: [],
     waitingSinceMs: undefined,
     sawToolTime: false,
+    diagnostics: startTurnDiagnostics(),
   };
 }
 
@@ -109,6 +120,11 @@ export function observeTurnMetrics(
   state: TurnMetricsState,
   event: ProviderRuntimeEvent,
 ): TurnMetricsState {
+  const timed = observeTiming(state, event);
+  return { ...timed, diagnostics: observeTurnDiagnostics(state.diagnostics, event) };
+}
+
+function observeTiming(state: TurnMetricsState, event: ProviderRuntimeEvent): TurnMetricsState {
   const at = Date.parse(event.occurredAt);
   if (!Number.isFinite(at)) return state;
   const resumed =
@@ -216,7 +232,11 @@ export function finishTurnMetrics(state: TurnMetricsState, endedAt: string): Tur
     state.calls.length > 0
       ? measureRequests(state, wallMs, retries)
       : measureTurn(state, endedAtMs, wallMs, usage, retries);
-  return { metrics: measured ?? unavailable, usage };
+  return {
+    metrics: measured ?? unavailable,
+    usage,
+    diagnostics: finishTurnDiagnostics(state.diagnostics),
+  };
 }
 
 /** Each request timed on its own; the time between requests is tool time. */

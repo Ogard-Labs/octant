@@ -104,6 +104,10 @@ export const BrowserToolApproval = Schema.Struct({
       reason: Schema.optional(Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(300))),
     }).annotations(strict),
   ),
+  /** One exact-source script; never a remembered origin permission. */
+  script: Schema.optional(
+    Schema.Struct({ source: Schema.String.pipe(Schema.maxLength(8192)) }).annotations(strict),
+  ),
   requestedAt: UtcTimestamp,
 }).annotations({ ...strict, ...personDecides });
 export type BrowserToolApproval = typeof BrowserToolApproval.Type;

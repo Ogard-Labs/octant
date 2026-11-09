@@ -1,0 +1,148 @@
+/**
+ * Diagnostics page additions to the Usage styling. The dashboard's charts are
+ * Canvas visuals with their own legends and tables; these rules only lay out
+ * their cards, the host-health strips, and the details below.
+ */
+
+.turn-diagnostics__details summary {
+  color: var(--oct-muted);
+  cursor: pointer;
+  font-size: var(--oct-text-xs);
+}
+
+.usage-table td.turn-diagnostics__message {
+  min-width: 240px;
+  max-width: 480px;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+.turn-diagnostics__toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--oct-space-2);
+}
+
+/*
+ * One shrinkable column. Without it the page's single grid track grows to the
+ * widest table's content, and embedded in Settings at phone width the whole
+ * view spilled past the screen instead of the tables scrolling inside.
+ */
+.turn-diagnostics {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.host-health__grid {
+  display: grid;
+  /* A grid item sizes to its content by default; this one must shrink to the
+     section so its columns are counted from the screen width. */
+  min-width: 0;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 260px), 1fr));
+  gap: var(--oct-space-3);
+}
+
+.host-health__metric {
+  display: grid;
+  min-width: 0;
+  gap: var(--oct-space-1);
+  margin: 0;
+  padding: var(--oct-space-3);
+  background: var(--oct-surface);
+  border: 1px solid var(--oct-border);
+  border-radius: var(--oct-radius-md);
+}
+
+.host-health__metric figcaption {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: var(--oct-space-1) var(--oct-space-2);
+  font-size: var(--oct-text-xs);
+}
+
+.host-health__label {
+  color: var(--oct-fg);
+}
+
+.host-health__peak {
+  color: var(--oct-muted);
+}
+
+.host-health__bars {
+  display: flex;
+  height: 56px;
+  align-items: flex-end;
+  gap: 1px;
+  margin: 0;
+  padding: 0;
+  overflow: hidden;
+  border-bottom: 1px solid var(--oct-border);
+  list-style: none;
+}
+
+.host-health__bar {
+  min-width: 1px;
+  flex: 1 1 0;
+  background: var(--oct-accent);
+  border-radius: 2px 2px 0 0;
+}
+
+/* Sections size to the page column, never to their widest content. */
+.turn-diagnostics .surface-section {
+  min-width: 0;
+}
+
+.diagnostics-dashboard__kpis {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 180px), 1fr));
+  gap: var(--oct-space-2);
+  min-width: 0;
+}
+
+.diagnostics-dashboard__kpi {
+  min-width: 0;
+  padding: var(--oct-space-3);
+  background: var(--oct-surface);
+  border: 1px solid var(--oct-border);
+  border-radius: var(--oct-radius-md);
+}
+
+.diagnostics-dashboard__pair {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 320px), 1fr));
+  gap: var(--oct-space-3);
+  min-width: 0;
+}
+
+.diagnostics-dashboard__panel {
+  display: grid;
+  min-width: 0;
+  gap: var(--oct-space-2);
+  padding: var(--oct-space-3);
+  background: var(--oct-surface);
+  border: 1px solid var(--oct-border);
+  border-radius: var(--oct-radius-md);
+}
+
+.diagnostics-dashboard__details-heading {
+  margin: var(--oct-space-3) 0 0;
+  color: var(--oct-muted);
+  font-size: var(--oct-text-sm);
+  font-weight: 500;
+}
+
+.turn-diagnostics__same-prompt {
+  display: flex;
+  flex-direction: column;
+  gap: var(--oct-space-2);
+}
+
+.turn-diagnostics__same-prompt-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--oct-space-3);
+  color: var(--oct-muted);
+  font-size: var(--oct-text-xs);
+}

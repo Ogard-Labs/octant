@@ -7,6 +7,7 @@ import type { SettingsSettingId } from "@octant/contracts";
 import {
   AUTOMATIC_MODEL_DISCLOSURE,
   AUTOMATIC_MODEL_NO_SWITCH_NOTE,
+  DECISION_REVIEW_OFF_LABEL,
   automaticModelUnavailableReason,
   type AutomaticModelJob,
 } from "@octant/domain/automatic-model-policy";
@@ -26,7 +27,7 @@ export interface AutomaticModelSettingsProps {
 }
 
 export const AUTOMATIC_MODEL_INTRO =
-  "Some work Octant does for you without being asked: judging an action when Auto is on, and writing memory after a thread. Each job uses the provider of the thread it is about, with that provider's smallest model, unless you choose an account and model here. Every call shows in Usage.";
+  "Some work Octant does for you without being asked: judging an action when Auto is on, and writing memory after a thread. Each job uses the provider of the thread it is about, with that provider's smallest model, unless you choose an account and model here. A second opinion on decisions has no default: it stays off until you choose an account and model. Every call shows in Usage.";
 
 const DEFAULT_LABEL = "The thread's provider, smallest model";
 
@@ -46,13 +47,15 @@ export const modelValue = (choice: ShieldModelChoice | undefined) =>
 export function shieldModelOptions(
   snapshot: ProviderRegistrySnapshot | undefined,
   current: ShieldModelChoice | undefined,
+  /** What the first option, which stands for no choice, is called. */
+  defaultLabel: string = DEFAULT_LABEL,
 ): ReadonlyArray<{
   readonly id: string;
   readonly label: string;
   readonly choice?: ShieldModelChoice;
 }> {
   const options: Array<{ id: string; label: string; choice?: ShieldModelChoice }> = [
-    { id: THREAD_PROVIDER_MODEL, label: DEFAULT_LABEL },
+    { id: THREAD_PROVIDER_MODEL, label: defaultLabel },
   ];
   for (const instance of snapshot?.instances ?? []) {
     if (!instance.enabled) continue;
@@ -112,6 +115,7 @@ function accountProblem(
 const CONSEQUENCE: Readonly<Record<AutomaticModelJob, string>> = {
   "shield-judge": "Until it is back, the Judge asks you about each action.",
   "person-memory": "Until it is back, memory waits and tries again later.",
+  "decision-review": "Until it is back, decisions show no second opinion.",
 };
 
 /**
@@ -145,6 +149,12 @@ export function AutomaticModelSettings(props: AutomaticModelSettingsProps) {
   const memoryChoice = memory?.settings.distillModel;
   const judgeOptions = shieldModelOptions(props.providerSnapshot, judgeChoice);
   const memoryOptions = shieldModelOptions(props.providerSnapshot, memoryChoice);
+  const reviewChoice = memory?.settings.decisionReviewModel;
+  const reviewOptions = shieldModelOptions(
+    props.providerSnapshot,
+    reviewChoice,
+    DECISION_REVIEW_OFF_LABEL,
+  );
   const [judgeValue, setJudgeValue] = useState(modelValue(judgeChoice));
   const [seenJudge, setSeenJudge] = useState(judgeChoice);
   if (seenJudge !== judgeChoice) {
@@ -213,6 +223,36 @@ export function AutomaticModelSettings(props: AutomaticModelSettingsProps) {
     }
   }
 
+  async function chooseReview(value: string) {
+    if (client === undefined || memory === undefined) return;
+    const option = reviewOptions.find((candidate) => candidate.id === value);
+    if (option === undefined || option.id === modelValue(reviewChoice)) return;
+    const { decisionReviewModel: _previous, ...rest }: PersonMemorySettings = memory.settings;
+    const settings: PersonMemorySettings =
+      value === THREAD_PROVIDER_MODEL || option.choice === undefined
+        ? rest
+        : { ...rest, decisionReviewModel: option.choice };
+    setBusy(true);
+    setProblem(undefined);
+    try {
+      const result = await client.change({
+        kind: "change-person-memory-settings",
+        expectedVersion: memory.version,
+        settings,
+      });
+      if (result.kind === "person-memory") {
+        setMemory(result);
+      } else {
+        setProblem(result.message);
+        await load();
+      }
+    } catch {
+      setProblem("The second opinion's model could not be saved.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
   const memoryAvailable = client !== undefined && !memoryFailed;
   return (
     <SettingsSection description={AUTOMATIC_MODEL_INTRO} title="Automatic model calls">
@@ -257,6 +297,32 @@ export function AutomaticModelSettings(props: AutomaticModelSettingsProps) {
             <span className="settings-state">Shown on the host machine only.</span>
           )}
         </SettingRow>
+        <SettingRow
+          description={
+            <JobNote
+              choice={reviewChoice}
+              job="decision-review"
+              snapshot={props.providerSnapshot}
+            />
+          }
+          focused={props.focusedSetting === "automatic-model-decision-review"}
+          label="Second opinion on decisions"
+          scope="host"
+          settingId="automatic-model-decision-review"
+        >
+          {memoryAvailable ? (
+            <OctantSelectField
+              aria-label="Model for second opinions on decisions"
+              className="settings-view__select window-no-drag"
+              disabled={busy || memory === undefined}
+              onValueChange={(value) => void chooseReview(value)}
+              options={reviewOptions.map(({ id, label }) => ({ id, label }))}
+              value={modelValue(reviewChoice)}
+            />
+          ) : (
+            <span className="settings-state">Shown on the host machine only.</span>
+          )}
+        </SettingRow>
       </div>
       <p className="setgroup-note">{AUTOMATIC_MODEL_NO_SWITCH_NOTE}</p>
       {problem === undefined ? null : <SettingsState kind="error">{problem}</SettingsState>}
@@ -270,6 +336,10 @@ function JobNote(props: {
   readonly snapshot: ProviderRegistrySnapshot | undefined;
 }) {
   const unavailable = accountProblem(props.snapshot, props.choice);
+  // A second opinion goes nowhere until an account is chosen.
+  if (props.job === "decision-review" && props.choice === undefined) {
+    return <>{AUTOMATIC_MODEL_DISCLOSURE[props.job]} While it is off, nothing is sent.</>;
+  }
   return (
     <>
       {AUTOMATIC_MODEL_DISCLOSURE[props.job]} It goes to {destination(props.snapshot, props.choice)}

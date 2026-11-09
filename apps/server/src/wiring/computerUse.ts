@@ -12,7 +12,10 @@ import {
   decodeCodeThreadId,
   decodeWindowId,
   decodeWorkThreadId,
+  type DesktopPreviewRequest,
+  type DesktopPreviewAnswer,
 } from "@octant/contracts";
+import type { DesktopLeaseCaller } from "../computerUse/desktopLeaseService";
 import { createMachineChangeRouteHandler } from "../machineChangeRoutes";
 import { decodeBrowserThreadId } from "@octant/contracts/browser-automation";
 import { createComputerUseRuntime } from "../computerUse/computerUseRuntime";
@@ -545,7 +548,18 @@ export function wireComputerUse(deps: ComputerUseDependencies) {
     launchSessionStore,
     windowAuthorityStore,
   });
+  let previewRequest:
+    | ((
+        caller: DesktopLeaseCaller & {
+          readonly leaseId: import("@octant/contracts").DesktopLeaseId;
+        },
+        request: DesktopPreviewRequest,
+      ) => Promise<DesktopPreviewAnswer>)
+    | undefined;
   const desktopPaneRoutes = createDesktopPaneRouteHandler({
+    previews: (caller, request) =>
+      previewRequest?.(caller, request) ??
+      Promise.resolve({ status: "preview-refused", reason: "unavailable" }),
     windowAuthorityStore,
     service: desktopLeases,
     recipeKey: (projectId) => {
@@ -574,6 +588,10 @@ export function wireComputerUse(deps: ComputerUseDependencies) {
     computerUseRuntime,
     computerUseTools,
     desktopPaneRoutes,
+    desktopLeases,
+    installDesktopPreviewRequest: (request: NonNullable<typeof previewRequest>) => {
+      previewRequest = request;
+    },
     /** Where a Project's desktop recipe keeps the key a cloud provider reads. */
     desktopRecipeKeys,
     launchSessionRoutes,

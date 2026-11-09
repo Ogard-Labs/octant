@@ -28,8 +28,24 @@ export function createMobileListenerFetch(input: {
     const pinned =
       trust !== undefined &&
       (trust.current.kind === "pinned" || trust.staged?.trust.kind === "pinned");
-    if (trust === undefined || !pinned) return input.platformFetch(request, init);
-    const transport = input.pinnedTransport({ origin, trust });
+    if (record === undefined || trust === undefined || !pinned)
+      return input.platformFetch(request, init);
+    const transport = input.pinnedTransport({
+      origin,
+      trust,
+      hostId: record.hostId,
+      onTrust: async (previous, next) => {
+        const current = await input.deviceKeyStore.findByOrigin(origin);
+        if (current?.keyId !== record.keyId) {
+          throw new TypeError("The computer's pairing changed.");
+        }
+        if (JSON.stringify(current.listenerTrust) === JSON.stringify(next)) return;
+        if (JSON.stringify(current.listenerTrust) !== JSON.stringify(previous))
+          throw new TypeError("The computer's pairing changed.");
+        if (!(await input.deviceKeyStore.updateListenerTrust?.(current.keyId, previous, next)))
+          throw new TypeError("The computer's pairing changed.");
+      },
+    });
     if (transport.status === "unavailable") throw new TypeError(NO_PINNED_TRANSPORT_COPY);
     return transport.fetch(request, init);
   };

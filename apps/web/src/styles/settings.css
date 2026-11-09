@@ -3771,3 +3771,21 @@ html[data-octant-increased-contrast="true"]
   align-items: center;
   gap: var(--oct-space-2);
 }
+
+.remote-setup__choices {
+  flex-wrap: wrap;
+}
+
+.remote-setup__details {
+  display: grid;
+  gap: var(--oct-space-3);
+  margin-top: var(--oct-space-3);
+  justify-items: start;
+}
+
+.remote-setup__steps {
+  display: grid;
+  gap: var(--oct-space-2);
+  padding-inline-start: var(--oct-space-4);
+  list-style: decimal;
+}

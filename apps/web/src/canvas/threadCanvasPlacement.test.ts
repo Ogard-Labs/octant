@@ -1,6 +1,6 @@
 import type { CanvasThreadReferenceCard } from "@octant/contracts/canvas-cards";
 import { describe, expect, it } from "vitest";
-import { placeThreadCanvases, threadTurnSpans } from "./threadCanvasPlacement";
+import { placeByTurn, placeThreadCanvases, threadTurnSpans } from "./threadCanvasPlacement";
 
 interface Row {
   readonly key: string;
@@ -69,5 +69,25 @@ describe("placing Canvases in a transcript", () => {
       "sidebar",
     ]);
     expect([...placement.placed]).toEqual(["sidebar"]);
+  });
+});
+
+describe("placing anything a turn made in a transcript", () => {
+  it("puts each item after the turn that made it and leaves earlier or undated ones for the list", () => {
+    const items = [
+      { id: "before", at: "2026-10-06T08:59:00.000Z" },
+      { id: "second", at: "2026-10-06T09:12:00.000Z" },
+      { id: "first", at: "2026-10-06T09:05:00.000Z" },
+      { id: "undated" },
+    ];
+    const placement = placeByTurn(
+      turns,
+      items,
+      (item) => item.at,
+      (item) => item.id,
+    );
+    expect(placement.byRow.get("reply-1b")?.map((item) => item.id)).toEqual(["first"]);
+    expect(placement.byRow.get("reply-2")?.map((item) => item.id)).toEqual(["second"]);
+    expect([...placement.placed].sort()).toEqual(["first", "second"]);
   });
 });

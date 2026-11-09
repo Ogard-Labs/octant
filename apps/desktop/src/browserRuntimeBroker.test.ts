@@ -1,3 +1,6 @@
+import { Server } from "node:http";
+import { connect } from "node:net";
+import { once } from "node:events";
 import { decodeBrowserPageScriptPlanId } from "@octant/contracts/browser-page-script";
 import { describe, expect, it, vi } from "vitest";
 import { startBrowserRuntimeBroker } from "./browserRuntimeBroker";
@@ -63,6 +66,97 @@ function host() {
 }
 
 describe("BrowserRuntimeBroker", () => {
+  it("cleans up acquired surfaces and subscriptions when the loopback listener fails", async () => {
+    const base = createBrowserSurfaceHost({
+      createView: () => {
+        throw new Error("No native page in this fixture");
+      },
+    });
+    const gone = vi.fn();
+    const person = vi.fn();
+    const closeAll = vi.fn(base.closeAll);
+    const failed = new Error("synthetic listen failure");
+    const listen = vi
+      .spyOn(Server.prototype, "listen")
+      .mockImplementationOnce(function (this: Server) {
+        queueMicrotask(() => this.emit("error", failed));
+        return this;
+      });
+    try {
+      await expect(
+        startBrowserRuntimeBroker({
+          ...base,
+          onContextGone: () => gone,
+          onPersonInput: () => person,
+          closeAll,
+        }),
+      ).rejects.toBe(failed);
+      expect(gone).toHaveBeenCalledOnce();
+      expect(person).toHaveBeenCalledOnce();
+      expect(closeAll).toHaveBeenCalledOnce();
+    } finally {
+      listen.mockRestore();
+      await base.closeAll();
+    }
+  });
+
+  it("closes the real listener and held connections even when surface cleanup fails", async () => {
+    const base = createBrowserSurfaceHost({
+      createView: () => {
+        throw new Error("No native page in this fixture");
+      },
+    });
+    const gone = vi.fn();
+    const person = vi.fn();
+    const failed = new Error("synthetic surface close failure");
+    const closeAll = vi.fn(async () => {
+      throw failed;
+    });
+    let server: Server | undefined;
+    const originalAddress = Server.prototype.address;
+    const address = vi
+      .spyOn(Server.prototype, "address")
+      .mockImplementation(function (this: Server) {
+        server = this;
+        return originalAddress.call(this);
+      });
+    const broker = await startBrowserRuntimeBroker({
+      ...base,
+      onContextGone: () => gone,
+      onPersonInput: () => person,
+      closeAll,
+    });
+    address.mockRestore();
+    const socket = connect(Number(new URL(broker.url).port), "127.0.0.1");
+    socket.on("error", () => undefined);
+    try {
+      await once(socket, "connect");
+      const disconnected = new Promise<void>((resolve) => socket.once("close", () => resolve()));
+      socket.write(
+        "POST /v1/available HTTP/1.1\r\nHost: 127.0.0.1\r\nContent-Length: 1000\r\n\r\n{",
+      );
+      const closing = broker.close();
+      expect(broker.close()).toBe(closing);
+      await expect(closing).rejects.toThrow();
+      expect(server?.listening).toBe(false);
+      await disconnected;
+      await expect(fetch(broker.url)).rejects.toThrow();
+      expect(gone).toHaveBeenCalledOnce();
+      expect(person).toHaveBeenCalledOnce();
+      expect(closeAll).toHaveBeenCalledOnce();
+    } finally {
+      socket.destroy();
+      if (server?.listening) {
+        const owned = server;
+        await new Promise<void>((resolve) => {
+          owned.close(() => resolve());
+          owned.closeAllConnections();
+        });
+      }
+      await base.closeAll();
+    }
+  });
+
   it("cancels queued owner input on a complete POST disconnect and refuses untyped or unauthenticated native requests", async () => {
     const base = createBrowserSurfaceHost({
       createView: () => {
