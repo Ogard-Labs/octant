@@ -13009,6 +13009,13 @@ approval-gated` command that undoes it. The terminal shows no one-time
     budget is charged, a source over its ticket allowance is refused before the
     read, and a source may have at most four such reads open at once (a
     second's bound each); its surplus is refused without a read.
+    The hello of an already paired browser shares that budget, and a reload
+    spends several hellos, so a few reloads in a minute can draw a 429. A client
+    treats that 429 as the host asking it to wait, never as a rejection: the
+    pairing and device key stay, the person sees a "Too many requests" notice
+    instead of "Pairing failed", and the resume runs again once the
+    `Retry-After` the host named has passed (a minute when it names none, at
+    most five). The budget itself is unchanged.
     A person who approves after the window has failed, closed, or never
     reached the key step leaves an approved device that no client holds a key
     for, so the host removes it: an approved device that has not signed in once

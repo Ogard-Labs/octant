@@ -17,6 +17,7 @@ import { createPairingDeviceKeyAdapter } from "./pairingDeviceKeyAdapter";
 import type { ListenerOriginTrust } from "./remoteListenerTrust";
 import {
   createRemoteConnection,
+  rateLimitedConnectionError,
   requireProvenHostHello,
   RemoteConnectionError,
   type RemoteConnection,
@@ -50,6 +51,8 @@ export type RemoteSessionBridgeState =
   | {
       readonly kind: "unavailable";
       readonly reason: string;
+      /** Present when the host rate limited this device and named a wait. */
+      readonly retryAfterMs?: number;
       readonly hostId?: string;
       readonly displayName?: string;
     };
@@ -213,7 +216,12 @@ export function createRemoteSessionBridge(
             ...partial,
           };
         case "unavailable":
-          return { kind: "unavailable", reason: error.message, ...partial };
+          return {
+            kind: "unavailable",
+            reason: error.message,
+            ...(error.retryAfterMs === undefined ? {} : { retryAfterMs: error.retryAfterMs }),
+            ...partial,
+          };
         default:
           return { kind: "unavailable", reason: error.message, ...partial };
       }
@@ -229,6 +237,9 @@ export function createRemoteSessionBridge(
     });
     if (helloResponse.status === HOST_HELLO_OUTDATED_STATUS) {
       throw new RemoteConnectionError("incompatible", HOST_OUTDATED_MESSAGE);
+    }
+    if (helloResponse.status === 429) {
+      throw rateLimitedConnectionError(helloResponse.headers.get("retry-after"));
     }
     if (!helloResponse.ok) {
       throw new RemoteConnectionError("unavailable", "Remote host hello failed.");
