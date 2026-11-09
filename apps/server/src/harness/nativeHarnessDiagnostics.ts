@@ -524,8 +524,7 @@ export async function runNativeHarnessDiagnostics(
     const admission = await admitNativeHarnessTool(options, {
       name: "bash",
       args: { command },
-      // The request refuses an intent with trailing space, which a cut can leave.
-      intent: `bash: ${command}`.slice(0, 2_048).trimEnd(),
+      intent: `bash: ${command}`.slice(0, 2_048),
       ...(signal === undefined ? {} : { signal }),
     });
     if (admission.status === "refused") {

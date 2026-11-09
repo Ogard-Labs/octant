@@ -1184,7 +1184,18 @@ describe("native harness composition", () => {
           inputJson: JSON.stringify({ command }),
           signal: new AbortController().signal,
         });
-      return { ran, asked, reviewed, shown, review, bash, recorded, tagged, forgeRecorded };
+      return {
+        composition,
+        ran,
+        asked,
+        reviewed,
+        shown,
+        review,
+        bash,
+        recorded,
+        tagged,
+        forgeRecorded,
+      };
     };
 
     it("refuses a Full access merge or a push to another thread's branch before it runs, and journals it", async () => {
@@ -1383,6 +1394,20 @@ describe("native harness composition", () => {
       );
       expect(harness.reviewed).not.toHaveBeenCalled();
       expect(harness.ran).toEqual(["ls -la"]);
+    });
+
+    it("admits a long Code command whose approval summary is cut at a space or inside wide characters", async () => {
+      const harness = setup({ fullAccessTag: "not-tagged" });
+      // "bash: " plus 2,041 characters puts the 2,048-character cut on the space.
+      for (const command of [`echo ${"x".repeat(2_036)} ${"y".repeat(100)}`, "é".repeat(3_000)]) {
+        const prepared = await harness.composition.prepareCodeCommand({
+          thread: autoThread,
+          checkoutRoot: "/Users/dev/app",
+          windowId: "window-1",
+          command,
+        });
+        expect(prepared).toMatchObject({ status: "admitted" });
+      }
     });
 
     it("asks the person as before when Shield is not the thread's reviewer", async () => {
