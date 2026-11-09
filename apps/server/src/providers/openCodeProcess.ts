@@ -83,6 +83,13 @@ export interface OpenCodeProcessStartInput {
   readonly mode?: "chat" | "work" | "code";
   /** Effective thread policy used to derive filesystem/process/network limits. */
   readonly executionPolicy?: ProviderExecutionPolicy;
+  /**
+   * A Full access thread that keeps the sandbox: its permission rules stay
+   * Full access's (the caller passes them), but the server takes the wall,
+   * network and server access Accept edits has. Absent, Full access runs
+   * unwrapped.
+   */
+  readonly fullAccessSandbox?: boolean;
   /** Exact loopback ports owned by this connection's app-managed tool bridges. */
   readonly loopbackPorts?: ReadonlyArray<number>;
   /**
@@ -994,6 +1001,18 @@ function prepareGitStandinDirectory(profile: PrivateOpenCodeProfile): string {
   return binDirectory;
 }
 
+/**
+ * The posture OpenCode's wall is built for. A Full access thread that keeps
+ * the sandbox is confined as Accept edits is (writes held to the Project,
+ * shell allowed, guarded network); its permission rules stay Full access's.
+ */
+function openCodeWallPolicy(input: OpenCodeProcessStartInput): ProviderExecutionPolicy {
+  const executionPolicy = input.executionPolicy ?? "approval-gated";
+  return executionPolicy === "full-access" && input.fullAccessSandbox === true
+    ? "auto-accept-edits"
+    : executionPolicy;
+}
+
 function prepareOpenCodeLaunch(
   input: OpenCodeProcessStartInput,
   profile: PrivateOpenCodeProfile,
@@ -1003,7 +1022,7 @@ function prepareOpenCodeLaunch(
   platform: NodeJS.Platform,
 ): Effect.Effect<OpenCodeLaunch, ProviderFailure> {
   const mode = input.mode ?? "code";
-  const executionPolicy = input.executionPolicy ?? "approval-gated";
+  const executionPolicy = openCodeWallPolicy(input);
   // OpenCode 2 removed the legacy `--pure` serve flag. Keep the runtime
   // protocol selected by the version probe aligned with its CLI contract.
   const args = openCodeServerArgs(runtime, port);
@@ -1633,7 +1652,7 @@ export function makeOpenCodeProcessLive(
           catch: () =>
             failure("invalid-configuration", "OpenCode runtime routing could not be prepared."),
         });
-        const executionPolicy = input.executionPolicy ?? "approval-gated";
+        const executionPolicy = openCodeWallPolicy(input);
         const network =
           executionPolicy === "full-access"
             ? undefined

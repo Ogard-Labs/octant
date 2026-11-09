@@ -1171,6 +1171,14 @@ export function makeOfficialOpenCodeClient(
   };
 }
 
+/** A Full access session that keeps the sandbox, which its server must be launched inside. */
+function keepsFullAccessSandbox(input: {
+  readonly executionPolicy: ProviderExecutionPolicy;
+  readonly fullAccessSandbox?: boolean;
+}): boolean {
+  return input.executionPolicy === "full-access" && input.fullAccessSandbox === true;
+}
+
 export function makeOpenCodeDriver(options: OpenCodeDriverOptions): ProviderDriver {
   const clientFactory = options.clientFactory ?? makeOfficialOpenCodeClient;
   const clock = options.clock ?? (() => new Date().toISOString());
@@ -1471,6 +1479,8 @@ function makeConnection(
     let runtimeScope: Scope.CloseableScope | undefined;
     let processMonitor: { readonly exited: Promise<void>; readonly cancel: () => void } | undefined;
     let runtimePolicy: ProviderExecutionPolicy | undefined;
+    // Whether the running server was launched inside the Full access sandbox.
+    let runtimeFullAccessSandbox = false;
     let runtimeOwnSkills = false;
     let runtimeOwnSetupKey = ownSetupKey(undefined);
     let runtimeKind: "legacy" | "beta" | undefined;
@@ -1682,6 +1692,7 @@ function makeConnection(
       client = undefined;
       runtimePolicy = undefined;
       runtimeOwnSkills = false;
+      runtimeFullAccessSandbox = false;
       runtimeOwnSetupKey = ownSetupKey(undefined);
       runtimeVersion = undefined;
       runtimeIsolated = false;
@@ -1690,6 +1701,7 @@ function makeConnection(
     };
     const ensureRuntime = (
       executionPolicy: ProviderExecutionPolicy,
+      fullAccessSandbox: boolean,
       loopbackPorts: ReadonlyArray<number>,
       managedToolServerName: string | undefined,
       ownSkills: boolean,
@@ -1702,6 +1714,7 @@ function makeConnection(
             // private configuration, which cannot change once it runs.
             if (
               runtimePolicy !== executionPolicy ||
+              runtimeFullAccessSandbox !== fullAccessSandbox ||
               runtimeOwnSkills !== ownSkills ||
               runtimeOwnSetupKey !== ownSetupKey(ownSetup)
             ) {
@@ -1728,6 +1741,7 @@ function makeConnection(
                   ...(extraFolders.length === 0 ? {} : { extraFolders }),
                   mode,
                   executionPolicy,
+                  ...(fullAccessSandbox ? { fullAccessSandbox: true } : {}),
                   ...(ownSkills ? { ownSkills: true as const } : {}),
                   ...(ownSetup === undefined || !ownSetup.toolServers
                     ? {}
@@ -1758,6 +1772,7 @@ function makeConnection(
             runtimeScope = scope;
             processMonitor = monitor;
             runtimePolicy = executionPolicy;
+            runtimeFullAccessSandbox = fullAccessSandbox;
             runtimeOwnSkills = ownSkills;
             runtimeOwnSetupKey = ownSetupKey(ownSetup);
             runtimeKind = started.runtime ?? "legacy";
@@ -2109,6 +2124,7 @@ function makeConnection(
             Effect.flatMap(() =>
               ensureRuntime(
                 input.executionPolicy,
+                keepsFullAccessSandbox(input),
                 state.managedTools === undefined ? [] : [state.managedTools.bridge.port],
                 state.managedTools?.serverName,
                 state.nativeSetup?.skills === true,
@@ -2271,6 +2287,7 @@ function makeConnection(
                 Effect.flatMap(() =>
                   ensureRuntime(
                     input.executionPolicy,
+                    keepsFullAccessSandbox(input),
                     state.managedTools === undefined ? [] : [state.managedTools.bridge.port],
                     state.managedTools?.serverName,
                     state.nativeSetup?.skills === true,
