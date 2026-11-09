@@ -14584,11 +14584,18 @@ approval-gated` command that undoes it. The terminal shows no one-time
   its compiled base `https://octant.sh/updates` and requests
   `<ring>/<file>`; octant.sh redirects that path to
   `https://github.com/Ogard-Labs/octant/releases/download/feed-<ring>/<file>`.
-  The updater follows that cross-host redirect, and the signature and artifact
-  hash checks never depend on the host that served the bytes. The mailbox tags
-  do not start with `v`, so no rule scoped to version tags reaches them. Whoever
-  can write release assets in the repository can withhold a ring's updates, and
-  nothing more, for the reason above.
+  The updater follows that cross-host redirect itself, at most five hops, and
+  every hop remains HTTPS without URL credentials. The configured feed origin
+  and a signed artifact origin retain their explicit authority, including a
+  private self-hosted origin; a redirect that widens to another origin resolves
+  and connects only to globally reachable addresses, pinned at socket lookup so
+  DNS cannot rebind after validation. Feed bodies stop at 64 KiB and 30 seconds;
+  artifact bodies stream only to their configured size limit and stop at 15
+  minutes. Redirect and oversized bodies are canceled. The signature and
+  artifact hash checks never depend on the host that served the bytes. The
+  mailbox tags do not start with `v`, so no rule scoped to version tags reaches
+  them. Whoever can write release assets in the repository can withhold a
+  ring's updates, and nothing more, for the reason above.
 
 **Proposed, not accepted: Claude sign-in inside Anthropic's terms.** Octant
 would not mint, store, or inject a Claude setup or OAuth token. Claude

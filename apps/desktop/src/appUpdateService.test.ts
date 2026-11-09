@@ -1,6 +1,7 @@
 import { createHash, generateKeyPairSync, sign } from "node:crypto";
-import { createServer, Server } from "node:http";
-import type { AddressInfo } from "node:net";
+import { EventEmitter } from "node:events";
+import { Server } from "node:http";
+import { Readable } from "node:stream";
 import type {
   AppReleaseRing,
   AppUpdateProduct,
@@ -13,7 +14,7 @@ import {
 } from "@octant/contracts/app-updates";
 import { canonicalReleaseBytes, canonicalReleaseBytesWithoutProduct } from "@octant/domain";
 import { DESKTOP_FLAVOR_IDENTITIES, RELEASE_TRUSTED_KEYS } from "@octant/host-runtime";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import {
   createFeedVerifier,
   DEFAULT_OCTANT_UPDATE_FEED_BASE_URL,
@@ -27,6 +28,7 @@ import {
   UPDATE_FEED_BASE_URL_ENVIRONMENT_VARIABLE,
   updateFeedUrl,
 } from "./appUpdateFeed";
+import { createPinnedUpdateFetch, isPrivateAddress } from "./updateHttpsTransport";
 import {
   createAppUpdateService,
   supportsSignedDesktopUpdateChannel,
@@ -322,50 +324,33 @@ describe("update verification", () => {
 });
 
 describe("a feed behind a cross-host redirect", () => {
-  const servers: Server[] = [];
-  async function listen(handler: Parameters<typeof createServer>[1]): Promise<number> {
-    const server = createServer(handler);
-    servers.push(server);
-    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
-    return (server.address() as AddressInfo).port;
-  }
-  afterEach(async () => {
-    await Promise.all(
-      servers.splice(0).map((server) => new Promise<void>((done) => server.close(() => done()))),
-    );
-  });
-
   it("follows the 302 to a file served from another host and still verifies it", async () => {
-    // The public address answers 302 and the file comes from a different origin
-    // (release assets on GitHub). Real sockets, so the redirect is followed by
-    // the real fetch with the exact options the updater sends.
     let seenPath = "";
-    const target = await listen((request, response) => {
-      seenPath = request.url ?? "";
-      response.writeHead(200, { "content-type": "application/octet-stream" });
-      response.end(JSON.stringify(signedFeed()));
-    });
-    const front = await listen((request, response) => {
-      const file = new URL(request.url ?? "/", "http://front.test").pathname.split("/").pop();
-      response.writeHead(302, { location: `http://127.0.0.1:${target}/feed-stable/${file}` });
-      response.end();
-    });
-    // The updater requires https for the compiled endpoint; only the transport
-    // is swapped here, the request options are passed through untouched.
-    const viaLoopback = ((input: string, init?: RequestInit) =>
-      globalThis.fetch(
-        input.replace("https://updates.example.test", `http://127.0.0.1:${front}`),
-        init,
-      )) as typeof globalThis.fetch;
+    const fetchImpl = vi.fn(async (input: string) => {
+      const url = new URL(input);
+      if (url.hostname === "updates.example.test") {
+        const file = url.pathname.split("/").pop();
+        return new Response(null, {
+          status: 302,
+          headers: {
+            location: `https://github.com/Ogard-Labs/octant/releases/download/feed-stable/${file}`,
+          },
+        });
+      }
+      seenPath = url.pathname;
+      return new Response(JSON.stringify(signedFeed()), { status: 200 });
+    }) as unknown as typeof globalThis.fetch;
 
     const fetched = await fetchUpdateFeed(
       FEED_URL,
       { version: "0.2.0", platform: "darwin", arch: "arm64" },
-      viaLoopback,
+      fetchImpl,
     );
 
     expect(fetched.kind).toBe("fetched");
-    expect(seenPath).toBe("/feed-stable/darwin-arm64.json");
+    expect(seenPath).toBe("/Ogard-Labs/octant/releases/download/feed-stable/darwin-arm64.json");
+    expect(fetchImpl).toHaveBeenCalledTimes(2);
+    expect(vi.mocked(fetchImpl).mock.calls[0]?.[1]).toMatchObject({ redirect: "manual" });
     const document = (fetched as { document: { release: AppUpdateRelease; signature: string } })
       .document;
     expect(
@@ -375,6 +360,236 @@ describe("a feed behind a cross-host redirect", () => {
         "stable",
       ),
     ).toBe(true);
+  });
+
+  it("follows a relative redirect on the explicitly authorized origin", async () => {
+    const fetchImpl = vi
+      .fn()
+      .mockResolvedValueOnce(
+        new Response(null, { status: 307, headers: { location: "next.json" } }),
+      )
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify(signedFeed()), { status: 200 }),
+      ) as unknown as typeof globalThis.fetch;
+
+    expect(
+      await fetchUpdateFeed(
+        FEED_URL,
+        { version: "0.2.0", platform: "darwin", arch: "arm64" },
+        fetchImpl,
+      ),
+    ).toMatchObject({ kind: "fetched" });
+    expect(vi.mocked(fetchImpl).mock.calls[1]?.[0]).toBe(
+      "https://updates.example.test/stable/next.json",
+    );
+  });
+
+  it.each([
+    "http://attacker.test/feed.json",
+    "https://127.0.0.1/feed.json",
+    "https://169.254.169.254/latest/meta-data",
+    "https://[::ffff:127.0.0.1]/feed.json",
+    "https://localhost/feed.json",
+  ])("refuses a redirect that widens the request to %s", async (location) => {
+    const fetchImpl = vi.fn(
+      async () => new Response(null, { status: 302, headers: { location } }),
+    ) as unknown as typeof globalThis.fetch;
+
+    await expect(
+      fetchUpdateFeed(FEED_URL, { version: "0.2.0", platform: "darwin", arch: "arm64" }, fetchImpl),
+    ).resolves.toEqual({ kind: "unreachable" });
+    expect(fetchImpl).toHaveBeenCalledOnce();
+  });
+
+  it("bounds redirect chains and refuses an incomplete redirect", async () => {
+    const looping = vi.fn(
+      async () => new Response(null, { status: 302, headers: { location: "/again" } }),
+    ) as unknown as typeof globalThis.fetch;
+    const incomplete = vi.fn(
+      async () => new Response(null, { status: 302 }),
+    ) as unknown as typeof globalThis.fetch;
+    const identity = { version: "0.2.0", platform: "darwin", arch: "arm64" };
+
+    await expect(fetchUpdateFeed(FEED_URL, identity, looping)).resolves.toEqual({
+      kind: "unreachable",
+    });
+    expect(looping).toHaveBeenCalledTimes(6);
+    await expect(fetchUpdateFeed(FEED_URL, identity, incomplete)).resolves.toEqual({
+      kind: "unreachable",
+    });
+  });
+});
+
+describe("the update network boundary", () => {
+  const identity = { version: "0.2.0", platform: "darwin", arch: "arm64" };
+
+  it("retains the authority of an explicitly configured private initial origin", async () => {
+    const fetchImpl = vi.fn(
+      async () => new Response(JSON.stringify(signedFeed()), { status: 200 }),
+    ) as unknown as typeof globalThis.fetch;
+
+    await expect(
+      fetchUpdateFeed("https://127.0.0.1/feed.json", identity, fetchImpl),
+    ).resolves.toMatchObject({ kind: "fetched" });
+    expect(fetchImpl).toHaveBeenCalledOnce();
+  });
+
+  it("cancels a feed as soon as streamed bytes exceed the feed limit", async () => {
+    const cancel = vi.fn();
+    const body = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(new Uint8Array(64 * 1024));
+        controller.enqueue(new Uint8Array(1));
+      },
+      cancel,
+    });
+    const fetchImpl = vi.fn(
+      async () => new Response(body, { status: 200 }),
+    ) as unknown as typeof globalThis.fetch;
+
+    await expect(fetchUpdateFeed(FEED_URL, identity, fetchImpl)).resolves.toEqual({
+      kind: "malformed",
+    });
+    expect(cancel).toHaveBeenCalledOnce();
+  });
+
+  it("rejects a declared oversized feed before reading its body", async () => {
+    const cancel = vi.fn();
+    const body = new ReadableStream<Uint8Array>({ cancel });
+    const fetchImpl = vi.fn(
+      async () =>
+        new Response(body, { status: 200, headers: { "content-length": String(64 * 1024 + 1) } }),
+    ) as unknown as typeof globalThis.fetch;
+
+    await expect(fetchUpdateFeed(FEED_URL, identity, fetchImpl)).resolves.toEqual({
+      kind: "malformed",
+    });
+    expect(cancel).toHaveBeenCalledOnce();
+  });
+
+  it("ends a feed request at its deadline", async () => {
+    const deadline = new AbortController();
+    const timeout = vi.spyOn(AbortSignal, "timeout").mockReturnValue(deadline.signal);
+    try {
+      const fetchImpl = vi.fn(
+        async (_input: string, init?: RequestInit) =>
+          new Promise<Response>((_resolve, reject) => {
+            init?.signal?.addEventListener("abort", () => reject(init.signal?.reason), {
+              once: true,
+            });
+          }),
+      ) as unknown as typeof globalThis.fetch;
+
+      const pending = fetchUpdateFeed(FEED_URL, identity, fetchImpl);
+      deadline.abort(new DOMException("The operation timed out", "TimeoutError"));
+      await expect(pending).resolves.toEqual({ kind: "unreachable" });
+      expect(timeout).toHaveBeenCalledWith(30 * 1000);
+    } finally {
+      timeout.mockRestore();
+    }
+  });
+
+  it("aborts while a feed body is still being read", async () => {
+    const caller = new AbortController();
+    let bodyController: ReadableStreamDefaultController<Uint8Array> | undefined;
+    const body = new ReadableStream<Uint8Array>({
+      start(controller) {
+        bodyController = controller;
+        controller.enqueue(new TextEncoder().encode("{"));
+      },
+    });
+    const fetchImpl = vi.fn(async (_input: string, init?: RequestInit) => {
+      init?.signal?.addEventListener(
+        "abort",
+        () => bodyController?.error(new DOMException("The operation was aborted", "AbortError")),
+        { once: true },
+      );
+      return new Response(body, { status: 200 });
+    }) as unknown as typeof globalThis.fetch;
+
+    const pending = fetchUpdateFeed(FEED_URL, identity, fetchImpl, caller.signal);
+    await vi.waitFor(() => expect(fetchImpl).toHaveBeenCalledOnce());
+    caller.abort();
+
+    await expect(pending).resolves.toEqual({ kind: "unreachable" });
+  });
+
+  it("refuses private DNS answers in the connect-time pinned transport", async () => {
+    const fetchImpl = createPinnedUpdateFetch({
+      resolveAll: async () => ["93.184.216.34", "127.0.0.1"],
+    });
+
+    await expect(
+      fetchImpl("https://updates.example.test/feed.json", {
+        signal: AbortSignal.timeout(1_000),
+      }),
+    ).rejects.toThrow(/private-address/);
+  });
+
+  it.each([204, 205, 304])(
+    "converts the null-body HTTP status %s without throwing",
+    async (status) => {
+      const incoming = Object.assign(Readable.from([]), {
+        statusCode: status,
+        statusMessage: "No body",
+        headers: {},
+      });
+      const requestPort = Object.assign(new EventEmitter(), { end: vi.fn() });
+      const request = vi.fn((_options: unknown, respond: (message: typeof incoming) => void) => {
+        queueMicrotask(() => respond(incoming));
+        return requestPort;
+      }) as unknown as typeof import("node:https").request;
+      const fetchImpl = createPinnedUpdateFetch({
+        resolveAll: async () => ["93.184.216.34"],
+        request,
+      });
+
+      const response = await fetchImpl("https://updates.example.test/feed.json");
+
+      expect(response.status).toBe(status);
+      expect(response.body).toBeNull();
+    },
+  );
+
+  it("rejects an HTTP status Fetch cannot represent instead of throwing asynchronously", async () => {
+    const incoming = Object.assign(Readable.from([]), {
+      statusCode: 600,
+      statusMessage: "Invalid",
+      headers: {},
+    });
+    const requestPort = Object.assign(new EventEmitter(), { end: vi.fn() });
+    const request = vi.fn((_options: unknown, respond: (message: typeof incoming) => void) => {
+      queueMicrotask(() => respond(incoming));
+      return requestPort;
+    }) as unknown as typeof import("node:https").request;
+    const fetchImpl = createPinnedUpdateFetch({
+      resolveAll: async () => ["93.184.216.34"],
+      request,
+    });
+
+    await expect(fetchImpl("https://updates.example.test/feed.json")).rejects.toThrow(
+      /invalid HTTP status/,
+    );
+    expect(incoming.destroyed).toBe(true);
+  });
+
+  it.each([
+    "127.0.0.1",
+    "169.254.169.254",
+    "10.0.0.1",
+    "192.168.0.1",
+    "::1",
+    "fe80::1",
+    "fd00::1",
+    "::ffff:127.0.0.1",
+    "4000::1",
+    "8000::1",
+  ])("classifies %s as a non-public update destination", (address) => {
+    expect(isPrivateAddress(address)).toBe(true);
+  });
+
+  it("keeps allocated global unicast IPv6 reachable", () => {
+    expect(isPrivateAddress("2001:4860:4860::8888")).toBe(false);
   });
 });
 
@@ -874,8 +1089,16 @@ describe("artifact integrity", () => {
   });
 
   it("refuses to read a body far larger than a release", async () => {
+    const cancel = vi.fn();
+    const body = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(new Uint8Array(64));
+        controller.enqueue(new Uint8Array(1));
+      },
+      cancel,
+    });
     const fetchImpl = vi.fn(
-      async () => new Response(served(Buffer.alloc(4096)), { status: 200 }),
+      async () => new Response(body, { status: 200 }),
     ) as unknown as typeof globalThis.fetch;
 
     expect(
@@ -884,6 +1107,33 @@ describe("artifact integrity", () => {
         fetchImpl,
       ),
     ).toEqual({ kind: "corrupt" });
+    expect(cancel).toHaveBeenCalledOnce();
+  });
+
+  it("accepts an artifact exactly at the configured byte limit", async () => {
+    const fetchImpl = vi.fn(
+      async () => new Response(served(artifactBytes), { status: 200 }),
+    ) as unknown as typeof globalThis.fetch;
+
+    await expect(
+      fetchVerifiedArtifact(
+        { url: release.url, sha256: artifactDigest, maxBytes: artifactBytes.byteLength },
+        fetchImpl,
+      ),
+    ).resolves.toMatchObject({ kind: "verified" });
+  });
+
+  it("cancels an artifact whose declared length exceeds the configured limit", async () => {
+    const cancel = vi.fn();
+    const body = new ReadableStream<Uint8Array>({ cancel });
+    const fetchImpl = vi.fn(
+      async () => new Response(body, { status: 200, headers: { "content-length": "65" } }),
+    ) as unknown as typeof globalThis.fetch;
+
+    await expect(
+      fetchVerifiedArtifact({ url: release.url, sha256: artifactDigest, maxBytes: 64 }, fetchImpl),
+    ).resolves.toEqual({ kind: "corrupt" });
+    expect(cancel).toHaveBeenCalledOnce();
   });
 });
 
