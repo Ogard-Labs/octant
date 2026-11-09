@@ -77,13 +77,12 @@ async function absent(path: string): Promise<boolean> {
   }
 }
 // Never inspect or remove a pre-existing host profile, even on disposable CI.
-for (const root of roots)
-  if (!(await absent(root))) throw new Error("The owned profile fixture is not empty.");
-for (const root of roots) {
-  cleanup.add(root);
-  cleanup.add(root + ".original");
-  cleanup.add(root + ".moved");
-}
+// Cleanup deletes every registered path recursively, so a saved sibling such as
+// `octant.original` must refuse the run rather than be registered for removal.
+const owned = roots.flatMap((root) => [root, root + ".original", root + ".moved"]);
+for (const path of owned)
+  if (!(await absent(path))) throw new Error("The owned profile fixture is not empty.");
+for (const path of owned) cleanup.add(path);
 const deadline = setTimeout(() => {
   for (const child of children) child.kill();
 }, 240_000);
