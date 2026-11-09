@@ -120,6 +120,53 @@ describe("native Windows owner admission", () => {
     expect(fake.native.close).toHaveBeenCalledTimes(1);
   });
 
+  it("delivers a stop acknowledgement before a stop callback releases its lease", async () => {
+    const fake = nativeFixture();
+    // Models the native pipe: a reply is queued, a later poll writes it, the
+    // client disconnects after reading, and closing discards anything queued.
+    let queued: unknown;
+    let written = false;
+    const delivered: unknown[] = [];
+    let owner: Awaited<ReturnType<typeof acquireWindowsHostRuntimeOwner>> | undefined;
+    const native: WindowsHostOwnerNative = {
+      ...fake.native,
+      poll: () => {
+        if (queued !== undefined) {
+          delivered.push(queued);
+          queued = undefined;
+          written = true;
+          return { status: "idle" };
+        }
+        if (written) {
+          written = false;
+          return { status: "idle", delivered: 1 };
+        }
+        return fake.events.shift() ?? { status: "idle" };
+      },
+      reply: (_id, raw) => {
+        queued = JSON.parse(raw.toString("utf8"));
+        return { status: "accepted" };
+      },
+      close: () => {
+        queued = undefined;
+        return fake.native.close();
+      },
+    };
+    const stopped = vi.fn(async () => {
+      if (owner?.kind === "owner") await owner.release();
+    });
+    owner = await acquireWindowsHostRuntimeOwner({
+      ...ownerOptions,
+      native,
+      onStopRequested: stopped,
+    });
+    if (owner.kind !== "owner") throw new Error("expected owner");
+    fake.events.push(fake.frame("stop"));
+    await vi.waitFor(() => expect(stopped).toHaveBeenCalledTimes(1));
+    expect(delivered).toEqual([{ ok: true }]);
+    expect(fake.native.close).toHaveBeenCalledTimes(1);
+  });
+
   it("never takes over an unknown prior writer", async () => {
     const fake = nativeFixture("unknown");
     await expect(

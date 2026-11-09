@@ -405,7 +405,12 @@ napi_value poll(napi_env env, napi_callback_info) {
   }
   if (state.response_sent) {
     DWORD remaining = 0;
-    if (!PeekNamedPipe(state.pipe.value, nullptr, 0, nullptr, &remaining, nullptr)) reset_connection(state);
+    if (!PeekNamedPipe(state.pipe.value, nullptr, 0, nullptr, &remaining, nullptr)) {
+      // The client disconnects only after reading its reply. A stop waits for
+      // this before releasing, since closing the pipe sooner can discard it.
+      const unsigned delivered = state.connection; reset_connection(state);
+      napi_value result = object(env, "idle"); number(env, result, "delivered", delivered); return result;
+    }
     return object(env, "idle");
   }
   if (state.awaiting_reply) return object(env, "idle");

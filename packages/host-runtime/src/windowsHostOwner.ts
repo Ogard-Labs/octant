@@ -229,6 +229,7 @@ export async function acquireWindowsHostRuntimeOwner(
   let preparedForCall = false;
   let ownedLease: HostRuntimeOwner | undefined;
   let timer: ReturnType<typeof setTimeout> | undefined;
+  const awaitingDelivery = new Map<number, () => void>();
   const nonce = randomBytes(32);
   const secret = nonce.toString("base64url");
   try {
@@ -309,6 +310,7 @@ export async function acquireWindowsHostRuntimeOwner(
         clearTimeout(timer);
         native.close();
         anchored.delete(owner);
+        for (const delivered of awaitingDelivery.values()) delivered();
         // The native PID/birth tombstone stays until the writer exits. A
         // missing endpoint is never permission to replace a live process.
       },
@@ -321,6 +323,7 @@ export async function acquireWindowsHostRuntimeOwner(
           void owner.release();
           return;
         }
+        if (typeof event.delivered === "number") awaitingDelivery.get(event.delivered)?.();
         if (
           event.status === "request" &&
           typeof event.id === "number" &&
@@ -341,6 +344,26 @@ export async function acquireWindowsHostRuntimeOwner(
               encoded.fill(0);
             }
           };
+          // native.reply only queues the acknowledgement for a later poll, and
+          // a stop callback that releases the lease closes the pipe. Stop runs
+          // once this client has read its reply, or after the control bound.
+          const onStopRequested = options.onStopRequested;
+          const stopAfterDelivery =
+            onStopRequested === undefined
+              ? undefined
+              : async () => {
+                  await new Promise<void>((resolve) => {
+                    const delivered = () => {
+                      clearTimeout(bound);
+                      awaitingDelivery.delete(id);
+                      resolve();
+                    };
+                    const bound = setTimeout(delivered, CONTROL_BOUND_MS);
+                    if (active) awaitingDelivery.set(id, delivered);
+                    else delivered();
+                  });
+                  await onStopRequested();
+                };
           // Host command callbacks retain the same host-owned lifecycle as
           // Unix control. Only replies to this exact live connection dispatch.
           const line = frame.toString("utf8");
@@ -350,7 +373,7 @@ export async function acquireWindowsHostRuntimeOwner(
             line,
             receipt,
             secret,
-            options.onStopRequested,
+            stopAfterDelivery,
             options.onControlRequest,
           ).catch(() => reply({ ok: false, error: "handler-failed" }));
         }
