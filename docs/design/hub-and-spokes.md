@@ -1354,8 +1354,10 @@ for Move after this turn.
     guard refuses stay behind. The source walks the folder without following
     a link, so nothing outside it is read, and a folder that is itself a link
     is not carried. A move carries at most 10,000 files and empty folders from
-    one folder, the bound the moved transcript holds its entries to; the rest
-    stay behind.
+    one folder, and at most 10,000 folders around them (each carried entry
+    takes the permission bits of every folder it sits in, and a deep tree
+    names more folders than files), the bounds the moved transcript holds its
+    entries to; the rest stay behind and are listed.
   - **How it travels.** Every file that travels goes back to back in one
     `work-files` part, with the part's size and digest in the manifest and
     each file's path, size, digest, and permission bits (`mode & 0o777`;

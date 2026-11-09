@@ -14,8 +14,11 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { decodeThreadWorkingDirectory } from "@octant/contracts";
+import { Schema } from "effect";
 import {
   captureWorkFolderForMove,
+  MOVED_WORK_FOLDER_ENTRIES_MAX,
+  MovedWorkFolder as MovedWorkFolderSchema,
   settleMovedWorkFolder,
   workThreadOwnFolder,
   type MovedWorkFolder,
@@ -108,6 +111,33 @@ describe("reading a Work folder's files for a move", () => {
     expect(captured.left).toEqual(["notes/rooms.txt"]);
     expect(readFileSync(partPath, "utf8")).not.toContain(OUTSIDE);
   });
+});
+
+describe("how much of a Work folder a move carries", () => {
+  it("leaves behind what would carry more folders than a move holds, and still packs", async () => {
+    const parent = realpathSync(mkdtempSync(join(tmpdir(), "octant-work-deep-")));
+    parents.push(parent);
+    const folder = join(parent, "report");
+    // Three folders for each file, so the folders pass the bound long before the files do.
+    const count = Math.ceil(MOVED_WORK_FOLDER_ENTRIES_MAX / 3) + 10;
+    for (let index = 0; index < count; index += 1) {
+      const name = `d${String(index).padStart(5, "0")}`;
+      mkdirSync(join(folder, name, "nested", "deep"), { recursive: true });
+      writeFileSync(join(folder, name, "nested", "deep", "file.txt"), name);
+    }
+
+    const captured = await captureWorkFolderForMove({
+      folder,
+      workingDirectory: report,
+      partId: "work-files",
+      partPath: join(parent, "work-files.part"),
+    });
+
+    expect(() => Schema.encodeSync(MovedWorkFolderSchema)(captured.index)).not.toThrow();
+    expect(captured.index.folderModes.length).toBeLessThanOrEqual(MOVED_WORK_FOLDER_ENTRIES_MAX);
+    expect(captured.index.files.length).toBe(Math.floor(MOVED_WORK_FOLDER_ENTRIES_MAX / 3));
+    expect(captured.left.length).toBe(count - captured.index.files.length);
+  }, 60_000);
 });
 
 describe("clearing a Work folder whose files moved", () => {

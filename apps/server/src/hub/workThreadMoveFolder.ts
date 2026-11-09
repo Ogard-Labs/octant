@@ -331,19 +331,38 @@ async function walkWorkFolder(folder: string): Promise<WalkedFolder> {
   const byPath = (a: string, b: string) => (a < b ? -1 : a > b ? 1 : 0);
   files.sort((a, b) => byPath(a.path, b.path));
   emptyFolders.sort(byPath);
-  const room = MOVED_WORK_FOLDER_ENTRIES_MAX;
-  const keptFiles = files.slice(0, room);
-  const keptFolders = emptyFolders.slice(0, room - keptFiles.length);
+  // Each carried entry also carries the bits of every folder it sits in, and
+  // a deep tree can name more folders than entries, so an entry travels only
+  // while both its own count and the folders it adds stay within the bound.
+  const carriedFolders = new Set<string>();
+  const fits = (path: string, isFolder: boolean, carriedEntries: number): boolean => {
+    if (carriedEntries >= MOVED_WORK_FOLDER_ENTRIES_MAX) return false;
+    const parts = path.split("/");
+    const adds = parts
+      .slice(0, isFolder ? parts.length : parts.length - 1)
+      .map((_, depth) => parts.slice(0, depth + 1).join("/"))
+      .filter((folderPath) => !carriedFolders.has(folderPath));
+    if (carriedFolders.size + adds.length > MOVED_WORK_FOLDER_ENTRIES_MAX) return false;
+    for (const folderPath of adds) carriedFolders.add(folderPath);
+    return true;
+  };
+  const keptFiles: WalkedFile[] = [];
+  const keptFolders: string[] = [];
+  const pastTheBound: string[] = [];
+  for (const file of files) {
+    if (fits(file.path, false, keptFiles.length)) keptFiles.push(file);
+    else pastTheBound.push(file.path);
+  }
+  for (const path of emptyFolders) {
+    if (fits(path, true, keptFiles.length + keptFolders.length)) keptFolders.push(path);
+    else pastTheBound.push(path);
+  }
   return {
     files: keptFiles,
     emptyFolders: keptFolders,
     rootMode: top.mode & 0o777,
     folderModes,
-    left: [
-      ...left,
-      ...files.slice(keptFiles.length).map((file) => file.path),
-      ...emptyFolders.slice(keptFolders.length),
-    ].sort(byPath),
+    left: [...left, ...pastTheBound].sort(byPath),
   };
 }
 
