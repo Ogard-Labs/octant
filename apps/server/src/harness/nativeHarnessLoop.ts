@@ -179,6 +179,29 @@ export interface NativeHarnessConnectionOptions {
 interface PendingStep {
   readonly calls: ReadonlyArray<NativeHarnessTranscriptToolCall>;
   readonly answers: Map<string, ProviderToolAnswer>;
+  /** Answers with images, journaled once the step knows whether their images fit. */
+  readonly unsettled: Set<string>;
+}
+
+/** A step's results as one message, in the order the model asked for them. */
+function resultsMessage(pending: PendingStep): NativeHarnessMessage {
+  return {
+    role: "assistant",
+    text: "",
+    toolResults: pending.calls.flatMap((call) => {
+      const answer = pending.answers.get(call.toolCallId);
+      return answer === undefined
+        ? []
+        : [
+            {
+              toolCallId: answer.requestId,
+              resultJson: answer.resultJson,
+              isError: answer.isError,
+              ...(answer.images === undefined ? {} : { images: answer.images }),
+            },
+          ];
+    }),
+  };
 }
 
 interface SessionState {
@@ -503,6 +526,23 @@ export function createNativeHarnessConnection(
      * is asked at most once per turn; once the router has nothing left the
      * turn fails with the endpoint's own failure and the reason none was found.
      */
+    /**
+     * A request refitted for the model the turn moved to, which the endpoint
+     * sizes by its own model id; the request itself when the turn has not
+     * moved.
+     */
+    const fitOnFallback = (
+      state: SessionState,
+      request: NativeHarnessRequest,
+    ): NativeHarnessRequest | undefined =>
+      state.fallback === undefined
+        ? request
+        : fitRequest(
+            state.fallback.endpoint,
+            { ...request, modelId: state.fallback.target.modelId },
+            { journalNumberOf: journalNumberIn(state), mode: options.mode },
+          );
+
     const sendOnLead = async (
       state: SessionState,
       request: NativeHarnessRequest,
@@ -538,11 +578,7 @@ export function createNativeHarnessConnection(
       };
       let current = request;
       if (state.fallback !== undefined) {
-        const refit = fitRequest(
-          state.fallback.endpoint,
-          { ...request, modelId: state.fallback.target.modelId },
-          { journalNumberOf: journalNumberIn(state), mode: options.mode },
-        );
+        const refit = fitOnFallback(state, request);
         if (refit === undefined) {
           throw failure(
             "invalid-configuration",
@@ -646,24 +682,7 @@ export function createNativeHarnessConnection(
     const advanceAfterResults = (state: SessionState): void => {
       const pending = state.pending;
       if (pending === undefined) return;
-      const results: NativeHarnessMessage = {
-        role: "assistant",
-        text: "",
-        toolResults: pending.calls.flatMap((call) => {
-          const answer = pending.answers.get(call.toolCallId);
-          return answer === undefined
-            ? []
-            : [
-                {
-                  toolCallId: answer.requestId,
-                  resultJson: answer.resultJson,
-                  isError: answer.isError,
-                  ...(answer.images === undefined ? {} : { images: answer.images }),
-                },
-              ];
-        }),
-      };
-      state.messages.push(results);
+      state.messages.push(resultsMessage(pending));
       state.pending = undefined;
       const request = takeSteeringRequest(state) ?? requestFor(state, [...state.messages]);
       if (request === undefined) {
@@ -691,6 +710,7 @@ export function createNativeHarnessConnection(
     const closePendingStep = (state: SessionState): void => {
       const pending = state.pending;
       if (pending === undefined) return;
+      settleImageAnswers(state, pending);
       const unanswered = pending.calls.filter((call) => !pending.answers.has(call.toolCallId));
       for (const result of interruptedResults(unanswered)) {
         state.transcripts.settle(state.transcriptId, result);
@@ -800,7 +820,7 @@ export function createNativeHarnessConnection(
             isError: true,
           });
         }
-        state.pending = { calls, answers };
+        state.pending = { calls, answers, unsettled: new Set() };
         if (malformed.size > 0) {
           state.selfCorrections += 1;
           if (state.selfCorrections > MAX_SELF_CORRECTION_ROUNDS) {
@@ -1114,6 +1134,60 @@ export function createNativeHarnessConnection(
       }
     };
 
+    /**
+     * A step's results are the latest message, which fitting never trims, so
+     * images too large for the endpoint's request would fail the whole turn
+     * ("The provider request exceeded the configured size limit"). Once every
+     * result is in, the request they would go in is checked on every endpoint
+     * the turn may send it to; while it does not fit, the largest image answer
+     * is refused instead, with its images left out, and the turn goes on. A
+     * step that does not fit even without images fails as before.
+     */
+    const refuseImagesThatDoNotFit = (state: SessionState, pending: PendingStep): void => {
+      // The same fitting the results go through: `requestFor` when they
+      // advance, then the fallback's refit when `sendOnLead` sends them.
+      const fits = () => {
+        const request = requestFor(state, [...state.messages, resultsMessage(pending)]);
+        return request !== undefined && fitOnFallback(state, request) !== undefined;
+      };
+      const imageCharacters = (answer: ProviderToolAnswer) =>
+        (answer.images ?? []).reduce((total, image) => total + image.data.length, 0);
+      const largestFirst = [...pending.answers.values()]
+        .filter((answer) => imageCharacters(answer) > 0)
+        .sort((left, right) => imageCharacters(right) - imageCharacters(left));
+      for (const answer of largestFirst) {
+        if (fits()) return;
+        pending.answers.set(answer.requestId, {
+          sessionId: answer.sessionId,
+          requestId: answer.requestId,
+          resultJson: JSON.stringify({
+            error: "image-too-large-for-endpoint",
+            message: `The image is ${imageCharacters(answer)} base64 characters, and a request carrying it is over this endpoint's request size limit, so it was left out. Use a smaller image.`,
+          }),
+          isError: true,
+        });
+      }
+    };
+
+    /**
+     * An answer that carries images is journaled only once its step's images
+     * are settled, so the journal holds what the model was actually sent.
+     */
+    const settleImageAnswers = (state: SessionState, pending: PendingStep): void => {
+      for (const answer of pending.answers.values()) {
+        if (!pending.unsettled.has(answer.requestId)) continue;
+        state.transcripts.settle(state.transcriptId, {
+          toolCallId: answer.requestId,
+          resultJson: answer.resultJson,
+          isError: answer.isError,
+          ...(answer.images === undefined || answer.images.length === 0
+            ? {}
+            : { imagesOmitted: answer.images.length }),
+        });
+      }
+      pending.unsettled.clear();
+    };
+
     const requestFor = (state: SessionState, history: ReadonlyArray<NativeHarnessMessage>) =>
       fitRequest(
         state.endpoint,
@@ -1386,17 +1460,20 @@ export function createNativeHarnessConnection(
               (candidate) => candidate.toolCallId === input.requestId,
             );
             if (call?.toolName === "todo-write" && !input.isError) emitTaskList(state, call);
-            state.transcripts.settle(state.transcriptId, {
-              toolCallId: input.requestId,
-              resultJson: input.resultJson,
-              isError: input.isError,
-              ...(input.images === undefined || input.images.length === 0
-                ? {}
-                : { imagesOmitted: input.images.length }),
-            });
+            if (input.images !== undefined && input.images.length > 0) {
+              pending.unsettled.add(input.requestId);
+            } else {
+              state.transcripts.settle(state.transcriptId, {
+                toolCallId: input.requestId,
+                resultJson: input.resultJson,
+                isError: input.isError,
+              });
+            }
             if (!pending.calls.every((call) => pending.answers.has(call.toolCallId))) {
               return undefined;
             }
+            refuseImagesThatDoNotFit(state, pending);
+            settleImageAnswers(state, pending);
             advanceAfterResults(state);
             return undefined;
           },

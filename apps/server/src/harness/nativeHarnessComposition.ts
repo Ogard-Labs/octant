@@ -79,6 +79,14 @@ export interface NativeHarnessCompositionOptions {
   readonly authority: NativeHarnessAuthority;
   /** Whether a provider instance is one the harness drives; others get no harness tools. */
   readonly isHarnessProvider: (providerInstanceId: ProviderInstanceId) => boolean;
+  /**
+   * Whether a model takes image input, as its provider reports it. Absent, or
+   * false for the session's model, `read` refuses an image.
+   */
+  readonly readsImages?: (model: {
+    readonly providerInstanceId: ProviderInstanceId;
+    readonly modelId: string;
+  }) => boolean;
   /** Where the lead's task list is kept; absent, the lead has no `todo-write`. */
   readonly tasks?: Pick<NativeHarnessSessionStore, "replaceTasks">;
   /** The thread goal a lead reads and checks; absent on a host without goals. */
@@ -1080,6 +1088,7 @@ export function createNativeHarnessComposition(
             root: projectRoot,
             ...(extraFolders === undefined ? {} : { extraRoots: extraFolders }),
           }),
+          readsImages: () => options.readsImages?.(thread) === true,
           ...(shell === undefined ? {} : { shell }),
           ...webPorts(),
           ...contextRemainingFor("work-thread", threadId),
@@ -1130,6 +1139,7 @@ export function createNativeHarnessComposition(
             root: checkoutRoot,
             ...(extraFolders === undefined ? {} : { extraRoots: extraFolders }),
           }),
+          readsImages: () => options.readsImages?.(thread) === true,
           ...(shell === undefined ? {} : { shell }),
           ...webPorts(),
           ...contextRemainingFor("code-thread", threadId),
@@ -1176,6 +1186,7 @@ export function createNativeHarnessComposition(
             onServer: server,
           }),
           filesystem,
+          readsImages: () => options.readsImages?.(thread) === true,
           shell,
           ...webPorts(),
           ...contextRemainingFor("code-thread", threadId),
@@ -1216,6 +1227,7 @@ export function createNativeHarnessComposition(
             onServer: server,
           }),
           filesystem,
+          readsImages: () => options.readsImages?.(thread) === true,
           shell,
           ...webPorts(),
           ...contextRemainingFor("work-thread", threadId),
@@ -1238,6 +1250,7 @@ export function createNativeHarnessComposition(
     forAgentRun: ({ run, authority, projectRoot }) => {
       const target = run.routingReceipt.selectedFallback ?? {
         providerInstanceId: run.routingReceipt.selectedProviderInstanceId,
+        modelId: run.routingReceipt.selectedModelId,
       };
       const mode = run.routingReceipt.mode;
       const runId = String(run.id);
@@ -1347,7 +1360,10 @@ export function createNativeHarnessComposition(
             confirmedCommandHosts.delete(callId);
           },
           ...(authority.filesystem && mode !== "chat"
-            ? { filesystem: new NativeHarnessFileSystem({ root: projectRoot }) }
+            ? {
+                filesystem: new NativeHarnessFileSystem({ root: projectRoot }),
+                readsImages: () => options.readsImages?.(target) === true,
+              }
             : {}),
           ...(authority.shell && mode === "code" && shell !== undefined ? { shell } : {}),
           ...(authority.network ? webPorts() : {}),

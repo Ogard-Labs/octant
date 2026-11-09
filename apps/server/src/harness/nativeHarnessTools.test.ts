@@ -128,6 +128,42 @@ describe("native harness tools", () => {
     expect((write.result as { error: string }).error).toBe("approval-required");
   });
 
+  describe("reading images and PDFs", () => {
+    const png = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 0]);
+
+    it("hands an image to a model that takes images, beside a result that holds no pixels", async () => {
+      const { root, tools } = await fixture({}, { readsImages: () => true });
+      await writeFile(join(root, "shot.png"), png);
+      expect(await call(tools, "read", { path: "shot.png" })).toEqual({
+        result: { kind: "image", path: "shot.png", mimeType: "image/png", bytes: png.length },
+        isError: false,
+        images: [{ mimeType: "image/png", data: png.toString("base64") }],
+      });
+    });
+
+    it("refuses an image when the model cannot take images", async () => {
+      for (const ports of [{ readsImages: () => false }, {}]) {
+        const { root, tools } = await fixture({}, ports);
+        await writeFile(join(root, "shot.png"), png);
+        const outcome = await call(tools, "read", { path: "shot.png" });
+        expect(outcome).toMatchObject({
+          result: { error: "image-input-unsupported" },
+          isError: true,
+        });
+        expect(outcome).not.toHaveProperty("images");
+      }
+    });
+
+    it("refuses a PDF, since no harness endpoint takes a document in a tool result", async () => {
+      const { root, tools } = await fixture({}, { readsImages: () => true });
+      await writeFile(join(root, "paper.pdf"), "%PDF-1.7\n");
+      expect(await call(tools, "read", { path: "paper.pdf" })).toMatchObject({
+        result: { error: "document-input-unsupported" },
+        isError: true,
+      });
+    });
+  });
+
   it("refuses edits, writes, and the shell in Plan mode by policy", async () => {
     const { tools } = await fixture(
       { executionPolicy: "plan", approvalSatisfied: false },

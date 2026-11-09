@@ -33,6 +33,7 @@ import {
   type OctantMode,
   type ProviderExecutionPolicy,
   type ProviderToolDefinition,
+  type ProviderToolImage,
   type ToolActionAuthority,
 } from "@octant/contracts";
 import { planRefusesApprovalClass } from "@octant/domain/tool-call-policy";
@@ -140,6 +141,12 @@ export interface NativeHarnessSkillPort {
  */
 export interface NativeHarnessToolPorts {
   readonly filesystem?: NativeHarnessFileSystemPort;
+  /**
+   * Whether the session's model takes image input, read at each call. Absent
+   * or false, `read` refuses an image rather than hand the model bytes it
+   * cannot see.
+   */
+  readonly readsImages?: () => boolean;
   readonly shell?: NativeHarnessShellPort;
   readonly webSearch?: (input: {
     readonly query: string;
@@ -295,6 +302,7 @@ export function createNativeHarnessTools(
       return {
         result: outcome.result,
         ...(outcome.isError === undefined ? {} : { isError: outcome.isError }),
+        ...(outcome.images === undefined ? {} : { images: outcome.images }),
       };
     },
   };
@@ -311,6 +319,7 @@ export function createNativeHarnessTools(
     readonly result: unknown;
     readonly isError?: boolean;
     readonly refused?: boolean;
+    readonly images?: ReadonlyArray<ProviderToolImage>;
   }> {
     if (signal?.aborted) return refused("tool-interrupted");
     if (!isToolName(name) || !offered.some((definition) => definition.name === name)) {
@@ -431,12 +440,33 @@ async function execute(
   ports: NativeHarnessToolPorts,
   signal: AbortSignal | undefined,
   callId: string,
-): Promise<{ readonly result: unknown; readonly isError?: boolean }> {
+): Promise<{
+  readonly result: unknown;
+  readonly isError?: boolean;
+  readonly images?: ReadonlyArray<ProviderToolImage>;
+}> {
   switch (name) {
     case "read": {
       const input = args as NativeHarnessReadArguments;
       const outcome = await ports.filesystem!.read(input);
-      return outcome.kind === "refused" ? refused(outcome.reason, outcome.message) : ok(outcome);
+      if (outcome.kind === "refused") return refused(outcome.reason, outcome.message);
+      if (outcome.kind === "document") {
+        return refused(
+          "document-input-unsupported",
+          "This is a PDF, and Octant Harness cannot hand a PDF to the model yet.",
+        );
+      }
+      if (outcome.kind !== "image") return ok(outcome);
+      if (ports.readsImages?.() !== true) {
+        return refused(
+          "image-input-unsupported",
+          "This is an image, and the model this thread uses does not take image input. Select a vision-capable model to read it.",
+        );
+      }
+      // The pixels ride beside the result, never in it, so the journal and
+      // the activity row hold only what the image is.
+      const { data, ...image } = outcome;
+      return { ...ok(image), images: [{ mimeType: outcome.mimeType, data }] };
     }
     case "grep": {
       const input = args as NativeHarnessGrepArguments;
