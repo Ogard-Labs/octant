@@ -21,7 +21,8 @@ struct NotificationKeyEntry {
   let privateKey: Curve25519.KeyAgreement.PrivateKey
 }
 
-/// What replaces the placeholder: display text and the thread to open.
+/// What replaces the placeholder: display text and the thread, or the list of
+/// moves waiting for this phone, to open.
 struct OpenedNotification: Equatable {
   /// The computer that sealed it; the system groups the notification under it
   /// so removing that computer can remove what it delivered.
@@ -88,7 +89,7 @@ enum SealedNotificationOpener {
   private struct Content: Decodable {
     let kind: String
     let hostId: String
-    let threadId: String
+    let threadId: String?
     let mode: String?
     let title: String
     let body: String
@@ -102,20 +103,29 @@ enum SealedNotificationOpener {
   /// from reaching the lock screen or the deep link.
   static func shape(_ plaintext: Data, for entry: NotificationKeyEntry) -> OpenedNotification? {
     guard let content = try? JSONDecoder().decode(Content.self, from: plaintext),
-      kinds.contains(content.kind),
       content.hostId == entry.hostId,
-      isLinkSegment(content.hostId), isLinkSegment(content.threadId)
+      isLinkSegment(content.hostId)
     else { return nil }
-    if let mode = content.mode, !modes.contains(mode) { return nil }
+    let deepLink: String
+    if content.kind == "move-waiting" {
+      // A held move names no thread: it opens the phone's Moves waiting for
+      // you list, which reads the threads from the computer itself.
+      guard content.threadId == nil, content.mode == nil else { return nil }
+      deepLink = "octant://hosts/\(content.hostId)/moves"
+    } else {
+      guard kinds.contains(content.kind), let threadId = content.threadId,
+        isLinkSegment(threadId)
+      else { return nil }
+      if let mode = content.mode, !modes.contains(mode) { return nil }
+      let path = content.mode.map { "\($0)/\(threadId)" } ?? threadId
+      deepLink = "octant://hosts/\(content.hostId)/threads/\(path)"
+    }
     let title = displayText(content.title)
     let body = displayText(content.body)
     guard !title.isEmpty,
       title.utf8.count <= titleMaximumBytes, body.utf8.count <= bodyMaximumBytes
     else { return nil }
-    let path = content.mode.map { "\($0)/\(content.threadId)" } ?? content.threadId
-    return OpenedNotification(
-      hostId: content.hostId, title: title, body: body,
-      deepLink: "octant://hosts/\(content.hostId)/threads/\(path)")
+    return OpenedNotification(hostId: content.hostId, title: title, body: body, deepLink: deepLink)
   }
 
   /// A thread or host id goes into a link, so it holds only characters a path

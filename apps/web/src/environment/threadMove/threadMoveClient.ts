@@ -50,6 +50,12 @@ export interface ThreadMoveClient {
   readonly dismiss: (thread: MovedThreadReference) => Promise<void>;
   /** Remove worktree on a moved thread's tombstone: the folder its move kept here. */
   readonly removeKeptWorktree: (moveId: string) => Promise<KeptWorktreeRemoveOutcome>;
+  /**
+   * Opens a departed thread on the destination's own web app in the default
+   * browser; absent when this window has no such door, and the tombstone
+   * copies the link instead.
+   */
+  readonly openThere?: (thread: MovedThreadReference) => Promise<"opened" | "refused">;
   /** What moving the thread to a member would send, and how fast; read-only. */
   readonly sizes: (
     destinationMemberId: string,
@@ -101,6 +107,7 @@ export class ThreadMoveRequestFailure extends Error {
 }
 
 export function threadMoveClientOf(hub: HubAdministrationBridge): ThreadMoveClient {
+  const openThere = hub.openMovedThreadThere;
   const call = async (operation: HubAdministrationOperation, body: unknown): Promise<unknown> => {
     const answer = await hub.hubAdministrationRequest(operation, body);
     // A refusal answers 409 with a body the caller reads; anything else that is
@@ -147,6 +154,9 @@ export function threadMoveClientOf(hub: HubAdministrationBridge): ThreadMoveClie
     },
     removeKeptWorktree: async (moveId) =>
       decodeKeptWorktreeRemoveOutcome(await call("thread-move-remove-kept-worktree", { moveId })),
+    ...(openThere === undefined
+      ? {}
+      : { openThere: async (thread: MovedThreadReference) => (await openThere(thread)).status }),
     sizes: async (destinationMemberId, threads) =>
       decodeThreadMoveSizes(await call("thread-move-sizes", { destinationMemberId, threads })),
     shutdownListing: async () => decodeShutdownListing(await call("shutdown-listing", {})),

@@ -2,7 +2,11 @@ import { randomUUID } from "node:crypto";
 import { lstat, rename, rm, writeFile } from "node:fs/promises";
 import { createRequire } from "node:module";
 import { dirname, isAbsolute, join, resolve } from "node:path";
-import { DESKTOP_PEER_LINUX_FILENAME, DESKTOP_PEER_STATUS_FILENAME } from "./runtimePaths";
+import {
+  DESKTOP_PEER_LINUX_FILENAME,
+  DESKTOP_PEER_STATUS_FILENAME,
+  DESKTOP_PEER_WINDOWS_FILENAME,
+} from "./runtimePaths";
 
 export type DesktopPeerRefusal =
   | "unsigned-build"
@@ -209,6 +213,12 @@ export function linuxRendererSandboxDisabled(input: {
   );
 }
 
+export interface WindowsDesktopPeerEndpoint {
+  /** The native private profile supplies its UUID; paths never identify peers. */
+  readonly profileId: string;
+  readonly version: string;
+}
+
 /** Only desktop main imports this fixed bundle resource. */
 export function loadDesktopPeerStatus(input: {
   readonly packaged: boolean;
@@ -216,16 +226,25 @@ export function loadDesktopPeerStatus(input: {
   readonly resourcesPath: string;
   /** Required on Linux; a Linux load without it is unavailable. */
   readonly linux?: LinuxDesktopPeerEndpoint;
+  readonly windows?: WindowsDesktopPeerEndpoint;
 }): NativeDesktopPeerStatus | undefined {
   if (!input.packaged) return undefined;
-  if (input.platform !== "darwin" && (input.platform !== "linux" || input.linux === undefined))
+  if (
+    input.platform !== "darwin" &&
+    !(input.platform === "linux" && input.linux !== undefined) &&
+    !(input.platform === "win32" && input.windows !== undefined)
+  )
     return undefined;
   try {
     const candidate: unknown = createRequire(import.meta.url)(
       resolve(
         input.resourcesPath,
         "native",
-        input.platform === "darwin" ? DESKTOP_PEER_STATUS_FILENAME : DESKTOP_PEER_LINUX_FILENAME,
+        input.platform === "darwin"
+          ? DESKTOP_PEER_STATUS_FILENAME
+          : input.platform === "win32"
+            ? DESKTOP_PEER_WINDOWS_FILENAME
+            : DESKTOP_PEER_LINUX_FILENAME,
       ),
     );
     if (
@@ -256,6 +275,16 @@ export function loadDesktopPeerStatus(input: {
           endpoint.launcherRecordPath,
           endpoint.version,
         ) !== true
+      )
+        return undefined;
+    }
+    if (input.platform === "win32") {
+      const endpoint = input.windows;
+      if (
+        endpoint === undefined ||
+        !("bindEndpoint" in candidate) ||
+        typeof candidate.bindEndpoint !== "function" ||
+        candidate.bindEndpoint(endpoint.profileId, endpoint.version) !== true
       )
         return undefined;
     }

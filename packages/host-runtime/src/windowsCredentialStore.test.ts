@@ -24,10 +24,14 @@ function reply(status = 0, value = "") {
   bytes.copy(result, 9);
   return { exitCode: 0, stdout: result };
 }
-function fixture(response = reply(), namespace?: WindowsCredentialNamespace) {
+function fixture(
+  response = reply(),
+  namespace?: WindowsCredentialNamespace,
+  commandPath = helperPath,
+) {
   const calls: WindowsCommandSpec[] = [];
   const store = makeWindowsCredentialStore({
-    helperPath,
+    helperPath: commandPath,
     storeScope,
     ...(namespace === undefined ? {} : { namespace }),
     serviceFamily: "octant-nightly-test-data",
@@ -40,25 +44,28 @@ function fixture(response = reply(), namespace?: WindowsCredentialNamespace) {
 }
 
 describe("Windows provider credentials", () => {
-  it("keeps the key and scoped identity in the private request pipe", async () => {
-    const { store, calls } = fixture();
-    await store.set(providerInstanceId, "synthetic-λ-key");
-    expect(calls).toHaveLength(1);
-    const call = calls[0];
-    expect(call?.command).toBe(helperPath);
-    expect(call?.args).toEqual([]);
-    expect(call?.environment).toEqual({});
-    const input = Buffer.from(call?.input ?? []);
-    expect(input.toString("ascii", 0, 4)).toBe("OCCR");
-    expect(input[4]).toBe(2);
-    expect(input[5]).toBe(1);
-    expect(input[6]).toBe(1);
-    expect(input.toString("ascii", 7, 43)).toBe(storeScope);
-    expect(input.toString("ascii", 43, 79)).toBe(providerInstanceId);
-    expect(input.readUInt32LE(79)).toBe(Buffer.byteLength("synthetic-λ-key"));
-    expect(input[83]).toBe(0);
-    expect(input.toString("utf8", 84)).toBe("synthetic-λ-key");
-  });
+  it.each([helperPath, `\\\\?\\${helperPath}`])(
+    "keeps the canonical helper path unchanged and the key and scoped identity in the private pipe: %s",
+    async (commandPath) => {
+      const { store, calls } = fixture(reply(), undefined, commandPath);
+      await store.set(providerInstanceId, "synthetic-λ-key");
+      expect(calls).toHaveLength(1);
+      const call = calls[0];
+      expect(call?.command).toBe(commandPath);
+      expect(call?.args).toEqual([]);
+      expect(call?.environment).toEqual({});
+      const input = Buffer.from(call?.input ?? []);
+      expect(input.toString("ascii", 0, 4)).toBe("OCCR");
+      expect(input[4]).toBe(2);
+      expect(input[5]).toBe(1);
+      expect(input[6]).toBe(1);
+      expect(input.toString("ascii", 7, 43)).toBe(storeScope);
+      expect(input.toString("ascii", 43, 79)).toBe(providerInstanceId);
+      expect(input.readUInt32LE(79)).toBe(Buffer.byteLength("synthetic-λ-key"));
+      expect(input[83]).toBe(0);
+      expect(input.toString("utf8", 84)).toBe("synthetic-λ-key");
+    },
+  );
 
   it("keeps every auxiliary purpose distinct from the provider and each other", async () => {
     const namespaces: ReadonlyArray<WindowsCredentialNamespace> = [
@@ -145,6 +152,18 @@ describe("Windows provider credentials", () => {
     for (const options of [
       { helperPath: "relative.exe", storeScope },
       { helperPath: "\\\\server\\helper.exe", storeScope },
+      ...[
+        "C:octant-credential-helper.exe",
+        "\\\\?\\UNC\\server\\share\\octant-credential-helper.exe",
+        `\\\\.\\${helperPath}`,
+        "\\\\?\\GLOBALROOT\\native\\octant-credential-helper.exe",
+        "C:/Octant/native/octant-credential-helper.exe",
+        "\\\\?\\C:/Octant/native/octant-credential-helper.exe",
+        "C:\\Octant\\native\\..\\native\\octant-credential-helper.exe",
+        "\\\\?\\C:\\Octant\\native\\.\\octant-credential-helper.exe",
+        "C:\\Octant\\native\\another.exe",
+        `${helperPath}\0`,
+      ].map((helperPath) => ({ helperPath, storeScope })),
       { helperPath, storeScope: "other" },
       { helperPath, storeScope, timeoutMs: 0 },
     ])

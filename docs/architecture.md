@@ -15450,7 +15450,19 @@ preview had shipped and a Linux self-update from the signed feed had been seen
 on a real image). That ordering was a release-scope choice, not a safety
 rule. The Linux signed-feed update path is still the shared trust root for
 every non-macOS platform, so a Windows feed builds on it and is not trusted
-before the path has been exercised on a real image. Windows Work and Code stay
+before the path has been exercised on a real image. Windows x64 QA packaging uses a matching native build host and emits a portable
+ZIP through `OCTANT_PACKAGE_TARGET=win32-x64`. The hosted Windows job rebuilds
+native dependencies and verifies them inside the packaged Electron runtime.
+The archive builds the existing native Windows owner and credential helper
+from source and includes only `resources/native/octant-windows-host-owner.node`
+and `resources/native/octant-credential-helper.exe`. The build uses the locked
+node-gyp dependency to verify the official Node-API SDK before CMake compilation;
+QA readers and build directories never enter the archive. Packaged Electron
+loads the native owner without acquiring a profile, and the credential fixture
+uses only owned synthetic entries and verifies their removal.
+This unsigned QA archive is not an installer, a usable Windows release, or an
+enabled signed-update channel; native host admission and credentials remain
+separate prerequisites. Windows Work and Code stay
 unavailable until an approved Windows confinement design is documented: the confinement port
 supports only macOS and Linux and refuses every other platform, so Work and
 Code fail closed there. Simulator, the Apple workbench, and vibrancy stay
@@ -15558,6 +15570,25 @@ profiles. Executable providers/extensions and Work/Code remain unavailable;
 desktop/Nightly bootstrap and service/encryption integration retain separate gates.
 The owning rules and local-owner trust limits are in
 [foreground storage and lifecycle](design/hub-and-spokes.md#the-hub-is-a-server-first).
+
+Packaged stable Windows desktop resolves that native profile without claiming
+the child server's owner. Its physical profile UUID supplies the runtime host
+identity and credential scope. Only positive native absence permits launching
+the normal server entry; unsafe or unknown discovery refuses. An attachment
+must match the authenticated native owner's instance and pipe endpoint, retain
+one host-info/bridge-secret generation around the health probe, and leave the
+separately managed host running when the desktop closes. Desktop main reads
+native policy but never writes native boot projections: its actual child owner
+publishes and clears those from the existing private launch seed. It passes no
+POSIX data/log override and starts no generic linked-state credential broker.
+Missing native code or closed storage ports stay unavailable. This composition
+requires a native packaged startup, second-attachment and owned-stop smoke;
+normal Nightly native window registration, service integration and effective
+Work/Code confinement remain distinct requirements. Normal owned shutdown authenticates the native
+owner and matches the exact launch instance before requesting its graceful
+control stop, then awaits the held child with bounded force escalation.
+Windows SIGTERM alone force-terminates a Node child and cannot prove projection
+cleanup; borrowed or replacement owners never receive this stop request.
 
 The Windows credential building block uses an Octant native helper
 with `CredWriteW`, `CredReadW` and `CredDeleteW`, never a secret in `cmdkey`
@@ -15685,7 +15716,11 @@ Work and Code remain refused until their native confinement boundary is proven.
   Nightly's own renderer with a short server-enforced lease. It never loads
   the host-owning module, owns a host or migrates shared data; it can ask a
   validated installed Stable to start without a window. Incompatible
-  or unsigned builds refuse. Bounded embedded frames and human input use the
+  builds refuse; macOS additionally requires the signed application identity.
+  Linux and Windows use the explicitly stated local-user kernel trust floor
+  ([Linux](design/nightly-app.md#linux-client-trust),
+  [Windows](design/nightly-app.md#windows-client-trust)), which does not attest
+  application code. Bounded embedded frames and human input use the
   existing native Browser owner; complete Browser parity, other native brokers
   remain unfinished. Current-client retention precedes the existing terminal
   shutdown path; full signed lifecycle acceptance remains separate.
@@ -15894,7 +15929,10 @@ bun run verify     # paths:check, wiring:check, ui:check, style:check, decisions
   A bad signature, a non-writable location, or a
   launch that is not that image fails closed, and the reason is shown in
   Settings. Windows stays out. Override with
-  `OCTANT_PACKAGE_TARGET=darwin-arm64|linux-x64` on a matching host only.
+  `OCTANT_PACKAGE_TARGET=darwin-arm64|linux-x64|win32-x64` on a matching host only;
+  Windows emits only the QA archive described above. Windows PE resource versions
+  use the numeric core; the staged application manifest and archive retain
+  the full preview/candidate version and flavor.
 - Focused checks: `bun run --filter <package> test|typecheck`; the store can be
   inspected with `bun run --cwd apps/server db:verify`.
 - Formatting is `oxfmt`, linting is `oxlint`; Turbo runs the per-package

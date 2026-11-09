@@ -35,8 +35,10 @@ import {
 } from "./codeThreadMoveGit";
 import {
   MovedThreadParts,
+  measureThreadParts,
   packThreadParts,
   rehomeThreadParts,
+  threadMoveSize,
   type ThreadPartsDestination,
   type ThreadPartsSource,
 } from "./movedThreadParts";
@@ -180,14 +182,11 @@ export function createCodeThreadMoveHost(options: CodeThreadMoveHostOptions): {
         entries: await options.transcript(code.id),
       };
       const historyBytes = Buffer.byteLength(JSON.stringify(history));
-      return {
-        status: "measured",
-        bytes: historyBytes + checkoutBytes,
-        parts: [
-          { kind: "thread-bundle", bytes: historyBytes },
-          { kind: "git-bundle", bytes: checkoutBytes },
-        ],
-      };
+      return threadMoveSize([
+        { status: "measured", kind: "thread-bundle", bytes: historyBytes },
+        ...measureThreadParts(thread, options.parts.source),
+        { status: "measured", kind: "git-bundle", bytes: checkoutBytes },
+      ]);
     },
     pack: async (thread, folder, moveId) => {
       const code = codeThreadOf(thread);

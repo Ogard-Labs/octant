@@ -211,11 +211,12 @@ describe("a moved thread's pane on the computer it left", () => {
     movedAt: "2026-11-09T09:30:00.000Z",
   };
 
-  it("shows Moved to with Open there, which copies the thread's link on that computer", async () => {
+  it("shows Moved to with Open there, which copies the thread's link and says this window can't open it", async () => {
     const user = userEvent.setup();
     const writeText = vi.fn(async () => {});
     Object.defineProperty(navigator, "clipboard", { configurable: true, value: { writeText } });
-    const { client } = fakeClient({ status: "read", departed });
+    const open = vi.spyOn(window, "open").mockReturnValue(null);
+    const { client, calls } = fakeClient({ status: "read", departed });
     pane(client);
 
     expect(await screen.findByRole("heading", { name: "Moved to Desktop" })).toBeInTheDocument();
@@ -223,7 +224,66 @@ describe("a moved thread's pane on the computer it left", () => {
     expect(screen.queryByRole("button", { name: "Remove worktree" })).not.toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "Open there" }));
     expect(writeText).toHaveBeenCalledWith(`octant://hosts/${DESKTOP}/threads/code/${ARRIVED}`);
-    expect(await screen.findByText(/Link copied/)).toBeInTheDocument();
+    expect(
+      await screen.findByText(
+        "Link copied. This window can't open threads on Desktop; the Octant phone app opens this link.",
+      ),
+    ).toBeInTheDocument();
+    // Copying is all it does: nothing is navigated or handed to the system,
+    // and the move routes are asked nothing that changes anything.
+    expect(open).not.toHaveBeenCalled();
+    expect(calls).toEqual([]);
+    open.mockRestore();
+  });
+
+  it("opens the moved thread on the destination's own web page through the desktop, and copies nothing", async () => {
+    const user = userEvent.setup();
+    const writeText = vi.fn(async () => {});
+    Object.defineProperty(navigator, "clipboard", { configurable: true, value: { writeText } });
+    const { client } = fakeClient({
+      status: "read",
+      departed: { ...departed, destinationWebOrigin: "https://desktop.tail1234.ts.net" },
+    });
+    const openThere = vi.fn(async (_thread: MovedThreadReference) => "opened" as const);
+    pane({ ...client, openThere });
+
+    await user.click(await screen.findByRole("button", { name: "Open there" }));
+    // The window names only the thread that moved; the desktop asks the host
+    // where it went and opens that page.
+    expect(openThere).toHaveBeenCalledWith(THREAD);
+    expect(
+      await screen.findByText("Opened on Desktop's own page in your browser."),
+    ).toBeInTheDocument();
+    expect(writeText).not.toHaveBeenCalled();
+  });
+
+  it("copies the link when the destination serves no web page, even where the desktop could open one", async () => {
+    const user = userEvent.setup();
+    const writeText = vi.fn(async () => {});
+    Object.defineProperty(navigator, "clipboard", { configurable: true, value: { writeText } });
+    const { client } = fakeClient({ status: "read", departed });
+    const openThere = vi.fn(async (_thread: MovedThreadReference) => "opened" as const);
+    pane({ ...client, openThere });
+
+    await user.click(await screen.findByRole("button", { name: "Open there" }));
+    expect(openThere).not.toHaveBeenCalled();
+    expect(writeText).toHaveBeenCalledWith(`octant://hosts/${DESKTOP}/threads/code/${ARRIVED}`);
+    expect(await screen.findByText(/^Link copied\. This window can't open/)).toBeInTheDocument();
+  });
+
+  it("copies the link when the desktop refuses to open the page", async () => {
+    const user = userEvent.setup();
+    const writeText = vi.fn(async () => {});
+    Object.defineProperty(navigator, "clipboard", { configurable: true, value: { writeText } });
+    const { client } = fakeClient({
+      status: "read",
+      departed: { ...departed, destinationWebOrigin: "https://desktop.tail1234.ts.net" },
+    });
+    pane({ ...client, openThere: async () => "refused" as const });
+
+    await user.click(await screen.findByRole("button", { name: "Open there" }));
+    expect(writeText).toHaveBeenCalledWith(`octant://hosts/${DESKTOP}/threads/code/${ARRIVED}`);
+    expect(await screen.findByText(/^Link copied\./)).toBeInTheDocument();
   });
 
   it("names the parts that could not be read here and did not move, on the tombstone", async () => {

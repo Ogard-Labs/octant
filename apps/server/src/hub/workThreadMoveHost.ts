@@ -21,8 +21,11 @@ import {
 import { Schema } from "effect";
 import {
   MovedThreadParts,
+  measureThreadParts,
   packThreadParts,
   rehomeThreadParts,
+  threadMoveSize,
+  type MeasuredPartKind,
   type ThreadPartsDestination,
   type ThreadPartsSource,
 } from "./movedThreadParts";
@@ -228,27 +231,30 @@ export function createWorkThreadMoveHost(options: WorkThreadMoveHostOptions): {
       const moved = await movedOf(thread);
       const id = idOf(thread);
       if (moved === undefined || id === undefined) return { status: "unknown" };
-      // The very text pack writes, short of the folder's file list, so the
-      // size is exact for a thread whose folder stays.
+      // The very text pack writes, short of the lines that list the bulk
+      // parts and the folder's files.
       const bytes = Buffer.byteLength(JSON.stringify(moved));
+      // The files row is present exactly when the folder is the thread's own,
+      // even with nothing in it, so the move sheet can say the files move.
       const own = options.ownFolder(id);
-      if (own.status !== "own") {
-        return { status: "measured", bytes, parts: [{ kind: "thread-bundle", bytes }] };
-      }
-      let files: number;
-      try {
-        files = await measureWorkFolderForMove(own.folder);
-      } catch {
-        return { status: "unknown" };
-      }
-      return {
-        status: "measured",
-        bytes: bytes + files,
-        parts: [
-          { kind: "thread-bundle", bytes },
-          { kind: "work-files", bytes: files },
-        ],
-      };
+      const files: ReadonlyArray<MeasuredPartKind> =
+        own.status !== "own"
+          ? []
+          : [
+              await measureWorkFolderForMove(own.folder).then(
+                (filesBytes): MeasuredPartKind => ({
+                  status: "measured",
+                  kind: "work-files",
+                  bytes: filesBytes,
+                }),
+                (): MeasuredPartKind => ({ status: "unknown", kind: "work-files" }),
+              ),
+            ];
+      return threadMoveSize([
+        { status: "measured", kind: "thread-bundle", bytes },
+        ...files,
+        ...measureThreadParts(thread, options.parts.source),
+      ]);
     },
     pack: async (thread, folder) => {
       const conversation = await movedOf(thread);

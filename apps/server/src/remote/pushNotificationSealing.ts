@@ -28,6 +28,7 @@ import {
   REMOTE_PUSH_PLACEHOLDER_ALERT,
   REMOTE_PUSH_SEALED_CONTENT_MAX_BYTES,
   type RemotePushEnvelopeV1,
+  type RemotePushMoveWaitingKind,
   type RemotePushNotificationKind,
 } from "@octant/contracts";
 import { remotePushUrgency } from "@octant/domain/push-notification-policy";
@@ -122,8 +123,12 @@ export function sealPushNotification(input: {
   readonly notificationPublicKey: string;
   /** The destination's own collapse key, base64url, kept in its registration. */
   readonly collapseKey: string;
+  /**
+   * What later notifications replace this one on: the thread, or for a run
+   * with no thread the run, or for a held move its wait.
+   */
   readonly threadId: string;
-  readonly kind: RemotePushNotificationKind;
+  readonly kind: RemotePushNotificationKind | RemotePushMoveWaitingKind;
   readonly content: unknown;
 }): SealedPushNotification {
   const content = Buffer.from(JSON.stringify(input.content), "utf8");

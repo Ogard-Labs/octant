@@ -2024,17 +2024,20 @@ this is how it looks.
   thread title under it in meta ink. A route line reads from the source to the
   destination: each host's glyph tile and name, an arrow between them, and the
   destination Project after a slash. **What moves** follows as rows with their
-  sizes in tabular figures at the right: Conversation (the turn count),
-  Attachments and inputs, the branch name in mono with its commit count and
-  uncommitted `+`/`-` counts (Code), the files in its own folder with their
-  size (Work, when the thread is that folder's only user; a Work thread whose
-  folder the Project or another thread shares says, in their place, that only
-  the thread moves and its files stay on this computer), and Canvases. A total line gives the size
-  and an estimate, and one meta sentence under it names what the estimate
-  rests on: the speed earlier moves to that member reached, or the assumed
-  rate when none has been timed. The sheet opens at once; the line reads
-  Measuring… until the sizes arrive, and Size unknown when they cannot be
-  read, which never holds the move back. **Stays here** is a closed disclosure naming each part that
+  sizes in tabular figures at the right: Conversation (the turn count), one
+  row for the attachments, admitted inputs, generated images, Browser
+  captures, and Canvases together (None when the thread has none), the
+  branch name in mono with its commit count and uncommitted `+`/`-` counts
+  (Code), and the files in its own folder with their size (Work, when the
+  thread is that folder's only user; a Work thread whose folder the Project
+  or another thread shares says, in their place, that only the thread moves
+  and its files stay on this computer). A total line gives the size, every row included, and an estimate,
+  and one meta sentence under it names what the estimate rests on: the speed
+  earlier moves to that member reached, or the assumed rate when none has
+  been timed. The sheet opens at once; the line reads Measuring… until the
+  sizes arrive, and Size unknown when they cannot be read. A row whose parts
+  could not be sized reads Size unknown in place of its figure, and the total
+  counts the rest and ends "1 size unknown". Neither holds the move back. **Stays here** is a closed disclosure naming each part that
   applies (terminals, previews, Browser pages, ignored files with their count,
   Full access and grants, sign-ins, and for Work the folder's ignored files,
   links, and files holding a secret, with which the folder stays). When the worktree holds files that stay
@@ -2087,10 +2090,15 @@ this is how it looks.
   offered. A failed move holds nothing, so its composer returns.
 - **Moved.** On `committed` the pane becomes the tombstone: the source and
   destination route line, "Moved to" and the member's name with the time, and
-  **Open there**, which opens the thread on that host in this window when the
-  window already reads that host, and copies its link otherwise (for now it
-  always copies the link, in the form an Octant phone opens, and says "Link
-  copied" under the button). The thread's
+  **Open there**, which opens the thread on that member's own web page in
+  the default browser and says under the button, in one polite line,
+  "Opened on" the member's "own page in your browser." When that member
+  serves no web page it copies the thread's link in the form an Octant phone
+  opens instead and says "Link copied. This window can't open threads on"
+  the member, "the Octant phone app opens this link." Nothing opens inside
+  this window
+  ([why](docs/design/hub-and-spokes.md#moving-a-thread-to-another-member)).
+  The thread's
   sidebar row leaves this host's list; a window that reads both hosts shows it
   under the destination with the cloud glyph, so it appears to travel rather
   than vanish. One notification says the move finished. When the worktree was
@@ -2157,7 +2165,9 @@ this is how it looks.
     with tabular figures ("8 move to Mac mini · 1 hands over · 2 stay here ·
     1.4 GB, about 2 min"), with the estimate's basis under it as one meta
     sentence, as in the move sheet; a row whose size cannot be read says
-    Size unknown and still moves. Then the buttons: Cancel, and the primary, which
+    Size unknown and still moves, and one whose bulk parts alone could not be
+    sized says "At least" what was measured, counted in the total as one size
+    unknown. Then the buttons: Cancel, and the primary, which
     names the count and the unlock (**Move 9 threads with Touch ID**; **Move 9
     threads** when more than one destination needs its own unlock, asked in
     turn; **Hand over 2 threads** when only handovers are set, which need no

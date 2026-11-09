@@ -105,6 +105,8 @@ export function serverSpawnSpec(options: ServerSpawnSpecOptions) {
   delete inherited.OCTANT_SIMULATOR_DEVICE_BROKER_TOKEN;
   delete inherited.OCTANT_SERVE_AVD_BROKER_URL;
   delete inherited.OCTANT_SERVE_AVD_BROKER_TOKEN;
+  delete inherited.OCTANT_CREDENTIAL_BROKER_URL;
+  delete inherited.OCTANT_CREDENTIAL_BROKER_TOKEN;
   delete inherited.OCTANT_TERMINAL_LAUNCHER_DIRECTORY;
   const env = {
     ...inherited,
@@ -377,17 +379,17 @@ export async function probeHostInfoReceipt(options: {
 
 export async function resolveStableHostAttachment(options: {
   readonly readReceipt: () => Promise<HostInfoReceipt | undefined>;
-  readonly readBridgeSecret: () => string | undefined;
+  readonly readBridgeSecret: () => string | undefined | Promise<string | undefined>;
   readonly probeReceipt: (receipt: HostInfoReceipt) => Promise<LocalHostProbe | undefined>;
 }): Promise<{ readonly probe: LocalHostProbe; readonly bridgeSecret: string } | undefined> {
   const receiptBefore = await options.readReceipt();
   if (receiptBefore === undefined) return undefined;
-  const secretBefore = options.readBridgeSecret();
+  const secretBefore = await options.readBridgeSecret();
   if (secretBefore === undefined || secretBefore === "") return undefined;
   const probe = await options.probeReceipt(receiptBefore);
   if (probe === undefined || probe.instanceId !== receiptBefore.instanceId) return undefined;
   const receiptAfter = await options.readReceipt();
-  const secretAfter = options.readBridgeSecret();
+  const secretAfter = await options.readBridgeSecret();
   if (
     receiptAfter === undefined ||
     !sameHostInfoGeneration(receiptBefore, receiptAfter) ||
@@ -562,6 +564,8 @@ export function createSingleFlight<T>(operation: () => Promise<T>): () => Promis
 }
 
 interface ShutdownManagedServerOptions {
+  /** Windows native control can drain normally; SIGTERM there force-terminates. */
+  readonly requestStop?: () => Promise<boolean>;
   readonly gracePeriodMs?: number;
   readonly forceKillWaitMs?: number;
   readonly waitForExit?: (child: ManagedChildProcess, timeoutMs: number) => Promise<boolean>;
@@ -574,7 +578,16 @@ export async function shutdownManagedServer(
   if (hasExited(child)) return;
   const gracePeriodMs = options.gracePeriodMs ?? 5_000;
   const forceKillWaitMs = options.forceKillWaitMs ?? 1_000;
-  deliverSignal(child, "SIGTERM", "sigterm");
+  let requested = false;
+  if (options.requestStop !== undefined) {
+    try {
+      requested = (await options.requestStop()) === true;
+    } catch {
+      // A failed native transport must not skip cleanup of the held child.
+    }
+    if (hasExited(child)) return;
+  }
+  if (!requested) deliverSignal(child, "SIGTERM", "sigterm");
   const exited = await (options.waitForExit ?? waitForChildExit)(child, gracePeriodMs);
   if (exited || hasExited(child)) return;
   deliverSignal(child, "SIGKILL", "sigkill");

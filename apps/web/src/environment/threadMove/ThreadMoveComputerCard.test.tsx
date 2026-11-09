@@ -249,7 +249,9 @@ describe("the Computer card", () => {
               bytes: 12_582_912,
               parts: [
                 { kind: "thread-bundle", bytes: 40_960 },
-                { kind: "git-bundle", bytes: 12_541_952 },
+                { kind: "attachment", bytes: 1_048_576 },
+                { kind: "canvas", bytes: 1_048_576 },
+                { kind: "git-bundle", bytes: 10_444_800 },
               ],
             },
           },
@@ -273,7 +275,17 @@ describe("the Computer card", () => {
     const sheet = await screen.findByRole("dialog");
     await waitFor(() => expect(sheet).toHaveTextContent("12.0 MB, about 3 min"));
     expect(within(sheet).getByText("40 KB")).toBeInTheDocument();
-    expect(within(sheet).getByText("12.0 MB")).toBeInTheDocument();
+    // The attachments and Canvases are one row, counted in the total.
+    expect(
+      within(sheet)
+        .getByText(/Its attachments/)
+        .closest("li"),
+    ).toHaveTextContent("2.0 MB");
+    expect(
+      within(sheet)
+        .getByText(/The branch/)
+        .closest("li"),
+    ).toHaveTextContent("10.0 MB");
     expect(sheet).toHaveTextContent("Estimated from the speed earlier moves to Desktop reached.");
   });
 
@@ -320,6 +332,58 @@ describe("the Computer card", () => {
         "its folder is shared with the Project or another thread, so the files stay on this computer",
       ),
     );
+  });
+
+  it("says Size unknown on the row whose parts could not be measured, totals the rest, and still moves", async () => {
+    const user = userEvent.setup();
+    const { client, started } = fakeClient({
+      sizes: async () => ({
+        status: "read",
+        rate: { basis: "measured", bytesPerSecond: 100_000 },
+        rows: [
+          {
+            thread: THREAD,
+            size: {
+              status: "partly-measured",
+              bytes: 1_089_536,
+              parts: [
+                { kind: "thread-bundle", bytes: 40_960 },
+                { kind: "git-bundle", bytes: 1_048_576 },
+              ],
+              unknownParts: ["canvas"],
+            },
+          },
+        ],
+      }),
+    });
+    render(
+      <ThreadMoveComputerCard
+        client={client}
+        hostName="Laptop"
+        isThisComputer
+        thread={THREAD}
+        threadTitle="Add dark mode"
+        unlock={{ ownerUnlockSign: async () => ({ status: "done", signature: "c2ln" }) }}
+      />,
+    );
+    await user.click(screen.getByRole("button", { name: /Laptop/ }));
+    await user.click(await screen.findByRole("radio", { name: /Desktop/ }));
+    await user.click(screen.getByRole("button", { name: "Review move" }));
+
+    const sheet = await screen.findByRole("dialog");
+    await waitFor(() => expect(sheet).toHaveTextContent("1.0 MB, under a minute, 1 size unknown"));
+    expect(
+      within(sheet)
+        .getByText(/Its attachments/)
+        .closest("li"),
+    ).toHaveTextContent("Size unknown");
+    expect(
+      within(sheet)
+        .getByText(/The branch/)
+        .closest("li"),
+    ).toHaveTextContent("1.0 MB");
+    await user.click(within(sheet).getByRole("button", { name: "Move with Touch ID" }));
+    await waitFor(() => expect(started).toHaveLength(1));
   });
 
   it("says the size is unknown when the thread could not be measured, and still moves it", async () => {

@@ -170,6 +170,7 @@ import {
 import { createPrivateListenerAdministrationRouteHandler } from "../remote/privateListenerAdministrationRoutes";
 import { createPrivateListenerSetting } from "../remote/privateListenerSetting";
 import { createSelfMadeListenerCertificateStore } from "../remote/selfMadeListenerCertificate";
+import type { ThreadNotificationDeliveryService } from "../remote/threadNotificationDeliveryService";
 import {
   boundHostRuntimeDiagnostics,
   createReleaseFeedVerifier,
@@ -288,6 +289,8 @@ export type RemoteDependencies = { readonly onSecretStoreLinkChange?: () => void
     /** Threads a move holds: frozen here while leaving, or arriving and not yet committed. */
     readonly threadMoveHolds: ThreadMoveHolds;
     readonly threadMoveState: ThreadMoveStatePort;
+    /** Tells owner phones, through the phone notification path, that a move waits. */
+    readonly threadNotifications: Pick<ThreadNotificationDeliveryService, "notifyMoveWaiting">;
   };
 
 const decodeAgentRunParentThreadId = Schema.decodeUnknownSync(AgentRunParentThreadId);
@@ -1133,6 +1136,7 @@ export function wireRemote(deps: RemoteDependencies) {
       readThreadExternalContentTaint(persistence.connection, threadId).externalContentIngested,
     importMovedThread: (input) => deps.chatService.importMovedThread(input),
     readOriginalInput: (reference) => movedInputSource.read(reference).catch(() => undefined),
+    originalInputSize: (reference) => movedInputSource.size(reference),
     readAttachment: async (threadId, attachmentId) => {
       try {
         return await deps.chatService.readAttachment(
@@ -1503,6 +1507,11 @@ export function wireRemote(deps: RemoteDependencies) {
       return status.membership === "member" ? status.roster.roster.members : [];
     },
     selfMemberId: () => hubService.hubMemberId(),
+    tellOwnerPhones: (wait) =>
+      deps.threadNotifications.notifyMoveWaiting({
+        ...wait,
+        confirmsMoves: (deviceId) => spokeLinkService.ownerDeviceIds().includes(deviceId),
+      }),
     listThreads: async () => {
       const lastEvent = persistence.connection.prepare(
         `SELECT e.occurred_at AS occurred_at FROM aggregate_heads h

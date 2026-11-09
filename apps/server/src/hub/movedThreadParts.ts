@@ -26,7 +26,9 @@ import {
   type BrowserCapture,
   type ImageJob,
   type MovedThreadReference,
+  type ThreadMovePartKind,
   type ThreadMovePartLeftBehind,
+  type ThreadMoveSize,
 } from "@octant/contracts";
 import { Schema } from "effect";
 import type { PackedPart } from "./threadMoveService";
@@ -214,6 +216,82 @@ export async function packThreadParts(
 
   const index: MovedThreadParts = { generatedImages, browserCaptures, canvases };
   return parts.length === 0 ? { parts, partsLeftBehind } : { parts, index, partsLeftBehind };
+}
+
+/**
+ * The size of one kind of part a move would carry. `unknown` when the sizes
+ * of that kind could not be read; the move still carries what it can.
+ */
+export type MeasuredPartKind =
+  | { readonly status: "measured"; readonly kind: ThreadMovePartKind; readonly bytes: number }
+  | { readonly status: "unknown"; readonly kind: ThreadMovePartKind };
+
+/**
+ * Sums the sizes of one kind of part, read by `sizes`. A kind the thread has
+ * none of is left out; one whose sizes cannot be read is `unknown`.
+ */
+export function measurePartKind(
+  kind: ThreadMovePartKind,
+  sizes: () => ReadonlyArray<number>,
+): ReadonlyArray<MeasuredPartKind> {
+  let read: ReadonlyArray<number>;
+  try {
+    read = sizes();
+  } catch {
+    return [{ status: "unknown", kind }];
+  }
+  if (read.length === 0) return [];
+  return [{ status: "measured", kind, bytes: read.reduce((total, bytes) => total + bytes, 0) }];
+}
+
+/**
+ * The sizes of the bulk parts `packThreadParts` would write, read from what
+ * the stores already record (each generated image's and capture's recorded
+ * size) without reading, writing, or freezing anything. A Canvas records no
+ * byte size, so its part is measured as the very text the pack writes, from
+ * the versions the Canvas projection already holds in memory.
+ */
+export function measureThreadParts(
+  thread: MovedThreadReference,
+  source: ThreadPartsSource,
+): ReadonlyArray<MeasuredPartKind> {
+  return [
+    ...measurePartKind("generated-image", () =>
+      source
+        .generatedImages(thread.threadId)
+        .filter((job) => job.status === "completed")
+        .flatMap((job) => job.artifacts.map((artifact) => artifact.size)),
+    ),
+    ...measurePartKind("browser-capture", () =>
+      source.browserCaptures(thread.threadId).map((capture) => capture.size),
+    ),
+    ...measurePartKind("canvas", () =>
+      source
+        .canvases(thread)
+        .map((canvas) =>
+          Buffer.byteLength(JSON.stringify(encodeMovedCanvas({ versions: canvas.versions }))),
+        ),
+    ),
+  ];
+}
+
+/** One thread's size from the sizes of the kinds of part it would carry. */
+export function threadMoveSize(parts: ReadonlyArray<MeasuredPartKind>): ThreadMoveSize {
+  const measured = parts.flatMap((part) =>
+    part.status === "measured" ? [{ kind: part.kind, bytes: part.bytes }] : [],
+  );
+  const bytes = measured.reduce((total, part) => total + part.bytes, 0);
+  const [firstUnknown, ...otherUnknown] = parts.flatMap((part) =>
+    part.status === "unknown" ? [part.kind] : [],
+  );
+  return firstUnknown === undefined
+    ? { status: "measured", bytes, parts: measured }
+    : {
+        status: "partly-measured",
+        bytes,
+        parts: measured,
+        unknownParts: [firstUnknown, ...otherUnknown],
+      };
 }
 
 /**

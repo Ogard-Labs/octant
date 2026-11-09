@@ -14,6 +14,72 @@ const fingerprint = "a".repeat(64);
 const limits = { timeoutMs: 5000, maxBytes: 16384 };
 
 describe("Windows desktop identity", () => {
+  it.each([helper, `\\\\?\\${helper}`])(
+    "constructs the signing service and dispatches the canonical helper path unchanged: %s",
+    async (commandPath) => {
+      const native = vi.fn(async () => ({
+        exitCode: 0,
+        stdout: Buffer.from(
+          JSON.stringify({
+            version: 1,
+            ok: true,
+            operation: "ensure",
+            keyId: "host-identity",
+            fingerprint,
+          }) + "\n",
+        ),
+      }));
+      const service = makeHostIdentitySigningService(commandPath, {
+        platform: "win32",
+        storeScope: scope,
+        execute: makeWindowsHostSigningExecutor("octant", native),
+      });
+      await expect(service.ensureIdentityKey()).resolves.toEqual({ fingerprint });
+      expect(native).toHaveBeenCalledExactlyOnceWith(
+        expect.objectContaining({ command: commandPath, args: [], environment: {} }),
+        limits,
+      );
+    },
+  );
+
+  it("refuses relative, noncanonical, UNC and device helper paths before native dispatch", async () => {
+    const native = vi.fn(async () => ({ exitCode: 0, stdout: Buffer.alloc(0) }));
+    const execute = makeWindowsHostSigningExecutor("octant", native);
+    for (const commandPath of [
+      "octant-credential-helper.exe",
+      "C:octant-credential-helper.exe",
+      "\\\\server\\share\\octant-credential-helper.exe",
+      "\\\\?\\UNC\\server\\share\\octant-credential-helper.exe",
+      `\\\\.\\${helper}`,
+      "\\\\?\\GLOBALROOT\\native\\octant-credential-helper.exe",
+      "C:/Octant/native/octant-credential-helper.exe",
+      "\\\\?\\C:/Octant/native/octant-credential-helper.exe",
+      "C:\\Octant\\native\\..\\native\\octant-credential-helper.exe",
+      "\\\\?\\C:\\Octant\\native\\.\\octant-credential-helper.exe",
+      "C:\\Octant\\native\\another.exe",
+      `${helper}\0`,
+    ]) {
+      expect(() =>
+        makeHostIdentitySigningService(commandPath, {
+          platform: "win32",
+          storeScope: scope,
+          execute,
+        }),
+      ).toThrow();
+      await expect(
+        execute(
+          hostSigningHelperSpec(
+            commandPath,
+            { operation: "ensure", keyId: "host-identity" },
+            scope,
+          ),
+          limits,
+        ),
+      ).rejects.toThrow();
+    }
+    expect(native).not.toHaveBeenCalled();
+  });
+
   it("keeps native purpose, scope and payload in the bounded private pipe", async () => {
     const calls: WindowsCommandSpec[] = [];
     const execute = makeWindowsHostSigningExecutor("octant-nightly-test-data", async (spec) => {

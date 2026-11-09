@@ -23,7 +23,13 @@ import { OctantSwitch } from "../../ui/base/OctantSwitch";
 import { EnvironmentCard, EnvironmentTile } from "../EnvironmentGroup";
 import type { ThreadMoveClient } from "./threadMoveClient";
 import { partsLeftBehindSentence } from "./ThreadMoveTombstone";
-import { estimateBasis, formatBytes, sizeAndEstimate } from "./threadMoveSize";
+import {
+  BULK_PART_KINDS,
+  estimateBasis,
+  formatBytes,
+  rowSize,
+  sizeAndEstimate,
+} from "./threadMoveSize";
 import { useThreadMove } from "./useThreadMove";
 
 export interface ThreadMoveComputerCardProps {
@@ -750,15 +756,16 @@ function ThreadMoveSheet(props: {
         <ul className="thread-move-sheet__list">
           <li>
             <span>The conversation</span>
-            <PartSize kind="thread-bundle" sizes={sizes} />
+            <PartSize kinds={["thread-bundle"]} sizes={sizes} />
           </li>
           <li>
             <span>Its attachments, generated images, Browser captures, and Canvases</span>
+            <PartSize kinds={BULK_PART_KINDS} sizes={sizes} />
           </li>
           {props.thread.mode === "code" ? (
             <li>
               <span>The branch, its unpushed commits, and the staged and unstaged changes</span>
-              <PartSize kind="git-bundle" sizes={sizes} />
+              <PartSize kinds={["git-bundle"]} sizes={sizes} />
             </li>
           ) : null}
           {props.thread.mode === "work" ? <WorkFilesRow sizes={sizes} /> : null}
@@ -770,7 +777,7 @@ function ThreadMoveSheet(props: {
               ? "Size unknown"
               : sizeAndEstimate([size], sizes.rate)}
         </p>
-        {typeof sizes === "string" || size?.status !== "measured" ? null : (
+        {typeof sizes === "string" || size === undefined || size.status === "unknown" ? null : (
           <p className="thread-move-sheet__basis">{estimateBasis(sizes.rate, member.name)}</p>
         )}
       </section>
@@ -1134,16 +1141,27 @@ function useMoveSizes(
   return sizes;
 }
 
+/**
+ * A What moves row's size: Size unknown when one of its parts could not be
+ * measured, None when the thread carries none of them, nothing while the
+ * thread as a whole is measuring or unknown, which the total line says.
+ */
 function PartSize(props: {
   readonly sizes: ThreadMoveSizes | "measuring" | "unknown";
-  readonly kind: ThreadMovePartKind;
+  readonly kinds: ReadonlyArray<ThreadMovePartKind>;
 }) {
   if (typeof props.sizes === "string") return null;
   const size = props.sizes.rows[0]?.size;
-  const part =
-    size?.status === "measured" ? size.parts.find((entry) => entry.kind === props.kind) : undefined;
-  return part === undefined ? null : (
-    <span className="thread-move-sheet__size">{formatBytes(part.bytes)}</span>
+  const row = size === undefined ? undefined : rowSize(size, props.kinds);
+  if (row === undefined) return null;
+  return (
+    <span className="thread-move-sheet__size">
+      {row.status === "measured"
+        ? formatBytes(row.bytes)
+        : row.status === "none"
+          ? "None"
+          : "Size unknown"}
+    </span>
   );
 }
 
@@ -1154,10 +1172,14 @@ function PartSize(props: {
  */
 function WorkFilesRow(props: { readonly sizes: ThreadMoveSizes | "measuring" | "unknown" }) {
   const size = typeof props.sizes === "string" ? undefined : props.sizes.rows[0]?.size;
-  if (size?.status !== "measured") {
+  if (size === undefined || size.status === "unknown") {
     return <li>The files in its own folder, unless the Project or another thread shares it</li>;
   }
-  if (!size.parts.some((part) => part.kind === "work-files")) {
+  // A folder whose files could not be sized is still the thread's own.
+  const ownFolder =
+    size.parts.some((part) => part.kind === "work-files") ||
+    (size.status === "partly-measured" && size.unknownParts.includes("work-files"));
+  if (!ownFolder) {
     return (
       <li>
         Only the thread: its folder is shared with the Project or another thread, so the files stay
@@ -1168,7 +1190,7 @@ function WorkFilesRow(props: { readonly sizes: ThreadMoveSizes | "measuring" | "
   return (
     <li>
       <span>The files in its own folder</span>
-      <PartSize kind="work-files" sizes={props.sizes} />
+      <PartSize kinds={["work-files"]} sizes={props.sizes} />
     </li>
   );
 }
