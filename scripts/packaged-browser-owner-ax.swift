@@ -991,35 +991,59 @@ if mode == "picker-metadata" || mode == "picker-location-prompt" || (fixesOwnedF
                                 if status != .success { errors += 1; recordPickerError("owned-location-value", status) }
                                 let equal = status == .success && (raw as? String) == fixturePath
                                 fixedFolder["fixedOwnedFieldValueMatched"] = equal
+                                // Only shape/equality facts from the already owned
+                                // fixture field leave this process, never its text.
+                                fixedFolder["fixedOwnedFieldValueLength"] = (raw as? String)?.utf16.count ?? -1
+                                fixedFolder["expectedOwnedFieldValueLength"] = fixturePath.utf16.count
+                                fixedFolder["fixedOwnedFieldValueIsPrefix"] = (raw as? String).map { fixturePath.hasPrefix($0) } ?? false
                                 return equal && fieldReady(field)
                             }
                             if mode == "picker-fill-owned-location", let focus = focusInSheet(), nestedLocation(focus), fieldReady(focus.node),
                                let selectDown = CGEvent(keyboardEventSource: nil, virtualKey: 0, keyDown: true),
-                               let selectUp = CGEvent(keyboardEventSource: nil, virtualKey: 0, keyDown: false),
-                               let textDown = CGEvent(keyboardEventSource: nil, virtualKey: 0, keyDown: true),
-                               let textUp = CGEvent(keyboardEventSource: nil, virtualKey: 0, keyDown: false) {
+                               let selectUp = CGEvent(keyboardEventSource: nil, virtualKey: 0, keyDown: false) {
                                 selectDown.flags = .maskCommand; selectUp.flags = .maskCommand
-                                let utf16 = Array(fixturePath.utf16)
-                                utf16.withUnsafeBufferPointer { buffer in
-                                    if let base = buffer.baseAddress {
-                                        textDown.keyboardSetUnicodeString(stringLength: buffer.count, unicodeString: base)
-                                        textUp.keyboardSetUnicodeString(stringLength: buffer.count, unicodeString: base)
-                                    }
-                                }
+                                // Like the prompt-opening chord, route through the
+                                // focused native session. PID posting to the app can
+                                // bypass its out-of-process open-panel text input.
                                 if fieldReady(focus.node) {
-                                    selectDown.postToPid(processId); selectUp.postToPid(processId)
+                                    selectDown.post(tap: .cghidEventTap); selectUp.post(tap: .cghidEventTap)
                                     fixedFolder["status"] = "select-all-dispatched-no-text"
                                     if fieldReady(focus.node) {
-                                        textDown.postToPid(processId); textUp.postToPid(processId)
-                                        fixedFolder["typingDispatched"] = true
+                                        // A Unicode keyboard event has a bounded payload.
+                                        // Keep each payload within 20 UTF-16 units without
+                                        // splitting a surrogate pair, even for long paths.
+                                        var chunks: [[UniChar]] = [[]]
+                                        for scalar in fixturePath.unicodeScalars {
+                                            let units = Array(String(scalar).utf16)
+                                            if chunks[chunks.count - 1].count + units.count > 20 { chunks.append([]) }
+                                            chunks[chunks.count - 1].append(contentsOf: units)
+                                        }
+                                        var sent = 0
+                                        for utf16 in chunks where !utf16.isEmpty {
+                                            guard fieldReady(focus.node),
+                                                  let textDown = CGEvent(keyboardEventSource: nil, virtualKey: 0, keyDown: true),
+                                                  let textUp = CGEvent(keyboardEventSource: nil, virtualKey: 0, keyDown: false) else { break }
+                                            textDown.flags = []; textUp.flags = []
+                                            utf16.withUnsafeBufferPointer { buffer in
+                                                if let base = buffer.baseAddress {
+                                                    textDown.keyboardSetUnicodeString(stringLength: buffer.count, unicodeString: base)
+                                                    textUp.keyboardSetUnicodeString(stringLength: buffer.count, unicodeString: base)
+                                                }
+                                            }
+                                            textDown.post(tap: .cghidEventTap); textUp.post(tap: .cghidEventTap)
+                                            sent += utf16.count
+                                        }
+                                        fixedFolder["utf16UnitsDispatched"] = sent
+                                        fixedFolder["typingDispatched"] = sent > 0
                                         fixedFolder["status"] = "typed-value-unconfirmed"
-                                        // Allow the ordinary posted key pair to be
-                                        // consumed before the one equality read.
+                                        // Posting a key pair does not mean AppKit
+                                        // has consumed it. Observe under the same
+                                        // bounded field/owner guards without ever
+                                        // replaying the input on a mismatch.
                                         Thread.sleep(forTimeInterval: 0.05)
-                                        while Date() < deadline, errors == priorErrors {
+                                        while Date() < deadline, errors == priorErrors, fieldReady(focus.node) {
                                             if exactOwnedValue(focus.node) { fixedFolder["status"] = "completed"; break }
-                                            // A mismatch is a refusal, never a text retry.
-                                            break
+                                            Thread.sleep(forTimeInterval: min(0.05, max(0, deadline.timeIntervalSinceNow)))
                                         }
                                     }
                                 }
@@ -1029,7 +1053,7 @@ if mode == "picker-metadata" || mode == "picker-location-prompt" || (fixesOwnedF
                                let down = CGEvent(keyboardEventSource: nil, virtualKey: 36, keyDown: true),
                                let up = CGEvent(keyboardEventSource: nil, virtualKey: 36, keyDown: false) {
                                 if fieldReady(focus.node) {
-                                    down.postToPid(processId); up.postToPid(processId)
+                                    down.post(tap: .cghidEventTap); up.post(tap: .cghidEventTap)
                                     fixedFolder["goDispatched"] = true
                                     fixedFolder["status"] = "go-dispatched-shape-unconfirmed"
                                     while Date() < deadline, errors == priorErrors, identitiesUnchanged() {
@@ -1047,18 +1071,32 @@ if mode == "picker-metadata" || mode == "picker-location-prompt" || (fixesOwnedF
                             }
                             if mode == "picker-choose-owned-folder", controlsComplete, cancelButtons == 1, chooserButtons == 1,
                                enabledChooserTargets.count == 1, let target = enabledChooserTargets.first,
-                               let focus = focusInSheet(), onlyOriginalSheet(focus), associationUnchanged(),
-                               fixedFolderButtonEnabled(target),
-                               let point = fixedFolderInputPoint(target, deadline, admitMetadataNode),
-                               let down = CGEvent(mouseEventSource: nil, mouseType: .leftMouseDown, mouseCursorPosition: point, mouseButton: .left),
-                               let up = CGEvent(mouseEventSource: nil, mouseType: .leftMouseUp, mouseCursorPosition: point, mouseButton: .left),
-                               ownedFixturePath() == fixturePath, let finalFocus = focusInSheet(), onlyOriginalSheet(finalFocus),
-                               associationUnchanged(), errors == priorErrors, fixedFolderButtonEnabled(target),
-                               fixedLabel(target, kAXTitleAttribute as CFString, "Open") || fixedLabel(target, kAXTitleAttribute as CFString, "Choose"),
-                               errors == priorErrors, fixedFolderInputPoint(target, deadline, admitMetadataNode) == point,
-                               identitiesUnchanged(), errors == priorErrors {
-                                down.post(tap: .cghidEventTap); up.post(tap: .cghidEventTap)
-                                fixedFolder["chooserDispatched"] = true; fixedFolder["status"] = "dispatched"
+                               let focus = focusInSheet(), onlyOriginalSheet(focus), associationUnchanged() {
+                                // The mirrored AppKit button has no AXWindow and mouse
+                                // hit-testing resolves its host container, not this button.
+                                // Invoke the exact enabled button's public native action;
+                                // do not guess a coordinate or press a default control.
+                                var actions: CFArray?, parent: CFTypeRef?, targetPid: pid_t = 0
+                                let actionsStatus = AXUIElementCopyActionNames(target, &actions)
+                                fixedFolder["chooserActionsStatus"] = actionsStatus.rawValue
+                                if actionsStatus == .success,
+                                   (actions as? [String])?.contains(kAXPressAction as String) == true,
+                                   AXUIElementGetPid(target, &targetPid) == .success, targetPid == processId,
+                                   AXUIElementCopyAttributeValue(target, kAXParentAttribute as CFString, &parent) == .success,
+                                   let parent = axNode(parent), CFEqual(parent, sheet),
+                                   fixedFolderButtonEnabled(target),
+                                   fixedLabel(target, kAXTitleAttribute as CFString, "Open") || fixedLabel(target, kAXTitleAttribute as CFString, "Choose"),
+                                   let finalFocus = focusInSheet(), onlyOriginalSheet(finalFocus),
+                                   ownedFixturePath() == fixturePath, associationUnchanged(), identitiesUnchanged(),
+                                   errors == priorErrors, Date() < deadline, AXIsProcessTrusted(),
+                                   NSWorkspace.shared.frontmostApplication?.processIdentifier == processId {
+                                    let pressStatus = AXUIElementPerformAction(target, kAXPressAction as CFString)
+                                    fixedFolder["chooserPressStatus"] = pressStatus.rawValue
+                                    fixedFolder["chooserAction"] = "AXPress"
+                                    if pressStatus == .success {
+                                        fixedFolder["chooserDispatched"] = true; fixedFolder["status"] = "dispatched"
+                                    }
+                                }
                             }
                             fixedFolder["hitChecks"] = fixedFolderHitChecks
                             fixedFolder["keyboardFocusProof"] = fixedFolderKeyboardFocusProof.map { $0 as Any } ?? NSNull()
