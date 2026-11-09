@@ -20,14 +20,14 @@
 
 import { spawn } from "node:child_process";
 import { createHash } from "node:crypto";
-import { constants as fsConstants, createReadStream } from "node:fs";
+import { constants as fsConstants } from "node:fs";
 import {
+  chmod,
   copyFile,
   link,
   lstat,
   mkdir,
   open,
-  readFile,
   readdir,
   realpath,
   rename,
@@ -63,6 +63,9 @@ const MovedWorkPath = ThreadWorkingDirectory.pipe(
 );
 const isMovedWorkPath = Schema.is(MovedWorkPath);
 
+/** Permission bits only (`mode & 0o777`): setuid, setgid, and sticky bits never travel. */
+const PermissionBits = Schema.Int.pipe(Schema.between(0, 0o777));
+
 /** What the moved transcript says about the folder's files. */
 export const MovedWorkFolder = Schema.Struct({
   /** Where the thread worked, under its Project's main folder. */
@@ -79,10 +82,18 @@ export const MovedWorkFolder = Schema.Struct({
        * runnable and a private file stays private. Setuid, setgid, and
        * sticky bits never travel.
        */
-      mode: Schema.Int.pipe(Schema.between(0, 0o777)),
+      mode: PermissionBits,
     }).annotations(strict),
   ).pipe(Schema.maxItems(MOVED_WORK_FOLDER_ENTRIES_MAX)),
   emptyFolders: Schema.Array(MovedWorkPath).pipe(Schema.maxItems(MOVED_WORK_FOLDER_ENTRIES_MAX)),
+  /**
+   * The folder's own permission bits and those of every folder inside it
+   * that travels, so a private folder stays private where it lands.
+   */
+  rootMode: PermissionBits,
+  folderModes: Schema.Array(
+    Schema.Struct({ path: MovedWorkPath, mode: PermissionBits }).annotations(strict),
+  ).pipe(Schema.maxItems(MOVED_WORK_FOLDER_ENTRIES_MAX)),
 })
   .pipe(
     Schema.filter((folder) =>
@@ -219,13 +230,22 @@ export function workThreadFolderOf(input: {
   });
 }
 
+/** A file as the walk found it, with the identity a later read must still see. */
+interface WalkedFile {
+  readonly path: string;
+  readonly bytes: number;
+  readonly mode: number;
+  readonly dev: number;
+  readonly ino: number;
+}
+
 interface WalkedFolder {
-  readonly files: ReadonlyArray<{
-    readonly path: string;
-    readonly bytes: number;
-    readonly mode: number;
-  }>;
+  readonly files: ReadonlyArray<WalkedFile>;
   readonly emptyFolders: ReadonlyArray<string>;
+  /** The folder's own permission bits. */
+  readonly rootMode: number;
+  /** The permission bits of every folder inside it the walk entered. */
+  readonly folderModes: ReadonlyMap<string, number>;
   /** Entries that never travel: ignored, `.git`, links, special files, unnamable paths, past the bound. */
   readonly left: ReadonlyArray<string>;
 }
@@ -240,8 +260,9 @@ async function walkWorkFolder(folder: string): Promise<WalkedFolder> {
   if (!top.isDirectory() || (await realpath(folder)) !== folder) {
     throw new Error("The Work folder is not a plain folder at its own path.");
   }
-  const files: Array<{ path: string; bytes: number; mode: number }> = [];
+  const files: WalkedFile[] = [];
   const emptyFolders: string[] = [];
+  const folderModes = new Map<string, number>();
   const left: string[] = [];
   const ignoring = await insideGitWorkTree(folder);
   // Breadth first, one ignore check per depth, so an ignored folder (build
@@ -282,15 +303,26 @@ async function walkWorkFolder(folder: string): Promise<WalkedFolder> {
         ignored.has(entry.path) ||
         !isMovedWorkPath(entry.path);
       if (stays) left.push(entry.path);
-      else if (entry.kind === "folder") next.push(entry.path);
-      else {
+      else if (entry.kind === "folder") {
+        const found = await lstat(join(folder, entry.path)).catch(() => undefined);
+        if (found?.isDirectory() === true) {
+          folderModes.set(entry.path, found.mode & 0o777);
+          next.push(entry.path);
+        }
+      } else {
         // A file deleted since the folder was listed has nothing to carry or keep.
         const found = await lstat(join(folder, entry.path)).catch((error: unknown) => {
           if (isMissing(error)) return undefined;
           throw error;
         });
-        if (found !== undefined) {
-          files.push({ path: entry.path, bytes: found.size, mode: found.mode & 0o777 });
+        if (found?.isFile() === true) {
+          files.push({
+            path: entry.path,
+            bytes: found.size,
+            mode: found.mode & 0o777,
+            dev: found.dev,
+            ino: found.ino,
+          });
         }
       }
     }
@@ -305,6 +337,8 @@ async function walkWorkFolder(folder: string): Promise<WalkedFolder> {
   return {
     files: keptFiles,
     emptyFolders: keptFolders,
+    rootMode: top.mode & 0o777,
+    folderModes,
     left: [
       ...left,
       ...files.slice(keptFiles.length).map((file) => file.path),
@@ -342,6 +376,11 @@ export async function captureWorkFolderForMove(input: {
   readonly workingDirectory: ThreadWorkingDirectory;
   readonly partId: string;
   readonly partPath: string;
+  /**
+   * Called before each file is opened: the moment an outside writer could
+   * still swap it for a link. Tests use it to do so.
+   */
+  readonly beforeReading?: (path: string) => Promise<void>;
 }): Promise<CapturedWorkFolder> {
   const walked = await walkWorkFolder(input.folder);
   const files: Array<MovedWorkFolder["files"][number]> = [];
@@ -353,12 +392,18 @@ export async function captureWorkFolderForMove(input: {
   let offset = 0;
   try {
     for (const file of walked.files) {
-      const source = join(input.folder, file.path);
+      await input.beforeReading?.(file.path);
       const hash = createHash("sha256");
       let bytes = 0;
+      const source = await openWalkedFile(join(input.folder, file.path), file);
+      if (source.status === "missing") continue;
+      if (source.status === "refused") {
+        left.push(file.path);
+        continue;
+      }
       try {
         if (file.bytes <= SECRET_SCAN_LIMIT_BYTES) {
-          const content = await readFile(source);
+          const content = await source.handle.readFile();
           if (redactSecrets(content.toString("utf8")).redacted) {
             left.push(file.path);
             continue;
@@ -369,18 +414,22 @@ export async function captureWorkFolderForMove(input: {
           bytes = content.byteLength;
         } else {
           part ??= await open(input.partPath, "w", 0o600);
-          for await (const chunk of createReadStream(source)) {
-            if (!(chunk instanceof Uint8Array)) continue;
+          const buffer = new Uint8Array(1024 * 1024);
+          for (;;) {
+            const { bytesRead } = await source.handle.read(buffer, 0, buffer.byteLength, bytes);
+            if (bytesRead === 0) break;
+            const chunk = buffer.subarray(0, bytesRead);
             hash.update(chunk);
-            await part.write(chunk, 0, chunk.byteLength, offset + bytes);
-            bytes += chunk.byteLength;
+            await part.write(chunk, 0, bytesRead, offset + bytes);
+            bytes += bytesRead;
           }
         }
-      } catch (error) {
+      } catch {
         await part?.truncate(offset);
-        // A file deleted since the walk has nothing left to carry or keep.
-        if (!isMissing(error)) left.push(file.path);
+        left.push(file.path);
         continue;
+      } finally {
+        await source.handle.close();
       }
       offset += bytes;
       files.push({
@@ -400,10 +449,77 @@ export async function captureWorkFolderForMove(input: {
       ...(files.length === 0 ? {} : { partId: input.partId }),
       files,
       emptyFolders: walked.emptyFolders.map((path) => Schema.decodeSync(MovedWorkPath)(path)),
+      rootMode: walked.rootMode,
+      folderModes: carriedFolderModes(
+        [...files.map((entry) => String(entry.path)), ...walked.emptyFolders],
+        walked.folderModes,
+      ),
     },
     left: left.sort(),
   };
 }
+
+/**
+ * The permission bits of every folder a carried file or empty folder sits in
+ * or is, so each lands with its own. A folder the walk did not record lands
+ * private (`0o700`), the narrowest a person can still open.
+ */
+function carriedFolderModes(
+  paths: ReadonlyArray<string>,
+  modes: ReadonlyMap<string, number>,
+): MovedWorkFolder["folderModes"] {
+  const folders = new Set<string>();
+  for (const path of paths) {
+    const parts = path.split("/");
+    for (let depth = 1; depth < parts.length; depth += 1) {
+      folders.add(parts.slice(0, depth).join("/"));
+    }
+  }
+  return [...folders].sort().map((path) => ({
+    path: Schema.decodeSync(MovedWorkPath)(path),
+    mode: modes.get(path) ?? 0o700,
+  }));
+}
+
+/**
+ * Opens a file the walk listed, refusing what it no longer is. A file can be
+ * swapped for a link, or a folder on its way for one, after the walk: opening
+ * by path would then read whatever the link points at, outside the folder.
+ * The file is opened without following a link in its last step, and the open
+ * handle must be a plain file with the device and inode the walk recorded,
+ * which a swapped folder on the way also fails. Every read is then made
+ * through that handle, never by path.
+ */
+async function openWalkedFile(
+  path: string,
+  walked: { readonly dev: number; readonly ino: number },
+): Promise<
+  | { readonly status: "opened"; readonly handle: FileHandle }
+  | { readonly status: "missing" }
+  | { readonly status: "refused" }
+> {
+  let handle: FileHandle;
+  try {
+    handle = await open(path, NO_FOLLOW_READ);
+  } catch (error) {
+    // A file deleted since the walk has nothing left to carry or keep.
+    return isMissing(error) ? { status: "missing" } : { status: "refused" };
+  }
+  const found = await handle.stat().catch(() => undefined);
+  if (
+    found === undefined ||
+    !found.isFile() ||
+    found.dev !== walked.dev ||
+    found.ino !== walked.ino
+  ) {
+    await handle.close();
+    return { status: "refused" };
+  }
+  return { status: "opened", handle };
+}
+
+/** Read-only, never through a link, and never waiting on a named pipe. */
+const NO_FOLLOW_READ = fsConstants.O_RDONLY | fsConstants.O_NOFOLLOW | fsConstants.O_NONBLOCK;
 
 export type LandedWorkFolder =
   | { readonly status: "landed"; readonly workingDirectory: ThreadWorkingDirectory }
@@ -435,7 +551,12 @@ export async function landWorkFolderFromMove(input: {
   const candidates = [index.workingDirectory, ...Option.toArray(fresh)];
   for (const candidate of candidates) {
     const state = await landingState(input.root, candidate, index);
-    if (state === "ours") return { status: "landed", workingDirectory: candidate };
+    if (state === "ours") {
+      // An earlier try may have stopped between landing and setting the
+      // folder's own bits, which stay private until then.
+      await chmod(join(input.root, candidate), index.rootMode).catch(() => undefined);
+      return { status: "landed", workingDirectory: candidate };
+    }
     if (state === "taken") continue;
     const target = join(input.root, candidate);
     const staging = join(dirname(target), `.octant-move-${input.moveId}`);
@@ -443,11 +564,17 @@ export async function landWorkFolderFromMove(input: {
       await mkdir(dirname(target), { recursive: true });
       // The staging folder is this move's own, so an earlier try's is restarted.
       await rm(staging, { recursive: true, force: true });
-      await mkdir(staging);
+      // Private while the files are written; each folder takes its own bits
+      // once its contents are in place, so none is ever wider than it was.
+      await mkdir(staging, { mode: 0o700 });
       await writeLandedFiles(staging, index, input.partPath);
+      for (const folder of [...index.folderModes].reverse()) {
+        await chmod(join(staging, folder.path), folder.mode);
+      }
       // Rename replaces only an empty folder; one that gained an entry
       // since the check refuses, and nothing of the person's is touched.
       await rename(staging, target);
+      await chmod(target, index.rootMode);
     } catch {
       await rm(staging, { recursive: true, force: true }).catch(() => undefined);
       return { status: "refused" };
@@ -463,7 +590,7 @@ async function writeLandedFiles(
   partPath: string | undefined,
 ): Promise<void> {
   for (const folder of index.emptyFolders) {
-    await mkdir(join(staging, folder), { recursive: true });
+    await mkdir(join(staging, folder), { recursive: true, mode: 0o700 });
   }
   if (partPath === undefined) return;
   const part = await open(partPath, "r");
@@ -473,7 +600,7 @@ async function writeLandedFiles(
     let offset = 0;
     for (const file of index.files) {
       const target = join(staging, file.path);
-      await mkdir(dirname(target), { recursive: true });
+      await mkdir(dirname(target), { recursive: true, mode: 0o700 });
       // Opened with its own bits, which the umask can only narrow, so a
       // private file is never readable by others even while it is written.
       const out = await open(target, "wx", file.mode);
@@ -552,7 +679,10 @@ async function folderHoldsExactly(
         const expected = expectedFiles.get(path);
         if (!child.isFile() || child.isSymbolicLink() || expected === undefined) return "taken";
         const size = (await lstat(join(folder, path))).size;
-        if (size !== expected.bytes || (await fileSha256(join(folder, path))) !== expected.sha256) {
+        if (
+          size !== expected.bytes ||
+          (await plainFileSha256(join(folder, path))) !== expected.sha256
+        ) {
           return "taken";
         }
       }
@@ -616,12 +746,17 @@ export async function settleMovedWorkFolder(input: {
   const files = input.index.files;
 
   /** Deletes a set-aside file that matches what travelled, or puts it back. */
-  const settleAside = async (aside: string, file: MovedWorkFolder["files"][number]) => {
+  const settleAside = async (
+    aside: string,
+    file: MovedWorkFolder["files"][number],
+    /** The file as it was found before it was set aside; a read must see that same file. */
+    identity?: { readonly dev: number; readonly ino: number },
+  ) => {
     const travelled =
       (await lstat(aside)
         .then((found) => (found.isFile() ? found.size : -1))
         .catch(() => -1)) === file.bytes &&
-      (await fileSha256(aside).catch(() => "")) === file.sha256;
+      (await plainFileSha256(aside, identity)) === file.sha256;
     if (travelled) {
       await rm(aside, { force: true });
       return;
@@ -671,7 +806,7 @@ export async function settleMovedWorkFolder(input: {
         continue;
       }
       await input.afterMovedAside?.(path);
-      await settleAside(aside, file);
+      await settleAside(aside, file, entry);
     }
     for (const directory of await foldersDeepestFirst(folder)) {
       await rmdir(join(folder, directory)).catch(() => undefined);
@@ -774,12 +909,42 @@ async function foldersDeepestFirst(root: string): Promise<ReadonlyArray<string>>
   return found.reverse();
 }
 
-async function fileSha256(path: string): Promise<string> {
-  const hash = createHash("sha256");
-  for await (const chunk of createReadStream(path)) {
-    if (chunk instanceof Uint8Array) hash.update(chunk);
+/**
+ * The digest of a plain file, read through a handle opened without following
+ * a link; undefined for a link, anything else, or a file whose device and
+ * inode are not the ones `expected` names.
+ */
+async function plainFileSha256(
+  path: string,
+  expected?: { readonly dev: number; readonly ino: number },
+): Promise<string | undefined> {
+  let handle: FileHandle;
+  try {
+    handle = await open(path, NO_FOLLOW_READ);
+  } catch {
+    return undefined;
   }
-  return hash.digest("hex");
+  try {
+    const found = await handle.stat();
+    if (!found.isFile()) return undefined;
+    if (expected !== undefined && (found.dev !== expected.dev || found.ino !== expected.ino)) {
+      return undefined;
+    }
+    const hash = createHash("sha256");
+    const buffer = new Uint8Array(1024 * 1024);
+    let position = 0;
+    for (;;) {
+      const { bytesRead } = await handle.read(buffer, 0, buffer.byteLength, position);
+      if (bytesRead === 0) break;
+      hash.update(buffer.subarray(0, bytesRead));
+      position += bytesRead;
+    }
+    return hash.digest("hex");
+  } catch {
+    return undefined;
+  } finally {
+    await handle.close();
+  }
 }
 
 function isMissing(error: unknown): boolean {

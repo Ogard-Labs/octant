@@ -7,6 +7,7 @@ import {
   readFileSync,
   realpathSync,
   rmSync,
+  symlinkSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
@@ -14,6 +15,7 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { decodeThreadWorkingDirectory } from "@octant/contracts";
 import {
+  captureWorkFolderForMove,
   settleMovedWorkFolder,
   workThreadOwnFolder,
   type MovedWorkFolder,
@@ -49,9 +51,64 @@ function travelledFolder(files: Readonly<Record<string, string>>) {
     partId: "work-files",
     files: entries,
     emptyFolders: [],
+    rootMode: 0o755,
+    folderModes: [],
   };
   return { parent, folder, index };
 }
+
+describe("reading a Work folder's files for a move", () => {
+  const OUTSIDE = "Payroll, not part of the offsite";
+
+  /** A folder with two files and a document outside it a link could point at. */
+  function folderBesideAnOutsideDocument() {
+    const parent = realpathSync(mkdtempSync(join(tmpdir(), "octant-work-capture-")));
+    parents.push(parent);
+    const folder = join(parent, "report");
+    mkdirSync(join(folder, "notes"), { recursive: true });
+    writeFileSync(join(folder, "agenda.md"), "# Offsite\n");
+    writeFileSync(join(folder, "notes", "rooms.txt"), "Room A");
+    mkdirSync(join(parent, "outside"));
+    writeFileSync(join(parent, "outside", "rooms.txt"), OUTSIDE);
+    return { parent, folder, partPath: join(parent, "work-files.part") };
+  }
+
+  it("never packs what a file swapped for a link after the walk points at", async () => {
+    const { parent, folder, partPath } = folderBesideAnOutsideDocument();
+    const captured = await captureWorkFolderForMove({
+      folder,
+      workingDirectory: report,
+      partId: "work-files",
+      partPath,
+      beforeReading: async (path) => {
+        if (path !== "agenda.md") return;
+        rmSync(join(folder, "notes", "rooms.txt"));
+        symlinkSync(join(parent, "outside", "rooms.txt"), join(folder, "notes", "rooms.txt"));
+      },
+    });
+    expect(captured.index.files.map((file) => file.path)).toEqual(["agenda.md"]);
+    expect(captured.left).toEqual(["notes/rooms.txt"]);
+    expect(readFileSync(partPath, "utf8")).not.toContain(OUTSIDE);
+  });
+
+  it("never packs a file reached through a folder swapped for a link after the walk", async () => {
+    const { parent, folder, partPath } = folderBesideAnOutsideDocument();
+    const captured = await captureWorkFolderForMove({
+      folder,
+      workingDirectory: report,
+      partId: "work-files",
+      partPath,
+      beforeReading: async (path) => {
+        if (path !== "agenda.md") return;
+        rmSync(join(folder, "notes"), { recursive: true });
+        symlinkSync(join(parent, "outside"), join(folder, "notes"));
+      },
+    });
+    expect(captured.index.files.map((file) => file.path)).toEqual(["agenda.md"]);
+    expect(captured.left).toEqual(["notes/rooms.txt"]);
+    expect(readFileSync(partPath, "utf8")).not.toContain(OUTSIDE);
+  });
+});
 
 describe("clearing a Work folder whose files moved", () => {
   it("removes every file and folder that travelled, and its trash folder", async () => {

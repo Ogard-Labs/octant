@@ -1358,10 +1358,19 @@ for Move after this turn.
     each file's path, size, digest, and permission bits (`mode & 0o777`;
     setuid, setgid, and sticky bits never travel) in the thread bundle's file
     list, so the offer stays one manifest row however many files the folder
-    holds. A
+    holds. The list also carries the permission bits of the folder itself
+    and of every folder inside it that travels. A
     file up to the Secret guard's read limit (2 MiB) is read once, checked,
     and written from that same read; a larger one travels unread, as a large
-    Code file does. An older destination that does not know the part refuses
+    Code file does. Every read goes through a handle, never a path: an
+    editor or terminal can swap a file, or a folder on its way, for a link
+    after the walk, and reading by path would then pack whatever the link
+    points at, outside the folder. Each file is opened without following a
+    link in its last step, and the open handle must be a plain file with the
+    device and inode the walk recorded, which a swapped folder on the way
+    also fails; a file that does not match stays behind and is named. The
+    erase's comparisons and the destination's check of an earlier landing
+    read the same way. An older destination that does not know the part refuses
     the move rather than dropping the files.
   - **Where it lands.** In the same subfolder of the destination Project's
     main folder, and the new thread works there. A path that holds anything
@@ -1375,7 +1384,11 @@ for Move after this turn.
     file lands with its own permission bits: it is created with them, which
     the umask can only narrow, and then set to exactly them, so a private
     file is never readable by others even while it is written and a script
-    stays runnable. A
+    stays runnable. Folders are the same: the staging folder and every folder
+    in it are made private (`0o700`) while the files are written, each then
+    takes its own bits deepest first, and the folder itself takes its own
+    once renamed into place, so a private folder never lands wider than it
+    was. A
     retried arrival that finds a folder holding exactly these files uses it
     rather than landing a second copy. A move that is discarded after landing
     leaves that copy where it is; the source still holds its own.
