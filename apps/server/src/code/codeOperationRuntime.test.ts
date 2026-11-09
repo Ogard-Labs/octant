@@ -3552,6 +3552,27 @@ describe("CodeOperationRuntime", () => {
     expect(threadWithActiveTurnPosture(plan, activeTurns)).toEqual(
       fixture.runtime.threadWithActiveTurnPosture?.(plan),
     );
+    // A turn that started sandboxed keeps the sandbox when it is turned off
+    // mid-turn; the change takes effect from the next turn.
+    const started = activeTurns.get(String(threadId));
+    if (started !== undefined) {
+      activeTurns.set(String(threadId), {
+        ...started,
+        thread: decodeCodeThread({
+          ...started.thread,
+          executionPolicy: "full-access",
+          permissionPersistence: "project-default",
+          fullAccessSandbox: true,
+        }),
+      });
+      const openNow = decodeCodeThread({
+        ...thread(),
+        executionPolicy: "full-access",
+        permissionPersistence: "project-default",
+      });
+      expect(threadWithActiveTurnPosture(openNow, activeTurns).fullAccessSandbox).toBe(true);
+      activeTurns.set(String(threadId), started);
+    }
     await fixture.runtime.execute(windowId, {
       kind: "cancel-provider-turn",
       operationId: operationId(906),
@@ -6416,6 +6437,43 @@ describe("provider switch handoff", () => {
     }
   });
 
+  it("leads a provider switch with the limit rule's summary, and says so on the journal", async () => {
+    const drivers = twoHarnesses();
+    const fixture = runtimeFixture({
+      resolveProviderDriver: drivers.resolveProviderDriver,
+      handoverSummary: () => ({
+        content: "The migration is half done; finish the index next.",
+        completedAt: "2026-11-08T10:00:00.000Z",
+      }),
+    });
+    fixture.setThread(onProvider(providerInstance, "model-a"));
+    try {
+      await finishFirstTurn(fixture, drivers, providerInstance);
+      fixture.setThread(onProvider(harnessInstance, "harness-model", 2));
+      await sendAfterSwitch(fixture);
+      const next = drivers.connection(harnessInstance);
+      await vi.waitFor(() => expect(next.send).toHaveBeenCalledOnce());
+      const context = vi.mocked(next.send).mock.calls[0]?.[0].context ?? [];
+      expect(context.map((block) => block.kind)).toEqual([
+        "conversation-summary",
+        "conversation-summary",
+        "user-message",
+        "assistant-message",
+      ]);
+      expect(context[1]?.text).toContain("finish the index next");
+      const frames = await fixture.runtime.subscribe(windowId, threadId, operationId(85), 0, 50);
+      expect(
+        frames.find((frame) => frame.event.kind === "context-handoff-attached")?.event,
+      ).toMatchObject({ reason: "provider-switch", messages: 2, handoverSummary: true });
+      expect(fixture.conversation().turns.at(-1)?.handoff).toMatchObject({
+        handoverSummary: true,
+      });
+    } finally {
+      await fixture.runtime.close();
+      fixture.close();
+    }
+  });
+
   it.each([
     {
       direction: "from a provider's session to the Octant Harness",
@@ -8249,6 +8307,8 @@ function runtimeFixture(options: {
   providerSwitchContext?:
     | Parameters<typeof createCodeOperationRuntime>[0]["providerSwitchContext"]
     | "none";
+  /** The limit rule's summary a provider switch leads with, when one waits. */
+  handoverSummary?: Parameters<typeof createCodeOperationRuntime>[0]["handoverSummary"];
   /** Whether the selector reports the thread as having taken in outside content. */
   externalContentIngested?: boolean;
   /** Reopen another fixture's journal and content, the way a restarted host does. */
@@ -8562,6 +8622,7 @@ function runtimeFixture(options: {
     ...(options.providerSwitchContext === "none"
       ? {}
       : { providerSwitchContext: options.providerSwitchContext ?? selectConversation }),
+    ...(options.handoverSummary === undefined ? {} : { handoverSummary: options.handoverSummary }),
     ...(options.forkContext === "none"
       ? {}
       : { forkContext: options.forkContext ?? selectForkConversation }),

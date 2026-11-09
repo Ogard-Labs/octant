@@ -217,6 +217,112 @@ describe("native harness loop", () => {
     },
   );
 
+  it("reports each task list the lead writes as task progress, keeping a row's id by its place", async () => {
+    const todo = (items: ReadonlyArray<{ title: string; status: string }>) =>
+      JSON.stringify({ items });
+    const scripted = scriptedTransport([
+      {
+        text: "Planning",
+        toolCalls: [
+          {
+            toolCallId: "todo-1",
+            toolName: "todo-write",
+            argumentsJson: todo([
+              { title: "Read the parser", status: "in-progress" },
+              { title: "Fix the bug", status: "pending" },
+            ]),
+          },
+        ],
+      },
+      {
+        text: "Refused",
+        toolCalls: [
+          {
+            toolCallId: "todo-2",
+            toolName: "todo-write",
+            argumentsJson: todo([{ title: "Never recorded", status: "done" }]),
+          },
+        ],
+      },
+      {
+        text: "Narrowed",
+        toolCalls: [
+          {
+            toolCallId: "todo-3",
+            toolName: "todo-write",
+            argumentsJson: todo([{ title: "Read the parser", status: "done" }]),
+          },
+        ],
+      },
+      { text: "Done", toolCalls: [] },
+    ]);
+    const offered = [...tools, tool("todo-write")];
+    await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const connection = yield* connect(
+            scripted.transport,
+            new MemoryNativeHarnessTranscriptStore(),
+          );
+          yield* connection.start({ sessionId, modelId, executionPolicy: "plan", tools: offered });
+          const all = yield* Effect.fork(
+            Stream.runCollect((yield* connection.subscribe).pipe(Stream.takeUntil(isTerminal))),
+          );
+          const requested = (requestId: string) =>
+            Effect.gen(function* () {
+              yield* Effect.yieldNow();
+              yield* connection.answerTool({
+                sessionId,
+                requestId,
+                resultJson: requestId === "todo-2" ? '{"error":"refused"}' : "{}",
+                isError: requestId === "todo-2",
+              });
+            });
+          yield* connection.send({ sessionId, prompt: "Fix it", attachments: [], tools: offered });
+          for (const requestId of ["todo-1", "todo-2", "todo-3"]) {
+            yield* Effect.promise(() =>
+              vi.waitFor(() =>
+                expect(scripted.requests.length).toBeGreaterThanOrEqual(
+                  ["todo-1", "todo-2", "todo-3"].indexOf(requestId) + 1,
+                ),
+              ),
+            );
+            yield* requested(requestId);
+          }
+          const events = Array.from(yield* Fiber.join(all));
+          const tasks = events.filter(
+            (event) => event.kind === "task-progress" || event.kind === "task-list",
+          );
+          const ids = tasks.flatMap((event) =>
+            event.kind === "task-progress" ? [event.taskId] : [],
+          );
+          const firstId = ids[0];
+          const secondId = ids[1];
+          if (firstId === undefined || secondId === undefined) {
+            throw new Error("The first list did not report its tasks.");
+          }
+          expect(
+            tasks.map((event) =>
+              event.kind === "task-progress"
+                ? [event.taskId, event.status, event.summary]
+                : event.kind === "task-list"
+                  ? event.taskIds
+                  : [],
+            ),
+          ).toEqual([
+            [firstId, "in-progress", "Read the parser"],
+            [secondId, "pending", "Fix the bug"],
+            [firstId, secondId],
+            [firstId, "completed", "Read the parser"],
+            [firstId],
+          ]);
+          expect(firstId).not.toBe(secondId);
+          expect(events.at(-1)?.kind).toBe("completed");
+        }),
+      ),
+    );
+  });
+
   it("does not acknowledge a steering note that cancellation prevents from reaching the model", async () => {
     const scripted = scriptedTransport([
       {
@@ -1213,6 +1319,8 @@ describe("fitting a request to the endpoint", () => {
         cacheReadInputTokens: 60,
         cacheWriteInputTokens: 60,
         reasoningTokens: 3,
+        // What the window holds is the last request's input, cache included.
+        contextTokens: 220,
       });
 
       // The same event is what the usage dashboard reads for cache coverage.
@@ -1898,6 +2006,39 @@ describe("compacting an Octant Harness session", () => {
         afterTurns: 3,
       },
     ]);
+  });
+
+  it("summarizes earlier turns inside a turn once its request passes the person's point", async () => {
+    const transcripts = new MemoryNativeHarnessTranscriptStore();
+    const { transport, requests } = scriptedTransport([
+      ...answers(2),
+      { text: "Earlier: chose the queue design.", toolCalls: [] },
+      { text: "answer 3", toolCalls: [] },
+    ]);
+    const long = "x".repeat(20_000);
+    const events = await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const connection = yield* connect(transport, transcripts);
+          yield* connection.start({
+            sessionId,
+            modelId,
+            executionPolicy: "approval-gated",
+            // Short turns stay under it; the long third prompt passes it.
+            compactionPoint: { tokens: 4_000, contextWindow: 100_000 },
+          });
+          yield* sendAndCollect(connection, "first", isTerminal);
+          yield* sendAndCollect(connection, "second", isTerminal);
+          return yield* sendAndCollect(connection, long, isTerminal);
+        }),
+      ),
+    );
+    expect(requests).toHaveLength(4);
+    expect(requests[2]?.tools).toEqual([]);
+    expect(requests[2]?.history[0]?.text).toContain("User: first");
+    expect(requests[3]?.history[0]?.text).toContain("Earlier: chose the queue design.");
+    expect(requests[3]?.history.at(-1)?.text).toBe(long);
+    expect(events.some((event) => event.kind === "context-compacted")).toBe(true);
   });
 
   it("resumes a compacted session from its summary and the turns after it", async () => {

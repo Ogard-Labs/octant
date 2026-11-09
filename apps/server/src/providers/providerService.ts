@@ -97,7 +97,10 @@ import {
   providerLatestVersionNpmPackage,
   type CapabilityEvidenceChange,
 } from "@octant/domain";
-import { describeProviderRuntimeIntegration } from "@octant/domain/provider-runtime-integration";
+import {
+  describeProviderRuntimeIntegration,
+  hostedProviderCapabilities,
+} from "@octant/domain/provider-runtime-integration";
 import { accessSync, constants, realpathSync, statSync } from "node:fs";
 import { mkdir, mkdtemp, realpath, rm } from "node:fs/promises";
 import { homedir, tmpdir } from "node:os";
@@ -3090,6 +3093,8 @@ function withRuntimeIntegration(
   driverKind: ProviderDriverKind,
   observed: ProviderObservedState,
 ): ProviderObservedState {
-  const integration = describeProviderRuntimeIntegration(driverKind, observed);
-  return integration === undefined ? observed : { ...observed, integration };
+  const capabilities = hostedProviderCapabilities(driverKind, observed);
+  const hosted = capabilities === observed.capabilities ? observed : { ...observed, capabilities };
+  const integration = describeProviderRuntimeIntegration(driverKind, hosted);
+  return integration === undefined ? hosted : { ...hosted, integration };
 }

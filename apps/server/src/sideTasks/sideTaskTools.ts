@@ -45,12 +45,15 @@ function definition(worktree: boolean, board: boolean): ProviderToolDefinition {
   return {
     name: SIDE_TASK_TOOL_NAME,
     description: [
-      "Offer the person a separate task you noticed while working: a real bug, stale docs, missing tests, dead code, or a security problem that is out of scope for what you were asked and would bloat this change.",
-      "The person sees a card with your title and reason and decides whether to start it in its own thread; nothing starts until they do, and you should not wait for an answer or do that work here.",
-      "Do not offer vague style notes, work you can finish in a line or two now, or hunches you have not checked.",
+      "Offer the person a task that should run on its own: out-of-scope work you noticed (a real bug, stale docs, missing tests, dead code, or a security problem that would bloat this change), a piece the person asked to split off, run separately, or run in the background, or a real next step your reply recommends.",
+      "The person sees a card after your reply and chooses whether to start it in a new thread or have this thread do it. Do not wait for that answer, and do not also do the work yourself here; continue with your current task.",
+      "Do not offer vague style notes, one-line tweaks you can make now, or hunches you have not checked.",
       worktree
         ? 'The prompt must stand alone for a fresh thread with none of this conversation: name the files, what you saw, and what done looks like. Target "new-worktree" (default) gives it an isolated checkout; "new-thread" works in the current checkout.'
         : "The prompt must stand alone for a fresh thread with none of this conversation: name what you saw and what done looks like.",
+      worktree
+        ? 'Context "fresh" (default) starts it with the prompt alone; "fork" starts it with this conversation through your reply and then the prompt, for a task that leans on what was said here. A fork always gets its own worktree.'
+        : 'Context "fresh" (default) starts it with the prompt alone; "fork" starts it with this conversation through your reply and then the prompt, for a task that leans on what was said here.',
       ...(board
         ? [
             `As this Project's designated planner, use target "board" to propose a new task on the Project board instead: the title, the reason as its rationale, and the prompt as its intent (at most ${String(BOARD_PROMPT_LENGTH)} characters). The person reviews it in the Project planner and only they create and start it; at most ${String(MAX_PENDING_CODE_PLANNER_PROPOSALS)} proposals wait at once. Report it as proposed, never as running or done.`,
@@ -68,7 +71,7 @@ function definition(worktree: boolean, board: boolean): ProviderToolDefinition {
         reason: {
           type: "string",
           maxLength: board ? BOARD_REASON_LENGTH : MAX_SIDE_TASK_REASON_LENGTH,
-          description: "One sentence: what you noticed and why it belongs in its own thread.",
+          description: "One sentence: what you noticed and why it belongs in a task of its own.",
         },
         prompt: {
           type: "string",
@@ -76,6 +79,7 @@ function definition(worktree: boolean, board: boolean): ProviderToolDefinition {
           description: "The first message of the new thread, complete on its own.",
         },
         ...(targets.length === 0 ? {} : { target: { type: "string", enum: targets } }),
+        context: { type: "string", enum: ["fresh", "fork"] },
       },
       required: ["title", "reason", "prompt"],
       additionalProperties: false,
@@ -106,6 +110,13 @@ export function createSideTaskTools(input: {
   readonly threadId: string;
   readonly mode: OctantMode;
   readonly projectId?: string | undefined;
+  /**
+   * The running turn in the mode's own identity (a Chat turn, a Work turn, or
+   * a Code operation), stamped on every offer so the card sits after that
+   * turn's reply and a fork is taken through it. Absent only where the caller
+   * has no turn to name; such an offer can still start fresh.
+   */
+  readonly turnId?: string | undefined;
   /** The thread's own model; decoded with the offer. */
   readonly suggestedBy: { readonly providerInstanceId: string; readonly modelId: string };
   readonly uuid: () => string;
@@ -138,7 +149,17 @@ export function createSideTaskTools(input: {
         return refused("The tool input must be an object with a title, reason, and prompt.");
       }
       const parsed = new Map<string, unknown>(Object.entries(raw));
-      const target = parsed.get("target") ?? (worktree ? "new-worktree" : "new-thread");
+      const context = parsed.get("context") ?? "fresh";
+      if (context !== "fresh" && context !== "fork") {
+        return refused('Context is "fresh" or "fork".');
+      }
+      // A fork carries the checkout as the offering turn left it, which only
+      // its own worktree can hold.
+      const requested = parsed.get("target");
+      const target =
+        requested !== "board" && context === "fork" && worktree
+          ? "new-worktree"
+          : (requested ?? (worktree ? "new-worktree" : "new-thread"));
       if (target === "board") {
         if (input.planner === undefined || !plannerThread()) {
           return refused(
@@ -171,6 +192,8 @@ export function createSideTaskTools(input: {
           reason: stringField(parsed, "reason"),
           prompt: stringField(parsed, "prompt"),
           target,
+          context,
+          ...(input.turnId === undefined ? {} : { turnId: input.turnId }),
           offeredAt: input.clock(),
         });
       } catch {
@@ -188,7 +211,7 @@ export function createSideTaskTools(input: {
         result: {
           status: "offered",
           message:
-            "The person sees this as a card and decides whether to start it. Continue with your current task.",
+            "The person sees this as a card and decides where it runs. Do not wait for the answer or do this work here; continue with your current task.",
         },
       };
     },
@@ -205,7 +228,13 @@ async function offerToBoard(
   threadId: string,
   fields: ReadonlyMap<string, unknown>,
 ) {
-  if ([...fields.keys()].some((key) => !["title", "reason", "prompt", "target"].includes(key))) {
+  // The schema offers every target a context; a board proposal starts no
+  // thread, so the context means nothing to it and is left aside.
+  if (
+    [...fields.keys()].some(
+      (key) => !["title", "reason", "prompt", "target", "context"].includes(key),
+    )
+  ) {
     return refused("A board offer takes only a title, a reason, a prompt, and its target.");
   }
   let draft;

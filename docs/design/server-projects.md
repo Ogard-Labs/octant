@@ -30,6 +30,26 @@ approvals, and journal as a Project on this computer. Inference, approvals,
 every authority check, and the journal stay on this host; only the thread's
 hands are on the server.
 
+## Setup entry
+
+Settings › Remote access begins with three explicit journeys: control an Octant
+host, run a command on a registered server, or work in a server folder. Selecting
+one shows execution/data locations, prerequisites and a read-only first task;
+Continue opens the existing pairing, server registry or server-Project binding
+controls. Continuing to local listener setup focuses its real form. A client
+without local administration instead directs the person to Settings on the
+Octant host; it offers no inert pairing continuation. Selection starts no
+connection, command, key creation or listener.
+Registration alone proves no connectivity. The folder journey uses the existing
+SSH folder check and focuses its binding form; missing folders, SSH keys and
+unverified host identities require correction through their existing owners.
+The entry explains unsupported server-Project capabilities and uncertain-result
+recovery without implying parity or retrying a command.
+
+This guide is an entry into existing setup, not a connection diagnostic service.
+It does not distinguish transport failures by parsing SSH text or accept a new
+host key. A future structured diagnostic must preserve those trust boundaries.
+
 ## Terms
 
 - **Registered server.** A server in the person's Octant Shield registry

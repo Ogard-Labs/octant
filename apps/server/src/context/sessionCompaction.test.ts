@@ -11,14 +11,17 @@ import {
   decodeModelContextLimits,
   decodeProviderInstance,
   decodeProviderInstanceId,
+  decodeProviderModel,
   decodeProviderModelId,
   decodeProviderServiceLimits,
   decodeProviderSessionId,
+  decodeWindowId,
   type ContextCompactionRefusalReason,
   type ContextSubjectRef,
   type WindowId,
   type ProjectProviderPolicy,
   type ProviderInstance,
+  type ProviderModel,
 } from "@octant/contracts";
 import type {
   ProviderAcquireInput,
@@ -140,6 +143,62 @@ describe("compacting a session on request", () => {
     // and the session it starts names none.
     expect(world.provider.sentTools).toEqual([]);
     expect(world.provider.started).not.toHaveProperty("tools");
+    world.close();
+  });
+
+  it("reads a fresh plan, not the last compaction's figure, once a turn replanned after it", async () => {
+    const world = createWorld();
+    planSession(world);
+    world.service.start(command(), "local-window");
+    await world.service.settled();
+    planSession(world);
+    expect(world.service.windowFill(subject)?.tokens).toBe(
+      world.harness.inspect(subject).next.plan.plannedInputTokens,
+    );
+    world.close();
+  });
+
+  it("records a compaction a rule the person set started, and why, on its receipt", async () => {
+    const world = createWorld();
+    planSession(world);
+    const fill = world.service.windowFill(subject);
+    expect(fill).toMatchObject({ keeper: "octant" });
+    expect(fill?.tokens).toBe(world.harness.inspect(subject).next.plan.plannedInputTokens);
+
+    const cause = { kind: "window-fill", filledPercent: 91, thresholdPercent: 85 } as const;
+    expect(world.service.start(command(), "host-policy", undefined, cause)).toMatchObject({
+      kind: "compaction-started",
+    });
+    expect(world.harness.latestCompaction(subject)).toMatchObject({ status: "running", cause });
+    await world.service.settled();
+
+    const record = world.harness.latestCompaction(subject);
+    if (record?.status !== "completed") throw new Error("The compaction completed");
+    expect(record.receipt).toMatchObject({ trigger: "requested", cause });
+    const requestedBy = world.fixture.connection
+      .prepare(
+        "SELECT json_extract(payload_json, '$.requestedBy') AS by FROM event_journal WHERE event_name = ?",
+      )
+      .all("context.compaction-requested@1") as ReadonlyArray<{ readonly by: string }>;
+    expect(requestedBy.map((row) => row.by)).toEqual(["host-policy"]);
+    world.close();
+  });
+
+  it("refuses a rule on a Code thread with no open window before journaling anything", () => {
+    const world = createWorld();
+    const codeSubject = decodeContextSubjectRef({
+      aggregateType: "code-thread",
+      aggregateId: "82000000-0000-4000-8000-0000000000c1",
+    });
+    expect(world.service.start(command(codeSubject), "host-policy")).toEqual({
+      kind: "compaction-refused",
+      reason: "no-session",
+    });
+    // A window that has closed since its turn could not resume the session.
+    expect(
+      world.service.start(command(codeSubject), "host-policy", decodeWindowId(CLOSED_WINDOW)),
+    ).toEqual({ kind: "compaction-refused", reason: "no-session" });
+    expect(world.harness.latestCompaction(codeSubject)).toBeUndefined();
     world.close();
   });
 
@@ -840,6 +899,82 @@ describe("compacting a session a runtime keeps", () => {
     world.close();
   });
 
+  it("writes a handover summary with the thread's own provider before a limit rule compacts it", async () => {
+    const world = createRuntimeWorld({
+      answer: { kind: "compacted", tokensBefore: 900, tokensAfter: 300 },
+      usage: { inputTokens: 50, outputTokens: 20 },
+      handover: "Rotate the signing key before the release.",
+    });
+    planSession(world);
+    const cause = {
+      kind: "limit-near",
+      window: "five_hour",
+      usedPercent: 91,
+      thresholdPercent: 90,
+    } as const;
+    world.service.start(command(), "host-policy", windowId, cause);
+    await world.service.settled();
+
+    const record = world.harness.latestCompaction(subject);
+    if (record?.status !== "completed") throw new Error("The compaction completed");
+    expect(record.receipt.cause).toEqual(cause);
+    expect(record.receipt.handover).toBeDefined();
+    // The summary read the conversation the host holds, before the runtime compacted.
+    expect(world.runtime.handoverPrompts).toHaveLength(1);
+    expect(world.runtime.handoverPrompts[0]).toContain("User: ");
+    expect(world.runtime.compactions).toEqual([String(compactionId)]);
+    expect(world.harness.handoverSummary(subject, () => conversation)).toEqual({
+      content: "Rotate the signing key before the release.",
+      completedAt: String(record.receipt.completedAt),
+    });
+    // Rewound past the last message it read, the summary covers dropped turns.
+    expect(world.harness.handoverSummary(subject, () => conversation.slice(0, -1))).toBeUndefined();
+    // What the summary spent is part of what the compaction spent.
+    expect(record.receipt.usage).toMatchObject({ inputTokens: 80, outputTokens: 30 });
+    world.close();
+  });
+
+  it("writes no handover summary for a compaction another rule or the person started", async () => {
+    const world = createRuntimeWorld({
+      answer: { kind: "compacted", tokensBefore: 900, tokensAfter: 300 },
+      handover: "Unused.",
+    });
+    planSession(world);
+    world.service.start(command(), "local-window", windowId);
+    await world.service.settled();
+    expect(world.runtime.handoverPrompts).toHaveLength(0);
+    expect(world.harness.handoverSummary(subject, () => conversation)).toBeUndefined();
+    world.close();
+  });
+
+  it("refuses a limit rule whose handover the spend ceiling cannot also pay for", () => {
+    const world = createRuntimeWorld({ answer: { kind: "compacted" }, handover: "Unused." });
+    planSession(world);
+    const budget = world.harness.inspect(subject).next.plan.safeInputBudget;
+    world.spend.execute("local-window", {
+      kind: "set-spend-ceiling",
+      scope: { kind: "thread", threadType: "chat-thread", threadId },
+      expectedVersion: decodeAggregateVersion(0),
+      // Room for the compaction alone, not for the summary beside it.
+      policy: { tokenBudget: budget + 1_000 },
+      window: { kind: "lifetime" },
+    });
+    const limit = {
+      kind: "limit-near",
+      window: "five_hour",
+      usedPercent: 91,
+      thresholdPercent: 90,
+    } as const;
+    expect(refusalOf(() => world.service.start(command(), "host-policy", windowId, limit))).toBe(
+      "spend-ceiling-reached",
+    );
+    expect(world.harness.latestCompaction(subject)).toBeUndefined();
+    expect(world.service.start(command(), "local-window", windowId)).toMatchObject({
+      kind: "compaction-started",
+    });
+    world.close();
+  });
+
   it("waits for the next usage report when the runtime reports no figures", async () => {
     const world = createRuntimeWorld({ answer: { kind: "compacted" } });
     planSession(world);
@@ -1276,6 +1411,69 @@ describe("compacting a session a runtime keeps", () => {
       world.close();
     });
 
+    it("writes a handover summary for a Code thread the limit rule compacts", async () => {
+      const world = createRuntimeWorld(
+        { answer: { kind: "compacted" }, handover: "Finish the index next." },
+        "code-thread",
+      );
+      world.state.thread = { mode: "code", projectId, providerInstanceId, modelId };
+      world.service.start(command(codeSubject), "host-policy", windowId, {
+        kind: "limit-near",
+        window: "seven_day",
+        usedPercent: 92,
+        thresholdPercent: 90,
+      });
+      await world.service.settled();
+      expect(world.runtime.handoverPrompts).toHaveLength(1);
+      // The summary's scratch folder is gone once its request ended.
+      expect(world.released).toEqual([String(codeSubject.aggregateId)]);
+      expect(world.harness.handoverSummary(codeSubject, () => conversation)).toMatchObject({
+        content: "Finish the index next.",
+      });
+      world.close();
+    });
+
+    it("still compacts a Code thread whose conversation cannot be read for a handover", async () => {
+      const world = createRuntimeWorld(
+        { answer: { kind: "compacted" }, handover: "Unused." },
+        "code-thread",
+        () => {
+          throw new Error("The store refuses a scan this long.");
+        },
+      );
+      world.state.thread = { mode: "code", projectId, providerInstanceId, modelId };
+      world.service.start(command(codeSubject), "host-policy", windowId, {
+        kind: "limit-near",
+        window: "seven_day",
+        usedPercent: 92,
+        thresholdPercent: 90,
+      });
+      await world.service.settled();
+      expect(world.runtime.handoverPrompts).toHaveLength(0);
+      expect(world.harness.latestCompaction(codeSubject)?.status).toBe("completed");
+      world.close();
+    });
+
+    it("reads a Code thread's window from its model when no report names one", () => {
+      const world = createRuntimeWorld({ answer: { kind: "compacted" } }, "code-thread");
+      world.state.thread = { mode: "code", projectId, providerInstanceId, modelId };
+      world.state.model = decodeProviderModel({
+        id: String(modelId),
+        displayName: "Model",
+        source: "manual",
+        verification: "unverified",
+        reasoning: "supported",
+        inputModalities: ["text"],
+        options: [],
+        contextLimit: 200_000,
+      });
+      expect(world.service.windowFill(codeSubject)).toMatchObject({
+        tokens: 1_200,
+        contextWindow: 200_000,
+      });
+      world.close();
+    });
+
     it("calls an older usage report only an upper bound once a compaction left no figure", async () => {
       const world = createRuntimeWorld({ answer: { kind: "compacted" } }, "code-thread");
       world.state.thread = { mode: "code", projectId, providerInstanceId, modelId };
@@ -1629,6 +1827,8 @@ function providerInstance(overrides: { readonly dataTags?: ReadonlyArray<"eu" | 
   });
 }
 
+const CLOSED_WINDOW = "83000000-0000-4000-8000-0000000000c2";
+
 function createWorld(providerOptions: FakeProviderOptions = {}) {
   const fixture = createFixture();
   const provider = fakeProvider(providerOptions);
@@ -1681,6 +1881,7 @@ function createWorld(providerOptions: FakeProviderOptions = {}) {
     harness: fixture.harness,
     threads: { "chat-thread": threadsFor(), "work-thread": threadsFor() },
     modeEnabled: () => state.modeEnabled,
+    windowOpen: (windowId) => String(windowId) !== CLOSED_WINDOW,
     conversationOwner: () => (state.ownership === "provider" ? "runtime" : "host"),
     providerFacts: () => ({ provider: state.provider }),
     harnessAdmission: () => (state.harnessPaused ? "paused" : "admitted"),
@@ -1974,6 +2175,7 @@ interface RuntimeWorldState {
   support: "supported" | "unsupported" | "unavailable" | undefined;
   hasSession: boolean;
   occupancy: { readonly tokens: number; readonly observedAt: string } | undefined;
+  model?: ProviderModel;
 }
 
 type RuntimeWorld = ReturnType<typeof createRuntimeWorld>;
@@ -1996,6 +2198,7 @@ function codexInstance() {
 function createRuntimeWorld(
   runtimeOptions: FakeRuntimeOptions = {},
   kind: "chat-thread" | "code-thread" = "chat-thread",
+  readConversation: () => ReadonlyArray<SessionConversationMessage> = () => conversation,
 ) {
   const fixture = createFixture();
   const runtime = fakeRuntime(runtimeOptions);
@@ -2009,6 +2212,7 @@ function createRuntimeWorld(
     // Reported before anything in these tests compacts the session.
     occupancy: { tokens: 1_200, observedAt: "2026-07-18T20:00:00.000Z" },
   };
+  const released: Array<string> = [];
   const opened: Array<WindowId | undefined> = [];
   const announced: Array<{ readonly threadId: string; readonly compaction: unknown }> = [];
   const capacity = makeProviderCapacityScheduler({
@@ -2034,6 +2238,11 @@ function createRuntimeWorld(
         settled: (threadId: string, compaction: unknown) => {
           announced.push({ threadId, compaction });
         },
+        conversation: readConversation,
+        scratchRoot: async () => "/tmp/octant-scratch",
+        releaseScratchRoot: async (threadId: string) => {
+          released.push(threadId);
+        },
         runtimeSessions: {
           exists: () => state.hasSession,
           ...(kind === "code-thread" ? { occupancy: () => state.occupancy } : {}),
@@ -2047,7 +2256,10 @@ function createRuntimeWorld(
     modeEnabled: () => state.modeEnabled,
     conversationOwner: () => "runtime",
     runtimeCompaction: () => state.support,
-    providerFacts: () => ({ provider: codexInstance() }),
+    providerFacts: () => ({
+      provider: codexInstance(),
+      ...(state.model === undefined ? {} : { model: state.model }),
+    }),
     availableDriver: () => (state.providerAvailable ? runtime.driver : undefined),
     capacity,
     spendCeiling: spend,
@@ -2062,6 +2274,7 @@ function createRuntimeWorld(
     harness: fixture.harness,
     runtime,
     state,
+    released,
     opened,
     announced,
     capacity,
@@ -2088,6 +2301,8 @@ interface FakeRuntimeOptions {
   readonly usage?: { readonly inputTokens: number; readonly outputTokens: number };
   /** Runs when the runtime is asked, before it answers. */
   readonly onCompact?: () => void;
+  /** What the runtime answers when the host asks it for a handover summary. */
+  readonly handover?: string;
 }
 
 /** A runtime connection whose session compacts the way its options say. */
@@ -2101,10 +2316,14 @@ function fakeRuntime(options: FakeRuntimeOptions) {
     endings: [] as Array<"interrupt" | "stop">,
   };
   const queue = Effect.runSync(Queue.unbounded<never>());
+  const handoverPrompts: Array<string> = [];
   const connection = {
     subscribe: Effect.succeed(Stream.fromQueue(queue)),
-    start: () =>
-      Effect.fail({ category: "protocol", message: "A compaction never starts a session." }),
+    // Only a handover summary starts a session of its own.
+    start: (input: { readonly sessionId: string }) =>
+      options.handover === undefined
+        ? Effect.fail({ category: "protocol", message: "A compaction never starts a session." })
+        : Effect.succeed({ sessionId: input.sessionId }),
     resume: (input: ProviderSessionResume) =>
       Effect.suspend(() => {
         recorded.resumed.push(input);
@@ -2112,7 +2331,23 @@ function fakeRuntime(options: FakeRuntimeOptions) {
           ? Effect.fail({ category: "unavailable", message: "The session is gone." })
           : Effect.succeed({ sessionId: input.sessionId, resumeCursor: input.resumeCursor });
       }),
-    send: () => Effect.void,
+    send: (input: { readonly sessionId: string; readonly prompt: string }) =>
+      Effect.gen(function* () {
+        if (options.handover === undefined) return;
+        handoverPrompts.push(input.prompt);
+        yield* Queue.offer(queue, {
+          kind: "text-delta",
+          sessionId: input.sessionId,
+          text: options.handover,
+        } as never);
+        yield* Queue.offer(queue, {
+          kind: "usage",
+          sessionId: input.sessionId,
+          inputTokens: 30,
+          outputTokens: 10,
+        } as never);
+        yield* Queue.offer(queue, { kind: "completed", sessionId: input.sessionId } as never);
+      }),
     compact: (input: { readonly sessionId: string; readonly compactionId: string }) =>
       Effect.suspend(() => {
         recorded.compactions.push(input.compactionId);
@@ -2160,6 +2395,7 @@ function fakeRuntime(options: FakeRuntimeOptions) {
   } as unknown as ProviderDriver;
   return {
     driver,
+    handoverPrompts,
     acquired: recorded.acquired,
     resumed: recorded.resumed,
     compactions: recorded.compactions,

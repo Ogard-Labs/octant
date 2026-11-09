@@ -31,6 +31,23 @@ describe("native application menu", () => {
     expect(onOpenSettings).toHaveBeenCalledOnce();
   });
 
+  it("offers Prepare to Shut Down just above Quit when the desktop can move threads", () => {
+    const onPrepareToShutDown = vi.fn();
+    const template = buildApplicationMenuTemplate({
+      appName: "Octant",
+      onOpenSettings: vi.fn(),
+      onPrepareToShutDown,
+      onQuit: vi.fn(),
+      developerTools: true,
+    });
+    const items = Array.isArray(template[0]?.submenu) ? template[0].submenu : [];
+    const labels = items.map((item) => item.label);
+    const prepare = items.find((item) => item.label === "Prepare to Shut Down…");
+    expect(labels.indexOf("Prepare to Shut Down…")).toBe(labels.indexOf("Quit Octant") - 1);
+    prepare?.click?.({} as never, {} as never, {} as never);
+    expect(onPrepareToShutDown).toHaveBeenCalledOnce();
+  });
+
   it("marks menu quit as interactive so the active-work confirmation can show", () => {
     const onQuit = vi.fn();
     const template = buildApplicationMenuTemplate({

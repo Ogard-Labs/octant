@@ -88,68 +88,103 @@
 }
 
 /*
- * Side-task cards stack above the suggested-task cards: each is its own offer the person
- * starts or dismisses, so it reads as an object rather than a row of text.
+ * A side-task offer sits in the transcript right after the reply that made it,
+ * as a card the person answers; once answered it shrinks to a one-line receipt.
  */
-.composer-side-tasks {
+.side-tasks {
   display: flex;
   flex-direction: column;
-  gap: 8px;
-  padding: 8px 12px 0;
+  gap: var(--oct-space-2);
+  margin-top: var(--oct-space-2);
 }
 
-.composer-side-task {
+.side-task {
   display: flex;
   flex-direction: column;
-  gap: 4px;
-  padding: 8px 12px;
-  border: 1px solid var(--octant-border-subtle);
-  border-radius: var(--oct-radius-sm);
+  gap: var(--oct-space-1);
+  max-width: 72ch;
+  padding: var(--oct-space-3) var(--oct-space-4);
+  border: 1px solid var(--oct-border);
+  border-radius: var(--oct-radius-md);
+  background: var(--octant-card);
+  font-size: var(--oct-text-sm);
   animation: composer-notice-reveal var(--oct-motion-fast) ease-out;
 }
 
-.composer-side-task__head {
+.side-task__head {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: var(--oct-space-2);
   color: var(--octant-text-secondary);
 }
 
-.composer-side-task__title {
+.side-task__title {
   flex: 1;
   min-width: 0;
   overflow: hidden;
   color: var(--octant-text-primary);
-  font-size: var(--oct-text-sm);
+  font-weight: var(--oct-weight-medium);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.composer-side-task__reason,
-.composer-side-task__prompt {
+.side-task__reason,
+.side-task__prompt,
+.side-task__hint {
   margin: 0;
   color: var(--octant-text-secondary);
   font-size: var(--oct-text-xs);
 }
 
-.composer-side-task__prompt summary {
-  color: var(--octant-text-muted);
+.side-task__prompt summary {
+  color: var(--octant-text-secondary);
   cursor: default;
 }
 
-.composer-side-task__prompt p {
-  margin: 4px 0 0;
+.side-task__prompt p {
+  margin: var(--oct-space-1) 0 0;
   white-space: pre-wrap;
 }
 
-.composer-side-task__actions {
+.side-task__question {
+  margin: var(--oct-space-1) 0 0;
+  color: var(--octant-text-primary);
+}
+
+.side-task__context,
+.side-task__actions {
   display: flex;
-  gap: 4px;
-  padding-top: 4px;
+  flex-wrap: wrap;
+  gap: var(--oct-space-1);
+}
+
+.side-task__actions {
+  padding-top: var(--oct-space-1);
+}
+
+.side-task-receipt {
+  display: flex;
+  flex-direction: column;
+  gap: var(--oct-space-1);
+  max-width: 72ch;
+  color: var(--octant-text-secondary);
+  font-size: var(--oct-text-xs);
+}
+
+.side-task-receipt__line {
+  margin: 0;
+}
+
+.side-task-receipt__title {
+  color: var(--octant-text-primary);
+}
+
+.side-task-receipt__open {
+  font-size: inherit;
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .composer-side-task {
+  .side-task {
     animation: none;
   }
 }

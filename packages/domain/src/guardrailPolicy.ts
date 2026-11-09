@@ -20,6 +20,12 @@ import { isNativeHarnessDriverKind } from "./providerPolicy";
 export interface ThreadAccess {
   readonly executionPolicy: ProviderExecutionPolicy;
   readonly autoApprove?: boolean | undefined;
+  /**
+   * Opt-in sandbox at Full access: when the posture is `full-access` and this
+   * is set, confinement and proxied egress stay on while prompts stay off.
+   * Absent or false is the default and replays older journals unchanged.
+   */
+  readonly fullAccessSandbox?: boolean | undefined;
 }
 
 /** What the thread's provider can do for itself, as its driver reports it. */
@@ -111,6 +117,35 @@ export function resolveAutoReviewer(input: {
     };
   }
   return { status: "none", reason: shield.reason };
+}
+
+export const FULL_ACCESS_SANDBOX_UNSUPPORTED =
+  "This provider can't keep the sandbox at Full access yet, so the turn did not start. Turn the sandbox off for this thread, or use Codex or an Octant Harness model.";
+
+/**
+ * Runtimes that honor the opt-in sandbox at Full access: Codex, whose process
+ * stays inside Octant's profile, and the Octant Harness, whose commands run
+ * on the confined shell. Every other runtime launches unwrapped at Full
+ * access, so a sandboxed thread on one of them is refused rather than run
+ * open while it says it is sandboxed.
+ */
+export function fullAccessSandboxSupported(driverKind: ProviderDriverKind): boolean {
+  return driverKind === "codex" || isNativeHarnessDriverKind(driverKind);
+}
+
+/**
+ * Whether a turn must refuse to start: the thread asked for the sandbox at
+ * Full access and its runtime cannot keep it. An unknown runtime refuses.
+ */
+export function refusesFullAccessSandbox(input: {
+  readonly access: ThreadAccess;
+  readonly driverKind: ProviderDriverKind | undefined;
+}): boolean {
+  return (
+    input.access.executionPolicy === "full-access" &&
+    input.access.fullAccessSandbox === true &&
+    (input.driverKind === undefined || !fullAccessSandboxSupported(input.driverKind))
+  );
 }
 
 /** The picker's words for a stored posture. */
@@ -223,11 +258,15 @@ export function permissionModeOfWorkAccess(access: WorkAccess): PermissionMode {
  * the level as they do in Code, and a Full access turn runs with no OS
  * sandbox. Worktrees, pull requests and Code checkouts stay Code's.
  */
-export function workTurnCapabilityFacts(access: WorkAccess): WorkTurnCapabilityFacts {
+export function workTurnCapabilityFacts(
+  access: WorkAccess,
+  fullAccessSandbox = false,
+): WorkTurnCapabilityFacts {
   const level = guardrailLevelOf(workThreadAccessOf(access));
   return {
     workspace: "project-backed",
-    confinement: level === "full-access" ? "unconfined" : "project-root-confined",
+    confinement:
+      level === "full-access" && !fullAccessSandbox ? "unconfined" : "project-root-confined",
     shell: level,
     git: level,
     worktree: "denied",
@@ -266,7 +305,9 @@ export function resolveGuardrail(input: {
   const mode = permissionModeOf(input.access);
   const level = guardrailLevelOf(input.access);
   const readOnly = input.access.executionPolicy === "plan";
-  const egress = guardrailEgress(surfaceMode, input.access.executionPolicy);
+  const sandboxedFullAccess =
+    input.access.executionPolicy === "full-access" && input.access.fullAccessSandbox === true;
+  const egress = guardrailEgress(surfaceMode, input.access.executionPolicy, sandboxedFullAccess);
   const ownSandbox = input.capabilities.providerSandbox;
   const reviewer = resolveAutoReviewer({
     chosen: input.reviewer,
@@ -312,14 +353,16 @@ export function resolveGuardrail(input: {
       };
     case "full-access":
       // What Full access means in the providers' own apps: no sandbox, Octant's
-      // or the provider's, and nobody asked. Network is open.
+      // or the provider's, and nobody asked. Network is open. The opt-in
+      // `fullAccessSandbox` flag keeps Octant's confinement and proxied egress
+      // while leaving every approval answered allow.
       return {
         status: "supported",
         level,
         mode,
         readOnly: false,
         folderEditsWaived: true,
-        sandbox: "none",
+        sandbox: sandboxedFullAccess ? (ownSandbox ? "both" : "octant") : "none",
         approver: "none",
         egress,
         outsideContent: "recorded",
@@ -380,6 +423,7 @@ export function shieldReviewsPrompts(input: {
 function guardrailEgress(
   mode: ToolActionAuthority["mode"],
   executionPolicy: ProviderExecutionPolicy,
+  sandboxedFullAccess = false,
 ): ToolNetworkEgressPolicy {
   if (mode === "chat") return "none";
   if (executionPolicy === "plan") return "none";
@@ -388,6 +432,9 @@ function guardrailEgress(
   if (executionPolicy === "approval-gated" || executionPolicy === "auto-accept-edits") {
     return "provider-endpoints-only";
   }
+  // Full access opens the network, unless the thread opted into the sandbox,
+  // which keeps the same proxied egress the guarded levels have.
+  if (executionPolicy === "full-access" && sandboxedFullAccess) return "provider-endpoints-only";
   return "unrestricted";
 }
 
@@ -448,6 +495,20 @@ export function outsideContentRecordedOnly(input: {
  */
 export function guardrailLowered(from: PermissionMode, to: PermissionMode): boolean {
   return from !== to && to !== "ask-first" && to !== "plan";
+}
+
+/**
+ * Whether a new thread that starts at Full access keeps the sandbox, when the
+ * request that created it did not say: the Project's choice, else Settings',
+ * else off (Full access stays open, as it always was).
+ */
+export function defaultFullAccessSandboxFor(input: {
+  readonly project?: { readonly defaultFullAccessSandbox?: boolean | undefined } | undefined;
+  readonly settings?: { readonly defaultFullAccessSandbox?: boolean | undefined } | undefined;
+}): boolean {
+  return (
+    input.project?.defaultFullAccessSandbox ?? input.settings?.defaultFullAccessSandbox ?? false
+  );
 }
 
 /**

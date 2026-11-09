@@ -13,6 +13,7 @@ import {
   workLeadQuestion,
 } from "../palette/pendingRequests.test-fixtures";
 import type { AssignedLinearIssuesList } from "./loadAssignedLinearIssues";
+import { decodePendingRequest } from "@octant/contracts/pending-requests";
 import { InboxView, type InboxDecisionSource } from "./InboxView";
 
 const stylesheet = readFileSync(resolve(import.meta.dirname, "../styles.css"), "utf8");
@@ -121,6 +122,70 @@ describe("InboxView decisions", () => {
     await user.click(within(row).getByRole("button", { name: /Wait for review/ }));
     expect(await within(row).findByRole("status")).toHaveTextContent("A turn is already running.");
     expect(screen.queryByText("No thread is waiting on you")).not.toBeInTheDocument();
+  });
+});
+
+describe("InboxView triage", () => {
+  it("shows only decisions once Decide is chosen, with the counts on the chips", async () => {
+    const user = userEvent.setup();
+    const source = decisionSource(decisionClients(), [codeDecision(), workChildApproval()]);
+    render(
+      <InboxView attentionItems={[]} decisions={source} onClose={vi.fn()} onOpenThread={vi.fn()} />,
+    );
+
+    await screen.findByRole("group", { name: "Quarterly report has a subagent waiting for you" });
+    expect(screen.getByRole("button", { name: /Decide/ })).toHaveTextContent("1");
+    expect(screen.getByRole("button", { name: /Stuck/ })).toHaveTextContent("1");
+    await user.click(screen.getByRole("button", { name: /Decide/ }));
+    expect(screen.getByRole("group", { name: "Fix the parser asks you to decide" })).toBeVisible();
+    expect(
+      screen.queryByRole("group", { name: "Quarterly report has a subagent waiting for you" }),
+    ).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: /Finished/ }));
+    expect(screen.getByRole("status")).toHaveTextContent("No finished turns waiting.");
+  });
+
+  it("lists a finished turn that asked a decision once, as the decision", async () => {
+    const user = userEvent.setup();
+    render(
+      <InboxView
+        attentionItems={[
+          {
+            signal: {
+              threadId: pendingIds.codeThread,
+              reason: "turn-finished",
+              title: "Fix the parser",
+              source: "code",
+              detail: "Finished a turn.",
+            },
+          },
+        ]}
+        decisions={decisionSource(decisionClients(), [codeDecision()])}
+        onClose={vi.fn()}
+        onOpenThread={vi.fn()}
+      />,
+    );
+
+    await screen.findByRole("group", { name: "Fix the parser asks you to decide" });
+    expect(screen.getByRole("button", { name: /Finished/ })).toHaveTextContent("0");
+    await user.click(screen.getByRole("button", { name: /Finished/ }));
+    expect(screen.getByRole("status")).toHaveTextContent("No finished turns waiting.");
+  });
+
+  it("heads each Project group with its count and its urgent count", async () => {
+    const source = decisionSource(decisionClients(), [
+      decodePendingRequest({ ...codeDecision(), urgent: true }),
+      workChildApproval(),
+    ]);
+    render(
+      <InboxView attentionItems={[]} decisions={source} onClose={vi.fn()} onOpenThread={vi.fn()} />,
+    );
+
+    const group = await screen.findByRole("region", { name: "octant" });
+    expect(within(group).getByRole("heading")).toHaveTextContent("octant21 urgent");
+    expect(screen.getByText("2 waiting", { exact: false })).toHaveTextContent(
+      "2 waiting · 1 urgent",
+    );
   });
 });
 
