@@ -1,3 +1,4 @@
+import { browserProfileFromChoice, browserProfileChoiceOf } from "@octant/domain";
 import { createHash } from "node:crypto";
 import {
   MAX_BROWSER_SCREENSHOT_DATA_URL_CHARACTERS,
@@ -43,6 +44,7 @@ export interface ProjectBrowserServiceOptions {
     BrowserRuntimePort,
     | "available"
     | "nativeAvailable"
+    | "profiles"
     | "createContext"
     | "act"
     | "peek"
@@ -284,8 +286,9 @@ export class ProjectBrowserService {
     if (target === undefined) {
       return refused("invalid", "Only http and https addresses open in a Project browser.");
     }
-    const profile: BrowserProfile =
-      choice === "project" ? { kind: "project", projectId } : { kind: choice };
+    const profile = browserProfileFromChoice(choice, projectId);
+    if (profile === undefined)
+      return refused("profile-unavailable", "This Project profile is unavailable.");
     // Checked before the old page closes, so a refused switch leaves the page
     // the person was on.
     const decision = evaluateBrowserProfileUse({
@@ -295,6 +298,20 @@ export class ProjectBrowserService {
       authority: { mode: authority.mode, projectId },
     });
     if (decision.kind === "refused") return refused("profile-unavailable", decision.message);
+    if (profile.kind === "account") {
+      const rows = await this.#options.runtime.profiles?.list(false).catch(() => undefined);
+      if (
+        !rows?.some(
+          (entry) =>
+            entry.profile.kind === "account" &&
+            String(entry.profile.profileId) === String(profile.profileId),
+        )
+      )
+        return refused(
+          "profile-unavailable",
+          "The named account profile is not available on this host.",
+        );
+    }
     // A live page on the same site and in the same profile takes the new
     // address. Another site, or another profile, starts a fresh isolated
     // context: its allowlist is the site it was opened for, nothing the old
@@ -483,7 +500,7 @@ export class ProjectBrowserService {
                 contextId: owned.contextId,
                 state: owned.state,
                 ...(owned.presentation === undefined ? {} : { presentation: owned.presentation }),
-                profile: owned.profile.kind,
+                profile: browserProfileChoiceOf(owned.profile),
               },
               ...(owned.page === undefined ? {} : { page: owned.page }),
             }),

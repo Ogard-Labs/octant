@@ -1,7 +1,8 @@
 import { useLayoutEffect, useRef, useState } from "react";
-import type { OwnerPostureTarget, ProviderExecutionPolicy } from "@octant/contracts";
+import type { OwnerPostureTarget, OwnerPosture } from "@octant/contracts";
 import {
   ownerPostureLabel,
+  ownerPostureLevels,
   readOwnerPostures,
   changeOwnerPosture,
   ownerActionNotice,
@@ -15,7 +16,7 @@ export function OwnerPostureSection({ spokes }: { readonly spokes: ReadonlyArray
   const [hostId, setHostId] = useState(spokes[0]?.memberId ?? "");
   const [targets, setTargets] = useState<ReadonlyArray<OwnerPostureTarget>>([]);
   const [targetKey, setTargetKey] = useState("");
-  const [requested, setRequested] = useState<ProviderExecutionPolicy>("approval-gated");
+  const [requested, setRequested] = useState<OwnerPosture["posture"]>("approval-gated");
   const [message, setMessage] = useState("");
   const [busy, setBusy] = useState(false);
   const host = spokes.find((spoke) => spoke.memberId === hostId) ?? spokes[0];
@@ -47,8 +48,8 @@ export function OwnerPostureSection({ spokes }: { readonly spokes: ReadonlyArray
       setTargets(result.targets);
       setMessage(
         result.targets.length === 0
-          ? "No active Code targets on this host."
-          : "Choose the Code thread or Project to change.",
+          ? "No active Work or Code targets on this host."
+          : "Choose the Work thread, Code thread or Code Project to change.",
       );
     } else setMessage(result.message);
     setBusy(false);
@@ -68,20 +69,17 @@ export function OwnerPostureSection({ spokes }: { readonly spokes: ReadonlyArray
     setBusy(false);
   };
   if (spokes.length === 0) return null;
-  const levels: ReadonlyArray<ProviderExecutionPolicy> =
-    selected?.posture.subject.kind === "project"
-      ? ["approval-gated", "full-access"]
-      : ["approval-gated", "auto-accept-edits", "plan", "full-access"];
+  const levels = ownerPostureLevels(selected?.posture);
   return (
-    <SettingsSection title="Owner Code recovery">
+    <SettingsSection title="Owner access recovery">
       <p className="settings-section-line">
-        Change a Code thread's level or a Project's remembered Full access. Full access asks for a
-        fresh unlock for this choice. Running turns keep their current level.
+        Change a Work or Code thread's level, or a Code Project's remembered Full access. Full
+        access asks for a fresh unlock for this choice. Running turns keep their current level.
       </p>
       <label>
         Computer
         <OctantSelectField
-          aria-label="Code recovery computer"
+          aria-label="Recovery computer"
           disabled={busy}
           value={host?.memberId ?? ""}
           options={spokes.map((spoke) => ({ id: spoke.memberId, label: spoke.name }))}
@@ -96,20 +94,20 @@ export function OwnerPostureSection({ spokes }: { readonly spokes: ReadonlyArray
             disabled={busy || host === undefined}
             onClick={() => void load()}
           >
-            Refresh Code levels
+            Refresh access levels
           </OctantButton>
           {targets.length === 0 ? null : (
             <label>
-              Code target
+              Recovery target
               <OctantSelectField
-                aria-label="Code recovery target"
+                aria-label="Recovery target"
                 disabled={busy}
                 value={targetKey}
                 options={[
                   { id: "", label: "Choose a target" },
                   ...targets.map((target) => ({
                     id: JSON.stringify(target.posture.subject),
-                    label: `${target.posture.subject.kind === "project" ? "Project" : "Thread"}: ${target.title}`,
+                    label: `${target.posture.subject.kind === "project" ? "Project" : target.posture.subject.kind === "work-thread" ? "Work thread" : "Thread"}: ${target.title}`,
                   })),
                 ]}
                 onValueChange={(key) => {
@@ -129,7 +127,7 @@ export function OwnerPostureSection({ spokes }: { readonly spokes: ReadonlyArray
               <label>
                 Requested level
                 <OctantSelectField
-                  aria-label="Requested Code level"
+                  aria-label="Requested level"
                   disabled={busy}
                   value={requested}
                   options={levels.map((policy) => ({
@@ -147,14 +145,14 @@ export function OwnerPostureSection({ spokes }: { readonly spokes: ReadonlyArray
                 disabled={busy || requested === selected.posture.posture}
                 onClick={() => void apply()}
               >
-                Apply Code level
+                Apply level
               </OctantButton>
             </>
           )}
         </>
       ) : (
         <a href={host.openAt} target="_blank" rel="noopener noreferrer">
-          Open {host.name} to change Code levels
+          Open {host.name} to change access levels
         </a>
       )}
       {message === "" ? null : <SettingsState kind="empty">{message}</SettingsState>}

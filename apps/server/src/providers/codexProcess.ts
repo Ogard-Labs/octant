@@ -711,6 +711,11 @@ export function prepareCodexLaunch(input: {
   | { readonly status: "prepared"; readonly launch: CodexLaunch }
   | { readonly status: "refused"; readonly failure: ProviderFailure } {
   const { authority } = input;
+  if (input.platform === "win32")
+    return {
+      status: "refused",
+      failure: failure("incompatible", "Provider processes require Windows host confinement."),
+    };
   if (
     authority.kind === "thread" &&
     authority.executionPolicy === "full-access" &&

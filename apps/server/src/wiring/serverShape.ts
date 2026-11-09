@@ -1,5 +1,6 @@
 import type {
   WindowsAuthorityStateFiles,
+  WindowsSqliteStores,
   WindowsListenerTlsFiles,
   WindowsRosterSigningKeyFile,
   WindowsServerIdentityFiles,
@@ -129,6 +130,7 @@ export interface StartOctantServerOptions {
   readonly listenerTlsFiles?: WindowsListenerTlsFiles;
   readonly authorityStateFiles?: WindowsAuthorityStateFiles;
   readonly rosterSigningKeyFile?: WindowsRosterSigningKeyFile;
+  readonly usageCacheFile?: WindowsSqliteStores["usageCache"];
   readonly instanceId?: string;
   readonly hostId?: string;
   readonly controlEndpoint?: string;
