@@ -89,6 +89,8 @@ function client(environment = vi.fn<ProjectClient["environment"]>()): ProjectCli
     environment,
     environmentForThread,
     executeMemory: vi.fn(),
+    listMemoryProposals: vi.fn(async () => []),
+    decideMemoryProposal: vi.fn(),
   };
 }
 

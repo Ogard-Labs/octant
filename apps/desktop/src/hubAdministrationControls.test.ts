@@ -289,10 +289,68 @@ describe("hub administration controls", () => {
     expect(calls).toHaveLength(2);
   });
 
+  it("forwards a thread move only with a body that names exactly the thread, member, and unlock", async () => {
+    const { calls, runtime: controls } = runtime(() => Response.json({ status: "started" }));
+    const thread = { mode: "code", threadId: "77777777-7777-4777-8777-777777777777" };
+    const destinationMemberId = "11111111-1111-4111-8111-111111111111";
+    const unlock = { challengeId: "22222222-2222-4222-8222-222222222222", signature: "c2ln" };
+
+    await sendHubAdministrationOperation(controls, "thread-move-destinations", { thread });
+    await sendHubAdministrationOperation(controls, "thread-move-start", {
+      thread,
+      destinationMemberId,
+      timing: "now",
+      unlock,
+    });
+    await sendHubAdministrationOperation(controls, "thread-move-sizes", {
+      destinationMemberId,
+      threads: [thread],
+    });
+    expect(calls.map((call) => call.url)).toEqual([
+      "http://127.0.0.1:4317/api/desktop/hub/thread-moves/destinations",
+      "http://127.0.0.1:4317/api/desktop/hub/thread-moves/start",
+      "http://127.0.0.1:4317/api/desktop/hub/thread-moves/sizes",
+    ]);
+
+    for (const [operation, body] of [
+      ["thread-move-destinations", { thread: { mode: "code" } }],
+      ["thread-move-start", { thread, destinationMemberId, timing: "now" }],
+      ["thread-move-start", { thread, destinationMemberId, timing: "later", unlock }],
+      ["thread-move-start", { thread, destinationMemberId, timing: "now", unlock, force: true }],
+      ["thread-move-cancel", { moveId: "not-a-move" }],
+      ["thread-move-sizes", { destinationMemberId, threads: [] }],
+      ["shutdown-sizes", { destinationMemberId, threads: [thread], unlock }],
+    ] as const) {
+      expect(await sendHubAdministrationOperation(controls, operation, body)).toMatchObject({
+        status: 400,
+      });
+    }
+    expect(calls).toHaveLength(3);
+  });
+
+  it("forwards Remove worktree naming only the move, never a folder", async () => {
+    const { calls, runtime: controls } = runtime(() => Response.json({ status: "removed" }));
+    const moveId = "66666666-6666-4666-8666-666666666666";
+
+    await sendHubAdministrationOperation(controls, "thread-move-remove-kept-worktree", { moveId });
+    expect(calls.map((call) => call.url)).toEqual([
+      "http://127.0.0.1:4317/api/desktop/hub/thread-moves/remove-kept-worktree",
+    ]);
+    for (const body of [{ moveId, folder: "/" }, { folder: "/" }, { moveId: "not-a-move" }]) {
+      expect(
+        await sendHubAdministrationOperation(controls, "thread-move-remove-kept-worktree", body),
+      ).toMatchObject({ status: 400 });
+    }
+    expect(calls).toHaveLength(1);
+  });
+
   it("sends the wake switch and the hardware address only with their decoded bodies", async () => {
     const { calls, runtime: controls } = runtime(() => Response.json({ status: "changed" }));
 
     await sendHubAdministrationOperation(controls, "wake", { enabled: true });
+    expect(
+      await sendHubAdministrationOperation(controls, "accept-moved-threads", { enabled: "no" }),
+    ).toMatchObject({ status: 400 });
     await sendHubAdministrationOperation(controls, "wake-hardware-address", {
       address: "aa:bb:cc:00:11:22",
     });

@@ -23,14 +23,26 @@ export interface SlowStatementOptions {
 class SlowStatementTally {
   #count = 0;
   #worstMs = 0;
+  #windowCount = 0;
+  #windowWorstMs = 0;
 
   record(durationMs: number): void {
     this.#count += 1;
     if (durationMs > this.#worstMs) this.#worstMs = durationMs;
+    this.#windowCount += 1;
+    if (durationMs > this.#windowWorstMs) this.#windowWorstMs = durationMs;
   }
 
   read(): SlowStatementCounters {
     return { count: this.#count, worstMs: Math.round(this.#worstMs) };
+  }
+
+  /** Slow statements since the previous call, for one host-health sample. */
+  takeWindow(): SlowStatementCounters {
+    const window = { count: this.#windowCount, worstMs: Math.round(this.#windowWorstMs) };
+    this.#windowCount = 0;
+    this.#windowWorstMs = 0;
+    return window;
   }
 }
 

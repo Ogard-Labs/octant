@@ -209,7 +209,11 @@ function turnIdFromResult(value: unknown): string | undefined {
   return typeof value.turn.id === "string" ? value.turn.id : undefined;
 }
 
-function extractReply(view: ChatThreadView, turnId: string): string | undefined {
+/**
+ * The text a turn answered with: its completed attempts' assistant replies,
+ * joined. Absent when the turn has no completed attempt or answered nothing.
+ */
+export function extractReply(view: ChatThreadView, turnId: string): string | undefined {
   const turn = view.turns.find((candidate) => String(candidate.id) === turnId);
   if (turn === undefined) return undefined;
   const contents = new Map(view.contents.map((content) => [String(content.contentId), content]));

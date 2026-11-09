@@ -53,6 +53,47 @@ function activeEntry(overrides: Partial<ActiveMemoryEntry> = {}): ActiveMemoryEn
   }) as ActiveMemoryEntry;
 }
 
+describe("agent-proposed Project memory", () => {
+  const agentOrigin = {
+    kind: "agent-authored",
+    mode: "work",
+    threadId: "88888888-8888-4888-8888-888888888888",
+  } as const;
+
+  it("marks a new entry and a replacement with the thread the agent proposed them from, authored by the approving person", () => {
+    const created = createMemoryEntry({
+      id: ids.entry,
+      projectId: ids.sourceProject,
+      kind: "fact",
+      content: "Invoices go out on the 1st.",
+      actor,
+      createdAt,
+      expectedVersion: version(0),
+      agentOrigin,
+    });
+    expect(created).toMatchObject({ provenance: agentOrigin, author: actor });
+
+    const replaced = supersedeMemoryEntry(activeEntry(), {
+      successorEntryId: ids.successor,
+      content: "Use the journal for every write.",
+      actor,
+      supersededAt: changedAt,
+      expectedVersion: version(1),
+      agentOrigin,
+    });
+    expect(replaced.previousEntry.provenance).toEqual({ kind: "user-authored" });
+    expect(replaced.entry.provenance).toEqual(agentOrigin);
+    expect(
+      retractMemoryEntry(created, {
+        reason: "Wrong",
+        actor,
+        retractedAt: laterAt,
+        expectedVersion: version(1),
+      }).provenance,
+    ).toEqual(agentOrigin);
+  });
+});
+
 describe("explicit Project memory creation", () => {
   it.each(["decision", "fact", "preference", "summary", "outcome"] as const)(
     "creates active user-authored %s memory scoped to one Project",

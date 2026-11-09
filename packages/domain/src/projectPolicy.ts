@@ -252,6 +252,8 @@ export function changeWorkProjectPermissionMode(
   project: Project,
   permissionMode: WorkProjectPermissionMode | undefined,
   updatedAt: UtcTimestamp,
+  /** The sandbox at Full access for new threads; absent returns it to Settings. */
+  fullAccessSandbox?: boolean,
 ): WorkProject {
   if (project.type !== "work") {
     reject("binding-not-allowed", "Only Work Projects take a Work default mode");
@@ -259,13 +261,21 @@ export function changeWorkProjectPermissionMode(
   if (project.lifecycle === "archived") {
     reject("invalid-lifecycle", "Archived Projects are read-only");
   }
-  if (project.defaultPermissionMode === permissionMode) {
+  if (
+    project.defaultPermissionMode === permissionMode &&
+    project.defaultFullAccessSandbox === fullAccessSandbox
+  ) {
     reject("invalid-lifecycle", "This Project already starts threads in that mode");
   }
-  const { defaultPermissionMode: _previousMode, ...rest } = project;
+  const {
+    defaultPermissionMode: _previousMode,
+    defaultFullAccessSandbox: _previousSandbox,
+    ...rest
+  } = project;
   return {
     ...rest,
     ...(permissionMode === undefined ? {} : { defaultPermissionMode: permissionMode }),
+    ...(fullAccessSandbox === undefined ? {} : { defaultFullAccessSandbox: fullAccessSandbox }),
     version: nextVersion(project),
     updatedAt,
   };
@@ -301,6 +311,8 @@ export function changeCodeProjectPermissionMode(
   project: Project,
   permissionMode: PermissionMode | undefined,
   updatedAt: UtcTimestamp,
+  /** The sandbox at Full access for new threads; absent returns it to Settings. */
+  fullAccessSandbox?: boolean,
 ): CodeProject {
   if (project.type !== "code") {
     reject("binding-not-allowed", "Only Code Projects have a default mode");
@@ -312,14 +324,20 @@ export function changeCodeProjectPermissionMode(
   // the Settings default is a change even though both modes are unset.
   if (
     project.defaultPermissionMode === permissionMode &&
-    project.codeAccessPersistence === codeAccessPersistence
+    project.codeAccessPersistence === codeAccessPersistence &&
+    project.defaultFullAccessSandbox === fullAccessSandbox
   ) {
     reject("invalid-lifecycle", "This Project already starts threads in that mode");
   }
-  const { defaultPermissionMode: _previousMode, ...rest } = project;
+  const {
+    defaultPermissionMode: _previousMode,
+    defaultFullAccessSandbox: _previousSandbox,
+    ...rest
+  } = project;
   return {
     ...rest,
     ...(permissionMode === undefined ? {} : { defaultPermissionMode: permissionMode }),
+    ...(fullAccessSandbox === undefined ? {} : { defaultFullAccessSandbox: fullAccessSandbox }),
     codeAccessPersistence,
     version: nextVersion(project),
     updatedAt,

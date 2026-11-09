@@ -58,6 +58,12 @@ export function formatScalar(value: unknown): string {
  * plain scalar reading otherwise. Charts, metrics, and table columns all call
  * this so a named format reads the same in every one of them.
  */
-export function formatCanvasValue(value: unknown, format?: CanvasNumberFormat | undefined): string {
-  return typeof value === "number" ? formatCanvasNumber(value, format) : formatScalar(value);
+export function formatCanvasValue(
+  value: unknown,
+  format?: CanvasNumberFormat | undefined,
+  locale?: string | undefined,
+): string {
+  return typeof value === "number"
+    ? formatCanvasNumber(value, format, locale)
+    : formatScalar(value);
 }

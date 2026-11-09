@@ -123,7 +123,11 @@ export function buildNeedsYouCommands(sources: NeedsYouSources): ReadonlyArray<O
             id: `needs-you:decision:${key}:${String(index)}`,
             title: `${option.label}: ${request.threadTitle}`,
             group: "Needs you",
-            detail: option.recommended ? `Recommended · ${detail}` : detail,
+            detail: [
+              ...(option.recommended ? ["Recommended"] : []),
+              ...(option.detail === undefined ? [] : [option.detail]),
+              detail,
+            ].join(" · "),
             keywords: [option.label, "decision", "reply", request.threadTitle],
             action: { kind: "run", run: () => sources.onAnswerDecision(request, option.label) },
           });

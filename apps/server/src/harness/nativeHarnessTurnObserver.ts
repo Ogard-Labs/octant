@@ -15,6 +15,7 @@ import {
   type ProviderInstanceId,
   type ProviderModelId,
   type ThreadGoal,
+  type WindowId,
 } from "@octant/contracts";
 import type { ProviderDriver } from "@octant/provider-sdk/driver";
 import type { ContextHarnessService } from "../context/contextHarnessService";
@@ -43,6 +44,11 @@ export interface NativeHarnessTurnScope {
   readonly providerInstanceId: ProviderInstanceId;
   readonly modelId: ProviderModelId;
   readonly projectId?: ProjectId | undefined;
+  /**
+   * The window that sent the turn, for a Code turn: what runs on the thread's
+   * checkout after the turn (a compaction rule) resolves it under that window.
+   */
+  readonly windowId?: WindowId | undefined;
 }
 
 export interface NativeHarnessTurnObserverOptions {

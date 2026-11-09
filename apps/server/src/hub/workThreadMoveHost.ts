@@ -1,0 +1,226 @@
+// The Work side of a thread move, on both computers. A Work thread moves its
+// conversation, not its folder: the files the thread worked on stay where
+// they are, and the destination opens the thread in a Work Project the person
+// picked there. The conversation travels as a moved transcript the new
+// thread's first turn carries once.
+//
+// A Work thread a peer delegated to this host belongs to that delegation and
+// never moves.
+
+import { readFile, writeFile } from "node:fs/promises";
+import { join } from "node:path";
+import {
+  MovedHistoryEntry,
+  ProviderModelId,
+  WorkThreadId,
+  type MovedThreadReference,
+} from "@octant/contracts";
+import { Schema } from "effect";
+import type { ThreadMoveHolds } from "./threadMoveHolds";
+import type {
+  PackedPart,
+  ThreadMoveDestinationHost,
+  ThreadMoveSourceHost,
+} from "./threadMoveService";
+
+export const MOVED_WORK_THREAD_FORMAT = "octant.thread-move.work/1" as const;
+
+const strict = { parseOptions: { onExcessProperty: "error" as const } };
+
+const MovedWorkThread = Schema.Struct({
+  format: Schema.Literal(MOVED_WORK_THREAD_FORMAT),
+  title: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(256)),
+  providerDriverKind: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(64)),
+  modelId: ProviderModelId,
+  externalContentIngested: Schema.Boolean,
+  entries: Schema.Array(MovedHistoryEntry).pipe(Schema.maxItems(10_000)),
+}).annotations(strict);
+type MovedWorkThread = typeof MovedWorkThread.Type;
+
+const decodeMovedWorkThread = Schema.decodeUnknownSync(MovedWorkThread);
+const decodeWorkThreadId = Schema.decodeUnknownSync(WorkThreadId);
+
+/** A Work thread as far as a move reads it. */
+export interface MovableWorkThread {
+  readonly title: string;
+  readonly active: boolean;
+  readonly providerInstanceId: string;
+  readonly modelId: string;
+}
+
+export interface WorkThreadMoveHostOptions {
+  readonly readThread: (threadId: WorkThreadId) => MovableWorkThread | undefined;
+  readonly isBusy: (threadId: WorkThreadId) => boolean;
+  /** Whether a peer delegated the thread to this host. */
+  readonly isDelegated: (threadId: WorkThreadId) => boolean;
+  readonly providerDriverKind: (providerInstanceId: string) => string | undefined;
+  readonly transcript: (threadId: WorkThreadId) => Promise<ReadonlyArray<MovedHistoryEntry>>;
+  readonly externalContentIngested: (threadId: string) => boolean;
+  readonly purge: (threadId: WorkThreadId) => Promise<void>;
+  readonly activeWorkProject: (projectId: string) => boolean;
+  readonly resolveProvider: (
+    driverKind: string,
+    modelId: string,
+  ) => { readonly providerInstanceId: string; readonly modelId: string } | undefined;
+  /** Opens a Work thread in a Project under the host's own scope. */
+  readonly createThread: (input: {
+    readonly threadId: WorkThreadId;
+    readonly projectId: string;
+    readonly title: string;
+    readonly provider: { readonly providerInstanceId: string; readonly modelId: string };
+    /** Set when the source thread had read outside content; the new thread starts marked too. */
+    readonly inheritedMark?: { readonly sourceLabel: string; readonly contentReference: string };
+  }) => Promise<void>;
+  readonly journalHistory: (input: {
+    readonly threadId: string;
+    readonly moveId: string;
+    readonly entries: ReadonlyArray<MovedHistoryEntry>;
+  }) => void;
+  readonly holds: ThreadMoveHolds;
+}
+
+export function createWorkThreadMoveHost(options: WorkThreadMoveHostOptions): {
+  readonly source: ThreadMoveSourceHost;
+  readonly destination: ThreadMoveDestinationHost;
+} {
+  const idOf = (thread: MovedThreadReference): WorkThreadId | undefined => {
+    if (thread.mode !== "work") return undefined;
+    try {
+      return decodeWorkThreadId(thread.threadId);
+    } catch {
+      return undefined;
+    }
+  };
+  const workThreadOf = (thread: MovedThreadReference) => {
+    const id = idOf(thread);
+    return id === undefined ? undefined : options.readThread(id);
+  };
+
+  /** The thread as its part carries it; undefined when it cannot move. */
+  const movedOf = async (thread: MovedThreadReference): Promise<MovedWorkThread | undefined> => {
+    const id = idOf(thread);
+    const work = id === undefined ? undefined : options.readThread(id);
+    const driverKind =
+      work === undefined ? undefined : options.providerDriverKind(work.providerInstanceId);
+    if (id === undefined || work === undefined || driverKind === undefined) return undefined;
+    return {
+      format: MOVED_WORK_THREAD_FORMAT,
+      title: work.title,
+      providerDriverKind: driverKind,
+      modelId: work.modelId as MovedWorkThread["modelId"],
+      externalContentIngested: options.externalContentIngested(thread.threadId),
+      entries: await options.transcript(id),
+    };
+  };
+
+  const source: ThreadMoveSourceHost = {
+    read: async (thread) => {
+      const id = idOf(thread);
+      const work = id === undefined ? undefined : options.readThread(id);
+      if (id === undefined || work === undefined || !work.active) return { status: "missing" };
+      return {
+        status: "found",
+        title: work.title,
+        busy: options.isBusy(id),
+        delegated: options.isDelegated(id),
+        repositoryRemotes: [],
+      };
+    },
+    freeze: (thread) => options.holds.hold(thread),
+    unfreeze: (thread) => options.holds.release(thread),
+    isFrozen: (thread) => options.holds.isHeld(thread),
+    measure: async (thread) => {
+      const moved = await movedOf(thread);
+      if (moved === undefined) return { status: "unknown" };
+      // The very text pack writes, so the size is exact.
+      const bytes = Buffer.byteLength(JSON.stringify(moved));
+      return { status: "measured", bytes, parts: [{ kind: "thread-bundle", bytes }] };
+    },
+    pack: async (thread, folder) => {
+      const moved = await movedOf(thread);
+      if (moved === undefined) return { status: "refused", reason: "refused" };
+      const path = join(folder, "thread.json");
+      await writeFile(path, JSON.stringify(moved), { mode: 0o600 });
+      const part: PackedPart = { partId: "thread", kind: "thread-bundle", path };
+      return { status: "packed", parts: [part] };
+    },
+    erase: async ({ thread }) => {
+      const id = idOf(thread);
+      if (id !== undefined) await options.purge(id);
+      // A Work thread owns no worktree; its folder is the person's.
+      return { worktreeKept: false };
+    },
+  };
+
+  const destination: ThreadMoveDestinationHost = {
+    acceptsProject: (placement) =>
+      placement.mode === "work" &&
+      placement.destinationProjectId !== undefined &&
+      options.activeWorkProject(placement.destinationProjectId),
+    arrive: async ({ thread: planned, offer, parts }) => {
+      const id = idOf(planned);
+      if (id === undefined || offer.destinationProjectId === undefined) {
+        return { status: "refused", reason: "transfer-failed" };
+      }
+      const bundle = offer.manifest.parts.find((part) => part.kind === "thread-bundle");
+      const path = bundle === undefined ? undefined : parts.get(bundle.partId);
+      if (path === undefined) return { status: "refused", reason: "transfer-failed" };
+      let moved: MovedWorkThread;
+      try {
+        moved = decodeMovedWorkThread(JSON.parse(await readFile(path, "utf8")));
+      } catch {
+        return { status: "refused", reason: "transfer-failed" };
+      }
+      const history = {
+        threadId: planned.threadId,
+        moveId: String(offer.moveId),
+        entries: moved.entries,
+      };
+      // A thread already opened under the planned id was opened by an earlier
+      // try that stopped before it was recorded: hold it and open no second.
+      // That try may have stopped before the history was kept, so it is kept
+      // now (a second import keeps the first), before the source is told it
+      // arrived and erases the only other copy.
+      if (workThreadOf(planned) !== undefined) {
+        options.holds.hold(planned);
+        options.journalHistory(history);
+        return { status: "arrived", thread: planned };
+      }
+      if (!options.activeWorkProject(String(offer.destinationProjectId))) {
+        return { status: "refused", reason: "no-eligible-project" };
+      }
+      const provider = options.resolveProvider(moved.providerDriverKind, String(moved.modelId));
+      if (provider === undefined) return { status: "refused", reason: "no-matching-provider" };
+      options.holds.hold(planned);
+      try {
+        await options.createThread({
+          threadId: id,
+          projectId: String(offer.destinationProjectId),
+          title: moved.title,
+          provider,
+          ...(moved.externalContentIngested
+            ? {
+                inheritedMark: {
+                  sourceLabel: "moved-thread",
+                  contentReference: `moved-thread-${String(offer.moveId)}`,
+                },
+              }
+            : {}),
+        });
+      } catch {
+        options.holds.release(planned);
+        return { status: "refused", reason: "transfer-failed" };
+      }
+      options.journalHistory(history);
+      return { status: "arrived", thread: planned };
+    },
+    activate: async (thread) => options.holds.release(thread),
+    discard: async (thread) => {
+      options.holds.release(thread);
+      const id = idOf(thread);
+      if (id !== undefined && options.readThread(id) !== undefined) await options.purge(id);
+    },
+  };
+
+  return { source, destination };
+}

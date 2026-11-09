@@ -4,6 +4,8 @@ import { CanvasDesignBrand } from "./canvasBrand";
 import { DesktopRecipe, DesktopRecipeKeyChange } from "./desktopLease";
 import { ActorId, AggregateVersion, EventActor, UtcTimestamp } from "./events";
 import { HostId } from "./host";
+import { ApprovalOutsideContent } from "./contentProvenance";
+import { OctantMode } from "./modes";
 import { KeyProviderDriverKinds, PermissionMode, ProviderInstanceId } from "./providers";
 import { AutoReviewer } from "./shield";
 
@@ -374,6 +376,8 @@ export const WorkProject = Schema.Struct({
    * default in Settings. Absent follows Settings.
    */
   defaultPermissionMode: Schema.optional(WorkProjectPermissionMode),
+  /** New threads here at Full access keep the sandbox; absent follows Settings. */
+  defaultFullAccessSandbox: Schema.optional(Schema.Boolean),
   /** Named commands for the Project terminal. Absent means none were defined. */
   actions: Schema.optional(ProjectActions),
 }).annotations(strict);
@@ -400,6 +404,8 @@ export const CodeProject = Schema.Struct({
    * starts in Full access, as it always did.
    */
   defaultPermissionMode: Schema.optional(PermissionMode),
+  /** New threads here at Full access keep the sandbox; absent follows Settings. */
+  defaultFullAccessSandbox: Schema.optional(Schema.Boolean),
   /**
    * Who answers this Project's prompts at Auto, overriding Settings. Absent
    * follows Settings.
@@ -435,6 +441,8 @@ const WorkProjectSummary = Schema.Struct({
   statusFile: Schema.optional(WorkProjectStatusFile),
   developerTools: Schema.optional(WorkProjectDeveloperTools),
   defaultPermissionMode: Schema.optional(WorkProjectPermissionMode),
+  /** New threads here at Full access keep the sandbox; absent follows Settings. */
+  defaultFullAccessSandbox: Schema.optional(Schema.Boolean),
   actions: Schema.optional(ProjectActions),
 }).annotations(strict);
 
@@ -450,6 +458,8 @@ const CodeProjectSummary = Schema.Struct({
   pullRequestBackgroundRefresh: Schema.optional(CodeProjectPullRequestBackgroundRefresh),
   agentMerge: Schema.optional(CodeProjectAgentMerge),
   defaultPermissionMode: Schema.optional(PermissionMode),
+  /** New threads here at Full access keep the sandbox; absent follows Settings. */
+  defaultFullAccessSandbox: Schema.optional(Schema.Boolean),
   autoReviewer: Schema.optional(AutoReviewer),
   desktopRecipe: Schema.optional(DesktopRecipe),
   actions: Schema.optional(ProjectActions),
@@ -498,9 +508,22 @@ const TransferredMemoryProvenance = Schema.Struct({
   selectedContent: Schema.NonEmptyTrimmedString,
 }).annotations(strict);
 
+/**
+ * An entry an agent proposed from a thread and the person approved. The
+ * approving person is the entry's author; this names where the words came
+ * from. A thread purge removes `threadId` and keeps the entry.
+ */
+export const AgentAuthoredMemoryProvenance = Schema.Struct({
+  kind: Schema.Literal("agent-authored"),
+  mode: OctantMode,
+  threadId: Schema.optional(Schema.UUID),
+}).annotations(strict);
+export type AgentAuthoredMemoryProvenance = typeof AgentAuthoredMemoryProvenance.Type;
+
 export const MemoryProvenance = Schema.Union(
   UserAuthoredMemoryProvenance,
   TransferredMemoryProvenance,
+  AgentAuthoredMemoryProvenance,
 );
 export type MemoryProvenance = typeof MemoryProvenance.Type;
 
@@ -665,6 +688,8 @@ export const ProjectCommand = Schema.Union(
     ...ProjectCommandFields,
     /** Absent returns the Project to the Settings default. */
     permissionMode: Schema.optional(PermissionMode),
+    /** The sandbox at Full access for new threads; absent returns it to Settings. */
+    fullAccessSandbox: Schema.optional(Schema.Boolean),
   }).annotations(strict),
   Schema.Struct({
     kind: Schema.Literal("change-code-project-auto-reviewer"),
@@ -720,6 +745,8 @@ export const ProjectCommand = Schema.Union(
     ...ProjectCommandFields,
     /** Absent returns the Project to Work's default in Settings. */
     permissionMode: Schema.optional(WorkProjectPermissionMode),
+    /** The sandbox at Full access for new threads; absent returns it to Settings. */
+    fullAccessSandbox: Schema.optional(Schema.Boolean),
   }).annotations(strict),
   Schema.Struct({
     kind: Schema.Literal("change-work-project-actions"),
@@ -894,6 +921,84 @@ export const MemoryCommandResult = Schema.Union(
   }).annotations(strict),
 );
 export type MemoryCommandResult = typeof MemoryCommandResult.Type;
+
+export const ProjectMemoryProposalId = brandedUuid("ProjectMemoryProposalId");
+export type ProjectMemoryProposalId = typeof ProjectMemoryProposalId.Type;
+
+/** The longest entry text an agent may propose; the person reads all of it before approving. */
+export const MAX_PROPOSED_MEMORY_CONTENT_LENGTH = 2_000;
+const ProposedMemoryText = Schema.NonEmptyTrimmedString.pipe(
+  Schema.maxLength(MAX_PROPOSED_MEMORY_CONTENT_LENGTH),
+);
+
+/** One change an agent asks to make to its Project's memory. */
+export const ProjectMemoryChange = Schema.Union(
+  Schema.Struct({
+    kind: Schema.Literal("create"),
+    memoryKind: MemoryKind,
+    content: ProposedMemoryText,
+  }).annotations(strict),
+  Schema.Struct({
+    kind: Schema.Literal("supersede"),
+    entryId: MemoryEntryId,
+    previousContent: Schema.NonEmptyTrimmedString,
+    content: ProposedMemoryText,
+  }).annotations(strict),
+  Schema.Struct({
+    kind: Schema.Literal("retract"),
+    entryId: MemoryEntryId,
+    content: Schema.NonEmptyTrimmedString,
+    reason: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(500)),
+  }).annotations(strict),
+);
+export type ProjectMemoryChange = typeof ProjectMemoryChange.Type;
+
+/**
+ * A change to Project memory a thread's agent asked for, waiting for the
+ * person. Nothing is written until the person confirms it; the host fixes the
+ * Project, thread, and memory version from the thread when it is asked.
+ */
+export const ProjectMemoryProposal = Schema.Struct({
+  proposalId: ProjectMemoryProposalId,
+  projectId: ProjectId,
+  mode: OctantMode,
+  threadId: Schema.UUID,
+  change: ProjectMemoryChange,
+  /** The Project memory version the agent's change was made against. */
+  expectedVersion: AggregateVersion,
+  /** Present when the thread has read outside content, naming what it read. */
+  outsideContent: Schema.optional(ApprovalOutsideContent),
+  requestedAt: UtcTimestamp,
+}).annotations(strict);
+export type ProjectMemoryProposal = typeof ProjectMemoryProposal.Type;
+
+export const ProjectMemoryProposalList = Schema.Struct({
+  kind: Schema.Literal("project-memory-proposal-list"),
+  proposals: Schema.Array(ProjectMemoryProposal).pipe(Schema.maxItems(32)),
+}).annotations(strict);
+export type ProjectMemoryProposalList = typeof ProjectMemoryProposalList.Type;
+
+export const ProjectMemoryProposalDecision = Schema.Struct({
+  proposalId: ProjectMemoryProposalId,
+  decision: Schema.Literal("confirm", "decline"),
+}).annotations(strict);
+export type ProjectMemoryProposalDecision = typeof ProjectMemoryProposalDecision.Type;
+
+export const ProjectMemoryProposalDecisionResult = Schema.Union(
+  Schema.Struct({
+    kind: Schema.Literal("project-memory-proposal-confirmed"),
+    result: MemoryCommandResult,
+  }).annotations(strict),
+  Schema.Struct({ kind: Schema.Literal("project-memory-proposal-declined") }).annotations(strict),
+  /** The proposal is no longer waiting: answered, expired, or withdrawn. */
+  Schema.Struct({ kind: Schema.Literal("project-memory-proposal-gone") }).annotations(strict),
+  /** The person confirmed and the memory command refused it; nothing changed. */
+  Schema.Struct({
+    kind: Schema.Literal("project-memory-proposal-not-applied"),
+    message: Schema.NonEmptyTrimmedString,
+  }).annotations(strict),
+);
+export type ProjectMemoryProposalDecisionResult = typeof ProjectMemoryProposalDecisionResult.Type;
 
 const FailureMessage = Schema.NonEmptyTrimmedString;
 export const ProjectFailure = Schema.Union(
@@ -1086,6 +1191,16 @@ export const decodeMemoryEntry = Schema.decodeUnknownSync(MemoryEntry);
 export const decodeProjectMemoryView = Schema.decodeUnknownSync(ProjectMemoryView);
 export const decodeMemoryCommand = Schema.decodeUnknownSync(MemoryCommand);
 export const decodeMemoryCommandResult = Schema.decodeUnknownSync(MemoryCommandResult);
+export const decodeProjectMemoryProposalId = Schema.decodeUnknownSync(ProjectMemoryProposalId);
+export const decodeProjectMemoryChange = Schema.decodeUnknownSync(ProjectMemoryChange);
+export const decodeProjectMemoryProposal = Schema.decodeUnknownSync(ProjectMemoryProposal);
+export const decodeProjectMemoryProposalList = Schema.decodeUnknownSync(ProjectMemoryProposalList);
+export const decodeProjectMemoryProposalDecision = Schema.decodeUnknownSync(
+  ProjectMemoryProposalDecision,
+);
+export const decodeProjectMemoryProposalDecisionResult = Schema.decodeUnknownSync(
+  ProjectMemoryProposalDecisionResult,
+);
 export const decodeProjectFailure = Schema.decodeUnknownSync(ProjectFailure);
 export const decodeProjectCreated = Schema.decodeUnknownSync(ProjectCreated);
 export const decodeProjectRenamed = Schema.decodeUnknownSync(ProjectRenamed);

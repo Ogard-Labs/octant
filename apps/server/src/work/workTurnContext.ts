@@ -54,7 +54,8 @@ export interface WorkTurnContextContribution {
     | "current-request"
     | "workspace-context"
     | "octant-policy"
-    | "person-memory";
+    | "person-memory"
+    | "project-memory";
   readonly posture: "required" | "compressible";
   readonly block: ProviderContextBlock;
   /**
@@ -113,6 +114,7 @@ export function planWorkTurnContext(input: {
         "workspace-context": "Workspace context",
         "octant-policy": "Work instructions",
         "person-memory": "Person memory",
+        "project-memory": "Project memory",
       }[contribution.category],
       eligibility: {
         providerInstanceId,

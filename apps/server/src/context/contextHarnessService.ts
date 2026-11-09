@@ -18,6 +18,7 @@ import {
   decodeUsageReconciliationId,
   type ContextCapabilityCounts,
   type ContextCommandResult,
+  type ContextCompactionCause,
   type ContextCompactionExecutor,
   type ContextCompactionFailureReason,
   type ContextCompactionId,
@@ -254,6 +255,12 @@ export type RuntimeCompactionOutcome =
       readonly tokensBefore: KnownTokenMeasurement;
       /** The occupancy the runtime reported after; absent until the next usage report. */
       readonly tokensAfter?: number;
+      /**
+       * A summary the host wrote from the thread's conversation before the
+       * runtime compacted, for a move to another provider to carry, and the
+       * last message it read.
+       */
+      readonly handover?: { readonly content: string; readonly throughSource: ContextSourceRef };
     }
   | {
       readonly kind: "failed";
@@ -281,6 +288,13 @@ export class ContextHarnessError extends Error {
     super(message);
   }
 }
+
+/**
+ * The share of a plan's safe input budget a summary request may fill: the rest
+ * covers the difference between the planner's counts and the request as the
+ * endpoint measures it.
+ */
+const SUMMARY_REQUEST_BUDGET_SHARE = 0.85;
 
 export class ContextHarnessService {
   readonly #persistence: ContextHarnessPersistence;
@@ -782,6 +796,45 @@ export class ContextHarnessService {
     return readContextSummaryContent(this.#persistence.connection, summaryId);
   }
 
+  /**
+   * The summary the limit rule left for a move to another provider: the
+   * host's own summary when the host compacted, else the handover it wrote
+   * beside the runtime's compaction. Only the latest compaction counts, and
+   * only one the limit rule made. `conversation` is the thread's as it stands:
+   * a summary whose last message is no longer in it (the thread was rewound
+   * past it, or that reply retried) covers turns the thread has dropped and is
+   * not handed over. Undefined too when its text is gone.
+   */
+  handoverSummary(
+    subject: ContextSubjectRef,
+    /** Read only once a limit-rule summary is found, since it reads the whole thread. */
+    readConversation: () => ReadonlyArray<SessionConversationMessage>,
+  ): { readonly content: string; readonly completedAt: string } | undefined {
+    this.#assertReady();
+    const latest = this.latestCompaction(subject);
+    if (latest?.status !== "completed") return undefined;
+    const { receipt } = latest;
+    if (receipt.cause?.kind !== "limit-near") return undefined;
+    const conversation = readConversation();
+    let summaryId: ContextSummaryId | undefined;
+    if (receipt.summary.visibility === "stored") {
+      const { throughTurnId } = receipt.summary;
+      if (!conversation.some((message) => message.exchangeKey === throughTurnId)) return undefined;
+      summaryId = receipt.summary.summaryId;
+    } else if (receipt.handover !== undefined) {
+      const through = contextSourceKey(receipt.handover.throughSource);
+      if (!conversation.some((message) => contextSourceKey(message.source) === through)) {
+        return undefined;
+      }
+      summaryId = receipt.handover.summaryId;
+    }
+    if (summaryId === undefined) return undefined;
+    const content = readContextSummaryContent(this.#persistence.connection, summaryId);
+    return content === undefined || content.length === 0
+      ? undefined
+      : { content, completedAt: String(receipt.completedAt) };
+  }
+
   /** The subject's completed compactions, oldest first. */
   completedCompactions(subject: ContextSubjectRef): ReadonlyArray<ContextCompactionReceipt> {
     this.#assertReady();
@@ -857,6 +910,9 @@ export class ContextHarnessService {
     readonly subject: ContextSubjectRef;
     readonly compactionId: ContextCompactionId;
     readonly executor: ContextCompactionExecutor;
+    /** Absent is a local window; `host-policy` is a rule the person set. */
+    readonly requestedBy?: "local-window" | "host-policy";
+    readonly cause?: ContextCompactionCause;
   }):
     | {
         readonly kind: "requested";
@@ -876,7 +932,8 @@ export class ContextHarnessService {
           compactionId: input.compactionId,
           subject: input.subject,
           executor: input.executor,
-          requestedBy: "local-window",
+          requestedBy: input.requestedBy ?? "local-window",
+          ...(input.cause === undefined ? {} : { cause: input.cause }),
           requestedAt,
         }),
       ],
@@ -887,6 +944,7 @@ export class ContextHarnessService {
         status: "running",
         compactionId: input.compactionId,
         executor: input.executor,
+        ...(input.cause === undefined ? {} : { cause: input.cause }),
         requestedAt,
       }),
       // Read in the same turn of the event loop as the append, so a plan
@@ -997,6 +1055,7 @@ export class ContextHarnessService {
               subject: input.subject,
               executor: hostExecutor(current),
               trigger: "requested",
+              ...(latest.cause === undefined ? {} : { cause: latest.cause }),
               // Both figures are the planner's own estimate of the same request
               // before and after, so their difference is an estimate too.
               tokensBefore: {
@@ -1121,11 +1180,20 @@ export class ContextHarnessService {
           });
     const before = outcome.tokensBefore;
     const completedAt = decodeTimestamp(this.#clock());
+    const handover =
+      outcome.handover === undefined
+        ? undefined
+        : {
+            summaryId: decodeContextSummaryId(this.#uuid()),
+            content: decodeContextSummaryContent(outcome.handover.content),
+            throughSource: outcome.handover.throughSource,
+          };
     const receipt = decodeContextCompactionReceipt({
       compactionId,
       subject,
       executor: latest.executor,
       trigger: "requested",
+      ...(latest.cause === undefined ? {} : { cause: latest.cause }),
       tokensBefore: before,
       ...(outcome.tokensAfter === undefined
         ? {
@@ -1147,6 +1215,9 @@ export class ContextHarnessService {
             },
           }),
       summary: { visibility: "runtime-only" },
+      ...(handover === undefined
+        ? {}
+        : { handover: { summaryId: handover.summaryId, throughSource: handover.throughSource } }),
       usage:
         usageReconciliation !== undefined
           ? compactionUsageOf(usageReconciliation)
@@ -1160,16 +1231,35 @@ export class ContextHarnessService {
               },
       completedAt,
     });
-    this.#persistence.journal.append({
-      aggregate: { aggregateType: "context-ledger", aggregateId: subject.aggregateId },
-      expectedVersion: this.#aggregateVersion(subject.aggregateId),
-      events: [
-        ...(usageReconciliation === undefined
-          ? []
-          : [this.#pending("context.usage-reconciled@1", { reconciliation: usageReconciliation })]),
-        this.#pending(CONTEXT_COMPACTION_EVENT_NAMES.completed, { receipt }),
-      ],
-    });
+    this.#persistence.journal.append(
+      {
+        aggregate: { aggregateType: "context-ledger", aggregateId: subject.aggregateId },
+        expectedVersion: this.#aggregateVersion(subject.aggregateId),
+        events: [
+          ...(usageReconciliation === undefined
+            ? []
+            : [
+                this.#pending("context.usage-reconciled@1", {
+                  reconciliation: usageReconciliation,
+                }),
+              ]),
+          this.#pending(CONTEXT_COMPACTION_EVENT_NAMES.completed, { receipt }),
+        ],
+      },
+      // The handover text is subject content, stored where a deletion purge
+      // reaches it, and committed with the receipt that names it or not at all.
+      handover === undefined
+        ? {}
+        : {
+            beforeEvents: (connection) =>
+              writeContextSummaryContent(connection, {
+                summaryId: handover.summaryId,
+                subject,
+                content: handover.content,
+                createdAt: completedAt,
+              }),
+          },
+    );
     const completed = this.compaction(subject, compactionId);
     if (completed === undefined) {
       throw new ContextHarnessError("unavailable", "Compaction was not recorded.");
@@ -1301,7 +1391,14 @@ export class ContextHarnessService {
             tokens: planned.next.plan.plannedInputTokens,
             accuracy: "conservative-heuristic",
           };
-    const changedSince = this.#compactedSince(subject, report?.observedAt);
+    // Without a report, the plan's estimate is as fresh as the plan: a plan
+    // made after the latest compaction already counts what it left, so that
+    // compaction's figure must not stand for every turn after it.
+    const changedSince = this.#compactedSince(
+      subject,
+      report?.observedAt ??
+        (planned === undefined ? undefined : String(planned.next.plan.createdAt)),
+    );
     if (changedSince !== undefined) {
       if (changedSince.kind === "known") return changedSince;
       return report === undefined
@@ -1515,7 +1612,13 @@ export class ContextHarnessService {
     }
     const selection = selectSessionCompaction({
       items,
-      safeInputBudget: current.next.plan.safeInputBudget,
+      // The summary request is measured by the endpoint as sent, and the
+      // escaping and multi-byte text of a written conversation make it larger
+      // than the planner's per-entry counts: measured 2026-11-09 on an
+      // Anthropic-compatible endpoint, a summary picked to the full budget of
+      // a 12,000-token window was refused before it was sent. The headroom
+      // keeps a summary of a nearly full window sendable.
+      safeInputBudget: Math.floor(current.next.plan.safeInputBudget * SUMMARY_REQUEST_BUDGET_SHARE),
       summaryFraming: SUMMARY_PROMPT_FRAMING,
     });
     if (selection.kind === "nothing-to-compact") return selection;
