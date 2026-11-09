@@ -2613,7 +2613,8 @@ picker that says whether the chosen Project uses the account's servers or
 its own list, which starts as a copy of the account list and is edited with
 the same rows and form. **Safe networks** is built as Settings › Access, in the
 Privacy & data group after Permissions: a **Network limits** panel with a
-switch that is off by default, a sentence saying plainly whether limits are on,
+switch that is on by default, a sentence saying plainly whether limits are on
+(and, when on, that they hold sandboxed runtimes only),
 and a note that a change applies to the next runtime started; then an intro
 sentence, the **Every
 Project** list, a **Project** picker that says whether the chosen Project
