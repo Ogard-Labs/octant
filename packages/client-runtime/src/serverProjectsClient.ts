@@ -1,3 +1,4 @@
+import { RemoteSetupCheckResult, type RemoteSetupCheckInput } from "@octant/contracts/remote-setup";
 import { decodeHostAnswer } from "@octant/contracts";
 import {
   type ServerProjectsCommand,
@@ -23,6 +24,7 @@ export interface ServerProjectsClientOptions {
 
 export interface ServerProjectsClient {
   read(signal?: AbortSignal): Promise<ServerProjectsView>;
+  check?(input: RemoteSetupCheckInput, signal?: AbortSignal): Promise<RemoteSetupCheckResult>;
   previewRead?(projectId: string): Promise<ServerPreviewView | null>;
   previewCommand?(command: ServerPreviewCommand): Promise<ServerPreviewResult>;
   command(
@@ -83,6 +85,18 @@ export function createServerProjectsClient(
     return body;
   };
   return {
+    async check(input, signal) {
+      return decodeHostAnswer(RemoteSetupCheckResult)(
+        await send(
+          {
+            method: "POST",
+            body: JSON.stringify(input),
+            ...(signal === undefined ? {} : { signal }),
+          },
+          "/api/remote-setup-check",
+        ),
+      );
+    },
     async previewRead(projectId) {
       const body = await send(
         { method: "GET" },

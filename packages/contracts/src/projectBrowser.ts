@@ -17,7 +17,15 @@ export type ProjectBrowserMode = typeof ProjectBrowserMode.Type;
 const PageAddress = Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(4096));
 
 /** The profile a person picks for a page; the host adds the Project it belongs to. */
-export const BrowserProfileChoice = Schema.Literal("private", "project", "personal");
+export const BrowserAccountProfileChoice = Schema.TemplateLiteral("account:", Schema.String).pipe(
+  Schema.pattern(
+    /^account:[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i,
+  ),
+);
+export const BrowserProfileChoice = Schema.Union(
+  Schema.Literal("private", "project", "personal"),
+  BrowserAccountProfileChoice,
+);
 export type BrowserProfileChoice = typeof BrowserProfileChoice.Type;
 
 /**
@@ -152,3 +160,5 @@ export type ProjectAgentPages = typeof ProjectAgentPages.Type;
 
 export const decodeProjectAgentPagesCommand = Schema.decodeUnknownSync(ProjectAgentPagesCommand);
 export const decodeProjectAgentPages = Schema.decodeUnknownSync(ProjectAgentPages);
+
+export const decodeBrowserProfileChoice = Schema.decodeUnknownSync(BrowserProfileChoice);

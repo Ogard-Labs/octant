@@ -18,6 +18,7 @@ import {
   TICKET_ID,
 } from "../../../../packages/client-runtime/src/remoteConnectionFixtures";
 import { RemoteShellView } from "./RemoteShellView";
+import { canvasFixture } from "../canvas/test-fixtures";
 
 const hostId = decodeStableHostId(HOST_ID);
 const now = "2026-08-03T00:00:00.000Z";
@@ -86,10 +87,100 @@ interface ProductRequest {
 }
 
 /** A fake host that answers the reads the remote workspace performs. */
-function answerProduct(seen: ProductRequest[]) {
+function answerProduct(seen: ProductRequest[], withCanvas = false) {
   return (input: ProductRequest): Response => {
     seen.push(input);
     const { method, path, body } = input;
+    if (method === "GET" && path === "/api/canvas/thread-reference-cards") {
+      return Response.json({
+        mode: "chat",
+        threadId: chatThreadId,
+        projectId: chatProjectId,
+        cards: withCanvas
+          ? [
+              {
+                schemaVersion: 1,
+                kind: "canvas-reference-card",
+                cardId: "20000000-0000-4000-8000-000000000001",
+                canvasId: "20000000-0000-4000-8000-000000000002",
+                versionId: "20000000-0000-4000-8000-000000000003",
+                title: canvasFixture.title,
+                scope: {
+                  hostId: "local",
+                  mode: "chat",
+                  workspace: { kind: "chat-virtual", projectId: chatProjectId },
+                },
+                originThreadId: chatThreadId,
+                status: "ready",
+                authority: {
+                  filesystem: false,
+                  shell: false,
+                  git: false,
+                  network: false,
+                  tools: true,
+                  subagents: false,
+                  executionPolicy: "plan",
+                  permissionPersistence: "current-session",
+                },
+                actorId: "99999999-9999-4999-8999-999999999999",
+                providerInstanceId,
+                modelId: "model-a",
+                createdAt: now,
+                actionCount: 0,
+              },
+            ]
+          : [],
+      });
+    }
+    if (withCanvas && method === "GET" && path === "/api/canvas/get") {
+      return Response.json({
+        kind: "ready",
+        workspace: { kind: "chat-virtual", projectId: chatProjectId },
+        version: {
+          schemaVersion: 1,
+          canvasId: "20000000-0000-4000-8000-000000000002",
+          versionId: "20000000-0000-4000-8000-000000000003",
+          sequence: 1,
+          definition: canvasFixture,
+          createdBy: { kind: "local-user", actorId: "99999999-9999-4999-8999-999999999999" },
+          createdAt: now,
+        },
+      });
+    }
+    if (withCanvas && method === "GET" && path === "/api/canvas/history") {
+      return Response.json({
+        kind: "ready",
+        history: {
+          canvasId: "20000000-0000-4000-8000-000000000002",
+          currentVersionId: "20000000-0000-4000-8000-000000000003",
+          entries: [],
+        },
+      });
+    }
+    if (withCanvas && method === "GET" && path === "/api/canvas/public-shares") {
+      return Response.json({
+        schemaVersion: 1,
+        kind: "canvas-public-share-list",
+        canvasId: "20000000-0000-4000-8000-000000000002",
+        enabled: true,
+        serviceUrl: "https://shares.example.test",
+        shares: [
+          {
+            publicShareId: "AAAAAAAAAAAAAAAAAAAAAA",
+            canvasId: "20000000-0000-4000-8000-000000000002",
+            url: "https://shares.example.test/s/AAAAAAAAAAAAAAAAAAAAAA",
+            serviceUrl: "https://shares.example.test",
+            versionId: "20000000-0000-4000-8000-000000000003",
+            sequence: 1,
+            publishedAt: now,
+            updatedAt: now,
+            expiresAt: null,
+            passwordProtected: false,
+            status: "active",
+          },
+        ],
+      });
+    }
     if (method === "GET" && path === "/api/chat/bootstrap") {
       return Response.json({
         settings: {
@@ -279,8 +370,8 @@ function answerProduct(seen: ProductRequest[]) {
   };
 }
 
-async function readyBridge(seen: ProductRequest[] = []) {
-  const server = createFakeRemoteServer({ handleProductRequest: answerProduct(seen) });
+async function readyBridge(seen: ProductRequest[] = [], withCanvas = false) {
+  const server = createFakeRemoteServer({ handleProductRequest: answerProduct(seen, withCanvas) });
   const pairingStore = createInMemoryDeviceKeyStore();
   const keyPair = (await crypto.subtle.generateKey({ name: "ECDSA", namedCurve: "P-256" }, false, [
     "sign",
@@ -371,6 +462,47 @@ describe("RemoteShellView", () => {
       expect(request.headers.get("x-octant-window-capability")).toBeNull();
     }
     expect(screen.queryByRole("button", { name: /verify .* mutation/i })).not.toBeInTheDocument();
+  });
+
+  it("opens a paired Chat Canvas and copies its public link without owner controls or window authority", async () => {
+    const user = userEvent.setup();
+    const seen: ProductRequest[] = [];
+    const { bridge, server } = await readyBridge(seen, true);
+    try {
+      render(<RemoteShellView bridge={bridge} onReset={vi.fn()} />);
+      const threads = await screen.findByRole("navigation", { name: "Chat thread list" });
+      await user.click(await within(threads).findByRole("button", { name: chatThread.title }));
+      await user.click(await screen.findByRole("button", { name: "Thread actions" }));
+      await user.click(await screen.findByRole("menuitemradio", { name: "Show canvas" }));
+      await user.click(
+        await screen.findByRole("button", { name: new RegExp(canvasFixture.title) }),
+      );
+      const canvas = await screen.findByRole("dialog", { name: canvasFixture.title });
+      await within(canvas).findByText("Q3 Overview");
+      await user.click(within(canvas).getByRole("button", { name: "More Canvas actions" }));
+      expect(screen.queryByRole("menuitem", { name: "Refine…" })).not.toBeInTheDocument();
+      expect(screen.queryByRole("menuitem", { name: "Export…" })).not.toBeInTheDocument();
+      await user.click(await screen.findByRole("menuitem", { name: "Share…" }));
+      await user.click(await screen.findByRole("button", { name: "Copy link" }));
+      expect(await navigator.clipboard.readText()).toBe(
+        "https://shares.example.test/s/AAAAAAAAAAAAAAAAAAAAAA",
+      );
+      expect(screen.queryByRole("button", { name: "Update" })).not.toBeInTheDocument();
+      expect(screen.queryByRole("button", { name: "Revoke" })).not.toBeInTheDocument();
+      expect(server.productProofVerified()).toBe(true);
+      const canvasRequests = seen.filter((request) => request.path.startsWith("/api/canvas/"));
+      expect(canvasRequests.some((request) => request.path === "/api/canvas/public-shares")).toBe(
+        true,
+      );
+      expect(
+        canvasRequests.every(
+          (request) =>
+            request.method === "GET" && !request.headers.has("x-octant-window-capability"),
+        ),
+      ).toBe(true);
+    } finally {
+      bridge.disconnect();
+    }
   });
 
   it("lists Work threads and explains an empty Code inventory instead of offering probe buttons", async () => {

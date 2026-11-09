@@ -1,4 +1,6 @@
 import { createHash } from "node:crypto";
+import { Schema } from "effect";
+import { WorkAccess, ProviderExecutionPolicy } from "@octant/contracts";
 import type {
   CodeThread,
   CodeCheckoutIdentity,
@@ -7,9 +9,11 @@ import type {
   OwnerPostureSubject,
   OwnerPostureTarget,
   Project,
+  WorkThread,
 } from "@octant/contracts";
 import type { CodeService } from "../code/codeService";
 import type { ProjectService } from "../projectService";
+import type { WorkThreadService } from "../work/workThreadService";
 
 export type OwnerPostureRefusalKind =
   | "not-found"
@@ -45,8 +49,39 @@ export function createOwnerPostureHost(options: {
   readonly readCheckout: (checkoutId: CodeThread["checkoutId"]) => CodeCheckoutIdentity | undefined;
   readonly code: Pick<CodeService, "changeOwnerPosture"> | undefined;
   readonly projects: Pick<ProjectService, "changeOwnerPosture">;
+  readonly work?: {
+    readonly readThreads: () => ReadonlyArray<WorkThread>;
+    readonly readThread: (threadId: WorkThread["id"]) => WorkThread | undefined;
+    readonly changeAccess: WorkThreadService["changeOwnerAccess"];
+  };
 }): OwnerPostureHost {
   const snapshot = (subject: OwnerPostureSubject): OwnerPostureRead => {
+    if (subject.kind === "work-thread") {
+      if (options.work === undefined) return { status: "refused", kind: "unsupported" };
+      const thread = options.work.readThread(subject.threadId);
+      const project = thread === undefined ? undefined : options.readProject(thread.projectId);
+      if (
+        thread?.lifecycle !== "active" ||
+        project?.type !== "work" ||
+        project.lifecycle !== "active"
+      )
+        return { status: "refused", kind: "not-found" };
+      if (
+        thread.bindingRevisionId !== undefined &&
+        String(thread.bindingRevisionId) !== String(project.bindingHistory.at(-1)?.revisionId)
+      )
+        return { status: "refused", kind: "posture-stale" };
+      return {
+        status: "read",
+        posture: {
+          subject,
+          posture: thread.access,
+          version: createHash("sha256")
+            .update(JSON.stringify({ subject, thread, project }))
+            .digest("hex"),
+        },
+      };
+    }
     const thread =
       subject.kind === "code-thread" ? options.readCodeThread(subject.threadId) : undefined;
     if (subject.kind === "code-thread" && thread === undefined)
@@ -102,6 +137,11 @@ export function createOwnerPostureHost(options: {
         if (result.status === "read")
           targets.push({ title: thread.title, posture: result.posture });
       }
+      for (const thread of options.work?.readThreads() ?? []) {
+        const result = snapshot({ kind: "work-thread", threadId: thread.id });
+        if (result.status === "read")
+          targets.push({ title: thread.title, posture: result.posture });
+      }
       return targets;
     },
     read: async (subject) => snapshot(subject),
@@ -115,14 +155,26 @@ export function createOwnerPostureHost(options: {
       try {
         // No await between the authoritative snapshot and the synchronous
         // service transaction: another command cannot change the target here.
-        if (request.subject.kind === "code-thread") {
+        if (request.subject.kind === "work-thread") {
+          if (options.work === undefined) return { status: "refused", kind: "unsupported" };
+          const current = options.work.readThread(request.subject.threadId);
+          if (current === undefined) return { status: "refused", kind: "not-found" };
+          options.work.changeAccess({
+            threadId: current.id,
+            expectedVersion: current.version,
+            access: Schema.decodeUnknownSync(WorkAccess)(request.posture),
+            ...authority,
+          });
+        } else if (!("persistence" in request)) {
+          return { status: "refused", kind: "unsupported" };
+        } else if (request.subject.kind === "code-thread") {
           if (options.code === undefined) return { status: "refused", kind: "unsupported" };
           const current = options.readCodeThread(request.subject.threadId);
           if (current === undefined) return { status: "refused", kind: "not-found" };
           options.code.changeOwnerPosture({
             threadId: current.id,
             expectedVersion: current.version,
-            executionPolicy: request.posture,
+            executionPolicy: Schema.decodeUnknownSync(ProviderExecutionPolicy)(request.posture),
             permissionPersistence: request.persistence,
             ...authority,
           });

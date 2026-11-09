@@ -1,4 +1,5 @@
 import { ConversationInputTransfer } from "../attachments/conversationInputTransfer";
+import { applyProtectedFilesChoice, currentProtectedFilesChoice } from "../process/secretGuard";
 import { createExistingWorktreeCodeFileRootAuthority } from "../wiring/code";
 import { withCodeOperationRuntime } from "../wiring/codeRuntime";
 import { createCodeRouteHandler } from "../codeRoutes";
@@ -171,6 +172,27 @@ afterEach(() => {
 });
 
 describe("CodeOperationRuntime", () => {
+  it("refuses a Windows operation before a terminal or provider can start", async () => {
+    const fixture = runtimeFixture({});
+    vi.stubGlobal("process", Object.create(process, { platform: { value: "win32" } }));
+    try {
+      await expect(
+        fixture.runtime.execute(windowId, {
+          kind: "start-terminal",
+          threadId,
+          checkoutId,
+          operationId: operationId(1),
+          terminalId: operationId(2),
+          columns: 100,
+          rows: 30,
+          credentialRefs: [],
+        }),
+      ).rejects.toMatchObject({ failure: { category: "unavailable" } });
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
   it("prepares and confirms native approval only for the authoritative active scope", async () => {
     const fixture = runtimeFixture({ approvalValidator: false });
     const request = {
@@ -1467,6 +1489,129 @@ describe("CodeOperationRuntime", () => {
       expect(fixture.runtime.turnInProgress?.(String(threadId))).toBe(false);
     } finally {
       fixture.close();
+    }
+  });
+
+  it("reads a supplementary checkpoint only from the bound idle session and refuses stale access or a competing turn", async () => {
+    const root = realpathSync(mkdtempSync(join(tmpdir(), "octant-file-review-")));
+    writeFileSync(join(root, "sample.txt"), "fixture");
+    writeFileSync(join(root, ".env"), "private");
+    const protectedFiles = currentProtectedFilesChoice();
+    applyProtectedFilesChoice({
+      ...protectedFiles,
+      added: [...protectedFiles.added, join(root, ".env")],
+    });
+    const queue = Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>());
+    const connection = providerConnection(queue);
+    const saved = {
+      driverKind: "codex" as const,
+      value: "host-recorded",
+      binding: {
+        instanceId: thread().providerInstanceId,
+        sessionId,
+        projectRoot: root,
+        mode: "code" as const,
+        modelId: thread().modelId,
+      },
+    };
+    vi.mocked(connection.start).mockImplementation((input) =>
+      Effect.succeed({ sessionId: input.sessionId, resumeCursor: saved }),
+    );
+    let allowed = true;
+    let finish: (() => void) | undefined;
+    const read = vi.fn(() =>
+      Effect.succeed({
+        status: "ready",
+        file: { path: "sample.txt", checkpoint: "", scopes: [], anchors: [] },
+      } as const),
+    );
+    const driver = {
+      ...providerDriver(connection),
+      kind: "codex" as const,
+      fileReviewReads: true as const,
+      acquire: () => Effect.succeed({ ...connection, readFileReview: read }),
+    };
+    const fixture = runtimeFixture({
+      provider: driver,
+      checkoutRoot: root,
+      projectAccess: () => allowed,
+    });
+    const reader = fixture.runtime.readProviderFileReview;
+    if (reader === undefined) throw new Error("Code file reader missing");
+    const request = {
+      kind: "file" as const,
+      threadId,
+      checkoutId,
+      path: decodeCodeRelativePath("sample.txt"),
+    };
+    try {
+      expect(await reader(windowId, request, () => true)).toEqual({
+        status: "refused",
+        reason: "no-session",
+      });
+      await fixture.runtime.execute(windowId, {
+        kind: "start-provider-turn",
+        operationId: operationId(31),
+        threadId,
+        checkoutId,
+        sessionId,
+        prompt: fixture.prompt,
+      });
+      await vi.waitFor(() => expect(connection.send).toHaveBeenCalledOnce());
+      expect(await reader(windowId, request, () => true)).toEqual({
+        status: "refused",
+        reason: "turn-running",
+      });
+      await Effect.runPromise(Queue.offer(queue, providerEvent({ kind: "completed" })));
+      await vi.waitFor(() =>
+        expect(fixture.runtime.turnInProgress?.(String(threadId))).toBe(false),
+      );
+      expect(await reader(windowId, request, () => true)).toMatchObject({
+        status: "ready",
+        file: { path: "sample.txt", checkpoint: "" },
+      });
+      expect(read).toHaveBeenCalledOnce();
+      expect(connection.resume).toHaveBeenCalledWith(
+        expect.objectContaining({ sessionId, resumeCursor: saved, tools: [] }),
+      );
+      expect(
+        await reader(windowId, { ...request, path: decodeCodeRelativePath(".env") }, () => true),
+      ).toEqual({ status: "refused", reason: "path-refused" });
+      expect(read).toHaveBeenCalledOnce();
+      read.mockImplementation(() =>
+        Effect.promise(
+          () =>
+            new Promise((resolve) => {
+              finish = () =>
+                resolve({
+                  status: "ready",
+                  file: { path: "sample.txt", checkpoint: "", scopes: [], anchors: [] },
+                } as const);
+            }),
+        ),
+      );
+      const pending = reader(windowId, request, () => true);
+      await vi.waitFor(() => expect(read).toHaveBeenCalledTimes(2));
+      await expect(
+        fixture.runtime.execute(windowId, {
+          kind: "start-provider-turn",
+          operationId: operationId(32),
+          threadId,
+          checkoutId,
+          sessionId,
+          prompt: fixture.prompt,
+        }),
+      ).rejects.toMatchObject({ failure: { category: "waiting" } });
+      allowed = false;
+      finish?.();
+      expect(await pending).toEqual({ status: "refused", reason: "stale" });
+      expect(connection.start).toHaveBeenCalledOnce();
+      expect(connection.send).toHaveBeenCalledOnce();
+    } finally {
+      finish?.();
+      fixture.close();
+      applyProtectedFilesChoice(protectedFiles);
+      rmSync(root, { recursive: true, force: true });
     }
   });
 
@@ -3580,6 +3725,87 @@ describe("CodeOperationRuntime", () => {
       checkoutId,
     });
     await vi.waitFor(() => expect(activeTurns.has(String(threadId))).toBe(false));
+    fixture.close();
+  });
+
+  it("journals the provider questionnaire and refuses invalid choices without consuming its request", async () => {
+    const queue = Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>());
+    const connection = providerConnection(queue);
+    const fixture = runtimeFixture({ provider: providerDriver(connection) });
+    const operation = operationId(910);
+    await fixture.runtime.execute(windowId, {
+      kind: "start-provider-turn",
+      operationId: operation,
+      threadId,
+      checkoutId,
+      sessionId,
+      prompt: fixture.prompt,
+    });
+    await vi.waitFor(() => expect(connection.send).toHaveBeenCalledOnce());
+    const questionnaire = {
+      allowComment: false,
+      questions: [
+        {
+          id: "q0",
+          prompt: "Formats?",
+          selection: "multiple" as const,
+          options: [
+            { id: "pdf", label: "PDF" },
+            { id: "text", label: "Text" },
+          ],
+        },
+      ],
+    };
+    await Effect.runPromise(
+      Queue.offer(
+        queue,
+        providerEvent({
+          kind: "user-input-request",
+          requestId: "native-form",
+          prompt: "Choose",
+          options: [],
+          questionnaire,
+        }),
+      ),
+    );
+    await vi.waitFor(async () => {
+      const frames = await fixture.runtime.subscribe(windowId, threadId, operation, 0, 20);
+      expect(frames.find((frame) => frame.event.kind === "input-requested")?.event).toMatchObject({
+        questionnaire,
+      });
+    });
+    const command = {
+      kind: "answer-provider-input" as const,
+      threadId,
+      checkoutId,
+      requestId: "native-form",
+    };
+    expect(
+      await fixture.runtime.execute(windowId, {
+        ...command,
+        operationId: operationId(911),
+        response: fixture.response,
+      }),
+    ).toMatchObject({ kind: "provider-turn-state", failure: { category: "invalid" } });
+    expect(connection.answerUserInput).not.toHaveBeenCalled();
+    expect(fixture.runtime.turnAwaitsPerson?.(String(threadId))).toBe(true);
+    const response = JSON.stringify({
+      version: 1,
+      answers: [{ questionId: "q0", selectedOptionIds: ["pdf", "text"] }],
+    });
+    fixture.evidenceValues.set(fixture.response.contentId, response);
+    await fixture.runtime.execute(windowId, {
+      ...command,
+      operationId: operationId(912),
+      response: fixture.response,
+    });
+    expect(connection.answerUserInput).toHaveBeenCalledWith({
+      sessionId,
+      requestId: "native-form",
+      answer: response,
+    });
+    expect(fixture.runtime.turnAwaitsPerson?.(String(threadId))).toBe(false);
+    await fixture.runtime.close();
     fixture.close();
   });
 

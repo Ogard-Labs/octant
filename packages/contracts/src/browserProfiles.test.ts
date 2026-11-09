@@ -1,3 +1,4 @@
+import { decodeBrowserProfileChoice } from "./projectBrowser";
 import { Schema } from "effect";
 import { describe, expect, it } from "vitest";
 import {
@@ -25,13 +26,36 @@ const policy = {
 };
 
 describe("Browser profiles contract", () => {
-  it("knows three profiles and nothing else", () => {
+  it("keeps built-in choices and bounds named account identities", () => {
     expect(decodeBrowserProfile({ kind: "private" })).toEqual({ kind: "private" });
     expect(decodeBrowserProfile({ kind: "personal" })).toEqual({ kind: "personal" });
     expect(decodeBrowserProfile({ kind: "project", projectId })).toEqual({
       kind: "project",
       projectId,
     });
+    expect(decodeBrowserProfile({ kind: "account", profileId: projectId })).toEqual({
+      kind: "account",
+      profileId: projectId,
+    });
+    expect(decodeBrowserProfileChoice(`account:${projectId}`)).toBe(`account:${projectId}`);
+    expect(() => decodeBrowserProfileChoice("account:../../outside")).toThrow();
+    expect(() =>
+      decodeBrowserProfile({
+        kind: "account",
+        profileId: projectId,
+        partition: "persist:another-account",
+      }),
+    ).toThrow();
+    expect(decodeBrowserProfilesCommand({ kind: "create-account", label: "Work account" })).toEqual(
+      { kind: "create-account", label: "Work account" },
+    );
+    expect(() =>
+      decodeBrowserProfilesCommand({
+        kind: "create-account",
+        label: "Work account",
+        profileId: projectId,
+      }),
+    ).toThrow();
     expect(() => decodeBrowserProfile({ kind: "existing" })).toThrow();
     expect(() => decodeBrowserProfile({ kind: "project" })).toThrow();
     // A profile cannot carry a store path or partition of its own choosing.

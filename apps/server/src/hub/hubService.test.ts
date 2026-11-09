@@ -1,10 +1,13 @@
-import { statSync } from "node:fs";
+import { mkdtempSync, readdirSync, rmSync, statSync } from "node:fs";
+import { createPublicKey, verify } from "node:crypto";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { decodeHubJoinRequest } from "@octant/contracts";
 import { hubRosterSigningPayload } from "@octant/domain";
 import { digestFromListenerPin, publicKeyFingerprint, verifySignature } from "./hubCrypto";
 import { HubTestNetwork, startHubTestHost, type HubTestHost } from "./hubHost.test-support";
+import { createRosterSigningKeyStore } from "./rosterSigningKey";
 
 const cleanups: Array<() => Promise<void> | void> = [];
 afterEach(async () => {
@@ -55,6 +58,80 @@ function joinRequest(
 }
 
 describe("the hub role of a host", () => {
+  it("keeps a native roster key stable across restart without ordinary file access", () => {
+    const directory = mkdtempSync(join(tmpdir(), "octant-native-roster-"));
+    cleanups.push(() => rmSync(directory, { recursive: true, force: true }));
+    let stored: Buffer | undefined;
+    const files = {
+      dataDirectory: directory,
+      read: () =>
+        stored === undefined
+          ? { status: "missing" as const }
+          : { status: "ready" as const, bytes: Buffer.from(stored) },
+      create: vi.fn((candidate: Buffer) => {
+        stored ??= Buffer.from(candidate);
+        return { status: "ready" as const, bytes: Buffer.from(stored) };
+      }),
+    };
+    const first = createRosterSigningKeyStore(directory, files).signer();
+    expect(files.create).toHaveBeenCalledTimes(1);
+    const restarted = createRosterSigningKeyStore(directory, files).signer();
+    expect(restarted.publicKey).toBe(first.publicKey);
+    expect(
+      verify(
+        "sha256",
+        Buffer.from("owned roster fixture"),
+        {
+          key: createPublicKey({
+            key: Buffer.from(first.publicKey, "base64url"),
+            format: "der",
+            type: "spki",
+          }),
+          dsaEncoding: "ieee-p1363",
+        },
+        Buffer.from(restarted.sign("owned roster fixture"), "base64url"),
+      ),
+    ).toBe(true);
+    expect(readdirSync(directory)).toEqual([]);
+    stored = Buffer.from("malformed owned roster fixture");
+    expect(() => createRosterSigningKeyStore(directory, files).signer()).toThrow(
+      "unavailable or unsafe",
+    );
+    expect(files.create).toHaveBeenCalledTimes(1);
+  });
+
+  it("refuses Windows roster signing without native storage before creating a file", () => {
+    const directory = mkdtempSync(join(tmpdir(), "octant-native-roster-"));
+    cleanups.push(() => rmSync(directory, { recursive: true, force: true }));
+    vi.stubGlobal("process", Object.create(process, { platform: { value: "win32" } }));
+    try {
+      expect(() => createRosterSigningKeyStore(directory).signer()).toThrow(
+        "unavailable or unsafe",
+      );
+      expect(readdirSync(directory)).toEqual([]);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it("refuses mismatched native storage or an unsafe roster key without provisioning", () => {
+    const directory = mkdtempSync(join(tmpdir(), "octant-native-roster-"));
+    cleanups.push(() => rmSync(directory, { recursive: true, force: true }));
+    const read = vi.fn(() => ({ status: "refused" as const }));
+    const create = vi.fn(() => {
+      throw Error("Unexpected native key creation.");
+    });
+    const wrong = { dataDirectory: directory + "-other", read, create };
+    expect(() => createRosterSigningKeyStore(directory, wrong).signer()).toThrow(
+      "unavailable or unsafe",
+    );
+    expect(read).not.toHaveBeenCalled();
+    expect(() =>
+      createRosterSigningKeyStore(directory, { ...wrong, dataDirectory: directory }).signer(),
+    ).toThrow("unavailable or unsafe");
+    expect(create).not.toHaveBeenCalled();
+    expect(readdirSync(directory)).toEqual([]);
+  });
   it("signs a roster that lists the hub, and bumps its sequence on every change", async () => {
     const { hub } = await startHub();
 

@@ -1,5 +1,5 @@
 import { Schema } from "effect";
-import { BrowserProfileRefusalReason } from "./browserAutomation";
+import { AccountBrowserProfile, BrowserProfileRefusalReason } from "./browserAutomation";
 import { ProjectId } from "./projects";
 
 const strict = { parseOptions: { onExcessProperty: "error" as const } };
@@ -9,10 +9,36 @@ const strict = { parseOptions: { onExcessProperty: "error" as const } };
  * Personal one. Private has no store to list or clear.
  */
 export const StoredBrowserProfile = Schema.Union(
+  AccountBrowserProfile,
   Schema.Struct({ kind: Schema.Literal("project"), projectId: ProjectId }).annotations(strict),
   Schema.Struct({ kind: Schema.Literal("personal") }).annotations(strict),
 );
 export type StoredBrowserProfile = typeof StoredBrowserProfile.Type;
+
+export const BrowserAccountProfileLabel = Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(80));
+export const NamedBrowserProfile = Schema.Struct({
+  ...AccountBrowserProfile.fields,
+  label: BrowserAccountProfileLabel,
+}).annotations(strict);
+export type NamedBrowserProfile = typeof NamedBrowserProfile.Type;
+export const decodeNamedBrowserProfiles = Schema.decodeUnknownSync(
+  Schema.Array(NamedBrowserProfile).pipe(Schema.maxItems(64)),
+);
+export const BrowserAccountProfileCreateResult = Schema.Union(
+  Schema.Struct({
+    status: Schema.Literal("created"),
+    profile: AccountBrowserProfile,
+    label: BrowserAccountProfileLabel,
+  }).annotations(strict),
+  Schema.Struct({
+    status: Schema.Literal("refused"),
+    reason: Schema.Literal("invalid-label", "store-unavailable", "limit-reached"),
+  }).annotations(strict),
+);
+export type BrowserAccountProfileCreateResult = typeof BrowserAccountProfileCreateResult.Type;
+export const decodeBrowserAccountProfileCreateResult = Schema.decodeUnknownSync(
+  BrowserAccountProfileCreateResult,
+);
 
 /** What clearing removes: sign-ins alone, or everything the profile stored. */
 export const BrowserProfileClearScope = Schema.Literal("cookies", "all");
@@ -87,7 +113,14 @@ export type ImportedCookie = typeof ImportedCookie.Type;
  * one of its profiles by the id the listing gave, and carries no cookie.
  */
 export const BrowserProfilesCommand = Schema.Union(
-  Schema.Struct({ kind: Schema.Literal("list") }).annotations(strict),
+  Schema.Struct({
+    kind: Schema.Literal("create-account"),
+    label: BrowserAccountProfileLabel,
+  }).annotations(strict),
+  Schema.Struct({
+    kind: Schema.Literal("list"),
+    includeSizes: Schema.optional(Schema.Boolean),
+  }).annotations(strict),
   Schema.Struct({
     kind: Schema.Literal("clear"),
     profile: StoredBrowserProfile,
@@ -122,6 +155,11 @@ export const BrowserProfilesRefusalReason = Schema.Literal(
 export type BrowserProfilesRefusalReason = typeof BrowserProfilesRefusalReason.Type;
 
 export const BrowserProfilesResult = Schema.Union(
+  Schema.Struct({
+    kind: Schema.Literal("browser-account-profile-created"),
+    profile: AccountBrowserProfile,
+    label: BrowserAccountProfileLabel,
+  }).annotations(strict),
   Schema.Struct({
     kind: Schema.Literal("browser-profiles"),
     profiles: Schema.Array(BrowserProfileSummary).pipe(Schema.maxItems(4_096)),

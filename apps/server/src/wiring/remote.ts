@@ -265,6 +265,7 @@ export type RemoteDependencies = { readonly onSecretStoreLinkChange?: () => void
     | "threadMessageQueue"
     | "onWorkTurnCancelled"
     | "workThreadServiceWithWorkflows"
+    | "workThreadService"
     | "workTurnService"
   > &
   Pick<CanvasWiring, "canvasRoutes" | "canvasPublicShareService" | "canvasService"> &
@@ -355,6 +356,7 @@ export function wireRemote(deps: RemoteDependencies) {
     workAttachments,
     workThreadProjection,
     workThreadServiceWithWorkflows,
+    workThreadService,
     workTurnService,
   } = deps;
 
@@ -444,6 +446,7 @@ export function wireRemote(deps: RemoteDependencies) {
   const resolveRemoteGatewayServices = (): Omit<RemoteGatewayServices, "config" | "serve"> => {
     if (injectedRemoteListenerServices !== undefined) return injectedRemoteListenerServices;
     const identity = resolvePrivateListenerHostIdentity({
+      identityFiles: options.serverIdentityFiles,
       connection: persistence.connection,
       dataDirectory: providerDataDirectory,
     });
@@ -489,6 +492,7 @@ export function wireRemote(deps: RemoteDependencies) {
   };
   const listenerCertificates = createSelfMadeListenerCertificateStore({
     dataDirectory: providerDataDirectory,
+    tlsFiles: options.listenerTlsFiles,
   });
   const privateListenerController = createPrivateListenerLifecycleController({
     hostId: () => String(resolveRemoteGatewayServices().hostId),
@@ -535,12 +539,16 @@ export function wireRemote(deps: RemoteDependencies) {
   let hostIdentity: PrivateListenerHostIdentity | undefined;
   const resolveHubIdentity = (): PrivateListenerHostIdentity => {
     hostIdentity ??= resolvePrivateListenerHostIdentity({
+      identityFiles: options.serverIdentityFiles,
       connection: persistence.connection,
       dataDirectory: providerDataDirectory,
     });
     return hostIdentity;
   };
-  const hubStateStore = createHubStateStore(providerDataDirectory);
+  const hubStateStore = createHubStateStore(
+    providerDataDirectory,
+    options.authorityStateFiles?.hub,
+  );
   const hubTransport = createPinnedHubTransport();
   let ownerBrowserAuthorityChanged: (() => void) | undefined;
   const writeHubMembership = createHubMembershipJournal({
@@ -581,7 +589,7 @@ export function wireRemote(deps: RemoteDependencies) {
   };
   const hubService = new HubService({
     state: hubStateStore,
-    rosterKey: createRosterSigningKeyStore(providerDataDirectory),
+    rosterKey: createRosterSigningKeyStore(providerDataDirectory, options.rosterSigningKeyFile),
     identity: resolveHubIdentity,
     listener: () => privateListenerController.status(),
     pairing: hubPairing,
@@ -799,7 +807,10 @@ export function wireRemote(deps: RemoteDependencies) {
   });
   setInterval(() => void spokeSignInService.tick().catch(() => undefined), SIGN_IN_LOOK_MS).unref();
   const tailscaleCertificate = new TailscaleCertificateService({
-    setting: createTailscaleCertificateSetting(providerDataDirectory),
+    setting: createTailscaleCertificateSetting(
+      providerDataDirectory,
+      options.authorityStateFiles?.certificate,
+    ),
     daemon: createTailscaleCliDaemon({
       dataDirectory: providerDataDirectory,
       exec: execTailscale,
@@ -865,7 +876,10 @@ export function wireRemote(deps: RemoteDependencies) {
   // Delegation between spokes: the receiving side starts an ordinary Work
   // thread under this host's own scope, and the sending side checks this host's
   // rules for the parent thread before it asks another member.
-  const delegationState = createDelegationStateStore(providerDataDirectory);
+  const delegationState = createDelegationStateStore(
+    providerDataDirectory,
+    options.authorityStateFiles?.delegations,
+  );
   const recordDelegation = createDelegationJournal({
     journal: persistence.journal,
     connection: persistence.connection,
@@ -1826,6 +1840,11 @@ export function wireRemote(deps: RemoteDependencies) {
       projects: deps.projectService,
       readCodeThread: (threadId) => persistence.readCodeThread(threadId),
       readProject: (projectId) => persistence.readProject(projectId),
+      work: {
+        readThreads: () => workThreadProjection.list(),
+        readThread: (threadId) => workThreadProjection.read(threadId),
+        changeAccess: (input) => workThreadService.changeOwnerAccess(input),
+      },
     }),
     credentials: ownerCredentialCopy,
     threadMoves,
