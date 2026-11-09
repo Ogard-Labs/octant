@@ -5,6 +5,7 @@ import {
   decodeUtcTimestamp,
   type HostResourceSnapshot,
 } from "@octant/contracts";
+import { createHostVitalsSampler, type HostVitals } from "./hostVitals";
 import { isLoopbackHostname } from "./shellRoutes";
 import { authenticateRoutePrincipal } from "./principalRouteContext";
 import { readPrincipalRouteContext } from "./principalRouteContext";
@@ -23,10 +24,22 @@ import type { ClientPrincipal } from "./clientPrincipal";
  */
 
 export const HOST_RESOURCE_PATH = "/api/host/resources";
+/** Asks for the extra readings; any other query is refused. */
+export const HOST_RESOURCE_DETAIL_QUERY = "?detail=vitals";
 export const HOST_RESOURCE_CACHE_MS = 5_000;
 export const HOST_RESOURCE_CPU_WINDOW_MS = 200;
 
-const ALLOWED_KEYS = new Set(["cores", "cpuPercent", "memory", "disk", "sampledAt"]);
+const ALLOWED_KEYS = new Set([
+  "cores",
+  "cpuPercent",
+  "memory",
+  "disk",
+  "network",
+  "diskIo",
+  "gpu",
+  "energy",
+  "sampledAt",
+]);
 
 export interface HostVolumeStats {
   readonly bsize: number;
@@ -52,6 +65,8 @@ export interface HostResourceRouteDependencies {
   readonly statfs?: (path: string) => Promise<HostVolumeStats>;
   readonly memory?: () => HostResourceMemoryReading;
   readonly cores?: () => number;
+  /** Network, disk throughput, GPU and battery; each part is omitted when unreadable. */
+  readonly vitals?: () => Promise<HostVitals>;
 }
 
 export function createHostResourceRouteHandler(
@@ -59,27 +74,38 @@ export function createHostResourceRouteHandler(
 ): (request: Request) => Promise<Response | undefined> {
   const now = dependencies.now ?? Date.now;
   const cacheMs = dependencies.cacheMs ?? HOST_RESOURCE_CACHE_MS;
-  const read = dependencies.read ?? (() => readHostResourceSnapshot(dependencies));
-  let cached: { readonly at: number; readonly snapshot: HostResourceSnapshot } | undefined;
-  let inflight: Promise<HostResourceSnapshot> | undefined;
-
-  const current = (): Promise<HostResourceSnapshot> => {
-    const at = now();
-    if (cached !== undefined && at - cached.at < cacheMs) return Promise.resolve(cached.snapshot);
-    if (inflight !== undefined) return inflight;
-    const pending = read()
-      .then((snapshot) => {
-        cached = { at: now(), snapshot };
-        inflight = undefined;
-        return snapshot;
-      })
-      .catch((error: unknown) => {
-        inflight = undefined;
-        throw error;
-      });
-    inflight = pending;
-    return pending;
+  // The extra readings (throughput, GPU, battery) start child processes on
+  // some hosts, so only a caller that asks for them (`?detail=vitals`, the
+  // Vitals tool) pays for them; the Computers card reads the plain snapshot.
+  const vitals = dependencies.vitals ?? createHostVitalsSampler();
+  const cachedRead = (read: () => Promise<HostResourceSnapshot>) => {
+    let cached: { readonly at: number; readonly snapshot: HostResourceSnapshot } | undefined;
+    let inflight: Promise<HostResourceSnapshot> | undefined;
+    return (): Promise<HostResourceSnapshot> => {
+      const at = now();
+      if (cached !== undefined && at - cached.at < cacheMs) {
+        return Promise.resolve(cached.snapshot);
+      }
+      if (inflight !== undefined) return inflight;
+      const pending = read()
+        .then((snapshot) => {
+          cached = { at: now(), snapshot };
+          inflight = undefined;
+          return snapshot;
+        })
+        .catch((error: unknown) => {
+          inflight = undefined;
+          throw error;
+        });
+      inflight = pending;
+      return pending;
+    };
   };
+  const { vitals: _injected, ...withoutVitals } = dependencies;
+  const plain = cachedRead(dependencies.read ?? (() => readHostResourceSnapshot(withoutVitals)));
+  const detailed = cachedRead(
+    dependencies.read ?? (() => readHostResourceSnapshot({ ...dependencies, vitals })),
+  );
 
   return async (request) => {
     const url = new URL(request.url);
@@ -97,14 +123,14 @@ export function createHostResourceRouteHandler(
     if (request.method !== "GET") {
       return failure("HTTP method is not supported for this route.", 405, origin);
     }
-    if (url.search !== "") {
+    if (url.search !== "" && url.search !== HOST_RESOURCE_DETAIL_QUERY) {
       return failure("Host resources request is invalid.", 400, origin);
     }
     if (!admits(request, dependencies)) {
       return failure("Host resources are not available to this client.", 403, origin);
     }
     try {
-      const snapshot = await current();
+      const snapshot = await (url.search === "" ? plain() : detailed());
       return json(snapshotBody(snapshot), 200, origin);
     } catch {
       return failure("Host resources are unavailable.", 500, origin);
@@ -119,7 +145,7 @@ export function createHostResourceRouteHandler(
 export async function readHostResourceSnapshot(
   dependencies: Pick<
     HostResourceRouteDependencies,
-    "dataDirectory" | "cpuPercent" | "statfs" | "memory" | "cores" | "now"
+    "dataDirectory" | "cpuPercent" | "statfs" | "memory" | "cores" | "now" | "vitals"
   >,
 ): Promise<HostResourceSnapshot> {
   const cpuPercent =
@@ -129,12 +155,16 @@ export async function readHostResourceSnapshot(
   const volume = dependencies.statfs ?? statfsVolume;
   const clock = dependencies.now ?? Date.now;
   const [percent, usedMemory] = await Promise.all([cpuPercent(), Promise.resolve(memory())]);
-  const disk = await readDisk(volume, dependencies.dataDirectory);
+  const [disk, extra] = await Promise.all([
+    readDisk(volume, dependencies.dataDirectory),
+    (dependencies.vitals?.() ?? Promise.resolve({})).catch((): HostVitals => ({})),
+  ]);
   return decodeHostResourceSnapshot({
     cores: cores(),
     cpuPercent: clampPercent(percent),
     memory: usedMemory,
     ...(disk === undefined ? {} : { disk }),
+    ...extra,
     sampledAt: decodeUtcTimestamp(new Date(clock()).toISOString()),
   });
 }
@@ -244,6 +274,10 @@ function snapshotBody(snapshot: HostResourceSnapshot): HostResourceSnapshot {
     ...(snapshot.disk === undefined
       ? {}
       : { disk: { usedBytes: snapshot.disk.usedBytes, freeBytes: snapshot.disk.freeBytes } }),
+    ...(snapshot.network === undefined ? {} : { network: snapshot.network }),
+    ...(snapshot.diskIo === undefined ? {} : { diskIo: snapshot.diskIo }),
+    ...(snapshot.gpu === undefined ? {} : { gpu: snapshot.gpu }),
+    ...(snapshot.energy === undefined ? {} : { energy: snapshot.energy }),
     sampledAt: snapshot.sampledAt,
   };
 }

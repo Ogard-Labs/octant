@@ -61,3 +61,20 @@ describe("a host resource snapshot", () => {
     ).toThrow();
   });
 });
+
+describe("a host resource snapshot with optional vitals", () => {
+  it("decodes network, disk throughput, GPU and battery when the host reports them", () => {
+    const decoded = decodeHostResourceSnapshot({
+      cores: 8,
+      cpuPercent: 5,
+      memory: { usedBytes: 1, totalBytes: 2 },
+      network: { inBytesPerSecond: 10, outBytesPerSecond: 20 },
+      diskIo: { inBytesPerSecond: 30, outBytesPerSecond: 40 },
+      gpu: { percent: 42 },
+      energy: { batteryPercent: 80, charging: false },
+      sampledAt,
+    });
+    expect(decoded.gpu).toEqual({ percent: 42 });
+    expect(decoded.energy?.charging).toBe(false);
+  });
+});

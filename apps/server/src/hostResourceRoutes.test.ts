@@ -94,6 +94,28 @@ describe("host resource route", () => {
     expect(decodeHostResourceSnapshot(body)).toEqual(loadSnapshot());
   });
 
+  it("samples throughput, GPU and battery only when the caller asks for the detail", async () => {
+    const vitals = vi.fn(async () => ({ gpu: { percent: 42 } }));
+    const { handler } = setup({
+      read: undefined as never,
+      dataDirectory,
+      vitals,
+      cpuPercent: async () => 5,
+      statfs: async () => ({ bsize: 1, blocks: 100, bavail: 80 }),
+      memory: () => ({ usedBytes: 1, totalBytes: 2 }),
+      cores: () => 4,
+    });
+    const plain = requireResponse(await handler(localRequest()));
+    expect(JSON.parse(await plain.text())).not.toHaveProperty("gpu");
+    expect(vitals).not.toHaveBeenCalled();
+    const detailed = requireResponse(
+      await handler(localRequest("/api/host/resources?detail=vitals")),
+    );
+    expect(JSON.parse(await detailed.text())).toMatchObject({ gpu: { percent: 42 } });
+    const other = requireResponse(await handler(localRequest("/api/host/resources?detail=all")));
+    expect(other.status).toBe(400);
+  });
+
   it("reuses one snapshot for about five seconds and samples again after that", async () => {
     let clock = nowMs;
     const first = loadSnapshot("2026-10-06T12:00:00.000Z");
