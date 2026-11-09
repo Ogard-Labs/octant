@@ -1,3 +1,4 @@
+import { readAcpFileReview } from "./acpFileReview";
 import { isAbsolute, resolve } from "node:path";
 import {
   CorrelationId,
@@ -573,6 +574,10 @@ function resolveApiKey(
   });
 }
 
+function hasVerifiedFileReview(profile: AcpProviderProfile): boolean {
+  return profile.kind === "mistral-vibe" && profile.fileReviewVersions?.includes("3.0.3") === true;
+}
+
 export function makeAcpDriver(options: AcpDriverOptions): ProviderDriver {
   const { profile } = options;
   const name = profile.displayName;
@@ -679,6 +684,7 @@ export function makeAcpDriver(options: AcpDriverOptions): ProviderDriver {
   return {
     kind: profile.kind,
     conversationOwnership: "provider",
+    ...(hasVerifiedFileReview(profile) ? { fileReviewReads: true as const } : {}),
     ...(profile.authentication.kind === "delegated-browser"
       ? {
           beginAuthentication: ({ instanceId }) => {
@@ -828,12 +834,15 @@ function makeConnection(
   const { profile } = options;
   const name = profile.displayName;
   const capabilities = baseCapabilities(profile);
-  const request = <A>(operation: () => Promise<A>): Effect.Effect<A, ProviderFailure> =>
+  const request = <A>(
+    operation: (signal: AbortSignal) => Promise<A>,
+  ): Effect.Effect<A, ProviderFailure> =>
     Effect.tryPromise({ try: operation, catch: (error) => providerFailure(profile, error) });
   return Effect.gen(function* () {
     const queue = yield* PubSub.unbounded<ProviderRuntimeEvent>();
     const sessions = new Map<ProviderSessionId, SessionState>();
     const pendingStarts = new Set<Promise<SessionState>>();
+    const cancelPendingStarts = new Set<() => void>();
     let connectionClosing = false;
     const runtimeRoot =
       mode === "chat" && profile.chatSessionRoot === "managed-home"
@@ -841,7 +850,13 @@ function makeConnection(
         : projectRoot;
 
     const closeState = async (state: SessionState) => {
-      if (state.closed) return;
+      if (state.closed) {
+        // A timed-out stop may already be closing this private runtime. Join
+        // its cleanup rather than leaving it detached from the owner scope.
+        // A parked retained runtime remains open and is owned by the registry.
+        if (state.runtime.isClosed()) await state.runtime.close();
+        return;
+      }
       state.closed = true;
       state.removeNotification();
       state.removeRequest();
@@ -870,6 +885,7 @@ function makeConnection(
     yield* Effect.addFinalizer(() =>
       Effect.promise(async () => {
         connectionClosing = true;
+        for (const cancel of cancelPendingStarts) cancel();
         await Promise.allSettled(pendingStarts);
         await Promise.all([...sessions.values()].map(closeState));
         sessions.clear();
@@ -1232,6 +1248,7 @@ function makeConnection(
       loopbackPorts: ReadonlyArray<number> = [],
       tools: ReadonlyArray<ProviderToolDefinition> = [],
       nativeSetup?: ProviderNativeSetup,
+      signal?: AbortSignal,
     ): Promise<{
       readonly scope: Scope.CloseableScope;
       readonly client: AcpClientPort;
@@ -1246,7 +1263,7 @@ function makeConnection(
       };
       const scope = await Effect.runPromise(Scope.make());
       try {
-        const apiKey = await Effect.runPromise(resolveApiKey(options));
+        const apiKey = await Effect.runPromise(resolveApiKey(options), { signal });
         let receipt: Awaited<ReturnType<ProviderRuntimeRegistry["trackProcess"]>> | undefined;
         const processConnection = await Effect.runPromise(
           options.process
@@ -1268,6 +1285,7 @@ function makeConnection(
               },
             })
             .pipe(Effect.provideService(Scope.Scope, scope)),
+          { signal },
         );
         if (receipt === undefined) {
           await options.runtimeRegistry.trackProcess(options.instanceId, processConnection);
@@ -1306,10 +1324,43 @@ function makeConnection(
       readonly nativeSetup?: ProviderNativeSetup;
       readonly sourceSessionId?: string;
       readonly tools: ReadonlyArray<ProviderToolDefinition>;
+      readonly current?: () => boolean;
     }) =>
-      request(() => {
+      request((effectSignal) => {
+        const controller = new AbortController();
+        const cancel = () => controller.abort();
+        effectSignal.addEventListener("abort", cancel, { once: true });
+        if (effectSignal.aborted) cancel();
+        cancelPendingStarts.add(cancel);
+        const signal = controller.signal;
+        const assertCurrent = () => {
+          if (signal.aborted || connectionClosing || input.current?.() === false)
+            throw failure("interrupted", "ACP session startup was cancelled.");
+        };
+        const awaitStartup = async <A>(run: () => Promise<A>): Promise<A> => {
+          assertCurrent();
+          let onAbort: (() => void) | undefined;
+          try {
+            const result = await Promise.race([
+              Promise.resolve().then(() => {
+                assertCurrent();
+                return run();
+              }),
+              new Promise<never>((_, reject) => {
+                onAbort = () =>
+                  reject(failure("interrupted", "ACP session startup was cancelled."));
+                signal.addEventListener("abort", onAbort, { once: true });
+                if (signal.aborted) onAbort();
+              }),
+            ]);
+            assertCurrent();
+            return result;
+          } finally {
+            if (onAbort !== undefined) signal.removeEventListener("abort", onAbort);
+          }
+        };
         const pending = (async () => {
-          if (connectionClosing) throw failure("interrupted", "ACP connection is closing.");
+          assertCurrent();
           const previous = sessions.get(input.sessionId);
           if (previous !== undefined && !previous.closed) {
             if (
@@ -1383,6 +1434,7 @@ function makeConnection(
                   compatibility,
                 )
               )?.value;
+              assertCurrent();
               if (runtime?.isClosed()) runtime = undefined;
               if (runtime !== undefined) {
                 runtime.activate();
@@ -1399,6 +1451,7 @@ function makeConnection(
                   ownership.release,
                   runtime,
                 );
+                assertCurrent();
                 return registered;
               }
               claimNative(input.sourceSessionId);
@@ -1424,8 +1477,10 @@ function makeConnection(
               managedTools?.bridge.port === undefined ? [] : [managedTools.bridge.port],
               input.tools,
               input.nativeSetup,
+              signal,
             );
             scope = started.scope;
+            assertCurrent();
             const { client, connection } = started;
             const appManagedTools = negotiatedAppManagedTools(
               connection.initialized,
@@ -1480,29 +1535,29 @@ function makeConnection(
               sourceSessionId === undefined
                 ? sessionMeta === undefined
                   ? mcpServers.length === 0
-                    ? await client.newSession(runtimeRoot)
-                    : await client.newSession(runtimeRoot, mcpServers)
-                  : await client.newSession(runtimeRoot, mcpServers, sessionMeta)
+                    ? await awaitStartup(() => client.newSession(runtimeRoot))
+                    : await awaitStartup(() => client.newSession(runtimeRoot, mcpServers))
+                  : await awaitStartup(() =>
+                      client.newSession(runtimeRoot, mcpServers, sessionMeta),
+                    )
                 : resumeWithoutReplay
                   ? sessionMeta === undefined
                     ? mcpServers.length === 0
-                      ? await client.resumeSession(sourceSessionId, runtimeRoot)
-                      : await client.resumeSession(sourceSessionId, runtimeRoot, mcpServers)
-                    : await client.resumeSession(
-                        sourceSessionId,
-                        runtimeRoot,
-                        mcpServers,
-                        sessionMeta,
+                      ? await awaitStartup(() => client.resumeSession(sourceSessionId, runtimeRoot))
+                      : await awaitStartup(() =>
+                          client.resumeSession(sourceSessionId, runtimeRoot, mcpServers),
+                        )
+                    : await awaitStartup(() =>
+                        client.resumeSession(sourceSessionId, runtimeRoot, mcpServers, sessionMeta),
                       )
                   : sessionMeta === undefined
                     ? mcpServers.length === 0
-                      ? await client.loadSession(sourceSessionId, runtimeRoot)
-                      : await client.loadSession(sourceSessionId, runtimeRoot, mcpServers)
-                    : await client.loadSession(
-                        sourceSessionId,
-                        runtimeRoot,
-                        mcpServers,
-                        sessionMeta,
+                      ? await awaitStartup(() => client.loadSession(sourceSessionId, runtimeRoot))
+                      : await awaitStartup(() =>
+                          client.loadSession(sourceSessionId, runtimeRoot, mcpServers),
+                        )
+                    : await awaitStartup(() =>
+                        client.loadSession(sourceSessionId, runtimeRoot, mcpServers, sessionMeta),
                       );
             if (sourceSessionId !== undefined && source.sessionId !== sourceSessionId)
               throw failure("stale-resume", "The provider returned a different native session.");
@@ -1526,14 +1581,12 @@ function makeConnection(
             let configOptions = source.configOptions ?? [];
             if (!modelOpenedWithSession) {
               if (setModelCall === undefined) {
-                const result = await client.setConfigOption(
-                  source.sessionId,
-                  "model",
-                  input.modelId,
+                const result = await awaitStartup(() =>
+                  client.setConfigOption(source.sessionId, "model", input.modelId),
                 );
                 configOptions = result.configOptions;
               } else {
-                await client.call(setModelCall.method, setModelCall.params);
+                await awaitStartup(() => client.call(setModelCall.method, setModelCall.params));
               }
             }
             const modeValue = profile.sessionMode(
@@ -1555,10 +1608,12 @@ function makeConnection(
               );
             const setModeCall = profile.setModeCall?.(source.sessionId, modeValue);
             if (setModeCall === undefined) {
-              const result = await client.setConfigOption(source.sessionId, "mode", modeValue);
+              const result = await awaitStartup(() =>
+                client.setConfigOption(source.sessionId, "mode", modeValue),
+              );
               configOptions = result.configOptions;
             } else {
-              await client.call(setModeCall.method, setModeCall.params);
+              await awaitStartup(() => client.call(setModeCall.method, setModeCall.params));
             }
             // Turns carry only the prompt. Restore model settings against the
             // selected session's fresh choices before it can send; apply effort
@@ -1587,7 +1642,9 @@ function makeConnection(
                   );
                 continue;
               }
-              const result = await client.setConfigOption(source.sessionId, option.id, value);
+              const result = await awaitStartup(() =>
+                client.setConfigOption(source.sessionId, option.id, value),
+              );
               configOptions = result.configOptions;
               if (
                 profile.discoverModelOptions === true &&
@@ -1624,8 +1681,19 @@ function makeConnection(
               runtimeTools?.bridge.bind(undefined);
               closing = (async () => {
                 await runtimeTools?.bridge.close();
-                if (profile.closesSessions)
-                  await client.closeSession(source.sessionId).catch(() => undefined);
+                if (profile.closesSessions) {
+                  let timer: ReturnType<typeof setTimeout> | undefined;
+                  try {
+                    await Promise.race([
+                      client.closeSession(source.sessionId).catch(() => undefined),
+                      new Promise<void>((resolve) => {
+                        timer = setTimeout(resolve, 500);
+                      }),
+                    ]);
+                  } finally {
+                    if (timer !== undefined) clearTimeout(timer);
+                  }
+                }
                 await Effect.runPromise(Scope.close(runtimeScope, Exit.void));
                 releaseNative?.();
               })();
@@ -1681,6 +1749,7 @@ function makeConnection(
             );
             registered = state;
             stateRef.state = state;
+            assertCurrent();
             return state;
           } catch (error) {
             // The bridge is opened before session/new so the agent can connect to
@@ -1696,11 +1765,48 @@ function makeConnection(
           }
         })();
         pendingStarts.add(pending);
-        void pending.finally(() => pendingStarts.delete(pending)).catch(() => undefined);
+        void pending
+          .finally(() => {
+            pendingStarts.delete(pending);
+            cancelPendingStarts.delete(cancel);
+            effectSignal.removeEventListener("abort", cancel);
+          })
+          .catch(() => undefined);
         return pending;
       });
 
     return {
+      ...(hasVerifiedFileReview(profile)
+        ? {
+            readFileReview: (
+              input: Parameters<NonNullable<ProviderConnection["readFileReview"]>>[0],
+            ) =>
+              Effect.promise(async () => {
+                const state = sessions.get(input.sessionId);
+                if (state === undefined || state.closed)
+                  return { status: "refused", reason: "no-session" } as const;
+                if (state.promptActive)
+                  return { status: "refused", reason: "turn-running" } as const;
+                if (profile.fileReviewVersions?.includes(state.runtime.version) !== true)
+                  return { status: "refused", reason: "unsupported" } as const;
+                return readAcpFileReview({
+                  runtimeVersion: state.runtime.version,
+                  sourceSessionId: state.sourceSessionId,
+                  path: input.path,
+                  root: projectRoot,
+                  ...(input.scopeId === undefined ? {} : { scopeId: input.scopeId }),
+                  ...(input.signal === undefined ? {} : { signal: input.signal }),
+                  current: () =>
+                    input.current() &&
+                    sessions.get(input.sessionId) === state &&
+                    !state.closed &&
+                    !state.promptActive &&
+                    !state.runtime.isClosed(),
+                  call: (method, params) => state.client.call(method, { ...params }),
+                });
+              }),
+          }
+        : {}),
       toolRequestSignal: ({ sessionId, requestId }) =>
         sessions.get(sessionId)?.pendingToolAnswers.get(requestId)?.controller.signal ??
         AbortSignal.abort(),
@@ -1757,6 +1863,7 @@ function makeConnection(
           modelId: identity.modelId,
           executionPolicy: input.executionPolicy,
           sourceSessionId: input.resumeCursor.value,
+          ...(input.current === undefined ? {} : { current: input.current }),
           ...(input.autoApprove === undefined ? {} : { autoApprove: input.autoApprove }),
           ...(input.nativeSetup === undefined ? {} : { nativeSetup: input.nativeSetup }),
           tools: input.tools ?? identity.tools,

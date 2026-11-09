@@ -166,6 +166,8 @@
     "./browser-page-script": "./src/browserPageScript.ts",
     "./owner-browser": "./src/ownerBrowser.ts",
     "./browser-presentation": "./src/browserPresentation.ts",
+    "./provider-file-review": "./src/providerFileReview.ts",
+    "./code-provider-file-review": "./src/codeProviderFileReview.ts",
     "./code-tool-contribution": "./src/codeToolContribution.ts"
   },
   "scripts": {
