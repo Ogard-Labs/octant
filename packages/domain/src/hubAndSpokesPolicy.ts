@@ -612,6 +612,9 @@ export function authorizeHubRequest(input: {
   return { status: "allowed" };
 }
 
+const TAILSCALE_NAME = /^[a-z0-9-]+(\.[a-z0-9-]+)*\.ts\.net$/;
+const THREAD_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
 /**
  * The origin a browser reaches a member's own web app at: its listener on its
  * Tailscale name, which the host's Tailscale certificate makes a browser trust.
@@ -624,9 +627,47 @@ export function rosterMemberWebOrigin(member: RosterMember): string | undefined 
   if (member.role === "guest") return undefined;
   const name = member.privateNames
     .map((candidate) => candidate.trim().toLowerCase())
-    .find((candidate) => /^[a-z0-9-]+(\.[a-z0-9-]+)*\.ts\.net$/.test(candidate));
+    .find((candidate) => TAILSCALE_NAME.test(candidate));
   if (name === undefined) return undefined;
   return `https://${name}${member.listenerPort === undefined ? "" : `:${member.listenerPort}`}`;
+}
+
+/**
+ * The page on a member's own web app that opens one of its threads: the
+ * member's web origin with the continue link its paired-browser screen reads
+ * at load (`continueMode` and `continueThread`), which opens a Chat, Work, or
+ * Code thread by its id with no Project. Undefined for an origin that is not
+ * a member's Tailscale web app as `rosterMemberWebOrigin` names one (https,
+ * a `.ts.net` name, an optional port, and nothing else), or for an id that is
+ * not a thread id, so nothing else can be dressed as a member's page. Opening
+ * it grants nothing: the member's page admits the browser as it already
+ * would, as a guest or with an owner's passkey, or asks it to pair.
+ */
+export function memberThreadPage(
+  webOrigin: string,
+  thread: { readonly mode: "chat" | "work" | "code"; readonly threadId: string },
+): string | undefined {
+  if (!THREAD_ID.test(thread.threadId)) return undefined;
+  let url: URL;
+  try {
+    url = new URL(webOrigin);
+  } catch {
+    return undefined;
+  }
+  if (
+    url.protocol !== "https:" ||
+    url.username !== "" ||
+    url.password !== "" ||
+    !TAILSCALE_NAME.test(url.hostname) ||
+    url.pathname !== "/" ||
+    url.search !== "" ||
+    url.hash !== ""
+  ) {
+    return undefined;
+  }
+  url.searchParams.set("continueMode", thread.mode);
+  url.searchParams.set("continueThread", thread.threadId.toLowerCase());
+  return url.toString();
 }
 
 /** The hub grant a spoke starts with: the roster, Introduce, and Owners ticked, the rest off. */

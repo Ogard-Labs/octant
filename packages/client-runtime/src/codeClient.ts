@@ -1,4 +1,9 @@
 import {
+  CodeProviderFileReviewRead,
+  decodeCodeProviderFileReviewRequest,
+  type CodeProviderFileReviewRequest,
+} from "@octant/contracts/code-provider-file-review";
+import {
   createProviderCloudSessionClient,
   type ProviderCloudSessionClient,
 } from "./providerCloudSessionClient";
@@ -169,6 +174,10 @@ export interface CodeFileSave {
 }
 
 export interface CodeClient {
+  readProviderFileReview?(
+    input: CodeProviderFileReviewRequest,
+    signal?: AbortSignal,
+  ): Promise<typeof CodeProviderFileReviewRead.Type>;
   readonly providerCloudSessions?: ProviderCloudSessionClient;
   bootstrap(): Promise<CodeBootstrap>;
   navigation(): Promise<CodeNavigation>;
@@ -1032,6 +1041,20 @@ export function createCodeClient(options: CodeClientOptions): CodeClient {
           ...(signal === undefined ? {} : { signal }),
         },
         decodeHostAnswer(CodeEvidenceBatchResponse),
+      );
+    },
+    async readProviderFileReview(input, signal) {
+      const validated = decodeCodeProviderFileReviewRequest(input);
+      return request(
+        fetch,
+        new URL("/api/code/provider-file-review", options.baseUrl).toString(),
+        {
+          method: "POST",
+          headers: { ...headers, "content-type": "application/json" },
+          body: JSON.stringify(validated),
+          ...(signal === undefined ? {} : { signal }),
+        },
+        decodeHostAnswer(CodeProviderFileReviewRead),
       );
     },
     async save(input) {

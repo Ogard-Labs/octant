@@ -1,3 +1,4 @@
+import { storedBrowserProfileOfPartitionFolder } from "@octant/domain";
 import { createDesktopBrowserCredentialFill } from "./desktopBrowserCredentialFill";
 import { createDesktopClientLifetime } from "./desktopClientLifetime";
 import {
@@ -331,6 +332,7 @@ import {
   sendHubAdministrationOperation,
   type HubAdministrationControlRuntime,
 } from "./hubAdministrationControls";
+import { openMovedThreadThere } from "./threadMoveOpenThere";
 import {
   installPairedComputerIpcHandlers,
   type PageStoragePort,
@@ -566,7 +568,24 @@ export function installHubAdministrationIpcHandlers(options: {
     handler: (event: unknown, ...args: readonly unknown[]) => unknown,
   ) => void;
   readonly runtimeFor: (event: unknown) => HubAdministrationControlRuntime;
+  /** Hands a validated page to the person's default browser. */
+  readonly openExternal: (url: string) => Promise<void>;
 }): void {
+  // Open there on a moved thread's tombstone. The window names the thread and
+  // nothing else; the page comes from the host's own answer for it.
+  options.handle(IPC_CHANNELS.threadMoveOpenThere, async (event, thread) => {
+    let runtime: HubAdministrationControlRuntime;
+    try {
+      runtime = options.runtimeFor(event);
+    } catch {
+      throw new Error("Octant rejected an unauthorized hub request.");
+    }
+    try {
+      return await openMovedThreadThere({ runtime, thread, openExternal: options.openExternal });
+    } catch {
+      throw new Error("Octant hub controls are unavailable.");
+    }
+  });
   options.handle(IPC_CHANNELS.hubAdministrationRequest, async (event, operation, body) => {
     let runtime: HubAdministrationControlRuntime;
     try {
@@ -1363,6 +1382,8 @@ let browserRuntimeBroker: BrowserRuntimeBroker | undefined;
 let computerUseService: ComputerUseDesktopService | undefined;
 let managedToolService: ManagedToolService | undefined;
 let browserSurfaceHost: ReturnTypeOfBrowserSurfaceHost | undefined;
+// Stores, native sessions and their owner survive a backend restart together.
+let browserProfileStore: ReturnType<typeof createBrowserProfileStore> | undefined;
 let browserExtensionPopupHost: ReturnType<typeof createExtensionPopupHost> | undefined;
 let browserExtensionBridge: ReturnType<typeof createExtensionBridge> | undefined;
 let canvasPrototypeSurface: CanvasPrototypeSurface | undefined;
@@ -1857,6 +1878,11 @@ async function startDesktopOwnedHost(): Promise<LocalHostDescriptor> {
       isEmbeddedOwner: (windowId) => nightlyWindowLeases?.hasWindow(windowId) === true,
       clipboard: { writeText: (text) => clipboard.writeText(text) },
       createView: (options) => {
+        const stored = storedBrowserProfileOfPartitionFolder(
+          options.partition.replace(/^persist:/, ""),
+        );
+        if (stored?.kind === "account" && !profileStore.hasAccountProfile(stored.profileId))
+          throw new Error("The named account profile is not registered on this host.");
         if (nightlyWindowLeases?.hasWindow(options.owner.windowId) === true)
           return createOffscreenBrowserSurface(options);
         return new WebContentsView({
@@ -1865,17 +1891,17 @@ async function startDesktopOwnedHost(): Promise<LocalHostDescriptor> {
       },
     });
     const surfaceHost = browserSurfaceHost;
-    const profileStore = createBrowserProfileStore({
+    const profileStore = (browserProfileStore ??= createBrowserProfileStore({
       partitionsDirectory: browserProfilesDirectory(),
       sessionFor: (partition) => session.fromPartition(partition),
       closeProfilePages: (profile) => surfaceHost.closeProfileContexts(profile),
       onExtensionSession: (profile) => browserExtensionBridge?.attachProfile(profile),
-    });
+    }));
     const extensionPreloadPath = resolve(
       dirname(fileURLToPath(import.meta.url)),
       EXTENSION_BRIDGE_PRELOAD_FILENAME,
     );
-    browserExtensionBridge = createExtensionBridge({
+    browserExtensionBridge ??= createExtensionBridge({
       preloadPath: extensionPreloadPath,
       tabsChannel: IPC_CHANNELS.browserExtensionTabs,
       actionChannel: IPC_CHANNELS.browserExtensionActionClicked,
@@ -3334,6 +3360,7 @@ function installIpcHandlers(): void {
         fetch: globalThis.fetch,
       };
     },
+    openExternal: (url) => shell.openExternal(url),
   });
   installHostIdentityIpcHandlers({
     handle: (channel, handler) => ipcMain.handle(channel, handler),
@@ -4561,13 +4588,13 @@ function forceExitAfterStalledQuit(): () => void {
 let desktopPeerStatusOwner: ReturnType<typeof ownDesktopPeerStatus> | undefined;
 let nightlyWindowLeases: ReturnType<typeof ownNightlyWindowLeases> | undefined;
 const desktopClientLifetime = createDesktopClientLifetime({
-  currentNightlyWindows: () => nightlyWindowLeases?.activeWindowCount() ?? 0,
+  currentNightlyWindows: () => nightlyWindowLeases?.lifetimeWindowCount() ?? 0,
   closeLocalWindows: closeLocalWindowsForRetainedHost,
   quitHost: quitHostAfterLastClient,
 });
 
 async function quitHostAfterLastClient(
-  stillRequested: () => boolean = () => (nightlyWindowLeases?.activeWindowCount() ?? 0) === 0,
+  stillRequested: () => boolean = () => (nightlyWindowLeases?.lifetimeWindowCount() ?? 0) === 0,
 ): Promise<"accepted" | "cancelled"> {
   if (quitPrepared) return "accepted";
   if (preparingQuit) return "cancelled";
@@ -4816,7 +4843,9 @@ function startDesktopInstance(): void {
   });
   const hostOnly = (args: ReadonlyArray<string>) =>
     app.isPackaged &&
-    (process.platform === "darwin" || process.platform === "linux") &&
+    (process.platform === "darwin" ||
+      process.platform === "linux" ||
+      process.platform === "win32") &&
     resolvePackagedDesktopLaunch(applicationIdentity, args).kind === "host-only";
   app.on("second-instance", (_event, commandLine) => {
     // A concurrent Nightly launch joins this owner without opening its shell.
@@ -4843,6 +4872,14 @@ function startDesktopInstance(): void {
           packaged: app.isPackaged,
           platform: process.platform,
           resourcesPath: process.resourcesPath,
+          ...(desktopWindowsHost === undefined
+            ? {}
+            : {
+                windows: {
+                  profileId: desktopWindowsHost.paths.profileId,
+                  version: app.getVersion(),
+                },
+              }),
           ...(linux
             ? {
                 linux: {
@@ -4867,7 +4904,7 @@ function startDesktopInstance(): void {
                       instanceId: serverInstanceId,
                       desktopBridgeSecret,
                     },
-              onActiveWindowCountChanged: () => desktopClientLifetime.nightlyWindowsChanged(),
+              onClientLifetimeCountChanged: () => desktopClientLifetime.nightlyWindowsChanged(),
               closeOwnerContexts: async (windowId) => {
                 await browserSurfaceHost?.closeOwnerContexts(windowId);
               },

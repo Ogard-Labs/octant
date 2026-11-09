@@ -169,6 +169,7 @@ import {
 import { createPrivateListenerAdministrationRouteHandler } from "../remote/privateListenerAdministrationRoutes";
 import { createPrivateListenerSetting } from "../remote/privateListenerSetting";
 import { createSelfMadeListenerCertificateStore } from "../remote/selfMadeListenerCertificate";
+import type { ThreadNotificationDeliveryService } from "../remote/threadNotificationDeliveryService";
 import {
   boundHostRuntimeDiagnostics,
   createReleaseFeedVerifier,
@@ -244,6 +245,8 @@ export type RemoteDependencies = { readonly onSecretStoreLinkChange?: () => void
   Pick<WorkspaceWiring, "shellService" | "projectService"> &
   Pick<
     BrowserWiring,
+    | "browserUploadPermissions"
+    | "browserDownloadPermissions"
     | "browserAutomationService"
     | "browserExtensionService"
     | "browserFlowService"
@@ -264,6 +267,7 @@ export type RemoteDependencies = { readonly onSecretStoreLinkChange?: () => void
     | "threadMessageQueue"
     | "onWorkTurnCancelled"
     | "workThreadServiceWithWorkflows"
+    | "workThreadService"
     | "workTurnService"
   > &
   Pick<CanvasWiring, "canvasRoutes" | "canvasPublicShareService" | "canvasService"> &
@@ -286,6 +290,8 @@ export type RemoteDependencies = { readonly onSecretStoreLinkChange?: () => void
     /** Threads a move holds: frozen here while leaving, or arriving and not yet committed. */
     readonly threadMoveHolds: ThreadMoveHolds;
     readonly threadMoveState: ThreadMoveStatePort;
+    /** Tells owner phones, through the phone notification path, that a move waits. */
+    readonly threadNotifications: Pick<ThreadNotificationDeliveryService, "notifyMoveWaiting">;
   };
 
 const decodeAgentRunParentThreadId = Schema.decodeUnknownSync(AgentRunParentThreadId);
@@ -302,6 +308,8 @@ function deviceIsActive(
 
 export function wireRemote(deps: RemoteDependencies) {
   const {
+    browserUploadPermissions,
+    browserDownloadPermissions,
     browserAutomationService,
     browserExtensionService,
     browserFlowService,
@@ -354,6 +362,7 @@ export function wireRemote(deps: RemoteDependencies) {
     workAttachments,
     workThreadProjection,
     workThreadServiceWithWorkflows,
+    workThreadService,
     workTurnService,
   } = deps;
 
@@ -1130,6 +1139,7 @@ export function wireRemote(deps: RemoteDependencies) {
       readThreadExternalContentTaint(persistence.connection, threadId).externalContentIngested,
     importMovedThread: (input) => deps.chatService.importMovedThread(input),
     readOriginalInput: (reference) => movedInputSource.read(reference).catch(() => undefined),
+    originalInputSize: (reference) => movedInputSource.size(reference),
     readAttachment: async (threadId, attachmentId) => {
       try {
         return await deps.chatService.readAttachment(
@@ -1478,6 +1488,11 @@ export function wireRemote(deps: RemoteDependencies) {
       return status.membership === "member" ? status.roster.roster.members : [];
     },
     selfMemberId: () => hubService.hubMemberId(),
+    tellOwnerPhones: (wait) =>
+      deps.threadNotifications.notifyMoveWaiting({
+        ...wait,
+        confirmsMoves: (deviceId) => spokeLinkService.ownerDeviceIds().includes(deviceId),
+      }),
     listThreads: async () => {
       const lastEvent = persistence.connection.prepare(
         `SELECT e.occurred_at AS occurred_at FROM aggregate_heads h
@@ -1815,6 +1830,11 @@ export function wireRemote(deps: RemoteDependencies) {
       projects: deps.projectService,
       readCodeThread: (threadId) => persistence.readCodeThread(threadId),
       readProject: (projectId) => persistence.readProject(projectId),
+      work: {
+        readThreads: () => workThreadProjection.list(),
+        readThread: (threadId) => workThreadProjection.read(threadId),
+        changeAccess: (input) => workThreadService.changeOwnerAccess(input),
+      },
     }),
     credentials: ownerCredentialCopy,
     threadMoves,
@@ -2005,6 +2025,8 @@ export function wireRemote(deps: RemoteDependencies) {
     },
     purgeCanvasFiles: (canvasIds) => removeMirrorFiles(persistence.connection, canvasIds),
     forgetProjectData: (projectId) => {
+      browserUploadPermissions.forgetProject(projectId);
+      browserDownloadPermissions.forgetProject(projectId);
       // The Project's Browser profile goes with its other data: its extensions
       // turn off, then its store is cleared.
       const profile = { kind: "project" as const, projectId: decodeProjectId(projectId) };

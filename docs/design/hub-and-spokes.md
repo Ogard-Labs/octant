@@ -43,7 +43,7 @@ real hub or a real Tailscale certificate. Nothing here has been run on a real ph
 passkey, or Android. An owner device's one unlock covers five minutes of
 administration (the host keeps the session in memory), copies an API-key
 sign-in between two spokes, reads a Code posture, and applies or dismisses a
-provisioning proposal, read narrowly as slice 5 and slice 10 record; an owner can change an active Code thread or Code Project posture through the existing owner route, with host-local current-state checks and owner-device journal attribution. A Mac's Touch ID unlock key is built
+provisioning proposal, read narrowly as slice 5 and slice 10 record; an owner can change an active local Work thread, Code thread or Code Project posture through the existing owner route, with host-local current-state checks and owner-device journal attribution. A Mac's Touch ID unlock key is built
 (a Secure Enclave key made through the desktop's native helper and registered
 when the Mac joins a hub, read narrowly as slice 5 records); the real Touch ID
 prompt has not been run. The wake service is built (the hub's own
@@ -262,7 +262,10 @@ the CLI. The hub depends on that:
     checks. The P-256 TLS key is distinct from the host signing key, capped
     at 4 KiB, exclusively created and held against writes or replacement.
     An existing corrupt, exposed or aliased key refuses without rotation.
-    Certificates are capped at 16 KiB. A private regular certificate may be
+    Certificates are capped at 16 KiB. First use creates the certificate
+    exclusively, like the key: a concurrent first use adopts the winner's
+    certificate rather than replacing one another ensure already returned.
+    Only renewal replaces it. A private regular certificate may be
     renewed using a flushed, exclusively created private staging file and a
     native handle rename into the held remote directory; an unsafe certificate
     entry refuses. The reopened destination must retain the staging file's
@@ -735,19 +738,19 @@ from their phone or laptop what they could do sitting at any of them. An
 
 #### Recovery inventory
 
-Code posture recovery is the bounded owner-device path. It does not grant an
+Work and Code access recovery is the bounded owner-device path. It does not grant an
 owner device every action that can unblock a task. The inventory below keeps
 those decisions separate. A refused request has no effect; retry requires a
 new authoritative reading and the proof required for that action.
 
-| Request                                  | Eligible responder and current boundary                                                                                                                                                                     | Queue and resume                                                                                     | Additional authority needed                                                                                  |
-| ---------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------ |
-| Code thread or Code Project posture      | An owner on this host's current owner list; Full access needs its own fresh unlock. The existing owner route applies the change through the Code or Project service after checking its current-state token. | Changing a level affects subsequent launches; it does not answer a waiting prompt or restart a turn. | Built through the existing posture routes and Settings/phone controls; no other grant follows.               |
-| Work level                               | The existing host-local controls; the Code posture routes do not accept Work subjects.                                                                                                                      | No owner recovery queue or automatic resume is added.                                                | A separate Work posture decision and route.                                                                  |
-| Approval answer                          | A paired device may approve once or deny prompts its own turns raised. A prompt raised by a local window stays local. The existing approval service checks the recorded turn and Project.                   | Existing prompt expiry and settlement apply; an owner unlock does not transfer a prompt.             | A separate decision for any additional eligible responder; no general owner approval route is granted.       |
-| File restore                             | The existing restore command and its approval, checkout freshness and live-writer checks.                                                                                                                   | An owner posture change neither approves nor retries a restore.                                      | Any owner recovery path must reuse those checks and define its own proof.                                    |
-| Saved-action launch                      | Existing action-launch authority on the selected host and checkout.                                                                                                                                         | No automatic relaunch after a lost reply or posture change.                                          | Server action delivery remains a separate slice; posture recovery adds no launch grant.                      |
-| Browser interaction, profile or transfer | Existing host-local take-over, profile and transfer rules. Owner posture recovery adds no remote controller or profile access.                                                                              | Preserve the existing pause, hand-back and disconnect rules.                                         | A separate owner browser decision must name permitted operations, controller arbitration and local recovery. |
+| Request                                  | Eligible responder and current boundary                                                                                                                                                                     | Queue and resume                                                                                     | Additional authority needed                                                                                               |
+| ---------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------- |
+| Code thread or Code Project posture      | An owner on this host's current owner list; Full access needs its own fresh unlock. The existing owner route applies the change through the Code or Project service after checking its current-state token. | Changing a level affects subsequent launches; it does not answer a waiting prompt or restart a turn. | Built through the existing posture routes and Settings/phone controls; no other grant follows.                            |
+| Work level                               | An enrolled owner uses the existing signed posture route for an active local Work thread and Project. The exact target/current-state digest is required; Full access needs its own fresh unlock.            | The next turn uses the chosen level; a running turn keeps its admitted level. No automatic resume.   | Built in the Work service and Settings/phone controls. No Plan, remembered Project default or approval answer is granted. |
+| Approval answer                          | A paired device may approve once or deny prompts its own turns raised. A prompt raised by a local window stays local. The existing approval service checks the recorded turn and Project.                   | Existing prompt expiry and settlement apply; an owner unlock does not transfer a prompt.             | A separate decision for any additional eligible responder; no general owner approval route is granted.                    |
+| File restore                             | The existing restore command and its approval, checkout freshness and live-writer checks.                                                                                                                   | An owner posture change neither approves nor retries a restore.                                      | Any owner recovery path must reuse those checks and define its own proof.                                                 |
+| Saved-action launch                      | Existing action-launch authority on the selected host and checkout.                                                                                                                                         | No automatic relaunch after a lost reply or posture change.                                          | Server action delivery remains a separate slice; posture recovery adds no launch grant.                                   |
+| Browser interaction, profile or transfer | Existing host-local take-over, profile and transfer rules. Owner posture recovery adds no remote controller or profile access.                                                                              | Preserve the existing pause, hand-back and disconnect rules.                                         | A separate owner browser decision must name permitted operations, controller arbitration and local recovery.              |
 
 Rationale: the earlier rule, that only a window on the host may administer it
 or hold its most sensitive powers, assumed every other device might belong to
@@ -1182,6 +1185,30 @@ an unlock on the source as well keeps a stolen phone without the person's
 face, finger, or passcode from even spending a confirmation there. The
 waits live in memory only, so a restart ends them and the person asks again.
 
+**Telling the phone a move waits.** When a move starts waiting, the source
+tells its owner phones through the phone notification path it already uses for
+a waiting approval ([Mobile maturity: delivery path](mobile-maturity.md#delivery-path),
+and the [push sender on the hub](#push-sender-on-the-hub) when the spoke ticked
+Push); nothing else is contacted. It sends one notification per wait, never
+one per thread: a Prepare to shut down batch for one destination is one
+notification, and a batch across destinations sends one for each destination,
+since each is its own confirmation. It goes only to the paired devices this
+host made for guests on its own owner list, the phones that can confirm here,
+and only to one whose Approval needed setting is on; a device paired with the
+source some other way hears nothing. The sealed text says only that a move
+waits and the destination's name ("A move is waiting for your phone", "To
+Office iMac"), with no thread title whatever the phone's thread-names
+setting, and tapping it opens the phone's Computers screen, where Moves
+waiting for you reads the held threads from each computer itself. With
+Notifications off, or no phone registered, nothing is sent and nothing fails:
+the list still shows the wait when the person opens the app. Each delivery is
+journaled as a receipt naming the device, the outcome, and the time, but no
+thread and no wait, since the wait lives in memory only. Rationale: an owner
+can already read the held threads' titles from the list, so leaving them out
+of the notification costs nothing and keeps them off a lock screen; and
+reusing the approval path keeps the phone's own Notifications choices, the
+hub's grant, and the rate limit in charge.
+
 **A browser passkey does not confirm a move, and none is planned.** A passkey belongs to the one
 origin that registered it, and the destination checks a passkey owner only on
 its own origin, so a browser on the source's page holds no passkey the
@@ -1308,9 +1335,21 @@ for Move after this turn.
   move would send now: the thread bundle exactly, and for a Code thread
   about its Git bundle, read as the on-disk size of the objects the head
   reaches that no remote-tracking ref holds plus each changed or untracked
-  file Git does not ignore, counted once at its size on disk. Reading it
-  packs, freezes, and writes nothing (not even the index's stat cache), and a
-  thread that cannot be measured shows **Size unknown** and still moves. The
+  file Git does not ignore, counted once at its size on disk. The bulk parts
+  count too, exactly the ones a move would carry: each attachment, admitted
+  original input, generated image, and Browser capture at the byte size its
+  store recorded, and each owned Canvas as the very text its part would hold,
+  read from the versions the Canvas projection already holds (a Canvas records
+  no byte size). An admitted input is sized through the same scope check as
+  the reader that packs it, so one that would stay behind (its source thread
+  moved to another Project, or its attachment is gone or no longer the one the
+  turn recorded) is not counted; a part whose bytes turn out unreadable only
+  when the move reads them is counted and then stays behind as above. Reading
+  it packs, freezes, and writes nothing (not even the index's stat cache), and
+  reads no part's bytes. A thread that cannot be measured shows **Size
+  unknown** and still moves; a kind of part whose sizes cannot be read leaves
+  the rest measured, is left out of the total, and shows its row as **Size
+  unknown**, and it never holds the move back. The
   estimate divides the size by the rate the latest full chunks to that
   member reached (up to the last 32 full 512 KiB chunks, kept while the host
   runs), or by an assumed 1 MiB a second when no full chunk to that member
@@ -1427,12 +1466,43 @@ remove. The thread's local branch and every remote stay. It journals
 `thread.moved-out-worktree-removed@1` on the move and records the removal on
 the departure; a second press answers `removed` without removing or journaling
 again, and a folder already gone counts as removed. No agent, routine, tool,
-peer, or paired device reaches it. **Open there** copies the moved thread's
-link in the form an Octant phone opens
+peer, or paired device reaches it.
+
+**Open there** opens the moved thread on the destination's own web app, in
+the person's default browser, not in this window. The page is the
+destination's web app origin, as its signed roster entry names it (H15:
+`https://`, its first `.ts.net` name, and its listener port), with the
+continue link that member's paired-browser screen reads at load
+(`?continueMode={mode}&continueThread={thread}`), which opens a Chat, Work,
+or Code thread by its id with no Project. That page admits the browser the
+way it already would there (a guest, an owner's passkey) or asks it to pair,
+so this computer grants nothing and the destination judges every action as
+it does for any browser. The status route reports the destination's web
+origin beside its name, read from the roster this host holds when asked, so
+a member that left the hub or lists no Tailscale name has none. The window
+names only the thread to a desktop channel (`thread-move:open-there`); the
+desktop main process asks the host for that thread's status with the
+window's own capability (a window that does not show the thread is refused
+as for every departure route), builds the page from the reported origin and
+destination thread, refuses anything but https on a `.ts.net` name with no
+path, query, or credentials of its own, and hands it to the default browser
+through its validated open-external path. No departure records a
+destination Project, because the page needs none. When there is no web
+origin, the window has no such channel, or the desktop refuses, Open there
+copies the moved thread's link in the form an Octant phone opens
 (`octant://hosts/{member}/threads/{mode}/{thread}`; a member is named by its
-host id). Rationale: no window path yet opens another computer's thread from
-what a departure records, which names no destination Project, so opening it in
-this window when the window already reads that host is not built yet.
+host id), and the line under it says this window can't open threads on that
+member and that the Octant phone app opens the link. Rationale (checked
+2026-11-09): no window shows a thread another member holds in place. A
+pane's content always comes from the window's own host, whose context is
+always this computer; a pane's host id only marks a thread as elsewhere and
+refuses it, and the federated paired computers a desktop window reads carry
+Running services and resources, not threads. Handing the `octant://` link to
+the system does not help either: the desktop app registers the scheme, but
+its handler takes only `octant://code/` links and ignores every other one.
+The destination's own page is the one existing view of its threads, so Open
+there uses it; a view of another member's thread inside this window is not
+built.
 
 **Interruptions.**
 
@@ -2008,17 +2078,20 @@ maintainer's hardware, or names the maintainer gate.
      compares a counter of owner-list changes (kept in memory, raised on every
      add and remove) with the one the session opened against, so a window that
      removes a device and lists it again ends the session too.
-   - **Postures are a Code Project's and a Code thread's.** A Project's posture is
-     whether it remembers Full access for its threads. Work threads take the shared
-     guardrail levels ([Modes](../architecture.md#modes-chat-work-and-code)), but the
-     owner routes read and change only a Code posture; reading a Work thread's level
-     is not built. Reading one asks for an unlock or an open session, which is stricter
-     than reading an alert. The same read route lists active Code targets by name.
+   - **Postures belong to a Code Project, Code thread or local Work thread.** A
+     Code Project's posture is whether it remembers Full access for its threads.
+     Work retains its four exact levels: Ask first, Accept folder edits, Auto and
+     Full access. It has no Plan overlay or remembered Project access default.
+     Reading one asks for an unlock or open administration session, stricter than
+     reading an alert. The same read route lists active eligible targets by name.
      Every reading carries a digest of the current thread, Project, binding and
      checkout records. The signed change names that digest, the target and the
-     requested posture and persistence. The host re-reads these records and
+     requested posture and Code persistence where applicable. The host re-reads these records and
      refuses a changed version or target before calling the synchronous Code or
-     Project service transaction. Full access requires this action's own fresh
+     Project service transaction, or the Work service transaction for a Work
+     thread. Its digest binds that thread and its entire current Project and
+     binding; a removed, archived or rebound target is refused. Server Projects
+     are not admitted through this local-Project recovery path. Full access requires this action's own fresh
      unlock; an administration session cannot satisfy it. The services journal
      the actual `owner-unlock` member, including any lowered guardrail, and
      never mint a window or cache a grant. A thread change discards legacy
@@ -2031,7 +2104,7 @@ maintainer's hardware, or names the maintainer gate.
      command against the replacement host. A
      running turn keeps the posture it launched with. The Project path changes
      its remembered Full access default; it does not change existing threads.
-     Actual signed routes, Code/Project services and SQLite readback/replay are
+     Actual signed routes, Work/Code/Project services and SQLite readback/replay are
      proved with deterministic unlocks. Physical-device unlock remains unrun.
    - **A sign-in copy is two unlocks on two hosts.** Each host keeps its own owner
      list, so the owner device unlocks on the receiving host first, which makes
@@ -2727,9 +2800,13 @@ a numbered slice. Built, with these narrower readings:
     [Erase on the source](#moving-a-thread-to-another-member) describes.
     The shell opens a departed thread's pane again after it closed, so an old
     link, a notification, or a search reaches the tombstone. A remote client,
-    or a window reading another host, shows neither. What it
-    does not do yet: Open there opening the thread in this window, and the
-    estimate in the bar.
+    or a window reading another host, shows neither. Open there opens the
+    thread on the destination's own web app in the default browser, and
+    copies its link when the destination serves no web app, as
+    [the tombstone rules](#moving-a-thread-to-another-member) record. What it
+    does not do yet: Open there opening the thread inside this window, which
+    waits on a window view of another member's thread, and the estimate in
+    the bar.
 
     The eleventh part lets an owner phone unlock a move a window started, as
     [Confirming on a phone](#moving-a-thread-to-another-member) describes.
@@ -2756,9 +2833,19 @@ a numbered slice. Built, with these narrower readings:
     unlock, a challenge bound to another body, an administration session on
     the ticket route, a ticket for other threads, and a phone removed from
     the destination's owner list after the ticket. What it does not do yet:
-    a notification telling the phone a move waits (the person opens the
-    app) and a run on a real phone, which is a maintainer gate. A browser
-    passkey confirming a move is not planned (above).
+    a run on a real phone, which is a maintainer gate. A browser
+    passkey confirming a move is not planned (above). The source now
+    tells its owner phones when a move starts waiting, as
+    [Telling the phone a move waits](#moving-a-thread-to-another-member)
+    describes: a held move is its own sealed notification kind
+    (`move-waiting`, no thread, high urgency) with its own receipt, and the
+    phone's native openers link it to `octant://hosts/<host>/moves`, which
+    opens the Computers screen. Server tests cover one notification per
+    wait for a single thread and a three-thread batch, owner phones only,
+    a phone with approvals off, and nothing sent or failed with
+    Notifications off; a spoke smoke covers which devices count as owner
+    phones; the phone's tests cover the link. Delivery to a real phone is
+    part of the same maintainer gate.
 
     A further part carries each thread's bulk parts with every move, in all
     three modes, as described under **What moves**. The source packs a Chat
@@ -2774,7 +2861,7 @@ a numbered slice. Built, with these narrower readings:
     same journal unit, then records the images, captures, and Canvases under
     ids derived from the move and the part, so a finish asked again records
     each once; a part it cannot record answers `transfer-failed`. The move
-    sheet lists these parts under What moves, without their sizes yet.
+    sheet lists these parts under What moves as one row with their size.
 
     Sizes and an estimate are built for the move sheet and Prepare to shut
     down. Two read-only window routes,
@@ -2784,15 +2871,19 @@ a numbered slice. Built, with these narrower readings:
     threads and answer each thread's size, by part, with the rate to that
     destination as described under
     [What moves](#moving-a-thread-to-another-member); at most four threads
-    are measured at once. The move sheet's What moves rows show the
-    conversation's and the checkout's sizes, with a total line, the
-    estimate, and its basis, and it opens and moves without waiting for
-    them. Prepare to shut down measures the rows its destination can take
-    when the list or the destination changes, shows each row's size, and
-    adds the total and estimate of the rows set to move to its summary,
-    with the basis under it. What it does not do yet: the conversation's
-    turn count and the branch's commit and `+`/`-` counts beside the sizes,
-    and the sizes of bulk parts, which the measure does not count yet.
+    are measured at once. Each answer lists the size of every kind of part
+    the move would carry, bulk parts included, and a thread whose bulk-part
+    sizes could not all be read answers `partly-measured`, naming the kinds
+    left out. The move sheet's What moves rows show the conversation's, the
+    bulk parts', and the checkout's sizes (a row whose parts could not be
+    sized reads Size unknown), with a total line, the estimate, and its
+    basis, and it opens and moves without waiting for them. Prepare to shut
+    down measures the rows its destination can take when the list or the
+    destination changes, shows each row's size ("At least" what was measured
+    for a partly measured thread), and adds the total and estimate of the
+    rows set to move to its summary, with the basis under it. What it does
+    not do yet: the conversation's turn count and the branch's commit and
+    `+`/`-` counts beside the sizes.
 
     The tenth part is Stop and move and the rest of Prepare to shut down's
     choices. The window's start and the batch's start take a `stop-and-move`

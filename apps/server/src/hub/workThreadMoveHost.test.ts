@@ -122,6 +122,14 @@ describe("moving a Work thread", () => {
     expect(new Set(carried.kept.map((capture) => capture.captureId)).size).toBe(1);
   });
 
+  it("counts its capture in what a move would send", async () => {
+    const { moveHost } = host({ parts: oneCaptureThreadParts().parts });
+    const size = await moveHost.source.measure({ mode: "work", threadId: THREAD });
+    if (size.status !== "measured") throw new Error("The thread was not measured.");
+    expect(size.parts.find((part) => part.kind === "browser-capture")?.bytes).toBe(3);
+    expect(size.bytes).toBe(size.parts.reduce((total, part) => total + part.bytes, 0));
+  });
+
   it("opens the thread marked when the source thread had read outside content", async () => {
     const { moveHost, marks } = host({ externalContentIngested: () => true });
     const { offer, parts } = await packAndOffer(moveHost);

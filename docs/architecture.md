@@ -150,9 +150,13 @@ The design rests on a small set of invariants that every package obeys:
 - **Dependencies point inward.** Apps consume packages; contracts and domain
   never import apps. Provider-specific payloads stop at the provider adapter.
 - **A provider question has one answer identity.** Each question in a provider
-  question set reaches Chat, Work, and Code with a distinct request id. The
+  flat question set reaches Chat, Work, and Code with a distinct request id. The
   adapter collects answers in the provider's original question order, rejects
   duplicate answers, and settles the underlying callback only when complete.
+  A native grouped form instead carries the shared bounded questionnaire under
+  one request identity, with its entire structural response validated before
+  settling the one-use callback. Provider wire shapes stay in the adapter;
+  Work keeps its sanitized text and no-path/no-URL response boundary.
 - **App-owned questionnaires stay in their thread.** The provider-neutral
   `ask-user` tool can collect a bounded group of single- or multiple-choice
   answers and an optional comment. The host validates the complete response
@@ -559,15 +563,24 @@ variables, and a debug console, deciding no refusal itself
 **Host resources.** `GET /api/host/resources` is a read-only snapshot of this
 host's load: CPU use averaged over a short sample of the process's CPU times,
 used and total memory, the core count, and used and free space on the volume
-that holds the data directory. The disk figures are omitted when that volume
-cannot be read. The snapshot names no path, no user, and no process. The server
+that holds the data directory. When the host can read them it also reports
+network and block-device throughput (bytes per second between its last two
+samples, so absent on the first), the busiest GPU's utilisation, and battery
+level with charging state; each is omitted when unreadable. Linux reads
+`/proc`, `/sys/class/drm` (AMD `gpu_busy_percent`), `nvidia-smi` for NVIDIA, and `/sys/class/power_supply`;
+macOS reads `netstat`, `ioreg`, and `pmset`; other platforms and GPUs report
+none. The disk figures are omitted when that volume cannot be read. The snapshot names no path, no user, and no process. The server
 keeps one snapshot for about five seconds. The local owner always receives it.
 A paired remote device with an active session receives it under the same
 `project.overview.read` action as the Project overview reads; an
 unauthenticated caller is refused, with no figures in the refusal. The route
 also compares the device's host identity with this host's, but every paired
 device row on a host carries that host's own identity, so the comparison does
-not separate one paired device from another. The Computers card
+not separate one paired device from another. A server Project's server is read by
+`GET /api/server-projects/resources?projectId=`, which runs one fixed
+read-only script over that Project's SSH connection and answers the same
+snapshot; a local window only, never a paired device, and Linux servers only.
+The Computers card
 reads the route only while the card is on screen and the window is visible,
 about every ten seconds, at most one read per host at a time and each abandoned
 after five seconds, and does not poll in the background.
@@ -726,9 +739,13 @@ level, before creating a new file in `downloads/` of the thread's workspace;
 programs and installers and a symbolic link are refused, and a paired device,
 a terminal grant, and Plan cannot save
 ([Browser for agents: Download](design/browser-agent-tool.md#download)). A
-person's own download in the Browser pane stays blocked. An upload asks every
-time, at every access level, naming each file and the site, and the answer is
-never remembered.
+person's own download in the Browser pane stays blocked. Ordinary uploads ask
+once per use at every access level. A local person may separately review a
+fixed-content routine upload manifest from one approved Project folder, binding
+caller/model/authority, profile/site, exact files, quota and expiry. It grants no
+account access or downloads; revocation and expiry close affected contexts, and
+restart restores none. The [upload specification](design/browser-agent-tool.md#recurring-upload-manifests)
+owns its file, quota and per-operation rules.
 
 Tool definitions carry the agent's usage guidance alongside their argument
 schemas. App-owned tools are capability families: one tool per object —
@@ -1324,7 +1341,10 @@ starts a Code session at the same level, and a Work turn journals `shell` and
   `project.work-developer-tools-changed@1` with who and when on the Project)
   is set only from a window on this host; a paired device is refused. It
   shows the Project terminal and Project actions, the developer surfaces Work
-  has today; no thread's authority reads it.
+  has today; no thread's authority reads it. A server Work Project's separately
+  journaled choice exposes saved actions only in Settings and the active
+  header/palette, without enabling a general terminal; [Server Projects](design/server-projects.md#threads)
+  owns that narrower surface.
 
 An ACP agent whose shell runs in-process with no protocol request reports
 `unsupported` at Guarded and Reviewed and runs only at Full access, in Work as
@@ -10872,20 +10892,21 @@ feature: usage, diagnostics, Navigator, the automations UI, browser and
 computer use, agent hierarchy, remote and mobile access, the Apple workbench,
 and the marketplace and plugin registry are no longer extraction candidates.
 
-| Surface                                                               | Status and boundary to preserve                                                                                         |
-| --------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------- |
-| GitHub                                                                | Switchable bundled plugin; integration ports and contributed views, no direct host-service wiring                       |
-| Thread boards                                                         | Switchable bundled plugin; separable projection and UI, Work/Code status policy stays host-owned, and Chat has no board |
-| Zen                                                                   | Switchable bundled plugin; appearance contributions and their scoped state                                              |
-| Linear, Azure Resource Manager reads                                  | Bundled Integration plugins with no switch; integration ports and contributed views                                     |
-| Canvas, preview viewers, backgrounds, theme presets                   | Core; scoped artifact contracts, registered viewers, and appearance contributions                                       |
-| Usage, diagnostics, Navigator, automations UI                         | Core; underlying authority stays in the host                                                                            |
-| Project memory and its agent tool                                     | Core; the journal, the person's confirmation, and purge stay host-owned                                                 |
-| Octant Harness built-in tools (`read`, `edit`, `bash`, `diagnostics`) | Core; part of the harness loop's closed catalog, judged by the same authority path                                      |
-| Browser/computer use, agent hierarchy, remote/mobile, Apple workbench | Core; capability, lifecycle, and security remain app-managed                                                            |
-| Marketplace and plugin registry                                       | Core; they stay in the host because they admit and activate other components                                            |
-| Provider drivers                                                      | Bundled vendor plugins through provider-sdk; generic ACP transport and honest-capability enforcement stay host-owned    |
-| Image adapters (OpenAI, Gemini, BFL, Ideogram)                        | All four extracted behind the provider-sdk image seam and bundled in-tree; image jobs stay host-owned                   |
+| Surface                                                               | Status and boundary to preserve                                                                                            |
+| --------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------- |
+| GitHub                                                                | Switchable bundled plugin; integration ports and contributed views, no direct host-service wiring                          |
+| Thread boards                                                         | Switchable bundled plugin; separable projection and UI, Work/Code status policy stays host-owned, and Chat has no board    |
+| Zen                                                                   | Switchable bundled plugin; appearance contributions and their scoped state                                                 |
+| Linear, Azure Resource Manager reads                                  | Bundled Integration plugins with no switch; integration ports and contributed views                                        |
+| Declarative Code tools                                                | Installed package declarations through the public Code-tool port; credential policy, consent and execution stay host-owned |
+| Canvas, preview viewers, backgrounds, theme presets                   | Core; scoped artifact contracts, registered viewers, and appearance contributions                                          |
+| Usage, diagnostics, Navigator, automations UI                         | Core; underlying authority stays in the host                                                                               |
+| Project memory and its agent tool                                     | Core; the journal, the person's confirmation, and purge stay host-owned                                                    |
+| Octant Harness built-in tools (`read`, `edit`, `bash`, `diagnostics`) | Core; part of the harness loop's closed catalog, judged by the same authority path                                         |
+| Browser/computer use, agent hierarchy, remote/mobile, Apple workbench | Core; capability, lifecycle, and security remain app-managed                                                               |
+| Marketplace and plugin registry                                       | Core; they stay in the host because they admit and activate other components                                               |
+| Provider drivers                                                      | Bundled vendor plugins through provider-sdk; generic ACP transport and honest-capability enforcement stay host-owned       |
+| Image adapters (OpenAI, Gemini, BFL, Ideogram)                        | All four extracted behind the provider-sdk image seam and bundled in-tree; image jobs stay host-owned                      |
 
 The first-party manifests have one definition,
 `@octant/plugin-host/first-party-plugins`, which the server and the renderer
@@ -10957,6 +10978,38 @@ Integration port, and plugin-module Settings/sidebar seams exist. The API is a
 curated re-export of contracts, preserving the contracts package's dependency
 direction. Some Settings rows remain host-compiled. Linear uses the Integration
 port as a bundled plugin.
+
+**Declarative Code tools.** An Agent Plugins package may declare up to sixteen
+bounded tools in `plugin.json` under `extensions.octant.codeTools`. Each declares
+an id (a lowercase slug of at most sixteen characters), label, description, up
+to sixteen unique registered credential operation ids and up to sixteen unique
+saved command binding UUIDs, with at least one selector. These are data-only
+`code-tool` components declaring the `credentials` capability; they have no
+entry point and are unavailable in Chat and Work. No package supplies a URL,
+command, secret reference, environment, acceptance callback or process handle.
+Installation uses the existing package inspection, trust, enablement and
+explicit selection or Project-pin ladder; none approves a credential operation.
+The host derives a qualified provider tool name from its package identity and
+declaration id, so packages cannot shadow `octant_credential` or one another.
+
+`@octant/plugin-api/code-tools` publishes a turn-scoped `CodeToolHostPort` with
+declaration-scoped metadata and only `request(id)` and `runSaved(id)` actions.
+The installed tool lists permitted operation ids, labels and static reasons,
+and saved-command ids and labels; it receives no account, path, argument,
+environment or binding configuration. An ordinary private card or saved-command
+review remains required. The existing host services keep local-window,
+provider/profile allowlists, active Code task, Project/checkout and Plan checks,
+command confinement, cancellation and uncertainty. The turn's offered action
+families are fixed at composition; unavailable or undeclared ids refuse.
+
+The host checks the exact package, digest, catalog epoch, scope, window, task,
+model, profile and posture before calls and after waits. Disablement, revoked
+trust, replacement, changed authority or turn teardown invalidates pending use;
+a saved-command review retains that host fence before execution. An effect
+already started cannot be undone, and a changed caller receives no stale result.
+Credential-operation registration and its trusted response predicates remain in
+the host. The unified core credential composition remains host-owned until its
+separate migration through this port; its existing behavior is unchanged here.
 
 Preserve the sequence: establish a provider-neutral port and renderer seam
 before moving a feature behind them, and keep that work separate from unrelated
@@ -12599,7 +12652,11 @@ approval-gated` command that undoes it. The terminal shows no one-time
   stops when its task, checkout or execution authority is revoked.
 
   `start-action` launches a fresh command process under the existing terminal
-  confinement and sanitized environment, not input into a running shell. The
+  confinement and sanitized environment, not input into a running shell.
+  Server Projects instead resolve actions and task identity on their server
+  and use dedicated, explicitly reviewed SSH runs with no OS confinement;
+  see [Server Projects](design/server-projects.md#threads). Their remote completion
+  remains uncertain after connection loss or Stop. The
   request names a saved action and checkout identities, never executable text.
   Its terminal start is journaled before launch; a repeated request identity,
   including after host restart, never starts another process. The legacy
@@ -12773,8 +12830,12 @@ approval-gated` command that undoes it. The terminal shows no one-time
   opens another browser's profile in place. The Work and Code agent adapters
   accept a stored profile request and the task's journaled default profile;
   neither grants access by itself. An agent reads or acts on an origin in a profile page only after a site approval naming the profile;
-  paired devices, routines, subagents, and terminal Browser grants are refused
-  on profile pages; a paired device sees only that a signed-in page exists. The
+  paired devices are refused on profile pages. A managed child, named routine
+  or selected terminal session may use an existing sign-in only through an
+  explicit local-person host/recipient/model/authority/profile/HTTPS session permission,
+  revalidated before effects and observations; it owns its context and receives
+  no parent authority or transfer permission. See [delegated sessions](design/browser-profiles.md#delegated-sessions).
+  A paired device sees only that a signed-in page exists. The
   person signs out of a profile (closing its pages and removing its storage) at a
   local window, and the host journals that it happened without naming a site or
   a cookie. The person may also import another browser's cookies into one
@@ -15502,8 +15563,9 @@ owner, format, creation and refusal rules. The existing remote/member and push
 consumers carry a host-internal storage dependency; absence refuses on Windows.
 The dependent listener TLS store carries its own closed native dependency for
 the two fixed TLS key/certificate files. It reuses the profile admission
-boundary, exclusively creates and retains the separate P-256 key, and renews
-only private regular certificates through a flushed native staging handle and
+boundary, exclusively creates and retains the separate P-256 key, exclusively
+creates the first certificate (a concurrent first use adopts the winner), and
+renews only private regular certificates through a flushed native staging handle and
 atomic rename into the held remote directory. The reopened file identity is
 checked before use. Renewal and restart preserve the SPKI pin; unsafe keys or
 certificate entries refuse without ordinary-file fallback or silent key rotation.
@@ -15679,7 +15741,11 @@ Work and Code remain refused until their native confinement boundary is proven.
   Nightly's own renderer with a short server-enforced lease. It never loads
   the host-owning module, owns a host or migrates shared data; it can ask a
   validated installed Stable to start without a window. Incompatible
-  or unsigned builds refuse. Bounded embedded frames and human input use the
+  builds refuse; macOS additionally requires the signed application identity.
+  Linux and Windows use the explicitly stated local-user kernel trust floor
+  ([Linux](design/nightly-app.md#linux-client-trust),
+  [Windows](design/nightly-app.md#windows-client-trust)), which does not attest
+  application code. Bounded embedded frames and human input use the
   existing native Browser owner; complete Browser parity, other native brokers
   remain unfinished. Current-client retention precedes the existing terminal
   shutdown path; full signed lifecycle acceptance remains separate.
@@ -15889,7 +15955,9 @@ bun run verify     # paths:check, wiring:check, ui:check, style:check, decisions
   launch that is not that image fails closed, and the reason is shown in
   Settings. Windows stays out. Override with
   `OCTANT_PACKAGE_TARGET=darwin-arm64|linux-x64|win32-x64` on a matching host only;
-  Windows emits only the QA archive described above.
+  Windows emits only the QA archive described above. Windows PE resource versions
+  use the numeric core; the staged application manifest and archive retain
+  the full preview/candidate version and flavor.
 - Focused checks: `bun run --filter <package> test|typecheck`; the store can be
   inspected with `bun run --cwd apps/server db:verify`.
 - Formatting is `oxfmt`, linting is `oxlint`; Turbo runs the per-package

@@ -32,7 +32,7 @@ export const CANVAS_PUBLIC_SHARE_REPORT_DETAIL_MAX_CHARS = 1_000;
 /** Revoked and expired links answer 410 for this long, then 404. */
 export const CANVAS_PUBLIC_SHARE_TOMBSTONE_DAYS = 90;
 
-/** 16 random bytes as URL-safe base64: 128 bits, 22 characters. */
+/** Opaque 128-bit id as 22 characters of URL-safe base64. */
 export const CanvasPublicShareId = Schema.String.pipe(
   Schema.pattern(/^[A-Za-z0-9_-]{22}$/),
   Schema.brand("CanvasPublicShareId"),
@@ -126,6 +126,25 @@ export const CanvasPublicShareCreateRequest = Schema.Struct({
 }).annotations(strict);
 export type CanvasPublicShareCreateRequest = typeof CanvasPublicShareCreateRequest.Type;
 
+/** A host commits the owner proof and withdrawal intent before sending a document. */
+export const CanvasPublicShareOwnedCreateRequest = Schema.Struct({
+  schemaVersion: CanvasPublicShareWireVersion,
+  kind: Schema.Literal("canvas-public-share-owned-create"),
+  shareId: CanvasPublicShareId,
+  ownerSecret: CanvasPublicShareOwnerSecret,
+  document: CanvasPublicShareDocument,
+  expiry: CanvasExportLinkExpiry,
+  password: Schema.optional(CanvasExportLinkPassword),
+}).annotations(strict);
+export type CanvasPublicShareOwnedCreateRequest = typeof CanvasPublicShareOwnedCreateRequest.Type;
+export const CanvasPublicShareIncomingCreateRequest = Schema.Union(
+  CanvasPublicShareCreateRequest,
+  CanvasPublicShareOwnedCreateRequest,
+);
+export const decodeCanvasPublicShareIncomingCreateRequest = Schema.decodeUnknownSync(
+  CanvasPublicShareIncomingCreateRequest,
+);
+
 const expiresAt = Schema.NullOr(UtcTimestamp);
 
 export const CanvasPublicShareCreated = Schema.Struct({
@@ -210,6 +229,7 @@ export type CanvasPublicShareReport = typeof CanvasPublicShareReport.Type;
 
 export const CanvasPublicShareRefusalCode = Schema.Literal(
   "malformed",
+  "conflict",
   "too-large",
   "unauthorized",
   "not-found",
@@ -340,6 +360,7 @@ export const CANVAS_PUBLIC_SHARE_UPDATED = "canvas.public-share-updated@1";
 export const CANVAS_PUBLIC_SHARE_REVOKED = "canvas.public-share-revoked@1";
 export const CANVAS_PUBLIC_SHARE_EXPIRED = "canvas.public-share-expired@1";
 export const CANVAS_PUBLIC_SHARE_REVOCATION_AGGREGATE_TYPE = "canvas-public-share-revocation";
+export const CANVAS_PUBLIC_SHARE_PUBLICATION_PENDING = "canvas.public-share-publication-pending@1";
 export const CANVAS_PUBLIC_SHARE_REVOCATION_PENDING = "canvas.public-share-revocation-pending@1";
 export const CANVAS_PUBLIC_SHARE_REVOCATION_SETTLED = "canvas.public-share-revocation-settled@1";
 export const CANVAS_PUBLIC_LINK_SETTINGS_AGGREGATE_TYPE = "canvas-public-link-settings";

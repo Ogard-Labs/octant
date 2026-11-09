@@ -26,6 +26,7 @@ export interface CommandCredentialContext {
 }
 type Outcome = Omit<CommandCredentialReceipt, "kind" | "requestId">;
 interface Pending {
+  readonly callerCurrent: () => boolean;
   readonly request: CommandCredentialRequest;
   readonly binding: CommandCredentialBinding;
   readonly context: CommandCredentialContext;
@@ -207,6 +208,7 @@ export class CommandCredentialBindings {
     threadId: string,
     bindingId: string,
     operationId: string,
+    callerCurrent: () => boolean = () => true,
   ): Promise<CommandCredentialResult> {
     this.#sweep();
     const replay = [...this.#pending.values()].find(
@@ -223,6 +225,7 @@ export class CommandCredentialBindings {
     const context = await this.#options.context(windowId, threadId);
     if (
       this.#closed ||
+      !callerCurrent() ||
       binding === undefined ||
       context === undefined ||
       !context.current() ||
@@ -259,6 +262,7 @@ export class CommandCredentialBindings {
     });
     if (finish === undefined) throw new Error("Command completion is unavailable.");
     this.#pending.set(request.requestId, {
+      callerCurrent,
       request,
       binding,
       context,
@@ -365,6 +369,7 @@ export class CommandCredentialBindings {
       return (
         !this.#closed &&
         !entry.revoked &&
+        entry.callerCurrent() &&
         this.#options.canConfigure(entry.context.windowId, entry.context.projectId) &&
         entry.context.current()
       );

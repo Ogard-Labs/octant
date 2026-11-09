@@ -14,6 +14,9 @@
 #include <memory>
 #include <string>
 #include <vector>
+#include <atomic>
+#include <cstddef>
+#include <userenv.h>
 
 // The stable Node-API imports belong to whichever supported runtime loaded
 // this module, including Electron and Bun; no separate node.exe is launched.
@@ -224,6 +227,8 @@ Handle open_directory(const std::wstring& path) {
       (info.FileAttributes & FILE_ATTRIBUTE_DIRECTORY) == 0 || (info.FileAttributes & FILE_ATTRIBUTE_REPARSE_POINT) != 0) return Handle();
   return handle;
 }
+#include "desktopArtifact.h"
+
 std::unique_ptr<Root> private_root(const std::vector<std::wstring>& components, bool create, bool inherit, bool* missing = nullptr) {
   auto result = std::make_unique<Root>();
   if (!token_sid(GetCurrentProcess(), result->sid_bytes, &result->sid)) return nullptr;
@@ -571,14 +576,17 @@ napi_value private_profile_file(napi_env env, napi_callback_info info, ProfileFi
   const std::string purpose = roster ? "roster-key" : string_arg(env, arguments[3]);
   const auto found = profiles.find(name);
   if (found == profiles.end() || found->second->scope != scope ||
-      (!roster && (tls ? (purpose != "key" && purpose != "certificate") : (purpose != "host-id" && purpose != "host-key")))) return object(env, "refused");
-  const bool certificate = tls && purpose == "certificate";
+      (!roster && (tls ? (purpose != "key" && purpose != "certificate" && purpose != "certificate-renewal") : (purpose != "host-id" && purpose != "host-key")))) return object(env, "refused");
+  // First use creates the certificate exclusively like the key and adopts a
+  // concurrent winner. Only an explicit renewal replaces an existing record.
+  const bool renewal = tls && purpose == "certificate-renewal";
+  const bool certificate = tls && (purpose == "certificate" || renewal);
   const DWORD maximum = purpose == "host-id" ? 37 : certificate ? 16384 : 4096;
   napi_valuetype candidate_type;
   if (napi_typeof(env, arguments[roster ? 3 : 4], &candidate_type) != napi_ok) return object(env, "refused");
   const bool create = candidate_type != napi_null;
   Bytes candidate;
-  if (create && (!byte_arg(env, arguments[roster ? 3 : 4], candidate, maximum) || candidate.empty())) return object(env, "refused");
+  if ((renewal && !create) || (create && (!byte_arg(env, arguments[roster ? 3 : 4], candidate, maximum) || candidate.empty()))) return object(env, "refused");
   bool missing_directory = false;
   auto admission = profile_directory(name, scope, expected_data, roster ? ProfileDirectoryKind::Hub : ProfileDirectoryKind::Remote, create, missing_directory);
   if (!admission) return object(env, missing_directory ? "missing" : "refused");
@@ -590,7 +598,7 @@ napi_value private_profile_file(napi_env env, napi_callback_info info, ProfileFi
     ? (certificate ? L"\\private-listener-tls-cert.pem" : L"\\private-listener-tls-key.pem")
     : (purpose == "host-id" ? L"\\private-listener-host-id" : L"\\private-listener-host-key.pem"));
   FILE_ID_INFO created_identity{}; bool wrote_identity = false;
-  if (certificate && create) {
+  if (renewal) {
     if (!replace_listener_certificate(*root, path, candidate, created_identity)) return object(env, "refused");
     wrote_identity = true;
   }
@@ -630,7 +638,7 @@ napi_value private_profile_file(napi_env env, napi_callback_info info, ProfileFi
   if (!ReadFile(file.value, bytes.data(), static_cast<DWORD>(bytes.size()), &got, nullptr) || got != bytes.size()) return object(env, "refused");
   napi_value result = object(env, "ready");
   put(env, result, "dataDirectory", expected_data); buffer(env, result, "bytes", bytes);
-  auto& retained = found->second->identity_guards[tls ? "tls-" + purpose : purpose];
+  auto& retained = found->second->identity_guards[tls ? (certificate ? std::string("tls-certificate") : "tls-" + purpose) : purpose];
   retained.clear();
   retained.push_back(std::move(remote));
   if (!certificate) retained.push_back(std::move(file));
@@ -684,17 +692,18 @@ const wchar_t* authority_leaf(const std::string& purpose) {
   return purpose == "hub-state" ? L"\\hub-state.json" : purpose == "delegations" ? L"\\delegations.json" :
     purpose == "tailscale-certificate" ? L"\\tailscale-certificate.json" :
     purpose == "bridge-secret" ? L"\\octant-bridge-secret" : purpose == "host-info" ? L"\\octant-host.json" :
-    purpose == "service-policy" ? L"\\service-policy.json" : purpose == "service-log" ? L"\\service.log" : nullptr;
+    purpose == "service-policy" ? L"\\service-policy.json" : purpose == "service-log" ? L"\\service.log" :
+    purpose == "desktop-launcher" ? L"\\desktop-launcher.bin" : nullptr;
 }
 ProfileDirectoryKind authority_directory(const std::string& purpose) {
   if (purpose == "bridge-secret" || purpose == "host-info") return ProfileDirectoryKind::Data;
-  if (purpose == "service-policy") return ProfileDirectoryKind::Config;
+  if (purpose == "service-policy" || purpose == "desktop-launcher") return ProfileDirectoryKind::Config;
   if (purpose == "service-log") return ProfileDirectoryKind::Logs;
   return ProfileDirectoryKind::Hub;
 }
 ULONGLONG authority_limit(const std::string& purpose) {
   return purpose == "bridge-secret" ? 44 : purpose == "host-info" ? 4096 :
-    purpose == "service-policy" ? 1024 : purpose == "service-log" ? 1048577 : safe_integer;
+    purpose == "service-policy" ? 1024 : purpose == "service-log" ? 1048577 : purpose == "desktop-launcher" ? 65574 : safe_integer;
 }
 bool authority_regular(HANDLE file, const Root& root, ULONGLONG* length = nullptr, bool unlinked = false) {
   BY_HANDLE_FILE_INFORMATION metadata{}; LARGE_INTEGER size{};
@@ -718,6 +727,50 @@ void abort_authority_sessions(napi_env env, bool writes_only) {
     else ++it;
   }
 }
+std::unique_ptr<AuthoritySession> open_authority_file(napi_env env, const std::string& name, const std::string& scope,
+    const std::string& expected_data, const std::string& purpose, bool writing, ULONGLONG length, bool& missing) {
+  const wchar_t* leaf = authority_leaf(purpose);
+  if (!leaf || (writing && (length > authority_limit(purpose) || !authority_writer(env, scope)))) return nullptr;
+  for (const auto& entry : authority_sessions)
+    if (writing && entry.second->env == env && entry.second->profile == name && entry.second->purpose == purpose && entry.second->writing) return nullptr;
+  auto admission = profile_directory(name, scope, expected_data, authority_directory(purpose), writing, missing);
+  if (!admission) return nullptr;
+  const std::wstring path = admission->path + leaf;
+  // A fully flushed stage becomes visible before its publishing write handle
+  // closes. Sharing that existing write access lets readers open the complete
+  // snapshot during this interval; the stage itself denies competing writes.
+  Handle existing(CreateFileW(path.c_str(), GENERIC_READ | READ_CONTROL, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+    nullptr, OPEN_EXISTING, FILE_FLAG_OPEN_REPARSE_POINT, nullptr));
+  if (!existing && GetLastError() != ERROR_FILE_NOT_FOUND) return nullptr;
+  if (!existing && !writing) { missing = true; return nullptr; }
+  // An atomic replacement may unlink this old snapshot after CreateFile and
+  // before validation. Read sessions already retain lawful unlinked snapshots;
+  // admission has the same rule, while writers still require a linked target.
+  if (existing && !authority_regular(existing.value, *admission->root, writing ? nullptr : &length, !writing)) return nullptr;
+  if (!writing && length > authority_limit(purpose)) return nullptr;
+  auto session = std::make_unique<AuthoritySession>();
+  session->env = env; session->profile = name; session->scope = scope; session->purpose = purpose;
+  session->expected_data = expected_data; session->length = length; session->writing = writing;
+  session->admission = std::move(admission);
+  if (writing) {
+    ULONGLONG nonce = 0;
+    if (BCryptGenRandom(nullptr, reinterpret_cast<PUCHAR>(&nonce), sizeof(nonce), BCRYPT_USE_SYSTEM_PREFERRED_RNG) < 0) return nullptr;
+    const std::wstring staging = path + L"." + std::to_wstring(nonce) + L".tmp";
+    SECURITY_ATTRIBUTES attributes{sizeof(SECURITY_ATTRIBUTES), session->admission->root->security, FALSE};
+    session->file = Handle(CreateFileW(staging.c_str(), GENERIC_READ | GENERIC_WRITE | DELETE | READ_CONTROL, FILE_SHARE_READ,
+      &attributes, CREATE_NEW, FILE_FLAG_OPEN_REPARSE_POINT | FILE_FLAG_WRITE_THROUGH, nullptr));
+  } else session->file = std::move(existing);
+  if (!session->file || !authority_regular(session->file.value, *session->admission->root, nullptr, !writing) ||
+      !GetFileInformationByHandleEx(session->file.value, FileIdInfo, &session->identity, sizeof(session->identity))) return nullptr;
+  // Keep each physical private directory bound across read/write sessions.
+  auto& retained = profiles.find(name)->second->identity_guards["authority-directory-" + std::to_string(static_cast<int>(authority_directory(purpose)))];
+  if (retained.empty()) {
+    HANDLE duplicate = INVALID_HANDLE_VALUE;
+    if (!DuplicateHandle(GetCurrentProcess(), session->admission->directory.value, GetCurrentProcess(), &duplicate, 0, FALSE, DUPLICATE_SAME_ACCESS)) return nullptr;
+    retained.emplace_back(duplicate);
+  } else if (!same_file(retained.front().value, session->admission->directory.value)) return nullptr;
+  return session;
+}
 napi_value begin_authority_state(napi_env env, napi_callback_info info) {
   Guard guard; size_t count = 6; napi_value arguments[6]; napi_get_cb_info(env, info, &count, arguments, nullptr, nullptr);
   if (count != 6) return object(env, "refused");
@@ -725,46 +778,11 @@ napi_value begin_authority_state(napi_env env, napi_callback_info info) {
   const std::string expected_data = string_arg(env, arguments[2]), purpose = string_arg(env, arguments[3]);
   const std::string mode = string_arg(env, arguments[4]); const wchar_t* leaf = authority_leaf(purpose);
   const bool writing = mode == "replace"; ULONGLONG length = 0;
-  if (!leaf || (mode != "read" && !writing) || (writing && (!integer_arg(env, arguments[5], length) || length > authority_limit(purpose) || !authority_writer(env, scope)))) return object(env, "refused");
-  for (const auto& entry : authority_sessions)
-    if (writing && entry.second->env == env && entry.second->profile == name && entry.second->purpose == purpose && entry.second->writing) return object(env, "refused");
+  if (!leaf || purpose == "desktop-launcher" || (mode != "read" && !writing) || (writing && (!integer_arg(env, arguments[5], length) || length > authority_limit(purpose) || !authority_writer(env, scope)))) return object(env, "refused");
   bool missing = false;
-  auto admission = profile_directory(name, scope, expected_data, authority_directory(purpose), writing, missing);
-  if (!admission) return object(env, missing && !writing ? "missing" : "refused");
-  const std::wstring path = admission->path + leaf;
-  // A fully flushed stage becomes visible before its publishing write handle
-  // closes. Sharing that existing write access lets readers open the complete
-  // snapshot during this interval; the stage itself denies competing writes.
-  Handle existing(CreateFileW(path.c_str(), GENERIC_READ | READ_CONTROL, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
-    nullptr, OPEN_EXISTING, FILE_FLAG_OPEN_REPARSE_POINT, nullptr));
-  if (!existing && GetLastError() != ERROR_FILE_NOT_FOUND) return object(env, "refused");
-  if (!existing && !writing) return object(env, "missing");
-  // An atomic replacement may unlink this old snapshot after CreateFile and
-  // before validation. Read sessions already retain lawful unlinked snapshots;
-  // admission has the same rule, while writers still require a linked target.
-  if (existing && !authority_regular(existing.value, *admission->root, writing ? nullptr : &length, !writing)) return object(env, "refused");
-  if (!writing && length > authority_limit(purpose)) return object(env, "refused");
-  auto session = std::make_unique<AuthoritySession>();
-  session->env = env; session->profile = name; session->scope = scope; session->purpose = purpose;
-  session->expected_data = expected_data; session->length = length; session->writing = writing;
-  session->admission = std::move(admission);
-  if (writing) {
-    ULONGLONG nonce = 0;
-    if (BCryptGenRandom(nullptr, reinterpret_cast<PUCHAR>(&nonce), sizeof(nonce), BCRYPT_USE_SYSTEM_PREFERRED_RNG) < 0) return object(env, "refused");
-    const std::wstring staging = path + L"." + std::to_wstring(nonce) + L".tmp";
-    SECURITY_ATTRIBUTES attributes{sizeof(SECURITY_ATTRIBUTES), session->admission->root->security, FALSE};
-    session->file = Handle(CreateFileW(staging.c_str(), GENERIC_READ | GENERIC_WRITE | DELETE | READ_CONTROL, FILE_SHARE_READ,
-      &attributes, CREATE_NEW, FILE_FLAG_OPEN_REPARSE_POINT | FILE_FLAG_WRITE_THROUGH, nullptr));
-  } else session->file = std::move(existing);
-  if (!session->file || !authority_regular(session->file.value, *session->admission->root, nullptr, !writing) ||
-      !GetFileInformationByHandleEx(session->file.value, FileIdInfo, &session->identity, sizeof(session->identity)) || next_authority_session > safe_integer) return object(env, "refused");
-  // Keep each physical private directory bound across read/write sessions.
-  auto& retained = profiles.find(name)->second->identity_guards["authority-directory-" + std::to_string(static_cast<int>(authority_directory(purpose)))];
-  if (retained.empty()) {
-    HANDLE duplicate = INVALID_HANDLE_VALUE;
-    if (!DuplicateHandle(GetCurrentProcess(), session->admission->directory.value, GetCurrentProcess(), &duplicate, 0, FALSE, DUPLICATE_SAME_ACCESS)) return object(env, "refused");
-    retained.emplace_back(duplicate);
-  } else if (!same_file(retained.front().value, session->admission->directory.value)) return object(env, "refused");
+  auto session = open_authority_file(env, name, scope, expected_data, purpose, writing, length, missing);
+  if (!session || next_authority_session > safe_integer) return object(env, missing && !writing ? "missing" : "refused");
+  length = session->length;
   const ULONGLONG id = next_authority_session++;
   authority_sessions.emplace(id, std::move(session));
   napi_value result = object(env, "opened"); safe_number(env, result, "session", id); safe_number(env, result, "length", length); put(env, result, "dataDirectory", expected_data); return result;
@@ -794,19 +812,13 @@ napi_value transfer_authority_state(napi_env env, napi_callback_info info, bool 
 }
 napi_value read_authority_state(napi_env env, napi_callback_info info) { return transfer_authority_state(env, info, false); }
 napi_value write_authority_state(napi_env env, napi_callback_info info) { return transfer_authority_state(env, info, true); }
-napi_value commit_authority_state(napi_env env, napi_callback_info info) {
-  Guard guard; size_t count = 1; napi_value arguments[1]; napi_get_cb_info(env, info, &count, arguments, nullptr, nullptr); ULONGLONG id = 0;
-  if (count != 1 || !integer_arg(env, arguments[0], id)) return object(env, "refused");
-  const auto found = authority_sessions.find(id);
-  if (found == authority_sessions.end() || found->second->env != env) return object(env, "refused");
-  AuthoritySession& session = *found->second;
-  const auto refused = [&]() { authority_sessions.erase(id); return object(env, "refused"); };
-  if (!session.writing || session.committed || session.offset != session.length || !authority_writer(env, session.scope) ||
-      !authority_revalidate(session) || !FlushFileBuffers(session.file.value)) return refused();
+bool commit_authority_file(AuthoritySession& session) {
+  if (!session.writing || session.committed || session.offset != session.length || !authority_writer(session.env, session.scope) ||
+      !authority_revalidate(session) || !FlushFileBuffers(session.file.value)) return false;
   const std::wstring path = session.admission->path + authority_leaf(session.purpose);
   Handle prior(CreateFileW(path.c_str(), GENERIC_READ | READ_CONTROL, FILE_SHARE_READ | FILE_SHARE_DELETE,
     nullptr, OPEN_EXISTING, FILE_FLAG_OPEN_REPARSE_POINT, nullptr));
-  if ((!prior && GetLastError() != ERROR_FILE_NOT_FOUND) || (prior && !authority_regular(prior.value, *session.admission->root))) return refused();
+  if ((!prior && GetLastError() != ERROR_FILE_NOT_FOUND) || (prior && !authority_regular(prior.value, *session.admission->root))) return false;
   std::vector<unsigned char> rename_bytes(sizeof(FILE_RENAME_INFO) + path.size() * sizeof(wchar_t));
   const auto rename = reinterpret_cast<FILE_RENAME_INFO*>(rename_bytes.data());
   // POSIX replacement preserves admitted old read snapshots without letting
@@ -814,18 +826,30 @@ napi_value commit_authority_state(napi_env env, napi_callback_info info) {
   rename->Flags = FILE_RENAME_FLAG_REPLACE_IF_EXISTS | FILE_RENAME_FLAG_POSIX_SEMANTICS;
   rename->RootDirectory = nullptr; rename->FileNameLength = static_cast<DWORD>(path.size() * sizeof(wchar_t));
   std::memcpy(rename->FileName, path.data(), rename->FileNameLength);
-  if (!SetFileInformationByHandle(session.file.value, FileRenameInfoEx, rename, static_cast<DWORD>(rename_bytes.size()))) return refused();
+  if (!SetFileInformationByHandle(session.file.value, FileRenameInfoEx, rename, static_cast<DWORD>(rename_bytes.size()))) return false;
   session.committed = true;
-  if (!FlushFileBuffers(session.file.value)) return refused();
+  if (!FlushFileBuffers(session.file.value)) return false;
   session.file.reset(); prior.reset();
   Handle reopened(CreateFileW(path.c_str(), GENERIC_READ | READ_CONTROL, FILE_SHARE_READ | FILE_SHARE_DELETE,
     nullptr, OPEN_EXISTING, FILE_FLAG_OPEN_REPARSE_POINT, nullptr));
   FILE_ID_INFO identity{}; ULONGLONG length = 0;
   if (!reopened || !authority_regular(reopened.value, *session.admission->root, &length) || length != session.length ||
       !GetFileInformationByHandleEx(reopened.value, FileIdInfo, &identity, sizeof(identity)) ||
-      identity.VolumeSerialNumber != session.identity.VolumeSerialNumber || std::memcmp(identity.FileId.Identifier, session.identity.FileId.Identifier, 16) != 0) return refused();
+      identity.VolumeSerialNumber != session.identity.VolumeSerialNumber || std::memcmp(identity.FileId.Identifier, session.identity.FileId.Identifier, 16) != 0) return false;
+  return true;
+}
+napi_value commit_authority_state(napi_env env, napi_callback_info info) {
+  Guard guard; size_t count = 1; napi_value arguments[1]; napi_get_cb_info(env, info, &count, arguments, nullptr, nullptr); ULONGLONG id = 0;
+  if (count != 1 || !integer_arg(env, arguments[0], id)) return object(env, "refused");
+  const auto found = authority_sessions.find(id);
+  if (found == authority_sessions.end() || found->second->env != env) return object(env, "refused");
+  AuthoritySession& session = *found->second;
+  const auto refused = [&]() { authority_sessions.erase(id); return object(env, "refused"); };
+  if (!commit_authority_file(session)) return refused();
   authority_sessions.erase(id); return object(env, "committed");
 }
+#include "desktopLauncher.h"
+
 napi_value close_authority_state(napi_env env, napi_callback_info info) {
   Guard guard; size_t count = 1; napi_value arguments[1]; napi_get_cb_info(env, info, &count, arguments, nullptr, nullptr); ULONGLONG id = 0;
   if (count != 1 || !integer_arg(env, arguments[0], id)) return object(env, "refused");
@@ -1009,6 +1033,7 @@ void reset_connection(Owner& state) {
 }
 void cleanup_env(void* input) {
   const auto env = static_cast<napi_env>(input); Guard guard;
+  if (desktop_launcher_job && desktop_launcher_job->env == env) desktop_launcher_job->cancelled = true;
   abort_authority_sessions(env, false);
   close_sqlite_admissions(env);
   if (owner && owner->env == env) retire_owner();
@@ -1222,6 +1247,7 @@ NAPI_MODULE_INIT() {
   napi_add_env_cleanup_hook(env, cleanup_env, env);
   const napi_property_descriptor methods[] = {
     {"openProfile", nullptr, open_profile, nullptr, nullptr, nullptr, napi_default, nullptr},
+    {"desktopLauncher", nullptr, desktop_launcher, nullptr, nullptr, nullptr, napi_default, nullptr},
     {"identityFile", nullptr, identity_file, nullptr, nullptr, nullptr, napi_default, nullptr},
     {"listenerTlsFile", nullptr, listener_tls_file, nullptr, nullptr, nullptr, napi_default, nullptr},
     {"rosterSigningKeyFile", nullptr, roster_signing_key_file, nullptr, nullptr, nullptr, napi_default, nullptr},

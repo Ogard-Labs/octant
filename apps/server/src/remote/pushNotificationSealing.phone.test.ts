@@ -238,6 +238,32 @@ describe.each(phones)("opening a sealed notification in $name", ({ opener, runs 
     });
   });
 
+  it.skipIf(!runs)("opens a held move on the list of moves waiting for this phone", () => {
+    const keys = newPhoneKeys();
+    const moveWaiting = {
+      kind: "move-waiting",
+      hostId,
+      title: "A move is waiting for your phone",
+      body: "To Office iMac",
+    };
+    const open = opener();
+    expect(open({ keys, ...seal({ keys, content: moveWaiting }) })).toEqual({
+      status: "opened",
+      title: "A move is waiting for your phone",
+      body: "To Office iMac",
+      deepLink: `octant://hosts/${hostId}/moves`,
+    });
+    // A held move names no thread, so one that does is not one the host sealed.
+    for (const change of [
+      { threadId },
+      { mode: "code" },
+      { hostId: "55555555-5555-4555-8555-555555555555" },
+    ]) {
+      const sealed = seal({ keys, content: { ...moveWaiting, ...change } });
+      expect(open({ keys, ...sealed }).status, JSON.stringify(change)).toBe("placeholder");
+    }
+  });
+
   it.skipIf(!runs)("links without a mode when the host names none", () => {
     const keys = newPhoneKeys();
     const { mode: _mode, ...withoutMode } = goodContent;

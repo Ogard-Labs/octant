@@ -8,6 +8,7 @@ import { createLocalUsageHistoryLastReadStore } from "../persistence/localUsageH
 import {
   createEffectiveSkillReader,
   createSelectedExtensionResolver,
+  type CodeToolHostFactory,
 } from "../extensions/selectedExtensions";
 import { randomUUID } from "node:crypto";
 import { bindGeneratedMcpSignInPolicy } from "../extensions/generatedMcpSignInPolicy";
@@ -1105,7 +1106,15 @@ export function wireProviders(deps: ProvidersDependencies) {
         },
       },
     });
+    let codeToolHost: CodeToolHostFactory | undefined;
+    const bindCodeToolHost = (factory: CodeToolHostFactory): void => {
+      if (codeToolHost !== undefined) throw new Error("The Code capability host is already bound.");
+      codeToolHost = factory;
+    };
     const resolveSelectedExtensions = createSelectedExtensionResolver({
+      codeToolHost: (input) => codeToolHost?.(input),
+      currentEffectiveState: (query) =>
+        extensionActivationService.resolve(extensionApiService.snapshot(), query),
       snapshot: async () => {
         await standaloneSkillService.reconcile();
         return extensionApiService.snapshot();
@@ -2177,6 +2186,7 @@ export function wireProviders(deps: ProvidersDependencies) {
     });
     yield* Effect.promise(() => imageJobService.reconcileInterruptedJobs());
     return {
+      bindCodeToolHost,
       agentPluginMcpSessionManager,
       githubRoutineEventSources: githubRoutineEventSources(() => mcpServerSignInHolder.current),
       chatAttachmentStore,

@@ -1,4 +1,7 @@
-import type { BrowserProfilesResult } from "@octant/contracts/browser-profiles";
+import type {
+  BrowserProfilesCommand,
+  BrowserProfilesResult,
+} from "@octant/contracts/browser-profiles";
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
@@ -14,6 +17,37 @@ const listing: BrowserProfilesResult = {
 };
 
 describe("BrowserProfilesSection", () => {
+  it("creates a named profile only after an explicit person action and leaves selection unchanged", async () => {
+    const user = userEvent.setup();
+    const profile = {
+      kind: "account" as const,
+      profileId: "40000000-0000-4000-8000-000000000002" as never,
+    };
+    let created = false;
+    const manageProfiles = vi.fn(
+      async (command: BrowserProfilesCommand): Promise<BrowserProfilesResult> => {
+        if (command.kind === "create-account") {
+          created = true;
+          return { kind: "browser-account-profile-created", profile, label: command.label };
+        }
+        return created
+          ? {
+              kind: "browser-profiles",
+              profiles: [{ profile, label: "Work account", sizeBytes: 0 }],
+            }
+          : listing;
+      },
+    );
+    render(<BrowserProfilesSection client={{ manageProfiles }} />);
+    await user.click(await screen.findByRole("button", { name: "New account profile…" }));
+    expect(created).toBe(false);
+    await user.type(screen.getByRole("textbox", { name: "Profile name" }), "Work account");
+    await user.click(screen.getByRole("button", { name: "Create profile" }));
+    expect(await screen.findByText("Work account · 0 B")).toBeVisible();
+    expect(manageProfiles).toHaveBeenCalledWith({ kind: "create-account", label: "Work account" });
+    expect(screen.getByText(/Choose it explicitly in a Browser profile control/)).toBeVisible();
+  });
+
   it("lists each stored profile with its size", async () => {
     const manageProfiles = vi.fn(async () => listing);
     render(<BrowserProfilesSection client={{ manageProfiles }} />);

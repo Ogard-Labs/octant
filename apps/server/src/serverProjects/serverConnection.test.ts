@@ -1,5 +1,5 @@
 import { spawnSync } from "node:child_process";
-import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync, chmodSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
@@ -30,6 +30,8 @@ describe("a server connection's arguments", () => {
       "ClearAllForwardings=yes",
       "PermitLocalCommand=no",
       "ControlPath=none",
+      "ControlMaster=no",
+      "ControlPersist=no",
     ]) {
       expect(args).toContain(option);
     }
@@ -98,6 +100,48 @@ describe("a server connection's arguments", () => {
     });
   });
 });
+
+it.skipIf(process.platform === "win32")(
+  "force-stops only its fresh probe when the SSH child ignores cancellation",
+  async () => {
+    const scratch = mkdtempSync(join(tmpdir(), "octant-fresh-ssh-"));
+    const pidFile = join(scratch, "pid");
+    const executable = join(scratch, "ssh");
+    writeFileSync(
+      executable,
+      `#!/usr/bin/env node
+const fs=require('node:fs');process.on('SIGTERM',()=>{});fs.writeFileSync(${JSON.stringify(pidFile)},String(process.pid));setTimeout(()=>process.exit(0),5000);`,
+    );
+    chmodSync(executable, 0o700);
+    const abort = new AbortController();
+    const connection = new ServerConnection({ sshPath: executable, agentSocket: () => undefined });
+    let pending: ReturnType<ServerConnection["run"]> | undefined;
+    try {
+      pending = connection.run(
+        { alias: "fixture", user: "fixture" },
+        {
+          script: "pwd",
+          timeoutMs: 3_000,
+          maxOutputBytes: 64,
+          freshConnection: true,
+          signal: abort.signal,
+        },
+      );
+      const deadline = Date.now() + 2_000;
+      while (!existsSync(pidFile) && Date.now() < deadline)
+        await new Promise((resolve) => setTimeout(resolve, 10));
+      expect(existsSync(pidFile)).toBe(true);
+      const pid = Number(readFileSync(pidFile, "utf8"));
+      abort.abort();
+      expect(await pending).toMatchObject({ status: "cancelled" });
+      expect(() => process.kill(pid, 0)).toThrow();
+    } finally {
+      abort.abort();
+      await pending;
+      rmSync(scratch, { recursive: true, force: true });
+    }
+  },
+);
 
 describe("the text a server's login shell is handed", () => {
   const HOSTILE = [

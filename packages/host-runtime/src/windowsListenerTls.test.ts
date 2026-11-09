@@ -64,8 +64,20 @@ describe("Windows listener TLS storage", () => {
     const operation = vi.fn();
     const files = createWindowsListenerTlsFiles(native(operation), paths);
     expect(files?.createKey(Buffer.alloc(4097))).toEqual({ status: "refused" });
+    expect(files?.createCertificate(Buffer.alloc(16385))).toEqual({ status: "refused" });
     expect(files?.replaceCertificate(Buffer.alloc(16385))).toEqual({ status: "refused" });
     expect(operation).not.toHaveBeenCalled();
+  });
+  it("asks native storage to replace a certificate only for renewal", () => {
+    const operation = vi.fn((): unknown => ({ status: "refused" }));
+    const files = createWindowsListenerTlsFiles(native(operation), paths);
+    const candidate = Buffer.from("public fixture");
+    files?.createCertificate(candidate);
+    files?.replaceCertificate(candidate);
+    expect(operation.mock.calls.map((call: ReadonlyArray<unknown>) => call[3])).toEqual([
+      "certificate",
+      "certificate-renewal",
+    ]);
   });
   it("retains exposed-key refusals and distinguishes an empty renewable certificate from an empty key", () => {
     const operation = vi.fn((): unknown => ({ status: "exposed" }));

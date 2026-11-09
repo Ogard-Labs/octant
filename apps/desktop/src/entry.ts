@@ -6,6 +6,9 @@ import {
   desktopIdentity,
   desktopIdentityForPackage,
   desktopWindowStorageDirectory,
+  createWindowsDesktopLauncher,
+  loadWindowsHostProfileNative,
+  resolveWindowsHostProfile,
 } from "@octant/host-runtime";
 import { launchDesktopApplication, resolvePackagedDesktopLaunch } from "./desktopLaunch";
 import {
@@ -13,8 +16,9 @@ import {
   ensureNightlyHostReady,
   linuxRendererSandboxDisabled,
   loadDesktopPeerStatus,
+  type DesktopPeerStart,
 } from "./desktopPeerStatus";
-import { resolveDesktopHostRuntimePaths } from "./runtimePaths";
+import { resolveDesktopHostRuntimePaths, WINDOWS_HOST_OWNER_FILENAME } from "./runtimePaths";
 import { resolveStartupHostRole } from "./nightlyTestData";
 import { createNightlyLaunchLinks } from "./nightlyLaunchLinks";
 
@@ -25,10 +29,12 @@ const identity = app.isPackaged
     )
   : desktopIdentity("stable");
 const launchLinks = createNightlyLaunchLinks(identity.scheme);
+let windowsHostOnlyLaunch = false;
 
 if (
   identity.flavor === "nightly" ||
-  (app.isPackaged && (process.platform === "darwin" || process.platform === "linux"))
+  (app.isPackaged &&
+    (process.platform === "darwin" || process.platform === "linux" || process.platform === "win32"))
 ) {
   const role = resolvePackagedDesktopLaunch(
     identity,
@@ -47,6 +53,10 @@ if (
         })
       : undefined,
   );
+  if (role.kind === "host-only" && process.platform === "win32") {
+    windowsHostOnlyLaunch = true;
+    process.stderr.write('{"windowsHostOnlyPhase":"entry-admitted"}\n');
+  }
   if (role.kind === "refused") {
     process.stderr.write(`${role.message}\n`);
     app.exit(1);
@@ -131,16 +141,17 @@ async function launchDesktop(): Promise<void> {
       return;
     }
   }
-  // A Linux Nightly whose renderers would run unsandboxed never reaches the
+  // A Nightly on these platforms whose renderers would run unsandboxed never reaches the
   // binding, so it neither starts Octant's host nor registers a window.
   const unsandboxed =
     identity.flavor === "nightly" &&
-    process.platform === "linux" &&
+    (process.platform === "linux" || process.platform === "win32") &&
     linuxRendererSandboxDisabled({
       hasSwitch: (name) => app.commandLine.hasSwitch(name),
       argv: process.argv,
       env: process.env,
     });
+  const windows = identity.flavor === "nightly" && !unsandboxed ? windowsPeerContext() : undefined;
   const native =
     identity.flavor === "nightly" && !unsandboxed
       ? loadDesktopPeerStatus({
@@ -148,15 +159,37 @@ async function launchDesktop(): Promise<void> {
           platform: process.platform,
           resourcesPath: process.resourcesPath,
           ...linuxPeerEndpoint(),
+          ...(windows === undefined ? {} : { windows: windows.endpoint }),
         })
       : undefined;
   const outcome = await launchDesktopApplication(
     identity,
-    () => import(new URL("./main.mjs", import.meta.url).href),
+    async () => {
+      const loaded = await import(new URL("./main.mjs", import.meta.url).href);
+      if (windowsHostOnlyLaunch)
+        process.stderr.write('{"windowsHostOnlyPhase":"main-evaluated"}\n');
+      return loaded;
+    },
     async () => {
       if (unsandboxed) return { kind: "refused", reason: "unsandboxed-renderer" };
       if (native === undefined) return { kind: "refused", reason: "native-unavailable" };
-      const status = await ensureNightlyHostReady(native);
+      const status = await ensureNightlyHostReady(
+        windows === undefined
+          ? native
+          : {
+              status: () => native.status(),
+              launchStableHost: windows.launchStableHost,
+            },
+      );
+      if (windows !== undefined)
+        process.stderr.write(
+          `${JSON.stringify({
+            windowsNightlyHostPreflight: {
+              status: status.kind,
+              ...(status.kind === "refused" ? { reason: status.reason } : {}),
+            },
+          })}\n`,
+        );
       const closed = await closeDesktopPeerStatus(native);
       return closed.kind === "closed" ? status : { kind: "refused", reason: closed.reason };
     },
@@ -196,4 +229,37 @@ function linuxPeerEndpoint() {
     // Unresolvable host paths leave the binding unloaded: native-unavailable.
     return {};
   }
+}
+
+/** Metadata may be created; this never claims the host owner or opens its journal. */
+function windowsPeerContext() {
+  if (process.platform !== "win32" || !app.isPackaged) return undefined;
+  const native = loadWindowsHostProfileNative(
+    join(process.resourcesPath, "native", WINDOWS_HOST_OWNER_FILENAME),
+  );
+  if (native === undefined) return undefined;
+  const profile = resolveWindowsHostProfile({ native, profile: "octant", env: process.env });
+  if (profile.status !== "ready") return undefined;
+  const launcher = createWindowsDesktopLauncher(native, profile.paths);
+  return {
+    endpoint: { profileId: profile.paths.profileId, version: app.getVersion() },
+    launchStableHost: async (): Promise<DesktopPeerStart> => {
+      if (launcher === undefined) return { kind: "refused", reason: "incompatible-host" };
+      const outcome = await launcher.launch();
+      // A later readiness timeout otherwise hides whether native launch refused
+      // or a started host failed before publishing its private projection.
+      process.stderr.write(`${JSON.stringify({ windowsNightlyHostLaunch: outcome })}\n`);
+      return outcome.status === "started"
+        ? { kind: "started" }
+        : {
+            kind: "refused",
+            reason:
+              outcome.status === "missing"
+                ? "no-launcher-record"
+                : outcome.reason === "deadline-exceeded"
+                  ? "deadline-exceeded"
+                  : "invalid-receipt",
+          };
+    },
+  };
 }

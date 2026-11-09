@@ -1,5 +1,9 @@
 import type { MobileInboxRow } from "@octant/client-runtime";
-import { parseMobileThreadDeepLink, type MobileDeepLinkTarget } from "../notifications/deepLinks";
+import {
+  parseMobileThreadDeepLink,
+  type MobileDeepLinkTarget,
+  type MobileMovesDeepLinkTarget,
+} from "../notifications/deepLinks";
 
 /**
  * Resolve a deep-link URL into an inbox row the navigator can open.
@@ -58,4 +62,21 @@ export function deepLinkRefusal(
   return pairedHostIds.some((hostId) => hostId === row.hostId)
     ? undefined
     : DEEP_LINK_HOST_NOT_PAIRED;
+}
+
+/**
+ * Where a tapped held-move notification lands: the Computers screen, whose
+ * Moves waiting for you list reads what waits on every computer and so shows
+ * the move whichever computer held it. A link from a computer this phone never
+ * paired still opens that screen, with the reason beside it.
+ */
+export function movesLinkOpening(
+  link: MobileMovesDeepLinkTarget,
+  pairedHostIds: ReadonlyArray<string>,
+  registryUnreadable = false,
+): { readonly route: "hosts"; readonly entryMode: "manage"; readonly notice?: string } {
+  const notice = deepLinkRefusal(link, pairedHostIds, registryUnreadable);
+  return notice === undefined
+    ? { route: "hosts", entryMode: "manage" }
+    : { route: "hosts", entryMode: "manage", notice };
 }

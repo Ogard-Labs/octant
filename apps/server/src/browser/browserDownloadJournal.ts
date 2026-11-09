@@ -5,6 +5,8 @@ import {
   BROWSER_DOWNLOAD_EVENT_NAMES,
   decodeBrowserDownloadRefused,
   decodeBrowserDownloadSaved,
+  decodeBrowserDownloadSelectedSaved,
+  type BrowserDownloadDestinationReceipt,
   decodeEventActor,
   EventId,
   EventName,
@@ -42,6 +44,7 @@ export interface BrowserDownloadRecorder {
       readonly sizeBytes: number;
       readonly mediaType: string;
       readonly sha256: string;
+      readonly destination?: BrowserDownloadDestinationReceipt;
     },
   ) => void;
   readonly refused: (
@@ -112,8 +115,13 @@ export function createBrowserDownloadJournal(
       const savedAt = options.clock();
       append(
         context,
-        BROWSER_DOWNLOAD_EVENT_NAMES.saved,
-        decodeBrowserDownloadSaved({
+        file.destination === undefined
+          ? BROWSER_DOWNLOAD_EVENT_NAMES.saved
+          : BROWSER_DOWNLOAD_EVENT_NAMES.selectedSaved,
+        (file.destination === undefined
+          ? decodeBrowserDownloadSaved
+          : decodeBrowserDownloadSelectedSaved)({
+          ...(file.destination === undefined ? {} : { destination: file.destination }),
           threadId: context.threadId,
           origin: context.origin,
           path: file.path,

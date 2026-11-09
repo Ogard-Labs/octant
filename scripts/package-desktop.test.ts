@@ -292,6 +292,25 @@ describe("desktop packaging boundary", () => {
     });
   });
 
+  it.each(["0.1.0-preview.20261108.1", "0.1.0-candidate.20261108.2"])(
+    "keeps full runtime identity while supplying numeric Windows PE version metadata (%s)",
+    (version) => {
+      const identity = desktopIdentity(version.includes("-preview.") ? "nightly" : "stable");
+      const options = createPackagerOptions(
+        "/tmp/stage",
+        "/tmp/out",
+        version,
+        DESKTOP_PACKAGE_TARGETS["win32-x64"],
+        identity,
+      );
+      expect(options.appVersion).toBe("0.1.0");
+      expect(createDesktopRuntimeManifest(version, identity)).toMatchObject({
+        version,
+        octantDesktopFlavor: identity.flavor,
+      });
+    },
+  );
+
   it("packages Nightly under its own bundle, executable and link scheme and stamps its flavor", () => {
     const identity = desktopIdentity("nightly");
     const version = "0.1.0-preview.20261103.1";

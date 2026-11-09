@@ -50,7 +50,9 @@ function QuestionnaireEditor(props: QuestionnaireCardProps) {
         ? {}
         : { customAnswer: customAnswer.trim() }),
     })),
-    ...(comment.trim() === "" ? {} : { comment: comment.trim() }),
+    ...(props.questionnaire.allowComment === false || comment.trim() === ""
+      ? {}
+      : { comment: comment.trim() }),
   };
   const encoded = JSON.stringify(response);
   const valid =
@@ -232,17 +234,19 @@ function QuestionnaireEditor(props: QuestionnaireCardProps) {
           </fieldset>
         );
       })}
-      <label className="questionnaire__written">
-        Anything to add?{" "}
-        <span className="provider-question-card__option-description">Optional</span>
-        <OctantTextarea
-          disabled={busy}
-          maxLength={2_000}
-          rows={2}
-          value={comment}
-          onChange={(event) => setComment(event.target.value)}
-        />
-      </label>
+      {props.questionnaire.allowComment === false ? null : (
+        <label className="questionnaire__written">
+          Anything to add?{" "}
+          <span className="provider-question-card__option-description">Optional</span>
+          <OctantTextarea
+            disabled={busy}
+            maxLength={2_000}
+            rows={2}
+            value={comment}
+            onChange={(event) => setComment(event.target.value)}
+          />
+        </label>
+      )}
       {notice === undefined ? null : <OctantAlert tone="warning">{notice}</OctantAlert>}
       <footer className="provider-question-card__actions">
         {props.onDismiss === undefined ? (

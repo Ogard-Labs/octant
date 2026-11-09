@@ -1,3 +1,14 @@
+import {
+  decodeBrowserDownloadPermissionsCommand,
+  decodeBrowserDownloadPermissionsResult,
+} from "@octant/contracts/browser-download-permissions";
+import type { BrowserDownloadPermissions } from "./browser/browserDownloadPermissions";
+import {
+  decodeBrowserUploadPermissionsCommand,
+  decodeBrowserUploadPermissionsResult,
+} from "@octant/contracts/browser-upload-permissions";
+import type { BrowserUploadPermissions } from "./browser/browserUploadPermissions";
+import { browserProfileFromChoice } from "@octant/domain";
 import type { BrowserAgentAvailability } from "@octant/contracts";
 import { randomUUID } from "node:crypto";
 import { sameToolActionAuthority, type ToolActionAuthority } from "@octant/contracts";
@@ -27,7 +38,6 @@ import {
   decodeBrowserAutomationFailure,
   type BrowserAutomationFailure,
   type BrowserThreadId,
-  type BrowserProfile,
 } from "@octant/contracts/browser-automation";
 import {
   decodeBrowserCaptureImage,
@@ -78,6 +88,11 @@ import {
 import type { BrowserCredentialUseService } from "./browser/browserCredentialUseService";
 import type { WindowId } from "@octant/contracts/shell";
 import type { WindowAuthorityStore } from "./windowAuthorityStore";
+import {
+  decodeBrowserSessionGrantsCommand,
+  decodeBrowserSessionGrantsResult,
+} from "@octant/contracts/browser-session-grants";
+import type { BrowserSessionGrants } from "./browser/browserSessionGrants";
 
 const PREFIX = "/api/browser/";
 const METHODS = "POST, OPTIONS";
@@ -85,6 +100,9 @@ const HEADERS = "content-type, x-octant-window-capability";
 const BROWSER_MODES = ["chat", "work", "code"] as const;
 
 export interface BrowserAutomationRouteDependencies {
+  readonly downloadPermissions?: Pick<BrowserDownloadPermissions, "execute">;
+  readonly uploadPermissions?: Pick<BrowserUploadPermissions, "execute">;
+  readonly sessionGrants?: Pick<BrowserSessionGrants, "execute">;
   readonly agentAvailability?: (
     windowId: WindowId,
     threadId: BrowserThreadId,
@@ -297,12 +315,7 @@ export function createBrowserAutomationRouteHandler(
             409,
             origin,
           );
-        const profile: BrowserProfile | undefined =
-          selection.profile === "project"
-            ? authority.projectId === undefined
-              ? undefined
-              : { kind: "project", projectId: authority.projectId }
-            : { kind: selection.profile };
+        const profile = browserProfileFromChoice(selection.profile, authority.projectId);
         if (profile === undefined)
           return failure(
             { category: "unavailable", message: "This task has no Project Browser profile." },
@@ -535,6 +548,84 @@ export function createBrowserAutomationRouteHandler(
                   reason: "not-found",
                   message: "That flow no longer exists.",
                 },
+          ),
+          origin,
+        );
+      }
+      if (url.pathname === "/api/browser/download-permissions") {
+        if (callerKind !== "local-window")
+          return success(
+            decodeBrowserDownloadPermissionsResult({
+              kind: "download-permission-refused",
+              reason: "not-local",
+              message: "Download manifests are reviewed only on the execution host.",
+            }),
+            origin,
+          );
+        if (dependencies.downloadPermissions === undefined)
+          return failure(
+            { category: "unavailable", message: "Recurring download permissions are unavailable." },
+            503,
+            origin,
+          );
+        return success(
+          decodeBrowserDownloadPermissionsResult(
+            await dependencies.downloadPermissions.execute(
+              windowId,
+              decodeBrowserDownloadPermissionsCommand(decoded.value),
+            ),
+          ),
+          origin,
+        );
+      }
+      if (url.pathname === "/api/browser/upload-permissions") {
+        if (callerKind !== "local-window")
+          return success(
+            decodeBrowserUploadPermissionsResult({
+              kind: "upload-permission-refused",
+              reason: "not-local",
+              message: "Upload manifests are reviewed only on the execution host.",
+            }),
+            origin,
+          );
+        if (dependencies.uploadPermissions === undefined)
+          return failure(
+            { category: "unavailable", message: "Recurring upload permissions are unavailable." },
+            503,
+            origin,
+          );
+        return success(
+          decodeBrowserUploadPermissionsResult(
+            await dependencies.uploadPermissions.execute(
+              windowId,
+              decodeBrowserUploadPermissionsCommand(decoded.value),
+            ),
+          ),
+          origin,
+        );
+      }
+      if (url.pathname === "/api/browser/session-grants") {
+        if (callerKind !== "local-window")
+          return success(
+            decodeBrowserSessionGrantsResult({
+              kind: "browser-session-refused",
+              reason: "not-local",
+              message: "Session permissions are reviewed only on the execution host.",
+            }),
+            origin,
+          );
+        if (dependencies.sessionGrants === undefined)
+          return failure(
+            { category: "unavailable", message: "Browser session permissions are unavailable." },
+            503,
+            origin,
+          );
+        return success(
+          decodeBrowserSessionGrantsResult(
+            await dependencies.sessionGrants.execute(
+              windowId,
+              decodeBrowserSessionGrantsCommand(decoded.value),
+            ),
           ),
           origin,
         );

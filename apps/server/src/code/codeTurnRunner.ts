@@ -1,3 +1,4 @@
+import type { Questionnaire } from "@octant/contracts";
 import { isAbsolute } from "node:path";
 import {
   decodeCodeRelativePath,
@@ -137,6 +138,7 @@ export interface CodeTurnEvent {
   readonly requestId?: string;
   /** The labels a provider question offers; absent on every other category. */
   readonly options?: ReadonlyArray<string>;
+  readonly questionnaire?: Questionnaire;
   /** The ids a restated plan still lists, in order; only on `task-list`. */
   readonly taskIds?: ReadonlyArray<string>;
   readonly toolCallId?: string;
@@ -978,6 +980,7 @@ function normalizeProviderEvent(
         requestId: text(event.requestId),
         text: text(event.prompt),
         options: event.options.map((option) => text(option.label)),
+        ...(event.questionnaire === undefined ? {} : { questionnaire: event.questionnaire }),
       });
     case "tool-request":
       return Effect.succeed({

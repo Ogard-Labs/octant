@@ -14,7 +14,7 @@ target_compile_definitions(octant-windows-host-owner PRIVATE NAPI_VERSION=8 UNIC
 set_property(TARGET octant-windows-host-owner PROPERTY MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
 target_compile_options(octant-windows-host-owner PRIVATE /W4 /WX /EHsc /utf-8)
 target_link_options(octant-windows-host-owner PRIVATE /DELAYLOAD:node.exe)
-target_link_libraries(octant-windows-host-owner PRIVATE "${OCTANT_NODE_IMPORT_LIB}" delayimp advapi32 bcrypt shell32 ole32)
+target_link_libraries(octant-windows-host-owner PRIVATE "${OCTANT_NODE_IMPORT_LIB}" delayimp advapi32 bcrypt shell32 ole32 userenv)
 
 # Disposable hosted QA only; this executable never enters the app package.
 add_executable(octant-windows-owner-reader ../../../../scripts/windows-host-owner/reader.cpp)

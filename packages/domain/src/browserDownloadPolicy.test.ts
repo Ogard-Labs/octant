@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   browserDownloadNameIsExecutable,
   browserDownloadQuestion,
+  browserDownloadSource,
   numberedBrowserDownloadName,
   refuseBrowserDownloadType,
   safeBrowserDownloadName,
@@ -85,7 +86,48 @@ describe("browserDownloadQuestion", () => {
         mediaType: "application/pdf",
       }),
     ).toBe(
-      "Let the agent save report.pdf (1.2 MB, PDF) from https://example.com into this thread's workspace?",
+      "Let the agent save report.pdf (1.2 MB, PDF) into this thread's workspace? Page: https://example.com. Download source: unverified.",
     );
   });
+});
+
+describe("download source receipts", () => {
+  it("retains the native HTTPS origin chain without URL paths or query values", () => {
+    expect(
+      browserDownloadSource([
+        "https://example.com/private/report?token=secret",
+        "https://files.example.com:443/final#value",
+      ]),
+    ).toEqual({
+      kind: "https-origin-chain",
+      origins: ["https://example.com", "https://files.example.com"],
+    });
+  });
+  it("leaves missing, truncated, credential-bearing and non-HTTPS chains unverified", () => {
+    for (const urls of [
+      [],
+      ["http://example.com/file"],
+      ["https://user:secret@example.com/file"],
+      ["blob:https://example.com/id"],
+      ["not a URL"],
+      Array.from({ length: 33 }, () => "https://example.com"),
+    ])
+      expect(browserDownloadSource(urls)).toBeUndefined();
+  });
+});
+
+it("shows the attested redirect origins separately from the requesting page", () => {
+  const question = browserDownloadQuestion("https://page.example.com", {
+    name: "report.pdf",
+    sizeBytes: 10,
+    mediaType: "application/pdf",
+    source: {
+      kind: "https-origin-chain",
+      origins: ["https://start.example.com", "https://files.example.com"],
+    },
+  });
+  expect(question).toContain("Page: https://page.example.com.");
+  expect(question).toContain(
+    "Download source: https://start.example.com → https://files.example.com.",
+  );
 });

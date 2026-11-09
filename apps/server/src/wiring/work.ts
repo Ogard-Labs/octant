@@ -1,3 +1,4 @@
+import { decodeBrowserThreadId } from "@octant/contracts";
 import { browserToolTransport } from "@octant/domain";
 import { threadWorkingDirectoryCurrent } from "../threadWorkingDirectoryAuthority";
 import type { ThreadMoveHolds } from "../hub/threadMoveHolds";
@@ -101,6 +102,7 @@ import { createCanvasAgentTools } from "../canvas/canvasAgentTools";
 import { saveGeneratedImageUnder } from "../image/generatedImageSave";
 import { createThreadImageAgentTools } from "../image/imageAgentTools";
 import { combineAppManagedToolSets } from "../providers/appManagedToolSet";
+import { withRoutineBrowserProfiles } from "../browser/browserRoutineSessions";
 import { makeConfiguredProviderDriver, type ProvidersWiring } from "./providers";
 import { MAX_JSON_REQUEST_BODY_SIZE, type ServerStart } from "./serverShape";
 import type { AuthorityWiring } from "./authority";
@@ -193,6 +195,7 @@ export type WorkDependencies = Pick<ServerStart, "persistence"> &
   > &
   Pick<
     BrowserWiring,
+    | "routineBrowserTools"
     | "browserAutomationService"
     | "browserFlows"
     | "browserToolApprovalService"
@@ -234,6 +237,7 @@ export function wireWork(deps: WorkDependencies) {
     authorizeWorkThreadForWindow,
     automationEventStore,
     browserAuthority,
+    routineBrowserTools,
     browserAutomationService,
     browserCaptures,
     browserModelBindings,
@@ -461,7 +465,22 @@ export function wireWork(deps: WorkDependencies) {
         const browserSupported =
           browserToolTransport(observed, String(input.thread.modelId)) === true;
         const native = nativeHarnessComposition?.forWork(input);
-        const browser = !browserSupported
+        const routineBrowser =
+          input.routineRun === undefined
+            ? undefined
+            : routineBrowserTools({
+                routineRun: input.routineRun,
+                threadId: decodeBrowserThreadId(String(input.thread.id)),
+                currentAuthority: () =>
+                  browserAuthority.resolve(decodeBrowserThreadId(String(input.thread.id)), "work"),
+                currentModelId: () => {
+                  const current = workThreadProjection.read(input.thread.id);
+                  return current === undefined || current.access !== input.thread.access
+                    ? undefined
+                    : String(current.modelId);
+                },
+              });
+        const privateBrowser = !browserSupported
           ? undefined
           : createBrowserAppManagedTools({
               windowId: input.windowId,
@@ -495,6 +514,15 @@ export function wireWork(deps: WorkDependencies) {
               uploadRoot: () => input.projectRoot,
               uuid: randomUUID,
             });
+        const browser =
+          routineBrowser === undefined
+            ? privateBrowser
+            : privateBrowser === undefined
+              ? routineBrowser
+              : withRoutineBrowserProfiles({
+                  privateTools: privateBrowser,
+                  profileTools: routineBrowser,
+                });
         const sideTaskTools = !browserSupported
           ? undefined
           : createSideTaskTools({

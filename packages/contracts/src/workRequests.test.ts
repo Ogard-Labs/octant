@@ -48,6 +48,62 @@ const pendingApproval = {
   version: 1,
 } as const;
 
+describe("Work questionnaire privacy", () => {
+  it("keeps structured multiple selections without admitting paths, URLs or unsafe identities", () => {
+    const questionnaire = {
+      allowComment: false,
+      questions: [
+        {
+          id: "q0",
+          prompt: "Formats?",
+          selection: "multiple",
+          options: [
+            { id: "pdf", label: "PDF" },
+            { id: "text", label: "Text" },
+          ],
+        },
+      ],
+    };
+    expect(
+      decodeWorkRequestDetail({ kind: "user-input", prompt: "Choose", options: [], questionnaire }),
+    ).toMatchObject({ questionnaire });
+    const answer = {
+      version: 1,
+      answers: [{ questionId: "q0", selectedOptionIds: ["pdf", "text"] }],
+    };
+    expect(decodeWorkRequestResolution({ kind: "user-input", answer })).toMatchObject({ answer });
+    const request = decodeWorkRequest({
+      ...pendingApproval,
+      detail: { kind: "user-input", prompt: "Choose", options: [], questionnaire },
+      status: "resolved",
+      resolution: { kind: "user-input", answer },
+      settledAt,
+    });
+    expect(
+      decodeWorkRequestFrame(JSON.parse(JSON.stringify({ kind: "resolved", request }))),
+    ).toMatchObject({ request: { resolution: { kind: "user-input", answer } } });
+    for (const customAnswer of ["/private/secret", "https://private.example", "folder\\secret"]) {
+      expect(() =>
+        decodeWorkRequestResolution({
+          kind: "user-input",
+          answer: {
+            version: 1,
+            answers: [{ questionId: "q0", selectedOptionIds: [], customAnswer }],
+          },
+        }),
+      ).toThrow();
+    }
+    expect(() =>
+      decodeWorkRequestDetail({
+        kind: "user-input",
+        prompt: "Choose",
+        options: [],
+        questionnaire: { questions: [{ ...questionnaire.questions[0], id: "/private/id" }] },
+      }),
+    ).toThrow();
+  });
+});
+
 describe("WorkRequestDetail", () => {
   it("decodes an approval detail", () => {
     expect(decodeWorkRequestDetail(approvalDetail).kind).toBe("approval");

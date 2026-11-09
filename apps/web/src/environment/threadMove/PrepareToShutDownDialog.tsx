@@ -30,7 +30,7 @@ import { OctantButton } from "../../ui/base/OctantButton";
 import { OctantDialog } from "../../ui/base/OctantDialog";
 import { OctantSelectField } from "../../ui/base/OctantSelect";
 import type { ThreadMoveClient } from "./threadMoveClient";
-import { estimateBasis, formatBytes, sizeAndEstimate } from "./threadMoveSize";
+import { estimateBasis, sizeAndEstimate, threadSize } from "./threadMoveSize";
 
 /** How far a running batch has come, for the menu bar while the dialog is hidden. */
 export interface ShutdownBatchProgress {
@@ -481,7 +481,11 @@ export function PrepareToShutDownDialog(props: PrepareToShutDownDialogProps) {
               measured.rate,
             );
     const basis =
-      typeof measured === "object" && group.rows.some((row) => sizeOf(row)?.status === "measured")
+      typeof measured === "object" &&
+      group.rows.some((row) => {
+        const size = sizeOf(row);
+        return size !== undefined && size.status !== "unknown";
+      })
         ? estimateBasis(measured.rate, group.member.name)
         : undefined;
     return { name: group.member.name, text, basis };
@@ -858,9 +862,7 @@ function ShutdownRow(props: {
         <span className="shutdown-row__project">{row.projectName}</span>
       )}
       {props.size === undefined ? null : (
-        <span className="shutdown-row__size">
-          {props.size.status === "measured" ? formatBytes(props.size.bytes) : "Size unknown"}
-        </span>
+        <span className="shutdown-row__size">{threadSize(props.size)}</span>
       )}
       {props.phase === "running" && props.notStarted !== undefined ? (
         <span className="shutdown-row__reason">
