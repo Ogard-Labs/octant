@@ -2,6 +2,7 @@ import type {
   MovedThreadReference,
   ShutdownListing,
   ShutdownStartRequest,
+  ThreadMoveSizes,
   ThreadMoveThreadStatus,
 } from "@octant/contracts";
 import { render, screen, waitFor, within } from "@testing-library/react";
@@ -94,6 +95,10 @@ function fakeClient(
     readonly arrives?: () => boolean;
     /** A thread whose move ended with nothing to show: Don't move, or its notice put away. */
     readonly settled?: MovedThreadReference;
+    readonly sizes?: (
+      memberId: string,
+      threads: ReadonlyArray<MovedThreadReference>,
+    ) => Promise<ThreadMoveSizes>;
   } = {},
 ) {
   const challenged: Array<{
@@ -143,6 +148,18 @@ function fakeClient(
     takeBack: async () => {},
     activate: async () => true,
     dismiss: async () => {},
+    sizes: async () => ({
+      status: "read",
+      rate: { basis: "assumed", bytesPerSecond: 1_048_576 },
+      rows: [],
+    }),
+    shutdownSizes:
+      input.sizes ??
+      (async (_memberId, threads) => ({
+        status: "read",
+        rate: { basis: "assumed", bytesPerSecond: 1_048_576 },
+        rows: threads.map((thread) => ({ thread, size: { status: "unknown" } })),
+      })),
     shutdownListing: async () => {
       listingsRead.count += 1;
       return input.listing ?? listing();
@@ -214,6 +231,50 @@ describe("Prepare to shut down", () => {
     expect(await screen.findByRole("heading", { name: /Safe to shut down/ })).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "Quit Octant" }));
     expect(quit).toHaveBeenCalledOnce();
+  });
+
+  it("shows each row's size and what the threads set to move add up to, with the estimate's basis", async () => {
+    const asked: Array<{ memberId: string; threads: ReadonlyArray<string> }> = [];
+    const { client } = fakeClient({
+      sizes: async (memberId, threads) => {
+        asked.push({ memberId, threads: threads.map((thread) => thread.threadId) });
+        return {
+          status: "read",
+          rate: { basis: "assumed", bytesPerSecond: 1_048_576 },
+          rows: threads.map((thread) => ({
+            thread,
+            size:
+              thread.threadId === DARK.threadId
+                ? { status: "unknown" }
+                : {
+                    status: "measured",
+                    bytes: thread.threadId === TRIP.threadId ? 2_048 : 1_000_000,
+                    parts: [],
+                  },
+          })),
+        };
+      },
+    });
+    render(<PrepareToShutDownDialog client={client} onClose={() => {}} open />);
+    await screen.findByText("Plan the trip");
+
+    await waitFor(() =>
+      expect(screen.getByText("· 2 KB, under a minute, 1 size unknown")).toBeInTheDocument(),
+    );
+    expect(asked).toEqual([
+      { memberId: MINI, threads: [TRIP.threadId, DARK.threadId, DIGEST.threadId] },
+    ]);
+    const trip = screen.getByText("Plan the trip").closest(".shutdown-row");
+    const dark = screen.getByText("Add dark mode").closest(".shutdown-row");
+    if (!(trip instanceof HTMLElement) || !(dark instanceof HTMLElement))
+      throw new Error("No row.");
+    expect(within(trip).getByText("2 KB")).toBeInTheDocument();
+    expect(within(dark).getByText("Size unknown")).toBeInTheDocument();
+    expect(
+      screen.getByText(
+        "Estimated at 1.0 MB a second, because no move to Mac mini has been timed yet.",
+      ),
+    ).toBeInTheDocument();
   });
 
   it("leaves a thread the chosen computer cannot take, with its reason", async () => {

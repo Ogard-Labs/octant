@@ -17,6 +17,7 @@ import {
   decodeShutdownStartRequest,
   decodeThreadMoveChallengeRequest,
   decodeThreadMoveControlRequest,
+  decodeThreadMoveSizesRequest,
   decodeThreadMoveStartRequest,
   decodeThreadMoveThreadRequest,
   type MovedThreadReference,
@@ -41,10 +42,13 @@ export const THREAD_MOVE_ADMINISTRATION_ROUTES = {
   takeBack: "/api/desktop/hub/thread-moves/take-back",
   activate: "/api/desktop/hub/thread-moves/activate",
   dismiss: "/api/desktop/hub/thread-moves/dismiss",
+  // Read-only sizes and an estimate, before the person decides.
+  sizes: "/api/desktop/hub/thread-moves/sizes",
   // Prepare to shut down acts for the whole host, as its menu entry does.
   shutdownListing: "/api/desktop/hub/thread-moves/shutdown/listing",
   shutdownChallenge: "/api/desktop/hub/thread-moves/shutdown/challenge",
   shutdownStart: "/api/desktop/hub/thread-moves/shutdown/start",
+  shutdownSizes: "/api/desktop/hub/thread-moves/shutdown/sizes",
   // A Code thread that cannot move hands over through its branch.
   handoverPreview: "/api/desktop/hub/thread-moves/handover/preview",
   handover: "/api/desktop/hub/thread-moves/handover",
@@ -146,6 +150,8 @@ export function createThreadMoveAdministrationRouteHandler(
           );
         case THREAD_MOVE_ADMINISTRATION_ROUTES.shutdownStart:
           return outcome(await options.moves.shutdownStart(decodeShutdownStartRequest(value)));
+        case THREAD_MOVE_ADMINISTRATION_ROUTES.shutdownSizes:
+          return outcome(await options.moves.sizes(decodeThreadMoveSizesRequest(value)));
         case THREAD_MOVE_ADMINISTRATION_ROUTES.handoverPreview:
         case THREAD_MOVE_ADMINISTRATION_ROUTES.handover: {
           const asked = decodeHandoverRequest(value);
@@ -187,6 +193,11 @@ export function createThreadMoveAdministrationRouteHandler(
           const { thread } = decodeThreadMoveThreadRequest(value);
           if (!holds(thread)) return unavailable();
           return outcome(await options.moves.destinations(thread));
+        }
+        case THREAD_MOVE_ADMINISTRATION_ROUTES.sizes: {
+          const asked = decodeThreadMoveSizesRequest(value);
+          if (!asked.threads.every(holds)) return unavailable();
+          return outcome(await options.moves.sizes(asked));
         }
         case THREAD_MOVE_ADMINISTRATION_ROUTES.start: {
           const started = decodeThreadMoveStartRequest(value);

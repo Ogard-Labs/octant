@@ -27,6 +27,7 @@ import {
   captureCheckoutForMove,
   checkoutStillMatchesMove,
   forgetMoveSnapshot,
+  measureCheckoutForMove,
   receiveCheckoutFromMove,
   relocateWorktree,
   repositoryRemotes,
@@ -142,6 +143,39 @@ export function createCodeThreadMoveHost(options: CodeThreadMoveHostOptions): {
     freeze: (thread) => options.holds.hold(thread),
     unfreeze: (thread) => options.holds.release(thread),
     isFrozen: (thread) => options.holds.isHeld(thread),
+    measure: async (thread) => {
+      const code = codeThreadOf(thread);
+      if (code === undefined) return { status: "unknown" };
+      const root = await options.checkoutRoot(code.id);
+      const driverKind = options.providerDriverKind(String(code.providerInstanceId));
+      if (root === undefined || driverKind === undefined) return { status: "unknown" };
+      let checkoutBytes: number;
+      try {
+        checkoutBytes = await measureCheckoutForMove(root);
+      } catch {
+        return { status: "unknown" };
+      }
+      // The history as pack writes it, short of the branch name and the
+      // refused files, which only the capture reads; a few bytes either way.
+      const history: MovedCodeThread = {
+        format: MOVED_CODE_THREAD_FORMAT,
+        title: code.title,
+        providerDriverKind: driverKind,
+        modelId: code.modelId,
+        externalContentIngested: options.externalContentIngested(thread.threadId),
+        refusedFiles: [],
+        entries: await options.transcript(code.id),
+      };
+      const historyBytes = Buffer.byteLength(JSON.stringify(history));
+      return {
+        status: "measured",
+        bytes: historyBytes + checkoutBytes,
+        parts: [
+          { kind: "thread-bundle", bytes: historyBytes },
+          { kind: "git-bundle", bytes: checkoutBytes },
+        ],
+      };
+    },
     pack: async (thread, folder, moveId) => {
       const code = codeThreadOf(thread);
       if (code === undefined) return { status: "refused", reason: "refused" };
