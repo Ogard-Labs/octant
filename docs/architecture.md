@@ -10525,6 +10525,7 @@ and the marketplace and plugin registry are no longer extraction candidates.
 | Canvas, preview viewers, backgrounds, theme presets                   | Core; scoped artifact contracts, registered viewers, and appearance contributions                                       |
 | Usage, diagnostics, Navigator, automations UI                         | Core; underlying authority stays in the host                                                                            |
 | Project memory and its agent tool                                     | Core; the journal, the person's confirmation, and purge stay host-owned                                                 |
+| Octant Harness built-in tools (`read`, `edit`, `bash`, `diagnostics`) | Core; part of the harness loop's closed catalog, judged by the same authority path                                      |
 | Browser/computer use, agent hierarchy, remote/mobile, Apple workbench | Core; capability, lifecycle, and security remain app-managed                                                            |
 | Marketplace and plugin registry                                       | Core; they stay in the host because they admit and activate other components                                            |
 | Provider drivers                                                      | Bundled vendor plugins through provider-sdk; generic ACP transport and honest-capability enforcement stay host-owned    |
