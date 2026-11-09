@@ -42,6 +42,12 @@ const chrome = [
 ].find((candidate) => candidate !== undefined && existsSync(candidate));
 
 const pages: Record<string, string> = {
+  "/feedback-rich": `<!doctype html><title>Feedback editable overflow</title><button id="feedback-save" style="position:absolute;left:100px;top:100px;width:120px;height:50px;margin:8px">Save changes</button><div contenteditable="true" style="position:absolute;left:500px;top:0;width:0;height:0"><span style="position:fixed;left:210px;top:130px">fixture-private-text</span></div>`,
+  "/feedback-open": `<!doctype html><title>Feedback open overflow</title><button id="feedback-save" style="position:absolute;left:100px;top:100px;width:120px;height:50px;margin:8px">Save changes</button><div id="shadow-host" style="position:absolute;left:500px;top:0;width:0;height:0"></div><script>document.getElementById('shadow-host').attachShadow({mode:'open'}).innerHTML='<input type="text" value="fixture-private-token" style="position:fixed;left:210px;top:130px;width:30px;height:10px">';</script>`,
+  "/feedback-closed": `<!doctype html><title>Feedback closed root</title><div id="feedback-container" style="position:absolute;left:100px;top:100px;width:120px;height:50px"></div><script>document.getElementById('feedback-container').attachShadow({mode:'closed'}).innerHTML='<input type="text" value="fixture-private-token">';</script>`,
+  "/feedback": `<!doctype html><title>Feedback page</title><main><button id="feedback-save" style="position:absolute;left:100px;top:100px;width:120px;height:50px;color:rgb(10,20,30);margin:8px">Save changes</button></main>`,
+  "/feedback-frame": `<!doctype html><title>Opaque feedback region</title><div id="feedback-container" style="position:absolute;left:10px;top:10px;width:300px;height:150px;background:white">Panel<iframe title="Opaque child" src="{{other}}/controls" style="position:absolute;left:80px;top:40px;width:160px;height:80px"></iframe></div>`,
+
   "/ime-editors": `<input id="a" value="private-fixture"><textarea id="b"></textarea><input id="password" type="password" value="fixture-password"><div id="custom" contenteditable="true">fixture</div><input id="readonly" readonly><script>for(const type of ['focusin','focusout'])window.addEventListener(type,event=>event.stopImmediatePropagation(),true)</script>`,
   "/login": `<!doctype html><title>Sign in</title>
     <h1>Sign in</h1>
@@ -273,7 +279,10 @@ beforeAll(async () => {
   // Electron keeps each site in its own process; Playwright turns that off
   // unless asked, and a frame on another site would then share the page's.
   if (chrome !== undefined) {
-    browser = await chromium.launch({ executablePath: chrome, args: ["--site-per-process"] });
+    browser = await chromium.launch({
+      executablePath: chrome,
+      args: ["--site-per-process", "--window-size=1600,1200"],
+    });
   }
 });
 
@@ -311,6 +320,7 @@ async function pageView(options: { readonly bridge?: boolean } = {}): Promise<{
   page: Page;
   /** Plays the person's key into the page, as Electron's input event does. */
   personKey: () => void;
+  personPoint: (x: number, y: number) => void;
 }> {
   if (browser === undefined) throw new Error("No Chromium.");
   // An Electron view has no color scheme of its own: it follows the machine.
@@ -319,6 +329,7 @@ async function pageView(options: { readonly bridge?: boolean } = {}): Promise<{
   let session: CDPSession | undefined;
   let attached = false;
   const inputListeners = new Set<(event: unknown, input: unknown) => void>();
+  const mouseListeners = new Set<(event: unknown, input: unknown) => void>();
   const messageListeners = new Set<
     (event: unknown, method: string, params: unknown, sessionId?: string) => void
   >();
@@ -515,6 +526,7 @@ async function pageView(options: { readonly bridge?: boolean } = {}): Promise<{
       },
       on: (event: string, listener: (event: unknown, input: unknown) => void) => {
         if (event === "before-input-event") inputListeners.add(listener);
+        if (event === "before-mouse-event") mouseListeners.add(listener);
       },
       reload: () => undefined,
       session: {
@@ -533,6 +545,11 @@ async function pageView(options: { readonly bridge?: boolean } = {}): Promise<{
   return {
     view,
     page,
+    personPoint: (x, y) => {
+      for (const type of ["mouseDown", "mouseUp"])
+        for (const listener of mouseListeners)
+          listener({ preventDefault: () => undefined }, { type, button: "left", x, y });
+    },
     personKey: () => {
       for (const listener of inputListeners) {
         listener({ preventDefault: () => undefined }, { type: "keyDown", key: "a" });
@@ -562,9 +579,10 @@ async function surface(
     },
   });
   const contextId = crypto.randomUUID();
+  const owner = { windowId: "window-a", threadId: crypto.randomUUID() };
   await host.createContext({
     contextId,
-    owner: { windowId: "window-a", threadId: crypto.randomUUID() },
+    owner,
     policy: {
       profileMode: "isolated",
       allowedOrigins: [origin],
@@ -585,6 +603,8 @@ async function surface(
     opened,
     view,
     personKey: pool[0]?.personKey ?? (() => undefined),
+    personPoint: pool[0]?.personPoint ?? (() => undefined),
+    owner,
   };
 }
 
@@ -2370,6 +2390,87 @@ describe.skipIf(chrome === undefined)(
         await page.close().catch(() => undefined);
         await rm(root, { recursive: true, force: true });
       });
+    });
+
+    it.each([
+      "/feedback",
+      "/feedback-frame",
+      "/feedback-closed",
+      "/feedback-open",
+      "/feedback-rich",
+      "/login",
+    ])("captures bounded feedback context/crop against a real page: %s", async (path) => {
+      const f = await surface(path);
+      try {
+        // Use the real content viewport rather than Playwright's emulated window
+        // size; a native view's declared bounds must match the captured document.
+        const sizing = await f.page.context().newCDPSession(f.page);
+        await sizing.send("Emulation.clearDeviceMetricsOverride");
+        await sizing.send("Page.captureScreenshot", {
+          format: "jpeg",
+          captureBeyondViewport: false,
+        });
+        const metrics = await sizing.send("Page.getLayoutMetrics");
+        const viewport = {
+          width: metrics.cssVisualViewport.clientWidth,
+          height: metrics.cssVisualViewport.clientHeight,
+        };
+        await sizing.detach();
+        f.host.attach(
+          f.contextId,
+          f.owner,
+          {
+            contentView: { addChildView: () => undefined, removeChildView: () => undefined },
+            isDestroyed: () => false,
+            webContents: { send: () => undefined },
+          },
+          { x: 0, y: 0, ...viewport },
+        );
+        f.host.setPointSelection(f.contextId, f.owner, true, crypto.randomUUID());
+        f.personPoint(path === "/feedback-frame" ? 20 : 160, path === "/feedback-frame" ? 20 : 125);
+        const selected = f.host.state(f.contextId).pointSelection;
+        if (selected?.status !== "selected") throw Error("Host point receipt missing");
+        const result = await f.host.describePoint(
+          f.contextId,
+          selected.point,
+          new AbortController().signal,
+          selected.selectionId,
+        );
+        if (path === "/login") {
+          expect(result).toEqual({ status: "unavailable", reason: "observation-paused" });
+          return;
+        }
+        if (result.status !== "described")
+          throw Error(`Real point capture refused: ${JSON.stringify(result)}`);
+        expect(result.element.context?.captureId).toMatch(/^[a-f0-9]{64}$/);
+        expect(result.element.context?.viewport).toEqual(viewport);
+        expect(result.element.context?.omissions).toContain("form-values-excluded");
+        if (path === "/feedback-open" || path === "/feedback-rich") {
+          expect(result.element.selector).toBe("#feedback-save");
+          expect(result.cropDataUrl).toBeUndefined();
+          expect(
+            result.element.context?.omissions.some((reason) => reason.startsWith("crop-withheld")),
+          ).toBe(true);
+          expect(JSON.stringify(result)).not.toContain("fixture-private-");
+        } else if (path === "/feedback-frame" || path === "/feedback-closed") {
+          expect(result.element.selector).toBe("#feedback-container");
+          expect(result.cropDataUrl).toBeUndefined();
+          expect(result.element.context?.omissions).toContain(
+            "crop-withheld-for-uninspected-region",
+          );
+        } else {
+          expect(result.element.selector).toBe("#feedback-save");
+          expect(result.element.text).toBe("Save changes");
+          expect(result.element.context?.styles).toContainEqual({
+            property: "color",
+            value: "rgb(10, 20, 30)",
+          });
+          expect(result.cropDataUrl).toMatch(/^data:image\/jpeg;base64,/);
+        }
+      } finally {
+        await f.host.closeAll();
+        await f.page.close();
+      }
     });
   },
 );

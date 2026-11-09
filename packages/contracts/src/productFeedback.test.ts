@@ -118,6 +118,45 @@ describe("a note pointed at the running product", () => {
       "feedback.note-captured@1",
       "feedback.note-discarded@1",
       "feedback.note-delivered@1",
+      "feedback.note-updated@1",
     ]);
+  });
+  it("requires host point correlation and rejects caller element, mode, or crop injection", () => {
+    const prepare = {
+      kind: "prepare-product-feedback",
+      threadId: ids.thread,
+      contextId: ids.context,
+      point: { x: 0.5, y: 0.5 },
+    };
+    expect(() => decodeProductFeedbackCommand(prepare)).toThrow();
+    expect(decodeProductFeedbackCommand({ ...prepare, selectionId: ids.note }).kind).toBe(
+      "prepare-product-feedback",
+    );
+    expect(decodeProductFeedbackCommand({ ...prepare, expectedObservationRevision: 3 }).kind).toBe(
+      "prepare-product-feedback",
+    );
+    for (const injected of [
+      { element: note.element },
+      { mode: "code" },
+      { cropDataUrl: "data:image/png;base64,AA==" },
+    ])
+      expect(() =>
+        decodeProductFeedbackCommand({ ...prepare, selectionId: ids.note, ...injected }),
+      ).toThrow();
+    expect(() =>
+      decodeProductFeedbackCommand({
+        kind: "update-product-feedback",
+        noteId: ids.note,
+        expectedVersion: 1,
+      }),
+    ).toThrow();
+    expect(
+      decodeProductFeedbackCommand({
+        kind: "update-product-feedback",
+        noteId: ids.note,
+        expectedVersion: 1,
+        included: false,
+      }),
+    ).toMatchObject({ included: false });
   });
 });

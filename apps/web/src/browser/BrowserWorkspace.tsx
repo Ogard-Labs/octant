@@ -53,6 +53,7 @@ import { OctantInput } from "../ui/base/OctantInput";
 import { ShellState } from "../shell/ShellState";
 import { ProductFeedbackPanel } from "./ProductFeedbackPanel";
 import { useProductFeedback } from "./useProductFeedback";
+import { useBrowserFeedbackPointing } from "./useBrowserFeedbackPointing";
 import type { OctantHostBridge } from "../shell/hostBridge";
 import { useNativeBrowserSurface } from "./useNativeBrowserSurface";
 import { OctantAlert } from "../ui/base/OctantAlert";
@@ -261,8 +262,6 @@ export function BrowserWorkspace(props: BrowserWorkspaceProps) {
   const [remoteFocused, setRemoteFocused] = useState(false);
   // Pointing at the page is a separate gesture from using it: while it is on, a
   // click marks a spot to write about instead of clicking through to the page.
-  const [pointing, setPointing] = useState(false);
-  const [pendingPoint, setPendingPoint] = useState<BrowserViewportPoint>();
   const feedback = useProductFeedback({
     threadId: props.tab.threadId === undefined ? undefined : String(props.tab.threadId),
     mode: props.tab.mode,
@@ -290,6 +289,30 @@ export function BrowserWorkspace(props: BrowserWorkspaceProps) {
     overlaySelector: RENDERER_OVERLAY_SELECTOR,
   });
   const nativeState = nativeSurface.state;
+  const feedbackSelectionUnavailable = !activeContext
+    ? "Open a Browser page before choosing an element."
+    : snapshot?.waitingForPerson === "sign-in"
+      ? "Finish sign-in and Continue before choosing an element."
+      : nativeSurface.embedded !== undefined
+        ? "Element selection is not available in this embedded Browser presentation yet."
+        : nativeContext &&
+            (props.hostBridge?.selectBrowserSurfacePoint === undefined ||
+              props.hostBridge.subscribeBrowserSurfaceState === undefined)
+          ? "This app build cannot select a native Browser element."
+          : !nativeContext && snapshot?.observation?.screenshotDataUrl === undefined
+            ? "Refresh the page preview before choosing an element."
+            : undefined;
+  const feedbackPointing = useBrowserFeedbackPointing({
+    contextId:
+      snapshot?.context?.contextId === undefined ? undefined : String(snapshot.context.contextId),
+    threadId: props.tab.threadId === undefined ? undefined : String(props.tab.threadId),
+    native: nativeContext,
+    feedback,
+    ...(props.hostBridge === undefined ? {} : { bridge: props.hostBridge }),
+    ...(feedbackSelectionUnavailable === undefined
+      ? {}
+      : { unavailableReason: feedbackSelectionUnavailable }),
+  });
   const codeThreadId = useMemo(
     () =>
       props.tab.mode === "code" && props.tab.threadId !== undefined
@@ -945,11 +968,17 @@ export function BrowserWorkspace(props: BrowserWorkspaceProps) {
   }
 
   const notice = message ?? captureNotice;
+  const showFeedback =
+    feedback.available &&
+    (snapshot?.context !== undefined ||
+      feedback.preview !== undefined ||
+      feedback.pending.length > 0);
+  const feedbackNotice = feedbackPointing.message ?? feedback.message;
 
   return (
     <section
       aria-label="Browser automation"
-      className={`browser-workspace${notice === undefined ? "" : " browser-workspace--message"}`}
+      className={`browser-workspace${notice === undefined ? "" : " browser-workspace--message"}${showFeedback ? " browser-workspace--feedback" : ""}`}
     >
       {pendingTaskProfile === undefined ? null : (
         <OctantConfirmDialog
@@ -1465,10 +1494,8 @@ export function BrowserWorkspace(props: BrowserWorkspaceProps) {
               onClick={(event) => {
                 const point = previewPoint(event.currentTarget, event.clientX, event.clientY);
                 if (point === undefined) return;
-                if (pointing) {
-                  // Marking a spot never touches the page: the host is asked
-                  // what is there only once the user has written the note.
-                  setPendingPoint(point);
+                if (feedbackPointing.pointing) {
+                  feedbackPointing.headlessPoint(point, snapshot.observation?.revision);
                   return;
                 }
                 event.currentTarget.parentElement?.focus();
@@ -1479,35 +1506,28 @@ export function BrowserWorkspace(props: BrowserWorkspaceProps) {
           )}
         </article>
       )}
-      {!feedback.available || snapshot?.context === undefined ? null : (
+      {!showFeedback ? null : (
         <ProductFeedbackPanel
+          key={`${props.tab.mode}:${props.tab.threadId}`}
           busy={feedback.busy}
-          {...(feedback.message === undefined ? {} : { message: feedback.message })}
-          onCancel={() => setPendingPoint(undefined)}
-          onDiscard={(note) => void feedback.discard(note)}
-          onSubmit={(comment) => {
-            const point = pendingPoint;
-            const contextId = snapshot.context?.contextId;
-            if (point === undefined || contextId === undefined) return;
-            void (async () => {
-              const captured = await feedback.capture({
-                contextId: String(contextId),
-                point,
-                comment,
-              });
-              if (captured) {
-                setPendingPoint(undefined);
-                setPointing(false);
-              }
-            })();
-          }}
-          onTogglePointing={() => {
-            setPointing((current) => !current);
-            setPendingPoint(undefined);
-          }}
           pending={feedback.pending}
-          {...(pendingPoint === undefined ? {} : { pendingPoint })}
-          pointing={pointing}
+          crops={feedback.crops}
+          preview={feedback.preview}
+          previewExpired={feedback.previewExpired}
+          {...(feedbackNotice === undefined ? {} : { message: feedbackNotice })}
+          {...(feedbackSelectionUnavailable === undefined
+            ? {}
+            : { selectionUnavailable: feedbackSelectionUnavailable })}
+          pointing={feedbackPointing.pointing}
+          onTogglePointing={feedbackPointing.toggle}
+          onCancel={() => {
+            feedbackPointing.cancel();
+            void feedback.cancel();
+          }}
+          onSubmit={feedback.commit}
+          onUpdate={feedback.update}
+          onDiscard={(note) => void feedback.discard(note)}
+          onRefresh={() => void feedback.refresh()}
         />
       )}
     </section>

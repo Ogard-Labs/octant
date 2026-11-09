@@ -351,6 +351,7 @@ export type CodeRuntimeDependencies = Pick<ServerStart, "options" | "persistence
     | "browserFlows"
     | "browserToolApprovalService"
     | "productFeedbackService"
+    | "resolveFeedbackThread"
   > &
   Pick<CanvasWiring, "canvasAgentToolPort"> &
   Pick<
@@ -446,6 +447,7 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
     persistence,
     probeProviderForThreads,
     productFeedbackService,
+    resolveFeedbackThread,
     projectPullRequestActionService,
     projectPullRequestCadence,
     projectPullRequestService,
@@ -1256,6 +1258,10 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
           }),
         takeProductFeedbackForTurn: createProductFeedbackTurnPort({
           service: productFeedbackService,
+          resolveScope: (windowId, threadId) => {
+            const scope = resolveFeedbackThread(windowId, threadId);
+            return scope?.mode === "code" ? scope : undefined;
+          },
         }),
         peekIssueContextFramed: peekCreateFromIssueFramed,
         consumeIssueContextFramed: consumeCreateFromIssueFramed,

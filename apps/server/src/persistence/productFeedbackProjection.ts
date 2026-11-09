@@ -2,6 +2,7 @@ import {
   ProductFeedbackCaptured,
   ProductFeedbackDelivered,
   ProductFeedbackDiscarded,
+  ProductFeedbackUpdated,
   decodeProductFeedbackNote,
   type EventEnvelope,
   type ProductFeedbackNote,
@@ -15,10 +16,12 @@ export const PRODUCT_FEEDBACK_AGGREGATE = "product-feedback-note";
 export const PRODUCT_FEEDBACK_CAPTURED = "feedback.note-captured@1";
 export const PRODUCT_FEEDBACK_DISCARDED = "feedback.note-discarded@1";
 export const PRODUCT_FEEDBACK_DELIVERED = "feedback.note-delivered@1";
+export const PRODUCT_FEEDBACK_UPDATED = "feedback.note-updated@1";
 
 const decodeCaptured = Schema.decodeUnknownSync(ProductFeedbackCaptured);
 const decodeDiscarded = Schema.decodeUnknownSync(ProductFeedbackDiscarded);
 const decodeDelivered = Schema.decodeUnknownSync(ProductFeedbackDelivered);
+const decodeUpdated = Schema.decodeUnknownSync(ProductFeedbackUpdated);
 
 interface ProductFeedbackRow {
   readonly note_json: string;
@@ -51,7 +54,9 @@ export class ProductFeedbackProjection implements Projection {
           ? decodeDiscarded(event.payload).note
           : event.eventName === PRODUCT_FEEDBACK_DELIVERED
             ? decodeDelivered(event.payload).note
-            : undefined;
+            : event.eventName === PRODUCT_FEEDBACK_UPDATED
+              ? decodeUpdated(event.payload).note
+              : undefined;
     if (note === undefined) return;
 
     connection

@@ -1,6 +1,7 @@
 export * from "./browserAgentAvailability";
 export * from "./questionnaire";
 export * from "./browserAutomationPolicy";
+export * from "./browserElementFeedback";
 export * from "./browserDownloadPolicy";
 export * from "./browserPageSnapshot";
 export * from "./browserPageAudit";

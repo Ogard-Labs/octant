@@ -26,8 +26,8 @@ export class CodeEvidenceStore {
   readonly #clock: () => string;
   readonly #maxStoredBytes: number;
   readonly #maxEntries: number;
-  #storedBytes: number;
-  #entryCount: number;
+  #storedBytes = 0;
+  #entryCount = 0;
 
   constructor(options: {
     readonly connection: SqliteConnection;
@@ -41,6 +41,11 @@ export class CodeEvidenceStore {
     this.#clock = options.clock ?? (() => new Date().toISOString());
     this.#maxStoredBytes = options.maxStoredBytes ?? DEFAULT_MAX_STORED_BYTES;
     this.#maxEntries = options.maxEntries ?? DEFAULT_MAX_ENTRIES;
+    this.reconcileCapacity();
+  }
+
+  /** Re-read accounting after an owning transaction rolls back an admitted put. */
+  reconcileCapacity(): void {
     const capacity = this.#connection
       .prepare(
         `SELECT COUNT(*) AS entry_count, COALESCE(SUM(byte_length), 0) AS stored_bytes

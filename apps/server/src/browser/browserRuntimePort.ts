@@ -140,28 +140,13 @@ export interface BrowserTargetInspection {
  * `bounds` is normalized to the viewport, so a caller can draw the same box the
  * host cropped without knowing the page's pixel size.
  */
-export interface BrowserPointDescription {
-  readonly selector: string;
-  readonly role?: string;
-  readonly accessibleName?: string;
-  readonly text?: string;
-  readonly bounds: {
-    readonly x: number;
-    readonly y: number;
-    readonly width: number;
-    readonly height: number;
-  };
-}
+export type BrowserPointDescription = Extract<
+  import("@octant/contracts/product-feedback").ProductFeedbackPointObservation,
+  { readonly status: "described" }
+>["element"];
 
 export type BrowserPointObservation =
-  | {
-      readonly status: "described";
-      readonly element: BrowserPointDescription;
-      readonly cropDataUrl?: string;
-      readonly url?: string;
-      readonly title?: string;
-    }
-  | { readonly status: "no-element" };
+  import("@octant/contracts/product-feedback").ProductFeedbackPointObservation;
 
 /**
  * A navigation was refused because the page tried to move to an origin outside
@@ -383,6 +368,7 @@ export interface BrowserRuntimePort {
     contextId: BrowserContextId,
     point: { readonly x: number; readonly y: number },
     signal: AbortSignal,
+    selectionId?: string,
   ) => Promise<BrowserPointObservation>;
   /**
    * Look at the page as it stands without acting on it: address, title, and

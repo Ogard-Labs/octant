@@ -7,7 +7,6 @@ import { crc32 } from "@octant/domain";
 import type { BrowserActionRequest, BrowserContextId } from "@octant/contracts";
 import { describe, expect, it, vi } from "vitest";
 import {
-  describeElementAtPoint,
   PlaywrightBrowserRuntime,
   type PlaywrightBrowserPort,
   type PlaywrightContextPort,
@@ -946,154 +945,186 @@ function onePixelPng(width = 1): Uint8Array {
   );
 }
 
-describe("naming the element a user pointed at", () => {
-  const described = {
-    selector: "main > button:nth-of-type(2)",
-    role: "button",
-    accessibleName: "Save changes",
-    text: "Save changes",
-    bounds: { x: 0.25, y: 0.5, width: 0.1, height: 0.05 },
-  };
+describe("bounded headless element feedback", () => {
+  async function feedbackFixture() {
+    const f = harness();
+    await f.runtime.createContext(firstId, policy, new AbortController().signal);
+    const page = f.pages[0]!;
+    await page.goto("https://example.com/page");
+    let absent = false;
+    let screenshot: (() => Promise<unknown>) | undefined;
+    const send = vi.fn(async (method: string): Promise<unknown> => {
+      switch (method) {
+        case "Page.getFrameTree":
+          return { frameTree: { frame: { id: "top", loaderId: "document-1", url: page.url() } } };
+        case "Page.getLayoutMetrics":
+          return {
+            cssVisualViewport: {
+              clientWidth: 1280,
+              clientHeight: 720,
+              pageX: 0,
+              pageY: 0,
+              offsetX: 0,
+              offsetY: 0,
+              scale: 1,
+            },
+          };
+        case "DOM.getDocument":
+          return { root: { nodeName: "#document", children: [] } };
+        case "DOM.getNodeForLocation":
+          return { frameId: "top", backendNodeId: 42 };
+        case "Page.createIsolatedWorld":
+          return { executionContextId: 7 };
+        case "Runtime.evaluate":
+          return {
+            result: {
+              value: {
+                title: "Example",
+                read: absent
+                  ? null
+                  : {
+                      element: {
+                        selector: "#save",
+                        text: "Save changes",
+                        bounds: { x: 0.25, y: 0.5, width: 0.1, height: 0.05 },
+                      },
+                      context: {
+                        viewport: { width: 1280, height: 720 },
+                        tag: "button",
+                        ancestors: ["main"],
+                        children: [],
+                        styles: [{ property: "color", value: "black" }],
+                        omissions: [],
+                      },
+                      cropBounds: { x: 296, y: 336, width: 176, height: 84 },
+                      cropBlocked: false,
+                    },
+              },
+            },
+          };
+        case "Page.captureScreenshot":
+          return screenshot?.() ?? { data: "/9j/AA==" };
+        default:
+          throw Error("Unexpected protocol method");
+      }
+    });
+    const detach = vi.fn(async () => undefined);
+    const session = { send, detach };
+    const open = vi.fn(async () => session);
+    page.context = () => ({ newCDPSession: open });
+    return {
+      ...f,
+      page,
+      send,
+      detach,
+      open,
+      session,
+      absent: () => {
+        absent = true;
+      },
+      screenshot: (effect: () => Promise<unknown>) => {
+        screenshot = effect;
+      },
+    };
+  }
 
-  it("cuts a crop with room around the element and reports where it sat", async () => {
-    const { pages, runtime } = harness();
-    await runtime.createContext(firstId, policy, new AbortController().signal);
-    const page = pages[0]!;
-    (page.evaluate as ReturnType<typeof vi.fn>).mockResolvedValue(described);
-
-    const observation = await runtime.describePoint(
+  it("uses the shared bounded DOM/style/crop sequence on a dedicated session", async () => {
+    const f = await feedbackFixture();
+    const result = await f.runtime.describePoint(
       firstId,
       { x: 0.3, y: 0.52 },
       new AbortController().signal,
     );
-
-    if (observation.status !== "described") throw new Error("expected a described element");
-    expect(observation.element).toEqual(described);
-    expect(observation.cropDataUrl).toMatch(/^data:image\/jpeg;base64,/);
-    // 1280x720 viewport, 24px of air on each side, clamped to the page.
-    expect(page.screenshot).toHaveBeenCalledWith({
-      type: "jpeg",
+    expect(result).toMatchObject({
+      status: "described",
+      cropDataUrl: "data:image/jpeg;base64,/9j/AA==",
+      element: {
+        selector: "#save",
+        context: {
+          captureId: expect.stringMatching(/^[a-f0-9]{64}$/),
+          styles: [{ property: "color", value: "black" }],
+        },
+      },
+    });
+    expect(f.send).toHaveBeenCalledWith("Page.captureScreenshot", {
+      format: "jpeg",
       quality: 60,
-      scale: "css",
-      clip: { x: 296, y: 336, width: 176, height: 84 },
+      captureBeyondViewport: false,
+      clip: { x: 296, y: 336, width: 176, height: 84, scale: 1 },
     });
+    expect(f.page.screenshot).not.toHaveBeenCalled();
+    expect(f.detach).toHaveBeenCalledOnce();
+    await f.runtime.closeAll();
   });
 
-  it("says there is nothing there rather than inventing an element", async () => {
-    const { pages, runtime } = harness();
-    await runtime.createContext(firstId, policy, new AbortController().signal);
-    (pages[0]!.evaluate as ReturnType<typeof vi.fn>).mockResolvedValue(null);
-
+  it("reports no element without creating a picture", async () => {
+    const f = await feedbackFixture();
+    f.absent();
     expect(
-      await runtime.describePoint(firstId, { x: 0.5, y: 0.5 }, new AbortController().signal),
+      await f.runtime.describePoint(firstId, { x: 0.3, y: 0.52 }, new AbortController().signal),
     ).toEqual({ status: "no-element" });
+    expect(f.send.mock.calls.some(([method]) => method === "Page.captureScreenshot")).toBe(false);
+    expect(f.detach).toHaveBeenCalledOnce();
+    await f.runtime.closeAll();
   });
 
-  it("keeps the note without a picture when the crop cannot be taken", async () => {
-    const { pages, runtime } = harness();
-    await runtime.createContext(firstId, policy, new AbortController().signal);
-    const page = pages[0]!;
-    (page.evaluate as ReturnType<typeof vi.fn>).mockResolvedValue(described);
-    (page.screenshot as ReturnType<typeof vi.fn>).mockRejectedValue(new Error("no picture"));
-
-    const observation = await runtime.describePoint(
+  it("retains bounded context and an honest omission when the crop fails", async () => {
+    const f = await feedbackFixture();
+    f.screenshot(async () => {
+      throw Error("Unavailable");
+    });
+    const result = await f.runtime.describePoint(
       firstId,
       { x: 0.3, y: 0.52 },
       new AbortController().signal,
     );
-
-    if (observation.status !== "described") throw new Error("expected a described element");
-    expect(observation.cropDataUrl).toBeUndefined();
-  });
-});
-
-describe("the description the page itself produces", () => {
-  interface FakeElement {
-    tagName: string;
-    textContent: string;
-    children: FakeElement[];
-    parentElement: FakeElement | null;
-    getAttribute: (attribute: string) => string | null;
-    getBoundingClientRect: () => {
-      left: number;
-      top: number;
-      width: number;
-      height: number;
-    };
-  }
-
-  function fakeElement(input: {
-    readonly tagName: string;
-    readonly id?: string;
-    readonly ariaLabel?: string;
-    readonly textContent?: string;
-    readonly parent?: FakeElement;
-  }): FakeElement {
-    const element: FakeElement = {
-      tagName: input.tagName,
-      textContent: input.textContent ?? "",
-      children: [],
-      parentElement: input.parent ?? null,
-      getAttribute: (attribute) =>
-        attribute === "id"
-          ? (input.id ?? null)
-          : attribute === "aria-label"
-            ? (input.ariaLabel ?? null)
-            : null,
-      getBoundingClientRect: () => ({ left: 320, top: 360, width: 128, height: 36 }),
-    };
-    input.parent?.children.push(element);
-    return element;
-  }
-
-  function withDocument(element: FakeElement | null, run: () => void): void {
-    const previous = (globalThis as { document?: unknown }).document;
-    (globalThis as { document?: unknown }).document = { elementFromPoint: () => element };
-    try {
-      run();
-    } finally {
-      (globalThis as { document?: unknown }).document = previous;
-    }
-  }
-
-  const argument = { x: 320, y: 360, viewportWidth: 1280, viewportHeight: 720 };
-
-  it("prefers an element's own id over a structural path", () => {
-    const parent = fakeElement({ tagName: "MAIN" });
-    const element = fakeElement({ tagName: "BUTTON", id: "save", parent });
-    withDocument(element, () => {
-      expect(describeElementAtPoint(argument)?.selector).toBe("#save");
+    expect(result).toMatchObject({
+      status: "described",
+      element: { context: { omissions: ["crop-unavailable"] } },
     });
+    expect("cropDataUrl" in result).toBe(false);
+    await f.runtime.closeAll();
   });
 
-  it("counts an element among its like siblings when it has no id", () => {
-    const parent = fakeElement({ tagName: "MAIN" });
-    fakeElement({ tagName: "BUTTON", parent });
-    const element = fakeElement({ tagName: "BUTTON", parent });
-    withDocument(element, () => {
-      expect(describeElementAtPoint(argument)?.selector).toContain("button:nth-of-type(2)");
-    });
+  it("pauses credential observations before DOM or crop reads", async () => {
+    const f = await feedbackFixture();
+    vi.mocked(f.page.frames()[0]!.evaluate).mockResolvedValue(true);
+    expect(
+      await f.runtime.describePoint(firstId, { x: 0.3, y: 0.52 }, new AbortController().signal),
+    ).toEqual({ status: "unavailable", reason: "observation-paused" });
+    expect(f.send).not.toHaveBeenCalled();
+    await vi.waitFor(() => expect(f.detach).toHaveBeenCalledOnce());
+    await f.runtime.closeAll();
   });
 
-  it("normalizes the element's box to the viewport and bounds its text", () => {
-    const parent = fakeElement({ tagName: "MAIN" });
-    const element = fakeElement({
-      tagName: "BUTTON",
-      ariaLabel: "Save changes",
-      textContent: "  Save   changes  ",
-      parent,
-    });
-    withDocument(element, () => {
-      const described = describeElementAtPoint(argument);
-      expect(described?.bounds).toEqual({ x: 0.25, y: 0.5, width: 0.1, height: 0.05 });
-      expect(described?.accessibleName).toBe("Save changes");
-      expect(described?.text).toBe("Save changes");
-    });
+  it("settles an ignored crop abort without publishing a late result", async () => {
+    const f = await feedbackFixture();
+    const held = Promise.withResolvers<unknown>();
+    f.screenshot(() => held.promise);
+    const abort = new AbortController();
+    const pending = f.runtime.describePoint(firstId, { x: 0.3, y: 0.52 }, abort.signal);
+    await vi.waitFor(() =>
+      expect(f.send.mock.calls.some(([method]) => method === "Page.captureScreenshot")).toBe(true),
+    );
+    abort.abort();
+    await expect(pending).resolves.toEqual({ status: "unavailable", reason: "page-changed" });
+    held.resolve({ data: "/9j/AA==" });
+    expect(f.detach).toHaveBeenCalledOnce();
+    await f.runtime.closeAll();
   });
 
-  it("reports nothing when the point lands on no element at all", () => {
-    withDocument(null, () => {
-      expect(describeElementAtPoint(argument)).toBeNull();
-    });
+  it("releases a dedicated session that opens after its request retired", async () => {
+    const f = await feedbackFixture();
+    const held = Promise.withResolvers<typeof f.session>();
+    f.open.mockImplementation(() => held.promise);
+    const abort = new AbortController();
+    const pending = f.runtime.describePoint(firstId, { x: 0.3, y: 0.52 }, abort.signal);
+    await vi.waitFor(() => expect(f.open).toHaveBeenCalledOnce());
+    abort.abort();
+    await expect(pending).resolves.toEqual({ status: "unavailable", reason: "page-changed" });
+    held.resolve(f.session);
+    await vi.waitFor(() => expect(f.detach).toHaveBeenCalledOnce());
+    expect(f.send).not.toHaveBeenCalled();
+    await f.runtime.closeAll();
   });
 });

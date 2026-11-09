@@ -234,6 +234,7 @@
       "name": "@octant/host-runtime",
       "dependencies": {
         "@octant/contracts": "workspace:*",
+        "@octant/domain": "workspace:*",
       },
       "devDependencies": {
         "tsdown": "0.22.5",

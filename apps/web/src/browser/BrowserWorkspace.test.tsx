@@ -1045,6 +1045,59 @@ describe("BrowserWorkspace", () => {
     expect(screen.getByText("Browser running")).toBeVisible();
   });
 
+  it("refuses element selection in an embedded native-client presentation", async () => {
+    const restoreDom = stubNativeSurfaceDom();
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(
+        async () =>
+          new Response(JSON.stringify({ notes: [] }), {
+            headers: { "content-type": "application/json" },
+          }),
+      ),
+    );
+    try {
+      const browser = client();
+      vi.mocked(browser.inspectThread).mockResolvedValue({
+        status: "running",
+        threadId,
+        context,
+        evidence: [],
+      } as any);
+      render(
+        <BrowserWorkspace
+          client={browser}
+          serverUrl="http://localhost:9999"
+          windowCapability="local-capability"
+          hostBridge={
+            {
+              getHostCapabilities: async () => ({
+                liveBrowserSupported: true,
+                embeddedBrowserSupported: true,
+              }),
+              presentBrowser: async () => ({ status: "refused" }),
+            } as any
+          }
+          tab={{
+            kind: "browser",
+            id: "90000000-0000-4000-8000-000000000020" as any,
+            mode: "work",
+            title: "Browser",
+            threadId: threadId as any,
+          }}
+        />,
+      );
+      expect(
+        await screen.findByText(
+          "Element selection is not available in this embedded Browser presentation yet.",
+        ),
+      ).toBeVisible();
+      expect(screen.getByRole("button", { name: "Point at something" })).toBeDisabled();
+    } finally {
+      restoreDom();
+    }
+  });
+
   it("detaches the native surface when an in-flight attach resolves after unmount", async () => {
     const restoreDom = stubNativeSurfaceDom();
     try {

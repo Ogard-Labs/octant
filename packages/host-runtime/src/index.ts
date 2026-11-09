@@ -298,6 +298,7 @@ export {
   type GithubActionsCompletedRun,
 } from "./githubActionsSource";
 
+export * from "./browserPointCapture";
 export {
   createWindowsListenerTlsFiles,
   type WindowsListenerTlsFiles,

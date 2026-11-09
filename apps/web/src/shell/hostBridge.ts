@@ -465,6 +465,12 @@ export interface OctantHostBridge
       readonly command: BrowserSurfaceTabCommand;
     },
   ) => Promise<BrowserSurfaceState>;
+  readonly selectBrowserSurfacePoint?: (
+    request: Omit<BrowserSurfaceRequest, "bounds"> & {
+      readonly enabled: boolean;
+      readonly requestId: string;
+    },
+  ) => Promise<BrowserSurfaceState>;
   /**
    * The desktop app's own update path. Absent on a remote client, which is
    * served by a host it does not update.

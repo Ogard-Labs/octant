@@ -1,3 +1,4 @@
+import { createProductFeedbackTurnPort } from "../browser/productFeedbackTurnPort";
 import { decodeBrowserThreadId } from "@octant/contracts";
 import { browserToolTransport } from "@octant/domain";
 import { threadWorkingDirectoryCurrent } from "../threadWorkingDirectoryAuthority";
@@ -199,6 +200,8 @@ export type WorkDependencies = Pick<ServerStart, "persistence"> &
     | "browserAutomationService"
     | "browserFlows"
     | "browserToolApprovalService"
+    | "productFeedbackService"
+    | "resolveFeedbackThread"
     | "windowHoldsProject"
   > &
   Pick<CodeRuntimeWiring, "codeService" | "routeCodeService"> &
@@ -243,6 +246,8 @@ export function wireWork(deps: WorkDependencies) {
     browserModelBindings,
     browserFlows,
     browserToolApprovalService,
+    productFeedbackService,
+    resolveFeedbackThread,
     canAccessCodeProject,
     canvasAgentToolPort,
     canvasService,
@@ -410,7 +415,17 @@ export function wireWork(deps: WorkDependencies) {
       }),
       projectLabel: (projectId) => persistence.readProject(projectId as ProjectId)?.name,
     });
+
+    const feedbackTurns = createProductFeedbackTurnPort({ service: productFeedbackService });
     const workTurnService = new WorkTurnService({
+      prepareProductFeedbackForTurn: (input) => {
+        const scope = resolveFeedbackThread(input.windowId, input.threadId);
+        if (scope?.mode !== "work") return undefined;
+        return feedbackTurns.prepare({
+          ...input,
+          current: () => input.current() && scope.current(),
+        });
+      },
       moveHold: (threadId) => deps.threadMoveHolds.isHeld({ mode: "work", threadId }),
       conversationInputTransfer,
       liveTurns,

@@ -55,6 +55,7 @@ const ROUTES = new Set([
   "/v1/available",
   "/v1/contexts/create",
   "/v1/contexts/inspect-target",
+  "/v1/contexts/describe-point",
   "/v1/contexts/gone",
   "/v1/contexts/person-input",
   "/v1/contexts/act",
@@ -469,6 +470,25 @@ async function handleBrokerRequest(
         return failure("invalid-request", 400);
       }
       return Response.json(await host.inspectTarget(body.contextId, body.selector));
+    }
+    if (url.pathname === "/v1/contexts/describe-point") {
+      if (
+        Object.keys(body).length !== 3 ||
+        !isUuid(body.contextId) ||
+        !isUuid(body.selectionId) ||
+        !isViewportPoint(body.point) ||
+        Object.keys(body.point).length !== 2
+      ) {
+        return failure("invalid-request", 400);
+      }
+      return Response.json(
+        await host.describePoint(
+          body.contextId,
+          body.point,
+          signal ?? request.signal,
+          body.selectionId,
+        ),
+      );
     }
     if (url.pathname === "/v1/contexts/peek") {
       if (!isUuid(body.contextId)) return failure("invalid-request", 400);
