@@ -143,7 +143,7 @@ describe("which live tools the dock may offer", () => {
     }
   });
 
-  it("keeps a Work thread on a server off the Files, terminal and other tools that read this host", () => {
+  it("offers server Work files while keeping host-backed tools unavailable", () => {
     const capabilities = {
       hasPlanArtifact: true,
       hasDelivery: true,
@@ -155,10 +155,10 @@ describe("which live tools the dock may offer", () => {
       hasExistingThread: true,
       serverWork: true,
     } as const;
-    for (const surface of ["plan", "canvas", "document", "side-chat", "agents"] as const) {
+    for (const surface of ["plan", "canvas", "document", "side-chat", "agents", "files"] as const) {
       expect(isDockToolLaunchable(surface as never, capabilities)).toBe(true);
     }
-    for (const surface of ["files", "terminal", "tests", "review", "browser"] as const) {
+    for (const surface of ["terminal", "tests", "review", "browser"] as const) {
       expect(isDockToolLaunchable(surface as never, capabilities)).toBe(false);
       expect(isDockToolStillOpenable(surface as never, capabilities)).toBe(false);
     }
