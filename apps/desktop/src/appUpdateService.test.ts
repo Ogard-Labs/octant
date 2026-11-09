@@ -2,6 +2,7 @@ import { createHash, generateKeyPairSync, sign } from "node:crypto";
 import { EventEmitter } from "node:events";
 import { Server } from "node:http";
 import { Readable } from "node:stream";
+import { gzipSync } from "node:zlib";
 import type {
   AppReleaseRing,
   AppUpdateProduct,
@@ -571,6 +572,80 @@ describe("the update network boundary", () => {
       /invalid HTTP status/,
     );
     expect(incoming.destroyed).toBe(true);
+  });
+
+  it("decodes compressed responses before the updater applies its byte limit", async () => {
+    const document = JSON.stringify(signedFeed());
+    const compressed = gzipSync(document);
+    const incoming = Object.assign(Readable.from([compressed]), {
+      statusCode: 200,
+      statusMessage: "OK",
+      headers: {
+        "content-encoding": "gzip",
+        "content-length": String(compressed.byteLength),
+      },
+    });
+    const requestPort = Object.assign(new EventEmitter(), { end: vi.fn() });
+    const request = vi.fn((_options: unknown, respond: (message: typeof incoming) => void) => {
+      queueMicrotask(() => respond(incoming));
+      return requestPort;
+    }) as unknown as typeof import("node:https").request;
+    const fetchImpl = createPinnedUpdateFetch({
+      resolveAll: async () => ["93.184.216.34"],
+      request,
+    });
+
+    const response = await fetchImpl("https://updates.example.test/feed.json");
+
+    await expect(response.text()).resolves.toBe(document);
+    expect(response.headers.get("content-encoding")).toBeNull();
+    expect(response.headers.get("content-length")).toBeNull();
+  });
+
+  it("counts decoded rather than compressed feed bytes against the limit", async () => {
+    const compressed = gzipSync(JSON.stringify({ value: "a".repeat(64 * 1024) }));
+    const incoming = Object.assign(Readable.from([compressed]), {
+      statusCode: 200,
+      statusMessage: "OK",
+      headers: {
+        "content-encoding": "gzip",
+        "content-length": String(compressed.byteLength),
+      },
+    });
+    const requestPort = Object.assign(new EventEmitter(), { end: vi.fn() });
+    const request = vi.fn((_options: unknown, respond: (message: typeof incoming) => void) => {
+      queueMicrotask(() => respond(incoming));
+      return requestPort;
+    }) as unknown as typeof import("node:https").request;
+    const fetchImpl = createPinnedUpdateFetch({
+      resolveAll: async () => ["93.184.216.34"],
+      request,
+    });
+
+    await expect(fetchUpdateFeed(FEED_URL, identity, fetchImpl)).resolves.toEqual({
+      kind: "malformed",
+    });
+  });
+
+  it("rejects an invalid compressed body without an uncaught stream error", async () => {
+    const incoming = Object.assign(Readable.from([Buffer.from("not gzip")]), {
+      statusCode: 200,
+      statusMessage: "OK",
+      headers: { "content-encoding": "gzip" },
+    });
+    const requestPort = Object.assign(new EventEmitter(), { end: vi.fn() });
+    const request = vi.fn((_options: unknown, respond: (message: typeof incoming) => void) => {
+      queueMicrotask(() => respond(incoming));
+      return requestPort;
+    }) as unknown as typeof import("node:https").request;
+    const fetchImpl = createPinnedUpdateFetch({
+      resolveAll: async () => ["93.184.216.34"],
+      request,
+    });
+
+    const response = await fetchImpl("https://updates.example.test/feed.json");
+
+    await expect(response.arrayBuffer()).rejects.toThrow();
   });
 
   it.each([

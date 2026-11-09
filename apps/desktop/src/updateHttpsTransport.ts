@@ -2,6 +2,9 @@ import { lookup } from "node:dns/promises";
 import { request as httpsRequest } from "node:https";
 import { isIP } from "node:net";
 import { Readable } from "node:stream";
+import { createBrotliDecompress, createGunzip, createInflate } from "node:zlib";
+
+const MAX_CONTENT_ENCODINGS = 4;
 
 export class UpdateDestinationRefused extends Error {
   override readonly name = "UpdateDestinationRefused";
@@ -95,9 +98,18 @@ export function createPinnedUpdateFetch(
             }
             const nullBody = status === 204 || status === 205 || status === 304;
             if (nullBody) incoming.resume();
+            const decoded = nullBody
+              ? { body: null, decoded: false }
+              : decodeResponseBody(incoming, responseHeaders.get("content-encoding"));
+            if (decoded.decoded) {
+              responseHeaders.delete("content-encoding");
+              responseHeaders.delete("content-length");
+            }
             resolve(
               new Response(
-                nullBody ? null : (Readable.toWeb(incoming) as ReadableStream<Uint8Array>),
+                decoded.body === null
+                  ? null
+                  : (Readable.toWeb(decoded.body) as ReadableStream<Uint8Array>),
                 {
                   status,
                   ...(incoming.statusMessage === undefined
@@ -117,6 +129,35 @@ export function createPinnedUpdateFetch(
       request.end();
     });
   }) as typeof globalThis.fetch;
+}
+
+function decodeResponseBody(
+  incoming: Readable,
+  contentEncoding: string | null,
+): { readonly body: Readable; readonly decoded: boolean } {
+  const codings = (contentEncoding ?? "")
+    .split(",")
+    .map((coding) => coding.trim().toLowerCase())
+    .filter((coding) => coding !== "" && coding !== "identity");
+  if (codings.length === 0) return { body: incoming, decoded: false };
+  if (codings.length > MAX_CONTENT_ENCODINGS) {
+    throw new TypeError("The update response has too many content encodings.");
+  }
+  const decoders = codings.reverse().map((coding) => {
+    if (coding === "gzip" || coding === "x-gzip") return createGunzip();
+    if (coding === "deflate") return createInflate();
+    if (coding === "br") return createBrotliDecompress();
+    throw new TypeError("The update response uses an unsupported content encoding.");
+  });
+  // Canceling the Web stream destroys every Node stream in the composition
+  // with AbortError. The composition still propagates real errors downstream;
+  // these listeners keep cancellation from also escaping as an uncaught
+  // EventEmitter error in Electron's main process.
+  incoming.on("error", () => undefined);
+  for (const decoder of decoders) decoder.on("error", () => undefined);
+  let body = incoming;
+  for (const decoder of decoders) body = body.compose(decoder);
+  return { body, decoded: true };
 }
 
 export function isPrivateAddress(address: string): boolean {
