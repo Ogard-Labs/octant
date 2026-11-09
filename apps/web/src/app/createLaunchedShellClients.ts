@@ -1,5 +1,6 @@
 import {
   createAgentProfileClient,
+  createBenchmarksClient,
   createAutomationClient,
   createUsageDashboardClient,
   createSpendCeilingClient,
@@ -7,6 +8,7 @@ import {
   createRequestCoordinator,
   type AgentProfileClient,
   type AutomationClient,
+  type BenchmarksClient,
 } from "@octant/client-runtime";
 import { createAgentRunClient, type AgentRunClient } from "@octant/client-runtime/agent-run-client";
 import {
@@ -218,6 +220,7 @@ export interface LaunchedShellClients {
   readonly replicaSyncStatusClient: ReplicaSyncStatusClient;
   readonly shipClient: ShipClient;
   readonly usageClient: ReturnType<typeof createUsageClient>;
+  readonly benchmarksClient: BenchmarksClient;
   readonly localUsageHistoryClient: ReturnType<typeof createLocalUsageHistoryClient> | undefined;
   readonly usageDashboardClient: ReturnType<typeof createUsageDashboardClient>;
   readonly spendCeilingClient: ReturnType<typeof createSpendCeilingClient>;
@@ -387,6 +390,7 @@ export function createLaunchedShellClients(
     replicaSyncStatusClient: createReplicaSyncStatusClient(port),
     shipClient: options.shipClient ?? createShipClient(port),
     usageClient: createUsageClient(port),
+    benchmarksClient: createBenchmarksClient(port),
     usageDashboardClient: createUsageDashboardClient(port),
     spendCeilingClient: createSpendCeilingClient(port),
     protectedFilesClient: createProtectedFilesClient(port),

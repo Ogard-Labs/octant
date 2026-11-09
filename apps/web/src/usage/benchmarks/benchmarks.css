@@ -1,0 +1,296 @@
+/*
+ * Benchmarks page additions to the Usage styling. Tables, fields, and charts
+ * come from the shared recipes; these rules lay out the editor, the grid's
+ * cells, and the side-by-side answers. Every grid track is shrinkable, so at a
+ * phone width the page never scrolls sideways and a table scrolls inside its
+ * own container instead.
+ */
+
+.benchmarks {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.benchmark-visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+/* An absolutely placed label escapes the scroller's clip unless the scroller
+   is its containing block, and it widened the whole page at a phone width. */
+.usage-table-scroll:has(.benchmark-visually-hidden) {
+  position: relative;
+}
+
+.benchmark-link,
+.benchmark-sort {
+  padding: 0;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  white-space: normal;
+  background: none;
+  border: 0;
+  cursor: default;
+  justify-content: flex-start;
+}
+
+.benchmark-link:hover,
+.benchmark-sort:hover,
+.benchmark-link[aria-pressed="true"],
+.benchmark-link[aria-expanded="true"] {
+  text-decoration: underline;
+}
+
+.benchmark-sort {
+  color: inherit;
+  letter-spacing: inherit;
+}
+
+.usage-table th[aria-sort="ascending"] .benchmark-sort::after {
+  content: " ↑";
+}
+
+.usage-table th[aria-sort="descending"] .benchmark-sort::after {
+  content: " ↓";
+}
+
+/* A table cell stays a table cell: display:flex on the td pulled it out of the
+   row's width, so the icons ran past the table's edge at a phone width. */
+.usage-table td.benchmark-actions {
+  text-align: right;
+}
+
+.benchmark-actions > * + * {
+  margin-inline-start: var(--oct-space-1);
+}
+
+/* A long suite name truncates (its title carries the whole name) instead of
+   wrapping to several lines in a narrow column. */
+.benchmark-link--name {
+  display: block;
+  max-width: 16rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.benchmark-editor,
+.benchmark-import,
+.benchmark-contenders,
+.benchmark-contenders__group {
+  display: grid;
+  min-width: 0;
+  gap: var(--oct-space-3);
+}
+
+.benchmark-editor__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--oct-space-2);
+}
+
+.benchmark-editor__toggle {
+  display: flex;
+  align-items: center;
+  gap: var(--oct-space-2);
+  font-size: var(--oct-text-sm);
+}
+
+.benchmark-case {
+  display: grid;
+  min-width: 0;
+  gap: var(--oct-space-3);
+  margin: 0 0 var(--oct-space-3);
+  padding: var(--oct-space-3);
+  border: 1px solid var(--oct-border);
+  border-radius: var(--oct-radius-md);
+}
+
+.benchmark-case legend {
+  padding: 0 var(--oct-space-1);
+  color: var(--oct-muted);
+  font-size: var(--oct-text-xs);
+  float: left;
+}
+
+.benchmark-case legend + * {
+  clear: both;
+}
+
+.benchmark-case__row,
+.benchmark-builder__row {
+  display: grid;
+  min-width: 0;
+  align-items: end;
+  gap: var(--oct-space-2);
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 180px), 1fr));
+}
+
+.benchmark-checks {
+  display: grid;
+  gap: var(--oct-space-2);
+}
+
+.benchmark-checks__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--oct-space-2);
+}
+
+.benchmark-check {
+  display: grid;
+  min-width: 0;
+  align-items: center;
+  gap: var(--oct-space-2);
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 160px), 1fr));
+}
+
+.benchmark-estimate {
+  margin: 0;
+  font-size: var(--oct-text-sm);
+}
+
+.benchmark-headline {
+  display: grid;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  gap: var(--oct-space-3);
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 200px), 1fr));
+}
+
+.benchmark-headline li {
+  display: grid;
+  min-width: 0;
+  gap: var(--oct-space-1);
+  padding: var(--oct-space-3);
+  background: var(--oct-surface);
+  border: 1px solid var(--oct-border);
+  border-radius: var(--oct-radius-md);
+  font-size: var(--oct-text-xs);
+  overflow-wrap: anywhere;
+}
+
+.benchmark-headline strong {
+  font-size: var(--oct-text-lg);
+  font-weight: var(--oct-weight-medium);
+}
+
+.benchmark-comparisons {
+  display: grid;
+  min-width: 0;
+  gap: var(--oct-space-3);
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 280px), 1fr));
+}
+
+.benchmark-grid td,
+.benchmark-grid th {
+  vertical-align: top;
+}
+
+.benchmark-cell {
+  display: grid;
+  gap: var(--oct-space-1);
+  padding-bottom: var(--oct-space-2);
+}
+
+.benchmark-cell__state {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--oct-space-1);
+}
+
+.benchmark-cell__figures {
+  color: var(--oct-muted);
+}
+
+.benchmark-end-reason {
+  margin: 0;
+  font-size: var(--oct-text-sm);
+}
+
+.benchmark-compare__picker {
+  max-width: 360px;
+}
+
+.benchmark-compare__grid {
+  display: grid;
+  min-width: 0;
+  align-items: start;
+  gap: var(--oct-space-3);
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 280px), 1fr));
+}
+
+.benchmark-compare__column,
+.benchmark-compare__cell {
+  display: grid;
+  min-width: 0;
+  gap: var(--oct-space-2);
+}
+
+.benchmark-compare__cell {
+  padding: var(--oct-space-3);
+  background: var(--oct-surface);
+  border: 1px solid var(--oct-border);
+  border-radius: var(--oct-radius-md);
+  font-size: var(--oct-text-sm);
+}
+
+.benchmark-compare__cell-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--oct-space-2);
+}
+
+.benchmark-answer {
+  max-height: 320px;
+  margin: 0;
+  overflow: auto;
+  font-family: var(--oct-font-body);
+  font-size: var(--oct-text-sm);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.benchmark-figures {
+  display: grid;
+  margin: 0;
+  gap: var(--oct-space-1) var(--oct-space-3);
+  grid-template-columns: auto 1fr;
+  color: var(--oct-muted);
+  font-size: var(--oct-text-xs);
+  font-variant-numeric: tabular-nums;
+}
+
+.benchmark-figures dd {
+  margin: 0;
+  color: var(--oct-fg);
+}
+
+.benchmark-checks-result {
+  display: grid;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  gap: var(--oct-space-1);
+  font-size: var(--oct-text-xs);
+}
+
+.benchmark-checks-result li {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--oct-space-1);
+  overflow-wrap: anywhere;
+}
+
+.benchmark-judge {
+  margin: 0;
+  font-size: var(--oct-text-xs);
+  overflow-wrap: anywhere;
+}

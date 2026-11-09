@@ -256,6 +256,22 @@ describe("the turn diagnostics report", () => {
     expect(report.models.find((row) => row.modelId === "model-quiet")?.cache).toBeUndefined();
   });
 
+  it("counts the turns whose cost the model's cost sum covers, and none when no turn reported one", () => {
+    const priced = (startMinute: number, costUsd: number) =>
+      turn(startMinute, {
+        usage: { inputTokens: 100, outputTokens: 10, costUsd },
+      });
+    const unpriced = turn(3, { usage: { inputTokens: 100, outputTokens: 10 } });
+    const report = decodeTurnDiagnosticsReport(
+      buildTurnDiagnosticsReport([priced(0, 0.25), priced(1, 0.75), unpriced], options),
+    );
+    expect(report.models[0]).toMatchObject({ turns: 3, costUsd: 1, costTurns: 2 });
+
+    const none = decodeTurnDiagnosticsReport(buildTurnDiagnosticsReport([unpriced], options));
+    expect(none.models[0]).not.toHaveProperty("costUsd");
+    expect(none.models[0]).not.toHaveProperty("costTurns");
+  });
+
   it("places day buckets in the reader's time zone", () => {
     // 23:06 UTC on 7 November is already 8 November in Oslo (UTC+1).
     const report = buildTurnDiagnosticsReport([turn(0), turn(65)], {

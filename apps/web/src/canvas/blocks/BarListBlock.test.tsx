@@ -1,8 +1,9 @@
 import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
-import { CANVAS_SCHEMA_VERSION } from "@octant/contracts/canvas";
+import { CANVAS_SCHEMA_VERSION, decodeCanvasBlock } from "@octant/contracts/canvas";
 import type { CanvasActionRuntime } from "../canvasActionRuntime";
+import { BarListBlock } from "./BarListBlock";
 import { CanvasView } from "../CanvasView";
 import { canvasFixture, canvasSource } from "../test-fixtures";
 
@@ -148,5 +149,29 @@ describe("bar list block", () => {
     await user.click(screen.getByRole("button", { name: "Largest first ↓" }));
 
     expect(JSON.stringify(definitionInput)).toBe(before);
+  });
+});
+
+describe("reading figures in a chosen locale", () => {
+  const decoded = decodeCanvasBlock({
+    ...base,
+    blockId: "cost",
+    kind: "bar-list",
+    valueLabel: "Cost, US dollars",
+    format: "number",
+    rows: [{ label: "Model A", value: 1234.5 }],
+  });
+  if (decoded.kind !== "bar-list") throw new Error("expected a bar list");
+  const block = decoded;
+
+  it("reads the bar's figure in the given locale, not the system's", () => {
+    render(<BarListBlock block={block} locale="de" />);
+    expect(screen.getAllByText("1.234,5").length).toBeGreaterThan(0);
+  });
+
+  it("reads the figure with a decimal point when asked for English", () => {
+    render(<BarListBlock block={block} locale="en" />);
+    expect(screen.getAllByText("1,234.5").length).toBeGreaterThan(0);
+    expect(screen.queryByText("1.234,5")).toBeNull();
   });
 });

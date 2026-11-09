@@ -19,6 +19,7 @@ import type { useWorkSettings } from "../work/useWorkSettings";
 import type { useWorkThreadNavigation } from "../work/useWorkThreadNavigation";
 import type { createLaunchedShellClients } from "./createLaunchedShellClients";
 import type { ShellActions } from "./shellActions";
+import { openUsageSubject as openUsageSubjectThread } from "./usageSubjectOpener";
 
 type HostFederationLifecycle = NonNullable<
   ReturnType<typeof useHostFederationLifecycle>
@@ -27,7 +28,7 @@ type HostFederationLifecycle = NonNullable<
 export interface SettingsContainerProps {
   readonly actions: Pick<
     ShellActions,
-    "setUsageOpen" | "selectChatThread" | "selectWorkThread" | "selectCodeThread"
+    "openChatThread" | "setUsageOpen" | "selectChatThread" | "selectWorkThread" | "selectCodeThread"
   >;
   readonly allProjects: ReturnType<typeof useProjectController>["allProjects"];
   readonly availableFonts?: ReadonlyArray<string>;
@@ -117,6 +118,8 @@ export const SettingsContainer = memo(function SettingsContainer(props: Settings
     serverProjectsClient,
     usageClient,
     usageDashboardClient,
+    benchmarksClient,
+    chatClient,
   } = props.clients;
   const selectLocalPluginFolder = props.hostBridge?.selectLocalPluginFolder;
   const selectSkillFolder = props.hostBridge?.selectSkillFolder;
@@ -140,6 +143,13 @@ export const SettingsContainer = memo(function SettingsContainer(props: Settings
   const chatThreads = chatController.bootstrap?.threads;
   const workThreads = workNavigation.bootstrap?.threads;
   const codeThreads = codeController.bootstrap?.threads;
+  const codeProjects = useMemo(
+    () =>
+      allProjects
+        .filter((project) => project.type === "code")
+        .map((project) => ({ id: String(project.id), name: project.name })),
+    [allProjects],
+  );
   const usageNames = useMemo(() => {
     const names = new Map<string, string>();
     for (const instance of providerController.instances)
@@ -153,18 +163,35 @@ export const SettingsContainer = memo(function SettingsContainer(props: Settings
 
   // Only threads can be opened from Usage; any other subject stays put.
   const openUsageSubject = (subjectType: string, subjectId: string) => {
-    const select =
-      subjectType === "chat-thread"
-        ? actions.selectChatThread
-        : subjectType === "work-thread"
-          ? actions.selectWorkThread
-          : subjectType === "code-thread"
-            ? actions.selectCodeThread
-            : undefined;
-    if (select === undefined) return;
-    actions.setUsageOpen(false);
-    if (props.surface === "settings") controller.closeSettings();
-    select(subjectId);
+    const leaveUsage = () => {
+      actions.setUsageOpen(false);
+      if (props.surface === "settings") controller.closeSettings();
+    };
+    openUsageSubjectThread(subjectType, subjectId, {
+      selectChatThread: (id) => {
+        leaveUsage();
+        actions.selectChatThread(id);
+      },
+      selectWorkThread: (id) => {
+        leaveUsage();
+        actions.selectWorkThread(id);
+      },
+      selectCodeThread: (id) => {
+        leaveUsage();
+        actions.selectCodeThread(id);
+      },
+      openChatThread: (id, title, projectId) => {
+        leaveUsage();
+        return actions.openChatThread(id, title, projectId);
+      },
+      listedChatThreadIds: new Set(chatController.navigation.map((row) => String(row.threadId))),
+      chatThreadRow: (id) => {
+        const thread = chatThreads?.find((candidate) => String(candidate.id) === id);
+        return thread === undefined
+          ? undefined
+          : { title: thread.title, projectId: thread.projectId };
+      },
+    });
   };
 
   const usageSurface = (
@@ -190,6 +217,10 @@ export const SettingsContainer = memo(function SettingsContainer(props: Settings
         {...(pendingUsageFilter === undefined ? {} : { initialFilter: pendingUsageFilter })}
         usageQuery={usageClient}
         diagnosticsClient={usageClient}
+        benchmarksClient={benchmarksClient}
+        chatClient={chatClient}
+        providerSnapshot={providerController.snapshot}
+        codeProjects={codeProjects}
       />
     </Suspense>
   );
@@ -264,6 +295,9 @@ export const SettingsContainer = memo(function SettingsContainer(props: Settings
       githubClient={githubClient}
       integrationClient={linearClient}
       usageClient={usageClient}
+      benchmarksClient={benchmarksClient}
+      chatClient={chatClient}
+      codeProjects={codeProjects}
       onOpenUsageSubject={openUsageSubject}
       {...(providerUsageLimitsClient === undefined ? {} : { providerUsageLimitsClient })}
       {...(localUsageHistoryClient === undefined ? {} : { localUsageHistoryClient })}

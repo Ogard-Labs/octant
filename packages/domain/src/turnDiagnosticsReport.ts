@@ -76,6 +76,7 @@ interface ModelAccumulator {
   cache: { inputTokens: number; readTokens: number; writeTokens: number } | undefined;
   likelyCacheMisses: number;
   costUsd: number | undefined;
+  costTurns: number;
 }
 
 interface ToolAccumulator {
@@ -176,6 +177,7 @@ export function buildTurnDiagnosticsReport(
       }
       if (record.usage.costUsd !== undefined) {
         model.costUsd = (model.costUsd ?? 0) + record.usage.costUsd;
+        model.costTurns += 1;
       }
     }
     if (missedTurns.has(missKey(record.threadId, record.endedAt))) model.likelyCacheMisses += 1;
@@ -562,7 +564,7 @@ function toModelRow(model: ModelAccumulator): TurnDiagnosticsModelRow {
     outputTokens: model.outputTokens,
     ...(model.cache === undefined ? {} : { cache: { ...model.cache } }),
     likelyCacheMisses: model.likelyCacheMisses,
-    ...(model.costUsd === undefined ? {} : { costUsd: model.costUsd }),
+    ...(model.costUsd === undefined ? {} : { costUsd: model.costUsd, costTurns: model.costTurns }),
   };
 }
 
@@ -596,6 +598,7 @@ function newModel(record: TurnMetricsRecord): ModelAccumulator {
     cache: undefined,
     likelyCacheMisses: 0,
     costUsd: undefined,
+    costTurns: 0,
   };
 }
 

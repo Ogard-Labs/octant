@@ -9,6 +9,8 @@ import {
   type ReactNode,
   type RefObject,
 } from "react";
+import type { BenchmarksClient, ChatClient } from "@octant/client-runtime";
+import type { ProviderRegistrySnapshot } from "@octant/contracts/providers";
 import { settleSettingsRail } from "./settingsRailScroll";
 import type { SkillRootStatus } from "@octant/contracts/extension-rpc";
 import { useDebouncedValue } from "../lib/useDebouncedValue";
@@ -77,6 +79,7 @@ import { CodeSettingsView } from "../code/CodeSettingsView";
 import { UsageDashboard } from "../usage/UsageDashboard";
 import { ProviderUsageHistoryWorkspace } from "../usage/ProviderUsageHistoryWorkspace";
 import { TurnDiagnosticsWorkspace } from "../usage/TurnDiagnosticsWorkspace";
+import { BenchmarksWorkspace } from "../usage/benchmarks/BenchmarksWorkspace";
 import type { ProviderInstance } from "@octant/contracts";
 import type { LocalUsageHistoryClient } from "@octant/client-runtime/provider-usage-history-client";
 import type { CanvasClient } from "@octant/client-runtime/canvas-client";
@@ -236,6 +239,9 @@ export interface SettingsViewProps {
   readonly providerController?: ProviderController;
   readonly discoveryController?: DiscoveryController;
   readonly usageClient?: UsageClient;
+  readonly benchmarksClient?: BenchmarksClient;
+  readonly chatClient?: Pick<ChatClient, "thread">;
+  readonly codeProjects?: ReadonlyArray<{ readonly id: string; readonly name: string }>;
   readonly providerUsageLimitsClient?: ProviderUsageLimitsClient;
   readonly localUsageHistoryClient?: LocalUsageHistoryClient;
   /** Leaves Settings for a thread a Usage or Diagnostics row names. */
@@ -1259,6 +1265,14 @@ function ActiveSectionContent({
       return props.usageClient !== undefined ? (
         <UsageSettingsSection
           client={props.usageClient}
+          {...(props.benchmarksClient === undefined
+            ? {}
+            : { benchmarksClient: props.benchmarksClient })}
+          {...(props.chatClient === undefined ? {} : { chatClient: props.chatClient })}
+          {...(props.codeProjects === undefined ? {} : { codeProjects: props.codeProjects })}
+          {...(props.providerController?.snapshot === undefined
+            ? {}
+            : { providerSnapshot: props.providerController.snapshot })}
           {...(props.isNarrow === undefined ? {} : { isNarrow: props.isNarrow })}
           {...(props.localUsageHistoryClient === undefined
             ? {}
@@ -2899,19 +2913,24 @@ interface MaintenanceSectionProps extends SectionProps {
  */
 function UsageSettingsSection(props: {
   readonly client: UsageClient;
+  readonly benchmarksClient?: BenchmarksClient;
+  readonly chatClient?: Pick<ChatClient, "thread">;
+  readonly codeProjects?: ReadonlyArray<{ readonly id: string; readonly name: string }>;
+  readonly providerSnapshot?: ProviderRegistrySnapshot | undefined;
   readonly historyClient?: LocalUsageHistoryClient;
   readonly isNarrow?: boolean;
   readonly limits?: ReactNode;
   readonly providers?: ReadonlyArray<ProviderInstance>;
   readonly onOpenSubject?: (subjectType: string, subjectId: string) => void;
 }) {
-  const [source, setSource] = useState<"provider" | "octant" | "diagnostics">(
+  const [source, setSource] = useState<"provider" | "octant" | "diagnostics" | "benchmarks">(
     props.historyClient === undefined ? "octant" : "provider",
   );
   // Diagnostics reads the same host as Octant records, so it is always offered.
   const sourceControl = (
-    <OctantToggleGroup<"provider" | "octant" | "diagnostics">
+    <OctantToggleGroup<"provider" | "octant" | "diagnostics" | "benchmarks">
       aria-label="Usage source"
+      className="usage-source"
       value={[source]}
       onValueChange={(values) => {
         const next = values[0];
@@ -2923,6 +2942,9 @@ function UsageSettingsSection(props: {
       )}
       <OctantToggleGroupItem value="octant">Octant records</OctantToggleGroupItem>
       <OctantToggleGroupItem value="diagnostics">Diagnostics</OctantToggleGroupItem>
+      {props.benchmarksClient === undefined ? null : (
+        <OctantToggleGroupItem value="benchmarks">Benchmarks</OctantToggleGroupItem>
+      )}
     </OctantToggleGroup>
   );
   return (
@@ -2933,6 +2955,20 @@ function UsageSettingsSection(props: {
           embedded
           sourceControl={sourceControl}
           {...(props.providers === undefined ? {} : { providers: props.providers })}
+          {...(props.onOpenSubject === undefined ? {} : { onOpenSubject: props.onOpenSubject })}
+        />
+      ) : source === "benchmarks" && props.benchmarksClient !== undefined ? (
+        <BenchmarksWorkspace
+          client={props.benchmarksClient}
+          diagnosticsClient={props.client}
+          embedded
+          sourceControl={sourceControl}
+          {...(props.chatClient === undefined ? {} : { chatClient: props.chatClient })}
+          {...(props.codeProjects === undefined ? {} : { codeProjects: props.codeProjects })}
+          {...(props.providers === undefined ? {} : { providers: props.providers })}
+          {...(props.providerSnapshot === undefined
+            ? {}
+            : { providerSnapshot: props.providerSnapshot })}
           {...(props.onOpenSubject === undefined ? {} : { onOpenSubject: props.onOpenSubject })}
         />
       ) : source === "provider" && props.historyClient !== undefined ? (
