@@ -1204,11 +1204,27 @@ const timer = setInterval(() => {
     } finally {
       setPasteboard("");
     }
-    await afterListenerLabel("listener-move", "press-after", 3);
-    await observeUntil("listener-move-confirm", (snapshot) =>
-      hasText(snapshot, "Move remote listener?"),
+    // The pasted key leaves its button on screen. Settings names it Enable or
+    // Move depending on the listener status it last read.
+    const listenerButton = await observeScrolling(
+      "listener-apply",
+      (snapshot) => snapshot.texts.some((row) => /^(Enable|Move) listener/.test(row.text.trim())),
+      ["Private key (PEM)", "-----END PRIVATE KEY-----"],
     );
-    await pairedInput("listener-move-confirmed", "click", "Confirm move");
+    const applyLabel = listenerButton.texts.some((row) =>
+      row.text.trim().startsWith("Move listener"),
+    )
+      ? "Move"
+      : "Enable";
+    await pairedInput("listener-apply-click", "click", `${applyLabel} listener`);
+    await observeUntil("listener-apply-confirm", (snapshot) =>
+      hasText(snapshot, `${applyLabel} remote listener?`),
+    );
+    await pairedInput(
+      "listener-apply-confirmed",
+      "click",
+      applyLabel === "Move" ? "Confirm move" : "Confirm enable",
+    );
     await waitForProcessCleanup(
       async () => {
         if (
