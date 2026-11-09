@@ -36,6 +36,8 @@ import {
   type ThreadMoveProjectChoice,
   type ThreadMoveProjects,
   type ThreadMoveProjectsRequest,
+  type ThreadMoveRate,
+  type ThreadMoveSize,
   type UtcTimestamp,
 } from "@octant/contracts";
 import { mayActivateAnyway, recoverSourceMove } from "@octant/domain";
@@ -77,6 +79,15 @@ export const THREAD_MOVE_TICKET_LIFETIME_MS = 15 * 60_000;
 /** How long a destination keeps a transfer that stopped part way. */
 export const THREAD_MOVE_PARTIAL_LIFETIME_MS = 7 * 24 * 60 * 60 * 1000;
 const MAX_OPEN_TICKETS = 16;
+/**
+ * The rate an estimate assumes for a member no full chunk has been timed to
+ * yet: 1 MiB of parts a second, below what a home network or a private
+ * overlay between two of the person's computers usually carries, so the
+ * first estimate errs long rather than short.
+ */
+export const THREAD_MOVE_ASSUMED_BYTES_PER_SECOND = 1024 * 1024;
+/** The most recent full chunks to a member its measured rate is read from. */
+const RATE_SAMPLES_KEPT = 32;
 
 /** A part the source packed, as a file in the move's staging folder. */
 export interface PackedPart {
@@ -103,6 +114,11 @@ export interface ThreadMoveSourceHost {
   readonly freeze: (thread: MovedThreadReference) => void;
   readonly unfreeze: (thread: MovedThreadReference) => void;
   readonly isFrozen: (thread: MovedThreadReference) => boolean;
+  /**
+   * How much a move of the thread would send now, for the move sheet and
+   * Prepare to shut down. Read-only: it packs, freezes, and writes nothing.
+   */
+  readonly measure: (thread: MovedThreadReference) => Promise<ThreadMoveSize>;
   /** Writes the thread's parts into `folder`; exactly one part is the thread bundle. */
   readonly pack: (
     thread: MovedThreadReference,
@@ -279,12 +295,21 @@ interface Ticket {
   readonly threads?: ReadonlyArray<MovedThreadReference>;
 }
 
+interface ChunkTiming {
+  readonly bytes: number;
+  readonly ms: number;
+}
+
 const decodeMemberId = Schema.decodeUnknownSync(HubMemberId);
 const decodeMoveId = Schema.decodeUnknownSync(ThreadMoveId);
 
 export class ThreadMoveService {
   readonly #options: ThreadMoveServiceOptions;
   readonly #tickets = new Map<string, Ticket>();
+  // Each full chunk's round trip to a member, newest last, for the estimate.
+  // Kept for the life of this process: a rate from another day or network
+  // would mislead more than the stated default does.
+  readonly #chunkTimings = new Map<string, ReadonlyArray<ChunkTiming>>();
 
   constructor(options: ThreadMoveServiceOptions) {
     this.#options = options;
@@ -770,6 +795,23 @@ export class ThreadMoveService {
     }
   }
 
+  /**
+   * How fast a move to a member is expected to send: what the latest full
+   * chunks to it measured, or the stated default when none has been timed.
+   */
+  rateTo(memberId: string): ThreadMoveRate {
+    const timings = this.#chunkTimings.get(memberId) ?? [];
+    if (timings.length === 0) {
+      return { basis: "assumed", bytesPerSecond: THREAD_MOVE_ASSUMED_BYTES_PER_SECOND };
+    }
+    const bytes = timings.reduce((total, timing) => total + timing.bytes, 0);
+    const ms = timings.reduce((total, timing) => total + timing.ms, 0);
+    return {
+      basis: "measured",
+      bytesPerSecond: Math.max(1, Math.round((bytes * 1000) / Math.max(1, ms))),
+    };
+  }
+
   /** The person dismisses This thread can't move. */
   dismissFailure(thread: MovedThreadReference): void {
     const state = this.#options.state.load();
@@ -869,6 +911,7 @@ export class ThreadMoveService {
         );
         if (buffer.length > 0)
           await handle.read(buffer, 0, buffer.length, index * THREAD_MOVE_CHUNK_BYTES);
+        const sentAt = this.#options.now();
         const answer = await this.#send(current, THREAD_MOVE_ROUTES.chunk, {
           moveId: current.moveId,
           partId: part.partId,
@@ -884,6 +927,14 @@ export class ThreadMoveService {
             status: "stopped",
             outcome: await this.#fail(current, refusalReason(answer.body.reason)),
           };
+        }
+        // Only a full chunk the destination took is timed: a short one's time
+        // is mostly the round trip and would make every estimate far too long.
+        if (buffer.length === THREAD_MOVE_CHUNK_BYTES && chunks === index + 1) {
+          this.#timeChunk(String(current.targetMemberId), {
+            bytes: buffer.length,
+            ms: this.#options.now() - sentAt,
+          });
         }
         index = chunks;
         current = {
@@ -944,6 +995,11 @@ export class ThreadMoveService {
       departures: [...(state.departures ?? []), departure].slice(-THREAD_MOVE_DEPARTURES_KEPT),
     });
     return { status: "moved", destination, worktreeKept: erased.worktreeKept };
+  }
+
+  #timeChunk(memberId: string, timing: ChunkTiming): void {
+    const timings = this.#chunkTimings.get(memberId) ?? [];
+    this.#chunkTimings.set(memberId, [...timings, timing].slice(-RATE_SAMPLES_KEPT));
   }
 
   #refuseUnfrozen(thread: MovedThreadReference, reason: ThreadMoveFailureReason): MoveOutcome {

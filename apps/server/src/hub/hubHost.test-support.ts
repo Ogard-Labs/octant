@@ -717,6 +717,7 @@ export async function startHubTestHost(input: {
       freeze: () => {},
       unfreeze: () => {},
       isFrozen: () => false,
+      measure: async () => ({ status: "unknown" as const }),
       pack: async () => ({ status: "refused" as const, reason: "refused" as const }),
       erase: async () => ({ worktreeKept: false }),
     },

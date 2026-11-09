@@ -1032,7 +1032,23 @@ and questions.
   listed. Ignored files (build output, installed dependencies, `.env` files)
   never travel.
 - There is no size limit ([decision H22](#decisions)). A large thread or
-  worktree takes longer; the move sheet shows the size and an estimate.
+  worktree takes longer; the move sheet and Prepare to shut down show the
+  size and an estimate, read before anything freezes. The size is what a
+  move would send now: the thread bundle exactly, and for a Code thread
+  about its Git bundle, read as the on-disk size of the objects the head
+  reaches that no remote-tracking ref holds plus each changed or untracked
+  file Git does not ignore, counted once at its size on disk. Reading it
+  packs, freezes, and writes nothing (not even the index's stat cache), and a
+  thread that cannot be measured shows **Size unknown** and still moves. The
+  estimate divides the size by the rate the latest full chunks to that
+  member reached (up to the last 32 full 512 KiB chunks, kept while the host
+  runs), or by an assumed 1 MiB a second when no full chunk to that member
+  has been timed, and says which. A batch's moves run one after another, so
+  its estimate is its total's. Rationale: a short chunk's time is mostly the
+  round trip, so only full chunks set the rate; a rate from an earlier run
+  may be from another network, so it is not kept; and the assumed rate errs
+  long, because a person about to switch the computer off is better served
+  by an estimate that is too long than one that is too short.
 - Never: credentials and sign-ins, the provider's own session, remembered Full
   access, session grants and "always allow" answers, running terminals and
   processes, dev-server previews, Browser pages and profiles, device panes,
@@ -2270,8 +2286,7 @@ a numbered slice. Built, with these narrower readings:
     turn for a busy thread), and shows the progress line with Cancel move,
     Take back here, the This thread can't move notice with Choose another
     computer and Dismiss, the Arriving notice with Activate anyway, and the
-    Moved notice. What it does not do yet: sizes and an estimate in the
-    sheet, Stop and move, Hand over instead,
+    Moved notice. What it does not do yet: Stop and move, Hand over instead,
     an unlock other than this Mac's Touch ID, carry bulk parts, accept
     moves on the hub, or Prepare to shut down.
 
@@ -2307,8 +2322,8 @@ a numbered slice. Built, with these narrower readings:
     first…** while the window last saw this host in a hub with another
     member, and the dialog then ends with Quit Octant through the guarded
     quit. What it does not do yet: Hand over and Stop and move as row
-    choices, a row moving to a member other than the head's, sizes and an
-    estimate, the menu bar entry and progress, more than one destination's
+    choices, a row moving to a member other than the head's, the menu bar
+    entry and progress, more than one destination's
     unlock in turn, and carrying bulk parts.
 
     The eighth part is the handover's source side. **Hand over instead**, in
@@ -2409,6 +2424,24 @@ a numbered slice. Built, with these narrower readings:
     or a window reading another host, shows neither. What it
     does not do yet: Open there opening the thread in this window, and the
     estimate in the bar.
+
+    Sizes and an estimate are built for the move sheet and Prepare to shut
+    down. Two read-only window routes,
+    `/api/desktop/hub/thread-moves/sizes` (only for threads the window
+    shows) and `/api/desktop/hub/thread-moves/shutdown/sizes` (any thread
+    on this host, as the listing is), take one destination and up to 512
+    threads and answer each thread's size, by part, with the rate to that
+    destination as described under
+    [What moves](#moving-a-thread-to-another-member); at most four threads
+    are measured at once. The move sheet's What moves rows show the
+    conversation's and the checkout's sizes, with a total line, the
+    estimate, and its basis, and it opens and moves without waiting for
+    them. Prepare to shut down measures the rows its destination can take
+    when the list or the destination changes, shows each row's size, and
+    adds the total and estimate of the rows set to move to its summary,
+    with the basis under it. What it does not do yet: the conversation's
+    turn count and the branch's commit and `+`/`-` counts beside the sizes,
+    and sizes for bulk parts, which no move carries yet.
 
 Any slice that would deploy an Octant-operated service, create an account, or
 spend money stops for a separate maintainer action.

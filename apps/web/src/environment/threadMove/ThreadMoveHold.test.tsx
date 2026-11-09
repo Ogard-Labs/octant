@@ -51,6 +51,16 @@ function fakeClient(initial: unknown) {
       }
       return { status: "removed" };
     },
+    sizes: async () => ({
+      status: "read",
+      rate: { basis: "assumed", bytesPerSecond: 1_048_576 },
+      rows: [],
+    }),
+    shutdownSizes: async () => ({
+      status: "read",
+      rate: { basis: "assumed", bytesPerSecond: 1_048_576 },
+      rows: [],
+    }),
     shutdownListing: async () => ({ status: "listed", members: [], rows: [] }),
     shutdownChallenge: async () => ({ status: "refused", kind: "refused" }),
     shutdownStart: async () => ({ status: "refused", reason: "refused" }),

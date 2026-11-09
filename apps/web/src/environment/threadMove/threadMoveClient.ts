@@ -7,6 +7,7 @@ import {
   decodeShutdownStartOutcome,
   decodeThreadMoveChallengeOutcome,
   decodeThreadMoveDestinations,
+  decodeThreadMoveSizes,
   decodeThreadMoveStartOutcome,
   decodeThreadMoveThreadStatus,
   type HandoverContinueOutcome,
@@ -19,6 +20,7 @@ import {
   type ShutdownStartRequest,
   type ThreadMoveChallengeOutcome,
   type ThreadMoveDestinations,
+  type ThreadMoveSizes,
   type ThreadMoveStartOutcome,
   type ThreadMoveStartRequest,
   type ThreadMoveThreadStatus,
@@ -42,6 +44,11 @@ export interface ThreadMoveClient {
   readonly dismiss: (thread: MovedThreadReference) => Promise<void>;
   /** Remove worktree on a moved thread's tombstone: the folder its move kept here. */
   readonly removeKeptWorktree: (moveId: string) => Promise<KeptWorktreeRemoveOutcome>;
+  /** What moving the thread to a member would send, and how fast; read-only. */
+  readonly sizes: (
+    destinationMemberId: string,
+    threads: ReadonlyArray<MovedThreadReference>,
+  ) => Promise<ThreadMoveSizes>;
   /** Prepare to shut down: every thread here, and one unlocked batch per destination. */
   readonly shutdownListing: () => Promise<ShutdownListing>;
   readonly shutdownChallenge: (
@@ -49,6 +56,11 @@ export interface ThreadMoveClient {
     threads: ReadonlyArray<MovedThreadReference>,
   ) => Promise<ThreadMoveChallengeOutcome>;
   readonly shutdownStart: (request: ShutdownStartRequest) => Promise<ShutdownStartOutcome>;
+  /** The same sizes for any of this host's threads, as Prepare to shut down lists them. */
+  readonly shutdownSizes: (
+    destinationMemberId: string,
+    threads: ReadonlyArray<MovedThreadReference>,
+  ) => Promise<ThreadMoveSizes>;
   /** A Code thread that cannot move: what a handover would do, doing it, and taking it back. */
   readonly handoverPreview: (thread: MovedThreadReference) => Promise<HandoverOutcome>;
   readonly handOver: (
@@ -119,6 +131,8 @@ export function threadMoveClientOf(hub: HubAdministrationBridge): ThreadMoveClie
     },
     removeKeptWorktree: async (moveId) =>
       decodeKeptWorktreeRemoveOutcome(await call("thread-move-remove-kept-worktree", { moveId })),
+    sizes: async (destinationMemberId, threads) =>
+      decodeThreadMoveSizes(await call("thread-move-sizes", { destinationMemberId, threads })),
     shutdownListing: async () => decodeShutdownListing(await call("shutdown-listing", {})),
     shutdownChallenge: async (destinationMemberId, threads) =>
       decodeThreadMoveChallengeOutcome(
@@ -126,6 +140,8 @@ export function threadMoveClientOf(hub: HubAdministrationBridge): ThreadMoveClie
       ),
     shutdownStart: async (request) =>
       decodeShutdownStartOutcome(await call("shutdown-start", request)),
+    shutdownSizes: async (destinationMemberId, threads) =>
+      decodeThreadMoveSizes(await call("shutdown-sizes", { destinationMemberId, threads })),
     handoverPreview: async (thread) =>
       decodeHandoverOutcome(await call("handover-preview", { thread })),
     handOver: async (thread, destinationMemberId, choices) =>

@@ -180,6 +180,50 @@ async function indexDisk(root: string, indexFile: string, base: string): Promise
   await git(root, ["add", "-A", "--", "."], env);
 }
 
+/**
+ * About how many bytes a move of this checkout would bundle, read without
+ * writing anything, so the move sheet can show it before the thread freezes:
+ * the on-disk size of the objects the checkout's head reaches that no
+ * remote-tracking ref does (what the bundle leaves out the same way), plus
+ * the size of every changed or untracked file Git does not ignore. A changed
+ * file is counted once at its size on disk, though the bundle may carry two
+ * compressed versions of it, so the figure is an estimate either way.
+ */
+export async function measureCheckoutForMove(checkoutRoot: string): Promise<number> {
+  // A plain `git status` refreshes the index's stat cache and rewrites it;
+  // measuring must leave the checkout exactly as it was.
+  const readOnly = { GIT_OPTIONAL_LOCKS: "0" };
+  const commits = Number(
+    await git(
+      checkoutRoot,
+      ["rev-list", "--objects", "--disk-usage", "HEAD", "--not", "--remotes"],
+      readOnly,
+    ),
+  );
+  if (!Number.isSafeInteger(commits)) throw new Error("git reported no disk usage");
+  // Not through `git()`: trimming would eat the leading space of the first entry's status.
+  const { stdout } = await run(
+    "git",
+    ["status", "--porcelain=v1", "-z", "--untracked-files=all", "--no-renames"],
+    {
+      cwd: checkoutRoot,
+      env: { ...process.env, ...readOnly, GIT_TERMINAL_PROMPT: "0" },
+      maxBuffer: GIT_MAX_BUFFER,
+    },
+  );
+  let files = 0;
+  for (const entry of stdout.split("\0")) {
+    if (entry.length <= 3) continue;
+    const size = await stat(join(checkoutRoot, entry.slice(3))).then(
+      (found) => (found.isFile() ? found.size : 0),
+      // A deleted file sends nothing.
+      () => 0,
+    );
+    files += size;
+  }
+  return commits + files;
+}
+
 /** Drops the move's snapshot ref from a checkout once the move is settled. */
 export async function forgetMoveSnapshot(checkoutRoot: string, moveId: string): Promise<void> {
   await git(checkoutRoot, ["update-ref", "-d", moveSnapshotRef(moveId)]).catch(() => undefined);

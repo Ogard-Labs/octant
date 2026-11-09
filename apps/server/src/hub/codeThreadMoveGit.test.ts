@@ -1,4 +1,5 @@
 import { execFileSync } from "node:child_process";
+import { randomBytes } from "node:crypto";
 import {
   existsSync,
   mkdtempSync,
@@ -15,6 +16,7 @@ import {
   captureCheckoutForMove,
   checkoutStillMatchesMove,
   filesTheMoveLeft,
+  measureCheckoutForMove,
   receiveCheckoutFromMove,
   removeMovedOutWorktree,
 } from "./codeThreadMoveGit";
@@ -268,5 +270,31 @@ describe("the worktree a moved-out thread leaves behind", () => {
     expect(await removeMovedOutWorktree(stray)).toBe("not-a-linked-worktree");
     expect(existsSync(join(laptop, "app.ts"))).toBe(true);
     expect(existsSync(stray)).toBe(true);
+  });
+});
+
+describe("sizing a Code checkout before a move", () => {
+  it("measures nothing for a checkout its remote already holds", async () => {
+    const { laptop } = repositories();
+    expect(await measureCheckoutForMove(laptop)).toBe(0);
+  });
+
+  it("counts unpushed commits and changed files but not ignored ones, and writes nothing", async () => {
+    const { laptop } = repositories();
+    // Random bytes do not compress, so the object on disk is about the file's size.
+    writeFileSync(join(laptop, "data.bin"), randomBytes(200_000));
+    git(laptop, "add", "data.bin");
+    git(laptop, "commit", "-q", "-m", "not pushed yet");
+    writeFileSync(join(laptop, "notes.txt"), randomBytes(50_000));
+    writeFileSync(join(laptop, ".env"), randomBytes(400_000));
+    const indexBefore = statSync(join(laptop, ".git", "index")).mtimeMs;
+
+    const bytes = await measureCheckoutForMove(laptop);
+
+    expect(bytes).toBeGreaterThanOrEqual(250_000);
+    expect(bytes).toBeLessThan(300_000);
+    expect(git(laptop, "for-each-ref", "refs/octant")).toBe("");
+    expect(statSync(join(laptop, ".git", "index")).mtimeMs).toBe(indexBefore);
+    expect(git(laptop, "status", "--porcelain")).toBe("?? notes.txt");
   });
 });

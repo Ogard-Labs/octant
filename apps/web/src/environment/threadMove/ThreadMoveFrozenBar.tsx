@@ -1,7 +1,8 @@
 import type { MovedThreadReference, ThreadMoveThreadStatus } from "@octant/contracts";
 import { useState, type ReactNode } from "react";
 import { OctantButton } from "../../ui/base/OctantButton";
-import { formatBytes, percent } from "./ThreadMoveComputerCard";
+import { percent } from "./ThreadMoveComputerCard";
+import { formatBytes } from "./threadMoveSize";
 import type { ThreadMoveClient } from "./threadMoveClient";
 
 /**

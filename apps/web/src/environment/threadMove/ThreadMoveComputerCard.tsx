@@ -4,6 +4,8 @@ import {
   type ThreadMoveDestination,
   type ThreadMoveDestinations,
   type ThreadMoveFailureReason,
+  type ThreadMovePartKind,
+  type ThreadMoveSizes,
   type ThreadMoveThreadStatus,
   type ThreadMoveUnlockChallenge,
   type HandoverOutcome,
@@ -20,6 +22,7 @@ import { OctantSelectField } from "../../ui/base/OctantSelect";
 import { OctantSwitch } from "../../ui/base/OctantSwitch";
 import { EnvironmentCard, EnvironmentTile } from "../EnvironmentGroup";
 import type { ThreadMoveClient } from "./threadMoveClient";
+import { estimateBasis, formatBytes, sizeAndEstimate } from "./threadMoveSize";
 import { useThreadMove } from "./useThreadMove";
 
 export interface ThreadMoveComputerCardProps {
@@ -606,6 +609,8 @@ function ThreadMoveSheet(props: {
   const [working, setWorking] = useState(false);
   const [problem, setProblem] = useState<string | undefined>(undefined);
   const { member } = props;
+  const sizes = useMoveSizes(props.client, String(member.memberId), props.thread);
+  const size = typeof sizes === "string" ? undefined : sizes.rows[0]?.size;
 
   const moveWithUnlock = async () => {
     if (props.unlock === undefined) return;
@@ -680,14 +685,30 @@ function ThreadMoveSheet(props: {
       <section className="thread-move-sheet__section">
         <h3 className="thread-move-sheet__heading">What moves</h3>
         <ul className="thread-move-sheet__list">
-          <li>The conversation</li>
+          <li>
+            <span>The conversation</span>
+            <PartSize kind="thread-bundle" sizes={sizes} />
+          </li>
           {props.thread.mode === "code" ? (
-            <li>The branch, its unpushed commits, and the staged and unstaged changes</li>
+            <li>
+              <span>The branch, its unpushed commits, and the staged and unstaged changes</span>
+              <PartSize kind="git-bundle" sizes={sizes} />
+            </li>
           ) : null}
           {props.thread.mode === "work" ? (
             <li>Only the thread: the files in its folder stay on this computer</li>
           ) : null}
         </ul>
+        <p className="thread-move-sheet__total">
+          {sizes === "measuring"
+            ? "Measuring…"
+            : sizes === "unknown" || size === undefined
+              ? "Size unknown"
+              : sizeAndEstimate([size], sizes.rate)}
+        </p>
+        {typeof sizes === "string" || size?.status !== "measured" ? null : (
+          <p className="thread-move-sheet__basis">{estimateBasis(sizes.rate, member.name)}</p>
+        )}
       </section>
       <details className="thread-move-sheet__section">
         <summary className="thread-move-sheet__heading">Stays here</summary>
@@ -967,9 +988,45 @@ function useLiveAnnouncement(status: ThreadMoveThreadStatus | undefined): string
   return said;
 }
 
-export function formatBytes(bytes: number): string {
-  if (bytes < 1024) return `${String(bytes)} B`;
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(0)} KB`;
-  if (bytes < 1024 * 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
-  return `${(bytes / (1024 * 1024 * 1024)).toFixed(1)} GB`;
+/**
+ * What a move of the thread to the member would send, read when the sheet
+ * opens. The sheet opens at once and never waits on it; a failure reads as
+ * size unknown and leaves the move as it was.
+ */
+function useMoveSizes(
+  client: ThreadMoveClient,
+  memberId: string,
+  thread: MovedThreadReference,
+): ThreadMoveSizes | "measuring" | "unknown" {
+  const [sizes, setSizes] = useState<ThreadMoveSizes | "measuring" | "unknown">("measuring");
+  const { mode, threadId } = thread;
+  useEffect(() => {
+    let stopped = false;
+    setSizes("measuring");
+    client
+      .sizes(memberId, [{ mode, threadId }])
+      .then((read) => {
+        if (!stopped) setSizes(read);
+      })
+      .catch(() => {
+        if (!stopped) setSizes("unknown");
+      });
+    return () => {
+      stopped = true;
+    };
+  }, [client, memberId, mode, threadId]);
+  return sizes;
+}
+
+function PartSize(props: {
+  readonly sizes: ThreadMoveSizes | "measuring" | "unknown";
+  readonly kind: ThreadMovePartKind;
+}) {
+  if (typeof props.sizes === "string") return null;
+  const size = props.sizes.rows[0]?.size;
+  const part =
+    size?.status === "measured" ? size.parts.find((entry) => entry.kind === props.kind) : undefined;
+  return part === undefined ? null : (
+    <span className="thread-move-sheet__size">{formatBytes(part.bytes)}</span>
+  );
 }
