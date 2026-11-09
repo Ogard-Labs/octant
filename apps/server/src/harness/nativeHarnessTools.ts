@@ -475,12 +475,6 @@ async function execute(
       const input = args as NativeHarnessReadArguments;
       const outcome = await ports.filesystem!.read(input);
       if (outcome.kind === "refused") return refused(outcome.reason, outcome.message);
-      if (outcome.kind === "document") {
-        return refused(
-          "document-input-unsupported",
-          "This is a PDF, and Octant Harness cannot hand a PDF to the model yet.",
-        );
-      }
       if (outcome.kind !== "image") return ok(outcome);
       if (ports.readsImages?.() !== true) {
         return refused(

@@ -1294,7 +1294,8 @@ Every harness tool call is authorized under the thread's current authority befor
 - At Full access in Code a tainted thread records the taint and asks no confirmation.
 - An `edit` call may make several replacements across files. It is one call under one approval that names every file, and it is all or nothing: every replacement is checked first, a refusal names the one that failed and changes nothing, and a write that fails afterwards puts the call's earlier writes back.
 - Every tool result is hard-capped with a truncation marker and paging, and nothing variable enters the stable request prefix. _Here only._
-- `read` hands the model a PNG, JPEG, GIF or WebP image, recognized by its bytes and capped at one tool image, only when the session's model takes image input, and otherwise refuses with the reason. A PDF is refused until a harness endpoint carries documents in a tool result.
+- `read` hands the model a PNG, JPEG, GIF or WebP image, recognized by its bytes and capped at one tool image, only when the session's model takes image input, and otherwise refuses with the reason.
+- `read` returns a PDF, Word, PowerPoint or Excel file, recognized by content, as text from the file preview parsers under their limits, saying when they cut it, and refuses any other binary file as `binary-file`. Older Office formats, audio, video and archives are binary.
 - A lead's `skill` tool lists and loads only the skills effective for its thread under the activation ladder, refuses any other, and never installs, trusts, enables or activates one; it only reads, so Plan keeps it.
 
 Status: Built. Since: —. Detail: [Architecture: Native harness](../architecture.md#native-harness), [On-demand skills](../architecture.md#extensions-and-skills), and [Search queries on a tainted thread](search-query-taint.md).

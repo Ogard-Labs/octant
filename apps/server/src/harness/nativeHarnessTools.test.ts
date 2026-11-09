@@ -11,6 +11,7 @@ import {
 import { ToolCallAuthorityService, type ToolCallLiveFacts } from "../toolCallAuthorityService";
 import { GoalService } from "../goal/goalService";
 import { InMemoryGoalStore } from "../goal/goalService.test-support";
+import { buildPdfFixture } from "../preview/previewTestFixtures";
 import { NativeHarnessFileSystem } from "./nativeHarnessFileSystem";
 import { createNativeHarnessGoalPort } from "./nativeHarnessGoal";
 import { createNativeHarnessTools, type NativeHarnessToolPorts } from "./nativeHarnessTools";
@@ -129,7 +130,7 @@ describe("native harness tools", () => {
     expect((write.result as { error: string }).error).toBe("approval-required");
   });
 
-  describe("reading images and PDFs", () => {
+  describe("reading images, PDFs and other binary files", () => {
     const png = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 0]);
 
     it("hands an image to a model that takes images, beside a result that holds no pixels", async () => {
@@ -155,11 +156,16 @@ describe("native harness tools", () => {
       }
     });
 
-    it("refuses a PDF, since no harness endpoint takes a document in a tool result", async () => {
-      const { root, tools } = await fixture({}, { readsImages: () => true });
-      await writeFile(join(root, "paper.pdf"), "%PDF-1.7\n");
+    it("returns a PDF's page text to any model, and refuses other binary files with the reason", async () => {
+      const { root, tools } = await fixture();
+      await writeFile(join(root, "paper.pdf"), buildPdfFixture([["Findings"]]));
       expect(await call(tools, "read", { path: "paper.pdf" })).toMatchObject({
-        result: { error: "document-input-unsupported" },
+        result: { kind: "file", format: "pdf", lines: ["[Page 1]", "Findings"] },
+        isError: false,
+      });
+      await writeFile(join(root, "data.db"), Buffer.from("SQLite format 3\x00", "latin1"));
+      expect(await call(tools, "read", { path: "data.db" })).toMatchObject({
+        result: { error: "binary-file", message: expect.stringContaining("binary") },
         isError: true,
       });
     });

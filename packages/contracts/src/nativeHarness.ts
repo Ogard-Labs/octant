@@ -452,7 +452,7 @@ export const NATIVE_HARNESS_TOOL_DEFINITIONS: ReadonlyArray<ProviderToolDefiniti
   {
     name: "read",
     description:
-      "Read a file as numbered lines. Page with offset and limit; results are capped. A PNG, JPEG, GIF, or WebP image is returned as an image when the model takes images.",
+      "Read a file as numbered lines. Page with offset and limit; results are capped. A PDF, Word (.docx), PowerPoint (.pptx), or Excel (.xlsx) file is returned as its text, an Excel sheet as tab-separated rows. A PNG, JPEG, GIF, or WebP image is returned as an image when the model takes images. Other binary files are refused.",
     inputSchema: {
       type: "object",
       properties: {
