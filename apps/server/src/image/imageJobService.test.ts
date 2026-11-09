@@ -658,6 +658,43 @@ describe("image job service", () => {
     }
   });
 
+  it("records an image carried in with a moved thread under the new thread, once, without usage or a provider call", async () => {
+    const generate = vi.fn(successfulAdapter().generate);
+    const { service, connection } = openHarness({ generate });
+    const movedScope = decodeImageGenerationScopeId("a3000000-0000-4000-8000-000000000010");
+    const carried = {
+      jobId: "a3000000-0000-4000-8000-000000000011" as never,
+      threadKind: "chat-thread" as const,
+      scopeId: movedScope,
+      profileInstanceId: profileId,
+      modelId,
+      promptHash: "a".repeat(64) as never,
+      createdAt: now as never,
+      updatedAt: now as never,
+      images: [{ attachmentId: "a3000000-0000-4000-8000-000000000012" as never, bytes: png }],
+    };
+    await service.carryMovedJob(carried);
+    // A finish asked again after a lost answer carries the same job again.
+    await service.carryMovedJob(carried);
+
+    const jobs = service.listByScope(movedScope);
+    expect(jobs.map((job) => [job.id, job.status, job.artifacts.length])).toEqual([
+      [carried.jobId, "completed", 1],
+    ]);
+    const read = await service.readArtifact(
+      carried.jobId,
+      carried.images[0]?.attachmentId ?? ("" as never),
+    );
+    expect(read?.bytes).toEqual(png);
+    expect(generate).not.toHaveBeenCalled();
+    const dashboard = readUsageDashboard(
+      connection,
+      { filter: { requestShape: IMAGE_GENERATION_REQUEST_SHAPE } },
+      { queryAt: now, projectScope: { kind: "unfiled" } },
+    );
+    expect(dashboard.detail).toEqual([]);
+  });
+
   it("removes finalized attachments when completion cannot be journaled", async () => {
     const { service, directory, attachments } = openHarness(successfulAdapter(), {
       failAppendAfter: 2,

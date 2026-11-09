@@ -22,6 +22,7 @@ import { OctantSelectField } from "../../ui/base/OctantSelect";
 import { OctantSwitch } from "../../ui/base/OctantSwitch";
 import { EnvironmentCard, EnvironmentTile } from "../EnvironmentGroup";
 import type { ThreadMoveClient } from "./threadMoveClient";
+import { partsLeftBehindSentence } from "./ThreadMoveTombstone";
 import { estimateBasis, formatBytes, sizeAndEstimate } from "./threadMoveSize";
 import { useThreadMove } from "./useThreadMove";
 
@@ -606,6 +607,7 @@ function MovedNotice(props: {
     hour: "numeric",
     minute: "2-digit",
   });
+  const leftBehind = partsLeftBehindSentence(props.departed);
   return (
     <OctantAlert title={`Moved to ${props.departed.destinationName}`} tone="neutral">
       Moved at {time}.
@@ -614,6 +616,7 @@ function MovedNotice(props: {
           ? " Its changes also remain in this Project's checkout."
           : null
         : ` Its worktree held files that stayed here, so it was kept at ${props.departed.keptWorktree}.`}
+      {leftBehind === undefined ? null : ` ${leftBehind}`}
     </OctantAlert>
   );
 }
@@ -746,6 +749,9 @@ function ThreadMoveSheet(props: {
           <li>
             <span>The conversation</span>
             <PartSize kind="thread-bundle" sizes={sizes} />
+          </li>
+          <li>
+            <span>Its attachments, generated images, Browser captures, and Canvases</span>
           </li>
           {props.thread.mode === "code" ? (
             <li>
