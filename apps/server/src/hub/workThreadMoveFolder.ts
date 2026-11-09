@@ -20,7 +20,7 @@
 
 import { spawn } from "node:child_process";
 import { createHash } from "node:crypto";
-import { constants as fsConstants } from "node:fs";
+import { constants as fsConstants, realpathSync } from "node:fs";
 import {
   chmod,
   copyFile,
@@ -129,8 +129,9 @@ export type WorkThreadFolder =
 
 /**
  * Whether a Work thread is the only user of the folder it works in. Every
- * path is absolute and compared as written; the caller resolves each from
- * the host's own Project records.
+ * path is absolute; the caller resolves each from the host's own Project
+ * records, and each is compared by the real folder `realFolder` names, so a
+ * thread working through a link to this folder shares it.
  */
 export function workThreadOwnFolder(input: {
   readonly workingFolder:
@@ -138,20 +139,31 @@ export function workThreadOwnFolder(input: {
     | { readonly kind: "extra" }
     | { readonly kind: "unavailable" };
   readonly workingDirectory: ThreadWorkingDirectory | undefined;
+  /**
+   * Whether the thread still belongs to its Project's current binding. A
+   * Project relinked since names another folder, which the thread never
+   * worked in, so nothing there is its own.
+   */
+  readonly bindingCurrent: boolean;
+  /** The real folder a path names, links resolved; the path as written when it can't be read. */
+  readonly realFolder: (path: string) => string;
   /** Where every other Work thread on this host that is not deleted works. */
   readonly otherThreadFolders: ReadonlyArray<string>;
   /** Every folder every Project on this host is bound to, main and extra. */
   readonly projectFolders: ReadonlyArray<string>;
 }): WorkThreadFolder {
   const { workingFolder, workingDirectory } = input;
-  if (workingFolder.kind === "unavailable") return { status: "stays", reason: "unavailable" };
+  if (workingFolder.kind === "unavailable" || !input.bindingCurrent) {
+    return { status: "stays", reason: "unavailable" };
+  }
   if (workingFolder.kind === "extra") return { status: "stays", reason: "extra-folder" };
   if (workingDirectory === undefined || workingDirectory === ".") {
     return { status: "stays", reason: "project-folder" };
   }
   const folder = join(workingFolder.root, workingDirectory);
+  const realFolder = input.realFolder(folder);
   const isInside = (other: string) => {
-    const path = relative(folder, other);
+    const path = relative(realFolder, input.realFolder(other));
     return path === "" || (!isAbsolute(path) && path !== ".." && !path.startsWith(`..${sep}`));
   };
   // A thread working above the folder is not counted: the subfolder was the
@@ -161,6 +173,15 @@ export function workThreadOwnFolder(input: {
     return { status: "stays", reason: "shared" };
   }
   return { status: "own", folder, workingDirectory };
+}
+
+/** The real folder a path names, links resolved; the path as written when it can't be read. */
+export function realFolderOrAsWritten(path: string): string {
+  try {
+    return realpathSync(path);
+  } catch {
+    return path;
+  }
 }
 
 /**
@@ -208,9 +229,15 @@ export function workThreadFolderOf(input: {
           ? { kind: "main", root: project.binding.canonicalRoot }
           : { kind: "extra" };
   }
+  const currentBinding = project?.type === "work" ? project.bindingHistory.at(-1) : undefined;
   return workThreadOwnFolder({
     workingFolder,
     workingDirectory: input.thread.workingDirectory,
+    // A thread from before bindings were recorded on it is judged by the current one.
+    bindingCurrent:
+      input.thread.bindingRevisionId === undefined ||
+      String(input.thread.bindingRevisionId) === String(currentBinding?.revisionId),
+    realFolder: realFolderOrAsWritten,
     otherThreadFolders: input.threads
       .filter(
         (other) => String(other.id) !== String(input.thread.id) && other.lifecycle !== "deleted",

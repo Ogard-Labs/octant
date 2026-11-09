@@ -18,6 +18,7 @@ import { Schema } from "effect";
 import {
   captureWorkFolderForMove,
   MOVED_WORK_FOLDER_ENTRIES_MAX,
+  realFolderOrAsWritten,
   MovedWorkFolder as MovedWorkFolderSchema,
   settleMovedWorkFolder,
   workThreadOwnFolder,
@@ -287,11 +288,15 @@ describe("clearing a Work folder whose files moved", () => {
 });
 
 describe("which Work folder a move carries", () => {
+  const asWritten = (path: string) => path;
+
   it("carries the subfolder a thread was started in when no other thread or Project uses it", () => {
     expect(
       workThreadOwnFolder({
         workingFolder: main,
         workingDirectory: report,
+        bindingCurrent: true,
+        realFolder: asWritten,
         // A thread working in the Project folder above does not share it.
         otherThreadFolders: ["/Users/person/Offsite", "/Users/person/Offsite/reports"],
         projectFolders: ["/Users/person/Offsite"],
@@ -300,7 +305,12 @@ describe("which Work folder a move carries", () => {
   });
 
   it("leaves the Project folder, an extra folder, and a shared subfolder where they are", () => {
-    const shared = { otherThreadFolders: [], projectFolders: [] };
+    const shared = {
+      otherThreadFolders: [],
+      projectFolders: [],
+      bindingCurrent: true,
+      realFolder: asWritten,
+    };
     expect(
       workThreadOwnFolder({ ...shared, workingFolder: main, workingDirectory: undefined }),
     ).toEqual({ status: "stays", reason: "project-folder" });
@@ -327,5 +337,35 @@ describe("which Work folder a move carries", () => {
         projectFolders: ["/Users/person/Offsite/report"],
       }),
     ).toEqual({ status: "stays", reason: "shared" });
+  });
+
+  it("leaves a folder another thread works in through a link to it", () => {
+    const root = realpathSync(mkdtempSync(join(tmpdir(), "octant-work-alias-")));
+    parents.push(root);
+    mkdirSync(join(root, "report"));
+    symlinkSync(join(root, "report"), join(root, "alias"));
+    expect(
+      workThreadOwnFolder({
+        workingFolder: { kind: "main", root },
+        workingDirectory: report,
+        bindingCurrent: true,
+        realFolder: realFolderOrAsWritten,
+        otherThreadFolders: [join(root, "alias")],
+        projectFolders: [root],
+      }),
+    ).toEqual({ status: "stays", reason: "shared" });
+  });
+
+  it("leaves the folder of a thread whose Project was relinked to another folder since", () => {
+    expect(
+      workThreadOwnFolder({
+        workingFolder: main,
+        workingDirectory: report,
+        bindingCurrent: false,
+        realFolder: asWritten,
+        otherThreadFolders: [],
+        projectFolders: [],
+      }),
+    ).toEqual({ status: "stays", reason: "unavailable" });
   });
 });

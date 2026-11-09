@@ -1344,6 +1344,11 @@ for Move after this turn.
     because the subfolder was the one this thread was started in. A thread
     working in the Project folder itself, or in an extra folder (shared by
     definition), moves only itself, and its files stay where they are.
+    Folders are compared by the real folder each path names, links resolved,
+    so a thread working through a link to the subfolder shares it. A thread
+    whose Project has been relinked since it started belongs to the old
+    binding and never worked in the new folder, so it carries nothing from
+    there and moves only itself.
     Rationale: carrying or removing files another thread or the Project still
     uses would take work from under it, and a guess at which files are this
     thread's could do that silently.
