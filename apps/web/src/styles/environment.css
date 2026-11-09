@@ -970,6 +970,13 @@ details.thread-move-sheet__section > summary {
   line-height: 1.5;
 }
 
+/* A busy thread's two-way choice: Move after this turn, or Stop and move. */
+.thread-move-sheet__timing {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--oct-space-2);
+}
+
 .thread-move-sheet__foot {
   display: flex;
   justify-content: flex-end;

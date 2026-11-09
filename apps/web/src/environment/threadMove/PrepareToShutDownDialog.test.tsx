@@ -101,6 +101,7 @@ function fakeClient(
     readonly threads: ReadonlyArray<MovedThreadReference>;
   }> = [];
   const started: ShutdownStartRequest[] = [];
+  const handedOver: Array<{ readonly thread: MovedThreadReference; readonly notify?: string }> = [];
   const listingsRead = { count: 0 };
   let moved = false;
   let movedAt = new Date().toISOString();
@@ -162,12 +163,21 @@ function fakeClient(
       return { status: "started" };
     },
     handoverPreview: async () => ({ status: "refused", reason: "refused" }),
-    handOver: async () => ({ status: "refused", reason: "refused" }),
+    handOver: async (thread, notify) => {
+      handedOver.push({ thread, ...(notify === undefined ? {} : { notify }) });
+      return {
+        status: "handed-over",
+        handoverId: "12121212-1212-4212-8212-121212121212" as never,
+        branch: "add-dark-mode",
+        pushed: true,
+        refusedFiles: [],
+      };
+    },
     handoverTakeBack: async () => {},
     handoversList: async () => ({ status: "listed", handovers: [] }),
     handoversContinue: async () => ({ status: "refused", reason: "refused" }),
   };
-  return { client, challenged, started, listingsRead };
+  return { client, challenged, started, handedOver, listingsRead };
 }
 
 describe("Prepare to shut down", () => {
@@ -372,6 +382,151 @@ describe("Prepare to shut down", () => {
       await screen.findByRole("heading", { name: "1 thread stays on this computer" }),
     ).toBeInTheDocument();
   });
+
+  it("offers Stop and move and Hand over only as the person's own choices, never preselected", async () => {
+    const user = userEvent.setup();
+    const { client, started } = fakeClient();
+    render(
+      <PrepareToShutDownDialog
+        client={client}
+        onClose={() => {}}
+        open
+        unlock={{ ownerUnlockSign: async () => ({ status: "done", signature: "c2ln" }) }}
+      />,
+    );
+    await screen.findByText("Add dark mode");
+    const choice = () => screen.getByRole("combobox", { name: "Choice for Add dark mode" });
+    expect(choice()).toHaveTextContent("After this turn");
+
+    await user.click(choice());
+    expect(await screen.findByRole("option", { name: "Stop and move" })).toBeInTheDocument();
+    // The hub can take it, so it moves properly: Hand over is for a thread that cannot move.
+    expect(screen.queryByRole("option", { name: "Hand over" })).not.toBeInTheDocument();
+    await user.click(screen.getByRole("option", { name: "Stop and move" }));
+    await user.click(screen.getByRole("button", { name: "Move 2 threads with Touch ID" }));
+
+    await waitFor(() => expect(started).toHaveLength(1));
+    expect(started[0]?.rows).toContainEqual({
+      thread: DARK,
+      destinationProjectId: PROJECT,
+      timing: "stop-and-move",
+    });
+  });
+
+  it("moves a row to another computer through its own choice, unlocking each destination in turn", async () => {
+    const user = userEvent.setup();
+    const { client, challenged, started } = fakeClient();
+    const sign = vi.fn(async () => ({ status: "done" as const, signature: "c2ln" }));
+    render(
+      <PrepareToShutDownDialog
+        client={client}
+        onClose={() => {}}
+        open
+        unlock={{ ownerUnlockSign: sign }}
+      />,
+    );
+    await screen.findByText("Plan the trip");
+    await user.click(screen.getByRole("combobox", { name: "Choice for Plan the trip" }));
+    await user.click(await screen.findByRole("option", { name: "Move to Desktop" }));
+
+    expect(screen.getByRole("combobox", { name: "Choice for Plan the trip" })).toHaveTextContent(
+      "Move to Desktop",
+    );
+    expect(
+      screen.getByText("1 move to Mac mini · 1 move to Desktop · 1 stay here"),
+    ).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Move 2 threads" }));
+
+    await waitFor(() => expect(started).toHaveLength(2));
+    expect(challenged).toEqual([
+      { memberId: MINI, threads: [DARK] },
+      { memberId: DESKTOP, threads: [TRIP] },
+    ]);
+    expect(sign).toHaveBeenCalledTimes(2);
+    expect(started.map((request) => request.destinationMemberId)).toEqual([MINI, DESKTOP]);
+    expect(await screen.findByRole("heading", { name: /Safe to shut down/ })).toBeInTheDocument();
+    expect(screen.getByText("1 moved to Mac mini, 1 to Desktop.")).toBeInTheDocument();
+  });
+
+  it("still moves to the other computers when one destination's unlock is declined", async () => {
+    const user = userEvent.setup();
+    const { client, started } = fakeClient();
+    let asked = 0;
+    const sign = vi.fn(async () => {
+      asked += 1;
+      return asked === 1
+        ? ({ status: "refused", kind: "cancelled" } as const)
+        : ({ status: "done", signature: "c2ln" } as const);
+    });
+    render(
+      <PrepareToShutDownDialog
+        client={client}
+        onClose={() => {}}
+        open
+        unlock={{ ownerUnlockSign: sign }}
+      />,
+    );
+    await screen.findByText("Plan the trip");
+    await user.click(screen.getByRole("combobox", { name: "Choice for Plan the trip" }));
+    await user.click(await screen.findByRole("option", { name: "Move to Desktop" }));
+    await user.click(screen.getByRole("button", { name: "Move 2 threads" }));
+
+    await waitFor(() => expect(started).toHaveLength(1));
+    expect(started[0]?.destinationMemberId).toBe(DESKTOP);
+    expect(
+      await screen.findByRole("heading", { name: "1 thread stays on this computer" }),
+    ).toBeInTheDocument();
+    expect(screen.getByRole("alert")).toHaveTextContent("The move to Mac mini wasn't unlocked.");
+  });
+
+  it("hands a Code thread that cannot move over with the batch, and is safe once it is pushed", async () => {
+    const user = userEvent.setup();
+    const { client, handedOver } = fakeClient();
+    render(
+      <PrepareToShutDownDialog
+        client={client}
+        onClose={() => {}}
+        open
+        unlock={{ ownerUnlockSign: async () => ({ status: "done", signature: "c2ln" }) }}
+      />,
+    );
+    await screen.findByText("Add dark mode");
+    await user.click(screen.getByRole("combobox", { name: "Move to" }));
+    await user.click(await screen.findByRole("option", { name: /Desktop/ }));
+    // The Desktop has no Project for its repository: it starts on Leave here, never on Hand over.
+    const choice = () => screen.getByRole("combobox", { name: "Choice for Add dark mode" });
+    expect(choice()).toHaveTextContent("Leave here");
+    await user.click(choice());
+    await user.click(await screen.findByRole("option", { name: "Hand over" }));
+    expect(screen.getByText("1 move to Desktop · 1 hands over · 1 stay here")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Move 2 threads with Touch ID" }));
+
+    await waitFor(() => expect(handedOver).toEqual([{ thread: DARK, notify: DESKTOP }]));
+    expect(await screen.findByRole("heading", { name: /Safe to shut down/ })).toBeInTheDocument();
+    expect(screen.getByText("1 moved to Desktop, 1 handed over.")).toBeInTheDocument();
+  });
+
+  it("tells the menu bar how far the batch has come while it runs, and nothing once it ends", async () => {
+    const user = userEvent.setup();
+    let arrived = false;
+    const { client } = fakeClient({ arrives: () => arrived });
+    const progress = vi.fn();
+    render(
+      <PrepareToShutDownDialog
+        client={client}
+        onClose={() => {}}
+        onProgress={progress}
+        open
+        unlock={{ ownerUnlockSign: async () => ({ status: "done", signature: "c2ln" }) }}
+      />,
+    );
+    await screen.findByText("Plan the trip");
+    await user.click(screen.getByRole("button", { name: "Move 2 threads with Touch ID" }));
+
+    await waitFor(() => expect(progress).toHaveBeenLastCalledWith({ ended: 0, total: 2 }));
+    arrived = true;
+    await waitFor(() => expect(progress).toHaveBeenLastCalledWith(undefined), { timeout: 5_000 });
+  }, 10_000);
 
   it("asks a computer that is in no hub to join one", async () => {
     const { client } = fakeClient({ listing: listing({ members: [], rows: [] }) });

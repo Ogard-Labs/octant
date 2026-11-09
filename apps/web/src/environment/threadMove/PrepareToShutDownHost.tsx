@@ -27,8 +27,9 @@ function inHubWithOthers(body: unknown): boolean {
 
 /**
  * Opens Prepare to shut down when the desktop asks: from Prepare to Shut
- * Down… in the application menu, or Move threads first… in the quit
- * confirmation, which ends with Quit Octant. A window without the loopback
+ * Down… in the application menu or the menu bar, or Move threads first… in
+ * the quit confirmation, which ends with Quit Octant. While its batch runs
+ * hidden, the menu bar shows how far it has come. A window without the loopback
  * hub administration (a remote client) never shows it.
  */
 export function PrepareToShutDownHost(props: {
@@ -72,6 +73,7 @@ export function PrepareToShutDownHost(props: {
   if (props.hostBridge === undefined || hub === undefined || request === undefined) return null;
   const unlock = ownerUnlockOf(props.hostBridge);
   const requestQuit = props.hostBridge.requestQuit;
+  const reportProgress = props.hostBridge.reportShutdownProgress;
   return (
     <PrepareToShutDownDialog
       client={threadMoveClientForBridge(props.hostBridge, hub)}
@@ -93,6 +95,7 @@ export function PrepareToShutDownHost(props: {
           }
         : {})}
       open={request.open}
+      {...(reportProgress === undefined ? {} : { onProgress: reportProgress })}
       {...(unlock === undefined ? {} : { unlock })}
     />
   );

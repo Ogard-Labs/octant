@@ -74,6 +74,7 @@ export const DESKTOP_IPC_CHANNELS = {
   quitShortcutHint: "octant:menu:quit-shortcut-hint",
   prepareToShutDown: "octant:menu:prepare-to-shut-down",
   shutdownMovesOffered: "octant:shutdown:moves-offered",
+  shutdownProgress: "octant:shutdown:progress",
   requestQuit: "octant:app:request-quit",
   previewHandoff: "octant:preview:handoff",
   requestCodeOperationApproval: "octant:code:request-operation-approval",

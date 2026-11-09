@@ -258,9 +258,11 @@ import {
   buildMenuBarItems,
   formatRedactedHostDiagnostics,
   decodeMenuBarOpenThread,
+  decodeMenuBarShutdownProgress,
   MenuBarFleet,
   menuBarTitle,
   type MenuBarOpenThread,
+  type MenuBarShutdownProgress,
 } from "./menuBar";
 import { createMenuBarFleetReader } from "./menuBarFleetRead";
 import { createHostTrayImage, shouldPresentHostTray } from "./menuBarIcon";
@@ -575,9 +577,10 @@ export function installHubAdministrationIpcHandlers(options: {
 }
 
 /**
- * Prepare to shut down's two requests from an owned window: whether this host
- * can offer Move threads first… at Quit, and Quit Octant at the end of the
- * dialog, which goes through the same guarded quit as the menu's.
+ * Prepare to shut down's requests from an owned window: whether this host can
+ * offer Move threads first… at Quit, how far a running batch has come for the
+ * menu bar, and Quit Octant at the end of the dialog, which goes through the
+ * same guarded quit as the menu's.
  */
 export function installShutdownIpcHandlers(options: {
   readonly handle: (
@@ -586,11 +589,16 @@ export function installShutdownIpcHandlers(options: {
   ) => void;
   readonly resolveOwnedWindow: (event: unknown) => void;
   readonly onMovesOffered: (offered: boolean) => void;
+  readonly onProgress: (progress: MenuBarShutdownProgress | undefined) => void;
   readonly onRequestQuit: () => void;
 }): void {
   options.handle(IPC_CHANNELS.shutdownMovesOffered, (event, offered) => {
     options.resolveOwnedWindow(event);
     options.onMovesOffered(offered === true);
+  });
+  options.handle(IPC_CHANNELS.shutdownProgress, (event, progress) => {
+    options.resolveOwnedWindow(event);
+    options.onProgress(decodeMenuBarShutdownProgress(progress));
   });
   options.handle(IPC_CHANNELS.requestQuit, (event) => {
     options.resolveOwnedWindow(event);
@@ -2805,7 +2813,10 @@ function updateHostTray(): void {
   if (hostTray === undefined) return;
   const snapshot = hostLifecycle.snapshot();
   const fleet = snapshot.state === "stopped" ? [] : menuBarFleet.threads();
-  const items = buildMenuBarItems(snapshot, fleet);
+  const items = buildMenuBarItems(snapshot, fleet, {
+    offered: shutdownMovesOffered,
+    ...(shutdownProgress === undefined ? {} : { progress: shutdownProgress }),
+  });
   const toTemplate = (item: (typeof items)[number]): MenuItemConstructorOptions => {
     if (item.id === "separator") return { type: "separator" };
     const thread = item.thread;
@@ -2834,7 +2845,7 @@ function updateHostTray(): void {
   const template = items.map(toTemplate);
   hostTray.setContextMenu(Menu.buildFromTemplate(template));
   hostTray.setToolTip(`Octant — ${hostStatusLabel()}`);
-  hostTray.setTitle?.(menuBarTitle(snapshot, fleet));
+  hostTray.setTitle?.(menuBarTitle(snapshot, fleet, shutdownProgress));
 }
 
 function ensureHostTray(): void {
@@ -3017,6 +3028,12 @@ async function runMenuBarAction(
         title: "Octant host diagnostics",
         message: formatRedactedHostDiagnostics(hostLifecycle.snapshot()),
       });
+    } else if (action === "prepare-to-shut-down") {
+      // Brings back a hidden dialog's running batch, or opens a new one.
+      await ensureMenuWindow();
+      mainWindow?.show();
+      mainWindow?.focus();
+      openPrepareToShutDown({ fromQuit: false });
     } else if (action === "fully-quit") {
       requestInteractiveQuit();
     }
@@ -3201,7 +3218,13 @@ function installIpcHandlers(): void {
     handle: (channel, handler) => ipcMain.handle(channel, handler),
     resolveOwnedWindow: (event) => void ownedWindowContext(event as IpcMainInvokeEvent),
     onMovesOffered: (offered) => {
+      if (shutdownMovesOffered === offered) return;
       shutdownMovesOffered = offered;
+      updateHostTray();
+    },
+    onProgress: (progress) => {
+      shutdownProgress = progress;
+      updateHostTray();
     },
     onRequestQuit: requestInteractiveQuit,
   });
@@ -4396,6 +4419,9 @@ async function confirmQuitWithActiveWork(
  * member. Only then does the quit confirmation offer Move threads first….
  */
 let shutdownMovesOffered = false;
+
+/** A running Prepare to shut down batch's progress, as the window last reported it. */
+let shutdownProgress: MenuBarShutdownProgress | undefined;
 
 /** Opens Prepare to shut down in the focused Octant window, or the main one. */
 function openPrepareToShutDown(request: { readonly fromQuit: boolean }): void {
