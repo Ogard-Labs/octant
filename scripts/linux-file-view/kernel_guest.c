@@ -415,7 +415,9 @@ static bool socket_rollback_measure(void)
   errno = 0;
   bool second_absent = reaped && lstat(second_path, &entry) == -1 && errno == ENOENT;
   bool cleaned = !unlink(first_path);
-  if (!second_absent) unlink(second_path);
+  /* Removed unconditionally: an absent entry only fails with ENOENT, and
+   * gating removal on the earlier lstat would act on a stale observation. */
+  unlink(second_path);
   passed = passed && reaped && WIFEXITED(status) && WEXITSTATUS(status) == 0 &&
     first_intact && second_absent && cleaned;
   printf("OCTANT_UNIX_ROLLBACK_SIGNAL {\"passed\":%s,\"signalPending\":%s,\"firstIntact\":%s,\"secondAbsent\":%s,\"ownedChildJoined\":%s,\"cleaned\":%s}\n",
