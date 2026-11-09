@@ -354,6 +354,7 @@ Desktop is one product on macOS, Linux and Windows, and platform differences are
 - The sequence is the Linux desktop shell, then the Linux AppImage with its signed feed, then Windows.
 - Windows packaging, installer, feed and packaging CI work may start now (maintainer decision, 2026-11-06, lifting the 2026-10-16 ordering gate on the macOS preview and a Linux self-update); a Windows feed is not trusted before the Linux signed-feed path has been exercised on a real image.
 - Work and Code stay unavailable on Windows until an approved Windows confinement design is documented.
+- The Windows provider-store building block uses a scoped native Credential Manager helper and private pipes. Its atomic protected blob accepts at most 2,560 UTF-8 bytes and refuses overflow before mutation; the broker transport bound remains 12 KiB. It does not admit host startup or Chat, implement auxiliary stores, or remove the Work/Code gate.
 - The simulator, the Apple development workbench and window vibrancy stay macOS-only.
 
 Status: Partly built. Since: 2026-10-16; ordering gate lifted 2026-11-06. Detail: [Architecture: Current Release Boundary](../architecture.md#current-release-boundary).

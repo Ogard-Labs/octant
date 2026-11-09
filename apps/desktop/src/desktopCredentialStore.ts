@@ -88,6 +88,7 @@ export type DesktopCredentialBackend =
 export async function resolveDesktopCredentialBackend(options: {
   readonly platform: NodeJS.Platform;
   readonly keychainHelperPath: string;
+  readonly windowsCredentialHelperPath?: string;
   readonly storeScope: string;
   readonly serviceFamily?: KeychainServiceFamily;
 }): Promise<DesktopCredentialBackend> {
@@ -147,10 +148,14 @@ export async function resolveDesktopCredentialBackend(options: {
       sshKeys: store("ssh-key"),
     };
   }
-  if (options.platform === "win32") {
+  if (options.platform === "win32" && options.windowsCredentialHelperPath !== undefined) {
     return {
       kind: "credential-manager",
-      store: makeWindowsCredentialStore(),
+      store: makeWindowsCredentialStore({
+        helperPath: options.windowsCredentialHelperPath,
+        storeScope: options.storeScope,
+        serviceFamily: options.serviceFamily ?? "octant",
+      }),
     };
   }
   return { kind: "unavailable" };
