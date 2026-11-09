@@ -1,3 +1,5 @@
+import { BrowserFlowRuns } from "./browser/browserFlowRuns";
+import { decodeBrowserFlow, decodeBrowserThreadId } from "@octant/contracts";
 import type { BrowserAutomationSnapshot, ToolActionAuthority, WindowId } from "@octant/contracts";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { createBrowserAutomationRouteHandler } from "./browserAutomationRoutes";
@@ -1192,6 +1194,88 @@ describe("browser automation routes", () => {
       });
       expect(flows.delete).not.toHaveBeenCalled();
       expect((await handler(post("flows", { kind: "list" })))?.status).toBe(503);
+    });
+
+    it("binds reviewed flow effects to the authenticated local window and refuses remote or unreviewed starts", async () => {
+      const flowProject = authority.projectId;
+      if (flowProject === undefined) throw Error("Project fixture missing");
+      const task = {
+        threadId: decodeBrowserThreadId(threadId),
+        mode: "work" as const,
+        title: "Check",
+        modelId: "synthetic" as never,
+        accessLabel: "Ask first",
+        profileLabel: "Private",
+      };
+      const flow = decodeBrowserFlow({
+        name: "Check",
+        savedAt: new Date().toISOString(),
+        steps: [
+          {
+            operation: "navigate",
+            input: { operation: "navigate", url: "https://example.com/" },
+            expect: { path: "/" },
+          },
+        ],
+      });
+      const execute = vi.fn(async () => ({
+        isError: false,
+        result: { page: { url: "https://example.com/" } },
+      }));
+      const runs = new BrowserFlowRuns({
+        readFlow: () => flow,
+        tasks: () => [task],
+        bindTask: () => ({
+          fingerprint: "current",
+          refs: () => [],
+          execute,
+          claim: () => ({ release: () => undefined }),
+        }),
+        uuid: () => contextId,
+        now: Date.now,
+      });
+      const handler = createBrowserAutomationRouteHandler({
+        service: service as never,
+        authority: { canAccessWindow: () => true, resolve: () => authority },
+        flows: { summaries: () => [], delete: () => false },
+        flowRuns: runs,
+        windowAuthorityStore: store,
+        maxRequestBodySize: 64_000,
+      });
+      try {
+        const review = {
+          kind: "review-run",
+          projectId: flowProject,
+          threadId,
+          mode: "work",
+          name: "Check",
+        };
+        expect(await (await handler(post("flows", review, true)))?.json()).toMatchObject({
+          reason: "not-local",
+        });
+        expect(
+          await (
+            await handler(post("flows", { kind: "start-run", runId: contextId, values: [] }))
+          )?.json(),
+        ).toMatchObject({ reason: "not-found" });
+        expect((await handler(post("flows", { ...review, authority })))?.status).toBe(400);
+        expect(execute).not.toHaveBeenCalled();
+        expect(await (await handler(post("flows", review)))?.json()).toMatchObject({
+          kind: "browser-flow-run",
+          run: { state: "review" },
+        });
+        expect(execute).not.toHaveBeenCalled();
+        expect(
+          await (
+            await handler(post("flows", { kind: "start-run", runId: contextId, values: [] }, true))
+          )?.json(),
+        ).toMatchObject({ reason: "not-local" });
+        expect(execute).not.toHaveBeenCalled();
+        await handler(post("flows", { kind: "start-run", runId: contextId, values: [] }));
+        await vi.waitFor(() => expect(execute).toHaveBeenCalledOnce());
+      } finally {
+        runs.close();
+      }
     });
 
     it("carries an extensions command with the window and the caller the host proved", async () => {

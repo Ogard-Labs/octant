@@ -31,6 +31,7 @@ import {
   decodeOwnerChallengeRequest,
   decodeOwnerCredentialCopyRequest,
   decodeOwnerCredentialReceiveRequest,
+  decodeOwnerThreadMoveConfirmRequest,
   decodeOwnerThreadMoveTicketRequest,
   decodeOwnerJoinCodeRequest,
   decodeOwnerMemberRequest,
@@ -65,6 +66,7 @@ import type { SpokeLinkService } from "./spokeLinkService";
 import type { SpokeProvisionService } from "./spokeProvisionService";
 import type { SpokeSignInService } from "./spokeSignInService";
 import type { ThreadMoveService } from "./threadMoveService";
+import type { ThreadMovesFromWindow } from "./threadMovesFromWindow";
 
 export const HUB_OWNER_ROUTE_PREFIX = "/api/hub/owner";
 
@@ -99,6 +101,10 @@ export const HUB_OWNER_ROUTES = {
   browserTakeOver: `${HUB_OWNER_ROUTE_PREFIX}/browser/take-over`,
   browserControl: `${HUB_OWNER_ROUTE_PREFIX}/browser/control`,
   threadMoveTicket: `${HUB_OWNER_ROUTE_PREFIX}/thread-moves/ticket`,
+  // On the source: the moves a window holds for an owner phone, and the phone
+  // handing over the ticket the destination issued it.
+  threadMoveConfirmations: `${HUB_OWNER_ROUTE_PREFIX}/thread-moves/confirmations`,
+  threadMoveConfirm: `${HUB_OWNER_ROUTE_PREFIX}/thread-moves/confirm`,
 } as const;
 
 type OwnerRoute = (typeof HUB_OWNER_ROUTES)[keyof typeof HUB_OWNER_ROUTES];
@@ -109,6 +115,7 @@ const READ_ROUTES: ReadonlySet<string> = new Set([
   HUB_OWNER_ROUTES.alerts,
   HUB_OWNER_ROUTES.heldMembers,
   HUB_OWNER_ROUTES.signInRequests,
+  HUB_OWNER_ROUTES.threadMoveConfirmations,
 ]);
 
 /** The routes an unlock can be asked for: every one that changes something. */
@@ -203,6 +210,8 @@ export interface HubOwnerRouteOptions {
   readonly postures: OwnerPostureHost;
   readonly credentials: OwnerCredentialCopyService;
   readonly threadMoves: ThreadMoveService;
+  /** The moves a window on this host holds until an owner phone confirms them. */
+  readonly phoneMoves: Pick<ThreadMovesFromWindow, "phoneConfirmations" | "confirmOnPhone">;
   readonly provision: SpokeProvisionService;
   readonly signIn: SignInService;
   readonly spokeSignIn: SpokeSignInService;
@@ -624,6 +633,21 @@ export function createHubOwnerRouteHandler(
             ownerMemberId: String(input.senderMemberId),
             sourceMemberId: String(asked.sourceMemberId),
             ...(asked.threads === undefined ? {} : { threads: asked.threads }),
+          }),
+        );
+      }
+      case HUB_OWNER_ROUTES.threadMoveConfirmations:
+        return Response.json(options.phoneMoves.phoneConfirmations(), { headers: NO_STORE });
+      case HUB_OWNER_ROUTES.threadMoveConfirm: {
+        // An administration-class unlock here says the person holding this
+        // phone is present on the source; the move itself was authorized on
+        // the destination, whose ticket needed its own fresh unlock there.
+        const confirmed = decodeOwnerThreadMoveConfirmRequest(json());
+        return outcome(
+          options.phoneMoves.confirmOnPhone({
+            confirmationId: confirmed.confirmationId,
+            ticketId: confirmed.ticketId,
+            principal,
           }),
         );
       }

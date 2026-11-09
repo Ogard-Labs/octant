@@ -151,6 +151,7 @@ export {
   WINDOWS_CREDENTIAL_MAX_BYTES,
   makeWindowsCredentialStore,
   type MakeWindowsCredentialStoreOptions,
+  type WindowsCredentialNamespace,
   type WindowsCommandExecutor,
   type WindowsCommandLimits,
   type WindowsCommandResult,

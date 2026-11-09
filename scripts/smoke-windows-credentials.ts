@@ -1,6 +1,22 @@
 import { spawn } from "node:child_process";
-import { randomUUID } from "node:crypto";
+import { createPublicKey, randomUUID, verify } from "node:crypto";
 import { resolve } from "node:path";
+import { fileURLToPath } from "node:url";
+import { resolveDesktopCredentialBackend } from "../apps/desktop/src/desktopCredentialStore";
+import {
+  startCredentialBroker,
+  type CredentialBroker,
+} from "../packages/host-runtime/src/credentialBroker";
+import type { CredentialStore } from "../packages/host-runtime/src/credentialStore";
+import {
+  makeReplicaDeviceKeyBrokerClient,
+  makeCredentialBrokerClient,
+} from "../apps/server/src/providers/credentialBrokerClient";
+import {
+  createReplicaDeviceKey,
+  makeReplicaDeviceSigner,
+  removeReplicaDeviceKey,
+} from "../apps/server/src/replica/replicaDeviceKeyService";
 import { makeWindowsCredentialStore } from "../packages/host-runtime/src/windowsCredentialStore";
 
 if (process.platform !== "win32") throw new Error("Credential acceptance requires native Windows.");
@@ -16,8 +32,52 @@ const store = (
 const primary = store();
 const otherScope = store(randomUUID());
 const nightly = store(scope, "octant-nightly-test-data");
+const backend = async (
+  storeScope = scope,
+  serviceFamily: "octant" | "octant-nightly-test-data" = "octant",
+) => {
+  const result = await resolveDesktopCredentialBackend({
+    platform: "win32",
+    windowsCredentialHelperPath: helperPath,
+    keychainHelperPath: "",
+    storeScope,
+    serviceFamily,
+  });
+  if (result.kind !== "credential-manager") throw new Error("Native backend unavailable.");
+  return result;
+};
+const desktop = await backend();
+const auxiliary = (value: typeof desktop) => [
+  value.replicaDeviceKeys,
+  value.replicaStoreCredentials,
+  value.canvasPublicShareSecrets,
+  value.mcpServerCredentials,
+  value.desktopProviderCredentials,
+  value.pushPlatformCredentials,
+  value.sshKeys,
+];
+const auxiliaryStores = auxiliary(desktop);
+const otherAuxiliary = auxiliary(await backend(randomUUID()));
+const nightlyAuxiliary = auxiliary(await backend(scope, "octant-nightly-test-data"));
+const owned: Array<{ store: CredentialStore; ref: string }> = [
+  primary,
+  nightly,
+  otherScope,
+  ...auxiliaryStores,
+  ...otherAuxiliary,
+  ...nightlyAuxiliary,
+].map((store) => ({ store, ref }));
+let broker: CredentialBroker | undefined;
 const checks: string[] = [];
 let cleanupConfirmed = false;
+let stage = "provider";
+function failureCategory(error: unknown) {
+  const value =
+    typeof error === "object" && error !== null && "category" in error ? error.category : undefined;
+  return value === "failed" || value === "invalid" || value === "missing" || value === "unavailable"
+    ? value
+    : "unclassified";
+}
 function requireValue(value: boolean, check: string) {
   if (!value) throw new Error(`Native credential check failed: ${check}`);
   checks.push(check);
@@ -34,6 +94,69 @@ async function refuses(action: () => Promise<unknown>, category: string) {
     );
   }
   return false;
+}
+
+let coordinationProcessesJoined = 0;
+async function withCoordination(
+  mode: "hold" | "unsafe" | "abandoned",
+  action: () => Promise<void>,
+) {
+  const child = spawn(
+    "powershell.exe",
+    [
+      "-NoProfile",
+      "-NonInteractive",
+      "-File",
+      fileURLToPath(new URL("./windows-credential-coordination.ps1", import.meta.url)),
+      mode,
+    ],
+    { stdio: ["pipe", "pipe", "ignore"], windowsHide: true },
+  );
+  let code: number | null = null;
+  let failed = false;
+  let output = "";
+  const ready = new Promise<void>((accept, refuse) => {
+    child.stdout.on("data", (chunk: Buffer) => {
+      output += chunk.toString("utf8");
+      if (output.length > 64 || output.includes("fixture-failed")) {
+        failed = true;
+        child.kill();
+      } else if (output.trim() === "ready") accept();
+    });
+    child.once("error", () => {
+      failed = true;
+    });
+    child.once("close", () =>
+      refuse(new Error("Owned coordination fixture ended before acceptance.")),
+    );
+  });
+  const closed = new Promise<void>((accept) =>
+    child.once("close", (exitCode) => {
+      code = exitCode;
+      accept();
+    }),
+  );
+  const deadline = setTimeout(() => {
+    failed = true;
+    child.kill();
+  }, 25_000);
+  child.stdin.on("error", () => {
+    failed = true;
+    child.kill();
+  });
+  let actionFailure: unknown;
+  try {
+    await ready;
+    await action();
+  } catch (error) {
+    actionFailure = error;
+  }
+  child.stdin.end("stop\n");
+  await closed;
+  clearTimeout(deadline);
+  coordinationProcessesJoined += 1;
+  if (failed || code !== 0) throw new Error("Owned coordination fixture did not exit cleanly.");
+  if (actionFailure !== undefined) throw actionFailure;
 }
 
 // Every target uses fresh opaque references. No enumerate, account lookup,
@@ -71,14 +194,15 @@ try {
     "isolated replacements preserved",
   );
 
-  const frame = Buffer.alloc(84);
+  const frame = Buffer.alloc(85);
   frame.write("OCCR");
-  frame[4] = 1;
+  frame[4] = 2;
   frame[5] = 1;
   frame.write(scope, 7, "ascii");
   frame.write(ref, 43, "ascii");
   frame.writeUInt32LE(1, 79);
-  frame[83] = 65;
+  frame[83] = 0;
+  frame[84] = 65;
   const nativeRefuses = async (input: Buffer) =>
     await new Promise<boolean>((resolveReply, reject) => {
       const child = spawn(helperPath, [], {
@@ -123,10 +247,19 @@ try {
   const invalidReference = Buffer.from(frame);
   invalidReference[43] = 46;
   const extra = Buffer.concat([frame, Buffer.from([0])]);
-  const oversized = Buffer.from(frame.subarray(0, 83));
+  const oversized = Buffer.from(frame.subarray(0, 84));
   oversized.writeUInt32LE(2561, 79);
+  const oldVersion = Buffer.from(frame);
+  oldVersion[4] = 1;
+  const unknownPurpose = Buffer.from(frame);
+  unknownPurpose[83] = 8;
+  const wrongFamily = Buffer.from(frame);
+  wrongFamily[6] = 2;
   requireValue(
-    (await nativeRefuses(invalidReference)) &&
+    (await nativeRefuses(oldVersion)) &&
+      (await nativeRefuses(unknownPurpose)) &&
+      (await nativeRefuses(wrongFamily)) &&
+      (await nativeRefuses(invalidReference)) &&
       (await nativeRefuses(extra)) &&
       (await nativeRefuses(oversized)),
     "native malformed frames refused before mutation",
@@ -135,25 +268,192 @@ try {
     (await primary.resolve(ref)) === boundary,
     "malformed requests preserved existing key",
   );
+  stage = "auxiliary";
+  for (const [index, auxiliaryStore] of auxiliaryStores.entries()) {
+    const isolated = otherAuxiliary[index];
+    const testData = nightlyAuxiliary[index];
+    if (isolated === undefined || testData === undefined)
+      throw new Error("Incomplete owned fixture.");
+    requireValue(
+      !(await auxiliaryStore.has(ref)) &&
+        (await refuses(() => auxiliaryStore.resolve(ref), "missing")),
+      `auxiliary ${index + 1} starts missing`,
+    );
+    await auxiliaryStore.set(ref, `synthetic-purpose-${index}-λ`);
+    requireValue(
+      !(await isolated.has(ref)) && !(await testData.has(ref)),
+      `auxiliary ${index + 1} scope and family isolation`,
+    );
+    await isolated.set(ref, "synthetic-other-scope");
+    await testData.set(ref, "synthetic-nightly");
+  }
+  for (const [index, auxiliaryStore] of auxiliaryStores.entries()) {
+    requireValue(
+      (await auxiliaryStore.resolve(ref)) === `synthetic-purpose-${index}-λ`,
+      `auxiliary ${index + 1} namespace isolation`,
+    );
+    await auxiliaryStore.set(ref, boundary);
+    const nativeOverflow = Buffer.from(oversized);
+    nativeOverflow[83] = index + 1;
+    requireValue(
+      (await refuses(() => auxiliaryStore.set(ref, boundary + "x"), "invalid")) &&
+        (await nativeRefuses(nativeOverflow)) &&
+        (await auxiliaryStore.resolve(ref)) === boundary,
+      `auxiliary ${index + 1} native and adapter overflow preserve 2560-byte value`,
+    );
+    await auxiliaryStore.delete(ref);
+    requireValue(
+      !(await auxiliaryStore.has(ref)) &&
+        (await otherAuxiliary[index]?.resolve(ref)) === "synthetic-other-scope" &&
+        (await nightlyAuxiliary[index]?.resolve(ref)) === "synthetic-nightly" &&
+        (await primary.resolve(ref)) === boundary,
+      `auxiliary ${index + 1} deletion preserves other stores and provider`,
+    );
+  }
+  stage = "coordination";
+  await withCoordination("unsafe", async () => {
+    requireValue(
+      await refuses(() => primary.set(ref, "synthetic-refused"), "unavailable"),
+      "unsafe existing coordination DACL refuses before mutation",
+    );
+  });
+  requireValue(
+    (await primary.resolve(ref)) === boundary,
+    "unsafe coordination preserves the stored value",
+  );
+  await withCoordination("hold", async () => {
+    const started = performance.now();
+    const refused = await refuses(() => primary.set(ref, "synthetic-refused"), "unavailable");
+    const elapsed = performance.now() - started;
+    requireValue(
+      refused && elapsed >= 2500 && elapsed < 5000,
+      "held coordination refuses within the adapter deadline",
+    );
+  });
+  requireValue(
+    (await primary.resolve(ref)) === boundary,
+    "blocked coordination preserves the stored value",
+  );
+  await withCoordination("abandoned", async () => {
+    requireValue(
+      await refuses(() => primary.set(ref, "synthetic-refused"), "unavailable"),
+      "abandoned coordination refuses without replay",
+    );
+    requireValue(
+      (await primary.resolve(ref)) === boundary,
+      "abandonment releases owned coordination and preserves the value",
+    );
+  });
+  const concurrent = owned.slice();
+  await Promise.all(
+    concurrent.map(({ store, ref }, index) => store.set(ref, `synthetic-parallel-${index}`)),
+  );
+  const preserved = await Promise.all(concurrent.map(({ store, ref }) => store.resolve(ref)));
+  requireValue(
+    preserved.every((value, index) => value === `synthetic-parallel-${index}`),
+    "concurrent writes preserve all eight purposes across families and stores",
+  );
+  stage = "replica-broker-start";
+  broker = await startCredentialBroker(
+    desktop.store,
+    undefined,
+    undefined,
+    desktop.replicaDeviceKeys,
+    desktop.replicaStoreCredentials,
+    desktop.canvasPublicShareSecrets,
+    desktop.mcpServerCredentials,
+    desktop.desktopProviderCredentials,
+    desktop.pushPlatformCredentials,
+    undefined,
+    desktop.sshKeys,
+  );
+  const options = {
+    url: broker.url,
+    token: broker.token,
+    fetch: (input: string | URL | Request, init?: RequestInit) =>
+      fetch(input, { ...init, signal: AbortSignal.timeout(5_000) }),
+  };
+  const replica = makeReplicaDeviceKeyBrokerClient(options);
+  const trackedReplica: CredentialStore = {
+    ...replica,
+    set: async (keyRef, value) => {
+      owned.push({ store: desktop.replicaDeviceKeys, ref: keyRef });
+      await replica.set(keyRef, value);
+    },
+  };
+  stage = "replica-generate";
+  const key = await createReplicaDeviceKey(trackedReplica);
+  const payload = Buffer.from("synthetic owned replica acceptance");
+  stage = "replica-sign";
+  const signed = await makeReplicaDeviceSigner(replica, key.instanceId).sign(payload);
+  requireValue(
+    signed.status === "signed" &&
+      verify(
+        null,
+        payload,
+        createPublicKey({ key: Buffer.from(key.publicKey, "base64"), format: "der", type: "spki" }),
+        Buffer.from(signed.signature, "base64"),
+      ),
+    "existing replica consumer generates and signs through native broker",
+  );
+  requireValue(
+    !(await makeCredentialBrokerClient(options).has(key.instanceId)),
+    "provider route cannot reach replica private key",
+  );
+  const unauthenticated = await fetch(new URL("/v1/replica-device-keys/has", broker.url), {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ instanceId: key.instanceId }),
+    signal: AbortSignal.timeout(5_000),
+  });
+  await unauthenticated.arrayBuffer();
+  requireValue(
+    unauthenticated.status === 401,
+    "native replica route refuses unauthenticated access",
+  );
+  stage = "replica-remove";
+  await removeReplicaDeviceKey(replica, key.instanceId);
+  requireValue(
+    !(await replica.has(key.instanceId)) &&
+      (await makeReplicaDeviceSigner(replica, key.instanceId).sign(payload)).status === "refused",
+    "replica deletion revokes signing through the existing consumer",
+  );
   await primary.delete(ref);
   requireValue(!(await primary.has(ref)), "explicit delete removes only owned target");
+} catch (error) {
+  console.log(
+    JSON.stringify({ ownedScenarioFailure: true, stage, checks, category: failureCategory(error) }),
+  );
+  throw new Error("Owned native credential scenario failed.");
 } finally {
   // No target is retained even after a failed scenario. A cleanup error fails CI.
-  const cleanup = await Promise.allSettled([
-    primary.delete(ref),
-    nightly.delete(ref),
-    otherScope.delete(ref),
-  ]);
-  cleanupConfirmed = cleanup.every((result) => result.status === "fulfilled");
-  console.log(JSON.stringify({ ownedCredentialCleanupConfirmed: cleanupConfirmed }));
+  const cleanup = await Promise.allSettled(owned.map(({ store, ref }) => store.delete(ref)));
+  await broker?.close();
+  const absence = await Promise.allSettled(owned.map(({ store, ref }) => store.has(ref)));
+  cleanupConfirmed =
+    cleanup.every((result) => result.status === "fulfilled") &&
+    absence.every((result) => result.status === "fulfilled" && !result.value);
+  console.log(
+    JSON.stringify({
+      ownedCredentialCleanupConfirmed: cleanupConfirmed,
+      checks,
+      ownedTargetCount: owned.length,
+      brokerClosed: true,
+      coordinationProcessesJoined,
+      cleanup: cleanup.map((result) =>
+        result.status === "fulfilled" ? "deleted" : failureCategory(result.reason),
+      ),
+      absence: absence.map((result) =>
+        result.status === "fulfilled"
+          ? result.value
+            ? "present"
+            : "absent"
+          : failureCategory(result.reason),
+      ),
+    }),
+  );
+  requireValue(cleanupConfirmed, "all owned targets confirmed absent");
 }
-requireValue(
-  cleanupConfirmed &&
-    !(await primary.has(ref)) &&
-    !(await nightly.has(ref)) &&
-    !(await otherScope.has(ref)),
-  "all three owned targets confirmed absent",
-);
 console.log(
   JSON.stringify({
     platform: process.platform,
