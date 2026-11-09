@@ -195,26 +195,41 @@ function unionBy<T>(
 }
 
 /**
- * The Canvas cards a shown run can place. A detached run stops before turns
- * that are not loaded, and placement puts a Canvas on the last turn opened at
- * or before it was written, so a Canvas a later, unloaded turn wrote would
- * land on the run's last turn. Only cards written by the time that turn last
- * changed belong to the run; the rest wait for their own turns to be shown.
+ * What a shown run can place: the items made by the time its last turn last
+ * changed. A detached run stops before turns that are not loaded, and
+ * placement puts an item on the last turn opened at or before it was made, so
+ * an item a later, unloaded turn made would land on the run's last turn. The
+ * rest wait for their own turns to be shown.
  */
-export function canvasCardsForShownRun<T extends { readonly canvasCreatedAt?: string | undefined }>(
-  cards: ReadonlyArray<T>,
+export function madeInShownRun<T>(
+  items: ReadonlyArray<T>,
+  createdAt: (item: T) => string | undefined,
   run: ChatThreadView,
   runEndsBeforeNewest: boolean,
 ): ReadonlyArray<T> {
-  if (!runEndsBeforeNewest) return cards;
+  if (!runEndsBeforeNewest) return items;
   const last = run.turns.at(-1);
   if (last === undefined) return [];
   const settledAt = Math.max(
     Date.parse(String(last.createdAt)),
     ...last.attempts.map((attempt) => Date.parse(String(attempt.updatedAt))),
   );
-  return cards.filter(
-    (card) =>
-      card.canvasCreatedAt !== undefined && Date.parse(String(card.canvasCreatedAt)) <= settledAt,
+  return items.filter((item) => {
+    const at = createdAt(item);
+    return at !== undefined && Date.parse(at) <= settledAt;
+  });
+}
+
+/** The Canvas cards a shown run can place; see {@link madeInShownRun}. */
+export function canvasCardsForShownRun<T extends { readonly canvasCreatedAt?: string | undefined }>(
+  cards: ReadonlyArray<T>,
+  run: ChatThreadView,
+  runEndsBeforeNewest: boolean,
+): ReadonlyArray<T> {
+  return madeInShownRun(
+    cards,
+    (card) => (card.canvasCreatedAt === undefined ? undefined : String(card.canvasCreatedAt)),
+    run,
+    runEndsBeforeNewest,
   );
 }

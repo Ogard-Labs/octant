@@ -15,6 +15,7 @@ import {
   type ExtensionToolGrantRequest,
   type UserAddedMcpServerRequest,
   DiscoveredAgentToolingListing,
+  RuntimeCompactionDefaults,
   type DiscoveredAgentToolingRequest,
   McpServerSignInView,
   type McpServerSignInRequest,
@@ -58,8 +59,13 @@ export interface ExtensionClient {
   listDiscoveredTooling(): Promise<DiscoveredAgentToolingListing>;
   /** Adds a found server, or imports a found plugin for preview, by its listed id. */
   applyDiscoveredTooling(
-    request: Exclude<DiscoveredAgentToolingRequest, { readonly kind: "list" }>,
+    request: Exclude<
+      DiscoveredAgentToolingRequest,
+      { readonly kind: "list" } | { readonly kind: "compaction-defaults" }
+    >,
   ): Promise<ExtensionCommandResult>;
+  /** What the person's own Claude Code and Codex files say about compacting; read, never written. */
+  runtimeCompactionDefaults(): Promise<RuntimeCompactionDefaults>;
   /** Sign-in state and actions for a hosted server a person added. */
   mcpServerSignIn(request: McpServerSignInRequest): Promise<McpServerSignInView>;
   /** How each installed MCP server is connecting, from what the host retained. */
@@ -328,6 +334,18 @@ export function createExtensionClient(options: ExtensionClientOptions): Extensio
           body: JSON.stringify({ kind: "list" }),
         },
         decodeHostAnswer(DiscoveredAgentToolingListing),
+      );
+    },
+    runtimeCompactionDefaults() {
+      return request(
+        fetch,
+        new URL("/api/extensions/discovered", options.baseUrl).toString(),
+        {
+          method: "POST",
+          headers: { ...headers, "content-type": "application/json" },
+          body: JSON.stringify({ kind: "compaction-defaults" }),
+        },
+        decodeHostAnswer(RuntimeCompactionDefaults),
       );
     },
     applyDiscoveredTooling(discovered) {

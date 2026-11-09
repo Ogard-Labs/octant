@@ -265,16 +265,19 @@ lease anyway.
 
 ### Isolation
 
-- A desktop holds no host credential and no checkout. Nothing of the host is
-  mounted, bound, or synced into it. It receives: the recipe's own contents,
-  artifacts sent by an explicit transfer, and input.
+- A desktop holds no host credential and no checkout. No host user directory
+  is mounted, bound, or synced into it. It receives the recipe's own contents,
+  artifacts sent by an explicit transfer, input, and the application traffic
+  of a separately approved [lease-bound preview](#lease-bound-dev-server-preview).
 - A host-local desktop runs as a dedicated Bubblewrap launch through
   `ProcessConfinementPort` with no checkout, no home directory, no Secret
   Service or session bus, no SSH agent, an allowlisted environment with no
   `OCTANT_*` value, a private writable home and inbox under a host-private lease
   directory, and its own network namespace. It cannot reach the host's loopback,
-  so it can never reach the Octant server. Its only channel to the host is the
-  launch's standard streams.
+  so it can never reach the Octant server. Standard streams carry the launch's
+  screen and control protocol. A separately approved
+  [lease-bound preview](#lease-bound-dev-server-preview) may expose only its
+  exact owned socket inode in that desktop's existing private home.
 - A cloud desktop's API key stays in the host credential store. The host
   attaches it to calls the driver makes, only over HTTPS and only to hosts the
   driver declares in code. It never enters the desktop, a provider runtime, a
@@ -430,6 +433,67 @@ returns observations with a screenshot and no elements, so it is usable only by
 image-capable models and refuses `needs-image-model` otherwise. Adding `drag`
 and `move-cursor` to the command set is its own contract change.
 
+## Lease-bound dev-server preview
+
+A person at a window on this host may share one healthy, Octant-owned HTTP(S)
+dev server from a Code task's own worktree with that task's ready host-local
+desktop. The Desktop pane asks for a port from 1024 through 65535, prepares a
+review naming the process, port and lease expiry, and requires **Share preview**.
+Preparation opens no relay. Plan, foreign threads, leftovers and unsupported
+providers refuse. The first adapter is the Linux host-local provider with an
+available Node runtime; E2B and Cua have no preview adapter. Ordinary desktop
+readiness does not depend on Node.
+
+The permission binds this host's live lease and provider, exact Code thread,
+checkout/binding/access, reviewing window and observed listener identity. A
+review expires after two minutes. The grant ends at the original lease expiry;
+extending a desktop does not extend this permission. Every new HTTP request or
+WebSocket handshake re-observes the exact owned listener after checking current
+lease and task authority. Request targets cannot choose an address, port or
+absolute URL; host and forwarding headers do not select an upstream. The host
+reuses the ordinary dev-server HTTP/WebSocket relay and its header filters.
+
+**Scoped IPC exception.** The desktop retains its separate network namespace
+and no route to host loopback. For one approved preview, the host creates a
+mode-0700 private directory outside the desktop's mounts, binds a mode-0600 Unix
+socket there, and hard-links only that socket inode into the desktop's already
+bound private home. A fresh invocation-only nonce authenticates the bridge;
+it lives only in memory and never enters an address, log, journal or upstream
+request. Held, no-follow directory descriptors keep long socket addresses short
+and must not be inherited by children. A trusted proxy runs inside the existing
+capsule, exposes only its own loopback port, and streams through that socket.
+No extra host directory, general socket port, network permission or credential
+is given to the guest or provider.
+
+Rationale: the existing sequential screen protocol remains unchanged. Binding
+outside the guest prevents Node's automatic socket unlink from deleting a
+guest replacement during shutdown. The exposed alias is removed only while
+its inode still matches; a replacement remains until normal owned-lease
+teardown. Removing or replacing the alias can break only that lease's preview.
+
+The bridge permits at most eight connections and eight active HTTP/WebSocket
+operations across them, 16 KiB of headers, 64 header fields and an 8 MiB request
+body. Admission precedes controller allocation, body reading and relay work;
+a saturated socket closes and cancels its operations instead of queuing
+rejection responses behind held pipelined requests. WebSocket messages are at most 1 MiB; writes
+use backpressure and bounded message queues. Header/request setup has finite
+deadlines; the grant's hard expiry bounds open streams and the guest proxy.
+The provider startup is bounded, and late results after cancellation are closed.
+An unavailable start that cannot confirm its guest stopped retains a cleanup
+handle; reporting unavailable alone never erases that ownership.
+**Stop sharing**, listener stop, window or permission loss, task/binding change,
+provider disablement and lease end cut requests and sockets. An already sent
+request may have effects; nothing is automatically replayed. Unconfirmed guest
+cleanup keeps access revoked, blocks another grant and asks the person to
+release the desktop. Grants and live relay handles never restore on restart.
+
+Grant and close audit events contain only the grant, lease, thread, provider,
+port and expiry plus the actual person actor; no page, header, body or nonce is
+journaled. Native enablement requires the real production-launch Bubblewrap
+proof, including HTTP/WebSocket delivery, denied unrelated host ports/data and
+other leases, descriptor non-inheritance, alias replacement and teardown. A
+host-process Unix fixture is integration evidence, not namespace evidence.
+
 ## Threat model
 
 | Risk                                                     | Mitigation                                                                                                                                                                                                                                      |
@@ -437,7 +501,7 @@ and `move-cursor` to the command set is its own contract change.
 | A leaked cloud desktop bills silently                    | Journal-before-create, tagged resources, mandatory provider-side expiry, restart reconciliation, verified release, visible failure; a teardown-only path with its retained driver and credential survives thread, recipe, and plugin revocation |
 | A person-extended lease dies at the old provider timeout | An extension is accepted only after the driver confirms the new provider-side expiry; otherwise it is refused and the original expiry stands                                                                                                    |
 | The app under test or an injected agent reads secrets    | No checkout, home, keyring, session bus, SSH agent, or `OCTANT_*` in the desktop; cloud key never leaves the host                                                                                                                               |
-| The desktop reaches the host                             | Own network namespace with no host loopback; standard streams are the only channel; bounded parsing of everything returned                                                                                                                      |
+| The desktop reaches the host                             | Own network namespace with no host loopback; standard streams and an explicitly approved lease-bound preview socket only; bounded parsing of everything returned                                                                                |
 | Kernel escape from a host-local desktop                  | Same Bubblewrap boundary Code tool launches already rely on; a VM-backed provider is the stronger boundary                                                                                                                                      |
 | Transfer used to exfiltrate                              | One named file, refused outside the root or under `.git`, hash journaled, the person sees it; cloud transfers always ask                                                                                                                        |
 | Desktop content steers the agent                         | Results taint the thread; standing approvals stop; sensitive-field protection and per-app approval unchanged                                                                                                                                    |
@@ -480,11 +544,11 @@ alternatives considered and the reason for the choice follow it.
    it to a recipe maximum of 4 hours; an idle lease is released after
    15 minutes; a thread holds at most two leases; a host runs at most two live
    host-local leases.
-5. **Host-local network.** A desktop has no network by default; a person may
-   set a per-recipe `allow`. Rejected: no network at all. Deferred to a later
-   slice: forwarding one approved Local server port into the desktop. A web app
-   is tested from its built artifact first; a forwarded port is a new inbound
-   path and gets its own approval design.
+5. **Host-local network.** A desktop retains its isolated network namespace.
+   General host-local network remains refused. The later accepted
+   [lease-bound preview](#lease-bound-dev-server-preview) is one explicitly
+   approved local HTTP/WebSocket port through a private authenticated bridge,
+   not a recipe network grant or access to other host ports.
 
 ## Delivery plan
 

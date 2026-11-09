@@ -1,7 +1,10 @@
+import { mkdir, rm } from "node:fs/promises";
+import { join } from "node:path";
 import { rememberModelBinding } from "../browser/browserAppManagedTools";
 import { randomUUID } from "node:crypto";
 import { approvedWorkingFolderRoot } from "../approvedWorkingFolders";
 import {
+  decodeContextSubjectRef,
   DEFAULT_WORK_ACCESS,
   decodeChatThreadId,
   decodeCodeThreadId,
@@ -13,6 +16,8 @@ import {
 import { resolveThreadWorkingDirectory } from "../threadWorkingDirectoryAuthority";
 import { chatImageScopeAllowedForWindow } from "../image/imageScopeAuthority";
 import { SessionCompactionService } from "../context/sessionCompaction";
+import { IdleCompactions } from "../context/idleCompaction";
+import { TurnEndCompactions } from "../context/turnEndCompaction";
 import { createContextRouteHandler } from "../contextRoutes";
 import { createTaskAccessFacts } from "../context/taskAccessFacts";
 import { createTaskAccessSubjectReader } from "../context/taskAccessSubject";
@@ -44,12 +49,12 @@ export type ContextDependencies = Pick<ServerStart, "persistence"> &
     "browserCaptures" | "windowAuthorityStore" | "browserModelBindings" | "codeSessionAuthority"
   > &
   Pick<AgentRunsWiring, "capacityScheduler"> &
-  Pick<HarnessWiring, "nativeHarnessHooks" | "hostShield"> &
+  Pick<HarnessWiring, "nativeHarnessHooks" | "hostShield" | "observeTurnEnded"> &
   Pick<HarnessStateWiring, "serverProjectStore"> &
   Pick<IntegrationsWiring, "agentMessageProjection"> &
   Pick<WorkspaceWiring, "contextHarness" | "projectService" | "spendCeilingService"> &
   Pick<CodeWiring, "canAccessCodeProject"> &
-  Pick<ProvidersWiring, "configuredDriverOptions"> &
+  Pick<ProvidersWiring, "configuredDriverOptions" | "providerUsageLimitsService"> &
   Pick<
     BrowserWiring,
     | "browserCredentialUseService"
@@ -65,7 +70,10 @@ export type ContextDependencies = Pick<ServerStart, "persistence"> &
   Pick<WorkWiring, "workThreadService" | "workTurnService"> &
   Pick<
     FoundationsWiring,
-    "providerRuntimeRegistry" | "workThreadProjection" | "workTurnProjection"
+    | "codeSessionConversation"
+    | "providerRuntimeRegistry"
+    | "workThreadProjection"
+    | "workTurnProjection"
   > &
   Pick<FoundationsWiring, "browserAuthority">;
 
@@ -83,6 +91,7 @@ export function wireContext(deps: ContextDependencies) {
     chatService,
     codeOperationRuntime,
     codeSessionAuthority,
+    codeSessionConversation,
     configuredDriverOptions,
     contextHarness,
     liveProjectBrowsers,
@@ -91,9 +100,11 @@ export function wireContext(deps: ContextDependencies) {
     browserProfileService,
     nativeHarnessHooks,
     hostShield,
+    observeTurnEnded,
     persistence,
     projectService,
     providerRuntimeRegistry,
+    providerUsageLimitsService,
     routeCodeService,
     serverProjectStore,
     spendCeilingService,
@@ -414,6 +425,31 @@ export function wireContext(deps: ContextDependencies) {
                 occupancy: codeCompactionSessions.occupancy,
                 open: codeCompactionSessions.open,
               },
+              // Read only for a limit rule's handover summary; the runtime keeps
+              // the session itself.
+              conversation: (threadId) =>
+                codeSessionConversation(decodeCodeThreadId(threadId)) ?? [],
+              // The summary is one tool-free request, so it runs in a private
+              // host folder, never in the thread's checkout, removed once it ends.
+              scratchRoot: async (threadId) => {
+                const root = join(
+                  persistence.dataDirectory,
+                  "hand-off-scratch",
+                  String(decodeCodeThreadId(threadId)),
+                );
+                await mkdir(root, { recursive: true, mode: 0o700 });
+                return root;
+              },
+              releaseScratchRoot: async (threadId) => {
+                await rm(
+                  join(
+                    persistence.dataDirectory,
+                    "hand-off-scratch",
+                    String(decodeCodeThreadId(threadId)),
+                  ),
+                  { recursive: true, force: true },
+                );
+              },
             },
           }),
     },
@@ -429,6 +465,8 @@ export function wireContext(deps: ContextDependencies) {
       }).kind === "paused"
         ? "paused"
         : "admitted",
+    windowOpen: (windowId) =>
+      windowAuthorityStore.listWindowIds().some((open) => String(open) === String(windowId)),
     conversationOwner: (providerInstanceId) => {
       const instance = persistence.readProviderInstance(providerInstanceId);
       if (instance === undefined) return undefined;
@@ -472,6 +510,43 @@ export function wireContext(deps: ContextDependencies) {
     capacity: capacityScheduler,
     spendCeiling: spendCeilingService,
     uuid: randomUUID,
+  });
+  const idleCompactions = new IdleCompactions({
+    compactions: sessionCompaction,
+    latestCompaction: (subject) => contextHarness.latestCompaction(subject),
+    idleMinutes: () =>
+      (persistence.readShellSettings()?.settings ?? defaultShellSettings()).autoCompactIdleMinutes,
+  });
+  const turnEndCompactions = new TurnEndCompactions({
+    compactions: sessionCompaction,
+    latestCompaction: (subject) => contextHarness.latestCompaction(subject),
+    compactionExists: (subject, compactionId) =>
+      contextHarness.compaction(subject, compactionId) !== undefined,
+    rules: () => {
+      const settings = persistence.readShellSettings()?.settings ?? defaultShellSettings();
+      return {
+        octant: settings.autoCompactOctantWindowPercent,
+        runtime: settings.autoCompactRuntimeWindowPercent,
+        limit: settings.autoCompactLimitPercent,
+      };
+    },
+    // The stored reading the usage page shows; reading it asks no provider.
+    accountWindows: (providerInstanceId) => {
+      const entry = providerUsageLimitsService
+        .snapshot()
+        .entries.find(
+          (candidate) => String(candidate.providerInstanceId) === String(providerInstanceId),
+        );
+      return entry?.status === "available" ? (entry.limits.rateLimitWindows ?? []) : [];
+    },
+  });
+  observeTurnEnded((scope, turn) => {
+    const subject = decodeContextSubjectRef({
+      aggregateType: `${scope.mode}-thread`,
+      aggregateId: scope.threadId,
+    });
+    idleCompactions.turnEnded({ subject, endedAt: turn.endedAt, windowId: scope.windowId });
+    turnEndCompactions.turnEnded({ subject, turnKey: turn.endedAt, windowId: scope.windowId });
   });
   const taskAccessFacts = createTaskAccessFacts({
     subject: createTaskAccessSubjectReader({
@@ -620,6 +695,7 @@ export function wireContext(deps: ContextDependencies) {
     agentMessageRoutes,
     browserAutomationRoutes,
     contextRoutes,
+    idleCompactions,
     windowCanOpenThread,
   };
 }

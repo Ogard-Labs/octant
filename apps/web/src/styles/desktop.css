@@ -7,6 +7,38 @@
   padding: var(--oct-space-3);
 }
 
+.desktop-pane__notices {
+  grid-row: 2;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.desktop-preview {
+  display: flex;
+  flex-direction: column;
+  gap: var(--oct-space-2);
+  padding: var(--oct-space-2) var(--oct-space-3);
+  border-bottom: 1px solid var(--oct-border);
+}
+
+.desktop-preview__actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--oct-space-2);
+  min-width: 0;
+}
+
+.desktop-preview__actions input {
+  width: 9ch;
+}
+
+.desktop-preview__actions p {
+  flex: 1 1 180px;
+  overflow-wrap: anywhere;
+}
+
 .desktop-pane__fit {
   container-type: size;
   display: grid;

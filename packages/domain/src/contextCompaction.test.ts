@@ -4,6 +4,10 @@ import {
   ContextCompactionRejected,
   decideContextLengthRecovery,
   decideSessionCompaction,
+  decideIdleCompaction,
+  decideLimitCompaction,
+  decideWindowFillCompaction,
+  IDLE_COMPACTION_MIN_TOKENS,
   evaluateSemanticSummary,
   orderContextMaintenance,
   reconcileContextVariance,
@@ -540,5 +544,148 @@ describe("session compaction on request", () => {
     expect(
       decideSessionCompaction({ ...available, owner: "runtime", runtimeCompaction: "supported" }),
     ).toEqual({ status: "available" });
+  });
+
+  it("admits a rule the person set wherever it admits their own window", () => {
+    expect(decideSessionCompaction({ ...available, principal: "host-policy" })).toEqual({
+      status: "available",
+    });
+    expect(
+      decideSessionCompaction({
+        ...available,
+        principal: "host-policy",
+        spendCeilingReached: true,
+      }),
+    ).toEqual({ status: "refused", reason: "spend-ceiling-reached" });
+  });
+});
+
+describe("compacting when the window fills", () => {
+  it("compacts once the window reaches the share the person set, and says how full it was", () => {
+    expect(
+      decideWindowFillCompaction({ thresholdPercent: 70, tokens: 72_000, contextWindow: 100_000 }),
+    ).toEqual({ kind: "window-fill", filledPercent: 72, thresholdPercent: 70 });
+    expect(
+      decideWindowFillCompaction({ thresholdPercent: 70, tokens: 70_000, contextWindow: 100_000 }),
+    ).toEqual({ kind: "window-fill", filledPercent: 70, thresholdPercent: 70 });
+    expect(
+      decideWindowFillCompaction({ thresholdPercent: 70, tokens: 69_999, contextWindow: 100_000 }),
+    ).toBeUndefined();
+  });
+
+  it("does nothing when the rule is off or no window has been named", () => {
+    expect(
+      decideWindowFillCompaction({
+        thresholdPercent: null,
+        tokens: 99_000,
+        contextWindow: 100_000,
+      }),
+    ).toBeUndefined();
+    expect(
+      decideWindowFillCompaction({
+        thresholdPercent: 70,
+        tokens: 99_000,
+        contextWindow: undefined,
+      }),
+    ).toBeUndefined();
+  });
+
+  it("does not pay again until the window has grown past where the last attempt left it", () => {
+    const facts = { thresholdPercent: 70, contextWindow: 100_000 } as const;
+    // A failed attempt at 72%, or a completed one that only got the window to 72%.
+    const leftAt72 = { leftPercent: 72 } as const;
+    expect(
+      decideWindowFillCompaction({ ...facts, tokens: 76_000, previousAttempt: leftAt72 }),
+    ).toBeUndefined();
+    expect(
+      decideWindowFillCompaction({ ...facts, tokens: 77_000, previousAttempt: leftAt72 }),
+    ).toEqual({ kind: "window-fill", filledPercent: 77, thresholdPercent: 70 });
+    // A compaction that freed most of the window does not hold back the next one.
+    expect(
+      decideWindowFillCompaction({
+        ...facts,
+        tokens: 72_000,
+        previousAttempt: { leftPercent: 20 },
+      }),
+    ).toEqual({ kind: "window-fill", filledPercent: 72, thresholdPercent: 70 });
+  });
+});
+
+describe("compacting a quiet thread", () => {
+  const endedAt = Date.parse("2026-11-07T10:00:00.000Z");
+  const facts = { thresholdMinutes: 30, lastTurnEndedAt: endedAt, tokens: 60_000 };
+
+  it("compacts a thread quiet past the rule's minutes and says how long it was quiet", () => {
+    expect(decideIdleCompaction({ ...facts, now: endedAt + 31 * 60_000 })).toEqual({
+      kind: "idle",
+      idleMinutes: 31,
+      thresholdMinutes: 30,
+    });
+    expect(decideIdleCompaction({ ...facts, now: endedAt + 29 * 60_000 + 59_999 })).toBeUndefined();
+  });
+
+  it("leaves a quiet thread that holds too little to be worth a compaction", () => {
+    expect(
+      decideIdleCompaction({
+        ...facts,
+        tokens: IDLE_COMPACTION_MIN_TOKENS - 1,
+        now: endedAt + 60 * 60_000,
+      }),
+    ).toBeUndefined();
+  });
+
+  it("never compacts while the person has the rule off", () => {
+    expect(
+      decideIdleCompaction({ ...facts, thresholdMinutes: null, now: endedAt + 600 * 60_000 }),
+    ).toBeUndefined();
+  });
+});
+
+describe("compacting when an account limit gets close", () => {
+  const now = Date.parse("2026-11-07T10:00:00.000Z");
+  const later = "2026-11-07T13:00:00.000Z";
+
+  it("compacts at the rule's share, naming the fullest window and its period", () => {
+    const decided = decideLimitCompaction({
+      thresholdPercent: 90,
+      now,
+      windows: [
+        { window: "seven_day", status: "allowed", utilization: 0.4, resetsAt: later },
+        { window: "five_hour", status: "warning", utilization: 0.913, resetsAt: later },
+      ],
+    });
+    expect(decided).toEqual({
+      cause: { kind: "limit-near", window: "five_hour", usedPercent: 91, thresholdPercent: 90 },
+      crossing: `five_hour:${later}`,
+    });
+  });
+
+  it("leaves a window below the share, one with no reset, and one already reset", () => {
+    expect(
+      decideLimitCompaction({
+        thresholdPercent: 90,
+        now,
+        windows: [
+          { window: "five_hour", status: "allowed", utilization: 0.89, resetsAt: later },
+          { window: "seven_day", status: "warning", utilization: 0.95 },
+          {
+            window: "one_day",
+            status: "warning",
+            utilization: 0.97,
+            resetsAt: "2026-11-07T09:00:00.000Z",
+          },
+        ],
+      }),
+    ).toBeUndefined();
+  });
+
+  it("counts an exhausted window with no share as full, and never acts with the rule off", () => {
+    const exhausted = [{ window: "five_hour", status: "exhausted" as const, resetsAt: later }];
+    expect(
+      decideLimitCompaction({ thresholdPercent: 95, now, windows: exhausted })?.cause,
+    ).toMatchObject({ usedPercent: 100 });
+    expect(
+      decideLimitCompaction({ thresholdPercent: null, now, windows: exhausted }),
+    ).toBeUndefined();
   });
 });

@@ -992,6 +992,7 @@ class CombinedOutputCapture {
   readonly #retention: "first" | "newest";
   readonly #chunks: Array<{ readonly target: "stdout" | "stderr"; bytes: Buffer }> = [];
   #retained = 0;
+  #cut = false;
 
   constructor(maximum: number, retention: "first" | "newest" = "first") {
     this.#maximum = maximum + 1;
@@ -999,7 +1000,10 @@ class CombinedOutputCapture {
   }
 
   append(target: "stdout" | "stderr", chunk: unknown): void {
-    if (this.#retention === "first" && this.#retained >= this.#maximum) return;
+    if (this.#retention === "first" && this.#retained >= this.#maximum) {
+      this.#cut = true;
+      return;
+    }
     const bytes = Buffer.isBuffer(chunk)
       ? chunk
       : chunk instanceof Uint8Array
@@ -1020,6 +1024,7 @@ class CombinedOutputCapture {
    */
   #dropOldest(): void {
     if (this.#retained <= this.#maximum) return;
+    this.#cut = true;
     const cut = new Set<"stdout" | "stderr">();
     let oldest = this.#chunks[0];
     while (oldest !== undefined && this.#retained > this.#maximum) {
@@ -1057,7 +1062,10 @@ class CombinedOutputCapture {
     }
   }
 
-  result(): Pick<RepositoryTestProcessResult, "stdout" | "stderr" | "parserFailed"> {
+  result(): Pick<
+    RepositoryTestProcessResult,
+    "stdout" | "stderr" | "parserFailed" | "outputTruncated"
+  > {
     const stream = (target: "stdout" | "stderr") =>
       Buffer.concat(
         this.#chunks.filter((chunk) => chunk.target === target).map((chunk) => chunk.bytes),
@@ -1068,6 +1076,8 @@ class CombinedOutputCapture {
       stdout: new Uint8Array(stdout),
       stderr: new Uint8Array(stderr),
       parserFailed: !validUtf8(stdout) || !validUtf8(stderr),
+      // Kept only when set, so a result that lost nothing reads as before.
+      ...(this.#cut || this.#retained >= this.#maximum ? { outputTruncated: true } : {}),
     };
   }
 }

@@ -110,6 +110,30 @@ describe("thread egress policy", () => {
     }
   });
 
+  it("keeps Full access proxied when the thread opted into the sandbox", () => {
+    expect(
+      resolveDefaultThreadEgressPolicy({
+        mode: "code",
+        executionPolicy: "full-access",
+        fullAccessSandbox: true,
+      }),
+    ).toBe("provider-endpoints-only");
+    expect(
+      resolveProviderRuntimeEgressPolicy({
+        mode: "code",
+        executionPolicy: "full-access",
+        fullAccessSandbox: true,
+      }),
+    ).toBe("provider-endpoints-only");
+    expect(
+      resolveDefaultThreadEgressPolicy({
+        mode: "code",
+        executionPolicy: "full-access",
+        fullAccessSandbox: false,
+      }),
+    ).toBe("unrestricted");
+  });
+
   it("resolves Full access and explicit network approval to unrestricted", () => {
     expect(
       resolveDefaultThreadEgressPolicy({

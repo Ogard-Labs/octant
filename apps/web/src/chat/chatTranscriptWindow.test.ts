@@ -2,6 +2,7 @@ import { decodeChatThreadView, type ChatThreadView } from "@octant/contracts/cha
 import { describe, expect, it } from "vitest";
 import {
   canvasCardsForShownRun,
+  madeInShownRun,
   joinChatViews,
   joinDetachedRange,
   refreshChatTail,
@@ -212,5 +213,17 @@ describe("joining Chat thread pages", () => {
     ]);
     // The newest turns end the thread, so every card may land on them.
     expect(canvasCardsForShownRun(cards, run, false)).toBe(cards);
+  });
+
+  it("places on a jumped-to run only the images made by the time its last turn settled", () => {
+    const run = view([3, 4]);
+    const jobs = [
+      { id: "during", createdAt: now },
+      { id: "later", createdAt: "2026-07-20T09:00:00.000Z" },
+    ];
+    expect(madeInShownRun(jobs, (job) => job.createdAt, run, true).map((job) => job.id)).toEqual([
+      "during",
+    ]);
+    expect(madeInShownRun(jobs, (job) => job.createdAt, run, false)).toBe(jobs);
   });
 });

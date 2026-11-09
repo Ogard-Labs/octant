@@ -16,6 +16,7 @@ import {
 } from "../browser/browserAuthorityResolver";
 import { CodeEvidenceStore } from "../code/codeEvidenceStore";
 import { CodeOperationEventStore } from "../code/codeOperationEventStore";
+import { readCodeSessionConversation } from "../code/codeSessionConversation";
 import { readThreadExternalContentTaint } from "../context/externalContentTaintProjection";
 import { requireJournalHydration } from "../persistence/journalHydration";
 import { OCTANT_LOCAL_ACTOR_ID } from "../shellService";
@@ -202,12 +203,21 @@ export function wireFoundations(deps: FoundationsDependencies) {
       ...selection,
     });
 
+  // A Code thread's whole public conversation, for what the host summarizes
+  // on the thread's behalf (a compaction rule's handover).
+  const codeSessionConversation = (threadId: CodeThreadId) =>
+    readCodeSessionConversation(threadId, {
+      conversation: (input) => codeBoardEventStore.conversation(input),
+      readEvidence: (reference) => codeEvidence.read(reference),
+    });
+
   const conversationInputTransfer = createConversationInputTransfer(
     persistence,
     workThreadProjection,
     providerRuntimeRegistry,
   );
   return {
+    codeSessionConversation,
     conversationInputTransfer,
     browserAuthority,
     codeBoardEventStore,
