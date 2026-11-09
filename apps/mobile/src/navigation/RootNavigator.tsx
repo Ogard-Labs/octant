@@ -11,6 +11,7 @@ import { hostHealthTone } from "../hosts/hostHealthTone";
 import { GuestHubPanel, GuestHubRefusals } from "../hosts/GuestHubPanel";
 import { createExpoPhoneUnlockKey } from "../hosts/expoOwnerUnlockPorts";
 import { OwnerAlertsPanel } from "../hosts/OwnerAlertsPanel";
+import { OwnerMovesPanel } from "../hosts/OwnerMovesPanel";
 import type { GuestSpokeRefusal } from "../hosts/hubGuestFlow";
 import { PairingPanel } from "../hosts/PairingPanel";
 import { RemoveHostPanel } from "../hosts/RemoveHostPanel";
@@ -294,6 +295,13 @@ function HostsBody(props: {
               </Text>
             ) : null}
             <GuestHubRefusals refused={notAccepted} />
+            {offlineDemo || unlockKey === undefined ? null : (
+              <OwnerMovesPanel
+                deviceKeyStore={deviceKeyStore}
+                guestHubStore={guestHubStore}
+                unlockKey={unlockKey}
+              />
+            )}
             {offlineDemo || unlockKey === undefined ? null : (
               <OwnerAlertsPanel
                 deviceKeyStore={deviceKeyStore}

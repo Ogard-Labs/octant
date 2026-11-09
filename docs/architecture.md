@@ -13025,6 +13025,21 @@ approval-gated` command that undoes it. The terminal shows no one-time
     certificate's SubjectPublicKeyInfo, not of its PEM text. It is shown in
     Settings and by `octant listener` for the person to compare, and no
     client pins it.
+- **Desktop identity controls.** The desktop-owned native signing service is
+  separate from the listener/member P-256 identity above, the roster signer,
+  owner-presence unlock and the profile/control UUID. It keeps a random
+  32-byte secret in the native store and returns only SHA-256 of those raw
+  bytes as a lowercase fingerprint, or a base64 HMAC-SHA256 over the exact
+  caller payload. Its production API has ensure, sign, explicit rotation and
+  recovery state; it never exports or imports the key. Local owned-window
+  status/rotation/recovery IPC uses this service. A failed store/helper leaves
+  this identity recovery-only while the local desktop remains usable. The
+  expected fingerprint parameter proves only a former Mac singleton's legacy
+  migration; it does not pin the currently scoped key or authorize adopting a
+  Windows legacy target. macOS uses the Keychain helper; the existing Linux
+  desktop path has no native implementation of this separate service.
+  Windows' internal prerequisite and its admission limits are specified in the
+  [Current Release Boundary](#current-release-boundary).
 - **Listener certificate.** The listener serves a certificate and key the
   person pastes exactly as given, or, when enabled with neither (the
   administration route without PEMs, or `octant listener enable` without
@@ -15397,13 +15412,13 @@ supports only macOS and Linux and refuses every other platform, so Work and
 Code fail closed there. Simulator, the Apple workbench, and vibrancy stay
 macOS-only.
 
-The Windows provider credential building block uses an Octant native helper
+The Windows credential building block uses an Octant native helper
 with `CredWriteW`, `CredReadW` and `CredDeleteW`, never a secret in `cmdkey`
 arguments or a PowerShell script. A generic credential's protected blob holds
 one UTF-8 value, at most 2,560 bytes; an empty, malformed or oversized value is
 refused before mutation. The broker's 12 KiB transport bound for other
 backends is unchanged. There is no truncation, chunking, attribute spill or
-file fallback. Targets use a fixed provider namespace, the host's store-scope
+file fallback. Targets use closed fixed-purpose namespaces, the host's store-scope
 UUID and the existing Octant or Nightly-test-data service family; no unscoped legacy target is read, copied or deleted
 implicitly. Secrets cross only bounded private child-process pipes, never
 arguments, environment variables, diagnostics or journal entries. Calls use a
@@ -15412,9 +15427,44 @@ deadline and joined owned-process cleanup. The standard Windows vault protects
 the user's account; it does not promise isolation from other programs running
 as that same account.
 
-This helper and its broker adapter do not admit a Windows host or Chat, package
-a Windows app, implement auxiliary secret namespaces or create a host signing
-identity. A missing trusted helper leaves the store unavailable. Native CI
+The desktop backend supplies seven distinct auxiliary stores: replica device
+keys, replica-store credentials, Canvas public-share secrets, MCP-server
+credentials, desktop-provider credentials, push-platform credentials and SSH
+keys. Their fixed purpose prefixes cannot reach provider targets or one another,
+including when the same UUID is used. All purposes use the same atomic blob cap;
+a larger auxiliary value is refused without modifying the stored value. There
+is no separate overflow store. The private frame is versioned; an unknown
+version or purpose is refused before any native credential operation. Existing
+provider target names are unchanged; no migration is implied.
+
+Native vault operations serialize across helper processes with one fixed
+user-SID-derived global mutex shared by all eight purposes, families and stores.
+The native token supplies the SID, never a caller or environment path. Both new
+and existing objects require that User owner and exactly User plus SYSTEM access,
+with a protected DACL. Coordination waits at most three seconds inside the
+existing five-second adapter deadline. Unsafe, blocked or abandoned coordination
+refuses as unavailable before any vault operation; no mutation is retried. Owned
+mutex handles are released on every return or by the OS on process death. This
+boundary preserves concurrent callers: native Windows Server 2025 acceptance
+observed parallel deletes reporting success while some owned entries remained
+present; ordered fixture cleanup alone did not satisfy that contract.
+
+A separate desktop HMAC identity protocol uses the same fixed native helper
+and per-user serialization, but a closed `desktop-host-identity` namespace
+outside every generic provider/auxiliary purpose. Native CNG generates its
+32-byte raw key (well below the 2,560-byte blob cap), hashes it with SHA-256 and
+signs with HMAC-SHA256; only the public fingerprint and MAC leave native code.
+A malformed existing blob refuses ensure/sign without replacing it; explicit
+rotation intentionally recovers it with one atomic replacement. No production
+operation imports, exports or deletes the key, and no unscoped or other
+namespace is read or migrated. Its existing normalized request bound remains
+16 KiB; the blob cap does not restrict sign payloads to 2,560 bytes. A fixed
+Windows executor uses empty arguments/environment and a five-second joined
+operation lifetime. Missing helper configuration stays recovery-only. macOS
+behavior and the existing Linux recovery-only path are unchanged.
+
+These native building blocks do not admit a Windows host or Chat, package
+a Windows app, supply server/member/roster P-256 identity or owner-presence unlock. A missing trusted helper leaves the store unavailable. Native CI
 exercises synthetic targets on an ephemeral Windows runner; real Windows host
 ownership, private runtime paths and lifecycle remain separate prerequisites.
 Work and Code remain refused until their native confinement boundary is proven.

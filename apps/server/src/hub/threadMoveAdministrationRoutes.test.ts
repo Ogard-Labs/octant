@@ -216,6 +216,10 @@ describe("starting a thread move from a window", () => {
         },
       ],
       [
+        THREAD_MOVE_ADMINISTRATION_ROUTES.phoneAsk,
+        { thread: ELSEWHERE, destinationMemberId: DESKTOP, timing: "now" },
+      ],
+      [
         THREAD_MOVE_ADMINISTRATION_ROUTES.start,
         {
           thread: ELSEWHERE,
@@ -275,6 +279,23 @@ describe("starting a thread move from a window", () => {
     );
     expect(response?.status).toBe(409);
     expect(await response?.json()).toEqual({ status: "refused", kind: "unlock-required" });
+  });
+
+  it("holds a thread the window shows for an owner phone, and lists it on the thread", async () => {
+    const { handle } = setup();
+    const response = await handle(
+      post(THREAD_MOVE_ADMINISTRATION_ROUTES.phoneAsk, {
+        thread: SHOWN,
+        destinationMemberId: DESKTOP,
+        timing: "now",
+      }),
+    );
+    expect(response?.status).toBe(200);
+    expect(await response?.json()).toMatchObject({ status: "waiting-for-phone" });
+    const status = await handle(post(THREAD_MOVE_ADMINISTRATION_ROUTES.status, { thread: SHOWN }));
+    expect(await status?.json()).toMatchObject({
+      waitingForPhone: { destinationMemberId: DESKTOP },
+    });
   });
 
   it("asks the agent to summarize a handover only when the window says so", async () => {

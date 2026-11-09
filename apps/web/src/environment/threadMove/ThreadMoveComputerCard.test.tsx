@@ -1,6 +1,7 @@
 import type {
   MovedThreadReference,
   ThreadMoveDestinations,
+  ThreadMovePhoneAskRequest,
   ThreadMoveSizes,
   ThreadMoveStartRequest,
   ThreadMoveThreadStatus,
@@ -63,6 +64,7 @@ function fakeClient(input: {
   readonly sizes?: () => Promise<ThreadMoveSizes>;
 }) {
   const started: ThreadMoveStartRequest[] = [];
+  const askedPhone: ThreadMovePhoneAskRequest[] = [];
   const dismissed: string[] = [];
   let status: ThreadMoveThreadStatus = input.status ?? { status: "read" };
   const client: ThreadMoveClient = {
@@ -84,8 +86,27 @@ function fakeClient(input: {
       };
       return { status: "started" };
     },
+    askPhone: async (request) => {
+      askedPhone.push(request);
+      status = {
+        status: "read",
+        waitingForPhone: {
+          destinationMemberId: DESKTOP as never,
+          destinationName: "Desktop",
+          expiresAt: 1_900_000_000_000,
+        },
+      };
+      return {
+        status: "waiting-for-phone",
+        expiresAt: 1_900_000_000_000,
+        held: [request.thread],
+        leftOut: [],
+      };
+    },
     status: async () => status,
-    stopWaiting: async () => {},
+    stopWaiting: async () => {
+      status = { status: "read" };
+    },
     cancel: async () => "cancelled",
     takeBack: async () => {},
     activate: async () => true,
@@ -109,6 +130,7 @@ function fakeClient(input: {
     }),
     shutdownChallenge: async () => ({ status: "refused", kind: "refused" }),
     shutdownStart: async () => ({ status: "refused", reason: "refused" }),
+    shutdownAskPhone: async () => ({ status: "refused", reason: "refused" }),
     shutdownHandOver: async () => ({ status: "refused", reason: "refused" }),
     handoverPreview: async () => ({ status: "refused", reason: "refused" }),
     handOver: async () => ({ status: "refused", reason: "refused" }),
@@ -116,7 +138,7 @@ function fakeClient(input: {
     handoversList: async () => ({ status: "listed", handovers: [] }),
     handoversContinue: async () => ({ status: "refused", reason: "refused" }),
   };
-  return { client, started, dismissed };
+  return { client, started, askedPhone, dismissed };
 }
 
 describe("the Computer card", () => {
@@ -381,6 +403,43 @@ describe("the Computer card", () => {
     await user.click(await screen.findByRole("button", { name: "Move with Touch ID" }));
     expect(await screen.findByText(/This Mac isn't an owner on Desktop/)).toBeInTheDocument();
     expect(started).toEqual([]);
+  });
+
+  it("asks an owner phone to confirm the move when this window has no Touch ID key, and Don't move ends the wait", async () => {
+    const user = userEvent.setup();
+    const { client, started, askedPhone } = fakeClient({});
+    render(
+      <ThreadMoveComputerCard
+        client={client}
+        hostName="Laptop"
+        isThisComputer
+        thread={THREAD}
+        threadTitle="Add dark mode"
+      />,
+    );
+    await user.click(screen.getByRole("button", { name: /Laptop/ }));
+    await user.click(await screen.findByRole("radio", { name: /Desktop/ }));
+    await user.click(screen.getByRole("button", { name: "Review move" }));
+    expect(screen.queryByRole("button", { name: "Move with Touch ID" })).not.toBeInTheDocument();
+    await user.click(await screen.findByRole("button", { name: "Confirm on your phone" }));
+
+    await waitFor(() =>
+      expect(askedPhone).toEqual([
+        {
+          thread: THREAD,
+          destinationMemberId: DESKTOP,
+          destinationProjectId: PROJECT,
+          timing: "now",
+        },
+      ]),
+    );
+    expect(started).toEqual([]);
+    expect(await screen.findByText("Waiting for your phone")).toBeInTheDocument();
+    expect(screen.getByText(/Confirm on your phone to move this thread to Desktop/)).toBeVisible();
+    await user.click(screen.getByRole("button", { name: "Don't move" }));
+    await waitFor(() =>
+      expect(screen.queryByText("Waiting for your phone")).not.toBeInTheDocument(),
+    );
   });
 
   it("keeps This thread can't move on the thread until the person dismisses it", async () => {
