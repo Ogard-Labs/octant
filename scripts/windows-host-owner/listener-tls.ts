@@ -133,6 +133,7 @@ try {
         [paths.profileId, paths.dataDirectory, "host-key", null],
         [paths.profileId, paths.dataDirectory, "key", Buffer.alloc(4097)],
         [paths.profileId, paths.dataDirectory, "certificate", Buffer.alloc(16385)],
+        [paths.profileId, paths.dataDirectory, "certificate-renewal", null],
       ] as const) {
         const refusal: unknown = native.listenerTlsFile(
           profile,
