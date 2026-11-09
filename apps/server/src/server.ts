@@ -1150,7 +1150,9 @@ export function startOctantServer(
       contextRoutes,
       idleCompactions,
       windowCanOpenThread,
+      flowRuns,
     } = wireContext({
+      onWindowRevoked,
       browserCredentialUseService,
       browserSessionGrants,
       browserUploadPermissions,
@@ -1728,6 +1730,9 @@ export function startOctantServer(
       threadRetention,
     } = wireRemote({
       chatService,
+      browserCaptures,
+      canvasService,
+      imageJobService,
       liveTurns,
       managedWorktreeReceipts,
       movedThreadHistory,
@@ -2124,6 +2129,7 @@ export function startOctantServer(
             shutdownFailure ??= error;
           }
           try {
+            flowRuns.close();
             projectBrowserService?.close();
             browserSessionGrants.close();
             browserUploadPermissions.close();

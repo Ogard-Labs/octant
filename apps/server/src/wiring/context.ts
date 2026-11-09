@@ -1,13 +1,28 @@
 import { mkdir, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { browserAgentAvailability, browserToolTransport } from "@octant/domain";
-import { rememberModelBinding } from "../browser/browserAppManagedTools";
+import {
+  createBrowserAppManagedTools,
+  BROWSER_TOOL_NAME,
+  rememberModelBinding,
+} from "../browser/browserAppManagedTools";
+import { BrowserFlowRuns } from "../browser/browserFlowRuns";
+import type { BrowserFlowCustody } from "../browser/browserAutomationService";
+import type { BrowserFlowTask } from "@octant/contracts/browser-flows";
+import {
+  browserProfileKey,
+  isToolAllowedByAllowlist,
+  storedBrowserProfile,
+  workThreadAccessOf,
+} from "@octant/domain";
+import { createHash } from "node:crypto";
 import { randomUUID } from "node:crypto";
 import { approvedWorkingFolderRoot } from "../approvedWorkingFolders";
 import {
   decodeContextSubjectRef,
   DEFAULT_WORK_ACCESS,
   decodeBrowserThreadId,
+  sameToolActionAuthority,
   decodeChatThreadId,
   decodeCodeThreadId,
   decodeProjectId,
@@ -48,7 +63,11 @@ import { serverWorkProjectOf } from "../serverProjects/serverWorkThreads";
 export type ContextDependencies = Pick<ServerStart, "persistence"> &
   Pick<
     AuthorityWiring,
-    "browserCaptures" | "windowAuthorityStore" | "browserModelBindings" | "codeSessionAuthority"
+    | "browserCaptures"
+    | "windowAuthorityStore"
+    | "browserModelBindings"
+    | "codeSessionAuthority"
+    | "onWindowRevoked"
   > &
   Pick<AgentRunsWiring, "capacityScheduler"> &
   Pick<HarnessWiring, "nativeHarnessHooks" | "hostShield" | "observeTurnEnded"> &
@@ -85,6 +104,7 @@ export type ContextDependencies = Pick<ServerStart, "persistence"> &
 export function wireContext(deps: ContextDependencies) {
   const {
     agentMessageProjection,
+    onWindowRevoked,
     browserAuthority,
     browserAutomationService,
     browserCredentialUseService,
@@ -631,6 +651,233 @@ export function wireContext(deps: ContextDependencies) {
         : persistence.readCodeThread(decodeCodeThreadId(threadId));
     return thread?.lifecycle === "active" ? thread : undefined;
   };
+  const flowTaskFacts = (
+    windowId: WindowId,
+    projectId: import("@octant/contracts").ProjectId,
+    task: Pick<BrowserFlowTask, "threadId" | "mode">,
+  ) => {
+    if (serverProjectStore.project(String(projectId)) !== undefined) return undefined;
+    const thread = taskProfileThread(String(task.threadId), task.mode);
+    if (
+      thread === undefined ||
+      thread.completedAt !== undefined ||
+      thread.snooze !== undefined ||
+      String(thread.projectId) !== String(projectId) ||
+      !browserAuthority.canAccessWindow(windowId, task.threadId, task.mode)
+    )
+      return undefined;
+    if (
+      task.mode === "code"
+        ? codeOperationRuntime?.turnInProgress?.(String(task.threadId)) !== false
+        : workTurnService.isTurnStarting(decodeWorkThreadId(String(task.threadId))) ||
+          workTurnService.isTurnActive(decodeWorkThreadId(String(task.threadId)))
+    )
+      return undefined;
+    const observed = providerRuntimeRegistry.observedState(thread.providerInstanceId);
+    if (
+      observed?.capabilities.appManagedTools !== "supported" &&
+      observed?.verifiedToolModelIds?.some((id) => String(id) === String(thread.modelId)) !== true
+    )
+      return undefined;
+    const authority = browserAuthority.resolve(task.threadId, task.mode);
+    if (authority === undefined) return undefined;
+    const code =
+      task.mode === "code"
+        ? persistence.readCodeThread(decodeCodeThreadId(String(task.threadId)))
+        : undefined;
+    const work =
+      task.mode === "work"
+        ? workThreadProjection.read(decodeWorkThreadId(String(task.threadId)))
+        : undefined;
+    if (code !== undefined) {
+      const checkout = persistence.readCodeCheckout(code.checkoutId);
+      if (
+        checkout === undefined ||
+        checkout.kind === "remote-root" ||
+        checkout.availability !== "available"
+      )
+        return undefined;
+    }
+    if (work?.completionConfirmed === true) return undefined;
+    if (!isToolAllowedByAllowlist(code?.toolConstraints ?? [], BROWSER_TOOL_NAME)) return undefined;
+    const policy =
+      code?.executionPolicy ??
+      workThreadAccessOf(work?.access ?? DEFAULT_WORK_ACCESS).executionPolicy;
+    if (policy === "plan") return undefined;
+    const inspectedContext = browserAutomationService.inspectThread(
+      windowId,
+      task.threadId,
+    ).context;
+    // A stopped/expired page does not choose the profile for a new navigation.
+    const context =
+      inspectedContext?.state === "active" || inspectedContext?.state === "creating"
+        ? inspectedContext
+        : undefined;
+    const choice = thread.browserTaskProfile ?? "private";
+    const profile =
+      context === undefined
+        ? choice === "project"
+          ? `project:${projectId}`
+          : choice
+        : browserProfileKey(storedBrowserProfile(context.policy.profile));
+    const settings = persistence.readShellSettings()?.settings ?? defaultShellSettings();
+    const digest = (value: unknown) =>
+      createHash("sha256").update(JSON.stringify(value)).digest("hex");
+    const accessLabel =
+      policy === "full-access"
+        ? "Full access"
+        : policy === "auto-accept-edits"
+          ? "Accept edits"
+          : code?.autoApprove === true || work?.access === "auto"
+            ? "Auto"
+            : "Ask first";
+    const profileLabel =
+      profile === "private"
+        ? "Private"
+        : profile === "personal"
+          ? "Personal"
+          : profile.startsWith("project:")
+            ? "Project"
+            : `Account ${profile.slice("account:".length, "account:".length + 8)}`;
+    return {
+      thread,
+      authority,
+      policy,
+      accessLabel,
+      profileLabel,
+      constraints: code?.toolConstraints,
+      fingerprint: digest({
+        authority,
+        model: thread.modelId,
+        version: thread.version,
+        profile,
+        policy,
+      }),
+      resumeFingerprint: digest({
+        context: context?.contextId,
+        contextProfile: context?.policy.profile,
+        allowedOrigins: context?.policy.allowedOrigins,
+        binding:
+          context === undefined ? undefined : browserModelBindings.get(String(context.contextId)),
+        origins: settings.rememberedBrowserOrigins,
+        profiles: settings.rememberedBrowserProfileSites,
+      }),
+    };
+  };
+  const flowRuns = new BrowserFlowRuns({
+    readFlow: (projectId, name) => browserFlowService.get(projectId, name),
+    tasks: (windowId, projectId) =>
+      [
+        ...workThreadProjection
+          .list()
+          .filter((thread) => String(thread.projectId) === String(projectId))
+          .map((thread) => ({
+            threadId: decodeBrowserThreadId(String(thread.id)),
+            mode: "work" as const,
+            title: thread.title.slice(0, 512).trim(),
+          })),
+        ...persistence
+          .readCodeThreads()
+          .filter((thread) => String(thread.projectId) === String(projectId))
+          .map((thread) => ({
+            threadId: decodeBrowserThreadId(String(thread.id)),
+            mode: "code" as const,
+            title: thread.title.slice(0, 512).trim(),
+          })),
+      ].flatMap((task) => {
+        const facts = flowTaskFacts(windowId, projectId, task);
+        return facts === undefined
+          ? []
+          : [
+              {
+                ...task,
+                modelId: facts.thread.modelId,
+                accessLabel: facts.accessLabel,
+                profileLabel: facts.profileLabel,
+              },
+            ];
+      }),
+    bindTask: (windowId, projectId, task) => {
+      const facts = flowTaskFacts(windowId, projectId, task);
+      if (facts === undefined) return undefined;
+      let custody: BrowserFlowCustody | undefined;
+      const tools = createBrowserAppManagedTools({
+        windowId,
+        threadId: task.threadId,
+        mode: task.mode,
+        modelId: String(facts.thread.modelId),
+        resolveModelId: () => taskProfileThread(String(task.threadId), task.mode)?.modelId,
+        resolveTaskProfile: () =>
+          taskProfileThread(String(task.threadId), task.mode)?.browserTaskProfile,
+        resolveAuthority: (threadId, mode) => browserAuthority.resolve(threadId, mode),
+        modelBindings: browserModelBindings,
+        executionPolicy: facts.policy,
+        ...(facts.constraints === undefined ? {} : { toolConstraints: facts.constraints }),
+        approvals: browserToolApprovalService,
+        uuid: randomUUID,
+        browser: {
+          inspectThread: (owner, threadId) =>
+            browserAutomationService.inspectThread(owner, threadId),
+          create: (command) =>
+            browserAutomationService.create({
+              ...command,
+              ...(custody === undefined ? {} : { flowRun: custody }),
+            }),
+          act: (command) =>
+            browserAutomationService.act({
+              ...command,
+              ...(custody === undefined ? {} : { flowRun: custody }),
+            }),
+          releaseThread: (owner, threadId) =>
+            browserAutomationService.releaseThread(owner, threadId),
+          snapshotRefs: (owner, threadId) => browserAutomationService.snapshotRefs(owner, threadId),
+        },
+      });
+      return {
+        fingerprint: facts.fingerprint,
+        resumeFingerprint: facts.resumeFingerprint,
+        refs: () => browserAutomationService.snapshotRefs(windowId, task.threadId),
+        execute: async (step, signal) => {
+          const result = await tools.execute({
+            name: BROWSER_TOOL_NAME,
+            inputJson: JSON.stringify(step),
+            signal,
+          });
+          return { ...result, isError: result.isError === true };
+        },
+        claim: (current) => {
+          custody = browserAutomationService.claimFlowRun({
+            windowId,
+            threadId: task.threadId,
+            mode: task.mode,
+            current: (requiresApprovedPage) => {
+              if (!current()) return false;
+              if (!requiresApprovedPage) return true;
+              const context = browserAutomationService.inspectThread(
+                windowId,
+                task.threadId,
+              ).context;
+              const binding =
+                context === undefined
+                  ? undefined
+                  : browserModelBindings.get(String(context.contextId));
+              return (
+                context?.state === "active" &&
+                binding !== undefined &&
+                binding.approval !== "pending" &&
+                String(binding.modelId) === String(facts.thread.modelId) &&
+                sameToolActionAuthority(binding.authority, facts.authority)
+              );
+            },
+          });
+          return custody;
+        },
+      };
+    },
+    uuid: randomUUID,
+    now: Date.now,
+  });
+  onWindowRevoked((windowId) => flowRuns.revokeWindow(windowId));
   const browserAutomationRoutes = createBrowserAutomationRouteHandler({
     agentAvailability: (windowId, threadId) => readBrowserAvailability(windowId, String(threadId)),
     service: browserAutomationService,
@@ -721,6 +968,7 @@ export function wireContext(deps: ContextDependencies) {
     },
     profiles: browserProfileService,
     flows: browserFlowService,
+    flowRuns,
     extensions: browserExtensionService,
     authority: browserAuthority,
     approvals: browserToolApprovalService,
@@ -735,6 +983,7 @@ export function wireContext(deps: ContextDependencies) {
   return {
     agentMessageRoutes,
     browserAutomationRoutes,
+    flowRuns,
     contextRoutes,
     idleCompactions,
     windowCanOpenThread,

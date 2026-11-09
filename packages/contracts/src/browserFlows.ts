@@ -1,6 +1,8 @@
 import { Schema } from "effect";
 import { UtcTimestamp } from "./events";
 import { ProjectId } from "./projects";
+import { BrowserThreadId } from "./browserAutomation";
+import { ProviderModelId } from "./providers";
 
 const strict = { parseOptions: { onExcessProperty: "error" as const } };
 
@@ -96,9 +98,70 @@ export const BrowserFlowSummary = Schema.Struct({
 }).annotations(strict);
 export type BrowserFlowSummary = typeof BrowserFlowSummary.Type;
 
+/** A chosen existing task. This names authority; it never creates a task or changes its model. */
+export const BrowserFlowTask = Schema.Struct({
+  threadId: BrowserThreadId,
+  mode: Schema.Literal("work", "code"),
+  title: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(512)),
+  modelId: ProviderModelId,
+  accessLabel: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(80)),
+  profileLabel: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(256)),
+}).annotations(strict);
+export type BrowserFlowTask = typeof BrowserFlowTask.Type;
+
+export const BrowserFlowRunId = Schema.UUID.pipe(Schema.brand("BrowserFlowRunId"));
+export type BrowserFlowRunId = typeof BrowserFlowRunId.Type;
+
+export const BrowserFlowRunValue = Schema.Struct({
+  /** Zero-based step index; only recorded text and expected title values are editable. */
+  step: Schema.Int.pipe(Schema.between(0, MAX_BROWSER_FLOW_STEPS - 1)),
+  text: Schema.optional(Schema.String.pipe(Schema.maxLength(8192))),
+  expectedTitle: Schema.optional(Schema.String.pipe(Schema.maxLength(1024))),
+})
+  .annotations(strict)
+  .pipe(Schema.filter((value) => value.text !== undefined || value.expectedTitle !== undefined));
+export type BrowserFlowRunValue = typeof BrowserFlowRunValue.Type;
+
+export const BrowserFlowRun = Schema.Struct({
+  id: BrowserFlowRunId,
+  projectId: ProjectId,
+  task: BrowserFlowTask,
+  flow: BrowserFlow,
+  state: Schema.Literal(
+    "review",
+    "running",
+    "paused",
+    "completed",
+    "failed",
+    "cancelled",
+    "expired",
+  ),
+  completed: Schema.Int.pipe(Schema.between(0, MAX_BROWSER_FLOW_STEPS)),
+  expiresAt: UtcTimestamp,
+  message: Schema.optional(Schema.String.pipe(Schema.maxLength(512))),
+}).annotations(strict);
+export type BrowserFlowRun = typeof BrowserFlowRun.Type;
+
 /** The person's commands about the flows this host keeps; local windows only. */
 export const BrowserFlowsCommand = Schema.Union(
   Schema.Struct({ kind: Schema.Literal("list") }).annotations(strict),
+  Schema.Struct({ kind: Schema.Literal("run-tasks"), projectId: ProjectId }).annotations(strict),
+  Schema.Struct({
+    kind: Schema.Literal("review-run"),
+    projectId: ProjectId,
+    name: BrowserFlowName,
+    threadId: BrowserThreadId,
+    mode: Schema.Literal("work", "code"),
+  }).annotations(strict),
+  Schema.Struct({
+    kind: Schema.Literal("start-run"),
+    runId: BrowserFlowRunId,
+    values: Schema.Array(BrowserFlowRunValue).pipe(Schema.maxItems(MAX_BROWSER_FLOW_STEPS)),
+  }).annotations(strict),
+  Schema.Struct({
+    kind: Schema.Literal("inspect-run", "resume-run", "cancel-run"),
+    runId: BrowserFlowRunId,
+  }).annotations(strict),
   Schema.Struct({
     kind: Schema.Literal("delete"),
     projectId: ProjectId,
@@ -108,6 +171,13 @@ export const BrowserFlowsCommand = Schema.Union(
 export type BrowserFlowsCommand = typeof BrowserFlowsCommand.Type;
 
 export const BrowserFlowsResult = Schema.Union(
+  Schema.Struct({
+    kind: Schema.Literal("browser-flow-tasks"),
+    tasks: Schema.Array(BrowserFlowTask).pipe(Schema.maxItems(256)),
+  }).annotations(strict),
+  Schema.Struct({ kind: Schema.Literal("browser-flow-run"), run: BrowserFlowRun }).annotations(
+    strict,
+  ),
   Schema.Struct({
     kind: Schema.Literal("browser-flows"),
     flows: Schema.Array(BrowserFlowSummary).pipe(Schema.maxItems(4_096)),
@@ -119,7 +189,14 @@ export const BrowserFlowsResult = Schema.Union(
   }).annotations(strict),
   Schema.Struct({
     kind: Schema.Literal("browser-flows-refused"),
-    reason: Schema.Literal("not-local", "not-found"),
+    reason: Schema.Literal(
+      "not-local",
+      "not-found",
+      "task-unavailable",
+      "run-stale",
+      "run-busy",
+      "invalid-values",
+    ),
     message: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(512)),
   }).annotations(strict),
 );

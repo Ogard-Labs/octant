@@ -95,6 +95,17 @@ export function importedPageWriter(versionId: CanvasVersionId): string {
   return `imported-page:${String(versionId)}`;
 }
 
+/**
+ * The writer recorded for a Canvas carried in with a thread that moved from
+ * another of the person's computers, when the Canvas carried outside content
+ * there. Its writers' marks stayed on that computer, so one writer that is
+ * never a thread stands for them: every reader is marked, the moved thread
+ * included, and a Clear on the moved thread does not exempt it.
+ */
+export function movedCanvasWriter(versionId: CanvasVersionId): string {
+  return `moved-canvas:${String(versionId)}`;
+}
+
 /** Whether the writer id names a synced version's own author rather than a thread. */
 export function isReplicaWriter(version: CanvasVersion, writerId: string): boolean {
   return writerId === String(version.versionId);

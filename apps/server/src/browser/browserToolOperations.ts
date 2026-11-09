@@ -963,9 +963,7 @@ export async function runBrowserToolSteps(
     // The page changed hands under this batch: the call that would have acted
     // was answered with a fresh snapshot, so what follows was planned against
     // a page that is no longer there.
-    if (
-      (answer.result as { readonly note?: unknown }).note === PERSON_USED_PAGE_NOTES["handed-back"]
-    ) {
+    if (browserToolCallDidNotRun(answer)) {
       return {
         ...(images.length === 0 ? {} : { images }),
         result: {
@@ -1077,6 +1075,16 @@ const PERSON_USED_PAGE_NOTES = {
   "handed-back":
     "The person took the page and handed it back, so your call did not run. This is a fresh snapshot of the page now.",
 } as const;
+
+/** A hand-back can answer a guarded input with a snapshot instead of dispatching it. */
+export function browserToolCallDidNotRun(answer: BrowserToolAnswer): boolean {
+  return (
+    typeof answer.result === "object" &&
+    answer.result !== null &&
+    "note" in answer.result &&
+    answer.result.note === PERSON_USED_PAGE_NOTES["handed-back"]
+  );
+}
 
 export function browserToolResult(snapshot: BrowserAutomationSnapshot, includeScreenshot = false) {
   const image = includeScreenshot

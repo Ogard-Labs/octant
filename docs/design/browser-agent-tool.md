@@ -546,7 +546,10 @@ runs, not when it was recorded.
   authority, model binding, origin approval, Plan mode, the stale check, and the
   credential check. A step that acted by ref first takes a snapshot of the fresh
   page and picks the one element with the recorded role and name; none, or more
-  than one, stops the replay. After each step the server compares the page's
+  than one, stops the replay. An untargeted keypress also takes a fresh snapshot
+  before dispatch, including after a person hands back the page. A hand-back
+  answer that substituted a snapshot is never counted as an executed step.
+  After each step the server compares the page's
   path and title with the recorded ones, and the first step whose outcome
   differs, or that fails or is refused, stops the replay. The answer names that
   step (its number, its operation, and the expected and found path and title, the
@@ -571,8 +574,29 @@ runs, not when it was recorded.
 - **The person's view.** Settings › Data & storage › Browser flows lists every
   Project's flows with step count and first address and deletes one after a
   confirmation, from a local window only (`/api/browser/flows`; a paired device
-  is refused). A person runs a flow by asking the agent to; a run needs a model's
-  authority and approvals, which a Settings button cannot hold.
+  is refused). A person may also select an existing active, idle Work or Code task,
+  review its fixed steps and run-specific text, and start through that task's
+  current model and authority. Settings supplies no authority of its own.
+- **Reviewed run.** The server binds the local window, flow version, task/model,
+  authority and profile to a host-issued review id. A type step's text and a
+  recorded expected title are editable for this run (8,192 text characters,
+  1,024 title characters, existing 256 KiB total). Operations, targets and paths
+  remain fixed. The person must review a changed expected title explicitly;
+  Octant does not infer substitutions or drop outcome checks when text changes.
+  Values stay in finite host memory and never replace the saved flow. Plan,
+  unavailable providers and server Projects refuse rather than fall back to
+  local execution. Each fixed step uses ordinary Browser admission with no
+  provider calls between steps.
+- **Progress and Resume.** A run holds exclusive agent Browser custody for its
+  task, including while paused; the person may still take over and hand back.
+  Only a refusal proving that a human-held operation did not run becomes Paused.
+  Resume is explicit and repeats that unexecuted step with a fresh snapshot.
+  A changed flow, task/model/authority, profile, context or site approval refuses
+  Resume and requires review again. Other failures and uncertain effects stop
+  without retry. Closing or cancelling stops the run; an already dispatched
+  operation may have acted. A review/run expires after 15 minutes, and at most
+  20 runs are retained. Window revocation or host shutdown cancels custody.
+  Progress reads never dispatch or resume a step.
 - Rationale: a stored step is read again with the tool's own parser at replay,
   so a flow can carry nothing a call could not, and a corrupted or edited record
   cannot add an operation. Refs are stored as role and name because a ref
@@ -584,7 +608,7 @@ runs, not when it was recorded.
   (a `type` or `press` into one is refused before any runtime acts), so no
   password, code, or card number reaches a flow through a step, and an address
   that holds a secret ends the recording instead. A step that needs the person
-  ends what can be saved because a replay has nobody to ask. A failed operation is
+  ends what can be saved because a stored step carries no credential or sign-in authority. A failed operation is
   not stored and does not end the run: the page is as it was, and storing it
   would replay a mistake. A routine may run but not save because saving writes a
   Project's data for good, with nobody there to have meant it. A secret in an
