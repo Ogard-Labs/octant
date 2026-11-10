@@ -988,12 +988,13 @@ Code, wherever `TurnActivityRows` and `AssistantMessageBody` draw a turn:
   turn's tool rows are open; Settings › Chat › Stream replies still alone
   decides whether the partial answer shows, at every level.
 
-The thread's own choice is a menu beside the thread's other actions: in Chat's
-header just before Thread actions, and among the leading controls of the Work and
-Code composer row. Its trigger is the shared `shell-icon-button` (`ListCollapse`) whose
-name says the level in effect and whose it is ("Reply detail: High, this
-thread's own" or "Reply detail: Low, the default"), because a menu trigger
-cannot otherwise show its selection. Its radio items are **Use default (Low)**
+The thread's own choice is a row of the thread's
+[info panel](docs/design/workspace.md#thread-info) in Chat, Work, and Code. Its
+trigger writes the level in effect ("Reply detail: Low") beside the
+`ListCollapse` glyph, and its name also says whose the level is ("Reply
+detail: High, this thread's own" or "Reply detail: Low, the default"). As a
+bare glyph in the composer row it read as one of two unexplained list icons.
+Its radio items are **Use default (Low)**
 (naming the current default; "Follow the level in Settings") and the three
 levels, with short descriptions that fit a phone-width menu: "Thinking and
 finished tool calls folded", "Thinking's first line, tool calls listed",

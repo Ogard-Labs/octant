@@ -62,7 +62,7 @@ describe("Project action buttons", () => {
     const { rerender } = render(
       <ProjectActionButtons actions={[dev]} mainFolder="/work/app" onRun={onRun} />,
     );
-    expect(within(host).queryByRole("button", { name: "Folder to run actions in" })).toBeNull();
+    expect(within(host).queryByRole("button", { name: "More Project actions" })).toBeNull();
 
     rerender(
       <ProjectActionButtons
@@ -75,9 +75,47 @@ describe("Project action buttons", () => {
     await userEvent.click(within(host).getByRole("button", { name: "Dev" }));
     expect(onRun).toHaveBeenLastCalledWith(dev);
 
-    await userEvent.click(within(host).getByRole("button", { name: "Folder to run actions in" }));
+    await userEvent.click(within(host).getByRole("button", { name: "More Project actions" }));
     await userEvent.click(await screen.findByRole("menuitemradio", { name: "notes" }));
+    await userEvent.keyboard("{Escape}");
     await userEvent.click(within(host).getByRole("button", { name: "Dev" }));
     expect(onRun).toHaveBeenLastCalledWith(dev, "/work/notes");
+  });
+
+  it("keeps the title bar to the run buttons: where they run and worktree setup sit in one menu", async () => {
+    const onSetup = vi.fn();
+    const host = slot();
+    const { rerender } = render(
+      <ProjectActionButtons
+        actions={[]}
+        defaultFolderLabel="Active checkout"
+        onRun={vi.fn()}
+        onSetup={onSetup}
+      />,
+    );
+    // Nothing to run: no choice of where to run it, only the task's setup.
+    expect(
+      within(host)
+        .getAllByRole("button")
+        .map((button) => button.textContent),
+    ).toEqual(["Worktrees"]);
+
+    rerender(
+      <ProjectActionButtons
+        actions={[action("Dev")]}
+        defaultFolderLabel="Active checkout"
+        onRun={vi.fn()}
+        onSetup={onSetup}
+      />,
+    );
+    expect(
+      within(host)
+        .getAllByRole("button")
+        .map((button) => button.textContent),
+    ).toEqual(["Dev", "More"]);
+    await userEvent.click(within(host).getByRole("button", { name: "More Project actions" }));
+    expect(await screen.findByRole("menuitemradio", { name: "Active checkout" })).toBeVisible();
+    await userEvent.click(screen.getByRole("menuitem", { name: "Worktrees…" }));
+    expect(onSetup).toHaveBeenCalledTimes(1);
   });
 });

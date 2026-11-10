@@ -5140,8 +5140,8 @@ The provider layer is defined by `@octant/provider-sdk` and implemented in
     settings, hooks, MCP servers, plugins, and tools. A Chat Project has no
     folder and holds no trust.
   - **Thread.** Each Chat, Work, and Code thread of a key provider carries its
-    own choice: Account default, On, or Off (the **Own setup** menu beside the
-    composer's picker). `set` on `POST /api/providers/thread-native-setup`
+    own choice: Account default, On, or Off (the **Provider tools** row of the
+    thread's info panel). `set` on `POST /api/providers/thread-native-setup`
     sends it, only from a local window (a paired device may read it, and the
     host refuses a provider account that is not a key provider's), and
     journals `thread.native-setup-changed@1` on the thread's own
@@ -11499,7 +11499,7 @@ settings sandbox on|off [--work]`. Only a window on this host can turn
   `harnessAutoReview` is Reviewed (below). Built: Guarded, Accept edits,
   Reviewed (the provider's own reviewer, or Octant Shield), and Full access
   in Code and Work, with the first-run question, a global default, a Project
-  override in Code and Work, the thread header line, the journaled record of
+  override in Code and Work, the level row of the thread's info panel, the journaled record of
   who lowered a level and from where, and the one-time warning. Full access
   runs Claude Code at `bypassPermissions` and Codex at `danger-full-access`
   with approval policy `never`, with no Octant wrapping for any provider

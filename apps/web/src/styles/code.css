@@ -1,14 +1,7 @@
+/* A row of the thread's info panel, which draws its spacing and divider. */
 .provider-cloud-sessions {
   min-width: 0;
-  margin-block: var(--oct-space-3);
-  padding-block: var(--oct-space-3);
-  border-top: 1px solid var(--oct-border);
   font-size: var(--oct-text-sm);
-}
-
-.provider-cloud-sessions summary {
-  cursor: pointer;
-  font-weight: 500;
 }
 
 .provider-cloud-sessions > p,
@@ -2724,8 +2717,6 @@ html[data-octant-increased-contrast="true"] .github-picker__option[aria-selected
 }
 
 .guardrail-level {
-  margin: 0;
-  padding-block: var(--oct-space-1);
   color: var(--oct-muted);
   font-size: var(--oct-text-xs);
   line-height: var(--oct-leading-snug);

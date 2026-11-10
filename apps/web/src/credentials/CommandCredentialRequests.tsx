@@ -1,3 +1,4 @@
+import { useThreadInfoAttention } from "../composer/ThreadInfo";
 import { OctantAlert } from "../ui/base/OctantAlert";
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
@@ -119,9 +120,11 @@ export function CommandCredentialRequests(props: {
       if (identity.current === captured) setBusy(false);
     }
   };
-  if (client === undefined || props.projectId === undefined) return null;
   const requests =
     view?.requests.filter((request) => String(request.threadId) === props.threadId) ?? [];
+  // A request waits for the person inside a panel that is usually closed.
+  useThreadInfoAttention("credential-commands", requests.length > 0);
+  if (client === undefined || props.projectId === undefined) return null;
   return (
     <details className="credential-requests">
       <summary>Credential commands{requests.length > 0 ? " · Review required" : ""}</summary>

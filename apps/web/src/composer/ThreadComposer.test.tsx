@@ -7,6 +7,7 @@ import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import { OutsideContentContext } from "./OutsideContentNotice";
 import { PlanUsageProvider } from "../usage/PlanUsageContext";
+import { FrozenBarScope } from "./frozenBarScope";
 import { ThreadComposer } from "./ThreadComposer";
 
 describe("ThreadComposer", () => {
@@ -291,5 +292,38 @@ describe("ThreadComposer", () => {
     expect(send).toHaveAttribute("type", "submit");
     await user.click(send);
     expect(onSubmit).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps the thread's info reachable, and what a person typed into it, while a move holds the thread", async () => {
+    const user = userEvent.setup();
+    const composer = (
+      <ThreadComposer
+        info={<input aria-label="Cloud task" />}
+        input={<textarea aria-label="Message" className="composer-input" />}
+        presentation="follow-up"
+        row={{ actions: { kind: "send", send: { ariaLabel: "Send", onSend: vi.fn() } } }}
+      />
+    );
+    const { rerender } = render(
+      <FrozenBarScope.Provider value={undefined}>{composer}</FrozenBarScope.Provider>,
+    );
+    await user.type(screen.getByRole("textbox", { name: "Cloud task" }), "Draft a report");
+
+    rerender(
+      <FrozenBarScope.Provider value={<p>Moving to another computer</p>}>
+        {composer}
+      </FrozenBarScope.Provider>,
+    );
+
+    expect(screen.getByText("Moving to another computer")).toBeVisible();
+    expect(screen.queryByRole("textbox", { name: "Message" })).toBeNull();
+    // The same field, not a new one: a move that starts and is cancelled must
+    // not discard a task the person was reviewing.
+    expect(screen.getByRole("textbox", { name: "Cloud task" })).toHaveValue("Draft a report");
+
+    rerender(<FrozenBarScope.Provider value={undefined}>{composer}</FrozenBarScope.Provider>);
+
+    expect(screen.getByRole("textbox", { name: "Message" })).toBeVisible();
+    expect(screen.getByRole("textbox", { name: "Cloud task" })).toHaveValue("Draft a report");
   });
 });
