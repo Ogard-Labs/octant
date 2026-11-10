@@ -435,7 +435,7 @@ function ProviderCatalogDetail(
               onClick={props.onOpenModelEndpoints}
               size="sm"
               type="button"
-              variant="outline"
+              variant="secondary"
             >
               Open Model endpoints
             </OctantButton>
@@ -697,7 +697,7 @@ function CurrentStep(
     </OctantButton>
   );
   const openEndpoints = (
-    <OctantButton onClick={props.onOpenModelEndpoints} size="sm" type="button" variant="outline">
+    <OctantButton onClick={props.onOpenModelEndpoints} size="sm" type="button" variant="secondary">
       Open Model endpoints
     </OctantButton>
   );

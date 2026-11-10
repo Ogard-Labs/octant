@@ -2388,7 +2388,7 @@ function SkillFoldersSection({
             aria-label="Refresh folder status"
             onClick={onSaved}
             type="button"
-            variant="outline"
+            variant="secondary"
           >
             Refresh
           </OctantButton>

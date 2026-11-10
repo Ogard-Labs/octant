@@ -290,7 +290,7 @@ export function RemoteSetupChecks(props: {
         <OctantButton
           size="sm"
           type="button"
-          variant="outline"
+          variant="secondary"
           onClick={() => void run()}
           disabled={
             busy ||

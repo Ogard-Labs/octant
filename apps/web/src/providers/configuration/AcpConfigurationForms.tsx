@@ -213,7 +213,7 @@ export function AcpAgentConfigurationForm(props: {
         <OctantButton
           disabled={props.disabled}
           type="submit"
-          variant="outline"
+          variant="secondary"
           size="sm"
           aria-label={`Save ${profile.name} settings for ${props.instance.displayName}`}
         >
@@ -262,7 +262,7 @@ export function OllamaConfigurationForm(props: {
         <OctantButton
           disabled={props.disabled}
           type="submit"
-          variant="outline"
+          variant="secondary"
           size="sm"
           aria-label={`Save Ollama settings for ${props.instance.displayName}`}
         >
