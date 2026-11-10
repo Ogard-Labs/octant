@@ -56,7 +56,10 @@ export interface NightlyBundleReader {
   readonly signatureVerifies: (bundle: string) => boolean;
   readonly fuses: (bundle: string) => Promise<void>;
   /** Every file in the bundle, the sealed archive's entries included. */
-  readonly entries: (bundle: string) => Promise<ReadonlyArray<PackagedPayloadEntry>>;
+  readonly entries: (
+    bundle: string,
+    stage: "sealed" | "signed",
+  ) => Promise<ReadonlyArray<PackagedPayloadEntry>>;
 }
 
 export type NightlyClientBundleCheck =
@@ -106,7 +109,13 @@ export async function checkPackagedNightlyClient(input: {
 
   let entries: ReadonlyArray<PackagedPayloadEntry> = [];
   try {
-    entries = await reader.entries(bundle);
+    // Only a bundle whose Developer ID signature was verified above may skip
+    // the sealed hashes of its re-signed native files; any other bundle must
+    // still match them byte for byte.
+    entries = await reader.entries(
+      bundle,
+      input.signature.kind === "developer-id" ? "signed" : "sealed",
+    );
   } catch (error) {
     reasons.push(message(error));
   }
@@ -132,7 +141,7 @@ const macosBundleReader: NightlyBundleReader = {
       timeout: 300_000,
     }).status === 0,
   fuses: (bundle) => validateDesktopRuntimeFuses(bundle),
-  entries: async (bundle) => {
+  entries: async (bundle, stage) => {
     // The sealed archive is read through its integrity record, as packaging
     // reads it, so its entries are the bytes the app will load.
     const archive = readDesktopArchive(
@@ -140,8 +149,7 @@ const macosBundleReader: NightlyBundleReader = {
       JSON.parse(
         plutilJson(join(bundle, "Contents/Info.plist"), ["-extract", "ElectronAsarIntegrity"]),
       ),
-      // This bundle is already signed, and signing rewrote the unpacked natives.
-      "signed",
+      stage,
     );
     return [...archive, ...(await collectPayloadEntries(join(bundle, "Contents")))];
   },
