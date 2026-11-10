@@ -38,6 +38,28 @@ export interface CodeBoardCoordinators {
   readonly titleByCoordinator: ReadonlyMap<string, string>;
 }
 
+/**
+ * The coordinator title each worker in the window's thread list belongs to,
+ * for the "via <coordinator>" label on a worker's Needs you and Inbox rows.
+ */
+export function coordinatorTitleByWorker(
+  threads: ReadonlyArray<{
+    readonly threadId: string;
+    readonly title: string;
+    readonly coordinator?: true;
+    readonly coordinatorThreadId?: string;
+  }>,
+): ReadonlyMap<string, string> {
+  const { titleByCoordinator } = codeBoardCoordinators(threads);
+  const byWorker = new Map<string, string>();
+  for (const thread of threads) {
+    if (thread.coordinatorThreadId === undefined) continue;
+    const title = titleByCoordinator.get(String(thread.coordinatorThreadId));
+    if (title !== undefined) byWorker.set(String(thread.threadId), title);
+  }
+  return byWorker;
+}
+
 export function codeBoardCoordinators(
   threads: ReadonlyArray<{
     readonly threadId: string;

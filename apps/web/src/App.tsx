@@ -445,7 +445,7 @@ import type { ComposerCompaction } from "./context/composerContextMeterScope";
 import type { ContextInspectorSnapshot } from "@octant/contracts/context-rpc";
 import { createCodeReadCursorStore, useCodeController } from "./code/useCodeController";
 import { useContinueCards } from "./code/useContinueCards";
-import { codeBoardCoordinatorLineage } from "./code/codeBoardGrouping";
+import { coordinatorTitleByWorker } from "./code/codeBoardGrouping";
 import {
   CodeThreadControllerSlots,
   createCodeThreadControllers,
@@ -4665,7 +4665,7 @@ function LaunchedShell(
   }, [workingNowProviders, workingNowThreads]);
   // Needs you names a worker's coordinator beside it, from the window's thread list.
   const needsYouCoordinatorTitles = useMemo(
-    () => codeBoardCoordinatorLineage(codeController.navigation).coordinatorTitleByWorker,
+    () => coordinatorTitleByWorker(codeController.navigation),
     [codeController.navigation],
   );
   const workingNowBoardFacts = useMemo(

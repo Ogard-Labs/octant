@@ -22,7 +22,7 @@ import type { useShellController } from "../shell/useShellController";
 import { WorkspaceRailLayers, type WorkspaceRailLayersProps } from "../shell/WorkspaceRailLayers";
 import type { useWorkThreadNavigation } from "../work/useWorkThreadNavigation";
 import type { CodeController } from "../code/useCodeController";
-import { codeBoardCoordinators } from "../code/codeBoardGrouping";
+import { codeBoardCoordinators, coordinatorTitleByWorker } from "../code/codeBoardGrouping";
 import type { createLaunchedShellClients } from "./createLaunchedShellClients";
 import type { ShellActions } from "./shellActions";
 
@@ -223,7 +223,7 @@ export const ReaderPagesContainer = memo(function ReaderPagesContainer(
 
   // A worker's row names its coordinator, read from the window's thread list.
   const workerCoordinatorTitles = useMemo(
-    () => codeBoardCoordinatorLineage(codeNavigationRows).coordinatorTitleByWorker,
+    () => coordinatorTitleByWorker(codeNavigationRows),
     [codeNavigationRows],
   );
   // The Inbox answers the decisions finished turns asked with the same
