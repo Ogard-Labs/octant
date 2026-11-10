@@ -121,7 +121,9 @@ export function FirstRunOnboarding(props: FirstRunOnboardingProps) {
   const [step, setStep] = useState<FirstRunStepId>("providers");
   const [chosenMode, setChosenMode] = useState<PermissionMode>();
   const [modeRecorded, setModeRecorded] = useState(false);
-  const [handoffOpen, setHandoffOpen] = useState(false);
+  const [handoffOpen, setHandoffOpen] = useState(
+    props.capabilities?.computerUse?.setupPending === true,
+  );
   const [selectedMode, setSelectedMode] = useState<FirstRunTaskMode>("code");
   const [chosenProjectId, setChosenProjectId] = useState<ProjectId>();
   const [knownProjects, setKnownProjects] = useState(props.projects);
@@ -400,7 +402,7 @@ export function FirstRunOnboarding(props: FirstRunOnboardingProps) {
           {handoffOpen ? (
             <>
               <FirstRunReadinessStep handoff={handoff} onSetup={openSetup} />
-              {blocked || capabilitiesDismissed || props.capabilities === undefined ? null : (
+              {capabilitiesDismissed || props.capabilities === undefined ? null : (
                 <FirstTaskCapabilities
                   {...props.capabilities}
                   browser={(() => {

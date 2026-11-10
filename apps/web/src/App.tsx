@@ -7611,6 +7611,7 @@ function LaunchedShell(
               helpers: launchedClients.agentRunSettingsClient,
               memory: launchedClients.personMemoryClient,
               computerUse: controller.settings?.computerUse,
+              onSettingsChange: controller.updateSettings,
               ...(props.hostBridge === undefined ? {} : { bridge: props.hostBridge }),
               onOpenSettings: (target) => void controller.openSettings(target),
             },

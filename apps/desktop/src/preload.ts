@@ -204,7 +204,10 @@ export interface OctantHostBridge {
   readonly subscribeMenuBarTask: (listener: (target: MenuBarOpenThread) => void) => () => void;
   readonly getComputerUseStatus: () => Promise<unknown>;
   readonly requestComputerUsePermissions: () => Promise<unknown>;
-  readonly openComputerUsePermissionSettings: () => Promise<void>;
+  readonly openComputerUsePermissionSettings: (
+    permission?: "accessibility" | "screenRecording",
+  ) => Promise<void>;
+  readonly testComputerUse?: () => Promise<unknown>;
   readonly checkComputerUseUpdates: () => Promise<unknown>;
   readonly getManagedToolsStatus: () => Promise<unknown>;
   readonly checkManagedToolUpdates: (tool?: string) => Promise<unknown>;
@@ -690,8 +693,8 @@ export function createHostBridge(
     closeBrowserExtensionPopup: () => invoke(IPC_CHANNELS.browserExtensionPopupClose),
     getComputerUseStatus: () => ipc.invoke(IPC_CHANNELS.computerUseStatus),
     requestComputerUsePermissions: () => ipc.invoke(IPC_CHANNELS.computerUsePermissions),
-    openComputerUsePermissionSettings: async () => {
-      await ipc.invoke(IPC_CHANNELS.computerUsePermissionSettings);
+    openComputerUsePermissionSettings: async (permission?: "accessibility" | "screenRecording") => {
+      await ipc.invoke(IPC_CHANNELS.computerUsePermissionSettings, permission);
     },
     checkComputerUseUpdates: () => ipc.invoke(IPC_CHANNELS.computerUseCheckUpdates),
     getManagedToolsStatus: async () =>
@@ -1147,6 +1150,7 @@ export function createHostBridge(
     ...(nightlyClient
       ? { managedInOctant: true as const }
       : {
+          testComputerUse: () => ipc.invoke(IPC_CHANNELS.computerUseTest),
           openRemoteServerPage: async (
             request: unknown,
           ): Promise<RemoteServerPageBridgeOutcome> => {
@@ -1424,6 +1428,7 @@ export function createHostBridge(
  * reach no Octant-only channel.
  */
 export const OCTANT_ONLY_BRIDGE_MEMBERS: ReadonlySet<string> = new Set([
+  "testComputerUse",
   "readNightlyInstall",
   "installNightly",
   "openNightly",

@@ -33,6 +33,7 @@ import {
 } from "./desktopHostLaunch";
 import { popupNativeMenu, installNativeEditingMenus } from "./nativeContextMenus";
 import { createNativeCodeApprovalViewHost } from "./nativeCodeApprovalView";
+import { testComputerUseWindow } from "./computerUseSetupTest";
 import { startComputerUseBroker } from "./computerUseBroker";
 import { startSimulatorDeviceBroker } from "./simulatorDeviceBroker";
 import { createSimulatorDeviceHelpers } from "./simulatorDeviceHelper";
@@ -3740,11 +3741,25 @@ function installIpcHandlers(): void {
       throw new Error("Computer use is unavailable for this host.");
     return computerUseService.requestPermissions();
   });
-  ipcMain.handle(IPC_CHANNELS.computerUsePermissionSettings, async (event) => {
+  ipcMain.handle(IPC_CHANNELS.computerUsePermissionSettings, async (event, permission: unknown) => {
     ownedTopLevelWindowContext(event);
     if (computerUseService === undefined)
       throw new Error("Computer use is unavailable for this host.");
-    await computerUseService.openPermissionSettings();
+    if (
+      permission !== undefined &&
+      permission !== "accessibility" &&
+      permission !== "screenRecording"
+    )
+      throw new TypeError("Unknown Computer use permission.");
+    await computerUseService.openPermissionSettings(permission);
+  });
+  ipcMain.handle(IPC_CHANNELS.computerUseTest, async (event) => {
+    const { window } = ownedTopLevelWindowContext(event);
+    if (computerUseService === undefined)
+      throw new Error("Computer use is unavailable for this host.");
+    return computerUseService.test((runtime, signal) =>
+      testComputerUseWindow(window, runtime, signal),
+    );
   });
   ipcMain.handle(IPC_CHANNELS.computerUseCheckUpdates, async (event) => {
     ownedTopLevelWindowContext(event);

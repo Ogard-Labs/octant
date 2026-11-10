@@ -1,14 +1,11 @@
+import { ComputerUseSetup, type ComputerUseSetupProps } from "../settings/ComputerUseSetup";
+import { useComputerUseSetup, type ComputerBridge } from "../settings/useComputerUseSetup";
 import type { AgentRunSettingsClient } from "@octant/client-runtime/agent-run-settings-client";
 import type { PersonMemoryClient } from "@octant/client-runtime/person-memory-client";
-import {
-  decodeComputerUseStatus,
-  type ComputerUseSettings,
-  type ComputerUseStatus,
-} from "@octant/contracts/computer-use-plugin";
+import { type ComputerUseSettings } from "@octant/contracts/computer-use-plugin";
 import type { AgentRunCreationPosture, SettingsDeepLink } from "@octant/contracts";
 import { Brain, ChevronDown, Globe2, Monitor, Users } from "lucide-react";
 import { useEffect, useState } from "react";
-import type { OctantHostBridge } from "../shell/hostBridge";
 import { OctantButton } from "../ui/base/OctantButton";
 import {
   OctantCard,
@@ -22,39 +19,39 @@ export interface FirstTaskCapabilitiesProps {
   readonly computerUse: ComputerUseSettings | undefined;
   readonly helpers: Pick<AgentRunSettingsClient, "current">;
   readonly memory: Pick<PersonMemoryClient, "read">;
-  readonly bridge?: Pick<OctantHostBridge, "getComputerUseStatus">;
+  readonly bridge?: ComputerBridge;
+  readonly onSettingsChange?: ComputerUseSetupProps["onSettingsChange"];
   readonly onOpenSettings?: (target: SettingsDeepLink) => void;
   readonly onDismiss: () => void;
 }
 
 export function FirstTaskCapabilities(props: FirstTaskCapabilitiesProps) {
-  const [expanded, setExpanded] = useState<string>();
+  const setup = useComputerUseSetup(props.bridge, props.computerUse?.enabled ?? false);
+  const [expanded, setExpanded] = useState<string | undefined>(
+    props.computerUse?.setupPending ? "Computer use" : undefined,
+  );
   const [read, setRead] = useState<{
     readonly memory: FirstTaskCapabilitiesProps["memory"];
     readonly helpers: FirstTaskCapabilitiesProps["helpers"];
     readonly bridge: FirstTaskCapabilitiesProps["bridge"];
     readonly memoryEnabled: boolean | undefined;
     readonly helperPosture: AgentRunCreationPosture | undefined;
-    readonly computer: ComputerUseStatus | undefined;
   }>();
   useEffect(() => {
     let active = true;
     const abort = new AbortController();
-    void Promise.allSettled([
-      props.memory.read(abort.signal),
-      props.helpers.current(),
-      props.bridge?.getComputerUseStatus?.().then(decodeComputerUseStatus),
-    ]).then(([memory, helpers, computer]) => {
-      if (!active) return;
-      setRead({
-        memory: props.memory,
-        helpers: props.helpers,
-        bridge: props.bridge,
-        memoryEnabled: memory.status === "fulfilled" ? memory.value.settings.enabled : undefined,
-        helperPosture: helpers.status === "fulfilled" ? helpers.value.creationPosture : undefined,
-        computer: computer.status === "fulfilled" ? computer.value : undefined,
-      });
-    });
+    void Promise.allSettled([props.memory.read(abort.signal), props.helpers.current()]).then(
+      ([memory, helpers]) => {
+        if (!active) return;
+        setRead({
+          memory: props.memory,
+          helpers: props.helpers,
+          bridge: props.bridge,
+          memoryEnabled: memory.status === "fulfilled" ? memory.value.settings.enabled : undefined,
+          helperPosture: helpers.status === "fulfilled" ? helpers.value.creationPosture : undefined,
+        });
+      },
+    );
     return () => {
       active = false;
       abort.abort();
@@ -64,7 +61,7 @@ export function FirstTaskCapabilities(props: FirstTaskCapabilitiesProps) {
     read?.memory === props.memory && read.helpers === props.helpers && read.bridge === props.bridge
       ? read
       : undefined;
-  const computer = current?.computer;
+  const computer = setup.status;
   const computerEnabled = props.computerUse?.enabled ?? computer?.enabled;
   const computerState =
     computerEnabled === false
@@ -79,7 +76,9 @@ export function FirstTaskCapabilities(props: FirstTaskCapabilitiesProps) {
               ? "On · Permissions needed"
               : computer.driver === "unavailable" || computer.driver === "failed"
                 ? "On · Driver unavailable"
-                : "On · Each app still asks";
+                : computer.verification === "passed" && computer.driver === "ready"
+                  ? "Verified working · Each app still asks"
+                  : "On · Not tested";
   const capabilities = [
     {
       title: "Browser",
@@ -170,14 +169,25 @@ export function FirstTaskCapabilities(props: FirstTaskCapabilitiesProps) {
             {expanded !== title ? null : (
               <>
                 <p className="text-sm">{description}</p>
-                <figure className="rounded-md border border-border p-3">
-                  <div role="img" aria-label={`Static ${title} preview`} className="text-xs">
-                    {preview}
-                  </div>
-                  <figcaption className="mt-2 text-xs text-muted-foreground">
-                    Example only
-                  </figcaption>
-                </figure>
+                {title === "Computer use" &&
+                props.onSettingsChange !== undefined &&
+                props.computerUse !== undefined ? (
+                  <ComputerUseSetup
+                    setup={setup}
+                    settings={props.computerUse}
+                    onSettingsChange={props.onSettingsChange}
+                    bridge={props.bridge}
+                  />
+                ) : (
+                  <figure className="rounded-md border border-border p-3">
+                    <div role="img" aria-label={`Static ${title} preview`} className="text-xs">
+                      {preview}
+                    </div>
+                    <figcaption className="mt-2 text-xs text-muted-foreground">
+                      Example only
+                    </figcaption>
+                  </figure>
+                )}
                 {props.onOpenSettings === undefined ? null : (
                   <OctantButton
                     type="button"

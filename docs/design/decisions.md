@@ -198,7 +198,9 @@ Status: Partly built. Since: 2026-10-31. Detail: [Architecture: Secret guard](..
 Your first task includes an optional Explore capabilities card for Browser,
 Computer use, helper agents and person memory. Current host facts and existing
 Settings own their state; examples are static, dismissal changes no settings,
-and the card adds no onboarding step or permission grant. Paired clients acquire
+and the card adds no counted onboarding step. Computer use shares Settings’
+explicit guided setup, saves pending progress across relaunch and reports working
+only after a successful local test. Paired clients acquire
 no local settings authority.
 
 Status: Built. Detail: [Start screen: Optional capability card](start-screen.md#optional-capability-card-in-your-first-task).
@@ -1471,6 +1473,7 @@ Status: Built. Since: 2026-10-20 (Connectors); 2026-11-01 (Claude and Codex tool
 Core capabilities (browser and computer use, tests, Apple validation, approvals, memory, subagents) are app-managed and provider-neutral. None depends on an optional extension.
 
 - Computer use needs a five-minute approval per application, treats application content as untrusted, fails closed if evidence recording fails, and is refused in Plan.
+- Onboarding and Settings share optional setup with separate macOS permission actions and a local, explicitly approved capture-and-click test of a temporary owned window. Verification expires on permission loss, disablement or driver restart. Existing standalone installations remain untouched; agent control of Octant stays refused.
 - The computer-use driver is a bundled, pinned, publisher-verified copy. It is accepted on the same contract minor, and updates only when the person turns on automatic updates.
 - Driver startup verifies the driver-reported host bundle identity and protocol and binary versions, and a failed check refuses admission. _Here only._
 - A screenshot alone never authorizes input; revalidation must resolve that exact window first. Interrupted work cancels pending approval and input. _Here only._

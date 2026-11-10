@@ -10901,8 +10901,31 @@ list current windows; stale IDs are never silently retargeted.
 On Apple Silicon macOS, Electron main owns the official CuaDriver SDK and its
 private embedded child. The authenticated loopback broker is available only
 to Octant's host process; its credentials never enter provider children.
-Settings exposes plugin enablement, macOS permission setup, the driver version,
-and update controls. An explicit permission setup requests macOS access, then
+Settings and first-run capability discovery share a guided Computer use setup.
+Set up Computer use persists enablement and pending setup before asking macOS
+for permissions. Skip for now clears only pending setup; it does not revoke
+an existing setting or permission. Pending setup returns to the first-run
+readiness view after relaunch. Settings exposes plugin enablement, separate
+Accessibility and Screen Recording shortcuts, the driver version and update
+controls. Both surfaces refresh permissions on focus and visibility changes.
+Enabled, permissions granted and verified working are separate facts. Only an
+explicit successful test reports Verified working. Driver restart/replacement,
+disablement, permission loss or an unreadable driver permission answer clears
+verification; a saved setup choice never stands in for a live test.
+
+The test is local desktop administration, unavailable to agents, remote clients
+and Nightly clients. A native confirmation authorizes capture and one background
+click in a temporary, sandboxed Octant-owned window. Main chooses its exact native
+window ID and a unique button label; the renderer supplies no target or command.
+The probe requires screenshot pixels, a button descended from the exact window's
+accessibility root and a verified trusted click result. Driver sessions retain
+standard approval policy. No agent app approval is created, and Octant remains
+reserved from agent control. The test refuses while tasks use the driver and
+blocks new leases and driver replacement until cleanup. Cancellation, timeout,
+window closure, shutdown and disablement close the test window and end its session.
+Pixels are neither saved nor sent to a provider. macOS grants still require the
+person's approval; Octant never edits the privacy database. Existing standalone
+CuaDriver installations and their settings remain untouched. An explicit permission setup requests macOS access, then
 opens Screen Recording settings if it remains unavailable; macOS may suppress
 a repeated prompt. Opening Settings does not grant access. Recheck only reads
 the current state and never requests permissions. While the plugin is enabled

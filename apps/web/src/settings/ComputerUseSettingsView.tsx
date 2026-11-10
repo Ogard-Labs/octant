@@ -1,90 +1,25 @@
-import { useEffect, useRef, useState } from "react";
+import { ComputerUseSetup } from "./ComputerUseSetup";
+import { useComputerUseSetup, type ComputerBridge } from "./useComputerUseSetup";
 import {
-  decodeComputerUseStatus,
   type ComputerUseSettings,
   type ComputerUseStatus,
 } from "@octant/contracts/computer-use-plugin";
 import type { ShellSettings } from "@octant/contracts/shell";
 import { thisComputerName, useHostPlatform } from "../platform";
-import { getInjectedHostBridge, type OctantHostBridge } from "../shell/hostBridge";
+import { getInjectedHostBridge } from "../shell/hostBridge";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantSwitch } from "../ui/base/OctantSwitch";
 import { SettingRow, SettingsSection } from "./primitives";
 
-type ComputerBridge = Pick<
-  OctantHostBridge,
-  | "getComputerUseStatus"
-  | "requestComputerUsePermissions"
-  | "openComputerUsePermissionSettings"
-  | "checkComputerUseUpdates"
->;
-
 export function ComputerUseSettingsView(props: {
   readonly settings: ComputerUseSettings;
-  readonly onSettingsChange: (patch: Partial<ShellSettings>) => void;
+  readonly onSettingsChange: (patch: Partial<ShellSettings>) => Promise<boolean> | boolean | void;
   readonly bridge?: ComputerBridge;
 }) {
   const bridge = props.bridge ?? getInjectedHostBridge();
   const computer = thisComputerName(useHostPlatform());
-  const [status, setStatus] = useState<ComputerUseStatus>();
-  const [error, setError] = useState<string>();
-  const [busy, setBusy] = useState(false);
-  const mounted = useRef(false);
-  const revision = useRef(0);
-  const inFlight = useRef(false);
-  useEffect(() => {
-    mounted.current = true;
-    let active = true;
-    const read = async () => {
-      if (!active || inFlight.current || document.visibilityState === "hidden") return;
-      if (bridge?.getComputerUseStatus === undefined) {
-        setError("Computer use requires the Octant desktop app on an Apple Silicon Mac.");
-        return;
-      }
-      const request = ++revision.current;
-      try {
-        const next = decodeComputerUseStatus(await bridge.getComputerUseStatus());
-        if (active && request === revision.current) {
-          setStatus(next);
-          setError(undefined);
-        }
-      } catch {
-        if (active && request === revision.current)
-          setError("Computer use status is unavailable. Try rechecking.");
-      }
-    };
-    void read();
-    const timer = setInterval(() => {
-      void read();
-    }, 3_000);
-    return () => {
-      active = false;
-      mounted.current = false;
-      revision.current += 1;
-      clearInterval(timer);
-    };
-  }, [bridge, props.settings.enabled, props.settings.automaticUpdates]);
-
-  async function run(operation: (() => Promise<unknown>) | undefined) {
-    if (operation === undefined || inFlight.current) return;
-    inFlight.current = true;
-    setBusy(true);
-    const request = ++revision.current;
-    try {
-      const value = await operation();
-      const next = decodeComputerUseStatus(value ?? (await bridge?.getComputerUseStatus?.()));
-      if (mounted.current && request === revision.current) {
-        setStatus(next);
-        setError(undefined);
-      }
-    } catch {
-      if (mounted.current)
-        setError("Computer use could not complete that request. Recheck its status and try again.");
-    } finally {
-      inFlight.current = false;
-      if (mounted.current) setBusy(false);
-    }
-  }
+  const setup = useComputerUseSetup(bridge, props.settings.enabled);
+  const { status, busy, run } = setup;
   const supported = status?.supported === true;
   const updateLabels: Readonly<Record<ComputerUseStatus["update"], string>> = {
     idle: "Not checked yet",
@@ -119,79 +54,12 @@ export function ComputerUseSettingsView(props: {
           </SettingRow>
         </div>
       </SettingsSection>
-      <SettingsSection
-        title="macOS permissions"
-        description="Set up permissions asks macOS for access and opens Screen Recording settings if access is still missing."
-      >
-        <div className="setgroup">
-          <SettingRow
-            settingId="computer-use-accessibility"
-            label="Accessibility"
-            description="Allows interaction with controls in an approved application."
-            scope="host"
-          >
-            <span>
-              {status === undefined
-                ? "Not checked"
-                : status.permissions.accessibility
-                  ? "Allowed"
-                  : "Not allowed"}
-            </span>
-          </SettingRow>
-          <SettingRow
-            settingId="computer-use-screen-recording"
-            label="Screen recording"
-            description="Allows the agent to see the application window it is working in."
-            scope="host"
-          >
-            <span>
-              {status === undefined
-                ? "Not checked"
-                : status.permissions.screenRecording
-                  ? "Allowed"
-                  : "Not allowed"}
-            </span>
-          </SettingRow>
-          <SettingRow
-            settingId="computer-use-permission-actions"
-            label="Permission setup"
-            description="If Octant is missing in System Settings, add this installed app with +, then relaunch and recheck."
-            scope="host"
-          >
-            <div className="settings-view__actions">
-              <OctantButton
-                type="button"
-                size="sm"
-                variant="secondary"
-                disabled={busy || !supported || bridge?.requestComputerUsePermissions === undefined}
-                onClick={() => void run(bridge?.requestComputerUsePermissions)}
-              >
-                Set up permissions
-              </OctantButton>
-              <OctantButton
-                type="button"
-                size="sm"
-                variant="ghost"
-                disabled={
-                  busy || !supported || bridge?.openComputerUsePermissionSettings === undefined
-                }
-                onClick={() => void run(bridge?.openComputerUsePermissionSettings)}
-              >
-                Open System Settings
-              </OctantButton>
-              <OctantButton
-                type="button"
-                size="sm"
-                variant="ghost"
-                disabled={busy || bridge?.getComputerUseStatus === undefined}
-                onClick={() => void run(bridge?.getComputerUseStatus)}
-              >
-                Recheck
-              </OctantButton>
-            </div>
-          </SettingRow>
-        </div>
-      </SettingsSection>
+      <ComputerUseSetup
+        settings={props.settings}
+        onSettingsChange={props.onSettingsChange}
+        bridge={bridge}
+        setup={setup}
+      />
       <SettingsSection
         title="Driver and updates"
         description="Which driver build Octant runs, and when it looks for a newer one."
@@ -252,15 +120,6 @@ export function ComputerUseSettingsView(props: {
           </p>
         ) : null}
       </SettingsSection>
-      {/* ui-boundary-exception: inline-field-error */}
-      <p
-        className="provider-settings__field-guidance"
-        role={error === undefined ? "status" : "alert"}
-      >
-        {error ??
-          status?.message ??
-          "Each task asks before controlling an application. Stop or disable the plugin to revoke access."}
-      </p>
     </section>
   );
 }

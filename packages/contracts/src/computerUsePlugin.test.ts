@@ -4,6 +4,7 @@ import {
   decodeComputerSendFileCommand,
   decodeComputerUseOwner,
   decodeComputerUseSettings,
+  decodeComputerUseStatus,
 } from "./computerUsePlugin";
 
 describe("Computer use plugin commands", () => {
@@ -78,4 +79,26 @@ describe("Computer use plugin commands", () => {
     ).toThrow();
     expect(() => decodeComputerControlCommand({ operation: "send-file", path: "a" })).toThrow();
   });
+});
+
+it("persists pending setup without treating it as a verified working driver", () => {
+  expect(decodeComputerUseSettings({ enabled: true, setupPending: true })).toEqual({
+    enabled: true,
+    automaticUpdates: false,
+    setupPending: true,
+  });
+  const status = {
+    supported: true,
+    enabled: true,
+    automaticUpdates: false,
+    permissions: { accessibility: true, screenRecording: true },
+    driver: "ready",
+    activeSessions: 0,
+    update: "idle",
+  };
+  expect(decodeComputerUseStatus(status).verification).toBeUndefined();
+  expect(decodeComputerUseStatus({ ...status, verification: "passed" }).verification).toBe(
+    "passed",
+  );
+  expect(() => decodeComputerUseStatus({ ...status, verification: "installed" })).toThrow();
 });

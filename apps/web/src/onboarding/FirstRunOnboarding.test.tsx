@@ -216,6 +216,29 @@ describe("FirstRunOnboarding", () => {
     expect(memory.change).not.toHaveBeenCalled();
   });
 
+  it("returns to pending Computer use setup after relaunch without requiring a provider", async () => {
+    mount({
+      capabilities: {
+        helpers: {
+          current: vi.fn(async () => {
+            throw new Error("unavailable");
+          }),
+        },
+        memory: {
+          read: vi.fn(async () => {
+            throw new Error("unavailable");
+          }),
+        },
+        computerUse: { enabled: true, automaticUpdates: false, setupPending: true },
+        onSettingsChange: vi.fn(async () => true),
+      },
+    });
+    expect(screen.getByRole("heading", { name: "Your first task" })).toBeVisible();
+    expect(screen.getByRole("button", { name: "Set up Computer use" })).toBeVisible();
+    expect(screen.getByRole("button", { name: "Skip for now" })).toBeVisible();
+    expect(screen.queryByRole("button", { name: "Start a task" })).toBeNull();
+  });
+
   it("stays out of the way once the host has recorded an answer", () => {
     mount({ controller: controller({ visible: false }) });
 

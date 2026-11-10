@@ -170,8 +170,17 @@ export async function computerDriverPermissions(
   }
 }
 
-export async function openComputerUsePermissionSettings(): Promise<void> {
+export async function openComputerUsePermissionSettings(
+  permission: "accessibility" | "screenRecording" = "screenRecording",
+): Promise<void> {
   if (process.platform !== "darwin") return;
+  if (permission === "accessibility") {
+    const { shell } = await import("electron");
+    await shell.openExternal(
+      "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility",
+    );
+    return;
+  }
   const sdk = await import("@trycua/cua-driver/electron");
   await sdk.openMacOSScreenRecordingSettings();
 }

@@ -11,6 +11,7 @@ const native = vi.hoisted(() => ({
   requestPermissions: vi.fn(),
   currentPermissions: vi.fn(),
   openPermissionSettings: vi.fn(async () => {}),
+  openExternal: vi.fn(async () => {}),
   contractVersion: "0.8.0",
   driverVersion: "0.38.0",
 }));
@@ -39,10 +40,15 @@ vi.mock("@trycua/cua-driver", () => ({
     connect: () => ({ callTool: native.callTool, uniffiDestroy: native.destroyClient }),
   },
 }));
+vi.mock("electron", () => ({ shell: { openExternal: native.openExternal } }));
 vi.mock("@trycua/cua-driver/electron", () => ({
   openMacOSScreenRecordingSettings: native.openPermissionSettings,
 }));
-import { computerUsePermissions, startComputerDriverRuntime } from "./computerUseSdkRuntime";
+import {
+  computerUsePermissions,
+  openComputerUsePermissionSettings,
+  startComputerDriverRuntime,
+} from "./computerUseSdkRuntime";
 
 let root: string;
 beforeEach(async () => {
@@ -118,7 +124,17 @@ describe("Embedded computer runtime identity", () => {
   });
 });
 
-describe.skipIf(process.platform !== "darwin")("Computer permission setup", () => {
+describe("Computer permission setup", () => {
+  beforeEach(() => vi.stubGlobal("process", { ...process, platform: "darwin" }));
+  afterEach(() => vi.unstubAllGlobals());
+  it("opens the requested Accessibility pane without requesting or granting permissions", async () => {
+    await openComputerUsePermissionSettings("accessibility");
+    expect(native.openExternal).toHaveBeenCalledWith(
+      "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility",
+    );
+    expect(native.requestPermissions).not.toHaveBeenCalled();
+    expect(native.openPermissionSettings).not.toHaveBeenCalled();
+  });
   it("opens System Settings when a permission request leaves Screen Recording unavailable", async () => {
     const denied = { accessibility: true, screenRecording: false };
     native.requestPermissions.mockReturnValue(denied);

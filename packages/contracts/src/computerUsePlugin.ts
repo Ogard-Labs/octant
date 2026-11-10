@@ -165,6 +165,9 @@ export const ComputerControlResult = Schema.Union(
 export type ComputerControlResult = typeof ComputerControlResult.Type;
 
 export const ComputerUseStatus = Schema.Struct({
+  verification: Schema.optional(Schema.Literal("not-tested", "running", "passed", "failed")),
+  verificationMessage: Schema.optional(text(1_024)),
+  setupPending: Schema.optional(Schema.Boolean),
   supported: Schema.Boolean,
   enabled: Schema.Boolean,
   automaticUpdates: Schema.Boolean,
