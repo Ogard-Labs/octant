@@ -1,4 +1,12 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, useState, type RefObject } from "react";
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+  type RefObject,
+} from "react";
 import { readTranscriptText } from "./transcriptFind";
 
 const INDEX_BATCH_SIZE = 32;
@@ -63,9 +71,47 @@ export function useTranscriptFindIndex<T>(
     const last = batch[batch.length - 1];
     // A task boundary lets input/paint interrupt indexing. Closing Find or
     // changing the row set cancels this stale batch before it can publish.
-    const timer = setTimeout(() => setIndex({ keys, rows: next, cursor: (last ?? 0) + 1 }), 0);
+    const timer = setTimeout(
+      () =>
+        setIndex((current) => {
+          if (current === undefined || current.keys !== keys) return current;
+          const merged = [...current.rows];
+          for (const i of batch) {
+            // A disclosure can change after this batch reads it but before the task
+            // publishes. Keep the newer visibility observation in that case.
+            if (current.rows[i] === rows[i]) merged[i] = next[i];
+          }
+          return { keys, rows: merged, cursor: (last ?? 0) + 1 };
+        }),
+      0,
+    );
     return () => clearTimeout(timer);
   }, [batch, items, keys, root, rows]);
+
+  const refreshRow = useCallback(
+    (rowIndex: number, element: Element) => {
+      const item = items[rowIndex];
+      const key = keys[rowIndex];
+      if (!enabled || item === undefined || key === undefined) return;
+      const text = readTranscriptText(element);
+      setIndex((current) => {
+        if (current === undefined) return current;
+        const i = current.keys.indexOf(key);
+        if (i < 0) return current;
+        const previous = current.rows[i];
+        if (
+          previous?.item === item &&
+          previous.text.length === text.length &&
+          previous.text.every((run, offset) => run === text[offset])
+        )
+          return current;
+        const next = [...current.rows];
+        next[i] = { item, text };
+        return { ...current, rows: next };
+      });
+    },
+    [enabled, items, keys],
+  );
 
   const counts = useRef(
     new WeakMap<ReadonlyArray<string>, { readonly query: string; readonly count: number }>(),
@@ -97,5 +143,5 @@ export function useTranscriptFindIndex<T>(
     }
     return { rows: found, total };
   }, [pending, query, rows]);
-  return { batch, pending, matches };
+  return { batch, pending, matches, refreshRow };
 }

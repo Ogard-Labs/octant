@@ -163,6 +163,10 @@ export function TranscriptWindow<T>(props: TranscriptWindowProps<T>) {
   const [findActive, setFindActive] = useState(false);
   const [findQuery, setFindQuery] = useState("");
   const [findIndex, setFindIndex] = useState(0);
+  const [findRevealRequest, setFindRevealRequest] = useState(0);
+  const measuredRowsRef = useRef(new WeakSet<HTMLElement>());
+  const initiallyOpenDisclosuresRef = useRef(new WeakSet<HTMLDetailsElement>());
+  const manuallyOpenDisclosuresRef = useRef(new WeakSet<HTMLDetailsElement>());
   const findInputRef = useRef<HTMLInputElement>(null);
   const revealAfterQueryRef = useRef(false);
   const [stickyIndexes, setStickyIndexes] = useState<ReadonlySet<number>>(() => new Set());
@@ -529,6 +533,7 @@ export function TranscriptWindow<T>(props: TranscriptWindowProps<T>) {
     find.pending,
     findQuery,
     currentFindIndex,
+    findRevealRequest,
     findRow,
     items,
     virtualizer.getVirtualItems(),
@@ -538,6 +543,7 @@ export function TranscriptWindow<T>(props: TranscriptWindowProps<T>) {
     if (find.pending || findCount === 0) return;
     revealAfterQueryRef.current = true;
     setFindIndex((currentFindIndex + direction + findCount) % findCount);
+    setFindRevealRequest((request) => request + 1);
   }
 
   useLayoutEffect(() => {
@@ -551,18 +557,26 @@ export function TranscriptWindow<T>(props: TranscriptWindowProps<T>) {
       if (!(event.target instanceof HTMLDetailsElement)) return;
       const index = rowIndexFromTarget(event.target);
       if (index === undefined) return;
+      const row = event.target.closest("[data-transcript-row]");
+      const initiallyOpen = initiallyOpenDisclosuresRef.current.delete(event.target);
+      if (row !== null && (!initiallyOpen || !event.target.open)) find.refreshRow(index, row);
       if (event.target.open) {
-        pinIndex(index);
+        // Mounting High-detail rows emits toggle too. Only a later disclosure
+        // choice, not initialization during indexing, keeps a row mounted.
+        if (!initiallyOpen) {
+          manuallyOpenDisclosuresRef.current.add(event.target);
+          pinIndex(index);
+        }
         return;
       }
-      const row = event.target.closest("[data-transcript-row]");
-      if (row instanceof HTMLElement && row.querySelector("details[open]") !== null) return;
+      manuallyOpenDisclosuresRef.current.delete(event.target);
+      if (row instanceof HTMLElement && hasManuallyOpenDisclosure(row)) return;
       if (row instanceof HTMLElement && row.contains(document.activeElement)) return;
       unpinIndex(index);
     }
     scroll.addEventListener("toggle", onToggle, true);
     return () => scroll.removeEventListener("toggle", onToggle, true);
-  }, []);
+  }, [find.refreshRow]);
 
   useLayoutEffect(() => {
     const pending = pendingFocusRef.current;
@@ -578,6 +592,12 @@ export function TranscriptWindow<T>(props: TranscriptWindowProps<T>) {
     pendingFocusRef.current = undefined;
     target?.focus();
   }, [virtualizer.getVirtualItems()]);
+
+  function hasManuallyOpenDisclosure(row: HTMLElement): boolean {
+    return [...row.querySelectorAll<HTMLDetailsElement>("details[open]")].some((details) =>
+      manuallyOpenDisclosuresRef.current.has(details),
+    );
+  }
 
   function pinIndex(index: number): void {
     setStickyIndexes((current) => {
@@ -624,7 +644,7 @@ export function TranscriptWindow<T>(props: TranscriptWindowProps<T>) {
       scroll === null
         ? null
         : scroll.querySelector(`[data-transcript-row][data-index="${String(index)}"]`);
-    if (row instanceof HTMLElement && row.querySelector("details[open]") !== null) return;
+    if (row instanceof HTMLElement && hasManuallyOpenDisclosure(row)) return;
     unpinIndex(index);
   }
 
@@ -696,7 +716,14 @@ export function TranscriptWindow<T>(props: TranscriptWindowProps<T>) {
             data-index={virtualItem.index}
             data-transcript-row=""
             key={virtualItem.key}
-            ref={virtualizer.measureElement}
+            ref={(node) => {
+              if (node !== null && !measuredRowsRef.current.has(node)) {
+                measuredRowsRef.current.add(node);
+                for (const details of node.querySelectorAll<HTMLDetailsElement>("details[open]"))
+                  initiallyOpenDisclosuresRef.current.add(details);
+              }
+              virtualizer.measureElement(node);
+            }}
             style={{
               left: 0,
               position: "absolute",

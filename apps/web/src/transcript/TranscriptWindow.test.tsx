@@ -419,6 +419,101 @@ describe("TranscriptWindow", () => {
     expect(await screen.findByText("No matches", {}, { timeout: 5000 })).toBeInTheDocument();
   });
 
+  it("refreshes matches when a disclosure opens or closes", async () => {
+    render(
+      <TranscriptWindow
+        items={rows(1)}
+        itemKey={(item) => item.id}
+        restoreKey="disclosure-find"
+        renderItem={() => (
+          <details>
+            <summary>Thinking</summary>
+            <p>Hidden phrase</p>
+          </details>
+        )}
+      />,
+    );
+    fireEvent.keyDown(window, { key: "f", ctrlKey: true });
+    const input = await screen.findByRole("textbox", { name: "Find in thread" });
+    fireEvent.change(input, { target: { value: "hidden phrase" } });
+    expect(await screen.findByText("No matches", {}, { timeout: 5000 })).toBeInTheDocument();
+    const disclosure = screen.getByText("Thinking").closest("details");
+    if (disclosure === null) throw new Error("expected disclosure");
+    disclosure.open = true;
+    fireEvent(disclosure, new Event("toggle"));
+    expect(await screen.findByText("1 of 1")).toBeInTheDocument();
+    disclosure.open = false;
+    fireEvent(disclosure, new Event("toggle"));
+    expect(await screen.findByText("No matches")).toBeInTheDocument();
+  });
+
+  it("reveals the only match again when navigation wraps to the same index", async () => {
+    renderWindow(rows(1));
+    fireEvent.keyDown(window, { key: "f", ctrlKey: true });
+    const input = await screen.findByRole("textbox", { name: "Find in thread" });
+    fireEvent.change(input, { target: { value: "Row 0" } });
+    expect(await screen.findByText("1 of 1")).toBeInTheDocument();
+    const reveal = vi.fn();
+    screen.getByRole("button", { name: "Row 0" }).scrollIntoView = reveal;
+    fireEvent.keyDown(input, { key: "Enter" });
+    await waitFor(() => expect(reveal).toHaveBeenCalled());
+  });
+
+  it("keeps a manually opened disclosure mounted until it closes", async () => {
+    render(
+      <TranscriptWindow
+        items={rows(1000)}
+        itemKey={(item) => item.id}
+        align="start"
+        restoreKey="manual-disclosure"
+        renderItem={(item) => (
+          <details>
+            <summary>{item.label}</summary>
+            <p>Visible detail</p>
+          </details>
+        )}
+      />,
+    );
+    const disclosure = screen.getByText("Row 0").closest("details");
+    if (disclosure === null) throw new Error("expected disclosure");
+    disclosure.open = true;
+    fireEvent(disclosure, new Event("toggle"));
+    scroller().scrollTop = 40000;
+    fireEvent.scroll(scroller());
+    await waitFor(() =>
+      expect(
+        [...document.querySelectorAll<HTMLElement>("[data-transcript-row]")].some(
+          (row) => Number(row.dataset.index) > 100,
+        ),
+      ).toBe(true),
+    );
+    expect(screen.getByText("Row 0")).toBeInTheDocument();
+    disclosure.open = false;
+    fireEvent(disclosure, new Event("toggle"));
+    await waitFor(() => expect(screen.queryByText("Row 0")).not.toBeInTheDocument());
+  });
+
+  it("releases indexing rows whose disclosures start open", async () => {
+    render(
+      <TranscriptWindow
+        items={rows(1000)}
+        itemKey={(item) => item.id}
+        restoreKey="open-details-find"
+        renderItem={(item) => (
+          <details open>
+            <summary>{item.label}</summary>
+            <p>Visible detail {item.id}.</p>
+          </details>
+        )}
+      />,
+    );
+    fireEvent.keyDown(window, { key: "f", ctrlKey: true });
+    const input = await screen.findByRole("textbox", { name: "Find in thread" });
+    fireEvent.change(input, { target: { value: "detail row-500." } });
+    expect(await screen.findByText("1 of 1", {}, { timeout: 5000 })).toBeInTheDocument();
+    expect(mountedCount()).toBeLessThan(80);
+  });
+
   it("leaves Cmd-F to the code editor and terminal", () => {
     renderWindow(rows(10));
     const editor = document.createElement("div");

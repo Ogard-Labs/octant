@@ -493,7 +493,10 @@ without a second interpretation of message markup. The index retains text,
 never detached DOM ranges, and subsequent queries reuse it. Changed rows refresh
 in rotating batches so streamed updates cannot repeatedly restart indexing at
 the beginning; known matches remain usable while refreshed text arrives.
-Closing Find releases the index. Navigation mounts only the current matching
+Closing Find releases the index. Disclosure visibility changes refresh the
+row's indexed text. Disclosures initially open at High detail do not pin an
+indexing row; explicit disclosure choices and focus retain their normal pins.
+Navigation mounts only the current matching
 row in addition to the ordinary viewport. This trades incremental first-search
 latency for responsive input and bounded mounted content in long histories.
 
