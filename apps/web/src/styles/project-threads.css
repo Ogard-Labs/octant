@@ -806,12 +806,12 @@
   margin-top: 2px;
 }
 
+/* The button recipe owns the height, the inset and the type. This class set
+   its own 31px height and 12px type, a step that exists nowhere else: in a
+   dialog's footer Cancel stood 3px taller than the primary button beside
+   it. */
 .project-button {
-  min-height: 31px;
-  padding: 0 var(--oct-space-3);
   cursor: default;
-  font-size: var(--oct-text-xs);
-  font-weight: var(--oct-weight-medium);
 }
 
 .project-button:disabled {
