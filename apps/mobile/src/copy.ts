@@ -90,6 +90,8 @@ export const MOBILE_COPY = {
   pairRevokeNote: "Other paired devices stay connected if you revoke later.",
   allHosts: "All hosts",
   allAgents: "Agents",
+  homeRecent: "Recent",
+  homeSeeAll: "See all",
   workspaces: "Computers",
   addWorkspace: "Add computer",
   composerHome: "Plan, ask, build…",

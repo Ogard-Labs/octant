@@ -38,10 +38,9 @@ export function FloatingComposer(props: FloatingComposerProps) {
         },
         card: {
           paddingHorizontal: space.md,
-          paddingTop: space.md,
-          paddingBottom: space.sm,
-          gap: space.sm,
-          minHeight: 84,
+          paddingTop: 12,
+          paddingBottom: space.xs,
+          gap: space.xs,
         },
         placeholder: {
           color: colors.textTertiary,
@@ -51,7 +50,7 @@ export function FloatingComposer(props: FloatingComposerProps) {
         input: {
           color: colors.textPrimary,
           fontSize: typography.body.fontSize,
-          minHeight: 48,
+          minHeight: 40,
           maxHeight: 140,
           textAlignVertical: "top",
           lineHeight: 21,
@@ -64,13 +63,12 @@ export function FloatingComposer(props: FloatingComposerProps) {
         },
         spacer: { flex: 1 },
         modelChip: {
-          flex: 1,
+          flexShrink: 1,
           flexDirection: "row",
           alignItems: "center",
-          justifyContent: "center",
           gap: 4,
-          paddingVertical: 7,
-          paddingHorizontal: space.sm,
+          height: 30,
+          paddingHorizontal: 10,
           borderRadius: radii.pill,
           backgroundColor: colors.glassFillThin,
           borderWidth: StyleSheet.hairlineWidth,
@@ -80,7 +78,7 @@ export function FloatingComposer(props: FloatingComposerProps) {
           color: colors.textPrimary,
           fontSize: typography.caption.fontSize,
           fontWeight: "500",
-          maxWidth: "85%",
+          flexShrink: 1,
         },
         footerHint: {
           marginTop: space.sm,
@@ -141,15 +139,14 @@ export function FloatingComposer(props: FloatingComposerProps) {
               <Text style={styles.modelLabel} numberOfLines={1}>
                 {props.modelLabel}
               </Text>
-              <Ionicons color={colors.textSecondary} name="chevron-down" size={14} />
+              <Ionicons color={colors.textSecondary} name="chevron-down" size={13} />
             </Pressable>
           ) : props.modelLabel !== undefined ? (
             <Text style={styles.modelLabel} numberOfLines={1}>
               {props.modelLabel}
             </Text>
-          ) : (
-            <View style={styles.spacer} />
-          )}
+          ) : null}
+          <View style={styles.spacer} />
           {props.busy === true ? (
             <Text style={styles.busyHint} testID="mobile-composer-busy">
               {props.busyLabel ?? "Working"}

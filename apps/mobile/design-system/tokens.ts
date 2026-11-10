@@ -237,12 +237,14 @@ export const space = {
   xxl: 48,
 } as const;
 
+// Compact, continuous corners: the design system's principle is card 16 and
+// composer about 20. Larger radii made every panel read as a soft tile.
 export const radii = {
   sm: 10,
-  md: 22,
-  lg: 26,
-  composer: 30,
-  bubble: 22,
+  md: 16,
+  lg: 18,
+  composer: 22,
+  bubble: 20,
   pill: 999,
   circle: 999,
 } as const;

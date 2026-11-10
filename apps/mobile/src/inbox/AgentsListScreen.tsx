@@ -207,18 +207,19 @@ export function AgentsListScreen(props: AgentsListScreenProps) {
         shell: { flex: 1, backgroundColor: "transparent" },
         topBar: {
           flexDirection: "row",
-          justifyContent: "space-between",
+          alignItems: "center",
+          gap: mobileSpacing.sm,
           paddingHorizontal: mobileSpacing.md,
-          paddingTop: mobileSpacing.sm,
+          paddingTop: mobileSpacing.xs,
+          paddingBottom: mobileSpacing.md,
         },
         topActions: { flexDirection: "row", gap: mobileSpacing.sm },
         hero: {
+          flex: 1,
           color: colors.textPrimary,
-          fontSize: mobileTypography.title.fontSize,
-          fontWeight: mobileTypography.title.fontWeight,
-          paddingHorizontal: mobileSpacing.md,
-          marginTop: mobileSpacing.sm,
-          marginBottom: mobileSpacing.md,
+          fontSize: mobileTypography.brand.fontSize,
+          fontWeight: "600",
+          letterSpacing: mobileTypography.brand.letterSpacing,
         },
         search: {
           marginHorizontal: mobileSpacing.md,
@@ -333,10 +334,14 @@ export function AgentsListScreen(props: AgentsListScreenProps) {
         <IconButton
           accessibilityLabel="Back"
           name="chevron-back"
+          iconSize={19}
           onPress={props.onBack}
-          size={44}
+          size={36}
           testID="mobile-agents-back"
         />
+        <Text accessibilityRole="header" numberOfLines={1} style={styles.hero}>
+          {title}
+        </Text>
         <View style={styles.topActions}>
           <IconButton
             accessibilityLabel={searchOpen ? "Close search" : "Search agent work"}
@@ -345,19 +350,20 @@ export function AgentsListScreen(props: AgentsListScreenProps) {
               setSearchOpen((open) => !open);
               if (searchOpen) setQuery("");
             }}
-            size={44}
+            iconSize={18}
+            size={36}
             testID="mobile-agents-search"
           />
           <IconButton
             accessibilityLabel="Filter hosts"
             name="options-outline"
             onPress={() => setFiltersOpen((open) => !open)}
-            size={44}
+            iconSize={18}
+            size={36}
             testID="mobile-agents-filter"
           />
         </View>
       </View>
-      <Text style={styles.hero}>{title}</Text>
 
       {searchOpen ? (
         <TextInput

@@ -10,7 +10,9 @@ distinctive implementation structures.
 
 1. **Tokens** — shared neutral greys and semantic statuses from `@octant/theme`;
    the base accent is the colour style's blue on every surface (the phone has no Mono choice yet).
-2. **Home** — status cards + Workspaces (unchanged by chat chrome).
+2. **Home** — a compact header (menu, title, search), one row of status pills
+   (Needs you, Working, In review) that open the filtered list, the Work and
+   Code threads that need the person first under Recent, then Computers.
 3. **Surfaces** — flat opaque panels (default, desktop-consistent) or Apple
    liquid-glass; user-selectable.
 4. **Conversation-first thread** — conversation spacing, full-width assistant prose,
@@ -55,7 +57,7 @@ design-system/
 src/ui/
   MessageBubble.tsx / MessageActions.tsx / MessageBlocks.tsx
   ReasoningPart.tsx / ToolPartCard.tsx / AttemptStatus.tsx
-  FloatingComposer.tsx / StatusCard.tsx
+  FloatingComposer.tsx / StatusPill.tsx
   messageDocument.ts
 ```
 
@@ -75,6 +77,9 @@ Hosts → Appearance:
 
 1. **Ground first** — flat workspace colour; material stays quiet unless opted in.
 2. **Soft idle** — danger color only after a failed mutation.
-3. **Continuous corners** — compact radii (card 16, composer ~20).
-4. **Hairline light** — neutral ink-alpha borders.
-5. **Octant-owned** — tokens, copy, assets stay `@octant/*`.
+3. **Continuous corners** — compact radii (card 16, composer 22). Large tiles
+   and soft oversized corners are not the Octant look.
+4. **Rows over tiles** — lists are flat rows on hairlines; panels are for
+   content the person reads, not for navigation targets.
+5. **Hairline light** — neutral ink-alpha borders.
+6. **Octant-owned** — tokens, copy, assets stay `@octant/*`.

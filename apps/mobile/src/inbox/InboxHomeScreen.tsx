@@ -20,10 +20,10 @@ import type { CodeDeliveryTarget } from "@octant/contracts";
 import { MOBILE_COPY, mobileHostHealthLabel } from "../copy";
 import { useMobileSession } from "../session/MobileSessionContext";
 import { formatScreenshotSafeLabel } from "../security/screenshotSafeLabel";
-import { GlassSurface, radii, space, typography, useTheme } from "../../design-system";
+import { radii, space, typography, useTheme } from "../../design-system";
 import { mobileCreateModePresentation, type MobileCreateMode } from "./createModePresentation";
 import type { MobileHomeView } from "./homeView";
-import { inboxStatusCounts, inboxWorkStatus } from "./inboxWorkPresentation";
+import { inboxPriorityRows, inboxStatusCounts, inboxWorkStatus } from "./inboxWorkPresentation";
 import { HomeComposerSheet } from "./HomeComposerSheet";
 import { HomeNavigationSheet } from "./HomeNavigationSheet";
 import { InboxComposerDock } from "./InboxComposerDock";
@@ -36,7 +36,8 @@ import { appendTranscript } from "../voice/voiceDictation";
 import { CodeDeliveryTargetSheet } from "./CodeDeliveryTargetSheet";
 import { createRequestGuard } from "./requestGuard";
 import { usePlacement } from "./usePlacement";
-import { StatusCard } from "../ui/StatusCard";
+import { StatusPill } from "../ui/StatusPill";
+import { hostHealthTone } from "../hosts/hostHealthTone";
 import type { AgentListView } from "./AgentsListScreen";
 import { summarizeMobileInboxFailures } from "./mobileInboxAvailability";
 
@@ -51,6 +52,9 @@ export interface InboxHomeScreenProps {
   readonly onScanToPair: () => void;
   readonly onOpenThread: (row: MobileInboxRow) => void;
 }
+
+/** Enough to show what needs the person without pushing Computers off the first screen. */
+const HOME_RECENT_LIMIT = 5;
 
 const VIEW_TITLES: Record<Exclude<MobileHomeView, "inbox">, string> = {
   chat: "Chat",
@@ -229,6 +233,15 @@ export function InboxHomeScreen(props: InboxHomeScreenProps) {
     [props.homeMode, rows],
   );
   const counts = useMemo(() => inboxStatusCounts(rows), [rows]);
+  const priorityRows = useMemo(() => inboxPriorityRows(rows, HOME_RECENT_LIMIT), [rows]);
+  const hostToneColor = (kind: Parameters<typeof hostHealthTone>[0]): string => {
+    const tone = hostHealthTone(kind);
+    return tone === "danger"
+      ? colors.danger
+      : tone === "warning"
+        ? colors.warning
+        : colors.textSecondary;
+  };
 
   const createThread = async (mode: MobileCreateMode) => {
     if (placementTransport === undefined) {
@@ -342,46 +355,54 @@ export function InboxHomeScreen(props: InboxHomeScreenProps) {
         shell: { flex: 1, backgroundColor: "transparent" },
         topBar: {
           flexDirection: "row",
-          justifyContent: "space-between",
           alignItems: "center",
-          paddingHorizontal: 20,
-          paddingTop: process.env.EXPO_OS === "web" ? 50 : space.sm,
-          paddingBottom: space.sm,
+          gap: space.sm,
+          paddingHorizontal: space.md,
+          paddingTop: process.env.EXPO_OS === "web" ? 50 : space.xs,
+          paddingBottom: space.xs,
         },
-        topActions: { flexDirection: "row", gap: space.sm },
-        content: { paddingHorizontal: 20, paddingBottom: space.xl, flexGrow: 1 },
-        titleRow: {
-          flexDirection: "row",
-          alignItems: "center",
-          justifyContent: "space-between",
-          marginTop: space.sm,
-          marginBottom: space.lg,
-        },
+        content: { paddingHorizontal: space.md, paddingBottom: space.xl, flexGrow: 1 },
         hero: {
+          flex: 1,
           color: colors.textPrimary,
-          fontSize: typography.title.fontSize,
-          fontWeight: typography.title.fontWeight,
-          letterSpacing: typography.title.letterSpacing,
+          fontSize: typography.brand.fontSize,
+          fontWeight: "600",
+          letterSpacing: typography.brand.letterSpacing,
         },
         subhero: {
           color: colors.textSecondary,
           fontSize: typography.caption.fontSize,
           lineHeight: 20,
-          marginTop: space.xs,
-          marginBottom: space.lg,
+          marginTop: space.sm,
+          marginBottom: space.md,
         },
-        grid: { gap: space.md, marginBottom: space.xxl },
-        gridRow: { flexDirection: "row", gap: space.md },
-        section: {
-          color: colors.textSecondary,
-          fontSize: typography.caption.fontSize,
-          marginBottom: space.sm,
-        },
-        workspaceRow: {
-          minHeight: 52,
+        pillRow: { marginHorizontal: -space.md, marginTop: space.sm, marginBottom: space.lg },
+        pillRowContent: { gap: space.sm, paddingHorizontal: space.md, paddingVertical: 2 },
+        homeSection: { marginBottom: space.lg },
+        sectionHeader: {
           flexDirection: "row",
           alignItems: "center",
-          gap: space.sm,
+          justifyContent: "space-between",
+        },
+        seeAll: {
+          color: colors.accent,
+          fontSize: typography.caption.fontSize,
+          fontWeight: "500",
+          marginBottom: space.xs,
+        },
+        addLabel: { color: colors.accent },
+        section: {
+          color: colors.textTertiary,
+          fontSize: 12,
+          fontWeight: "600",
+          letterSpacing: 0.2,
+          marginBottom: space.xs,
+        },
+        workspaceRow: {
+          minHeight: 48,
+          flexDirection: "row",
+          alignItems: "center",
+          gap: space.md,
           paddingHorizontal: space.xs,
           borderBottomWidth: StyleSheet.hairlineWidth,
           borderBottomColor: colors.glassStroke,
@@ -448,24 +469,19 @@ export function InboxHomeScreen(props: InboxHomeScreenProps) {
           fontSize: typography.caption.fontSize,
           fontVariant: ["tabular-nums"],
         },
-        threadList: { gap: space.sm },
-        threadRow: { minHeight: 56 },
-        threadRowContent: {
+        threadList: {},
+        threadRow: {
+          minHeight: 52,
           flexDirection: "row",
           alignItems: "center",
           gap: space.md,
-          paddingHorizontal: space.md,
+          paddingHorizontal: space.xs,
           paddingVertical: space.sm,
+          borderBottomWidth: StyleSheet.hairlineWidth,
+          borderBottomColor: colors.glassStroke,
         },
-        threadIcon: {
-          width: 34,
-          height: 34,
-          borderRadius: 17,
-          alignItems: "center",
-          justifyContent: "center",
-          backgroundColor: colors.glassFillRegular,
-        },
-        threadBody: { flex: 1, gap: 4 },
+        threadRowPressed: { backgroundColor: colors.glassFillThin },
+        threadBody: { flex: 1, gap: 2 },
         threadTitle: {
           color: colors.textPrimary,
           fontSize: typography.body.fontSize,
@@ -473,7 +489,6 @@ export function InboxHomeScreen(props: InboxHomeScreenProps) {
         },
         threadMeta: { color: colors.textSecondary, fontSize: typography.caption.fontSize },
         status: {
-          color: colors.textSecondary,
           fontSize: 12,
           fontWeight: "500",
           textAlign: "right",
@@ -532,36 +547,39 @@ export function InboxHomeScreen(props: InboxHomeScreenProps) {
     [colors],
   );
 
+  const statusColor = (row: MobileInboxRow): string => {
+    const status = inboxWorkStatus(row.status, row.reviewState);
+    if (status === "Needs attention") return colors.warning;
+    if (status === "Working") return colors.attention;
+    if (status === "In review") return colors.merged;
+    return colors.textTertiary;
+  };
+
   const threadRow = (row: MobileInboxRow, showMode: boolean) => (
     <Pressable
       accessibilityRole="button"
       key={`${row.hostId}:${row.mode}:${row.threadId}`}
       onPress={() => props.onOpenThread(row)}
+      style={({ pressed }) => [styles.threadRow, pressed ? styles.threadRowPressed : null]}
       testID={`mobile-home-thread-row-${row.mode}-${row.threadId}`}
     >
-      <GlassSurface
-        contentStyle={styles.threadRowContent}
-        material="thin"
-        radius={radii.md}
-        style={styles.threadRow}
-      >
-        <View style={styles.threadIcon}>
-          <Ionicons color={colors.textSecondary} name={modeIcon(row.mode)} size={17} />
-        </View>
-        <View style={styles.threadBody}>
-          <Text numberOfLines={1} style={styles.threadTitle}>
-            {formatScreenshotSafeLabel(row.title)}
-          </Text>
-          <Text numberOfLines={1} style={styles.threadMeta}>
-            {showMode ? `${row.mode === "code" ? "Code" : "Work"} · ` : ""}
-            {hostLabels.get(row.hostId) ?? row.hostId.slice(0, 8)}
-          </Text>
-        </View>
-        {showMode ? (
-          <Text style={styles.status}>{inboxWorkStatus(row.status, row.reviewState)}</Text>
-        ) : null}
-        <Ionicons color={colors.textTertiary} name="chevron-forward" size={17} />
-      </GlassSurface>
+      <Ionicons color={colors.textSecondary} name={modeIcon(row.mode)} size={18} />
+      <View style={styles.threadBody}>
+        <Text numberOfLines={1} style={styles.threadTitle}>
+          {formatScreenshotSafeLabel(row.title)}
+        </Text>
+        <Text numberOfLines={1} style={styles.threadMeta}>
+          {showMode ? `${row.mode === "code" ? "Code" : "Work"} · ` : ""}
+          {hostLabels.get(row.hostId) ?? row.hostId.slice(0, 8)}
+        </Text>
+      </View>
+      {showMode ? (
+        <Text style={[styles.status, { color: statusColor(row) }]}>
+          {inboxWorkStatus(row.status, row.reviewState)}
+        </Text>
+      ) : (
+        <Ionicons color={colors.textTertiary} name="chevron-forward" size={16} />
+      )}
     </Pressable>
   );
 
@@ -570,31 +588,23 @@ export function InboxHomeScreen(props: InboxHomeScreenProps) {
       <View style={styles.topBar}>
         <IconButton
           accessibilityLabel="Open navigation menu"
+          iconSize={19}
           name="menu-outline"
           onPress={() => setNavigationOpen(true)}
-          size={44}
+          size={36}
           testID="mobile-home-menu"
         />
-        <View style={styles.topActions}>
-          <IconButton
-            accessibilityLabel="Search threads"
-            iconSize={20}
-            name="search-outline"
-            onPress={() => props.onOpenAgents("all")}
-            size={44}
-            testID="mobile-home-search"
-          />
-          {props.homeMode === "inbox" ? (
-            <IconButton
-              accessibilityLabel="Add computer"
-              iconSize={20}
-              name="folder-open-outline"
-              onPress={props.onAddWorkspace}
-              size={44}
-              testID="mobile-home-add-workspace"
-            />
-          ) : null}
-        </View>
+        <Text accessibilityRole="header" numberOfLines={1} style={styles.hero}>
+          {props.homeMode === "inbox" ? "Inbox" : VIEW_TITLES[props.homeMode]}
+        </Text>
+        <IconButton
+          accessibilityLabel="Search threads"
+          iconSize={18}
+          name="search-outline"
+          onPress={() => props.onOpenAgents("all")}
+          size={36}
+          testID="mobile-home-search"
+        />
       </View>
 
       <ScrollView
@@ -603,12 +613,6 @@ export function InboxHomeScreen(props: InboxHomeScreenProps) {
         keyboardShouldPersistTaps="handled"
         showsVerticalScrollIndicator={false}
       >
-        <View style={styles.titleRow}>
-          <Text style={styles.hero}>
-            {props.homeMode === "inbox" ? "Inbox" : VIEW_TITLES[props.homeMode]}
-          </Text>
-        </View>
-
         {props.homeMode === "inbox" ? null : (
           <Text style={styles.subhero}>{modePresentation?.description}</Text>
         )}
@@ -698,43 +702,53 @@ export function InboxHomeScreen(props: InboxHomeScreenProps) {
           </View>
         ) : props.homeMode === "inbox" ? (
           <View>
-            <View style={styles.grid} testID="mobile-home-status-grid">
-              <View style={styles.gridRow}>
-                <StatusCard
-                  icon="play-forward"
-                  iconColor={colors.primary}
-                  onPress={() => props.onOpenAgents("all")}
-                  testID="mobile-card-all-agents"
-                  title={MOBILE_COPY.allAgents}
-                />
-                <StatusCard
-                  count={counts.working}
-                  icon="ellipse"
-                  iconColor={colors.attention}
-                  onPress={() => props.onOpenAgents("working")}
-                  testID="mobile-card-working"
-                  title={MOBILE_COPY.working}
-                />
+            <ScrollView
+              contentContainerStyle={styles.pillRowContent}
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              style={styles.pillRow}
+              testID="mobile-home-status-pills"
+            >
+              <StatusPill
+                count={counts.needsAttention}
+                emphasized={counts.needsAttention > 0}
+                label={MOBILE_COPY.needsAttention}
+                onPress={() => props.onOpenAgents("attention")}
+                testID="mobile-status-attention"
+                tone={colors.warning}
+              />
+              <StatusPill
+                count={counts.working}
+                label={MOBILE_COPY.working}
+                onPress={() => props.onOpenAgents("working")}
+                testID="mobile-status-working"
+                tone={colors.attention}
+              />
+              <StatusPill
+                count={counts.inReview}
+                label={MOBILE_COPY.inReview}
+                onPress={() => props.onOpenAgents("review")}
+                testID="mobile-status-review"
+                tone={colors.merged}
+              />
+            </ScrollView>
+
+            {priorityRows.length > 0 ? (
+              <View style={styles.homeSection} testID="mobile-home-recent">
+                <View style={styles.sectionHeader}>
+                  <Text style={styles.section}>{MOBILE_COPY.homeRecent}</Text>
+                  <Pressable
+                    accessibilityRole="button"
+                    hitSlop={12}
+                    onPress={() => props.onOpenAgents("all")}
+                    testID="mobile-home-see-all"
+                  >
+                    <Text style={styles.seeAll}>{MOBILE_COPY.homeSeeAll}</Text>
+                  </Pressable>
+                </View>
+                {priorityRows.map((row) => threadRow(row, true))}
               </View>
-              <View style={styles.gridRow}>
-                <StatusCard
-                  count={counts.needsAttention}
-                  icon="notifications-outline"
-                  iconColor={colors.warning}
-                  onPress={() => props.onOpenAgents("attention")}
-                  testID="mobile-card-attention"
-                  title={MOBILE_COPY.needsAttention}
-                />
-                <StatusCard
-                  count={counts.inReview}
-                  icon="checkmark-circle-outline"
-                  iconColor={colors.merged}
-                  onPress={() => props.onOpenAgents("review")}
-                  testID="mobile-card-review"
-                  title={MOBILE_COPY.inReview}
-                />
-              </View>
-            </View>
+            ) : null}
 
             <Text style={styles.section}>{MOBILE_COPY.workspaces}</Text>
             {loading ? <ActivityIndicator color={colors.accent} style={styles.loader} /> : null}
@@ -754,7 +768,11 @@ export function InboxHomeScreen(props: InboxHomeScreenProps) {
                   ]}
                   testID={`mobile-workspace-${host.hostId}`}
                 >
-                  <Ionicons color={colors.textSecondary} name="folder-outline" size={21} />
+                  <Ionicons
+                    color={hostToneColor(hostHealth?.kind ?? "idle")}
+                    name="desktop-outline"
+                    size={18}
+                  />
                   <View style={styles.threadBody}>
                     <Text numberOfLines={1} style={styles.workspaceLabel}>
                       {host.label}
@@ -767,7 +785,7 @@ export function InboxHomeScreen(props: InboxHomeScreenProps) {
                   {hostWorkCount > 0 ? (
                     <Text style={styles.workspaceCount}>{hostWorkCount}</Text>
                   ) : null}
-                  <Ionicons color={colors.textTertiary} name="chevron-forward" size={18} />
+                  <Ionicons color={colors.textTertiary} name="chevron-forward" size={16} />
                 </Pressable>
               );
             })}
@@ -780,9 +798,10 @@ export function InboxHomeScreen(props: InboxHomeScreenProps) {
               ]}
               testID="mobile-workspace-add"
             >
-              <Ionicons color={colors.textSecondary} name="folder-open-outline" size={21} />
-              <Text style={styles.workspaceLabel}>{MOBILE_COPY.addWorkspace}</Text>
-              <Ionicons color={colors.textTertiary} name="chevron-forward" size={18} />
+              <Ionicons color={colors.accent} name="add" size={18} />
+              <Text style={[styles.workspaceLabel, styles.addLabel]}>
+                {MOBILE_COPY.addWorkspace}
+              </Text>
             </Pressable>
           </View>
         ) : (
