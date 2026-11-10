@@ -12513,7 +12513,14 @@ approval-gated` command that undoes it. The terminal shows no one-time
   Apple builds prepare a private derived-data directory per action and grant
   writes to that directory only for its `xcodebuild` phases. Run installation
   reads its product from the same directory without write access; XCTest
-  results also land inside it. Simulator captures remain isolated in their own
+  results also land inside it. The action removes that directory however it
+  ends: a run's app is already installed in the Simulator and every action
+  builds into its own directory, so nothing reads it again and keeping it would
+  leave a full build tree per action. A test run's result bundle first moves out
+  to the action's `apple-xcresult-<action>` artifact, and only a real directory
+  moves, never a link a build script planted. At start, before it serves
+  requests, the host removes any derived-data directory a stopped host or an
+  outlived build process left. Simulator captures remain isolated in their own
   private directory and are writable only by the capture launch.
 
 - **Provider capability matrix ("degraded on").** Claude Code, Codex, Mistral

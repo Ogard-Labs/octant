@@ -569,6 +569,7 @@ Apple development is simulator-only. Physical devices and store upload, submissi
 - Journals with earlier device or distribution validation events replay unchanged; leftover files and the stored store key are left in place and nothing reads them.
 - Apple discovery is derived and refreshable from the checkout; Octant never rewrites projects, schemes, build settings or manifests to make discovery pass. _Here only._
 - A test run preserves its result bundle and logs as evidence and reports a structured verdict. If parsing fails it keeps the raw artifact and reports the verdict incomplete. _Here only._
+- A build's derived data is private to its action and removed when the action ends; a test run's result bundle is kept as its artifact first, and the host clears any leftover derived data at start (maintainer request, 2026-11-10). _Here only._
 - After a restart, ambiguous device work is waiting or inconclusive, never verified. _Here only._
 
 Status: Built. Since: 2026-10-29. Detail: [Architecture: Device transport and evidence](../architecture.md#device-transport-and-evidence) and [Device workbench](device-workbench.md).
