@@ -74,7 +74,11 @@ import {
   ThreadMentionService,
 } from "../chat/threadMentionService";
 import { fileMentionContextBlocks, FileMentionService } from "../fileMentionService";
-import { codeSiblingThreadSource } from "../siblingThreads/codeSiblingThreadSource";
+import {
+  codeSiblingThreadSource,
+  codeSiblingThreadState,
+} from "../siblingThreads/codeSiblingThreadSource";
+import { CoordinatorService } from "../coordinator/coordinatorService";
 import { createThreadsTools } from "../siblingThreads/siblingThreadTools";
 import {
   readShieldWatcherLabels,
@@ -1370,9 +1374,15 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
             readPosture,
             messaging: agentMessageService,
             ...(planner === undefined ? {} : { planner }),
+            coordinator: {
+              levelOf: (threadId) => coordinatorService.levelOf(threadId),
+              start: (input) => coordinatorService.start(input),
+            },
             recordExternalContentIngestion: (input) => externalContentIngestionStore.record(input),
             uuid: randomUUID,
           }),
+        isCoordinatorThread: (threadId) => coordinatorService.isCoordinator(threadId),
+        coordinatorContext: (threadId) => coordinatorService.contextFor(threadId),
         carryAgentMessages: (threadId) => agentMessageService.carryIntoTurn(threadId),
         confirmAgentMessagesDelivered: (messageIds) =>
           agentMessageService.confirmDelivered(messageIds),
@@ -1630,6 +1640,103 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
       isMarkedWithOutsideContent: (threadId) =>
         readThreadExternalContentTaint(persistence.connection, threadId).externalContentIngested,
     });
+    // Coordinator threads and message wakes (docs/design/coordinator-threads.md):
+    // a worker is created through the ordinary Code command path and started,
+    // like a wake turn, as an agent-initiated host turn under the routine host
+    // scope, so every approval it raises waits for a person.
+    const coordinatorService = new CoordinatorService({
+      readThread: (threadId) => persistence.readCodeThread(decodeCodeThreadId(threadId)),
+      readThreads: () => persistence.readCodeThreads(),
+      readProject: (projectId) => persistence.readProject(projectId),
+      readSettings: () => persistence.readCodeSettings()?.settings,
+      isMarked: (threadId) =>
+        readThreadExternalContentTaint(persistence.connection, threadId).externalContentIngested,
+      threadState: (threadId) => {
+        const thread = persistence.readCodeThread(decodeCodeThreadId(threadId));
+        if (thread === undefined) return undefined;
+        return codeSiblingThreadState(thread, {
+          runtimeWorks: (id) => persistence.readCodeRuntimeWorks(id),
+          turnAwaitsPerson: (id) =>
+            codeOperationRuntime?.turnAwaitsPerson?.(String(id)) === true ||
+            threadAwaitsHarnessApproval(String(id)),
+          decisionPending: (candidate) => codeTurnDecisions.forThread(candidate) !== undefined,
+        }).state;
+      },
+      latestTurnId: (threadId) => {
+        const latest = persistence
+          .readCodeRuntimeWorks(decodeCodeThreadId(threadId))
+          .filter(({ work }) => work.kind === "provider-turn")
+          .at(-1);
+        return latest === undefined ? undefined : String(latest.work.id);
+      },
+      providerKnown: (providerInstanceId) =>
+        persistence
+          .readProviderInstances()
+          .some((instance) => String(instance.id) === providerInstanceId),
+      executeCode: async (windowId, command, executionContext) => {
+        if (!(codeService instanceof CodeService)) {
+          throw new Error("Coordinators need the host's own Code service.");
+        }
+        return await codeService.execute(windowId, command, undefined, executionContext);
+      },
+      startHostTurn: async (threadId, prompt) => {
+        const thread = persistence.readCodeThread(threadId);
+        if (
+          thread === undefined ||
+          baseRouteCodeService.stageEvidence === undefined ||
+          baseRouteCodeService.executeOperation === undefined
+        ) {
+          return { status: "refused", message: "Code turns are unavailable on this host." };
+        }
+        const staged = await baseRouteCodeService.stageEvidence(
+          ROUTINE_HOST_SCOPE_ID,
+          threadId,
+          prompt,
+        );
+        const operationId = randomUUID();
+        const result = await baseRouteCodeService.executeOperation(ROUTINE_HOST_SCOPE_ID, {
+          kind: "start-provider-turn",
+          operationId: decodeCodeOperationId(operationId),
+          threadId,
+          checkoutId: thread.checkoutId,
+          sessionId: decodeProviderSessionId(randomUUID()),
+          prompt: staged,
+        });
+        return result.kind === "provider-turn-state" &&
+          (result.state === "running" || result.state === "waiting" || result.state === "completed")
+          ? { status: "started", operationId }
+          : {
+              status: "refused",
+              message:
+                result.kind === "provider-turn-state" && result.failure !== undefined
+                  ? result.failure.message
+                  : "The turn was not admitted.",
+            };
+      },
+      propose: (coordinatorThreadId, draft, workerOptions) => {
+        const outcome = codePlannerService.proposeForCoordinator(
+          coordinatorThreadId,
+          draft,
+          workerOptions,
+        );
+        return outcome.status === "proposed"
+          ? { status: "proposed", proposalId: String(outcome.proposal.id) }
+          : outcome;
+      },
+      uuid: randomUUID,
+      now: () => Date.now(),
+      onError: (message, error) => console.error(`[coordinators] ${message}`, error),
+    });
+    const unsubscribeCoordinator = persistence.journal.subscribeCommitted((append) =>
+      coordinatorService.onCommittedEvents(append.events),
+    );
+    coordinatorService.startSweeping();
+    yield* Effect.addFinalizer(() =>
+      Effect.sync(() => {
+        unsubscribeCoordinator();
+        coordinatorService.stop();
+      }),
+    );
     // A linked pull request's checks turning red is a user obligation, not an
     // agent event: every snapshot refresh feeds the durable follow-up marker on
     // the owning thread. Read-only toward GitHub; only an explicit completion
@@ -1654,7 +1761,13 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
           bootstrap.checkouts.map((checkout) => [String(checkout.id), checkout] as const),
         );
         const boardThreads: CodeBoardThread[] = bootstrap.threads
-          .filter((thread) => thread.lifecycle !== "archived" && thread.completedAt === undefined)
+          // A coordinator is never a board card: it has no delivery and no Done.
+          .filter(
+            (thread) =>
+              thread.lifecycle !== "archived" &&
+              thread.completedAt === undefined &&
+              thread.coordinator !== true,
+          )
           .map((thread) => {
             const project = projectById.get(String(thread.projectId));
             return {

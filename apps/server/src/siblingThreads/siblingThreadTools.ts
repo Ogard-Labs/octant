@@ -16,6 +16,9 @@ import {
   SIBLING_THREADS_TOOL_NAME,
   THREADS_TOOL_BOARD_ALLOWLIST_ENTRY,
   THREADS_TOOL_SEND_ALLOWLIST_ENTRY,
+  THREADS_TOOL_START_ALLOWLIST_ENTRY,
+  MAX_COORDINATOR_WORKER_PROMPT_LENGTH,
+  MAX_COORDINATOR_WORKER_TITLE_LENGTH,
   UtcTimestamp,
   decodeCodeThreadId,
   decodeSiblingThreadId,
@@ -371,6 +374,7 @@ const HELP_LINES: Readonly<Record<ThreadsToolOperation, string>> = {
     "receipts takes messageIds you sent and returns whether each is queued, delivered, acknowledged, or refused, never its text.",
   board:
     "board reads this Project's task board as its designated planner: each task's state, delivery evidence, checks, and helper-agent activity, at most 100 tasks with truncated stated. It changes nothing; offer new work with octant_offer_side_task and target board.",
+  start: `start creates a worker thread in this Project, as its coordinator: title (at most ${String(MAX_COORDINATOR_WORKER_TITLE_LENGTH)} characters) and prompt (at most ${String(MAX_COORDINATOR_WORKER_PROMPT_LENGTH)}), optionally providerInstanceId with modelId and a level no higher than yours. The worker gets its own worktree and runs the prompt as its first message; its approvals wait for the person. The answer is started (with the worker's reference) or proposed (a person approves it first). Message workers with send; you hear when one finishes or needs the person.`,
 };
 
 /**
@@ -388,6 +392,7 @@ function threadsToolDefinition(
     ...(reading ? ["see this Project's other open threads"] : []),
     ...(messaging ? ["message them"] : []),
     ...(offers.has("board") ? ["read this Project's board as its planner"] : []),
+    ...(offers.has("start") ? ["start worker threads as this Project's coordinator"] : []),
   ];
   const last = purposes.at(-1) ?? "";
   const purpose =
@@ -407,7 +412,9 @@ function threadsToolDefinition(
         .filter((operation) => operation !== "help")
         .map((operation) => HELP_LINES[operation]),
       ...(reading ? ["list and read mark this thread as having read outside content."] : []),
-      "Nothing here starts, steers, completes, or stops another thread.",
+      offers.has("start")
+        ? "Nothing here steers, completes, or stops another thread."
+        : "Nothing here starts, steers, completes, or stops another thread.",
     ].join(" "),
     inputSchema: {
       type: "object",
@@ -451,6 +458,33 @@ function threadsToolDefinition(
               },
             }
           : {}),
+        ...(offers.has("start")
+          ? {
+              title: {
+                type: "string",
+                maxLength: MAX_COORDINATOR_WORKER_TITLE_LENGTH,
+                description: "For start: the worker thread's title.",
+              },
+              prompt: {
+                type: "string",
+                maxLength: MAX_COORDINATOR_WORKER_PROMPT_LENGTH,
+                description: "For start: the worker's first message.",
+              },
+              providerInstanceId: {
+                type: "string",
+                description: "For start: a provider instance; omit to use yours.",
+              },
+              modelId: {
+                type: "string",
+                description: "For start: a model of that provider; omit to use yours.",
+              },
+              level: {
+                type: "string",
+                enum: ["approval-gated", "auto-accept-edits", "full-access"],
+                description: "For start: the worker's guardrail level; omit to use yours.",
+              },
+            }
+          : {}),
       },
       required: ["operation"],
       additionalProperties: false,
@@ -461,6 +495,23 @@ function threadsToolDefinition(
 const NOT_MESSAGING = "This thread cannot message other threads.";
 const PLAN_REFUSAL = "Plan mode is read-only; this thread cannot send an agent message.";
 const NOT_PLANNER = "Only the Project's designated planner thread may read the board.";
+const NOT_COORDINATOR = "Only a coordinator thread may start workers.";
+
+/**
+ * What the threads tool needs from the host's coordinator start. `levelOf`
+ * answers the caller's stored level while it is a coordinator and
+ * `undefined` otherwise; `start` decides and acts on one call.
+ */
+export interface CoordinatorToolPort {
+  levelOf(threadId: string): ProviderExecutionPolicy | undefined;
+  start(input: {
+    readonly callerThreadId: string;
+    readonly windowId: WindowId;
+    readonly fields: Readonly<Record<string, unknown>>;
+    readonly profileAllowsStart: boolean;
+    readonly signal?: AbortSignal;
+  }): Promise<{ readonly result: unknown; readonly isError: boolean }>;
+}
 
 /**
  * The threads tool for one Work or Code turn.
@@ -493,6 +544,8 @@ export function createThreadsTools(input: {
     "send" | "recordRefusedSend" | "acknowledge" | "statusForSender"
   >;
   readonly planner?: CodePlannerToolPort;
+  /** The host's coordinator start, where this mode's threads can coordinate. */
+  readonly coordinator?: CoordinatorToolPort;
   /** Marks the caller for a board read, whose cards are text agents wrote. */
   readonly recordExternalContentIngestion?: (
     input: RecordExternalContentIngestionInput,
@@ -513,8 +566,12 @@ export function createThreadsTools(input: {
   };
   const isPlanner = () =>
     input.planner?.isPlannerThread(decodeCodeThreadId(String(callerThreadId))) === true;
-  const offeredNow = () =>
-    threadsToolOperations({
+  /** The caller's stored level while it is a coordinator, re-read on every call. */
+  const coordinatorLevel = () =>
+    input.mode === "code" ? input.coordinator?.levelOf(String(callerThreadId)) : undefined;
+  const offeredNow = () => {
+    const level = coordinatorLevel();
+    return threadsToolOperations({
       mode: input.mode,
       posture: input.readPosture?.(),
       profileAllowsRead: allows(SIBLING_THREADS_TOOL_NAME),
@@ -522,7 +579,10 @@ export function createThreadsTools(input: {
       profileAllowsBoard: allows(THREADS_TOOL_BOARD_ALLOWLIST_ENTRY),
       messagingCarried: input.messaging !== undefined,
       plannerThread: isPlanner(),
+      ...(level === undefined ? {} : { coordinatorLevel: level }),
+      profileAllowsStart: allows(THREADS_TOOL_START_ALLOWLIST_ENTRY),
     });
+  };
   const operations = offeredNow();
   const messaging =
     input.messaging === undefined
@@ -540,6 +600,10 @@ export function createThreadsTools(input: {
     if (input.mode !== "code" || messaging === undefined) return NOT_MESSAGING;
     const profile = profileRefusal(THREADS_TOOL_SEND_ALLOWLIST_ENTRY);
     if (profile !== undefined) return profile;
+    // A coordinator's turn always runs in Plan; whether it may message
+    // follows the level the person gave the thread.
+    const level = coordinatorLevel();
+    if (level !== undefined) return level === "plan" ? PLAN_REFUSAL : undefined;
     return input.readPosture?.() === "plan" ? PLAN_REFUSAL : undefined;
   };
   const answered = (outcome: SiblingThreadOutcome) => ({
@@ -605,6 +669,24 @@ export function createThreadsTools(input: {
           fields,
           () => signal?.aborted !== true && messagingRefusal() === undefined,
         );
+      }
+      if (operation === "start") {
+        // The role is re-read on every call, so Stop coordinating takes
+        // effect mid-turn.
+        if (
+          input.mode !== "code" ||
+          input.coordinator === undefined ||
+          coordinatorLevel() === undefined
+        ) {
+          return policy(NOT_COORDINATOR);
+        }
+        return await input.coordinator.start({
+          callerThreadId: String(callerThreadId),
+          windowId: input.windowId,
+          fields,
+          profileAllowsStart: allows(THREADS_TOOL_START_ALLOWLIST_ENTRY),
+          ...(signal === undefined ? {} : { signal }),
+        });
       }
       if (operation === "board") {
         if (input.mode !== "code" || input.planner === undefined) return policy(NOT_PLANNER);

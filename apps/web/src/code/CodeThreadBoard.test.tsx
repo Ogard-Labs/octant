@@ -433,6 +433,34 @@ describe("CodeThreadBoard", () => {
     expect(within(cardFor("Flagged thread")).queryAllByRole("button")).toHaveLength(1);
   });
 
+  it("leaves a coordinator off the board and names a worker's coordinator on its card", async () => {
+    const loadBoard = vi.fn(async () =>
+      view([
+        card({ id: "01", status: "ready", title: "Backlog coordinator" }),
+        card({ id: "02", status: "in-progress", title: "Fix the flaky test" }),
+        card({ id: "03", status: "ready", title: "Ordinary thread" }),
+      ]),
+    );
+    render(
+      <CodeThreadBoard
+        coordinators={{
+          coordinatorThreadIds: new Set(["00000000-0000-4000-8000-000000005101"]),
+          coordinatorTitleByWorker: new Map([
+            ["00000000-0000-4000-8000-000000005102", "Backlog coordinator"],
+          ]),
+        }}
+        loadBoard={loadBoard}
+        projects={projects}
+        storage={memoryStorage()}
+      />,
+    );
+
+    await screen.findByText("Fix the flaky test");
+    expect(screen.queryByRole("button", { name: "Backlog coordinator" })).toBeNull();
+    expect(within(cardFor("Fix the flaky test")).getByText("Backlog coordinator")).toBeVisible();
+    expect(cardFor("Ordinary thread").querySelector(".board-card-coordinator")).toBeNull();
+  });
+
   it("keeps failing checks and active agents visible in the board scan path", async () => {
     const loadBoard = vi.fn(async () =>
       view([

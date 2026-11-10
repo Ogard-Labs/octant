@@ -1292,6 +1292,17 @@ export interface CodeOperationServiceOptions {
    * they stand now, recorded as external content on the thread, and framed as
    * data. Reading them delivers nothing by itself.
    */
+  /**
+   * Whether a thread is a coordinator now, so its turn runs under Plan's
+   * read-only gate (docs/design/coordinator-threads.md).
+   */
+  readonly isCoordinatorThread?: (threadId: string) => boolean;
+  /**
+   * The host-written roster and state notices a coordinator's turn carries,
+   * or `undefined` for any other thread. Facts only, no agent-written text,
+   * so carrying it marks nothing.
+   */
+  readonly coordinatorContext?: (threadId: string) => string | undefined;
   readonly carryAgentMessages?: (
     threadId: string,
   ) => Promise<ReadonlyArray<{ readonly messageId: string; readonly text: string }>>;
@@ -1670,7 +1681,12 @@ export class CodeOperationService {
               command.kind === "start-provider-turn"
                 ? threadForTurn(
                     scope.thread,
-                    turnAccessPosture(scope.thread, command, recordedStart?.event.executionPolicy),
+                    turnAccessPosture(
+                      scope.thread,
+                      command,
+                      recordedStart?.event.executionPolicy,
+                      this.#options.isCoordinatorThread?.(String(scope.thread.id)) === true,
+                    ),
                   )
                 : scope.thread;
             // A writing turn holds its checkout against an in-place restore
@@ -1951,7 +1967,12 @@ export class CodeOperationService {
       const frames = this.#replay(command.threadId, command.operationId, 0, 256).frames;
       const turnThread = threadForTurn(
         thread,
-        turnAccessPosture(thread, command, recordedTurnAccessPosture(frames)),
+        turnAccessPosture(
+          thread,
+          command,
+          recordedTurnAccessPosture(frames),
+          this.#options.isCoordinatorThread?.(String(thread.id)) === true,
+        ),
       );
       const held: StartingTurn = {
         thread: turnThread,
@@ -5726,6 +5747,8 @@ export class CodeOperationService {
       this.#options.carryAgentMessages?.(String(thread.id)) ?? Promise.resolve([])
     ).catch(() => []);
     for (const message of agentMessages) context.push({ kind: "user-message", text: message.text });
+    const roster = this.#options.coordinatorContext?.(String(thread.id));
+    if (roster !== undefined) context.push({ kind: "user-message", text: roster });
     // Only the host-vouched local person send carries their chosen notes.
     // Child results, usage recovery, and replay recovery are not that intent.
     const takeProductFeedback =
@@ -6194,8 +6217,13 @@ function recordedTurnAccessPosture(
 function turnAccessPosture(
   thread: CodeThread,
   command: Extract<CodeOperationCommand, { readonly kind: "start-provider-turn" }>,
-  recorded?: CodeThread["executionPolicy"],
+  recorded: CodeThread["executionPolicy"] | undefined,
+  coordinator: boolean,
 ): CodeThread["executionPolicy"] {
+  // A coordinator reads and its workers write: every one of its turns runs
+  // under Plan's read-only gate, whatever level the person gave the thread.
+  // That level stays on the thread as the ceiling for the workers it starts.
+  if (coordinator) return "plan";
   const requested = recorded ?? command.executionPolicy;
   return clampTurnAccessPosture({
     thread: thread.executionPolicy,

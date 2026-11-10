@@ -80,6 +80,7 @@ export interface SidebarContainerProps {
     | "openAutomationCenter"
     | "openDraftInActiveProject"
     | "openDraftInProject"
+    | "openCoordinatorDraftInProject"
     | "openGithubIssues"
     | "openImageLibrary"
     | "openHome"
@@ -116,6 +117,9 @@ export interface SidebarContainerProps {
     | "selectWorkThread"
     | "setProjectArchived"
     | "setProjectColor"
+    | "setCodeThreadCoordinator"
+    | "setCodeThreadCoordinatorWake"
+    | "setCodeThreadMessageWake"
     | "setThreadExportNotice"
     | "snoozeChatThread"
     | "snoozeCodeThread"
@@ -423,6 +427,18 @@ export const SidebarContainer = memo(function SidebarContainer(props: SidebarCon
       },
       onPinThread: (threadId, pinned) =>
         void actions.pinCodeThread(decodeCodeThreadId(threadId), pinned),
+      onSetCoordinator: (threadId, coordinator) =>
+        void actions
+          .setCodeThreadCoordinator(decodeCodeThreadId(threadId), coordinator)
+          .then(noteCodeThreadRest),
+      onSetMessageWake: (threadId, wake) =>
+        void actions
+          .setCodeThreadMessageWake(decodeCodeThreadId(threadId), wake)
+          .then(noteCodeThreadRest),
+      onSetCoordinatorWake: (threadId, wake) =>
+        void actions
+          .setCodeThreadCoordinatorWake(decodeCodeThreadId(threadId), wake)
+          .then(noteCodeThreadRest),
       onOpenPullRequest: actions.selectProjectPullRequestIdentity,
       onOpenPullRequestOnGithub: (identity) => {
         const url = githubPullRequestUrl(identity);
@@ -792,6 +808,8 @@ export const SidebarContainer = memo(function SidebarContainer(props: SidebarCon
                       ? {
                           newThreadVerb: "thread" as const,
                           onNewThreadInProject: (projectId) => void openDraftInProject(projectId),
+                          onNewCoordinatorInProject: (projectId) =>
+                            void actions.openCoordinatorDraftInProject(projectId),
                         }
                       : activeMode === "work"
                         ? {

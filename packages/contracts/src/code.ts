@@ -8,6 +8,11 @@ import { GithubIssueContextRequest } from "./githubIssueContext";
 import { TerminalSessionImportRequest } from "./terminalSessions";
 import { LinearIssueContextRequest } from "./linearIssueContext";
 import { BindingRevisionId, ProjectId } from "./projects";
+import {
+  CoordinatorOpenWorkerLimit,
+  CoordinatorStartingByProject,
+  CoordinatorStartingChoice,
+} from "./coordinator";
 import { AutoReviewer, ShieldModelChoice } from "./shield";
 import { ThreadWorkingDirectory, ProjectWorkingFolderId } from "./workingDirectory";
 import {
@@ -330,6 +335,29 @@ export const CodeThread = Schema.Struct({
   documentDelivery: Schema.optional(ThreadDocumentDelivery),
   /** A person's default for this task's new Browser pages; a profile choice grants no access. */
   browserTaskProfile: Schema.optional(BrowserProfileChoice),
+  /**
+   * Present on a coordinator thread (docs/design/coordinator-threads.md): only
+   * a person sets or clears it, and while it is present the thread's own
+   * actions run under Plan's read-only gate and its agent may start workers.
+   * Absent on every thread written before coordinators existed.
+   */
+  coordinator: Schema.optional(Schema.Literal(true)),
+  /**
+   * The coordinator that started this worker thread, recorded by the host at
+   * creation and never changed. No wire command can set it.
+   */
+  coordinatorThreadId: Schema.optional(CodeThreadId),
+  /**
+   * The person's **Wake when a message arrives** switch: an idle thread with
+   * it on starts one host turn to carry an admitted agent message. Absent is
+   * off.
+   */
+  messageWake: Schema.optional(Schema.Literal(true)),
+  /**
+   * Set when a person turned off **Wake for coordinator** on a worker; absent,
+   * a worker wakes for its own coordinator's messages.
+   */
+  coordinatorWakeOff: Schema.optional(Schema.Literal(true)),
   /** Completed and snoozed rest, shared with Chat and Work; see {@link ThreadRestFields}. */
   ...ThreadRestFields,
   lifecycle: CodeThreadLifecycle,
@@ -495,6 +523,19 @@ export const CodeSettings = Schema.Struct({
    * provider account with that provider's smallest model.
    */
   shieldModel: Schema.optional(ShieldModelChoice),
+  /**
+   * Settings › Code › Coordinators › Starting workers. Absent is
+   * `start-without-asking`; `propose-for-approval` turns a coordinator's
+   * `start` into a proposal a person approves.
+   */
+  coordinatorStarting: Schema.optional(CoordinatorStartingChoice),
+  /**
+   * Per-Project overrides of {@link coordinatorStarting}, keyed by Project id;
+   * a Project not listed uses Settings.
+   */
+  coordinatorStartingByProject: Schema.optional(CoordinatorStartingByProject),
+  /** How many open workers one coordinator may have; absent is the default. */
+  coordinatorOpenWorkerLimit: Schema.optional(CoordinatorOpenWorkerLimit),
   fullAccessSandboxOff: RetiredSandboxOffSwitch,
   version: AggregateVersion,
   updatedAt: UtcTimestamp,
@@ -720,6 +761,12 @@ export const CodeCommand = Schema.Union(
     autoReviewer: Schema.optional(AutoReviewer),
     /** Absent keeps the stored choice; null returns to each thread's own provider. */
     shieldModel: Schema.optional(Schema.NullOr(ShieldModelChoice)),
+    /** Absent keeps the stored choice. */
+    coordinatorStarting: Schema.optional(CoordinatorStartingChoice),
+    /** Absent keeps the stored overrides; a present map replaces them. */
+    coordinatorStartingByProject: Schema.optional(CoordinatorStartingByProject),
+    /** Absent keeps the stored limit. */
+    coordinatorOpenWorkerLimit: Schema.optional(CoordinatorOpenWorkerLimit),
   }).annotations(strict),
   CreateCodeThreadCommand,
   Schema.Struct({
@@ -736,6 +783,24 @@ export const CodeCommand = Schema.Union(
     kind: Schema.Literal("pin-code-thread"),
     ...CodeThreadCommandFields,
     pinned: Schema.Boolean,
+  }).annotations(strict),
+  /** Make Coordinator and Stop coordinating; only a person at a local window. */
+  Schema.Struct({
+    kind: Schema.Literal("set-code-thread-coordinator"),
+    ...CodeThreadCommandFields,
+    coordinator: Schema.Boolean,
+  }).annotations(strict),
+  /** The Wake when a message arrives switch; only a person at a local window. */
+  Schema.Struct({
+    kind: Schema.Literal("set-code-thread-message-wake"),
+    ...CodeThreadCommandFields,
+    wake: Schema.Boolean,
+  }).annotations(strict),
+  /** A worker's Wake for coordinator switch; only a person at a local window. */
+  Schema.Struct({
+    kind: Schema.Literal("set-code-thread-coordinator-wake"),
+    ...CodeThreadCommandFields,
+    wake: Schema.Boolean,
   }).annotations(strict),
   /**
    * Put a finished thread away without archiving it. The host refuses while a

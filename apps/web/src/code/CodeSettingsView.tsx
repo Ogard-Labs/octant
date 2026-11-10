@@ -1,6 +1,15 @@
 import type { CodeDiffLayout, CodeSettings } from "@octant/contracts/code";
 import type { AutoReviewer, ShieldModelChoice } from "@octant/contracts/shield";
-import type { PermissionMode, SettingsSettingId } from "@octant/contracts";
+import { Schema } from "effect";
+import {
+  DEFAULT_COORDINATOR_OPEN_WORKER_LIMIT,
+  MAX_COORDINATOR_OPEN_WORKER_LIMIT,
+  CoordinatorOpenWorkerLimit,
+  type CoordinatorStartingByProject,
+  type CoordinatorStartingChoice,
+  type PermissionMode,
+  type SettingsSettingId,
+} from "@octant/contracts";
 import { permissionModeOf, threadAccessOf } from "@octant/domain/guardrail-policy";
 import { useRef, useState } from "react";
 import { SettingRow, SettingsSection } from "../settings/primitives";
@@ -26,7 +35,29 @@ export interface CodeSettingsUpdate {
   readonly requireGitRepository?: boolean;
   readonly defaultDiffLayout?: CodeDiffLayout;
   readonly bundledLanguageServer?: boolean;
+  /** Absent keeps the stored choice. */
+  readonly coordinatorStarting?: CoordinatorStartingChoice;
+  /** Absent keeps the stored overrides; a present map replaces them. */
+  readonly coordinatorStartingByProject?: CoordinatorStartingByProject;
+  /** Absent keeps the stored limit. */
+  readonly coordinatorOpenWorkerLimit?: CoordinatorOpenWorkerLimit;
 }
+
+/** Settings › Code › Coordinators › Starting workers (docs/design/coordinator-threads.md). */
+export const COORDINATOR_STARTING_OPTIONS: ReadonlyArray<{
+  readonly id: CoordinatorStartingChoice;
+  readonly label: string;
+}> = [
+  { id: "start-without-asking", label: "Start without asking" },
+  { id: "propose-for-approval", label: "Propose for approval" },
+];
+
+const isOpenWorkerLimit = Schema.is(CoordinatorOpenWorkerLimit);
+
+const OPEN_WORKER_LIMIT_OPTIONS = Array.from(
+  { length: MAX_COORDINATOR_OPEN_WORKER_LIMIT },
+  (_, index) => ({ id: String(index + 1), label: String(index + 1) }),
+);
 
 interface CodeSettingsDraft {
   readonly permissionMode: PermissionMode;
@@ -49,7 +80,12 @@ const AUTO_REVIEWER_OPTIONS: ReadonlyArray<{ readonly id: AutoReviewer; readonly
   ];
 
 /** The section holding the control a change came from. */
-type CodeSettingsSectionId = "access" | "thread-defaults" | "editor" | "external-editor";
+type CodeSettingsSectionId =
+  | "access"
+  | "thread-defaults"
+  | "coordinators"
+  | "editor"
+  | "external-editor";
 
 /**
  * Why the last change was not kept. A refusal is said in the section whose
@@ -98,9 +134,26 @@ export function CodeSettingsView(props: CodeSettingsViewProps) {
   const [argumentsText, setArgumentsText] = useState(
     props.settings.externalEditor?.arguments.join("\n") ?? "",
   );
+  const [coordinatorStarting, setCoordinatorStarting] = useState<CoordinatorStartingChoice>(
+    props.settings.coordinatorStarting ?? "start-without-asking",
+  );
+  const [openWorkerLimit, setOpenWorkerLimit] = useState<number>(
+    props.settings.coordinatorOpenWorkerLimit ?? DEFAULT_COORDINATOR_OPEN_WORKER_LIMIT,
+  );
   const [previousSettings, setPreviousSettings] = useState(props.settings);
   if (previousSettings !== props.settings) {
     setPreviousSettings(props.settings);
+    setCoordinatorStarting((current) =>
+      current === (previousSettings.coordinatorStarting ?? "start-without-asking")
+        ? (props.settings.coordinatorStarting ?? "start-without-asking")
+        : current,
+    );
+    setOpenWorkerLimit((current) =>
+      current ===
+      (previousSettings.coordinatorOpenWorkerLimit ?? DEFAULT_COORDINATOR_OPEN_WORKER_LIMIT)
+        ? (props.settings.coordinatorOpenWorkerLimit ?? DEFAULT_COORDINATOR_OPEN_WORKER_LIMIT)
+        : current,
+    );
     setPermissionMode((current) =>
       current === permissionModeOfSettings(previousSettings)
         ? permissionModeOfSettings(props.settings)
@@ -155,9 +208,17 @@ export function CodeSettingsView(props: CodeSettingsViewProps) {
       readonly bundledLanguageServer?: boolean;
       readonly autoReviewer?: AutoReviewer;
       readonly fullAccessSandbox?: boolean;
+      readonly coordinatorStarting?: CoordinatorStartingChoice;
+      readonly coordinatorOpenWorkerLimit?: CoordinatorOpenWorkerLimit;
     },
   ) {
     const host = hostSettings.current;
+    if (change.coordinatorStarting !== undefined) {
+      setCoordinatorStarting(host.coordinatorStarting ?? "start-without-asking");
+    }
+    if (change.coordinatorOpenWorkerLimit !== undefined) {
+      setOpenWorkerLimit(host.coordinatorOpenWorkerLimit ?? DEFAULT_COORDINATOR_OPEN_WORKER_LIMIT);
+    }
     if (change.fullAccessSandbox !== undefined) {
       setFullAccessSandbox(host.defaultFullAccessSandbox === true);
     }
@@ -190,6 +251,8 @@ export function CodeSettingsView(props: CodeSettingsViewProps) {
       readonly bundledLanguageServer?: boolean;
       readonly autoReviewer?: AutoReviewer;
       readonly fullAccessSandbox?: boolean;
+      readonly coordinatorStarting?: CoordinatorStartingChoice;
+      readonly coordinatorOpenWorkerLimit?: CoordinatorOpenWorkerLimit;
     },
   ) {
     const draft: CodeSettingsDraft = {
@@ -241,6 +304,12 @@ export function CodeSettingsView(props: CodeSettingsViewProps) {
         ...(change.bundledLanguageServer === undefined
           ? {}
           : { bundledLanguageServer: change.bundledLanguageServer }),
+        ...(change.coordinatorStarting === undefined
+          ? {}
+          : { coordinatorStarting: change.coordinatorStarting }),
+        ...(change.coordinatorOpenWorkerLimit === undefined
+          ? {}
+          : { coordinatorOpenWorkerLimit: change.coordinatorOpenWorkerLimit }),
         ...(trimmedExecutable === ""
           ? {}
           : {
@@ -370,6 +439,56 @@ export function CodeSettingsView(props: CodeSettingsViewProps) {
           </SettingRow>
         </div>
         <CodeSettingsFeedbackSlot feedback={feedback} section="thread-defaults" />
+      </SettingsSection>
+      <SettingsSection
+        description="A coordinator splits a Project's work into worker threads, starts them, and brings their questions back to you."
+        title="Coordinators"
+      >
+        <div className="setgroup">
+          <SettingRow
+            description="Whether a coordinator starts each worker itself or proposes it for you to approve. A Project can choose its own in its overview."
+            focused={props.focusedSetting === "code-coordinator-starting"}
+            label="Starting workers"
+            scope="mode"
+            settingId="code-coordinator-starting"
+          >
+            <OctantSelectField
+              aria-label="Starting workers"
+              className="settings-view__select window-no-drag"
+              onValueChange={(value) => {
+                const option = COORDINATOR_STARTING_OPTIONS.find(
+                  (candidate) => candidate.id === value,
+                );
+                if (option === undefined || option.id === coordinatorStarting) return;
+                setCoordinatorStarting(option.id);
+                void commit("coordinators", { coordinatorStarting: option.id });
+              }}
+              options={COORDINATOR_STARTING_OPTIONS}
+              value={coordinatorStarting}
+            />
+          </SettingRow>
+          <SettingRow
+            description="How many workers one coordinator may have open at once. A worker that is Done, put away, or archived no longer counts."
+            focused={props.focusedSetting === "code-coordinator-open-workers"}
+            label="Open workers per coordinator"
+            scope="mode"
+            settingId="code-coordinator-open-workers"
+          >
+            <OctantSelectField
+              aria-label="Open workers per coordinator"
+              className="settings-view__select window-no-drag"
+              onValueChange={(value) => {
+                const limit = Number(value);
+                if (!isOpenWorkerLimit(limit) || limit === openWorkerLimit) return;
+                setOpenWorkerLimit(limit);
+                void commit("coordinators", { coordinatorOpenWorkerLimit: limit });
+              }}
+              options={OPEN_WORKER_LIMIT_OPTIONS}
+              value={String(openWorkerLimit)}
+            />
+          </SettingRow>
+        </div>
+        <CodeSettingsFeedbackSlot feedback={feedback} section="coordinators" />
       </SettingsSection>
       <SettingsSection title="Editor">
         <div className="setgroup">

@@ -391,4 +391,27 @@ describe("buildSidebarStatusView", () => {
       ["Idle", ["idle-new", "idle-old"]],
     ]);
   });
+
+  it("keeps a coordinator with the pins and its worker under its own heading", () => {
+    const view = buildSidebarStatusView({
+      projects: [{ id: projectId, name: "Octant" }],
+      threads: [
+        thread({ threadId: "coordinator", title: "Backlog", coordinator: true }),
+        thread({
+          threadId: "worker",
+          title: "Fix the flaky test",
+          activity: "working",
+          coordinatorThreadId: "coordinator",
+          coordinatorTitle: "Backlog",
+        }),
+      ],
+    });
+    expect(
+      view.groups.map((group) => [group.label, group.threads.map((row) => row.threadId)]),
+    ).toEqual([
+      ["Pinned", ["coordinator"]],
+      ["Working", ["worker"]],
+    ]);
+    expect(view.groups[1]?.threads[0]?.coordinatorTitle).toBe("Backlog");
+  });
 });

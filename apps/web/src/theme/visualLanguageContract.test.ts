@@ -440,10 +440,15 @@ describe("the public-block visual language", () => {
     expect(strip).not.toMatch(/position:\s*absolute/);
     expect(strip).not.toMatch(/background/);
     expect(strip).not.toMatch(/border-top/);
-    // Every composer, start screen or thread, has one prompt: two lines before
-    // the box grows. A start screen redefining it made the same message change
-    // shape between the first send and the next.
+    // Every composer, start screen or thread, has one prompt. A start screen
+    // redefining it made the same message change shape between the first send
+    // and the next. It is two lines before it grows; under a thread the empty
+    // box is one line, with the same insets and type, and nothing else differs.
     expect(prompt).toMatch(/min-height:\s*calc\(2lh \+ 30px\)/);
+    const reply =
+      system.match(/\.composer--follow-up \.composer-input \{\n(?:.*\n)*?\}/m)?.[0] ?? "";
+    expect(reply).toMatch(/min-height:\s*calc\(1lh \+ 30px\)/);
+    expect(reply).not.toMatch(/padding|font-size|line-height/);
     expect(surface).not.toMatch(/\.composer-stack > \.composer > \.composer-input \{/);
     for (const source of welcomes) {
       expect(source).toMatch(/className="composer-tray composer-tray--start"/);

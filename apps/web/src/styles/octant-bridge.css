@@ -209,6 +209,16 @@ html:not([data-octant-reduced-transparency="true"]) .shell--material-translucent
   --muted: var(--octant-control);
   --accent: var(--octant-control-hover);
   --oct-surface-warm: var(--octant-control);
+  /* What is chosen (the mode in the switch, a selected row) is one step
+     above the control tint, for the same reason. */
+  --octant-selection: color-mix(in srgb, var(--octant-text-primary) 12%, transparent);
+  --oct-selection: var(--octant-selection);
+  /* A switch's track at rest, and the grounds behind a toned notice: each was
+     an opaque dark made for the theme's page. */
+  --input: var(--octant-control-pressed);
+  --oct-success-soft: color-mix(in oklab, var(--oct-success-fg) 14%, transparent);
+  --oct-warn-soft: color-mix(in oklab, var(--oct-warn-fg) 14%, transparent);
+  --oct-accent-soft: color-mix(in oklab, var(--oct-accent-fg) 14%, transparent);
 
   /* The composer and the person's messages: a light veil of the page colour
      for legibility over the ground, then a tint of the foreground, so the
@@ -216,4 +226,21 @@ html:not([data-octant-reduced-transparency="true"]) .shell--material-translucent
   --oct-glass-floor: color-mix(in srgb, var(--octant-workspace) 30%, transparent);
   --oct-glass-thick: color-mix(in srgb, var(--octant-text-primary) 6%, transparent);
   --oct-glass-chrome: color-mix(in srgb, var(--octant-text-primary) 4%, transparent);
+}
+
+/* A plain notice inside the shell is drawn on the raised surface, which is
+   opaque; under Glass it takes the control tint. A switch that is off keeps a
+   thumb the eye can find: the page colour it is drawn in was the same black as
+   its track. */
+html:not([data-octant-reduced-transparency="true"])
+  .shell--material-translucent
+  .callout[data-tone="neutral"] {
+  background: var(--octant-control);
+}
+
+html:not([data-octant-reduced-transparency="true"])
+  .shell--material-translucent
+  .octant-switch[data-unchecked]
+  [data-slot="switch-thumb"] {
+  background: color-mix(in srgb, var(--octant-text-primary) 62%, transparent);
 }
