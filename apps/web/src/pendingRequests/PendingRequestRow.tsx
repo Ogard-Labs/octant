@@ -28,6 +28,12 @@ export interface PendingRequestRowProps {
   /** The clock the wait is read against; the shell advances it once a minute. */
   readonly now: number;
   readonly projectName?: string | undefined;
+  /**
+   * The coordinator that started the waiting thread, by title, read from the
+   * window's thread list. The row names it beside the worker; answering is
+   * unchanged.
+   */
+  readonly coordinatorTitle?: string | undefined;
   /** The thread's provider when the shell knows it; otherwise the row draws its mode's glyph. */
   readonly provider?: ThreadProviderIdentity | undefined;
   /**
@@ -205,6 +211,11 @@ export function PendingRequestRow(props: PendingRequestRowProps) {
             >
               {request.threadTitle}
             </OctantButton>
+            {props.coordinatorTitle === undefined ? null : (
+              <span className="oct-meta pending-request__via" title={props.coordinatorTitle}>
+                {`via ${props.coordinatorTitle}`}
+              </span>
+            )}
           </>
         )}
         {decision?.urgent === true ? (

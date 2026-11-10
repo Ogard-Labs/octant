@@ -445,6 +445,7 @@ import type { ComposerCompaction } from "./context/composerContextMeterScope";
 import type { ContextInspectorSnapshot } from "@octant/contracts/context-rpc";
 import { createCodeReadCursorStore, useCodeController } from "./code/useCodeController";
 import { useContinueCards } from "./code/useContinueCards";
+import { codeBoardCoordinatorLineage } from "./code/codeBoardGrouping";
 import {
   CodeThreadControllerSlots,
   createCodeThreadControllers,
@@ -4661,6 +4662,11 @@ function LaunchedShell(
     }
     return byThread;
   }, [workingNowProviders, workingNowThreads]);
+  // Needs you names a worker's coordinator beside it, from the window's thread list.
+  const needsYouCoordinatorTitles = useMemo(
+    () => codeBoardCoordinatorLineage(codeController.navigation).coordinatorTitleByWorker,
+    [codeController.navigation],
+  );
   const workingNowBoardFacts = useMemo(
     () =>
       continueCards.kind === "ready" && activeMode === "code"
@@ -5056,6 +5062,7 @@ function LaunchedShell(
     hostResourceClient,
     isDesktop: props.hostBridge !== undefined,
     loadHomePullRequests,
+    needsYouCoordinatorTitles,
     needsYouThreadProviders,
     now: minuteNow.getTime(),
     openRunningServiceLive,

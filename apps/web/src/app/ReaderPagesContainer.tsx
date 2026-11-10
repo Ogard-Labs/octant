@@ -221,6 +221,11 @@ export const ReaderPagesContainer = memo(function ReaderPagesContainer(
     [chatClient, codeClient, workRequestClient, workTurnClient],
   );
 
+  // A worker's row names its coordinator, read from the window's thread list.
+  const workerCoordinatorTitles = useMemo(
+    () => codeBoardCoordinatorLineage(codeNavigationRows).coordinatorTitleByWorker,
+    [codeNavigationRows],
+  );
   // The Inbox answers the decisions finished turns asked with the same
   // reader and send clients as the Needs you card; a remote window has none.
   const inboxDecisions = useMemo<InboxDecisionSource | undefined>(
@@ -229,6 +234,7 @@ export const ReaderPagesContainer = memo(function ReaderPagesContainer(
         ? undefined
         : {
             answerClients,
+            coordinatorTitles: workerCoordinatorTitles,
             feedRevision: navigationRevision,
             modes: DECISION_MODES,
             now,
@@ -249,6 +255,7 @@ export const ReaderPagesContainer = memo(function ReaderPagesContainer(
       answerClients,
       navigationRevision,
       now,
+      workerCoordinatorTitles,
       pendingRequestClient,
       projectNames,
       settings,

@@ -19,6 +19,8 @@ export const NEEDS_YOU_CARD_ID = "needs-you";
  */
 export interface NeedsYouCardSource extends PendingRequestRowsSource {
   readonly projectNames: ReadonlyMap<string, string>;
+  /** Each worker's coordinator title, by worker thread id, from the window's thread list. */
+  readonly coordinatorTitles?: ReadonlyMap<string, string>;
   /** The provider of each thread the shell knows, by thread id. */
   readonly threadProviders: ReadonlyMap<string, ThreadProviderIdentity>;
   /** The clock the waits read, advanced once a minute by the shell. */
@@ -67,6 +69,7 @@ function useNeedsYouContent(source: NeedsYouCardSource): HomeCardContent {
           {shown.map(({ request, unlisted }) => (
             <li key={pendingRequestKey(request)}>
               <PendingRequestRow
+                coordinatorTitle={source.coordinatorTitles?.get(String(request.threadId))}
                 onDefer={defer}
                 now={now}
                 onAnswer={answer}
