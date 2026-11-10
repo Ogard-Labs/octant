@@ -54,7 +54,12 @@ interface Harness {
   readonly marked: Set<string>;
   readonly executed: Array<{ readonly command: CodeCommand; readonly context: unknown }>;
   readonly hostTurns: Array<{ readonly threadId: string; readonly prompt: string }>;
-  readonly proposals: Array<{ readonly coordinator: string; readonly title: string }>;
+  readonly proposals: Array<{
+    readonly coordinator: string;
+    readonly title: string;
+    readonly level: string;
+  }>;
+  readonly turnIds: Map<string, string>;
   settings: CodeSettings | undefined;
   clock: number;
 }
@@ -68,6 +73,7 @@ function harness(): Harness {
   const executed: Harness["executed"] = [];
   const hostTurns: Harness["hostTurns"] = [];
   const proposals: Harness["proposals"] = [];
+  const turnIds = new Map<string, string>();
   let turnCount = 0;
   const self: { settings: CodeSettings | undefined; clock: number } = {
     settings: undefined,
@@ -80,7 +86,8 @@ function harness(): Harness {
     readSettings: () => self.settings,
     isMarked: (id) => marked.has(id),
     threadState: (id) => states.get(id) ?? "idle",
-    latestTurnId: (id) => hostTurns.findLast((turn) => turn.threadId === id) && `turn-${id}`,
+    latestTurnId: (id) =>
+      turnIds.get(id) ?? (hostTurns.findLast((turn) => turn.threadId === id) && `turn-${id}`),
     providerKnown: (id) => id === "60000000-0000-4000-8000-000000000009",
     executeCode: async (_window, command, context) => {
       executed.push({ command, context });
@@ -107,8 +114,12 @@ function harness(): Harness {
       hostTurns.push({ threadId: String(threadId), prompt });
       return { status: "started", operationId: `turn-${String(threadId)}` };
     },
-    propose: (coordinator, draft) => {
-      proposals.push({ coordinator: String(coordinator), title: draft.title });
+    propose: (coordinator, draft, workerOptions) => {
+      proposals.push({
+        coordinator: String(coordinator),
+        title: draft.title,
+        level: workerOptions.executionPolicy,
+      });
       return { status: "proposed", proposalId: `proposal-${String(turnCount)}` };
     },
     uuid: () => NEW_WORKER,
@@ -123,6 +134,7 @@ function harness(): Harness {
     executed,
     hostTurns,
     proposals,
+    turnIds,
   });
 }
 
@@ -209,7 +221,9 @@ describe("starting workers", () => {
     const answer = await h.service.start(startCall({}));
     expect(answer.isError).toBe(false);
     expect(answer.result).toMatchObject({ status: "proposed" });
-    expect(h.proposals).toEqual([{ coordinator: COORDINATOR, title: "Fix the flaky test" }]);
+    expect(h.proposals).toEqual([
+      { coordinator: COORDINATOR, title: "Fix the flaky test", level: "auto-accept-edits" },
+    ]);
     expect(h.executed).toEqual([]);
   });
 
@@ -292,5 +306,30 @@ describe("waking for messages and worker state", () => {
     // The notice is carried once.
     expect(h.service.contextFor(COORDINATOR)).not.toContain("became idle");
     expect(h.service.contextFor(WORKER)).toBeUndefined();
+  });
+});
+
+describe("after a coordinator stops coordinating", () => {
+  it("no longer wakes its former workers without their own switch", async () => {
+    const h = harness();
+    h.threads.set(COORDINATOR, codeThread(COORDINATOR));
+    h.threads.set(WORKER, codeThread(WORKER, { coordinatorThreadId: COORDINATOR }));
+    h.service.onCommittedEvents([sent(COORDINATOR, WORKER)]);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(h.hostTurns).toEqual([]);
+  });
+});
+
+describe("a worker turn that starts and finishes between sweeps", () => {
+  it("still tells the coordinator the worker finished", async () => {
+    const h = harness();
+    h.threads.set(WORKER, codeThread(WORKER, { coordinatorThreadId: COORDINATOR }));
+    h.turnIds.set(WORKER, "turn-a");
+    await h.service.sweep();
+    expect(h.hostTurns).toEqual([]);
+    h.turnIds.set(WORKER, "turn-b");
+    await h.service.sweep();
+    expect(h.hostTurns.map((turn) => turn.threadId)).toEqual([COORDINATOR]);
+    expect(h.service.contextFor(COORDINATOR)).toContain(`${WORKER}@${PROJECT} became idle`);
   });
 });
