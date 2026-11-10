@@ -6298,6 +6298,36 @@ html[data-octant-reduced-transparency="true"] [data-slot="card"][data-variant="g
   }
 }
 
+/* Code Home's Up next and Continue cards are buttons, not the card recipe,
+   so they take the glass card's paints by name: the same fallback, material
+   and opt-outs, in the same order. */
+.code-home__card {
+  background: var(--oct-surface);
+  box-shadow: 0 0 0 1px var(--oct-glass-stroke);
+}
+@supports (backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px)) {
+  .code-home__card {
+    background-color: var(--oct-glass-floor);
+    background-image: linear-gradient(var(--oct-glass-thick), var(--oct-glass-thick));
+    backdrop-filter: blur(var(--oct-glass-blur-thick)) saturate(150%);
+    -webkit-backdrop-filter: blur(var(--oct-glass-blur-thick)) saturate(150%);
+  }
+}
+html[data-octant-reduced-transparency="true"] .code-home__card {
+  background: var(--oct-surface);
+  box-shadow: 0 0 0 1px var(--oct-border);
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+}
+@media (prefers-reduced-transparency: reduce) {
+  .code-home__card {
+    background: var(--oct-surface);
+    box-shadow: 0 0 0 1px var(--oct-border);
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+  }
+}
+
 /* Input surfaces retain the glass material over the application ground,
    and under window Glass with no ground too, so the
    composer is one material whichever of the two a window shows. Under Glass

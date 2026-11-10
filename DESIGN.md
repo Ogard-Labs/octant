@@ -570,7 +570,7 @@ and cost with Previous and Next turn controls.
 
 **Plan meters.** Remaining plan usage stands above the composer, right-aligned on
 the same row as where the work runs: the strip above a thread's box, and on a
-start screen the end of the context-chip row inside the card (it drops to its
+start screen the end of the context-chip row above the card (it drops to its
 own right-aligned line when the chips leave no room). Two compact meters read
 `5h ▬▬▬ 85%  wk ▬▬ 43%`: the shortest window the provider reported and the
 longest, each a short name (`wk` for a week, `mo` for a month) in the primary
@@ -593,7 +593,8 @@ just before send, and send is the round accent-filled button with an up arrow.
 
 **Usage-limit warning.** On a start screen, when the chosen account has a window
 that is spent or at 80% used (the same levels the meters colour), a warning
-callout takes the full row above the context chips: which account, that it has
+callout takes the full row above the context chips, on the page above the
+card: which account, that it has
 reached or is close to its usage limit, and the reset time the provider gave.
 For each other ready account that has room (an observed window below the near
 level; an account with no observed window is never offered as having room) up to
@@ -658,19 +659,24 @@ the bubble it becomes. Its width is the reading measure; in a split every
 composer takes the narrowest pane's room, so composers side by side match
 instead of each filling its own pane. A start screen's composer docks 12px
 above the pane's foot, where a thread's sits, so the two line up across a
-split; a start screen's card adds only its row of where-it-runs chips. Nothing
-about the box changes while a turn runs. The composer is prompt first; its toolbar row holds how the thread runs (attach, image and access
+split; a start screen's card is the same box, with its row of where-it-runs
+chips on the page above it. Nothing about the box changes while a turn runs. The composer is prompt first; its toolbar row holds how the thread runs (attach, image and access
 on the left; the context ring, model and microphone on the right, next to send).
 The model button names a chosen reasoning effort after the model in muted ink
 ("GPT-6 Astra Medium"); the provider default names none. Where the thread runs
-(Project, base branch, checkout, Environment, repository) is the first row
-inside the card, above the prompt, as quiet chips set together from the left,
-the first label lined up with the prompt's text: meta ink and no fill at rest,
-a fill only under the pointer or while the chip's menu is open, the same as
-the access and model controls under the prompt. Plan meters keep the right
-end of that row. The composer stays a single object. On a start screen the
-Project chooser stands just above the card's top-left edge as plain text,
-lifted out of the row so it never pushes the prompt down. Code's
+(Project, working folder, base branch, checkout, Environment, repository) is
+one row on the page just above the card, as quiet chips set together from the
+left: meta ink and no fill at rest, a fill only under the pointer or while the
+chip's menu is open, the same as the access and model controls under the
+prompt. Plan meters keep the right end of that row. The card itself holds only
+the prompt and its toolbar, so a start screen's composer and a thread's are
+the same object with the same strip above it. Inside the card the row stood
+between the person and the prompt, and a control that was more than a label
+grew the card: a Project with extra folders drew a select, a labelled field
+and a paragraph there. That choice is one chip now ("Main folder", or "Main
+folder / src"), whose two fields open over the page; a subfolder the host
+would refuse stays on the chip in the danger ink until it is corrected. The
+Project chooser is the row's first chip. Code's
 base-branch chip is absent until a Project is chosen: with no Project it
 would name a branch of nothing. The chip
 is painted on the plain element that holds each control, never on the shared
@@ -1455,7 +1461,7 @@ the person a next step. In light the card is workspace white on the
 `--octant-app-background` well, not the grey floating fill — that fill reads
 as a sunken field. Code welcome keeps one stable question while Project and
 Environment sit on the context row above the composer
-(`.composer-tray--above`, rendered beside the card inside `.composer-stack`),
+(`.composer-tray--start`, rendered before the card inside `.composer-stack`),
 on the page ground with no band chrome. The base-branch chip joins that row
 once a Project is chosen. Environment is the
 create-facing presentation of Octant's authoritative host federation: its
@@ -1515,6 +1521,11 @@ read through:
 - a thread's user bubbles and composer over the application ground or window
   glass, one material either way (agent replies stay bare prose; see
   [Transcript](#transcript));
+- Code Home's cards and its Up next and Continue cards, which stand on the
+  start screen's ground beside the composer and wear its material, so the
+  ground reads evenly behind every surface on the screen (with the plain card
+  fill its characters ran through the cards at full strength while the
+  composer beside them was frosted);
 - Zen's windows, dock, pills, and sheets (glass cards);
 - the floating activity picture-in-picture, and the Browser's live preview,
   which shows the page itself and frosts only its caption, count, and close
@@ -1523,7 +1534,11 @@ read through:
 
 Its tint, stroke, and highlight are theme roles, and its floor is the theme's
 page colour at 66%, so a neutral or tinted preset gets no fixed warm cast under
-the composer. Reduced transparency and unsupported `backdrop-filter` resolve
+the composer. The thick and chrome tints poured over that floor are the theme's
+raised surface at 56% and 48%: as a fixed neutral grey they made the composer a
+flat grey slab on a black or tinted preset. Together the floor and tint are
+dense enough that the ground stays quiet behind text where the engine does not
+blur it (the packaged window over the ground). Reduced transparency and unsupported `backdrop-filter` resolve
 every one of them to an opaque surface.
 
 Window glass is the `sidebarMaterial` shell setting with the theme's vibrancy
@@ -1961,12 +1976,15 @@ still appears in only one region at a time.
 Without a saved show or hide choice, a wide window starts with the right dock open and a narrow window starts with it closed. The bottom panel starts closed. An explicit dock show or hide is restored per window; merely mounting the default records no choice, so an initial narrow frame does not become a saved close. The active-pane eligibility rules below still determine whether dock chrome is shown.
 
 A welcome, Project, or other pane with neither a bound thread nor a valid
-launchable tool keeps the dock closed and omits its toggle. The exception is a
-new Code task's pane before its thread exists: the dock keeps its place, its
-title band shows the common tools disabled ("Available once the task starts"),
-and its body says so (or, once the start screen has a Project, holds that
-Project's quick tools), so the band does not vanish and return around the first
-message. Restored presentation for another subject never makes unavailable
+launchable tool keeps the dock closed and omits its toggle. A new Code task's
+pane before its thread exists keeps the toggle but starts closed, whatever the
+window's saved choice: it has nothing of a thread's to show, and opened by
+default it covered a third of a blank start screen to say its tools were not
+available yet. Opened there by the person, its title band shows the common
+tools disabled ("Available once the task starts") and its body says so (or,
+once the start screen has a Project, holds that Project's quick tools). That
+show or hide belongs to the draft and is never saved as the window's choice;
+once the task has a thread the window's own choice applies again. Restored presentation for another subject never makes unavailable
 chrome visible.
 
 Environment is a right-dock tool, opened from the dock's title band (its

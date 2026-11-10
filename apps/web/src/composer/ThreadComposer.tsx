@@ -112,9 +112,9 @@ export interface ThreadComposerProps {
   /** Appended after `composer`; positions the frame within the surface. */
   readonly className?: string | undefined;
   /**
-   * Where a new thread will run (Project, branch, Environment), as the first
-   * row inside a start screen's card, above the chips and the message. A
-   * thread's own composer never takes it: its context is already fixed.
+   * Where a new thread will run (Project, branch, Environment), as one quiet
+   * row on the page just above a start screen's card. A thread's own composer
+   * never takes it: its context is already fixed.
    */
   readonly startContext?: ReactNode;
   /**
@@ -196,25 +196,31 @@ function ComposerSurface(props: ThreadComposerProps & { readonly held: boolean }
   const dropActive = dropKey !== undefined && activeDropKey === dropKey;
   const baseClassName = props.className === undefined ? "composer" : `composer ${props.className}`;
   const followUp = props.presentation === "follow-up";
-  const frameClassName = `${followUp ? `${baseClassName} composer--follow-up` : baseClassName}${notice == null ? "" : " composer--has-notice"}`;
+  const frameClassName = `${followUp ? `${baseClassName} composer--follow-up` : baseClassName}${notice == null || (!followUp && props.startContext !== undefined) ? "" : " composer--has-notice"}`;
+  // Where a new thread runs and how much of the plan is left stand on the
+  // page above the card, as a thread's strip does, so the card holds only the
+  // prompt and its toolbar. Inside the card the row sat between the person
+  // and the prompt, and a control with more than a label (a folder form) grew
+  // the card instead of opening over the page.
+  const startRow =
+    props.startContext === undefined ? null : (
+      <div className="composer-start">
+        {props.planUsage?.alternatives === undefined ? null : (
+          <ComposerUsageWarning
+            groups={props.planUsage.alternatives.groups}
+            onSelect={props.planUsage.alternatives.onSelect}
+            selectedModelId={props.planUsage.alternatives.selectedModelId}
+            selectedProviderInstanceId={props.planUsage.providerInstanceId}
+          />
+        )}
+        {props.startContext}
+        {props.planUsage === undefined ? null : (
+          <ComposerPlanUsage providerInstanceId={props.planUsage.providerInstanceId} />
+        )}
+      </div>
+    );
   const message = (
     <>
-      {props.startContext === undefined || props.planUsage === undefined ? (
-        props.startContext
-      ) : (
-        <div className="composer-start">
-          {props.planUsage.alternatives === undefined ? null : (
-            <ComposerUsageWarning
-              groups={props.planUsage.alternatives.groups}
-              onSelect={props.planUsage.alternatives.onSelect}
-              selectedModelId={props.planUsage.alternatives.selectedModelId}
-              selectedProviderInstanceId={props.planUsage.providerInstanceId}
-            />
-          )}
-          {props.startContext}
-          <ComposerPlanUsage providerInstanceId={props.planUsage.providerInstanceId} />
-        </div>
-      )}
       {props.queue}
       {props.chips}
       {props.label === undefined ? (
@@ -299,7 +305,7 @@ function ComposerSurface(props: ThreadComposerProps & { readonly held: boolean }
           ? {}
           : { onFocusCapture: () => focusComposerThreadDrop(dropKey) })}
       >
-        {held ? null : notice}
+        {held || startRow !== null ? null : notice}
         {dropActive && !held ? <ComposerThreadDropCue /> : null}
         {held ? null : <ComposerSubagents />}
         {body}
@@ -314,13 +320,25 @@ function ComposerSurface(props: ThreadComposerProps & { readonly held: boolean }
           ? {}
           : { onFocusCapture: () => focusComposerThreadDrop(dropKey) })}
       >
-        {held ? null : notice}
+        {held || startRow !== null ? null : notice}
         {dropActive && !held ? <ComposerThreadDropCue /> : null}
         {held ? null : <ComposerSubagents />}
         {body}
       </section>
     );
-  return frame;
+  return startRow === null ? (
+    frame
+  ) : (
+    <>
+      {/* The notice rises from the card's top edge, where the row now stands,
+          so on a start screen it is anchored above the row instead. */}
+      {notice == null ? null : (
+        <div className="composer-start-notice composer--has-notice">{notice}</div>
+      )}
+      {startRow}
+      {frame}
+    </>
+  );
 }
 
 function ComposerThreadDropCue() {

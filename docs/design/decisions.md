@@ -2303,6 +2303,7 @@ Status: Built. Since: —. Detail: [Workspace: Thread info](workspace.md#thread-
 The dock is contextual: it follows the active pane's thread and Project, and never shows another pane's content.
 
 - Each thread keeps its own open tools and selected tool; a tool with no valid subject shows an explicit unavailable state. _Here only._
+- A new Code task's pane starts with the dock closed until the person opens it there; that choice belongs to the draft and is never saved as the window's.
 - A saved layout never starts a new shell. Restoring a Terminal tab may reattach to an existing process; otherwise it offers Start terminal.
 - Git History stays read-only in every posture, Plan included. Browsing or refreshing it never fetches, checks out, stages, reverts or resets. _Here only._
 - Current Code Review selects exact staged or unstaged text hunks through retained host comparison identities; stage and unstage preserve unrelated changes, and reversal confirms selected unstaged loss under the existing root writer guard and approval policy. Stale, unsupported and captured views never silently become whole-file mutations.
@@ -2392,6 +2393,8 @@ Every start screen shows one question and its composer. Code Home adds one card 
 - The composer paints first. Cards mount after the first commit, read only what the window's own authority returns, and are never mounted when off or unavailable.
 - Answers, Open, Stop and Start a fix go through the commands the open thread already uses. An option is words sent as the next turn; Start a fix only opens a draft.
 - An empty card shows one quiet line, never fake rows. Customize is stored in one shell setting and ignores unknown card ids.
+- A start screen's composer card holds only the prompt and its toolbar. Where the thread runs is one row of chips on the page above it, the working folder among them as a chip that opens its fields over the page.
+- Suggestions sit directly under the composer, and everything below ends on the composer's edges.
 
 Status: Built. Since: —. Detail: [Workspace: Start-screen cards](workspace.md#start-screen-cards) and [Start screen: Card registry](start-screen.md#card-registry).
 

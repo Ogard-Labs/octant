@@ -179,7 +179,7 @@ export function ChatWelcome(props: ChatWelcomeProps) {
               },
             }}
             startContext={
-              <div className="composer-tray composer-tray--inside" aria-label="Thread context">
+              <div className="composer-tray composer-tray--start" aria-label="Thread context">
                 <div className="composer-tray__leading">
                   <WorkKindSwitch />
                   <HostSelector

@@ -756,9 +756,10 @@ window can do it. Rules and limits are owned by
 [Architecture: modes](../architecture.md#modes-chat-work-and-code).
 The top-right control reveals the dock only when the active pane has a bound thread
 or a valid launchable tool. A new Code task's pane, before its thread exists, keeps
-the dock: its title band shows the common tools disabled ("Available once the task
-starts") and its body says so, so the band does not vanish and return around the
-first message. Once that start screen has a Project, the dock's body holds the
+the control but starts with the dock closed, whatever the window's saved choice;
+opened there, its title band shows the common tools disabled ("Available once the
+task starts") and its body says so. That show or hide belongs to the draft and is
+never saved as the window's choice. Once that start screen has a Project, the dock's body holds the
 Project's quick tools (Terminal and Browser; a server Project's are its
 Terminal only); they never stand as a column
 beside the start screen ([DESIGN.md](../../DESIGN.md#welcome-and-composer)). An available empty dock opens on a stack of fact cards (Environment with

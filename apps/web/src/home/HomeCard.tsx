@@ -22,6 +22,10 @@ export function HomeCard(props: { readonly definition: HomeCardDefinition }) {
       aria-labelledby={titleId}
       className="home-card"
       data-card={definition.id}
+      // The cards stand on the start screen's ground beside the composer, so
+      // they wear its material. With the plain card fill the ground's
+      // characters ran through them at full strength.
+      variant="glass"
       data-state={
         content.status === "loading" ? "loading" : content.count === 0 ? "empty" : "ready"
       }
