@@ -1,11 +1,12 @@
 import { describe, expect, it } from "vitest";
 
+// Imported once at the top: loading the contracts module took about five seconds
+// on CI runners, and an import inside a test counted against that test's 5 s
+// timeout, which failed it on slower runs.
+import { decodeAppleArtifactRequest, decodeAppleRpcEnvelope } from "./appleToolchainRpc";
+
 describe("Apple toolchain RPC", () => {
-  it("decodes scoped discovery, action, cancellation, and snapshot envelopes", async () => {
-    const path = "./appleToolchainRpc";
-    const rpc = await import(path).catch(() => undefined);
-    expect(rpc).toBeDefined();
-    expect(rpc?.decodeAppleRpcEnvelope).toBeTypeOf("function");
+  it("decodes scoped discovery, action, cancellation, and snapshot envelopes", () => {
     const authority = {
       hostId: "50000000-0000-4000-8000-000000000001",
       mode: "code",
@@ -18,14 +19,14 @@ describe("Apple toolchain RPC", () => {
       checkoutId: "50000000-0000-4000-8000-000000000005",
     } as const;
     expect(
-      rpc!.decodeAppleRpcEnvelope({
+      decodeAppleRpcEnvelope({
         kind: "apple-snapshot-request",
         authority,
         ...scope,
       }),
     ).toMatchObject({ kind: "apple-snapshot-request" });
     expect(
-      rpc!.decodeAppleRpcEnvelope({
+      decodeAppleRpcEnvelope({
         kind: "apple-cancel-request",
         cancellation: {
           actionId: "50000000-0000-4000-8000-000000000006",
@@ -37,7 +38,7 @@ describe("Apple toolchain RPC", () => {
       }),
     ).toMatchObject({ kind: "apple-cancel-request" });
     expect(
-      rpc!.decodeAppleArtifactRequest({
+      decodeAppleArtifactRequest({
         kind: "apple-artifact-request",
         authority,
         ...scope,
@@ -45,7 +46,7 @@ describe("Apple toolchain RPC", () => {
       }),
     ).toMatchObject({ kind: "apple-artifact-request", reference: "apple-screenshot-1" });
     expect(() =>
-      rpc!.decodeAppleArtifactRequest({
+      decodeAppleArtifactRequest({
         kind: "apple-artifact-request",
         authority,
         ...scope,
@@ -54,8 +55,7 @@ describe("Apple toolchain RPC", () => {
     ).toThrow();
   });
 
-  it("decodes a discovery request that names the project by absolute path and still refuses traversal", async () => {
-    const { decodeAppleRpcEnvelope } = await import("./appleToolchainRpc");
+  it("decodes a discovery request that names the project by absolute path and still refuses traversal", () => {
     const request = {
       actionId: "50000000-0000-4000-8000-000000000006",
       correlationId: "50000000-0000-4000-8000-000000000007",
