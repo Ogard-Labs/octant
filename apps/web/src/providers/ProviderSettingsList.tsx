@@ -174,7 +174,7 @@ export function ProviderSettingsList(props: ProviderSettingsListProps) {
       ? undefined
       : props.instances.find((instance) => String(instance.id) === String(detailRowId));
   const detailName = detailInstance?.displayName;
-  const { onDetailChange } = props;
+  const { onAddAccount, onDetailChange } = props;
   useEffect(() => {
     onDetailChange?.(detailName);
   }, [onDetailChange, detailName]);
@@ -349,7 +349,16 @@ export function ProviderSettingsList(props: ProviderSettingsListProps) {
         }
         onRowOpened={noteRowOpened}
         openedRowId={openedRowId}
-        {...(props.onAddAccount === undefined ? {} : { onAddAccount: props.onAddAccount })}
+        {...(onAddAccount === undefined
+          ? {}
+          : {
+              onAddAccount: (account: ProviderInstance) => {
+                // The account form stands under the list, which a provider's
+                // page hides: the page gives way so the form can be seen.
+                setDetailRowId(undefined);
+                onAddAccount(account);
+              },
+            })}
         {...(props.discoverySnapshot === undefined
           ? {}
           : { discoverySnapshot: props.discoverySnapshot })}

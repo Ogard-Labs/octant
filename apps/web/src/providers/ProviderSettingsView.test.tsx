@@ -710,6 +710,8 @@ describe("ProviderSettingsView", () => {
     await user.click(screen.getByRole("button", { name: "Details for Claude local" }));
     await user.click(screen.getByRole("button", { name: "Add account for Claude local" }));
 
+    // The form stands under the list, so the provider's page gives way to it.
+    expect(screen.queryByRole("button", { name: "Back to providers" })).toBeNull();
     const create = screen.getByRole("form", { name: "Add Claude provider" });
     expect(within(create).getByRole("combobox", { name: "Provider type" })).toHaveTextContent(
       "Claude Agent SDK",
