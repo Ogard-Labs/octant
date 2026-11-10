@@ -1324,6 +1324,12 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
             "data map privacy stored location journal projections artifacts credentials keychain secret-service caches provider calls update checks marketplace",
         },
         {
+          id: settingId("host-backup"),
+          label: "Host snapshot",
+          scope: "host",
+          keywords: "snapshot backup restore before risky changes",
+        },
+        {
           id: settingId("browser-accounts"),
           label: "Named account profiles",
           scope: "host",
@@ -1651,12 +1657,6 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
           scope: "host",
           keywords:
             "memory limits low very low pressure ram gigabytes gb automatic custom critical",
-        },
-        {
-          id: settingId("host-backup"),
-          label: "Host snapshot",
-          scope: "host",
-          keywords: "snapshot backup restore before risky changes",
         },
         {
           id: settingId("host-lifecycle"),
