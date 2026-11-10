@@ -156,16 +156,14 @@ export function RewindDialog(props: RewindDialogProps) {
           disabled={props.busy}
           onClick={props.onClose}
           ref={cancel}
-          size="sm"
           type="button"
-          variant="ghost"
+          variant="outline"
         >
           Cancel
         </OctantButton>
         <OctantButton
           disabled={props.busy || !ready}
           onClick={() => props.onRewind(chosen)}
-          size="sm"
           type="button"
           variant="destructive"
         >

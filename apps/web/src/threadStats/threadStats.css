@@ -78,7 +78,6 @@
   --octant-dialog-width: 28rem;
 
   max-height: calc(100vh - 48px);
-  padding: var(--oct-space-4);
   overflow-y: auto;
 }
 
@@ -98,8 +97,8 @@
 .thread-stats-detail__title {
   margin: 0;
   color: var(--oct-fg);
-  font-size: var(--oct-text-sm);
-  font-weight: 500;
+  font-size: var(--oct-text-base);
+  font-weight: var(--oct-weight-strong);
 }
 
 .thread-stats-detail__nav {

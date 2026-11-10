@@ -44,7 +44,7 @@ export function WhatsNewDialog(props: WhatsNewDialogProps) {
           </div>
         </>
       )}
-      <OctantButton onClick={props.onClose} type="button" variant="secondary">
+      <OctantButton onClick={props.onClose} type="button" variant="outline">
         Close
       </OctantButton>
     </OctantDialog>

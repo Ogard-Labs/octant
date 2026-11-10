@@ -2522,7 +2522,7 @@ html[data-octant-native-host="true"] .shell--sidebar-collapsed .workspace-pane__
 .endpoint-add__title {
   margin: 0;
   font-size: var(--oct-text-base);
-  font-weight: var(--oct-weight-display);
+  font-weight: var(--oct-weight-strong);
 }
 
 .endpoint-add__result {
