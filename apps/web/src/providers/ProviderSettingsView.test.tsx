@@ -3523,6 +3523,26 @@ describe("ProviderSettingsView", () => {
     await waitFor(() => expect(first).toHaveFocus());
   });
 
+  it("closes a provider that needs attention when its own page is left", async () => {
+    const user = userEvent.setup();
+    renderProviderSettings(
+      <ProviderSettingsView
+        {...fixture()}
+        observedByInstance={new Map([[id, observation({ readiness: "unauthenticated" })]])}
+      />,
+    );
+    const details = await screen.findByRole("button", { name: /^Details for / });
+    await waitFor(() => expect(details).toHaveAttribute("aria-expanded", "true"));
+    // The list opened it in place; closing and opening it again is the
+    // person's doing, so it becomes the page.
+    await user.click(details);
+    await user.click(details);
+
+    await user.click(screen.getByRole("button", { name: "Back to providers" }));
+
+    expect(details).toHaveAttribute("aria-expanded", "false");
+  });
+
   it("goes back to the list when the open provider's details are closed", async () => {
     const user = userEvent.setup();
     const second = "70000000-0000-4000-8000-0000000000a4" as ProviderInstance["id"];

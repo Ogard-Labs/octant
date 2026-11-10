@@ -3831,6 +3831,11 @@ html[data-octant-increased-contrast="true"]
   display: none;
 }
 
+/* The row sets its own display, which would outrank the hidden attribute. */
+.provider-list--detail .provrow[hidden] {
+  display: none;
+}
+
 .provider-list__back {
   justify-self: start;
   margin-bottom: var(--oct-space-2);

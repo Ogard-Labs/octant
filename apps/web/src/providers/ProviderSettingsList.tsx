@@ -178,6 +178,12 @@ export function ProviderSettingsList(props: ProviderSettingsListProps) {
   useEffect(() => {
     onDetailChange?.(detailName);
   }, [onDetailChange, detailName]);
+  // A provider that leaves the list (removed, or dropped by a probe) takes its
+  // page with it: coming back, it would stand alone with its details shut.
+  const detailGone = detailRowId !== undefined && detailInstance === undefined;
+  useEffect(() => {
+    if (detailGone) setDetailRowId(undefined);
+  }, [detailGone]);
   const detailShown = useRef(false);
   detailShown.current = detailInstance !== undefined;
   // Stable, because each row's attention effect depends on it: a new function
@@ -304,9 +310,11 @@ export function ProviderSettingsList(props: ProviderSettingsListProps) {
   const backToList = () => {
     const left = detailRowId;
     setDetailRowId(undefined);
-    // The row that asked for attention meanwhile keeps its place as the open
-    // one; every other row closes.
-    setOpenedRowId(attentionId ?? null);
+    // Another row that asked for attention meanwhile keeps its place as the
+    // open one; every other row closes, the one being left included.
+    setOpenedRowId(
+      attentionId !== undefined && String(attentionId) !== String(left) ? attentionId : null,
+    );
     // Back leaves the page, so focus returns to the control that opened it.
     if (left !== undefined) {
       requestAnimationFrame(() => {
