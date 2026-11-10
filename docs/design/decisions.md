@@ -1376,6 +1376,7 @@ One journaled session per thread is the only state, and every surface reads and 
 - The host validates the complete questionnaire response against the journaled ask before accepting it once. Another window's answer withdraws the pending card, and the originating thread retains an expandable submitted-answer summary after reopening. [Workspace: Inline questionnaires](workspace.md#inline-questionnaires) owns the presentation and answer contract.
 - A goal completes only on evidence from a criterion check or a person; a model saying it is done completes nothing.
 - A goal loop's budgets are its stopping condition. A loop that would exceed a token, time or turn ceiling does not start the next iteration and moves to budget-limited, which only a person resumes. _Here only._
+- A person sets, raises or clears a goal's turn, time and token budgets when revising it; a revision's budget replaces the whole budget. A loop refuses to start on a goal with none. _Here only._
 - An unattended iteration runs under a ceiling declared at loop start, clamped to the thread's authority, which can only narrow. An effect needing an approval no person can give suspends the loop and is never auto-approved. _Here only._
 - Harness parity with the first-class runtimes is claimed only while every checklist item holds in Chat, Work and Code.
 
