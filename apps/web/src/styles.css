@@ -3435,6 +3435,13 @@ html[data-octant-native-host="true"] .shell--sidebar-collapsed .workspace-pane__
   text-align: center;
 }
 
+/* Inside a Glass shell the boundary is the shell reporting on itself, on the
+   shell's own surface. Painting the theme's opaque page there turned the whole
+   window black for the moment Settings took to load. */
+html:not([data-octant-reduced-transparency="true"]) .shell--material-translucent .shell-boundary {
+  background: transparent;
+}
+
 .workspace-pane__panel > [data-slot="empty"] {
   margin: clamp(36px, 8vh, 72px) clamp(28px, 6vw, 72px);
 }
