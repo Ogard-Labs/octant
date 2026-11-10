@@ -10905,7 +10905,9 @@ Settings and first-run capability discovery share a guided Computer use setup.
 Set up Computer use persists enablement and pending setup before asking macOS
 for permissions. Skip for now clears only pending setup; it does not revoke
 an existing setting or permission. Pending setup returns to the first-run
-readiness view after relaunch. Settings exposes plugin enablement, separate
+readiness view after relaunch while onboarding remains unfinished. After a
+completed or skipped onboarding, the local desktop instead opens Computer use
+Settings once on launch, without changing that onboarding outcome. Settings exposes plugin enablement, separate
 Accessibility and Screen Recording shortcuts, the driver version and update
 controls. Both surfaces refresh permissions on focus and visibility changes.
 Enabled, permissions granted and verified working are separate facts. Only an

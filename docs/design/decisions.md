@@ -200,7 +200,8 @@ Computer use, helper agents and person memory. Current host facts and existing
 Settings own their state; examples are static, dismissal changes no settings,
 and the card adds no counted onboarding step. Computer use shares Settings’
 explicit guided setup, saves pending progress across relaunch and reports working
-only after a successful local test. Paired clients acquire
+only after a successful local test. After onboarding has been answered, pending
+Computer use setup reopens Settings once on launch without changing that outcome. Paired clients acquire
 no local settings authority.
 
 Status: Built. Detail: [Start screen: Optional capability card](start-screen.md#optional-capability-card-in-your-first-task).

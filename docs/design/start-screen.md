@@ -29,7 +29,9 @@ person expands its row: Set up Computer use saves enablement and pending setup
 through the existing settings command, then requests macOS permissions. It offers
 separate Accessibility and Screen Recording shortcuts, Recheck and an explicitly
 approved local test. A refused save requests no permissions. Pending setup resumes
-in Your first task after relaunch, even if provider setup is incomplete. Skip for
+in Your first task after relaunch, even if provider setup is incomplete. When
+onboarding was already completed or skipped, the local desktop opens Computer
+use Settings once on launch instead, preserving the onboarding outcome. Skip for
 now clears pending setup without disabling Computer use; it remains optional for
 starting a task. The state distinguishes enabled, permissions granted and verified
 working. See [Computer use](../architecture.md#extensions-and-skills) for the

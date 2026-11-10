@@ -3,7 +3,7 @@ import type { CodeCheckoutId, CodeRelativePath, CodeThreadId } from "@octant/con
 import type { OctantMode } from "@octant/contracts/modes";
 import type { ProjectId } from "@octant/contracts/projects";
 import { CodeSearchDialog } from "../code/CodeSearchDialog";
-import { lazy, Suspense } from "react";
+import { lazy, Suspense, useEffect, useRef } from "react";
 import type { FirstRunOnboardingProps } from "../onboarding/FirstRunOnboarding";
 
 // First run is shown once per install; its wizard stays out of the first bundle.
@@ -75,6 +75,21 @@ export interface ShellDialogHostProps {
 }
 
 export function ShellDialogHost(props: ShellDialogHostProps) {
+  const checkedComputerSetup = useRef(false);
+  const capabilities = props.firstRun.capabilities;
+  useEffect(() => {
+    if (checkedComputerSetup.current || capabilities?.computerUse === undefined) return;
+    // Only the first authoritative settings snapshot can resume a launch.
+    // Starting setup later must not pull the person back after they leave it.
+    checkedComputerSetup.current = true;
+    if (
+      !props.firstRun.controller.pending &&
+      capabilities.computerUse.setupPending &&
+      capabilities.bridge?.testComputerUse !== undefined
+    ) {
+      capabilities.onOpenSettings?.({ section: "computer-use", setting: "computer-use-setup" });
+    }
+  }, [capabilities, props.firstRun.controller.pending]);
   return (
     <>
       {props.createOpen ? (
