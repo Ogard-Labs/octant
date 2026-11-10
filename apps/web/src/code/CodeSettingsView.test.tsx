@@ -2,7 +2,7 @@ import { act, fireEvent, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import { chooseSelectFieldOption } from "../test/chooseSelectFieldOption.test-support";
-import { CodeSettingsView } from "./CodeSettingsView";
+import { CodeSettingsView, type CodeSettingsUpdate } from "./CodeSettingsView";
 
 const settings = {
   defaultExecutionPolicy: "approval-gated",
@@ -30,6 +30,48 @@ describe("CodeSettingsView", () => {
     expect(field).toHaveValue("/unfinished");
     expect(field).toHaveFocus();
     expect(screen.getByRole("combobox", { name: "Default mode" })).toHaveTextContent("Plan");
+  });
+
+  it("saves Starting workers and the open-worker bound from Settings › Code › Coordinators", async () => {
+    const update = vi.fn(async (_input: CodeSettingsUpdate) => true);
+    render(<CodeSettingsView onUpdate={update} settings={settings as never} />);
+    const user = userEvent.setup();
+
+    const starting = screen.getByRole("combobox", { name: "Starting workers" });
+    expect(starting).toHaveTextContent("Start without asking");
+    await chooseSelectFieldOption(user, starting, "Propose for approval");
+    expect(update).toHaveBeenLastCalledWith(
+      expect.objectContaining({ coordinatorStarting: "propose-for-approval" }),
+    );
+
+    const limit = screen.getByRole("combobox", { name: "Open workers per coordinator" });
+    expect(limit).toHaveTextContent("6");
+    await chooseSelectFieldOption(user, limit, "10");
+    expect(update).toHaveBeenLastCalledWith(
+      expect.objectContaining({ coordinatorOpenWorkerLimit: 10 }),
+    );
+    // A later change carries only what it changed; the host keeps the rest.
+    expect(update.mock.lastCall?.[0]).not.toHaveProperty("coordinatorStarting");
+  });
+
+  it("returns Starting workers to the stored choice when the host refuses it", async () => {
+    const update = vi.fn(async () => false);
+    render(
+      <CodeSettingsView
+        onUpdate={update}
+        settings={{ ...settings, coordinatorStarting: "propose-for-approval" } as never}
+      />,
+    );
+    const user = userEvent.setup();
+    const starting = screen.getByRole("combobox", { name: "Starting workers" });
+    await chooseSelectFieldOption(user, starting, "Start without asking");
+
+    expect(starting).toHaveTextContent("Propose for approval");
+    expect(
+      within(screen.getByRole("region", { name: "Coordinators" })).getByText(
+        "Code defaults could not be saved.",
+      ),
+    ).toBeVisible();
   });
 
   it("keeps a chosen default mode the moment it is chosen, with no Save step", async () => {
@@ -165,11 +207,12 @@ describe("CodeSettingsView", () => {
 
     expect(screen.getByRole("heading", { name: "Access" })).toBeVisible();
     expect(screen.getByRole("heading", { name: "Thread defaults" })).toBeVisible();
+    expect(screen.getByRole("heading", { name: "Coordinators" })).toBeVisible();
     expect(screen.getByRole("heading", { name: "Editor" })).toBeVisible();
     expect(screen.getByRole("heading", { name: "External editor" })).toBeVisible();
     expect(container.querySelector(".code-settings [data-slot='card']")).toBeNull();
     expect(container.querySelectorAll(".code-settings .settings-card-section--open")).toHaveLength(
-      4,
+      5,
     );
     // The five-way mode choice is a select like the Agents posture.
     expect(screen.getByRole("combobox", { name: "Default mode" })).toBeVisible();
