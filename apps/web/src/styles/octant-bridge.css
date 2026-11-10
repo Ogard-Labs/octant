@@ -223,6 +223,11 @@ html:not([data-octant-reduced-transparency="true"]) .shell--material-translucent
    with a tone keeps its tinted ground. */
 html:not([data-octant-reduced-transparency="true"])
   .shell--material-translucent
-  .callout:not([data-tone], .callout-accent, .callout-ok, .callout-warn, .callout-danger) {
+  .callout:is([data-tone="neutral"], :not([data-tone])):not(
+    .callout-accent,
+    .callout-ok,
+    .callout-warn,
+    .callout-danger
+  ) {
   background: var(--octant-control);
 }
