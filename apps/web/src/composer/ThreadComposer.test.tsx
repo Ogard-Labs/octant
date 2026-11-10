@@ -7,6 +7,7 @@ import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import { OutsideContentContext } from "./OutsideContentNotice";
 import { PlanUsageProvider } from "../usage/PlanUsageContext";
+import { FrozenBarScope } from "./frozenBarScope";
 import { ThreadComposer } from "./ThreadComposer";
 
 describe("ThreadComposer", () => {
@@ -291,5 +292,22 @@ describe("ThreadComposer", () => {
     expect(send).toHaveAttribute("type", "submit");
     await user.click(send);
     expect(onSubmit).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps the thread's info reachable while a move holds the thread", () => {
+    render(
+      <FrozenBarScope.Provider value={<p>Moving to another computer</p>}>
+        <ThreadComposer
+          info={<button type="button">Thread info</button>}
+          input={<textarea aria-label="Message" className="composer-input" />}
+          presentation="follow-up"
+          row={{ actions: { kind: "send", send: { ariaLabel: "Send", onSend: vi.fn() } } }}
+        />
+      </FrozenBarScope.Provider>,
+    );
+
+    expect(screen.getByText("Moving to another computer")).toBeVisible();
+    expect(screen.queryByRole("textbox", { name: "Message" })).toBeNull();
+    expect(screen.getByRole("button", { name: "Thread info" })).toBeVisible();
   });
 });

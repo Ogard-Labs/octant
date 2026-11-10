@@ -166,7 +166,18 @@ export interface ThreadComposerProps {
  */
 export function ThreadComposer(props: ThreadComposerProps) {
   const frozenBar = useFrozenBar();
-  if (props.presentation === "follow-up" && frozenBar !== undefined) return <>{frozenBar}</>;
+  if (props.presentation === "follow-up" && frozenBar !== undefined) {
+    // A held thread takes no message, but its access level and a credential
+    // command waiting for review are still the person's to read and answer.
+    return (
+      <>
+        {props.info === undefined ? null : (
+          <div className="thread-composer__strip thread-column">{props.info}</div>
+        )}
+        {frozenBar}
+      </>
+    );
+  }
   return <ComposerSurface {...props} />;
 }
 

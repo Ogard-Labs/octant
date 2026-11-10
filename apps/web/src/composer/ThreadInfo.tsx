@@ -19,6 +19,9 @@ interface ThreadInfoPanel {
   readonly flag: (key: string, needsPerson: boolean) => void;
 }
 
+/** Popups a row opens. They are drawn outside the panel but belong to it. */
+const ROW_POPUP = '[role="dialog"], [role="alertdialog"], [role="menu"], [role="listbox"]';
+
 const ThreadInfoContext = createContext<ThreadInfoPanel | undefined>(undefined);
 
 /** The thread's info panel, or undefined where a row renders outside one. */
@@ -74,8 +77,7 @@ export function ThreadInfo(props: { readonly children: ReactNode }) {
       if (!(target instanceof Element) || root.current?.contains(target) === true) return;
       // A dialog or menu a row opened is drawn outside the panel but belongs
       // to it; pressing inside one must not close the panel under it.
-      if (target.closest('[role="dialog"], [role="alertdialog"], [role="menu"], [role="listbox"]'))
-        return;
+      if (target.closest(ROW_POPUP)) return;
       setOpen(false);
     };
     document.addEventListener("pointerdown", closeOnOutsidePress);
@@ -88,6 +90,9 @@ export function ThreadInfo(props: { readonly children: ReactNode }) {
         className="thread-info"
         onKeyDown={(event) => {
           if (event.key !== "Escape" || !open) return;
+          // Escape in a row's own menu or dialog closes that, not the panel:
+          // React hands the key to this wrapper even from a portaled popup.
+          if (event.target instanceof Element && event.target.closest(ROW_POPUP)) return;
           event.stopPropagation();
           setOpen(false);
           trigger.current?.focus();

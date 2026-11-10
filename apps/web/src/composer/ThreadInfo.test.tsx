@@ -66,4 +66,22 @@ describe("ThreadInfo", () => {
 
     expect(screen.getByRole("region", { name: "Thread info" })).toBeVisible();
   });
+
+  it("leaves the panel open when Escape closes a menu one of its rows opened", () => {
+    render(
+      <ThreadInfo>
+        <div role="menu">
+          <button type="button">Low</button>
+        </div>
+      </ThreadInfo>,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Thread info" }));
+
+    fireEvent.keyDown(screen.getByRole("button", { name: "Low" }), { key: "Escape" });
+    expect(screen.getByRole("region", { name: "Thread info" })).toBeVisible();
+
+    fireEvent.keyDown(screen.getByRole("region", { name: "Thread info" }), { key: "Escape" });
+    expect(screen.queryByRole("region", { name: "Thread info" })).toBeNull();
+    expect(screen.getByRole("button", { name: "Thread info" })).toHaveFocus();
+  });
 });

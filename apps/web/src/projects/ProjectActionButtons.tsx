@@ -123,7 +123,11 @@ export function ProjectActionButtons(props: ProjectActionButtonsProps) {
             <OctantMenuPositioner align="end">
               <OctantMenuPopup>
                 {rest.map((action) => (
-                  <OctantMenuItem key={String(action.id)} onClick={() => run(action)}>
+                  <OctantMenuItem
+                    key={String(action.id)}
+                    onClick={() => run(action)}
+                    title={action.command}
+                  >
                     <Play aria-hidden="true" size={12} />
                     {action.name}
                   </OctantMenuItem>

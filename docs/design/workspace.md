@@ -88,7 +88,11 @@ of them does not restart when it opens. A row that waits for the person (a
 credential command awaiting review) marks the button "Review required" in the
 warning ink. A control elsewhere that leads to a row (the access shortcut)
 opens the card. Escape or a press outside closes it and returns focus to the
-button; a dialog or menu a row opened does not count as outside.
+button; a dialog or menu a row opened does not count as outside, and Escape
+inside one closes only that. While a move holds the thread and its composer
+gives way to the held bar, the button stays above the bar: a held thread takes
+no message, but its level and a pending review are still the person's to read
+and answer.
 
 ## Continue elsewhere
 
