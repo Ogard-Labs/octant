@@ -1561,7 +1561,10 @@ the composer. The thick and chrome tints poured over that floor are the theme's
 raised surface at 56% and 48%: as a fixed neutral grey they made the composer a
 flat grey slab on a black or tinted preset. Together the floor and tint are
 dense enough that the ground stays quiet behind text where the engine does not
-blur it (the packaged window over the ground). Reduced transparency and unsupported `backdrop-filter` resolve
+blur it (the packaged window over the ground). Under window Glass the floor and
+the tints are lighter, as the conversation rule on Glass says: a 30% veil of
+the page colour under the primary text at 6% (4% for chrome), because over the
+desktop the dense pair read as a near-black slab. Reduced transparency and unsupported `backdrop-filter` resolve
 every one of them to an opaque surface.
 
 Window glass is the `sidebarMaterial` shell setting with the theme's vibrancy
@@ -1596,8 +1599,10 @@ stage), defined once on every shell in `shell.css`:
 - **The Browser** is clear on its own start page, whose rows take the card
   step; a loaded page keeps its opaque canvas.
 
-Controls keep their own opaque fills (a switch thumb, a filled or secondary
-button, a segmented track), and menus, popovers, and dialogs keep the opaque
+A filled button and a switch keep their own fills. The control fill (a
+secondary button, a segmented track, a select, a chip, a ghost button's hover)
+is a tint of the primary text at 7%, 11% hovered and 15% pressed, as the
+conversation rule on Glass says; menus, popovers, and dialogs keep the opaque
 floating surface. Increased contrast and reduced transparency return cards and
 outline buttons to their opaque colours. The ground behind it all steps down
 by what is on screen: a fifth of its strength behind any surface that shows
