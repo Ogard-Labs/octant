@@ -11426,7 +11426,7 @@ settings sandbox on|off [--work]`. Only a window on this host can turn
     model), that thread falls back to Ask first and the picker says why.
     There is no separate switch below Full access. The answer becomes the
     default for every new thread, Work and
-    Code; Settings › Permissions changes it, a Project, Work or Code, may override
+    Code; Settings › Work and Settings › Code change it, a Project, Work or Code, may override
     it, and any thread can switch mode at any time from the composer in one
     click (maintainer decision, 2026-10-31). Work has no Plan, so a Plan
     answer leaves new Work threads at Ask first. A new Work thread takes its
@@ -11525,7 +11525,7 @@ settings sandbox on|off [--work]`. Only a window on this host can turn
 - **Reviewed.** A reviewer answers the prompts that would otherwise go to
   the person: the provider's own, where it has one, or
   [Octant Shield](#octant-shield) for any runtime that routes approvals
-  through Octant. The person chooses in Settings › Permissions; the provider's own
+  through Octant. The person chooses in Settings › Code › Access; the provider's own
   is the default where it exists, Shield everywhere else. Claude Code's automatic
   mode (`permissionMode: "auto"`, its model reviewing each call) and Codex's
   own approval review (`approvalsReviewer: "auto_review"`) are built for Code
@@ -15000,7 +15000,7 @@ the provider's own, or Octant Shield. The picker label stays Auto, and Auto
 is offered for every runtime that routes approvals through Octant. The
 default reviewer is the provider's own where it has one (Claude Code, Codex,
 and Mistral Vibe's auto-approve mode) and Octant Shield everywhere else.
-Settings › Permissions sets "Auto reviewer: Provider's own / Octant Shield" as an
+Settings › Code › Access sets "Auto reviewer: Provider's own / Octant Shield" as an
 account default with a Project override. Auto falls back to Ask first only
 when no reviewer can run, for example when no Shield model is reachable, and
 the picker says why.

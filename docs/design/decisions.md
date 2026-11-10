@@ -212,7 +212,7 @@ The first run asks once which mode new threads start in, with Auto pre-selected 
 
 - The picker lists Auto, Ask first, Accept edits, Plan and Full access, in that order.
 - Where no reviewer can run for a thread, that thread falls back to Ask first and the picker says why.
-- The answer is the default for new Work and Code threads; Settings › Permissions changes it, a Project may override it, and the composer switches a thread's mode in one click.
+- The answer is the default for new Work and Code threads; Settings › Work and Settings › Code change it, a Project may override it, and the composer switches a thread's mode in one click.
 - Built for Code: the answer is stored as the Code default, Settings › Code › Access changes it, and a Code Project may override it; a Project that remembered Full access before Project modes existed starts its threads in Full access.
 - Work takes the same modes without Plan; a new Work thread starts in its Project's mode, else the default the first-run answer or Settings › Work set, and its composer switches a thread's mode.
 
@@ -237,7 +237,7 @@ Status: Built. Since: 2026-10-31. Detail: [Architecture: Modes](../architecture.
 
 At the Reviewed level a reviewer stands in for the person's click: the provider's own reviewer where it has one, otherwise Octant Shield.
 
-- The person chooses the reviewer in Settings › Permissions with a Project override; the provider's own is the default where it exists (built for Code in Settings › Code › Access and on a Code Project's overview).
+- The person chooses the reviewer in Settings › Code › Access with a Project override; the provider's own is the default where it exists (built for Code in Settings › Code › Access and on a Code Project's overview).
 - A verdict the provider reports is journaled with the provider as approver and shown like a person's approval, with the call it covered. Built in Code: Codex reports approvals and denials, Claude Code only denials; Mistral Vibe's auto-approve mode reports none over ACP. The capability report says which (`reviewVerdicts`), and the host never infers a verdict from a call that ran.
 - Taint withdraws the provider's own reviewer for irreversible, publish and new-egress classes.
 - Built in Code for the two key CLI providers and for Mistral Vibe's auto-approve mode.

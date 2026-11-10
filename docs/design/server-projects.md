@@ -297,7 +297,7 @@ checks never change registry/configuration or journal state.
   server nothing does: Octant has no sandbox there, and the person opening
   their own shell is the approval, as it is for a local Project terminal.
   A Code Project opens it from the dock's quick tools. A Work Project opens
-  **Open terminal** in its Settings → Access → Servers row, only while this
+  **Open terminal** in its Settings → Permissions → Servers row, only while this
   live local window holds that Work Project and its default-off **Developer
   tools** choice is on. Another Work Project offers its existing explicit
   **Open Project** transition first. The login user, alias, canonical folder
@@ -313,7 +313,7 @@ checks never change registry/configuration or journal state.
   same. The terminal reuses ordinary input, resize, Stop and exit rendering.
   A dropped session is never restarted; closing SSH cannot prove every
   program on the server ended. Unknown replies never replay a start or input.
-- **Saved Project actions.** Settings → Access → Servers edits up to
+- **Saved Project actions.** Settings → Permissions → Servers edits up to
   twelve saved commands on the server Project's own catalog record. Action
   saves have an optimistic revision and a journaled `server-projects.actions-replaced@1`
   event; old records remain valid. Root package scripts and Makefile targets
@@ -364,7 +364,7 @@ checks never change registry/configuration or journal state.
   transition as Code, while manual action edits remain available.
 
   The Work server Project's **Show developer tools** switch is off by default
-  in its existing Settings → Access → Servers row. A local-only
+  in its existing Settings → Permissions → Servers row. A local-only
   `set-server-work-developer-tools` command journals who and when as
   `server-projects.work-developer-tools-changed@1`. It reveals the action editor,
   saved-action buttons, the person's Project terminal in this Settings row,

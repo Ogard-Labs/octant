@@ -736,7 +736,7 @@ and is never pre-selected; Auto uses the provider's own reviewer or
 [Octant Shield](docs/architecture.md#octant-shield), so it is listed for every
 runtime, and where no reviewer can run the picker shows it unavailable with
 the reason; the pick becomes the default for every new Work and Code thread
-until changed in Settings › Permissions or for one Project) — and ends in one primary action, Start a task,
+until changed in Settings › Work or Settings › Code, or for one Project) — and ends in one primary action, Start a task,
 that opens the new-task composer in that Project. Every step is optional from
 the first one. Opening setup focuses the current step's heading so a long
 provider list does not scroll past its introduction; Tab then reaches the
@@ -2612,7 +2612,8 @@ proceed. Native Code approvals keep their isolated host-owned document. The
 extension tool request names the plugin, its server, and the tool, and adds
 "Always allow in this Project" only when the host marks the call rememberable
 and the window is a local one. Settings › Permissions lists those answers by
-Project, each with Revoke, beside Remembered websites. The same page shows the global guardrail level with one-click change,
+Project, each with Revoke, beside Remembered websites. Settings › Work and
+Settings › Code show the global guardrail level with one-click change,
 which governs Work and Code alike; a Work or Code Project overrides it from
 its overview (Default mode), and each thread's header shows the level in force
 and the scope it came from, in one quiet line ("Auto · set by this Project").
@@ -2657,8 +2658,8 @@ override as a select on a Code Project's overview; **Servers** is built below
 Safe networks in Settings › Permissions as an account list and a **Project**
 picker that says whether the chosen Project uses the account's servers or
 its own list, which starts as a copy of the account list and is edited with
-the same rows and form. **Safe networks** is built as Settings › Permissions, in the
-Safety group after Permissions: a **Network limits** panel with a
+the same rows and form. **Safe networks** is built on Settings › Permissions, after
+Protected files: a **Network limits** panel with a
 switch that is on by default, a sentence saying plainly whether limits are on
 (and, when on, that they hold sandboxed runtimes only),
 and a note that a change applies to the next runtime started; then an intro
