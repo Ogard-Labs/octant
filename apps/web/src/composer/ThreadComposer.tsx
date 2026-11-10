@@ -166,22 +166,21 @@ export interface ThreadComposerProps {
  */
 export function ThreadComposer(props: ThreadComposerProps) {
   const frozenBar = useFrozenBar();
-  if (props.presentation === "follow-up" && frozenBar !== undefined) {
-    // A held thread takes no message, but its access level and a credential
-    // command waiting for review are still the person's to read and answer.
-    return (
-      <>
-        {props.info === undefined ? null : (
-          <div className="thread-composer__strip thread-column">{props.info}</div>
-        )}
-        {frozenBar}
-      </>
-    );
-  }
-  return <ComposerSurface {...props} />;
+  const held = props.presentation === "follow-up" && frozenBar !== undefined;
+  // A held thread takes no message, but its access level and a credential
+  // command waiting for review are still the person's to read and answer. The
+  // surface stays where it is and draws only the strip's info while held, so
+  // a row of the info panel keeps what the person typed into it (a provider
+  // cloud task under review) when a move starts and is then cancelled.
+  return (
+    <>
+      <ComposerSurface {...props} held={held} />
+      {held ? frozenBar : null}
+    </>
+  );
 }
 
-function ComposerSurface(props: ThreadComposerProps) {
+function ComposerSurface(props: ThreadComposerProps & { readonly held: boolean }) {
   const notice = useComposerNotice();
   // The host refuses a turn while the session compacts, so send waits too, and
   // says why under the row.
@@ -254,26 +253,31 @@ function ComposerSurface(props: ThreadComposerProps) {
   // above the box, so the box itself holds only the message and its controls.
   // The stats line stands under the box, where a person reads the last turn's
   // figures after sending.
+  // Every child keeps its place whether or not the thread is held: only what
+  // is drawn in each place changes, so the info panel is never remounted.
+  const { held } = props;
   const body = followUp ? (
     <>
-      <ComposerFollowUpSuggestions />
+      {held ? null : <ComposerFollowUpSuggestions />}
       <div className="thread-composer__strip">
-        {props.context === undefined ? null : (
+        {held || props.context === undefined ? null : (
           <div className="thread-composer__context">{props.context}</div>
         )}
-        <ThreadPlanWindows />
+        {held ? null : <ThreadPlanWindows />}
         {props.info}
       </div>
-      <div className="thread-composer__surface">
-        <ComposerOutsideContentNotice busy={props.threadBusy === true} />
-        {message}
-        <div className="thread-composer__feedback">
-          {compactingNote}
-          {props.footer}
+      {held ? null : (
+        <div className="thread-composer__surface">
+          <ComposerOutsideContentNotice busy={props.threadBusy === true} />
+          {message}
+          <div className="thread-composer__feedback">
+            {compactingNote}
+            {props.footer}
+          </div>
+          {controls}
         </div>
-        {controls}
-      </div>
-      <ThreadStats windows={false} />
+      )}
+      {held ? null : <ThreadStats windows={false} />}
     </>
   ) : (
     <>
@@ -295,9 +299,9 @@ function ComposerSurface(props: ThreadComposerProps) {
           ? {}
           : { onFocusCapture: () => focusComposerThreadDrop(dropKey) })}
       >
-        {notice}
-        {dropActive ? <ComposerThreadDropCue /> : null}
-        <ComposerSubagents />
+        {held ? null : notice}
+        {dropActive && !held ? <ComposerThreadDropCue /> : null}
+        {held ? null : <ComposerSubagents />}
         {body}
       </div>
     ) : (
@@ -310,9 +314,9 @@ function ComposerSurface(props: ThreadComposerProps) {
           ? {}
           : { onFocusCapture: () => focusComposerThreadDrop(dropKey) })}
       >
-        {notice}
-        {dropActive ? <ComposerThreadDropCue /> : null}
-        <ComposerSubagents />
+        {held ? null : notice}
+        {dropActive && !held ? <ComposerThreadDropCue /> : null}
+        {held ? null : <ComposerSubagents />}
         {body}
       </section>
     );
