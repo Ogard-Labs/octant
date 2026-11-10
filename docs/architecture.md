@@ -1827,6 +1827,12 @@ the planner thread's mark at the confirm and hands it to the Code creation as
 the same host-only input; a mark that cannot be journaled refuses the confirm,
 creates nothing, and leaves the proposal pending.
 
+A worker thread a coordinator starts begins marked when the coordinator is
+marked, by the same rule (label `coordinator-start`), whether it starts at once
+or from an approved proposal; the detail is in
+[Coordinator threads: outside content](design/coordinator-threads.md#outside-content).
+Designed, not built.
+
 Fork, branch, follow-up, and planner proposal journal their marks through one
 shared step.
 
@@ -2988,6 +2994,16 @@ enabled target (`hasActionableDelivery`), so it stays absent. It stays absent
 until all three exist; a standing grant never substitutes for the per-act
 approval.
 
+**Coordinator threads start and direct worker threads.** A person may make a
+Code thread a coordinator: a long-lived thread whose own actions are read-only,
+which starts worker threads without asking (or proposes them, when the person
+restricts that globally or per Project), messages them, receives their state,
+and brings their requests to the person. Coordinators replace the planner role
+below: the planner becomes a coordinator whose starts need approval, and its
+proposal path becomes the coordinator's approval path. The rules are in
+[Coordinator threads](design/coordinator-threads.md). Designed, not built; until
+it is built, the planner below is the built behavior.
+
 **The Project planner thread proposes work for a person to review.** A Code Project may
 designate one of its own Code threads as its planner, whose agent surveys the
 Project's board and proposes new Code threads for a person to accept. The
@@ -3722,7 +3738,12 @@ approved by the maintainer on 2026-10-12. This section is the effective rule.
   is journaled as `thread.message-wake-set@1` with its principal. When a
   message is admitted for a thread with the switch on and the thread is idle,
   the host starts one turn to carry it, so agents can coordinate without a
-  person starting each turn.
+  person starting each turn. Coordinator threads add two cases under the same
+  bounds: making a thread a coordinator turns its switch on as part of the
+  person's change, and a worker wakes for its own coordinator's messages unless
+  a person turns that off
+  ([Coordinator threads: talking to workers](design/coordinator-threads.md#talking-to-workers)).
+  Designed, not built.
   - **Idle** means the thread is active Code outside Plan, has no turn running
     or queued, and is not waiting for a person (an approval, a question, or a
     usage-limit pause). A thread that is not idle carries the message in its
@@ -3812,7 +3833,11 @@ maintainer folded messaging and the planner's board into the same tool. The
 own Project, and a Code turn message one or wait for one to finish. Its
 operations are `help`, `list`, `read`, `wait`, and in Code `send`,
 `acknowledge`, `receipts`, and the planner's `board`. No operation creates,
-steers, completes, archives, or stops a thread.
+steers, completes, archives, or stops a thread. The designed coordinator
+operation `start`, offered only to a coordinator thread, is the one exception:
+it creates a worker thread, under the rules in
+[Coordinator threads](design/coordinator-threads.md#starting-workers).
+Designed, not built.
 
 - **Rationale for Work.** Work and Code share one authority model, so the
   read-only operations, which change nothing outside the caller's own record,
