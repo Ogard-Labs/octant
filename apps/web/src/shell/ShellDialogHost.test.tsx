@@ -125,3 +125,54 @@ function hostProps(): ShellDialogHostProps {
     zenActive: false,
   } as ShellDialogHostProps;
 }
+
+it("resumes saved Computer use setup in Settings after onboarding was answered, only once per launch", () => {
+  const props = hostProps();
+  const onOpenSettings = vi.fn();
+  const capabilities = {
+    helpers: {
+      current: vi.fn(async () => {
+        throw new Error("unused");
+      }),
+    },
+    memory: {
+      read: vi.fn(async () => {
+        throw new Error("unused");
+      }),
+    },
+    computerUse: { enabled: true, automaticUpdates: false, setupPending: true },
+    onOpenSettings,
+  };
+  const shell = (loaded: boolean, desktop = true) => (
+    <OctantCommandProvider commands={[]}>
+      <ShellDialogHost
+        {...props}
+        firstRun={{
+          ...props.firstRun,
+          ...(loaded
+            ? {
+                capabilities: {
+                  ...capabilities,
+                  bridge: desktop ? { testComputerUse: vi.fn() } : {},
+                },
+              }
+            : {}),
+        }}
+      />
+    </OctantCommandProvider>
+  );
+  const { rerender, unmount } = render(shell(false));
+  expect(onOpenSettings).not.toHaveBeenCalled();
+  rerender(shell(true));
+  expect(onOpenSettings).toHaveBeenCalledExactlyOnceWith({
+    section: "computer-use",
+    setting: "computer-use-setup",
+  });
+  rerender(shell(true));
+  expect(onOpenSettings).toHaveBeenCalledOnce();
+  expect(screen.queryByTestId("first-run")).not.toBeInTheDocument();
+  unmount();
+  onOpenSettings.mockClear();
+  render(shell(true, false));
+  expect(onOpenSettings).not.toHaveBeenCalled();
+});

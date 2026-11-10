@@ -158,3 +158,40 @@ it("drops a previous host's answers before replacement readers respond", async (
   expect(screen.getByLabelText("Person memory status")).toHaveTextContent("Not reported");
   expect(screen.getByLabelText("Helper agents status")).toHaveTextContent("Not reported");
 });
+
+it("resumes pending setup and never asks macOS when enabling was refused", async () => {
+  const input = props();
+  const requestComputerUsePermissions = vi.fn();
+  const onSettingsChange = vi.fn(async () => false);
+  render(
+    <FirstTaskCapabilities
+      {...input}
+      computerUse={{ enabled: false, automaticUpdates: false, setupPending: true }}
+      onSettingsChange={onSettingsChange}
+      bridge={{
+        getComputerUseStatus: async () => ({
+          supported: true,
+          enabled: false,
+          automaticUpdates: false,
+          permissions: { accessibility: false, screenRecording: false },
+          driver: "stopped",
+          activeSessions: 0,
+          update: "idle",
+        }),
+        requestComputerUsePermissions,
+      }}
+    />,
+  );
+  const start = await screen.findByRole("button", { name: "Set up Computer use" });
+  await waitFor(() => expect(start).toBeEnabled());
+  await userEvent.click(start);
+  expect(onSettingsChange).toHaveBeenCalledWith({
+    computerUse: { enabled: true, automaticUpdates: false, setupPending: true },
+  });
+  expect(await screen.findByRole("alert")).toHaveTextContent("not saved");
+  expect(requestComputerUsePermissions).not.toHaveBeenCalled();
+  await userEvent.click(screen.getByRole("button", { name: "Skip for now" }));
+  expect(onSettingsChange).toHaveBeenLastCalledWith({
+    computerUse: { enabled: false, automaticUpdates: false, setupPending: false },
+  });
+});

@@ -847,6 +847,7 @@ describe("desktop preload bridge", () => {
       "subscribeResolvedSidebarVibrancy",
       "subscribeStartNewAgent",
       "tabBrowserSurface",
+      "testComputerUse",
       "updateBrowserSurfaceBounds",
       "updateCodeOperationApprovalAnchor",
       "windowChrome",

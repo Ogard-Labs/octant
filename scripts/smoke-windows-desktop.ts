@@ -597,9 +597,12 @@ try {
     await launcherRecord();
     check(await window(nightly, true), "the cold-started Nightly window closes normally");
     await joined(nightly);
-    await stopped(first.probe.url);
+    // Joining the Nightly client does not join its separately launched host.
+    // Wait for that exact host to exit before reading projections: Windows
+    // can refuse opening a file while shutdown has marked it for deletion.
     await until("the exact cold-launched Stable process exited", () => coldHostExited(cold), 8000);
     check(true, "the cold-launched Stable process exited before owned job cleanup");
+    await stopped(first.probe.url);
   } else {
     const environment = await hostOnlyControlEnvironment();
     await verifyHostOnlyDiagnosticPipe(environment);

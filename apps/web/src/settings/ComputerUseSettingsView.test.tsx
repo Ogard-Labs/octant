@@ -88,3 +88,49 @@ describe.each(HOSTS)("Computer use Settings on a $hostPlatform host", (host) => 
     expect(await screen.findByText(/requires the Octant desktop app/)).toBeVisible();
   });
 });
+
+it("opens each privacy pane explicitly and requires a successful test before claiming readiness", async () => {
+  let current = {
+    ...status,
+    driver: "ready",
+    permissions: { accessibility: true, screenRecording: true },
+    verification: "not-tested",
+  };
+  const openComputerUsePermissionSettings = vi.fn(async () => {});
+  const testComputerUse = vi.fn(async () => {
+    current = { ...current, verification: "passed" };
+    return current;
+  });
+  render(
+    <ComputerUseSettingsView
+      settings={{ enabled: true, automaticUpdates: false }}
+      onSettingsChange={() => {}}
+      bridge={{
+        getComputerUseStatus: async () => current,
+        openComputerUsePermissionSettings,
+        testComputerUse,
+      }}
+    />,
+  );
+  expect(await screen.findByText("Not tested")).toBeVisible();
+  expect(screen.queryByText("Verified working")).toBeNull();
+  fireEvent.click(screen.getByRole("button", { name: "Open Accessibility settings" }));
+  await waitFor(() =>
+    expect(openComputerUsePermissionSettings).toHaveBeenCalledWith("accessibility"),
+  );
+  fireEvent.click(screen.getByRole("button", { name: "Open Screen Recording settings" }));
+  await waitFor(() =>
+    expect(openComputerUsePermissionSettings).toHaveBeenCalledWith("screenRecording"),
+  );
+  fireEvent.click(screen.getByRole("button", { name: "Test Computer use" }));
+  expect(await screen.findByText("Verified working")).toBeVisible();
+  expect(testComputerUse).toHaveBeenCalledOnce();
+  current = {
+    ...current,
+    verification: "not-tested",
+    permissions: { accessibility: false, screenRecording: true },
+  };
+  fireEvent.focus(window);
+  expect(await screen.findByText("Not tested")).toBeVisible();
+  expect(screen.getByRole("button", { name: "Test Computer use" })).toBeDisabled();
+});

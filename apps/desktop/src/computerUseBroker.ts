@@ -13,7 +13,10 @@ const MAX_BODY_BYTES = 128 * 1024;
 const failure = (status: number) =>
   Response.json({ error: "computer-use-broker-refused" }, { status });
 
-export function computerUseBrokerHandler(service: ComputerUseDesktopService, token: string) {
+export function computerUseBrokerHandler(
+  service: Omit<ComputerUseDesktopService, "test">,
+  token: string,
+) {
   return async (request: Request, peer = "127.0.0.1"): Promise<Response> => {
     const supplied = Buffer.from(request.headers.get(HEADER) ?? "");
     const expected = Buffer.from(token);
@@ -68,7 +71,7 @@ async function readBody(request: IncomingMessage): Promise<Uint8Array | undefine
   return Buffer.concat(chunks, length);
 }
 
-export async function startComputerUseBroker(service: ComputerUseDesktopService) {
+export async function startComputerUseBroker(service: Omit<ComputerUseDesktopService, "test">) {
   const token = randomBytes(32).toString("base64url");
   const handle = computerUseBrokerHandler(service, token);
   const server = createServer((incoming, outgoing) => {

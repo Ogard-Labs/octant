@@ -43,6 +43,7 @@ export const DESKTOP_IPC_CHANNELS = {
   appUpdateInstall: "octant:app-update:install",
   appUpdateAutomatic: "octant:app-update:automatic",
   computerUseStatus: "octant:computer-use:status",
+  computerUseTest: "octant:computer-use:test",
   computerUsePermissions: "octant:computer-use:permissions",
   computerUsePermissionSettings: "octant:computer-use:permission-settings",
   computerUseCheckUpdates: "octant:computer-use:check-updates",

@@ -400,7 +400,10 @@ export interface OctantHostBridge
   readonly popupNativeMenu?: (request: NativeMenuRequest) => Promise<NativeMenuOutcome>;
   readonly getComputerUseStatus?: () => Promise<unknown>;
   readonly requestComputerUsePermissions?: () => Promise<unknown>;
-  readonly openComputerUsePermissionSettings?: () => Promise<void>;
+  readonly openComputerUsePermissionSettings?: (
+    permission?: "accessibility" | "screenRecording",
+  ) => Promise<void>;
+  readonly testComputerUse?: () => Promise<unknown>;
   readonly checkComputerUseUpdates?: () => Promise<unknown>;
   readonly getManagedToolsStatus?: () => Promise<unknown>;
   readonly checkManagedToolUpdates?: (tool?: string) => Promise<unknown>;

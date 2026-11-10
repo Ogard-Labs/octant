@@ -1873,7 +1873,9 @@ that answer, so a refusing host can never leave the dialog impossible to leave.
 A refused outcome is reported the same way and the dialog stays open.
 The readiness view also offers an optional Explore capabilities card for Browser,
 Computer use, helper agents and person memory. It reports current host settings,
-uses labelled static examples and links to existing Settings controls. Dismissing
+uses labelled static examples and links to existing Settings controls. Computer use
+shares the guided permission setup and working test from Settings, with saved
+progress across relaunch. Setup is optional and never grants an agent app access. Dismissing
 it changes no setting or readiness answer. It adds no step or progress count.
 [Start screen](docs/design/start-screen.md#optional-capability-card-in-your-first-task)
 owns its behavior.

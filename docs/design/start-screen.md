@@ -22,11 +22,20 @@ facts when reported. Helper agents and memory read their current host settings.
 Missing, refused or failed reads say Not reported instead of assuming a default.
 The existing defaults remain unchanged.
 
-Each capability is a compact disclosure row showing its current state, with a static, labelled example when expanded. Viewing it starts no provider call,
-agent, Browser, desktop session, driver installation or permission request.
+Each capability is a compact disclosure row showing its current state, with a static, labelled example when expanded. Viewing it starts no provider call, agent, Browser, control session, driver installation or permission request. Reading status may start the bundled driver to check its actual grants when Computer use is enabled and macOS allows Octant.
 **Review** links open the existing owning Settings surfaces, whose controls,
-server checks and refusal handling own every change. The card has no setting
-switch or new write path. A read-only surface omits those links; paired clients
+server checks and refusal handling own every change. Computer use additionally offers the same guided setup as Settings after the
+person expands its row: Set up Computer use saves enablement and pending setup
+through the existing settings command, then requests macOS permissions. It offers
+separate Accessibility and Screen Recording shortcuts, Recheck and an explicitly
+approved local test. A refused save requests no permissions. Pending setup resumes
+in Your first task after relaunch, even if provider setup is incomplete. When
+onboarding was already completed or skipped, the local desktop opens Computer
+use Settings once on launch instead, preserving the onboarding outcome. Skip for
+now clears pending setup without disabling Computer use; it remains optional for
+starting a task. The state distinguishes enabled, permissions granted and verified
+working. See [Computer use](../architecture.md#extensions-and-skills) for the
+diagnostic's exact-window scope and lifecycle. A read-only surface omits those links; paired clients
 have no first-run capability card and acquire no local settings authority.
 Installation, package trust, enablement and task access remain separate.
 

@@ -44,6 +44,11 @@ export function createComputerUseDesktopService(options: {
   let starting: Promise<ComputerDriverRuntime> | undefined;
   let initializing: Promise<void> | undefined;
   let state: ComputerUseStatus["driver"] = "unavailable";
+  let verification: NonNullable<ComputerUseStatus["verification"]> = "not-tested";
+  let verificationMessage: string | undefined;
+  let verifiedRuntime: ComputerDriverRuntime | undefined;
+  let testing: AbortController | undefined;
+  let testCompletion: Promise<unknown> | undefined;
   let replacing = false;
   let closed = false;
   let closing: Promise<void> | undefined;
@@ -78,13 +83,18 @@ export function createComputerUseDesktopService(options: {
     });
   async function getRuntime(): Promise<ComputerDriverRuntime> {
     await initialize();
-    if (closed || !supported || state === "unavailable")
+    if (closed || !settings.enabled || !supported || state === "unavailable")
       throw new Error("Computer use is unavailable.");
     if (runtime !== undefined) return runtime;
     starting ??= (async () => {
       state = "starting";
       try {
-        runtime = await makeRuntime(active);
+        const started = await makeRuntime(active);
+        if (closed || !settings.enabled) {
+          await started.close();
+          throw new Error("Computer use startup was cancelled.");
+        }
+        runtime = started;
         state = "ready";
         return runtime;
       } catch (error) {
@@ -111,9 +121,16 @@ export function createComputerUseDesktopService(options: {
     currentVersion: active.version,
     check: latestComputerDriverRelease,
     stage: (release, signal) => stageComputerDriver(release, versions, signal),
-    isBusy: () => controls.activeSessions() > 0 || replacing,
+    isBusy: () => controls.activeSessions() > 0 || replacing || testing !== undefined,
     activate: async (candidate) => {
-      if (closed || replacing || !settings.enabled || controls.activeSessions() > 0) return false;
+      if (
+        closed ||
+        replacing ||
+        testing !== undefined ||
+        !settings.enabled ||
+        controls.activeSessions() > 0
+      )
+        return false;
       replacing = true;
       const admittedRevision = revision;
       const previous = active;
@@ -167,10 +184,28 @@ export function createComputerUseDesktopService(options: {
         ? await getRuntime().then(computerDriverPermissions, () => undefined)
         : undefined;
     const permissions = driver ?? host;
+    if (
+      verification === "passed" &&
+      (!settings.enabled ||
+        runtime !== verifiedRuntime ||
+        state !== "ready" ||
+        !permissions.accessibility ||
+        !permissions.screenRecording)
+    ) {
+      verification = "not-tested";
+      verifiedRuntime = undefined;
+    }
+    if (
+      testing !== undefined &&
+      (!settings.enabled || !permissions.accessibility || !permissions.screenRecording)
+    )
+      testing.abort();
     const update = updates.state();
     return {
       supported,
       ...settings,
+      verification,
+      ...(verificationMessage === undefined ? {} : { verificationMessage }),
       permissions,
       driver: state,
       activeSessions: controls.activeSessions(),
@@ -183,24 +218,30 @@ export function createComputerUseDesktopService(options: {
         ? { message: "Computer use requires the Apple Silicon macOS desktop app." }
         : state === "unavailable"
           ? { message: "The bundled computer-use driver is unavailable." }
-          : driver !== undefined && (!driver.accessibility || !driver.screenRecording)
+          : state === "failed"
             ? {
                 message:
-                  "macOS allows Octant but refuses the computer-use driver it starts. This happens with unsigned Octant builds; install a signed Octant build, allow it in Accessibility and Screen Recording, then relaunch and recheck.",
+                  "The bundled driver could not start. Relaunch the signed Octant app and recheck.",
               }
-            : !permissions.accessibility || !permissions.screenRecording
+            : driver !== undefined && (!driver.accessibility || !driver.screenRecording)
               ? {
                   message:
-                    "Allow Octant in macOS Accessibility and Screen Recording, then recheck. Some permission changes require relaunching Octant.",
+                    "macOS allows Octant but refuses the computer-use driver it starts. This happens with unsigned Octant builds; install a signed Octant build, allow it in Accessibility and Screen Recording, then relaunch and recheck.",
                 }
-              : update.message === undefined
-                ? {}
-                : { message: update.message }),
+              : !permissions.accessibility || !permissions.screenRecording
+                ? {
+                    message:
+                      "Allow Octant in macOS Accessibility and Screen Recording, then recheck. Some permission changes require relaunching Octant.",
+                  }
+                : update.message === undefined
+                  ? {}
+                  : { message: update.message }),
     };
   }
   async function reserve(owner: ComputerUseOwner): Promise<boolean> {
     if (
       closed ||
+      testing !== undefined ||
       replacing ||
       !settings.enabled ||
       !options.isWindowAvailable(String(owner.windowId))
@@ -209,6 +250,7 @@ export function createComputerUseDesktopService(options: {
     const current = await status();
     if (
       closed ||
+      testing !== undefined ||
       replacing ||
       !settings.enabled ||
       !current.supported ||
@@ -222,7 +264,11 @@ export function createComputerUseDesktopService(options: {
   return {
     status,
     configure: async (next: ComputerUseSettings) => {
-      if (settings.enabled === next.enabled && settings.automaticUpdates === next.automaticUpdates)
+      if (
+        settings.enabled === next.enabled &&
+        settings.automaticUpdates === next.automaticUpdates &&
+        settings.setupPending === next.setupPending
+      )
         return;
       revision += 1;
       settings = next;
@@ -232,6 +278,12 @@ export function createComputerUseDesktopService(options: {
         automaticUpdates: settings.automaticUpdates,
       });
       if (!settings.enabled) {
+        verification = "not-tested";
+        verificationMessage = undefined;
+        verifiedRuntime = undefined;
+        testing?.abort();
+        await testCompletion;
+        await starting?.catch(() => undefined);
         await controls.revokeAll();
         await runtime?.close();
         runtime = undefined;
@@ -255,6 +307,73 @@ export function createComputerUseDesktopService(options: {
       return controls.execute(owner, command, signal);
     },
     release: controls.release,
+    test: async (
+      run: (runtime: ComputerDriverRuntime, signal: AbortSignal) => Promise<boolean>,
+    ) => {
+      if (testing !== undefined) return status();
+      const abort = new AbortController();
+      testing = abort;
+      const complete = async () => {
+        try {
+          const current = await status();
+          if (
+            closed ||
+            replacing ||
+            !settings.enabled ||
+            !current.supported ||
+            current.driver !== "ready" ||
+            !current.permissions.accessibility ||
+            !current.permissions.screenRecording
+          )
+            throw new Error(
+              "Enable Computer use, allow both macOS permissions, then recheck before testing.",
+            );
+          if (controls.activeSessions() > 0)
+            throw new Error("Wait for computer-use tasks to finish, then test again.");
+          verification = "running";
+          verificationMessage = undefined;
+          const checkedRuntime = await getRuntime();
+          const signal = AbortSignal.any([
+            abort.signal,
+            shutdown.signal,
+            AbortSignal.timeout(60_000),
+          ]);
+          const passed = await run(checkedRuntime, signal);
+          signal.throwIfAborted();
+          const permissions = await computerDriverPermissions(checkedRuntime);
+          signal.throwIfAborted();
+          if (
+            runtime !== checkedRuntime ||
+            !settings.enabled ||
+            !permissions.accessibility ||
+            !permissions.screenRecording
+          )
+            throw new Error(
+              "Computer use changed during the test. Recheck permissions and test again.",
+            );
+          verification = passed ? "passed" : "not-tested";
+          verifiedRuntime = passed ? checkedRuntime : undefined;
+          verificationMessage = passed
+            ? undefined
+            : "Test cancelled. You can test again when ready.";
+        } catch (error) {
+          verification = settings.enabled ? "failed" : "not-tested";
+          verifiedRuntime = undefined;
+          verificationMessage =
+            abort.signal.aborted || shutdown.signal.aborted
+              ? "Test cancelled. Recheck permissions and retry."
+              : error instanceof Error
+                ? error.message.slice(0, 1_024)
+                : "The test failed. Recheck permissions and retry.";
+        } finally {
+          testing = undefined;
+          void updates.applyWhenIdle();
+        }
+      };
+      testCompletion = complete();
+      await testCompletion;
+      return status();
+    },
     requestPermissions: async () => {
       if (supported) await computerUsePermissions(true);
       return status();
@@ -268,6 +387,9 @@ export function createComputerUseDesktopService(options: {
       closing ??= (async () => {
         closed = true;
         shutdown.abort();
+        testing?.abort();
+        await testCompletion;
+        await starting?.catch(() => undefined);
         let failed = false;
         try {
           await updates.close();

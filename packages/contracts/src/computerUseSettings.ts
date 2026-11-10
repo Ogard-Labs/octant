@@ -1,6 +1,7 @@
 import { Schema } from "effect";
 
 export const ComputerUseSettings = Schema.Struct({
+  setupPending: Schema.optional(Schema.Boolean),
   enabled: Schema.optionalWith(Schema.Boolean, { default: () => true }),
   // The driver is an upstream binary that runs under Octant's macOS permissions,
   // so a new release waits for a person unless they turned automatic updates on.

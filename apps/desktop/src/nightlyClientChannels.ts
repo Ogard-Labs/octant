@@ -50,6 +50,7 @@ export const NIGHTLY_CLIENT_CHANNELS = {
   appUpdateDownload: "local",
   appUpdateInstall: "local",
   appUpdateAutomatic: "local",
+  computerUseTest: "octant-only",
   computerUseStatus: "brokered",
   computerUsePermissions: "brokered",
   computerUsePermissionSettings: "brokered",

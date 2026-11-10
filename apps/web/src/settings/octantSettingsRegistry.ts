@@ -974,6 +974,18 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
           keywords: "plugin enable computer control",
         },
         {
+          id: settingId("computer-use-setup"),
+          label: "Guided setup",
+          scope: "host",
+          keywords: "computer use setup onboarding permissions resume",
+        },
+        {
+          id: settingId("computer-use-test"),
+          label: "Working test",
+          scope: "app",
+          keywords: "computer use test verify working capture click readiness",
+        },
+        {
           id: settingId("computer-use-accessibility"),
           label: "Accessibility",
           scope: "host",
