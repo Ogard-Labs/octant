@@ -1786,7 +1786,8 @@ html[data-octant-native-host="true"] .shell--sidebar-collapsed .workspace-pane__
    width of the label decided where its icon sat. */
 .workspace-disclosure__action {
   display: flex;
-  min-height: 29px;
+  /* 28px, the control step; 29 fitted no other row or button. */
+  min-height: 28px;
   align-items: center;
   justify-content: flex-start;
   gap: 8px;
