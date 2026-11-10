@@ -191,7 +191,10 @@ export function ThreadRowMenu(props: {
   // A worker belongs to the coordinator that started it and never becomes
   // one, so its menu offers the worker's own switch in place of the role.
   const worker = props.thread.coordinatorThreadId !== undefined;
-  const coordinatorAction = worker ? undefined : props.actions.onSetCoordinator;
+  // The designated planner coordinates because of its designation, which a
+  // person removes from the Project overview, so the role item would do nothing.
+  const coordinatorAction =
+    worker || props.thread.planner === true ? undefined : props.actions.onSetCoordinator;
   const coordinatorWakeAction = worker ? props.actions.onSetCoordinatorWake : undefined;
   const hasCoordinatorActions =
     coordinatorAction !== undefined ||

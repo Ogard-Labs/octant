@@ -4454,6 +4454,7 @@ function LaunchedShell(
             ...(thread.completedAt === undefined ? {} : { completedAt: thread.completedAt }),
             ...(thread.snooze === undefined ? {} : { snooze: thread.snooze }),
             ...(thread.coordinator === true ? { coordinator: true } : {}),
+            ...(thread.planner === true ? { planner: true } : {}),
             ...workerLineage(thread.coordinatorThreadId),
             ...(thread.messageWake === true ? { messageWake: true } : {}),
             ...(thread.coordinatorWakeOff === true ? { coordinatorWakeOff: true } : {}),

@@ -1438,6 +1438,20 @@ describe("coordinator threads in a thread row's menu", () => {
     ).toHaveAttribute("aria-checked", "false");
   });
 
+  it("offers no coordinator role item on the designated planner, whose role follows its designation", async () => {
+    render(
+      <ProjectThreadRows
+        actions={{ onSetCoordinator: vi.fn(), onSetMessageWake: vi.fn() }}
+        onSelectThread={vi.fn()}
+        threads={[{ ...thread, coordinator: true, planner: true }]}
+      />,
+    );
+    await openMenu(/Controller foundation/);
+    await screen.findByRole("menuitemcheckbox", { name: "Wake when a message arrives" });
+    expect(screen.queryByRole("menuitem", { name: "Stop coordinating" })).toBeNull();
+    expect(screen.queryByRole("menuitem", { name: "Make coordinator" })).toBeNull();
+  });
+
   it("never offers Wake for coordinator on a thread that no coordinator started", async () => {
     render(
       <ProjectThreadRows
