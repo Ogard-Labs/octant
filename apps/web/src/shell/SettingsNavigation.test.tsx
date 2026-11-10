@@ -7,7 +7,7 @@ import { SettingsNavigation, type SettingsNavigationItem } from "./SettingsNavig
 const settingsStyles = readFileSync(resolve(process.cwd(), "src/styles/settings.css"), "utf8");
 
 describe("SettingsNavigation", () => {
-  it("lists only implemented visible sections in the supplied order", () => {
+  it("lists only implemented visible sections, grouped, with a model's page before a mode's", () => {
     const sections: SettingsNavigationItem[] = [
       { id: "general", label: "General" },
       { id: "appearance", label: "Appearance" },
@@ -25,8 +25,8 @@ describe("SettingsNavigation", () => {
       "General",
       "Appearance",
       "Keybindings",
-      "Chat",
       "Providers",
+      "Chat",
     ]);
     expect(screen.queryByRole("button", { name: /theme|typography|extensions/i })).toBeNull();
   });
