@@ -1921,6 +1921,7 @@ html[data-octant-increased-contrast="true"] .project-row[data-active="true"] {
   .project-coordinator__fold svg {
     transition: none;
   }
+}
 
 /* Design system: the list of DESIGN.md files, then one drawn as samples. */
 .project-design-system__list,
