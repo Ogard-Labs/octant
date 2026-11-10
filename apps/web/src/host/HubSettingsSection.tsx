@@ -1558,7 +1558,7 @@ export function HubSettingsSection({ hub, pairing, ownerUnlock, now }: HubSettin
         <SettingsSection title="Wake service">
           <div className="setgroup">
             <SettingRow
-              description="Wake a spoke's computer just before one of its routines is due. A computer takes part only if its own person ticked Wake in its hub grant. The hub learns only a time and an opaque id for each routine, never what it does. Off by default."
+              description="Wakes a computer just before one of its routines is due, if its owner allowed Wake. The hub learns only a time and an id for each routine, never what it does. Off by default."
               label="Wake service"
               scope="host"
               settingId="hub-wake-service"

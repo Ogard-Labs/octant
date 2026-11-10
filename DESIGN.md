@@ -329,16 +329,21 @@ frame: the wide measure, so Back, the title, and the actions sit on the same lef
 and right edges from page to page. A list there runs the frame's width; a board's
 columns may use all of it. Settings is the same shell with a 920px measure and its own
 navigation rail; the rail names each group of pages with a quiet label and
-draws no hairline between groups. The groups are General (General, Profile,
-Notifications), Look & feel (Appearance, Sidebar, Keybindings), Modes (each
-mode's defaults), AI & models (Providers & Models, Octant Harness, Voice &
-images: which provider or model answers each job), Tools (Skills & Extensions,
-Computer use, Device tools, GitHub, Linear: what a running agent may reach),
-Privacy & data (Permissions, Data & storage, Sync, Remote access), and Advanced
-(Host, Usage). Permissions holds what a person has already allowed (remembered
+draws no hairline between groups. There are six groups, each one question a
+person brings to Settings, and a group lists its pages in this order: General
+(General, Profile, Notifications: who you are and what Octant tells you), Look &
+feel (Appearance, Sidebar, Keybindings), AI (Providers & Models, Octant Harness,
+Voice & images, then Chat, Work and Code: which provider or model answers each
+job, and how each mode starts), Tools (Skills & Extensions, Computer use, Device
+tools, GitHub, Linear: what a running agent may reach), Safety (Permissions,
+Access, Secret stores, Memory: what an agent may touch, reach and remember), and
+Data & devices (Data & storage, Sync, Remote access, Host, Usage: what this
+computer stores and the other machines it talks to). An earlier Privacy & data
+group had grown to seven pages answering three different questions, Modes stood
+apart from the models its pages choose, and Advanced held two pages. Permissions holds what a person has already allowed (remembered
 websites, remembered tool approvals, public links); Data & storage holds what
 the host keeps (data map, caches, backup, recovery, export, retention, purge);
-Notifications holds what Octant sends while a person is away. AI & models
+Notifications holds what Octant sends while a person is away. AI
 lists each provider kind on the page of what it serves: Providers & Models
 holds the agent runtimes Octant drives (ACP agents, CLIs, the Agent SDK, RPC
 runtimes), and its manual add form offers only those kinds. It opens on the
@@ -2654,7 +2659,7 @@ Safe networks in Settings › Access as an account list and a **Project**
 picker that says whether the chosen Project uses the account's servers or
 its own list, which starts as a copy of the account list and is edited with
 the same rows and form. **Safe networks** is built as Settings › Access, in the
-Privacy & data group after Permissions: a **Network limits** panel with a
+Safety group after Permissions: a **Network limits** panel with a
 switch that is on by default, a sentence saying plainly whether limits are on
 (and, when on, that they hold sandboxed runtimes only),
 and a note that a change applies to the next runtime started; then an intro
@@ -2892,7 +2897,7 @@ resizing distinct from unsolicited layout movement.
 
 ### Secret stores
 
-Settings › Secret stores sits with Permissions under Privacy & data and is
+Settings › Secret stores sits with Permissions under Safety and is
 host-scoped. It has two cards. **Linked secret stores** is a plain row per
 tool: the tool's name, one line saying whether it is linked and whether the
 store is ready, locked, not installed, or unreachable, and one button, Link or

@@ -455,7 +455,7 @@ export function RemoteAccessSettingsSection({
         <div className="setgroup">
           <SettingRow
             focused={focusedSetting === "remote-listener"}
-            description="The address paired devices reach. Loopback and public addresses are refused; use a private LAN or Tailscale address with a certificate browsers trust."
+            description="The address paired devices reach. Use a private network or Tailscale address with a certificate browsers trust; loopback and public addresses are refused."
             label={status?.enabled === true ? "Move the listener" : "Enable the listener"}
             scope="host"
             settingId="remote-listener"
@@ -582,7 +582,7 @@ export function RemoteAccessSettingsSection({
         {browserCannotVerify ? (
           <div className="setgroup">
             <SettingRow
-              description="A pairing code is single-use and expires in five minutes. It carries a fingerprint of this computer's own certificate key, so an Octant app can tell it is talking to this computer. Approve the request that appears below."
+              description="Enter this code on the other device, then approve the request below. It works once, for five minutes, and lets the device confirm it is talking to this computer."
               label="Pairing code"
               scope="host"
               settingId="remote-pairing-code"
