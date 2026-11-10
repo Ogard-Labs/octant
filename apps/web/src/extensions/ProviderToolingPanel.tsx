@@ -250,7 +250,7 @@ export function ProviderToolingPanel(props: ProviderToolingPanelProps) {
               onClick={() => props.onOpenRunAsItself(account.id)}
               size="sm"
               type="button"
-              variant="outline"
+              variant="secondary"
             >
               Open the Run as itself setting
             </OctantButton>

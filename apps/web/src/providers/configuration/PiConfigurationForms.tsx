@@ -39,7 +39,7 @@ export function PiConfigurationForm(props: {
         <OctantButton
           disabled={props.disabled}
           type="submit"
-          variant="outline"
+          variant="secondary"
           size="sm"
           aria-label={`Save Pi settings for ${props.instance.displayName}`}
         >
@@ -86,7 +86,7 @@ export function OhMyPiConfigurationForm(props: {
         <OctantButton
           disabled={props.disabled}
           type="submit"
-          variant="outline"
+          variant="secondary"
           size="sm"
           aria-label={`Save Oh My Pi settings for ${props.instance.displayName}`}
         >

@@ -167,7 +167,7 @@ export function SkillFolderSettingsPanel(props: SkillFolderSettingsProps) {
                     })
                   }
                   type="button"
-                  variant="outline"
+                  variant="secondary"
                 >
                   Remove
                 </OctantButton>
@@ -189,14 +189,14 @@ export function SkillFolderSettingsPanel(props: SkillFolderSettingsProps) {
               placeholder="/path/to/skills"
               value={draft}
             />
-            <OctantButton disabled={busy || draft.trim() === ""} type="submit" variant="outline">
+            <OctantButton disabled={busy || draft.trim() === ""} type="submit" variant="secondary">
               Add folder
             </OctantButton>
             {props.pickFolder === undefined ? null : (
               <OctantButton
                 disabled={busy || props.value.folders.length >= MAX_ADDED_SKILL_FOLDERS}
                 type="button"
-                variant="outline"
+                variant="secondary"
                 onClick={() => void pick()}
               >
                 Choose folder…

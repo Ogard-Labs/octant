@@ -72,7 +72,7 @@ owns the rules behind each step.
 ### A runtime whose saved binary is gone
 
 A runtime card whose saved binary is missing or reported incompatible, while the
-latest scan found the same driver at another path, offers one outlined action in
+latest scan found the same driver at another path, offers one action in
 the card's details: "Use the one found at ~/.local/bin/claude (2.1.306)". The
 card is missing when the scan searched where the saved binary should be and did
 not find it, or when its last check could not start it. A runtime that is off

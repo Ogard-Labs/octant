@@ -422,6 +422,13 @@ error instead of retaining another integration's account controls.
   its own section, last on the page, whose card holds the destructive row
   with the destructive button variant. The danger is carried by the
   placement and the confirm control; the label keeps its ink.
+- **Actions.** A Settings action is the secondary button: the quiet control
+  fill and no edge, the way a Mac push button is drawn. The page's one main
+  action may take the primary button, a quiet or in-row extra the ghost
+  button, and the destructive group its own variant. Settings does not use
+  the outline button: the same kind of action was drawn filled on one row and
+  outlined on the next (62 outlined beside 113 filled), so a page of rows read
+  as two unrelated sets of controls.
 - **Rail.** Each page keeps its icon (16px) in the navigation rail, and
   Device tools has its own, apart from Computer use. The open page takes the
   same neutral wash of the ink as the open thread in the workspace sidebar,
@@ -1818,13 +1825,13 @@ palette's green and setup the palette's orange. The detected, supported-but-not-
 detected, and other groups are Settings sections; the readiness summary is the
 label's description. Ordering controls appear only in an explicit Reorder mode.
 A runtime installed in an unusual location is fixed from its own row rather
-than a manual form: the row's details carry an outlined "Locate binary…"
+than a manual form: the row's details carry a "Locate binary…"
 action beside Check connection, shown only where the desktop's file picker
 exists and only for a runtime whose version probe the host can run. Its
 answer is one quiet line under the actions (the version the host read), or a
 warning box saying why the host refused the file. A row whose saved binary is
 missing or incompatible, while the latest scan found that runtime elsewhere,
-adds a second outlined action, "Use the one found at ~/.local/bin/claude
+adds a second action, "Use the one found at ~/.local/bin/claude
 (2.1.306)", that gives the same answer without the picker; see
 [Providers and model endpoints](docs/design/model-endpoints.md).
 

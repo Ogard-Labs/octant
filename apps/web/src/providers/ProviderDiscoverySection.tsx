@@ -164,7 +164,7 @@ function DiscoveryRow(props: DiscoveryRowProps) {
         ) : (
           <OctantButton
             size="sm"
-            variant="outline"
+            variant="secondary"
             disabled={connecting}
             onClick={() => {
               void props.onConnect(candidate).then((ok) => {

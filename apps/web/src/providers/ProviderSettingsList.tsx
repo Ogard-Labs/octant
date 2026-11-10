@@ -1056,7 +1056,7 @@ function ProviderRow(props: ProviderRowProps) {
                 onClick={() => void props.onProbe(props.instance.id)}
                 size="sm"
                 type="button"
-                variant="outline"
+                variant="secondary"
               >
                 {props.probing ? "Checking…" : "Check connection"}
               </OctantButton>
@@ -1069,7 +1069,7 @@ function ProviderRow(props: ProviderRowProps) {
                 onClick={() => void locateBinary()}
                 size="sm"
                 type="button"
-                variant="outline"
+                variant="secondary"
               >
                 {locating ? "Checking binary…" : "Locate binary…"}
               </OctantButton>
@@ -1081,7 +1081,7 @@ function ProviderRow(props: ProviderRowProps) {
                 onClick={() => void useScannedBinary()}
                 size="sm"
                 type="button"
-                variant="outline"
+                variant="secondary"
               >
                 {locating ? "Checking binary…" : scannedOffer.label}
               </OctantButton>
@@ -1093,7 +1093,7 @@ function ProviderRow(props: ProviderRowProps) {
                 onClick={() => props.onAddAccount?.(props.instance)}
                 size="sm"
                 type="button"
-                variant="outline"
+                variant="secondary"
               >
                 Add account
               </OctantButton>
@@ -1126,7 +1126,7 @@ function ProviderRow(props: ProviderRowProps) {
                 onClick={() => void props.onUpdateProviderCli?.(props.instance.id)}
                 size="sm"
                 type="button"
-                variant="outline"
+                variant="secondary"
               >
                 {props.updating ? "Updating…" : "Update CLI"}
               </OctantButton>
@@ -1193,7 +1193,7 @@ function ProviderRow(props: ProviderRowProps) {
                     <OctantButton
                       disabled={disabled}
                       type="submit"
-                      variant="outline"
+                      variant="secondary"
                       size="sm"
                       aria-label={`Save name for ${props.instance.displayName}`}
                     >
@@ -1243,7 +1243,7 @@ function ProviderRow(props: ProviderRowProps) {
                     <OctantButton
                       disabled={disabled}
                       type="submit"
-                      variant="outline"
+                      variant="secondary"
                       size="sm"
                       aria-label={`Save binary path for ${props.instance.displayName}`}
                     >

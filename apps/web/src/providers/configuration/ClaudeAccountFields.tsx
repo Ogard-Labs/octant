@@ -211,7 +211,7 @@ function ProviderAccountSettingsFields(props: {
             onClick={props.onReassignDirectory}
             size="sm"
             type="button"
-            variant="outline"
+            variant="secondary"
           >
             Use Octant's assigned directory
           </OctantButton>

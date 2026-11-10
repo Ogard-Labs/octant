@@ -1675,7 +1675,7 @@ export function HubSettingsSection({ hub, pairing, ownerUnlock, now }: HubSettin
                 <OctantButton
                   disabled={busy}
                   onClick={() => void removeDirectPushCredential("ios")}
-                  variant="outline"
+                  variant="secondary"
                 >
                   Remove
                 </OctantButton>
@@ -1755,7 +1755,7 @@ export function HubSettingsSection({ hub, pairing, ownerUnlock, now }: HubSettin
                 <OctantButton
                   disabled={busy}
                   onClick={() => void removeDirectPushCredential("android")}
-                  variant="outline"
+                  variant="secondary"
                 >
                   Remove
                 </OctantButton>

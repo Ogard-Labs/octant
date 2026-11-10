@@ -556,7 +556,7 @@ export function OpenAiImageConfigurationForm(props: OpenAiImageConfigurationForm
         <OctantButton
           disabled={props.disabled}
           type="submit"
-          variant="outline"
+          variant="secondary"
           size="sm"
           aria-label={`Save OpenAI image settings for ${props.instance.displayName}`}
         >
@@ -627,7 +627,7 @@ export function GeminiImageConfigurationForm(props: GeminiImageConfigurationForm
         <OctantButton
           disabled={props.disabled}
           type="submit"
-          variant="outline"
+          variant="secondary"
           size="sm"
           aria-label={`Save Gemini image settings for ${props.instance.displayName}`}
         >
@@ -705,7 +705,7 @@ export function BflImageConfigurationForm(props: BflImageConfigurationFormProps)
         <OctantButton
           disabled={props.disabled}
           type="submit"
-          variant="outline"
+          variant="secondary"
           size="sm"
           aria-label={`Save Black Forest Labs image settings for ${props.instance.displayName}`}
         >
@@ -783,7 +783,7 @@ export function IdeogramImageConfigurationForm(props: IdeogramImageConfiguration
         <OctantButton
           disabled={props.disabled}
           type="submit"
-          variant="outline"
+          variant="secondary"
           size="sm"
           aria-label={`Save Ideogram image settings for ${props.instance.displayName}`}
         >
