@@ -72,7 +72,7 @@ import type {
 } from "@octant/contracts/canvasContext";
 import { OctantButton } from "../ui/base/OctantButton";
 import { ComposerContextMeterGate } from "../context/composerContextMeterScope";
-import { SplitWorkspace, type PaneFacts } from "./SplitWorkspace";
+import { SplitWorkspace, type PaneFacts, type SplitWorkspaceProps } from "./SplitWorkspace";
 import { ProjectOverview } from "../projects/ProjectOverview";
 import type { ProjectChange } from "../projects/useProjectController";
 import { providerGroupsForProject } from "../projects/ProjectProviderPolicySection";
@@ -307,6 +307,8 @@ export interface WorkspaceViewProps {
   readonly onCommitResize: (splitNodeId: LayoutNodeId, ratio: number) => void;
   readonly onFocus: (paneId: PaneId) => void;
   readonly onOpenCodeThread: (threadId: CodeThreadId, title: string, projectId?: ProjectId) => void;
+  /** A pane's own thread items for its header menu, such as a Code thread's coordinator items. */
+  readonly threadMenuItems?: SplitWorkspaceProps["threadMenuItems"];
   readonly onOpenWorkThread?: (
     threadId: WorkThreadId,
     projectId: ProjectId,
@@ -867,6 +869,9 @@ export function WorkspaceView(props: WorkspaceViewProps) {
                 : { onSelectPullRequest: props.onSelectPullRequest })}
               onPreviewResize={props.onPreviewResize}
               onSplitPane={props.onSplitPane}
+              {...(props.threadMenuItems === undefined
+                ? {}
+                : { threadMenuItems: props.threadMenuItems })}
               activePaneId={props.workspace.activePaneIds[props.mode]}
               {...(props.focusedPaneId === undefined ? {} : { focusedPaneId: props.focusedPaneId })}
               renderSurface={(surface, paneId) => (

@@ -18,6 +18,7 @@ import type {
 import { deliverComposerThreadDrop } from "../chat/composerThreadDrop";
 import { projectViewEnvironmentOptionsFromHosts } from "../code/codeProjectViewModel";
 import type { CodeReadCursorStore, CodeThreadRestOutcome } from "../code/useCodeController";
+import { codeThreadCoordinatorActions } from "./codeThreadCoordinatorActions";
 import { mergeThreadRowActions } from "../projects/mergeThreadRowActions";
 import { MoveThreadToProjectDialog } from "../projects/MoveThreadToProjectDialog";
 import { ProjectSidebarSection } from "../projects/ProjectSidebarSection";
@@ -427,18 +428,7 @@ export const SidebarContainer = memo(function SidebarContainer(props: SidebarCon
       },
       onPinThread: (threadId, pinned) =>
         void actions.pinCodeThread(decodeCodeThreadId(threadId), pinned),
-      onSetCoordinator: (threadId, coordinator) =>
-        void actions
-          .setCodeThreadCoordinator(decodeCodeThreadId(threadId), coordinator)
-          .then(noteCodeThreadRest),
-      onSetMessageWake: (threadId, wake) =>
-        void actions
-          .setCodeThreadMessageWake(decodeCodeThreadId(threadId), wake)
-          .then(noteCodeThreadRest),
-      onSetCoordinatorWake: (threadId, wake) =>
-        void actions
-          .setCodeThreadCoordinatorWake(decodeCodeThreadId(threadId), wake)
-          .then(noteCodeThreadRest),
+      ...codeThreadCoordinatorActions(actions),
       onOpenPullRequest: actions.selectProjectPullRequestIdentity,
       onOpenPullRequestOnGithub: (identity) => {
         const url = githubPullRequestUrl(identity);

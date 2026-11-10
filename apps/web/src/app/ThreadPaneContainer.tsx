@@ -56,6 +56,9 @@ import type { useWorkThreadNavigation } from "../work/useWorkThreadNavigation";
 import type { useZenController } from "../zen/useZenController";
 import type { createLaunchedShellClients } from "./createLaunchedShellClients";
 import type { ShellActions } from "./shellActions";
+import type { WorkspaceTab } from "@octant/contracts/shell";
+import { ThreadCoordinatorMenuItems, threadCoordinatorMenuOffers } from "../projects/ThreadRowMenu";
+import { codeThreadCoordinatorActions } from "./codeThreadCoordinatorActions";
 import type { ShellNavigationModel } from "./shellNavigationModel";
 
 type ShellController = ReturnType<typeof useShellController>;
@@ -64,6 +67,10 @@ type ProjectController = ReturnType<typeof useProjectController>;
 export interface ThreadPaneContainerProps {
   readonly actions: Pick<
     ShellActions,
+    | "setCodeThreadCoordinator"
+    | "setCodeThreadCoordinatorWake"
+    | "setCodeThreadMessageWake"
+    | "setThreadExportNotice"
     | "activateContentTab"
     | "activatePane"
     | "clearFocus"
@@ -418,6 +425,19 @@ export const ThreadPaneContainer = memo(function ThreadPaneContainer(
     touchMemoryRevision,
     viewAllChatProjectThreads,
   } = actions;
+  // A Code thread pane's header menu carries the thread's coordinator items,
+  // with the sidebar row menu's own handlers (docs/design/workspace.md#coordinators).
+  const coordinatorActions = codeThreadCoordinatorActions(actions);
+  const threadMenuItems = (surface: WorkspaceTab): ReactNode => {
+    if (surface.kind !== "code-overview") return undefined;
+    const row = navigation.codeProjectThreads.find(
+      (thread) => String(thread.threadId) === String(surface.threadId),
+    );
+    return row === undefined ||
+      !threadCoordinatorMenuOffers(row, coordinatorActions) ? undefined : (
+      <ThreadCoordinatorMenuItems actions={coordinatorActions} thread={row} />
+    );
+  };
   const {
     agentRunClient,
     appleToolchainClient,
@@ -532,6 +552,7 @@ export const ThreadPaneContainer = memo(function ThreadPaneContainer(
               <ComposerContextMeterShortcut />
               <ThreadStatsDetailDialog />
               <WorkspaceView
+                threadMenuItems={threadMenuItems}
                 {...(contextClient === undefined ? {} : { contextClient })}
                 {...(welcomeBackdrop === undefined ? {} : { welcomeBackdrop })}
                 followUpSuggestions={{
