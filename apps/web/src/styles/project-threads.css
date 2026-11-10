@@ -1517,10 +1517,11 @@ button[aria-expanded="true"] > .project-overview-inspector__chevron {
   white-space: nowrap;
 }
 
+/* 28px, the icon button's own step; 27 fitted no other control. */
 .project-memory-inspector__header button {
   display: grid;
-  width: 27px;
-  height: 27px;
+  width: 28px;
+  height: 28px;
   color: var(--octant-text-muted);
   border-radius: var(--oct-radius-sm);
   cursor: default;
