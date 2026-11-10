@@ -186,3 +186,34 @@ html[data-octant-theme-mode="light"] {
    sizes, z-index, breakpoints — static in both systems. Mapping a
    constant onto another constant buys indirection and nothing else.
    ────────────────────────────────────────────────────────────────────── */
+
+/* ─── window Glass ──────────────────────────────────────────────────
+   Under window Glass the page is the desktop seen through the window, and it
+   is as light as whatever sits behind it. The theme's control and floating
+   colours are opaque and were chosen against the theme's own page: on an
+   OLED preset over a bright desktop every button, segmented control and
+   select, the composer and each of the person's messages stood as a
+   near-black block on mid-grey glass. Here those fills are tints of the
+   foreground instead, at the step the theme's own control sits above its
+   page, so they stay one small step off whatever the glass shows.
+
+   The shadcn roles are restated because a custom property that names
+   another is resolved where it is declared: left at the root they would keep
+   the opaque colour. Menus, popovers and dialogs are portalled outside the
+   shell and keep the opaque floating surface. */
+html:not([data-octant-reduced-transparency="true"]) .shell--material-translucent {
+  --octant-control: color-mix(in srgb, var(--octant-text-primary) 7%, transparent);
+  --octant-control-hover: color-mix(in srgb, var(--octant-text-primary) 11%, transparent);
+  --octant-control-pressed: color-mix(in srgb, var(--octant-text-primary) 15%, transparent);
+  --secondary: var(--octant-control);
+  --muted: var(--octant-control);
+  --accent: var(--octant-control-hover);
+  --oct-surface-warm: var(--octant-control);
+
+  /* The composer and the person's messages: a light veil of the page colour
+     for legibility over the ground, then a tint of the foreground, so the
+     surface reads as a pane of the same glass and not as a slab laid on it. */
+  --oct-glass-floor: color-mix(in srgb, var(--octant-workspace) 30%, transparent);
+  --oct-glass-thick: color-mix(in srgb, var(--octant-text-primary) 6%, transparent);
+  --oct-glass-chrome: color-mix(in srgb, var(--octant-text-primary) 4%, transparent);
+}
