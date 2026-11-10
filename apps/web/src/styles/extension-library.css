@@ -354,7 +354,7 @@
 .library-detail__title h3 {
   margin: 0;
   overflow-wrap: anywhere;
-  font-size: var(--oct-text-lg);
+  font-size: var(--oct-text-base);
   font-weight: var(--oct-weight-strong);
   letter-spacing: var(--oct-tracking-snug);
 }

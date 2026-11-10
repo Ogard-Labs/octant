@@ -23,7 +23,7 @@ export function WhatsNewDialog(props: WhatsNewDialogProps) {
       onClose={props.onClose}
       open={props.open}
     >
-      <h2 className="h4" id={titleId}>
+      <h2 className="octant-dialog__title" id={titleId}>
         What's new
       </h2>
       {props.document === undefined ? (

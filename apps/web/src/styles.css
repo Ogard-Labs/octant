@@ -3623,9 +3623,9 @@ html[data-octant-native-host="true"] .shell--sidebar-collapsed .workspace-pane__
 
 .folder-picker__header h2 {
   margin: 0;
-  font-size: var(--oct-text-lg);
-  font-weight: var(--oct-weight-display);
-  letter-spacing: -0.02em;
+  font-size: var(--oct-text-base);
+  font-weight: var(--oct-weight-strong);
+  letter-spacing: var(--oct-tracking-tight);
 }
 
 .folder-picker__header > button {
