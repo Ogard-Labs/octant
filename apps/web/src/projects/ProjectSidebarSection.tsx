@@ -2256,8 +2256,8 @@ function CodeProjectViewEditorDialog(props: {
         </OctantButton>
       </div>
       <p id={descriptionId}>
-        Choose which saved Code Projects appear in this sidebar view. Authority stays on each
-        Project.
+        Choose which saved Code Projects appear in this sidebar view. A view changes only what the
+        sidebar lists.
       </p>
       <form noValidate onSubmit={submit}>
         <label htmlFor="code-project-view-name">Project view name</label>
