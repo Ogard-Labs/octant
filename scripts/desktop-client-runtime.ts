@@ -63,6 +63,14 @@ export const DESKTOP_UNPACKED_FILES = [
 export function readDesktopArchive(
   archive: string,
   integrity: unknown,
+  /**
+   * `signed` is for a bundle that Developer ID signing has already finished.
+   * Signing rewrites the unpacked native files, so their bytes no longer match
+   * the hashes the archive recorded when it was sealed. Their trust there is
+   * the code signature, which the caller verifies; the archive's own entries
+   * and its header are still checked byte for byte.
+   */
+  stage: "sealed" | "signed" = "sealed",
 ): ReadonlyArray<{ readonly path: string; readonly content?: string }> {
   uncache(archive);
   const expected =
@@ -92,7 +100,9 @@ export function readDesktopArchive(
     if (entry.unpacked && !unpacked.has(path))
       throw new Error(`Desktop archive contains unexpected unpacked file: ${path}.`);
     const bytes = extractFile(archive, path);
-    if (
+    if (stage === "signed" && entry.unpacked) {
+      if (bytes.length === 0) throw new Error(`Desktop archive contains an empty file: ${path}.`);
+    } else if (
       entry.integrity?.algorithm !== "SHA256" ||
       createHash("sha256").update(bytes).digest("hex") !== entry.integrity.hash
     ) {
