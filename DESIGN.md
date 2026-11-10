@@ -1573,7 +1573,10 @@ its Tint slider. It takes effect only when the host resolved the material
 translucent, so every accessibility, performance, and host-support gate
 applies; then the frame (the sidebar colour) and the sheet (the workspace
 colour) are each at the Tint's opacity over the native material, and reduced
-transparency or an unsupported host leaves them opaque. Menus, dialogs, popovers, and other controls drawn
+transparency or an unsupported host leaves them opaque. A browser is such a
+host: with no native material behind the page, Glass would leave the frame and
+the sheet as the page colour and take the sidebar's own colour away, so a
+browser window always paints the theme's opaque surfaces. Menus, dialogs, popovers, and other controls drawn
 over it stay opaque semantic surfaces. The older `workspaceMaterial` setting
 is still read and stored but no longer changes anything: the whole window is
 glass or none of it is.
