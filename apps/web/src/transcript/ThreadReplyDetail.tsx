@@ -1,6 +1,7 @@
 import type { ReplyDetailLevel } from "@octant/contracts/shell";
-import { ListCollapse } from "lucide-react";
+import { ChevronDown, ListCollapse } from "lucide-react";
 import { createContext, useContext, type ReactNode } from "react";
+import { octantButtonClassName } from "../ui/base/OctantButton";
 import { OctantMenu } from "../ui/base/OctantMenu";
 import {
   REPLY_DETAIL_LABELS,
@@ -41,7 +42,14 @@ const USE_DEFAULT = "default";
  * thread's own, because a menu trigger cannot otherwise show the selection.
  * A client that cannot change the level (a paired browser) shows nothing.
  */
-export function ThreadReplyDetailMenu(props: { readonly triggerClassName?: string }) {
+export function ThreadReplyDetailMenu(props: {
+  readonly triggerClassName?: string;
+  /**
+   * Writes the level on the trigger, for a row with room for words. The bare
+   * icon in a composer toolbar read as one of two unexplained list glyphs.
+   */
+  readonly labelled?: boolean;
+}) {
   const state = useContext(ThreadReplyDetailStateContext);
   if (state === undefined || state.setLevel === undefined) return null;
   const setLevel = state.setLevel;
@@ -61,8 +69,23 @@ export function ThreadReplyDetailMenu(props: { readonly triggerClassName?: strin
         })),
       ]}
       onValueChange={(value) => setLevel(levelOfMenuValue(value))}
-      trigger={<ListCollapse aria-hidden="true" className="icon" size={16} strokeWidth={1.5} />}
-      triggerClassName={props.triggerClassName ?? "shell-icon-button"}
+      trigger={
+        props.labelled === true ? (
+          <>
+            <ListCollapse aria-hidden="true" size={14} strokeWidth={1.7} />
+            <span>Reply detail: {levelLabel}</span>
+            <ChevronDown aria-hidden="true" size={12} />
+          </>
+        ) : (
+          <ListCollapse aria-hidden="true" className="icon" size={16} strokeWidth={1.5} />
+        )
+      }
+      triggerClassName={
+        props.triggerClassName ??
+        (props.labelled === true
+          ? octantButtonClassName({ variant: "ghost", size: "sm" })
+          : "shell-icon-button")
+      }
       triggerLabel={
         state.override === undefined
           ? `Reply detail: ${levelLabel}, the default`

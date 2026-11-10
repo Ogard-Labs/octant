@@ -764,7 +764,7 @@
   color: var(--oct-meta);
 }
 
-/* Settings > Access > Safe networks: one row per trusted place or refused
+/* Settings > Permissions > Safe networks: one row per trusted place or refused
    host over hairlines, and the add form on a wrapping line. */
 .safe-networks {
   display: grid;

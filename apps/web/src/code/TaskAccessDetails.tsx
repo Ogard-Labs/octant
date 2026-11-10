@@ -1,4 +1,5 @@
 import { useThreadControlNavigation } from "../composer/threadControlNavigation";
+import { useThreadInfoPanel } from "../composer/ThreadInfo";
 import type { ContextClient } from "@octant/client-runtime/context-client";
 import type {
   ContextSubjectRef,
@@ -97,11 +98,14 @@ const CAPABILITY = {
 /** Expands the existing indicator; every recovery uses an existing person action. */
 export function TaskAccessDetails({ read }: { readonly read: AccessRead }) {
   const [open, setOpen] = useState(false);
+  const infoPanel = useThreadInfoPanel();
   useThreadControlNavigation(
     read.context === undefined ? undefined : String(read.context.subject.aggregateId),
     "access",
     () => {
       read.refresh();
+      // The details live in the thread's info panel, which may be closed.
+      infoPanel?.open();
       setOpen(true);
     },
   );
@@ -123,7 +127,7 @@ export function TaskAccessDetails({ read }: { readonly read: AccessRead }) {
         ? context?.onOpenAccess
         : undefined;
   return (
-    <div className="thread-column shrink-0 text-sm text-muted-foreground">
+    <div className="task-access-details text-sm text-muted-foreground">
       <OctantButton
         ref={trigger}
         aria-expanded={open}

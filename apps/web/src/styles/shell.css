@@ -1067,20 +1067,10 @@ html[data-octant-native-host="true"]
   font-weight: var(--oct-weight-medium);
 }
 
-/* Under Colour the rows' icons take the hue too, so the same four places read
-   in the same colours whether a rail or rows show them. The name and the count
-   stay in the sidebar ink. */
-:root[data-octant-style="colour"][data-octant-theme-mode] .sidebar-tiles--rows .sidebar-tile__icon {
-  color: var(--sidebar-tile-hue);
-}
-
-/* Colour style: the rail's four count icons take the tiles' hues, from the
-   same variables above. Only the glyph is coloured: the hover and current
-   fills stay the neutral ones, and the badge keeps the sidebar ink. Mono and
-   increased contrast never set the style, so the icons stay muted there. */
-:root[data-octant-style="colour"] .sidebar-rail__button[data-tile] .sidebar-rail__face {
-  color: var(--sidebar-tile-hue);
-}
+/* The rail's icons and the count rows' icons stay in the sidebar ink in every
+   style. Under Colour four of them took the tiles' hues, so a column of
+   otherwise grey marks carried a blue, an orange, a purple and a green one;
+   the tile faces above keep their hue, where it is a fill and not a glyph. */
 
 /* The thread filter opens under the header when the Search icon asks for
    it, or stays there when Settings › Sidebar keeps it shown. The input keeps
@@ -2505,14 +2495,6 @@ html[data-octant-increased-contrast="true"] .shell-frame > .sidebar {
   max-width: min(15rem, 42vw);
 }
 
-/* On the start screen this control sits on the bare ground, where a picture or
-   the character field ran through its label. */
-.draft-thread__composer .composer-folder-selector {
-  width: fit-content;
-  background: var(--octant-control);
-  border-radius: var(--oct-radius-sm);
-}
-
 .composer-folder-selector__label {
   overflow: hidden;
   text-overflow: ellipsis;
@@ -3672,8 +3654,8 @@ html:not([data-octant-reduced-transparency="true"], [data-octant-increased-contr
   flex-wrap: wrap;
   justify-content: center;
   gap: var(--oct-space-2);
-  width: min(100%, 704px);
-  margin: var(--oct-space-6) auto 0;
+  width: 100%;
+  margin: var(--oct-space-4) auto 0;
 }
 
 .draft-thread__intent-cards > button {
@@ -3715,13 +3697,14 @@ html:not([data-octant-reduced-transparency="true"], [data-octant-increased-contr
   line-height: 1.45;
 }
 
-/* The composer is the widest thing on the start screen; everything under it
-   sits on a narrower measure so the prompt reads as the window and the
-   cards as its contents. */
+/* Everything under the composer ends on the composer's own edges. A fixed
+   704px measure matched the default reading width only: at the widest reading
+   width the composer was 1040px over a 704px column of cards, and the page
+   read as two unrelated stacks. */
 /* What continues below the cards keeps the same clear step under them. */
 .code-home {
   display: grid;
-  width: min(100%, 704px);
+  width: 100%;
   gap: var(--oct-space-6);
   margin: 44px auto 0;
 }
@@ -3822,17 +3805,17 @@ html:not([data-octant-reduced-transparency="true"], [data-octant-increased-contr
   justify-items: start;
   gap: var(--oct-space-1);
   padding: 12px var(--oct-space-4);
-  border: 1px solid var(--oct-border);
+  /* The edge is the glass ring (octant.css), the same one the cards above
+     and the composer wear; a border under it drew the edge twice. */
+  border: 0;
   border-radius: var(--oct-radius-md);
-  background: var(--octant-card);
   font-weight: 400;
   text-align: left;
   white-space: normal;
 }
 
 .code-home__card:hover:not(:disabled) {
-  border-color: var(--octant-border-strong);
-  background: var(--octant-card);
+  box-shadow: 0 0 0 1px var(--oct-glass-stroke-strong);
 }
 
 /* Keep the thread title first and the state at the trailing edge. Container
@@ -4123,7 +4106,7 @@ html:not([data-octant-reduced-transparency="true"], [data-octant-increased-contr
 
 .home-start {
   display: grid;
-  width: min(100%, 704px);
+  width: 100%;
   gap: var(--oct-space-6);
   margin: var(--oct-space-3) auto 0;
 }
@@ -4274,7 +4257,7 @@ html:not([data-octant-reduced-transparency="true"], [data-octant-increased-contr
   align-items: center;
   justify-content: center;
   gap: var(--oct-space-2);
-  width: min(100%, 704px);
+  width: 100%;
   margin: var(--oct-space-3) auto 0;
   color: var(--oct-muted);
   font-size: var(--oct-text-detail);
@@ -4327,7 +4310,8 @@ html:not([data-octant-reduced-transparency="true"], [data-octant-increased-contr
 }
 
 .code-project-planner__review {
-  width: min(760px, calc(100vw - 32px));
+  /* The shared popup caps a width set here at its 420px default. */
+  --octant-dialog-width: 760px;
   max-height: calc(100dvh - 32px);
   overflow: auto;
 }
@@ -4351,7 +4335,7 @@ html:not([data-octant-reduced-transparency="true"], [data-octant-increased-contr
 .code-project-planner__review h2 {
   margin: 0;
   font-size: var(--oct-text-base);
-  font-weight: 600;
+  font-weight: var(--oct-weight-strong);
   letter-spacing: var(--oct-tracking-tight);
 }
 

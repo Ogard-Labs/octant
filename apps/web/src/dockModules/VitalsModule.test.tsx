@@ -21,11 +21,13 @@ it("shows this host's load and says so when it has no battery", async () => {
     Response.json(snapshot({ gpu: { percent: 42 } })),
   );
   vi.stubGlobal("fetch", fetchMock);
-  render(
+  const { container } = render(
     <VitalsModule serverUrl="http://127.0.0.1:4000" subject={{ mode: "code", threadId: "t" }} />,
   );
   await waitFor(() => expect(screen.getByText("CPU · 8 cores")).toBeVisible());
   expect(screen.getByText("54%")).toBeVisible();
+  // One sample is a figure, not a line: no empty chart box under it.
+  expect(container.querySelector(".vitals__chart")).toBeNull();
   expect(screen.getByText("GPU")).toBeVisible();
   expect(screen.getByText("No battery")).toBeVisible();
   expect(String(fetchMock.mock.calls[0]?.[0])).toBe(

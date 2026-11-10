@@ -19,7 +19,12 @@ const TILE_LABELS: Readonly<Record<SidebarTileId, string>> = {
   done: "Done today",
 };
 
-const TILE_ICONS: Readonly<Record<SidebarTileId, LucideIcon>> = {
+/**
+ * One mark per count, wherever it shows. The rail drew three of them with
+ * other glyphs (a spinner arc for Running, a clipboard, a double tick), so the
+ * same place had two symbols depending on the window's width.
+ */
+export const TILE_ICONS: Readonly<Record<SidebarTileId, LucideIcon>> = {
   inbox: Inbox,
   running: CirclePlay,
   review: Eye,

@@ -176,7 +176,10 @@ function AddMcpServerForm(props: Omit<AddMcpServerDialogProps, "open">) {
     } catch (error) {
       setFailure({
         category: "unavailable",
-        message: error instanceof Error ? error.message : "Extension service is unavailable.",
+        message:
+          error instanceof Error
+            ? error.message
+            : "Extensions could not be reached. Restart Octant and try again.",
       });
     } finally {
       setSubmitting(false);

@@ -1,9 +1,21 @@
 import type { ProjectAction } from "@octant/contracts/projects";
-import { Play } from "lucide-react";
+import { ChevronDown, Play } from "lucide-react";
 import { useEffect, useState } from "react";
 import { createPortal } from "react-dom";
 import { OctantButton } from "../ui/base/OctantButton";
-import { OctantMenu } from "../ui/base/OctantMenu";
+import {
+  OctantMenuGroup,
+  OctantMenuGroupLabel,
+  OctantMenuItem,
+  OctantMenuPopup,
+  OctantMenuPortal,
+  OctantMenuPositioner,
+  OctantMenuRadioGroup,
+  OctantMenuRadioItem,
+  OctantMenuRoot,
+  OctantMenuSeparator,
+  OctantMenuTrigger,
+} from "../ui/base/OctantMenu";
 
 /** How many actions sit in the header before the rest move into a menu. */
 const INLINE_ACTIONS = 3;
@@ -24,7 +36,8 @@ function folderName(path: string): string {
 }
 
 /**
- * The Code Project's saved actions as buttons in the window header. Each one
+ * The Code Project's saved actions in the window header: up to three as
+ * one-press buttons, the rest in one menu with where they run. Each one
  * opens the host-resolved preview before a dedicated run; the host decides
  * which checkout and authority may run the saved line. Drawn into the header's own slot, and
  * nowhere when that slot is not on screen.
@@ -51,17 +64,39 @@ export function ProjectActionButtons(props: ProjectActionButtonsProps) {
   if (host === null || (props.actions.length === 0 && props.onSetup === undefined)) return null;
   const inline = props.actions.slice(0, INLINE_ACTIONS);
   const rest = props.actions.slice(INLINE_ACTIONS);
+  const folderChoices: ReadonlyArray<{ readonly label: string; readonly value: string }> =
+    // Where to run is a choice about the buttons beside it, so it is offered
+    // only when there is something to run. With no saved action the header
+    // used to read "Run in: Active checkout" next to nothing.
+    props.actions.length === 0 || (extras.length === 0 && props.defaultFolderLabel === undefined)
+      ? []
+      : [
+          ...(props.defaultFolderLabel === undefined
+            ? [{ label: `${folderName(props.mainFolder ?? "")} (main)`, value: "" }]
+            : [
+                { label: props.defaultFolderLabel, value: "" },
+                ...(props.mainFolder === undefined
+                  ? []
+                  : [
+                      {
+                        label: `${folderName(props.mainFolder)} (Project folder)`,
+                        value: props.mainFolder,
+                      },
+                    ]),
+              ]),
+          ...extras.map((path) => ({ label: folderName(path), value: path })),
+        ];
+  const onSetup = props.onSetup;
+  // One menu holds everything that is not a one-press run: the actions past
+  // the third, where they run, and the task's worktree setup. Each used to be
+  // its own text control in the window's title bar.
+  const inMenu = rest.length > 0 || folderChoices.length > 0;
   return createPortal(
     <div
       aria-label="Project actions"
       className="project-action-buttons window-no-drag"
       role="group"
     >
-      {props.onSetup === undefined ? null : (
-        <OctantButton onClick={props.onSetup} size="sm" type="button" variant="ghost">
-          Worktrees
-        </OctantButton>
-      )}
       {inline.map((action) => (
         <OctantButton
           key={String(action.id)}
@@ -75,49 +110,57 @@ export function ProjectActionButtons(props: ProjectActionButtonsProps) {
           {action.name}
         </OctantButton>
       ))}
-      {rest.length === 0 ? null : (
-        <OctantMenu
-          items={rest.map((action) => ({ label: action.name, value: String(action.id) }))}
-          onValueChange={(value) => {
-            const selected = rest.find((action) => String(action.id) === value);
-            if (selected !== undefined) run(selected);
-          }}
-          selectionMode="action"
-          trigger={<span>More</span>}
-          triggerClassName="project-action-buttons__more"
-          triggerLabel="More Project actions"
-          value=""
-        />
-      )}
-      {extras.length === 0 && props.defaultFolderLabel === undefined ? null : (
-        <OctantMenu
-          items={[
-            ...(props.defaultFolderLabel === undefined
-              ? [{ label: `${folderName(props.mainFolder ?? "")} (main)`, value: "" }]
-              : [
-                  { label: props.defaultFolderLabel, value: "" },
-                  ...(props.mainFolder === undefined
-                    ? []
-                    : [
-                        {
-                          label: `${folderName(props.mainFolder)} (Project folder)`,
-                          value: props.mainFolder,
-                        },
-                      ]),
-                ]),
-            ...extras.map((path) => ({ label: folderName(path), value: path })),
-          ]}
-          onValueChange={setChosen}
-          trigger={
-            <span>
-              Run in:{" "}
-              {folder === "" ? (props.defaultFolderLabel ?? "main folder") : folderName(folder)}
-            </span>
-          }
-          triggerClassName="project-action-buttons__more"
-          triggerLabel="Folder to run actions in"
-          value={folder}
-        />
+      {inMenu ? (
+        <OctantMenuRoot>
+          <OctantMenuTrigger
+            aria-label="More Project actions"
+            render={<OctantButton size="sm" variant="ghost" />}
+          >
+            <span>More</span>
+            <ChevronDown aria-hidden="true" size={12} />
+          </OctantMenuTrigger>
+          <OctantMenuPortal>
+            <OctantMenuPositioner align="end">
+              <OctantMenuPopup>
+                {rest.map((action) => (
+                  <OctantMenuItem
+                    key={String(action.id)}
+                    onClick={() => run(action)}
+                    title={action.command}
+                  >
+                    <Play aria-hidden="true" size={12} />
+                    {action.name}
+                  </OctantMenuItem>
+                ))}
+                {folderChoices.length === 0 ? null : (
+                  <>
+                    {rest.length === 0 ? null : <OctantMenuSeparator />}
+                    <OctantMenuGroup>
+                      <OctantMenuGroupLabel>Run in</OctantMenuGroupLabel>
+                      <OctantMenuRadioGroup onValueChange={setChosen} value={folder}>
+                        {folderChoices.map((choice) => (
+                          <OctantMenuRadioItem key={choice.value} value={choice.value}>
+                            {choice.label}
+                          </OctantMenuRadioItem>
+                        ))}
+                      </OctantMenuRadioGroup>
+                    </OctantMenuGroup>
+                  </>
+                )}
+                {onSetup === undefined ? null : (
+                  <>
+                    <OctantMenuSeparator />
+                    <OctantMenuItem onClick={onSetup}>Worktrees…</OctantMenuItem>
+                  </>
+                )}
+              </OctantMenuPopup>
+            </OctantMenuPositioner>
+          </OctantMenuPortal>
+        </OctantMenuRoot>
+      ) : onSetup === undefined ? null : (
+        <OctantButton onClick={onSetup} size="sm" type="button" variant="ghost">
+          Worktrees
+        </OctantButton>
       )}
     </div>,
     host,

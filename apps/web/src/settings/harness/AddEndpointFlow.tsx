@@ -445,7 +445,7 @@ function ConnectStep(props: ConnectStepProps) {
               onClick={() => void props.onProbe(added.instance.id, { quiet: true })}
               size="sm"
               type="button"
-              variant="outline"
+              variant="secondary"
             >
               {status.fix.label}
             </OctantButton>
@@ -454,7 +454,7 @@ function ConnectStep(props: ConnectStepProps) {
               onClick={() => props.onOpenAdded(focusForFix(status))}
               size="sm"
               type="button"
-              variant="outline"
+              variant="secondary"
             >
               Open details to fix
             </OctantButton>
@@ -659,7 +659,7 @@ function ConnectStep(props: ConnectStepProps) {
               }}
               size="sm"
               type="button"
-              variant="outline"
+              variant="secondary"
             >
               Switch to Azure AI Foundry
             </OctantButton>
@@ -1206,7 +1206,7 @@ function DeploymentChips(props: {
           onClick={addDraft}
           size="sm"
           type="button"
-          variant="outline"
+          variant="secondary"
         >
           Add deployment
         </OctantButton>
@@ -1418,7 +1418,7 @@ function CatalogueStep(props: ModelsStepProps) {
               onClick={() => void props.onProbe(instance.id, { quiet: true })}
               size="sm"
               type="button"
-              variant="outline"
+              variant="secondary"
             >
               Check again
             </OctantButton>
@@ -1446,7 +1446,7 @@ function CatalogueStep(props: ModelsStepProps) {
             onClick={addById}
             size="sm"
             type="button"
-            variant="outline"
+            variant="secondary"
           >
             Add by ID
           </OctantButton>
@@ -2010,7 +2010,12 @@ function DoneStep(props: {
         />
       )}
       <div className="endpoint-flow__actions">
-        <OctantButton onClick={() => props.onOpenAdded()} size="sm" type="button" variant="outline">
+        <OctantButton
+          onClick={() => props.onOpenAdded()}
+          size="sm"
+          type="button"
+          variant="secondary"
+        >
           Open details
         </OctantButton>
         <OctantButton onClick={props.onClose} size="sm" type="button">

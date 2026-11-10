@@ -31,7 +31,7 @@ import {
   threadAccessOf,
   type PickerGroup,
 } from "@octant/domain";
-import { CirclePause, FileOutput, X } from "lucide-react";
+import { ChevronDown, CirclePause, FileOutput, X } from "lucide-react";
 import { OctantMenu } from "../ui/base/OctantMenu";
 import { ThreadReplyDetailMenu, ThreadReplyDetailScope } from "../transcript/ThreadReplyDetail";
 import {
@@ -43,6 +43,7 @@ import {
   type ReactNode,
 } from "react";
 import { ThreadComposer } from "../composer/ThreadComposer";
+import { ThreadInfo } from "../composer/ThreadInfo";
 import { useDelayedForceStop } from "../composer/useDelayedForceStop";
 import { ComposerAttachButton } from "../composer/ComposerAttachButton";
 import { ComposerVoiceButton } from "../voice/ComposerVoiceButton";
@@ -63,7 +64,7 @@ import {
   COMPOSER_STAGED_DROPPED_NOTE,
 } from "../composer/composerThreadDraftStore";
 import { ShellState } from "../shell/ShellState";
-import { OctantButton } from "../ui/base/OctantButton";
+import { OctantButton, octantButtonClassName } from "../ui/base/OctantButton";
 import { OctantAlert } from "../ui/base/OctantAlert";
 import { OctantSeparatorWithLabel } from "../ui/base/OctantSeparator";
 import { OctantTextarea } from "../ui/base/OctantTextarea";
@@ -1483,22 +1484,9 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
         {/* No identity header. The title repeated the pane's own grip, the
           lifecycle badge said "Active" on nearly every thread, the branch is
           the Environment summary's fact, and follow-up is the thread row's
-          right-click menu. Live subagents, the last thing it held, now sit in
-          the composer's tray. The one line it keeps is the guardrail level in
-          force and the scope it came from. */}
-        <ThreadGuardrailLevel
-          factsVersion={thread.version}
-          factsActivity={`${providerTurnOperationId ?? ""}:${props.controller.turnStatus}`}
-          autoSupported={
-            props.autoReview === undefined
-              ? props.harnessAutoReviewSupported === true
-              : props.autoReview.status === "reviewer"
-          }
-          mode={permissionModeOf(thread)}
-          projectId={String(thread.projectId)}
-          surface="code"
-        />
-
+          right-click menu. Live subagents sit in the composer's tray, and the
+          guardrail level in force is the first row of the thread's info panel
+          above the composer. */}
         {props.controller.errorMessage === undefined ||
         (turnErrorCallout &&
           props.controller.errorMessage === props.controller.turnError) ? null : (
@@ -1515,7 +1503,12 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
               <CirclePause aria-hidden="true" size={14} strokeWidth={1.8} />
               <span>
                 {props.controller.providerRequests.length === 0 &&
-                props.controller.turnError !== undefined
+                props.controller.turnError !== undefined &&
+                // The parked turn's own row in the transcript already says
+                // why. Repeated here, a thread with three parked turns read
+                // the same sentence four times.
+                props.controller.conversation.at(-1)?.text.includes(props.controller.turnError) !==
+                  true
                   ? `Waiting · ${props.controller.turnError}`
                   : props.controller.providerAnswerRefusal === undefined
                     ? waitingTurnLabel(props.controller.providerRequests)
@@ -1664,16 +1657,6 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
             <TranscriptWindow
               trail={
                 <>
-                  <CommandCredentialRequests
-                    threadId={String(props.threadId)}
-                    projectId={
-                      view?.thread.projectId === undefined
-                        ? undefined
-                        : String(view.thread.projectId)
-                    }
-                    serverUrl={props.serverUrl}
-                    windowCapability={props.windowCapability}
-                  />
                   <CredentialRequests
                     key={String(props.threadId)}
                     threadId={String(props.threadId)}
@@ -2224,14 +2207,6 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
 
         <InlineThreadPlan {...(changedFiles === undefined ? {} : { changedFiles })} />
         {!displayReady ||
-        props.pairedDevice === true ||
-        codeClient?.providerCloudSessions === undefined ? null : (
-          <div className="thread-column">
-            <ProviderCloudSessions client={codeClient.providerCloudSessions} threadId={thread.id} />
-          </div>
-        )}
-
-        {!displayReady ||
         props.imageGenerationClient === undefined ||
         props.imageGenerationProfiles === undefined ? null : (
           <GeneratedImageJobs
@@ -2253,16 +2228,6 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
             threadId={decodeBrowserThreadId(String(thread.id))}
           />
         )}
-        <ContinueElsewhere
-          mode="code"
-          threadId={String(thread.id)}
-          groups={threadModelGroups}
-          selected={thread}
-          policy={continuation.policy}
-          onPolicyChange={continuation.change}
-          onProviderChange={changeProvider}
-          disabled={busy}
-        />
         {props.controller.providerRequests.length === 0 ? null : (
           <div
             aria-label="Pending provider requests"
@@ -2348,6 +2313,93 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
           threadBusy={busy || (messageQueue.snapshot?.items.length ?? 0) > 0}
           presentation="follow-up"
           {...(threadDropKey === undefined ? {} : { threadDropKey })}
+          info={
+            <ThreadInfo>
+              <ThreadGuardrailLevel
+                factsVersion={thread.version}
+                factsActivity={`${providerTurnOperationId ?? ""}:${props.controller.turnStatus}`}
+                autoSupported={
+                  props.autoReview === undefined
+                    ? props.harnessAutoReviewSupported === true
+                    : props.autoReview.status === "reviewer"
+                }
+                mode={permissionModeOf(thread)}
+                projectId={String(thread.projectId)}
+                surface="code"
+              />
+              <ThreadReplyDetailMenu labelled />
+              {thread.documentDelivery === "native-artifacts" || artifactsChoosable ? (
+                <OctantMenu
+                  items={
+                    thread.documentDelivery === "native-artifacts"
+                      ? [
+                          {
+                            value: "canvas",
+                            label: "Use Canvas instead of Claude artifacts",
+                            disabled: deliveryChanging,
+                          },
+                        ]
+                      : [
+                          {
+                            value: "native-artifacts",
+                            label: "Use Claude artifacts instead of Canvas",
+                            disabled: deliveryChanging,
+                          },
+                        ]
+                  }
+                  onValueChange={(value) => {
+                    if (value === "canvas") void changeDocumentDelivery("canvas");
+                    else setConfirmArtifacts(true);
+                  }}
+                  selectionMode="action"
+                  trigger={
+                    <>
+                      <FileOutput aria-hidden="true" size={14} strokeWidth={1.7} />
+                      <span>
+                        Documents:{" "}
+                        {thread.documentDelivery === "native-artifacts"
+                          ? "Claude artifacts"
+                          : "Canvas"}
+                      </span>
+                      <ChevronDown aria-hidden="true" size={12} />
+                    </>
+                  }
+                  triggerClassName={octantButtonClassName({ variant: "ghost", size: "sm" })}
+                  triggerLabel="How this thread delivers documents"
+                  value=""
+                />
+              ) : null}
+              <ThreadNativeSetupControl
+                disabled={accessChanging}
+                providerInstanceId={thread.providerInstanceId}
+                threadId={String(thread.id)}
+              />
+              <CommandCredentialRequests
+                threadId={String(props.threadId)}
+                projectId={String(thread.projectId)}
+                serverUrl={props.serverUrl}
+                windowCapability={props.windowCapability}
+              />
+              {!displayReady ||
+              props.pairedDevice === true ||
+              codeClient?.providerCloudSessions === undefined ? null : (
+                <ProviderCloudSessions
+                  client={codeClient.providerCloudSessions}
+                  threadId={thread.id}
+                />
+              )}
+              <ContinueElsewhere
+                mode="code"
+                threadId={String(thread.id)}
+                groups={threadModelGroups}
+                selected={thread}
+                policy={continuation.policy}
+                onPolicyChange={continuation.change}
+                onProviderChange={changeProvider}
+                disabled={busy}
+              />
+            </ThreadInfo>
+          }
           context={
             <CodeCheckoutBar
               {...(props.onCreatePullRequest === undefined
@@ -2357,6 +2409,9 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
               {...(serverProject === undefined || props.onOpenGit === undefined
                 ? {}
                 : { onOpenServerGit: props.onOpenGit })}
+              {...(props.onOpenReview === undefined
+                ? {}
+                : { onOpenReview: () => props.onOpenReview?.() })}
             />
           }
           className="thread-composer code-thread-workspace__composer thread-column"
@@ -2615,37 +2670,6 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
                 {plan == null || plan.status === "withdrawn" ? (
                   <ThreadPlanProposal key={String(thread.id)} />
                 ) : null}
-                {thread.documentDelivery === "native-artifacts" || artifactsChoosable ? (
-                  <OctantMenu
-                    items={
-                      thread.documentDelivery === "native-artifacts"
-                        ? [
-                            {
-                              value: "canvas",
-                              label: "Use Canvas instead of Claude artifacts",
-                              disabled: deliveryChanging,
-                            },
-                          ]
-                        : [
-                            {
-                              value: "native-artifacts",
-                              label: "Use Claude artifacts instead of Canvas",
-                              disabled: deliveryChanging,
-                            },
-                          ]
-                    }
-                    onValueChange={(value) => {
-                      if (value === "canvas") void changeDocumentDelivery("canvas");
-                      else setConfirmArtifacts(true);
-                    }}
-                    selectionMode="action"
-                    trigger={<FileOutput aria-hidden="true" size={16} />}
-                    triggerClassName="shell-icon-button"
-                    triggerLabel="How this thread delivers documents"
-                    value=""
-                  />
-                ) : null}
-                <ThreadReplyDetailMenu />
                 {confirmArtifacts ? (
                   <ThreadArtifactsConfirm
                     onCancel={() => setConfirmArtifacts(false)}
@@ -2653,11 +2677,6 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
                     pending={deliveryChanging}
                   />
                 ) : null}
-                <ThreadNativeSetupControl
-                  disabled={accessChanging}
-                  providerInstanceId={thread.providerInstanceId}
-                  threadId={String(thread.id)}
-                />
                 <PermissionModePicker
                   autoSupported={props.harnessAutoReviewSupported === true}
                   autoReview={props.autoReview}

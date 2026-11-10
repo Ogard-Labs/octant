@@ -304,7 +304,7 @@ describe("CodeComposerAdapter", () => {
     );
   });
 
-  it("puts Project, branch, and Environment on the context row inside the composer, above the prompt", () => {
+  it("puts Project, branch, and Environment on the context row above the composer card", () => {
     const { container } = render(<CodeComposerAdapter {...defaultProps} hosts={twoHosts} />);
     const frame = container.querySelector(".composer");
     const dock = container.querySelector(".composer-tray");
@@ -315,7 +315,9 @@ describe("CodeComposerAdapter", () => {
     if (frame === null || dock === null || row === null) {
       throw new Error("Composer stack is incomplete.");
     }
-    expect(frame.contains(dock)).toBe(true);
+    // The card holds the prompt and its toolbar; where the thread runs stands
+    // on the page above it.
+    expect(frame.contains(dock)).toBe(false);
     expect(
       dock.compareDocumentPosition(screen.getByRole("textbox", { name: "First message" })) &
         Node.DOCUMENT_POSITION_FOLLOWING,
@@ -440,13 +442,14 @@ describe("CodeComposerAdapter", () => {
     expect(screen.getByRole("button", { name: "Base branch" })).toHaveTextContent("development");
   });
 
-  it("keeps repository context on the context row inside the composer", () => {
+  it("keeps repository context on the context row above the composer", () => {
     const { container } = render(<CodeComposerAdapter {...defaultProps} />);
     const frame = container.querySelector(".composer");
     const dock = container.querySelector(".composer-tray");
     expect(frame).not.toBeNull();
     expect(dock).not.toBeNull();
-    expect(frame?.contains(dock)).toBe(true);
+    expect(frame?.contains(dock)).toBe(false);
+    expect(dock?.closest(".composer-stack")).toBe(frame?.closest(".composer-stack"));
     expect(dock?.textContent).toContain("development");
     expect(container.querySelector('[class*="context-strip"]')).toBeNull();
   });

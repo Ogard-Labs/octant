@@ -1,6 +1,8 @@
 export interface HostActivity {
   readonly activeAgentCount: number;
   readonly attentionRequired: boolean;
+  /** A category, never a provider's name: this route is unauthenticated. */
+  readonly attentionReason?: "provider-not-ready" | "provider-stopped";
 }
 
 export function healthResponse(
@@ -20,4 +22,17 @@ export function healthResponse(
     // attached to it can tell a host started without the web build path.
     ...(canvasPreviewPage === undefined ? {} : { canvasPreviewPage }),
   });
+}
+
+/** What `/health` says about work and attention, read from the provider registry. */
+export function hostActivity(registry: {
+  activeSessionTotal(): number;
+  attentionReason(): HostActivity["attentionReason"];
+}): HostActivity {
+  const attentionReason = registry.attentionReason();
+  return {
+    activeAgentCount: registry.activeSessionTotal(),
+    attentionRequired: attentionReason !== undefined,
+    ...(attentionReason === undefined ? {} : { attentionReason }),
+  };
 }

@@ -1,33 +1,36 @@
-/* Vitals: load on the host a thread works on. One tile per reading, each a
-   label and figure over a short history line; the dock's width never forces
-   horizontal scroll. */
+/* Vitals: load on the host a thread works on. One row per reading, a label
+   and its figure over a short history line, on the dock's own surface with a
+   hairline between rows. As bordered tiles on the page colour it was a black
+   panel of boxes inside a dock that draws neither. The dock's width never
+   forces horizontal scroll. */
 
 .vitals {
   display: grid;
-  gap: var(--oct-space-3);
   align-content: start;
   height: 100%;
   min-width: 0;
-  padding: var(--oct-space-3);
+  padding: var(--oct-space-1) var(--oct-space-3);
   overflow-y: auto;
   color: var(--oct-fg);
   font-size: var(--oct-text-sm);
-  background: var(--oct-bg);
 }
 
 .vitals__empty {
   margin: 0;
+  padding-block: var(--oct-space-3);
   color: var(--oct-muted);
 }
 
-.vitals__tile {
+.vitals__row {
   display: grid;
   gap: var(--oct-space-2);
   min-width: 0;
-  padding: var(--oct-space-3);
-  border: 1px solid var(--oct-border);
-  border-radius: var(--oct-radius-md);
-  background: var(--oct-surface);
+  padding-block: var(--oct-space-3);
+  border-top: 1px solid var(--oct-hairline);
+}
+
+.vitals__row:first-child {
+  border-top: 0;
 }
 
 .vitals__head {

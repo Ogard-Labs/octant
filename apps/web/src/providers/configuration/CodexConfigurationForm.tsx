@@ -77,7 +77,7 @@ export function CodexConfigurationForm(props: CodexConfigurationFormProps) {
         <OctantButton
           disabled={props.disabled}
           type="submit"
-          variant="outline"
+          variant="secondary"
           size="sm"
           aria-label={`Save Codex settings for ${props.instance.displayName}`}
         >

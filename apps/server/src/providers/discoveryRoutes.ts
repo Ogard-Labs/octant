@@ -1,3 +1,4 @@
+import { access } from "node:fs/promises";
 import { isAbsolute } from "node:path";
 import {
   decodeDiscoveryCommand,
@@ -54,8 +55,19 @@ export interface DiscoveryRouteDependencies {
     windowId: string,
     command: ProviderRegistryCommand,
   ) => Promise<unknown>;
+  /** Whether a saved binary path still names a file; the filesystem by default. */
+  readonly binaryExists?: (binaryPath: string) => Promise<boolean>;
   readonly maxRequestBodySize?: number;
   readonly now?: () => number;
+}
+
+async function fileExists(path: string): Promise<boolean> {
+  try {
+    await access(path);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 export function createDiscoveryRouteHandler(dependencies: DiscoveryRouteDependencies) {
@@ -160,6 +172,8 @@ export function createDiscoveryRouteHandler(dependencies: DiscoveryRouteDependen
         let snapshot = await dependencies.discoveryService.scan();
         const listInstances = dependencies.listInstances;
         const createFromDiscovery = dependencies.createFromDiscovery;
+        const applyProviderCommand = dependencies.applyProviderCommand;
+        const binaryExists = dependencies.binaryExists ?? fileExists;
         if (listInstances !== undefined && createFromDiscovery !== undefined) {
           const result = await autoRegisterPreferredCandidates({
             snapshot,
@@ -168,6 +182,17 @@ export function createDiscoveryRouteHandler(dependencies: DiscoveryRouteDependen
               (await createFromDiscovery(candidate, windowId, options)).instanceId,
             // Missing onboarding is fail-closed: never enable from an unwired host.
             firstRunOnboarding: (await dependencies.readFirstRunOnboarding?.()) ?? "completed",
+            ...(applyProviderCommand === undefined
+              ? {}
+              : {
+                  movedBinaries: {
+                    exists: binaryExists,
+                    repoint: async (instance, binaryPath) => {
+                      const command = locatedBinaryCommand(instance, binaryPath);
+                      if (command !== undefined) await applyProviderCommand(windowId, command);
+                    },
+                  },
+                }),
           });
           snapshot = result.snapshot;
         }

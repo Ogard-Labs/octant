@@ -329,16 +329,28 @@ frame: the wide measure, so Back, the title, and the actions sit on the same lef
 and right edges from page to page. A list there runs the frame's width; a board's
 columns may use all of it. Settings is the same shell with a 920px measure and its own
 navigation rail; the rail names each group of pages with a quiet label and
-draws no hairline between groups. The groups are General (General, Profile,
-Notifications), Look & feel (Appearance, Sidebar, Keybindings), Modes (each
-mode's defaults), AI & models (Providers & Models, Octant Harness, Voice &
-images: which provider or model answers each job), Tools (Skills & Extensions,
-Computer use, Device tools, GitHub, Linear: what a running agent may reach),
-Privacy & data (Permissions, Data & storage, Sync, Remote access), and Advanced
-(Host, Usage). Permissions holds what a person has already allowed (remembered
-websites, remembered tool approvals, public links); Data & storage holds what
-the host keeps (data map, caches, backup, recovery, export, retention, purge);
-Notifications holds what Octant sends while a person is away. AI & models
+draws no hairline between groups. There are six groups, each one question a
+person brings to Settings, and a group lists its pages in this order: General
+(General alone: who you are, app-wide defaults, and what Octant tells you), Look &
+feel (Appearance, Sidebar, Keybindings), AI (Providers & Models, Octant Harness,
+Voice & images, then Chat, Work and Code: which provider or model answers each
+job, and how each mode starts), Tools (Skills & Extensions, Computer use, Device
+tools, GitHub, Linear: what a running agent may reach), Safety (Permissions,
+Secret stores, Memory: what an agent may touch, reach and remember), and
+Data & devices (Data & storage, Sync, Remote access, Host, Usage: what this
+computer stores and the other machines it talks to). An earlier Privacy & data
+group had grown to seven pages answering three different questions, Modes stood
+apart from the models its pages choose, and Advanced held two pages. General
+opens on Your identity (the profile) and ends on Notifications (what Octant
+sends while a person is away); Permissions holds the files no agent may touch,
+then the network places and servers agents may reach (Network limits, Safe
+networks, Servers), then what a person has already allowed (remembered
+websites, remembered tool approvals, public links). Profile and Notifications
+were pages of one and two controls, and Access was the other half of the
+question Permissions answers, so the rail listed three pages a person rarely
+needed alone; links to those pages open the page that holds them now. Data &
+storage holds what the host keeps (data map, caches, backup, recovery, export,
+retention, purge). AI
 lists each provider kind on the page of what it serves: Providers & Models
 holds the agent runtimes Octant drives (ACP agents, CLIs, the Agent SDK, RPC
 runtimes), and its manual add form offers only those kinds. It opens on the
@@ -422,6 +434,13 @@ error instead of retaining another integration's account controls.
   its own section, last on the page, whose card holds the destructive row
   with the destructive button variant. The danger is carried by the
   placement and the confirm control; the label keeps its ink.
+- **Actions.** A Settings action is the secondary button: the quiet control
+  fill and no edge, the way a Mac push button is drawn. The page's one main
+  action may take the primary button, a quiet or in-row extra the ghost
+  button, and the destructive group its own variant. Settings does not use
+  the outline button: the same kind of action was drawn filled on one row and
+  outlined on the next (62 outlined beside 113 filled), so a page of rows read
+  as two unrelated sets of controls.
 - **Rail.** Each page keeps its icon (16px) in the navigation rail, and
   Device tools has its own, apart from Computer use. The open page takes the
   same neutral wash of the ink as the open thread in the workspace sidebar,
@@ -563,7 +582,7 @@ and cost with Previous and Next turn controls.
 
 **Plan meters.** Remaining plan usage stands above the composer, right-aligned on
 the same row as where the work runs: the strip above a thread's box, and on a
-start screen the end of the context-chip row inside the card (it drops to its
+start screen the end of the context-chip row above the card (it drops to its
 own right-aligned line when the chips leave no room). Two compact meters read
 `5h ▬▬▬ 85%  wk ▬▬ 43%`: the shortest window the provider reported and the
 longest, each a short name (`wk` for a week, `mo` for a month) in the primary
@@ -586,7 +605,8 @@ just before send, and send is the round accent-filled button with an up arrow.
 
 **Usage-limit warning.** On a start screen, when the chosen account has a window
 that is spent or at 80% used (the same levels the meters colour), a warning
-callout takes the full row above the context chips: which account, that it has
+callout takes the full row above the context chips, on the page above the
+card: which account, that it has
 reached or is close to its usage limit, and the reset time the provider gave.
 For each other ready account that has room (an observed window below the near
 level; an account with no observed window is never offered as having room) up to
@@ -645,25 +665,32 @@ different task.
 
 Every composer has one shape, on a start screen or under a thread, in Chat,
 Work, and Code: the same width, corner (`--oct-radius-lg`), hairline ring and
-mid shadow, a prompt two lines tall before it grows with the same insets, and
-the transcript's own type size, so a message looks the same in the box as in
-the bubble it becomes. Its width is the reading measure; in a split every
+mid shadow, the same insets, and the transcript's own type size, so a message
+looks the same in the box as in the bubble it becomes. The empty prompt is two
+lines tall on a start screen and one line under a thread, and grows as the
+person types: at two lines the empty reply box stood 114px tall under every
+conversation. Its width is the reading measure; in a split every
 composer takes the narrowest pane's room, so composers side by side match
 instead of each filling its own pane. A start screen's composer docks 12px
 above the pane's foot, where a thread's sits, so the two line up across a
-split; a start screen's card adds only its row of where-it-runs chips. Nothing
-about the box changes while a turn runs. The composer is prompt first; its toolbar row holds how the thread runs (attach, image and access
+split; a start screen's card is the same box, with its row of where-it-runs
+chips on the page above it. Nothing about the box changes while a turn runs. The composer is prompt first; its toolbar row holds how the thread runs (attach, image and access
 on the left; the context ring, model and microphone on the right, next to send).
 The model button names a chosen reasoning effort after the model in muted ink
 ("GPT-6 Astra Medium"); the provider default names none. Where the thread runs
-(Project, base branch, checkout, Environment, repository) is the first row
-inside the card, above the prompt, as quiet chips set together from the left,
-the first label lined up with the prompt's text: meta ink and no fill at rest,
-a fill only under the pointer or while the chip's menu is open, the same as
-the access and model controls under the prompt. Plan meters keep the right
-end of that row. The composer stays a single object. On a start screen the
-Project chooser stands just above the card's top-left edge as plain text,
-lifted out of the row so it never pushes the prompt down. Code's
+(Project, working folder, base branch, checkout, Environment, repository) is
+one row on the page just above the card, as quiet chips set together from the
+left: meta ink and no fill at rest, a fill only under the pointer or while the
+chip's menu is open, the same as the access and model controls under the
+prompt. Plan meters keep the right end of that row. The card itself holds only
+the prompt and its toolbar, so a start screen's composer and a thread's are
+the same object with the same strip above it. Inside the card the row stood
+between the person and the prompt, and a control that was more than a label
+grew the card: a Project with extra folders drew a select, a labelled field
+and a paragraph there. That choice is one chip now ("Main folder", or "Main
+folder / src"), whose two fields open over the page; a subfolder the host
+would refuse stays on the chip in the danger ink until it is corrected. The
+Project chooser is the row's first chip. Code's
 base-branch chip is absent until a Project is chosen: with no Project it
 would name a branch of nothing. The chip
 is painted on the plain element that holds each control, never on the shared
@@ -711,7 +738,7 @@ and is never pre-selected; Auto uses the provider's own reviewer or
 [Octant Shield](docs/architecture.md#octant-shield), so it is listed for every
 runtime, and where no reviewer can run the picker shows it unavailable with
 the reason; the pick becomes the default for every new Work and Code thread
-until changed in Settings › Access or for one Project) — and ends in one primary action, Start a task,
+until changed in Settings › Work or Settings › Code, or for one Project) — and ends in one primary action, Start a task,
 that opens the new-task composer in that Project. Every step is optional from
 the first one. Opening setup focuses the current step's heading so a long
 provider list does not scroll past its introduction; Tab then reaches the
@@ -929,11 +956,30 @@ produced is boxed. Over the application ground, the conversation supplies one qu
 continuous reading veil below the title band: the sheet colour at 80%, so the
 ground stays faintly visible behind the transcript. Replies remain bare prose, including on translucent
 workspaces; user bubbles and the composer retain glass over the application
-ground. Under Glass the thread's container stays clear, the ground steps down to a fifth of its strength while a thread is on screen, and keeps a quarter of it under the sidebar, so it never reads as letters behind text. Reduced transparency keeps the reading background opaque.
+ground. Under Glass the thread's container stays clear, the ground steps down to an eighth of its strength while a thread is on screen, and keeps a quarter of it under the sidebar, so it never reads as letters behind text. Reduced transparency keeps the reading background opaque.
+Under window Glass the page is the desktop seen through the window, so nothing
+inside the shell is filled with one of the theme's opaque colours: the control
+fill (a secondary button, a segmented control, a select, a chip, a ghost
+button's hover) is the primary text at 7%, 11% hovered and 15% pressed, the
+step the theme's control sits above its own page, and the composer and the
+person's messages are a 30% veil of the page colour under the primary text at
+6%, with the glass hairline. What is chosen (the mode in the switch, a
+selected row) is the primary text at 12%; a switch's track at rest is the
+pressed control tint and its thumb, off, the primary text at 62%, so it is
+never the page's black on a dark track; a toned notice's ground is its tone at
+14%, and a plain notice takes the control tint. The shell's own loading state
+(Opening Settings) is clear on the shell's surface, where the opaque page
+colour turned the whole window black for the moment Settings took to load. On an OLED
+preset over a bright desktop the opaque fills stood as near-black blocks on
+mid-grey glass: every Settings button, each message and the composer. Menus,
+popovers and dialogs sit outside the shell and stay opaque, and reduced
+transparency keeps the theme's own fills.
 The follow-up composer has 24px of space above it outside the transcript
-scroll frame, so a reply never touches the input. Running text keeps a 72ch
-measure; tables and code blocks run the column's width, ending on the same edge
-as the composer; markdown headings inside it are labels
+scroll frame, so a reply never touches the input. Running text, tables and code
+blocks all run the column's width, which is the reading width the person chose,
+and end on the same edge as the divider, the bubble and the composer (a 72ch cap
+on prose stopped paragraphs at about 635px at every width past Narrow, so the
+setting only ever moved tables); markdown headings inside it are labels
 (14/13/13, weight 500), lists sit 4px apart, and a fenced block is a
 `CodeBlock`: a 28px header strip naming the language with a ghost copy control,
 then detail-size mono on the application ground. Tool rows are 28px each, the
@@ -988,12 +1034,13 @@ Code, wherever `TurnActivityRows` and `AssistantMessageBody` draw a turn:
   turn's tool rows are open; Settings › Chat › Stream replies still alone
   decides whether the partial answer shows, at every level.
 
-The thread's own choice is a menu beside the thread's other actions: in Chat's
-header just before Thread actions, and among the leading controls of the Work and
-Code composer row. Its trigger is the shared `shell-icon-button` (`ListCollapse`) whose
-name says the level in effect and whose it is ("Reply detail: High, this
-thread's own" or "Reply detail: Low, the default"), because a menu trigger
-cannot otherwise show its selection. Its radio items are **Use default (Low)**
+The thread's own choice is a row of the thread's
+[info panel](docs/design/workspace.md#thread-info) in Chat, Work, and Code. Its
+trigger writes the level in effect ("Reply detail: Low") beside the
+`ListCollapse` glyph, and its name also says whose the level is ("Reply
+detail: High, this thread's own" or "Reply detail: Low, the default"). As a
+bare glyph in the composer row it read as one of two unexplained list icons.
+Its radio items are **Use default (Low)**
 (naming the current default; "Follow the level in Settings") and the three
 levels, with short descriptions that fit a phone-width menu: "Thinking and
 finished tool calls folded", "Thinking's first line, tool calls listed",
@@ -1445,7 +1492,7 @@ the person a next step. In light the card is workspace white on the
 `--octant-app-background` well, not the grey floating fill — that fill reads
 as a sunken field. Code welcome keeps one stable question while Project and
 Environment sit on the context row above the composer
-(`.composer-tray--above`, rendered beside the card inside `.composer-stack`),
+(`.composer-tray--start`, rendered before the card inside `.composer-stack`),
 on the page ground with no band chrome. The base-branch chip joins that row
 once a Project is chosen. Environment is the
 create-facing presentation of Octant's authoritative host federation: its
@@ -1505,6 +1552,11 @@ read through:
 - a thread's user bubbles and composer over the application ground or window
   glass, one material either way (agent replies stay bare prose; see
   [Transcript](#transcript));
+- Code Home's cards and its Up next and Continue cards, which stand on the
+  start screen's ground beside the composer and wear its material, so the
+  ground reads evenly behind every surface on the screen (with the plain card
+  fill its characters ran through the cards at full strength while the
+  composer beside them was frosted);
 - Zen's windows, dock, pills, and sheets (glass cards);
 - the floating activity picture-in-picture, and the Browser's live preview,
   which shows the page itself and frosts only its caption, count, and close
@@ -1513,7 +1565,14 @@ read through:
 
 Its tint, stroke, and highlight are theme roles, and its floor is the theme's
 page colour at 66%, so a neutral or tinted preset gets no fixed warm cast under
-the composer. Reduced transparency and unsupported `backdrop-filter` resolve
+the composer. The thick and chrome tints poured over that floor are the theme's
+raised surface at 56% and 48%: as a fixed neutral grey they made the composer a
+flat grey slab on a black or tinted preset. Together the floor and tint are
+dense enough that the ground stays quiet behind text where the engine does not
+blur it (the packaged window over the ground). Under window Glass the floor and
+the tints are lighter, as the conversation rule on Glass says: a 30% veil of
+the page colour under the primary text at 6% (4% for chrome), because over the
+desktop the dense pair read as a near-black slab. Reduced transparency and unsupported `backdrop-filter` resolve
 every one of them to an opaque surface.
 
 Window glass is the `sidebarMaterial` shell setting with the theme's vibrancy
@@ -1548,8 +1607,10 @@ stage), defined once on every shell in `shell.css`:
 - **The Browser** is clear on its own start page, whose rows take the card
   step; a loaded page keeps its opaque canvas.
 
-Controls keep their own opaque fills (a switch thumb, a filled or secondary
-button, a segmented track), and menus, popovers, and dialogs keep the opaque
+A filled button and a switch that is on keep their own fills. The control fill (a
+secondary button, a segmented track, a select, a chip, a ghost button's hover)
+is a tint of the primary text at 7%, 11% hovered and 15% pressed, as the
+conversation rule on Glass says; menus, popovers, and dialogs keep the opaque
 floating surface. Increased contrast and reduced transparency return cards and
 outline buttons to their opaque colours. The ground behind it all steps down
 by what is on screen: a fifth of its strength behind any surface that shows
@@ -1729,9 +1790,10 @@ the light theme and as a tint with a coloured count in the dark one. At 960px an
 narrower, where no rail shows (the same breakpoint as the rail's own, one
 number), and in the phone drawer, the four destinations are compact rows
 instead: icon, name, and the count at the trailing edge, with no fill, so they
-sit quieter than the thread list under them. Under Colour the row's icon takes the
-same hue as the rail's icon, so the four places read in the same colours
-whichever layout shows them; the name and the count stay in the sidebar ink. Each row keeps its name with its
+sit quieter than the thread list under them. The row's icon, like every icon in
+the rail, stays in the sidebar ink in every style, and each count has one mark
+wherever it shows (Inbox, a play circle for Running, an eye for To review, a
+ticked circle for Done today); the name and the count stay in the sidebar ink. Each row keeps its name with its
 count and its destination. The drawer itself paints the opaque sidebar surface
 in every material, since it overlays the page and a transparent drawer let the
 page's text show through it.
@@ -1804,13 +1866,21 @@ rows divided by the surface's inset hairline and never filled. A row holds a
 there is none, never an approximation of a brand mark), the name in the
 row-label role, one status line in secondary ink (state, model count, maker
 and runtime), and the details chevron and enable switch at the trailing edge.
-The chevron is the row's disclosure (`aria-expanded`): the details expand in
-place inside the row, under a hairline, and keep every control and fact. The
-page opens at most one row by itself, the first that needs attention (a
-sign-in, or a binary the scan found for a broken runtime), and none when no
-provider does. A card per provider, two to a row, made the boxes the loudest
-thing on the page, and one open card among nine shut ones ran to about eight
-screens. The state line
+The chevron is the row's disclosure (`aria-expanded`). A provider a person
+opens becomes the page: its row and details stand alone, with every control and
+fact, and the other rows, the group headings, the list's heading, the sections
+around it and the page outline step away. One **Providers** Back control above
+it, the chevron, or Escape returns to the list and puts focus back on the
+row's chevron. The page opens at most one row by itself, in place in the list,
+the first that needs attention (a sign-in, or a binary the scan found for a
+broken runtime), and none when no provider does; a row that comes to need
+attention while a provider's page is up waits, open, in the list. Remove is the
+last thing in those details, alone under a hairline with one line saying what
+it does, never among Check connection, Configure and the other routine actions.
+A card per provider, two to a row, made the boxes the loudest thing on the
+page; details expanded in place, one row at a time, still grew the page by a
+provider's models and actions among rows that had nothing to do with them, to
+about four screens. The state line
 reads from a dot that carries the state without colour: a filled ink dot is
 ready, a ring in ink needs setup or a sign-in, a muted ring is off or not
 checked, and a failure keeps its red role. Only under Colour does ready turn the
@@ -1818,14 +1888,16 @@ palette's green and setup the palette's orange. The detected, supported-but-not-
 detected, and other groups are Settings sections; the readiness summary is the
 label's description. Ordering controls appear only in an explicit Reorder mode.
 A runtime installed in an unusual location is fixed from its own row rather
-than a manual form: the row's details carry an outlined "Locate binary…"
+than a manual form: the row's details carry a "Locate binary…"
 action beside Check connection, shown only where the desktop's file picker
 exists and only for a runtime whose version probe the host can run. Its
 answer is one quiet line under the actions (the version the host read), or a
-warning box saying why the host refused the file. A row whose saved binary is
-missing or incompatible, while the latest scan found that runtime elsewhere,
-adds a second outlined action, "Use the one found at ~/.local/bin/claude
-(2.1.306)", that gives the same answer without the picker; see
+warning box saying why the host refused the file. A scan repairs a saved
+binary that no longer exists by itself. A row whose saved binary is still
+unusable, while the latest scan found that runtime elsewhere, says "Found at
+~/.local/bin/claude (2.1.306)." on the row beside a "Use it" button,
+visible while the details are closed; pressing it opens the details and gives
+the same answer without the picker. See
 [Providers and model endpoints](docs/design/model-endpoints.md).
 
 Provider catalog and the Octant Harness model endpoints (rows, detail
@@ -1949,12 +2021,15 @@ still appears in only one region at a time.
 Without a saved show or hide choice, a wide window starts with the right dock open and a narrow window starts with it closed. The bottom panel starts closed. An explicit dock show or hide is restored per window; merely mounting the default records no choice, so an initial narrow frame does not become a saved close. The active-pane eligibility rules below still determine whether dock chrome is shown.
 
 A welcome, Project, or other pane with neither a bound thread nor a valid
-launchable tool keeps the dock closed and omits its toggle. The exception is a
-new Code task's pane before its thread exists: the dock keeps its place, its
-title band shows the common tools disabled ("Available once the task starts"),
-and its body says so (or, once the start screen has a Project, holds that
-Project's quick tools), so the band does not vanish and return around the first
-message. Restored presentation for another subject never makes unavailable
+launchable tool keeps the dock closed and omits its toggle. A new Code task's
+pane before its thread exists keeps the toggle but starts closed, whatever the
+window's saved choice: it has nothing of a thread's to show, and opened by
+default it covered a third of a blank start screen to say its tools were not
+available yet. Opened there by the person, its title band shows the common
+tools disabled ("Available once the task starts") and its body says so (or,
+once the start screen has a Project, holds that Project's quick tools). That
+show or hide belongs to the draft and is never saved as the window's choice;
+once the task has a thread the window's own choice applies again. Restored presentation for another subject never makes unavailable
 chrome visible.
 
 Environment is a right-dock tool, opened from the dock's title band (its
@@ -2568,8 +2643,8 @@ proceed. Native Code approvals keep their isolated host-owned document. The
 extension tool request names the plugin, its server, and the tool, and adds
 "Always allow in this Project" only when the host marks the call rememberable
 and the window is a local one. Settings › Permissions lists those answers by
-Project, each with Revoke, beside Remembered websites. Its Access section
-(Settings › Access) shows the global guardrail level with one-click change,
+Project, each with Revoke, beside Remembered websites. Settings › Work and
+Settings › Code show the global guardrail level with one-click change,
 which governs Work and Code alike; a Work or Code Project overrides it from
 its overview (Default mode), and each thread's header shows the level in force
 and the scope it came from, in one quiet line ("Auto · set by this Project").
@@ -2611,11 +2686,11 @@ Providers & Models (a section with one select per job, a plain note of where the
 work goes, and the account's problem when it has one; the second opinion on
 decisions starts at **Off** and is the only job with no default account), and the reviewer
 override as a select on a Code Project's overview; **Servers** is built below
-Safe networks in Settings › Access as an account list and a **Project**
+Safe networks in Settings › Permissions as an account list and a **Project**
 picker that says whether the chosen Project uses the account's servers or
 its own list, which starts as a copy of the account list and is edited with
-the same rows and form. **Safe networks** is built as Settings › Access, in the
-Privacy & data group after Permissions: a **Network limits** panel with a
+the same rows and form. **Safe networks** is built on Settings › Permissions, after
+Protected files: a **Network limits** panel with a
 switch that is on by default, a sentence saying plainly whether limits are on
 (and, when on, that they hold sandboxed runtimes only),
 and a note that a change applies to the next runtime started; then an intro
@@ -2670,6 +2745,26 @@ focus to the opener. Git confirmations consistently offer **Keep changes** and
 ordinary confirmations use the standard action treatment. Long paths in the
 description wrap within the shared dialog. Their existing host approvals,
 receipts, and observed-state checks remain separate and mandatory.
+
+Every dialog shares one frame. The shared popup insets its content 16px, the
+title is the 15px body step at the strong weight, and the answers sit in one
+row at the trailing edge: the answer that dismisses first, as an outline
+button, and the answer that acts last, filled (or in the destructive role),
+both at the default control height. A dialog that draws to its edges (the
+command palette, a player, a sheet with its own head and foot) sets its own
+inset with one class; no dialog sets its own title size or draws its answers
+at another height. A dialog wider than the 420px default says so with
+`--octant-dialog-width`, never with a width of its own: the shared popup caps
+any other width at the default, which had opened the rewind, synced-artifact,
+Continue elsewhere, planner-review, plugin-detail and thread-search dialogs
+narrower than they were written. Before this, dialog titles ran from 14px to
+17px at two weights, the dismissing answer was drawn bare, outlined or filled
+depending on the dialog, and a confirmation's buttons were one step shorter
+than every other dialog's.
+
+Product notices stack at the top trailing corner of the window, under the
+title bar. At the bottom trailing corner a notice covered the composer's model
+picker and Send.
 
 Settings connection removal uses the same confirmation while retaining its
 host command and GitHub's explicit local-logout confirmation.
@@ -2853,7 +2948,7 @@ resizing distinct from unsolicited layout movement.
 
 ### Secret stores
 
-Settings › Secret stores sits with Permissions under Privacy & data and is
+Settings › Secret stores sits with Permissions under Safety and is
 host-scoped. It has two cards. **Linked secret stores** is a plain row per
 tool: the tool's name, one line saying whether it is linked and whether the
 store is ready, locked, not installed, or unreachable, and one button, Link or

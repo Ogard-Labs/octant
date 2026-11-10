@@ -89,6 +89,9 @@ it("verifies sealed application bytes and refuses loose JavaScript or mismatched
     expect(statFile(archive, nativePath)).toHaveProperty("unpacked", true);
     await writeFile(`${archive}.unpacked/${nativePath}`, "modified native fixture");
     expect(() => readDesktopArchive(archive, metadata())).toThrow(/mismatched file bytes/);
+    expect(readDesktopArchive(archive, metadata(), "signed").map((entry) => entry.path)).toContain(
+      nativePath,
+    );
   } finally {
     await rm(root, { recursive: true, force: true });
   }

@@ -13,7 +13,7 @@ Unfinished plugin extraction and other proposals are separate from these rules.
 ## Provider cloud jobs
 
 An existing local Code thread offers a separate **Provider cloud sessions**
-disclosure beside its plan. This is an explicit remote job, not a thread mode,
+disclosure in its [info panel](#thread-info). This is an explicit remote job, not a thread mode,
 checkout relocation or fallback for local tools. The person chooses an enabled
 endpoint/model, edits bounded task text, reviews it and approves sending that
 exact text for remote execution and possible model/sandbox charges. Changing
@@ -65,10 +65,39 @@ settlement, duplicate requests, authority refusals, and dead approvals/questions
 Rendered checks at 1000px and 390px confirm the notice, actionable refusal,
 single-click continuation, and preservation of the composer draft.
 
+## Thread info
+
+What is true about a thread but is not part of its conversation has one home:
+a quiet **Thread info** button at the end of the strip above the follow-up
+composer, after the plan meters. It opens one floating card above the strip,
+at most 440px wide, whose rows are, in order and each only where it applies:
+the access level in force and where it came from (Work and Code) with its
+**Access details**, **Reply detail**, how the thread delivers documents
+(Code), **Provider tools** (a key provider's own setup for this thread),
+**Credential commands** (Code), **Provider cloud sessions** (Code, local
+host), and **Continue elsewhere**. A choice made once for the thread lives
+here, not in the composer's toolbar: the toolbar holds what a person changes
+from one message to the next (attach, access, model) and had grown to eleven
+controls, several of them bare glyphs. Nothing else about
+the thread is drawn on the thread page outside the transcript and the
+composer; these rows had each been added to the page on their own, at four
+places, two of them outside the reading column.
+
+The rows stay mounted while the card is closed, so a read or a review in one
+of them does not restart when it opens. A row that waits for the person (a
+credential command awaiting review) marks the button "Review required" in the
+warning ink. A control elsewhere that leads to a row (the access shortcut)
+opens the card. Escape or a press outside closes it and returns focus to the
+button; a dialog or menu a row opened does not count as outside, and Escape
+inside one closes only that. While a move holds the thread and its composer
+gives way to the held bar, the button stays above the bar: a held thread takes
+no message, but its level and a pending review are still the person's to read
+and answer.
+
 ## Continue elsewhere
 
-An existing Chat, Work or Code conversation offers **Continue elsewhere** beside
-its composer. Provider requests retain their established placement. The flow names the execution host and the screen controlling it,
+An existing Chat, Work or Code conversation offers **Continue elsewhere** in its
+[info panel](#thread-info). Provider requests retain their established placement. The flow names the execution host and the screen controlling it,
 the source provider and the authoritative current destination. Choosing another
 provider uses the same provider/model command as its composer picker and sends
 nothing. Task state, the checkout and pending feedback remain on the execution
@@ -161,7 +190,7 @@ changes what the Project shows, not what its threads may do: a Work thread
 has the same shell, Git, and tools as a Code thread at the same level either
 way ([Modes](../architecture.md#modes-chat-work-and-code)). Built today it
 shows the Project terminal and Project actions. On a server Work Project its
-existing Settings → Access → Servers row instead offers the same default-off
+existing Settings → Permissions → Servers row instead offers the same default-off
 presentation choice for saved actions and the person's Project terminal.
 Only this window's bound Work Project offers **Open terminal** in that row;
 the shell has Full remote SSH access and closes when the panel or that
@@ -747,9 +776,10 @@ window can do it. Rules and limits are owned by
 [Architecture: modes](../architecture.md#modes-chat-work-and-code).
 The top-right control reveals the dock only when the active pane has a bound thread
 or a valid launchable tool. A new Code task's pane, before its thread exists, keeps
-the dock: its title band shows the common tools disabled ("Available once the task
-starts") and its body says so, so the band does not vanish and return around the
-first message. Once that start screen has a Project, the dock's body holds the
+the control but starts with the dock closed, whatever the window's saved choice;
+opened there, its title band shows the common tools disabled ("Available once the
+task starts") and its body says so. That show or hide belongs to the draft and is
+never saved as the window's choice. Once that start screen has a Project, the dock's body holds the
 Project's quick tools (Terminal and Browser; a server Project's are its
 Terminal only); they never stand as a column
 beside the start screen ([DESIGN.md](../../DESIGN.md#welcome-and-composer)). An available empty dock opens on a stack of fact cards (Environment with
@@ -764,8 +794,10 @@ admits only the [Agents dock](#subagents) and has no bottom panel. **Vitals**
 (Work and Code) shows the load on the host the dock is connected to, local or
 remote, from the host-resources read: a CPU history line with the core count,
 memory used and total, network in and out, disk throughput, disk space, GPU
-utilisation, and **Energy**. Each reading is drawn only when that host reports
-it; a host with no battery says "No battery", and a figure the host cannot read
+utilisation, and **Energy**. The readings are plain rows on the dock's own
+surface with a hairline between them, never boxes on a fill of their own, and a
+history line appears once it has two samples to join. Each reading is drawn
+only when that host reports it; a host with no battery says "No battery", and a figure the host cannot read
 is left out rather than drawn as zero. The tool keeps the last five minutes of
 samples in the window (nothing is stored), reads about every five seconds only
 while it is mounted and the window is visible, never overlaps reads, abandons one
@@ -1309,7 +1341,10 @@ and the journal record follow the
 [Project terminal rule](../architecture.md#security-and-authority). A Code
 Project's saved actions (Run, Test, Dev) are buttons in the window header, three
 inline and the rest under More, and entries in the command palette's Actions
-group; the Project overview's Actions section edits them and offers suggestions
+group. More is the header's one menu for this group: it also holds where the
+actions run ("Run in") and the task's Worktrees setup, which used to be text
+controls of their own in the title bar. Where to run is offered only when there
+is an action to run; with none, the header shows Worktrees alone; the Project overview's Actions section edits them and offers suggestions
 the person confirms. Choosing one previews its actual folder and branch,
 then starts a dedicated run beside the task. A Code thread defaults to its
 active checkout; the Project folder and approved extra folders remain explicit
@@ -1408,7 +1443,8 @@ authenticated, thread-scoped answer routes and one-use request identity.
 Provider-native question formats keep their existing adapter contracts; the
 questionnaire capability uses the provider-neutral app tool boundary.
 
-A Code task's **Worktrees** header control opens its Setup tab beside
+A Code task's **Worktrees** control (in the header's More menu, or alone in the
+header when the Project has no saved action) opens its Setup tab beside
 that task, including a selector for its child checkouts. It shows the reviewed
 command and relative folder, bounded output, exit result, Retry, Cancel and
 explicit Skip. The Project overview's Actions list lets the person review and

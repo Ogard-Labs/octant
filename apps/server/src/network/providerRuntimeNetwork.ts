@@ -52,7 +52,7 @@ import type { SafeNetworkStore } from "./safeNetworkStore";
  * harness commands use, and its OS rules reach nothing but that listener. A
  * request passes when it names the provider's own endpoints, a loopback port
  * the launch serves Octant's tools on, a host the Project's egress rules
- * allow, or a place the person trusts in Settings › Access; anything else is
+ * allow, or a place the person trusts in Settings › Permissions; anything else is
  * refused with the host named. At Auto an unlisted host goes to the reviewer
  * hook first, and the refusal stands when no reviewer can answer. Every
  * decision is journaled per host on the launch's own `runtime-network`
@@ -404,7 +404,7 @@ export class ProviderRuntimeNetwork implements ProviderRuntimeNetworkPort {
       authentication: input.authentication ?? "launch-token",
       refusalHint: {
         reasons: TRUSTABLE_REFUSALS,
-        text: "Octant's Network limits refused this host. To allow it, choose Trust beside it under Recently refused in Settings › Access › Safe networks, then start the turn again.",
+        text: "Octant's Network limits refused this host. To allow it, choose Trust beside it under Recently refused in Settings › Permissions › Safe networks, then start the turn again.",
       },
       decision: {
         kind: "provider-runtime",

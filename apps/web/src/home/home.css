@@ -17,7 +17,10 @@
   display: grid;
   min-width: 0;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  align-items: start;
+  /* Cards in a row share its height. Each at its own height left a short
+     card beside a tall one with a hole under it, and the next row started
+     at a different line in each column. */
+  align-items: stretch;
   gap: var(--oct-space-3);
 }
 
@@ -388,6 +391,7 @@
 
 .running-services__origin {
   min-width: 0;
+  flex: 1 1 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;

@@ -112,4 +112,22 @@ describe("createProviderFromDiscoveryCandidate", () => {
       });
     },
   );
+  it("saves the launcher the scan examined, not the versioned file it resolves to", () => {
+    const result = createProviderFromDiscoveryCandidate(
+      {
+        ...makeCandidate({
+          driverKind: "claude",
+          displayName: "Claude Code",
+          binaryPath: "/Users/example/.local/share/claude/versions/2.1.318",
+        }),
+        discoveredPath: "/Users/example/.local/bin/claude" as DiscoveryCandidate["discoveredPath"],
+      },
+      { enabled: false },
+    );
+
+    expect(result.command).toMatchObject({
+      kind: "create-claude-provider",
+      configuration: { binaryPath: "/Users/example/.local/bin/claude" },
+    });
+  });
 });

@@ -19,7 +19,6 @@ import type { ShellSettings } from "@octant/contracts/shell";
 import type { ProjectTerminalClient } from "@octant/client-runtime/project-terminal-client";
 import type { ServerProject } from "@octant/contracts/server-projects";
 import {
-  type HostPlatform,
   type ProjectId,
   type ProviderInstanceId,
   type SettingsDeepLink,
@@ -158,6 +157,7 @@ import { UserProfileSettingsView } from "../profile/UserProfileSettingsView";
 import {
   ScopeIndicator,
   SettingRow,
+  SettingsDisclosure,
   SettingsOutlineRegistration,
   SettingsPageScope,
   SettingsSection,
@@ -266,10 +266,10 @@ export interface SettingsViewProps {
   /** Settings › Sync on this host; absent off it, where store setup is not offered. */
   readonly replicaStoreSettingsClient?: ReplicaStoreSettingsClient;
   /** Absent off the host: linking a secret store and pointing a key at it are host authority. */
-  /** Settings › Access › Safe networks; absent where the host has no such route. */
+  /** Settings › Permissions › Safe networks; absent where the host has no such route. */
   readonly safeNetworksClient?: SafeNetworksClient;
   readonly secretStoresClient?: SecretStoresClient;
-  /** Settings › Access › Servers; absent off this computer. */
+  /** Settings › Permissions › Servers; absent off this computer. */
   readonly shieldServersClient?: ShieldServersClient;
   /** Settings › Skills & Extensions › Claude and Codex; absent off this computer. */
   readonly providerToolingClient?: ProviderToolingClient;
@@ -325,30 +325,30 @@ const SECTION_LABELS: Readonly<Partial<Record<SettingsSectionId, string>>> = Obj
 );
 
 const SECTION_DESCRIPTIONS: Readonly<Partial<Record<SettingsSectionId, string>>> = {
-  general: "Choose app-wide defaults, updates, and network behavior.",
+  general:
+    "Who you are in Octant, app-wide defaults, updates, and what Octant tells you while you are away.",
   appearance: "Choose how Octant looks. Use a built-in theme or make your own.",
   sidebar: "How the sidebar is laid out and what each thread row in it shows.",
   keybindings: "Change the shortcuts that reach Octant's global surfaces.",
   chat: "Defaults for new Chat conversations.",
   work: "Defaults for new Work threads: the model they start on and what they may do without asking.",
   code: "Defaults for Code threads and delivery.",
-  notifications: "What Octant tells you while you are away, and where it sends it.",
   voice: "The providers that turn speech into text, text into speech, and prompts into images.",
   "computer-use": "Control applications through the bundled Computer use plugin.",
-  "device-tools": "Bundled simulator and emulator streaming tools and their updates.",
+  "device-tools":
+    "The iPhone simulator and Android emulator tools that come with Octant, and their updates.",
   providers:
     "Connect providers, manage authentication, pick default models, and see every provider Octant can set up.",
   harness:
-    "Octant's own agent loop for API-key and local models: which model does which job, including Navigator's.",
+    "Models you add by API key or run locally: which model does which job, including Navigator's.",
   skills:
     "Skills extend what agents can do. Review the source, then trust and enable only what you want.",
   github: "Connection and repository access on the selected host.",
-  host: "The host process: its status, startup, notifications, and maintenance.",
+  host: "Octant's background service: its status, startup, and maintenance.",
   permissions:
-    "The files no agent may touch, and what you have already allowed: websites, extension tools, and public links.",
+    "The files no agent may touch, the network places and servers agents may reach, and what you have already allowed.",
   memory:
     "What Octant remembers about you across threads and Projects, and how to keep things out of it.",
-  access: "The network places and your own servers agents may reach below Full access.",
   data: "What this host stores, how long it keeps threads, and how to back it up.",
   "secret-stores":
     "Keep API keys in a password manager you already use. Octant keeps a reference and fetches the key when it is used.",
@@ -371,8 +371,7 @@ const MOVED_SETTINGS: ReadonlyArray<{
   readonly setting: string;
   readonly to: SettingsSectionId;
 }> = [
-  { from: "general", setting: "user-profile", to: "profile" },
-  { from: "host", setting: "host-automation-notifications", to: "notifications" },
+  { from: "host", setting: "host-automation-notifications", to: "general" },
   ...["public-links", "public-link-service", "browser-site-approvals", "tool-approvals"].map(
     (setting) => ({ from: "data" as const, setting, to: "permissions" as const }),
   ),
@@ -400,26 +399,28 @@ const MOVED_SETTINGS: ReadonlyArray<{
   { from: "host", setting: "thread-retention", to: "data" },
 ];
 
+/**
+ * Pages that were folded into another keep answering their own links, with
+ * or without a setting. Profile and Notifications each held one or two
+ * controls and Access was the other half of what an agent may touch and
+ * reach, so the sidebar listed three pages a person rarely needed alone.
+ */
+const MERGED_PAGES: Readonly<Partial<Record<SettingsSectionId, SettingsSectionId>>> = {
+  profile: "general",
+  notifications: "general",
+  access: "permissions",
+};
+
 function currentSettingsLink(link: SettingsDeepLink): SettingsDeepLink {
   const moved = MOVED_SETTINGS.find(
     (entry) => entry.from === link.section && entry.setting === link.setting,
   );
-  return moved === undefined ? link : { ...link, section: moved.to };
-}
-
-/** The profile is kept on the host, so the host's platform names its computer. */
-function sectionDescription(
-  section: SettingsSectionId,
-  hostPlatform: HostPlatform | undefined,
-): string | undefined {
-  if (section === "profile") {
-    return `Choose how you appear inside Octant. Everything is optional and kept on ${thisComputerName(hostPlatform)}.`;
-  }
-  return SECTION_DESCRIPTIONS[section];
+  const section = moved === undefined ? link.section : moved.to;
+  const merged = MERGED_PAGES[section] ?? section;
+  return merged === link.section ? link : { ...link, section: merged };
 }
 
 export function SettingsView(props: SettingsViewProps) {
-  const hostPlatform = useHostPlatform();
   const capabilities: SettingsNativeCapabilities = {
     nativeBoundsAvailable: props.nativeBoundsAvailable,
     sidebarVibrancySupported: props.sidebarVibrancySupported,
@@ -583,7 +584,7 @@ export function SettingsView(props: SettingsViewProps) {
   const activeSectionScope = availableSections.find(
     (section) => section.id === route.activeSection,
   )?.scope;
-  const activeSectionDescription = sectionDescription(route.activeSection, hostPlatform);
+  const activeSectionDescription = SECTION_DESCRIPTIONS[route.activeSection];
   const subPage = hasQuery
     ? undefined
     : route.activeSection === "harness"
@@ -794,6 +795,15 @@ export function SettingsView(props: SettingsViewProps) {
                           href={`#${entry.id}`}
                           onClick={(event) => {
                             event.preventDefault();
+                            // A section inside a closed disclosure opens first,
+                            // or the link would scroll to nothing.
+                            for (
+                              let ancestor = entry.element.parentElement;
+                              ancestor !== null;
+                              ancestor = ancestor.parentElement
+                            ) {
+                              if (ancestor instanceof HTMLDetailsElement) ancestor.open = true;
+                            }
                             entry.element.scrollIntoView?.({ block: "start" });
                           }}
                         >
@@ -980,10 +990,12 @@ function ActiveSectionContent({
     );
   }
   switch (activeSection) {
+    // The folded pages are never the active one (their links are redirected
+    // before they reach the route); they share the page that holds them now.
     case "general":
-      return <GeneralSection focusedSetting={focusedSetting} props={props} />;
     case "profile":
-      return <ProfileSection focusedSetting={focusedSetting} props={props} />;
+    case "notifications":
+      return <GeneralSection focusedSetting={focusedSetting} props={props} />;
     case "appearance":
       return (
         <AppearanceSection
@@ -1092,7 +1104,7 @@ function ActiveSectionContent({
       );
     case "voice":
       // Voice and image generation both pick a model endpoint to send media
-      // through, so they share one page under AI & models.
+      // through, so they share one page under AI.
       return (
         <div className="settings-section-stack" id="settings-voice">
           <VoiceSettingsView
@@ -1324,7 +1336,7 @@ function ActiveSectionContent({
               intent === "control-host"
                 ? { section: "remote-access", setting: settingId("remote-listener") }
                 : {
-                    section: "access",
+                    section: "permissions",
                     setting: settingId(
                       intent === "server-folder" ? "server-projects" : "shield-servers-add",
                     ),
@@ -1396,9 +1408,24 @@ function ActiveSectionContent({
           focusedSetting={focusedSetting}
         />
       );
+    case "sync":
+      return (
+        <SyncSettingsSection
+          client={props.replicaStoreSettingsClient}
+          focusedSetting={focusedSetting}
+          folderBrowse={props.folderBrowseClient}
+          membership={props.replicaMembershipClient}
+          status={props.replicaSyncStatusClient}
+        />
+      );
+    case "permissions":
     case "access":
       return (
-        <div className="settings-section-stack" id="settings-access">
+        <div className="settings-section-stack" id="settings-permissions">
+          <ProtectedFilesSettings
+            client={props.protectedFilesClient}
+            focusedSetting={focusedSetting}
+          />
           <SafeNetworksSettings
             client={props.safeNetworksClient}
             projectNames={props.projectNames ?? NO_PROJECT_NAMES}
@@ -1420,42 +1447,6 @@ function ActiveSectionContent({
             projectNames={props.projectNames ?? NO_PROJECT_NAMES}
             projects={props.serverProjectsClient}
             servers={props.shieldServersClient}
-          />
-        </div>
-      );
-    case "sync":
-      return (
-        <SyncSettingsSection
-          client={props.replicaStoreSettingsClient}
-          focusedSetting={focusedSetting}
-          folderBrowse={props.folderBrowseClient}
-          membership={props.replicaMembershipClient}
-          status={props.replicaSyncStatusClient}
-        />
-      );
-    case "notifications":
-      return props.automationNotificationClient !== undefined ? (
-        <div className="settings-section-stack" id="settings-notifications">
-          <PhoneNotificationSettings
-            client={props.automationNotificationClient}
-            focusedSetting={focusedSetting}
-          />
-          <AutomationNotificationSettings
-            client={props.automationNotificationClient}
-            focused={focusedSetting === "host-automation-notifications"}
-          />
-        </div>
-      ) : (
-        <section aria-label="Notifications" id="settings-notifications">
-          <p>Notifications are set up on the host machine.</p>
-        </section>
-      );
-    case "permissions":
-      return (
-        <div className="settings-section-stack" id="settings-permissions">
-          <ProtectedFilesSettings
-            client={props.protectedFilesClient}
-            focusedSetting={focusedSetting}
           />
           <RememberedBrowserOriginsPanel
             origins={props.settings.rememberedBrowserOrigins}
@@ -1485,7 +1476,7 @@ function ActiveSectionContent({
           >
             <div className="setgroup">
               <SettingRow
-                description="On, a file a page starts downloading while the agent drives it is held on this computer, not in the workspace, until you say yes to saving it into the thread's downloads folder. You are asked every time. Downloads you start yourself stay blocked."
+                description="Octant asks before saving a file a page starts downloading while an agent drives it, every time. Downloads you start yourself stay blocked."
                 focused={focusedSetting === settingId("browser-agent-downloads")}
                 label="Let agents download files"
                 scope="host"
@@ -1568,7 +1559,7 @@ function ActiveSectionContent({
                 scope="host"
                 settingId="persistent-browser-owner"
                 focused={focusedSetting === settingId("persistent-browser-owner")}
-                description="Off by default; enabling starts no task, copies no sign-ins and upgrades no existing permission, while turning it off or quitting Octant ends background leases."
+                description="Keeps the agent's Browser running after the last window closes. It starts no task, copies no sign-ins and widens no permission; turning it off or quitting Octant ends it."
               >
                 <OctantSwitch
                   checked={props.settings.persistentBrowserOwner}
@@ -1854,53 +1845,68 @@ function ProviderCatalogSection(props: {
   const onLocateBinary = locateRuntimeBinary(controller, discoveryController, props.hostBridge);
   const onUseScannedBinary = adoptScannedRuntimeBinary(controller, discoveryController);
   const cardProps = providerSettingsViewProps(controller, props.hostBridge);
+  const [setupOpen, setSetupOpen] = useState(false);
   return (
     <div id="settings-provider-catalog">
-      <ProviderCatalogView
-        busy={controller.busy}
-        {...(discoveryController === undefined
-          ? {}
-          : {
-              discovery: {
-                snapshot: discoveryController.snapshot,
-                scanning: discoveryController.scanning,
-                ...(discoveryController.message === undefined
-                  ? {}
-                  : { message: discoveryController.message }),
-                connectingPaths: discoveryController.connectingPaths,
-                onScan: discoveryController.scan,
-                onConnect: discoveryController.connect,
-              },
-            })}
-        credentialManagementAvailable={controller.credentialManagementAvailable}
-        instances={controller.instances}
-        {...(controller.message === undefined ? {} : { message: controller.message })}
-        observedByInstance={controller.observedByInstance}
-        onAddOutsideProvider={controller.createOutsideHarnessEndpoint}
-        {...(controller.snapshot?.outsideDrivers === undefined
-          ? {}
-          : { outsideDrivers: controller.snapshot.outsideDrivers })}
-        onDetailChange={props.onDetailChange}
-        onOpenModelEndpoints={props.onOpenModelEndpoints}
-        onOpenProviders={props.onOpenProviders}
-        onProbe={(instanceId) => controller.probe(instanceId)}
-        onSetEnabled={controller.setEnabled}
-        probingIds={controller.probingIds}
-        renderRuntimeCard={(instance) => (
-          <ProviderSettingsList
-            {...cardProps}
-            {...(onLocateBinary === undefined ? {} : { onLocateBinary })}
-            {...(onUseScannedBinary === undefined ? {} : { onUseScannedBinary })}
-            discoverySnapshot={discoveryController?.snapshot}
-            heading="Its provider"
-            instances={[instance]}
-            note="The same card as on Providers & Models: sign-in, Locate binary, and what its last check found."
-            showAgentEligibleModels={false}
-            showReorder={false}
-          />
-        )}
-        status={controller.status}
-      />
+      {/* Every provider Octant can set up is a long reference list. Standing
+          open under the providers a person already has, it made this page six
+          screens tall; it opens when someone goes looking for one to add. */}
+      <SettingsDisclosure
+        // A provider's setup replaces the catalog's lists, so it stands
+        // without the disclosure's own heading above it.
+        {...(setupOpen ? { className: "provider-catalog--setup-open" } : {})}
+        description="Every agent runtime and model endpoint Octant can set up."
+        title="Add a provider"
+      >
+        <ProviderCatalogView
+          busy={controller.busy}
+          {...(discoveryController === undefined
+            ? {}
+            : {
+                discovery: {
+                  snapshot: discoveryController.snapshot,
+                  scanning: discoveryController.scanning,
+                  ...(discoveryController.message === undefined
+                    ? {}
+                    : { message: discoveryController.message }),
+                  connectingPaths: discoveryController.connectingPaths,
+                  onScan: discoveryController.scan,
+                  onConnect: discoveryController.connect,
+                },
+              })}
+          credentialManagementAvailable={controller.credentialManagementAvailable}
+          instances={controller.instances}
+          {...(controller.message === undefined ? {} : { message: controller.message })}
+          observedByInstance={controller.observedByInstance}
+          onAddOutsideProvider={controller.createOutsideHarnessEndpoint}
+          {...(controller.snapshot?.outsideDrivers === undefined
+            ? {}
+            : { outsideDrivers: controller.snapshot.outsideDrivers })}
+          onDetailChange={(entryName) => {
+            setSetupOpen(entryName !== undefined);
+            props.onDetailChange(entryName);
+          }}
+          onOpenModelEndpoints={props.onOpenModelEndpoints}
+          onOpenProviders={props.onOpenProviders}
+          onProbe={(instanceId) => controller.probe(instanceId)}
+          onSetEnabled={controller.setEnabled}
+          probingIds={controller.probingIds}
+          renderRuntimeCard={(instance) => (
+            <ProviderSettingsList
+              {...cardProps}
+              {...(onLocateBinary === undefined ? {} : { onLocateBinary })}
+              {...(onUseScannedBinary === undefined ? {} : { onUseScannedBinary })}
+              discoverySnapshot={discoveryController?.snapshot}
+              heading="Its provider"
+              instances={[instance]}
+              note="The same card as on Providers & Models: sign-in, Locate binary, and what its last check found."
+              showAgentEligibleModels={false}
+              showReorder={false}
+            />
+          )}
+          status={controller.status}
+        />
+      </SettingsDisclosure>
     </div>
   );
 }
@@ -2024,7 +2030,7 @@ function CompletedThreadArchiveSelect(props: {
 const AUTO_COMPACT_WINDOW_CHOICES: ReadonlyArray<number> = [50, 60, 70, 75, 80, 85, 90, 95];
 
 const RUNTIME_COMPACTION_DESCRIPTION =
-  "Claude Code, Codex and the other runtimes compact by themselves. A share picked here overrides theirs in the sessions Octant starts: Claude Code and Codex then compact at it inside a turn too, and the others between turns. Close to a full window, or on a small one, Claude Code keeps its own point.";
+  "Claude Code, Codex and the other runtimes compact by themselves. A share picked here replaces theirs in the sessions Octant starts, except that Claude Code keeps its own point near a full or small window.";
 
 /** How full a window may get before a compaction rule acts, plus off. */
 function AutoCompactWindowSelect(props: {
@@ -2116,10 +2122,16 @@ function AutoCompactLimitSelect(props: {
   );
 }
 
-function ProfileSection({ focusedSetting, props }: SectionProps) {
+function GeneralSection({ focusedSetting, props }: SectionProps) {
+  const runtimeDefaults = useRuntimeCompactionDefaults(props.extensionClient);
+  // The profile is kept on the host, so the host's platform names its computer.
+  const hostPlatform = useHostPlatform();
   return (
-    <section aria-label="Profile" className="settings-section-stack" id="settings-profile">
-      <SettingsSection title="Your identity">
+    <section aria-label="General" className="settings-section-stack" id="settings-general">
+      <SettingsSection
+        description={`Everything is optional and kept on ${thisComputerName(hostPlatform)}.`}
+        title="Your identity"
+      >
         <div className="setgroup">
           <SettingRow
             description="How you are shown inside Octant. There is no account behind this, and none of it is required."
@@ -2135,14 +2147,6 @@ function ProfileSection({ focusedSetting, props }: SectionProps) {
           </SettingRow>
         </div>
       </SettingsSection>
-    </section>
-  );
-}
-
-function GeneralSection({ focusedSetting, props }: SectionProps) {
-  const runtimeDefaults = useRuntimeCompactionDefaults(props.extensionClient);
-  return (
-    <section aria-label="General" className="settings-section-stack" id="settings-general">
       <SettingsSection title="Available modes">
         <div className="setgroup">
           <SettingRow
@@ -2236,7 +2240,7 @@ function GeneralSection({ focusedSetting, props }: SectionProps) {
       <SettingsSection title="Compaction">
         <div className="setgroup">
           <SettingRow
-            description="When a thread Octant keeps (Octant Harness, and Chat or Work on a model endpoint) fills this much of its window, Octant compacts it before the next turn, and Octant Harness inside a long turn too. The thread keeps every message."
+            description="When a thread on Octant Harness or a model endpoint fills this much of its window, Octant compacts it before the next turn. The thread keeps every message."
             focused={focusedSetting === settingId("auto-compact-octant")}
             label="Compact Octant threads"
             scope="host"
@@ -2286,7 +2290,7 @@ function GeneralSection({ focusedSetting, props }: SectionProps) {
             />
           </SettingRow>
           <SettingRow
-            description="When a turn leaves a provider's 5-hour or weekly limit this used, Octant compacts the thread and writes a summary another provider can pick up, so you can switch before the limit stops you."
+            description="When a provider's 5-hour or weekly limit is this used, Octant compacts the thread so another provider can pick it up before the limit stops you."
             focused={focusedSetting === settingId("auto-compact-limit")}
             label="Compact near a usage limit"
             scope="host"
@@ -2299,6 +2303,22 @@ function GeneralSection({ focusedSetting, props }: SectionProps) {
           </SettingRow>
         </div>
       </SettingsSection>
+      {props.automationNotificationClient === undefined ? (
+        <SettingsSection title="Notifications">
+          <p className="settings-section-line">Notifications are set up on the host machine.</p>
+        </SettingsSection>
+      ) : (
+        <>
+          <PhoneNotificationSettings
+            client={props.automationNotificationClient}
+            focusedSetting={focusedSetting}
+          />
+          <AutomationNotificationSettings
+            client={props.automationNotificationClient}
+            focused={focusedSetting === "host-automation-notifications"}
+          />
+        </>
+      )}
     </section>
   );
 }
@@ -2388,7 +2408,7 @@ function SkillFoldersSection({
             aria-label="Refresh folder status"
             onClick={onSaved}
             type="button"
-            variant="outline"
+            variant="secondary"
           >
             Refresh
           </OctantButton>
@@ -3106,7 +3126,7 @@ function MaintenanceSection({
         ) : null}
         {diagnosticsExportClient !== undefined ? (
           <SettingRow
-            description="Exports a redacted report about one failed operation, found by its correlation ID. Review it before sharing."
+            description="Saves a redacted report about one failed action, found by the ID shown with the error. Review it before sharing."
             focused={focusedSetting === settingId("export-diagnostics")}
             label="Failure report"
             scope="host"

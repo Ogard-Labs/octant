@@ -141,7 +141,7 @@ export function EndpointChoices(props: EndpointChoicesProps) {
             onClick={() => props.onAddWithKey(preset)}
             size="sm"
             type="button"
-            variant="outline"
+            variant="secondary"
           >
             Add with key
           </OctantButton>
@@ -163,7 +163,7 @@ export function EndpointChoices(props: EndpointChoicesProps) {
             onClick={props.onAddEndpoint}
             size="sm"
             type="button"
-            variant="outline"
+            variant="secondary"
           >
             Add endpoint
           </OctantButton>

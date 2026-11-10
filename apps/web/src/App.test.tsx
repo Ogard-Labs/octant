@@ -4452,12 +4452,8 @@ describe("App", () => {
     );
     await waitFor(() => expect(macHost.list).toHaveBeenCalled());
     await openSettingsFromSidebar(user);
-    fireEvent.click(await screen.findByRole("button", { name: "Profile" }));
-    expect(
-      await screen.findByText(
-        "Choose how you appear inside Octant. Everything is optional and kept on this Mac.",
-      ),
-    ).toBeVisible();
+    fireEvent.click(await screen.findByRole("button", { name: "General" }));
+    expect(await screen.findByText("Everything is optional and kept on this Mac.")).toBeVisible();
   });
 
   it("uses the CSS translucent sidebar fallback when no native host is available", async () => {
@@ -6180,7 +6176,7 @@ describe("App", () => {
     );
   });
 
-  it("keeps the dock, tools disabled, while a new Code task waits for its thread, and enables them in place once it starts", async () => {
+  it("leaves the dock closed on a new Code task until the person opens it, with its tools disabled until the task starts", async () => {
     const user = userEvent.setup();
     const base = codes();
     const initialCode = await base.bootstrap();
@@ -6272,8 +6268,8 @@ describe("App", () => {
 
     await screen.findByRole("region", { name: "Workspace pane: Controller foundation" });
     await showRightUtilityDock(user);
-    const dock = await screen.findByRole("complementary", { name: "Right Utility Dock" });
-    expect(within(dock).getByRole("button", { name: "Open Terminal" })).toBeEnabled();
+    const threadDock = await screen.findByRole("complementary", { name: "Right Utility Dock" });
+    expect(within(threadDock).getByRole("button", { name: "Open Terminal" })).toBeEnabled();
 
     fireEvent.pointerDown(screen.getByRole("region", { name: "Workspace pane: New Code thread" }));
     await waitFor(() =>
@@ -6282,8 +6278,15 @@ describe("App", () => {
       ).toHaveAttribute("aria-current", "true"),
     );
 
-    // The same dock, not one that closed and reopened.
-    expect(screen.getByRole("complementary", { name: "Right Utility Dock" })).toBe(dock);
+    // A task with no thread has nothing of its own to show, so the dock the
+    // thread had open does not follow the person onto the blank start screen.
+    await waitFor(() =>
+      expect(screen.queryByRole("complementary", { name: "Right Utility Dock" })).toBeNull(),
+    );
+
+    // It is still one press away, and then says what it will offer.
+    await showRightUtilityDock(user);
+    const dock = await screen.findByRole("complementary", { name: "Right Utility Dock" });
     expect(screen.getByRole("button", { name: "Close Right sidebar" })).toBeVisible();
     const quickTools = within(dock).getByRole("group", { name: "Quick tools" });
     for (const name of ["Open Environment", "Open Terminal", "Open Browser", "Open Files"]) {
@@ -6304,11 +6307,13 @@ describe("App", () => {
     await user.click(screen.getByRole("button", { name: "Create thread" }));
     await screen.findByRole("region", { name: "Workspace pane: Start here" });
 
+    // The window's own choice, made on the thread earlier, shows the dock again
+    // once the task has a thread.
+    const started = await screen.findByRole("complementary", { name: "Right Utility Dock" });
     await waitFor(() =>
-      expect(within(dock).getByRole("button", { name: "Open Terminal" })).toBeEnabled(),
+      expect(within(started).getByRole("button", { name: "Open Terminal" })).toBeEnabled(),
     );
-    expect(screen.getByRole("complementary", { name: "Right Utility Dock" })).toBe(dock);
-    expect(within(dock).queryByRole("complementary", { name: "Project tools" })).toBeNull();
+    expect(within(started).queryByRole("complementary", { name: "Project tools" })).toBeNull();
   });
 
   it("closes the dock when the active pane becomes a Project overview, which holds neither a thread nor a task draft", async () => {

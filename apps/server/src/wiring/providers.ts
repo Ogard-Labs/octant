@@ -1931,9 +1931,21 @@ export function wireProviders(deps: ProvidersDependencies) {
       readFirstRunOnboarding: () =>
         persistence.readShellSettings()?.settings.firstRunOnboarding ?? "pending",
       onConnect: async (command, windowId) => {
-        const { command: providerCommand } = createProviderFromDiscoveryCandidate(command, {
-          enabled: true,
-        });
+        // The renderer names the canonical file; the launcher that reaches it
+        // comes from the host's own scan, never from the request.
+        const scanned = discoveryService
+          .getLastScanCandidates()
+          .find(
+            (candidate) =>
+              candidate.driverKind === command.driverKind &&
+              candidate.binaryPath === command.binaryPath,
+          );
+        const { command: providerCommand } = createProviderFromDiscoveryCandidate(
+          scanned?.discoveredPath === undefined
+            ? command
+            : { ...command, discoveredPath: scanned.discoveredPath },
+          { enabled: true },
+        );
         const result = await providerService.execute(windowId as never, providerCommand);
         if (result.kind !== "provider-created") {
           throw new Error("Provider discovery connect did not create a provider instance.");

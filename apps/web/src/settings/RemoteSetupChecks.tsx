@@ -18,7 +18,7 @@ const REMEDIES: Readonly<Record<RemoteSetupCheckReason, string>> = {
     "The read-only SSH check completed. This proves this connection only; no task was started.",
   "needs-local-window":
     "Run server checks in the Octant window on the host. A paired client cannot administer its servers.",
-  "server-not-registered": "Register this server under Access › Servers before checking it.",
+  "server-not-registered": "Register this server under Permissions › Servers before checking it.",
   "registration-changed":
     "The registered server changed during the check. Inspect its alias and login user, then check again.",
   "missing-agent":
@@ -205,7 +205,7 @@ export function RemoteSetupChecks(props: {
           ) : servers === undefined ? (
             <p>Loading registered servers…</p>
           ) : servers.length === 0 ? (
-            <p>Register a server under Access › Servers, then return here to check it.</p>
+            <p>Register a server under Permissions › Servers, then return here to check it.</p>
           ) : (
             <>
               <div className="host-settings__field">
@@ -290,7 +290,7 @@ export function RemoteSetupChecks(props: {
         <OctantButton
           size="sm"
           type="button"
-          variant="outline"
+          variant="secondary"
           onClick={() => void run()}
           disabled={
             busy ||

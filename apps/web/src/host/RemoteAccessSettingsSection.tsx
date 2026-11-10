@@ -92,9 +92,10 @@ const LISTENER_FAILURE_COPY: Readonly<Record<string, string>> = {
     "The listener's certificate key can be read by other users on this computer, so Octant won't use it.",
   "occupied-port": "Another process is already using that port.",
   "interface-unavailable": "That network interface is not available right now.",
-  "bind-failed": "Octant could not bind the listener.",
-  "shutdown-failed": "Octant could not stop the listener cleanly.",
-  unavailable: "The remote listener service is unavailable.",
+  "bind-failed": "Octant could not start listening on that address. Try another address or port.",
+  "shutdown-failed":
+    "Octant could not stop listening cleanly. Restart Octant if remote access still answers.",
+  unavailable: "Remote access is unavailable right now. Restart Octant and try again.",
 };
 
 function pairingLink(origin: string, ticket: RemoteMintedPairingTicket): string {
@@ -454,7 +455,7 @@ export function RemoteAccessSettingsSection({
         <div className="setgroup">
           <SettingRow
             focused={focusedSetting === "remote-listener"}
-            description="The address paired devices reach. Loopback and public addresses are refused; use a private LAN or Tailscale address with a certificate browsers trust."
+            description="The address paired devices reach. Use a private network or Tailscale address with a certificate browsers trust; loopback and public addresses are refused."
             label={status?.enabled === true ? "Move the listener" : "Enable the listener"}
             scope="host"
             settingId="remote-listener"
@@ -581,7 +582,7 @@ export function RemoteAccessSettingsSection({
         {browserCannotVerify ? (
           <div className="setgroup">
             <SettingRow
-              description="A pairing code is single-use and expires in five minutes. It carries a fingerprint of this computer's own certificate key, so an Octant app can tell it is talking to this computer. Approve the request that appears below."
+              description="Enter this code on the other device, then approve the request below. It works once, for five minutes, and lets the device confirm it is talking to this computer."
               label="Pairing code"
               scope="host"
               settingId="remote-pairing-code"
@@ -842,6 +843,7 @@ export function RemoteAccessSettingsSection({
           {activeDevices.length !== 0 && confirmRevokeAll ? (
             <OctantConfirmDialog
               cancelLabel="Keep them"
+              destructive
               confirmLabel="Revoke all devices"
               onCancel={() => setConfirmRevokeAll(false)}
               onConfirm={() => void revokeAll()}

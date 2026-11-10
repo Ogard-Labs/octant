@@ -61,7 +61,7 @@ export function VoiceTip(props: VoiceTipProps) {
               }}
               size="sm"
               type="button"
-              variant="outline"
+              variant="secondary"
             >
               Use for Transcription
             </OctantButton>

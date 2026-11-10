@@ -265,7 +265,7 @@ export function ProviderCatalogView(props: ProviderCatalogViewProps) {
         </p>
       </SettingsSection>
       <SettingsSection
-        description="Runtimes run their own agent loop. Octant finds them on this host and drives them."
+        description="Coding agents installed on this host, such as Claude Code and Codex. Octant finds them and runs them for you."
         title="Agent runtimes"
       >
         <ul aria-label="Agent runtimes" className="endpoint-list">
@@ -273,7 +273,7 @@ export function ProviderCatalogView(props: ProviderCatalogViewProps) {
         </ul>
       </SettingsSection>
       <SettingsSection
-        description="Endpoints Octant calls over an API itself. They are added with an address under Octant Harness."
+        description="Models Octant calls directly, with an API key or a local address. Add them under Octant Harness."
         title="Model endpoints"
       >
         <ul aria-label="Model endpoints" className="endpoint-list">
@@ -282,7 +282,7 @@ export function ProviderCatalogView(props: ProviderCatalogViewProps) {
       </SettingsSection>
       {outsideEntries.length === 0 ? null : (
         <SettingsSection
-          description="Drivers you installed from outside Octant and trusted. Each runs in its own confined process with no network, and Octant makes every request it asks for."
+          description="Provider add-ons you installed and trusted. Each runs on its own with no network access, and Octant makes every request for it."
           title="Outside drivers"
         >
           <ul aria-label="Outside drivers" className="endpoint-list">
@@ -435,7 +435,7 @@ function ProviderCatalogDetail(
               onClick={props.onOpenModelEndpoints}
               size="sm"
               type="button"
-              variant="outline"
+              variant="secondary"
             >
               Open Model endpoints
             </OctantButton>
@@ -697,7 +697,7 @@ function CurrentStep(
     </OctantButton>
   );
   const openEndpoints = (
-    <OctantButton onClick={props.onOpenModelEndpoints} size="sm" type="button" variant="outline">
+    <OctantButton onClick={props.onOpenModelEndpoints} size="sm" type="button" variant="secondary">
       Open Model endpoints
     </OctantButton>
   );

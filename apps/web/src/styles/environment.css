@@ -874,7 +874,6 @@ html[data-octant-reduced-motion="true"] .environment-move__bar > span {
   display: flex;
   flex-direction: column;
   gap: var(--oct-space-4);
-  padding: var(--oct-space-5);
 }
 
 /* A full-height sheet at phone width, edge to edge, with its buttons at the
@@ -906,7 +905,7 @@ html[data-octant-reduced-motion="true"] .environment-move__bar > span {
 .thread-move-sheet__title {
   margin: 0;
   font-size: var(--oct-text-base);
-  font-weight: var(--oct-weight-display);
+  font-weight: var(--oct-weight-strong);
 }
 
 .thread-move-sheet__meta {
@@ -1075,7 +1074,7 @@ details.thread-move-sheet__section > summary {
   gap: var(--oct-space-2);
   margin: 0;
   font-size: var(--oct-text-base);
-  font-weight: var(--oct-weight-display);
+  font-weight: var(--oct-weight-strong);
 }
 
 .shutdown-dialog__title--warning {

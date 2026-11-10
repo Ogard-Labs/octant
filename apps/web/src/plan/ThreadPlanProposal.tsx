@@ -26,12 +26,15 @@ export function ThreadPlanProposal() {
         disabled={controller.pending}
         onClick={() => setOpen(true)}
         ref={trigger}
-        size="icon"
+        size="sm"
         title="Propose plan"
         type="button"
         variant="ghost"
       >
-        <ListChecks aria-hidden="true" size={16} strokeWidth={1.8} />
+        {/* Named in words: as a bare tick-list beside other bare glyphs in the
+            composer's toolbar, nobody could tell what it offered. */}
+        <ListChecks aria-hidden="true" size={14} strokeWidth={1.7} />
+        <span>Plan</span>
       </OctantButton>
       <OctantDialog
         className="project-dialog thread-plan-proposal"
