@@ -76,7 +76,7 @@ export function useGuardrailScope(input: {
   });
 }
 
-/** A thread's header line: its level and where the level came from. */
+/** The first row of a thread's info panel: its level and where the level came from. */
 export function ThreadGuardrailLevel(props: {
   readonly surface: "code" | "work";
   readonly projectId: string;
@@ -124,7 +124,7 @@ export function ThreadGuardrailLevel(props: {
   );
 }
 
-/** The level in force on a thread and the scope it came from, in the thread's header. */
+/** The level in force on a thread and the scope it came from. */
 export function GuardrailLevelIndicator(props: {
   readonly mode: PermissionMode;
   readonly scope?: GuardrailLevelScope | undefined;
@@ -133,7 +133,7 @@ export function GuardrailLevelIndicator(props: {
 }) {
   const label = PERMISSION_MODE_LABEL[props.mode];
   return (
-    <p className="guardrail-level thread-column" data-mode={props.mode}>
+    <p className="guardrail-level" data-mode={props.mode}>
       <span className="guardrail-level__mode">
         {props.selectedOnly ? `Selected ${label}` : label}
       </span>

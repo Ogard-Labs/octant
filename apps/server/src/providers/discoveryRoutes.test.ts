@@ -208,6 +208,56 @@ describe("discoveryRoutes", () => {
     );
   });
 
+  it("repoints a runtime whose saved binary is gone at the launcher the scan found", async () => {
+    const instance = {
+      id: decodeProviderInstanceId("00000000-0000-4000-8000-000000000904"),
+      displayName: "Claude Code",
+      driverKind: "claude",
+      enabled: false,
+      version: 3,
+      configuration: {
+        kind: "claude-agent-sdk",
+        binaryPath: "/gone/lib/node_modules/claude-code/bin/claude.exe",
+        authentication: "subscription",
+      },
+    } as unknown as ProviderInstance;
+    const applyProviderCommand = vi.fn(async () => undefined);
+    const createFromDiscovery = vi.fn();
+    const handler = createDiscoveryRouteHandler({
+      discoveryService: makeFakeDiscoveryService({
+        ...fakeSnapshot,
+        candidates: [
+          {
+            ...fakeSnapshot.candidates[0]!,
+            driverKind: "claude",
+            displayName: "Claude Code",
+            binaryPath: "/Users/example/.local/share/claude/versions/2.1.321",
+            discoveredPath: "/Users/example/.local/bin/claude",
+            pathSummary: "~/.local/bin/claude",
+          },
+        ],
+      } as unknown as typeof fakeSnapshot),
+      windowAuthorityStore: makeFakeWindowAuthorityStore(),
+      listInstances: async () => [instance],
+      createFromDiscovery,
+      applyProviderCommand,
+      binaryExists: async () => false,
+    });
+
+    const result = await handler(makeRequest("/api/providers/discovery/scan"));
+
+    expect(result!.status).toBe(200);
+    // Only the path changes: the switch stays off and nothing new is created.
+    expect(applyProviderCommand).toHaveBeenCalledTimes(1);
+    expect(applyProviderCommand).toHaveBeenCalledWith("test-window-id", {
+      kind: "change-claude-configuration",
+      instanceId: instance.id,
+      expectedVersion: 3,
+      configuration: { ...instance.configuration, binaryPath: "/Users/example/.local/bin/claude" },
+    });
+    expect(createFromDiscovery).not.toHaveBeenCalled();
+  });
+
   it("rejects connect without onConnect handler", async () => {
     const handler = createDiscoveryRouteHandler({
       discoveryService: makeFakeDiscoveryService(),

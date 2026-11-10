@@ -2289,6 +2289,15 @@ The central workspace is one recursive split tree with one surface per leaf, and
 
 Status: Built. Since: —. Detail: [Workspace: Panes and content navigation](workspace.md#panes-and-content-navigation).
 
+### Thread info
+
+What is true about a thread but is not part of its conversation has one home, a panel opened from the strip above the follow-up composer.
+
+- Its rows are the access level in force with Access details, Reply detail, document delivery, Provider tools, Credential commands, Provider cloud sessions and Continue elsewhere, each only where it applies. The composer's toolbar keeps only what changes from one message to the next. Nothing else about the thread is drawn on the thread page outside the transcript and the composer.
+- Rows stay mounted while the panel is closed, and a row that waits for the person marks the panel's button.
+
+Status: Built. Since: —. Detail: [Workspace: Thread info](workspace.md#thread-info).
+
 ### Right dock and thread tools
 
 The dock is contextual: it follows the active pane's thread and Project, and never shows another pane's content.
@@ -2745,7 +2754,7 @@ Status: Built. Since: —. Detail: [Provider runtimes: runtime updates](provider
 Settings lists every bundled provider driver, runtimes and model endpoints in separate sections. Bundled drivers need no install or trust step, and opening a catalog page runs nothing.
 
 - An outside driver the person trusted appears in its own third section, labelled as an outside driver, never as bundled, and its provider is added off.
-- A runtime card whose saved binary is gone offers only a replacement from the host's own latest scan; the offer never switches or turns the runtime on by itself.
+- A scan points a runtime whose saved binary no longer exists at the launcher it found for the same driver, and a runtime created from a scan saves that launcher rather than the versioned file behind it; neither ever turns the runtime on. A saved binary that exists but is incompatible is only offered a replacement, on the card's row.
 - A browser can create an API-key profile but never supply the key; the key is set in the host terminal or the desktop app, and host-local credential authority is unchanged.
 
 Status: Built. Since: —. Detail: [Model endpoints: provider catalog](model-endpoints.md#provider-catalog).

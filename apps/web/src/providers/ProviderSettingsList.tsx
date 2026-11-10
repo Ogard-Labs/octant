@@ -755,6 +755,12 @@ function ProviderRow(props: ProviderRowProps) {
     props.onUseScannedBinary === undefined
       ? undefined
       : scannedBinaryOffer(props.instance, props.discoverySnapshot, readiness, detectedLocally);
+  // The scan found this runtime somewhere other than the saved path. A row
+  // that said only "Not found" while its way out sat inside the closed details
+  // left a Claude Code moved by its own installer looking uninstalled, so the
+  // row names where it was found and carries the offer itself.
+  const rowNote =
+    withheldOff || scannedOffer === undefined ? scanSilence : `Found at ${scannedOffer.foundAt}.`;
   const isCli = props.instance.driverKind === "opencode";
   const isCodex = props.instance.driverKind === "codex";
   const isClaude = props.instance.driverKind === "claude";
@@ -915,11 +921,28 @@ function ProviderRow(props: ProviderRowProps) {
           </span>
           {meta === name ? null : <span className="prov-meta oct-meta">{meta}</span>}
         </span>
-        {scanSilence === undefined ? null : (
-          <span className="prov-meta provider-settings__scan-note">{scanSilence}</span>
+        {rowNote === undefined ? null : (
+          <span className="prov-meta provider-settings__scan-note">{rowNote}</span>
         )}
       </span>
       <span className="prov-actions">
+        {scannedOffer === undefined ? null : (
+          <OctantButton
+            aria-label={`${scannedOffer.label} for ${name}`}
+            className="window-no-drag"
+            disabled={disabled || locating}
+            onClick={() => {
+              // The host's answer is reported in the details, so they open.
+              setDetailsOpen(true);
+              void useScannedBinary();
+            }}
+            size="sm"
+            type="button"
+            variant="secondary"
+          >
+            {locating ? "Checking binary…" : "Use it"}
+          </OctantButton>
+        )}
         <OctantButton
           size="icon"
           aria-controls={`provider-details-${props.instance.id}`}
@@ -1074,18 +1097,6 @@ function ProviderRow(props: ProviderRowProps) {
                 {locating ? "Checking binary…" : "Locate binary…"}
               </OctantButton>
             ) : null}
-            {scannedOffer === undefined ? null : (
-              <OctantButton
-                aria-label={`${scannedOffer.label} for ${name}`}
-                disabled={disabled || locating}
-                onClick={() => void useScannedBinary()}
-                size="sm"
-                type="button"
-                variant="secondary"
-              >
-                {locating ? "Checking binary…" : scannedOffer.label}
-              </OctantButton>
-            )}
             {props.onAddAccount !== undefined && (isClaude || isCodex) ? (
               <OctantButton
                 aria-label={`Add account for ${name}`}
@@ -1903,6 +1914,8 @@ interface ScannedBinaryOffer {
   /** The path the host is asked to use: the stable launcher, not a versioned target. */
   readonly path: string;
   readonly label: string;
+  /** Where the scan found it, home-relative, with its version when known. */
+  readonly foundAt: string;
 }
 
 /**
@@ -1967,10 +1980,8 @@ function scannedBinaryOffer(
   if (best === undefined) return undefined;
   const path = best.discoveredPath ?? best.binaryPath;
   const version = best.version === undefined ? undefined : versionNumber(best.version);
-  return {
-    path,
-    label: `Use the one found at ${homeRelativePath(best, path)}${version === undefined ? "" : ` (${version})`}`,
-  };
+  const foundAt = `${homeRelativePath(best, path)}${version === undefined ? "" : ` (${version})`}`;
+  return { path, label: `Use the one found at ${foundAt}`, foundAt };
 }
 
 /** The dotted version number in a probe's output, such as `2.1.306` in `2.1.306 (Claude Code)`. */
