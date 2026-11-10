@@ -1476,7 +1476,7 @@ function ActiveSectionContent({
           >
             <div className="setgroup">
               <SettingRow
-                description="On, a file a page starts downloading while the agent drives it is held on this computer, not in the workspace, until you say yes to saving it into the thread's downloads folder. You are asked every time. Downloads you start yourself stay blocked."
+                description="Octant asks before saving a file a page starts downloading while an agent drives it, every time. Downloads you start yourself stay blocked."
                 focused={focusedSetting === settingId("browser-agent-downloads")}
                 label="Let agents download files"
                 scope="host"
@@ -1559,7 +1559,7 @@ function ActiveSectionContent({
                 scope="host"
                 settingId="persistent-browser-owner"
                 focused={focusedSetting === settingId("persistent-browser-owner")}
-                description="Off by default; enabling starts no task, copies no sign-ins and upgrades no existing permission, while turning it off or quitting Octant ends background leases."
+                description="Keeps the agent's Browser running after the last window closes. It starts no task, copies no sign-ins and widens no permission; turning it off or quitting Octant ends it."
               >
                 <OctantSwitch
                   checked={props.settings.persistentBrowserOwner}
@@ -2030,7 +2030,7 @@ function CompletedThreadArchiveSelect(props: {
 const AUTO_COMPACT_WINDOW_CHOICES: ReadonlyArray<number> = [50, 60, 70, 75, 80, 85, 90, 95];
 
 const RUNTIME_COMPACTION_DESCRIPTION =
-  "Claude Code, Codex and the other runtimes compact by themselves. A share picked here overrides theirs in the sessions Octant starts: Claude Code and Codex then compact at it inside a turn too, and the others between turns. Close to a full window, or on a small one, Claude Code keeps its own point.";
+  "Claude Code, Codex and the other runtimes compact by themselves. A share picked here replaces theirs in the sessions Octant starts, except that Claude Code keeps its own point near a full or small window.";
 
 /** How full a window may get before a compaction rule acts, plus off. */
 function AutoCompactWindowSelect(props: {
@@ -2240,7 +2240,7 @@ function GeneralSection({ focusedSetting, props }: SectionProps) {
       <SettingsSection title="Compaction">
         <div className="setgroup">
           <SettingRow
-            description="When a thread Octant keeps (Octant Harness, and Chat or Work on a model endpoint) fills this much of its window, Octant compacts it before the next turn, and Octant Harness inside a long turn too. The thread keeps every message."
+            description="When a thread on Octant Harness or a model endpoint fills this much of its window, Octant compacts it before the next turn. The thread keeps every message."
             focused={focusedSetting === settingId("auto-compact-octant")}
             label="Compact Octant threads"
             scope="host"
@@ -2290,7 +2290,7 @@ function GeneralSection({ focusedSetting, props }: SectionProps) {
             />
           </SettingRow>
           <SettingRow
-            description="When a turn leaves a provider's 5-hour or weekly limit this used, Octant compacts the thread and writes a summary another provider can pick up, so you can switch before the limit stops you."
+            description="When a provider's 5-hour or weekly limit is this used, Octant compacts the thread so another provider can pick it up before the limit stops you."
             focused={focusedSetting === settingId("auto-compact-limit")}
             label="Compact near a usage limit"
             scope="host"

@@ -391,6 +391,7 @@
 
 .running-services__origin {
   min-width: 0;
+  flex: 1 1 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
