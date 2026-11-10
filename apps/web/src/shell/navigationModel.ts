@@ -220,6 +220,11 @@ export interface ChatThreadNavigationItem {
    * (docs/design/coordinator-threads.md). Absent on Chat and Work rows.
    */
   readonly coordinator?: boolean;
+  /**
+   * Code only: the coordinator is its Project's designated planner, whose
+   * role follows the designation rather than Make coordinator.
+   */
+  readonly planner?: boolean;
   /** Code only: the coordinator that started this worker. */
   readonly coordinatorThreadId?: string;
   /** The worker's coordinator's title, when that coordinator is still listed. */

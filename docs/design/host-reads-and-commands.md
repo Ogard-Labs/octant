@@ -18,7 +18,8 @@ Each mode keeps its sidebar current with a projection-only navigation read:
 ## Pending requests
 
 Every Needs you surface (the start-screen card, Board cards, the command
-palette, the Inbox, and the Review page) reads one host list, the
+palette, the Inbox, the Review page, and a coordinator's composer, which
+filters it to the coordinator's workers) reads one host list, the
 `pendingRequests` read. The Board files a thread whose live turn waits on an
 approval or question under Waiting with the `awaiting-input` reason, and a
 thread whose latest finished turn closed with a decision under Waiting with the

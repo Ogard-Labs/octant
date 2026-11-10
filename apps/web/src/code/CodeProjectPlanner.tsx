@@ -1,153 +1,38 @@
-import type { CodePlannerCommand, CodePlannerView, ProjectId } from "@octant/contracts";
-import { useEffect, useRef, useState } from "react";
-import { defaultPermissionModeFor } from "@octant/domain/guardrail-policy";
-import { isDraftSelectionSelectable } from "@octant/domain";
+import type { CodePlannerCommand, ProjectId } from "@octant/contracts";
+import { useState } from "react";
 import { OctantAlert } from "../ui/base/OctantAlert";
 import { OctantButton } from "../ui/base/OctantButton";
-import { OctantDialog } from "../ui/base/OctantDialog";
 import { OctantSelectField } from "../ui/base/OctantSelect";
-import { NewTaskDraftScopeContext } from "../composer/useNewTaskPrompt";
 import type { CodeOverviewProps } from "./CodeOverview";
-import { CodeComposerAdapter } from "./composer/CodeComposerAdapter";
-import { useWorktreeRemoteFacts } from "./composer/useWorktreeRemoteFacts";
-import { plannerReply, type PlannerProposalReview } from "./plannerProposalCreation";
-import { readPlannerAttempt, settlePlannerAttempt } from "./plannerProposalAttempt";
+import type { PlannerProposalReview } from "./plannerProposalCreation";
+import { readPlannerAttempt } from "./plannerProposalAttempt";
+import { PlannerProposalReviewDialog, usePlannerState } from "./plannerProposalReview";
 
 /** The person reviews one Project's planner; every write retains its server version. */
 export function CodeProjectPlanner(
   props: Extract<CodeOverviewProps, { readonly projectId: ProjectId }>,
 ) {
   const { client } = props.controller;
-  const ready = props.controller.status === "ready";
-  const supported = client.readPlanner !== undefined;
-  const [state, setState] = useState<{
-    readonly projectId: ProjectId;
-    readonly client: typeof client;
-    readonly view?: CodePlannerView;
-    readonly failure?: string;
-  }>();
-  const [revision, refresh] = useState(0);
-  const [chosen, choose] = useState<string>();
-  const [busy, setBusy] = useState(false);
-  const inFlight = useRef(false);
-  const [notice, setNotice] = useState<string>();
-  const [review, setReview] = useState<PlannerProposalReview>();
-  const { remoteFacts } = useWorktreeRemoteFacts({
-    execute: props.controller.execute,
+  const plannerState = usePlannerState({
+    controller: props.controller,
     projectId: props.projectId,
-    enabled: ready && review !== undefined,
   });
-  const view =
-    state?.client === client && String(state.projectId) === String(props.projectId)
-      ? state.view
-      : undefined;
-  const current = ready && view !== undefined && state?.failure === undefined;
+  const { ready, view, current, busy, notice, refresh, mutate } = plannerState;
+  const failure = plannerState.failure;
+  const [chosen, choose] = useState<string>();
+  const [review, setReview] = useState<PlannerProposalReview>();
   const threads = (props.controller.bootstrap?.threads ?? []).filter(
     (thread) =>
       String(thread.projectId) === String(props.projectId) && thread.lifecycle !== "archived",
   );
   const selected = threads.find((thread) => String(thread.id) === chosen) ?? threads[0];
-  const providerGroups = props.providerGroups ?? [];
-  const providerSelection =
-    props.selectedProviderInstanceId !== undefined && props.selectedModelId !== undefined
-      ? { providerInstanceId: props.selectedProviderInstanceId, modelId: props.selectedModelId }
-      : undefined;
-  const providerGroup = providerGroups.find(
-    (group) => String(group.instance.id) === String(providerSelection?.providerInstanceId),
-  );
-  const providerReady =
-    providerSelection !== undefined &&
-    (providerGroup?.readiness === "ready" || providerGroup?.readiness === "degraded") &&
-    isDraftSelectionSelectable(providerGroups, providerSelection);
-
-  useEffect(() => {
-    if (!ready) {
-      setState((previous) =>
-        previous === undefined
-          ? previous
-          : {
-              ...previous,
-              failure: "Reconnect and refresh planner state before making a decision.",
-            },
-      );
-      return;
-    }
-    if (client.readPlanner === undefined) return;
-    let disposed = false;
-    let timer: ReturnType<typeof setTimeout> | undefined;
-    const read = async () => {
-      try {
-        const pending = client.readPlanner?.(props.projectId);
-        const next = pending === undefined ? undefined : await plannerReply(pending);
-        if (!disposed && next !== undefined)
-          for (const entry of next.proposals) settlePlannerAttempt(entry);
-        if (!disposed)
-          setState({
-            projectId: props.projectId,
-            client,
-            ...(next === undefined ? {} : { view: next }),
-          });
-      } catch (error) {
-        if (!disposed)
-          setState((previous) => ({
-            projectId: props.projectId,
-            client,
-            ...(previous?.client === client &&
-            String(previous.projectId) === String(props.projectId) &&
-            previous.view !== undefined
-              ? { view: previous.view }
-              : {}),
-            failure:
-              error instanceof Error
-                ? error.message
-                : "Planner state is unavailable. Refresh before making a decision.",
-          }));
-      }
-      if (!disposed) timer = setTimeout(() => void read(), 5_000);
-    };
-    void read();
-    return () => {
-      disposed = true;
-      clearTimeout(timer);
-    };
-  }, [client, props.projectId, ready, revision]);
-
-  async function mutate(
-    action: () => Promise<{ readonly status: string; readonly message?: string }>,
-  ) {
-    if (!current || inFlight.current) return;
-    inFlight.current = true;
-    setBusy(true);
-    setNotice(undefined);
-    try {
-      const result = await plannerReply(action());
-      setNotice(
-        result.status === "refused"
-          ? (result.message ?? "The planner decision was refused.")
-          : "Planner decision recorded.",
-      );
-    } catch {
-      setNotice(
-        "The decision reply was lost. Refresh and inspect current proposals before trying again; nothing is retried automatically.",
-      );
-    } finally {
-      inFlight.current = false;
-      setBusy(false);
-      setState((previous) =>
-        previous === undefined
-          ? previous
-          : { ...previous, failure: "Checking current planner state…" },
-      );
-      refresh((value) => value + 1);
-    }
-  }
   const designation = (command: CodePlannerCommand) =>
     mutate(async () => {
       if (client.executePlanner === undefined)
         return { status: "refused", message: "Planner designation is unavailable on this host." };
       return client.executePlanner(command);
     });
-  if (!supported) return null;
+  if (!plannerState.supported) return null;
   const disabled = !current || busy || props.creating === true;
   const activePlanner =
     view?.designation.kind === "designated" ? view.designation.plannerThreadId : undefined;
@@ -159,32 +44,11 @@ export function CodeProjectPlanner(
         b.proposal.proposedAt.localeCompare(a.proposal.proposedAt),
     )
     .slice(0, 50);
-  const reviewCurrent =
-    review !== undefined &&
-    view?.proposals.some(
-      (entry) =>
-        String(entry.proposal.id) === String(review.proposal.id) &&
-        entry.proposal.status === "pending" &&
-        entry.proposalVersion === review.proposalVersion,
-    );
-  const reviewAttempt =
-    review === undefined
-      ? { status: "none" as const }
-      : readPlannerAttempt(
-          view?.proposals.find(
-            (entry) => String(entry.proposal.id) === String(review.proposal.id),
-          ) ?? review,
-        );
   return (
     <section aria-label="Project planner" className="code-project-planner">
       <header className="code-project-overview__section-header">
         <h2>Project planner</h2>
-        <OctantButton
-          type="button"
-          variant="ghost"
-          size="sm"
-          onClick={() => refresh((value) => value + 1)}
-        >
+        <OctantButton type="button" variant="ghost" size="sm" onClick={refresh}>
           Refresh planner
         </OctantButton>
       </header>
@@ -192,11 +56,11 @@ export function CodeProjectPlanner(
         One Code thread may survey this Project and propose tasks. Each proposal waits for your
         decision; designation grants no right to start work.
       </p>
-      {!ready || state?.failure !== undefined ? (
+      {!ready || failure !== undefined ? (
         <OctantAlert tone="warning">
           {!ready
             ? "Planner decisions need a connected host. Reconnect and refresh before continuing."
-            : state?.failure}
+            : failure}
         </OctantAlert>
       ) : null}
       {notice === undefined ? null : (
@@ -369,112 +233,14 @@ export function CodeProjectPlanner(
       {(view?.proposals.length ?? 0) > 50 ? (
         <p className="oct-meta">Showing the first fifty proposals, with pending decisions first.</p>
       ) : null}
-      {review === undefined || props.controller.bootstrap === undefined ? null : (
-        <OctantDialog
-          label="Approve planner proposal"
-          open
-          onClose={() => {
-            if (!busy && !props.creating) setReview(undefined);
-          }}
-          className="code-project-planner__review"
-        >
-          <NewTaskDraftScopeContext.Provider
-            value={`planner-proposal:${String(review.proposal.id)}`}
-          >
-            <CodeComposerAdapter
-              projectId={props.projectId}
-              projectAvailable={current && reviewCurrent === true}
-              heading={
-                <>
-                  <h2>{"Review the planner's proposal"}</h2>
-                  <h3>{review.proposal.title}</h3>
-                </>
-              }
-              fixedPrompt={review.proposal.intent}
-              createLabel="Approve and start described task"
-              providerGroups={providerGroups}
-              {...(!current || !reviewCurrent
-                ? {
-                    createDisabledReason:
-                      "Refresh the changed proposal and host state before approving.",
-                  }
-                : reviewAttempt.status !== "none"
-                  ? {
-                      createDisabledReason:
-                        "The prior approval outcome is unresolved. Inspect its submitted task; no replacement approval can be sent.",
-                    }
-                  : providerReady
-                    ? {}
-                    : {
-                        createDisabledReason:
-                          "Choose an available provider and model before approving this task.",
-                      })}
-              {...(props.projectName === undefined ? {} : { projectName: props.projectName })}
-              {...(props.projectRoot === undefined ? {} : { projectRoot: props.projectRoot })}
-              {...(props.baseRepository === undefined
-                ? {}
-                : { baseRepository: props.baseRepository })}
-              {...(props.hosts === undefined ? {} : { hosts: props.hosts })}
-              {...(props.newThreadWorkspace === undefined
-                ? {}
-                : { newThreadWorkspace: props.newThreadWorkspace })}
-              {...(remoteFacts === undefined ? {} : { worktreeRemoteFacts: remoteFacts })}
-              defaultPermissionMode={defaultPermissionModeFor({
-                settings: props.controller.bootstrap.settings,
-              })}
-              defaultPermissionPersistence={
-                props.controller.bootstrap.settings.defaultPermissionPersistence
-              }
-              {...(props.selectedProviderInstanceId === undefined
-                ? {}
-                : { selectedProviderInstanceId: props.selectedProviderInstanceId })}
-              {...(props.selectedModelId === undefined
-                ? {}
-                : { selectedModelId: props.selectedModelId })}
-              onSelectProvider={props.onSelectProvider ?? (() => {})}
-              creating={disabled}
-              {...(props.errorMessage === undefined ? {} : { errorMessage: props.errorMessage })}
-              {...(props.pendingMessage === undefined
-                ? {}
-                : { pendingMessage: props.pendingMessage })}
-              execute={props.controller.execute}
-              onCancel={() => setReview(undefined)}
-              onCreateThread={async (input) => {
-                if (
-                  !current ||
-                  !reviewCurrent ||
-                  reviewAttempt.status !== "none" ||
-                  !providerReady ||
-                  inFlight.current
-                )
-                  return false;
-                inFlight.current = true;
-                setBusy(true);
-                try {
-                  return await props.onCreateThread?.(
-                    { ...input, prompt: review.proposal.intent },
-                    props.projectId,
-                    review,
-                  );
-                } finally {
-                  inFlight.current = false;
-                  setBusy(false);
-                  refresh((value) => value + 1);
-                }
-              }}
-            />
-          </NewTaskDraftScopeContext.Provider>
-          <p className="oct-row-detail">
-            Approve and start creates this described task in {props.projectName ?? "this Project"}{" "}
-            and sends its exact proposal as the first message, using the provider, checkout and
-            access you choose above.
-          </p>
-          {!current || !reviewCurrent ? (
-            <OctantAlert tone="warning">
-              The proposal or host state changed. Close this review and refresh before deciding.
-            </OctantAlert>
-          ) : null}
-        </OctantDialog>
+      {review === undefined ? null : (
+        <PlannerProposalReviewDialog
+          {...props}
+          heading="Review the planner's proposal"
+          onClose={() => setReview(undefined)}
+          planner={plannerState}
+          review={review}
+        />
       )}
     </section>
   );

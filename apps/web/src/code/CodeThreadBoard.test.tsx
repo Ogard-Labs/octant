@@ -27,6 +27,7 @@ const octantCss = readFileSync(resolve(srcDir, "styles/octant.css"), "utf-8");
 
 const projectA = "00000000-0000-4000-8000-0000000050a1" as ProjectId;
 const projectB = "00000000-0000-4000-8000-0000000050a2" as ProjectId;
+const COORDINATOR_ID = "00000000-0000-4000-8000-000000005101";
 
 function card(overrides: {
   readonly id: string;
@@ -46,6 +47,7 @@ function card(overrides: {
   readonly reviewState?: CodeBoardCard["reviewState"];
   readonly lastMeaningfulActivityAt?: CodeBoardCard["lastMeaningfulActivityAt"];
   readonly outsideContent?: CodeBoardCard["outsideContent"];
+  readonly coordinatorThreadId?: string;
 }): CodeBoardCard {
   return {
     threadId: `00000000-0000-4000-8000-0000000051${overrides.id}`,
@@ -96,6 +98,9 @@ function card(overrides: {
     followUp: overrides.followUp ?? false,
     lastMeaningfulActivityAt: overrides.lastMeaningfulActivityAt ?? null,
     ...(overrides.outsideContent === undefined ? {} : { outsideContent: overrides.outsideContent }),
+    ...(overrides.coordinatorThreadId === undefined
+      ? {}
+      : { coordinatorThreadId: overrides.coordinatorThreadId }),
   } as unknown as CodeBoardCard;
 }
 
@@ -437,18 +442,18 @@ describe("CodeThreadBoard", () => {
     const loadBoard = vi.fn(async () =>
       view([
         card({ id: "01", status: "ready", title: "Backlog coordinator" }),
-        card({ id: "02", status: "in-progress", title: "Fix the flaky test" }),
+        card({
+          id: "02",
+          status: "in-progress",
+          title: "Fix the flaky test",
+          coordinatorThreadId: COORDINATOR_ID,
+        }),
         card({ id: "03", status: "ready", title: "Ordinary thread" }),
       ]),
     );
     render(
       <CodeThreadBoard
-        coordinators={{
-          coordinatorThreadIds: new Set(["00000000-0000-4000-8000-000000005101"]),
-          coordinatorTitleByWorker: new Map([
-            ["00000000-0000-4000-8000-000000005102", "Backlog coordinator"],
-          ]),
-        }}
+        coordinators={{ titleByCoordinator: new Map([[COORDINATOR_ID, "Backlog coordinator"]]) }}
         loadBoard={loadBoard}
         projects={projects}
         storage={memoryStorage()}
@@ -459,6 +464,48 @@ describe("CodeThreadBoard", () => {
     expect(screen.queryByRole("button", { name: "Backlog coordinator" })).toBeNull();
     expect(within(cardFor("Fix the flaky test")).getByText("Backlog coordinator")).toBeVisible();
     expect(cardFor("Ordinary thread").querySelector(".board-card-coordinator")).toBeNull();
+  });
+
+  it("filters the board to one coordinator's workers from the Filters popover", async () => {
+    const loadBoard = vi.fn(async (_query: CodeBoardQuery) =>
+      view([card({ id: "02", status: "ready", coordinatorThreadId: COORDINATOR_ID })]),
+    );
+    render(
+      <CodeThreadBoard
+        coordinators={{ titleByCoordinator: new Map([[COORDINATOR_ID, "Backlog coordinator"]]) }}
+        loadBoard={loadBoard}
+        projects={projects}
+        storage={memoryStorage()}
+      />,
+    );
+    await screen.findByText("Thread 02");
+    fireEvent.click(screen.getByRole("button", { name: "Filters" }));
+    const panel = await screen.findByRole("dialog", { name: "Filters" });
+    const user = userEvent.setup();
+    await user.click(within(panel).getByRole("combobox", { name: "Coordinator" }));
+    await user.click(await screen.findByRole("option", { name: "Backlog coordinator" }));
+    await waitFor(() =>
+      expect(loadBoard).toHaveBeenLastCalledWith({
+        version: 1,
+        coordinatorThreadId: COORDINATOR_ID,
+      }),
+    );
+    const activeFilters = screen.getByRole("status", { name: "Active filters" });
+    expect(within(activeFilters).getByText("Workers of Backlog coordinator")).toBeVisible();
+  });
+
+  it("offers no Coordinator filter when the window has no coordinators", async () => {
+    render(
+      <CodeThreadBoard
+        loadBoard={vi.fn(async () => view([card({ id: "01", status: "ready" })]))}
+        projects={projects}
+        storage={memoryStorage()}
+      />,
+    );
+    await screen.findByText("Thread 01");
+    fireEvent.click(screen.getByRole("button", { name: "Filters" }));
+    const panel = await screen.findByRole("dialog", { name: "Filters" });
+    expect(within(panel).queryByRole("combobox", { name: "Coordinator" })).toBeNull();
   });
 
   it("keeps failing checks and active agents visible in the board scan path", async () => {

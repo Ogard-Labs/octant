@@ -346,6 +346,9 @@ function buildCard(
     followUp: entry.followUp,
     lastMeaningfulActivityAt: metadata.lastMeaningfulActivityAt,
     ...(outsideContent === undefined ? {} : { outsideContent }),
+    ...(entry.thread.coordinatorThreadId === undefined
+      ? {}
+      : { coordinatorThreadId: entry.thread.coordinatorThreadId }),
   };
 }
 
@@ -409,6 +412,12 @@ function matchesQuery(
   if (!matchesPullRequest(card, query.pullRequest)) return false;
   if (!matchesChecks(card, query.checks)) return false;
   if (!matchesFollowUp(card, query.followUp)) return false;
+  if (
+    query.coordinatorThreadId !== undefined &&
+    String(card.coordinatorThreadId) !== String(query.coordinatorThreadId)
+  ) {
+    return false;
+  }
   if (query.text !== undefined && !matchesText(card, query.text)) return false;
   return true;
 }

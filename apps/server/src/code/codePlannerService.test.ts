@@ -96,6 +96,7 @@ function fixture(options?: FixtureOptions): {
     readProject: (projectId: ProjectId) =>
       String(projectId) === ids.project ? project : undefined,
     readCodeThread: (threadId: CodeThreadId) => createdThreads.get(String(threadId)),
+    readCodeThreads: () => [...createdThreads.values()],
   } as unknown as PersistenceService;
   const created: Array<CodePlannerThreadCreation> = [];
   const contexts: Array<unknown> = [];
@@ -205,6 +206,23 @@ describe("planner designation", () => {
       expectedVersion: 1,
     });
     expect(outcome).toMatchObject({ status: "refused", reason: "planner-already-designated" });
+  });
+
+  it("refuses to designate a fifth coordinator of the Project, because the planner reads as one", async () => {
+    const { service, createdThreads } = fixture();
+    for (let index = 0; index < 4; index += 1) {
+      const id = `20000000-0000-4000-8000-0000000001${String(index).padStart(2, "0")}`;
+      createdThreads.set(id, {
+        id: decodeCodeThreadId(id),
+        projectId,
+        lifecycle: "active",
+        coordinator: true,
+      } as unknown as CodeThread);
+    }
+    expect(await designate(service)).toMatchObject({
+      status: "refused",
+      reason: "coordinator-limit-reached",
+    });
   });
 
   it("refuses a stale designation command instead of overwriting a newer one", async () => {
@@ -686,6 +704,23 @@ describe("planner work proposals", () => {
           : {},
       ]);
     }
+  });
+
+  it("records a designated planner's start as a proposal whose confirmed thread is the planner's worker", async () => {
+    const { service, contexts } = fixture();
+    expect(service.proposeForCoordinator(threadId, draft)).toMatchObject({ status: "refused" });
+    await designate(service);
+    const proposed = service.proposeForCoordinator(threadId, draft);
+    if (proposed.status !== "proposed") throw new Error("expected a proposal");
+    expect(proposed.proposal).toMatchObject({ fromCoordinator: true, plannerThreadId: threadId });
+    const outcome = await service.resolveProposal(windowId, {
+      kind: "confirm-planner-work-proposal",
+      proposalId: String(proposed.proposal.id),
+      expectedVersion: 1,
+      creation: managedCreation(),
+    });
+    expect(outcome.status).toBe("confirmed");
+    expect(contexts).toEqual([{ coordinatorThreadId: threadId }]);
   });
 
   it("creates nothing when the user declines", async () => {

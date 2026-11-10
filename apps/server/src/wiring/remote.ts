@@ -107,6 +107,7 @@ import { createHubOwnerRouteHandler } from "../hub/hubOwnerRoutes";
 import { OwnerCredentialCopyService } from "../hub/ownerCredentialCopy";
 import { createProviderCredentialCopyBroker } from "../hub/ownerCredentialBroker";
 import { createOwnerPostureHost } from "../hub/ownerPostureHost";
+import { createOwnerThreadWakeHost } from "../hub/ownerThreadWakeHost";
 import { createPeerCredentialRouteHandler } from "../hub/peerCredentialRoutes";
 import { createChatThreadMoveHost } from "../hub/chatThreadMoveHost";
 import { createCodeThreadMoveHost } from "../hub/codeThreadMoveHost";
@@ -1948,6 +1949,11 @@ export function wireRemote(deps: RemoteDependencies) {
         readThread: (threadId) => workThreadProjection.read(threadId),
         changeAccess: (input) => workThreadService.changeOwnerAccess(input),
       },
+    }),
+    threadWakes: createOwnerThreadWakeHost({
+      readCodeThread: (threadId) => persistence.readCodeThread(threadId),
+      readProject: (projectId) => persistence.readProject(projectId),
+      code: deps.codeService instanceof CodeService ? deps.codeService : undefined,
     }),
     credentials: ownerCredentialCopy,
     threadMoves,

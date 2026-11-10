@@ -197,6 +197,12 @@ export interface CodeThreadNavigationItem {
   readonly lineageParentThreadId?: string;
   /** Present on a coordinator thread (docs/design/coordinator-threads.md). */
   readonly coordinator?: true;
+  /**
+   * The thread is its Project's designated planner, which reads as a
+   * coordinator whose starts always need approval. Its role follows the
+   * designation, so Make coordinator and Stop coordinating are not offered.
+   */
+  readonly planner?: true;
   /** The coordinator that started this worker; the host records it at creation. */
   readonly coordinatorThreadId?: CodeThreadId;
   /** The thread's Wake when a message arrives switch is on. */
@@ -287,6 +293,14 @@ export interface CodeThreadUsage {
 }
 
 const EMPTY_THREAD_USAGE: CodeThreadUsage = { limits: [] };
+
+/** A navigation read's planner list replaces the bootstrap's; an older host's absent list clears it. */
+function withNavigationPlanners(current: CodeBootstrap, next: CodeNavigation): CodeBootstrap {
+  const { plannerThreadIds: _previous, ...rest } = current;
+  return next.plannerThreadIds === undefined
+    ? rest
+    : { ...rest, plannerThreadIds: next.plannerThreadIds };
+}
 
 /**
  * The usage object already held while a re-read changed none of its figures,
@@ -844,11 +858,12 @@ export function useCodeController(options: CodeControllerOptions) {
           !(
             samePollingData(currentBootstrap.threads, next.threads) &&
             samePollingData(currentBootstrap.activity, next.activity) &&
-            samePollingData(currentBootstrap.runtime, next.runtime)
+            samePollingData(currentBootstrap.runtime, next.runtime) &&
+            samePollingData(currentBootstrap.plannerThreadIds, next.plannerThreadIds)
           )
         ) {
           bootstrapRef.current = {
-            ...currentBootstrap,
+            ...withNavigationPlanners(currentBootstrap, next),
             threads: next.threads,
             activity: next.activity,
             runtime: next.runtime,
@@ -860,12 +875,13 @@ export function useCodeController(options: CodeControllerOptions) {
         if (
           samePollingData(current.threads, next.threads) &&
           samePollingData(current.activity, next.activity) &&
-          samePollingData(current.runtime, next.runtime)
+          samePollingData(current.runtime, next.runtime) &&
+          samePollingData(current.plannerThreadIds, next.plannerThreadIds)
         ) {
           return current;
         }
         return {
-          ...current,
+          ...withNavigationPlanners(current, next),
           threads: next.threads,
           activity: next.activity,
           runtime: next.runtime,
@@ -2024,6 +2040,10 @@ export function useCodeController(options: CodeControllerOptions) {
   // transcript itself records what it renders, through `markRenderedActivity`
   // and `recordSeenActivity`.
   observedActivity.current = activityByThread;
+  const plannerThreadIds = useMemo(
+    () => new Set((bootstrap?.plannerThreadIds ?? []).map(String)),
+    [bootstrap],
+  );
 
   const navigation = useMemo(
     (): ReadonlyArray<CodeThreadNavigationItem> =>
@@ -2031,6 +2051,10 @@ export function useCodeController(options: CodeControllerOptions) {
         .filter((thread) => thread.lifecycle !== "archived")
         .map((thread) => {
           const runtime = runtimeByThread.get(String(thread.id));
+          // The designated planner reads as a coordinator whose starts need
+          // approval; a worker never does (docs/design/coordinator-threads.md).
+          const planner =
+            thread.coordinatorThreadId === undefined && plannerThreadIds.has(String(thread.id));
           return {
             executionPolicy: thread.executionPolicy,
             lifecycle: thread.lifecycle,
@@ -2059,7 +2083,8 @@ export function useCodeController(options: CodeControllerOptions) {
             ...(thread.forkedFrom === undefined
               ? {}
               : { lineageParentThreadId: String(thread.forkedFrom.threadId) }),
-            ...(thread.coordinator === true ? { coordinator: true as const } : {}),
+            ...(thread.coordinator === true || planner ? { coordinator: true as const } : {}),
+            ...(planner ? { planner: true as const } : {}),
             ...(thread.coordinatorThreadId === undefined
               ? {}
               : { coordinatorThreadId: thread.coordinatorThreadId }),
@@ -2072,7 +2097,15 @@ export function useCodeController(options: CodeControllerOptions) {
         // Sorting the whole list by recency instead would move a pinned thread
         // the moment anything else ran, which is the opposite of pinning it.
         .sort((left, right) => Number(right.pinned ?? false) - Number(left.pinned ?? false)),
-    [activityByThread, bootstrap, followUps, markedUnreadThreads, readCursors, runtimeByThread],
+    [
+      activityByThread,
+      bootstrap,
+      followUps,
+      markedUnreadThreads,
+      plannerThreadIds,
+      readCursors,
+      runtimeByThread,
+    ],
   );
 
   // Only the thread in view streams, so the list is re-read on a timer to keep
