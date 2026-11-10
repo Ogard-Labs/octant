@@ -3997,6 +3997,21 @@ html[data-octant-native-host="true"] .shell--sidebar-collapsed .workspace-pane__
   border-bottom: 1px solid var(--octant-border);
 }
 
+/* The start screen's working-folder chip opens the same two fields over the
+   page; the popup draws the edge, so the form keeps none of its own. */
+.working-folder-popover {
+  width: min(340px, calc(100vw - 32px));
+}
+
+.working-folder-chip[data-invalid="true"] {
+  color: var(--oct-danger-fg);
+}
+
+.working-folder-popover .working-directory-control {
+  padding: var(--oct-space-1);
+  border-bottom: 0;
+}
+
 .working-directory-control label {
   color: var(--octant-text-secondary);
   font-size: var(--oct-text-detail);

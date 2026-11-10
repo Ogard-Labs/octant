@@ -1,31 +1,31 @@
-/* The start screen's context row with the plan meters at its right end: where
-   the thread runs on the left, how much of the plan is left on the right. The
-   meters drop to their own right-aligned line when the chips leave no room. */
+/* The start screen's context row, on the page just above the card: where the
+   thread runs on the left, how much of the plan is left on the right. It has
+   no fill or edge of its own, like a thread's strip, and the meters drop to
+   their own right-aligned line when the chips leave no room. */
 .composer-start {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
+  gap: 0 var(--oct-space-3);
   min-width: 0;
+  min-height: 32px;
+  padding-inline: var(--oct-space-1);
 }
 
-.composer-start > .composer-tray--inside {
+.composer-start > .composer-tray--start {
   flex: 1 1 auto;
   min-width: 0;
 }
 
-.composer-start:has(> .plan-usage) > .composer-tray--inside {
-  padding-right: 0;
-}
-
 .composer-start > .plan-usage {
   margin-left: auto;
-  padding: var(--oct-space-3) var(--oct-composer-gutter) 0 var(--oct-space-2);
+  padding: 0 var(--oct-space-2);
 }
 
-/* The usage warning takes the full row above the context chips, inside the
-   composer's gutter, so it reads as part of the composer and not a page banner. */
+/* The usage warning takes the full row above the context chips, so it reads as
+   part of the composer and not a page banner. */
 .composer-start > .composer-usage-warning {
-  flex: 1 1 calc(100% - 2 * var(--oct-composer-gutter));
-  margin: var(--oct-space-2) var(--oct-composer-gutter) 0;
+  flex: 1 1 100%;
+  margin: 0 0 var(--oct-space-2);
 }

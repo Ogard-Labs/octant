@@ -1123,7 +1123,7 @@ function LaunchedShell(
   >(undefined);
   const {
     dockVisible,
-    setDockVisible,
+    setDockVisible: setWindowDockVisible,
     dockStatesByThread,
     setDockStatesByThread,
     fallbackDockState,
@@ -1135,6 +1135,21 @@ function LaunchedShell(
     fallbackBottomPanelState,
     setFallbackBottomPanelState,
   } = useThreadUtilityPresentation(String(props.launch.windowId), globalThis, !isNarrow);
+  // A new task's pane has no thread yet, so the dock has nothing of the
+  // thread's to show: it stays closed there until the person opens it, and
+  // that show or hide belongs to the draft, never to the window's saved
+  // choice. Opened by default it covered a third of a blank start screen to
+  // say its tools were not available yet.
+  const draftDockKeyRef = useRef<string | undefined>(undefined);
+  const [draftDockShownFor, setDraftDockShownFor] = useState<string>();
+  const setDockVisible = useCallback(
+    (next: boolean) => {
+      const draftKey = draftDockKeyRef.current;
+      if (draftKey === undefined) setWindowDockVisible(next);
+      else setDraftDockShownFor(next ? draftKey : undefined);
+    },
+    [setWindowDockVisible],
+  );
   const [previewBottomPanelHeight, setPreviewBottomPanelHeight] = useState<number>();
   const [navigatorOpen, setNavigatorOpen] = useState(false);
   const navigatorOpener = useRef<HTMLElement | null>(null);
@@ -3059,6 +3074,8 @@ function LaunchedShell(
     activeProjectId !== undefined &&
     dockThreadId === undefined &&
     activeDraftKey !== undefined;
+  draftDockKeyRef.current = dockHoldsForCodeDraft ? activeDraftKey : undefined;
+  const dockShown = dockHoldsForCodeDraft ? draftDockShownFor === activeDraftKey : dockVisible;
   const dockPresentation = useMemo(() => {
     const resolveDockSurface = (surface: unknown): RightUtilityDockResolution =>
       resolveRightUtilityDockSurface({
@@ -3243,7 +3260,7 @@ function LaunchedShell(
       dockTabs.length > 0 ||
       launchableDockSurfaces.length > 0 ||
       dockHoldsForCodeDraft);
-  const dockOpen = dockVisible && dockAvailable;
+  const dockOpen = dockShown && dockAvailable;
   // A Browser tab bound to one host-opened context (a link or a local server)
   // is not the thread's shared Browser, so it does not stand in for the agent's
   // session: only a tab with no context of its own counts as that view.

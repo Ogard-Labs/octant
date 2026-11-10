@@ -3672,8 +3672,8 @@ html:not([data-octant-reduced-transparency="true"], [data-octant-increased-contr
   flex-wrap: wrap;
   justify-content: center;
   gap: var(--oct-space-2);
-  width: min(100%, 704px);
-  margin: var(--oct-space-6) auto 0;
+  width: 100%;
+  margin: var(--oct-space-4) auto 0;
 }
 
 .draft-thread__intent-cards > button {
@@ -3715,13 +3715,14 @@ html:not([data-octant-reduced-transparency="true"], [data-octant-increased-contr
   line-height: 1.45;
 }
 
-/* The composer is the widest thing on the start screen; everything under it
-   sits on a narrower measure so the prompt reads as the window and the
-   cards as its contents. */
+/* Everything under the composer ends on the composer's own edges. A fixed
+   704px measure matched the default reading width only: at the widest reading
+   width the composer was 1040px over a 704px column of cards, and the page
+   read as two unrelated stacks. */
 /* What continues below the cards keeps the same clear step under them. */
 .code-home {
   display: grid;
-  width: min(100%, 704px);
+  width: 100%;
   gap: var(--oct-space-6);
   margin: 44px auto 0;
 }
@@ -4123,7 +4124,7 @@ html:not([data-octant-reduced-transparency="true"], [data-octant-increased-contr
 
 .home-start {
   display: grid;
-  width: min(100%, 704px);
+  width: 100%;
   gap: var(--oct-space-6);
   margin: var(--oct-space-3) auto 0;
 }
@@ -4274,7 +4275,7 @@ html:not([data-octant-reduced-transparency="true"], [data-octant-increased-contr
   align-items: center;
   justify-content: center;
   gap: var(--oct-space-2);
-  width: min(100%, 704px);
+  width: 100%;
   margin: var(--oct-space-3) auto 0;
   color: var(--oct-muted);
   font-size: var(--oct-text-detail);

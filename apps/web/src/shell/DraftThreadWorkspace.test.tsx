@@ -158,7 +158,7 @@ describe("DraftThreadWorkspace", () => {
       }
     },
   );
-  it("keeps the context chips as the composer's first row with model controls below the prompt", () => {
+  it("keeps the context chips on the page above the composer card with model controls below the prompt", () => {
     const { container } = render(<DraftThreadWorkspace {...baseProps} startPresentation="home" />);
     const composer = container.querySelector(".composer");
     const contextBar = container.querySelector(".composer-tray");
@@ -166,7 +166,7 @@ describe("DraftThreadWorkspace", () => {
       screen.getByRole("button", { name: "Provider and model" }).closest(".composer-row"),
     ).not.toBeNull();
     expect(contextBar).not.toBeNull();
-    expect(composer?.contains(contextBar)).toBe(true);
+    expect(composer?.contains(contextBar)).toBe(false);
     expect(
       contextBar?.compareDocumentPosition(screen.getByRole("textbox", { name: "First message" })),
     ).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
@@ -1128,7 +1128,8 @@ describe("DraftThreadWorkspace", () => {
     );
     const draft = screen.getByRole("textbox", { name: "First message" });
     await user.type(draft, "Fix search without losing this draft");
-    const subfolder = screen.getByLabelText("Subfolder within working folder");
+    await user.click(screen.getByRole("button", { name: /^Working folder:/ }));
+    const subfolder = await screen.findByLabelText("Subfolder within working folder");
     await user.clear(subfolder);
     await user.type(subfolder, "src");
     await user.clear(subfolder);
@@ -1141,10 +1142,15 @@ describe("DraftThreadWorkspace", () => {
     expect(onCreateCodeThread).not.toHaveBeenCalled();
     expect(onCreateThread).not.toHaveBeenCalled();
     expect(draft).toHaveValue("Fix search without losing this draft");
-    expect(subfolder).toHaveValue("../outside");
+    // The chip keeps saying what was typed, and the field still holds it.
+    const chip = screen.getByRole("button", { name: /^Working folder:.*not a usable subfolder$/ });
+    expect(chip).toHaveTextContent("../outside");
+    if (screen.queryByLabelText("Subfolder within working folder") === null) await user.click(chip);
+    const reopened = await screen.findByLabelText("Subfolder within working folder");
+    expect(reopened).toHaveValue("../outside");
 
-    await user.clear(subfolder);
-    await user.type(subfolder, "docs");
+    await user.clear(reopened);
+    await user.type(reopened, "docs");
     await user.click(screen.getByRole("button", { name: "Create thread" }));
     await waitFor(() => expect(onCreateCodeThread).toHaveBeenCalledOnce());
     expect(onCreateCodeThread).toHaveBeenCalledWith(
@@ -1182,7 +1188,8 @@ describe("DraftThreadWorkspace", () => {
       />,
     );
     await user.type(screen.getByRole("textbox", { name: "First message" }), "Draft brief");
-    await user.click(screen.getByRole("combobox", { name: "Task working folder" }));
+    await user.click(screen.getByRole("button", { name: /^Working folder:/ }));
+    await user.click(await screen.findByRole("combobox", { name: "Task working folder" }));
     await user.click(await screen.findByRole("option", { name: "Shared notes 日本語" }));
     await user.clear(screen.getByLabelText("Subfolder within working folder"));
     await user.type(screen.getByLabelText("Subfolder within working folder"), "資料 folder");

@@ -70,7 +70,7 @@ describe("ThreadComposer", () => {
           row={{
             actions: { kind: "send", send: { ariaLabel: "Send", onSend: vi.fn() } },
           }}
-          startContext={<div className="composer-tray composer-tray--inside">Project</div>}
+          startContext={<div className="composer-tray composer-tray--start">Project</div>}
         />
       </PlanUsageProvider>,
     );

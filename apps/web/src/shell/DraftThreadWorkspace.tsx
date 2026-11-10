@@ -1249,7 +1249,7 @@ export function DraftThreadWorkspace(props: DraftThreadWorkspaceProps) {
               },
             }}
             startContext={
-              <div className="composer-tray composer-tray--inside" aria-label="Thread context">
+              <div className="composer-tray composer-tray--start" aria-label="Thread context">
                 {props.mode === "chat" ? <WorkKindSwitch /> : null}
                 <DraftContextStrip
                   mode={props.mode}
