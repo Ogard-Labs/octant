@@ -213,6 +213,23 @@ describe("workspace surface drag geometry", () => {
     ).toEqual({ kind: "composer", composerKey: "composer-1" });
   });
 
+  it("keeps a dragged tab on the pane when the pointer is over a composer", () => {
+    expect(
+      resolveSidebarComposerDrop({
+        point: { x: 200, y: 500 },
+        source: {
+          dragKey: "tab:other",
+          surface: draggedSurface,
+          title: draggedSurface.title,
+          fromTab: { paneId: sourcePaneId, tabId: draggedSurface.id },
+        },
+        composerZones: [
+          { key: "composer-1", rect: { left: 40, top: 420, width: 320, height: 120 } },
+        ],
+      }),
+    ).toBeNull();
+  });
+
   it("keeps a pane drag on the pane even when the pointer is over a composer", () => {
     expect(
       resolveSidebarComposerDrop({

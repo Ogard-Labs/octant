@@ -155,15 +155,16 @@ function canUseEdge(
 
 /**
  * A sidebar thread dropped on a composer attaches context instead of opening
- * a pane. A pane grip keeps the pane destination even when the pointer is
- * over a composer, so moving a pane is unchanged.
+ * a pane. A pane grip or a tab keeps the pane destination even when the
+ * pointer is over a composer, so moving a pane or a tab is unchanged: a tab
+ * names no sidebar row, and resolved to a composer it attached nothing.
  */
 export function resolveSidebarComposerDrop(input: {
   readonly point: WorkspaceDragPoint;
   readonly source: WorkspaceSurfaceDragSource;
   readonly composerZones: ReadonlyArray<ComposerThreadDropZone>;
 }): WorkspaceSurfaceDropDestination | null {
-  if (input.source.paneId !== undefined) return null;
+  if (input.source.paneId !== undefined || input.source.fromTab !== undefined) return null;
   const zone = input.composerZones.find((candidate) => containsPoint(candidate.rect, input.point));
   return zone === undefined ? null : { kind: "composer", composerKey: zone.key };
 }

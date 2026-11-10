@@ -1501,7 +1501,8 @@ function LaunchedShell(
       }
       // A pane's open tab first hands the pane to its neighbour, so it is
       // placed like any other tab: the host refuses to split a pane off the
-      // surface it is showing. A refused hand-over leaves everything as it was.
+      // surface it is showing. A refused hand-over leaves everything as it
+      // was, and a placement refused after it gives the pane back to the tab.
       const openTab = source.openTab;
       const handedOver =
         openTab === undefined
@@ -1518,8 +1519,11 @@ function LaunchedShell(
             : false,
         )
         .then((placed) => {
-          // A tab that was not its pane's open one leaves that pane's row
-          // once it is placed somewhere else; a refused drop leaves it.
+          if (!placed && openTab !== undefined) {
+            void controller.activateContentTab(openTab.paneId, source.surface.id);
+          }
+          // A tab leaves its pane's row once it is placed somewhere else; a
+          // refused drop leaves it.
           const fromTab = source.fromTab;
           if (!placed || fromTab === undefined) return;
           if (
