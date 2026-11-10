@@ -1835,17 +1835,21 @@ rows divided by the surface's inset hairline and never filled. A row holds a
 there is none, never an approximation of a brand mark), the name in the
 row-label role, one status line in secondary ink (state, model count, maker
 and runtime), and the details chevron and enable switch at the trailing edge.
-The chevron is the row's disclosure (`aria-expanded`): the details expand in
-place inside the row, under a hairline, and keep every control and fact. The
-page opens at most one row by itself, the first that needs attention (a
-sign-in, or a binary the scan found for a broken runtime), and none when no
-provider does. One row is open at a time: opening another closes the one that
-was open, so the page never grows by more than one provider's details. Remove
-is the last thing in those details, alone under a hairline with one line saying
-what it does, never among Check connection, Configure and the other routine
-actions. A card per provider, two to a row, made the boxes the loudest
-thing on the page, and one open card among nine shut ones ran to about eight
-screens. The state line
+The chevron is the row's disclosure (`aria-expanded`). A provider a person
+opens becomes the page: its row and details stand alone, with every control and
+fact, and the other rows, the group headings, the list's heading, the sections
+around it and the page outline step away. One **Providers** Back control above
+it, the chevron, or Escape returns to the list and puts focus back on the
+row's chevron. The page opens at most one row by itself, in place in the list,
+the first that needs attention (a sign-in, or a binary the scan found for a
+broken runtime), and none when no provider does; a row that comes to need
+attention while a provider's page is up waits, open, in the list. Remove is the
+last thing in those details, alone under a hairline with one line saying what
+it does, never among Check connection, Configure and the other routine actions.
+A card per provider, two to a row, made the boxes the loudest thing on the
+page; details expanded in place, one row at a time, still grew the page by a
+provider's models and actions among rows that had nothing to do with them, to
+about four screens. The state line
 reads from a dot that carries the state without colour: a filled ink dot is
 ready, a ring in ink needs setup or a sign-in, a muted ring is off or not
 checked, and a failure keeps its red role. Only under Colour does ready turn the

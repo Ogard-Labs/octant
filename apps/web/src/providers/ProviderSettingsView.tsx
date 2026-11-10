@@ -33,7 +33,7 @@ import {
   implicitCodexAccountOwnerId,
   isImageProfileDriverKind,
 } from "@octant/domain";
-import { useEffect, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useState, type ReactNode } from "react";
 import type { ProviderUsageLimitsClient } from "@octant/client-runtime/provider-usage-limits-client";
 import { SettingsSection } from "../settings/primitives";
 import { OctantButton } from "../ui/base/OctantButton";
@@ -351,6 +351,11 @@ function suggestedAccountName(
 
 export function ProviderSettingsView(props: ProviderSettingsViewProps) {
   const [addAccount, setAddAccount] = useState<AddAccountRequest | undefined>(undefined);
+  const [detailOpen, setDetailOpen] = useState(false);
+  const noteDetail = useCallback(
+    (name: string | undefined) => setDetailOpen(name !== undefined),
+    [],
+  );
   const { instances, onCheckLatestVersions } = props;
   useEffect(() => {
     onCheckLatestVersions?.();
@@ -368,7 +373,12 @@ export function ProviderSettingsView(props: ProviderSettingsViewProps) {
   // Defaults. Finding more providers and Octant's own OpenCode copy follow:
   // the OpenCode box used to open the page, above the providers it serves.
   return (
-    <div className="provider-settings">
+    <div
+      className="provider-settings"
+      // While one provider's page is open, the sections under the list (and,
+      // by the stylesheet, the page's other sections) step out of the way.
+      {...(detailOpen ? { "data-provider-detail": "true" } : {})}
+    >
       <div aria-live="polite" className="provider-settings__message-slot">
         {props.status === "loading" ? <p role="status">Loading providers…</p> : null}
         {props.status === "disconnected" ? (
@@ -387,6 +397,7 @@ export function ProviderSettingsView(props: ProviderSettingsViewProps) {
         )}
       </div>
       <ProviderSettingsList
+        onDetailChange={noteDetail}
         busy={props.busy}
         onAddAccount={(source) => {
           if (source.driverKind !== "claude" && source.driverKind !== "codex") return;
