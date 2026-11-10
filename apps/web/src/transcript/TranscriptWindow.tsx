@@ -202,7 +202,15 @@ export function TranscriptWindow<T>(props: TranscriptWindowProps<T>) {
         }
       : undefined);
   const restored = remembered?.firstKey === firstKey ? remembered : undefined;
-  const followingRef = useRef(follows && (restored?.following === true || restored === undefined));
+  // A list that mounts empty beside a saved view of a reader who had scrolled
+  // away must not start out following: the first page arrives before the
+  // restore below has run, and the virtualizer follows that append to the end,
+  // past the position being restored.
+  const awaitingSavedView =
+    items.length === 0 && savedView?.kind === "transcript" && !savedView.following;
+  const followingRef = useRef(
+    follows && !awaitingSavedView && (restored?.following === true || restored === undefined),
+  );
   const appliedRevealKeyRef = useRef<string | undefined>(undefined);
   const pendingFocusRef = useRef<
     { readonly index: number; readonly edge: "start" | "end" } | undefined
