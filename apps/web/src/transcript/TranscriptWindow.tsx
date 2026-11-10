@@ -716,7 +716,7 @@ export function TranscriptWindow<T>(props: TranscriptWindowProps<T>) {
             data-index={virtualItem.index}
             data-transcript-row=""
             key={virtualItem.key}
-            ref={(node) => {
+            ref={(node: HTMLElement | null) => {
               if (node !== null && !measuredRowsRef.current.has(node)) {
                 measuredRowsRef.current.add(node);
                 for (const details of node.querySelectorAll<HTMLDetailsElement>("details[open]"))

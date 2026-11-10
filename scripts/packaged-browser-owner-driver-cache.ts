@@ -15,7 +15,10 @@ import {
   BUNDLED_CUA_DRIVER,
   stageComputerDriver,
 } from "../apps/desktop/src/computerUseDriverRelease";
-import { writeVerifiedElectronFile as writeVerifiedDriverArchive } from "./packaged-browser-owner-electron-cache";
+import {
+  requestOfficialQaApi,
+  writeVerifiedElectronFile as writeVerifiedDriverArchive,
+} from "./packaged-browser-owner-electron-cache";
 
 const version = "0.38.0";
 const assetId = 661454894;
@@ -104,18 +107,16 @@ export async function removeOwnedBrowserDriverCache(root: string, owner: string)
   if (remaining !== undefined) throw Error("Owned driver cache cleanup did not finish.");
 }
 
-async function releaseMetadata(signal: AbortSignal): Promise<unknown> {
-  const response = await fetch(
+export async function releaseMetadata(signal: AbortSignal): Promise<unknown> {
+  const response = await requestOfficialQaApi(
     `https://api.github.com/repos/trycua/cua/releases/tags/cua-driver-rs-v${version}`,
-    {
-      headers: { accept: "application/vnd.github+json", "user-agent": "Octant native QA" },
-      credentials: "omit",
-      redirect: "manual",
-      signal,
-    },
+    "application/vnd.github+json",
+    signal,
   );
-  if (response.status !== 200 || response.body === null)
-    throw Error("Official driver metadata is unavailable.");
+  if (response.status !== 200 || response.body === null) {
+    await response.body?.cancel();
+    throw Error(`Official driver metadata is unavailable (HTTP ${response.status}).`);
+  }
   const reader = response.body.getReader();
   const chunks: Uint8Array[] = [];
   let bytes = 0;
@@ -134,19 +135,14 @@ async function releaseMetadata(signal: AbortSignal): Promise<unknown> {
   return JSON.parse(Buffer.concat(chunks).toString("utf8"));
 }
 
-async function archiveResponse(signal: AbortSignal): Promise<Response> {
+export async function archiveResponse(signal: AbortSignal): Promise<Response> {
   const headers = { accept: "application/octet-stream", "user-agent": "Octant native QA" };
-  const response = await fetch(assetUrl, {
-    headers,
-    credentials: "omit",
-    redirect: "manual",
-    signal,
-  });
+  const response = await requestOfficialQaApi(assetUrl, headers.accept, signal);
   if (response.status === 200) return response;
   const location = response.headers.get("location");
   await response.body?.cancel();
   if (response.status !== 302 || location === null)
-    throw Error("Official driver asset API refused the request.");
+    throw Error(`Official driver asset API refused the request (HTTP ${response.status}).`);
   return fetch(requireBrowserDriverRedirect(location), {
     headers,
     credentials: "omit",

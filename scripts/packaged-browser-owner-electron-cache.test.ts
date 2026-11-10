@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   officialAsset,
+  requestOfficialQaApi,
   readRelease,
   requireOfficialElectronRedirect,
   requirePinnedElectronRelease,
@@ -47,6 +48,23 @@ afterEach(() => {
 });
 
 describe("the owned Browser QA Electron cache", () => {
+  it("refuses non-release API destinations before sending the workflow token", async () => {
+    vi.stubEnv("OCTANT_QA_GITHUB_TOKEN", "synthetic-workflow-token");
+    const fetcher = vi.fn();
+    vi.stubGlobal("fetch", fetcher);
+    for (const url of [
+      "https://untrusted.invalid/releases",
+      "https://api.github.com/user",
+      "https://api.github.com/repos/untrusted/repo/releases/assets/1",
+      "https://api.github.com/repos/electron/electron/releases/assets/1?redirect=elsewhere",
+    ]) {
+      await expect(
+        requestOfficialQaApi(url, "application/json", new AbortController().signal),
+      ).rejects.toThrow("official release API");
+    }
+    expect(fetcher).not.toHaveBeenCalled();
+  });
+
   it("retries transient metadata failures with the workflow token on the fixed API only", async () => {
     vi.stubEnv("OCTANT_QA_GITHUB_TOKEN", "synthetic-workflow-token");
     const fetcher = vi

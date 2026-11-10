@@ -114,7 +114,26 @@ export async function writeVerifiedElectronFile(
   }
 }
 
-async function officialApi(url: string, accept: string, signal: AbortSignal): Promise<Response> {
+export async function requestOfficialQaApi(
+  url: string,
+  accept: string,
+  signal: AbortSignal,
+): Promise<Response> {
+  const endpoint = new URL(url);
+  if (
+    endpoint.protocol !== "https:" ||
+    endpoint.hostname !== "api.github.com" ||
+    endpoint.port !== "" ||
+    endpoint.username !== "" ||
+    endpoint.password !== "" ||
+    endpoint.search !== "" ||
+    endpoint.hash !== "" ||
+    !/^\/repos\/(?:electron\/electron|trycua\/cua)\/releases\/(?:tags\/[^/]+|assets\/[0-9]+)$/.test(
+      endpoint.pathname,
+    )
+  ) {
+    throw Error("Native QA metadata must use its official release API.");
+  }
   const token = process.env.OCTANT_QA_GITHUB_TOKEN;
   for (let attempt = 0; ; attempt++) {
     const response = await fetch(url, {
@@ -129,7 +148,7 @@ async function officialApi(url: string, accept: string, signal: AbortSignal): Pr
 }
 
 export async function readRelease(signal: AbortSignal): Promise<unknown> {
-  const response = await officialApi(releaseUrl, "application/vnd.github+json", signal);
+  const response = await requestOfficialQaApi(releaseUrl, "application/vnd.github+json", signal);
   if (response.status !== 200 || response.body === null) {
     await response.body?.cancel();
     throw Error(`Official release metadata is unavailable (HTTP ${response.status}).`);
@@ -157,7 +176,7 @@ export async function officialAsset(
   signal: AbortSignal,
 ): Promise<Response> {
   const headers = { accept: "application/octet-stream" };
-  const response = await officialApi(
+  const response = await requestOfficialQaApi(
     `https://api.github.com/repos/electron/electron/releases/assets/${id}`,
     headers.accept,
     signal,
