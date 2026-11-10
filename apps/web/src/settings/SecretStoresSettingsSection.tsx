@@ -166,7 +166,7 @@ export function SecretStoresSettingsSection(props: SecretStoresSettingsSectionPr
   return (
     <div className="settings-section-stack" id="settings-secret-stores">
       <SettingsSection
-        description="Link a password manager you already use. Octant keeps an item's address, never the key: it asks the manager for the key each time one is used, and never stores, logs, or shows it."
+        description="Link a password manager you already use. Octant keeps an item's address and asks the manager for the key each time; it never stores, logs, or shows the key."
         title="Linked secret stores"
       >
         {view === undefined ? (

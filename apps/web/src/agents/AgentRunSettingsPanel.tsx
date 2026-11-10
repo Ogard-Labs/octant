@@ -176,7 +176,7 @@ export function AgentRunSettingsPanel(props: {
           </SettingRow>
           <SettingRow
             label="Working minutes per attempt"
-            description="Default 30 minutes of active work, excluding approval and answer waits. Retry and Resume each start a fresh window at this setting; cumulative Project and thread ceilings still apply. Changes affect the next attempt only."
+            description="How long a helper may work per attempt, not counting waits for approval or answers. Default 30 minutes; Project and thread ceilings still apply, and a change affects the next attempt."
             scope="app"
             settingId="subagent-working-minutes"
           >

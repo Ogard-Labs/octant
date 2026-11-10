@@ -455,7 +455,7 @@ export function RemoteAccessSettingsSection({
         <div className="setgroup">
           <SettingRow
             focused={focusedSetting === "remote-listener"}
-            description="The address paired devices reach. Loopback and public addresses are refused; use a private LAN or Tailscale address with a certificate browsers trust."
+            description="The address paired devices reach. Use a private network or Tailscale address with a certificate browsers trust; loopback and public addresses are refused."
             label={status?.enabled === true ? "Move the listener" : "Enable the listener"}
             scope="host"
             settingId="remote-listener"
