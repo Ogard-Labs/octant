@@ -1,4 +1,5 @@
 import type { UpdateWorkInFlight } from "@octant/domain";
+import type { HostAttentionReason } from "./localHostProbe";
 
 export type LocalHostOwnership = "desktop-owned" | "managed";
 export type LocalHostState = "stopped" | "starting" | "running" | "attention-required";
@@ -18,6 +19,8 @@ export interface LocalHostActivity {
    * all; whether stopping would interrupt something is `workInFlight`.
    */
   readonly attentionRequired: boolean;
+  /** Why, when known, so the menu bar can say more than "Attention needed". */
+  readonly attentionReason?: HostAttentionReason;
   /**
    * The desktop could not confirm what the host is running (it did not answer
    * its health check, or its window authority could not be refreshed), so its

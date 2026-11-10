@@ -266,6 +266,7 @@ import { createDesktopBackendSupervisor } from "./desktopBackendSupervision";
 import {
   buildMenuBarItems,
   formatRedactedHostDiagnostics,
+  hostStateLabel,
   decodeMenuBarOpenThread,
   decodeMenuBarShutdownProgress,
   MenuBarFleet,
@@ -2844,11 +2845,7 @@ async function openSecondaryProjectWindow(target: ProjectWindowTarget): Promise<
 }
 
 function hostStatusLabel(): string {
-  const snapshot = hostLifecycle.snapshot();
-  if (snapshot.state === "attention-required") return "Attention needed";
-  if (snapshot.state === "running") return "Running";
-  if (snapshot.state === "starting") return "Starting";
-  return "Stopped";
+  return hostStateLabel(hostLifecycle.snapshot());
 }
 
 /** The thread each trusted window last reported showing; `undefined` when none. */
@@ -3055,6 +3052,7 @@ async function refreshHostActivity(): Promise<void> {
   hostLifecycle.setActivity({
     activeAgentCount: probe.activeAgentCount ?? 0,
     attentionRequired: probe.attentionRequired ?? false,
+    ...(probe.attentionReason === undefined ? {} : { attentionReason: probe.attentionReason }),
   });
   // Only a present menu bar reads the roster; window startup never waits on it.
   if (hostTray !== undefined) {
