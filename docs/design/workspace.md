@@ -1314,7 +1314,10 @@ and the journal record follow the
 [Project terminal rule](../architecture.md#security-and-authority). A Code
 Project's saved actions (Run, Test, Dev) are buttons in the window header, three
 inline and the rest under More, and entries in the command palette's Actions
-group; the Project overview's Actions section edits them and offers suggestions
+group. More is the header's one menu for this group: it also holds where the
+actions run ("Run in") and the task's Worktrees setup, which used to be text
+controls of their own in the title bar. Where to run is offered only when there
+is an action to run; with none, the header shows Worktrees alone; the Project overview's Actions section edits them and offers suggestions
 the person confirms. Choosing one previews its actual folder and branch,
 then starts a dedicated run beside the task. A Code thread defaults to its
 active checkout; the Project folder and approved extra folders remain explicit
@@ -1413,7 +1416,8 @@ authenticated, thread-scoped answer routes and one-use request identity.
 Provider-native question formats keep their existing adapter contracts; the
 questionnaire capability uses the provider-neutral app tool boundary.
 
-A Code task's **Worktrees** header control opens its Setup tab beside
+A Code task's **Worktrees** control (in the header's More menu, or alone in the
+header when the Project has no saved action) opens its Setup tab beside
 that task, including a selector for its child checkouts. It shows the reviewed
 command and relative folder, bounded output, exit result, Retry, Cancel and
 explicit Skip. The Project overview's Actions list lets the person review and
