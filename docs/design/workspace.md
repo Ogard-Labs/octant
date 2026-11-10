@@ -251,7 +251,7 @@ list-side counterpart, so no second priority group is added to the Projects tree
 ### Coordinators
 
 [Coordinator threads](coordinator-threads.md) own the role; this section owns
-where a coordinator and its workers appear. Designed; the workspace surfaces below are not built yet, while the host commands and settings they use are.
+where a coordinator and its workers appear. Built, except where a bullet says otherwise; rendered against mocked threads, not yet on the desktop app.
 
 - **Sidebar.** A Code Project with coordinators shows a **Coordinators**
   section at the top of its Project tree, above its other threads. Each
@@ -266,17 +266,23 @@ where a coordinator and its workers appear. Designed; the workspace surfaces bel
 - **Status arrangement.** Coordinators are listed under **Pinned**. Workers
   keep their ordinary headings, with their coordinator's name as secondary text
   on the row.
-- **Board.** A coordinator is never a board card. A worker's card names its
-  coordinator, and the board's filter can show one coordinator's workers.
-- **Menus.** A Code Project's sidebar menu has **New coordinator**; a Code
-  thread's header and row menus have **Make coordinator**, or **Stop
-  coordinating** on a coordinator; a worker's header menu has **Wake for
-  coordinator**. Settings › Code › Coordinators holds **Starting workers** and
-  the open-worker bound, and a Code Project's overview holds its own
-  **Starting workers** choice beside the Project planner section.
+- **Board.** A coordinator is never a board card: the host's board read
+  leaves it out. A worker's card names its coordinator. A board filter for one
+  coordinator's workers is not built.
+- **Menus.** A Code Project's sidebar menu has **New coordinator**, which
+  opens the ordinary Code draft under a "New coordinator" heading and makes the
+  thread a coordinator once its creation is confirmed, before the first
+  message is sent. A Code thread's row menu has **Make coordinator**, or **Stop
+  coordinating** on a coordinator (never on a worker), the **Wake when a message
+  arrives** checkbox, and on a worker the **Wake for coordinator** checkbox.
+  The Code thread has no header menu, so these live in the row menu only.
+  Settings › Code › Coordinators holds **Starting workers** and **Open workers
+  per coordinator**, and a Code Project's overview holds its own **Starting
+  workers** choice (Use Settings, Start without asking, Propose for approval)
+  after the Project planner section.
 - **Requests.** A coordinator's composer lists its workers' pending approvals
   and questions in the same bounded region as its child runs' requests, each
-  naming its worker, with an Open worker action.
+  naming its worker, with an Open worker action. Not built.
 
 ### Sidebar thread status
 
