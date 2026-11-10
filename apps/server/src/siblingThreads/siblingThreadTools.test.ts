@@ -35,6 +35,7 @@ import { createPhase1RuntimeRegistries } from "../persistence/runtimeRegistry";
 import { erasePurgedThread } from "../persistence/threadPurge";
 import { openSqlite } from "../persistence/sqlitePort";
 import type { CodePlannerToolPort } from "../code/codePlannerTools";
+import type { CoordinatorToolPort } from "./siblingThreadTools";
 import {
   SiblingThreadsService,
   createThreadsTools,
@@ -104,6 +105,7 @@ interface HarnessOptions {
   readonly toolConstraints?: ReadonlyArray<string>;
   readonly mode?: "work" | "code";
   readonly planner?: CodePlannerToolPort;
+  readonly coordinator?: CoordinatorToolPort;
 }
 
 function harness(options: HarnessOptions = {}) {
@@ -189,6 +191,7 @@ function harness(options: HarnessOptions = {}) {
       toolConstraints: options.toolConstraints ?? [],
       profileDisplayName: "Reviewer",
       ...(options.planner === undefined ? {} : { planner: options.planner }),
+      ...(options.coordinator === undefined ? {} : { coordinator: options.coordinator }),
       recordExternalContentIngestion: (input) => ingestion.record(input),
       uuid: randomUUID,
     });
@@ -724,6 +727,38 @@ describe("the sibling threads tool", () => {
     expect(tools.definitions[0]?.description).toMatch(
       /^See this Project's other open threads\. Every operation names a thread by the reference list returns, <thread id>@<project id>/,
     );
+  });
+});
+
+describe("starting workers through the threads tool", () => {
+  it("offers start to a coordinator and hands the call to the host's coordinator start", async () => {
+    const started: unknown[] = [];
+    const fixture = harness({
+      coordinator: {
+        levelOf: () => "approval-gated",
+        start: async (input) => {
+          started.push(input.fields);
+          return { result: { status: "started" }, isError: false };
+        },
+      },
+    });
+    const definition = fixture.tools.definitions[0];
+    expect(JSON.stringify(definition?.inputSchema)).toContain('"start"');
+    const answer = await fixture.call({ operation: "start", title: "Fix it", prompt: "Go." });
+    expect(answer).toEqual({ result: { status: "started" }, isError: false });
+    expect(started).toEqual([{ operation: "start", title: "Fix it", prompt: "Go." }]);
+  });
+
+  it("does not offer start to a thread that is not a coordinator, and refuses the call", async () => {
+    const fixture = harness({
+      coordinator: {
+        levelOf: () => undefined,
+        start: async () => ({ result: { status: "started" }, isError: false }),
+      },
+    });
+    expect(JSON.stringify(fixture.tools.definitions[0]?.inputSchema)).not.toContain('"start"');
+    const answer = await fixture.call({ operation: "start", title: "Fix it", prompt: "Go." });
+    expect(answer.isError).toBe(true);
   });
 });
 

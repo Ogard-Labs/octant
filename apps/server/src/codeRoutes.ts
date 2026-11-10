@@ -749,6 +749,29 @@ export function createCodeRouteHandler(dependencies: CodeRouteDependencies) {
               origin,
             );
           }
+          // The coordinator role, the wake switches, and how coordinators
+          // start workers are the person's choices at a window on this host;
+          // a paired device or any agent-gated caller may watch, never set.
+          if (
+            command !== undefined &&
+            callerKind !== "local-window" &&
+            (command.kind === "set-code-thread-coordinator" ||
+              command.kind === "set-code-thread-message-wake" ||
+              command.kind === "set-code-thread-coordinator-wake" ||
+              (command.kind === "update-code-settings" &&
+                (command.coordinatorStarting !== undefined ||
+                  command.coordinatorStartingByProject !== undefined ||
+                  command.coordinatorOpenWorkerLimit !== undefined)))
+          ) {
+            return failureResponse(
+              {
+                category: "unauthorized",
+                message: "Coordinators and wake switches are set at a window on this computer.",
+              },
+              403,
+              origin,
+            );
+          }
           if (command?.kind === "change-code-thread-browser-profile") {
             return failureResponse(
               {

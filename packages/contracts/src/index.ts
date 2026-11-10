@@ -41,6 +41,7 @@ export * from "./threadToolStepList";
 export * from "./threadWindow";
 export * from "./agentMessage";
 export * from "./siblingThreads";
+export * from "./coordinator";
 export * from "./extensions";
 export * from "./extensionEvents";
 export * from "./extensionRpc";
