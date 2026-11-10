@@ -961,7 +961,13 @@ fill (a secondary button, a segmented control, a select, a chip, a ghost
 button's hover) is the primary text at 7%, 11% hovered and 15% pressed, the
 step the theme's control sits above its own page, and the composer and the
 person's messages are a 30% veil of the page colour under the primary text at
-6%, with the glass hairline. On an OLED
+6%, with the glass hairline. What is chosen (the mode in the switch, a
+selected row) is the primary text at 12%; a switch's track at rest is the
+pressed control tint and its thumb, off, the primary text at 62%, so it is
+never the page's black on a dark track; a toned notice's ground is its tone at
+14%, and a plain notice takes the control tint. The shell's own loading state
+(Opening Settings) is clear on the shell's surface, where the opaque page
+colour turned the whole window black for the moment Settings took to load. On an OLED
 preset over a bright desktop the opaque fills stood as near-black blocks on
 mid-grey glass: every Settings button, each message and the composer. Menus,
 popovers and dialogs sit outside the shell and stay opaque, and reduced
@@ -1599,7 +1605,7 @@ stage), defined once on every shell in `shell.css`:
 - **The Browser** is clear on its own start page, whose rows take the card
   step; a loaded page keeps its opaque canvas.
 
-A filled button and a switch keep their own fills. The control fill (a
+A filled button and a switch that is on keep their own fills. The control fill (a
 secondary button, a segmented track, a select, a chip, a ghost button's hover)
 is a tint of the primary text at 7%, 11% hovered and 15% pressed, as the
 conversation rule on Glass says; menus, popovers, and dialogs keep the opaque
