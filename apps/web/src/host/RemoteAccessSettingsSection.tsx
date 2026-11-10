@@ -92,9 +92,10 @@ const LISTENER_FAILURE_COPY: Readonly<Record<string, string>> = {
     "The listener's certificate key can be read by other users on this computer, so Octant won't use it.",
   "occupied-port": "Another process is already using that port.",
   "interface-unavailable": "That network interface is not available right now.",
-  "bind-failed": "Octant could not bind the listener.",
-  "shutdown-failed": "Octant could not stop the listener cleanly.",
-  unavailable: "The remote listener service is unavailable.",
+  "bind-failed": "Octant could not start listening on that address. Try another address or port.",
+  "shutdown-failed":
+    "Octant could not stop listening cleanly. Restart Octant if remote access still answers.",
+  unavailable: "Remote access is unavailable right now. Restart Octant and try again.",
 };
 
 function pairingLink(origin: string, ticket: RemoteMintedPairingTicket): string {

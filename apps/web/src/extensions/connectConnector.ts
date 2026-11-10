@@ -78,7 +78,10 @@ async function addServer(
       kind: "failed",
       failure: {
         category: "unavailable",
-        message: error instanceof Error ? error.message : "Extension service is unavailable.",
+        message:
+          error instanceof Error
+            ? error.message
+            : "Extensions could not be reached. Restart Octant and try again.",
       },
     };
   }
