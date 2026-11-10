@@ -863,25 +863,17 @@ describe("the public-block visual language", () => {
   describe("count hues in the rail and the narrow rows", () => {
     const shell = readFileSync(join(webRoot, "styles", "shell.css"), "utf8");
 
-    it("gives the rail icons the tiles' hue variables, once, and only under Colour", () => {
+    it("keeps the rail's and the rows' icons in the sidebar ink in every style", () => {
       for (const id of ["inbox", "running", "review", "done"]) {
-        // One definition per hue: the tile and the rail button share the rule.
-        const shared = new RegExp(
-          `\\.sidebar-tile\\[data-tile="${id}"\\],\\s*\\.sidebar-rail__button\\[data-tile="${id}"\\]\\s*\\{[^}]*var\\(--oct-colour-${id}`,
-        );
-        expect(shell).toMatch(shared);
+        // One definition per hue: the tile face still takes it.
         expect(
           shell.match(new RegExp(`--sidebar-tile-hue:\\s*var\\(--oct-colour-${id}`, "g")),
         ).toHaveLength(1);
       }
-      const hued = [
-        ...shell.matchAll(/([^{}]*\.sidebar-rail__button\[data-tile\][^{]*)\{([^}]*)\}/g),
-      ];
-      expect(hued).toHaveLength(1);
-      expect(hued[0]?.[1]).toContain(':root[data-octant-style="colour"]');
-      expect(hued[0]?.[2]).toMatch(/color:\s*var\(--sidebar-tile-hue\)/);
-      // Mono and increased contrast never set the style, so the rail icon keeps
-      // the muted ink from its base rule.
+      // No rule paints a glyph in a tile's hue: a column of grey marks carried
+      // four coloured ones under Colour.
+      expect(shell).not.toMatch(/\.sidebar-rail__face\s*\{[^}]*color:\s*var\(--sidebar-tile-hue\)/);
+      expect(shell).not.toMatch(/\.sidebar-tile__icon\s*\{[^}]*color:\s*var\(--sidebar-tile-hue\)/);
       expect(shell).toMatch(/\.sidebar-rail__face \{[^}]*color:\s*var\(--oct-muted\)/);
     });
 

@@ -1067,20 +1067,10 @@ html[data-octant-native-host="true"]
   font-weight: var(--oct-weight-medium);
 }
 
-/* Under Colour the rows' icons take the hue too, so the same four places read
-   in the same colours whether a rail or rows show them. The name and the count
-   stay in the sidebar ink. */
-:root[data-octant-style="colour"][data-octant-theme-mode] .sidebar-tiles--rows .sidebar-tile__icon {
-  color: var(--sidebar-tile-hue);
-}
-
-/* Colour style: the rail's four count icons take the tiles' hues, from the
-   same variables above. Only the glyph is coloured: the hover and current
-   fills stay the neutral ones, and the badge keeps the sidebar ink. Mono and
-   increased contrast never set the style, so the icons stay muted there. */
-:root[data-octant-style="colour"] .sidebar-rail__button[data-tile] .sidebar-rail__face {
-  color: var(--sidebar-tile-hue);
-}
+/* The rail's icons and the count rows' icons stay in the sidebar ink in every
+   style. Under Colour four of them took the tiles' hues, so a column of
+   otherwise grey marks carried a blue, an orange, a purple and a green one;
+   the tile faces above keep their hue, where it is a fill and not a glyph. */
 
 /* The thread filter opens under the header when the Search icon asks for
    it, or stays there when Settings › Sidebar keeps it shown. The input keeps

@@ -26,7 +26,7 @@ describe("SidebarRail", () => {
     expect(await screen.findByRole("tooltip")).toHaveTextContent("octant");
   });
 
-  it("marks only the four count icons with their hue role", () => {
+  it("marks only the four count icons with the count they stand for", () => {
     render(
       <SidebarRail
         activeMode="code"
@@ -45,11 +45,11 @@ describe("SidebarRail", () => {
       />,
     );
 
-    const hued = screen
+    const counts = screen
       .getAllByRole("button")
       .filter((button) => button.hasAttribute("data-tile"))
       .map((button) => button.getAttribute("data-tile"));
-    expect(hued).toEqual(["inbox", "running", "review", "done"]);
+    expect(counts).toEqual(["inbox", "running", "review", "done"]);
     expect(screen.getByRole("button", { name: "Settings" })).not.toHaveAttribute("data-tile");
   });
 

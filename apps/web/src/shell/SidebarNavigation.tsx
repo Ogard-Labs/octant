@@ -8,7 +8,7 @@ import {
   Images,
   Inbox,
   Layers,
-  ListChecks,
+  ListTodo,
   SquareKanban,
   SquarePen,
 } from "lucide-react";
@@ -157,7 +157,8 @@ export function navigationIcon(id: SidebarNavigationDescriptorId) {
     case "github-issues":
       return CircleDot;
     case "linear-issues":
-      return ListChecks;
+      // Not the tick-list that means "plan" in a thread.
+      return ListTodo;
     case "projects":
       return Folders;
     default:

@@ -1,12 +1,8 @@
 import type { OctantMode } from "@octant/contracts/modes";
 import {
-  Activity,
-  CheckCheck,
-  ClipboardCheck,
   Folders,
   House,
-  Inbox,
-  LoaderCircle,
+  ScrollText,
   Search,
   Settings,
   SquarePen,
@@ -17,7 +13,7 @@ import { OctantButton } from "../ui/base/OctantButton";
 import { OctantTooltip } from "../ui/base/OctantTooltip";
 import { iconForVisibleMode, modeLabels } from "./ModeSwitcher";
 import { visibleModeOf, visibleModes, type VisibleMode } from "./workKind";
-import type { SidebarTile, SidebarTileId } from "./SidebarCountTiles";
+import { TILE_ICONS, type SidebarTile, type SidebarTileId } from "./SidebarCountTiles";
 import { navigationIcon } from "./SidebarNavigation";
 import type { SidebarNavigationDescriptorId } from "./navigationModel";
 
@@ -69,10 +65,10 @@ export interface SidebarRailProps {
 const TILE_RAIL: Readonly<
   Record<SidebarTileId, { readonly label: string; readonly icon: LucideIcon }>
 > = {
-  inbox: { label: "Inbox", icon: Inbox },
-  running: { label: "Running", icon: LoaderCircle },
-  review: { label: "To review", icon: ClipboardCheck },
-  done: { label: "Done today", icon: CheckCheck },
+  inbox: { label: "Inbox", icon: TILE_ICONS.inbox },
+  running: { label: "Running", icon: TILE_ICONS.running },
+  review: { label: "To review", icon: TILE_ICONS.review },
+  done: { label: "Done today", icon: TILE_ICONS.done },
 };
 
 /** Projects past this many wait behind the folder button rather than scroll the rail. */
@@ -187,7 +183,7 @@ export function SidebarRail(props: SidebarRailProps) {
           </RailButton>
         ))}
         {props.onOpenActivity === undefined ? null : (
-          <RailButton icon={Activity} label="Activity feed" onSelect={props.onOpenActivity} />
+          <RailButton icon={ScrollText} label="Activity feed" onSelect={props.onOpenActivity} />
         )}
         {props.onOpenProjects === undefined ? null : (
           <RailButton
