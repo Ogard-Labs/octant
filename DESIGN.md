@@ -961,7 +961,7 @@ fill (a secondary button, a segmented control, a select, a chip, a ghost
 button's hover) is the primary text at 7%, 11% hovered and 15% pressed, the
 step the theme's control sits above its own page, and the composer and the
 person's messages are a 30% veil of the page colour under the primary text at
-6%, with the glass hairline. A plain notice takes the control tint. On an OLED
+6%, with the glass hairline. On an OLED
 preset over a bright desktop the opaque fills stood as near-black blocks on
 mid-grey glass: every Settings button, each message and the composer. Menus,
 popovers and dialogs sit outside the shell and stay opaque, and reduced

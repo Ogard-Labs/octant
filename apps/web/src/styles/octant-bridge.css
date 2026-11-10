@@ -217,17 +217,3 @@ html:not([data-octant-reduced-transparency="true"]) .shell--material-translucent
   --oct-glass-thick: color-mix(in srgb, var(--octant-text-primary) 6%, transparent);
   --oct-glass-chrome: color-mix(in srgb, var(--octant-text-primary) 4%, transparent);
 }
-
-/* A plain notice inside the shell takes the same tint: its opaque floating
-   fill was the one black box left on a Settings page under Glass. A notice
-   with a tone keeps its tinted ground. */
-html:not([data-octant-reduced-transparency="true"])
-  .shell--material-translucent
-  .callout:is([data-tone="neutral"], :not([data-tone])):not(
-    .callout-accent,
-    .callout-ok,
-    .callout-warn,
-    .callout-danger
-  ) {
-  background: var(--octant-control);
-}
