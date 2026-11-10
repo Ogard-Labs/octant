@@ -665,9 +665,11 @@ different task.
 
 Every composer has one shape, on a start screen or under a thread, in Chat,
 Work, and Code: the same width, corner (`--oct-radius-lg`), hairline ring and
-mid shadow, a prompt two lines tall before it grows with the same insets, and
-the transcript's own type size, so a message looks the same in the box as in
-the bubble it becomes. Its width is the reading measure; in a split every
+mid shadow, the same insets, and the transcript's own type size, so a message
+looks the same in the box as in the bubble it becomes. The empty prompt is two
+lines tall on a start screen and one line under a thread, and grows as the
+person types: at two lines the empty reply box stood 114px tall under every
+conversation. Its width is the reading measure; in a split every
 composer takes the narrowest pane's room, so composers side by side match
 instead of each filling its own pane. A start screen's composer docks 12px
 above the pane's foot, where a thread's sits, so the two line up across a
