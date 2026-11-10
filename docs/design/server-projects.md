@@ -86,7 +86,7 @@ checks never change registry/configuration or journal state.
 ## Terms
 
 - **Registered server.** A server in the person's Octant Shield registry
-  (Settings › Access › Servers): a host alias from their SSH config and a user
+  (Settings › Permissions › Servers): a host alias from their SSH config and a user
   ([Octant Shield](../architecture.md#octant-shield)).
 - **Server Project.** A Code Project whose folder is an absolute path on one
   registered server. It has no folder on this host.
@@ -434,7 +434,7 @@ checks never change registry/configuration or journal state.
   window's access withholds the result; no local folder is tried instead. The
   binding, registry and window authority are checked again after the remote
   read. Paired-device callers are refused.
-- **Views.** Settings › Access › Servers binds one with **Project kind: Work**.
+- **Views.** Settings › Permissions › Servers binds one with **Project kind: Work**.
   The Work sidebar lists it under **On your servers** with its threads; the
   Work composer offers it, with only Octant Harness models choosable and no
   extension, issue, or terminal session to start from; and its thread view
@@ -590,7 +590,7 @@ checks never change registry/configuration or journal state.
 ## Person-operated dev-server previews
 
 A local person can open **Dev server preview** under a bound Project in Settings
-› Access › Servers. Choose the port of an already running HTTP dev server on
+› Permissions › Servers. Choose the port of an already running HTTP dev server on
 that server's literal `127.0.0.1`, and a local port, or `0` to choose a free one.
 The effective local URL and remote port are visible. Where a paired Octant
 host already owns the dev server, use its existing paired-host preview. An SSH

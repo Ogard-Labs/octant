@@ -331,19 +331,26 @@ columns may use all of it. Settings is the same shell with a 920px measure and i
 navigation rail; the rail names each group of pages with a quiet label and
 draws no hairline between groups. There are six groups, each one question a
 person brings to Settings, and a group lists its pages in this order: General
-(General, Profile, Notifications: who you are and what Octant tells you), Look &
+(General alone: who you are, app-wide defaults, and what Octant tells you), Look &
 feel (Appearance, Sidebar, Keybindings), AI (Providers & Models, Octant Harness,
 Voice & images, then Chat, Work and Code: which provider or model answers each
 job, and how each mode starts), Tools (Skills & Extensions, Computer use, Device
 tools, GitHub, Linear: what a running agent may reach), Safety (Permissions,
-Access, Secret stores, Memory: what an agent may touch, reach and remember), and
+Secret stores, Memory: what an agent may touch, reach and remember), and
 Data & devices (Data & storage, Sync, Remote access, Host, Usage: what this
 computer stores and the other machines it talks to). An earlier Privacy & data
 group had grown to seven pages answering three different questions, Modes stood
-apart from the models its pages choose, and Advanced held two pages. Permissions holds what a person has already allowed (remembered
-websites, remembered tool approvals, public links); Data & storage holds what
-the host keeps (data map, caches, backup, recovery, export, retention, purge);
-Notifications holds what Octant sends while a person is away. AI
+apart from the models its pages choose, and Advanced held two pages. General
+opens on Your identity (the profile) and ends on Notifications (what Octant
+sends while a person is away); Permissions holds the files no agent may touch,
+then the network places and servers agents may reach (Network limits, Safe
+networks, Servers), then what a person has already allowed (remembered
+websites, remembered tool approvals, public links). Profile and Notifications
+were pages of one and two controls, and Access was the other half of the
+question Permissions answers, so the rail listed three pages a person rarely
+needed alone; links to those pages open the page that holds them now. Data &
+storage holds what the host keeps (data map, caches, backup, recovery, export,
+retention, purge). AI
 lists each provider kind on the page of what it serves: Providers & Models
 holds the agent runtimes Octant drives (ACP agents, CLIs, the Agent SDK, RPC
 runtimes), and its manual add form offers only those kinds. It opens on the
@@ -729,7 +736,7 @@ and is never pre-selected; Auto uses the provider's own reviewer or
 [Octant Shield](docs/architecture.md#octant-shield), so it is listed for every
 runtime, and where no reviewer can run the picker shows it unavailable with
 the reason; the pick becomes the default for every new Work and Code thread
-until changed in Settings › Access or for one Project) — and ends in one primary action, Start a task,
+until changed in Settings › Permissions or for one Project) — and ends in one primary action, Start a task,
 that opens the new-task composer in that Project. Every step is optional from
 the first one. Opening setup focuses the current step's heading so a long
 provider list does not scroll past its introduction; Tab then reaches the
@@ -2605,8 +2612,7 @@ proceed. Native Code approvals keep their isolated host-owned document. The
 extension tool request names the plugin, its server, and the tool, and adds
 "Always allow in this Project" only when the host marks the call rememberable
 and the window is a local one. Settings › Permissions lists those answers by
-Project, each with Revoke, beside Remembered websites. Its Access section
-(Settings › Access) shows the global guardrail level with one-click change,
+Project, each with Revoke, beside Remembered websites. The same page shows the global guardrail level with one-click change,
 which governs Work and Code alike; a Work or Code Project overrides it from
 its overview (Default mode), and each thread's header shows the level in force
 and the scope it came from, in one quiet line ("Auto · set by this Project").
@@ -2648,10 +2654,10 @@ Providers & Models (a section with one select per job, a plain note of where the
 work goes, and the account's problem when it has one; the second opinion on
 decisions starts at **Off** and is the only job with no default account), and the reviewer
 override as a select on a Code Project's overview; **Servers** is built below
-Safe networks in Settings › Access as an account list and a **Project**
+Safe networks in Settings › Permissions as an account list and a **Project**
 picker that says whether the chosen Project uses the account's servers or
 its own list, which starts as a copy of the account list and is edited with
-the same rows and form. **Safe networks** is built as Settings › Access, in the
+the same rows and form. **Safe networks** is built as Settings › Permissions, in the
 Safety group after Permissions: a **Network limits** panel with a
 switch that is on by default, a sentence saying plainly whether limits are on
 (and, when on, that they hold sandboxed runtimes only),

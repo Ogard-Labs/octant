@@ -51,7 +51,7 @@ function failure(message: string, status: number, origin: string | null): Respon
 }
 
 /**
- * Settings › Access › Safe networks: the account default, a Project's
+ * Settings › Permissions › Safe networks: the account default, a Project's
  * override, and the hosts its runtimes were recently refused. The principal
  * comes from the authenticated request; only a person at a local window
  * changes what is trusted.

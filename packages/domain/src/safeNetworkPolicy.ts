@@ -15,7 +15,7 @@ import { canonicalToolEgressHost, canonicalToolEgressRuleHost } from "./toolEgre
  * the loopback ports its own launch serves Octant's tools on, the hosts its
  * Project's egress rules name, and the places the person trusts, and nothing
  * else. Nothing a runtime asks for, and no number of refusals, becomes a
- * place: places come only from a person in Settings › Access.
+ * place: places come only from a person in Settings › Permissions.
  */
 
 /** One parsed address: four bytes for IPv4 (an IPv4-mapped IPv6 address is read as IPv4), sixteen for IPv6. */

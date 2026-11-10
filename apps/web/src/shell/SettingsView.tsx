@@ -19,7 +19,6 @@ import type { ShellSettings } from "@octant/contracts/shell";
 import type { ProjectTerminalClient } from "@octant/client-runtime/project-terminal-client";
 import type { ServerProject } from "@octant/contracts/server-projects";
 import {
-  type HostPlatform,
   type ProjectId,
   type ProviderInstanceId,
   type SettingsDeepLink,
@@ -267,10 +266,10 @@ export interface SettingsViewProps {
   /** Settings › Sync on this host; absent off it, where store setup is not offered. */
   readonly replicaStoreSettingsClient?: ReplicaStoreSettingsClient;
   /** Absent off the host: linking a secret store and pointing a key at it are host authority. */
-  /** Settings › Access › Safe networks; absent where the host has no such route. */
+  /** Settings › Permissions › Safe networks; absent where the host has no such route. */
   readonly safeNetworksClient?: SafeNetworksClient;
   readonly secretStoresClient?: SecretStoresClient;
-  /** Settings › Access › Servers; absent off this computer. */
+  /** Settings › Permissions › Servers; absent off this computer. */
   readonly shieldServersClient?: ShieldServersClient;
   /** Settings › Skills & Extensions › Claude and Codex; absent off this computer. */
   readonly providerToolingClient?: ProviderToolingClient;
@@ -326,14 +325,14 @@ const SECTION_LABELS: Readonly<Partial<Record<SettingsSectionId, string>>> = Obj
 );
 
 const SECTION_DESCRIPTIONS: Readonly<Partial<Record<SettingsSectionId, string>>> = {
-  general: "Choose app-wide defaults, updates, and network behavior.",
+  general:
+    "Who you are in Octant, app-wide defaults, updates, and what Octant tells you while you are away.",
   appearance: "Choose how Octant looks. Use a built-in theme or make your own.",
   sidebar: "How the sidebar is laid out and what each thread row in it shows.",
   keybindings: "Change the shortcuts that reach Octant's global surfaces.",
   chat: "Defaults for new Chat conversations.",
   work: "Defaults for new Work threads: the model they start on and what they may do without asking.",
   code: "Defaults for Code threads and delivery.",
-  notifications: "What Octant tells you while you are away, and where it sends it.",
   voice: "The providers that turn speech into text, text into speech, and prompts into images.",
   "computer-use": "Control applications through the bundled Computer use plugin.",
   "device-tools":
@@ -347,10 +346,9 @@ const SECTION_DESCRIPTIONS: Readonly<Partial<Record<SettingsSectionId, string>>>
   github: "Connection and repository access on the selected host.",
   host: "Octant's background service: its status, startup, and maintenance.",
   permissions:
-    "The files no agent may touch, and what you have already allowed: websites, extension tools, and public links.",
+    "The files no agent may touch, the network places and servers agents may reach, and what you have already allowed.",
   memory:
     "What Octant remembers about you across threads and Projects, and how to keep things out of it.",
-  access: "The network places and your own servers agents may reach below Full access.",
   data: "What this host stores, how long it keeps threads, and how to back it up.",
   "secret-stores":
     "Keep API keys in a password manager you already use. Octant keeps a reference and fetches the key when it is used.",
@@ -373,8 +371,7 @@ const MOVED_SETTINGS: ReadonlyArray<{
   readonly setting: string;
   readonly to: SettingsSectionId;
 }> = [
-  { from: "general", setting: "user-profile", to: "profile" },
-  { from: "host", setting: "host-automation-notifications", to: "notifications" },
+  { from: "host", setting: "host-automation-notifications", to: "general" },
   ...["public-links", "public-link-service", "browser-site-approvals", "tool-approvals"].map(
     (setting) => ({ from: "data" as const, setting, to: "permissions" as const }),
   ),
@@ -402,26 +399,28 @@ const MOVED_SETTINGS: ReadonlyArray<{
   { from: "host", setting: "thread-retention", to: "data" },
 ];
 
+/**
+ * Pages that were folded into another keep answering their own links, with
+ * or without a setting. Profile and Notifications each held one or two
+ * controls and Access was the other half of what an agent may touch and
+ * reach, so the sidebar listed three pages a person rarely needed alone.
+ */
+const MERGED_PAGES: Readonly<Partial<Record<SettingsSectionId, SettingsSectionId>>> = {
+  profile: "general",
+  notifications: "general",
+  access: "permissions",
+};
+
 function currentSettingsLink(link: SettingsDeepLink): SettingsDeepLink {
   const moved = MOVED_SETTINGS.find(
     (entry) => entry.from === link.section && entry.setting === link.setting,
   );
-  return moved === undefined ? link : { ...link, section: moved.to };
-}
-
-/** The profile is kept on the host, so the host's platform names its computer. */
-function sectionDescription(
-  section: SettingsSectionId,
-  hostPlatform: HostPlatform | undefined,
-): string | undefined {
-  if (section === "profile") {
-    return `Choose how you appear inside Octant. Everything is optional and kept on ${thisComputerName(hostPlatform)}.`;
-  }
-  return SECTION_DESCRIPTIONS[section];
+  const section = moved === undefined ? link.section : moved.to;
+  const merged = MERGED_PAGES[section] ?? section;
+  return merged === link.section ? link : { ...link, section: merged };
 }
 
 export function SettingsView(props: SettingsViewProps) {
-  const hostPlatform = useHostPlatform();
   const capabilities: SettingsNativeCapabilities = {
     nativeBoundsAvailable: props.nativeBoundsAvailable,
     sidebarVibrancySupported: props.sidebarVibrancySupported,
@@ -585,7 +584,7 @@ export function SettingsView(props: SettingsViewProps) {
   const activeSectionScope = availableSections.find(
     (section) => section.id === route.activeSection,
   )?.scope;
-  const activeSectionDescription = sectionDescription(route.activeSection, hostPlatform);
+  const activeSectionDescription = SECTION_DESCRIPTIONS[route.activeSection];
   const subPage = hasQuery
     ? undefined
     : route.activeSection === "harness"
@@ -991,10 +990,12 @@ function ActiveSectionContent({
     );
   }
   switch (activeSection) {
+    // The folded pages are never the active one (their links are redirected
+    // before they reach the route); they share the page that holds them now.
     case "general":
-      return <GeneralSection focusedSetting={focusedSetting} props={props} />;
     case "profile":
-      return <ProfileSection focusedSetting={focusedSetting} props={props} />;
+    case "notifications":
+      return <GeneralSection focusedSetting={focusedSetting} props={props} />;
     case "appearance":
       return (
         <AppearanceSection
@@ -1335,7 +1336,7 @@ function ActiveSectionContent({
               intent === "control-host"
                 ? { section: "remote-access", setting: settingId("remote-listener") }
                 : {
-                    section: "access",
+                    section: "permissions",
                     setting: settingId(
                       intent === "server-folder" ? "server-projects" : "shield-servers-add",
                     ),
@@ -1407,9 +1408,24 @@ function ActiveSectionContent({
           focusedSetting={focusedSetting}
         />
       );
+    case "sync":
+      return (
+        <SyncSettingsSection
+          client={props.replicaStoreSettingsClient}
+          focusedSetting={focusedSetting}
+          folderBrowse={props.folderBrowseClient}
+          membership={props.replicaMembershipClient}
+          status={props.replicaSyncStatusClient}
+        />
+      );
+    case "permissions":
     case "access":
       return (
-        <div className="settings-section-stack" id="settings-access">
+        <div className="settings-section-stack" id="settings-permissions">
+          <ProtectedFilesSettings
+            client={props.protectedFilesClient}
+            focusedSetting={focusedSetting}
+          />
           <SafeNetworksSettings
             client={props.safeNetworksClient}
             projectNames={props.projectNames ?? NO_PROJECT_NAMES}
@@ -1431,42 +1447,6 @@ function ActiveSectionContent({
             projectNames={props.projectNames ?? NO_PROJECT_NAMES}
             projects={props.serverProjectsClient}
             servers={props.shieldServersClient}
-          />
-        </div>
-      );
-    case "sync":
-      return (
-        <SyncSettingsSection
-          client={props.replicaStoreSettingsClient}
-          focusedSetting={focusedSetting}
-          folderBrowse={props.folderBrowseClient}
-          membership={props.replicaMembershipClient}
-          status={props.replicaSyncStatusClient}
-        />
-      );
-    case "notifications":
-      return props.automationNotificationClient !== undefined ? (
-        <div className="settings-section-stack" id="settings-notifications">
-          <PhoneNotificationSettings
-            client={props.automationNotificationClient}
-            focusedSetting={focusedSetting}
-          />
-          <AutomationNotificationSettings
-            client={props.automationNotificationClient}
-            focused={focusedSetting === "host-automation-notifications"}
-          />
-        </div>
-      ) : (
-        <section aria-label="Notifications" id="settings-notifications">
-          <p>Notifications are set up on the host machine.</p>
-        </section>
-      );
-    case "permissions":
-      return (
-        <div className="settings-section-stack" id="settings-permissions">
-          <ProtectedFilesSettings
-            client={props.protectedFilesClient}
-            focusedSetting={focusedSetting}
           />
           <RememberedBrowserOriginsPanel
             origins={props.settings.rememberedBrowserOrigins}
@@ -2142,10 +2122,16 @@ function AutoCompactLimitSelect(props: {
   );
 }
 
-function ProfileSection({ focusedSetting, props }: SectionProps) {
+function GeneralSection({ focusedSetting, props }: SectionProps) {
+  const runtimeDefaults = useRuntimeCompactionDefaults(props.extensionClient);
+  // The profile is kept on the host, so the host's platform names its computer.
+  const hostPlatform = useHostPlatform();
   return (
-    <section aria-label="Profile" className="settings-section-stack" id="settings-profile">
-      <SettingsSection title="Your identity">
+    <section aria-label="General" className="settings-section-stack" id="settings-general">
+      <SettingsSection
+        description={`Everything is optional and kept on ${thisComputerName(hostPlatform)}.`}
+        title="Your identity"
+      >
         <div className="setgroup">
           <SettingRow
             description="How you are shown inside Octant. There is no account behind this, and none of it is required."
@@ -2161,14 +2147,6 @@ function ProfileSection({ focusedSetting, props }: SectionProps) {
           </SettingRow>
         </div>
       </SettingsSection>
-    </section>
-  );
-}
-
-function GeneralSection({ focusedSetting, props }: SectionProps) {
-  const runtimeDefaults = useRuntimeCompactionDefaults(props.extensionClient);
-  return (
-    <section aria-label="General" className="settings-section-stack" id="settings-general">
       <SettingsSection title="Available modes">
         <div className="setgroup">
           <SettingRow
@@ -2325,6 +2303,22 @@ function GeneralSection({ focusedSetting, props }: SectionProps) {
           </SettingRow>
         </div>
       </SettingsSection>
+      {props.automationNotificationClient === undefined ? (
+        <SettingsSection title="Notifications">
+          <p className="settings-section-line">Notifications are set up on the host machine.</p>
+        </SettingsSection>
+      ) : (
+        <>
+          <PhoneNotificationSettings
+            client={props.automationNotificationClient}
+            focusedSetting={focusedSetting}
+          />
+          <AutomationNotificationSettings
+            client={props.automationNotificationClient}
+            focused={focusedSetting === "host-automation-notifications"}
+          />
+        </>
+      )}
     </section>
   );
 }

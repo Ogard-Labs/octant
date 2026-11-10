@@ -22,7 +22,7 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
       label: "General",
       scope: "app",
       keywords:
-        "general enabled modes startup default chat work updates version release threads completed put away archive snooze compact compaction context window",
+        "general enabled modes startup default chat work updates version release threads completed put away archive snooze compact compaction context window profile name email avatar gravatar initials colour color picture identity notifications notify alerts push phone waiting approval failure completion automation routines",
       settings: [
         {
           id: settingId("enable-chat"),
@@ -116,29 +116,12 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
           scope: "app",
           keywords: "octant nightly test folder development testing",
         },
-      ],
-    },
-    {
-      id: "profile",
-      label: "Profile",
-      scope: "app",
-      keywords: "profile name email avatar gravatar initials colour color picture identity",
-      settings: [
         {
           id: settingId("user-profile"),
           label: "Your profile",
           scope: "app",
           keywords: "profile name email avatar gravatar initials colour color picture",
         },
-      ],
-    },
-    {
-      id: "notifications",
-      label: "Notifications",
-      scope: "host",
-      keywords:
-        "notifications notify alerts push phone waiting approval failure completion automation routines",
-      settings: [
         {
           id: settingId("host-phone-notifications"),
           label: "Phone notifications",
@@ -1097,7 +1080,7 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
       label: "Permissions",
       scope: "host",
       keywords:
-        "permissions protected files secrets ssh keys credentials remembered websites sites origins browser always allow forget public links share sharing remembered tool approvals extension tools revoke trust allowed",
+        "permissions protected files secrets ssh keys credentials remembered websites sites origins browser always allow forget public links share sharing remembered tool approvals extension tools revoke trust allowed access network safe networks servers ssh trusted hosts domains address ranges local network this mac private network overlay egress proxy refused recently refused trust allow outbound connections",
       settings: [
         {
           id: settingId("protected-files"),
@@ -1146,15 +1129,6 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
           keywords:
             "remembered tool approvals mcp plugin extension server project allow always revoke ask again permission",
         },
-      ],
-    },
-    {
-      id: "access",
-      label: "Access",
-      scope: "host",
-      keywords:
-        "access network safe networks servers ssh trusted hosts domains address ranges local network this mac private network overlay egress proxy refused recently refused trust allow outbound connections",
-      settings: [
         {
           id: settingId("network-limits"),
           label: "Network limits",
