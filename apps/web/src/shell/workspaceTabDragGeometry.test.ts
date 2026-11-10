@@ -75,10 +75,7 @@ describe("workspace surface drag geometry", () => {
       surface: draggedSurface,
       title: draggedSurface.title,
       fromTab: { paneId: sourcePaneId, tabId: draggedSurface.id },
-      openTab: {
-        paneId: sourcePaneId,
-        neighborTabId: decodeWorkspaceTabId("00000000-0000-4000-8000-000000001104"),
-      },
+      openTab: { paneId: sourcePaneId },
     };
     const panes = [paneGeometry(sourcePaneId, 0), paneGeometry(targetPaneId, 400)];
     // Its own pane's right edge: the tab lands beside the pane's next tab.

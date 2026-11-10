@@ -1499,7 +1499,7 @@ function LaunchedShell(
         void controller.arrangeSideBySide(destination.targetPaneId, source.surfaces);
         return;
       }
-      // A pane's open tab first hands the pane to its neighbour, so it is
+      // A pane's open tab first hands the pane to another of its tabs, so it is
       // placed like any other tab: the host refuses to split a pane off the
       // surface it is showing. A refused hand-over leaves everything as it
       // was, and a placement refused after it gives the pane back to the tab.
@@ -1507,7 +1507,7 @@ function LaunchedShell(
       const handedOver =
         openTab === undefined
           ? Promise.resolve(true)
-          : controller.activateContentTab(openTab.paneId, openTab.neighborTabId);
+          : controller.showAnotherContentTab(openTab.paneId, source.surface.id);
       void handedOver
         .then((ready) =>
           ready

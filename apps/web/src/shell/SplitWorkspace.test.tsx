@@ -138,7 +138,7 @@ describe("tabs side by side", () => {
     expect(sources[0]).toMatchObject({
       surface: chatTab(0),
       fromTab: { paneId: firstPaneId, tabId: chatTab(0).id },
-      openTab: { paneId: firstPaneId, neighborTabId: chatTab(1).id },
+      openTab: { paneId: firstPaneId },
     });
     expect(sources[0]).not.toHaveProperty("paneId");
     expect(sources[1]).toMatchObject({

@@ -53,10 +53,10 @@ export interface WorkspaceSurfaceDragSource {
   readonly fromTab?: { readonly paneId: PaneId; readonly tabId: WorkspaceTab["id"] };
   /**
    * Set when the dragged tab is its pane's open one and the pane holds other
-   * tabs. The pane shows `neighborTabId` before the tab is placed, so the tab
+   * tabs. The pane shows another of them before the tab is placed, so the tab
    * leaves like any other and the pane keeps the rest of its row.
    */
-  readonly openTab?: { readonly paneId: PaneId; readonly neighborTabId: WorkspaceTab["id"] };
+  readonly openTab?: { readonly paneId: PaneId };
   /** Two to four selected tabs dragged together; they lay out side by side where dropped. */
   readonly surfaces?: ReadonlyArray<WorkspaceTab>;
 }

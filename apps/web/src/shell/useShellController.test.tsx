@@ -1852,6 +1852,69 @@ describe("useShellController", () => {
     ]);
   });
 
+  it("hands a pane to another of its tabs so the open one can be placed elsewhere, and keeps the row", async () => {
+    const { result, threadId } = await readyBoundCodeShell();
+    const pane = firstPane(result.current.workspace!.layouts.code);
+    await act(async () =>
+      result.current.openCodeSurface({
+        kind: "code-file",
+        threadId,
+        title: "README.md",
+        relativePath: "README.md" as never,
+      }),
+    );
+    const entries = result.current.contentTabs.get(pane.paneId)!;
+    const file = entries.find((entry) => entry.kind === "code-file")!;
+    expect(firstPane(result.current.workspace!.layouts.code).surface.kind).toBe("code-file");
+
+    let handedOver = false;
+    await act(async () => {
+      handedOver = await result.current.showAnotherContentTab(pane.paneId, file.id);
+    });
+
+    expect(handedOver).toBe(true);
+    expect(firstPane(result.current.workspace!.layouts.code).surface.kind).toBe("code-overview");
+    expect(result.current.contentTabs.get(pane.paneId)?.map((entry) => entry.kind)).toEqual([
+      "code-overview",
+      "code-file",
+    ]);
+  });
+
+  it("hands nothing over when the pane's only other tab is already shown in another pane", async () => {
+    const { result, threadId } = await readyBoundCodeShell();
+    const pane = firstPane(result.current.workspace!.layouts.code);
+    await act(async () =>
+      result.current.openCodeSurface({
+        kind: "code-file",
+        threadId,
+        title: "README.md",
+        relativePath: "README.md" as never,
+      }),
+    );
+    const entries = result.current.contentTabs.get(pane.paneId)!;
+    const overview = entries.find((entry) => entry.kind === "code-overview")!;
+    const file = entries.find((entry) => entry.kind === "code-file")!;
+    // The remembered task tab leaves for a pane of its own; this pane's row
+    // still names it.
+    await act(async () => {
+      await result.current.dropSurface(overview, {
+        kind: "edge",
+        targetPaneId: pane.paneId,
+        edge: "right",
+      });
+    });
+    expect(result.current.workspace!.layouts.code.kind).toBe("split");
+
+    let handedOver = true;
+    await act(async () => {
+      handedOver = await result.current.showAnotherContentTab(pane.paneId, file.id);
+    });
+
+    // Activating it would only focus the other pane and leave this one on the
+    // file, which would then be placed while still shown here.
+    expect(handedOver).toBe(false);
+  });
+
   it("opens reviewed Code evidence through the authoritative workspace command path", async () => {
     const server = statefulClient();
     const threadId = decodeCodeThreadId("00000000-0000-4000-8000-000000000897");
