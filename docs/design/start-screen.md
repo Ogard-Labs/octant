@@ -299,8 +299,9 @@ and other listeners running in the host's Code Projects: the Code Environment's
 Local servers read host-wide, across every active Code Project the Project
 bootstrap lists, which today does not vary by window (see
 [Architecture: security and authority](../architecture.md#security-and-authority),
-Local servers and Running services). A row is the server's name (its framework,
-else its runtime) and port, the Project and the branch or thread it belongs to,
+Local servers and Running services). A row is two lines: the server's name (its
+framework, else its runtime) and port with the Project and the branch or thread
+it belongs to on the same line, cut from the end, then
 its health with a glyph and a word ("Listening", "Not responding", "Not
 checked"; never a colour), and the host's name only when the window is reading a
 computer that is not this one. A server Octant owns says nothing more; any other
