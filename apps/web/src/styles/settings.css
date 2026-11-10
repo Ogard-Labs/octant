@@ -3802,3 +3802,15 @@ html[data-octant-increased-contrast="true"]
 .provider-catalog--setup-open > summary {
   display: none;
 }
+
+/* A provider's Remove stands alone at the foot of its details, under a
+   hairline, so it is never among the routine actions. */
+.provider-details__danger {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--oct-space-3);
+  margin-top: var(--oct-space-3);
+  padding-top: var(--oct-space-3);
+  border-top: 1px solid var(--oct-hairline);
+}

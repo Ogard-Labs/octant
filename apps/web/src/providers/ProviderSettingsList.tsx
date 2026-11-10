@@ -1166,16 +1166,6 @@ function ProviderRow(props: ProviderRowProps) {
                 {props.updating ? "Updating…" : "Update CLI"}
               </OctantButton>
             ) : null}
-            <OctantButton
-              aria-label={`Remove ${props.instance.displayName}`}
-              disabled={disabled || (usesCredential && !props.credentialManagementAvailable)}
-              onClick={() => void props.onRemove(props.instance.id)}
-              size="sm"
-              type="button"
-              variant="destructive"
-            >
-              Remove
-            </OctantButton>
           </div>
           {located === undefined ? null : located.kind === "located" ? (
             <p className="provider-card__guidance" role="status">
@@ -1848,6 +1838,22 @@ function ProviderRow(props: ProviderRowProps) {
                 )}
               </div>
             ) : null}
+          </div>
+          {/* Removing is the last thing in a provider's details, apart from
+              the routine actions. Beside Check connection and Configure it was
+              one slip away from them. */}
+          <div className="provider-details__danger">
+            <span className="oct-row-detail">Removes this provider from Octant.</span>
+            <OctantButton
+              aria-label={`Remove ${props.instance.displayName}`}
+              disabled={disabled || (usesCredential && !props.credentialManagementAvailable)}
+              onClick={() => void props.onRemove(props.instance.id)}
+              size="sm"
+              type="button"
+              variant="destructive"
+            >
+              Remove
+            </OctantButton>
           </div>
         </div>
       ) : null}
