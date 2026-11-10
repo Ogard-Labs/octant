@@ -11495,7 +11495,7 @@ settings sandbox on|off [--work]`. Only a window on this host can turn
   `harnessAutoReview` is Reviewed (below). Built: Guarded, Accept edits,
   Reviewed (the provider's own reviewer, or Octant Shield), and Full access
   in Code and Work, with the first-run question, a global default, a Project
-  override in Code and Work, the thread header line, the journaled record of
+  override in Code and Work, the level row of the thread's info panel, the journaled record of
   who lowered a level and from where, and the one-time warning. Full access
   runs Claude Code at `bypassPermissions` and Codex at `danger-full-access`
   with approval policy `never`, with no Octant wrapping for any provider

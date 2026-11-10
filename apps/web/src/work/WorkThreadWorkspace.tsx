@@ -93,6 +93,7 @@ import { OctantButton } from "../ui/base/OctantButton";
 import { OctantConfirmDialog } from "../ui/base/OctantConfirmDialog";
 import { OctantTextarea } from "../ui/base/OctantTextarea";
 import { ThreadComposer } from "../composer/ThreadComposer";
+import { ThreadInfo } from "../composer/ThreadInfo";
 import { useDelayedForceStop } from "../composer/useDelayedForceStop";
 import { ComposerVoiceButton } from "../voice/ComposerVoiceButton";
 import { appendTranscript } from "../voice/appendTranscript";
@@ -2219,17 +2220,6 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
     <ThreadReplyDetailScope thread={{ mode: "work", threadId: String(props.threadId) }}>
       <section aria-label="Task workspace" className="work-thread-workspace">
         <h1 className="sr-only">{props.title}</h1>
-        {thread === undefined ? null : (
-          <ThreadGuardrailLevel
-            factsVersion={thread.version}
-            factsActivity={`${runningTurn?.requestId ?? ""}:${latestStatus ?? "idle"}`}
-            autoSupported={autoSupported}
-            mode={workModeOf(thread.access)}
-            projectId={String(thread.projectId)}
-            surface="work"
-          />
-        )}
-
         {confirmArtifacts ? (
           <ThreadArtifactsConfirm
             onCancel={() => setConfirmArtifacts(false)}
@@ -2727,30 +2717,44 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
           />
         )}
         {folderDrops.notice}
-        {thread === undefined ? null : (
-          <ContinueElsewhere
-            mode="work"
-            threadId={String(thread.id)}
-            groups={
-              turns.length > 0
-                ? startedConversationPickerGroups(props.providerGroups ?? [], {
-                    providerInstanceId: thread.providerInstanceId,
-                    modelId: thread.modelId,
-                  })
-                : (props.providerGroups ?? [])
-            }
-            selected={thread}
-            policy={continuation.policy}
-            onPolicyChange={continuation.change}
-            onProviderChange={changeProvider}
-            disabled={providerChanging || creating || completionLocked || turnRunning}
-          />
-        )}
         <ThreadComposer
           queue={<ThreadMessageQueue queue={messageQueue} showUnavailable={queueFollowUp} />}
           threadBusy={turnRunning || (messageQueue.snapshot?.items.length ?? 0) > 0}
           presentation="follow-up"
           {...(threadDropKey === undefined ? {} : { threadDropKey })}
+          {...(thread === undefined
+            ? {}
+            : {
+                info: (
+                  <ThreadInfo>
+                    <ThreadGuardrailLevel
+                      factsVersion={thread.version}
+                      factsActivity={`${runningTurn?.requestId ?? ""}:${latestStatus ?? "idle"}`}
+                      autoSupported={autoSupported}
+                      mode={workModeOf(thread.access)}
+                      projectId={String(thread.projectId)}
+                      surface="work"
+                    />
+                    <ContinueElsewhere
+                      mode="work"
+                      threadId={String(thread.id)}
+                      groups={
+                        turns.length > 0
+                          ? startedConversationPickerGroups(props.providerGroups ?? [], {
+                              providerInstanceId: thread.providerInstanceId,
+                              modelId: thread.modelId,
+                            })
+                          : (props.providerGroups ?? [])
+                      }
+                      selected={thread}
+                      policy={continuation.policy}
+                      onPolicyChange={continuation.change}
+                      onProviderChange={changeProvider}
+                      disabled={providerChanging || creating || completionLocked || turnRunning}
+                    />
+                  </ThreadInfo>
+                ),
+              })}
           context={
             <div className="work-folder-bar" role="group" aria-label="Project and folder">
               <FolderOpen aria-hidden="true" size={12} strokeWidth={1.8} />

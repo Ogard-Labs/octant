@@ -137,6 +137,8 @@ export interface ChatComposerProps {
    * manage that message.
    */
   readonly queue?: ReactNode;
+  /** The thread's info panel and its button, in the strip above the box. */
+  readonly info?: ReactNode;
   readonly queueing?: boolean;
   readonly threadBusy?: boolean;
   readonly provider: ChatComposerSelection;
@@ -923,6 +925,7 @@ export function ChatComposer(props: ChatComposerProps) {
       queue={props.queue}
       {...(props.threadBusy === undefined ? {} : { threadBusy: props.threadBusy })}
       presentation="follow-up"
+      {...(props.info === undefined ? {} : { info: props.info })}
       ariaLabel="Chat composer"
       chips={chips}
       className={`thread-composer chat-composer thread-column${props.isSending ? " chat-composer--running" : ""}`}

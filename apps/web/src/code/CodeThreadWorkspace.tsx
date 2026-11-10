@@ -36,6 +36,7 @@ import { OctantMenu } from "../ui/base/OctantMenu";
 import { ThreadReplyDetailMenu, ThreadReplyDetailScope } from "../transcript/ThreadReplyDetail";
 import { useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent } from "react";
 import { ThreadComposer } from "../composer/ThreadComposer";
+import { ThreadInfo } from "../composer/ThreadInfo";
 import { useDelayedForceStop } from "../composer/useDelayedForceStop";
 import { ComposerAttachButton } from "../composer/ComposerAttachButton";
 import { ComposerVoiceButton } from "../voice/ComposerVoiceButton";
@@ -1471,22 +1472,9 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
         {/* No identity header. The title repeated the pane's own grip, the
           lifecycle badge said "Active" on nearly every thread, the branch is
           the Environment summary's fact, and follow-up is the thread row's
-          right-click menu. Live subagents, the last thing it held, now sit in
-          the composer's tray. The one line it keeps is the guardrail level in
-          force and the scope it came from. */}
-        <ThreadGuardrailLevel
-          factsVersion={thread.version}
-          factsActivity={`${providerTurnOperationId ?? ""}:${props.controller.turnStatus}`}
-          autoSupported={
-            props.autoReview === undefined
-              ? props.harnessAutoReviewSupported === true
-              : props.autoReview.status === "reviewer"
-          }
-          mode={permissionModeOf(thread)}
-          projectId={String(thread.projectId)}
-          surface="code"
-        />
-
+          right-click menu. Live subagents sit in the composer's tray, and the
+          guardrail level in force is the first row of the thread's info panel
+          above the composer. */}
         {props.controller.errorMessage === undefined ||
         (turnErrorCallout &&
           props.controller.errorMessage === props.controller.turnError) ? null : (
@@ -1652,16 +1640,6 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
             <TranscriptWindow
               trail={
                 <>
-                  <CommandCredentialRequests
-                    threadId={String(props.threadId)}
-                    projectId={
-                      view?.thread.projectId === undefined
-                        ? undefined
-                        : String(view.thread.projectId)
-                    }
-                    serverUrl={props.serverUrl}
-                    windowCapability={props.windowCapability}
-                  />
                   <CredentialRequests
                     key={String(props.threadId)}
                     threadId={String(props.threadId)}
@@ -2212,14 +2190,6 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
 
         <InlineThreadPlan {...(changedFiles === undefined ? {} : { changedFiles })} />
         {!displayReady ||
-        props.pairedDevice === true ||
-        codeClient?.providerCloudSessions === undefined ? null : (
-          <div className="thread-column">
-            <ProviderCloudSessions client={codeClient.providerCloudSessions} threadId={thread.id} />
-          </div>
-        )}
-
-        {!displayReady ||
         props.imageGenerationClient === undefined ||
         props.imageGenerationProfiles === undefined ? null : (
           <GeneratedImageJobs
@@ -2241,16 +2211,6 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
             threadId={decodeBrowserThreadId(String(thread.id))}
           />
         )}
-        <ContinueElsewhere
-          mode="code"
-          threadId={String(thread.id)}
-          groups={threadModelGroups}
-          selected={thread}
-          policy={continuation.policy}
-          onPolicyChange={continuation.change}
-          onProviderChange={changeProvider}
-          disabled={busy}
-        />
         {props.controller.providerRequests.length === 0 ? null : (
           <div
             aria-label="Pending provider requests"
@@ -2335,6 +2295,46 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
           threadBusy={busy || (messageQueue.snapshot?.items.length ?? 0) > 0}
           presentation="follow-up"
           {...(threadDropKey === undefined ? {} : { threadDropKey })}
+          info={
+            <ThreadInfo>
+              <ThreadGuardrailLevel
+                factsVersion={thread.version}
+                factsActivity={`${providerTurnOperationId ?? ""}:${props.controller.turnStatus}`}
+                autoSupported={
+                  props.autoReview === undefined
+                    ? props.harnessAutoReviewSupported === true
+                    : props.autoReview.status === "reviewer"
+                }
+                mode={permissionModeOf(thread)}
+                projectId={String(thread.projectId)}
+                surface="code"
+              />
+              <CommandCredentialRequests
+                threadId={String(props.threadId)}
+                projectId={String(thread.projectId)}
+                serverUrl={props.serverUrl}
+                windowCapability={props.windowCapability}
+              />
+              {!displayReady ||
+              props.pairedDevice === true ||
+              codeClient?.providerCloudSessions === undefined ? null : (
+                <ProviderCloudSessions
+                  client={codeClient.providerCloudSessions}
+                  threadId={thread.id}
+                />
+              )}
+              <ContinueElsewhere
+                mode="code"
+                threadId={String(thread.id)}
+                groups={threadModelGroups}
+                selected={thread}
+                policy={continuation.policy}
+                onPolicyChange={continuation.change}
+                onProviderChange={changeProvider}
+                disabled={busy}
+              />
+            </ThreadInfo>
+          }
           context={
             <CodeCheckoutBar
               {...(props.onCreatePullRequest === undefined

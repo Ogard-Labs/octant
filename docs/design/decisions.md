@@ -2289,6 +2289,15 @@ The central workspace is one recursive split tree with one surface per leaf, and
 
 Status: Built. Since: —. Detail: [Workspace: Panes and content navigation](workspace.md#panes-and-content-navigation).
 
+### Thread info
+
+What is true about a thread but is not part of its conversation has one home, a panel opened from the strip above the follow-up composer.
+
+- Its rows are the access level in force with Access details, Credential commands, Provider cloud sessions and Continue elsewhere, each only where it applies. Nothing else about the thread is drawn on the thread page outside the transcript and the composer.
+- Rows stay mounted while the panel is closed, and a row that waits for the person marks the panel's button.
+
+Status: Built. Since: —. Detail: [Workspace: Thread info](workspace.md#thread-info).
+
 ### Right dock and thread tools
 
 The dock is contextual: it follows the active pane's thread and Project, and never shows another pane's content.

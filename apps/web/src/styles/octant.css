@@ -4781,6 +4781,73 @@ input.switch:checked::after {
   margin-left: auto;
   padding: 0 var(--oct-space-2);
 }
+/* The thread's info panel: a quiet button at the end of the strip and one
+   floating card above it. What it holds (access level, credential commands,
+   provider cloud sessions, continuing elsewhere) used to sit at four places
+   on the thread page, two of them outside the reading column. */
+.thread-info {
+  position: relative;
+  display: inline-flex;
+  flex: 0 0 auto;
+}
+.thread-composer__strip > .thread-plan-windows + .thread-info {
+  margin-left: 0;
+}
+.thread-composer__strip > .thread-info {
+  margin-left: auto;
+}
+.thread-info__trigger {
+  color: var(--oct-meta);
+  font-size: var(--oct-text-xs);
+  font-weight: var(--oct-weight-medium);
+}
+.thread-info__attention {
+  color: var(--oct-warn-fg);
+}
+.thread-info__panel {
+  position: absolute;
+  right: 0;
+  bottom: calc(100% + var(--oct-space-1));
+  z-index: 5;
+  display: grid;
+  width: min(440px, calc(100vw - 48px));
+  max-height: min(60vh, 520px);
+  overflow-y: auto;
+  padding: var(--oct-space-2) var(--oct-space-3);
+  border-radius: var(--oct-radius-md);
+  background: var(--octant-floating);
+  box-shadow: var(--octant-shadow-overlay);
+  color: var(--oct-fg-2);
+  font-size: var(--oct-text-sm);
+  line-height: var(--oct-leading-snug);
+}
+.thread-info__panel[hidden] {
+  display: none;
+}
+/* Each row is one fact or one action; a hairline separates them. */
+.thread-info__panel > * {
+  min-width: 0;
+  margin: 0;
+  padding-block: var(--oct-space-2);
+  border-top: 1px solid var(--oct-hairline);
+}
+.thread-info__panel > :first-child {
+  border-top: 0;
+}
+.thread-info__panel > button {
+  justify-self: start;
+  margin-block: var(--oct-space-1);
+  padding-block: 0;
+  border-top: 0;
+}
+.thread-info__panel summary {
+  color: var(--oct-fg);
+  font-weight: var(--oct-weight-medium);
+}
+.thread-info__panel p {
+  margin-block: var(--oct-space-1);
+  color: var(--oct-muted);
+}
 /* The quiet line under the composer's toolbar: the keyboard hint or a
    receipt on the left, spend and limits on the right. One recipe replaces
    the three footers Chat, Work, and Code drew under the same frame (and, in

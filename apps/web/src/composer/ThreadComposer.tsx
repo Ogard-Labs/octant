@@ -105,6 +105,8 @@ export interface ThreadComposerProps {
   readonly presentation?: "follow-up";
   /** Existing-thread checkout context, in the strip above the message surface. */
   readonly context?: ReactNode;
+  /** The thread's info panel and its button, at the end of that strip. */
+  readonly info?: ReactNode;
   /** Naming the frame promotes it to a `<section>` landmark (Chat). */
   readonly ariaLabel?: string | undefined;
   /** Appended after `composer`; positions the frame within the surface. */
@@ -249,6 +251,7 @@ function ComposerSurface(props: ThreadComposerProps) {
           <div className="thread-composer__context">{props.context}</div>
         )}
         <ThreadPlanWindows />
+        {props.info}
       </div>
       <div className="thread-composer__surface">
         <ComposerOutsideContentNotice busy={props.threadBusy === true} />

@@ -13,7 +13,7 @@ Unfinished plugin extraction and other proposals are separate from these rules.
 ## Provider cloud jobs
 
 An existing local Code thread offers a separate **Provider cloud sessions**
-disclosure beside its plan. This is an explicit remote job, not a thread mode,
+disclosure in its [info panel](#thread-info). This is an explicit remote job, not a thread mode,
 checkout relocation or fallback for local tools. The person chooses an enabled
 endpoint/model, edits bounded task text, reviews it and approves sending that
 exact text for remote execution and possible model/sandbox charges. Changing
@@ -65,10 +65,30 @@ settlement, duplicate requests, authority refusals, and dead approvals/questions
 Rendered checks at 1000px and 390px confirm the notice, actionable refusal,
 single-click continuation, and preservation of the composer draft.
 
+## Thread info
+
+What is true about a thread but is not part of its conversation has one home:
+a quiet **Thread info** button at the end of the strip above the follow-up
+composer, after the plan meters. It opens one floating card above the strip,
+at most 440px wide, whose rows are, in order and each only where it applies:
+the access level in force and where it came from (Work and Code) with its
+**Access details**, **Credential commands** (Code), **Provider cloud
+sessions** (Code, local host), and **Continue elsewhere**. Nothing else about
+the thread is drawn on the thread page outside the transcript and the
+composer; these rows had each been added to the page on their own, at four
+places, two of them outside the reading column.
+
+The rows stay mounted while the card is closed, so a read or a review in one
+of them does not restart when it opens. A row that waits for the person (a
+credential command awaiting review) marks the button "Review required" in the
+warning ink. A control elsewhere that leads to a row (the access shortcut)
+opens the card. Escape or a press outside closes it and returns focus to the
+button; a dialog or menu a row opened does not count as outside.
+
 ## Continue elsewhere
 
-An existing Chat, Work or Code conversation offers **Continue elsewhere** beside
-its composer. Provider requests retain their established placement. The flow names the execution host and the screen controlling it,
+An existing Chat, Work or Code conversation offers **Continue elsewhere** in its
+[info panel](#thread-info). Provider requests retain their established placement. The flow names the execution host and the screen controlling it,
 the source provider and the authoritative current destination. Choosing another
 provider uses the same provider/model command as its composer picker and sends
 nothing. Task state, the checkout and pending feedback remain on the execution
