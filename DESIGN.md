@@ -1401,7 +1401,7 @@ disabled, at its end of the history.
 **Hiding the sidebar.** Hide sidebar, or Mod+\ (rebindable, "Show or hide
 the sidebar", answered in text fields too and leaving focus where it was),
 collapses the sidebar to the rail alone, which then also shows New thread and
-Search at the top, the modes, and up to six Project letters (outlined at icon
+Search at the top, the modes (with the same marks as the sidebar's mode switcher, so Work keeps one icon), and up to six Project letters (outlined at icon
 size in the icons' muted ink) with a Projects button for the rest; Show sidebar, Back, and Forward move into the
 title band, so the rail stays one icon wide. Icon rail: When hidden shows the
 rail only in that state; Never removes the sidebar completely when hidden and

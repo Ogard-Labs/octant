@@ -52,4 +52,23 @@ describe("SidebarRail", () => {
     expect(hued).toEqual(["inbox", "running", "review", "done"]);
     expect(screen.getByRole("button", { name: "Settings" })).not.toHaveAttribute("data-tile");
   });
+
+  it("draws Work with the same mark as the sidebar's mode switcher", () => {
+    render(
+      <SidebarRail
+        activeMode="work"
+        destinations={[]}
+        modes={["chat", "work", "code"]}
+        nativeHost={false}
+        onOpenSettings={vi.fn()}
+        onSelectMode={vi.fn()}
+        projects={[]}
+        tiles={[]}
+      />,
+    );
+
+    const work = screen.getByRole("button", { name: "Work" });
+    expect(work.querySelector("svg.lucide-message-square")).not.toBeNull();
+    expect(work.querySelector("svg.lucide-folder-open")).toBeNull();
+  });
 });
