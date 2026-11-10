@@ -232,7 +232,7 @@ export function ContinueElsewhere(props: {
           </>
         )}
         {notice === undefined ? null : <p role="status">{notice}</p>}
-        <OctantButton variant="secondary" onClick={() => setOpen(false)}>
+        <OctantButton variant="outline" onClick={() => setOpen(false)}>
           Close
         </OctantButton>
       </OctantDialog>

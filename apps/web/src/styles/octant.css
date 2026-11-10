@@ -2202,10 +2202,12 @@ input.switch:checked::after {
 }
 
 /* ─── toast ─────────────────────────────────────────────────────────── */
+/* Under the title bar, at the trailing edge. At the bottom corner a notice
+   covered the composer's model picker and Send. */
 .toast-stack {
   position: fixed;
+  top: calc(var(--oct-titlebar-h) + var(--oct-space-3));
   right: var(--oct-space-4);
-  bottom: var(--oct-space-4);
   display: grid;
   gap: var(--oct-space-2);
   z-index: var(--oct-z-toast);
@@ -4482,11 +4484,12 @@ input.switch:checked::after {
   display: none;
 }
 /* Every composer, on a start screen or under a thread, in Chat, Work, and
-   Code, has this one prompt: two lines and the same insets before it grows,
-   and the transcript's own type, so a message reads the same in the box as in
-   the bubble it becomes. The start screen's box was four lines and the
-   thread's under two, with smaller insets and 14px type beside a 13px
-   transcript, so the same message changed shape as it moved. */
+   Code, has this one prompt: the same insets and the transcript's own type,
+   so a message reads the same in the box as in the bubble it becomes. The
+   start screen's box was four lines and the thread's under two, with smaller
+   insets and 14px type beside a 13px transcript, so the same message changed
+   shape as it moved. A start screen's prompt is two lines before it grows;
+   under a thread it is one (the rule below). */
 .composer-input {
   display: block;
   width: 100%;
@@ -4517,6 +4520,14 @@ input.switch:checked::after {
 }
 .composer-input::placeholder {
   color: var(--oct-meta);
+}
+/* Under a thread the empty prompt is one line and grows as the person types.
+   At two lines the empty box stood 114px tall under every conversation, a
+   quarter of a laptop window's reading room held for a reply not yet begun.
+   The insets and type are the shared ones, so a message still keeps its
+   shape; only the empty box is shorter. */
+.composer--follow-up .composer-input {
+  min-height: calc(1lh + 30px);
 }
 /* The toolbar belongs to the composer, so it shares its ground. A divider
    above it split one object into two stacked boxes. */
@@ -4780,6 +4791,70 @@ input.switch:checked::after {
   flex: 0 1 auto;
   margin-left: auto;
   padding: 0 var(--oct-space-2);
+}
+/* The thread's info panel: a quiet button at the end of the strip and one
+   floating card above it. What it holds (access level, credential commands,
+   provider cloud sessions, continuing elsewhere) used to sit at four places
+   on the thread page, two of them outside the reading column. */
+.thread-info {
+  position: relative;
+  display: inline-flex;
+  flex: 0 0 auto;
+}
+.thread-composer__strip > .thread-plan-windows + .thread-info {
+  margin-left: 0;
+}
+.thread-composer__strip > .thread-info {
+  margin-left: auto;
+}
+.thread-info__attention {
+  color: var(--oct-warn-fg);
+}
+.thread-info__panel {
+  position: absolute;
+  right: 0;
+  bottom: calc(100% + var(--oct-space-1));
+  z-index: 5;
+  display: grid;
+  /* Measured against the pane, as the composer is: in a split the viewport is
+     wider than the pane and a viewport width ran into the neighbour. */
+  width: min(440px, calc(var(--octant-split-composer-width, 100vw) - 48px));
+  max-height: min(60vh, 520px);
+  overflow-y: auto;
+  padding: var(--oct-space-2) var(--oct-space-3);
+  border-radius: var(--oct-radius-md);
+  background: var(--octant-floating);
+  box-shadow: var(--octant-shadow-overlay);
+  color: var(--oct-fg-2);
+  font-size: var(--oct-text-sm);
+  line-height: var(--oct-leading-snug);
+}
+.thread-info__panel[hidden] {
+  display: none;
+}
+/* Each row is one fact or one action; a hairline separates them. */
+.thread-info__panel > * {
+  min-width: 0;
+  margin: 0;
+  padding-block: var(--oct-space-2);
+  border-top: 1px solid var(--oct-hairline);
+}
+.thread-info__panel > :first-child {
+  border-top: 0;
+}
+.thread-info__panel > button {
+  justify-self: start;
+  margin-block: var(--oct-space-1);
+  padding-block: 0;
+  border-top: 0;
+}
+.thread-info__panel summary {
+  color: var(--oct-fg);
+  font-weight: var(--oct-weight-medium);
+}
+.thread-info__panel p {
+  margin-block: var(--oct-space-1);
+  color: var(--oct-muted);
 }
 /* The quiet line under the composer's toolbar: the keyboard hint or a
    receipt on the left, spend and limits on the right. One recipe replaces
@@ -6231,6 +6306,36 @@ html[data-octant-reduced-transparency="true"] [data-slot="card"][data-variant="g
   }
   [data-slot="card"][data-variant="glass"] {
     box-shadow: 0 0 0 1px var(--oct-border);
+  }
+}
+
+/* Code Home's Up next and Continue cards are buttons, not the card recipe,
+   so they take the glass card's paints by name: the same fallback, material
+   and opt-outs, in the same order. */
+.code-home__card {
+  background: var(--oct-surface);
+  box-shadow: 0 0 0 1px var(--oct-glass-stroke);
+}
+@supports (backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px)) {
+  .code-home__card {
+    background-color: var(--oct-glass-floor);
+    background-image: linear-gradient(var(--oct-glass-thick), var(--oct-glass-thick));
+    backdrop-filter: blur(var(--oct-glass-blur-thick)) saturate(150%);
+    -webkit-backdrop-filter: blur(var(--oct-glass-blur-thick)) saturate(150%);
+  }
+}
+html[data-octant-reduced-transparency="true"] .code-home__card {
+  background: var(--oct-surface);
+  box-shadow: 0 0 0 1px var(--oct-border);
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+}
+@media (prefers-reduced-transparency: reduce) {
+  .code-home__card {
+    background: var(--oct-surface);
+    box-shadow: 0 0 0 1px var(--oct-border);
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
   }
 }
 

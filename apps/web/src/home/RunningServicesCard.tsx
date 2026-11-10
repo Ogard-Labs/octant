@@ -203,9 +203,11 @@ function RunningServiceRow(props: {
         <span className="running-services__head">
           <span className="oct-row-label running-services__name">{name}</span>
           <span className="oct-meta oct-meta--mono">{`:${String(service.port)}`}</span>
-        </span>
-        <span className="oct-meta running-services__origin" title={runningServiceOrigin(service)}>
-          {runningServiceOrigin(service)}
+          {/* On the name's line: as a line of its own each server stood three
+              lines tall, and five of them ran the card past the fold. */}
+          <span className="oct-meta running-services__origin" title={runningServiceOrigin(service)}>
+            {runningServiceOrigin(service)}
+          </span>
         </span>
         <span className="oct-meta running-services__detail">
           <HealthIcon aria-hidden="true" size={12} strokeWidth={1.8} />

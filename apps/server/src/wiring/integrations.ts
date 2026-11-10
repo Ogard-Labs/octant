@@ -271,7 +271,7 @@ export function wireIntegrations(deps: IntegrationsDependencies) {
       },
     });
     safeNetworksForCommands = safeNetworkStore;
-    // Settings › Access › Safe networks; only a local window changes a list.
+    // Settings › Permissions › Safe networks; only a local window changes a list.
     const safeNetworkRoutes = createSafeNetworkRouteHandler({
       windowAuthorityStore,
       store: safeNetworkStore,

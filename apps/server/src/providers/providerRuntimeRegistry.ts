@@ -115,6 +115,9 @@ export class ProviderExecutableUpdateRejected extends Error {
   override readonly name = "ProviderExecutableUpdateRejected";
 }
 
+/** The category of what needs a look on this host; see `attentionReason`. */
+export type HostAttentionReason = "provider-not-ready" | "provider-stopped";
+
 export class ProviderRuntimeRegistry {
   readonly #receiptDirectory: string | undefined;
   readonly #processIdentity: ((pid: number) => Promise<string | undefined>) | undefined;
@@ -221,13 +224,27 @@ export class ProviderRuntimeRegistry {
   }
 
   attentionRequired(): boolean {
+    return this.attentionReason() !== undefined;
+  }
+
+  /**
+   * Why the host needs a look, as a category and never a name: `/health`
+   * answers without authentication. A stopped process under live sessions is
+   * the more urgent of the two, so it wins. A provider whose check is still
+   * running is not a problem yet: counted, it raised the menu-bar mark on
+   * every start and after every Check connection.
+   */
+  attentionReason(): HostAttentionReason | undefined {
+    let reason: HostAttentionReason | undefined;
     for (const observed of this.#observedByInstance.values()) {
-      if (observed.readiness !== "ready") return true;
       if (this.activeSessionCount(observed.instanceId) > 0 && observed.processState !== "running") {
-        return true;
+        return "provider-stopped";
+      }
+      if (observed.readiness !== "ready" && observed.readiness !== "checking") {
+        reason = "provider-not-ready";
       }
     }
-    return false;
+    return reason;
   }
 
   setActiveSessionCount(instanceId: ProviderInstanceId, count: number): void {

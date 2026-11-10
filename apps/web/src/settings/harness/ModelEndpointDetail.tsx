@@ -275,7 +275,7 @@ export function ModelEndpointDetail(props: ModelEndpointDetailProps) {
                   onClick={() => runFix(fix.kind)}
                   size="sm"
                   type="button"
-                  variant="outline"
+                  variant="secondary"
                 >
                   {fix.label}
                 </OctantButton>
@@ -412,7 +412,7 @@ function AccessSection(
               onClick={props.onFocusKey}
               size="sm"
               type="button"
-              variant="outline"
+              variant="secondary"
             >
               {status === "missing" ? "Add key" : "Replace key"}
             </OctantButton>
@@ -810,7 +810,7 @@ function NameAndAddressSection(
                 disabled={props.disabled}
                 size="sm"
                 type="submit"
-                variant="outline"
+                variant="secondary"
               >
                 Save
               </OctantButton>
@@ -976,7 +976,7 @@ function DiagnosticsSection(props: ModelEndpointDetailProps & { readonly failing
       >
         <SettingsFactList facts={facts} />
         <div className="endpoint-detail__actions">
-          <OctantButton onClick={copy} size="sm" type="button" variant="outline">
+          <OctantButton onClick={copy} size="sm" type="button" variant="secondary">
             Copy diagnostics
           </OctantButton>
           <span aria-live="polite" className="endpoint-detail__saved" role="status">

@@ -54,7 +54,7 @@ import { MAX_CODE_FILE_BODY_SIZE } from "./codeRoutes";
 import { existsSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { CANVAS_PREVIEW_ASSET_FOLDER, CANVAS_PREVIEW_PAGE } from "./canvas/canvasPreviewRenderer";
-import { healthResponse } from "./health";
+import { healthResponse, hostActivity } from "./health";
 import {
   Persistence,
   type PersistenceService,
@@ -1892,10 +1892,7 @@ export function startOctantServer(
                 return healthResponse(
                   version,
                   options.instanceId,
-                  {
-                    activeAgentCount: providerRuntimeRegistry.activeSessionTotal(),
-                    attentionRequired: providerRuntimeRegistry.attentionRequired(),
-                  },
+                  hostActivity(providerRuntimeRegistry),
                   existsSync(
                     join(
                       options.webAssetsPath ?? resolveWebAssetsPath(),

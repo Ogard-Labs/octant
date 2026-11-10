@@ -27,7 +27,11 @@ this toggle is not evidence of API access or a successful billed call.
 ## Provider catalog
 
 Provider catalog, the section of Providers & Models under the providers this
-host has, lists every
+host has, stands behind one closed disclosure, **Add a provider**: it is a
+reference list of everything Octant can set up, and standing open under the
+providers a person already has it made the page about six screens tall. The
+page outline's links into it, and a deep link to a setting inside it, open it
+first. Opened, it lists every
 bundled provider driver in the Model endpoints row style. Agent runtimes and
 model endpoints are two sections. A row is one link named with its state
 ("Codex CLI, off. Open setup") and shows the mark, the name, "Agent runtime ·
@@ -71,9 +75,23 @@ owns the rules behind each step.
 
 ### A runtime whose saved binary is gone
 
-A runtime card whose saved binary is missing or reported incompatible, while the
-latest scan found the same driver at another path, offers one outlined action in
-the card's details: "Use the one found at ~/.local/bin/claude (2.1.306)". The
+A scan repairs what it can prove. When a runtime's saved binary no longer
+exists as a file and the scan found the same driver elsewhere, the host points
+the runtime at the launcher the scan examined, in the same pass. Only the
+binary path changes: the runtime's switch, sign-in, and every other setting
+stay as they were, a saved binary that still exists is never replaced, and a
+failed or cancelled scan repairs nothing. Runtimes move when they are
+reinstalled another way or update themselves, and a card that waited for a
+click stayed "not found" for months (a Claude Code saved under an npm prefix
+that a native install had replaced). For the same reason a runtime created
+from a scan saves the launcher path (`~/.local/bin/claude`), never the
+versioned file it resolves to, which the runtime's own updater deletes.
+
+What the scan cannot repair by itself stays an offer. A runtime card whose
+saved binary is missing or reported incompatible, while the
+latest scan found the same driver at another path, says so on its row ("Found
+at ~/.local/bin/claude (2.1.306).") beside a "Use it" button, so a closed card
+never reads as not installed. The
 card is missing when the scan searched where the saved binary should be and did
 not find it, or when its last check could not start it. A runtime that is off
 and that the scan did not find counts too, wherever its binary was saved: nothing
@@ -85,8 +103,8 @@ offers nothing. The offer names the launcher path the scan examined, not the
 versioned file it resolves to, so it survives the runtime's own updates; of
 several candidates it takes a compatible one with the highest version, and a
 candidate the scan itself found incompatible or unavailable is never offered.
-The details open when an offer first appears. Nothing switches by itself and
-the offer never turns the runtime on.
+Pressing it opens the details, where the host's answer is reported. Neither the
+repair nor the offer ever turns the runtime on.
 
 Clicking the offer goes through the same host path as Locate binary, without
 the file picker: the `locate-binary` command names a scanned path instead of a

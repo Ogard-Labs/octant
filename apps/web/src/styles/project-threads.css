@@ -621,7 +621,7 @@
 .project-dialog h1 {
   margin: 2px 0 0;
   font-size: var(--oct-text-base);
-  font-weight: 600;
+  font-weight: var(--oct-weight-strong);
   letter-spacing: var(--oct-tracking-tight);
 }
 
@@ -806,12 +806,12 @@
   margin-top: 2px;
 }
 
+/* The button recipe owns the height, the inset and the type. This class set
+   its own 31px height and 12px type, a step that exists nowhere else: in a
+   dialog's footer Cancel stood 3px taller than the primary button beside
+   it. */
 .project-button {
-  min-height: 31px;
-  padding: 0 var(--oct-space-3);
   cursor: default;
-  font-size: var(--oct-text-xs);
-  font-weight: var(--oct-weight-medium);
 }
 
 .project-button:disabled {
@@ -1517,10 +1517,11 @@ button[aria-expanded="true"] > .project-overview-inspector__chevron {
   white-space: nowrap;
 }
 
+/* 28px, the icon button's own step; 27 fitted no other control. */
 .project-memory-inspector__header button {
   display: grid;
-  width: 27px;
-  height: 27px;
+  width: 28px;
+  height: 28px;
   color: var(--octant-text-muted);
   border-radius: var(--oct-radius-sm);
   cursor: default;

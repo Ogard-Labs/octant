@@ -285,7 +285,7 @@ export const RemotePushGatewayUrl = Schema.String.pipe(
 );
 export type RemotePushGatewayUrl = typeof RemotePushGatewayUrl.Type;
 
-/** Settings › Notifications › Phone notifications. Off until the person turns it on. */
+/** Settings › General › Phone notifications. Off until the person turns it on. */
 export const RemotePushGatewaySettingsV1 = Schema.Struct({
   kind: Schema.Literal("remote-push-gateway-settings"),
   enabled: Schema.Boolean,

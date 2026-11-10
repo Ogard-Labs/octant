@@ -44,21 +44,27 @@ export interface SettingsNavigationProps {
   readonly onSelect: (sectionId: SettingsSectionId) => void;
 }
 
-/* General is who you are and what Octant tells you; Look & feel is how it
-   looks and is driven; AI & models is which model answers each job; Tools is
-   what an agent may reach once running; Privacy & data is what is remembered,
-   stored, and shared; Advanced is the host process, the machines it reaches
-   over SSH, and its usage. */
+/* Six groups, each one question a person brings to Settings. General is who
+   you are and what Octant tells you; Look & feel is how it looks and is
+   driven; AI is which model answers and how each mode starts; Tools is what a
+   running agent may reach; Safety is what an agent may touch, reach and
+   remember; Data & devices is what this computer stores and the other
+   machines it talks to.
+
+   Privacy & data had grown to seven pages that answered three different
+   questions (permissions, storage, other devices), Modes stood apart from the
+   models its pages choose, and Advanced held two pages. */
 const SETTINGS_GROUPS = [
   "General",
   "Look & feel",
-  "Modes",
-  "AI & models",
+  "AI",
   "Tools",
-  "Privacy & data",
-  "Advanced",
+  "Safety",
+  "Data & devices",
 ] as const;
 
+/* A group lists its pages in the order they are written here, whatever order
+   the registry supplies them in. */
 const SETTINGS_NAVIGATION_META: Readonly<
   Record<
     SettingsSectionId,
@@ -71,27 +77,31 @@ const SETTINGS_NAVIGATION_META: Readonly<
   appearance: { group: "Look & feel", icon: Palette },
   sidebar: { group: "Look & feel", icon: PanelLeft },
   keybindings: { group: "Look & feel", icon: Keyboard },
-  chat: { group: "Modes", icon: MessageCircle },
-  work: { group: "Modes", icon: FolderOpen },
-  code: { group: "Modes", icon: Code2 },
-  providers: { group: "AI & models", icon: Plug },
-  harness: { group: "AI & models", icon: Hexagon },
-  voice: { group: "AI & models", icon: Mic },
+  providers: { group: "AI", icon: Plug },
+  harness: { group: "AI", icon: Hexagon },
+  voice: { group: "AI", icon: Mic },
+  chat: { group: "AI", icon: MessageCircle },
+  work: { group: "AI", icon: FolderOpen },
+  code: { group: "AI", icon: Code2 },
   skills: { group: "Tools", icon: Blocks },
   "computer-use": { group: "Tools", icon: Monitor },
   "device-tools": { group: "Tools", icon: TabletSmartphone },
   github: { group: "Tools", icon: FolderGit2 },
   linear: { group: "Tools", icon: ListTodo },
-  permissions: { group: "Privacy & data", icon: ShieldCheck },
-  memory: { group: "Privacy & data", icon: Brain },
-  access: { group: "Privacy & data", icon: Network },
-  "secret-stores": { group: "Privacy & data", icon: KeyRound },
-  data: { group: "Privacy & data", icon: Database },
-  sync: { group: "Privacy & data", icon: FolderSync },
-  "remote-access": { group: "Privacy & data", icon: Radio },
-  host: { group: "Advanced", icon: Server },
-  usage: { group: "Advanced", icon: ChartNoAxesColumnIncreasing },
+  permissions: { group: "Safety", icon: ShieldCheck },
+  access: { group: "Safety", icon: Network },
+  "secret-stores": { group: "Safety", icon: KeyRound },
+  memory: { group: "Safety", icon: Brain },
+  data: { group: "Data & devices", icon: Database },
+  sync: { group: "Data & devices", icon: FolderSync },
+  "remote-access": { group: "Data & devices", icon: Radio },
+  host: { group: "Data & devices", icon: Server },
+  usage: { group: "Data & devices", icon: ChartNoAxesColumnIncreasing },
 };
+
+const SETTINGS_PAGE_ORDER = new Map(
+  Object.keys(SETTINGS_NAVIGATION_META).map((id, index) => [id, index]),
+);
 
 /** The page's nav icon, shared with the tile in that page's header. */
 export function settingsSectionIcon(id: SettingsSectionId): LucideIcon {
@@ -120,9 +130,12 @@ export function SettingsNavigation({ sections, activeSection, onSelect }: Settin
   return (
     <nav aria-label="Settings sections" className="settings-navigation" ref={navigation}>
       {SETTINGS_GROUPS.map((group) => {
-        const groupedSections = sections.filter(
-          (section) => SETTINGS_NAVIGATION_META[section.id].group === group,
-        );
+        const groupedSections = sections
+          .filter((section) => SETTINGS_NAVIGATION_META[section.id].group === group)
+          .toSorted(
+            (left, right) =>
+              (SETTINGS_PAGE_ORDER.get(left.id) ?? 0) - (SETTINGS_PAGE_ORDER.get(right.id) ?? 0),
+          );
         if (groupedSections.length === 0) return null;
         return (
           <div className="settings-navigation__group" key={group}>

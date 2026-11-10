@@ -847,7 +847,7 @@ export function CodeComposerAdapter(props: CodeComposerAdapterProps) {
               },
             }}
             startContext={
-              <div className="composer-tray composer-tray--inside" aria-label="Thread context">
+              <div className="composer-tray composer-tray--start" aria-label="Thread context">
                 <div className="composer-tray__leading">
                   {projectControl}
                   {branchControl}
@@ -1088,13 +1088,11 @@ export function CodeComposerAdapter(props: CodeComposerAdapterProps) {
           />
         )}
 
-        {/* The action tiles and Running now come first: a running thread is
-            what a person most often came back to, and below the five
-            suggestions it sat under the fold. */}
-        {props.homeStart}
-        {/* A draft of only spaces is empty to submit, so it is empty here too:
-            the suggestions stay reachable instead of disappearing behind a
-            stray space. */}
+        {/* The prompts sit directly under the composer they fill in, and the
+            cards follow. Under the cards they were a screen away from the
+            box they act on. A draft of only spaces is empty to submit, so it
+            is empty here too: the suggestions stay reachable instead of
+            disappearing behind a stray space. */}
         {props.suggestions === undefined ||
         props.suggestions.length === 0 ||
         trimmed !== "" ? null : (
@@ -1116,6 +1114,9 @@ export function CodeComposerAdapter(props: CodeComposerAdapterProps) {
             ))}
           </div>
         )}
+        {/* Running now comes before what waits below: a running thread is what
+            a person most often came back to. */}
+        {props.homeStart}
         {props.beneath}
         {props.creating ? (
           <div>

@@ -246,7 +246,25 @@ describe("ProviderRuntimeRegistry", () => {
     );
 
     expect(registry.attentionRequired()).toBe(true);
+    expect(registry.attentionReason()).toBe("provider-not-ready");
     expect(registry.activeSessionTotal()).toBe(0);
+  });
+
+  it("does not ask for attention while a provider's check is still running", () => {
+    const registry = new ProviderRuntimeRegistry();
+    registry.setObservedState(
+      decodeProviderObservedState({
+        instanceId,
+        readiness: "checking",
+        processState: "stopped",
+        models: [],
+        capabilities,
+        observedAt: "2026-07-14T10:00:00.000Z",
+      }),
+    );
+
+    expect(registry.attentionRequired()).toBe(false);
+    expect(registry.attentionReason()).toBeUndefined();
   });
 
   it("reports a provider process that stopped under live sessions, but not a running one", () => {

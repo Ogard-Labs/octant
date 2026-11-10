@@ -375,17 +375,15 @@ describe("the public-block visual language", () => {
     }
   });
 
-  it("lets a table or code block reach the column's width in any reply", () => {
+  it("lets everything in a reply, prose included, reach the reading width the person chose", () => {
     const chat = readFileSync(join(webRoot, "styles/chat.css"), "utf8");
-    // The reading measure belongs to running text. On the wrapper a reply that
-    // also reasoned or used a tool was capped whole, so its table stayed narrow
-    // while a plain reply's could run wide.
+    // The column is the measure. A cap on the wrapper kept tables narrow, and
+    // a 72ch cap on prose stopped paragraphs short of the divider, the bubble
+    // and the composer at every width past Narrow.
     const parts = chat.match(/\.chat-transcript__parts\s*\{[^}]+\}/)?.[0] ?? "";
     expect(parts).not.toContain("max-width");
-    expect(chat).toMatch(
-      /\.chat-rich-text > :is\(p, ul, ol, h2, h3, h4, blockquote\)\s*\{\s*max-width: 72ch;/,
-    );
-    expect(chat).toMatch(/\.chat-transcript__parts > \.thinking\s*\{\s*max-width: 72ch;/);
+    expect(chat).not.toMatch(/\.chat-rich-text > :is\([^)]*\)\s*\{\s*max-width/);
+    expect(chat).not.toMatch(/\.chat-transcript__parts > \.thinking\s*\{\s*max-width/);
   });
 
   it("does not add a switch-specific focus ring after its reset", () => {
@@ -421,10 +419,10 @@ describe("the public-block visual language", () => {
     expect(emptyPicker).toMatch(/background:\s*transparent/);
   });
 
-  it("holds the shared context row inside the composer on every welcome", () => {
+  it("holds the shared context row as plain chips above the composer on every welcome", () => {
     const surface = readFileSync(join(webRoot, "styles/surface.css"), "utf8");
     const stack = surface.match(/\.composer-stack \{\n(?:.*\n)*?\}/m)?.[0] ?? "";
-    const strip = surface.match(/\.composer-tray--inside \{\n(?:.*\n)*?\}/m)?.[0] ?? "";
+    const strip = surface.match(/\.composer-tray--start \{\n(?:.*\n)*?\}/m)?.[0] ?? "";
     const system = readFileSync(join(webRoot, "styles/octant.css"), "utf8");
     const prompt = system.match(/\.composer-input \{\n(?:.*\n)*?\}/m)?.[0] ?? "";
     const welcomes = [
@@ -434,21 +432,26 @@ describe("the public-block visual language", () => {
     ].map((path) => readFileSync(join(webRoot, path), "utf8"));
 
     expect(stack).toMatch(/flex-direction:\s*column/);
-    // One card: where the thread runs is the first row inside it, as small
-    // chips with no band behind them, so the card stays a single object and a
-    // control opening a list can never push the prompt down the page.
+    // Where the thread runs is one row above the card, as small chips with no
+    // band behind them, so the card holds only the prompt and a control
+    // opening a list can never push the prompt down the page.
     expect(strip).toMatch(/display:\s*flex/);
     expect(strip).not.toMatch(/box-shadow/);
     expect(strip).not.toMatch(/position:\s*absolute/);
     expect(strip).not.toMatch(/background/);
     expect(strip).not.toMatch(/border-top/);
-    // Every composer, start screen or thread, has one prompt: two lines before
-    // the box grows. A start screen redefining it made the same message change
-    // shape between the first send and the next.
+    // Every composer, start screen or thread, has one prompt. A start screen
+    // redefining it made the same message change shape between the first send
+    // and the next. It is two lines before it grows; under a thread the empty
+    // box is one line, with the same insets and type, and nothing else differs.
     expect(prompt).toMatch(/min-height:\s*calc\(2lh \+ 30px\)/);
+    const reply =
+      system.match(/\.composer--follow-up \.composer-input \{\n(?:.*\n)*?\}/m)?.[0] ?? "";
+    expect(reply).toMatch(/min-height:\s*calc\(1lh \+ 30px\)/);
+    expect(reply).not.toMatch(/padding|font-size|line-height/);
     expect(surface).not.toMatch(/\.composer-stack > \.composer > \.composer-input \{/);
     for (const source of welcomes) {
-      expect(source).toMatch(/className="composer-tray composer-tray--inside"/);
+      expect(source).toMatch(/className="composer-tray composer-tray--start"/);
       expect(source).not.toMatch(/footer=\{\s*<div className="composer-tray"/);
       expect(source).not.toContain("context-strip");
     }
@@ -865,25 +868,17 @@ describe("the public-block visual language", () => {
   describe("count hues in the rail and the narrow rows", () => {
     const shell = readFileSync(join(webRoot, "styles", "shell.css"), "utf8");
 
-    it("gives the rail icons the tiles' hue variables, once, and only under Colour", () => {
+    it("keeps the rail's and the rows' icons in the sidebar ink in every style", () => {
       for (const id of ["inbox", "running", "review", "done"]) {
-        // One definition per hue: the tile and the rail button share the rule.
-        const shared = new RegExp(
-          `\\.sidebar-tile\\[data-tile="${id}"\\],\\s*\\.sidebar-rail__button\\[data-tile="${id}"\\]\\s*\\{[^}]*var\\(--oct-colour-${id}`,
-        );
-        expect(shell).toMatch(shared);
+        // One definition per hue: the tile face still takes it.
         expect(
           shell.match(new RegExp(`--sidebar-tile-hue:\\s*var\\(--oct-colour-${id}`, "g")),
         ).toHaveLength(1);
       }
-      const hued = [
-        ...shell.matchAll(/([^{}]*\.sidebar-rail__button\[data-tile\][^{]*)\{([^}]*)\}/g),
-      ];
-      expect(hued).toHaveLength(1);
-      expect(hued[0]?.[1]).toContain(':root[data-octant-style="colour"]');
-      expect(hued[0]?.[2]).toMatch(/color:\s*var\(--sidebar-tile-hue\)/);
-      // Mono and increased contrast never set the style, so the rail icon keeps
-      // the muted ink from its base rule.
+      // No rule paints a glyph in a tile's hue: a column of grey marks carried
+      // four coloured ones under Colour.
+      expect(shell).not.toMatch(/\.sidebar-rail__face\s*\{[^}]*color:\s*var\(--sidebar-tile-hue\)/);
+      expect(shell).not.toMatch(/\.sidebar-tile__icon\s*\{[^}]*color:\s*var\(--sidebar-tile-hue\)/);
       expect(shell).toMatch(/\.sidebar-rail__face \{[^}]*color:\s*var\(--oct-muted\)/);
     });
 

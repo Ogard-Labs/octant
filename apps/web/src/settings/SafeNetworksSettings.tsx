@@ -305,7 +305,7 @@ function PlaceList(props: PlaceListProps) {
 }
 
 /**
- * Settings › Access › Safe networks: the places provider runtimes may reach
+ * Settings › Permissions › Safe networks: the places provider runtimes may reach
  * beyond their own endpoints, for every Project and for one Project that
  * keeps its own list, with the hosts they were recently refused so a person
  * can trust one in a click. Only a local window changes places; the host

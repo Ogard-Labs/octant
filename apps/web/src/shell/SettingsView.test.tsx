@@ -378,28 +378,26 @@ describe("SettingsView", () => {
     expect(screen.queryByRole("heading", { name: "General" })).not.toBeInTheDocument();
   });
 
-  it("keeps General focused on defaults and opens profile editing from Personal settings", () => {
+  it("holds the profile and notifications on General, with no pages of their own", () => {
     renderSettings();
-    expect(screen.queryByLabelText("Name")).not.toBeInTheDocument();
-    expect(screen.getByRole("heading", { name: "Updates" })).toBeVisible();
-    navigateTo("Profile");
-    expect(screen.getByRole("heading", { level: 1, name: "Profile" })).toBeVisible();
+    expect(screen.getByRole("heading", { name: "Your identity" })).toBeVisible();
     expect(screen.getByLabelText("Name")).toBeVisible();
     expect(screen.getByLabelText("Name").closest("details")).toBeNull();
+    expect(screen.getByRole("heading", { name: "Updates" })).toBeVisible();
+    const pages = screen.getByRole("navigation", { name: "Settings sections" });
+    expect(within(pages).queryByRole("button", { name: "Profile" })).toBeNull();
+    expect(within(pages).queryByRole("button", { name: "Notifications" })).toBeNull();
+    expect(within(pages).queryByRole("button", { name: "Access" })).toBeNull();
   });
 
   it("says the profile is kept on the host's computer, which a Linux host does not call a Mac", () => {
-    const props = { ...defaultProps(), initialDeepLink: { section: "profile" } } as const;
+    const props = defaultProps();
     const { unmount } = render(
       <HostPlatformContext.Provider value="linux">
         <SettingsView {...props} />
       </HostPlatformContext.Provider>,
     );
-    expect(
-      screen.getByText(
-        "Choose how you appear inside Octant. Everything is optional and kept on this computer.",
-      ),
-    ).toBeVisible();
+    expect(screen.getByText("Everything is optional and kept on this computer.")).toBeVisible();
     unmount();
 
     render(
@@ -407,20 +405,30 @@ describe("SettingsView", () => {
         <SettingsView {...props} />
       </HostPlatformContext.Provider>,
     );
-    expect(screen.getByText(/Everything is optional and kept on this Mac\.$/)).toBeVisible();
+    expect(screen.getByText("Everything is optional and kept on this Mac.")).toBeVisible();
   });
 
-  it("keeps existing profile setting links pointed at the profile editor", () => {
-    renderSettings({ initialDeepLink: { section: "general", setting: "user-profile" } });
-    expect(screen.getByRole("heading", { level: 1, name: "Profile" })).toBeVisible();
+  it("keeps links to the pages folded into General and Permissions on the page that holds them now", () => {
+    for (const section of ["profile", "notifications"] as const) {
+      const { unmount } = renderSettings({ initialDeepLink: { section } });
+      expect(screen.getByRole("heading", { level: 1, name: "General" })).toBeVisible();
+      unmount();
+    }
+    const { unmount } = renderSettings({
+      initialDeepLink: { section: "profile", setting: "user-profile" },
+    });
+    expect(screen.getByRole("heading", { level: 1, name: "General" })).toBeVisible();
     expect(screen.getByLabelText("Name")).toBeVisible();
+    unmount();
+    renderSettings({ initialDeepLink: { section: "access", setting: "safe-networks" } });
+    expect(screen.getByRole("heading", { level: 1, name: "Permissions" })).toBeVisible();
   });
 
   it("keeps links to settings moved out of Host and Data on the pages that hold them now", () => {
     const { unmount } = renderSettings({
       initialDeepLink: { section: "host", setting: "host-automation-notifications" },
     });
-    expect(screen.getByRole("heading", { level: 1, name: "Notifications" })).toBeVisible();
+    expect(screen.getByRole("heading", { level: 1, name: "General" })).toBeVisible();
     unmount();
     renderSettings({ initialDeepLink: { section: "data", setting: "browser-site-approvals" } });
     expect(screen.getByRole("heading", { level: 1, name: "Permissions" })).toBeVisible();
@@ -2088,7 +2096,7 @@ describe("SettingsView", () => {
     expect(screen.queryByText("Saved")).toBeNull();
     await user.click(screen.getByRole("switch", { name: "Enable Chat" }));
     expect(props.onSettingsChange).toHaveBeenCalledWith({ chatEnabled: false });
-    expect(await screen.findByRole("status")).toHaveTextContent("Saved");
+    expect(await screen.findByText("Saved")).toBeVisible();
   });
 
   it("says nothing was saved when the host refuses the change", async () => {
@@ -2107,11 +2115,13 @@ describe("SettingsView", () => {
     const outline = screen.getByRole("navigation", { name: "On this page" });
     const links = within(outline).getAllByRole("link");
     expect(links.map((link) => link.textContent)).toEqual([
+      "Your identity",
       "Available modes",
       "Updates",
       "Files",
       "Threads",
       "Compaction",
+      "Notifications",
     ]);
     const updates = screen.getByRole("heading", { name: "Updates" }).closest("section")!;
     updates.scrollIntoView = vi.fn();

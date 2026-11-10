@@ -23,8 +23,8 @@ import {
   subscriptionDescriptorIdOf,
   supportsProviderCliUpdate,
 } from "@octant/domain";
-import { CheckCircle2, ChevronDown, ChevronRight, ChevronUp } from "lucide-react";
-import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { CheckCircle2, ChevronDown, ChevronLeft, ChevronRight, ChevronUp } from "lucide-react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { ProviderToolVerification } from "./ProviderToolVerification";
 import { ClaudeArtifactDeliverySetting } from "./ClaudeArtifactDeliverySetting";
 import {
@@ -157,10 +157,44 @@ export type ProviderSettingsListProps = Pick<
   /** The Providers page separates detected rows from supported rows. */
   readonly showDetectionGroups?: boolean;
   readonly showReorder?: boolean;
+  /** Names the provider whose page is open, or undefined back on the list. */
+  readonly onDetailChange?: (providerName: string | undefined) => void;
 };
 
 export function ProviderSettingsList(props: ProviderSettingsListProps) {
   const [reordering, setReordering] = useState(false);
+  // `null` means no row may stay open (the person went back to the list).
+  const [openedRowId, setOpenedRowId] = useState<ProviderInstance["id"] | null>();
+  // The provider a person opened stands alone as a page of its own, with a way
+  // back. A row the list opens by itself (a sign-in is waiting) stays in the
+  // list: arriving on someone's detail page unasked would hide the others.
+  const [detailRowId, setDetailRowId] = useState<ProviderInstance["id"]>();
+  const detailInstance =
+    detailRowId === undefined
+      ? undefined
+      : props.instances.find((instance) => String(instance.id) === String(detailRowId));
+  const detailName = detailInstance?.displayName;
+  const { onAddAccount, onDetailChange } = props;
+  useEffect(() => {
+    onDetailChange?.(detailName);
+  }, [onDetailChange, detailName]);
+  // A provider that leaves the list (removed, or dropped by a probe) takes its
+  // page with it: coming back, it would stand alone with its details shut.
+  const detailGone = detailRowId !== undefined && detailInstance === undefined;
+  useEffect(() => {
+    if (detailGone) setDetailRowId(undefined);
+  }, [detailGone]);
+  const detailShown = useRef(false);
+  detailShown.current = detailInstance !== undefined;
+  // Stable, because each row's attention effect depends on it: a new function
+  // every render would reopen a row its person had just collapsed.
+  const noteRowOpened = useCallback((instanceId: ProviderInstance["id"], byPerson: boolean) => {
+    if (byPerson) setDetailRowId(instanceId);
+    // A row that opens by itself while a provider's page is up does not take
+    // the page from under the person; it is open when they go back.
+    else if (detailShown.current) return;
+    setOpenedRowId(instanceId);
+  }, []);
   // The registry projection is authoritative and can be intentionally empty
   // during a probe. Settings may use the last observed facts for geometry
   // while the probe is pending; eligibility controls below still use the
@@ -273,6 +307,23 @@ export function ProviderSettingsList(props: ProviderSettingsListProps) {
         ) !== undefined)
     );
   })?.id;
+  const backToList = () => {
+    const left = detailRowId;
+    setDetailRowId(undefined);
+    // Another row that asked for attention meanwhile keeps its place as the
+    // open one; every other row closes, the one being left included.
+    setOpenedRowId(
+      attentionId !== undefined && String(attentionId) !== String(left) ? attentionId : null,
+    );
+    // Back leaves the page, so focus returns to the control that opened it.
+    if (left !== undefined) {
+      requestAnimationFrame(() => {
+        document
+          .querySelector<HTMLElement>(`[aria-controls="provider-details-${String(left)}"]`)
+          ?.focus();
+      });
+    }
+  };
 
   function renderProviderRow(instance: ProviderInstance, index: number) {
     return (
@@ -289,7 +340,25 @@ export function ProviderSettingsList(props: ProviderSettingsListProps) {
         instance={instance}
         key={instance.id}
         needsAttention={attentionId !== undefined && String(attentionId) === String(instance.id)}
-        {...(props.onAddAccount === undefined ? {} : { onAddAccount: props.onAddAccount })}
+        concealed={
+          detailInstance !== undefined && String(detailInstance.id) !== String(instance.id)
+        }
+        onRowClosed={backToList}
+        standsAlone={
+          detailInstance !== undefined && String(detailInstance.id) === String(instance.id)
+        }
+        onRowOpened={noteRowOpened}
+        openedRowId={openedRowId}
+        {...(onAddAccount === undefined
+          ? {}
+          : {
+              onAddAccount: (account: ProviderInstance) => {
+                // The account form stands under the list, which a provider's
+                // page hides: the page gives way so the form can be seen.
+                setDetailRowId(undefined);
+                onAddAccount(account);
+              },
+            })}
         {...(props.discoverySnapshot === undefined
           ? {}
           : { discoverySnapshot: props.discoverySnapshot })}
@@ -380,7 +449,9 @@ export function ProviderSettingsList(props: ProviderSettingsListProps) {
           )
         }
         ariaLabel="Providers"
-        className="provider-list"
+        className={
+          detailInstance === undefined ? "provider-list" : "provider-list provider-list--detail"
+        }
         description={
           <>
             {reordering
@@ -401,6 +472,19 @@ export function ProviderSettingsList(props: ProviderSettingsListProps) {
         }
         title={props.heading ?? "Configured providers"}
       >
+        {detailInstance === undefined ? null : (
+          <OctantButton
+            aria-label="Back to providers"
+            className="provider-list__back window-no-drag"
+            onClick={backToList}
+            size="sm"
+            type="button"
+            variant="ghost"
+          >
+            <ChevronLeft aria-hidden="true" size={16} />
+            Providers
+          </OctantButton>
+        )}
         {ordered.length === 0 ? (
           <p className="settings-section-line">{props.emptyLabel ?? "No providers configured."}</p>
         ) : !showDetectionGroups ? (
@@ -448,7 +532,9 @@ export function ProviderSettingsList(props: ProviderSettingsListProps) {
           <div className="provider-settings__foot">{props.createForm}</div>
         )}
       </SettingsSection>
-      {ordered.length === 0 || props.showAgentEligibleModels === false ? null : (
+      {ordered.length === 0 ||
+      props.showAgentEligibleModels === false ||
+      detailInstance !== undefined ? null : (
         <AgentEligibleModelsControls
           agentEligibleModels={props.defaults.agentEligibleModels}
           busy={busy}
@@ -621,6 +707,15 @@ interface ProviderRowProps {
   readonly instance: ProviderInstance;
   /** The one row the list opens by itself: a sign-in or a found binary is waiting. */
   readonly needsAttention: boolean;
+  /** The row a person opened last; every other row closes, so one is open at a time. */
+  readonly openedRowId: ProviderInstance["id"] | null | undefined;
+  /** `byPerson` is false when the list opened the row itself. */
+  readonly onRowOpened: (instanceId: ProviderInstance["id"], byPerson: boolean) => void;
+  readonly onRowClosed: () => void;
+  /** Another provider's page is open, so this row is out of sight. */
+  readonly concealed: boolean;
+  /** This provider is the page: Escape goes back to the list. */
+  readonly standsAlone: boolean;
   readonly observed?: ProviderObservedState;
   readonly discoverySnapshot?: DiscoverySnapshot;
   readonly busy: boolean;
@@ -716,9 +811,26 @@ function ProviderRow(props: ProviderRowProps) {
   const readiness = props.updating || props.probing ? "checking" : props.observed?.readiness;
   const [connectionDetailsOpen, setConnectionDetailsOpen] = useState(() => readiness !== "ready");
   // A row that comes to need attention opens; collapsing it afterwards sticks.
+  const { needsAttention, onRowOpened } = props;
   useEffect(() => {
-    if (props.needsAttention) setDetailsOpen(true);
-  }, [props.needsAttention]);
+    if (!needsAttention) return;
+    setDetailsOpen(true);
+    // An opening the page makes counts as the open row too, or a row that
+    // comes to need attention would stand open beside the one a person opened.
+    onRowOpened(props.instance.id, false);
+  }, [needsAttention, onRowOpened, props.instance.id]);
+  // One row is open at a time. Several open rows, each with its models and
+  // actions, were most of what made this page many screens tall.
+  const { openedRowId } = props;
+  const instanceId = props.instance.id;
+  useEffect(() => {
+    if (
+      openedRowId !== undefined &&
+      (openedRowId === null || String(openedRowId) !== String(instanceId))
+    ) {
+      setDetailsOpen(false);
+    }
+  }, [openedRowId, instanceId]);
   useEffect(() => {
     if (!renameSaved) return;
     const timeout = window.setTimeout(() => setRenameSaved(false), 2500);
@@ -755,6 +867,12 @@ function ProviderRow(props: ProviderRowProps) {
     props.onUseScannedBinary === undefined
       ? undefined
       : scannedBinaryOffer(props.instance, props.discoverySnapshot, readiness, detectedLocally);
+  // The scan found this runtime somewhere other than the saved path. A row
+  // that said only "Not found" while its way out sat inside the closed details
+  // left a Claude Code moved by its own installer looking uninstalled, so the
+  // row names where it was found and carries the offer itself.
+  const rowNote =
+    withheldOff || scannedOffer === undefined ? scanSilence : `Found at ${scannedOffer.foundAt}.`;
   const isCli = props.instance.driverKind === "opencode";
   const isCodex = props.instance.driverKind === "codex";
   const isClaude = props.instance.driverKind === "claude";
@@ -846,6 +964,18 @@ function ProviderRow(props: ProviderRowProps) {
     <article
       aria-label={name}
       className="provrow"
+      hidden={props.concealed}
+      onKeyDown={(event) => {
+        if (!props.standsAlone || event.key !== "Escape" || event.defaultPrevented) return;
+        // A menu or dialog opened from here renders in a portal and its
+        // Escape closes it, not the page; Escape in a field belongs to the
+        // field.
+        const target = event.target;
+        if (!(target instanceof HTMLElement) || !event.currentTarget.contains(target)) return;
+        if (target.closest("input, textarea, select") !== null) return;
+        event.preventDefault();
+        props.onRowClosed();
+      }}
       data-enabled={props.instance.enabled ? "true" : "false"}
       data-reordering={props.reordering ? "true" : "false"}
     >
@@ -915,18 +1045,40 @@ function ProviderRow(props: ProviderRowProps) {
           </span>
           {meta === name ? null : <span className="prov-meta oct-meta">{meta}</span>}
         </span>
-        {scanSilence === undefined ? null : (
-          <span className="prov-meta provider-settings__scan-note">{scanSilence}</span>
+        {rowNote === undefined ? null : (
+          <span className="prov-meta provider-settings__scan-note">{rowNote}</span>
         )}
       </span>
       <span className="prov-actions">
+        {scannedOffer === undefined ? null : (
+          <OctantButton
+            aria-label={`${scannedOffer.label} for ${name}`}
+            className="window-no-drag"
+            disabled={disabled || locating}
+            onClick={() => {
+              // The host's answer is reported in the details, so they open.
+              setDetailsOpen(true);
+              props.onRowOpened(props.instance.id, true);
+              void useScannedBinary();
+            }}
+            size="sm"
+            type="button"
+            variant="secondary"
+          >
+            {locating ? "Checking binary…" : "Use it"}
+          </OctantButton>
+        )}
         <OctantButton
           size="icon"
           aria-controls={`provider-details-${props.instance.id}`}
           aria-expanded={detailsOpen}
           aria-label={`Details for ${name}`}
           className="prov-details-trigger window-no-drag"
-          onClick={() => setDetailsOpen((current) => !current)}
+          onClick={() => {
+            if (detailsOpen) props.onRowClosed();
+            else props.onRowOpened(props.instance.id, true);
+            setDetailsOpen(!detailsOpen);
+          }}
           type="button"
           variant="ghost"
         >
@@ -1056,7 +1208,7 @@ function ProviderRow(props: ProviderRowProps) {
                 onClick={() => void props.onProbe(props.instance.id)}
                 size="sm"
                 type="button"
-                variant="outline"
+                variant="secondary"
               >
                 {props.probing ? "Checking…" : "Check connection"}
               </OctantButton>
@@ -1069,23 +1221,11 @@ function ProviderRow(props: ProviderRowProps) {
                 onClick={() => void locateBinary()}
                 size="sm"
                 type="button"
-                variant="outline"
+                variant="secondary"
               >
                 {locating ? "Checking binary…" : "Locate binary…"}
               </OctantButton>
             ) : null}
-            {scannedOffer === undefined ? null : (
-              <OctantButton
-                aria-label={`${scannedOffer.label} for ${name}`}
-                disabled={disabled || locating}
-                onClick={() => void useScannedBinary()}
-                size="sm"
-                type="button"
-                variant="outline"
-              >
-                {locating ? "Checking binary…" : scannedOffer.label}
-              </OctantButton>
-            )}
             {props.onAddAccount !== undefined && (isClaude || isCodex) ? (
               <OctantButton
                 aria-label={`Add account for ${name}`}
@@ -1093,7 +1233,7 @@ function ProviderRow(props: ProviderRowProps) {
                 onClick={() => props.onAddAccount?.(props.instance)}
                 size="sm"
                 type="button"
-                variant="outline"
+                variant="secondary"
               >
                 Add account
               </OctantButton>
@@ -1126,21 +1266,11 @@ function ProviderRow(props: ProviderRowProps) {
                 onClick={() => void props.onUpdateProviderCli?.(props.instance.id)}
                 size="sm"
                 type="button"
-                variant="outline"
+                variant="secondary"
               >
                 {props.updating ? "Updating…" : "Update CLI"}
               </OctantButton>
             ) : null}
-            <OctantButton
-              aria-label={`Remove ${props.instance.displayName}`}
-              disabled={disabled || (usesCredential && !props.credentialManagementAvailable)}
-              onClick={() => void props.onRemove(props.instance.id)}
-              size="sm"
-              type="button"
-              variant="destructive"
-            >
-              Remove
-            </OctantButton>
           </div>
           {located === undefined ? null : located.kind === "located" ? (
             <p className="provider-card__guidance" role="status">
@@ -1193,7 +1323,7 @@ function ProviderRow(props: ProviderRowProps) {
                     <OctantButton
                       disabled={disabled}
                       type="submit"
-                      variant="outline"
+                      variant="secondary"
                       size="sm"
                       aria-label={`Save name for ${props.instance.displayName}`}
                     >
@@ -1243,7 +1373,7 @@ function ProviderRow(props: ProviderRowProps) {
                     <OctantButton
                       disabled={disabled}
                       type="submit"
-                      variant="outline"
+                      variant="secondary"
                       size="sm"
                       aria-label={`Save binary path for ${props.instance.displayName}`}
                     >
@@ -1814,6 +1944,22 @@ function ProviderRow(props: ProviderRowProps) {
               </div>
             ) : null}
           </div>
+          {/* Removing is the last thing in a provider's details, apart from
+              the routine actions. Beside Check connection and Configure it was
+              one slip away from them. */}
+          <div className="provider-details__danger">
+            <span className="oct-row-detail">Removes this provider from Octant.</span>
+            <OctantButton
+              aria-label={`Remove ${props.instance.displayName}`}
+              disabled={disabled || (usesCredential && !props.credentialManagementAvailable)}
+              onClick={() => void props.onRemove(props.instance.id)}
+              size="sm"
+              type="button"
+              variant="destructive"
+            >
+              Remove
+            </OctantButton>
+          </div>
         </div>
       ) : null}
     </article>
@@ -1903,6 +2049,8 @@ interface ScannedBinaryOffer {
   /** The path the host is asked to use: the stable launcher, not a versioned target. */
   readonly path: string;
   readonly label: string;
+  /** Where the scan found it, home-relative, with its version when known. */
+  readonly foundAt: string;
 }
 
 /**
@@ -1967,10 +2115,8 @@ function scannedBinaryOffer(
   if (best === undefined) return undefined;
   const path = best.discoveredPath ?? best.binaryPath;
   const version = best.version === undefined ? undefined : versionNumber(best.version);
-  return {
-    path,
-    label: `Use the one found at ${homeRelativePath(best, path)}${version === undefined ? "" : ` (${version})`}`,
-  };
+  const foundAt = `${homeRelativePath(best, path)}${version === undefined ? "" : ` (${version})`}`;
+  return { path, label: `Use the one found at ${foundAt}`, foundAt };
 }
 
 /** The dotted version number in a probe's output, such as `2.1.306` in `2.1.306 (Claude Code)`. */

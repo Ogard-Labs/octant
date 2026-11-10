@@ -105,7 +105,7 @@ export function BedrockConfigurationForm(props: {
           disabled={props.disabled}
           size="sm"
           type="submit"
-          variant="outline"
+          variant="secondary"
         >
           Save
         </OctantButton>
@@ -272,7 +272,7 @@ export function CloudEndpointSignIn(props: {
           onClick={signOut}
           size="sm"
           type="button"
-          variant="outline"
+          variant="secondary"
         >
           Sign out
         </OctantButton>
@@ -286,7 +286,7 @@ export function CloudEndpointSignIn(props: {
           onClick={() => setChecks((count) => count + 1)}
           size="sm"
           type="button"
-          variant="outline"
+          variant="secondary"
         >
           Check again
         </OctantButton>

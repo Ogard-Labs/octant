@@ -710,6 +710,8 @@ describe("ProviderSettingsView", () => {
     await user.click(screen.getByRole("button", { name: "Details for Claude local" }));
     await user.click(screen.getByRole("button", { name: "Add account for Claude local" }));
 
+    // The form stands under the list, so the provider's page gives way to it.
+    expect(screen.queryByRole("button", { name: "Back to providers" })).toBeNull();
     const create = screen.getByRole("form", { name: "Add Claude provider" });
     expect(within(create).getByRole("combobox", { name: "Provider type" })).toHaveTextContent(
       "Claude Agent SDK",
@@ -3450,6 +3452,7 @@ describe("ProviderSettingsView", () => {
       "Octant checked the chosen binary and will use it (codex-cli 0.48.0).",
     );
 
+    await user.click(screen.getByRole("button", { name: "Back to providers" }));
     const missingSection = screen.getByRole("region", { name: "Supported, not detected" });
     const missingCard = within(missingSection).getByRole("article", { name: "Missing OpenCode" });
     await user.click(
@@ -3487,6 +3490,130 @@ describe("ProviderSettingsView", () => {
       />,
     );
     expect(screen.queryByRole("button", { name: "Locate binary for GLM" })).toBeNull();
+  });
+
+  it("opens a provider as a page of its own and goes back to the list", async () => {
+    const user = userEvent.setup();
+    const second = "70000000-0000-4000-8000-0000000000a2" as ProviderInstance["id"];
+    renderProviderSettings(
+      <ProviderSettingsView
+        {...fixture({ instance: provider({ displayName: "First Codex" }) })}
+        instances={[
+          provider({ displayName: "First Codex" }),
+          provider({ id: second, displayName: "Second Codex" }),
+        ]}
+      />,
+    );
+    expect(screen.queryByRole("button", { name: "Back to providers" })).toBeNull();
+
+    await user.click(screen.getByRole("button", { name: "Details for First Codex" }));
+
+    // The opened provider stands alone: several rows open in place made the
+    // page many screens tall.
+    expect(screen.getByRole("button", { name: "Details for First Codex" })).toHaveAttribute(
+      "aria-expanded",
+      "true",
+    );
+    expect(screen.queryByRole("article", { name: "Second Codex" })).toBeNull();
+
+    await user.click(screen.getByRole("button", { name: "Back to providers" }));
+
+    const first = screen.getByRole("button", { name: "Details for First Codex" });
+    expect(first).toHaveAttribute("aria-expanded", "false");
+    expect(screen.getByRole("article", { name: "Second Codex" })).toBeVisible();
+    expect(screen.queryByRole("button", { name: "Back to providers" })).toBeNull();
+    await waitFor(() => expect(first).toHaveFocus());
+  });
+
+  it("closes a provider that needs attention when its own page is left", async () => {
+    const user = userEvent.setup();
+    renderProviderSettings(
+      <ProviderSettingsView
+        {...fixture()}
+        observedByInstance={new Map([[id, observation({ readiness: "unauthenticated" })]])}
+      />,
+    );
+    const details = await screen.findByRole("button", { name: /^Details for / });
+    await waitFor(() => expect(details).toHaveAttribute("aria-expanded", "true"));
+    // The list opened it in place; closing and opening it again is the
+    // person's doing, so it becomes the page.
+    await user.click(details);
+    await user.click(details);
+
+    await user.click(screen.getByRole("button", { name: "Back to providers" }));
+
+    expect(details).toHaveAttribute("aria-expanded", "false");
+  });
+
+  it("goes back to the list when the open provider's details are closed", async () => {
+    const user = userEvent.setup();
+    const second = "70000000-0000-4000-8000-0000000000a4" as ProviderInstance["id"];
+    renderProviderSettings(
+      <ProviderSettingsView
+        {...fixture({ instance: provider({ displayName: "First Codex" }) })}
+        instances={[
+          provider({ displayName: "First Codex" }),
+          provider({ id: second, displayName: "Second Codex" }),
+        ]}
+      />,
+    );
+    const first = screen.getByRole("button", { name: "Details for First Codex" });
+    await user.click(first);
+    await user.click(first);
+
+    expect(first).toHaveAttribute("aria-expanded", "false");
+    expect(screen.getByRole("article", { name: "Second Codex" })).toBeVisible();
+
+    // Escape leaves the page too, as it does an endpoint's page.
+    await user.click(first);
+    expect(screen.queryByRole("article", { name: "Second Codex" })).toBeNull();
+    await user.keyboard("{Escape}");
+    expect(first).toHaveAttribute("aria-expanded", "false");
+    expect(screen.getByRole("article", { name: "Second Codex" })).toBeVisible();
+  });
+
+  it("keeps a provider's page up when another comes to need attention, and shows that one open on the way back", async () => {
+    const user = userEvent.setup();
+    const second = "70000000-0000-4000-8000-0000000000a3" as ProviderInstance["id"];
+    const instances = [
+      provider({ displayName: "First Codex" }),
+      provider({ id: second, displayName: "Second Codex" }),
+    ];
+    const props = fixture({ instance: instances[0]! });
+    const { rerender } = renderProviderSettings(
+      <ProviderSettingsView {...props} instances={instances} />,
+    );
+    await user.click(screen.getByRole("button", { name: "Details for First Codex" }));
+
+    rerender(
+      <ProviderSettingsView
+        {...props}
+        instances={instances}
+        observedByInstance={
+          new Map([
+            [id, observation({ readiness: "ready" })],
+            [second, { ...observation({ readiness: "unauthenticated" }), instanceId: second }],
+          ])
+        }
+      />,
+    );
+
+    expect(screen.getByRole("button", { name: "Details for First Codex" })).toHaveAttribute(
+      "aria-expanded",
+      "true",
+    );
+    expect(screen.queryByRole("article", { name: "Second Codex" })).toBeNull();
+
+    await user.click(screen.getByRole("button", { name: "Back to providers" }));
+
+    expect(screen.getByRole("button", { name: "Details for Second Codex" })).toHaveAttribute(
+      "aria-expanded",
+      "true",
+    );
+    expect(screen.getByRole("button", { name: "Details for First Codex" })).toHaveAttribute(
+      "aria-expanded",
+      "false",
+    );
   });
 
   it("offers the binary the scan found when the saved one is gone, and has the host check it on click", async () => {
@@ -3528,6 +3655,10 @@ describe("ProviderSettingsView", () => {
       name: "Use the one found at ~/.local/bin/codex (0.49.1) for Missing Codex",
     });
     expect(onUseScannedBinary).not.toHaveBeenCalled();
+    // The row itself says where the runtime was found and carries the offer,
+    // so a closed card never reads as "not installed".
+    expect(card).toHaveTextContent("Found at ~/.local/bin/codex (0.49.1).");
+    expect(card).not.toHaveTextContent("Not found by the latest scan");
 
     await user.click(offer);
 

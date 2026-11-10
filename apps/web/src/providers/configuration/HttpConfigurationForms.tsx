@@ -210,7 +210,7 @@ export function HttpConfigurationForm(props: HttpConfigurationFormProps) {
         <OctantButton
           disabled={props.disabled}
           type="submit"
-          variant="outline"
+          variant="secondary"
           size="sm"
           aria-label={`Save HTTP settings for ${props.instance.displayName}`}
         >
@@ -452,7 +452,7 @@ export function AnthropicConfigurationForm(props: AnthropicConfigurationFormProp
         <OctantButton
           disabled={props.disabled}
           type="submit"
-          variant="outline"
+          variant="secondary"
           size="sm"
           aria-label={`Save Anthropic settings for ${props.instance.displayName}`}
         >
@@ -644,7 +644,7 @@ export function FoundryConfigurationForm(props: FoundryConfigurationFormProps) {
         <OctantButton
           disabled={props.disabled}
           type="submit"
-          variant="outline"
+          variant="secondary"
           size="sm"
           aria-label={`Save Azure AI Foundry settings for ${props.instance.displayName}`}
         >

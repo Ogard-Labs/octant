@@ -243,7 +243,7 @@ const MANAGED_CREATION_REFUSAL_MESSAGES: Record<string, string> = {
   "server-unreachable":
     "The server could not be reached, so no worktree was made there. Nothing ran on this computer.",
   "server-not-registered":
-    "This Project's server is no longer registered in Settings › Access › Servers, so nothing can run there.",
+    "This Project's server is no longer registered in Settings › Permissions › Servers, so nothing can run there.",
   "not-repository-top":
     "A worktree on a server needs the Project's folder to be its repository's top folder.",
   "worktree-unavailable": "Git on the server could not make the worktree, so nothing was created.",

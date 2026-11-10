@@ -22,7 +22,7 @@ export const PHONE_NOTIFICATIONS_FACT =
   "Let paired phones get notifications from this computer. They are sent through the push gateway below, sealed so only the phone can read them; the gateway sees when a phone is notified, never what about.";
 
 /**
- * Settings › Notifications: the switch that lets this host notify paired
+ * Settings › General: the switch that lets this host notify paired
  * phones, and the push gateway it sends through. Both are saved together from
  * the version the person read, so a change made in another window is refused
  * rather than overwritten.

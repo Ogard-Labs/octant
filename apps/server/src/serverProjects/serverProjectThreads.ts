@@ -211,7 +211,7 @@ export type ServerCodeTurnBinding =
 export const SERVER_RUNTIME_NOT_HARNESS =
   "A thread in a Project on a server runs on the Octant Harness only, because other runtimes act on this computer's files. Choose a model the Octant Harness runs.";
 const SERVER_NOT_REGISTERED =
-  "This Project's server is no longer registered in Settings › Access › Servers, so nothing can run there.";
+  "This Project's server is no longer registered in Settings › Permissions › Servers, so nothing can run there.";
 
 /**
  * Binds a server thread's turn before anything launches: the harness's

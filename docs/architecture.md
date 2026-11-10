@@ -922,7 +922,11 @@ window first when none is open. Local host contains status, browser access,
 applicable lifecycle controls, and redacted diagnostics; Quit Octant retains
 the existing active-work confirmation. The text beside the glyph is `!` while
 the host itself needs attention (provider readiness, a lost host), otherwise the
-count of threads that need the person.
+count of threads that need the person. The status line and the diagnostics say
+why in plain words ("A provider needs setup (Settings › Providers)", "A provider
+stopped during a task", "The host did not answer"), from a category the host's
+health answer carries; that answer is unauthenticated, so it never names a
+provider. A provider whose check is still running raises nothing.
 
 The roster comes from the host, not from open windows, so it stays current with
 every window closed. The shell registers its own local-window authority for the
@@ -1653,7 +1657,7 @@ Octant connects with this host's own `ssh`, the person's SSH config, and their
 agent: keys stay with the host, nothing is forwarded, an unknown host key is
 refused, and a call that cannot reach the server fails with nothing run on
 this host instead. Built: the catalog, the connection, and the folder check
-at binding (Settings › Access › Servers); Code threads there, which run only
+at binding (Settings › Permissions › Servers); Code threads there, which run only
 on the Octant Harness, with file tools, commands, and Git on the server under
 the same levels, approvals, and journal as a local Project; thread
 terminals that are logins on the server; the Git tab, whose Git runs on
@@ -5145,8 +5149,8 @@ The provider layer is defined by `@octant/provider-sdk` and implemented in
     settings, hooks, MCP servers, plugins, and tools. A Chat Project has no
     folder and holds no trust.
   - **Thread.** Each Chat, Work, and Code thread of a key provider carries its
-    own choice: Account default, On, or Off (the **Own setup** menu beside the
-    composer's picker). `set` on `POST /api/providers/thread-native-setup`
+    own choice: Account default, On, or Off (the **Provider tools** row of the
+    thread's info panel). `set` on `POST /api/providers/thread-native-setup`
     sends it, only from a local window (a paired device may read it, and the
     host refuses a provider account that is not a key provider's), and
     journals `thread.native-setup-changed@1` on the thread's own
@@ -5343,7 +5347,11 @@ modelId }`, and the model picker is provider-first. Each Claude instance is
   installed runtimes and auto-register them. On first run, a detected Claude
   Code or Codex CLI instance is created enabled; every other detected runtime
   is created disabled. Discovery never installs or updates runtimes, never
-  toggles an existing instance, and never treats enablement as readiness.
+  toggles an existing instance, and never treats enablement as readiness. A
+  runtime created from a scan saves the launcher the scan examined, not the
+  versioned file it resolves to, and a scan points an existing runtime whose
+  saved binary no longer exists at the launcher it found for the same driver,
+  changing nothing else about it.
   Providers settings may read a runtime's newest published version (one plain
   npm `dist-tags` request, cached a day, off with the Marketplace fetches
   switch) to say "Update available"; only the person's click runs the
@@ -9239,7 +9247,7 @@ the host side is `apps/server/src/network/` (`providerRuntimeNetwork.ts`,
 `wiring/runtimeNetwork.ts`. On Linux OpenCode keeps open network (below).
 
 **Network limits ship on, for sandboxed runtimes only.** The proxy is behind
-a host setting, Settings › Access › Network limits, which reads on until a
+a host setting, Settings › Permissions › Network limits, which reads on until a
 person turns it off (maintainer request, 2026-11-09: "network limits on by
 default — only if sandbox is enabled though"). It applies only where the
 runtime runs inside Octant's sandbox: the guarded levels, and Full access
@@ -9250,7 +9258,7 @@ so a host that turned limits off before this change stays off, and one that
 never touched the switch starts limiting from its next runtime launch. The
 risk is a workflow that reaches a host nobody approved (a private registry,
 an internal API); the proxy's refusal names the host and says to trust it
-under Recently refused in Settings › Access › Safe networks, and turning
+under Recently refused in Settings › Permissions › Safe networks, and turning
 the switch off restores open network. The switch also governs what Octant
 Harness commands may add to their own rules, which they follow either way:
 with it on, a command on an untainted thread also reaches the person's safe
@@ -9272,7 +9280,7 @@ Everything below describes limits on.
 **Outcome.** Below Full access a provider runtime reaches its provider's own
 endpoints, the loopback ports its own launch serves Octant's tools on, the
 hosts its Project's egress rules allow, and the places the person trusts in
-Settings › Access, and nothing else. `provider-endpoints-only` finally means
+Settings › Permissions, and nothing else. `provider-endpoints-only` finally means
 that for the runtime process too. Full access stays open network, except a
 thread that keeps the sandbox, which is held as the guarded levels are
 (Codex, whose app-server takes the proxy inside Octant's profile, Claude
@@ -9282,7 +9290,7 @@ the runtimes that cannot keep the sandbox refuse such a thread). A refused reque
 first body line stays the machine-readable `octant-egress-refused: <reason>
 <host>:<port>`; for a refusal a person can lift (`no-rule`, `expired`,
 `ip-literal`, `private-destination`) a second line says to choose Trust
-beside it under Recently refused in Settings › Access › Safe networks. No
+beside it under Recently refused in Settings › Permissions › Safe networks. No
 host is allowed by default beyond the provider's own endpoints: a package
 registry or the Project's Git remote over HTTPS needs a Project egress rule
 or a safe network. Which hosts an ordinary Code turn reaches has not been
@@ -9369,7 +9377,7 @@ transcript. An `allow` is journaled first (`runtime-network.reviewer-allowed@1`)
 and holds for that launch alone; it is never a place or a rule. Every other
 answer, a launch whose thread no running turn holds (a probe, a child run),
 and Ask first leave the refusal standing for the person: the host appears
-under Recently refused in Settings › Access › Safe networks, where one click
+under Recently refused in Settings › Permissions › Safe networks, where one click
 trusts it for the Project or every Project, and the runtime's next attempt
 passes. The connection is refused at once rather than held. _Rationale:_ the
 person chose who reviews at Auto; where they kept the provider's own
@@ -11423,7 +11431,7 @@ settings sandbox on|off [--work]`. Only a window on this host can turn
     model), that thread falls back to Ask first and the picker says why.
     There is no separate switch below Full access. The answer becomes the
     default for every new thread, Work and
-    Code; Settings › Access changes it, a Project, Work or Code, may override
+    Code; Settings › Work and Settings › Code change it, a Project, Work or Code, may override
     it, and any thread can switch mode at any time from the composer in one
     click (maintainer decision, 2026-10-31). Work has no Plan, so a Plan
     answer leaves new Work threads at Ask first. A new Work thread takes its
@@ -11500,7 +11508,7 @@ settings sandbox on|off [--work]`. Only a window on this host can turn
   `harnessAutoReview` is Reviewed (below). Built: Guarded, Accept edits,
   Reviewed (the provider's own reviewer, or Octant Shield), and Full access
   in Code and Work, with the first-run question, a global default, a Project
-  override in Code and Work, the thread header line, the journaled record of
+  override in Code and Work, the level row of the thread's info panel, the journaled record of
   who lowered a level and from where, and the one-time warning. Full access
   runs Claude Code at `bypassPermissions` and Codex at `danger-full-access`
   with approval policy `never`, with no Octant wrapping for any provider
@@ -11522,7 +11530,7 @@ settings sandbox on|off [--work]`. Only a window on this host can turn
 - **Reviewed.** A reviewer answers the prompts that would otherwise go to
   the person: the provider's own, where it has one, or
   [Octant Shield](#octant-shield) for any runtime that routes approvals
-  through Octant. The person chooses in Settings › Access; the provider's own
+  through Octant. The person chooses in Settings › Code › Access; the provider's own
   is the default where it exists, Shield everywhere else. Claude Code's automatic
   mode (`permissionMode: "auto"`, its model reviewing each call) and Codex's
   own approval review (`approvalsReviewer: "auto_review"`) are built for Code
@@ -14997,7 +15005,7 @@ the provider's own, or Octant Shield. The picker label stays Auto, and Auto
 is offered for every runtime that routes approvals through Octant. The
 default reviewer is the provider's own where it has one (Claude Code, Codex,
 and Mistral Vibe's auto-approve mode) and Octant Shield everywhere else.
-Settings › Access sets "Auto reviewer: Provider's own / Octant Shield" as an
+Settings › Code › Access sets "Auto reviewer: Provider's own / Octant Shield" as an
 account default with a Project override. Auto falls back to Ask first only
 when no reviewer can run, for example when no Shield model is reachable, and
 the picker says why.
@@ -15058,7 +15066,7 @@ the person's review of the mark and is forgotten when the person clears it;
 the Judge is told the label kinds, never the text, and a subagent's labels
 count beside its parent's.
 
-**Safe networks.** The person names trusted places in Settings › Access
+**Safe networks.** The person names trusted places in Settings › Permissions
 (account default, Project override): hosts, domains, address ranges, and
 private-network tags. Egress to a trusted place passes by rule; anything else
 goes to the Judge at Reviewed and to the person at Guarded. Each decision is
@@ -15125,7 +15133,7 @@ command to exactly its thread and Project rules.
   too, and never by this host's safe places or protected paths
   ([Server Projects](design/server-projects.md#threads)).
 
-**Servers as built.** The registry is Settings › Access › Servers: an
+**Servers as built.** The registry is Settings › Permissions › Servers: an
 account list, and per Project an optional list of its own that replaces the
 account list for that Project's threads. A server is its alias, user, profile,
 the deploy commands the person described (Operate and Admin run them exactly

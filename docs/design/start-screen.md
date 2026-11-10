@@ -68,8 +68,12 @@ workspace tools, and what is running or waiting for review in the sidebar.
 
 The card area is a ghost **Customize** button right-aligned under the composer
 (icon at the 14px step and the label), then a grid of cards, two columns and one
-under 560px. A card uses the card recipe (`OctantCard`: hairline ring, no
-shadow, the card fill) at a compact 12px rhythm. Its header is an icon at the
+under 560px. The card area, the suggestions and everything below end on the
+composer's own edges at every reading width, and cards in a row share the
+row's height; a fixed narrower measure under a wide composer, with each card at
+its own height, read as two unrelated ragged stacks. A card uses the glass card recipe (`OctantCard` `variant="glass"`: the glass
+ring, no shadow, the composer's material; the opaque card fill under reduced
+transparency) at a compact 12px rhythm. Its header is an icon at the
 16px step in secondary ink, the title as a section label, and a count as
 tabular meta text; its body is rows or one quiet line in the detail step. No
 card has a hue of its own: a state is carried by wording and weight, and the
@@ -113,7 +117,9 @@ lists up to five failing checks from that same read, the check name, the
 repository or branch, and how long ago it failed. It is absent when nothing is
 failing, and absent when that read is not allowed. **Start a fix** opens a
 draft; it does not send. Code's five prompt
-suggestions are one compact row of label-only chips under the cards, and
+suggestions are one compact row of label-only chips directly under the composer
+they fill in, above the cards (under the cards they were a screen away from
+the box they act on), and
 Work's Write, Learn, Plan, and Explore starters use the same chip (the outline
 button: hairline, resting fill, hover and focus fill); the prompt rides as the
 chip's tooltip and description and fills the composer when chosen, nothing more.
@@ -293,8 +299,9 @@ and other listeners running in the host's Code Projects: the Code Environment's
 Local servers read host-wide, across every active Code Project the Project
 bootstrap lists, which today does not vary by window (see
 [Architecture: security and authority](../architecture.md#security-and-authority),
-Local servers and Running services). A row is the server's name (its framework,
-else its runtime) and port, the Project and the branch or thread it belongs to,
+Local servers and Running services). A row is two lines: the server's name (its
+framework, else its runtime) and port with the Project and the branch or thread
+it belongs to on the same line, cut from the end, then
 its health with a glyph and a word ("Listening", "Not responding", "Not
 checked"; never a colour), and the host's name only when the window is reading a
 computer that is not this one. A server Octant owns says nothing more; any other

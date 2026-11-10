@@ -404,13 +404,36 @@ describe("Code host queue", () => {
 });
 
 describe("CodeThreadWorkspace", () => {
-  it("shows the thread's guardrail level in its header", async () => {
-    render(<CodeThreadWorkspace controller={controller()} threadId={threadId} />);
+  it("keeps the thread's guardrail level and its other facts in one info panel above the composer", async () => {
+    const user = userEvent.setup();
+    const { container } = render(
+      <CodeThreadWorkspace controller={controller()} threadId={threadId} />,
+    );
+    const level = await screen.findByText(/Ask first|Auto|Accept edits|Plan|Full access/, {
+      selector: ".guardrail-level__mode",
+    });
+    // A closed panel has no accessible name to find it by.
+    const panel = container.querySelector<HTMLElement>(".thread-info__panel")!;
+    // Nothing about the thread floats on the page: the level, the access
+    // details and continuing elsewhere are rows of the one panel.
+    expect(panel).toContainElement(level);
+    expect(level).not.toBeVisible();
+    expect(container.querySelector(".thread-composer__strip")).toContainElement(panel);
     expect(
-      await screen.findByText(/Ask first|Auto|Accept edits|Plan|Full access/, {
-        selector: ".guardrail-level__mode",
-      }),
-    ).toBeVisible();
+      screen.getByRole("button", { name: /Continue elsewhere/, hidden: true }),
+    ).not.toBeVisible();
+
+    await user.click(screen.getByRole("button", { name: "Thread info" }));
+
+    expect(level).toBeVisible();
+    expect(screen.getByRole("region", { name: "Thread info" })).toBe(panel);
+    expect(within(panel).getByRole("button", { name: "Access details" })).toBeVisible();
+    expect(within(panel).getByRole("button", { name: /Continue elsewhere/ })).toBeVisible();
+
+    await user.keyboard("{Escape}");
+
+    expect(level).not.toBeVisible();
+    expect(screen.getByRole("button", { name: "Thread info" })).toHaveFocus();
   });
 
   it("shows how long a completed Code turn worked and leaves unsettled turns without a duration", async () => {
@@ -945,6 +968,32 @@ describe("CodeThreadWorkspace", () => {
       .closest('[role="status"]');
     expect(status).toBeVisible();
     expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  });
+
+  it("says why a turn waits once, in the turn's own row, not again above the transcript", () => {
+    const reason = "Mistral Vibe resume identity does not match this Project.";
+    render(
+      <CodeThreadWorkspace
+        controller={controller({
+          conversation: [
+            { id: "ask", role: "user", text: "Open the page", at: "2026-09-30T08:00:00.000Z" },
+            {
+              id: "parked",
+              role: "assistant",
+              text: reason,
+              status: "waiting",
+              at: "2026-09-30T08:00:02.000Z",
+            },
+          ],
+          turnStatus: "waiting",
+          turnError: reason,
+        })}
+        threadId={threadId}
+      />,
+    );
+
+    expect(screen.getAllByText(reason, { exact: false })).toHaveLength(1);
+    expect(screen.queryByText(`Waiting · ${reason}`)).toBeNull();
   });
 
   it("offers a new task in the Project when the provider refused to resume its session", async () => {

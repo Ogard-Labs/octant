@@ -1786,7 +1786,8 @@ html[data-octant-native-host="true"] .shell--sidebar-collapsed .workspace-pane__
    width of the label decided where its icon sat. */
 .workspace-disclosure__action {
   display: flex;
-  min-height: 29px;
+  /* 28px, the control step; 29 fitted no other row or button. */
+  min-height: 28px;
   align-items: center;
   justify-content: flex-start;
   gap: 8px;
@@ -2521,7 +2522,7 @@ html[data-octant-native-host="true"] .shell--sidebar-collapsed .workspace-pane__
 .endpoint-add__title {
   margin: 0;
   font-size: var(--oct-text-base);
-  font-weight: var(--oct-weight-display);
+  font-weight: var(--oct-weight-strong);
 }
 
 .endpoint-add__result {
@@ -3434,6 +3435,13 @@ html[data-octant-native-host="true"] .shell--sidebar-collapsed .workspace-pane__
   text-align: center;
 }
 
+/* Inside a Glass shell the boundary is the shell reporting on itself, on the
+   shell's own surface. Painting the theme's opaque page there turned the whole
+   window black for the moment Settings took to load. */
+html:not([data-octant-reduced-transparency="true"]) .shell--material-translucent .shell-boundary {
+  background: transparent;
+}
+
 .workspace-pane__panel > [data-slot="empty"] {
   margin: clamp(36px, 8vh, 72px) clamp(28px, 6vw, 72px);
 }
@@ -3622,9 +3630,9 @@ html[data-octant-native-host="true"] .shell--sidebar-collapsed .workspace-pane__
 
 .folder-picker__header h2 {
   margin: 0;
-  font-size: var(--oct-text-lg);
-  font-weight: var(--oct-weight-display);
-  letter-spacing: -0.02em;
+  font-size: var(--oct-text-base);
+  font-weight: var(--oct-weight-strong);
+  letter-spacing: var(--oct-tracking-tight);
 }
 
 .folder-picker__header > button {
@@ -3995,6 +4003,21 @@ html[data-octant-native-host="true"] .shell--sidebar-collapsed .workspace-pane__
   gap: var(--oct-space-1);
   padding: var(--oct-space-3) 12px;
   border-bottom: 1px solid var(--octant-border);
+}
+
+/* The start screen's working-folder chip opens the same two fields over the
+   page; the popup draws the edge, so the form keeps none of its own. */
+.working-folder-popover {
+  width: min(340px, calc(100vw - 32px));
+}
+
+.working-folder-chip[data-invalid="true"] {
+  color: var(--oct-danger-fg);
+}
+
+.working-folder-popover .working-directory-control {
+  padding: var(--oct-space-1);
+  border-bottom: 0;
 }
 
 .working-directory-control label {

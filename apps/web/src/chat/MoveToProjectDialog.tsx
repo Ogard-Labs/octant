@@ -102,7 +102,7 @@ export function MoveToProjectDialog(props: MoveToProjectDialogProps) {
             <OctantInput onChange={(event) => setName(event.target.value)} value={name} />
           </label>
           <div className="project-dialog__actions">
-            <OctantButton disabled={busy} onClick={requestClose} type="button" variant="ghost">
+            <OctantButton disabled={busy} onClick={requestClose} type="button" variant="outline">
               Cancel
             </OctantButton>
             <OctantButton disabled={busy || trimmed === ""} type="submit">

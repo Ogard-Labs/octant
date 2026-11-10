@@ -81,7 +81,7 @@ export function OutsideDriverConfigurationForm(props: {
           onClick={() => setOpen(true)}
           size="sm"
           type="button"
-          variant="outline"
+          variant="secondary"
         >
           Edit
         </OctantButton>
@@ -260,7 +260,7 @@ export function OutsideDriverConfigurationForm(props: {
           disabled={props.disabled}
           size="sm"
           type="submit"
-          variant="outline"
+          variant="secondary"
         >
           Save
         </OctantButton>

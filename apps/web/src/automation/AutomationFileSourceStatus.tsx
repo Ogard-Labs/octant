@@ -257,7 +257,7 @@ export function AutomationFileSourceStatus(props: {
           </p>
         ) : null}
         <div className="automation-detail__actions">
-          <OctantButton ref={closeRef} type="button" variant="secondary" onClick={close}>
+          <OctantButton ref={closeRef} type="button" variant="outline" onClick={close}>
             Close review
           </OctantButton>
           {requiresRefresh || stale ? (

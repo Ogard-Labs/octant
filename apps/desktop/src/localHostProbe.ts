@@ -4,7 +4,12 @@ export interface LocalHostProbe {
   readonly version?: string;
   readonly activeAgentCount?: number;
   readonly attentionRequired?: boolean;
+  /** Why the host asks for a look, when it says. */
+  readonly attentionReason?: HostAttentionReason;
 }
+
+/** The host's own categories, plus the desktop's for a host it cannot read. */
+export type HostAttentionReason = "provider-not-ready" | "provider-stopped" | "host-unconfirmed";
 
 export async function probeLocalHost(options: {
   readonly url: string;
@@ -52,6 +57,10 @@ export async function probeLocalHost(options: {
         : {}),
       ...(typeof body.attentionRequired === "boolean"
         ? { attentionRequired: body.attentionRequired }
+        : {}),
+      ...(body.attentionReason === "provider-not-ready" ||
+      body.attentionReason === "provider-stopped"
+        ? { attentionReason: body.attentionReason }
         : {}),
     };
   } catch {

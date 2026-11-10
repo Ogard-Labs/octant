@@ -338,9 +338,9 @@
 .library-detail {
   display: grid;
   gap: var(--oct-space-4);
-  width: min(560px, calc(100vw - 32px));
+  /* The shared popup caps a width set here at its 420px default. */
+  --octant-dialog-width: 560px;
   max-height: calc(100vh - 48px);
-  padding: var(--oct-space-5);
   overflow-y: auto;
 }
 
@@ -354,7 +354,7 @@
 .library-detail__title h3 {
   margin: 0;
   overflow-wrap: anywhere;
-  font-size: var(--oct-text-lg);
+  font-size: var(--oct-text-base);
   font-weight: var(--oct-weight-strong);
   letter-spacing: var(--oct-tracking-snug);
 }
@@ -505,10 +505,6 @@
 
   .library-detail__cols {
     grid-template-columns: minmax(0, 1fr);
-  }
-
-  .library-detail {
-    padding: var(--oct-space-4);
   }
 }
 

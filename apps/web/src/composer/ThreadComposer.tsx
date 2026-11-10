@@ -105,14 +105,16 @@ export interface ThreadComposerProps {
   readonly presentation?: "follow-up";
   /** Existing-thread checkout context, in the strip above the message surface. */
   readonly context?: ReactNode;
+  /** The thread's info panel and its button, at the end of that strip. */
+  readonly info?: ReactNode;
   /** Naming the frame promotes it to a `<section>` landmark (Chat). */
   readonly ariaLabel?: string | undefined;
   /** Appended after `composer`; positions the frame within the surface. */
   readonly className?: string | undefined;
   /**
-   * Where a new thread will run (Project, branch, Environment), as the first
-   * row inside a start screen's card, above the chips and the message. A
-   * thread's own composer never takes it: its context is already fixed.
+   * Where a new thread will run (Project, branch, Environment), as one quiet
+   * row on the page just above a start screen's card. A thread's own composer
+   * never takes it: its context is already fixed.
    */
   readonly startContext?: ReactNode;
   /**
@@ -164,11 +166,21 @@ export interface ThreadComposerProps {
  */
 export function ThreadComposer(props: ThreadComposerProps) {
   const frozenBar = useFrozenBar();
-  if (props.presentation === "follow-up" && frozenBar !== undefined) return <>{frozenBar}</>;
-  return <ComposerSurface {...props} />;
+  const held = props.presentation === "follow-up" && frozenBar !== undefined;
+  // A held thread takes no message, but its access level and a credential
+  // command waiting for review are still the person's to read and answer. The
+  // surface stays where it is and draws only the strip's info while held, so
+  // a row of the info panel keeps what the person typed into it (a provider
+  // cloud task under review) when a move starts and is then cancelled.
+  return (
+    <>
+      <ComposerSurface {...props} held={held} />
+      {held ? frozenBar : null}
+    </>
+  );
 }
 
-function ComposerSurface(props: ThreadComposerProps) {
+function ComposerSurface(props: ThreadComposerProps & { readonly held: boolean }) {
   const notice = useComposerNotice();
   // The host refuses a turn while the session compacts, so send waits too, and
   // says why under the row.
@@ -184,25 +196,31 @@ function ComposerSurface(props: ThreadComposerProps) {
   const dropActive = dropKey !== undefined && activeDropKey === dropKey;
   const baseClassName = props.className === undefined ? "composer" : `composer ${props.className}`;
   const followUp = props.presentation === "follow-up";
-  const frameClassName = `${followUp ? `${baseClassName} composer--follow-up` : baseClassName}${notice == null ? "" : " composer--has-notice"}`;
+  const frameClassName = `${followUp ? `${baseClassName} composer--follow-up` : baseClassName}${notice == null || (!followUp && props.startContext !== undefined) ? "" : " composer--has-notice"}`;
+  // Where a new thread runs and how much of the plan is left stand on the
+  // page above the card, as a thread's strip does, so the card holds only the
+  // prompt and its toolbar. Inside the card the row sat between the person
+  // and the prompt, and a control with more than a label (a folder form) grew
+  // the card instead of opening over the page.
+  const startRow =
+    props.startContext === undefined ? null : (
+      <div className="composer-start">
+        {props.planUsage?.alternatives === undefined ? null : (
+          <ComposerUsageWarning
+            groups={props.planUsage.alternatives.groups}
+            onSelect={props.planUsage.alternatives.onSelect}
+            selectedModelId={props.planUsage.alternatives.selectedModelId}
+            selectedProviderInstanceId={props.planUsage.providerInstanceId}
+          />
+        )}
+        {props.startContext}
+        {props.planUsage === undefined ? null : (
+          <ComposerPlanUsage providerInstanceId={props.planUsage.providerInstanceId} />
+        )}
+      </div>
+    );
   const message = (
     <>
-      {props.startContext === undefined || props.planUsage === undefined ? (
-        props.startContext
-      ) : (
-        <div className="composer-start">
-          {props.planUsage.alternatives === undefined ? null : (
-            <ComposerUsageWarning
-              groups={props.planUsage.alternatives.groups}
-              onSelect={props.planUsage.alternatives.onSelect}
-              selectedModelId={props.planUsage.alternatives.selectedModelId}
-              selectedProviderInstanceId={props.planUsage.providerInstanceId}
-            />
-          )}
-          {props.startContext}
-          <ComposerPlanUsage providerInstanceId={props.planUsage.providerInstanceId} />
-        </div>
-      )}
       {props.queue}
       {props.chips}
       {props.label === undefined ? (
@@ -241,25 +259,31 @@ function ComposerSurface(props: ThreadComposerProps) {
   // above the box, so the box itself holds only the message and its controls.
   // The stats line stands under the box, where a person reads the last turn's
   // figures after sending.
+  // Every child keeps its place whether or not the thread is held: only what
+  // is drawn in each place changes, so the info panel is never remounted.
+  const { held } = props;
   const body = followUp ? (
     <>
-      <ComposerFollowUpSuggestions />
+      {held ? null : <ComposerFollowUpSuggestions />}
       <div className="thread-composer__strip">
-        {props.context === undefined ? null : (
+        {held || props.context === undefined ? null : (
           <div className="thread-composer__context">{props.context}</div>
         )}
-        <ThreadPlanWindows />
+        {held ? null : <ThreadPlanWindows />}
+        {props.info}
       </div>
-      <div className="thread-composer__surface">
-        <ComposerOutsideContentNotice busy={props.threadBusy === true} />
-        {message}
-        <div className="thread-composer__feedback">
-          {compactingNote}
-          {props.footer}
+      {held ? null : (
+        <div className="thread-composer__surface">
+          <ComposerOutsideContentNotice busy={props.threadBusy === true} />
+          {message}
+          <div className="thread-composer__feedback">
+            {compactingNote}
+            {props.footer}
+          </div>
+          {controls}
         </div>
-        {controls}
-      </div>
-      <ThreadStats windows={false} />
+      )}
+      {held ? null : <ThreadStats windows={false} />}
     </>
   ) : (
     <>
@@ -281,9 +305,9 @@ function ComposerSurface(props: ThreadComposerProps) {
           ? {}
           : { onFocusCapture: () => focusComposerThreadDrop(dropKey) })}
       >
-        {notice}
-        {dropActive ? <ComposerThreadDropCue /> : null}
-        <ComposerSubagents />
+        {held || startRow !== null ? null : notice}
+        {dropActive && !held ? <ComposerThreadDropCue /> : null}
+        {held ? null : <ComposerSubagents />}
         {body}
       </div>
     ) : (
@@ -296,13 +320,25 @@ function ComposerSurface(props: ThreadComposerProps) {
           ? {}
           : { onFocusCapture: () => focusComposerThreadDrop(dropKey) })}
       >
-        {notice}
-        {dropActive ? <ComposerThreadDropCue /> : null}
-        <ComposerSubagents />
+        {held || startRow !== null ? null : notice}
+        {dropActive && !held ? <ComposerThreadDropCue /> : null}
+        {held ? null : <ComposerSubagents />}
         {body}
       </section>
     );
-  return frame;
+  return startRow === null ? (
+    frame
+  ) : (
+    <>
+      {/* The notice rises from the card's top edge, where the row now stands,
+          so on a start screen it is anchored above the row instead. */}
+      {notice == null ? null : (
+        <div className="composer-start-notice composer--has-notice">{notice}</div>
+      )}
+      {startRow}
+      {frame}
+    </>
+  );
 }
 
 function ComposerThreadDropCue() {

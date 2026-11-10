@@ -761,15 +761,47 @@ html[data-octant-reduced-motion="true"] :is(.octant-dialog__popup, .octant-dialo
   transition: none;
 }
 
+/* One inset for every dialog. The recipe's own padding is a rem step, which
+   the interface size scaled down to 13px at the default and left a confirm's
+   words closer to the edge than the corner radius. `:where()` keeps this at
+   zero specificity, so a dialog that draws to its edges (the palette, a
+   player, a sheet with its own head and foot) still says so with one class. */
+:where(.octant-dialog__popup) {
+  padding: var(--oct-space-4);
+}
+
+/* One title, one row of answers. Each dialog family had drawn its own: titles
+   ran from 14px to 17px at two weights, and footers put the answer first or
+   last, filled or bare, at two heights. A family's title rule names these
+   values; a dialog with no family uses the classes. */
+.octant-dialog__title,
 .octant-confirmation__title {
   margin: 0;
-  font-size: var(--oct-text-sm);
-  font-weight: var(--oct-weight-display);
-  line-height: 1.4;
+  color: var(--oct-fg);
+  font-size: var(--oct-text-base);
+  font-weight: var(--oct-weight-strong);
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+
+.octant-dialog__head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--oct-space-3);
+}
+
+/* The quiet answer first, the answer that acts last, at the trailing edge. */
+.octant-dialog__actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: var(--oct-space-2);
+  margin-top: var(--oct-space-4);
 }
 
 .octant-confirmation__description {
-  margin: var(--oct-space-3) 0;
+  margin: var(--oct-space-2) 0 var(--oct-space-3);
   color: var(--oct-muted);
   font-size: var(--oct-text-sm);
   line-height: 1.5;
