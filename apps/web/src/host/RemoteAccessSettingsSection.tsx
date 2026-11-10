@@ -582,7 +582,7 @@ export function RemoteAccessSettingsSection({
         {browserCannotVerify ? (
           <div className="setgroup">
             <SettingRow
-              description="A pairing code is single-use and expires in five minutes. It carries a fingerprint of this computer's own certificate key, so an Octant app can tell it is talking to this computer. Approve the request that appears below."
+              description="Enter this code on the other device, then approve the request below. It works once, for five minutes, and lets the device confirm it is talking to this computer."
               label="Pairing code"
               scope="host"
               settingId="remote-pairing-code"

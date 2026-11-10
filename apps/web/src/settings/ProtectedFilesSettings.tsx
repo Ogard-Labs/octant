@@ -28,7 +28,7 @@ type ProtectedFilesChange = {
 
 /** What the section says the guard is, in the person's words. */
 export const PROTECTED_FILES_FACT =
-  "Below Full access, agents cannot read or change these files. At Full access they are guarded by Octant's own tools and redaction only, and a shell command can read them. Work goes through the channel instead: SSH through your SSH agent, Git over HTTPS through the system credential helper, and keys through Octant's credential broker.";
+  "Below Full access, agents cannot read or change these files. At Full access only Octant's own tools and redaction guard them, and a shell command can read them. Use your SSH agent, the system's Git credential helper, and Octant's credential broker instead.";
 
 const CHANNEL_HINT: Record<BuiltInProtectedFiles["channel"], string> = {
   "ssh-agent": "Use SSH through your SSH agent.",

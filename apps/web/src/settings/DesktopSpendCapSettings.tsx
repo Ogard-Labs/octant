@@ -104,7 +104,7 @@ export function DesktopSpendCapSettings(props: {
         <SettingRow
           settingId="desktop-spend-cap"
           label="Monthly cap"
-          description="No desktop that bills you starts until you set one. Before each starts, Octant estimates its most from the recipe's cost per hour and refuses it if this month's total would pass the cap. Desktops already running keep running."
+          description="No desktop that bills you starts until you set a cap. Octant estimates each one's cost before it starts and refuses it if the month's total would pass the cap; desktops already running keep running."
           scope="host"
           focused={props.focusedSetting === "desktop-spend-cap"}
         >
