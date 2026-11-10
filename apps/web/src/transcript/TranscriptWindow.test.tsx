@@ -271,16 +271,39 @@ describe("TranscriptWindow", () => {
     });
   });
 
-  it("mounts off-window rows so in-page find can read them", async () => {
+  it("keeps a long transcript windowed when Find opens and while it searches", async () => {
     renderWindow(rows(1000));
-    expect(screen.queryByRole("button", { name: "Row 500" })).not.toBeInTheDocument();
-
     fireEvent.keyDown(window, { key: "f", metaKey: true });
+    const input = await screen.findByRole("textbox", { name: "Find in thread" });
+    expect(mountedCount()).toBeLessThan(80);
+    fireEvent.change(input, { target: { value: "Row 500" } });
+    expect(mountedCount()).toBeLessThan(80);
+    expect(await screen.findByText("1 of 1", {}, { timeout: 5000 })).toBeInTheDocument();
+    expect(mountedCount()).toBeLessThan(80);
+    expect(screen.getByRole("button", { name: "Row 500" })).toBeInTheDocument();
+  });
 
-    await waitFor(() => {
-      expect(screen.getByRole("button", { name: "Row 500" })).toBeInTheDocument();
-    });
-    expect(mountedCount()).toBe(1000);
+  it("cancels an unfinished search when Find closes", async () => {
+    renderWindow(rows(10000));
+    fireEvent.keyDown(window, { key: "f", ctrlKey: true });
+    const input = await screen.findByRole("textbox", { name: "Find in thread" });
+    fireEvent.change(input, { target: { value: "Row 500" } });
+    expect(screen.getByText("Searching…")).toBeInTheDocument();
+    fireEvent.keyDown(input, { key: "Escape" });
+    await waitFor(() => expect(mountedCount()).toBeLessThan(32));
+    expect(screen.queryByRole("textbox", { name: "Find in thread" })).not.toBeInTheDocument();
+  });
+
+  it("reuses indexed text for a new query without mounting the history again", async () => {
+    renderWindow(rows(1000));
+    fireEvent.keyDown(window, { key: "f", ctrlKey: true });
+    const input = await screen.findByRole("textbox", { name: "Find in thread" });
+    fireEvent.change(input, { target: { value: "Row 500" } });
+    expect(await screen.findByText("1 of 1", {}, { timeout: 5000 })).toBeInTheDocument();
+    fireEvent.change(input, { target: { value: "Row 600" } });
+    expect(screen.queryByText("Searching…")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Row 600" })).toBeInTheDocument();
+    expect(mountedCount()).toBeLessThan(80);
   });
 
   it("opens a find bar that counts matches across rows that were off-window", async () => {
@@ -291,7 +314,7 @@ describe("TranscriptWindow", () => {
     fireEvent.change(input, { target: { value: "row 5" } });
 
     // Row 5, 50-59, 500-599.
-    expect(await screen.findByText("1 of 111")).toBeInTheDocument();
+    expect(await screen.findByText("1 of 111", {}, { timeout: 5000 })).toBeInTheDocument();
     fireEvent.keyDown(input, { key: "Enter" });
     expect(screen.getByText("2 of 111")).toBeInTheDocument();
     fireEvent.keyDown(input, { key: "Enter", shiftKey: true });
@@ -299,14 +322,14 @@ describe("TranscriptWindow", () => {
     expect(screen.getByText("111 of 111")).toBeInTheDocument();
   });
 
-  it("says when nothing matches and collapses the expanded range on close", async () => {
+  it("says when nothing matches and keeps rows windowed on close", async () => {
     renderWindow(rows(1000));
     fireEvent.keyDown(window, { key: "f", metaKey: true });
     const input = await screen.findByRole("textbox", { name: "Find in thread" });
     fireEvent.change(input, { target: { value: "no such text" } });
-    expect(await screen.findByText("No matches")).toBeInTheDocument();
+    expect(await screen.findByText("No matches", {}, { timeout: 5000 })).toBeInTheDocument();
     await waitFor(() => {
-      expect(mountedCount()).toBe(1000);
+      expect(mountedCount()).toBeLessThan(80);
     });
 
     fireEvent.keyDown(input, { key: "Escape" });
@@ -363,10 +386,10 @@ describe("TranscriptWindow", () => {
     const input = await screen.findByRole("textbox", { name: "Find in thread" });
 
     fireEvent.change(input, { target: { value: "the plan is" } });
-    expect(await screen.findByText("1 of 1")).toBeInTheDocument();
+    expect(await screen.findByText("1 of 1", {}, { timeout: 5000 })).toBeInTheDocument();
 
     fireEvent.change(input, { target: { value: "readysecond" } });
-    expect(await screen.findByText("No matches")).toBeInTheDocument();
+    expect(await screen.findByText("No matches", {}, { timeout: 5000 })).toBeInTheDocument();
   });
 
   it("leaves Cmd-F to the code editor and terminal", () => {

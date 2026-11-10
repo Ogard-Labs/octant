@@ -397,6 +397,13 @@ Status: Built. Detail: [Architecture: Current Release Boundary](../architecture.
 
 ### Desktop, server and renderer roles
 
+- Crash recovery retains desktop lifetime through replacement-window preparation;
+  last-window quit must not race it. Explicit quit wins and recovery is bounded
+  to two replacements per minute.
+- Stale-owner receipt quarantine is atomic on the data filesystem, separate from
+  socket/secret quarantine on the runtime filesystem; identity and receipt-first
+  recovery checks remain required. Detail: [Process topology](../architecture.md#process-topology).
+
 The desktop main process owns native windows, menus, the system keychain and all native pickers. The server is the single authority that resolves a client principal for every request and journals every mutation. The renderer holds no authority of its own.
 
 - A picker hands the server the chosen path under the desktop bridge secret and gives the renderer only a single-use receipt bound to its window.
@@ -2189,6 +2196,15 @@ Reply detail chooses how much of a turn's thinking and tool calls the transcript
 Status: Built. Since: —. Detail: [DESIGN.md: Transcript](../../DESIGN.md#transcript).
 
 ## Workspace
+
+### Responsive in-thread Find
+
+Find keeps viewport virtualization. A first nonempty query indexes the actual
+rendered text in cancellable batches, retains no off-window DOM, and reuses
+its text index for later queries. Only the current match is additionally mounted
+for navigation. Closing Find releases the index; changed rows invalidate it.
+
+Status: Built. Since: 2026-11-10. Detail: [Find in a thread](workspace.md#find-in-a-thread-and-a-new-thread-from-a-selection).
 
 ### Mode-first navigation and Projects
 

@@ -1,11 +1,6 @@
 import { WorkspaceViewStateContext } from "../shell/workspaceViewState";
 import type { ContextSubjectRef } from "@octant/contracts/context";
-import {
-  defaultRangeExtractor,
-  useVirtualizer,
-  type Range,
-  type VirtualItem,
-} from "@tanstack/react-virtual";
+import { defaultRangeExtractor, useVirtualizer, type VirtualItem } from "@tanstack/react-virtual";
 import {
   useContext,
   useLayoutEffect,
@@ -23,13 +18,13 @@ import {
   useCompactionReceipts,
 } from "../context/CompactionDivider";
 import { TranscriptOutputLimitNote } from "./outputLimitNote";
+import { useTranscriptFindIndex } from "./useTranscriptFindIndex";
 import { TranscriptFindBar } from "./TranscriptFindBar";
 import {
   clearTranscriptMatches,
   findTranscriptMatches,
   paintTranscriptMatches,
   revealTranscriptMatch,
-  type TextMatch,
 } from "./transcriptFind";
 
 /**
@@ -168,14 +163,24 @@ export function TranscriptWindow<T>(props: TranscriptWindowProps<T>) {
   const [findActive, setFindActive] = useState(false);
   const [findQuery, setFindQuery] = useState("");
   const [findIndex, setFindIndex] = useState(0);
-  const [findCount, setFindCount] = useState(0);
   const findInputRef = useRef<HTMLInputElement>(null);
-  const matchesRef = useRef<ReadonlyArray<TextMatch>>([]);
   const revealAfterQueryRef = useRef(false);
   const [stickyIndexes, setStickyIndexes] = useState<ReadonlySet<number>>(() => new Set());
   const [liveMessage, setLiveMessage] = useState("");
   const items = props.items;
   const itemKey = props.itemKey;
+  const find = useTranscriptFindIndex(
+    items,
+    findActive && findQuery !== "",
+    findQuery,
+    scrollElementRef,
+  );
+  const findCount = find.matches.total;
+  const currentFindIndex = Math.min(findIndex, Math.max(0, findCount - 1));
+  const findRow = find.matches.rows.find(
+    (row) => currentFindIndex >= row.first && currentFindIndex < row.first + row.count,
+  );
+
   const restoreKey = props.restoreKey;
   const viewStore = useContext(WorkspaceViewStateContext);
   const savedView = viewStore?.read(`transcript:${restoreKey}`);
@@ -224,7 +229,7 @@ export function TranscriptWindow<T>(props: TranscriptWindowProps<T>) {
     count: items.length,
     getScrollElement: () => scrollElementRef.current,
     estimateSize: () => estimateSize,
-    overscan: findActive ? Math.max(overscan, items.length) : overscan,
+    overscan,
     gap,
     scrollMargin,
     scrollEndThreshold: FOLLOW_THRESHOLD_PX,
@@ -241,8 +246,12 @@ export function TranscriptWindow<T>(props: TranscriptWindowProps<T>) {
       return item === undefined ? String(index) : itemKey(item, index);
     },
     rangeExtractor: (range) => {
-      const extracted = findActive ? allIndexes(range) : defaultRangeExtractor(range);
+      const extracted = defaultRangeExtractor(range);
       const extra = new Set<number>();
+      if (findActive) {
+        for (let i = find.start; i < find.end; i++) extra.add(i);
+        if (!find.pending && findRow !== undefined) extra.add(findRow.row);
+      }
       if (revealIndex >= 0) extra.add(revealIndex);
       const pending = pendingFocusRef.current?.index;
       if (pending !== undefined) extra.add(pending);
@@ -480,7 +489,7 @@ export function TranscriptWindow<T>(props: TranscriptWindowProps<T>) {
         if (target !== document.body && owner !== null && !owner.contains(target)) return;
       }
       event.preventDefault();
-      // Mount every row before matching so off-window rows can be found.
+      // Only the bar mounts synchronously; row indexing yields between batches.
       flushSync(() => setFindActive(true));
       findInputRef.current?.focus();
       findInputRef.current?.select();
@@ -490,33 +499,44 @@ export function TranscriptWindow<T>(props: TranscriptWindowProps<T>) {
   }, []);
 
   useLayoutEffect(() => {
-    if (!findActive) {
-      clearTranscriptMatches();
-      matchesRef.current = [];
-      setFindCount(0);
-      return;
-    }
+    clearTranscriptMatches();
+    if (!findActive || find.pending) return;
     const root = scrollElementRef.current;
     if (root === null) return;
     const ranges = findTranscriptMatches(root, findQuery);
-    matchesRef.current = ranges;
-    setFindCount(ranges.length);
-    const index = Math.min(findIndex, Math.max(0, ranges.length - 1));
-    if (index !== findIndex) setFindIndex(index);
-    paintTranscriptMatches(ranges, index);
-    if (revealAfterQueryRef.current) {
+    const currentRanges =
+      findRow === undefined
+        ? []
+        : ranges.filter(
+            (range) =>
+              range.startContainer.parentElement
+                ?.closest("[data-transcript-row]")
+                ?.getAttribute("data-index") === String(findRow.row),
+          );
+    const active =
+      findRow === undefined ? undefined : currentRanges[currentFindIndex - findRow.first];
+    paintTranscriptMatches(ranges, active === undefined ? -1 : ranges.indexOf(active));
+    if (revealAfterQueryRef.current && findRow !== undefined) {
       revealAfterQueryRef.current = false;
-      revealTranscriptMatch(ranges[index]);
+      followingRef.current = false;
+      virtualizer.scrollToIndex(findRow.row, { align: "center" });
+      revealTranscriptMatch(active);
     }
     return clearTranscriptMatches;
-  }, [findActive, findQuery, findIndex, items, virtualizer.getVirtualItems().length]);
+  }, [
+    findActive,
+    find.pending,
+    findQuery,
+    currentFindIndex,
+    findRow,
+    items,
+    virtualizer.getVirtualItems(),
+  ]);
 
   function stepFind(direction: 1 | -1): void {
-    const count = matchesRef.current.length;
-    if (count === 0) return;
-    const next = (findIndex + direction + count) % count;
-    setFindIndex(next);
-    revealTranscriptMatch(matchesRef.current[next]);
+    if (find.pending || findCount === 0) return;
+    revealAfterQueryRef.current = true;
+    setFindIndex((currentFindIndex + direction + findCount) % findCount);
   }
 
   useLayoutEffect(() => {
@@ -713,7 +733,8 @@ export function TranscriptWindow<T>(props: TranscriptWindowProps<T>) {
         <div className="transcript-find-anchor">
           <TranscriptFindBar
             count={findCount}
-            current={findIndex}
+            current={currentFindIndex}
+            pending={find.pending}
             onClose={() => setFindActive(false)}
             onQueryChange={(query) => {
               revealAfterQueryRef.current = true;
@@ -871,10 +892,6 @@ function scrollToContentEnd(element: HTMLElement): void {
 
 function isAtContentEnd(element: HTMLElement): boolean {
   return element.scrollHeight - element.scrollTop - element.clientHeight <= FOLLOW_THRESHOLD_PX;
-}
-
-function allIndexes(range: Range): number[] {
-  return Array.from({ length: range.count }, (_, index) => index);
 }
 
 function computeScrollMargin(scrollParent: HTMLElement, lead: HTMLElement | null): number {
