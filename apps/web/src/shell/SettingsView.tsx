@@ -158,6 +158,7 @@ import { UserProfileSettingsView } from "../profile/UserProfileSettingsView";
 import {
   ScopeIndicator,
   SettingRow,
+  SettingsDisclosure,
   SettingsOutlineRegistration,
   SettingsPageScope,
   SettingsSection,
@@ -795,6 +796,15 @@ export function SettingsView(props: SettingsViewProps) {
                           href={`#${entry.id}`}
                           onClick={(event) => {
                             event.preventDefault();
+                            // A section inside a closed disclosure opens first,
+                            // or the link would scroll to nothing.
+                            for (
+                              let ancestor = entry.element.parentElement;
+                              ancestor !== null;
+                              ancestor = ancestor.parentElement
+                            ) {
+                              if (ancestor instanceof HTMLDetailsElement) ancestor.open = true;
+                            }
                             entry.element.scrollIntoView?.({ block: "start" });
                           }}
                         >
@@ -1855,53 +1865,68 @@ function ProviderCatalogSection(props: {
   const onLocateBinary = locateRuntimeBinary(controller, discoveryController, props.hostBridge);
   const onUseScannedBinary = adoptScannedRuntimeBinary(controller, discoveryController);
   const cardProps = providerSettingsViewProps(controller, props.hostBridge);
+  const [setupOpen, setSetupOpen] = useState(false);
   return (
     <div id="settings-provider-catalog">
-      <ProviderCatalogView
-        busy={controller.busy}
-        {...(discoveryController === undefined
-          ? {}
-          : {
-              discovery: {
-                snapshot: discoveryController.snapshot,
-                scanning: discoveryController.scanning,
-                ...(discoveryController.message === undefined
-                  ? {}
-                  : { message: discoveryController.message }),
-                connectingPaths: discoveryController.connectingPaths,
-                onScan: discoveryController.scan,
-                onConnect: discoveryController.connect,
-              },
-            })}
-        credentialManagementAvailable={controller.credentialManagementAvailable}
-        instances={controller.instances}
-        {...(controller.message === undefined ? {} : { message: controller.message })}
-        observedByInstance={controller.observedByInstance}
-        onAddOutsideProvider={controller.createOutsideHarnessEndpoint}
-        {...(controller.snapshot?.outsideDrivers === undefined
-          ? {}
-          : { outsideDrivers: controller.snapshot.outsideDrivers })}
-        onDetailChange={props.onDetailChange}
-        onOpenModelEndpoints={props.onOpenModelEndpoints}
-        onOpenProviders={props.onOpenProviders}
-        onProbe={(instanceId) => controller.probe(instanceId)}
-        onSetEnabled={controller.setEnabled}
-        probingIds={controller.probingIds}
-        renderRuntimeCard={(instance) => (
-          <ProviderSettingsList
-            {...cardProps}
-            {...(onLocateBinary === undefined ? {} : { onLocateBinary })}
-            {...(onUseScannedBinary === undefined ? {} : { onUseScannedBinary })}
-            discoverySnapshot={discoveryController?.snapshot}
-            heading="Its provider"
-            instances={[instance]}
-            note="The same card as on Providers & Models: sign-in, Locate binary, and what its last check found."
-            showAgentEligibleModels={false}
-            showReorder={false}
-          />
-        )}
-        status={controller.status}
-      />
+      {/* Every provider Octant can set up is a long reference list. Standing
+          open under the providers a person already has, it made this page six
+          screens tall; it opens when someone goes looking for one to add. */}
+      <SettingsDisclosure
+        // A provider's setup replaces the catalog's lists, so it stands
+        // without the disclosure's own heading above it.
+        {...(setupOpen ? { className: "provider-catalog--setup-open" } : {})}
+        description="Every agent runtime and model endpoint Octant can set up."
+        title="Add a provider"
+      >
+        <ProviderCatalogView
+          busy={controller.busy}
+          {...(discoveryController === undefined
+            ? {}
+            : {
+                discovery: {
+                  snapshot: discoveryController.snapshot,
+                  scanning: discoveryController.scanning,
+                  ...(discoveryController.message === undefined
+                    ? {}
+                    : { message: discoveryController.message }),
+                  connectingPaths: discoveryController.connectingPaths,
+                  onScan: discoveryController.scan,
+                  onConnect: discoveryController.connect,
+                },
+              })}
+          credentialManagementAvailable={controller.credentialManagementAvailable}
+          instances={controller.instances}
+          {...(controller.message === undefined ? {} : { message: controller.message })}
+          observedByInstance={controller.observedByInstance}
+          onAddOutsideProvider={controller.createOutsideHarnessEndpoint}
+          {...(controller.snapshot?.outsideDrivers === undefined
+            ? {}
+            : { outsideDrivers: controller.snapshot.outsideDrivers })}
+          onDetailChange={(entryName) => {
+            setSetupOpen(entryName !== undefined);
+            props.onDetailChange(entryName);
+          }}
+          onOpenModelEndpoints={props.onOpenModelEndpoints}
+          onOpenProviders={props.onOpenProviders}
+          onProbe={(instanceId) => controller.probe(instanceId)}
+          onSetEnabled={controller.setEnabled}
+          probingIds={controller.probingIds}
+          renderRuntimeCard={(instance) => (
+            <ProviderSettingsList
+              {...cardProps}
+              {...(onLocateBinary === undefined ? {} : { onLocateBinary })}
+              {...(onUseScannedBinary === undefined ? {} : { onUseScannedBinary })}
+              discoverySnapshot={discoveryController?.snapshot}
+              heading="Its provider"
+              instances={[instance]}
+              note="The same card as on Providers & Models: sign-in, Locate binary, and what its last check found."
+              showAgentEligibleModels={false}
+              showReorder={false}
+            />
+          )}
+          status={controller.status}
+        />
+      </SettingsDisclosure>
     </div>
   );
 }

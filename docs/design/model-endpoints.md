@@ -27,7 +27,11 @@ this toggle is not evidence of API access or a successful billed call.
 ## Provider catalog
 
 Provider catalog, the section of Providers & Models under the providers this
-host has, lists every
+host has, stands behind one closed disclosure, **Add a provider**: it is a
+reference list of everything Octant can set up, and standing open under the
+providers a person already has it made the page about six screens tall. The
+page outline's links into it, and a deep link to a setting inside it, open it
+first. Opened, it lists every
 bundled provider driver in the Model endpoints row style. Agent runtimes and
 model endpoints are two sections. A row is one link named with its state
 ("Codex CLI, off. Open setup") and shows the mark, the name, "Agent runtime ·

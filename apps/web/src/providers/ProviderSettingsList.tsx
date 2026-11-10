@@ -161,6 +161,7 @@ export type ProviderSettingsListProps = Pick<
 
 export function ProviderSettingsList(props: ProviderSettingsListProps) {
   const [reordering, setReordering] = useState(false);
+  const [openedRowId, setOpenedRowId] = useState<ProviderInstance["id"]>();
   // The registry projection is authoritative and can be intentionally empty
   // during a probe. Settings may use the last observed facts for geometry
   // while the probe is pending; eligibility controls below still use the
@@ -289,6 +290,8 @@ export function ProviderSettingsList(props: ProviderSettingsListProps) {
         instance={instance}
         key={instance.id}
         needsAttention={attentionId !== undefined && String(attentionId) === String(instance.id)}
+        onRowOpened={setOpenedRowId}
+        openedRowId={openedRowId}
         {...(props.onAddAccount === undefined ? {} : { onAddAccount: props.onAddAccount })}
         {...(props.discoverySnapshot === undefined
           ? {}
@@ -621,6 +624,9 @@ interface ProviderRowProps {
   readonly instance: ProviderInstance;
   /** The one row the list opens by itself: a sign-in or a found binary is waiting. */
   readonly needsAttention: boolean;
+  /** The row a person opened last; every other row closes, so one is open at a time. */
+  readonly openedRowId: ProviderInstance["id"] | undefined;
+  readonly onRowOpened: (instanceId: ProviderInstance["id"]) => void;
   readonly observed?: ProviderObservedState;
   readonly discoverySnapshot?: DiscoverySnapshot;
   readonly busy: boolean;
@@ -716,9 +722,23 @@ function ProviderRow(props: ProviderRowProps) {
   const readiness = props.updating || props.probing ? "checking" : props.observed?.readiness;
   const [connectionDetailsOpen, setConnectionDetailsOpen] = useState(() => readiness !== "ready");
   // A row that comes to need attention opens; collapsing it afterwards sticks.
+  const { needsAttention, onRowOpened } = props;
   useEffect(() => {
-    if (props.needsAttention) setDetailsOpen(true);
-  }, [props.needsAttention]);
+    if (!needsAttention) return;
+    setDetailsOpen(true);
+    // An opening the page makes counts as the open row too, or a row that
+    // comes to need attention would stand open beside the one a person opened.
+    onRowOpened(props.instance.id);
+  }, [needsAttention, onRowOpened, props.instance.id]);
+  // One row is open at a time. Several open rows, each with its models and
+  // actions, were most of what made this page many screens tall.
+  const { openedRowId } = props;
+  const instanceId = props.instance.id;
+  useEffect(() => {
+    if (openedRowId !== undefined && String(openedRowId) !== String(instanceId)) {
+      setDetailsOpen(false);
+    }
+  }, [openedRowId, instanceId]);
   useEffect(() => {
     if (!renameSaved) return;
     const timeout = window.setTimeout(() => setRenameSaved(false), 2500);
@@ -934,6 +954,7 @@ function ProviderRow(props: ProviderRowProps) {
             onClick={() => {
               // The host's answer is reported in the details, so they open.
               setDetailsOpen(true);
+              props.onRowOpened(props.instance.id);
               void useScannedBinary();
             }}
             size="sm"
@@ -949,7 +970,10 @@ function ProviderRow(props: ProviderRowProps) {
           aria-expanded={detailsOpen}
           aria-label={`Details for ${name}`}
           className="prov-details-trigger window-no-drag"
-          onClick={() => setDetailsOpen((current) => !current)}
+          onClick={() => {
+            if (!detailsOpen) props.onRowOpened(props.instance.id);
+            setDetailsOpen(!detailsOpen);
+          }}
           type="button"
           variant="ghost"
         >

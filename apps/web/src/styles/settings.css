@@ -3796,3 +3796,9 @@ html[data-octant-increased-contrast="true"]
   overflow-wrap: anywhere;
   user-select: text;
 }
+
+/* A provider's setup page stands alone: the "Add a provider" heading it was
+   opened from would read as the page's title above the real one. */
+.provider-catalog--setup-open > summary {
+  display: none;
+}
