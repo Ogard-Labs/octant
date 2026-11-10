@@ -5,6 +5,7 @@ import {
 import { ToolCatalogContinuation } from "../providers/ToolCatalogContinuation";
 import { ContinueElsewhere } from "../continuity/ContinueElsewhere";
 import { ThreadInfo } from "../composer/ThreadInfo";
+import { ThreadNativeSetupControl } from "../providers/ThreadNativeSetupControl";
 import { useContinuationInputPolicy } from "../continuity/useContinuationInputPolicy";
 import { SideChatDraftNotice } from "../composer/SideChatDraftNotice";
 import type { ProviderModelOptionValues } from "@octant/contracts";
@@ -1052,7 +1053,6 @@ export function ChatWorkspace(props: ChatWorkspaceProps) {
           <div className="chat-workspace__conversation">
             <header className="chat-workspace__header">
               <h1 className="sr-only">{view.thread.title}</h1>
-              <ThreadReplyDetailMenu triggerClassName="shell-icon-button chat-workspace__reply-detail" />
               <ChatThreadActionsMenu
                 {...(props.moveToProject === undefined
                   ? {}
@@ -1489,6 +1489,12 @@ export function ChatWorkspace(props: ChatWorkspaceProps) {
             key={String(thread.id)}
             info={
               <ThreadInfo>
+                <ThreadReplyDetailMenu labelled />
+                <ThreadNativeSetupControl
+                  disabled={isSending}
+                  providerInstanceId={view.thread.providerInstanceId}
+                  threadId={String(view.thread.id)}
+                />
                 <ContinueElsewhere
                   mode="chat"
                   threadId={String(view.thread.id)}
@@ -1520,10 +1526,6 @@ export function ChatWorkspace(props: ChatWorkspaceProps) {
                 })}
             draft={props.controller.pendingDraft}
             caretRestoreKey={String(thread.id)}
-            nativeSetupThread={{
-              threadId: String(thread.id),
-              providerInstanceId: thread.providerInstanceId,
-            }}
             {...(props.controller.pendingDraftCaret === undefined
               ? {}
               : { caretIndex: props.controller.pendingDraftCaret })}

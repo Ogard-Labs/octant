@@ -5140,8 +5140,8 @@ The provider layer is defined by `@octant/provider-sdk` and implemented in
     settings, hooks, MCP servers, plugins, and tools. A Chat Project has no
     folder and holds no trust.
   - **Thread.** Each Chat, Work, and Code thread of a key provider carries its
-    own choice: Account default, On, or Off (the **Own setup** menu beside the
-    composer's picker). `set` on `POST /api/providers/thread-native-setup`
+    own choice: Account default, On, or Off (the **Provider tools** row of the
+    thread's info panel). `set` on `POST /api/providers/thread-native-setup`
     sends it, only from a local window (a paired device may read it, and the
     host refuses a provider account that is not a key provider's), and
     journals `thread.native-setup-changed@1` on the thread's own

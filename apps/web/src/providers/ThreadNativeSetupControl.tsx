@@ -116,7 +116,9 @@ export function ThreadNativeSetupControl(props: {
       >
         <Blocks aria-hidden="true" />
         <span>
-          {choice === "inherit" ? "Own setup" : `Own setup ${selected.label.toLowerCase()}`}
+          {choice === "inherit"
+            ? "Provider tools"
+            : `Provider tools ${selected.label.toLowerCase()}`}
         </span>
         <ChevronDown aria-hidden="true" />
       </OctantMenuTrigger>

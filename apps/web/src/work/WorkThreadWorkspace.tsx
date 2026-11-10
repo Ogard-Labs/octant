@@ -2735,6 +2735,12 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
                       projectId={String(thread.projectId)}
                       surface="work"
                     />
+                    <ThreadReplyDetailMenu labelled />
+                    <ThreadNativeSetupControl
+                      disabled={accessChanging || creating || completionLocked}
+                      providerInstanceId={thread.providerInstanceId}
+                      threadId={String(thread.id)}
+                    />
                     <ContinueElsewhere
                       mode="work"
                       threadId={String(thread.id)}
@@ -2980,7 +2986,6 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
                     value=""
                   />
                 ) : null}
-                {thread === undefined ? null : <ThreadReplyDetailMenu />}
               </>
             ),
             // Two groups: what the person adds sits left, how the task runs
@@ -2989,13 +2994,6 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
             // became.
             trailing: (
               <>
-                {thread === undefined ? null : (
-                  <ThreadNativeSetupControl
-                    disabled={accessChanging || creating || completionLocked}
-                    providerInstanceId={thread.providerInstanceId}
-                    threadId={String(thread.id)}
-                  />
-                )}
                 {thread === undefined ? null : (
                   <PermissionModePicker
                     autoSupported={autoSupported}

@@ -31,7 +31,7 @@ import {
   threadAccessOf,
   type PickerGroup,
 } from "@octant/domain";
-import { CirclePause, FileOutput, X } from "lucide-react";
+import { ChevronDown, CirclePause, FileOutput, X } from "lucide-react";
 import { OctantMenu } from "../ui/base/OctantMenu";
 import { ThreadReplyDetailMenu, ThreadReplyDetailScope } from "../transcript/ThreadReplyDetail";
 import { useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent } from "react";
@@ -57,7 +57,7 @@ import {
   COMPOSER_STAGED_DROPPED_NOTE,
 } from "../composer/composerThreadDraftStore";
 import { ShellState } from "../shell/ShellState";
-import { OctantButton } from "../ui/base/OctantButton";
+import { OctantButton, octantButtonClassName } from "../ui/base/OctantButton";
 import { OctantAlert } from "../ui/base/OctantAlert";
 import { OctantSeparatorWithLabel } from "../ui/base/OctantSeparator";
 import { OctantTextarea } from "../ui/base/OctantTextarea";
@@ -2309,6 +2309,53 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
                 projectId={String(thread.projectId)}
                 surface="code"
               />
+              <ThreadReplyDetailMenu labelled />
+              {thread.documentDelivery === "native-artifacts" || artifactsChoosable ? (
+                <OctantMenu
+                  items={
+                    thread.documentDelivery === "native-artifacts"
+                      ? [
+                          {
+                            value: "canvas",
+                            label: "Use Canvas instead of Claude artifacts",
+                            disabled: deliveryChanging,
+                          },
+                        ]
+                      : [
+                          {
+                            value: "native-artifacts",
+                            label: "Use Claude artifacts instead of Canvas",
+                            disabled: deliveryChanging,
+                          },
+                        ]
+                  }
+                  onValueChange={(value) => {
+                    if (value === "canvas") void changeDocumentDelivery("canvas");
+                    else setConfirmArtifacts(true);
+                  }}
+                  selectionMode="action"
+                  trigger={
+                    <>
+                      <FileOutput aria-hidden="true" size={14} strokeWidth={1.7} />
+                      <span>
+                        Documents:{" "}
+                        {thread.documentDelivery === "native-artifacts"
+                          ? "Claude artifacts"
+                          : "Canvas"}
+                      </span>
+                      <ChevronDown aria-hidden="true" size={12} />
+                    </>
+                  }
+                  triggerClassName={octantButtonClassName({ variant: "ghost", size: "sm" })}
+                  triggerLabel="How this thread delivers documents"
+                  value=""
+                />
+              ) : null}
+              <ThreadNativeSetupControl
+                disabled={accessChanging}
+                providerInstanceId={thread.providerInstanceId}
+                threadId={String(thread.id)}
+              />
               <CommandCredentialRequests
                 threadId={String(props.threadId)}
                 projectId={String(thread.projectId)}
@@ -2602,37 +2649,6 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
                 {plan == null || plan.status === "withdrawn" ? (
                   <ThreadPlanProposal key={String(thread.id)} />
                 ) : null}
-                {thread.documentDelivery === "native-artifacts" || artifactsChoosable ? (
-                  <OctantMenu
-                    items={
-                      thread.documentDelivery === "native-artifacts"
-                        ? [
-                            {
-                              value: "canvas",
-                              label: "Use Canvas instead of Claude artifacts",
-                              disabled: deliveryChanging,
-                            },
-                          ]
-                        : [
-                            {
-                              value: "native-artifacts",
-                              label: "Use Claude artifacts instead of Canvas",
-                              disabled: deliveryChanging,
-                            },
-                          ]
-                    }
-                    onValueChange={(value) => {
-                      if (value === "canvas") void changeDocumentDelivery("canvas");
-                      else setConfirmArtifacts(true);
-                    }}
-                    selectionMode="action"
-                    trigger={<FileOutput aria-hidden="true" size={16} />}
-                    triggerClassName="shell-icon-button"
-                    triggerLabel="How this thread delivers documents"
-                    value=""
-                  />
-                ) : null}
-                <ThreadReplyDetailMenu />
                 {confirmArtifacts ? (
                   <ThreadArtifactsConfirm
                     onCancel={() => setConfirmArtifacts(false)}
@@ -2640,11 +2656,6 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
                     pending={deliveryChanging}
                   />
                 ) : null}
-                <ThreadNativeSetupControl
-                  disabled={accessChanging}
-                  providerInstanceId={thread.providerInstanceId}
-                  threadId={String(thread.id)}
-                />
                 <PermissionModePicker
                   autoSupported={props.harnessAutoReviewSupported === true}
                   autoReview={props.autoReview}

@@ -72,8 +72,13 @@ a quiet **Thread info** button at the end of the strip above the follow-up
 composer, after the plan meters. It opens one floating card above the strip,
 at most 440px wide, whose rows are, in order and each only where it applies:
 the access level in force and where it came from (Work and Code) with its
-**Access details**, **Credential commands** (Code), **Provider cloud
-sessions** (Code, local host), and **Continue elsewhere**. Nothing else about
+**Access details**, **Reply detail**, how the thread delivers documents
+(Code), **Provider tools** (a key provider's own setup for this thread),
+**Credential commands** (Code), **Provider cloud sessions** (Code, local
+host), and **Continue elsewhere**. A choice made once for the thread lives
+here, not in the composer's toolbar: the toolbar holds what a person changes
+from one message to the next (attach, access, model) and had grown to eleven
+controls, several of them bare glyphs. Nothing else about
 the thread is drawn on the thread page outside the transcript and the
 composer; these rows had each been added to the page on their own, at four
 places, two of them outside the reading column.
