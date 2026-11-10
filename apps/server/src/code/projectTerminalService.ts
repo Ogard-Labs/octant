@@ -1196,7 +1196,7 @@ export class ProjectTerminalService {
     // dropped SSH connection is classified here too, from the same exit code.
     const uncertainty =
       owner.uncertainty ??
-      (owner.action?.server !== undefined &&
+      ((owner.action?.server !== undefined || owner.serverWorkShell) &&
       snapshot.status !== "running" &&
       snapshot.exitCode === 255
         ? "server-transport-lost"

@@ -2032,6 +2032,7 @@ The desktop updater verifies a feed's Ed25519 signature against the compiled-in 
 - Stable trusts only the stable key; preview and candidate trust the preview key and the stable key, so unreviewed preview builds cannot sign a stable feed.
 - The release wizard mints a ring's key only when the app ships none for it, because replacing a deployed key strands every install that trusts it.
 - Each ring's feed is a fixed mailbox release on the forge; signature and artifact hash checks never depend on the host that served the bytes.
+- Update responses are streamed under size and time bounds. Redirects are manually bounded, stay HTTPS, and may widen from an explicitly configured or signed origin only to a connect-time-pinned globally reachable address.
 - Whoever can write feed files can withhold a ring's updates, never install something no trusted key signed.
 - A Linux AppImage update verifies signature and hash before use, replaces the image atomically, and fails closed with the reason shown in Settings.
 

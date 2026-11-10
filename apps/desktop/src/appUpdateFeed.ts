@@ -1,6 +1,18 @@
 import { createHash, timingSafeEqual } from "node:crypto";
+import { mkdtemp, open, readFile, rm, type FileHandle } from "node:fs/promises";
+import { isIP } from "node:net";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { createReleaseFeedVerifier, type ReleaseFeedVerifier } from "@octant/host-runtime";
 import { type AppReleaseRing, OCTANT_UPDATE_CHECK_DISCLOSURE } from "@octant/contracts/app-updates";
+import { createPinnedUpdateFetch, isPrivateAddress } from "./updateHttpsTransport";
+
+const MAX_UPDATE_REDIRECTS = 5;
+const MAX_UPDATE_FEED_BYTES = 64 * 1024;
+const UPDATE_FEED_DEADLINE_MS = 30 * 1000;
+const UPDATE_ARTIFACT_DEADLINE_MS = 15 * 60 * 1000;
+const REDIRECT_STATUSES = new Set([301, 302, 303, 307, 308]);
+const pinnedUpdateFetch = createPinnedUpdateFetch();
 
 /**
  * The public half of the key that signs Octant's stable update feed, as base64
@@ -168,7 +180,8 @@ export function legacyUpdateFeedRelativePath(target: {
 
 function isHttpsUrl(value: string): boolean {
   try {
-    return new URL(value).protocol === "https:";
+    const url = new URL(value);
+    return url.protocol === "https:" && url.username === "" && url.password === "";
   } catch {
     return false;
   }
@@ -228,7 +241,7 @@ export function buildUpdateCheckRequest(
     init: {
       method: "GET",
       headers: { accept: "application/json", "user-agent": UPDATE_CHECK_USER_AGENT },
-      redirect: "follow",
+      redirect: "manual",
       // No cookies, no credentials: this request identifies nobody, and a
       // stored cookie would quietly turn a version check into a visit count.
       credentials: "omit",
@@ -245,26 +258,179 @@ export function buildUpdateCheckRequest(
 export async function fetchUpdateFeed(
   feedUrl: string,
   identity: UpdateCheckIdentity,
-  fetchImpl: typeof globalThis.fetch = globalThis.fetch,
+  fetchImpl?: typeof globalThis.fetch,
   signal?: AbortSignal,
 ): Promise<FeedFetchResult | FeedFetchFailure> {
   if (!isHttpsUrl(feedUrl)) return { kind: "unreachable" };
   const request = buildUpdateCheckRequest(feedUrl, identity);
-  let response: Response;
+  const requestSignal = withDeadline(signal, UPDATE_FEED_DEADLINE_MS);
+  let response: Response | undefined;
   try {
-    response = await fetchImpl(request.url, {
-      ...request.init,
-      ...(signal === undefined ? {} : { signal }),
-    });
+    response = await fetchUpdateResponse(request.url, request.init, fetchImpl, requestSignal);
   } catch {
     return { kind: "unreachable" };
   }
-  if (!response.ok) return { kind: "unreachable" };
+  if (response === undefined) return { kind: "unreachable" };
+  if (!response.ok) {
+    await response.body?.cancel().catch(() => undefined);
+    return { kind: "unreachable" };
+  }
   try {
-    return { kind: "fetched", document: await response.json() };
-  } catch {
+    const bytes = await readBoundedBody(response, MAX_UPDATE_FEED_BYTES);
+    return { kind: "fetched", document: JSON.parse(new TextDecoder().decode(bytes)) };
+  } catch (error) {
+    if (error instanceof UpdateBodyTooLarge) return { kind: "malformed" };
+    if (requestSignal.aborted) return { kind: "unreachable" };
     return { kind: "malformed" };
   }
+}
+
+async function fetchUpdateResponse(
+  initialUrl: string,
+  init: RequestInit,
+  injectedFetch: typeof globalThis.fetch | undefined,
+  signal: AbortSignal,
+): Promise<Response | undefined> {
+  const initial = new URL(initialUrl);
+  let current = initial;
+  for (let redirects = 0; redirects <= MAX_UPDATE_REDIRECTS; redirects += 1) {
+    if (!isPermittedUpdateUrl(current, initial)) return undefined;
+    const transport =
+      injectedFetch ?? (current.origin === initial.origin ? globalThis.fetch : pinnedUpdateFetch);
+    const response = await transport(current.href, {
+      ...init,
+      redirect: "manual",
+      signal,
+    });
+    if (!REDIRECT_STATUSES.has(response.status)) return response;
+    const location = response.headers.get("location");
+    await response.body?.cancel().catch(() => undefined);
+    if (location === null) return undefined;
+    try {
+      current = new URL(location, current);
+    } catch {
+      return undefined;
+    }
+  }
+  return undefined;
+}
+
+/** A redirect may retain initial private authority, but may not introduce it. */
+function isPermittedUpdateUrl(candidate: URL, initial: URL): boolean {
+  if (candidate.protocol !== "https:" || candidate.username !== "" || candidate.password !== "") {
+    return false;
+  }
+  if (candidate.origin === initial.origin) return true;
+  const hostname = candidate.hostname.toLowerCase();
+  if (hostname === "localhost" || hostname.endsWith(".localhost")) return false;
+  const bare =
+    hostname.startsWith("[") && hostname.endsWith("]") ? hostname.slice(1, -1) : hostname;
+  return isIP(bare) === 0 || !isPrivateAddress(bare);
+}
+
+class UpdateBodyTooLarge extends Error {}
+
+function declaredBodyTooLarge(response: Response, maximumBytes: number): boolean {
+  const contentLength = response.headers.get("content-length");
+  if (contentLength === null || !/^\d+$/.test(contentLength)) return false;
+  const declared = Number(contentLength);
+  return !Number.isSafeInteger(declared) || declared > maximumBytes;
+}
+
+async function readBoundedBody(response: Response, maximumBytes: number): Promise<Uint8Array> {
+  if (declaredBodyTooLarge(response, maximumBytes)) {
+    await response.body?.cancel().catch(() => undefined);
+    throw new UpdateBodyTooLarge();
+  }
+  if (response.body === null) return new Uint8Array();
+  const reader = response.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  try {
+    for (;;) {
+      const next = await reader.read();
+      if (next.done) break;
+      total += next.value.byteLength;
+      if (total > maximumBytes) {
+        await reader.cancel().catch(() => undefined);
+        throw new UpdateBodyTooLarge();
+      }
+      chunks.push(next.value);
+    }
+  } finally {
+    reader.releaseLock();
+  }
+  const bytes = new Uint8Array(total);
+  let offset = 0;
+  for (const chunk of chunks) {
+    bytes.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  return bytes;
+}
+
+async function writeWhole(file: FileHandle, bytes: Uint8Array): Promise<void> {
+  let offset = 0;
+  while (offset < bytes.byteLength) {
+    const written = await file.write(bytes, offset, bytes.byteLength - offset);
+    if (written.bytesWritten === 0) throw new Error("The update artifact could not be staged.");
+    offset += written.bytesWritten;
+  }
+}
+
+/**
+ * Stage and hash an artifact on disk before allocating its final byte array.
+ * A corrupt or oversized response therefore never keeps both every network
+ * chunk and a second contiguous copy resident in the desktop main process.
+ */
+async function readVerifiedArtifactBody(
+  response: Response,
+  maximumBytes: number,
+  expectedHex: string,
+): Promise<ArtifactFetchOutcome> {
+  if (declaredBodyTooLarge(response, maximumBytes)) {
+    await response.body?.cancel().catch(() => undefined);
+    return { kind: "corrupt" };
+  }
+  if (response.body === null) {
+    const empty = new Uint8Array();
+    return matchesDigest(empty, expectedHex)
+      ? { kind: "verified", bytes: empty }
+      : { kind: "corrupt" };
+  }
+  const directory = await mkdtemp(join(tmpdir(), "octant-update-"));
+  const artifact = join(directory, "artifact");
+  const reader = response.body.getReader();
+  let file: FileHandle | undefined;
+  let complete = false;
+  try {
+    file = await open(artifact, "wx", 0o600);
+    const hash = createHash("sha256");
+    let total = 0;
+    for (;;) {
+      const next = await reader.read();
+      if (next.done) break;
+      total += next.value.byteLength;
+      if (total > maximumBytes) throw new UpdateBodyTooLarge();
+      hash.update(next.value);
+      await writeWhole(file, next.value);
+    }
+    complete = true;
+    await file.close();
+    file = undefined;
+    if (!matchesDigestValue(hash.digest(), expectedHex)) return { kind: "corrupt" };
+    return { kind: "verified", bytes: await readFile(artifact) };
+  } finally {
+    if (!complete) await reader.cancel().catch(() => undefined);
+    reader.releaseLock();
+    await file?.close().catch(() => undefined);
+    await rm(directory, { recursive: true, force: true }).catch(() => undefined);
+  }
+}
+
+function withDeadline(signal: AbortSignal | undefined, timeoutMs: number): AbortSignal {
+  const deadline = AbortSignal.timeout(timeoutMs);
+  return signal === undefined ? deadline : AbortSignal.any([signal, deadline]);
 }
 
 /**
@@ -305,39 +471,43 @@ export type ArtifactFetchOutcome =
  */
 export async function fetchVerifiedArtifact(
   input: { readonly url: string; readonly sha256: string; readonly maxBytes: number },
-  fetchImpl: typeof globalThis.fetch = globalThis.fetch,
+  fetchImpl?: typeof globalThis.fetch,
   signal?: AbortSignal,
 ): Promise<ArtifactFetchOutcome> {
   if (!isHttpsUrl(input.url)) return { kind: "unreachable" };
-  let response: Response;
+  if (!Number.isSafeInteger(input.maxBytes) || input.maxBytes < 0) return { kind: "corrupt" };
+  const requestSignal = withDeadline(signal, UPDATE_ARTIFACT_DEADLINE_MS);
+  let response: Response | undefined;
   try {
-    response = await fetchImpl(input.url, {
-      method: "GET",
-      redirect: "follow",
-      credentials: "omit",
-      ...(signal === undefined ? {} : { signal }),
-    });
+    response = await fetchUpdateResponse(
+      input.url,
+      { method: "GET", redirect: "manual", credentials: "omit" },
+      fetchImpl,
+      requestSignal,
+    );
   } catch {
     return { kind: "unreachable" };
   }
-  if (!response.ok) return { kind: "unreachable" };
-  let bytes: Uint8Array;
-  try {
-    const buffer = await response.arrayBuffer();
-    // A release is a known size; a body far past it is not a release, and
-    // reading it into memory to find that out is how a download becomes a
-    // denial of service.
-    if (buffer.byteLength > input.maxBytes) return { kind: "corrupt" };
-    bytes = new Uint8Array(buffer);
-  } catch {
+  if (response === undefined) return { kind: "unreachable" };
+  if (!response.ok) {
+    await response.body?.cancel().catch(() => undefined);
     return { kind: "unreachable" };
   }
-  return matchesDigest(bytes, input.sha256) ? { kind: "verified", bytes } : { kind: "corrupt" };
+  try {
+    return await readVerifiedArtifactBody(response, input.maxBytes, input.sha256);
+  } catch (error) {
+    if (error instanceof UpdateBodyTooLarge) return { kind: "corrupt" };
+    return { kind: "unreachable" };
+  }
 }
 
 /** Constant-time comparison, so a mismatch reveals nothing about where it differs. */
 function matchesDigest(bytes: Uint8Array, expectedHex: string): boolean {
   const actual = createHash("sha256").update(bytes).digest();
+  return matchesDigestValue(actual, expectedHex);
+}
+
+function matchesDigestValue(actual: Buffer, expectedHex: string): boolean {
   let expected: Buffer;
   try {
     expected = Buffer.from(expectedHex, "hex");
