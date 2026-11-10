@@ -3489,6 +3489,31 @@ describe("ProviderSettingsView", () => {
     expect(screen.queryByRole("button", { name: "Locate binary for GLM" })).toBeNull();
   });
 
+  it("keeps one provider's details open at a time", async () => {
+    const user = userEvent.setup();
+    const second = "70000000-0000-4000-8000-0000000000a2" as ProviderInstance["id"];
+    renderProviderSettings(
+      <ProviderSettingsView
+        {...fixture({ instance: provider({ displayName: "First Codex" }) })}
+        instances={[
+          provider({ displayName: "First Codex" }),
+          provider({ id: second, displayName: "Second Codex" }),
+        ]}
+      />,
+    );
+    const first = screen.getByRole("button", { name: "Details for First Codex" });
+    const other = screen.getByRole("button", { name: "Details for Second Codex" });
+
+    await user.click(first);
+    expect(first).toHaveAttribute("aria-expanded", "true");
+
+    // Opening another closes the first: several open rows made the page
+    // many screens tall.
+    await user.click(other);
+    expect(other).toHaveAttribute("aria-expanded", "true");
+    expect(first).toHaveAttribute("aria-expanded", "false");
+  });
+
   it("offers the binary the scan found when the saved one is gone, and has the host check it on click", async () => {
     const user = userEvent.setup();
     const onUseScannedBinary = vi.fn(
