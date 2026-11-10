@@ -528,6 +528,11 @@ describe("application background contracts", () => {
     expect(() => decodeAppBackground({ kind: "builtin" })).toThrow();
     expect(() => decodeAppBackground({ kind: "builtin", presetId: "not-a-preset" })).toThrow();
     expect(() => decodeAppBackground({ kind: "theme", backgroundId: "x" })).toThrow();
+    expect(decodeAppBackground({ kind: "flowing" })).toEqual({ kind: "flowing", ...tuning });
+    expect(decodeAppBackground({ kind: "flowing", motion: "still" })).toMatchObject({
+      kind: "flowing",
+      motion: "still",
+    });
     expect(() => decodeAppBackground({ kind: "pattern" })).toThrow();
     expect(() => decodeAppBackground({ kind: "theme", patternSpeed: 140 })).toThrow();
     expect(() => decodeAppBackground({ kind: "theme", scope: "sidebar" })).toThrow();
