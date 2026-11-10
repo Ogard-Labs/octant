@@ -20,6 +20,8 @@ export function CodeCheckoutBar(props: {
   readonly serverLocation?: string;
   /** Opens the Git tab, whose Git runs on the server. */
   readonly onOpenServerGit?: () => void;
+  /** Opens Review on the checkout's changes. */
+  readonly onOpenReview?: () => void;
 }) {
   const checkout = useCodeCheckout();
   if (props.serverLocation !== undefined) {
@@ -105,10 +107,29 @@ export function CodeCheckoutBar(props: {
         </span>
       </span>
       {measured ? (
-        <span className="code-checkout-bar__diffstat">
-          <span className="code-checkout-bar__insertions">{`+${insertions.toLocaleString("en")}`}</span>
-          <span className="code-checkout-bar__deletions">{`−${deletions.toLocaleString("en")}`}</span>
-        </span>
+        props.onOpenReview === undefined ? (
+          <span className="code-checkout-bar__diffstat">
+            <span className="code-checkout-bar__insertions">{`+${insertions.toLocaleString("en")}`}</span>
+            <span className="code-checkout-bar__deletions">{`−${deletions.toLocaleString("en")}`}</span>
+          </span>
+        ) : (
+          // The size of the diff is the way into it. As plain text it named
+          // the changes and left the person to find the Review tool in the dock.
+          <OctantButton
+            aria-label={`Review changes: ${insertions.toLocaleString("en")} added, ${deletions.toLocaleString("en")} removed`}
+            className="code-checkout-bar__action window-no-drag"
+            onClick={props.onOpenReview}
+            size="sm"
+            title="Review changes"
+            type="button"
+            variant="ghost"
+          >
+            <span className="code-checkout-bar__diffstat">
+              <span className="code-checkout-bar__insertions">{`+${insertions.toLocaleString("en")}`}</span>
+              <span className="code-checkout-bar__deletions">{`−${deletions.toLocaleString("en")}`}</span>
+            </span>
+          </OctantButton>
+        )
       ) : null}
       {props.onCreatePullRequest === undefined ? null : (
         <CreatePullRequestAction onCreatePullRequest={props.onCreatePullRequest} />

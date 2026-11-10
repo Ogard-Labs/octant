@@ -38,6 +38,21 @@ describe("CodeCheckoutBar", () => {
     expect(screen.getByText(`−${(378).toLocaleString()}`)).toBeVisible();
   });
 
+  it("opens Review from the size of the diff", async () => {
+    const onOpenReview = vi.fn();
+    render(
+      <CodeCheckoutProvider observation={facts({ insertions: 12, deletions: 3 })}>
+        <CodeCheckoutBar onOpenReview={onOpenReview} />
+      </CodeCheckoutProvider>,
+    );
+
+    await userEvent.click(
+      screen.getByRole("button", { name: "Review changes: 12 added, 3 removed" }),
+    );
+
+    expect(onOpenReview).toHaveBeenCalledTimes(1);
+  });
+
   it("shows no totals for a clean tree or one the host did not measure", () => {
     const { rerender } = render(
       <CodeCheckoutProvider observation={facts({ changes: "clean" })}>
