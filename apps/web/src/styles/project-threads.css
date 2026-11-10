@@ -621,7 +621,7 @@
 .project-dialog h1 {
   margin: 2px 0 0;
   font-size: var(--oct-text-base);
-  font-weight: 600;
+  font-weight: var(--oct-weight-strong);
   letter-spacing: var(--oct-tracking-tight);
 }
 

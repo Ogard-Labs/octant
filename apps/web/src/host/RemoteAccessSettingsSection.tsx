@@ -843,6 +843,7 @@ export function RemoteAccessSettingsSection({
           {activeDevices.length !== 0 && confirmRevokeAll ? (
             <OctantConfirmDialog
               cancelLabel="Keep them"
+              destructive
               confirmLabel="Revoke all devices"
               onCancel={() => setConfirmRevokeAll(false)}
               onConfirm={() => void revokeAll()}

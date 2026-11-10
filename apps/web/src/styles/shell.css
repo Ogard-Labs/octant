@@ -4310,7 +4310,8 @@ html:not([data-octant-reduced-transparency="true"], [data-octant-increased-contr
 }
 
 .code-project-planner__review {
-  width: min(760px, calc(100vw - 32px));
+  /* The shared popup caps a width set here at its 420px default. */
+  --octant-dialog-width: 760px;
   max-height: calc(100dvh - 32px);
   overflow: auto;
 }
@@ -4334,7 +4335,7 @@ html:not([data-octant-reduced-transparency="true"], [data-octant-increased-contr
 .code-project-planner__review h2 {
   margin: 0;
   font-size: var(--oct-text-base);
-  font-weight: 600;
+  font-weight: var(--oct-weight-strong);
   letter-spacing: var(--oct-tracking-tight);
 }
 

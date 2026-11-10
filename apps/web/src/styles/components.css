@@ -372,8 +372,9 @@ html[data-octant-reduced-motion="true"] .turn-action-menu__more {
  * token-derived fill *and* the row's own words rather than colour alone.
  */
 .thread-search {
+  /* The shared popup caps a width set here at its 420px default. */
+  --octant-dialog-width: 520px;
   display: flex;
-  width: min(520px, calc(100vw - 32px));
   max-height: min(680px, calc(100vh - 80px));
   flex-direction: column;
   gap: 0;

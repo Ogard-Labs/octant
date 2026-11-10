@@ -5,7 +5,9 @@
   display: flex;
   flex-direction: column;
   gap: var(--oct-space-3);
-  width: min(32rem, calc(100vw - 2rem));
+  /* Said as the shared dialog's variable: a width set here loses to the
+     shared popup's own cap, and the dialog opened at the 420px default. */
+  --octant-dialog-width: 32rem;
   max-height: calc(100dvh - 2rem);
   overflow-y: auto;
 }
@@ -13,8 +15,8 @@
 .rewind-dialog__title {
   margin: 0;
   color: var(--oct-fg);
-  font-size: var(--oct-text-lg);
-  font-weight: var(--oct-weight-display);
+  font-size: var(--oct-text-base);
+  font-weight: var(--oct-weight-strong);
 }
 
 .rewind-dialog__detail,
