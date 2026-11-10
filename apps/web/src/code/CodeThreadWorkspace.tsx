@@ -2396,6 +2396,9 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
               {...(serverProject === undefined || props.onOpenGit === undefined
                 ? {}
                 : { onOpenServerGit: props.onOpenGit })}
+              {...(props.onOpenReview === undefined
+                ? {}
+                : { onOpenReview: () => props.onOpenReview?.() })}
             />
           }
           className="thread-composer code-thread-workspace__composer thread-column"
