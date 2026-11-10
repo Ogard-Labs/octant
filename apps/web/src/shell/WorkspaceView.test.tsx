@@ -214,7 +214,9 @@ describe("WorkspaceView welcome", () => {
     expect(screen.getByRole("textbox", { name: "First message" })).toHaveValue(
       "Keep this message while choosing a Project",
     );
-    expect(screen.getByRole("alert").closest(".composer")).not.toBeNull();
+    // The notice stays with the composer: on a start screen it stands above
+    // the context row, inside the same stack as the card.
+    expect(screen.getByRole("alert").closest(".composer-stack")).not.toBeNull();
     expect(
       screen.queryByText("Open it in a new window to keep its authority."),
     ).not.toBeInTheDocument();

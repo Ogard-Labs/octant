@@ -1147,12 +1147,23 @@ function LaunchedShell(
   // choice directly: routed here it would have opened the draft's dock and
   // left the thread it was meant for closed.
   const draftDockKeyRef = useRef<string | undefined>(undefined);
-  const [draftDockShownFor, setDraftDockShownFor] = useState<string>();
+  // Kept per draft: with two new tasks open, opening the dock on one must not
+  // close it on the other.
+  const [draftDocksShown, setDraftDocksShown] = useState<ReadonlySet<string>>(() => new Set());
   const setActivePaneDockVisible = useCallback(
     (next: boolean) => {
       const draftKey = draftDockKeyRef.current;
-      if (draftKey === undefined) setDockVisible(next);
-      else setDraftDockShownFor(next ? draftKey : undefined);
+      if (draftKey === undefined) {
+        setDockVisible(next);
+        return;
+      }
+      setDraftDocksShown((current) => {
+        if (current.has(draftKey) === next) return current;
+        const shown = new Set(current);
+        if (next) shown.add(draftKey);
+        else shown.delete(draftKey);
+        return shown;
+      });
     },
     [setDockVisible],
   );
@@ -3081,7 +3092,9 @@ function LaunchedShell(
     dockThreadId === undefined &&
     activeDraftKey !== undefined;
   draftDockKeyRef.current = dockHoldsForCodeDraft ? activeDraftKey : undefined;
-  const dockShown = dockHoldsForCodeDraft ? draftDockShownFor === activeDraftKey : dockVisible;
+  const dockShown = dockHoldsForCodeDraft
+    ? activeDraftKey !== undefined && draftDocksShown.has(activeDraftKey)
+    : dockVisible;
   const dockPresentation = useMemo(() => {
     const resolveDockSurface = (surface: unknown): RightUtilityDockResolution =>
       resolveRightUtilityDockSurface({
