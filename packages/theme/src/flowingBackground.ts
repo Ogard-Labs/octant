@@ -9,11 +9,11 @@ import { DEFAULT_LIGHT_TOKENS } from "./tokens";
 export interface FlowingPalette {
   /** Near-black (dark) or near-paper (light), low chroma, the accent's hue. */
   readonly deep: string;
-  /** The accent itself, sitting in the middle of the field. */
+  /** Dark saturated reading of the accent (dark) or a pale wash (light). */
   readonly mid: string;
-  /** Lighter and a little more chromatic than the accent. */
+  /** Brighter accent tone between mid and the glow. */
   readonly light: string;
-  /** Brighter still, with a slight hue shift toward the glow. */
+  /** Vivid luminous corner, with a slight hue shift toward the glow. */
   readonly glow: string;
 }
 
@@ -39,10 +39,13 @@ function stop(l: number, c: number, h: number): string {
 }
 
 /**
- * Four OKLCH stops from one accent hex. Dark mode keeps a near-black corner, the
- * accent in the middle, and a brighter, more saturated glow. Light mode inverts
- * that ramp into a pale wash so primary text still clears WCAG AA against every
- * stop, even before the reading veil sits on top.
+ * Four OKLCH stops from one accent hex. Dark mode is a dark field: near-black
+ * at the top-left, a darkened saturated reading of the accent through the
+ * middle, then a vivid (not pastel) glow at the bottom-right. The bright
+ * swatch itself is too light to sit in the middle, so mid is pulled down in
+ * lightness while chroma is kept. Light mode inverts that ramp into a pale
+ * wash so primary text still clears WCAG AA against every stop, even before
+ * the reading veil sits on top.
  */
 export function deriveFlowingPalette(accentHex: string, mode: FlowingPaletteMode): FlowingPalette {
   const accent = hexToOklch(accentHex);
@@ -60,14 +63,10 @@ export function deriveFlowingPalette(accentHex: string, mode: FlowingPaletteMode
     };
   }
   return {
-    deep: stop(0.09, clamp(chroma * 0.28, 0.02, 0.05), hue),
-    mid: accentHex.toLowerCase(),
-    light: stop(clamp(accent.l + 0.12, 0.48, 0.78), clamp(chroma * 1.22, chroma, 0.22), hue),
-    glow: stop(
-      clamp(accent.l + 0.26, 0.64, 0.88),
-      clamp(chroma * 1.08, chroma * 0.7, 0.2),
-      hue + GLOW_HUE_SHIFT,
-    ),
+    deep: stop(0.06, clamp(chroma * 0.38, 0.03, 0.055), hue),
+    mid: stop(0.38, clamp(chroma * 1.2, 0.12, 0.18), hue),
+    light: stop(0.56, clamp(chroma * 1.28, 0.14, 0.22), hue),
+    glow: stop(0.7, clamp(chroma * 1.28, 0.14, 0.22), hue + GLOW_HUE_SHIFT),
   };
 }
 

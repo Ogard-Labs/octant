@@ -763,9 +763,9 @@
 
 .app-backdrop__flowing-fallback {
   background:
-    radial-gradient(ellipse 70% 65% at 88% 92%, var(--octant-flowing-glow), transparent 58%),
-    radial-gradient(ellipse 75% 70% at 58% 58%, var(--octant-flowing-light), transparent 62%),
-    radial-gradient(ellipse 90% 80% at 38% 36%, var(--octant-flowing-mid), transparent 64%),
+    radial-gradient(ellipse 55% 50% at 92% 94%, var(--octant-flowing-glow), transparent 52%),
+    radial-gradient(ellipse 58% 52% at 74% 78%, var(--octant-flowing-light), transparent 56%),
+    radial-gradient(ellipse 70% 62% at 46% 48%, var(--octant-flowing-mid), transparent 58%),
     var(--octant-flowing-deep);
   background-size: 140% 140%;
   background-position: 20% 15%;

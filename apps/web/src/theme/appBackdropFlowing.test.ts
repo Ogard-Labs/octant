@@ -119,7 +119,9 @@ describe("flowing ground", () => {
     const { root, canvas } = mount();
     const stop = runFlowingField(canvas, root, false);
     expect(root.dataset.engine).toBe("css");
-    expect(root.style.getPropertyValue("--octant-flowing-mid")).toBe("#5b9cf5");
+    expect(root.style.getPropertyValue("--octant-flowing-mid")).toBe(
+      deriveFlowingPalette("#5b9cf5", "dark").mid,
+    );
     expect(canvas.width).toBe(Math.round(400 * FLOWING_RESOLUTION_SCALE));
     stop();
   });

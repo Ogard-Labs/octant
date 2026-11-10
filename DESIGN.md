@@ -811,12 +811,13 @@ the chosen pixel size and number of shades; a click on a start screen sends
 the same pushing, accent-lit ring through it at twenty-four frames a second,
 for under two seconds. Flowing is a drawn ground of large, soft, edgeless
 colour that drifts like ink in water, and only when a person picks it. Four
-stops are taken from the theme's accent in OKLCH — a deep tone at very low
-lightness and chroma, the accent, a lighter more chromatic tone, and a glow
+stops are taken from the theme's accent in OKLCH — a near-black deep tone, a
+dark saturated reading of the accent, a brighter accent tone, and a vivid glow
 with a slight hue shift — so a change of accent recolours the field over about
-600 ms. Dark mode keeps a near-black corner and a bright glow; light mode
-inverts that ramp into a pale wash whose every stop still clears WCAG AA
-against primary text. The field is painted in one GPU pass at about half
+600 ms. Dark mode is predominantly dark: near-black at the top-left, the dark
+accent through the middle, and one luminous corner at the bottom-right, never
+a pastel wash. Light mode inverts that ramp into a pale wash whose every stop
+still clears WCAG AA against primary text. The field is painted in one GPU pass at about half
 resolution and thirty frames a second, paused while the window is hidden or
 the ground is off-screen, and falls back to a few blurred radial gradients
 that use the same stops when that path is unavailable. A static grain at a few

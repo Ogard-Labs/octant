@@ -75,41 +75,45 @@ float fbm(vec2 p) {
 
 vec3 ramp(float amount) {
   float t = clamp(amount, 0.0, 1.0);
-  if (t < 0.36) return mix(uDeep, uMid, smoothstep(0.0, 0.36, t));
-  if (t < 0.66) return mix(uMid, uLight, smoothstep(0.36, 0.66, t));
-  return mix(uLight, uGlow, smoothstep(0.66, 1.0, t));
+  // Most of the field stays in deep-to-mid so the window reads dark. Only the
+  // last stretch climbs through the bright accent into the glow.
+  if (t < 0.5) return mix(uDeep, uMid, smoothstep(0.0, 0.5, t));
+  if (t < 0.78) return mix(uMid, uLight, smoothstep(0.5, 0.78, t));
+  return mix(uLight, uGlow, smoothstep(0.78, 1.0, t));
 }
 
 void main() {
-  vec2 uv = gl_FragCoord.xy / uResolution;
+  // gl_FragCoord origin is bottom-left; the deep tone must sit at the
+  // window's top-left, so Y is flipped into page space.
+  vec2 uv = vec2(gl_FragCoord.x, uResolution.y - gl_FragCoord.y) / uResolution;
   float aspect = uResolution.x / max(uResolution.y, 1.0);
   vec2 p = vec2(uv.x * aspect, uv.y);
   float t = uTime * 0.022;
 
   vec2 q = vec2(
-    fbm(p * 0.62 + vec2(0.0, t * 0.31)),
-    fbm(p * 0.62 + vec2(5.2, 1.3) - vec2(t * 0.24, t * 0.16))
+    fbm(p * 0.58 + vec2(0.0, t * 0.31)),
+    fbm(p * 0.58 + vec2(5.2, 1.3) - vec2(t * 0.24, t * 0.16))
   );
   vec2 r = vec2(
-    fbm(p * 0.48 + 2.4 * q + vec2(1.7, 9.2) + vec2(t * 0.13, -t * 0.1)),
-    fbm(p * 0.48 + 2.4 * q + vec2(8.3, 2.8) - vec2(t * 0.11, t * 0.09))
+    fbm(p * 0.44 + 2.2 * q + vec2(1.7, 9.2) + vec2(t * 0.13, -t * 0.1)),
+    fbm(p * 0.44 + 2.2 * q + vec2(8.3, 2.8) - vec2(t * 0.11, t * 0.09))
   );
-  float n = fbm(p * 0.42 + 2.1 * r);
+  float n = fbm(p * 0.4 + 2.0 * r);
 
-  float diag = uv.x * 0.58 + uv.y * 0.76;
-  float field = clamp(diag * 0.92 + n * 0.28 - 0.04, 0.0, 1.0);
-  field = smoothstep(0.02, 0.98, field);
+  float diag = uv.x * 0.52 + uv.y * 0.48;
+  float field = clamp(pow(max(diag, 0.0), 1.28) * 0.9 + n * 0.2 - 0.02, 0.0, 1.0);
+  field = smoothstep(0.0, 1.0, field);
 
   vec3 col = ramp(field);
-  float blob = smoothstep(0.72, 0.18, length((uv - vec2(0.88, 0.92)) * vec2(0.7, 1.0)));
-  col = mix(col, uGlow, blob * 0.32);
-
-  vec2 vigUv = (uv - 0.5) * vec2(1.12, 1.02);
-  float vig = clamp(1.0 - 0.48 * dot(vigUv, vigUv), 0.0, 1.0);
-  col = mix(uDeep, col, vig);
+  float midBand = smoothstep(0.78, 0.18, length((uv - vec2(0.46, 0.5)) * vec2(0.82, 1.05)));
+  col = mix(col, uMid, midBand * 0.28);
+  float blob = smoothstep(0.58, 0.08, length((uv - vec2(0.93, 0.95)) * vec2(0.72, 0.9)));
+  col = mix(col, uGlow, blob * 0.52);
+  float toDeep = pow(clamp((1.0 - uv.x) * (1.0 - uv.y), 0.0, 1.0), 0.9);
+  col = mix(col, uDeep, toDeep * 0.42);
 
   float grain = hash2(gl_FragCoord.xy).x;
-  col += (grain - 0.5) * 0.032;
+  col += (grain - 0.5) * 0.028;
   outColor = vec4(clamp(col, 0.0, 1.0), 1.0);
 }
 `;

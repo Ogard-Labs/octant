@@ -15,22 +15,24 @@ const CLAY = "#d97757";
 const LIGHT_INK = "#141414";
 
 describe("flowing palette derivation", () => {
-  it("keeps the accent as the dark-mode mid stop and builds a deep-to-glow ramp around its hue", () => {
+  it("builds a dark saturated ramp around the accent hue, not a pastel wash of the swatch", () => {
     const palette = deriveFlowingPalette(BLUE, "dark");
-    expect(palette.mid).toBe(BLUE);
-    expect(flowingPaletteLightness(palette.deep)).toBeLessThan(0.16);
-    expect(flowingPaletteLightness(palette.deep)).toBeLessThan(
-      flowingPaletteLightness(palette.mid),
-    );
+    expect(flowingPaletteLightness(palette.deep)).toBeLessThan(0.12);
+    expect(flowingPaletteLightness(palette.mid)).toBeGreaterThan(0.2);
+    expect(flowingPaletteLightness(palette.mid)).toBeLessThan(0.4);
+    expect(flowingPaletteLightness(palette.mid)).toBeLessThan(flowingPaletteLightness(BLUE) - 0.2);
     expect(flowingPaletteLightness(palette.light)).toBeGreaterThan(
       flowingPaletteLightness(palette.mid),
     );
     expect(flowingPaletteLightness(palette.glow)).toBeGreaterThan(
       flowingPaletteLightness(palette.light),
     );
-    expect(flowingPaletteChroma(palette.deep)).toBeLessThan(flowingPaletteChroma(palette.mid));
+    expect(flowingPaletteLightness(palette.glow)).toBeLessThan(0.8);
+    expect(flowingPaletteChroma(palette.mid)).toBeGreaterThan(0.08);
+    expect(flowingPaletteChroma(palette.light)).toBeGreaterThan(0.1);
+    expect(flowingPaletteChroma(palette.glow)).toBeGreaterThan(0.1);
     const midHue = flowingPaletteHue(palette.mid);
-    expect(Math.abs(flowingPaletteHue(palette.deep) - midHue)).toBeLessThan(8);
+    expect(Math.abs(flowingPaletteHue(palette.deep) - midHue)).toBeLessThan(12);
     const glowShift = (flowingPaletteHue(palette.glow) - midHue + 360) % 360;
     expect(glowShift).toBeGreaterThan(8);
     expect(glowShift).toBeLessThan(22);
@@ -39,11 +41,12 @@ describe("flowing palette derivation", () => {
   it("follows a different accent's hue so clay and blue fields do not share a ramp", () => {
     const blue = deriveFlowingPalette(BLUE, "dark");
     const clay = deriveFlowingPalette(CLAY, "dark");
-    expect(clay.mid).toBe(CLAY);
-    expect(blue.mid).toBe(BLUE);
+    expect(flowingPaletteLightness(clay.mid)).toBeLessThan(0.4);
+    expect(flowingPaletteLightness(blue.mid)).toBeLessThan(0.4);
     const hueGap = Math.abs(flowingPaletteHue(blue.glow) - flowingPaletteHue(clay.glow));
     expect(Math.min(hueGap, 360 - hueGap)).toBeGreaterThan(40);
     expect(blue.deep).not.toBe(clay.deep);
+    expect(blue.mid).not.toBe(clay.mid);
     expect(blue.glow).not.toBe(clay.glow);
   });
 
