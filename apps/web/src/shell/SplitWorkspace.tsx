@@ -500,17 +500,28 @@ function WorkspacePaneView(props: WorkspaceNodeProps & { readonly pane: Workspac
     if (selectedTabIds.size > 0) setSelectedTabIds(new Set());
     return false;
   };
+  // A pane's only tab moves its pane, as the title row does. Any other tab
+  // opens where it lands and leaves this pane's row. That includes the open
+  // one when the pane holds more: the pane shows the neighbour a close would
+  // show, and the tab can then split its own pane. Carried with its pane, the
+  // open tab had no drop target anywhere in the pane it was in, and dropped on
+  // another pane it took the whole pane, tabs and all.
+  const tabDragOrigin = (entry: WorkspaceTab) => {
+    const fromTab = { fromTab: { paneId: pane.paneId, tabId: entry.id } };
+    if (String(entry.id) !== String(surface.id)) return fromTab;
+    const index = navigation.findIndex((item) => String(item.id) === String(entry.id));
+    const neighbor = navigation[index - 1] ?? navigation[index + 1];
+    return neighbor === undefined
+      ? { paneId: pane.paneId }
+      : { ...fromTab, openTab: { paneId: pane.paneId, neighborTabId: neighbor.id } };
+  };
   const tabDragSource = (entry: WorkspaceTab) => {
     const selected = selectedTabs.length >= 2 && selectedTabIds.has(String(entry.id));
     return {
       dragKey: `tab:${String(pane.paneId)}:${String(entry.id)}`,
       surface: entry,
       title: workspaceSurfaceTitle(entry, props.liveThreadTitles),
-      // The open tab moves its pane, as the title row does; any other tab
-      // opens where it lands and leaves this pane's row.
-      ...(String(entry.id) === String(surface.id)
-        ? { paneId: pane.paneId }
-        : { fromTab: { paneId: pane.paneId, tabId: entry.id } }),
+      ...tabDragOrigin(entry),
       ...(selected ? { surfaces: selectedTabs } : {}),
     };
   };

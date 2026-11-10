@@ -69,6 +69,47 @@ describe("workspace surface drag geometry", () => {
     ).toBeNull();
   });
 
+  it("lets a pane's open tab split the pane it is in when the pane holds other tabs, and nothing else there", () => {
+    const openTab: WorkspaceSurfaceDragSource = {
+      dragKey: "tab:open",
+      surface: draggedSurface,
+      title: draggedSurface.title,
+      fromTab: { paneId: sourcePaneId, tabId: draggedSurface.id },
+      openTab: {
+        paneId: sourcePaneId,
+        neighborTabId: decodeWorkspaceTabId("00000000-0000-4000-8000-000000001104"),
+      },
+    };
+    const panes = [paneGeometry(sourcePaneId, 0), paneGeometry(targetPaneId, 400)];
+    // Its own pane's right edge: the tab lands beside the pane's next tab.
+    expect(
+      resolveWorkspaceSurfaceDropDestination({
+        panes,
+        point: { x: 390, y: 300 },
+        source: openTab,
+        workspaceRect,
+      }),
+    ).toEqual({ kind: "edge", targetPaneId: sourcePaneId, edge: "right" });
+    // Its own pane's centre already shows it.
+    expect(
+      resolveWorkspaceSurfaceDropDestination({
+        panes,
+        point: { x: 200, y: 300 },
+        source: openTab,
+        workspaceRect,
+      }),
+    ).toBeNull();
+    // Another pane's centre takes it as it takes any tab.
+    expect(
+      resolveWorkspaceSurfaceDropDestination({
+        panes,
+        point: { x: 600, y: 300 },
+        source: openTab,
+        workspaceRect,
+      }),
+    ).toEqual({ kind: "center", targetPaneId });
+  });
+
   it("lets a sidebar row land on any pane's center, including the active one", () => {
     expect(
       resolveWorkspaceSurfaceDropDestination({

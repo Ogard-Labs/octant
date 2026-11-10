@@ -495,9 +495,20 @@ drop) is kept.
 **Moving tabs and showing them side by side.** A tab drags the way a pane's
 title row does, through the same drop rules: dropped on another pane's edge it
 splits that pane and opens there, dropped on a pane's centre it opens in that
-pane, and a tab that is not the pane's open one may split its own pane, so a
-tab dragged to its pane's right edge lands beside the open thread. A tab that
-moved out of a pane leaves that pane's tab row. ⌘-click (Ctrl-click off Apple
+pane, and any tab of a pane that holds more than one may split its own pane,
+so a tab dragged to its pane's right edge lands beside the thread the pane
+shows. The pane's open tab does so too: the pane first shows the neighbour a
+close would show, then the tab is placed. (Carried with its pane, the open tab
+had no drop target anywhere in the pane it was in, and dropped on another pane
+it took the whole pane, its other tabs with it.) A pane's only tab moves its
+pane, as the title row does. A tab that moved out of a pane leaves that pane's
+tab row.
+
+A thread row drags out of the sidebar the same way from either arrangement,
+Status or the Project tree. Chat and Work threads share that list but not a
+layout, so a row is dragged as the kind of thread it is, and a row of the
+other mode dropped on a pane opens the way its click does, the window
+following it to that mode, where the host would refuse to place it. ⌘-click (Ctrl-click off Apple
 platforms) adds a tab to a selection or takes it out; Shift-click selects the
 run of tabs from the open one to the clicked one; a plain click clears the
 selection and opens the tab. Selected tabs carry a wash between the plain and

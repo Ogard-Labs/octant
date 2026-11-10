@@ -149,7 +149,16 @@ import {
 import { SidebarThreadRowContent } from "./SidebarThreadRowContent";
 import { threadRowMenuIsEmpty, type ThreadRowActions } from "./ThreadRowMenu";
 import { SidebarThreadTabsContext } from "../shell/sidebarThreadTabs";
-import { useContext, useEffect, useId, useMemo, useRef, useState } from "react";
+import { SidebarThreadDragContext } from "../shell/useWorkspaceTabDrag";
+import {
+  useContext,
+  useEffect,
+  useId,
+  useMemo,
+  useRef,
+  useState,
+  type PointerEvent as ReactPointerEvent,
+} from "react";
 
 type ThreadGroupId = "recents" | "all" | "unfiled";
 
@@ -1500,6 +1509,11 @@ function ActivityThreadButton(props: {
 }) {
   const shows = useSidebarRowProperties();
   const tabs = useContext(SidebarThreadTabsContext);
+  // A Status row drags into the workspace exactly as a Project tree row does.
+  // Only the tree's rows offered themselves, so in Status, the arrangement the
+  // sidebar opens on, a thread could be opened by a click and never placed.
+  const drag = useContext(SidebarThreadDragContext);
+  const rowId = props.thread.navigationId;
   const parentTitle = lineageParentTitle(props.thread, props.lineageThreads);
   const selected = props.activeThreadId === props.thread.navigationId;
   const pullRequest = shows.pullRequest ? props.thread.pullRequests?.items[0] : undefined;
@@ -1516,10 +1530,28 @@ function ActivityThreadButton(props: {
       data-attention={props.thread.attention}
       data-thread-id={props.thread.threadId}
       onClick={() => {
+        // The click that ends a drag belongs to the drop, not to the row.
+        if (drag?.consumeThreadClickSuppression(rowId) === true) return;
         tabs?.openAsPreview(props.thread.threadId);
         props.onSelectThread(props.thread.navigationId);
       }}
       onDoubleClick={() => tabs?.keep(props.thread.threadId)}
+      {...(drag === null
+        ? {}
+        : {
+            onPointerCancel: drag.onPointerCancel,
+            onPointerDown: (event: ReactPointerEvent<HTMLButtonElement>) =>
+              drag.beginThreadDrag(event, {
+                rowId,
+                threadId: props.thread.threadId,
+                title: props.thread.title,
+                ...(props.thread.projectId === undefined
+                  ? {}
+                  : { projectId: props.thread.projectId }),
+              }),
+            onPointerMove: drag.onPointerMove,
+            onPointerUp: drag.onPointerUp,
+          })}
       type="button"
       variant="bare"
     >
