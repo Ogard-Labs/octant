@@ -75,6 +75,7 @@
     "./work-delivery-policy": "./src/workDeliveryPolicy.ts",
     "./work-promotion-policy": "./src/workPromotionPolicy.ts",
     "./work-project-status-policy": "./src/workProjectStatusPolicy.ts",
+    "./design-system-policy": "./src/designSystemPolicy.ts",
     "./work-research-policy": "./src/workResearchPolicy.ts",
     "./event-policy": "./src/eventPolicy.ts",
     "./thread-retention-policy": "./src/threadRetentionPolicy.ts",

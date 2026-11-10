@@ -177,7 +177,7 @@ in one card: the title alone on its line, then the state chip, the approval
 posture as quiet text (it is a standing setting, not a state or a control, so
 it takes no chip), and facts on one line beneath it, then Details. A Work
 Project's thread list takes the same labelled card. Settings
-rows split into **Context** (Memory, Brand kit, Canvases) and **Access and
+rows split into **Context** (Memory, Design system on a Work or Code Project ([Project design systems](design-systems.md#the-design-system-panel)), Brand kit, Canvases) and **Access and
 limits** (Provider access, Guardrail level, Developer tools on a Work
 Project, Disposable desktop, Status file, Spend ceiling); a group with no
 rows is not drawn. **Guardrail level** shows the level the Project's threads

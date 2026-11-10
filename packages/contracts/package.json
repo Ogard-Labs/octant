@@ -40,6 +40,7 @@
     "./work-board": "./src/workBoard.ts",
     "./work-overview": "./src/workOverview.ts",
     "./work-project-status": "./src/workProjectStatus.ts",
+    "./design-systems": "./src/designSystems.ts",
     "./work-promotion": "./src/workPromotion.ts",
     "./work-requests": "./src/workRequests.ts",
     "./pending-requests": "./src/pendingRequests.ts",

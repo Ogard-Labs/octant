@@ -1328,6 +1328,7 @@ export function startOctantServer(
       workThreadProjection,
     });
     const {
+      designSystemRoutes,
       fleetActivityRoutes,
       pendingRequestRoutes,
       sidebarBackgroundRoutes,
@@ -1683,6 +1684,7 @@ export function startOctantServer(
       codeRoutes,
       computerUseRoutes,
       desktopPaneRoutes,
+      designSystemRoutes,
       contextRoutes,
       diagnosticsExportRoutes,
       discoveryRoutes,

@@ -297,7 +297,10 @@ no Project, or a Project without a kit, is told nothing. The kit is looked up
 by the Project the host bound the thread to, never by a name the model gives,
 and `describe` still reads no window state. The agent's design carries its own
 copy of the tokens, so later edits to the kit change new designs, not ones
-already made.
+already made. A Work or Code Project whose own `DESIGN.md` carries tokens lends
+those instead: `describe` returns them as `designSystem` (path, name, `brand`)
+with guidance that every design kind follows the design system, and the kit is
+not returned ([Project design systems](design-systems.md#where-it-is-used)).
 
 A share carries a brand (validated again before it leaves) and the diagram
 fields, so share version 11 names blocks up to Canvas version 21 and a share

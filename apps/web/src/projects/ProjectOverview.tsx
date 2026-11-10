@@ -25,6 +25,7 @@ import { FolderPicker } from "./FolderPicker";
 import { ProjectMemorySection } from "./ProjectMemorySection";
 import { ProjectThreadsSection } from "./ProjectThreadsSection";
 import { ProjectBrandKitSection } from "./ProjectBrandKitSection";
+import { ProjectDesignSystemSection } from "./ProjectDesignSystemSection";
 import { ProjectActionsSection } from "./ProjectActionsSection";
 import { ProjectFoldersSection } from "./ProjectFoldersSection";
 import type { ProjectChange } from "./useProjectController";
@@ -421,7 +422,7 @@ export function ProjectOverview(props: ProjectOverviewProps) {
         </div>
         {/*
           Two groups rather than one run of identical rows: what the Project's
-          threads know (memory, brand, canvases) and what they may reach or
+          threads know (memory, design system, brand, canvases) and what they may reach or
           spend. Six alike rows in one list gave a reader nothing to scan by.
         */}
         <div aria-label="Project settings" className="project-overview__inspectors">
@@ -443,11 +444,28 @@ export function ProjectOverview(props: ProjectOverviewProps) {
                 />
               </ProjectOverviewInspector>
             )}
+            {props.projectClient === undefined || props.project.type === "chat" ? null : (
+              <ProjectOverviewInspector
+                key={`${String(props.project.id)}-design-system`}
+                label="Design system"
+                summary="DESIGN.md: the look code, documents, and decks follow"
+              >
+                <ProjectDesignSystemSection
+                  client={props.projectClient}
+                  disabled={archived || connectionStale}
+                  project={props.project}
+                />
+              </ProjectOverviewInspector>
+            )}
             {props.onBrandKitChange === undefined ? null : (
               <ProjectOverviewInspector
                 key={`${String(props.project.id)}-brand-kit`}
                 label="Brand kit"
-                summary="Colours and fonts your designs can use"
+                summary={
+                  props.project.type === "chat"
+                    ? "Colours and fonts your designs can use"
+                    : "Colours and fonts designs use when no DESIGN.md sets them"
+                }
               >
                 <ProjectBrandKitSection
                   disabled={archived || connectionStale}

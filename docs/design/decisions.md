@@ -56,7 +56,7 @@ The former decision archive is history in `docs/legacy/` and has no authority.
 | [Design system](#design-system)                                                       | 10        | 10      | 0            | 0                   |
 | [Workspace](#workspace)                                                               | 14        | 14      | 0            | 0                   |
 | [Start screen](#start-screen)                                                         | 3         | 3       | 0            | 0                   |
-| [Canvas](#canvas)                                                                     | 9         | 8       | 1            | 0                   |
+| [Canvas](#canvas)                                                                     | 10        | 9       | 1            | 0                   |
 | [Artifact sync](#artifact-sync)                                                       | 5         | 5       | 0            | 0                   |
 | [Browser](#browser)                                                                   | 6         | 5       | 1            | 0                   |
 | [Provider runtimes](#provider-runtimes)                                               | 6         | 6       | 0            | 0                   |
@@ -67,7 +67,7 @@ The former decision archive is history in `docs/legacy/` and has no authority.
 | [Code tooling](#code-tooling)                                                         | 2         | 1       | 1            | 0                   |
 | [Disposable desktops](#disposable-desktops)                                           | 4         | 3       | 1            | 0                   |
 | [Bots](#bots)                                                                         | 1         | 0       | 0            | 1                   |
-| **All areas**                                                                         | **230**   | **193** | **32**       | **5**               |
+| **All areas**                                                                         | **231**   | **194** | **32**       | **5**               |
 
 ## Principles and hard lines
 
@@ -2498,6 +2498,18 @@ Charts, tables, mockups, designs and flow boards share one visual system.
 - A flow board's hotspot is the only live control, and a list reaches every screen without the board.
 
 Status: Built. Since: —. Detail: [Canvas visuals: Data visualisation](canvas-visuals.md#data-visualisation), [Mockups and designs](canvas-visuals.md#mockups-and-designs) and [Flow boards](canvas-visuals.md#flow-boards).
+
+### Project design systems
+
+A Work or Code Project's design system is a `DESIGN.md` in its folder. Octant lists, draws, edits, and creates these files, every Work and Code turn follows the governing one, and Canvas designs draw with its tokens (maintainer request, 2026-11-10).
+
+- The file is the only source: nothing is stored on the Project record or journaled. The top-level `DESIGN.md` is the Project's own, else the only one; the nearest `DESIGN.md` above a file governs it.
+- Front-matter colours, typography, radii, and spacing become Canvas brand tokens under the design brand rule; each is reported carried, adjusted (a font stack without web faces), or refused with its reason. At most 32 are carried.
+- Every Work and Code turn carries the rule to follow it and the Project's own file as keyed standing context, read from the folder each turn (a Code turn from its worktree). Nothing is added for a server Project's remote folder.
+- Canvas `describe` returns the design system's tokens for every design kind (documents, decks, sites, screens, UI kits, flows); a running design copies the values into its own stylesheet, and typed blocks keep the reader's theme. Tokens from `DESIGN.md` take the place of the brand kit.
+- Only a window on this host may list, read, create, or save one; a save replaces only the revision it opened; no read or write follows a link; files over 256 KiB are left to the editor.
+
+Status: Built. Since: 2026-11-10. Detail: [Project design systems](design-systems.md).
 
 ### Public links
 

@@ -1,4 +1,6 @@
 import { decodeBrowserThreadId } from "@octant/contracts";
+import { DesignSystemFiles } from "../designSystems/designSystemFiles";
+import { designSystemTurnContext } from "../designSystems/designSystemContext";
 import { browserToolTransport } from "@octant/domain";
 import { threadWorkingDirectoryCurrent } from "../threadWorkingDirectoryAuthority";
 import type { ThreadMoveHolds } from "../hub/threadMoveHolds";
@@ -383,6 +385,7 @@ export type CodeRuntimeDependencies = Pick<ServerStart, "options" | "persistence
   };
 
 export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
+  const designSystemFiles = new DesignSystemFiles();
   const {
     conversationInputTransfer,
     threadAwaitsHarnessApproval,
@@ -698,6 +701,12 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
           }),
         projectMemoryEntries: (thread) =>
           persistence.readProjectMemory(thread.projectId).active.map((entry) => entry.content),
+        designSystemContext: ({ thread, root, extraFolders }) =>
+          designSystemTurnContext(designSystemFiles, {
+            main: root,
+            extra: extraFolders,
+            projectName: persistence.readProject(thread.projectId)?.name ?? "",
+          }),
         chosenAutoReviewer: (thread) => {
           const project = persistence.readProject(thread.projectId);
           return chosenAutoReviewer({

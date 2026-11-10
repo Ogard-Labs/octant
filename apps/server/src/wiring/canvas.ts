@@ -57,6 +57,8 @@ import type {
   CanvasProvenance,
 } from "@octant/contracts/canvas";
 import { CanvasDesignRunTickets } from "../canvas/canvasDesignPage";
+import { DesignSystemFiles, designSystemFolders } from "../designSystems/designSystemFiles";
+import { projectCanvasBrand } from "../designSystems/designSystemContext";
 import {
   type CanvasDesignAssetPorts,
   readCanvasDesignAssetFile,
@@ -909,6 +911,7 @@ export function wireCanvas(deps: CanvasDependencies) {
   // through the same service and the same Project the person clicking New
   // Canvas reaches. The Project and workspace are resolved from the window
   // here, never taken from the agent.
+  const designSystemFiles = new DesignSystemFiles();
   const canvasAgentToolPort: CanvasAgentToolPort = {
     activeContext: (windowId) => resolveCanvasActiveContext(shellService.bootstrap(windowId)),
     project: async (windowId, projectId) => {
@@ -918,7 +921,17 @@ export function wireCanvas(deps: CanvasDependencies) {
         ? undefined
         : { id: String(project.id), type: project.type, lifecycle: project.lifecycle };
     },
-    brandKit: (projectId) => persistence.readProject(decodeProjectId(projectId))?.brandKit,
+    // The design system in the Project's folder outranks the kit on its
+    // record, so a design follows the same tokens the Project's code does.
+    brandKit: async (projectId) => {
+      const project = persistence.readProject(decodeProjectId(projectId));
+      if (project === undefined) return undefined;
+      return projectCanvasBrand({
+        files: designSystemFiles,
+        folders: designSystemFolders(project),
+        brandKit: project.brandKit,
+      });
+    },
     canvas: canvasService,
     commentRequests: (canvasId) => canvasCommentService.agentRequests(canvasId),
     markReader: ({ readerId, canvasId }) => {

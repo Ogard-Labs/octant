@@ -19,6 +19,7 @@ export * from "./workFileListing";
 export * from "./workBoard";
 export * from "./workOverview";
 export * from "./workProjectStatus";
+export * from "./designSystems";
 export * from "./workPromotion";
 export * from "./workRequests";
 export * from "./pendingRequests";
