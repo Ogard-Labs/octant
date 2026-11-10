@@ -24,6 +24,21 @@ describe("a Project's DESIGN.md", () => {
     expect(reading.sections).toEqual(["Colour", "Voice"]);
   });
 
+  it("reads headings padded with long runs of tabs without slowing down", () => {
+    const body = `#\ta${"\t".repeat(200_000)}\u2028\n##\ta${"\t".repeat(200_000)}\u2028\n# Acme\n## x\n`;
+    const started = performance.now();
+    const reading = readDesignSystem({
+      frontMatter: undefined,
+      hasFrontMatter: false,
+      body,
+      fallbackName: "Project",
+    });
+    expect(performance.now() - started).toBeLessThan(500);
+    expect(reading.name).toBe("a");
+    expect(reading.sections).toHaveLength(2);
+    expect(reading.sections.at(-1)).toBe("x");
+  });
+
   it("reads a file with no front matter as prose named by its title", () => {
     const text = "# Field notes\n\n## Colour\n";
     const split = splitDesignSystemFrontMatter(text);

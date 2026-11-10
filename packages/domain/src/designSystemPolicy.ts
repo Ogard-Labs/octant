@@ -153,21 +153,41 @@ function readToken(group: DesignSystemTokenGroup, key: string, raw: unknown): De
     : { ...base, status: "refused", note: refusal };
 }
 
+/**
+ * The text of a heading at exactly this level, or undefined. Scanned once
+ * rather than matched with a regex: a pattern with a lazy capture between two
+ * whitespace runs backtracked quadratically on a long run of tabs, and the
+ * file is the person's, so any text may arrive.
+ */
+function headingText(line: string, level: 1 | 2): string | undefined {
+  const marker = "#".repeat(level);
+  if (!line.startsWith(marker)) return undefined;
+  const after = line.charAt(level);
+  if (after !== " " && after !== "\t") return undefined;
+  let end = line.length;
+  while (end > level && " \t#".includes(line.charAt(end - 1))) end -= 1;
+  const text = line.slice(level, end).trim();
+  return text === "" ? undefined : text;
+}
+
 function sectionsOf(body: string): ReadonlyArray<string> {
   const sections: string[] = [];
   let fenced = false;
   for (const line of body.split(/\r?\n/)) {
     if (/^\s*(?:```|~~~)/.test(line)) fenced = !fenced;
     if (fenced) continue;
-    const match = /^##[ \t]+(.+?)[ \t#]*$/.exec(line);
-    if (match?.[1] !== undefined) sections.push(match[1]);
+    const heading = headingText(line, 2);
+    if (heading !== undefined) sections.push(heading);
   }
   return sections;
 }
 
 function titleOf(body: string): string | undefined {
-  const match = /^#[ \t]+(.+?)[ \t#]*$/m.exec(body);
-  return match?.[1];
+  for (const line of body.split(/\r?\n/)) {
+    const heading = headingText(line, 1);
+    if (heading !== undefined) return heading;
+  }
+  return undefined;
 }
 
 /**
