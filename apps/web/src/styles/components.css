@@ -551,6 +551,44 @@ html[data-octant-reduced-motion="true"] .turn-action-menu__more {
   flex-wrap: wrap;
 }
 
+/* The budget sits on its own row so its three limits read as one decision. */
+.thread-goal__budget {
+  display: flex;
+  flex-basis: 100%;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.thread-goal__budget legend {
+  padding: 0;
+  font-size: var(--oct-text-xs);
+  color: var(--oct-muted);
+}
+
+.thread-goal__budget-note {
+  flex-basis: 100%;
+  margin: 0;
+  color: var(--oct-muted);
+  font-size: var(--oct-text-xs);
+}
+
+.thread-goal__budget-field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--oct-space-1);
+  color: var(--oct-muted);
+  font-size: var(--oct-text-xs);
+}
+
+.thread-goal__budget-field input {
+  inline-size: 8rem;
+}
+
 .thread-goal__status,
 .thread-goal__empty,
 .thread-goal__command-error,

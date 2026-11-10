@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import {
   decodeThreadGoalCommand,
   type ThreadGoal,
+  type ThreadGoalBudget,
   type ThreadGoalHistoryEntry,
 } from "@octant/contracts";
 import { GoalClientFailure, type GoalClient } from "@octant/client-runtime/goal-client";
@@ -33,7 +34,8 @@ export interface GoalController {
   readonly create: (objective: string) => Promise<boolean>;
   readonly pause: () => Promise<boolean>;
   readonly resume: () => Promise<boolean>;
-  readonly revise: (objective: string) => Promise<boolean>;
+  /** A budget replaces the goal's whole budget; leaving it out keeps the current one. */
+  readonly revise: (objective: string, budget?: ThreadGoalBudget) => Promise<boolean>;
   readonly complete: () => Promise<boolean>;
 }
 
@@ -177,7 +179,7 @@ export function useGoalController(options: UseGoalControllerOptions): GoalContro
   const complete = useCallback(() => transition("complete-thread-goal")(), [transition]);
 
   const revise = useCallback(
-    (objective: string) =>
+    (objective: string, budget?: ThreadGoalBudget) =>
       run((current) =>
         current === null
           ? undefined
@@ -188,6 +190,7 @@ export function useGoalController(options: UseGoalControllerOptions): GoalContro
               goalId: current.id,
               revisionId: mintId(),
               objective,
+              ...(budget === undefined ? {} : { budget }),
             },
       ),
     [mintId, run],

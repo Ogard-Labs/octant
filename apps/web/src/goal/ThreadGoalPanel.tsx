@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import type { GoalClient } from "@octant/client-runtime/goal-client";
 import type { GoalLoopClient } from "@octant/client-runtime/goal-loop-client";
+import type { ThreadGoalBudget } from "@octant/contracts";
 import { AlertTriangle, CloudOff, Loader, ShieldAlert, Target } from "lucide-react";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantInput } from "../ui/base/OctantInput";
@@ -40,6 +41,9 @@ export function ThreadGoalPanel(props: ThreadGoalPanelProps) {
   const [objective, setObjective] = useState("");
   const [revising, setRevising] = useState(false);
   const [revision, setRevision] = useState("");
+  const [budgetDraft, setBudgetDraft] = useState<BudgetDraft>(EMPTY_BUDGET_DRAFT);
+  /** The budget as it was when Revise opened; the draft is compared with this, not the live goal. */
+  const [budgetOpened, setBudgetOpened] = useState<ThreadGoalBudget>({});
 
   const goal = controller.goal;
   const { pending, reload } = controller;
@@ -78,6 +82,8 @@ export function ThreadGoalPanel(props: ThreadGoalPanelProps) {
             onComplete={() => void controller.complete()}
             onRevise={() => {
               setRevision(goal.objective);
+              setBudgetDraft(budgetDraftFrom(goal.budget));
+              setBudgetOpened(goal.budget);
               setRevising(true);
             }}
           />
@@ -93,8 +99,13 @@ export function ThreadGoalPanel(props: ThreadGoalPanelProps) {
               onSubmit={(event) => {
                 event.preventDefault();
                 const trimmed = revision.trim();
-                if (trimmed === "") return;
-                void controller.revise(trimmed).then((accepted) => {
+                const budget = budgetFromDraft(budgetDraft, budgetOpened);
+                if (trimmed === "" || budget.kind === "invalid") return;
+                const saved =
+                  budget.kind === "unchanged"
+                    ? controller.revise(trimmed)
+                    : controller.revise(trimmed, budget.budget);
+                void saved.then((accepted) => {
                   if (accepted) setRevising(false);
                 });
               }}
@@ -104,8 +115,56 @@ export function ThreadGoalPanel(props: ThreadGoalPanelProps) {
                 onChange={(event) => setRevision(event.target.value)}
                 value={revision}
               />
+              <fieldset className="thread-goal__budget">
+                <legend>Budget</legend>
+                <p className="thread-goal__budget-note" role="note">
+                  A loop stops at the first limit it reaches. Leave a field empty for no limit of
+                  that kind; a loop needs at least one.
+                </p>
+                <label className="thread-goal__budget-field">
+                  <span>Turns</span>
+                  <OctantInput
+                    inputMode="numeric"
+                    onChange={(event) =>
+                      setBudgetDraft({ ...budgetDraft, turns: event.target.value })
+                    }
+                    value={budgetDraft.turns}
+                  />
+                </label>
+                <label className="thread-goal__budget-field">
+                  <span>Minutes</span>
+                  <OctantInput
+                    inputMode="numeric"
+                    onChange={(event) =>
+                      setBudgetDraft({ ...budgetDraft, minutes: event.target.value })
+                    }
+                    value={budgetDraft.minutes}
+                  />
+                </label>
+                <label className="thread-goal__budget-field">
+                  <span>Tokens</span>
+                  <OctantInput
+                    inputMode="numeric"
+                    onChange={(event) =>
+                      setBudgetDraft({ ...budgetDraft, tokens: event.target.value })
+                    }
+                    value={budgetDraft.tokens}
+                  />
+                </label>
+              </fieldset>
+              {budgetFromDraft(budgetDraft, budgetOpened).kind === "invalid" ? (
+                /* ui-boundary-exception: inline-field-error */
+                <p className="thread-goal__command-error" role="alert">
+                  <AlertTriangle aria-hidden="true" size={14} strokeWidth={1.8} />
+                  <span>Each budget must be a whole number above zero, or empty.</span>
+                </p>
+              ) : null}
               <OctantButton
-                disabled={controller.pending || revision.trim() === ""}
+                disabled={
+                  controller.pending ||
+                  revision.trim() === "" ||
+                  budgetFromDraft(budgetDraft, budgetOpened).kind === "invalid"
+                }
                 type="submit"
                 variant="default"
               >
@@ -177,6 +236,86 @@ export function ThreadGoalPanel(props: ThreadGoalPanelProps) {
       </p>
     </section>
   );
+}
+
+interface BudgetDraft {
+  readonly turns: string;
+  readonly minutes: string;
+  readonly tokens: string;
+}
+
+const EMPTY_BUDGET_DRAFT: BudgetDraft = { turns: "", minutes: "", tokens: "" };
+const MS_PER_MINUTE = 60_000;
+
+function budgetDraftFrom(budget: ThreadGoalBudget): BudgetDraft {
+  return {
+    turns: budget.turnBudget === undefined ? "" : String(budget.turnBudget),
+    minutes:
+      budget.timeBudgetMs === undefined
+        ? ""
+        : String(Math.ceil(budget.timeBudgetMs / MS_PER_MINUTE)),
+    tokens: budget.tokenBudget === undefined ? "" : String(budget.tokenBudget),
+  };
+}
+
+type ParsedLimit =
+  | { readonly kind: "none" }
+  | { readonly kind: "set"; readonly value: number }
+  | { readonly kind: "invalid" };
+
+function parseLimit(text: string): ParsedLimit {
+  const trimmed = text.trim();
+  if (trimmed === "") return { kind: "none" };
+  if (!/^\d+$/.test(trimmed)) return { kind: "invalid" };
+  const value = Number(trimmed);
+  return Number.isSafeInteger(value) && value > 0 ? { kind: "set", value } : { kind: "invalid" };
+}
+
+/**
+ * The budget a revision sends, replacing the goal's whole budget.
+ *
+ * An untouched draft sends nothing, so the host keeps the budget it holds: the
+ * panel re-reads an active goal every ten seconds, and a budget another window
+ * lowered meanwhile would otherwise be replaced by this form's stale copy under
+ * the refreshed version, with no conflict reported. Minutes are shown rounded
+ * up, so a time limit the person left as shown keeps its exact stored value.
+ */
+function budgetFromDraft(
+  draft: BudgetDraft,
+  opened: ThreadGoalBudget,
+):
+  | { readonly kind: "unchanged" }
+  | { readonly kind: "valid"; readonly budget: ThreadGoalBudget }
+  | { readonly kind: "invalid" } {
+  const turns = parseLimit(draft.turns);
+  const minutes = parseLimit(draft.minutes);
+  const tokens = parseLimit(draft.tokens);
+  if (turns.kind === "invalid" || minutes.kind === "invalid" || tokens.kind === "invalid") {
+    return { kind: "invalid" };
+  }
+  const shown = budgetDraftFrom(opened);
+  if (
+    draft.turns === shown.turns &&
+    draft.minutes === shown.minutes &&
+    draft.tokens === shown.tokens
+  ) {
+    return { kind: "unchanged" };
+  }
+  const timeUnchanged = opened.timeBudgetMs !== undefined && draft.minutes === shown.minutes;
+  const timeBudgetMs =
+    minutes.kind === "none"
+      ? undefined
+      : timeUnchanged
+        ? opened.timeBudgetMs
+        : minutes.value * MS_PER_MINUTE;
+  return {
+    kind: "valid",
+    budget: {
+      ...(turns.kind === "set" ? { turnBudget: turns.value } : {}),
+      ...(timeBudgetMs === undefined ? {} : { timeBudgetMs }),
+      ...(tokens.kind === "set" ? { tokenBudget: tokens.value } : {}),
+    },
+  };
 }
 
 const STATUS_COPY: Record<Exclude<GoalStatus, "ready">, string> = {

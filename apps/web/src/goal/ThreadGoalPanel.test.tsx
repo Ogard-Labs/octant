@@ -244,6 +244,82 @@ describe("ThreadGoalPanel", () => {
     );
   });
 
+  it("sets a budget on the goal so its loop has a stopping condition", async () => {
+    const user = userEvent.setup();
+    const client: GoalClient = {
+      read: vi.fn().mockResolvedValue({ goal: goalWith(), history: [] }),
+      execute: vi.fn().mockResolvedValue({
+        goal: goalWith({
+          budget: { turnBudget: 20, timeBudgetMs: 1_800_000 },
+          version: 2 as ThreadGoal["version"],
+        } as Partial<ThreadGoal>),
+        history: [],
+      }),
+    };
+
+    render(<ThreadGoalPanel client={client} threadId={threadId} />);
+    await screen.findByTestId("goal-objective");
+    await user.click(screen.getByRole("button", { name: "Revise" }));
+    await user.type(screen.getByLabelText("Turns"), "20");
+    await user.type(screen.getByLabelText("Minutes"), "30");
+    await user.click(screen.getByRole("button", { name: "Save revision" }));
+
+    expect(client.execute).toHaveBeenCalledWith(
+      expect.objectContaining({
+        kind: "revise-thread-goal",
+        objective: "Ship the Goal surface",
+        budget: { turnBudget: 20, timeBudgetMs: 1_800_000 },
+      }),
+    );
+    await waitFor(() => expect(screen.queryByLabelText("Turns")).not.toBeInTheDocument());
+  });
+
+  it("leaves the budget to the host when a revision changes only the objective", async () => {
+    const user = userEvent.setup();
+    const client: GoalClient = {
+      read: vi.fn().mockResolvedValue({
+        goal: goalWith({ budget: { turnBudget: 5 } } as Partial<ThreadGoal>),
+        history: [],
+      }),
+      execute: vi.fn().mockResolvedValue({ goal: goalWith(), history: [] }),
+    };
+
+    render(<ThreadGoalPanel client={client} threadId={threadId} />);
+    await screen.findByTestId("goal-objective");
+    await user.click(screen.getByRole("button", { name: "Revise" }));
+    const field = screen.getByLabelText("Revised objective");
+    await user.clear(field);
+    await user.type(field, "Ship it twice");
+    await user.click(screen.getByRole("button", { name: "Save revision" }));
+
+    // Another window may have changed the budget since this form opened; an
+    // untouched budget must not send the stale copy back as a replacement.
+    expect(client.execute).toHaveBeenCalledWith(
+      expect.not.objectContaining({ budget: expect.anything() }),
+    );
+  });
+
+  it("shows the goal's current budget when revising, and refuses one that is not a whole number above zero", async () => {
+    const user = userEvent.setup();
+    const client: GoalClient = {
+      read: vi.fn().mockResolvedValue({
+        goal: goalWith({ budget: { tokenBudget: 50_000 } } as Partial<ThreadGoal>),
+        history: [],
+      }),
+      execute: vi.fn(),
+    };
+
+    render(<ThreadGoalPanel client={client} threadId={threadId} />);
+    await screen.findByTestId("goal-objective");
+    await user.click(screen.getByRole("button", { name: "Revise" }));
+    expect(screen.getByLabelText("Tokens")).toHaveValue("50000");
+    await user.type(screen.getByLabelText("Turns"), "0");
+
+    expect(screen.getByRole("button", { name: "Save revision" })).toBeDisabled();
+    expect(screen.getByRole("alert")).toHaveTextContent("whole number above zero");
+    expect(client.execute).not.toHaveBeenCalled();
+  });
+
   it("announces a refused command in words alongside its icon", async () => {
     const user = userEvent.setup();
     const client: GoalClient = {
