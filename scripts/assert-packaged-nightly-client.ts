@@ -140,6 +140,8 @@ const macosBundleReader: NightlyBundleReader = {
       JSON.parse(
         plutilJson(join(bundle, "Contents/Info.plist"), ["-extract", "ElectronAsarIntegrity"]),
       ),
+      // This bundle is already signed, and signing rewrote the unpacked natives.
+      "signed",
     );
     return [...archive, ...(await collectPayloadEntries(join(bundle, "Contents")))];
   },
