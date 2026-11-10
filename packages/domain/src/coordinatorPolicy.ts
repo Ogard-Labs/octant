@@ -22,7 +22,7 @@ export const MAX_WAKE_HOPS = 3;
 export const MAX_WAKE_TURNS_PER_HOUR = 6;
 
 export interface CoordinatorRoleFacts {
-  readonly lifecycle: "active" | "archived";
+  readonly lifecycle: string;
   readonly coordinator: boolean;
   /** Set on a worker; a worker is never a coordinator. */
   readonly startedByCoordinator: boolean;
@@ -101,7 +101,7 @@ export function decideCoordinatorStart(input: {
   readonly caller:
     | {
         readonly coordinator: boolean;
-        readonly lifecycle: "active" | "archived";
+        readonly lifecycle: string;
         readonly level: ProviderExecutionPolicy;
         readonly marked: boolean;
       }
@@ -114,7 +114,7 @@ export function decideCoordinatorStart(input: {
   readonly requestedLevel: WorkerLevel | undefined;
 }): CoordinatorStartDecision {
   const caller = input.caller;
-  if (caller === undefined || caller.lifecycle !== "active" || !caller.coordinator) {
+  if (caller === undefined || caller.lifecycle === "archived" || !caller.coordinator) {
     return {
       status: "refused",
       reason: "unauthorized",

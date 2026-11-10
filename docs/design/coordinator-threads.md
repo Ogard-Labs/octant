@@ -14,15 +14,18 @@ and its bounds. Architecture owns the boundaries it extends:
 sidebar and board presentation is in
 [Workspace: Coordinators](workspace.md#coordinators).
 
-**Status: approved design 2026-11-10 (maintainer request); designed, not built.**
-The Project planner, `octant_threads` (`list`, `read`, `wait`, `send`,
-`acknowledge`, `receipts`, `board`), the planner's proposals, child runs, and
-the composer's list of child requests are built and are the parts this design
-reuses. Nothing below is built yet: not the coordinator role, the `start`
-operation, the start setting, state notices, the worker roster, or the sidebar
-grouping. It also depends on the **Wake when a message arrives** switch, which
-is designed and not built
-([agent-to-agent messaging](../architecture.md#modes-chat-work-and-code)).
+**Status: approved design 2026-11-10 (maintainer request); partly built.** The
+host side is built: the coordinator role and its commands, worker lineage, the
+read-only gate on a coordinator's own turns, the worker roster, `start` with
+the start setting, its bounds and marks, Propose for approval through the
+planner's proposal path, the **Wake when a message arrives** switch with its
+wake turns, a worker waking for its own coordinator, and state notices. The
+workspace surfaces are in [Workspace: Coordinators](workspace.md#coordinators),
+which says which of them are built. Not built: a proposal card inside the
+coordinator thread (a person approves from the Project overview), workers'
+requests listed in the coordinator's composer, and Needs you rows naming the
+coordinator. None of it has run against a real provider yet; whether each
+runtime's own tools honour the read-only gate is a maintainer live check.
 
 ## What a coordinator is
 
@@ -31,19 +34,22 @@ is designed and not built
   that is one from the start, or with **Make coordinator** in an existing
   thread's header or row menu. **Stop coordinating** in the same menus makes it
   an ordinary thread again. Only a person does any of this, from a local window
-  on the host; an agent, a routine, a paired device, or a peer cannot. Each
-  change is journaled on the Project's coordinator aggregate with its principal
-  and expected version, and a stale version is refused.
+  on the host; an agent, a routine, a paired device, or a peer cannot. The role
+  is a field on the thread's own record: each change is journaled as
+  `code.thread-updated@1` under the thread's expected version (commands
+  `set-code-thread-coordinator`, `set-code-thread-message-wake`, and
+  `set-code-thread-coordinator-wake`), a stale version is refused, and the
+  Code commands route refuses all three from anything but a local window. A
+  new thread's creation command may not carry the role, lineage, or switches.
 - **Several per Project.** A Code Project may have up to four coordinators at
   once, for separate lines of work (one for the backlog, one for a dependency
   audit). Each coordinator has its own workers.
-- **It replaces the planner role.** The Project planner becomes a coordinator
-  whose starts need approval. Once coordinators are built, the designated
-  planner thread reads as a coordinator, its pending proposals stay pending,
-  and the planner's routes, versioned proposals, and **Review and approve**
-  flow become the coordinator's approval path (below). The planner's rule of
-  one per Project and its lack of creation authority are replaced by this
-  specification.
+- **It replaces the planner role.** The Project planner is meant to become a
+  coordinator whose starts need approval: the designated planner thread
+  reading as a coordinator, its pending proposals staying pending. That
+  carry-over is not built; today the planner designation and coordinators sit
+  side by side, and the planner's routes, versioned proposals, and **Review
+  and approve** flow are already the coordinator's approval path (below).
 - **Code only.** Work threads neither send nor receive messages, because only
   Code turns carry them, so a Work coordinator could start workers but never
   follow up with them. Work coordinators wait for the rule that lets a Work turn
@@ -109,10 +115,11 @@ A coordinator starts a worker with the `start` operation of `octant_threads`.
   opening prompt is its first message, sent through the normal first-message
   path. Its first turn has the `agent` initiator with the kind
   `coordinator-start`, the way a routine's turn starts, so every approval waits
-  for a person. The provider and model resolve against the Project's eligible
-  catalog the way delegation does: with none named, the worker takes the
-  Project's default for new Code threads; a named one that is unavailable or
-  disallowed refuses rather than falling back.
+  for a person. With no provider named, the worker runs on the coordinator's
+  own provider and model; a named provider the host does not know refuses
+  `provider-unavailable`, a provider or model the Project's policy disallows
+  is refused by the ordinary creation command, and nothing falls back to
+  another model.
 - **Authority.** The worker's guardrail level is the one named, or the
   coordinator's level when none is named, and never higher than the
   coordinator's. A worker started by a marked coordinator never starts at Full
@@ -123,10 +130,10 @@ A coordinator starts a worker with the `start` operation of `octant_threads`.
   coordinator stops coordinating, is archived, or is deleted, its workers stay
   as ordinary threads; they keep the lineage as history, and nothing wakes them
   for that coordinator any more.
-- **Journal.** An admitted start journals `coordinator.worker-started@1` with
-  the coordinator, the worker, the start setting that applied, and the resolved
-  provider, model, and level, never the prompt. The prompt lives where any first
-  message lives.
+- **Journal.** An admitted start is journaled as the worker's own
+  `code.thread-created@1`, whose thread record carries the coordinator, the
+  provider, model, and level, never the prompt. The prompt lives where any
+  first message lives.
 - **Refusals.** A refused call returns one closed reason: `unauthorized` (the
   caller is not a coordinator), `policy` (Plan, a profile without the operation,
   a malformed input, a level above the ceiling), `limit-reached` (the open-worker
@@ -152,8 +159,9 @@ restrict that can do it for the whole host or for one Project.
   proposal with the title, the prompt as its intent, and the requested provider,
   model, and level, through the planner's proposal path, with its bound of ten
   waiting proposals per Project. The coordinator is told `proposed`. A person
-  approves or declines it from a card in the coordinator thread or from the
-  Project overview, with the planner's **Review and approve** controls; an
+  approves or declines it from the Project overview, with the planner's
+  **Review and approve** controls (a card in the coordinator thread is not
+  built); an
   approved proposal creates the worker exactly as an unasked start would,
   recorded as that coordinator's worker.
 
@@ -171,7 +179,8 @@ approval flow with one switch.
   Done, put away, archived, nor deleted) by default. A person sets this from 1 to
   16 in Settings › Code › Coordinators; an agent cannot.
 - **Starts per hour.** At most twelve `start` calls per coordinator in any hour,
-  admitted or proposed.
+  admitted or proposed. The host counts them in memory, as it counts wake
+  turns and hops, so a restart starts the counts again.
 - **Ordinary gates.** Each worker's turns take ordinary turn admission: capacity
   gating, spend ceilings, usage limits, and the Done lock all apply unchanged.
 

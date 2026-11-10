@@ -13,6 +13,7 @@ import {
   decodeCodePlannerProposalId,
   decodeCodePlannerView,
   decodeProjectId,
+  MAX_PENDING_CODE_PLANNER_PROPOSALS,
   type CodeCommandResult,
   type CodeFailure,
   type CodePlannerCommandOutcome,
@@ -304,6 +305,54 @@ export class CodePlannerService {
     return { status: "proposed", proposal };
   }
 
+  /**
+   * Records a coordinator's `start` as a pending proposal because a person
+   * chose Propose for approval. The coordinator role, not a planner
+   * designation, admits it; the pending cap is the planner's.
+   */
+  proposeForCoordinator(
+    coordinatorThreadId: CodeThreadId,
+    draftInput: { readonly title: string; readonly intent: string },
+  ):
+    | { readonly status: "proposed"; readonly proposal: CodePlannerWorkProposal }
+    | { readonly status: "refused"; readonly message: string } {
+    let draft: ReturnType<typeof decodeCodePlannerProposalDraft>;
+    try {
+      draft = decodeCodePlannerProposalDraft(draftInput);
+    } catch {
+      return { status: "refused", message: "The proposal is invalid or over its bounds." };
+    }
+    const thread = this.#persistence.readCodeThread(coordinatorThreadId);
+    if (thread?.coordinator !== true || thread.lifecycle === "archived") {
+      return { status: "refused", message: "Only a coordinator thread may propose a worker." };
+    }
+    if (
+      countPendingCodePlannerProposals(this.#persistence.connection, thread.projectId) >=
+      MAX_PENDING_CODE_PLANNER_PROPOSALS
+    ) {
+      return {
+        status: "refused",
+        message: "This Project already has the maximum number of unresolved proposals.",
+      };
+    }
+    const proposal: CodePlannerWorkProposal = {
+      id: decodeCodePlannerProposalId(this.#uuid()),
+      projectId: thread.projectId,
+      plannerThreadId: coordinatorThreadId,
+      title: draft.title,
+      intent: draft.intent,
+      fromCoordinator: true,
+      status: "pending",
+      proposedAt: decodeTimestamp(this.#clock()),
+    };
+    try {
+      this.#appendProposal(proposal, 0, this.#agentActor(coordinatorThreadId));
+    } catch {
+      return { status: "refused", message: "Planner storage is unavailable." };
+    }
+    return { status: "proposed", proposal };
+  }
+
   async resolveProposal(
     authenticatedWindowId: WindowId,
     input: unknown,
@@ -505,11 +554,17 @@ export class CodePlannerService {
    */
   #inheritedMarkFor(proposal: CodePlannerWorkProposal): CodeServiceExecutionContext {
     const plannerThreadId = String(proposal.plannerThreadId);
-    if (!this.#isMarkedWithOutsideContent(plannerThreadId)) return {};
+    // A coordinator's proposal creates its worker: the host records the
+    // lineage, and the mark carries the coordinator-start label.
+    const lineage =
+      proposal.fromCoordinator === true ? { coordinatorThreadId: proposal.plannerThreadId } : {};
+    if (!this.#isMarkedWithOutsideContent(plannerThreadId)) return lineage;
+    const label = proposal.fromCoordinator === true ? "coordinator-start" : "planner-proposal";
     return {
+      ...lineage,
       inheritedMark: {
-        sourceLabel: "planner-proposal",
-        contentReference: `planner-proposal-${plannerThreadId}-${String(proposal.id)}`,
+        sourceLabel: label,
+        contentReference: `${label}-${plannerThreadId}-${String(proposal.id)}`,
       },
     };
   }

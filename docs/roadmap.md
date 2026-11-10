@@ -145,7 +145,7 @@ Hardening in progress for the preview:
 - **Coordinator threads** — a long-lived Code thread per line of work that
   starts worker threads without asking (or proposes them where a person
   restricts it), messages them, and brings their questions back, replacing the
-  Project planner. Approved 2026-11-10; it needs the message wake switch first.
+  Project planner. Approved 2026-11-10; the host side and the message wake switch are built.
   Rules in [Coordinator threads](design/coordinator-threads.md).
 - **Dogfood-driven fixes** — whatever daily use of the preview surfaces first.
 

@@ -1841,7 +1841,6 @@ A worker thread a coordinator starts begins marked when the coordinator is
 marked, by the same rule (label `coordinator-start`), whether it starts at once
 or from an approved proposal; the detail is in
 [Coordinator threads: outside content](design/coordinator-threads.md#outside-content).
-Designed, not built.
 
 Fork, branch, follow-up, and planner proposal journal their marks through one
 shared step.
@@ -3008,11 +3007,13 @@ approval.
 Code thread a coordinator: a long-lived thread whose own actions are read-only,
 which starts worker threads without asking (or proposes them, when the person
 restricts that globally or per Project), messages them, receives their state,
-and brings their requests to the person. Coordinators replace the planner role
-below: the planner becomes a coordinator whose starts need approval, and its
-proposal path becomes the coordinator's approval path. The rules are in
-[Coordinator threads](design/coordinator-threads.md). Designed, not built; until
-it is built, the planner below is the built behavior.
+and brings their requests to the person. Coordinators are meant to replace the
+planner role below (the planner becoming a coordinator whose starts need
+approval); that carry-over is not built, and today the two roles sit side by
+side, a coordinator's proposals using the planner's proposal path. The rules are in
+[Coordinator threads](design/coordinator-threads.md), which says what is built.
+The planner below keeps working: a designated planner thread still reads the
+board and proposes, and a coordinator's proposals use its proposal path.
 
 **The Project planner thread proposes work for a person to review.** A Code Project may
 designate one of its own Code threads as its planner, whose agent surveys the
@@ -3743,9 +3744,10 @@ approved by the maintainer on 2026-10-12. This section is the effective rule.
   that turn only.
 - **Waking an idle recipient.** Every Code thread has a **Wake when a message
   arrives** switch in its header menu and its row's context menu. It is off by
-  default, only a person sets it (a window on the host, or an owner device
-  after a fresh unlock; never an agent, a routine, or a peer), and each change
-  is journaled as `thread.message-wake-set@1` with its principal. When a
+  default, only a person sets it (a window on the host; never an agent, a
+  routine, a paired device, or a peer; an owner device's route is not built),
+  and each change is journaled as the thread's own `code.thread-updated@1`
+  (command `set-code-thread-message-wake`). When a
   message is admitted for a thread with the switch on and the thread is idle,
   the host starts one turn to carry it, so agents can coordinate without a
   person starting each turn. Coordinator threads add two cases under the same
@@ -3753,7 +3755,9 @@ approved by the maintainer on 2026-10-12. This section is the effective rule.
   person's change, and a worker wakes for its own coordinator's messages unless
   a person turns that off
   ([Coordinator threads: talking to workers](design/coordinator-threads.md#talking-to-workers)).
-  Designed, not built.
+  Built on one host by `CoordinatorService`, which watches committed
+  `agent.message-sent@1` events; the menu items are in
+  [Workspace: Coordinators](design/workspace.md#coordinators).
   - **Idle** means the thread is active Code outside Plan, has no turn running
     or queued, and is not waiting for a person (an approval, a question, or a
     usage-limit pause). A thread that is not idle carries the message in its
@@ -3764,17 +3768,19 @@ approved by the maintainer on 2026-10-12. This section is the effective rule.
     ordinary turn admission: capacity gating, the Done lock, and usage limits
     apply, and a turn refused there starts nothing and leaves the messages
     waiting. Its prompt is a host sentence naming the sender thread that woke
-    it; the messages arrive as the ordinary delivery block after the ordinary
-    delivery checks, and when every waiting message is refused there, no turn
-    starts. It is journaled with the initiator kind `agent-message` and the
-    message ids, and the thread's row and transcript say which thread woke it.
+    it, so the transcript says which thread woke it; the messages arrive as the
+    ordinary delivery block after the ordinary delivery checks. A message
+    refused at that check leaves the turn with only its prompt. No separate
+    initiator kind is journaled for it.
   - **Bounds.** One wake turn at a time per thread and at most six per thread
     in any hour; a message past either bound waits for the next turn. Each
     message carries a hop count: zero from a turn a person or a routine
     started, and one more than the message that woke the sender's turn
     otherwise. A message whose hop count is three or more is delivered but
     wakes nothing, so two agents answering each other stop waking each other
-    after three rounds and continue only when a person runs a turn.
+    after three rounds and continue only when a person runs a turn. The host
+    holds hop counts and the hourly count in memory, so a restart starts them
+    again from zero.
   - Turning the switch off stops new wake turns; one already running finishes
     like any turn, and cancelling it is the ordinary cancel.
 
@@ -3843,11 +3849,10 @@ maintainer folded messaging and the planner's board into the same tool. The
 own Project, and a Code turn message one or wait for one to finish. Its
 operations are `help`, `list`, `read`, `wait`, and in Code `send`,
 `acknowledge`, `receipts`, and the planner's `board`. No operation creates,
-steers, completes, archives, or stops a thread. The designed coordinator
-operation `start`, offered only to a coordinator thread, is the one exception:
+steers, completes, archives, or stops a thread. The coordinator operation
+`start`, offered only to a coordinator thread, is the one exception:
 it creates a worker thread, under the rules in
 [Coordinator threads](design/coordinator-threads.md#starting-workers).
-Designed, not built.
 
 - **Rationale for Work.** Work and Code share one authority model, so the
   read-only operations, which change nothing outside the caller's own record,

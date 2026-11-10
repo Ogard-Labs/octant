@@ -65,6 +65,12 @@ const CodePlannerProposalFields = {
     Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(MAX_CODE_PLANNER_PROPOSAL_RATIONALE_LENGTH)),
   ),
   proposedAt: UtcTimestamp,
+  /**
+   * Set when a coordinator's `start` became this proposal because a person
+   * chose Propose for approval; `plannerThreadId` then names that
+   * coordinator, and confirming records the new thread as its worker.
+   */
+  fromCoordinator: Schema.optional(Schema.Literal(true)),
   /** Host-authored admission; a draft cannot assert that creation did not start. */
   creationAttempt: Schema.optional(
     Schema.Struct({

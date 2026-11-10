@@ -1,7 +1,11 @@
 import { decodeThreadWorkingDirectory } from "@octant/contracts";
 import { THREAD_MOVING_REFUSAL } from "../hub/threadMoveHolds";
 import type { ConversationInputPolicy } from "@octant/contracts/conversation-inputs";
-import { projectExtraFolderRoots, unsupportedModelOptionValues } from "@octant/domain";
+import {
+  decideCoordinatorRole,
+  projectExtraFolderRoots,
+  unsupportedModelOptionValues,
+} from "@octant/domain";
 import {
   defaultFullAccessSandboxFor,
   guardrailLowered,
@@ -654,6 +658,12 @@ export interface CodeServiceExecutionContext {
    * this clone. Host-resolved only, like a fork's files; no command carries it.
    */
   readonly movedFiles?: CodeForkFiles;
+  /**
+   * The coordinator a worker this command creates belongs to, set only by the
+   * host's coordinator start and a confirmed coordinator proposal. No wire
+   * command carries it, and a created thread's own record never may.
+   */
+  readonly coordinatorThreadId?: CodeThreadId;
 }
 
 export interface CodeServiceOptions {
@@ -1564,6 +1574,9 @@ export class CodeService {
               ...(command.profileId === undefined ? {} : { profileId: command.profileId }),
               ...profileToolSnapshot(managedAuthority),
               ...profileContextSnapshot(managedAuthority),
+              ...(executionContext?.coordinatorThreadId === undefined
+                ? {}
+                : { coordinatorThreadId: executionContext.coordinatorThreadId }),
               version: 1,
               createdAt: timestamp,
               updatedAt: timestamp,
@@ -1841,6 +1854,23 @@ export class CodeService {
             : (command.shieldModel ?? current.shieldModel) === undefined
               ? {}
               : { shieldModel: command.shieldModel ?? current.shieldModel }),
+          ...((command.coordinatorStarting ?? current.coordinatorStarting) === undefined
+            ? {}
+            : { coordinatorStarting: command.coordinatorStarting ?? current.coordinatorStarting }),
+          ...((command.coordinatorStartingByProject ?? current.coordinatorStartingByProject) ===
+          undefined
+            ? {}
+            : {
+                coordinatorStartingByProject:
+                  command.coordinatorStartingByProject ?? current.coordinatorStartingByProject,
+              }),
+          ...((command.coordinatorOpenWorkerLimit ?? current.coordinatorOpenWorkerLimit) ===
+          undefined
+            ? {}
+            : {
+                coordinatorOpenWorkerLimit:
+                  command.coordinatorOpenWorkerLimit ?? current.coordinatorOpenWorkerLimit,
+              }),
           version: command.expectedVersion + 1,
           updatedAt: decodeTimestamp(this.#clock()),
         });
@@ -1885,6 +1915,20 @@ export class CodeService {
         }
         if (this.#persistence.readCodeThread(command.thread.id) !== undefined) {
           throw this.#failure("conflict", "Code thread already exists.");
+        }
+        // The coordinator role and its switches are a person's later choice,
+        // and a worker's lineage is the host's record; a new thread's own
+        // record carries none of them.
+        if (
+          command.thread.coordinator !== undefined ||
+          command.thread.coordinatorThreadId !== undefined ||
+          command.thread.messageWake !== undefined ||
+          command.thread.coordinatorWakeOff !== undefined
+        ) {
+          throw this.#failure(
+            "unauthorized",
+            "A new Code thread starts without a coordinator role or wake switches.",
+          );
         }
         this.#assertThreadIdFree(command.thread.id);
         const inheritedMark =
@@ -1990,6 +2034,29 @@ export class CodeService {
         return await this.#moveThread(authenticatedWindowId, current, command);
       }
       const updatedAt = decodeTimestamp(this.#clock());
+      if (
+        command.kind === "set-code-thread-coordinator" ||
+        command.kind === "set-code-thread-message-wake" ||
+        command.kind === "set-code-thread-coordinator-wake"
+      ) {
+        const next = this.#coordinatorSwitches(current, command, updatedAt);
+        this.#inUnit(() => {
+          this.#append(
+            "code-thread",
+            current.id,
+            command.expectedVersion,
+            "code.thread-updated@1",
+            {
+              kind: "thread-updated",
+              thread: next,
+            },
+          );
+        });
+        return {
+          kind: "thread-updated",
+          thread: this.#sessionAuthority.effectiveThread(authenticatedWindowId, next),
+        };
+      }
       if (command.kind === "schedule-code-usage-resume") {
         if (current.lifecycle !== "active") {
           throw this.#failure("invalid", "Only an active Code thread can resume at reset.");
@@ -3647,6 +3714,89 @@ export class CodeService {
       kind: "thread-updated",
       thread: this.#sessionAuthority.effectiveThread(authenticatedWindowId, moved),
     };
+  }
+
+  /**
+   * A person's coordinator role and wake switches. Making a thread a
+   * coordinator also turns its Wake when a message arrives switch on, so its
+   * workers' messages and state reach it while it is idle; stopping it leaves
+   * the switch as the person last set it.
+   */
+  #coordinatorSwitches(
+    current: CodeThread,
+    command: Extract<
+      CodeCommand,
+      {
+        readonly kind:
+          | "set-code-thread-coordinator"
+          | "set-code-thread-message-wake"
+          | "set-code-thread-coordinator-wake";
+      }
+    >,
+    updatedAt: UtcTimestamp,
+  ): CodeThread {
+    const {
+      coordinator: _coordinator,
+      messageWake: _messageWake,
+      coordinatorWakeOff: _wakeOff,
+      ...rest
+    } = current;
+    const stamp = { version: command.expectedVersion + 1, updatedAt };
+    if (command.kind === "set-code-thread-message-wake") {
+      return decodeCodeThread({
+        ...rest,
+        ...(current.coordinator === true ? { coordinator: true } : {}),
+        ...(current.coordinatorWakeOff === true ? { coordinatorWakeOff: true } : {}),
+        ...(command.wake ? { messageWake: true } : {}),
+        ...stamp,
+      });
+    }
+    if (command.kind === "set-code-thread-coordinator-wake") {
+      if (current.coordinatorThreadId === undefined) {
+        throw this.#failure("invalid", "Only a worker thread has a coordinator to wake for.");
+      }
+      return decodeCodeThread({
+        ...rest,
+        ...(current.messageWake === true ? { messageWake: true } : {}),
+        ...(command.wake ? {} : { coordinatorWakeOff: true }),
+        ...stamp,
+      });
+    }
+    const project = this.#persistence.readProject?.(current.projectId);
+    const coordinatorsInProject = this.#persistence
+      .readCodeThreads()
+      .filter(
+        (thread) =>
+          String(thread.projectId) === String(current.projectId) &&
+          thread.coordinator === true &&
+          thread.lifecycle !== "archived",
+      ).length;
+    const decision = decideCoordinatorRole({
+      thread: {
+        lifecycle: current.lifecycle,
+        coordinator: current.coordinator === true,
+        startedByCoordinator: current.coordinatorThreadId !== undefined,
+        // The thread command was already authorized against its Project;
+        // a host without a Project read (tests, a route service) relies on that.
+        projectActive:
+          this.#persistence.readProject === undefined ||
+          (project?.type === "code" && project.lifecycle === "active"),
+      },
+      make: command.coordinator,
+      coordinatorsInProject,
+    });
+    if (decision.status === "refused") throw this.#failure("invalid", decision.message);
+    if (decision.status === "unchanged") return current;
+    return decodeCodeThread({
+      ...rest,
+      ...(current.coordinatorWakeOff === true ? { coordinatorWakeOff: true } : {}),
+      ...(command.coordinator
+        ? { coordinator: true, messageWake: true }
+        : current.messageWake === true
+          ? { messageWake: true }
+          : {}),
+      ...stamp,
+    });
   }
 
   #rebindRefused(

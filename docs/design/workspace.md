@@ -251,7 +251,7 @@ list-side counterpart, so no second priority group is added to the Projects tree
 ### Coordinators
 
 [Coordinator threads](coordinator-threads.md) own the role; this section owns
-where a coordinator and its workers appear. Designed, not built.
+where a coordinator and its workers appear. Designed; the workspace surfaces below are not built yet, while the host commands and settings they use are.
 
 - **Sidebar.** A Code Project with coordinators shows a **Coordinators**
   section at the top of its Project tree, above its other threads. Each
