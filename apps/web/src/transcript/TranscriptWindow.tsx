@@ -1,11 +1,6 @@
 import { WorkspaceViewStateContext } from "../shell/workspaceViewState";
 import type { ContextSubjectRef } from "@octant/contracts/context";
-import {
-  defaultRangeExtractor,
-  useVirtualizer,
-  type Range,
-  type VirtualItem,
-} from "@tanstack/react-virtual";
+import { defaultRangeExtractor, useVirtualizer, type VirtualItem } from "@tanstack/react-virtual";
 import {
   useContext,
   useLayoutEffect,
@@ -23,13 +18,13 @@ import {
   useCompactionReceipts,
 } from "../context/CompactionDivider";
 import { TranscriptOutputLimitNote } from "./outputLimitNote";
+import { useTranscriptFindIndex } from "./useTranscriptFindIndex";
 import { TranscriptFindBar } from "./TranscriptFindBar";
 import {
   clearTranscriptMatches,
   findTranscriptMatches,
   paintTranscriptMatches,
   revealTranscriptMatch,
-  type TextMatch,
 } from "./transcriptFind";
 
 /**
@@ -168,14 +163,29 @@ export function TranscriptWindow<T>(props: TranscriptWindowProps<T>) {
   const [findActive, setFindActive] = useState(false);
   const [findQuery, setFindQuery] = useState("");
   const [findIndex, setFindIndex] = useState(0);
-  const [findCount, setFindCount] = useState(0);
+  const [findRevealRequest, setFindRevealRequest] = useState(0);
+  const measuredRowsRef = useRef(new WeakSet<HTMLElement>());
+  const initiallyOpenDisclosuresRef = useRef(new WeakSet<HTMLDetailsElement>());
+  const manuallyOpenDisclosuresRef = useRef(new WeakSet<HTMLDetailsElement>());
   const findInputRef = useRef<HTMLInputElement>(null);
-  const matchesRef = useRef<ReadonlyArray<TextMatch>>([]);
   const revealAfterQueryRef = useRef(false);
   const [stickyIndexes, setStickyIndexes] = useState<ReadonlySet<number>>(() => new Set());
   const [liveMessage, setLiveMessage] = useState("");
   const items = props.items;
   const itemKey = props.itemKey;
+  const find = useTranscriptFindIndex(
+    items,
+    itemKey,
+    findActive && findQuery !== "",
+    findQuery,
+    scrollElementRef,
+  );
+  const findCount = find.matches.total;
+  const currentFindIndex = Math.min(findIndex, Math.max(0, findCount - 1));
+  const findRow = find.matches.rows.find(
+    (row) => currentFindIndex >= row.first && currentFindIndex < row.first + row.count,
+  );
+
   const restoreKey = props.restoreKey;
   const viewStore = useContext(WorkspaceViewStateContext);
   const savedView = viewStore?.read(`transcript:${restoreKey}`);
@@ -224,7 +234,7 @@ export function TranscriptWindow<T>(props: TranscriptWindowProps<T>) {
     count: items.length,
     getScrollElement: () => scrollElementRef.current,
     estimateSize: () => estimateSize,
-    overscan: findActive ? Math.max(overscan, items.length) : overscan,
+    overscan,
     gap,
     scrollMargin,
     scrollEndThreshold: FOLLOW_THRESHOLD_PX,
@@ -241,8 +251,12 @@ export function TranscriptWindow<T>(props: TranscriptWindowProps<T>) {
       return item === undefined ? String(index) : itemKey(item, index);
     },
     rangeExtractor: (range) => {
-      const extracted = findActive ? allIndexes(range) : defaultRangeExtractor(range);
+      const extracted = defaultRangeExtractor(range);
       const extra = new Set<number>();
+      if (findActive) {
+        for (const i of find.batch) extra.add(i);
+        if (!find.pending && findRow !== undefined) extra.add(findRow.row);
+      }
       if (revealIndex >= 0) extra.add(revealIndex);
       const pending = pendingFocusRef.current?.index;
       if (pending !== undefined) extra.add(pending);
@@ -480,7 +494,7 @@ export function TranscriptWindow<T>(props: TranscriptWindowProps<T>) {
         if (target !== document.body && owner !== null && !owner.contains(target)) return;
       }
       event.preventDefault();
-      // Mount every row before matching so off-window rows can be found.
+      // Only the bar mounts synchronously; row indexing yields between batches.
       flushSync(() => setFindActive(true));
       findInputRef.current?.focus();
       findInputRef.current?.select();
@@ -490,33 +504,46 @@ export function TranscriptWindow<T>(props: TranscriptWindowProps<T>) {
   }, []);
 
   useLayoutEffect(() => {
-    if (!findActive) {
-      clearTranscriptMatches();
-      matchesRef.current = [];
-      setFindCount(0);
-      return;
-    }
+    clearTranscriptMatches();
+    if (!findActive || find.pending) return;
     const root = scrollElementRef.current;
     if (root === null) return;
     const ranges = findTranscriptMatches(root, findQuery);
-    matchesRef.current = ranges;
-    setFindCount(ranges.length);
-    const index = Math.min(findIndex, Math.max(0, ranges.length - 1));
-    if (index !== findIndex) setFindIndex(index);
-    paintTranscriptMatches(ranges, index);
-    if (revealAfterQueryRef.current) {
+    const currentRanges =
+      findRow === undefined
+        ? []
+        : ranges.filter(
+            (range) =>
+              range.startContainer.parentElement
+                ?.closest("[data-transcript-row]")
+                ?.getAttribute("data-index") === String(findRow.row),
+          );
+    const active =
+      findRow === undefined ? undefined : currentRanges[currentFindIndex - findRow.first];
+    paintTranscriptMatches(ranges, active === undefined ? -1 : ranges.indexOf(active));
+    if (revealAfterQueryRef.current && findRow !== undefined) {
       revealAfterQueryRef.current = false;
-      revealTranscriptMatch(ranges[index]);
+      followingRef.current = false;
+      virtualizer.scrollToIndex(findRow.row, { align: "center" });
+      revealTranscriptMatch(active);
     }
     return clearTranscriptMatches;
-  }, [findActive, findQuery, findIndex, items, virtualizer.getVirtualItems().length]);
+  }, [
+    findActive,
+    find.pending,
+    findQuery,
+    currentFindIndex,
+    findRevealRequest,
+    findRow,
+    items,
+    virtualizer.getVirtualItems(),
+  ]);
 
   function stepFind(direction: 1 | -1): void {
-    const count = matchesRef.current.length;
-    if (count === 0) return;
-    const next = (findIndex + direction + count) % count;
-    setFindIndex(next);
-    revealTranscriptMatch(matchesRef.current[next]);
+    if (find.pending || findCount === 0) return;
+    revealAfterQueryRef.current = true;
+    setFindIndex((currentFindIndex + direction + findCount) % findCount);
+    setFindRevealRequest((request) => request + 1);
   }
 
   useLayoutEffect(() => {
@@ -530,18 +557,26 @@ export function TranscriptWindow<T>(props: TranscriptWindowProps<T>) {
       if (!(event.target instanceof HTMLDetailsElement)) return;
       const index = rowIndexFromTarget(event.target);
       if (index === undefined) return;
+      const row = event.target.closest("[data-transcript-row]");
+      const initiallyOpen = initiallyOpenDisclosuresRef.current.delete(event.target);
+      if (row !== null && (!initiallyOpen || !event.target.open)) find.refreshRow(index, row);
       if (event.target.open) {
-        pinIndex(index);
+        // Mounting High-detail rows emits toggle too. Only a later disclosure
+        // choice, not initialization during indexing, keeps a row mounted.
+        if (!initiallyOpen) {
+          manuallyOpenDisclosuresRef.current.add(event.target);
+          pinIndex(index);
+        }
         return;
       }
-      const row = event.target.closest("[data-transcript-row]");
-      if (row instanceof HTMLElement && row.querySelector("details[open]") !== null) return;
+      manuallyOpenDisclosuresRef.current.delete(event.target);
+      if (row instanceof HTMLElement && hasManuallyOpenDisclosure(row)) return;
       if (row instanceof HTMLElement && row.contains(document.activeElement)) return;
       unpinIndex(index);
     }
     scroll.addEventListener("toggle", onToggle, true);
     return () => scroll.removeEventListener("toggle", onToggle, true);
-  }, []);
+  }, [find.refreshRow]);
 
   useLayoutEffect(() => {
     const pending = pendingFocusRef.current;
@@ -557,6 +592,12 @@ export function TranscriptWindow<T>(props: TranscriptWindowProps<T>) {
     pendingFocusRef.current = undefined;
     target?.focus();
   }, [virtualizer.getVirtualItems()]);
+
+  function hasManuallyOpenDisclosure(row: HTMLElement): boolean {
+    return [...row.querySelectorAll<HTMLDetailsElement>("details[open]")].some((details) =>
+      manuallyOpenDisclosuresRef.current.has(details),
+    );
+  }
 
   function pinIndex(index: number): void {
     setStickyIndexes((current) => {
@@ -603,7 +644,7 @@ export function TranscriptWindow<T>(props: TranscriptWindowProps<T>) {
       scroll === null
         ? null
         : scroll.querySelector(`[data-transcript-row][data-index="${String(index)}"]`);
-    if (row instanceof HTMLElement && row.querySelector("details[open]") !== null) return;
+    if (row instanceof HTMLElement && hasManuallyOpenDisclosure(row)) return;
     unpinIndex(index);
   }
 
@@ -675,7 +716,14 @@ export function TranscriptWindow<T>(props: TranscriptWindowProps<T>) {
             data-index={virtualItem.index}
             data-transcript-row=""
             key={virtualItem.key}
-            ref={virtualizer.measureElement}
+            ref={(node: HTMLElement | null) => {
+              if (node !== null && !measuredRowsRef.current.has(node)) {
+                measuredRowsRef.current.add(node);
+                for (const details of node.querySelectorAll<HTMLDetailsElement>("details[open]"))
+                  initiallyOpenDisclosuresRef.current.add(details);
+              }
+              virtualizer.measureElement(node);
+            }}
             style={{
               left: 0,
               position: "absolute",
@@ -713,7 +761,8 @@ export function TranscriptWindow<T>(props: TranscriptWindowProps<T>) {
         <div className="transcript-find-anchor">
           <TranscriptFindBar
             count={findCount}
-            current={findIndex}
+            current={currentFindIndex}
+            pending={find.pending}
             onClose={() => setFindActive(false)}
             onQueryChange={(query) => {
               revealAfterQueryRef.current = true;
@@ -871,10 +920,6 @@ function scrollToContentEnd(element: HTMLElement): void {
 
 function isAtContentEnd(element: HTMLElement): boolean {
   return element.scrollHeight - element.scrollTop - element.clientHeight <= FOLLOW_THRESHOLD_PX;
-}
-
-function allIndexes(range: Range): number[] {
-  return Array.from({ length: range.count }, (_, index) => index);
 }
 
 function computeScrollMargin(scrollParent: HTMLElement, lead: HTMLElement | null): number {

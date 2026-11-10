@@ -274,6 +274,12 @@ entries are excluded.
 
 ## Process topology
 
+An unexpected shell renderer exit retires its authority and opens a replacement,
+with at most two automatic recoveries per minute. The desktop retains its
+lifetime across retirement and replacement preparation, so last-window closure
+cannot race recovery into quitting. Explicit Quit and intentional window closure
+remain authoritative and do not trigger recovery.
+
 The desktop's single native Browser owner may explicitly retain host-owned
 execution pages after its last renderer closes, using the same native profile
 store. These pages carry native execution leases rather than renderer window
@@ -447,7 +453,11 @@ aborted owner whose parent has not collected it yet), or belongs to a process
 with a different start time (a recycled pid, including one now held by another
 user). If the process cannot be inspected, the owner counts as live and the
 start refuses. An ownership failure names the code, the artifact path, and the
-next step.
+next step. The stale receipt is atomically quarantined beside its own data
+files; socket and secret quarantine stay on the runtime filesystem. A separate
+data mount must not turn verified stale-owner recovery into a cross-device
+rename failure. Receipt identity checks and the receipt-first claim still
+precede exposing the stale socket pathname.
 
 **Memory pressure.** The server samples its own resident size and the
 system's memory-pressure signal every 15 seconds (every 5 while pressure
@@ -14584,11 +14594,18 @@ approval-gated` command that undoes it. The terminal shows no one-time
   its compiled base `https://octant.sh/updates` and requests
   `<ring>/<file>`; octant.sh redirects that path to
   `https://github.com/Ogard-Labs/octant/releases/download/feed-<ring>/<file>`.
-  The updater follows that cross-host redirect, and the signature and artifact
-  hash checks never depend on the host that served the bytes. The mailbox tags
-  do not start with `v`, so no rule scoped to version tags reaches them. Whoever
-  can write release assets in the repository can withhold a ring's updates, and
-  nothing more, for the reason above.
+  The updater follows that cross-host redirect itself, at most five hops, and
+  every hop remains HTTPS without URL credentials. The configured feed origin
+  and a signed artifact origin retain their explicit authority, including a
+  private self-hosted origin; a redirect that widens to another origin resolves
+  and connects only to globally reachable addresses, pinned at socket lookup so
+  DNS cannot rebind after validation. Feed bodies stop at 64 KiB and 30 seconds;
+  artifact bodies stream only to their configured size limit and stop at 15
+  minutes. Redirect and oversized bodies are canceled. The signature and
+  artifact hash checks never depend on the host that served the bytes. The
+  mailbox tags do not start with `v`, so no rule scoped to version tags reaches
+  them. Whoever can write release assets in the repository can withhold a
+  ring's updates, and nothing more, for the reason above.
 
 **Proposed, not accepted: Claude sign-in inside Anthropic's terms.** Octant
 would not mint, store, or inject a Claude setup or OAuth token. Claude

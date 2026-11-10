@@ -1,6 +1,6 @@
 /**
- * In-thread find over the rows a transcript has mounted. The caller mounts
- * every row first (see `TranscriptWindow`), so a match is never off-window.
+ * In-thread find uses bounded rendered batches to index the same text that
+ * highlighting reads, without retaining off-window DOM nodes or ranges.
  */
 
 /** The DOM `Range`, named apart from the virtualizer's own `Range`. */
@@ -52,30 +52,44 @@ export function findTranscriptMatches(root: HTMLElement, query: string): TextMat
   if (needle === "") return [];
   const ranges: TextMatch[] = [];
   for (const row of root.querySelectorAll("[data-transcript-row]")) {
-    const walker = document.createTreeWalker(row, NodeFilter.SHOW_TEXT);
-    let block: Element | null = null;
-    let pieces: Piece[] = [];
-    let lowered = "";
-    const flush = () => {
-      if (pieces.length > 0) matchRun(pieces, lowered, needle, ranges);
-      pieces = [];
-      lowered = "";
-    };
-    for (let node = walker.nextNode(); node !== null; node = walker.nextNode()) {
-      if (!(node instanceof Text) || node.data === "" || isHidden(node)) continue;
-      const owner = blockOf(node);
-      if (owner !== block) {
-        flush();
-        block = owner;
-      }
-      pieces.push({ node, start: lowered.length });
-      const folded = node.data.toLowerCase();
-      // A few characters change length when lowercased; keep offsets aligned.
-      lowered += folded.length === node.data.length ? folded : node.data;
-    }
-    flush();
+    visitTextRuns(row, (pieces, lowered) => matchRun(pieces, lowered, needle, ranges));
   }
   return ranges;
+}
+
+/** Plain text only: an index must not keep an unmounted row's DOM alive. */
+export function readTranscriptText(row: Element): ReadonlyArray<string> {
+  const runs: string[] = [];
+  visitTextRuns(row, (_pieces, text) => runs.push(text));
+  return runs;
+}
+
+function visitTextRuns(
+  row: Element,
+  visit: (pieces: ReadonlyArray<Piece>, text: string) => void,
+): void {
+  const walker = document.createTreeWalker(row, NodeFilter.SHOW_TEXT);
+  let block: Element | null = null;
+  let pieces: Piece[] = [];
+  let lowered = "";
+  const flush = () => {
+    if (pieces.length > 0) visit(pieces, lowered);
+    pieces = [];
+    lowered = "";
+  };
+  for (let node = walker.nextNode(); node !== null; node = walker.nextNode()) {
+    if (!(node instanceof Text) || node.data === "" || isHidden(node)) continue;
+    const owner = blockOf(node);
+    if (owner !== block) {
+      flush();
+      block = owner;
+    }
+    pieces.push({ node, start: lowered.length });
+    const folded = node.data.toLowerCase();
+    // A few characters change length when lowercased; keep offsets aligned.
+    lowered += folded.length === node.data.length ? folded : node.data;
+  }
+  flush();
 }
 
 function blockOf(node: Text): Element | null {

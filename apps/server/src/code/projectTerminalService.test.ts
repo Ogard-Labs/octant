@@ -163,11 +163,14 @@ class FakeTerminals {
     return this.#snapshot(terminalId);
   }
   exit(terminalId: string, exitCode: number) {
-    this.#status = "exited";
-    this.#exitCode = exitCode;
+    this.exitWithoutEmission(exitCode);
     for (const listener of this.#listeners) {
       listener({ text: "", replace: false, characters: 0, snapshot: this.#snapshot(terminalId) });
     }
+  }
+  exitWithoutEmission(exitCode: number) {
+    this.#status = "exited";
+    this.#exitCode = exitCode;
   }
   #snapshot(terminalId: string): TerminalSnapshot {
     return {
@@ -1351,6 +1354,20 @@ describe("a person's terminal in a server Work Project", () => {
       terminal: { state: "interrupted", uncertainty: "server-transport-lost" },
     });
     expect(events().at(-1)?.payload).toMatchObject({ reason: "transport-lost", exitCode: 255 });
+    expect(terminals.launches).toHaveLength(1);
+  });
+
+  it("classifies a dropped Work SSH connection before the observer reports it", async () => {
+    const { service, terminals } = workServer();
+    await service.execute(windowId, "local-window", start());
+    terminals.exitWithoutEmission(255);
+
+    expect(
+      await service.execute(windowId, "local-window", { kind: "attach", projectId, terminalId }),
+    ).toMatchObject({
+      kind: "project-terminal",
+      terminal: { state: "interrupted", uncertainty: "server-transport-lost" },
+    });
     expect(terminals.launches).toHaveLength(1);
   });
 });

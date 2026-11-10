@@ -485,6 +485,21 @@ button dismisses it. The shortcut does nothing while focus is in the code editor
 or a terminal, which have their own find, and it acts only in the thread the
 person is in. This is separate from Thread Search, which looks across threads.
 
+Opening Find keeps the transcript virtualized. On the first nonempty query,
+a cancellable pass indexes rendered text in batches of at most 32 additional
+rows, yielding between batches and showing Searching until the index is ready.
+This preserves inline formatting, block boundaries and closed-disclosure rules
+without a second interpretation of message markup. The index retains text,
+never detached DOM ranges, and subsequent queries reuse it. Changed rows refresh
+in rotating batches so streamed updates cannot repeatedly restart indexing at
+the beginning; known matches remain usable while refreshed text arrives.
+Closing Find releases the index. Disclosure visibility changes refresh the
+row's indexed text. Disclosures initially open at High detail do not pin an
+indexing row; explicit disclosure choices and focus retain their normal pins.
+Navigation mounts only the current matching
+row in addition to the ordinary viewport. This trades incremental first-search
+latency for responsive input and bounded mounted content in long histories.
+
 In a Work or Code thread, selecting text inside one assistant reply offers
 "New thread from selection" as a small action under the reply and in the
 reply's right-click menu. It opens the new-thread draft in the same Project and

@@ -13,7 +13,7 @@ import {
   unlink,
   writeFile,
 } from "node:fs/promises";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { promisify } from "node:util";
 import {
   decodeOwnerReceipt,
@@ -719,10 +719,22 @@ async function quarantineStaleReceipt(
 ): Promise<{ readonly quarantine: string; readonly suffix: string }> {
   const quarantine = join(paths.runtimeDirectory, "quarantine");
   await mkdir(quarantine, { recursive: true, mode: 0o700 });
+  // The receipt is the atomic recovery claim. Its data directory may be on
+  // another filesystem from the fixed socket root, where rename would fail.
+  const receiptQuarantine = join(dirname(paths.ownerReceiptPath), "quarantine");
+  await mkdir(receiptQuarantine, { recursive: true, mode: 0o700 });
+  const node = await lstat(receiptQuarantine);
+  if (!node.isDirectory() || node.uid !== process.getuid?.() || (node.mode & 0o077) !== 0) {
+    throw new HostRuntimeOwnershipError(
+      "unsafe-owner-artifact",
+      "Octant found an unsafe receipt quarantine directory.",
+      receiptQuarantine,
+    );
+  }
   const suffix = `${Date.now()}-${stale.receipt.instanceId}`;
   await renameIfSame(
     paths.ownerReceiptPath,
-    join(quarantine, `owner-${suffix}.json`),
+    join(receiptQuarantine, `owner-${suffix}.json`),
     stale.receiptIdentity,
   );
   return { quarantine, suffix };

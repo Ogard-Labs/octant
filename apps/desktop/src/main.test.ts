@@ -940,6 +940,25 @@ describe("Project window production preparation cleanup", () => {
 });
 
 describe("Project window production request gate", () => {
+  it("holds a recovery request until replacement preparation settles", async () => {
+    let finish = () => {};
+    const prepared = new Promise<void>((resolve) => {
+      finish = resolve;
+    });
+    let settled = false;
+    const recovery = requestProjectWindowWhileRunning({
+      isTearingDown: () => false,
+      request: () => prepared,
+      handleFailure: vi.fn(),
+    }).then(() => {
+      settled = true;
+    });
+    await Promise.resolve();
+    expect(settled).toBe(false);
+    finish();
+    await recovery;
+    expect(settled).toBe(true);
+  });
   it("does not request a window after teardown begins", () => {
     const request = vi.fn();
     const handleFailure = vi.fn();
