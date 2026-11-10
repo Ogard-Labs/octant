@@ -124,14 +124,14 @@ separate evidence gates from the local test suite.
 ### Apple Silicon (macOS)
 
 - Apple Silicon Mac (M1 or later) running a recent macOS
-- [Bun](https://bun.sh) 1.3.x for building from source (`packageManager` in
+- [Bun](https://bun.sh) 1.4.4 for building from source (`packageManager` in
   `package.json` pins the exact version)
 - Node 26 only for the optional Node SQLite portability smoke
 
 ### Linux x64 (Ubuntu dogfood)
 
 - x64 Linux host (Ubuntu is the dogfood target)
-- Bun 1.3.x for building from source
+- Bun 1.4.4 for building from source
 - Bubblewrap and a live Secret Service session for Work/Code on the host
 - Node 26 only for the optional Node SQLite portability smoke
 
