@@ -1835,7 +1835,10 @@ place inside the row, under a hairline, and keep every control and fact. The
 page opens at most one row by itself, the first that needs attention (a
 sign-in, or a binary the scan found for a broken runtime), and none when no
 provider does. One row is open at a time: opening another closes the one that
-was open, so the page never grows by more than one provider's details. A card per provider, two to a row, made the boxes the loudest
+was open, so the page never grows by more than one provider's details. Remove
+is the last thing in those details, alone under a hairline with one line saying
+what it does, never among Check connection, Configure and the other routine
+actions. A card per provider, two to a row, made the boxes the loudest
 thing on the page, and one open card among nine shut ones ran to about eight
 screens. The state line
 reads from a dot that carries the state without colour: a filled ink dot is
