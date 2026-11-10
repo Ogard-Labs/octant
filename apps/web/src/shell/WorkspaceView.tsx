@@ -132,6 +132,10 @@ import type { PlanClient } from "@octant/client-runtime/plan-client";
 import { SideChatWorkspaceTab } from "../chat/SideChatWorkspaceTab";
 import { ThreadSubagentsTray } from "../agents/ComposerSubagentsTray";
 import { ThreadHarnessCards } from "../harness/ThreadHarnessCards";
+import {
+  CoordinatorWorkerRequests,
+  type CoordinatorWorkerRequestSource,
+} from "../code/CoordinatorWorkerRequests";
 import { createThreadMessageQueueClient } from "../messageQueue/threadMessageQueueClient";
 import type { NativeHarnessClient } from "@octant/client-runtime/native-harness-client";
 import { useWorkResearchController } from "../work/useWorkResearchController";
@@ -191,6 +195,11 @@ export interface WorkspaceViewProps {
   readonly nativeHarnessClient?: NativeHarnessClient;
   /** Opens the Agents tool; with a run id, on that subagent's page. */
   readonly onOpenSubagent?: (runId?: string) => void;
+  /**
+   * The window's pending-request reader, for a coordinator's composer to list
+   * its workers' requests. Absent in a window that cannot read them (remote).
+   */
+  readonly workerRequestSource?: CoordinatorWorkerRequestSource;
   readonly chatClient: ChatClient;
   readonly chatController: ChatController;
   readonly chatReadCursorStore: ChatReadCursorStore;
@@ -1110,12 +1119,50 @@ function subagentsTrayFor(surface: WorkspaceTab, props: WorkspaceViewProps): Rea
         threadId={threadId}
       />
     );
-  if (harness === null && tray === null) return null;
+  const workerRequests = ownHost ? coordinatorWorkerRequestsFor(surface, threadId, props) : null;
+  if (harness === null && workerRequests === null && tray === null) return null;
   return (
     <>
       {harness}
+      {workerRequests}
       {tray}
     </>
+  );
+}
+
+/**
+ * A coordinator's composer lists its workers' requests beside its child runs'
+ * (docs/design/coordinator-threads.md#questions-and-approvals). Its workers
+ * are read from the window's thread list, so a worker this window cannot see
+ * is never listed.
+ */
+function coordinatorWorkerRequestsFor(
+  surface: WorkspaceTab,
+  threadId: string,
+  props: WorkspaceViewProps,
+): ReactNode {
+  if (surface.kind !== "code-overview" || props.workerRequestSource === undefined) return null;
+  const threads = props.codeController.navigation;
+  const coordinator = threads.find((thread) => String(thread.threadId) === threadId);
+  if (coordinator?.coordinator !== true) return null;
+  const workers = threads.filter(
+    (thread) =>
+      thread.coordinatorThreadId !== undefined && String(thread.coordinatorThreadId) === threadId,
+  );
+  if (workers.length === 0) return null;
+  return (
+    <CoordinatorWorkerRequests
+      source={props.workerRequestSource}
+      workers={workers.map((thread) => ({
+        threadId: String(thread.threadId),
+        title: thread.title,
+      }))}
+      onOpenWorker={(worker) => {
+        const thread = workers.find((candidate) => String(candidate.threadId) === worker.threadId);
+        if (thread !== undefined)
+          props.onOpenCodeThread(thread.threadId, thread.title, thread.projectId);
+      }}
+    />
   );
 }
 

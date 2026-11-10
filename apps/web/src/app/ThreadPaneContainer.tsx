@@ -16,11 +16,12 @@ import type {
   CreateHostViewScope,
   listEligibleImageProfiles,
 } from "@octant/domain";
-import { memo, type ReactNode, type RefObject } from "react";
+import { memo, useMemo, type ReactNode, type RefObject } from "react";
 import type { useAgentProfiles } from "../agentProfile/useAgentProfiles";
 import { AgentProfileNamesProvider } from "../agentProfile/AgentProfileNames";
 import type { ChatController, createChatReadCursorStore } from "../chat/useChatController";
 import type { CodeThreadControllerRegistry } from "../code/codeThreadControllers";
+import type { CoordinatorWorkerRequestSource } from "../code/CoordinatorWorkerRequests";
 import type { CodeThreadProviderChoice } from "../code/codeThreadCreate";
 import type { CodeController } from "../code/useCodeController";
 import type { useContinueCards } from "../code/useContinueCards";
@@ -448,6 +449,32 @@ export const ThreadPaneContainer = memo(function ThreadPaneContainer(
   } = props.clients;
   const { liveThreadTitles, needsPersonThreadIds, providerByThreadId, runningThreadIds } =
     navigation;
+  // A coordinator's composer reads the same pending-request list as Needs you
+  // and answers through the same clients; a remote window has no reader.
+  const { codeClient, pendingRequestClient } = props.clients;
+  const workerRequestSource = useMemo<CoordinatorWorkerRequestSource | undefined>(
+    () =>
+      pendingRequestClient === undefined
+        ? undefined
+        : {
+            pendingRequestClient,
+            answerClients: { chatClient, codeClient, workRequestClient, workTurnClient },
+            feedRevision: machineChanges.codeNavigation,
+            modes: ["code"],
+            settings,
+            workspace,
+          },
+    [
+      chatClient,
+      codeClient,
+      machineChanges.codeNavigation,
+      pendingRequestClient,
+      settings,
+      workRequestClient,
+      workTurnClient,
+      workspace,
+    ],
+  );
   // A draft only: the quote lands in a clean composer in the same Project and
   // mode, and the person sends it. Nothing here starts a turn.
   const startThreadFromSelection = (request: SelectionThreadRequest) => {
@@ -555,6 +582,7 @@ export const ThreadPaneContainer = memo(function ThreadPaneContainer(
                 agentRunClient={agentRunClient}
                 nativeHarnessClient={nativeHarnessClient}
                 onOpenSubagent={openSubagent}
+                {...(workerRequestSource === undefined ? {} : { workerRequestSource })}
                 onOpenAgents={openSubagent}
                 chatClient={chatClient}
                 chatController={chatController}

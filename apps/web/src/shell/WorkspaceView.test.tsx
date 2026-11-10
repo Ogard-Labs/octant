@@ -1580,6 +1580,77 @@ describe("WorkspaceView subagent tray", () => {
   });
 });
 
+describe("WorkspaceView coordinator composer", () => {
+  it("lists a worker's approval in its coordinator's composer and opens that worker", async () => {
+    const user = userEvent.setup();
+    const workerId = "40000000-0000-4000-8000-0000000000aa";
+    const base = propsFor(codeTab("code-overview", "Release coordinator"));
+    const onOpenCodeThread = vi.fn();
+    const list = vi.fn(async () => ({
+      requests: [
+        {
+          mode: "code",
+          kind: "approval",
+          projectId: ids.project,
+          threadId: workerId,
+          threadTitle: "Fix the parser",
+          text: "Run: bun run test",
+          requestedAt: "2026-10-06T09:56:00.000Z",
+          answer: { threadId: workerId, checkoutId: codeIds.checkout, approvalId: "approval-1" },
+        },
+      ],
+      truncated: false,
+    }));
+    render(
+      <WorkspaceView
+        {...base}
+        codeController={
+          {
+            ...(base.codeController as object),
+            navigation: [
+              {
+                threadId: codeIds.thread,
+                projectId: ids.project,
+                title: "Release coordinator",
+                coordinator: true,
+              },
+              {
+                threadId: workerId,
+                projectId: ids.project,
+                title: "Fix the parser",
+                coordinatorThreadId: codeIds.thread,
+              },
+            ],
+          } as never
+        }
+        onOpenCodeThread={onOpenCodeThread}
+        workerRequestSource={{
+          pendingRequestClient: { list } as never,
+          answerClients: {} as never,
+          feedRevision: 0,
+          modes: ["code"],
+          settings: {},
+          workspace: {},
+        }}
+      />,
+    );
+    const region = await screen.findByRole(
+      "region",
+      { name: "Worker requests" },
+      { timeout: 5_000 },
+    );
+    expect(region.closest(".composer")).not.toBeNull();
+    expect(region).toHaveTextContent("Fix the parser");
+    expect(region).toHaveTextContent("Run: bun run test");
+    await user.click(within(region).getByRole("button", { name: "Open worker" }));
+    expect(onOpenCodeThread).toHaveBeenCalledExactlyOnceWith(
+      workerId,
+      "Fix the parser",
+      ids.project,
+    );
+  });
+});
+
 describe("WorkspaceView agent approval card", () => {
   const approval = {
     id: "00000000-0000-4000-8000-000000000061",
