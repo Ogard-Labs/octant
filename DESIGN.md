@@ -1732,9 +1732,10 @@ the light theme and as a tint with a coloured count in the dark one. At 960px an
 narrower, where no rail shows (the same breakpoint as the rail's own, one
 number), and in the phone drawer, the four destinations are compact rows
 instead: icon, name, and the count at the trailing edge, with no fill, so they
-sit quieter than the thread list under them. Under Colour the row's icon takes the
-same hue as the rail's icon, so the four places read in the same colours
-whichever layout shows them; the name and the count stay in the sidebar ink. Each row keeps its name with its
+sit quieter than the thread list under them. The row's icon, like every icon in
+the rail, stays in the sidebar ink in every style, and each count has one mark
+wherever it shows (Inbox, a play circle for Running, an eye for To review, a
+ticked circle for Done today); the name and the count stay in the sidebar ink. Each row keeps its name with its
 count and its destination. The drawer itself paints the opaque sidebar surface
 in every material, since it overlays the page and a transparent drawer let the
 page's text show through it.
