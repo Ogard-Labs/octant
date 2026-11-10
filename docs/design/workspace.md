@@ -490,8 +490,10 @@ a cancellable pass indexes rendered text in batches of at most 32 additional
 rows, yielding between batches and showing Searching until the index is ready.
 This preserves inline formatting, block boundaries and closed-disclosure rules
 without a second interpretation of message markup. The index retains text,
-never detached DOM ranges, and subsequent queries reuse it; changed rows rebuild
-it and closing Find releases it. Navigation mounts only the current matching
+never detached DOM ranges, and subsequent queries reuse it. Changed rows refresh
+in rotating batches so streamed updates cannot repeatedly restart indexing at
+the beginning; known matches remain usable while refreshed text arrives.
+Closing Find releases the index. Navigation mounts only the current matching
 row in addition to the ordinary viewport. This trades incremental first-search
 latency for responsive input and bounded mounted content in long histories.
 

@@ -1,6 +1,6 @@
 import { WorkspaceViewStateContext, type WorkspaceViewStore } from "../shell/workspaceViewState";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { useState, type ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { describe, expect, it, vi } from "vitest";
 import { TranscriptWindow } from "./TranscriptWindow";
 
@@ -292,6 +292,33 @@ describe("TranscriptWindow", () => {
     fireEvent.keyDown(input, { key: "Escape" });
     await waitFor(() => expect(mountedCount()).toBeLessThan(32));
     expect(screen.queryByRole("textbox", { name: "Find in thread" })).not.toBeInTheDocument();
+  });
+
+  it("finishes indexing while streamed rows continue to refresh", async () => {
+    function StreamingThread() {
+      const [items, setItems] = useState(() => rows(1000));
+      useEffect(() => {
+        const timer = setInterval(
+          () => setItems((current) => current.map((item) => ({ ...item }))),
+          20,
+        );
+        return () => clearInterval(timer);
+      }, []);
+      return (
+        <TranscriptWindow
+          items={items}
+          itemKey={(item) => item.id}
+          renderItem={(item) => <button type="button">{item.label}</button>}
+          restoreKey="streaming-find"
+        />
+      );
+    }
+    render(<StreamingThread />);
+    fireEvent.keyDown(window, { key: "f", ctrlKey: true });
+    const input = await screen.findByRole("textbox", { name: "Find in thread" });
+    fireEvent.change(input, { target: { value: "Row 500" } });
+    expect(await screen.findByText("1 of 1", {}, { timeout: 5000 })).toBeInTheDocument();
+    expect(mountedCount()).toBeLessThan(80);
   });
 
   it("reuses indexed text for a new query without mounting the history again", async () => {

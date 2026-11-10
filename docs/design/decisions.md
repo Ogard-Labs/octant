@@ -2202,7 +2202,8 @@ Status: Built. Since: —. Detail: [DESIGN.md: Transcript](../../DESIGN.md#trans
 Find keeps viewport virtualization. A first nonempty query indexes the actual
 rendered text in cancellable batches, retains no off-window DOM, and reuses
 its text index for later queries. Only the current match is additionally mounted
-for navigation. Closing Find releases the index; changed rows invalidate it.
+for navigation. Closing Find releases the index; changed rows refresh in rotating
+batches without starving later rows during streaming.
 
 Status: Built. Since: 2026-11-10. Detail: [Find in a thread](workspace.md#find-in-a-thread-and-a-new-thread-from-a-selection).
 

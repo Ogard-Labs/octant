@@ -171,6 +171,7 @@ export function TranscriptWindow<T>(props: TranscriptWindowProps<T>) {
   const itemKey = props.itemKey;
   const find = useTranscriptFindIndex(
     items,
+    itemKey,
     findActive && findQuery !== "",
     findQuery,
     scrollElementRef,
@@ -249,7 +250,7 @@ export function TranscriptWindow<T>(props: TranscriptWindowProps<T>) {
       const extracted = defaultRangeExtractor(range);
       const extra = new Set<number>();
       if (findActive) {
-        for (let i = find.start; i < find.end; i++) extra.add(i);
+        for (const i of find.batch) extra.add(i);
         if (!find.pending && findRow !== undefined) extra.add(findRow.row);
       }
       if (revealIndex >= 0) extra.add(revealIndex);
