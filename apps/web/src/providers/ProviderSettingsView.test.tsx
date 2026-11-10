@@ -3528,6 +3528,10 @@ describe("ProviderSettingsView", () => {
       name: "Use the one found at ~/.local/bin/codex (0.49.1) for Missing Codex",
     });
     expect(onUseScannedBinary).not.toHaveBeenCalled();
+    // The row itself says where the runtime was found and carries the offer,
+    // so a closed card never reads as "not installed".
+    expect(card).toHaveTextContent("Found at ~/.local/bin/codex (0.49.1).");
+    expect(card).not.toHaveTextContent("Not found by the latest scan");
 
     await user.click(offer);
 

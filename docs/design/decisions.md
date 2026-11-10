@@ -2745,7 +2745,7 @@ Status: Built. Since: —. Detail: [Provider runtimes: runtime updates](provider
 Settings lists every bundled provider driver, runtimes and model endpoints in separate sections. Bundled drivers need no install or trust step, and opening a catalog page runs nothing.
 
 - An outside driver the person trusted appears in its own third section, labelled as an outside driver, never as bundled, and its provider is added off.
-- A runtime card whose saved binary is gone offers only a replacement from the host's own latest scan; the offer never switches or turns the runtime on by itself.
+- A scan points a runtime whose saved binary no longer exists at the launcher it found for the same driver, and a runtime created from a scan saves that launcher rather than the versioned file behind it; neither ever turns the runtime on. A saved binary that exists but is incompatible is only offered a replacement, on the card's row.
 - A browser can create an API-key profile but never supply the key; the key is set in the host terminal or the desktop app, and host-local credential authority is unchanged.
 
 Status: Built. Since: —. Detail: [Model endpoints: provider catalog](model-endpoints.md#provider-catalog).

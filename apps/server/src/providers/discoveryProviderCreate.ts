@@ -12,7 +12,8 @@ import {
 type DiscoveryCreateCandidate = Pick<
   DiscoveryCandidate,
   "driverKind" | "displayName" | "binaryPath"
->;
+> &
+  Partial<Pick<DiscoveryCandidate, "discoveredPath">>;
 type DiscoveryCreateCommand =
   | CreateAcpAgentProviderCommand
   | Extract<
@@ -37,6 +38,12 @@ export function createProviderFromDiscoveryCandidate(
 } {
   const instanceId = decodeProviderInstanceId(crypto.randomUUID());
   const expectedVersion = 0 as DiscoveryCreateCommand["expectedVersion"];
+  // The saved path is the launcher the scan examined, not the file it
+  // resolves to. A runtime that updates itself replaces that file: a Claude
+  // Code saved as `~/.local/share/claude/versions/2.1.318` stopped starting
+  // once its updater pruned the version, while `~/.local/bin/claude` kept
+  // pointing at the current one.
+  const binaryPath = candidate.discoveredPath ?? candidate.binaryPath;
 
   if (isAcpAgentKind(candidate.driverKind)) {
     // Discovery proves only that the binary is present, so it registers the
@@ -52,7 +59,7 @@ export function createProviderFromDiscoveryCandidate(
         displayName: candidate.displayName,
         configuration: {
           kind: acpAgentConfigurationKind(candidate.driverKind),
-          binaryPath: candidate.binaryPath,
+          binaryPath,
           ...(authentication === undefined ? {} : { authentication }),
         },
         enabled: options.enabled,
@@ -68,7 +75,7 @@ export function createProviderFromDiscoveryCandidate(
           instanceId,
           expectedVersion,
           displayName: candidate.displayName,
-          binaryPath: candidate.binaryPath,
+          binaryPath,
           enabled: options.enabled,
         },
       };
@@ -80,7 +87,7 @@ export function createProviderFromDiscoveryCandidate(
           instanceId,
           expectedVersion,
           displayName: candidate.displayName,
-          binaryPath: candidate.binaryPath,
+          binaryPath,
           enabled: options.enabled,
         },
       };
@@ -94,7 +101,7 @@ export function createProviderFromDiscoveryCandidate(
           displayName: candidate.displayName,
           configuration: {
             kind: "claude-agent-sdk",
-            binaryPath: candidate.binaryPath,
+            binaryPath,
             authentication: "subscription",
           },
           enabled: options.enabled,
@@ -110,7 +117,7 @@ export function createProviderFromDiscoveryCandidate(
           displayName: candidate.displayName,
           configuration: {
             kind: "oh-my-pi-rpc",
-            binaryPath: candidate.binaryPath,
+            binaryPath,
             // Discovery only proves binary presence; the fail-closed runtime probe
             // re-validates the pinned version before readiness is accepted.
             supportedVersion: "17.2.1",
@@ -128,7 +135,7 @@ export function createProviderFromDiscoveryCandidate(
           displayName: candidate.displayName,
           configuration: {
             kind: "pi-rpc",
-            binaryPath: candidate.binaryPath,
+            binaryPath,
           },
           enabled: options.enabled,
         },
