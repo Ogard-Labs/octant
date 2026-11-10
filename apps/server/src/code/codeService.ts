@@ -2126,6 +2126,15 @@ export class CodeService {
         command.kind === "set-code-thread-coordinator-wake"
       ) {
         const next = this.#coordinatorSwitches(current, command, updatedAt);
+        // Setting the role to what it already is changes nothing: appending
+        // the unchanged record at the next version would disagree with its
+        // own version and fail in the projection.
+        if (next === current) {
+          return {
+            kind: "thread-updated",
+            thread: this.#sessionAuthority.effectiveThread(authenticatedWindowId, current),
+          };
+        }
         this.#inUnit(() => {
           this.#append(
             "code-thread",

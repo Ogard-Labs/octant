@@ -12,6 +12,7 @@ import {
   decodeCodePlannerProposalDraft,
   decodeCodePlannerProposalId,
   decodeCodePlannerView,
+  decodeCodePlannerWorkProposal,
   decodeProjectId,
   MAX_PENDING_CODE_PLANNER_PROPOSALS,
   type CodeCommandResult,
@@ -37,6 +38,7 @@ import {
   type CodePlannerThreadFacts,
 } from "@octant/domain/code-planner-policy";
 import { readsAsCoordinator } from "@octant/domain";
+import { ACCESS_POSTURE_RANK } from "@octant/domain/code-policy";
 import { Schema } from "effect";
 import { ConcurrencyConflict } from "../persistence/journalErrors";
 import type { PersistenceService } from "../persistence/persistenceService";
@@ -335,6 +337,11 @@ export class CodePlannerService {
   proposeForCoordinator(
     coordinatorThreadId: CodeThreadId,
     draftInput: { readonly title: string; readonly intent: string },
+    workerOptions?: {
+      readonly providerInstanceId?: string;
+      readonly modelId?: string;
+      readonly executionPolicy: string;
+    },
   ):
     | { readonly status: "proposed"; readonly proposal: CodePlannerWorkProposal }
     | { readonly status: "refused"; readonly message: string } {
@@ -375,12 +382,21 @@ export class CodePlannerService {
       status: "pending",
       proposedAt: decodeTimestamp(this.#clock()),
     };
+    let withOptions: CodePlannerWorkProposal;
     try {
-      this.#appendProposal(proposal, 0, this.#agentActor(coordinatorThreadId));
+      withOptions =
+        workerOptions === undefined
+          ? proposal
+          : decodeCodePlannerWorkProposal({ ...proposal, workerOptions });
+    } catch {
+      return { status: "refused", message: "The proposed worker's options are invalid." };
+    }
+    try {
+      this.#appendProposal(withOptions, 0, this.#agentActor(coordinatorThreadId));
     } catch {
       return { status: "refused", message: "Planner storage is unavailable." };
     }
-    return { status: "proposed", proposal };
+    return { status: "proposed", proposal: withOptions };
   }
 
   async resolveProposal(
@@ -426,6 +442,20 @@ export class CodePlannerService {
         status: "refused",
         reason: "proposal-changed",
         message: "The proposal changed; reload and retry.",
+      };
+    }
+    // A coordinator's start resolved a level; approving it cannot start the
+    // worker any higher, whatever the creation controls were set to.
+    const proposedLevel = decision.proposal.workerOptions?.executionPolicy;
+    if (
+      command.kind === "confirm-planner-work-proposal" &&
+      proposedLevel !== undefined &&
+      ACCESS_POSTURE_RANK[creationLevel(command.creation)] > ACCESS_POSTURE_RANK[proposedLevel]
+    ) {
+      return {
+        status: "refused",
+        reason: "creation-above-proposed-level",
+        message: "This worker was proposed at a lower guardrail level. Choose that level or lower.",
       };
     }
     if (decision.proposal.creationAttempt?.status === "creating")
@@ -737,6 +767,12 @@ function creationProjectId(creation: CodePlannerThreadCreation): ProjectId {
   return creation.kind === "create-managed-code-thread"
     ? creation.projectId
     : creation.thread.projectId;
+}
+
+function creationLevel(creation: CodePlannerThreadCreation) {
+  return creation.kind === "create-managed-code-thread"
+    ? creation.executionPolicy
+    : creation.thread.executionPolicy;
 }
 
 function createdThreadId(creation: CodePlannerThreadCreation): CodeThreadId {

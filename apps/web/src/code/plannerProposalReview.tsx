@@ -239,6 +239,11 @@ export function PlannerProposalReviewDialog(
             <>
               <h2>{props.heading}</h2>
               <h3>{review.proposal.title}</h3>
+              {review.proposal.workerOptions === undefined ? null : (
+                <p className="code-project-planner__requested">
+                  {requestedWorkerOptions(review.proposal.workerOptions)}
+                </p>
+              )}
             </>
           }
           fixedPrompt={review.proposal.intent}
@@ -309,4 +314,24 @@ export function PlannerProposalReviewDialog(
       ) : null}
     </OctantDialog>
   );
+}
+
+const LEVEL_LABELS: Readonly<Record<string, string>> = {
+  plan: "Plan",
+  "approval-gated": "Ask first",
+  "auto-accept-edits": "Accept edits",
+  "full-access": "Full access",
+};
+
+/**
+ * What a coordinator's start asked for, shown in its review so the person can
+ * match it. The host refuses an approval above the requested level.
+ */
+export function requestedWorkerOptions(options: {
+  readonly modelId?: string | undefined;
+  readonly executionPolicy: string;
+}): string {
+  const level = LEVEL_LABELS[options.executionPolicy] ?? options.executionPolicy;
+  const model = options.modelId === undefined ? "" : ` on ${options.modelId}`;
+  return `The coordinator asked for this worker${model} at ${level} or lower.`;
 }

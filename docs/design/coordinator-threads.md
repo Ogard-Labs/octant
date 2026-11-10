@@ -161,10 +161,12 @@ restrict that can do it for the whole host or for one Project.
 - Under **Propose for approval**, `start` creates nothing. It journals a pending
   proposal with the title, the prompt as its intent, and the requested provider,
   model, and level, through the planner's proposal path, with its bound of ten
-  waiting proposals per Project. The coordinator is told `proposed`. A person
-  approves or declines it from a card above the coordinator's composer or
-  from the Project overview, with the same **Review and approve** and versioned
-  decline; an
+  waiting proposals per Project; the proposal keeps the provider and model the
+  call named and the level it resolved, and approving it cannot start the
+  worker above that level (`creation-above-proposed-level`). The coordinator is
+  told `proposed`. A person approves or declines it from a card above the
+  coordinator's composer or from the Project overview, with the same **Review
+  and approve** and versioned decline; an
   approved proposal creates the worker exactly as an unasked start would,
   recorded as that coordinator's worker.
 

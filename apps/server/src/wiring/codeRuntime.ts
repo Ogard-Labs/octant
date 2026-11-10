@@ -1706,8 +1706,12 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
                   : "The turn was not admitted.",
             };
       },
-      propose: (coordinatorThreadId, draft) => {
-        const outcome = codePlannerService.proposeForCoordinator(coordinatorThreadId, draft);
+      propose: (coordinatorThreadId, draft, workerOptions) => {
+        const outcome = codePlannerService.proposeForCoordinator(
+          coordinatorThreadId,
+          draft,
+          workerOptions,
+        );
         return outcome.status === "proposed"
           ? { status: "proposed", proposalId: String(outcome.proposal.id) }
           : outcome;

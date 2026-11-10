@@ -74,6 +74,11 @@ export interface CoordinatorServicePorts {
   readonly propose: (
     coordinatorThreadId: CodeThreadId,
     draft: { readonly title: string; readonly intent: string },
+    workerOptions: {
+      readonly providerInstanceId?: string;
+      readonly modelId?: string;
+      readonly executionPolicy: string;
+    },
   ) =>
     | { readonly status: "proposed"; readonly proposalId: string }
     | { readonly status: "refused"; readonly message: string };
@@ -107,6 +112,7 @@ export class CoordinatorService {
   readonly #wakeTimes = new Map<string, number[]>();
   readonly #startTimes = new Map<string, number[]>();
   readonly #lastState = new Map<string, CoordinatorWorkerState>();
+  readonly #lastTurn = new Map<string, string | undefined>();
   readonly #notices = new Map<string, Map<string, PendingNotice>>();
   readonly #noticeHops = new Map<string, number>();
   #sweepTimer: ReturnType<typeof setInterval> | undefined;
@@ -192,7 +198,17 @@ export class CoordinatorService {
     starts.push(now);
     this.#startTimes.set(input.callerThreadId, starts);
     if (decision.status === "propose") {
-      const proposed = this.#ports.propose(caller.id, { title: call.title, intent: call.prompt });
+      const proposed = this.#ports.propose(
+        caller.id,
+        { title: call.title, intent: call.prompt },
+        {
+          ...(call.providerInstanceId === undefined
+            ? {}
+            : { providerInstanceId: call.providerInstanceId }),
+          ...(call.modelId === undefined ? {} : { modelId: call.modelId }),
+          executionPolicy: decision.level,
+        },
+      );
       return proposed.status === "proposed"
         ? {
             result: {
@@ -283,7 +299,18 @@ export class CoordinatorService {
         if (next === undefined) continue;
         const previous = this.#lastState.get(key);
         this.#lastState.set(key, next);
-        if (!coordinatorNoticeFor(previous, next)) continue;
+        // A turn can start and finish between two sweeps, so both see the
+        // same settled state; a new latest turn that is no longer working is
+        // a finished turn all the same.
+        const turn = this.#ports.latestTurnId(key);
+        const previousTurn = this.#lastTurn.get(key);
+        this.#lastTurn.set(key, turn);
+        const finishedUnseen =
+          previous !== undefined &&
+          next !== "working" &&
+          turn !== undefined &&
+          turn !== previousTurn;
+        if (!coordinatorNoticeFor(previous, next) && !finishedUnseen) continue;
         const pending =
           this.#notices.get(String(coordinator.id)) ?? new Map<string, PendingNotice>();
         pending.set(key, { state: next, at: new Date(this.#ports.now()).toISOString() });
@@ -429,8 +456,10 @@ export class CoordinatorService {
     const decision = decideMessageWake({
       recipient: {
         messageWake: recipient.messageWake === true,
+        // A worker keeps its lineage as history after its coordinator stops
+        // coordinating; only a current coordinator wakes it without its switch.
         coordinatorThreadId:
-          recipient.coordinatorThreadId === undefined
+          recipient.coordinatorThreadId === undefined || !this.isCoordinator(senderId)
             ? undefined
             : String(recipient.coordinatorThreadId),
         coordinatorWakeOff: recipient.coordinatorWakeOff === true,
