@@ -4796,11 +4796,6 @@ input.switch:checked::after {
 .thread-composer__strip > .thread-info {
   margin-left: auto;
 }
-.thread-info__trigger {
-  color: var(--oct-meta);
-  font-size: var(--oct-text-xs);
-  font-weight: var(--oct-weight-medium);
-}
 .thread-info__attention {
   color: var(--oct-warn-fg);
 }
