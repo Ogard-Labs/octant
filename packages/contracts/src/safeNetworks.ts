@@ -201,7 +201,7 @@ export const SafeNetworkRefusalView = Schema.Struct({
 export type SafeNetworkRefusalView = typeof SafeNetworkRefusalView.Type;
 
 /**
- * Settings › Access › Safe networks for one caller: the account default and,
+ * Settings › Permissions › Safe networks for one caller: the account default and,
  * when a Project is asked about, its override (`null` while it follows the
  * default), with the hosts its runtimes were recently refused.
  */

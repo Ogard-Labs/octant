@@ -190,7 +190,7 @@ changes what the Project shows, not what its threads may do: a Work thread
 has the same shell, Git, and tools as a Code thread at the same level either
 way ([Modes](../architecture.md#modes-chat-work-and-code)). Built today it
 shows the Project terminal and Project actions. On a server Work Project its
-existing Settings → Access → Servers row instead offers the same default-off
+existing Settings → Permissions → Servers row instead offers the same default-off
 presentation choice for saved actions and the person's Project terminal.
 Only this window's bound Work Project offers **Open terminal** in that row;
 the shell has Full remote SSH access and closes when the panel or that

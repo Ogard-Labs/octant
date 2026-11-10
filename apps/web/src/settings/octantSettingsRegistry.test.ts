@@ -60,8 +60,6 @@ describe("octantSettingsRegistry", () => {
   it("registers only sections with working content, in navigation order", () => {
     expect(octantSettingsRegistry.sections.map((s) => s.id)).toEqual([
       "general",
-      "profile",
-      "notifications",
       "appearance",
       "sidebar",
       "keybindings",
@@ -77,7 +75,6 @@ describe("octantSettingsRegistry", () => {
       "github",
       "linear",
       "permissions",
-      "access",
       "memory",
       "secret-stores",
       "data",
@@ -117,7 +114,8 @@ describe("octantSettingsRegistry", () => {
     ]);
     expect(section("host")?.keywords).toMatch(/lifecycle/);
     expect(section("host")?.keywords).toMatch(/diagnostics/);
-    expect(ids("notifications")).toEqual([
+    expect(ids("general")?.slice(-4)).toEqual([
+      "user-profile",
       "host-phone-notifications",
       "host-push-gateway",
       "host-automation-notifications",
@@ -131,10 +129,6 @@ describe("octantSettingsRegistry", () => {
       "browser-site-approvals",
       "browser-agent-downloads",
       "tool-approvals",
-    ]);
-    expect(section("access")?.label).toBe("Access");
-    expect(section("access")?.scope).toBe("host");
-    expect(ids("access")).toEqual([
       "network-limits",
       "safe-networks",
       "shield-servers-list",

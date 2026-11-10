@@ -59,7 +59,7 @@ export type ServerWorkTurnBinding =
   | { readonly status: "refused"; readonly message: string };
 
 const SERVER_NOT_REGISTERED =
-  "This Project's server is no longer registered in Settings › Access › Servers, so nothing can run there.";
+  "This Project's server is no longer registered in Settings › Permissions › Servers, so nothing can run there.";
 
 /**
  * Binds a server Work thread's turn before anything launches: the harness's

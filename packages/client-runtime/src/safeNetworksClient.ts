@@ -7,7 +7,7 @@ import {
 import { bindFetchPort } from "./bindFetchPort";
 
 /**
- * Settings › Access › Safe networks: the places a person trusts for the
+ * Settings › Permissions › Safe networks: the places a person trusts for the
  * account and for one Project, and the hosts that Project's runtimes were
  * recently refused. A refused change is a value the caller shows; only a
  * transport failure throws.

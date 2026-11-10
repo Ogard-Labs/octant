@@ -45,7 +45,7 @@ export const SERVER_PROJECTS_INTRO =
   "A Code or Work Project whose files and commands are on one of your servers. Octant connects with your own SSH agent and never falls back to this computer.";
 
 /**
- * Settings › Access › Servers: the Code and Work Projects bound to a folder on one of
+ * Settings › Permissions › Servers: the Code and Work Projects bound to a folder on one of
  * the registered servers. The host checks the folder over SSH before it binds
  * anything, and its refusal is shown beside the form as it arrived.
  */
@@ -424,7 +424,7 @@ export function ServerProjectsSettings(props: ServerProjectsSettingsProps) {
 }
 
 /**
- * Settings › Access › Servers: the registry and the server Projects below it,
+ * Settings › Permissions › Servers: the registry and the server Projects below it,
  * which read the registry again whenever it changes above.
  */
 export function ServerAccessSettings(props: {
