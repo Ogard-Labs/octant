@@ -1586,7 +1586,7 @@ function CreateFromIssueControl(props: {
 function CoordinatorDraftHeading(props: { readonly onCancel: () => void }) {
   return (
     <>
-      <Network aria-hidden="true" className="welcome__mark" size={22} strokeWidth={1.6} />
+      <Network aria-hidden="true" className="welcome__mark" size={24} strokeWidth={1.6} />
       <h1 className="oct-title oct-title--hero welcome__question">New coordinator</h1>
       <p className="oct-row-detail welcome__status">
         Describe the line of work. This thread reads the Project and starts worker threads for it.{" "}
