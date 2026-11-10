@@ -175,7 +175,7 @@ function VitalsView(props: { readonly history: ReadonlyArray<HostResourceSnapsho
         />
       )}
       {latest.disk === undefined ? null : (
-        <div className="vitals__tile">
+        <div className="vitals__row">
           <div className="vitals__head">
             <span>Disk space</span>
             <span>
@@ -193,7 +193,7 @@ function VitalsView(props: { readonly history: ReadonlyArray<HostResourceSnapsho
       {latest.gpu === undefined ? null : (
         <VitalsTile label="GPU" max={100} series={[series.gpu]} value={`${latest.gpu.percent}%`} />
       )}
-      <div className="vitals__tile">
+      <div className="vitals__row">
         <div className="vitals__head">
           <span>Energy</span>
           <span>
@@ -216,30 +216,35 @@ function VitalsTile(props: {
 }) {
   const width = 240;
   const height = props.tall === true ? 72 : 36;
+  // A line needs two samples. With one, the chart was an empty box under the
+  // figure for the first five seconds, and on every change of host.
+  const drawn = props.series.some((values) => values.length > 1);
   return (
-    <div className="vitals__tile">
+    <div className="vitals__row">
       <div className="vitals__head">
         <span>{props.label}</span>
         <span>{props.value}</span>
       </div>
-      <svg
-        aria-hidden="true"
-        className="vitals__chart"
-        data-tall={props.tall === true ? "true" : undefined}
-        preserveAspectRatio="none"
-        viewBox={`0 0 ${width} ${height}`}
-      >
-        {props.series.map((values, index) => (
-          <polyline
-            className="vitals__line"
-            data-series={index}
-            fill="none"
-            key={index}
-            points={sparklinePoints(values, props.max, width, height)}
-            vectorEffect="non-scaling-stroke"
-          />
-        ))}
-      </svg>
+      {drawn ? (
+        <svg
+          aria-hidden="true"
+          className="vitals__chart"
+          data-tall={props.tall === true ? "true" : undefined}
+          preserveAspectRatio="none"
+          viewBox={`0 0 ${width} ${height}`}
+        >
+          {props.series.map((values, index) => (
+            <polyline
+              className="vitals__line"
+              data-series={index}
+              fill="none"
+              key={index}
+              points={sparklinePoints(values, props.max, width, height)}
+              vectorEffect="non-scaling-stroke"
+            />
+          ))}
+        </svg>
+      ) : null}
     </div>
   );
 }
