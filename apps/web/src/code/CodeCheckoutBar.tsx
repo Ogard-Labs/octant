@@ -117,7 +117,9 @@ export function CodeCheckoutBar(props: {
           // the changes and left the person to find the Review tool in the dock.
           <OctantButton
             aria-label={`Review changes: ${insertions.toLocaleString("en")} added, ${deletions.toLocaleString("en")} removed`}
-            className="code-checkout-bar__action window-no-drag"
+            // Not the strip's action class: at phone width that one hides a
+            // button's words to leave its icon, and this button is its words.
+            className="code-checkout-bar__review window-no-drag"
             onClick={props.onOpenReview}
             size="sm"
             title="Review changes"
