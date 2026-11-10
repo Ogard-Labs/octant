@@ -273,6 +273,8 @@ export interface ProjectSidebarSectionProps {
   readonly onMove: (projectId: ProjectId, pinned: boolean) => void;
   readonly onNewChatInProject?: (projectId: ProjectId) => void;
   readonly onNewThreadInProject?: (projectId: ProjectId) => void;
+  /** New coordinator in a Code Project's menu; absent outside Code. */
+  readonly onNewCoordinatorInProject?: (projectId: ProjectId) => void;
   readonly newThreadVerb?: "chat" | "thread";
   readonly onReorder: (
     projectId: ProjectId,
@@ -652,6 +654,9 @@ export function ProjectSidebarSection(props: ProjectSidebarSectionProps) {
         onMove={props.onMove}
         onRestore={props.onRestore}
         {...(onNewThread === undefined ? {} : { newThreadVerb, onNewThreadInProject: onNewThread })}
+        {...(props.onNewCoordinatorInProject === undefined
+          ? {}
+          : { onNewCoordinatorInProject: props.onNewCoordinatorInProject })}
         onReorder={props.onReorder}
         onProjectOpen={props.onProjectOpen}
         {...(options.allowAdd === true && props.onAddProject !== undefined
@@ -958,6 +963,7 @@ function ProjectGroup(props: {
   readonly onRestore: (projectId: ProjectId) => void;
   readonly newThreadVerb?: "chat" | "thread";
   readonly onNewThreadInProject?: (projectId: ProjectId) => void;
+  readonly onNewCoordinatorInProject?: (projectId: ProjectId) => void;
   readonly onReorder: (
     projectId: ProjectId,
     pinned: boolean,
@@ -1142,6 +1148,9 @@ function ProjectGroup(props: {
                   ? {}
                   : { onColorChange: props.onColorChange })}
                 onMove={props.onMove}
+                {...(props.onNewCoordinatorInProject === undefined
+                  ? {}
+                  : { onNewCoordinator: props.onNewCoordinatorInProject })}
                 onOpen={props.onProjectOpen}
                 onReorder={props.onReorder}
                 onRestore={props.onRestore}
@@ -1179,9 +1188,10 @@ function ProjectGroup(props: {
                   ? {}
                   : { onRenameThread: props.onRenameThread })}
                 collapsedLimit={SIDEBAR_THREAD_LIMIT}
-                // Only Code threads carry a checkout, so Chat and Work Projects
-                // never split.
+                // Only Code threads carry a checkout or a coordinator, so Chat
+                // and Work Projects never split.
                 groupByCheckout
+                groupCoordinators
                 id={projectThreadListId(project.id)}
                 label={`Threads in ${project.name}`}
                 onSelectThread={props.onSelectThread!}
@@ -1249,6 +1259,8 @@ function ProjectActionsMenu(props: {
   readonly onArchive: (projectId: ProjectId) => void;
   readonly onColorChange?: (projectId: ProjectId, color: ProjectColor | null) => void;
   readonly onMove: (projectId: ProjectId, pinned: boolean) => void;
+  /** Starts a coordinator in a Code Project (docs/design/coordinator-threads.md). */
+  readonly onNewCoordinator?: (projectId: ProjectId) => void;
   readonly onOpen: (project: ProjectSummary) => void;
   readonly onReorder: (
     projectId: ProjectId,
@@ -1264,6 +1276,9 @@ function ProjectActionsMenu(props: {
   const archived = project.lifecycle === "archived";
   // An archived Project is read-only, so its colour is as fixed as its name.
   const onColorChange = archived ? undefined : props.onColorChange;
+  // Coordinators are Code only: Work turns carry no messages for one to follow
+  // up with, and an archived Project starts nothing.
+  const onNewCoordinator = archived || project.type !== "code" ? undefined : props.onNewCoordinator;
   return (
     <OctantMenuRoot>
       <OctantMenuTrigger
@@ -1279,6 +1294,11 @@ function ProjectActionsMenu(props: {
             <OctantMenuActionItem onClick={() => props.onOpen(project)}>
               Open Project
             </OctantMenuActionItem>
+            {onNewCoordinator === undefined ? null : (
+              <OctantMenuActionItem onClick={() => onNewCoordinator(project.id)}>
+                New coordinator
+              </OctantMenuActionItem>
+            )}
             <OctantMenuActionItem onClick={() => props.onMove(project.id, !project.pinned)}>
               {project.pinned ? "Unpin Project" : "Pin Project"}
             </OctantMenuActionItem>
@@ -1526,6 +1546,10 @@ function ActivityThreadButton(props: {
       <SidebarThreadRowContent
         {...(age === undefined ? {} : { age })}
         {...(checkout === undefined ? {} : { checkout })}
+        {...(props.thread.coordinator === true ? { coordinator: true } : {})}
+        {...(props.thread.coordinatorTitle === undefined
+          ? {}
+          : { coordinatorName: props.thread.coordinatorTitle })}
         {...(shows.project ? { projectName: props.thread.projectName } : {})}
         {...(props.thread.provider === undefined ? {} : { provider: props.thread.provider })}
         {...(pullRequest === undefined ? {} : { pullRequest })}

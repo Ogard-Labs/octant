@@ -71,7 +71,7 @@ import {
   type DraftIntentCard,
   type PickerGroup,
 } from "@octant/domain";
-import { FolderOpen, GitBranch, ShieldCheck } from "lucide-react";
+import { FolderOpen, GitBranch, Network, ShieldCheck } from "lucide-react";
 import {
   useCallback,
   useContext,
@@ -154,6 +154,11 @@ export interface DraftThreadWorkspaceProps {
   readonly projectName?: string;
   readonly projectRoot?: string;
   readonly branchName?: string;
+  /**
+   * Present while this Code draft was opened with New coordinator. It applies
+   * only while that Project stays selected.
+   */
+  readonly coordinator?: { readonly projectId: ProjectId; readonly onCancel: () => void };
   readonly approvalLabel?: string;
   readonly hosts?: ReadonlyArray<HostIdentity>;
   readonly selectedHostId?: HostId;
@@ -883,6 +888,10 @@ export function DraftThreadWorkspace(props: DraftThreadWorkspaceProps) {
           ? {}
           : { baseRepository: connectedBaseRepository })}
         {...(props.branchName === undefined ? {} : { branchName: props.branchName })}
+        {...(props.coordinator === undefined ||
+        String(props.coordinator.projectId) !== String(selectedProjectId)
+          ? {}
+          : { heading: <CoordinatorDraftHeading onCancel={props.coordinator.onCancel} /> })}
         newThreadWorkspace={newThreadWorkspace}
         {...(worktreeRemoteFacts === undefined ? {} : { worktreeRemoteFacts })}
         defaultPermissionMode={props.defaultPermissionMode ?? "ask-first"}
@@ -1565,6 +1574,27 @@ function CreateFromIssueControl(props: {
         )}
       </div>
     </div>
+  );
+}
+
+/**
+ * The start screen's question for a draft opened with New coordinator. The
+ * thread it starts becomes a coordinator before its first message
+ * (docs/design/coordinator-threads.md), and the way back to an ordinary
+ * thread stays one click away.
+ */
+function CoordinatorDraftHeading(props: { readonly onCancel: () => void }) {
+  return (
+    <>
+      <Network aria-hidden="true" className="welcome__mark" size={22} strokeWidth={1.6} />
+      <h1 className="oct-title oct-title--hero welcome__question">New coordinator</h1>
+      <p className="oct-row-detail welcome__status">
+        Describe the line of work. This thread reads the Project and starts worker threads for it.{" "}
+        <OctantButton onClick={props.onCancel} type="button" variant="link">
+          Start an ordinary thread instead
+        </OctantButton>
+      </p>
+    </>
   );
 }
 

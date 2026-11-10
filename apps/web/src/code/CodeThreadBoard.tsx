@@ -14,6 +14,7 @@ import {
   Filter,
   GitBranch,
   GitPullRequest,
+  Network,
   RefreshCw,
   Search,
   ShieldAlert,
@@ -59,6 +60,7 @@ import {
   codeBoardStatusReasonLabel,
   groupCodeBoardCards,
   type CodeBoardColumn,
+  type CodeBoardCoordinatorLineage,
   type CodeBoardGrouping,
   type CodeBoardProjectRef,
 } from "./codeBoardGrouping";
@@ -97,6 +99,8 @@ export interface CodeThreadBoardProps {
   readonly isNarrow?: boolean;
   /** Lets a waiting card answer its thread's question; without it cards look as they always did. */
   readonly pendingRequests?: BoardPendingRequestSource;
+  /** Absent leaves every card as the host sent it. */
+  readonly coordinators?: CodeBoardCoordinatorLineage;
 }
 
 interface FilterState {
@@ -464,7 +468,16 @@ export function CodeThreadBoard(props: CodeThreadBoardProps) {
             : activeFilterSummary(filters)
         }
         board={board}
-        cardsOf={(view) => view.cards}
+        // A coordinator has no delivery target and is never Done, so it is
+        // never a card (docs/design/workspace.md#coordinators).
+        cardsOf={(view) =>
+          props.coordinators === undefined
+            ? view.cards
+            : view.cards.filter(
+                (card) =>
+                  props.coordinators?.coordinatorThreadIds.has(String(card.threadId)) !== true,
+              )
+        }
         copy={{
           eyebrow: "Thread board",
           emptyTitle: "No Code threads yet",
@@ -488,6 +501,7 @@ export function CodeThreadBoard(props: CodeThreadBoardProps) {
             statusPresentation={presentation.statusPresentation}
             unread={props.unreadThreadIds?.has(String(card.threadId)) === true}
             request={pending.forCard(card)}
+            {...coordinatorOfCard(props.coordinators, card)}
             {...cardViewExtras(card, {
               projectNames,
               ...(props.providerLabels === undefined
@@ -530,8 +544,18 @@ function OutsideContentCardMark(props: { readonly found: boolean }) {
   );
 }
 
+function coordinatorOfCard(
+  lineage: CodeBoardCoordinatorLineage | undefined,
+  card: CodeBoardCard,
+): { readonly coordinatorTitle?: string } {
+  const coordinatorTitle = lineage?.coordinatorTitleByWorker.get(String(card.threadId));
+  return coordinatorTitle === undefined ? {} : { coordinatorTitle };
+}
+
 function CodeBoardCardView(props: {
   readonly card: CodeBoardCard;
+  /** A worker's card names the coordinator that started it. */
+  readonly coordinatorTitle?: string;
   readonly layout: "card" | "list";
   readonly statusPresentation: "visible" | "screen-reader";
   readonly unread: boolean;
@@ -616,6 +640,18 @@ function CodeBoardCardView(props: {
           </span>
         ))}
       </span>
+      {props.coordinatorTitle === undefined ? null : (
+        <span
+          className="board-card-coordinator fact"
+          title={`Coordinator: ${props.coordinatorTitle}`}
+        >
+          <Network aria-hidden="true" size={12} strokeWidth={1.8} />
+          <span className="fact__text">
+            <span className="sr-only">Coordinator: </span>
+            {props.coordinatorTitle}
+          </span>
+        </span>
+      )}
       {props.request === undefined ? null : (
         <ThreadBoardCardRequest onOpenThread={onOpenThread} request={props.request} />
       )}

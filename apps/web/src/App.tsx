@@ -116,6 +116,7 @@ import {
   decodeCodeThreadId,
   type CodeDeliveryOutcomeKind,
   type CodeTerminalId,
+  type CodeThreadId,
 } from "@octant/contracts/code";
 import { decodeCodeOperationId } from "@octant/contracts/code-operations";
 import type { CodeComposerSubmitInput } from "./code/composer/CodeComposerAdapter";
@@ -451,6 +452,7 @@ import {
   useOpenCodeThreadProviderRequests,
 } from "./code/codeThreadControllers";
 import { planCodeThreadCreate, type CodeThreadProviderChoice } from "./code/codeThreadCreate";
+import { setCodeThreadCoordinator } from "./code/codeThreadCommands";
 import {
   createPlannerProposalTask,
   type PlannerProposalReview,
@@ -972,6 +974,7 @@ function LaunchedShell(
       setDraftPermissionMode(undefined);
       setDraftPermissionPersistence(undefined);
       setPendingDraftBranch(undefined);
+      setPendingDraftCoordinator(undefined);
     }
   }
   // The Project an unbound draft composer targets, per mode. The draft lives
@@ -1010,6 +1013,10 @@ function LaunchedShell(
   // in, and the person sends it like any new thread.
   const [pendingDraftPrompt, setPendingDraftPrompt] = useState<string>();
   const [pendingDraftBranch, setPendingDraftBranch] = useState<string>();
+  // New coordinator opens an ordinary Code draft in its Project; the thread it
+  // creates becomes a coordinator before its first message is sent. It holds
+  // only for that Project, so choosing another one in the draft drops it.
+  const [pendingDraftCoordinator, setPendingDraftCoordinator] = useState<ProjectId>();
   const [githubIssuesReadAvailable, setGithubIssuesReadAvailable] = useState(false);
   const [githubPullRequestCapability, setGithubPullRequestCapability] =
     useState<PullRequestCardCapability>({ readable: false });
@@ -4401,6 +4408,23 @@ function LaunchedShell(
   // by every App render — including the once-a-minute clock tick and every
   // machine-change revision — and handed fresh array identities to the sidebar.
   const navigationModel = useMemo(() => {
+    // A worker names its coordinator by title only while that coordinator is
+    // still in the list; an archived one leaves the worker an ordinary row.
+    const codeCoordinatorTitles = new Map(
+      codeController.navigation
+        .filter((thread) => thread.coordinator === true)
+        .map((thread) => [String(thread.threadId), thread.title]),
+    );
+    const workerLineage = (
+      coordinatorThreadId: CodeThreadId | undefined,
+    ): Pick<ChatThreadNavigationItem, "coordinatorThreadId" | "coordinatorTitle"> => {
+      if (coordinatorThreadId === undefined) return {};
+      const coordinatorTitle = codeCoordinatorTitles.get(String(coordinatorThreadId));
+      return {
+        coordinatorThreadId: String(coordinatorThreadId),
+        ...(coordinatorTitle === undefined ? {} : { coordinatorTitle }),
+      };
+    };
     const codeProjectThreads: ReadonlyArray<ChatThreadNavigationItem> =
       codeController.status === "ready"
         ? codeController.navigation.map((thread) => ({
@@ -4428,6 +4452,10 @@ function LaunchedShell(
               : { lineageParentThreadId: thread.lineageParentThreadId }),
             ...(thread.completedAt === undefined ? {} : { completedAt: thread.completedAt }),
             ...(thread.snooze === undefined ? {} : { snooze: thread.snooze }),
+            ...(thread.coordinator === true ? { coordinator: true } : {}),
+            ...workerLineage(thread.coordinatorThreadId),
+            ...(thread.messageWake === true ? { messageWake: true } : {}),
+            ...(thread.coordinatorWakeOff === true ? { coordinatorWakeOff: true } : {}),
             ...threadRest(thread, {
               now: minuteNow,
               awaitingInput:
@@ -4854,6 +4882,8 @@ function LaunchedShell(
       openDockTab,
       openDraftInActiveProject,
       openDraftInProject,
+      openCoordinatorDraftInProject,
+      cancelCoordinatorDraft: () => setPendingDraftCoordinator(undefined),
       openDraftThread: controller.openDraftThread,
       openGithubIssues,
       openImageLibrary,
@@ -4970,6 +5000,9 @@ function LaunchedShell(
       setUsageOpen,
       setWorkBoardOpen,
       setWorkComposerSelection,
+      setCodeThreadCoordinator: codeController.setThreadCoordinator,
+      setCodeThreadCoordinatorWake: codeController.setThreadCoordinatorWake,
+      setCodeThreadMessageWake: codeController.setThreadMessageWake,
       snoozeChatThread: chatController.snoozeThread,
       snoozeCodeThread: codeController.snoozeThread,
       spendRevealChatTurn,
@@ -5671,6 +5704,12 @@ function LaunchedShell(
     setArchiveOpen(false);
   }
 
+  /** New coordinator: an ordinary Code draft whose thread becomes a coordinator. */
+  async function openCoordinatorDraftInProject(projectId: ProjectId) {
+    await openDraftInProject(projectId);
+    setPendingDraftCoordinator(projectId);
+  }
+
   async function openDraftInProject(projectId: ProjectId) {
     const serverProject = serverCodeProjectFor(serverCodeProjects.projects, projectId);
     if (serverProject !== undefined) {
@@ -6282,6 +6321,32 @@ function LaunchedShell(
       // The branch Start a fix handed in now belongs to this thread; the next
       // draft must not open on it.
       setPendingDraftBranch(undefined);
+      // A draft opened with New coordinator makes its thread a coordinator
+      // before the first message, so the opening turn already runs under the
+      // coordinator's read-only gate. A refusal (a fifth coordinator, a window
+      // that is not local) leaves an ordinary thread with the prompt unsent.
+      if (
+        pendingDraftCoordinator !== undefined &&
+        String(pendingDraftCoordinator) === String(project.id) &&
+        plannerReview === undefined
+      ) {
+        setPendingDraftCoordinator(undefined);
+        const made = await codeController.execute(setCodeThreadCoordinator(created.thread, true));
+        if (made?.kind !== "thread-updated") {
+          const refusal = `The thread was created, but it could not become a coordinator: ${
+            codeController.lastExecuteError.current?.message ?? "the host refused the change."
+          }`;
+          await controller.openCodeThread(
+            created.thread.id,
+            created.thread.title,
+            undefined,
+            created.thread.projectId,
+          );
+          codeThreadControllers.restoreDraft(created.thread.id, input.prompt, refusal);
+          setDraftError(refusal);
+          return false;
+        }
+      }
       // The thread opens before its first turn starts, so tell its own
       // controller which prompt is coming. Otherwise the transcript reads the
       // empty journal and calls the thread empty until the turn is durable.
@@ -7384,6 +7449,7 @@ function LaunchedShell(
                     machineChanges={machineChanges}
                     navigation={navigationModel}
                     {...(pendingDraftBranch === undefined ? {} : { pendingDraftBranch })}
+                    {...(pendingDraftCoordinator === undefined ? {} : { pendingDraftCoordinator })}
                     {...(pendingDraftPrompt === undefined ? {} : { pendingDraftPrompt })}
                     {...(pendingIssue === undefined ? {} : { pendingIssue })}
                     presentedLayout={controller.presentedLayout}

@@ -22,6 +22,7 @@ import type { useShellController } from "../shell/useShellController";
 import { WorkspaceRailLayers, type WorkspaceRailLayersProps } from "../shell/WorkspaceRailLayers";
 import type { useWorkThreadNavigation } from "../work/useWorkThreadNavigation";
 import type { CodeController } from "../code/useCodeController";
+import { codeBoardCoordinatorLineage } from "../code/codeBoardGrouping";
 import type { createLaunchedShellClients } from "./createLaunchedShellClients";
 import type { ShellActions } from "./shellActions";
 
@@ -500,6 +501,7 @@ export const ReaderPagesContainer = memo(function ReaderPagesContainer(
         }}
         {...(selectedProjectPullRequestKey === undefined ? {} : { selectedProjectPullRequestKey })}
         onCloseWorkBoard={() => actions.setWorkBoardOpen(false)}
+        codeBoardCoordinators={codeBoardCoordinatorLineage(codeNavigationRows)}
         unreadThreadIds={
           new Set(
             (activeMode === "work" ? workNavigationRows : codeNavigationRows)

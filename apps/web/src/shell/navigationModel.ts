@@ -215,6 +215,19 @@ export interface ChatThreadNavigationItem {
   readonly woke?: boolean;
   /** Compact time until a snoozed row wakes, such as "2h" or "3d". */
   readonly wakeLabel?: string;
+  /**
+   * Code only: the thread is a coordinator
+   * (docs/design/coordinator-threads.md). Absent on Chat and Work rows.
+   */
+  readonly coordinator?: boolean;
+  /** Code only: the coordinator that started this worker. */
+  readonly coordinatorThreadId?: string;
+  /** The worker's coordinator's title, when that coordinator is still listed. */
+  readonly coordinatorTitle?: string;
+  /** Code only: the Wake when a message arrives switch is on. */
+  readonly messageWake?: boolean;
+  /** Code only: a person turned off this worker's Wake for coordinator. */
+  readonly coordinatorWakeOff?: boolean;
 }
 
 /** The same activity precedence applies in the Project tree and Activity view. */

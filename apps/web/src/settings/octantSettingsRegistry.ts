@@ -628,6 +628,19 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
             "language services language server typescript javascript type errors diagnostics problems go to definition lsp editor bundled",
         },
         {
+          id: settingId("code-coordinator-starting"),
+          label: "Starting workers",
+          scope: "mode",
+          keywords:
+            "coordinator coordinators workers start without asking propose for approval planner proposals",
+        },
+        {
+          id: settingId("code-coordinator-open-workers"),
+          label: "Open workers per coordinator",
+          scope: "mode",
+          keywords: "coordinator coordinators workers open limit bound how many",
+        },
+        {
           id: settingId("project-view-switcher"),
           label: "Project view switcher",
           scope: "app",

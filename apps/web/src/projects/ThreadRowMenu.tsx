@@ -17,6 +17,7 @@ import {
   Hash,
   Mail,
   MailOpen,
+  Network,
   Pencil,
   Pin,
   PinOff,
@@ -25,6 +26,7 @@ import {
 } from "lucide-react";
 import type { ReactNode } from "react";
 import {
+  OctantContextMenuCheckboxItem,
   OctantContextMenuContent,
   OctantContextMenuGroup,
   OctantContextMenuItem,
@@ -124,6 +126,16 @@ export interface ThreadRowActions {
    * a row of a kind with no move never offers an item that would do nothing.
    */
   readonly canMoveToProject?: (threadId: string) => boolean;
+  /**
+   * Make coordinator and Stop coordinating (docs/design/coordinator-threads.md).
+   * Never offered on a worker, which the host refuses as a coordinator. Absent
+   * where the host has no coordinators, such as Chat and Work rows.
+   */
+  readonly onSetCoordinator?: (threadId: string, coordinator: boolean) => void;
+  /** The thread's Wake when a message arrives switch. Absent outside Code. */
+  readonly onSetMessageWake?: (threadId: string, wake: boolean) => void;
+  /** A worker's Wake for coordinator switch, offered only on a worker. */
+  readonly onSetCoordinatorWake?: (threadId: string, wake: boolean) => void;
 }
 
 export function threadRowMenuIsEmpty(actions: ThreadRowActions | undefined): boolean {
@@ -147,7 +159,10 @@ export function threadRowMenuIsEmpty(actions: ThreadRowActions | undefined): boo
     actions.onOpenPullRequest === undefined &&
     actions.onOpenPullRequestOnGithub === undefined &&
     actions.onStartRenameThread === undefined &&
-    actions.onMoveToProject === undefined
+    actions.onMoveToProject === undefined &&
+    actions.onSetCoordinator === undefined &&
+    actions.onSetMessageWake === undefined &&
+    actions.onSetCoordinatorWake === undefined
   );
 }
 
@@ -173,6 +188,15 @@ export function ThreadRowMenu(props: {
     props.actions.onMarkThreadUnread !== undefined ||
     props.actions.onCompleteFollowUp !== undefined ||
     props.actions.onMarkFollowUp !== undefined;
+  // A worker belongs to the coordinator that started it and never becomes
+  // one, so its menu offers the worker's own switch in place of the role.
+  const worker = props.thread.coordinatorThreadId !== undefined;
+  const coordinatorAction = worker ? undefined : props.actions.onSetCoordinator;
+  const coordinatorWakeAction = worker ? props.actions.onSetCoordinatorWake : undefined;
+  const hasCoordinatorActions =
+    coordinatorAction !== undefined ||
+    props.actions.onSetMessageWake !== undefined ||
+    coordinatorWakeAction !== undefined;
   const hasLifecycleActions =
     (props.thread.completedAt === undefined
       ? props.actions.onCompleteThread
@@ -264,6 +288,44 @@ export function ThreadRowMenu(props: {
               >
                 <MenuContent icon={Flag}>Mark for follow-up</MenuContent>
               </OctantContextMenuItem>
+            )}
+          </OctantContextMenuGroup>
+        </>
+      ) : null}
+      {hasCoordinatorActions ? (
+        <>
+          {hasThreadActions ? <OctantContextMenuSeparator /> : null}
+          <OctantContextMenuGroup>
+            {coordinatorAction === undefined ? null : (
+              <OctantContextMenuItem
+                className="thread-row-context-menu__item"
+                label={props.thread.coordinator === true ? "Stop coordinating" : "Make coordinator"}
+                onClick={() => coordinatorAction(threadId, props.thread.coordinator !== true)}
+              >
+                <MenuContent icon={Network}>
+                  {props.thread.coordinator === true ? "Stop coordinating" : "Make coordinator"}
+                </MenuContent>
+              </OctantContextMenuItem>
+            )}
+            {props.actions.onSetMessageWake === undefined ? null : (
+              <OctantContextMenuCheckboxItem
+                checked={props.thread.messageWake === true}
+                className="thread-row-context-menu__item"
+                label="Wake when a message arrives"
+                onCheckedChange={(checked) => props.actions.onSetMessageWake?.(threadId, checked)}
+              >
+                <MenuContent icon={BellRing}>Wake when a message arrives</MenuContent>
+              </OctantContextMenuCheckboxItem>
+            )}
+            {coordinatorWakeAction === undefined ? null : (
+              <OctantContextMenuCheckboxItem
+                checked={props.thread.coordinatorWakeOff !== true}
+                className="thread-row-context-menu__item"
+                label="Wake for coordinator"
+                onCheckedChange={(checked) => coordinatorWakeAction(threadId, checked)}
+              >
+                <MenuContent icon={BellRing}>Wake for coordinator</MenuContent>
+              </OctantContextMenuCheckboxItem>
             )}
           </OctantContextMenuGroup>
         </>

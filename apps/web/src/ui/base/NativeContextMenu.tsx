@@ -158,6 +158,28 @@ export function ContextMenuItem(props: ComponentProps<typeof Web.ContextMenuItem
   );
 }
 
+/** A menu switch; the caller reads only the next value, which both menus can report. */
+type ContextMenuCheckboxItemProps = Omit<
+  ComponentProps<typeof Web.ContextMenuCheckboxItem>,
+  "onCheckedChange"
+> & { readonly onCheckedChange?: (checked: boolean) => void };
+
+export function ContextMenuCheckboxItem(props: ContextMenuCheckboxItemProps) {
+  if (useContext(Native) === undefined) return <Web.ContextMenuCheckboxItem {...props} />;
+  const checked = props.checked === true;
+  return (
+    <div
+      aria-checked={checked}
+      data-native-menu-kind="checkbox"
+      data-native-menu-label={props.label}
+      data-native-menu-enabled={props.disabled !== true}
+      onClick={() => props.onCheckedChange?.(!checked)}
+    >
+      {props.children}
+    </div>
+  );
+}
+
 export function ContextMenuGroup(props: ComponentProps<typeof Web.ContextMenuGroup>) {
   return useContext(Native) === undefined ? (
     <Web.ContextMenuGroup {...props} />
