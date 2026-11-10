@@ -260,6 +260,35 @@ describe("planner board access", () => {
   });
 });
 
+describe("a coordinator's proposed worker", () => {
+  it("keeps the requested level and refuses an approval that would start the worker higher", async () => {
+    const world = fixture();
+    const thread = world.createdThreads.get(ids.thread);
+    if (thread === undefined) throw new Error("Expected the fixture thread");
+    world.createdThreads.set(ids.thread, { ...thread, coordinator: true });
+    const proposed = world.service.proposeForCoordinator(threadId, draft, {
+      executionPolicy: "approval-gated",
+    });
+    if (proposed.status !== "proposed") throw new Error("Expected proposal");
+    expect(proposed.proposal.workerOptions).toEqual({ executionPolicy: "approval-gated" });
+    const above = await world.service.resolveProposal(windowId, {
+      kind: "confirm-planner-work-proposal",
+      proposalId: proposed.proposal.id,
+      expectedVersion: 1,
+      creation: { ...managedCreation(), executionPolicy: "full-access" },
+    });
+    expect(above).toMatchObject({ status: "refused", reason: "creation-above-proposed-level" });
+    expect(world.created).toEqual([]);
+    const at = await world.service.resolveProposal(windowId, {
+      kind: "confirm-planner-work-proposal",
+      proposalId: proposed.proposal.id,
+      expectedVersion: 1,
+      creation: managedCreation(),
+    });
+    expect(at).toMatchObject({ status: "confirmed" });
+  });
+});
+
 describe("planner work proposals", () => {
   it("retains an unresolved admission across replay and another service instance after an unknown failure", async () => {
     const createThread = vi.fn<CodePlannerServiceOptions["createThread"]>(async () => {

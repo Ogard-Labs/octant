@@ -2263,6 +2263,23 @@ describe("CodeService commands", () => {
     expect(after.messageWake).toBe(true);
   });
 
+  it("answers setting the role a thread already has without appending anything", async () => {
+    const already = thread({ coordinator: true, messageWake: true });
+    const fixture = serviceFixture({ threads: [already], project: rememberedFullAccessProject });
+    await expect(
+      fixture.service.execute(ids.window, {
+        kind: "set-code-thread-coordinator",
+        threadId: already.id,
+        expectedVersion: 1,
+        coordinator: true,
+      }),
+    ).resolves.toEqual({
+      kind: "thread-updated",
+      thread: expect.objectContaining({ coordinator: true, version: 1 }),
+    });
+    expect(fixture.persistence.journal.append).not.toHaveBeenCalled();
+  });
+
   it("refuses to make a worker a coordinator, or a wake-for-coordinator switch on a thread with none", async () => {
     const worker = thread({
       coordinatorThreadId: decodeCodeThreadId("20000000-0000-4000-8000-0000000000ff"),
