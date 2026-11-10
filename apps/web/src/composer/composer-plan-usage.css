@@ -29,3 +29,11 @@
   flex: 1 1 100%;
   margin: 0 0 var(--oct-space-2);
 }
+
+/* A start screen's notice is anchored above the context row. The banner hangs
+   8px below its anchor to tuck under a card's edge; the anchor's own margin
+   takes that overlap so it never covers the row's chips. */
+.composer-start-notice {
+  height: 0;
+  margin-bottom: var(--oct-space-2);
+}

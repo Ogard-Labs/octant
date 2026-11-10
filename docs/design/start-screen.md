@@ -71,8 +71,9 @@ The card area is a ghost **Customize** button right-aligned under the composer
 under 560px. The card area, the suggestions and everything below end on the
 composer's own edges at every reading width, and cards in a row share the
 row's height; a fixed narrower measure under a wide composer, with each card at
-its own height, read as two unrelated ragged stacks. A card uses the card recipe (`OctantCard`: hairline ring, no
-shadow, the card fill) at a compact 12px rhythm. Its header is an icon at the
+its own height, read as two unrelated ragged stacks. A card uses the glass card recipe (`OctantCard` `variant="glass"`: the glass
+ring, no shadow, the composer's material; the opaque card fill under reduced
+transparency) at a compact 12px rhythm. Its header is an icon at the
 16px step in secondary ink, the title as a section label, and a count as
 tabular meta text; its body is rows or one quiet line in the detail step. No
 card has a hue of its own: a state is carried by wording and weight, and the

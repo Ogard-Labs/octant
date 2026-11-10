@@ -2505,14 +2505,6 @@ html[data-octant-increased-contrast="true"] .shell-frame > .sidebar {
   max-width: min(15rem, 42vw);
 }
 
-/* On the start screen this control sits on the bare ground, where a picture or
-   the character field ran through its label. */
-.draft-thread__composer .composer-folder-selector {
-  width: fit-content;
-  background: var(--octant-control);
-  border-radius: var(--oct-radius-sm);
-}
-
 .composer-folder-selector__label {
   overflow: hidden;
   text-overflow: ellipsis;
@@ -3823,17 +3815,17 @@ html:not([data-octant-reduced-transparency="true"], [data-octant-increased-contr
   justify-items: start;
   gap: var(--oct-space-1);
   padding: 12px var(--oct-space-4);
-  border: 1px solid var(--oct-border);
+  /* The edge is the glass ring (octant.css), the same one the cards above
+     and the composer wear; a border under it drew the edge twice. */
+  border: 0;
   border-radius: var(--oct-radius-md);
-  background: var(--octant-card);
   font-weight: 400;
   text-align: left;
   white-space: normal;
 }
 
 .code-home__card:hover:not(:disabled) {
-  border-color: var(--octant-border-strong);
-  background: var(--octant-card);
+  box-shadow: 0 0 0 1px var(--oct-glass-stroke-strong);
 }
 
 /* Keep the thread title first and the state at the trailing edge. Container

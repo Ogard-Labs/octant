@@ -121,6 +121,15 @@
      Its fixed warm near-black put a brown cast under the composer and the
      user bubbles on a neutral or green-black preset such as Onyx. */
   --oct-glass-floor: color-mix(in srgb, var(--octant-workspace) 66%, transparent);
+  /* The tints poured over that floor are the theme's own raised surface, for
+     the same reason. Their fixed neutral grey made the composer a flat grey
+     slab on a black or tinted preset: the one object on the start screen in a
+     colour the theme does not have. At the same strengths the theme's surface
+     keeps the measured legibility (it is never lighter than the grey in a
+     dark theme, nor darker than white in a light one) and the glass reads as
+     a deeper pour of the page instead of a pane laid over it. */
+  --oct-glass-thick: color-mix(in srgb, var(--octant-floating) 56%, transparent);
+  --oct-glass-chrome: color-mix(in srgb, var(--octant-floating) 48%, transparent);
 
   /* ─── focus and scrim ───────────────────────────────────────────────
      The focus role stays available to imported themes and accent tints, but

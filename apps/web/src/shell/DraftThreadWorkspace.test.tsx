@@ -1144,8 +1144,11 @@ describe("DraftThreadWorkspace", () => {
     expect(draft).toHaveValue("Fix search without losing this draft");
     // The chip keeps saying what was typed, and the field still holds it.
     const chip = screen.getByRole("button", { name: /^Working folder:.*not a usable subfolder$/ });
-    expect(chip).toHaveTextContent("../outside");
-    if (screen.queryByLabelText("Subfolder within working folder") === null) await user.click(chip);
+    expect(chip).toHaveTextContent("../outside · not usable");
+    // Pressing send closed the popup; the rejected entry is still there when
+    // it opens again.
+    expect(screen.queryByLabelText("Subfolder within working folder")).toBeNull();
+    await user.click(chip);
     const reopened = await screen.findByLabelText("Subfolder within working folder");
     expect(reopened).toHaveValue("../outside");
 

@@ -184,7 +184,7 @@ function ComposerSurface(props: ThreadComposerProps) {
   const dropActive = dropKey !== undefined && activeDropKey === dropKey;
   const baseClassName = props.className === undefined ? "composer" : `composer ${props.className}`;
   const followUp = props.presentation === "follow-up";
-  const frameClassName = `${followUp ? `${baseClassName} composer--follow-up` : baseClassName}${notice == null ? "" : " composer--has-notice"}`;
+  const frameClassName = `${followUp ? `${baseClassName} composer--follow-up` : baseClassName}${notice == null || (!followUp && props.startContext !== undefined) ? "" : " composer--has-notice"}`;
   // Where a new thread runs and how much of the plan is left stand on the
   // page above the card, as a thread's strip does, so the card holds only the
   // prompt and its toolbar. Inside the card the row sat between the person
@@ -287,7 +287,7 @@ function ComposerSurface(props: ThreadComposerProps) {
           ? {}
           : { onFocusCapture: () => focusComposerThreadDrop(dropKey) })}
       >
-        {notice}
+        {startRow === null ? notice : null}
         {dropActive ? <ComposerThreadDropCue /> : null}
         <ComposerSubagents />
         {body}
@@ -302,7 +302,7 @@ function ComposerSurface(props: ThreadComposerProps) {
           ? {}
           : { onFocusCapture: () => focusComposerThreadDrop(dropKey) })}
       >
-        {notice}
+        {startRow === null ? notice : null}
         {dropActive ? <ComposerThreadDropCue /> : null}
         <ComposerSubagents />
         {body}
@@ -312,6 +312,11 @@ function ComposerSurface(props: ThreadComposerProps) {
     frame
   ) : (
     <>
+      {/* The notice rises from the card's top edge, where the row now stands,
+          so on a start screen it is anchored above the row instead. */}
+      {notice == null ? null : (
+        <div className="composer-start-notice composer--has-notice">{notice}</div>
+      )}
       {startRow}
       {frame}
     </>

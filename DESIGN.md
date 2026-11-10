@@ -1451,7 +1451,7 @@ the person a next step. In light the card is workspace white on the
 `--octant-app-background` well, not the grey floating fill — that fill reads
 as a sunken field. Code welcome keeps one stable question while Project and
 Environment sit on the context row above the composer
-(`.composer-tray--above`, rendered beside the card inside `.composer-stack`),
+(`.composer-tray--start`, rendered before the card inside `.composer-stack`),
 on the page ground with no band chrome. The base-branch chip joins that row
 once a Project is chosen. Environment is the
 create-facing presentation of Octant's authoritative host federation: its
@@ -1511,6 +1511,11 @@ read through:
 - a thread's user bubbles and composer over the application ground or window
   glass, one material either way (agent replies stay bare prose; see
   [Transcript](#transcript));
+- Code Home's cards and its Up next and Continue cards, which stand on the
+  start screen's ground beside the composer and wear its material, so the
+  ground reads evenly behind every surface on the screen (with the plain card
+  fill its characters ran through the cards at full strength while the
+  composer beside them was frosted);
 - Zen's windows, dock, pills, and sheets (glass cards);
 - the floating activity picture-in-picture, and the Browser's live preview,
   which shows the page itself and frosts only its caption, count, and close
@@ -1519,7 +1524,11 @@ read through:
 
 Its tint, stroke, and highlight are theme roles, and its floor is the theme's
 page colour at 66%, so a neutral or tinted preset gets no fixed warm cast under
-the composer. Reduced transparency and unsupported `backdrop-filter` resolve
+the composer. The thick and chrome tints poured over that floor are the theme's
+raised surface at 56% and 48%: as a fixed neutral grey they made the composer a
+flat grey slab on a black or tinted preset. Together the floor and tint are
+dense enough that the ground stays quiet behind text where the engine does not
+blur it (the packaged window over the ground). Reduced transparency and unsupported `backdrop-filter` resolve
 every one of them to an opaque surface.
 
 Window glass is the `sidebarMaterial` shell setting with the theme's vibrancy

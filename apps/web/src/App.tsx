@@ -1123,7 +1123,7 @@ function LaunchedShell(
   >(undefined);
   const {
     dockVisible,
-    setDockVisible: setWindowDockVisible,
+    setDockVisible,
     dockStatesByThread,
     setDockStatesByThread,
     fallbackDockState,
@@ -1140,15 +1140,21 @@ function LaunchedShell(
   // that show or hide belongs to the draft, never to the window's saved
   // choice. Opened by default it covered a third of a blank start screen to
   // say its tools were not available yet.
+  //
+  // Only the active pane's own dock controls go through this (its toggle, its
+  // close, a tool opened in it). Anything that opens the dock for a thread
+  // (a review, a subagent request, a written document) sets the window's
+  // choice directly: routed here it would have opened the draft's dock and
+  // left the thread it was meant for closed.
   const draftDockKeyRef = useRef<string | undefined>(undefined);
   const [draftDockShownFor, setDraftDockShownFor] = useState<string>();
-  const setDockVisible = useCallback(
+  const setActivePaneDockVisible = useCallback(
     (next: boolean) => {
       const draftKey = draftDockKeyRef.current;
-      if (draftKey === undefined) setWindowDockVisible(next);
+      if (draftKey === undefined) setDockVisible(next);
       else setDraftDockShownFor(next ? draftKey : undefined);
     },
-    [setWindowDockVisible],
+    [setDockVisible],
   );
   const [previewBottomPanelHeight, setPreviewBottomPanelHeight] = useState<number>();
   const [navigatorOpen, setNavigatorOpen] = useState(false);
@@ -3960,7 +3966,7 @@ function LaunchedShell(
       persistBottomPanelPresentation({ ...bottomPanelPresentation, open: false });
     }
     if (opener !== undefined) dockOpener.current = { element: opener, logicalTarget: "dock" };
-    setDockVisible(true);
+    setActivePaneDockVisible(true);
     if (dockThreadKey === undefined) {
       setFallbackDockState((current) => openUtilityTabState(current, surface));
     } else {
@@ -3983,7 +3989,7 @@ function LaunchedShell(
       dockTabActivation.noteActivated(workspaceDockTabId(instanceId, "terminal"));
     }
     widenDockFor(surface);
-    setDockVisible(true);
+    setActivePaneDockVisible(true);
     if (dockThreadKey === undefined) {
       setFallbackDockState((current) => addUtilityTabState(current, surface, instanceId));
     } else {
@@ -4221,7 +4227,7 @@ function LaunchedShell(
 
   function closeDock() {
     pendingDockFocus.current = dockOpener.current;
-    setDockVisible(false);
+    setActivePaneDockVisible(false);
   }
   function closeBottomPanel(restoreFocus = true) {
     // Closing is a decision about this thread's panel, so its entry goes with
@@ -4315,7 +4321,7 @@ function LaunchedShell(
       if (!dockOpen) {
         markInteraction("renderer", "dock-open-requested");
         markInteractionAfterPaint("dock-open");
-        setDockVisible(true);
+        setActivePaneDockVisible(true);
       }
       return;
     }
@@ -4325,7 +4331,7 @@ function LaunchedShell(
     }
     markInteraction("renderer", "dock-open-requested");
     markInteractionAfterPaint("dock-open");
-    setDockVisible(true);
+    setActivePaneDockVisible(true);
   }
   useEffect(() => {
     const current = projectController.activeProject;
@@ -4347,13 +4353,16 @@ function LaunchedShell(
         ?.focus();
     });
   }, [projectController.activeProject]);
+  // Keyed on what the active pane shows, not the window's saved choice: a
+  // draft's dock closes without changing that choice, and focus must still
+  // return to its opener.
   useEffect(() => {
-    if (dockVisible) return;
+    if (dockShown) return;
     const pending = pendingDockFocus.current;
     if (pending === undefined) return;
     pendingDockFocus.current = undefined;
     focusLogicalOpener(pending);
-  }, [dockVisible]);
+  }, [dockShown]);
   useEffect(() => {
     setPreviewContextWidth(undefined);
   }, [controller.settings?.contextSidebarWidth]);
