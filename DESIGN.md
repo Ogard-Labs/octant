@@ -929,11 +929,13 @@ produced is boxed. Over the application ground, the conversation supplies one qu
 continuous reading veil below the title band: the sheet colour at 80%, so the
 ground stays faintly visible behind the transcript. Replies remain bare prose, including on translucent
 workspaces; user bubbles and the composer retain glass over the application
-ground. Under Glass the thread's container stays clear, the ground steps down to a fifth of its strength while a thread is on screen, and keeps a quarter of it under the sidebar, so it never reads as letters behind text. Reduced transparency keeps the reading background opaque.
+ground. Under Glass the thread's container stays clear, the ground steps down to an eighth of its strength while a thread is on screen, and keeps a quarter of it under the sidebar, so it never reads as letters behind text. Reduced transparency keeps the reading background opaque.
 The follow-up composer has 24px of space above it outside the transcript
-scroll frame, so a reply never touches the input. Running text keeps a 72ch
-measure; tables and code blocks run the column's width, ending on the same edge
-as the composer; markdown headings inside it are labels
+scroll frame, so a reply never touches the input. Running text, tables and code
+blocks all run the column's width, which is the reading width the person chose,
+and end on the same edge as the divider, the bubble and the composer (a 72ch cap
+on prose stopped paragraphs at about 635px at every width past Narrow, so the
+setting only ever moved tables); markdown headings inside it are labels
 (14/13/13, weight 500), lists sit 4px apart, and a fenced block is a
 `CodeBlock`: a 28px header strip naming the language with a ghost copy control,
 then detail-size mono on the application ground. Tool rows are 28px each, the

@@ -970,6 +970,32 @@ describe("CodeThreadWorkspace", () => {
     expect(screen.queryByRole("alert")).not.toBeInTheDocument();
   });
 
+  it("says why a turn waits once, in the turn's own row, not again above the transcript", () => {
+    const reason = "Mistral Vibe resume identity does not match this Project.";
+    render(
+      <CodeThreadWorkspace
+        controller={controller({
+          conversation: [
+            { id: "ask", role: "user", text: "Open the page", at: "2026-09-30T08:00:00.000Z" },
+            {
+              id: "parked",
+              role: "assistant",
+              text: reason,
+              status: "waiting",
+              at: "2026-09-30T08:00:02.000Z",
+            },
+          ],
+          turnStatus: "waiting",
+          turnError: reason,
+        })}
+        threadId={threadId}
+      />,
+    );
+
+    expect(screen.getAllByText(reason, { exact: false })).toHaveLength(1);
+    expect(screen.queryByText(`Waiting · ${reason}`)).toBeNull();
+  });
+
   it("offers a new task in the Project when the provider refused to resume its session", async () => {
     const onNewThreadInProject = vi.fn();
     const user = userEvent.setup();

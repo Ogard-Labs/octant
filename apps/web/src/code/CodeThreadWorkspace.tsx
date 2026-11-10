@@ -1491,7 +1491,12 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
               <CirclePause aria-hidden="true" size={14} strokeWidth={1.8} />
               <span>
                 {props.controller.providerRequests.length === 0 &&
-                props.controller.turnError !== undefined
+                props.controller.turnError !== undefined &&
+                // The parked turn's own row in the transcript already says
+                // why. Repeated here, a thread with three parked turns read
+                // the same sentence four times.
+                props.controller.conversation.at(-1)?.text.includes(props.controller.turnError) !==
+                  true
                   ? `Waiting · ${props.controller.turnError}`
                   : props.controller.providerAnswerRefusal === undefined
                     ? waitingTurnLabel(props.controller.providerRequests)
