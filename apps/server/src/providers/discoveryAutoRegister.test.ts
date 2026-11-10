@@ -467,4 +467,61 @@ describe("autoRegisterPreferredCandidates", () => {
     expect(result.createdIds).toEqual([]);
     expect(result.snapshot.autoRegisteredInstanceIds).toEqual([]);
   });
+  describe("a runtime whose saved binary is gone", () => {
+    const moved = makeInstance({
+      driverKind: "claude",
+      binaryPath: "/Users/example/.local/lib/node_modules/@anthropic-ai/claude-code/bin/claude.exe",
+      enabled: false,
+    });
+    const found = makeCandidate({
+      driverKind: "claude",
+      displayName: "Claude Code",
+      binaryPath: "/Users/example/.local/share/claude/versions/2.1.321",
+      discoveredPath: "/Users/example/.local/bin/claude",
+    } as Partial<DiscoveryCandidate>);
+
+    async function scan(input: {
+      readonly candidates: ReadonlyArray<DiscoveryCandidate>;
+      readonly instance?: ProviderInstance;
+      readonly exists?: boolean;
+      readonly status?: DiscoverySnapshot["status"];
+    }) {
+      const repoint = vi.fn(async () => undefined);
+      await autoRegisterPreferredCandidates({
+        snapshot: makeSnapshot(input.candidates, { status: input.status ?? "completed" }),
+        listInstances: async () => [input.instance ?? moved],
+        createFromDiscovery: vi.fn(),
+        firstRunOnboarding: "completed",
+        movedBinaries: { exists: async () => input.exists ?? false, repoint },
+      });
+      return repoint;
+    }
+
+    it("points it at the launcher the scan found and leaves its switch alone", async () => {
+      const repoint = await scan({ candidates: [found] });
+
+      expect(repoint).toHaveBeenCalledTimes(1);
+      expect(repoint).toHaveBeenCalledWith(moved, "/Users/example/.local/bin/claude");
+    });
+
+    it("never second-guesses a saved binary that still exists", async () => {
+      expect(await scan({ candidates: [found], exists: true })).not.toHaveBeenCalled();
+    });
+
+    it("leaves a runtime alone when it is already saved as what the scan found", async () => {
+      const instance = makeInstance({
+        driverKind: "claude",
+        binaryPath: "/Users/example/.local/share/claude/versions/2.1.321",
+      });
+
+      expect(await scan({ candidates: [found], instance })).not.toHaveBeenCalled();
+    });
+
+    it("repairs nothing from a failed scan or a candidate the scan found unusable", async () => {
+      expect(await scan({ candidates: [found], status: "failed" })).not.toHaveBeenCalled();
+      expect(
+        await scan({ candidates: [{ ...found, readiness: "incompatible" } as DiscoveryCandidate] }),
+      ).not.toHaveBeenCalled();
+    });
+  });
 });

@@ -1043,9 +1043,10 @@ html:not([data-octant-reduced-transparency="true"], [data-octant-increased-contr
    any reading surface is on screen the ground itself steps down to about the
    strength the veil leaves it on an opaque sheet; a third was tried first and
    the To review list still read as names printed over a character ground
-   (walk-through, October 2026). A backdrop blur behind the thread was tried
-   too: a browser frosted the letters, but the packaged window, whose glass is
-   the system's, drew them sharp. */
+   (walk-through, October 2026). At a fifth the packaged window still showed a
+   field of letters behind a transcript, so it is an eighth. A backdrop blur
+   behind the thread was tried too: a browser frosted the letters, but the
+   packaged window, whose glass is the system's, drew them sharp. */
 .shell--app-backdrop.shell--material-translucent.shell-frame:has(
     :is(
       .workspace-pane:not([data-surface-kind="welcome"], [data-surface-kind="draft-thread"]),
@@ -1063,7 +1064,7 @@ html:not([data-octant-reduced-transparency="true"], [data-octant-increased-contr
     )
   )
   > .app-backdrop[data-placement="shell"] {
-  opacity: 0.2;
+  opacity: 0.12;
 }
 
 /* Where the veil meets the sheet's rounded corner, it rounds with it. */

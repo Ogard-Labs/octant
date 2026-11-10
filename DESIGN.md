@@ -935,11 +935,13 @@ produced is boxed. Over the application ground, the conversation supplies one qu
 continuous reading veil below the title band: the sheet colour at 80%, so the
 ground stays faintly visible behind the transcript. Replies remain bare prose, including on translucent
 workspaces; user bubbles and the composer retain glass over the application
-ground. Under Glass the thread's container stays clear, the ground steps down to a fifth of its strength while a thread is on screen, and keeps a quarter of it under the sidebar, so it never reads as letters behind text. Reduced transparency keeps the reading background opaque.
+ground. Under Glass the thread's container stays clear, the ground steps down to an eighth of its strength while a thread is on screen, and keeps a quarter of it under the sidebar, so it never reads as letters behind text. Reduced transparency keeps the reading background opaque.
 The follow-up composer has 24px of space above it outside the transcript
-scroll frame, so a reply never touches the input. Running text keeps a 72ch
-measure; tables and code blocks run the column's width, ending on the same edge
-as the composer; markdown headings inside it are labels
+scroll frame, so a reply never touches the input. Running text, tables and code
+blocks all run the column's width, which is the reading width the person chose,
+and end on the same edge as the divider, the bubble and the composer (a 72ch cap
+on prose stopped paragraphs at about 635px at every width past Narrow, so the
+setting only ever moved tables); markdown headings inside it are labels
 (14/13/13, weight 500), lists sit 4px apart, and a fenced block is a
 `CodeBlock`: a 28px header strip naming the language with a ghost copy control,
 then detail-size mono on the application ground. Tool rows are 28px each, the
@@ -994,12 +996,13 @@ Code, wherever `TurnActivityRows` and `AssistantMessageBody` draw a turn:
   turn's tool rows are open; Settings › Chat › Stream replies still alone
   decides whether the partial answer shows, at every level.
 
-The thread's own choice is a menu beside the thread's other actions: in Chat's
-header just before Thread actions, and among the leading controls of the Work and
-Code composer row. Its trigger is the shared `shell-icon-button` (`ListCollapse`) whose
-name says the level in effect and whose it is ("Reply detail: High, this
-thread's own" or "Reply detail: Low, the default"), because a menu trigger
-cannot otherwise show its selection. Its radio items are **Use default (Low)**
+The thread's own choice is a row of the thread's
+[info panel](docs/design/workspace.md#thread-info) in Chat, Work, and Code. Its
+trigger writes the level in effect ("Reply detail: Low") beside the
+`ListCollapse` glyph, and its name also says whose the level is ("Reply
+detail: High, this thread's own" or "Reply detail: Low, the default"). As a
+bare glyph in the composer row it read as one of two unexplained list icons.
+Its radio items are **Use default (Low)**
 (naming the current default; "Follow the level in Settings") and the three
 levels, with short descriptions that fit a phone-width menu: "Thinking and
 finished tool calls folded", "Thinking's first line, tool calls listed",
@@ -1837,10 +1840,12 @@ than a manual form: the row's details carry an outlined "Locate binary…"
 action beside Check connection, shown only where the desktop's file picker
 exists and only for a runtime whose version probe the host can run. Its
 answer is one quiet line under the actions (the version the host read), or a
-warning box saying why the host refused the file. A row whose saved binary is
-missing or incompatible, while the latest scan found that runtime elsewhere,
-adds a second outlined action, "Use the one found at ~/.local/bin/claude
-(2.1.306)", that gives the same answer without the picker; see
+warning box saying why the host refused the file. A scan repairs a saved
+binary that no longer exists by itself. A row whose saved binary is still
+unusable, while the latest scan found that runtime elsewhere, says "Found at
+~/.local/bin/claude (2.1.306)." on the row beside an outlined "Use it" button,
+visible while the details are closed; pressing it opens the details and gives
+the same answer without the picker. See
 [Providers and model endpoints](docs/design/model-endpoints.md).
 
 Provider catalog and the Octant Harness model endpoints (rows, detail

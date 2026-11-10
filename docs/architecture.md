@@ -922,7 +922,11 @@ window first when none is open. Local host contains status, browser access,
 applicable lifecycle controls, and redacted diagnostics; Quit Octant retains
 the existing active-work confirmation. The text beside the glyph is `!` while
 the host itself needs attention (provider readiness, a lost host), otherwise the
-count of threads that need the person.
+count of threads that need the person. The status line and the diagnostics say
+why in plain words ("A provider needs setup (Settings › Providers)", "A provider
+stopped during a task", "The host did not answer"), from a category the host's
+health answer carries; that answer is unauthenticated, so it never names a
+provider. A provider whose check is still running raises nothing.
 
 The roster comes from the host, not from open windows, so it stays current with
 every window closed. The shell registers its own local-window authority for the
@@ -5140,8 +5144,8 @@ The provider layer is defined by `@octant/provider-sdk` and implemented in
     settings, hooks, MCP servers, plugins, and tools. A Chat Project has no
     folder and holds no trust.
   - **Thread.** Each Chat, Work, and Code thread of a key provider carries its
-    own choice: Account default, On, or Off (the **Own setup** menu beside the
-    composer's picker). `set` on `POST /api/providers/thread-native-setup`
+    own choice: Account default, On, or Off (the **Provider tools** row of the
+    thread's info panel). `set` on `POST /api/providers/thread-native-setup`
     sends it, only from a local window (a paired device may read it, and the
     host refuses a provider account that is not a key provider's), and
     journals `thread.native-setup-changed@1` on the thread's own
@@ -5338,7 +5342,11 @@ modelId }`, and the model picker is provider-first. Each Claude instance is
   installed runtimes and auto-register them. On first run, a detected Claude
   Code or Codex CLI instance is created enabled; every other detected runtime
   is created disabled. Discovery never installs or updates runtimes, never
-  toggles an existing instance, and never treats enablement as readiness.
+  toggles an existing instance, and never treats enablement as readiness. A
+  runtime created from a scan saves the launcher the scan examined, not the
+  versioned file it resolves to, and a scan points an existing runtime whose
+  saved binary no longer exists at the launcher it found for the same driver,
+  changing nothing else about it.
   Providers settings may read a runtime's newest published version (one plain
   npm `dist-tags` request, cached a day, off with the Marketplace fetches
   switch) to say "Update available"; only the person's click runs the
@@ -11495,7 +11503,7 @@ settings sandbox on|off [--work]`. Only a window on this host can turn
   `harnessAutoReview` is Reviewed (below). Built: Guarded, Accept edits,
   Reviewed (the provider's own reviewer, or Octant Shield), and Full access
   in Code and Work, with the first-run question, a global default, a Project
-  override in Code and Work, the thread header line, the journaled record of
+  override in Code and Work, the level row of the thread's info panel, the journaled record of
   who lowered a level and from where, and the one-time warning. Full access
   runs Claude Code at `bypassPermissions` and Codex at `danger-full-access`
   with approval policy `never`, with no Octant wrapping for any provider

@@ -262,6 +262,37 @@ describe("macOS menu-bar host controls", () => {
     expect(diagnostics).not.toMatch(/prompt|thread|credential|secret/i);
   });
 
+  it("says why the host needs a look, in the status line and the diagnostics", () => {
+    const needsSetup = {
+      state: "attention-required",
+      ownership: "desktop-owned",
+      activeAgentCount: 0,
+      attentionRequired: true,
+      attentionReason: "provider-not-ready",
+    } as const;
+    const status = (snapshot: Parameters<typeof buildMenuBarItems>[0]) =>
+      buildMenuBarItems(snapshot)
+        .find((item) => item.id === "local-host")
+        ?.submenu?.find((item) => item.id === "status")?.label;
+
+    expect(status(needsSetup)).toBe("Status: A provider needs setup (Settings › Providers)");
+    expect(formatRedactedHostDiagnostics(needsSetup)).toContain(
+      "Attention needed: A provider needs setup (Settings › Providers)",
+    );
+    expect(status({ ...needsSetup, attentionReason: "provider-stopped" })).toBe(
+      "Status: A provider stopped during a task",
+    );
+    expect(
+      status({
+        state: "attention-required",
+        ownership: "desktop-owned",
+        activeAgentCount: 0,
+        attentionRequired: true,
+        activityUnconfirmed: true,
+      }),
+    ).toBe("Status: The host did not answer");
+  });
+
   it("always offers an explicit full application shutdown", () => {
     const items = buildMenuBarItems({
       state: "running",

@@ -205,7 +205,7 @@ describe("Work host queue", () => {
 });
 
 describe("WorkThreadWorkspace", () => {
-  it("shows the thread's guardrail level in its header", async () => {
+  it("shows the thread's guardrail level in its info panel", async () => {
     const thread = workThread();
     render(
       <WorkThreadWorkspace
@@ -222,6 +222,11 @@ describe("WorkThreadWorkspace", () => {
       />,
     );
     const level = await screen.findByText("Ask first", { selector: ".guardrail-level__mode" });
+    expect(level).not.toBeVisible();
+
+    fireEvent.click(screen.getByRole("button", { name: "Thread info" }));
+
+    expect(screen.getByRole("region", { name: "Thread info" })).toContainElement(level);
     expect(level).toBeVisible();
   });
 
