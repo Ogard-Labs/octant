@@ -149,8 +149,11 @@ export function ModeSwitcher(props: ModeSwitcherProps) {
   );
 }
 
-/** Work is a conversation surface beside Code; keep the folder mark when Chat stands apart. */
-function iconForVisibleMode(mode: OctantMode, separate: boolean): LucideIcon {
+/**
+ * Work is a conversation surface beside Code; keep the folder mark when Chat stands apart.
+ * The icon rail reads this too, so a collapsed sidebar shows the same Work mark as the switcher.
+ */
+export function iconForVisibleMode(mode: OctantMode, separate: boolean): LucideIcon {
   if (mode === "work" && !separate) return MessageSquare;
   return modeIcons[mode];
 }

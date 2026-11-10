@@ -15,7 +15,7 @@ import {
 import type { ReactNode } from "react";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantTooltip } from "../ui/base/OctantTooltip";
-import { modeIcons, modeLabels } from "./ModeSwitcher";
+import { iconForVisibleMode, modeLabels } from "./ModeSwitcher";
 import { visibleModeOf, visibleModes, type VisibleMode } from "./workKind";
 import type { SidebarTile, SidebarTileId } from "./SidebarCountTiles";
 import { navigationIcon } from "./SidebarNavigation";
@@ -120,7 +120,7 @@ export function SidebarRail(props: SidebarRailProps) {
               {modes.map((mode) => (
                 <RailButton
                   active={mode === activeMode}
-                  icon={modeIcons[mode]}
+                  icon={iconForVisibleMode(mode, false)}
                   key={mode}
                   label={modeLabels[mode]}
                   onSelect={() => {
