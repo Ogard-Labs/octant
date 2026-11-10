@@ -41,6 +41,11 @@ export function CodeProjectCoordinatorStarting(props: {
       saved = await props.controller.updateSettings({
         defaultExecutionPolicy: settings.defaultExecutionPolicy,
         defaultPermissionPersistence: settings.defaultPermissionPersistence,
+        // The host replaces the external editor with whatever a settings
+        // update carries, so leaving it out would erase the person's editor.
+        ...(settings.externalEditor === undefined
+          ? {}
+          : { externalEditor: settings.externalEditor }),
         coordinatorStartingByProject:
           next === "use-settings" ? others : { ...others, [props.projectId]: next },
       });

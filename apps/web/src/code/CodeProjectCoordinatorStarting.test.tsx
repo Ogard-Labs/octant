@@ -49,6 +49,17 @@ describe("CodeProjectCoordinatorStarting", () => {
     });
   });
 
+  it("keeps the person's external editor when it saves this Project's choice", async () => {
+    const externalEditor = { executable: "/usr/local/bin/code", arguments: ["--wait"] };
+    const { controller: code, updateSettings } = controller({ externalEditor });
+    render(<CodeProjectCoordinatorStarting controller={code} projectId={projectId} />);
+    const choice = screen.getByRole("combobox", { name: "Starting workers in this Project" });
+
+    await chooseSelectFieldOption(userEvent.setup(), choice, "Propose for approval");
+
+    expect(updateSettings).toHaveBeenCalledWith(expect.objectContaining({ externalEditor }));
+  });
+
   it("removes this Project's entry when it goes back to Use Settings", async () => {
     const { controller: code, updateSettings } = controller({
       coordinatorStarting: "propose-for-approval",
