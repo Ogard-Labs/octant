@@ -76,6 +76,7 @@ import { SplitWorkspace, type PaneFacts } from "./SplitWorkspace";
 import { ProjectOverview } from "../projects/ProjectOverview";
 import type { ProjectChange } from "../projects/useProjectController";
 import { providerGroupsForProject } from "../projects/ProjectProviderPolicySection";
+import { CoordinatorProposalCards } from "../code/CoordinatorProposalCards";
 import { pickerHasReadyInstance } from "../providers/ComposerModelPicker";
 import { hubAdministrationOf, ownerUnlockOf, type OctantHostBridge } from "./hostBridge";
 import type { ThreadMoveEnvironment } from "../environment/threadMove/ThreadMoveComputerCard";
@@ -1365,6 +1366,7 @@ function renderCodeTab(
     shieldModel: codeController.bootstrap?.settings.shieldModel,
   });
   const harnessAutoReviewSupported = autoReview?.status === "reviewer" ? true : undefined;
+  const coordinatorProposals = coordinatorProposalsFor(tab, props, codeController, project);
   const content = (
     <Suspense
       fallback={
@@ -1390,6 +1392,7 @@ function renderCodeTab(
         controller={codeController}
         holdAccessNotice={props.codeControllers.holdAccessNotice}
         onOpenCodeThread={props.onOpenCodeThread}
+        {...(coordinatorProposals === undefined ? {} : { coordinatorProposals })}
         {...(props.onNewThreadInProject === undefined
           ? {}
           : { onNewThreadInProject: props.onNewThreadInProject })}
@@ -2652,6 +2655,69 @@ function isCodeWorkspaceTab(
     tab.kind === "code-pr" ||
     tab.kind === "code-local-review" ||
     tab.kind === "apple-workbench"
+  );
+}
+
+/**
+ * A coordinator thread's proposed workers, with the same creation review and
+ * planner routes the Project overview uses. Only a thread the window reads as
+ * a coordinator (the role, or the designated planner) gets the cards.
+ */
+function coordinatorProposalsFor(
+  tab: Extract<WorkspaceTab, { readonly mode: "code"; readonly threadId: unknown }>,
+  props: WorkspaceViewProps,
+  codeController: CodeController,
+  project: ProjectSummary | undefined,
+): React.ReactNode {
+  if (tab.kind !== "code-overview" || project?.type !== "code") return undefined;
+  const coordinator = codeController.navigation.find(
+    (item) => String(item.threadId) === String(tab.threadId) && item.coordinator === true,
+  );
+  if (coordinator === undefined) return undefined;
+  return (
+    <CoordinatorProposalCards
+      controller={codeController}
+      coordinatorThreadId={coordinator.threadId}
+      {...(props.hosts === undefined ? {} : { hosts: props.hosts })}
+      onOpenThread={(threadId) => {
+        const thread = codeController.bootstrap?.threads.find(
+          (candidate) => candidate.id === threadId,
+        );
+        props.onOpenCodeThread(threadId, thread?.title ?? "Code task", project.id);
+      }}
+      projectId={project.id}
+      projectName={project.name}
+      projectRoot={project.binding.canonicalRoot}
+      {...(project.connectedRepository === undefined
+        ? {}
+        : {
+            baseRepository: `${project.connectedRepository.owner}/${project.connectedRepository.repository}`,
+          })}
+      providerGroups={providerGroupsForProject(
+        project,
+        props.codeProviderGroups ?? props.draftProviderGroups ?? [],
+      )}
+      {...(props.draftSelectedProviderInstanceId === undefined
+        ? {}
+        : { selectedProviderInstanceId: props.draftSelectedProviderInstanceId })}
+      {...(props.draftSelectedModelId === undefined
+        ? {}
+        : { selectedModelId: props.draftSelectedModelId })}
+      {...(props.onDraftSelectProvider === undefined
+        ? {}
+        : { onSelectProvider: props.onDraftSelectProvider })}
+      {...(props.onDraftCreateCodeThread === undefined
+        ? {}
+        : { onCreateThread: props.onDraftCreateCodeThread })}
+      {...(project.newThreadWorkspace === undefined
+        ? {}
+        : { newThreadWorkspace: project.newThreadWorkspace })}
+      {...(props.onDraftCreating === undefined ? {} : { creating: props.onDraftCreating })}
+      {...(props.onDraftError === undefined ? {} : { errorMessage: props.onDraftError })}
+      {...(props.onDraftPendingMessage === undefined
+        ? {}
+        : { pendingMessage: props.onDraftPendingMessage })}
+    />
   );
 }
 

@@ -4,6 +4,7 @@ import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import { chooseSelectFieldOption } from "../test/chooseSelectFieldOption.test-support";
 import { CodeOverview } from "./CodeOverview";
+import { CoordinatorProposalCards } from "./CoordinatorProposalCards";
 import { reservePlannerAttempt, finishPlannerAttempt } from "./plannerProposalAttempt";
 import type { PlannerProposalReview } from "./plannerProposalCreation";
 import type { CodeController } from "./useCodeController";
@@ -703,6 +704,121 @@ describe("CodeOverview", () => {
     expect(await screen.findByRole("alert")).toHaveTextContent("Code transport disconnected.");
     expect(screen.getByText("Code projections unavailable")).toBeVisible();
     expect(screen.queryByRole("textbox", { name: "First message" })).not.toBeInTheDocument();
+  });
+});
+
+describe("CoordinatorProposalCards", () => {
+  const otherCoordinator = "10000000-0000-4000-8000-000000000009";
+  function proposal(
+    id: string,
+    overrides: Record<string, unknown>,
+  ): { readonly proposal: Record<string, unknown>; readonly proposalVersion: number } {
+    return {
+      proposal: {
+        id: `70000000-0000-4000-8000-0000000001${id}`,
+        projectId: ids.project,
+        plannerThreadId: ids.thread,
+        fromCoordinator: true,
+        title: `Worker ${id}`,
+        intent: `Intent of worker ${id}.`,
+        status: "pending",
+        proposedAt: "2026-11-10T00:00:00.000Z",
+        ...overrides,
+      },
+      proposalVersion: 2,
+    };
+  }
+
+  function coordinatorController(
+    proposals: ReadonlyArray<ReturnType<typeof proposal>>,
+  ): CodeController & { readonly decline: ReturnType<typeof vi.fn> } {
+    const value = controller();
+    const decline = vi.fn(async () => ({ status: "declined" }));
+    value.client = {
+      ...value.client,
+      readPlanner: vi.fn(async () => ({
+        designation: { kind: "none", projectId: ids.project, updatedAt: "2026-11-10T00:00:00Z" },
+        designationVersion: 0,
+        proposals,
+      })),
+      executePlannerProposal: decline,
+    } as never;
+    return Object.assign(value, { decline });
+  }
+
+  it("shows only this coordinator's pending proposed workers and declines the exact current one", async () => {
+    const value = coordinatorController([
+      proposal("01", {}),
+      proposal("02", { plannerThreadId: otherCoordinator }),
+      proposal("03", { fromCoordinator: undefined }),
+      proposal("04", {
+        status: "declined",
+        resolvedAt: "2026-11-10T00:00:00.000Z",
+      }),
+    ]);
+    render(
+      <CoordinatorProposalCards
+        controller={value}
+        coordinatorThreadId={ids.thread as never}
+        onOpenThread={vi.fn()}
+        projectId={ids.project as never}
+      />,
+    );
+    const card = await screen.findByRole("article", { name: "Proposed worker: Worker 01" });
+    expect(within(card).getByText("Intent of worker 01.")).toBeVisible();
+    expect(screen.queryByText("Worker 02")).toBeNull();
+    expect(screen.queryByText("Worker 03")).toBeNull();
+    expect(screen.queryByText("Worker 04")).toBeNull();
+    await waitFor(() =>
+      expect(within(card).getByRole("button", { name: "Decline" })).toBeEnabled(),
+    );
+    fireEvent.click(within(card).getByRole("button", { name: "Decline" }));
+    await waitFor(() =>
+      expect(value.decline).toHaveBeenCalledWith({
+        kind: "decline-planner-work-proposal",
+        proposalId: "70000000-0000-4000-8000-000000000101",
+        expectedVersion: 2,
+      }),
+    );
+  });
+
+  it("opens the ordinary creation review with the proposed worker's intent fixed", async () => {
+    const onCreateThread = vi.fn();
+    render(
+      <CoordinatorProposalCards
+        controller={coordinatorController([proposal("01", {})])}
+        coordinatorThreadId={ids.thread as never}
+        onCreateThread={onCreateThread}
+        onOpenThread={vi.fn()}
+        projectId={ids.project as never}
+      />,
+    );
+    const approve = await screen.findByRole("button", { name: "Review and approve" });
+    await waitFor(() => expect(approve).toBeEnabled());
+    fireEvent.click(approve);
+    const review = await screen.findByRole("dialog", { name: "Approve planner proposal" });
+    expect(
+      within(review).getByRole("heading", { name: "Review the proposed worker" }),
+    ).toBeVisible();
+    expect(screen.getByRole("textbox", { name: "First message" })).toHaveValue(
+      "Intent of worker 01.",
+    );
+    expect(screen.getByRole("button", { name: "Approve and start described task" })).toBeDisabled();
+    expect(onCreateThread).not.toHaveBeenCalled();
+  });
+
+  it("shows nothing on a coordinator with no proposal waiting", async () => {
+    const value = coordinatorController([proposal("02", { plannerThreadId: otherCoordinator })]);
+    const { container } = render(
+      <CoordinatorProposalCards
+        controller={value}
+        coordinatorThreadId={ids.thread as never}
+        onOpenThread={vi.fn()}
+        projectId={ids.project as never}
+      />,
+    );
+    await waitFor(() => expect(value.client.readPlanner).toHaveBeenCalled());
+    expect(container).toBeEmptyDOMElement();
   });
 });
 
