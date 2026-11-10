@@ -1375,6 +1375,62 @@ export class CodeService {
     return next;
   }
 
+  /**
+   * Called only by the host's owner route after verifying a fresh action-bound
+   * unlock. It sets the same wake switches a window sets, journaled as the
+   * owner device; the coordinator role itself is never set this way.
+   */
+  changeOwnerWake(input: {
+    readonly threadId: CodeThreadId;
+    readonly expectedVersion: number;
+    readonly switch: "message-wake" | "coordinator-wake";
+    readonly wake: boolean;
+    readonly ownerMemberId: string;
+  }): CodeThread {
+    const current = this.#persistence.readCodeThread(input.threadId);
+    if (current === undefined) throw this.#failure("invalid", "Code thread was not found.");
+    if (current.version !== input.expectedVersion) {
+      throw this.#failure("stale", "Code state changed; reload and unlock again.");
+    }
+    const project = this.#persistence.readProject?.(current.projectId);
+    if (
+      project?.type !== "code" ||
+      project.lifecycle !== "active" ||
+      current.lifecycle !== "active"
+    ) {
+      throw this.#failure("unauthorized", "The Code thread or Project is unavailable.");
+    }
+    const next = this.#coordinatorSwitches(
+      current,
+      {
+        kind:
+          input.switch === "message-wake"
+            ? "set-code-thread-message-wake"
+            : "set-code-thread-coordinator-wake",
+        threadId: current.id,
+        expectedVersion: current.version,
+        wake: input.wake,
+      },
+      decodeTimestamp(this.#clock()),
+    );
+    const actor: EventActor = {
+      kind: "owner-unlock",
+      actorId: decodeActorId(input.ownerMemberId),
+      memberId: input.ownerMemberId,
+    };
+    this.#inUnit(() => {
+      this.#append(
+        "code-thread",
+        current.id,
+        current.version,
+        "code.thread-updated@1",
+        { kind: "thread-updated", thread: next },
+        actor,
+      );
+    });
+    return next;
+  }
+
   async execute(
     authenticatedWindowId: WindowId,
     input: unknown,
