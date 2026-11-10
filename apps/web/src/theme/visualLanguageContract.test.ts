@@ -375,17 +375,15 @@ describe("the public-block visual language", () => {
     }
   });
 
-  it("lets a table or code block reach the column's width in any reply", () => {
+  it("lets everything in a reply, prose included, reach the reading width the person chose", () => {
     const chat = readFileSync(join(webRoot, "styles/chat.css"), "utf8");
-    // The reading measure belongs to running text. On the wrapper a reply that
-    // also reasoned or used a tool was capped whole, so its table stayed narrow
-    // while a plain reply's could run wide.
+    // The column is the measure. A cap on the wrapper kept tables narrow, and
+    // a 72ch cap on prose stopped paragraphs short of the divider, the bubble
+    // and the composer at every width past Narrow.
     const parts = chat.match(/\.chat-transcript__parts\s*\{[^}]+\}/)?.[0] ?? "";
     expect(parts).not.toContain("max-width");
-    expect(chat).toMatch(
-      /\.chat-rich-text > :is\(p, ul, ol, h2, h3, h4, blockquote\)\s*\{\s*max-width: 72ch;/,
-    );
-    expect(chat).toMatch(/\.chat-transcript__parts > \.thinking\s*\{\s*max-width: 72ch;/);
+    expect(chat).not.toMatch(/\.chat-rich-text > :is\([^)]*\)\s*\{\s*max-width/);
+    expect(chat).not.toMatch(/\.chat-transcript__parts > \.thinking\s*\{\s*max-width/);
   });
 
   it("does not add a switch-specific focus ring after its reset", () => {

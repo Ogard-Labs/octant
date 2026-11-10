@@ -353,13 +353,11 @@
   line-height: var(--oct-leading-body);
 }
 
-/* The reading measure belongs to running text. On the whole reply it also cut
-   tables and code blocks 44px short of the column, which the reply's old card
-   hid and bare prose shows: boxed work now ends on the same edge as the
-   composer and the person's bubble. */
-.chat-rich-text > :is(p, ul, ol, h2, h3, h4, blockquote) {
-  max-width: 72ch;
-}
+/* Running text takes the column, which is the reading width the person chose
+   (Narrow, Medium, Wide). A second 72ch cap on prose stopped every paragraph
+   at about 635px whatever they chose: at Wide the text ended 400px short of
+   the divider, the bubble and the composer on the same page, and the setting
+   only ever moved tables. */
 
 .chat-rich-text h2,
 .chat-rich-text h3,
@@ -528,14 +526,6 @@
 .chat-transcript__parts {
   display: grid;
   gap: var(--oct-space-3);
-}
-
-/* The measure belongs to running text, not to the wrapper. Capped here, a reply
-   that also thought or used a tool could never let its table or code block
-   reach the column's width, while a plain reply could. The reasoning block is
-   prose, so it keeps the measure itself. */
-.chat-transcript__parts > .thinking {
-  max-width: 72ch;
 }
 
 .chat-transcript__quote-offer {
