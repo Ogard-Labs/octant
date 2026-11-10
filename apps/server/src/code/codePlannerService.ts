@@ -37,6 +37,7 @@ import {
   type CodePlannerProjectFacts,
   type CodePlannerThreadFacts,
 } from "@octant/domain/code-planner-policy";
+import { readsAsCoordinator } from "@octant/domain";
 import { ACCESS_POSTURE_RANK } from "@octant/domain/code-policy";
 import { Schema } from "effect";
 import { ConcurrencyConflict } from "../persistence/journalErrors";
@@ -187,10 +188,30 @@ export class CodePlannerService {
 
     const timestamp = decodeTimestamp(this.#clock());
     if (command.kind === "designate-code-planner-thread") {
+      const candidate = this.#persistence.readCodeThread(command.threadId);
       const decision = decideCodePlannerDesignation({
         project,
         thread: this.#threadFacts(command.threadId),
         currentDesignation,
+        ...(candidate === undefined
+          ? {}
+          : {
+              coordinatorFacts: {
+                startedByCoordinator: candidate.coordinatorThreadId !== undefined,
+                threadIsCoordinator: candidate.coordinator === true,
+                // No planner is designated here (the policy refused that), so
+                // the Project's coordinators are the threads holding the role.
+                otherCoordinators: this.#persistence
+                  .readCodeThreads()
+                  .filter(
+                    (thread) =>
+                      String(thread.projectId) === String(command.projectId) &&
+                      String(thread.id) !== String(command.threadId) &&
+                      thread.coordinator === true &&
+                      thread.lifecycle !== "archived",
+                  ).length,
+              },
+            }),
       });
       if (decision.status === "refused") return decision;
       const designation: CodePlannerDesignation = {
@@ -309,8 +330,9 @@ export class CodePlannerService {
 
   /**
    * Records a coordinator's `start` as a pending proposal because a person
-   * chose Propose for approval. The coordinator role, not a planner
-   * designation, admits it; the pending cap is the planner's.
+   * chose Propose for approval, or because the caller is the designated
+   * planner, which reads as a coordinator whose starts always need approval.
+   * The pending cap is the planner's.
    */
   proposeForCoordinator(
     coordinatorThreadId: CodeThreadId,
@@ -330,7 +352,15 @@ export class CodePlannerService {
       return { status: "refused", message: "The proposal is invalid or over its bounds." };
     }
     const thread = this.#persistence.readCodeThread(coordinatorThreadId);
-    if (thread?.coordinator !== true || thread.lifecycle === "archived") {
+    if (
+      thread === undefined ||
+      !readsAsCoordinator({
+        lifecycle: thread.lifecycle,
+        coordinator: thread.coordinator === true,
+        startedByCoordinator: thread.coordinatorThreadId !== undefined,
+        designatedPlanner: this.isPlannerThread(coordinatorThreadId),
+      })
+    ) {
       return { status: "refused", message: "Only a coordinator thread may propose a worker." };
     }
     if (

@@ -16,11 +16,12 @@ import type {
   CreateHostViewScope,
   listEligibleImageProfiles,
 } from "@octant/domain";
-import { memo, type ReactNode, type RefObject } from "react";
+import { memo, useMemo, type ReactNode, type RefObject } from "react";
 import type { useAgentProfiles } from "../agentProfile/useAgentProfiles";
 import { AgentProfileNamesProvider } from "../agentProfile/AgentProfileNames";
 import type { ChatController, createChatReadCursorStore } from "../chat/useChatController";
 import type { CodeThreadControllerRegistry } from "../code/codeThreadControllers";
+import type { CoordinatorWorkerRequestSource } from "../code/CoordinatorWorkerRequests";
 import type { CodeThreadProviderChoice } from "../code/codeThreadCreate";
 import type { CodeController } from "../code/useCodeController";
 import type { useContinueCards } from "../code/useContinueCards";
@@ -55,6 +56,9 @@ import type { useWorkThreadNavigation } from "../work/useWorkThreadNavigation";
 import type { useZenController } from "../zen/useZenController";
 import type { createLaunchedShellClients } from "./createLaunchedShellClients";
 import type { ShellActions } from "./shellActions";
+import type { WorkspaceTab } from "@octant/contracts/shell";
+import { ThreadCoordinatorMenuItems, threadCoordinatorMenuOffers } from "../projects/ThreadRowMenu";
+import { codeThreadCoordinatorActions } from "./codeThreadCoordinatorActions";
 import type { ShellNavigationModel } from "./shellNavigationModel";
 
 type ShellController = ReturnType<typeof useShellController>;
@@ -63,6 +67,10 @@ type ProjectController = ReturnType<typeof useProjectController>;
 export interface ThreadPaneContainerProps {
   readonly actions: Pick<
     ShellActions,
+    | "setCodeThreadCoordinator"
+    | "setCodeThreadCoordinatorWake"
+    | "setCodeThreadMessageWake"
+    | "setThreadExportNotice"
     | "activateContentTab"
     | "activatePane"
     | "clearFocus"
@@ -417,6 +425,19 @@ export const ThreadPaneContainer = memo(function ThreadPaneContainer(
     touchMemoryRevision,
     viewAllChatProjectThreads,
   } = actions;
+  // A Code thread pane's header menu carries the thread's coordinator items,
+  // with the sidebar row menu's own handlers (docs/design/workspace.md#coordinators).
+  const coordinatorActions = codeThreadCoordinatorActions(actions);
+  const threadMenuItems = (surface: WorkspaceTab): ReactNode => {
+    if (surface.kind !== "code-overview") return undefined;
+    const row = navigation.codeProjectThreads.find(
+      (thread) => String(thread.threadId) === String(surface.threadId),
+    );
+    return row === undefined ||
+      !threadCoordinatorMenuOffers(row, coordinatorActions) ? undefined : (
+      <ThreadCoordinatorMenuItems actions={coordinatorActions} thread={row} />
+    );
+  };
   const {
     agentRunClient,
     appleToolchainClient,
@@ -448,6 +469,32 @@ export const ThreadPaneContainer = memo(function ThreadPaneContainer(
   } = props.clients;
   const { liveThreadTitles, needsPersonThreadIds, providerByThreadId, runningThreadIds } =
     navigation;
+  // A coordinator's composer reads the same pending-request list as Needs you
+  // and answers through the same clients; a remote window has no reader.
+  const { codeClient, pendingRequestClient } = props.clients;
+  const workerRequestSource = useMemo<CoordinatorWorkerRequestSource | undefined>(
+    () =>
+      pendingRequestClient === undefined
+        ? undefined
+        : {
+            pendingRequestClient,
+            answerClients: { chatClient, codeClient, workRequestClient, workTurnClient },
+            feedRevision: machineChanges.codeNavigation,
+            modes: ["code"],
+            settings,
+            workspace,
+          },
+    [
+      chatClient,
+      codeClient,
+      machineChanges.codeNavigation,
+      pendingRequestClient,
+      settings,
+      workRequestClient,
+      workTurnClient,
+      workspace,
+    ],
+  );
   // A draft only: the quote lands in a clean composer in the same Project and
   // mode, and the person sends it. Nothing here starts a turn.
   const startThreadFromSelection = (request: SelectionThreadRequest) => {
@@ -505,6 +552,7 @@ export const ThreadPaneContainer = memo(function ThreadPaneContainer(
               <ComposerContextMeterShortcut />
               <ThreadStatsDetailDialog />
               <WorkspaceView
+                threadMenuItems={threadMenuItems}
                 {...(contextClient === undefined ? {} : { contextClient })}
                 {...(welcomeBackdrop === undefined ? {} : { welcomeBackdrop })}
                 followUpSuggestions={{
@@ -555,6 +603,7 @@ export const ThreadPaneContainer = memo(function ThreadPaneContainer(
                 agentRunClient={agentRunClient}
                 nativeHarnessClient={nativeHarnessClient}
                 onOpenSubagent={openSubagent}
+                {...(workerRequestSource === undefined ? {} : { workerRequestSource })}
                 onOpenAgents={openSubagent}
                 chatClient={chatClient}
                 chatController={chatController}

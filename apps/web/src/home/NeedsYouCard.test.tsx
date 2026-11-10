@@ -256,23 +256,29 @@ describe("the Needs you card", () => {
     expect(answerClients.workRequestClient.execute).not.toHaveBeenCalled();
   });
 
-  it("answers a Code approval and a Work approval through their own commands with the listed handle", async () => {
+  it("names a worker's coordinator beside it and answers Code and Work approvals through their own commands with the listed handle", async () => {
     const user = userEvent.setup();
     const answerClients = clients();
     renderCard(
       createNeedsYouCard(
         source({
           answerClients: answerClients as never,
+          coordinatorTitles: new Map([["code-thread", "Release coordinator"]]),
           pendingRequestClient: reader([codeApproval, workApproval]),
         }),
       ),
     );
     const card = await findCard();
-    await user.click(
+    const worker = await within(card).findByRole("group", {
+      name: "Fix the flaky build is waiting for you",
+    });
+    expect(within(worker).getByText("via Release coordinator")).toBeInTheDocument();
+    expect(
       within(
-        await within(card).findByRole("group", { name: "Fix the flaky build is waiting for you" }),
-      ).getByRole("button", { name: "Approve" }),
-    );
+        within(card).getByRole("group", { name: "Quarterly notes is waiting for you" }),
+      ).queryByText(/^via /),
+    ).toBeNull();
+    await user.click(within(worker).getByRole("button", { name: "Approve" }));
     expect(answerClients.codeClient.executeOperation).toHaveBeenCalledExactlyOnceWith({
       kind: "answer-provider-approval",
       operationId: expect.any(String),

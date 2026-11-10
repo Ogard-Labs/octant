@@ -8,7 +8,10 @@ import type {
   ProjectLifecycle,
   ProjectType,
 } from "@octant/contracts";
-import { MAX_PENDING_CODE_PLANNER_PROPOSALS } from "@octant/contracts";
+import {
+  MAX_COORDINATORS_PER_PROJECT,
+  MAX_PENDING_CODE_PLANNER_PROPOSALS,
+} from "@octant/contracts";
 
 /**
  * Pure planner policy for Code Projects.
@@ -71,6 +74,19 @@ export function decideCodePlannerDesignation(input: {
   readonly project: CodePlannerProjectFacts | undefined;
   readonly thread: CodePlannerThreadFacts | undefined;
   readonly currentDesignation: CodePlannerDesignation | undefined;
+  /**
+   * The designated planner reads as a coordinator
+   * (docs/design/coordinator-threads.md), so a worker cannot hold the
+   * designation and it counts toward the Project's coordinator limit.
+   * `otherCoordinators` counts the Project's coordinators other than the
+   * thread itself.
+   */
+  readonly coordinatorFacts?: {
+    readonly startedByCoordinator: boolean;
+    /** Already a coordinator by its own record, so already counted. */
+    readonly threadIsCoordinator: boolean;
+    readonly otherCoordinators: number;
+  };
 }): CodePlannerDesignationDecision {
   const project = requireActiveCodeProject(input.project);
   if (project.status === "refused") return project;
@@ -92,6 +108,23 @@ export function decideCodePlannerDesignation(input: {
     return refusal(
       "planner-already-designated",
       "This Project already has a planner thread. Undesignate it first.",
+    );
+  }
+  const coordinatorFacts = input.coordinatorFacts;
+  if (coordinatorFacts?.startedByCoordinator === true) {
+    return refusal(
+      "thread-is-worker",
+      "A worker thread cannot be the planner; its coordinator directs it.",
+    );
+  }
+  if (
+    coordinatorFacts !== undefined &&
+    !coordinatorFacts.threadIsCoordinator &&
+    coordinatorFacts.otherCoordinators >= MAX_COORDINATORS_PER_PROJECT
+  ) {
+    return refusal(
+      "coordinator-limit-reached",
+      `The planner counts as a coordinator, and a Code Project may have at most ${String(MAX_COORDINATORS_PER_PROJECT)}.`,
     );
   }
   return { status: "designate" };

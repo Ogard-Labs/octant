@@ -81,6 +81,7 @@ export const HubMembershipChange = Schema.Literal(
   "sign-in-outcome-received",
   "owner-session-opened",
   "owner-posture-changed",
+  "owner-thread-wake-changed",
   "owner-merge-unlocked",
   "paired-merge-unlock-on",
   "paired-merge-unlock-off",

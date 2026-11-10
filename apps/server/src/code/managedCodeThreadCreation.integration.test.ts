@@ -1140,6 +1140,8 @@ describe("a thread confirmed from a marked planner thread's proposal", () => {
         readProject: () => project,
         readCodeThread: (id: CodeThreadId) =>
           String(id) === String(sourceThreadId) ? sourceThread() : undefined,
+        // Designation counts the Project's coordinators across its threads.
+        readCodeThreads: () => [sourceThread()],
       } as unknown as PersistenceService,
       uuid: host.uuid,
       clock: () => now,

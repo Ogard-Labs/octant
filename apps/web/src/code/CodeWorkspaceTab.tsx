@@ -61,6 +61,7 @@ export default function CodeWorkspaceTab(props: {
   readonly onOpenCanvas?: (card: CanvasThreadReferenceCard) => void;
   readonly onCanvasReferencesObserved?: CodeWorkspaceProps["onCanvasReferencesObserved"];
   readonly onNewThreadInProject?: CodeWorkspaceProps["onNewThreadInProject"];
+  readonly coordinatorProposals?: CodeWorkspaceProps["coordinatorProposals"];
   /**
    * Opens a Code thread this workspace started, such as a fork of the one in
    * view. Absent on a surface with no tab of its own.
@@ -156,6 +157,9 @@ export default function CodeWorkspaceTab(props: {
           ? {}
           : { automationClient: props.automationClient })}
         {...(approvals === undefined ? {} : { approvals })}
+        {...(props.coordinatorProposals === undefined
+          ? {}
+          : { coordinatorProposals: props.coordinatorProposals })}
         client={props.controller.client}
         controller={props.controller}
         {...(props.holdAccessNotice === undefined

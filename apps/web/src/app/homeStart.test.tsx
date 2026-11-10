@@ -36,6 +36,7 @@ function input(computerSnapshots: HomeStartInput["computerSnapshots"]): HomeStar
     hostResourceClient,
     isDesktop: false,
     loadHomePullRequests,
+    needsYouCoordinatorTitles: emptyMap,
     needsYouThreadProviders: emptyMap,
     now: 0,
     openRunningServiceLive: undefined,

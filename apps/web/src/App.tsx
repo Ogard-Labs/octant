@@ -445,6 +445,7 @@ import type { ComposerCompaction } from "./context/composerContextMeterScope";
 import type { ContextInspectorSnapshot } from "@octant/contracts/context-rpc";
 import { createCodeReadCursorStore, useCodeController } from "./code/useCodeController";
 import { useContinueCards } from "./code/useContinueCards";
+import { coordinatorTitleByWorker } from "./code/codeBoardGrouping";
 import {
   CodeThreadControllerSlots,
   createCodeThreadControllers,
@@ -4492,6 +4493,7 @@ function LaunchedShell(
             ...(thread.completedAt === undefined ? {} : { completedAt: thread.completedAt }),
             ...(thread.snooze === undefined ? {} : { snooze: thread.snooze }),
             ...(thread.coordinator === true ? { coordinator: true } : {}),
+            ...(thread.planner === true ? { planner: true } : {}),
             ...workerLineage(thread.coordinatorThreadId),
             ...(thread.messageWake === true ? { messageWake: true } : {}),
             ...(thread.coordinatorWakeOff === true ? { coordinatorWakeOff: true } : {}),
@@ -4700,6 +4702,11 @@ function LaunchedShell(
     }
     return byThread;
   }, [workingNowProviders, workingNowThreads]);
+  // Needs you names a worker's coordinator beside it, from the window's thread list.
+  const needsYouCoordinatorTitles = useMemo(
+    () => coordinatorTitleByWorker(codeController.navigation),
+    [codeController.navigation],
+  );
   const workingNowBoardFacts = useMemo(
     () =>
       continueCards.kind === "ready" && activeMode === "code"
@@ -5095,6 +5102,7 @@ function LaunchedShell(
     hostResourceClient,
     isDesktop: props.hostBridge !== undefined,
     loadHomePullRequests,
+    needsYouCoordinatorTitles,
     needsYouThreadProviders,
     now: minuteNow.getTime(),
     openRunningServiceLive,

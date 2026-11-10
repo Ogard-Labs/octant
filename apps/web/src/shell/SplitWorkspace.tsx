@@ -76,6 +76,12 @@ export interface SplitWorkspaceProps {
     placement: "before" | "after",
   ) => void;
   readonly renderSurface: (surface: WorkspaceTab, paneId: PaneId) => React.ReactNode;
+  /**
+   * Menu items the surface's own thread offers, placed in the pane's header
+   * menu above Close pane, such as a Code thread's coordinator items. Answers
+   * nothing for a surface with no thread items.
+   */
+  readonly threadMenuItems?: (surface: WorkspaceTab) => React.ReactNode;
   /** Provider identity for thread-owned surfaces, used by the pane's content tabs. */
   readonly providerByThreadId?: ReadonlyMap<string, ThreadProviderIdentity>;
   /**
@@ -782,6 +788,7 @@ function WorkspacePaneView(props: WorkspaceNodeProps & { readonly pane: Workspac
               onClose={() => props.onClosePane(pane.paneId)}
               onFocus={() => props.onFocus(pane.paneId)}
               onSplit={(orientation) => props.onSplitPane(pane.paneId, orientation, "after")}
+              threadItems={props.threadMenuItems?.(surface)}
               title={title}
             />
           </OctantContextMenuRoot>
@@ -829,6 +836,8 @@ function PaneMenu(props: {
   readonly onSplit: (orientation: "horizontal" | "vertical") => void;
   /** Present when two to four tabs can be laid out side by side. */
   readonly onShowSideBySide?: () => void;
+  /** The surface's own thread items; absent or empty adds nothing. */
+  readonly threadItems?: React.ReactNode;
   readonly title: string;
 }) {
   const focusLabel = props.focused ? "Show all panes" : "Focus this pane";
@@ -860,6 +869,12 @@ function PaneMenu(props: {
           )}
         </>
       ) : null}
+      {props.threadItems === undefined || props.threadItems === null ? null : (
+        <>
+          <OctantContextMenuSeparator />
+          {props.threadItems}
+        </>
+      )}
       <OctantContextMenuSeparator />
       <OctantContextMenuItem label="Close pane" onClick={props.onClose}>
         Close pane

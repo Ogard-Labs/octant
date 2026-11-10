@@ -38,7 +38,7 @@ The former decision archive is history in `docs/legacy/` and has no authority.
 | [Canvas authority](#canvas-authority)                                                 | 2         | 2       | 0            | 0                   |
 | [Device transport](#device-transport)                                                 | 3         | 3       | 0            | 0                   |
 | [Modes, Projects and authority](#modes-projects-and-authority)                        | 14        | 12      | 2            | 0                   |
-| [Agents and delegation](#agents-and-delegation)                                       | 5         | 4       | 1            | 0                   |
+| [Agents and delegation](#agents-and-delegation)                                       | 5         | 5       | 0            | 0                   |
 | [Boards, pull requests and delivery](#boards-pull-requests-and-delivery)              | 6         | 3       | 2            | 1                   |
 | [Routines and timed turns](#routines-and-timed-turns)                                 | 4         | 3       | 1            | 0                   |
 | [Transcript records](#transcript-records)                                             | 1         | 1       | 0            | 0                   |
@@ -67,7 +67,7 @@ The former decision archive is history in `docs/legacy/` and has no authority.
 | [Code tooling](#code-tooling)                                                         | 2         | 1       | 1            | 0                   |
 | [Disposable desktops](#disposable-desktops)                                           | 4         | 3       | 1            | 0                   |
 | [Bots](#bots)                                                                         | 1         | 0       | 0            | 1                   |
-| **All areas**                                                                         | **231**   | **194** | **33**       | **4**               |
+| **All areas**                                                                         | **231**   | **195** | **32**       | **4**               |
 
 ## Principles and hard lines
 
@@ -840,18 +840,20 @@ Status: Built. Since: —. Detail: [Architecture: Modes: Chat, Work, and Code](.
 
 A person may make a Code thread a coordinator: a long-lived thread that starts worker threads without asking, talks to them, and brings their requests to the person (maintainer request, 2026-11-10). A person can restrict starting to proposals for the whole host or for one Project.
 
-- Only a person makes or stops a coordinator, from a local window; up to four per Code Project. The role, lineage and switches are fields on the thread, journaled as `code.thread-updated@1`; a creation command may not carry them. A coordinator's proposals use the planner's proposal path; carrying an existing planner designation over to a coordinator is not built yet.
+- Only a person makes or stops a coordinator, from a local window; up to four per Code Project. The role, lineage and switches are fields on the thread, journaled as `code.thread-updated@1`; a creation command may not carry them. A coordinator's proposals use the planner's proposal path. The designated planner reads as a coordinator whose starts always need approval, counted toward the four; designation refuses a worker or a fifth coordinator.
 - A coordinator's own file, shell and Git actions take Plan's read-only gate whatever its level; it has no delivery target, no board card, no pull request of its own, and is never Done. Each turn carries a host-written roster of its workers with no agent-written text.
 - `octant_threads` `start` is offered only to a current coordinator, outside Plan, and to a profile allowlist naming `octant_threads.start`. It creates an ordinary Code thread in the same Project on a new managed worktree, with an `agent`-initiated first turn, so every approval waits for a person. Workers are never coordinators and never offered `start`.
 - Settings › Code › Coordinators › Starting workers is Start without asking (default) or Propose for approval, with a per-Project override; only a person changes it, and the host reads it at every call.
 - A worker's level is at most the coordinator's, and never Full access from a marked coordinator. A marked coordinator's worker starts marked (label `coordinator-start`); a mark that cannot be journaled refuses the start.
 - At most six open workers per coordinator by default (person-set, 1–16) and twelve starts per hour; ordinary turn admission, capacity and spend ceilings apply.
 - A worker wakes for its own coordinator's messages unless a person turns that off; making a coordinator turns its own wake switch on. The host sends a coordinator closed-set state notices (turn ended, waiting for a person, Done) that do not mark it. Wake bounds and the three-round hop count apply.
-- A worker's approvals and questions are listed in its coordinator's composer; only the person answers them, never the coordinator agent. Not built yet: the composer listing, Needs you rows naming the coordinator, a proposal card in the coordinator thread, and a board filter by coordinator. The sidebar section, row-menu items, New coordinator, and both settings are built ([Workspace: Coordinators](workspace.md#coordinators)).
+- A worker's approvals and questions are listed in its coordinator's composer; only the person answers them, never the coordinator agent. Needs you rows name the coordinator, pending proposals show as a card in the coordinator thread, and the board can be filtered by coordinator ([Workspace: Coordinators](workspace.md#coordinators)).
+- The wake switches (never the role) may also be set from an owner device through the owner routes, each change under its own fresh unlock and journaled as that device; no owner-device screen calls them yet.
+- Not yet run against a real provider or on the desktop app; the live checks are on the maintainer live-smoke list.
 - Wake, start and hop counts are held in host memory; a restart starts them again.
 - Work coordinators wait for a rule that lets a Work turn carry a message.
 
-Status: Partly built. Since: 2026-11-10. Detail: [Coordinator threads](coordinator-threads.md).
+Status: Built. Since: 2026-11-10. Detail: [Coordinator threads](coordinator-threads.md).
 
 ## Boards, pull requests and delivery
 

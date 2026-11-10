@@ -60,7 +60,7 @@ import {
   codeBoardStatusReasonLabel,
   groupCodeBoardCards,
   type CodeBoardColumn,
-  type CodeBoardCoordinatorLineage,
+  type CodeBoardCoordinators,
   type CodeBoardGrouping,
   type CodeBoardProjectRef,
 } from "./codeBoardGrouping";
@@ -99,8 +99,11 @@ export interface CodeThreadBoardProps {
   readonly isNarrow?: boolean;
   /** Lets a waiting card answer its thread's question; without it cards look as they always did. */
   readonly pendingRequests?: BoardPendingRequestSource;
-  /** Absent leaves every card as the host sent it. */
-  readonly coordinators?: CodeBoardCoordinatorLineage;
+  /**
+   * The window's coordinators: names a worker's coordinator on its card and
+   * offers the Coordinator filter. Absent leaves every card as the host sent it.
+   */
+  readonly coordinators?: CodeBoardCoordinators;
 }
 
 interface FilterState {
@@ -110,6 +113,8 @@ interface FilterState {
   readonly followUp: "any" | "only" | "excluded";
   readonly pullRequest: "any" | "linked" | "none" | "open" | "merged" | "closed";
   readonly checks: "any" | "unknown" | "pending" | "passing" | "failing";
+  /** One coordinator's workers only; empty for every thread. */
+  readonly coordinatorThreadId: string;
 }
 
 const DEFAULT_FILTERS: FilterState = {
@@ -119,6 +124,7 @@ const DEFAULT_FILTERS: FilterState = {
   followUp: "any",
   pullRequest: "any",
   checks: "any",
+  coordinatorThreadId: "",
 };
 
 export function CodeThreadBoard(props: CodeThreadBoardProps) {
@@ -206,7 +212,8 @@ export function CodeThreadBoard(props: CodeThreadBoardProps) {
     return map;
   }, [props.projects]);
 
-  const activeFilters = activeFilterLabels(filters, projectNames);
+  const coordinatorTitles = props.coordinators?.titleByCoordinator ?? EMPTY_COORDINATOR_TITLES;
+  const activeFilters = activeFilterLabels(filters, projectNames, coordinatorTitles);
   const activeAdvancedFilterCount = activeFilters.filter(
     (filter) => filter.kind !== "search",
   ).length;
@@ -340,6 +347,26 @@ export function CodeThreadBoard(props: CodeThreadBoardProps) {
                 />
               </label>
 
+              {coordinatorTitles.size === 0 ? null : (
+                <label>
+                  <span>Coordinator</span>
+                  <OctantSelectField
+                    onValueChange={(value) =>
+                      setFilters((prev) => ({ ...prev, coordinatorThreadId: value }))
+                    }
+                    options={[
+                      { id: "", label: "Any" },
+                      ...[...coordinatorTitles].map(([id, title]) => ({ id, label: title })),
+                    ]}
+                    value={
+                      coordinatorTitles.has(filters.coordinatorThreadId)
+                        ? filters.coordinatorThreadId
+                        : ""
+                    }
+                  />
+                </label>
+              )}
+
               <label>
                 <span>Follow-up</span>
                 <OctantSelectField
@@ -463,20 +490,16 @@ export function CodeThreadBoard(props: CodeThreadBoardProps) {
 
       <ThreadBoardBody<CodeBoardCard, CodeBoardColumn, CodeBoardView>
         activeFilterSummary={
-          activeFilterLabels(filters, projectNames).length === 0
+          activeFilterLabels(filters, projectNames, coordinatorTitles).length === 0
             ? undefined
             : activeFilterSummary(filters)
         }
         board={board}
         // A coordinator has no delivery target and is never Done, so it is
-        // never a card (docs/design/workspace.md#coordinators).
+        // never a card (docs/design/workspace.md#coordinators). The host
+        // leaves it out; an older host may not, so the window does too.
         cardsOf={(view) =>
-          props.coordinators === undefined
-            ? view.cards
-            : view.cards.filter(
-                (card) =>
-                  props.coordinators?.coordinatorThreadIds.has(String(card.threadId)) !== true,
-              )
+          view.cards.filter((card) => !coordinatorTitles.has(String(card.threadId)))
         }
         copy={{
           eyebrow: "Thread board",
@@ -501,7 +524,7 @@ export function CodeThreadBoard(props: CodeThreadBoardProps) {
             statusPresentation={presentation.statusPresentation}
             unread={props.unreadThreadIds?.has(String(card.threadId)) === true}
             request={pending.forCard(card)}
-            {...coordinatorOfCard(props.coordinators, card)}
+            {...coordinatorOfCard(coordinatorTitles, card)}
             {...cardViewExtras(card, {
               projectNames,
               ...(props.providerLabels === undefined
@@ -544,11 +567,16 @@ function OutsideContentCardMark(props: { readonly found: boolean }) {
   );
 }
 
+const EMPTY_COORDINATOR_TITLES: ReadonlyMap<string, string> = new Map();
+
 function coordinatorOfCard(
-  lineage: CodeBoardCoordinatorLineage | undefined,
+  titles: ReadonlyMap<string, string>,
   card: CodeBoardCard,
 ): { readonly coordinatorTitle?: string } {
-  const coordinatorTitle = lineage?.coordinatorTitleByWorker.get(String(card.threadId));
+  const coordinatorTitle =
+    card.coordinatorThreadId === undefined
+      ? undefined
+      : titles.get(String(card.coordinatorThreadId));
   return coordinatorTitle === undefined ? {} : { coordinatorTitle };
 }
 
@@ -949,6 +977,7 @@ function buildQuery(filters: FilterState): CodeBoardQuery {
     followUp?: FilterState["followUp"];
     pullRequest?: FilterState["pullRequest"];
     checks?: FilterState["checks"];
+    coordinatorThreadId?: CodeThreadId;
   } = { version: 1 };
   const text = filters.text.trim();
   if (text !== "") query.text = text;
@@ -961,6 +990,9 @@ function buildQuery(filters: FilterState): CodeBoardQuery {
   if (filters.followUp !== "any") query.followUp = filters.followUp;
   if (filters.pullRequest !== "any") query.pullRequest = filters.pullRequest;
   if (filters.checks !== "any") query.checks = filters.checks;
+  if (filters.coordinatorThreadId !== "") {
+    query.coordinatorThreadId = filters.coordinatorThreadId as CodeThreadId;
+  }
   return query as CodeBoardQuery;
 }
 
@@ -982,6 +1014,7 @@ function statusSummary(statuses: ReadonlySet<CodeBoardStatus>): string {
 function activeFilterLabels(
   filters: FilterState,
   projectNames: ReadonlyMap<string, string>,
+  coordinatorTitles: ReadonlyMap<string, string>,
 ): ReadonlyArray<ActiveFilterLabel> {
   const active: ActiveFilterLabel[] = [];
   const text = filters.text.trim();
@@ -1015,6 +1048,13 @@ function activeFilterLabels(
       label: `${filters.checks.charAt(0).toUpperCase()}${filters.checks.slice(1)} checks`,
     });
   }
+  if (filters.coordinatorThreadId !== "") {
+    active.push({
+      kind: "coordinator",
+      label: `Workers of ${coordinatorTitles.get(filters.coordinatorThreadId) ?? "a coordinator"}`,
+      verbatim: true,
+    });
+  }
   if (filters.followUp !== "any") {
     active.push({
       kind: "follow-up",
@@ -1034,6 +1074,7 @@ function activeFilterSummary(filters: FilterState): string {
   if (filters.pullRequest !== "any") active.push(`pull request ${filters.pullRequest}`);
   if (filters.checks !== "any") active.push(`checks ${filters.checks}`);
   if (filters.followUp !== "any") active.push(`follow-up ${filters.followUp}`);
+  if (filters.coordinatorThreadId !== "") active.push("one coordinator's workers");
   return active.length === 0 ? "No filters are active." : `Active filters: ${active.join("; ")}.`;
 }
 

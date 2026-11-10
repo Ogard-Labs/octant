@@ -76,6 +76,24 @@ describe("designating a planner thread", () => {
     expect(decision).toMatchObject({ status: "refused", reason: "planner-already-designated" });
   });
 
+  it("refuses a worker, and a fifth coordinator, because the planner reads as a coordinator", () => {
+    const facts = { startedByCoordinator: false, threadIsCoordinator: false, otherCoordinators: 3 };
+    const designate = (coordinatorFacts: typeof facts) =>
+      decideCodePlannerDesignation({
+        project: codeProject,
+        thread,
+        currentDesignation: undefined,
+        coordinatorFacts,
+      });
+    expect(designate(facts)).toEqual({ status: "designate" });
+    expect(designate({ ...facts, startedByCoordinator: true })).toMatchObject({
+      reason: "thread-is-worker",
+    });
+    expect(designate({ ...facts, otherCoordinators: 4 })).toMatchObject({
+      reason: "coordinator-limit-reached",
+    });
+  });
+
   it("refuses to designate a planner for anything but an active Code Project", () => {
     expect(
       decideCodePlannerDesignation({

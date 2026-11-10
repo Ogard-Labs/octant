@@ -8,6 +8,7 @@ import { fireEvent, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import { splitCallbacks, splitLayout } from "../App.test-fixtures";
+import { ThreadCoordinatorMenuItems } from "../projects/ThreadRowMenu";
 import { SplitWorkspace } from "./SplitWorkspace";
 import { useWorkspaceSurfaceDrag, type WorkspaceSurfaceDragHandle } from "./useWorkspaceTabDrag";
 import type {
@@ -722,6 +723,40 @@ describe("SplitWorkspace", () => {
     await openPaneMenu(user, "Second");
     await user.click(await screen.findByRole("menuitem", { name: "Close pane" }));
     expect(handlers.onClosePane).toHaveBeenCalledWith(secondPaneId);
+  });
+
+  it("adds a thread's coordinator items to its pane's header menu, and nothing to other panes", async () => {
+    const user = userEvent.setup();
+    const onSetCoordinator = vi.fn();
+    const onSetMessageWake = vi.fn();
+    render(
+      <SplitWorkspace
+        {...splitCallbacks()}
+        layout={splitLayout()}
+        renderSurface={(surface) => surface.title}
+        threadMenuItems={(surface) =>
+          "title" in surface && surface.title === "Second" ? (
+            <ThreadCoordinatorMenuItems
+              actions={{ onSetCoordinator, onSetMessageWake }}
+              thread={{ threadId: "thread-two", title: "Second", coordinator: true }}
+            />
+          ) : undefined
+        }
+      />,
+    );
+
+    await openPaneMenu(user, "Second");
+    await user.click(await screen.findByRole("menuitem", { name: "Stop coordinating" }));
+    expect(onSetCoordinator).toHaveBeenCalledWith("thread-two", false);
+    await openPaneMenu(user, "Second");
+    await user.click(
+      await screen.findByRole("menuitemcheckbox", { name: "Wake when a message arrives" }),
+    );
+    expect(onSetMessageWake).toHaveBeenCalledWith("thread-two", true);
+
+    await openPaneMenu(user, "First");
+    await screen.findByRole("menuitem", { name: "Close pane" });
+    expect(screen.queryByRole("menuitem", { name: "Stop coordinating" })).toBeNull();
   });
 
   it("activates whichever pane a pointer lands in", () => {
