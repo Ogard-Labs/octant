@@ -922,7 +922,11 @@ window first when none is open. Local host contains status, browser access,
 applicable lifecycle controls, and redacted diagnostics; Quit Octant retains
 the existing active-work confirmation. The text beside the glyph is `!` while
 the host itself needs attention (provider readiness, a lost host), otherwise the
-count of threads that need the person.
+count of threads that need the person. The status line and the diagnostics say
+why in plain words ("A provider needs setup (Settings › Providers)", "A provider
+stopped during a task", "The host did not answer"), from a category the host's
+health answer carries; that answer is unauthenticated, so it never names a
+provider. A provider whose check is still running raises nothing.
 
 The roster comes from the host, not from open windows, so it stays current with
 every window closed. The shell registers its own local-window authority for the

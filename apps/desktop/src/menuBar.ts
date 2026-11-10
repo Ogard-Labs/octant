@@ -219,8 +219,30 @@ export function menuBarTitle(
   return waiting === 0 ? "" : String(waiting);
 }
 
+/**
+ * What the person can do about the mark. "Attention needed" alone named no
+ * cause, and the diagnostics said only "yes": with four providers waiting for
+ * setup the menu bar showed "!" for weeks and nothing said which screen held
+ * the answer.
+ */
+function attentionLabel(snapshot: LocalHostSnapshot): string {
+  if (snapshot.attentionReason === "provider-stopped") {
+    return "A provider stopped during a task";
+  }
+  if (snapshot.attentionReason === "provider-not-ready") {
+    return "A provider needs setup (Settings › Providers)";
+  }
+  if (snapshot.activityUnconfirmed === true) return "The host did not answer";
+  return "Attention needed";
+}
+
+/** The host's state in the words the menu bar and the app menu both show. */
+export function hostStateLabel(snapshot: LocalHostSnapshot): string {
+  return stateLabel(snapshot);
+}
+
 function stateLabel(snapshot: LocalHostSnapshot): string {
-  if (snapshot.state === "attention-required") return "Attention needed";
+  if (snapshot.state === "attention-required") return attentionLabel(snapshot);
   if (snapshot.state === "running") return "Running";
   if (snapshot.state === "starting") return "Starting";
   return "Stopped";
@@ -328,7 +350,7 @@ export function formatRedactedHostDiagnostics(snapshot: LocalHostSnapshot): stri
     `Ownership: ${snapshot.ownership ?? "unavailable"}`,
     `Endpoint: ${origin}`,
     `Active agents: ${snapshot.activeAgentCount}`,
-    `Attention needed: ${snapshot.attentionRequired ? "yes" : "no"}`,
+    `Attention needed: ${snapshot.attentionRequired ? attentionLabel(snapshot) : "no"}`,
   ].join("\n");
 }
 
