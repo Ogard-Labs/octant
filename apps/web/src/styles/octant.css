@@ -2202,10 +2202,12 @@ input.switch:checked::after {
 }
 
 /* ─── toast ─────────────────────────────────────────────────────────── */
+/* Under the title bar, at the trailing edge. At the bottom corner a notice
+   covered the composer's model picker and Send. */
 .toast-stack {
   position: fixed;
+  top: calc(var(--oct-titlebar-h) + var(--oct-space-3));
   right: var(--oct-space-4);
-  bottom: var(--oct-space-4);
   display: grid;
   gap: var(--oct-space-2);
   z-index: var(--oct-z-toast);

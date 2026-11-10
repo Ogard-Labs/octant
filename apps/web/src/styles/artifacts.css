@@ -483,7 +483,8 @@
   display: flex;
   flex-direction: column;
   gap: 0.75rem;
-  width: min(44rem, calc(100vw - 2rem));
+  /* The shared popup caps a width set here at its 420px default. */
+  --octant-dialog-width: 44rem;
   max-height: calc(100dvh - 2rem);
   overflow-y: auto;
 }
@@ -492,8 +493,8 @@
   margin: 0;
   overflow-wrap: anywhere;
   color: var(--oct-fg);
-  font-size: var(--oct-text-lg);
-  font-weight: var(--oct-weight-display);
+  font-size: var(--oct-text-base);
+  font-weight: var(--oct-weight-strong);
 }
 
 .synced-artifact__detail,

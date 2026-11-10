@@ -396,7 +396,7 @@ function McpClientSetupDialog(
         )}
         {problem === undefined ? null : <OctantAlert tone="warning">{problem}</OctantAlert>}
         <div className="endpoint-flow__actions">
-          <OctantButton disabled={busy} onClick={props.onClose} type="button" variant="ghost">
+          <OctantButton disabled={busy} onClick={props.onClose} type="button" variant="outline">
             Cancel
           </OctantButton>
           <OctantButton

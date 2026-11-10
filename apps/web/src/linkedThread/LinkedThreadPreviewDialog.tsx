@@ -29,10 +29,12 @@ export function LinkedThreadPreviewDialog(props: LinkedThreadPreviewDialogProps)
       open={props.open}
       popupId="linked-thread-preview-dialog"
     >
-      <div className="linked-thread-preview-dialog__header">
+      <div className="octant-dialog__head linked-thread-preview-dialog__header">
         <div>
           <span className="linked-thread-preview-dialog__eyebrow">Linked threads</span>
-          <h2 id={titleId}>Confirm parallel review</h2>
+          <h2 className="octant-dialog__title" id={titleId}>
+            Confirm parallel review
+          </h2>
         </div>
         <OctantButton
           aria-label="Close linked-thread preview"
@@ -90,24 +92,23 @@ export function LinkedThreadPreviewDialog(props: LinkedThreadPreviewDialogProps)
         </OctantAlert>
       )}
 
-      <div className="linked-thread-preview-dialog__actions">
-        <OctantButton
-          className="linked-thread-preview-dialog__confirm"
-          disabled={props.submitting}
-          onClick={props.onConfirm}
-          type="button"
-          variant="secondary"
-        >
-          Confirm fan-out
-        </OctantButton>
+      <div className="octant-dialog__actions linked-thread-preview-dialog__actions">
         <OctantButton
           className="linked-thread-preview-dialog__cancel"
           disabled={props.submitting}
           onClick={props.onClose}
           type="button"
-          variant="ghost"
+          variant="outline"
         >
           Cancel
+        </OctantButton>
+        <OctantButton
+          className="linked-thread-preview-dialog__confirm"
+          disabled={props.submitting}
+          onClick={props.onConfirm}
+          type="button"
+        >
+          Confirm fan-out
         </OctantButton>
       </div>
     </OctantDialog>
