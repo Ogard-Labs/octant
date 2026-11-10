@@ -10,8 +10,10 @@ import {
 } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
+  archiveResponse,
+  releaseMetadata,
   removeOwnedBrowserDriverCache,
   requireBrowserDriverRedirect,
   requirePinnedBrowserDriverRelease,
@@ -35,7 +37,57 @@ const release = () => ({
   ],
 });
 
+afterEach(() => {
+  vi.unstubAllGlobals();
+  vi.unstubAllEnvs();
+});
+
 describe("the owned native Browser driver cache", () => {
+  it("authenticates the fixed driver metadata API and retries transient failures", async () => {
+    vi.stubEnv("OCTANT_QA_GITHUB_TOKEN", "synthetic-workflow-token");
+    const fetcher = vi
+      .fn()
+      .mockResolvedValueOnce(new Response("temporary", { status: 503 }))
+      .mockResolvedValueOnce(Response.json(release()));
+    vi.stubGlobal("fetch", fetcher);
+    expect(await releaseMetadata(new AbortController().signal)).toEqual(release());
+    expect(fetcher).toHaveBeenCalledTimes(2);
+    for (const [url, options] of fetcher.mock.calls) {
+      expect(url).toBe(
+        "https://api.github.com/repos/trycua/cua/releases/tags/cua-driver-rs-v0.38.0",
+      );
+      expect(options).toMatchObject({
+        redirect: "manual",
+        headers: { authorization: "Bearer synthetic-workflow-token" },
+      });
+    }
+  });
+
+  it("keeps the workflow token out of the driver archive redirect", async () => {
+    vi.stubEnv("OCTANT_QA_GITHUB_TOKEN", "synthetic-workflow-token");
+    const fetcher = vi
+      .fn()
+      .mockResolvedValueOnce(
+        new Response(null, {
+          status: 302,
+          headers: {
+            location:
+              "https://release-assets.githubusercontent.com/github-production-release-asset/925270205/owned",
+          },
+        }),
+      )
+      .mockResolvedValueOnce(new Response("owned"));
+    vi.stubGlobal("fetch", fetcher);
+    expect(await (await archiveResponse(new AbortController().signal)).text()).toBe("owned");
+    expect(fetcher.mock.calls[0]?.[1].headers.authorization).toBe(
+      "Bearer synthetic-workflow-token",
+    );
+    expect(fetcher.mock.calls[1]?.[1].headers).toEqual({
+      accept: "application/octet-stream",
+      "user-agent": "Octant native QA",
+    });
+  });
+
   it("requires the exact pinned prerelease, asset identity, size and bundled digest", () => {
     expect(() => requirePinnedBrowserDriverRelease(release())).not.toThrow();
     for (const invalid of [

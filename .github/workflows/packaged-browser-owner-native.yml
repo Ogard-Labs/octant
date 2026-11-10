@@ -43,6 +43,7 @@ jobs:
       - name: Seed only the pinned Electron archive from its official asset API
         timeout-minutes: 4
         env:
+          OCTANT_QA_GITHUB_TOKEN: ${{ github.token }}
           electron_config_cache: ${{ runner.temp }}/browser-owner-electron-cache
         run: bun scripts/packaged-browser-owner-electron-cache.ts
       - run: node node_modules/electron/install.js
@@ -50,6 +51,8 @@ jobs:
           electron_config_cache: ${{ runner.temp }}/browser-owner-electron-cache
       - name: Seed only the pinned driver through its canonical verifier
         timeout-minutes: 5
+        env:
+          OCTANT_QA_GITHUB_TOKEN: ${{ github.token }}
         run: bun scripts/packaged-browser-owner-driver-cache.ts
       - name: Package source without signing or publication
         timeout-minutes: 25

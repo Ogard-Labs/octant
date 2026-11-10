@@ -1,6 +1,6 @@
 import { WorkspaceViewStateContext, type WorkspaceViewStore } from "../shell/workspaceViewState";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { useState, type ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { describe, expect, it, vi } from "vitest";
 import { TranscriptWindow } from "./TranscriptWindow";
 
@@ -271,16 +271,66 @@ describe("TranscriptWindow", () => {
     });
   });
 
-  it("mounts off-window rows so in-page find can read them", async () => {
+  it("keeps a long transcript windowed when Find opens and while it searches", async () => {
     renderWindow(rows(1000));
-    expect(screen.queryByRole("button", { name: "Row 500" })).not.toBeInTheDocument();
-
     fireEvent.keyDown(window, { key: "f", metaKey: true });
+    const input = await screen.findByRole("textbox", { name: "Find in thread" });
+    expect(mountedCount()).toBeLessThan(80);
+    fireEvent.change(input, { target: { value: "Row 500" } });
+    expect(mountedCount()).toBeLessThan(80);
+    expect(await screen.findByText("1 of 1", {}, { timeout: 5000 })).toBeInTheDocument();
+    expect(mountedCount()).toBeLessThan(80);
+    expect(screen.getByRole("button", { name: "Row 500" })).toBeInTheDocument();
+  });
 
-    await waitFor(() => {
-      expect(screen.getByRole("button", { name: "Row 500" })).toBeInTheDocument();
-    });
-    expect(mountedCount()).toBe(1000);
+  it("cancels an unfinished search when Find closes", async () => {
+    renderWindow(rows(10000));
+    fireEvent.keyDown(window, { key: "f", ctrlKey: true });
+    const input = await screen.findByRole("textbox", { name: "Find in thread" });
+    fireEvent.change(input, { target: { value: "Row 500" } });
+    expect(screen.getByText("Searching…")).toBeInTheDocument();
+    fireEvent.keyDown(input, { key: "Escape" });
+    await waitFor(() => expect(mountedCount()).toBeLessThan(32));
+    expect(screen.queryByRole("textbox", { name: "Find in thread" })).not.toBeInTheDocument();
+  });
+
+  it("finishes indexing while streamed rows continue to refresh", async () => {
+    function StreamingThread() {
+      const [items, setItems] = useState(() => rows(1000));
+      useEffect(() => {
+        const timer = setInterval(
+          () => setItems((current) => current.map((item) => ({ ...item }))),
+          20,
+        );
+        return () => clearInterval(timer);
+      }, []);
+      return (
+        <TranscriptWindow
+          items={items}
+          itemKey={(item) => item.id}
+          renderItem={(item) => <button type="button">{item.label}</button>}
+          restoreKey="streaming-find"
+        />
+      );
+    }
+    render(<StreamingThread />);
+    fireEvent.keyDown(window, { key: "f", ctrlKey: true });
+    const input = await screen.findByRole("textbox", { name: "Find in thread" });
+    fireEvent.change(input, { target: { value: "Row 500" } });
+    expect(await screen.findByText("1 of 1", {}, { timeout: 5000 })).toBeInTheDocument();
+    expect(mountedCount()).toBeLessThan(80);
+  });
+
+  it("reuses indexed text for a new query without mounting the history again", async () => {
+    renderWindow(rows(1000));
+    fireEvent.keyDown(window, { key: "f", ctrlKey: true });
+    const input = await screen.findByRole("textbox", { name: "Find in thread" });
+    fireEvent.change(input, { target: { value: "Row 500" } });
+    expect(await screen.findByText("1 of 1", {}, { timeout: 5000 })).toBeInTheDocument();
+    fireEvent.change(input, { target: { value: "Row 600" } });
+    expect(screen.queryByText("Searching…")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Row 600" })).toBeInTheDocument();
+    expect(mountedCount()).toBeLessThan(80);
   });
 
   it("opens a find bar that counts matches across rows that were off-window", async () => {
@@ -291,7 +341,7 @@ describe("TranscriptWindow", () => {
     fireEvent.change(input, { target: { value: "row 5" } });
 
     // Row 5, 50-59, 500-599.
-    expect(await screen.findByText("1 of 111")).toBeInTheDocument();
+    expect(await screen.findByText("1 of 111", {}, { timeout: 5000 })).toBeInTheDocument();
     fireEvent.keyDown(input, { key: "Enter" });
     expect(screen.getByText("2 of 111")).toBeInTheDocument();
     fireEvent.keyDown(input, { key: "Enter", shiftKey: true });
@@ -299,14 +349,14 @@ describe("TranscriptWindow", () => {
     expect(screen.getByText("111 of 111")).toBeInTheDocument();
   });
 
-  it("says when nothing matches and collapses the expanded range on close", async () => {
+  it("says when nothing matches and keeps rows windowed on close", async () => {
     renderWindow(rows(1000));
     fireEvent.keyDown(window, { key: "f", metaKey: true });
     const input = await screen.findByRole("textbox", { name: "Find in thread" });
     fireEvent.change(input, { target: { value: "no such text" } });
-    expect(await screen.findByText("No matches")).toBeInTheDocument();
+    expect(await screen.findByText("No matches", {}, { timeout: 5000 })).toBeInTheDocument();
     await waitFor(() => {
-      expect(mountedCount()).toBe(1000);
+      expect(mountedCount()).toBeLessThan(80);
     });
 
     fireEvent.keyDown(input, { key: "Escape" });
@@ -363,10 +413,105 @@ describe("TranscriptWindow", () => {
     const input = await screen.findByRole("textbox", { name: "Find in thread" });
 
     fireEvent.change(input, { target: { value: "the plan is" } });
-    expect(await screen.findByText("1 of 1")).toBeInTheDocument();
+    expect(await screen.findByText("1 of 1", {}, { timeout: 5000 })).toBeInTheDocument();
 
     fireEvent.change(input, { target: { value: "readysecond" } });
+    expect(await screen.findByText("No matches", {}, { timeout: 5000 })).toBeInTheDocument();
+  });
+
+  it("refreshes matches when a disclosure opens or closes", async () => {
+    render(
+      <TranscriptWindow
+        items={rows(1)}
+        itemKey={(item) => item.id}
+        restoreKey="disclosure-find"
+        renderItem={() => (
+          <details>
+            <summary>Thinking</summary>
+            <p>Hidden phrase</p>
+          </details>
+        )}
+      />,
+    );
+    fireEvent.keyDown(window, { key: "f", ctrlKey: true });
+    const input = await screen.findByRole("textbox", { name: "Find in thread" });
+    fireEvent.change(input, { target: { value: "hidden phrase" } });
+    expect(await screen.findByText("No matches", {}, { timeout: 5000 })).toBeInTheDocument();
+    const disclosure = screen.getByText("Thinking").closest("details");
+    if (disclosure === null) throw new Error("expected disclosure");
+    disclosure.open = true;
+    fireEvent(disclosure, new Event("toggle"));
+    expect(await screen.findByText("1 of 1")).toBeInTheDocument();
+    disclosure.open = false;
+    fireEvent(disclosure, new Event("toggle"));
     expect(await screen.findByText("No matches")).toBeInTheDocument();
+  });
+
+  it("reveals the only match again when navigation wraps to the same index", async () => {
+    renderWindow(rows(1));
+    fireEvent.keyDown(window, { key: "f", ctrlKey: true });
+    const input = await screen.findByRole("textbox", { name: "Find in thread" });
+    fireEvent.change(input, { target: { value: "Row 0" } });
+    expect(await screen.findByText("1 of 1")).toBeInTheDocument();
+    const reveal = vi.fn();
+    screen.getByRole("button", { name: "Row 0" }).scrollIntoView = reveal;
+    fireEvent.keyDown(input, { key: "Enter" });
+    await waitFor(() => expect(reveal).toHaveBeenCalled());
+  });
+
+  it("keeps a manually opened disclosure mounted until it closes", async () => {
+    render(
+      <TranscriptWindow
+        items={rows(1000)}
+        itemKey={(item) => item.id}
+        align="start"
+        restoreKey="manual-disclosure"
+        renderItem={(item) => (
+          <details>
+            <summary>{item.label}</summary>
+            <p>Visible detail</p>
+          </details>
+        )}
+      />,
+    );
+    const disclosure = screen.getByText("Row 0").closest("details");
+    if (disclosure === null) throw new Error("expected disclosure");
+    disclosure.open = true;
+    fireEvent(disclosure, new Event("toggle"));
+    scroller().scrollTop = 40000;
+    fireEvent.scroll(scroller());
+    await waitFor(() =>
+      expect(
+        [...document.querySelectorAll<HTMLElement>("[data-transcript-row]")].some(
+          (row) => Number(row.dataset.index) > 100,
+        ),
+      ).toBe(true),
+    );
+    expect(screen.getByText("Row 0")).toBeInTheDocument();
+    disclosure.open = false;
+    fireEvent(disclosure, new Event("toggle"));
+    await waitFor(() => expect(screen.queryByText("Row 0")).not.toBeInTheDocument());
+  });
+
+  it("releases indexing rows whose disclosures start open", async () => {
+    render(
+      <TranscriptWindow
+        items={rows(1000)}
+        itemKey={(item) => item.id}
+        restoreKey="open-details-find"
+        renderItem={(item) => (
+          <details open>
+            <summary>{item.label}</summary>
+            <p>Visible detail {item.id}.</p>
+          </details>
+        )}
+      />,
+    );
+    fireEvent.keyDown(window, { key: "f", ctrlKey: true });
+    const input = await screen.findByRole("textbox", { name: "Find in thread" });
+    fireEvent.change(input, { target: { value: "detail row-500." } });
+    expect(await screen.findByText("1 of 1", {}, { timeout: 5000 })).toBeInTheDocument();
+    expect(mountedCount()).toBeLessThan(80);
   });
 
   it("leaves Cmd-F to the code editor and terminal", () => {

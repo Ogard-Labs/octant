@@ -6,6 +6,7 @@ import { OctantInput } from "../ui/base/OctantInput";
 export interface TranscriptFindBarProps {
   readonly query: string;
   readonly count: number;
+  readonly pending?: boolean;
   /** Zero-based position of the current match. */
   readonly current: number;
   readonly onQueryChange: (query: string) => void;
@@ -19,9 +20,11 @@ export const TranscriptFindBar = forwardRef<HTMLInputElement, TranscriptFindBarP
     const status =
       props.query === ""
         ? ""
-        : props.count === 0
-          ? "No matches"
-          : `${props.current + 1} of ${props.count}`;
+        : props.pending === true
+          ? "Searching…"
+          : props.count === 0
+            ? "No matches"
+            : `${props.current + 1} of ${props.count}`;
     function onKeyDown(event: KeyboardEvent<HTMLInputElement>) {
       if (event.key === "Enter") {
         event.preventDefault();
@@ -48,7 +51,7 @@ export const TranscriptFindBar = forwardRef<HTMLInputElement, TranscriptFindBarP
         </span>
         <OctantButton
           aria-label="Previous match"
-          disabled={props.count === 0}
+          disabled={props.pending === true || props.count === 0}
           onClick={() => props.onStep(-1)}
           size="icon-sm"
           type="button"
@@ -58,7 +61,7 @@ export const TranscriptFindBar = forwardRef<HTMLInputElement, TranscriptFindBarP
         </OctantButton>
         <OctantButton
           aria-label="Next match"
-          disabled={props.count === 0}
+          disabled={props.pending === true || props.count === 0}
           onClick={() => props.onStep(1)}
           size="icon-sm"
           type="button"
