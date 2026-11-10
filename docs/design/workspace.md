@@ -744,8 +744,10 @@ admits only the [Agents dock](#subagents) and has no bottom panel. **Vitals**
 (Work and Code) shows the load on the host the dock is connected to, local or
 remote, from the host-resources read: a CPU history line with the core count,
 memory used and total, network in and out, disk throughput, disk space, GPU
-utilisation, and **Energy**. Each reading is drawn only when that host reports
-it; a host with no battery says "No battery", and a figure the host cannot read
+utilisation, and **Energy**. The readings are plain rows on the dock's own
+surface with a hairline between them, never boxes on a fill of their own, and a
+history line appears once it has two samples to join. Each reading is drawn
+only when that host reports it; a host with no battery says "No battery", and a figure the host cannot read
 is left out rather than drawn as zero. The tool keeps the last five minutes of
 samples in the window (nothing is stored), reads about every five seconds only
 while it is mounted and the window is visible, never overlaps reads, abandons one
