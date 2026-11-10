@@ -26,7 +26,7 @@ who prefers grey chooses Mono (Settings › Appearance › Style):
 
 - One active thread, board, Project overview, or Project-level list is the
   primary work surface.
-- The main title band is a Project/mode breadcrumb plus window-local thread
+- The main title band is a Project/thread breadcrumb plus window-local thread
   navigation. One unpinned conversation is the current preview; pinned
   conversations remain within reach. Selecting one reopens it through the
   authoritative shell command rather than keeping a hidden transcript alive.
@@ -1370,7 +1370,7 @@ generator images, Plugins blocks, and the Activity feed a pulse line.
 (modes, Home when no rail stands beside it, Search, New thread, Hide, Back and
 Forward) cannot fit one row, which is the 220-236px sidebar of a 681-960px
 browser window, the actions wrap to a second row under the tray instead of
-sliding beneath it. The first row keeps its place in the title band.
+sliding beneath it. The tray's row stays first at the top of the sidebar.
 
 **Usage rings.** Above Settings, at the foot of either rail, each provider
 that reports a plan window with a figure gets a ring in its identity colour
@@ -1572,7 +1572,7 @@ The shell is a CSS grid: sidebar, central workspace, optional right dock, and a
 full-width status bar. A horizontal bottom panel is an optional sibling below
 the central workspace. The central pane remains the thread, board, Project
 overview, or Project-level list. An unsplit conversation uses the title band
-for the Project/mode breadcrumb and compact thread strip, so the transcript
+for the Project/thread breadcrumb and compact thread strip, so the transcript
 does not repeat a second title block. Split panes and utility surfaces retain
 their own pane headers and lifecycle controls. Capability-gated toggles for
 Open in, bottom panel, and right dock remain window chrome. Above the right
@@ -1646,9 +1646,10 @@ same thing, and the notice landed on top of it.
 The app has three server-enforced modes—Chat, Work, and Code—shown as two:
 **Work**, which lists Chat and Work threads together and whose new-thread
 composer opens with a Chat / In a folder switch in its context tray, and
-**Code**. Work reopens on the kind last used. Mode switching is two compact icon buttons in the sidebar header when Work
+**Code**. Work reopens on the kind last used. Mode switching is two compact icon buttons at the top of the sidebar, never in the title band, when Work
 and Code are both on: a conversation mark for Work and a code mark for Code.
-A tooltip names the mode on hover and keyboard focus. The active mode carries
+A tooltip names the mode on hover and keyboard focus; the label is clipped
+from view and stays the button's accessible name. The active mode carries
 `aria-current="page"` and a fill plus hairline, not colour alone. With one
 mode enabled the header is a single label and no control. Settings still
 offers a dropdown that names the current mode; a host that stored that choice
