@@ -113,7 +113,6 @@ describe("octantSettingsRegistry", () => {
       "journal-growth",
       "host-automatic-startup",
       "host-memory-limits",
-      "host-backup",
       "host-lifecycle",
     ]);
     expect(section("host")?.keywords).toMatch(/lifecycle/);
@@ -159,6 +158,7 @@ describe("octantSettingsRegistry", () => {
     expect(section("data")?.scope).toBe("host");
     expect(ids("data")).toEqual([
       "data-map",
+      "host-backup",
       "browser-accounts",
       "browser-profiles",
       "browser-upload-permissions",
