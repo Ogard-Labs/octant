@@ -722,9 +722,14 @@ function ProviderRow(props: ProviderRowProps) {
   const readiness = props.updating || props.probing ? "checking" : props.observed?.readiness;
   const [connectionDetailsOpen, setConnectionDetailsOpen] = useState(() => readiness !== "ready");
   // A row that comes to need attention opens; collapsing it afterwards sticks.
+  const { needsAttention, onRowOpened } = props;
   useEffect(() => {
-    if (props.needsAttention) setDetailsOpen(true);
-  }, [props.needsAttention]);
+    if (!needsAttention) return;
+    setDetailsOpen(true);
+    // An opening the page makes counts as the open row too, or a row that
+    // comes to need attention would stand open beside the one a person opened.
+    onRowOpened(props.instance.id);
+  }, [needsAttention, onRowOpened, props.instance.id]);
   // One row is open at a time. Several open rows, each with its models and
   // actions, were most of what made this page many screens tall.
   const { openedRowId } = props;

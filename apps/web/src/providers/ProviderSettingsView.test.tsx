@@ -3514,6 +3514,43 @@ describe("ProviderSettingsView", () => {
     expect(first).toHaveAttribute("aria-expanded", "false");
   });
 
+  it("closes the open row when another comes to need attention and opens by itself", async () => {
+    const user = userEvent.setup();
+    const second = "70000000-0000-4000-8000-0000000000a3" as ProviderInstance["id"];
+    const instances = [
+      provider({ displayName: "First Codex" }),
+      provider({ id: second, displayName: "Second Codex" }),
+    ];
+    const props = fixture({ instance: instances[0]! });
+    const { rerender } = renderProviderSettings(
+      <ProviderSettingsView {...props} instances={instances} />,
+    );
+    const first = screen.getByRole("button", { name: "Details for First Codex" });
+    await user.click(first);
+    expect(first).toHaveAttribute("aria-expanded", "true");
+
+    rerender(
+      <ProviderSettingsView
+        {...props}
+        instances={instances}
+        observedByInstance={
+          new Map([
+            [id, observation({ readiness: "ready" })],
+            [second, { ...observation({ readiness: "unauthenticated" }), instanceId: second }],
+          ])
+        }
+      />,
+    );
+
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "Details for Second Codex" })).toHaveAttribute(
+        "aria-expanded",
+        "true",
+      ),
+    );
+    expect(first).toHaveAttribute("aria-expanded", "false");
+  });
+
   it("offers the binary the scan found when the saved one is gone, and has the host check it on click", async () => {
     const user = userEvent.setup();
     const onUseScannedBinary = vi.fn(
