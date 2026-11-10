@@ -1,5 +1,11 @@
 import type { ConversationInputPolicy } from "@octant/contracts/conversation-inputs";
-import type { SideChatDraftReturnReference, CodeReviewFindingReference } from "@octant/contracts";
+import type {
+  CodeReviewFindingReference,
+  CoordinatorOpenWorkerLimit,
+  CoordinatorStartingByProject,
+  CoordinatorStartingChoice,
+  SideChatDraftReturnReference,
+} from "@octant/contracts";
 import type { ExtensionSelection } from "@octant/contracts/extensions";
 import type { ProjectId } from "@octant/contracts/projects";
 import type { AutoReviewer, ShieldModelChoice } from "@octant/contracts/shield";
@@ -112,6 +118,9 @@ import {
   pinCodeThread,
   renameCodeThread,
   reopenCodeThread,
+  setCodeThreadCoordinator,
+  setCodeThreadCoordinatorWake,
+  setCodeThreadMessageWake,
   snoozeCodeThread,
   wakeCodeThread,
 } from "./codeThreadCommands";
@@ -186,6 +195,14 @@ export interface CodeThreadNavigationItem {
    * started on its own.
    */
   readonly lineageParentThreadId?: string;
+  /** Present on a coordinator thread (docs/design/coordinator-threads.md). */
+  readonly coordinator?: true;
+  /** The coordinator that started this worker; the host records it at creation. */
+  readonly coordinatorThreadId?: CodeThreadId;
+  /** The thread's Wake when a message arrives switch is on. */
+  readonly messageWake?: true;
+  /** A person turned off this worker's Wake for coordinator. */
+  readonly coordinatorWakeOff?: true;
 }
 
 /**
@@ -2042,6 +2059,12 @@ export function useCodeController(options: CodeControllerOptions) {
             ...(thread.forkedFrom === undefined
               ? {}
               : { lineageParentThreadId: String(thread.forkedFrom.threadId) }),
+            ...(thread.coordinator === true ? { coordinator: true as const } : {}),
+            ...(thread.coordinatorThreadId === undefined
+              ? {}
+              : { coordinatorThreadId: thread.coordinatorThreadId }),
+            ...(thread.messageWake === true ? { messageWake: true as const } : {}),
+            ...(thread.coordinatorWakeOff === true ? { coordinatorWakeOff: true as const } : {}),
             updatedAt: thread.updatedAt,
           };
         })
@@ -2490,6 +2513,24 @@ export function useCodeController(options: CodeControllerOptions) {
       restCommand(threadId, (thread) => moveCodeThread(thread, projectId)),
     [restCommand],
   );
+  // The coordinator role and both wake switches are a person's choice from a
+  // local window; the host refuses the rest (a worker, a fifth coordinator)
+  // and the refusal comes back in its words, like a rest command's.
+  const setThreadCoordinator = useCallback(
+    (threadId: CodeThreadId, coordinator: boolean) =>
+      restCommand(threadId, (thread) => setCodeThreadCoordinator(thread, coordinator)),
+    [restCommand],
+  );
+  const setThreadMessageWake = useCallback(
+    (threadId: CodeThreadId, wake: boolean) =>
+      restCommand(threadId, (thread) => setCodeThreadMessageWake(thread, wake)),
+    [restCommand],
+  );
+  const setThreadCoordinatorWake = useCallback(
+    (threadId: CodeThreadId, wake: boolean) =>
+      restCommand(threadId, (thread) => setCodeThreadCoordinatorWake(thread, wake)),
+    [restCommand],
+  );
 
   /**
    * Hand a finished thread one more turn without opening it. The host starts
@@ -2597,6 +2638,9 @@ export function useCodeController(options: CodeControllerOptions) {
       readonly defaultAutoApprove?: boolean;
       readonly autoReviewer?: AutoReviewer;
       readonly shieldModel?: ShieldModelChoice | null;
+      readonly coordinatorStarting?: CoordinatorStartingChoice;
+      readonly coordinatorStartingByProject?: CoordinatorStartingByProject;
+      readonly coordinatorOpenWorkerLimit?: CoordinatorOpenWorkerLimit;
     }): Promise<boolean> => {
       if (bootstrap === undefined) return false;
       const result = await execute({
@@ -3192,6 +3236,9 @@ export function useCodeController(options: CodeControllerOptions) {
     markDraftStagedDropped: composerDraft.markStagedDropped,
     purgeThreadDraft: composerDraft.purge,
     pinThread,
+    setThreadCoordinator,
+    setThreadCoordinatorWake,
+    setThreadMessageWake,
     rebindThreadCheckout,
     renameThread,
     providerRequests,

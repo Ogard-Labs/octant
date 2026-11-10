@@ -172,3 +172,45 @@ export function nestFollowUpThreads(
   const orphaned = threads.filter((thread) => !reachable.has(thread.threadId));
   return { topLevel: [...topLevel, ...orphaned], expand };
 }
+
+/** One coordinator and the open workers the tree folds under it. */
+export interface CoordinatorThreadGroup {
+  readonly coordinator: ChatThreadNavigationItem;
+  readonly workers: ReadonlyArray<ChatThreadNavigationItem>;
+}
+
+/**
+ * Splits one Project's listed threads into its coordinators, each with its
+ * workers, and the rest (docs/design/workspace.md#coordinators). A worker is
+ * listed only under its coordinator; a worker whose coordinator is not listed
+ * here (stopped coordinating, archived, put away, or filtered out) stays an
+ * ordinary row, so no thread disappears because its coordinator did.
+ */
+export function groupCoordinatorThreads(threads: ReadonlyArray<ChatThreadNavigationItem>): {
+  readonly coordinators: ReadonlyArray<CoordinatorThreadGroup>;
+  readonly others: ReadonlyArray<ChatThreadNavigationItem>;
+} {
+  const coordinatorRows = threads.filter((thread) => thread.coordinator === true);
+  if (coordinatorRows.length === 0) return { coordinators: [], others: threads };
+  const coordinatorIds = new Set(coordinatorRows.map((thread) => thread.threadId));
+  const workersOf = new Map<string, ChatThreadNavigationItem[]>();
+  const others: ChatThreadNavigationItem[] = [];
+  for (const thread of threads) {
+    if (thread.coordinator === true) continue;
+    const coordinatorId = thread.coordinatorThreadId;
+    if (coordinatorId === undefined || !coordinatorIds.has(coordinatorId)) {
+      others.push(thread);
+      continue;
+    }
+    const workers = workersOf.get(coordinatorId);
+    if (workers === undefined) workersOf.set(coordinatorId, [thread]);
+    else workers.push(thread);
+  }
+  return {
+    coordinators: coordinatorRows.map((coordinator) => ({
+      coordinator,
+      workers: workersOf.get(coordinator.threadId) ?? [],
+    })),
+    others,
+  };
+}

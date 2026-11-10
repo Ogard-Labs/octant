@@ -20,8 +20,9 @@ read-only gate on a coordinator's own turns, the worker roster, `start` with
 the start setting, its bounds and marks, Propose for approval through the
 planner's proposal path, the **Wake when a message arrives** switch with its
 wake turns, a worker waking for its own coordinator, and state notices. The
-workspace surfaces are in [Workspace: Coordinators](workspace.md#coordinators),
-which says which of them are built. Not built: a proposal card inside the
+workspace surfaces are built as [Workspace: Coordinators](workspace.md#coordinators)
+records: the row-menu items, New coordinator, the sidebar section, board
+cards, and the settings. Not built: a proposal card inside the
 coordinator thread (a person approves from the Project overview), workers'
 requests listed in the coordinator's composer, and Needs you rows naming the
 coordinator. None of it has run against a real provider yet; whether each

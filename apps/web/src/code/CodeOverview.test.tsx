@@ -768,6 +768,9 @@ function controller(): CodeController {
     mergeForkContext: vi.fn(async () => undefined),
     renameThread: vi.fn(async () => true),
     pinThread: vi.fn(async () => true),
+    setThreadCoordinator: vi.fn(async () => ({ status: "ok" as const })),
+    setThreadCoordinatorWake: vi.fn(async () => ({ status: "ok" as const })),
+    setThreadMessageWake: vi.fn(async () => ({ status: "ok" as const })),
     rebindThreadCheckout: vi.fn(async () => undefined),
 
     turnActivity: new Map(),

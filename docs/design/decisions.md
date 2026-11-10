@@ -847,7 +847,7 @@ A person may make a Code thread a coordinator: a long-lived thread that starts w
 - A worker's level is at most the coordinator's, and never Full access from a marked coordinator. A marked coordinator's worker starts marked (label `coordinator-start`); a mark that cannot be journaled refuses the start.
 - At most six open workers per coordinator by default (person-set, 1–16) and twelve starts per hour; ordinary turn admission, capacity and spend ceilings apply.
 - A worker wakes for its own coordinator's messages unless a person turns that off; making a coordinator turns its own wake switch on. The host sends a coordinator closed-set state notices (turn ended, waiting for a person, Done) that do not mark it. Wake bounds and the three-round hop count apply.
-- A worker's approvals and questions are listed in its coordinator's composer; only the person answers them, never the coordinator agent. Not built yet: the composer listing, Needs you rows naming the coordinator, and a proposal card in the coordinator thread.
+- A worker's approvals and questions are listed in its coordinator's composer; only the person answers them, never the coordinator agent. Not built yet: the composer listing, Needs you rows naming the coordinator, a proposal card in the coordinator thread, and a board filter by coordinator. The sidebar section, row-menu items, New coordinator, and both settings are built ([Workspace: Coordinators](workspace.md#coordinators)).
 - Wake, start and hop counts are held in host memory; a restart starts them again.
 - Work coordinators wait for a rule that lets a Work turn carry a message.
 
