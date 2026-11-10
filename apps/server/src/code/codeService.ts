@@ -4,6 +4,7 @@ import type { ConversationInputPolicy } from "@octant/contracts/conversation-inp
 import {
   decideCoordinatorRole,
   projectExtraFolderRoots,
+  readsAsCoordinator,
   unsupportedModelOptionValues,
 } from "@octant/domain";
 import {
@@ -415,6 +416,8 @@ export interface CodePersistencePort {
   /** The modes whose journaled thread answers to this id. */
   readonly readThreadIdModes: (threadId: string) => ReadonlyArray<OctantMode>;
   readonly readCodeThreads: () => ReadonlyArray<CodeThread>;
+  /** The thread a Code Project designated as its planner; absent where the host keeps none. */
+  readonly readCodePlannerThreadId?: (projectId: ProjectId) => CodeThreadId | undefined;
   readonly readCodeThreadActivity: () => ReadonlyArray<CodeThreadActivity>;
   readonly readCodeRuntimeWorks: (
     threadId: CodeThreadId,
@@ -1073,6 +1076,7 @@ export class CodeService {
       threads,
       activity: this.#visibleActivity(threads),
       runtime: this.#visibleRuntime(threads, pullRequests),
+      ...this.#visiblePlanners(threads),
     };
   }
 
@@ -1212,6 +1216,7 @@ export class CodeService {
         .map((checkout) => recoveredCheckouts.get(String(checkout.id)) ?? checkout),
       activity: this.#visibleActivity(threads),
       runtime: this.#visibleRuntime(threads, pullRequests),
+      ...this.#visiblePlanners(threads),
     };
   }
 
@@ -1242,6 +1247,31 @@ export class CodeService {
    * cheap. The chip appears only for a thread's own managed worktree. A running
    * turn also carries its start time and latest step, read from memory.
    */
+  /**
+   * The visible threads that are their Project's designated planner, which the
+   * renderer shows as coordinators. Drawn from the authority-filtered list, so
+   * a window learns nothing about a Project it cannot browse.
+   */
+  #visiblePlanners(threads: ReadonlyArray<CodeThread>): {
+    readonly plannerThreadIds?: ReadonlyArray<CodeThreadId>;
+  } {
+    const read = this.#persistence.readCodePlannerThreadId;
+    if (read === undefined) return {};
+    const plannerThreadIds = threads
+      .filter((thread) => {
+        const planner = read(thread.projectId);
+        return planner !== undefined && String(planner) === String(thread.id);
+      })
+      .map((thread) => thread.id);
+    return { plannerThreadIds };
+  }
+
+  /** Whether a thread is its Project's designated planner, which reads as a coordinator. */
+  #isDesignatedPlanner(thread: CodeThread): boolean {
+    const planner = this.#persistence.readCodePlannerThreadId?.(thread.projectId);
+    return planner !== undefined && String(planner) === String(thread.id);
+  }
+
   #visibleRuntime(
     threads: ReadonlyArray<CodeThread>,
     pullRequests: ThreadBoardPullRequestSnapshot | undefined,
@@ -3819,14 +3849,20 @@ export class CodeService {
       });
     }
     const project = this.#persistence.readProject?.(current.projectId);
-    const coordinatorsInProject = this.#persistence
-      .readCodeThreads()
-      .filter(
-        (thread) =>
-          String(thread.projectId) === String(current.projectId) &&
-          thread.coordinator === true &&
-          thread.lifecycle !== "archived",
-      ).length;
+    // The designated planner reads as a coordinator, so it counts toward the
+    // Project's limit. The thread itself is left out: the count matters only
+    // when it is not yet a coordinator, and a planner made one adds nothing.
+    const coordinatorsInProject = this.#persistence.readCodeThreads().filter(
+      (thread) =>
+        String(thread.projectId) === String(current.projectId) &&
+        String(thread.id) !== String(current.id) &&
+        readsAsCoordinator({
+          lifecycle: thread.lifecycle,
+          coordinator: thread.coordinator === true,
+          startedByCoordinator: thread.coordinatorThreadId !== undefined,
+          designatedPlanner: this.#isDesignatedPlanner(thread),
+        }),
+    ).length;
     const decision = decideCoordinatorRole({
       thread: {
         lifecycle: current.lifecycle,

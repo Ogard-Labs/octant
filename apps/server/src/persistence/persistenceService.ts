@@ -111,6 +111,7 @@ import {
   readCodeCheckout,
   readCodeCheckoutAggregateVersion,
   readCodeCheckouts,
+  readCodePlannerDesignation,
   readCodeFileReference,
   readCodeFileReferences,
   readCodeRuntimeWork,
@@ -246,6 +247,8 @@ export interface PersistenceService {
   /** The modes whose journaled thread answers to this id; see `readThreadIdModes`. */
   readonly readThreadIdModes: (threadId: string) => ReadonlyArray<OctantMode>;
   readonly readCodeThreads: () => ReadonlyArray<CodeThread>;
+  /** The thread a Code Project designated as its planner, if any. */
+  readonly readCodePlannerThreadId: (projectId: ProjectId) => CodeThreadId | undefined;
   readonly readCodeThreadActivity: () => ReadonlyArray<CodeThreadActivity>;
   readonly readCodeCheckout: (checkoutId: CodeCheckoutId) => CodeCheckoutIdentity | undefined;
   readonly readCodeCheckoutAggregateVersion: (checkoutId: CodeCheckoutId) => number;
@@ -530,6 +533,10 @@ async function acquirePersistence(options: PersistenceLiveOptions): Promise<Pers
       readCodeThread: (threadId) => readCodeThread(connection, threadId),
       readThreadIdModes: (threadId) => readThreadIdModes(connection, threadId),
       readCodeThreads: () => readCodeThreads(connection),
+      readCodePlannerThreadId: (projectId) => {
+        const designation = readCodePlannerDesignation(connection, projectId);
+        return designation?.kind === "designated" ? designation.plannerThreadId : undefined;
+      },
       readCodeThreadActivity: () => readCodeThreadActivity(connection),
       readCodeCheckout: (checkoutId) => readCodeCheckout(connection, checkoutId),
       readCodeCheckoutAggregateVersion: (checkoutId) =>

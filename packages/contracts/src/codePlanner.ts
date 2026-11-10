@@ -140,6 +140,10 @@ export const CodePlannerDesignationRefusalReason = Schema.Literal(
   "thread-not-found",
   "thread-in-another-project",
   "thread-archived",
+  /** A worker thread follows its coordinator and cannot read as one. */
+  "thread-is-worker",
+  /** The planner reads as a coordinator, and the Project already has its four. */
+  "coordinator-limit-reached",
   "planner-already-designated",
   "no-planner-designated",
   "designation-changed",

@@ -6,6 +6,7 @@ import {
   decideCoordinatorRole,
   decideCoordinatorStart,
   decideMessageWake,
+  readsAsCoordinator,
 } from "./coordinatorPolicy";
 import { threadsToolOperations } from "./siblingThreadPolicy";
 
@@ -107,6 +108,27 @@ describe("starting workers", () => {
     expect(decideCoordinatorStart({ ...start, starting: "propose-for-approval" }).status).toBe(
       "propose",
     );
+  });
+
+  it("always turns a designated planner's start into a proposal, even under Start without asking", () => {
+    const planner = { ...coordinator, coordinator: false, designatedPlanner: true } as const;
+    expect(decideCoordinatorStart({ ...start, caller: planner })).toEqual({
+      status: "propose",
+      level: "auto-accept-edits",
+    });
+  });
+
+  it("reads a designated planner as a coordinator, but never a worker or an archived thread", () => {
+    const facts = {
+      lifecycle: "active",
+      coordinator: false,
+      startedByCoordinator: false,
+      designatedPlanner: true,
+    } as const;
+    expect(readsAsCoordinator(facts)).toBe(true);
+    expect(readsAsCoordinator({ ...facts, designatedPlanner: false })).toBe(false);
+    expect(readsAsCoordinator({ ...facts, startedByCoordinator: true })).toBe(false);
+    expect(readsAsCoordinator({ ...facts, lifecycle: "archived" })).toBe(false);
   });
 
   it("lets a Project's own choice win over Settings", () => {

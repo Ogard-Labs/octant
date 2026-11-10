@@ -55,6 +55,7 @@ interface Harness {
   readonly executed: Array<{ readonly command: CodeCommand; readonly context: unknown }>;
   readonly hostTurns: Array<{ readonly threadId: string; readonly prompt: string }>;
   readonly proposals: Array<{ readonly coordinator: string; readonly title: string }>;
+  readonly planners: Set<string>;
   settings: CodeSettings | undefined;
   clock: number;
 }
@@ -68,6 +69,7 @@ function harness(): Harness {
   const executed: Harness["executed"] = [];
   const hostTurns: Harness["hostTurns"] = [];
   const proposals: Harness["proposals"] = [];
+  const planners = new Set<string>();
   let turnCount = 0;
   const self: { settings: CodeSettings | undefined; clock: number } = {
     settings: undefined,
@@ -78,6 +80,7 @@ function harness(): Harness {
     readThreads: () => [...threads.values()],
     readProject: () => ({ type: "code", lifecycle: "active" }) as unknown as Project,
     readSettings: () => self.settings,
+    isDesignatedPlanner: (id) => planners.has(id),
     isMarked: (id) => marked.has(id),
     threadState: (id) => states.get(id) ?? "idle",
     latestTurnId: (id) => hostTurns.findLast((turn) => turn.threadId === id) && `turn-${id}`,
@@ -123,6 +126,7 @@ function harness(): Harness {
     executed,
     hostTurns,
     proposals,
+    planners,
   });
 }
 
@@ -240,6 +244,46 @@ describe("starting workers", () => {
     expect(await h.service.start(startCall({}))).toMatchObject({
       result: { reason: "limit-reached" },
     });
+  });
+});
+
+describe("the designated planner", () => {
+  const PLANNER = OTHER;
+
+  function plannerHarness(): Harness {
+    const h = harness();
+    h.threads.set(PLANNER, codeThread(PLANNER));
+    h.planners.add(PLANNER);
+    return h;
+  }
+
+  it("reads as a coordinator, so its turns take the coordinator's read-only gate and roster", () => {
+    const h = plannerHarness();
+    expect(h.service.isCoordinator(PLANNER)).toBe(true);
+    expect(h.service.levelOf(PLANNER)).toBe("auto-accept-edits");
+    expect(h.service.contextFor(PLANNER)).toContain("every start becomes a proposal");
+    h.planners.delete(PLANNER);
+    expect(h.service.isCoordinator(PLANNER)).toBe(false);
+    expect(h.service.contextFor(PLANNER)).toBeUndefined();
+  });
+
+  it("proposes every start, even under Start without asking, and creates nothing", async () => {
+    const h = plannerHarness();
+    h.settings = { coordinatorStarting: "start-without-asking" } as unknown as CodeSettings;
+    const answer = await h.service.start({ ...startCall({}), callerThreadId: PLANNER });
+    expect(answer).toMatchObject({ result: { status: "proposed" }, isError: false });
+    expect(h.proposals).toEqual([{ coordinator: PLANNER, title: "Fix the flaky test" }]);
+    expect(h.executed).toEqual([]);
+  });
+
+  it("never makes a worker a coordinator, even one designated as planner", async () => {
+    const h = plannerHarness();
+    h.threads.set(PLANNER, codeThread(PLANNER, { coordinatorThreadId: COORDINATOR }));
+    expect(h.service.isCoordinator(PLANNER)).toBe(false);
+    expect(await h.service.start({ ...startCall({}), callerThreadId: PLANNER })).toMatchObject({
+      result: { reason: "unauthorized" },
+    });
+    expect(h.proposals).toEqual([]);
   });
 });
 
