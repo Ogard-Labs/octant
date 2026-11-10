@@ -5338,7 +5338,11 @@ modelId }`, and the model picker is provider-first. Each Claude instance is
   installed runtimes and auto-register them. On first run, a detected Claude
   Code or Codex CLI instance is created enabled; every other detected runtime
   is created disabled. Discovery never installs or updates runtimes, never
-  toggles an existing instance, and never treats enablement as readiness.
+  toggles an existing instance, and never treats enablement as readiness. A
+  runtime created from a scan saves the launcher the scan examined, not the
+  versioned file it resolves to, and a scan points an existing runtime whose
+  saved binary no longer exists at the launcher it found for the same driver,
+  changing nothing else about it.
   Providers settings may read a runtime's newest published version (one plain
   npm `dist-tags` request, cached a day, off with the Marketplace fetches
   switch) to say "Update available"; only the person's click runs the
