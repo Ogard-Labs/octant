@@ -2675,7 +2675,8 @@ function coordinatorProposalsFor(
   project: ProjectSummary | undefined,
 ): React.ReactNode {
   if (tab.kind !== "code-overview" || project?.type !== "code") return undefined;
-  const coordinator = codeController.navigation.find(
+  // A partial controller (tests, an early render) may hold no navigation yet.
+  const coordinator = codeController.navigation?.find(
     (item) => String(item.threadId) === String(tab.threadId) && item.coordinator === true,
   );
   if (coordinator === undefined) return undefined;
