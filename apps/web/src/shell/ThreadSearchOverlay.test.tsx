@@ -48,9 +48,12 @@ describe("ThreadSearchOverlay", () => {
     ).toBeVisible();
     expect(screen.getByRole("group", { name: "Threads" })).toBeVisible();
     expect(screen.getByText("Release checklist")).toBeVisible();
+    // Said as the shared dialog's width, which a width of its own loses to:
+    // the overlay opened at the 420px default.
     expect(componentStyles).toMatch(
-      /\.thread-search\s*\{[^}]*width:\s*min\(520px, calc\(100vw - 32px\)\);[^}]*max-height:/s,
+      /\.thread-search\s*\{[^}]*--octant-dialog-width:\s*520px;[^}]*max-height:/s,
     );
+    expect(componentStyles).not.toMatch(/\.thread-search\s*\{[^}]*\bwidth:\s*min\(/s);
   });
 
   it("offers existing shell actions as compact quick actions", async () => {
