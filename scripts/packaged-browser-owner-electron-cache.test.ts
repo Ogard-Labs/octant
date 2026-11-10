@@ -2,8 +2,11 @@ import { createHash } from "node:crypto";
 import { lstat, mkdtemp, readFile, rm, symlink } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
+  officialAsset,
+  requestOfficialQaApi,
+  readRelease,
   requireOfficialElectronRedirect,
   requirePinnedElectronRelease,
   writeVerifiedElectronFile,
@@ -39,7 +42,77 @@ const pinnedRelease = () => ({
 const bytes = new TextEncoder().encode("owned synthetic archive bytes");
 const proof = { bytes: bytes.length, sha256: createHash("sha256").update(bytes).digest("hex") };
 
+afterEach(() => {
+  vi.unstubAllGlobals();
+  vi.unstubAllEnvs();
+});
+
 describe("the owned Browser QA Electron cache", () => {
+  it("refuses non-release API destinations before sending the workflow token", async () => {
+    vi.stubEnv("OCTANT_QA_GITHUB_TOKEN", "synthetic-workflow-token");
+    const fetcher = vi.fn();
+    vi.stubGlobal("fetch", fetcher);
+    for (const url of [
+      "https://untrusted.invalid/releases",
+      "https://api.github.com/user",
+      "https://api.github.com/repos/untrusted/repo/releases/assets/1",
+      "https://api.github.com/repos/electron/electron/releases/assets/1?redirect=elsewhere",
+    ]) {
+      await expect(
+        requestOfficialQaApi(url, "application/json", new AbortController().signal),
+      ).rejects.toThrow("official release API");
+    }
+    expect(fetcher).not.toHaveBeenCalled();
+  });
+
+  it("retries transient metadata failures with the workflow token on the fixed API only", async () => {
+    vi.stubEnv("OCTANT_QA_GITHUB_TOKEN", "synthetic-workflow-token");
+    const fetcher = vi
+      .fn()
+      .mockResolvedValueOnce(new Response("temporary", { status: 503 }))
+      .mockResolvedValueOnce(Response.json(pinnedRelease()));
+    vi.stubGlobal("fetch", fetcher);
+    expect(await readRelease(new AbortController().signal)).toEqual(pinnedRelease());
+    expect(fetcher).toHaveBeenCalledTimes(2);
+    for (const [url, options] of fetcher.mock.calls) {
+      expect(url).toBe("https://api.github.com/repos/electron/electron/releases/tags/v43.7.11");
+      expect(options).toMatchObject({
+        redirect: "manual",
+        headers: { authorization: "Bearer synthetic-workflow-token" },
+      });
+    }
+  });
+
+  it("never forwards the workflow token to redirected release storage", async () => {
+    vi.stubEnv("OCTANT_QA_GITHUB_TOKEN", "synthetic-workflow-token");
+    const location =
+      "https://release-assets.githubusercontent.com/github-production-release-asset/9384267/owned";
+    const fetcher = vi
+      .fn()
+      .mockResolvedValueOnce(new Response(null, { status: 302, headers: { location } }))
+      .mockResolvedValueOnce(new Response("owned"));
+    vi.stubGlobal("fetch", fetcher);
+    const response = await officialAsset(638764792, new AbortController().signal);
+    expect(await response.text()).toBe("owned");
+    expect(fetcher.mock.calls[0]?.[1].headers.authorization).toBe(
+      "Bearer synthetic-workflow-token",
+    );
+    expect(fetcher.mock.calls[1]?.[1].headers).toEqual({ accept: "application/octet-stream" });
+  });
+
+  it("bounds retries and reports the HTTP status without response contents", async () => {
+    const fetcher = vi
+      .fn()
+      .mockImplementation(() =>
+        Promise.resolve(new Response("private diagnostic", { status: 503 })),
+      );
+    vi.stubGlobal("fetch", fetcher);
+    await expect(readRelease(new AbortController().signal)).rejects.toThrow(
+      "unavailable (HTTP 503)",
+    );
+    expect(fetcher).toHaveBeenCalledTimes(3);
+  });
+
   it("requires the exact stable official release, assets and checksums", () => {
     expect(() => requirePinnedElectronRelease(pinnedRelease())).not.toThrow();
     for (const invalid of [

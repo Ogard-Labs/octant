@@ -274,6 +274,12 @@ entries are excluded.
 
 ## Process topology
 
+An unexpected shell renderer exit retires its authority and opens a replacement,
+with at most two automatic recoveries per minute. The desktop retains its
+lifetime across retirement and replacement preparation, so last-window closure
+cannot race recovery into quitting. Explicit Quit and intentional window closure
+remain authoritative and do not trigger recovery.
+
 The desktop's single native Browser owner may explicitly retain host-owned
 execution pages after its last renderer closes, using the same native profile
 store. These pages carry native execution leases rather than renderer window
@@ -447,7 +453,11 @@ aborted owner whose parent has not collected it yet), or belongs to a process
 with a different start time (a recycled pid, including one now held by another
 user). If the process cannot be inspected, the owner counts as live and the
 start refuses. An ownership failure names the code, the artifact path, and the
-next step.
+next step. The stale receipt is atomically quarantined beside its own data
+files; socket and secret quarantine stay on the runtime filesystem. A separate
+data mount must not turn verified stale-owner recovery into a cross-device
+rename failure. Receipt identity checks and the receipt-first claim still
+precede exposing the stale socket pathname.
 
 **Memory pressure.** The server samples its own resident size and the
 system's memory-pressure signal every 15 seconds (every 5 while pressure

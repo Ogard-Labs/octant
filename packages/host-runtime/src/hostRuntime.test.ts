@@ -19,11 +19,13 @@ import { createServer, type Server } from "node:net";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 const openMock = vi.hoisted(() => vi.fn());
+const renameMock = vi.hoisted(() => vi.fn());
 
 vi.mock("node:fs/promises", async (importOriginal) => {
   const actual = await importOriginal<typeof import("node:fs/promises")>();
   openMock.mockImplementation(actual.open);
-  return { ...actual, open: openMock };
+  renameMock.mockImplementation(actual.rename);
+  return { ...actual, open: openMock, rename: renameMock };
 });
 
 import {
@@ -52,6 +54,9 @@ const temporaryRoots: string[] = [];
 const filesystemTestPlatform: NodeJS.Platform = process.platform === "darwin" ? "darwin" : "linux";
 
 afterEach(async () => {
+  renameMock.mockImplementation(
+    (await vi.importActual<typeof import("node:fs/promises")>("node:fs/promises")).rename,
+  );
   await Promise.all(owners.splice(0).map((owner) => owner.release()));
   await Promise.all(
     temporaryRoots.splice(0).map((root) => rm(root, { recursive: true, force: true })),
@@ -893,6 +898,78 @@ describe("single owner control socket", () => {
     });
     expect(replacement.kind).toBe("owner");
     if (replacement.kind === "owner") owners.push(replacement);
+  });
+
+  it("recovers stale authority when data and runtime directories are on different filesystems", async () => {
+    const runtimeBase = await realpath(tmpdir());
+    const root = await mkdtemp(join(runtimeBase, "octant-stale-owner-"));
+    temporaryRoots.push(root);
+    const paths = resolveHostRuntimePaths({
+      env: { OCTANT_DATA_DIR: join(root, "data") },
+      platform: filesystemTestPlatform,
+      home: join(root, "home"),
+      temporaryDirectory: runtimeBase,
+      uid: process.getuid?.() ?? 1000,
+    });
+    await prepareHostRuntimePaths(paths);
+    const stalePid = await leaveStaleSocket(paths.socketPath);
+    const secret = "stale-control-secret";
+    const staleReceipt = {
+      schemaVersion: 1 as const,
+      hostId: "11111111-1111-4111-8111-111111111111",
+      instanceId: "22222222-2222-4222-8222-222222222222",
+      endpoint: paths.socketPath,
+      pid: stalePid,
+      processStart: "stale-start",
+      serverVersion: "1.2.2",
+      wireVersion: "1",
+      serviceMode: "foreground" as const,
+      nonceDigest: createHash("sha256").update(secret).digest("hex"),
+      createdAt: "2026-08-09T10:00:00.000Z",
+    };
+    await writeFile(paths.controlSecretPath, secret, { mode: 0o600 });
+    await writeFile(paths.ownerReceiptPath, encodeOwnerReceipt(staleReceipt), { mode: 0o600 });
+
+    const actual = await vi.importActual<typeof import("node:fs/promises")>("node:fs/promises");
+    renameMock.mockImplementation(async (from: string, to: string) => {
+      if (from.startsWith(paths.dataDirectory) !== to.startsWith(paths.dataDirectory)) {
+        throw Object.assign(new Error("cross-device link"), { code: "EXDEV" });
+      }
+      return actual.rename(from, to);
+    });
+    const replacement = await acquireHostRuntimeOwner({
+      paths,
+      hostId: staleReceipt.hostId,
+      instanceId: "33333333-3333-4333-8333-333333333333",
+      serverVersion: "1.2.3",
+      wireVersion: "1",
+      serviceMode: "foreground",
+      processStart: "replacement-start",
+      processAlive: () => false,
+    });
+    expect(replacement.kind).toBe("owner");
+    const receipts = await readdir(join(paths.dataDirectory, "run", "quarantine"));
+    expect(receipts.some((name) => name.endsWith(".json"))).toBe(true);
+    renameMock.mockImplementation(actual.rename);
+    if (replacement.kind === "owner") owners.push(replacement);
+  });
+
+  it("refuses a redirected receipt quarantine without moving authority", async () => {
+    const paths = await plantAbortedOwner("octant-quarantine-link-", 99999999, "gone");
+    const receipt = await readFile(paths.ownerReceiptPath, "utf8");
+    const outside = join(paths.dataDirectory, "outside");
+    await mkdir(outside, { mode: 0o700 });
+    await symlink(outside, join(paths.dataDirectory, "run", "quarantine"));
+    try {
+      await expect(acquireAfterAbort(paths)).rejects.toMatchObject({
+        code: "unsafe-owner-artifact",
+      });
+      expect(await readFile(paths.ownerReceiptPath, "utf8")).toBe(receipt);
+      expect(await readdir(outside)).toEqual([]);
+    } finally {
+      await rm(paths.socketPath, { force: true });
+      await rm(paths.controlSecretPath, { force: true });
+    }
   });
 
   it("quarantines stale authority artifacts before exposing the socket path", async () => {

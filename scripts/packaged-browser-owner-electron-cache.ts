@@ -1,3 +1,4 @@
+import { setTimeout as delay } from "node:timers/promises";
 import { createHash } from "node:crypto";
 import {
   link,
@@ -113,14 +114,45 @@ export async function writeVerifiedElectronFile(
   }
 }
 
-async function readRelease(signal: AbortSignal): Promise<unknown> {
-  const response = await fetch(releaseUrl, {
-    headers: { accept: "application/vnd.github+json" },
-    redirect: "manual",
-    signal,
-  });
-  if (response.status !== 200 || response.body === null)
-    throw Error("Official release metadata is unavailable.");
+export async function requestOfficialQaApi(
+  url: string,
+  accept: string,
+  signal: AbortSignal,
+): Promise<Response> {
+  const endpoint = new URL(url);
+  if (
+    endpoint.protocol !== "https:" ||
+    endpoint.hostname !== "api.github.com" ||
+    endpoint.port !== "" ||
+    endpoint.username !== "" ||
+    endpoint.password !== "" ||
+    endpoint.search !== "" ||
+    endpoint.hash !== "" ||
+    !/^\/repos\/(?:electron\/electron|trycua\/cua)\/releases\/(?:tags\/[^/]+|assets\/[0-9]+)$/.test(
+      endpoint.pathname,
+    )
+  ) {
+    throw Error("Native QA metadata must use its official release API.");
+  }
+  const token = process.env.OCTANT_QA_GITHUB_TOKEN;
+  for (let attempt = 0; ; attempt++) {
+    const response = await fetch(url, {
+      headers: { accept, ...(token === undefined ? {} : { authorization: `Bearer ${token}` }) },
+      redirect: "manual",
+      signal,
+    });
+    if (attempt >= 2 || (response.status !== 429 && response.status < 500)) return response;
+    await response.body?.cancel();
+    await delay(200 * (attempt + 1), undefined, { signal });
+  }
+}
+
+export async function readRelease(signal: AbortSignal): Promise<unknown> {
+  const response = await requestOfficialQaApi(releaseUrl, "application/vnd.github+json", signal);
+  if (response.status !== 200 || response.body === null) {
+    await response.body?.cancel();
+    throw Error(`Official release metadata is unavailable (HTTP ${response.status}).`);
+  }
   const reader = response.body.getReader();
   const chunks: Array<Uint8Array> = [];
   let bytes = 0;
@@ -139,25 +171,23 @@ async function readRelease(signal: AbortSignal): Promise<unknown> {
   return JSON.parse(Buffer.concat(chunks).toString("utf8"));
 }
 
-async function officialAsset(
+export async function officialAsset(
   id: typeof archiveId | typeof manifestId,
   signal: AbortSignal,
 ): Promise<Response> {
   const headers = { accept: "application/octet-stream" };
-  const response = await fetch(
+  const response = await requestOfficialQaApi(
     `https://api.github.com/repos/electron/electron/releases/assets/${id}`,
-    {
-      headers,
-      redirect: "manual",
-      signal,
-    },
+    headers.accept,
+    signal,
   );
   if (response.status === 200) return response;
   const location = response.headers.get("location");
   await response.body?.cancel();
   if (response.status !== 302 || location === null)
-    throw Error("Official asset API refused the request.");
-  // Only one redirect from the exact public API to GitHub's release storage.
+    throw Error(`Official asset API refused the request (HTTP ${response.status}).`);
+  // Only one redirect to official release storage. The workflow token stays
+  // on the fixed GitHub API requests and is never forwarded to asset storage.
   return fetch(requireOfficialElectronRedirect(location), { headers, redirect: "manual", signal });
 }
 

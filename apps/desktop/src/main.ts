@@ -1117,12 +1117,15 @@ export function requestProjectWindowWhileRunning(options: {
   readonly isTearingDown: () => boolean;
   readonly request: () => Promise<unknown>;
   readonly handleFailure: (error: unknown) => Promise<void> | void;
-}): void {
-  if (options.isTearingDown()) return;
-  void options.request().catch((error: unknown) => {
-    if (options.isTearingDown()) return;
-    void Promise.resolve(options.handleFailure(error)).catch(() => undefined);
-  });
+}): Promise<void> {
+  if (options.isTearingDown()) return Promise.resolve();
+  return options
+    .request()
+    .then(() => undefined)
+    .catch((error: unknown) => {
+      if (options.isTearingDown()) return;
+      void Promise.resolve(options.handleFailure(error)).catch(() => undefined);
+    });
 }
 
 export function createProjectWindowAuthorityLifecycle() {
@@ -2509,9 +2512,9 @@ async function createWindow(stillRequested: () => boolean): Promise<void> {
           browserSurfaceHost?.closeOwnerContexts(state.windowId),
           closeAuthority(),
         ]).finally(() => {
-          if (!window.isDestroyed()) window.destroy();
-          if (desktopClientLifetime.localWindowAdmission()())
-            recoverWindowAfterRendererExit(details.reason);
+          void recoverWindowAfterRendererExit(details.reason, () => {
+            if (!window.isDestroyed()) window.destroy();
+          }).catch(handleFatalStartup);
         });
       });
       window.once("ready-to-show", () => {
@@ -4778,7 +4781,7 @@ async function ensureMenuWindow(): Promise<void> {
 
 const requestActiveWindow = async () => {
   if (!(await desktopClientLifetime.reopen())) return;
-  requestProjectWindowWhileRunning({
+  await requestProjectWindowWhileRunning({
     isTearingDown: () => preparingQuit || quitPrepared,
     request: requestWindow,
     handleFailure: handleFatalStartup,
@@ -4795,15 +4798,34 @@ export function shouldRecoverWindowAfterRendererExit(reason: string): boolean {
 }
 
 const rendererRecoveryTimestamps: number[] = [];
+let pendingRendererRecoveries = 0;
 
-function recoverWindowAfterRendererExit(reason: string): void {
-  if (!shouldRecoverWindowAfterRendererExit(reason)) return;
+async function recoverWindowAfterRendererExit(
+  reason: string,
+  retireWindow: () => void,
+): Promise<void> {
   const now = Date.now();
   const recent = rendererRecoveryTimestamps.filter((at) => now - at <= 60_000);
-  if (recent.length >= 2) return;
+  if (
+    !shouldRecoverWindowAfterRendererExit(reason) ||
+    !desktopClientLifetime.localWindowAdmission()() ||
+    recent.length >= 2
+  ) {
+    retireWindow();
+    return;
+  }
   rendererRecoveryTimestamps.length = 0;
   rendererRecoveryTimestamps.push(...recent, now);
-  requestActiveWindow();
+  // Destroying the last window emits window-all-closed synchronously. Retain
+  // this recovery before destroying it, through the replacement's preparation;
+  // explicit quit still goes through the normal lifetime/admission checks.
+  pendingRendererRecoveries++;
+  try {
+    retireWindow();
+    await requestActiveWindow();
+  } finally {
+    pendingRendererRecoveries--;
+  }
 }
 
 const quitShortcutGuard = createQuitShortcutGuard({
@@ -4992,6 +5014,7 @@ else {
 app.on("window-all-closed", () => {
   if (
     process.platform !== "darwin" &&
+    pendingRendererRecoveries === 0 &&
     browserSurfaceHost?.persistentOwner?.retainsProcess() !== true
   ) {
     quitCanPrompt = true;
