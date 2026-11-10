@@ -59,7 +59,7 @@ export function validateOverride(
 export function applySemanticOverrides(
   base: Readonly<Record<string, string>>,
   overrides: ReadonlyArray<ThemeSemanticOverrideEntry>,
-  _mode: "light" | "dark",
+  mode: "light" | "dark",
 ): {
   tokens: Readonly<Record<string, string>>;
   droppedOverrides: ReadonlyArray<DroppedOverride>;
@@ -67,6 +67,7 @@ export function applySemanticOverrides(
   const tokens: Record<string, string> = { ...base };
   const dropped: DroppedOverride[] = [];
   for (const entry of overrides) {
+    if (entry.mode !== undefined && entry.mode !== mode) continue;
     const result = validateOverride(entry.role, entry.color, tokens);
     if (result.ok) {
       tokens[entry.role] = entry.color;

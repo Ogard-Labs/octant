@@ -126,6 +126,17 @@ describe("theme fallback policy", () => {
     expect(resolved.droppedOverrides[0]?.reason).toBe("insufficient-contrast");
   });
 
+  it("applies an override scoped to one mode only in that mode", () => {
+    const semanticOverrides = [
+      { role: "accent", color: "#2b2b2e", mode: "light" },
+      { role: "accent", color: "#ffffff", mode: "dark" },
+    ] as const;
+    const light = resolveEffectiveTokens(makeSettings({ mode: "light", semanticOverrides }), false);
+    const dark = resolveEffectiveTokens(makeSettings({ mode: "dark", semanticOverrides }), false);
+    expect(light.tokens["accent"]).toBe("#2b2b2e");
+    expect(dark.tokens["accent"]).toBe("#ffffff");
+  });
+
   it("keeps a non-text accent override even when its contrast against the workspace is low", () => {
     const resolved = resolveEffectiveTokens(
       makeSettings({ mode: "dark", semanticOverrides: [{ role: "accent", color: "#222225" }] }),

@@ -100,9 +100,13 @@ export const ThemeTypography = Schema.Struct({
 }).annotations(strict);
 export type ThemeTypography = typeof ThemeTypography.Type;
 
+// `mode` limits an override to the light or the dark theme. Without it the
+// colour applies to both. An accent such as White can only be seen against one
+// page, so it names a different colour for the other.
 export const ThemeSemanticOverrideEntry = Schema.Struct({
   role: ThemeTokenRole,
   color: ThemeHexColor,
+  mode: Schema.optional(Schema.Literal("light", "dark")),
 }).annotations(strict);
 export type ThemeSemanticOverrideEntry = typeof ThemeSemanticOverrideEntry.Type;
 
@@ -110,8 +114,9 @@ const UniqueThemeSemanticOverrides = Schema.Array(ThemeSemanticOverrideEntry).pi
   Schema.filter((overrides) => {
     const seen = new Set<string>();
     for (const entry of overrides) {
-      if (seen.has(entry.role)) return false;
-      seen.add(entry.role);
+      const key = `${entry.role}:${entry.mode ?? "both"}`;
+      if (seen.has(key)) return false;
+      seen.add(key);
     }
     return true;
   }),
