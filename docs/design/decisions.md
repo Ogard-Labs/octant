@@ -38,7 +38,7 @@ The former decision archive is history in `docs/legacy/` and has no authority.
 | [Canvas authority](#canvas-authority)                                                 | 2         | 2       | 0            | 0                   |
 | [Device transport](#device-transport)                                                 | 3         | 3       | 0            | 0                   |
 | [Modes, Projects and authority](#modes-projects-and-authority)                        | 14        | 12      | 2            | 0                   |
-| [Agents and delegation](#agents-and-delegation)                                       | 4         | 4       | 0            | 0                   |
+| [Agents and delegation](#agents-and-delegation)                                       | 5         | 4       | 0            | 1                   |
 | [Boards, pull requests and delivery](#boards-pull-requests-and-delivery)              | 6         | 3       | 2            | 1                   |
 | [Routines and timed turns](#routines-and-timed-turns)                                 | 4         | 3       | 1            | 0                   |
 | [Transcript records](#transcript-records)                                             | 1         | 1       | 0            | 0                   |
@@ -67,7 +67,7 @@ The former decision archive is history in `docs/legacy/` and has no authority.
 | [Code tooling](#code-tooling)                                                         | 2         | 1       | 1            | 0                   |
 | [Disposable desktops](#disposable-desktops)                                           | 4         | 3       | 1            | 0                   |
 | [Bots](#bots)                                                                         | 1         | 0       | 0            | 1                   |
-| **All areas**                                                                         | **229**   | **193** | **32**       | **4**               |
+| **All areas**                                                                         | **230**   | **193** | **32**       | **5**               |
 
 ## Principles and hard lines
 
@@ -808,7 +808,7 @@ Status: Built. Since: —. Detail: [Architecture: Modes: Chat, Work, and Code](.
 Agent-to-agent messaging is a host-delivered channel, and seeing sibling threads is its read-only companion. Both are operations of one tool, `octant_threads` (maintainer decision, 2026-11-05): Work and Code turns see the other open threads of their own Project, and only Code turns message them.
 
 - A refusal reveals nothing about whether another thread exists, and sending grants no authority and returns no reply.
-- A message wakes an idle recipient only when a person turned on its Wake when a message arrives switch (off by default): one `agent`-initiated turn under the thread's own posture, one at a time, at most six an hour, and none past three rounds of agents answering each other (maintainer request, 2026-11-07). _Designed, not built._
+- A message wakes an idle recipient only when a person turned on its Wake when a message arrives switch (off by default), or under the coordinator cases in [Coordinator threads](#coordinator-threads): one `agent`-initiated turn under the thread's own posture, one at a time, at most six an hour, and none past three rounds of agents answering each other (maintainer request, 2026-11-07). _Designed, not built._
 - Message bodies never enter the journal; delivery marks the recipient as having read outside content, and delivery is at least once.
 - A tagged Code thread may message a tagged Code thread on another hub member under that member's Message peer-grant item; each host keeps its own end's rules and the receiver keeps the final say (maintainer request, 2026-11-07). _Designed, not built._ Detail: [Hub and spokes: messaging between members](hub-and-spokes.md#messaging-between-members).
 - A source turn may make at most three `octant_ask_thread` calls, and a target turn started by that tool is never offered the tool. _Here only._
@@ -835,6 +835,22 @@ A `#thread` mention is a bounded, read-only view of a thread the sender can alre
 - In Chat, an explicit mention of a Chat thread also offers `octant_ask_thread`, which sends one instruction to the mentioned Chat thread and waits for its reply, one hop, failing closed. A turn whose mentions name no Chat thread is not offered it.
 
 Status: Built. Since: —. Detail: [Architecture: Modes: Chat, Work, and Code](../architecture.md#modes-chat-work-and-code).
+
+### Coordinator threads
+
+A person may make a Code thread a coordinator: a long-lived thread that starts worker threads without asking, talks to them, and brings their requests to the person (maintainer request, 2026-11-10). A person can restrict starting to proposals for the whole host or for one Project.
+
+- Only a person makes or stops a coordinator, from a local window; up to four per Code Project. Coordinators replace the planner role: the planner becomes a coordinator whose starts need approval, and its proposal path becomes the approval path.
+- A coordinator's own file, shell and Git actions take Plan's read-only gate whatever its level; it has no delivery target, no board card, no pull request of its own, and is never Done. Each turn carries a host-written roster of its workers with no agent-written text.
+- `octant_threads` `start` is offered only to a current coordinator, outside Plan, and to a profile allowlist naming `octant_threads.start`. It creates an ordinary Code thread in the same Project on a new managed worktree, with an `agent`-initiated first turn, so every approval waits for a person. Workers are never coordinators and never offered `start`.
+- Settings › Code › Coordinators › Starting workers is Start without asking (default) or Propose for approval, with a per-Project override; only a person changes it, and the host reads it at every call.
+- A worker's level is at most the coordinator's, and never Full access from a marked coordinator. A marked coordinator's worker starts marked (label `coordinator-start`); a mark that cannot be journaled refuses the start.
+- At most six open workers per coordinator by default (person-set, 1–16) and twelve starts per hour; ordinary turn admission, capacity and spend ceilings apply.
+- A worker wakes for its own coordinator's messages unless a person turns that off; making a coordinator turns its own wake switch on. The host sends a coordinator closed-set state notices (turn ended, waiting for a person, Done) that do not mark it. Wake bounds and the three-round hop count apply.
+- A worker's approvals and questions are listed in its coordinator's composer; only the person answers them, never the coordinator agent.
+- Work coordinators wait for a rule that lets a Work turn carry a message.
+
+Status: Designed, not built. Since: 2026-11-10. Detail: [Coordinator threads](coordinator-threads.md).
 
 ## Boards, pull requests and delivery
 
@@ -906,7 +922,7 @@ Status: Designed, not built. Since: —. Detail: [Architecture: Modes: Chat, Wor
 
 ### Project planner thread
 
-A Code Project may designate one of its own threads as its planner, whose agent proposes new Code threads for a person to accept in the Project overview.
+A Code Project may designate one of its own threads as its planner, whose agent proposes new Code threads for a person to accept in the Project overview. [Coordinator threads](#coordinator-threads) replace this role once built; until then this entry is the built behavior.
 
 - Only a person confirms or declines a proposal; a proposal executes nothing and the planner has no creation authority of its own.
 - The planner reads its board through `octant_threads` (`board`) and proposes through `octant_offer_side_task` (target `board`); both are offered only to the designated thread and re-resolve the designation on every call. The side-task schema states the proposal's bounds, and the planner service keeps its cap of ten waiting proposals.

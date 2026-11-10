@@ -248,6 +248,36 @@ A due follow-up is a reminder, not a waiting thread, and is left out. The
 Status arrangement's **Needs input** and **Ready for review** headings are the
 list-side counterpart, so no second priority group is added to the Projects tree.
 
+### Coordinators
+
+[Coordinator threads](coordinator-threads.md) own the role; this section owns
+where a coordinator and its workers appear. Designed, not built.
+
+- **Sidebar.** A Code Project with coordinators shows a **Coordinators**
+  section at the top of its Project tree, above its other threads. Each
+  coordinator row has the coordinator mark in place of the thread icon and a
+  fold button (`aria-expanded`) that shows or hides its workers beneath it.
+  Folded, the row reports how many of its workers are working and how many need
+  input, through the [sidebar status policy](#sidebar-thread-status), so a
+  folded coordinator never hides a request. Its open workers are listed only
+  under it, never again among the Project's other threads; finished workers
+  follow the ordinary completion and put-away rules. The window remembers each
+  coordinator's fold state as session storage.
+- **Status arrangement.** Coordinators are listed under **Pinned**. Workers
+  keep their ordinary headings, with their coordinator's name as secondary text
+  on the row.
+- **Board.** A coordinator is never a board card. A worker's card names its
+  coordinator, and the board's filter can show one coordinator's workers.
+- **Menus.** A Code Project's sidebar menu has **New coordinator**; a Code
+  thread's header and row menus have **Make coordinator**, or **Stop
+  coordinating** on a coordinator; a worker's header menu has **Wake for
+  coordinator**. Settings › Code › Coordinators holds **Starting workers** and
+  the open-worker bound, and a Code Project's overview holds its own
+  **Starting workers** choice beside the Project planner section.
+- **Requests.** A coordinator's composer lists its workers' pending approvals
+  and questions in the same bounded region as its child runs' requests, each
+  naming its worker, with an Open worker action.
+
 ### Sidebar thread status
 
 The sidebar speaks about what a thread is doing now with one vocabulary, in
@@ -1287,6 +1317,9 @@ precreation failure allows progress; an explicit retry reviews that new version.
 A disconnect disables decisions until the
 current host state has been refreshed. Resulting tasks remain reachable from
 approved proposals. See the [Project planner rule](../architecture.md#modes-chat-work-and-code).
+When [coordinator threads](coordinator-threads.md) are built, this section
+designates coordinators and its proposals are the approval path for a
+coordinator whose starts need approval.
 
 ## Local-server ownership
 

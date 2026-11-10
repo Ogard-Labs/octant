@@ -142,6 +142,11 @@ Hardening in progress for the preview:
     Linux host run under the same Bubblewrap confinement as every other
     confined process. Station provisioning and Devices and Machines
     navigation remain separate follow-up deliveries.
+- **Coordinator threads** — a long-lived Code thread per line of work that
+  starts worker threads without asking (or proposes them where a person
+  restricts it), messages them, and brings their questions back, replacing the
+  Project planner. Approved 2026-11-10; it needs the message wake switch first.
+  Rules in [Coordinator threads](design/coordinator-threads.md).
 - **Dogfood-driven fixes** — whatever daily use of the preview surfaces first.
 
 ## Also in scope for the first preview
