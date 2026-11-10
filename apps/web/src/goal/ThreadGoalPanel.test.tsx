@@ -274,6 +274,31 @@ describe("ThreadGoalPanel", () => {
     await waitFor(() => expect(screen.queryByLabelText("Turns")).not.toBeInTheDocument());
   });
 
+  it("leaves the budget to the host when a revision changes only the objective", async () => {
+    const user = userEvent.setup();
+    const client: GoalClient = {
+      read: vi.fn().mockResolvedValue({
+        goal: goalWith({ budget: { turnBudget: 5 } } as Partial<ThreadGoal>),
+        history: [],
+      }),
+      execute: vi.fn().mockResolvedValue({ goal: goalWith(), history: [] }),
+    };
+
+    render(<ThreadGoalPanel client={client} threadId={threadId} />);
+    await screen.findByTestId("goal-objective");
+    await user.click(screen.getByRole("button", { name: "Revise" }));
+    const field = screen.getByLabelText("Revised objective");
+    await user.clear(field);
+    await user.type(field, "Ship it twice");
+    await user.click(screen.getByRole("button", { name: "Save revision" }));
+
+    // Another window may have changed the budget since this form opened; an
+    // untouched budget must not send the stale copy back as a replacement.
+    expect(client.execute).toHaveBeenCalledWith(
+      expect.not.objectContaining({ budget: expect.anything() }),
+    );
+  });
+
   it("shows the goal's current budget when revising, and refuses one that is not a whole number above zero", async () => {
     const user = userEvent.setup();
     const client: GoalClient = {
