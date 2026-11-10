@@ -1103,7 +1103,7 @@ function ActiveSectionContent({
       );
     case "voice":
       // Voice and image generation both pick a model endpoint to send media
-      // through, so they share one page under AI & models.
+      // through, so they share one page under AI.
       return (
         <div className="settings-section-stack" id="settings-voice">
           <VoiceSettingsView
