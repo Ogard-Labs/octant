@@ -1660,7 +1660,7 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
         },
         {
           id: settingId("host-lifecycle"),
-          label: "Host process",
+          label: "Background service",
           scope: "host",
           keywords: "host process stop restart",
         },

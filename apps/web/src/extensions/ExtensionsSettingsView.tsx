@@ -658,7 +658,7 @@ export function ExtensionsSettingsView(props: ExtensionsSettingsViewProps) {
       } catch {
         setFailure({
           category: "unavailable" as never,
-          message: "Extension service is unavailable.",
+          message: "Extensions could not be reached. Restart Octant and try again.",
         });
         return false;
       } finally {
@@ -734,7 +734,7 @@ export function ExtensionsSettingsView(props: ExtensionsSettingsViewProps) {
       } catch {
         setFailure({
           category: "unavailable" as never,
-          message: "Extension service is unavailable.",
+          message: "Extensions could not be reached. Restart Octant and try again.",
         });
       } finally {
         setInspectingEntryId(undefined);
@@ -777,7 +777,7 @@ export function ExtensionsSettingsView(props: ExtensionsSettingsViewProps) {
       } catch {
         setFailure({
           category: "unavailable" as never,
-          message: "Extension service is unavailable.",
+          message: "Extensions could not be reached. Restart Octant and try again.",
         });
       } finally {
         setLookingUpNpm(false);
@@ -807,7 +807,10 @@ export function ExtensionsSettingsView(props: ExtensionsSettingsViewProps) {
       } catch {
         // Fall through to the plain failure below.
       }
-      return { status: "failed", message: "Extension service is unavailable." };
+      return {
+        status: "failed",
+        message: "Extensions could not be reached. Restart Octant and try again.",
+      };
     },
     [props.client, marketplaceFetchesEnabled],
   );
@@ -853,9 +856,9 @@ export function ExtensionsSettingsView(props: ExtensionsSettingsViewProps) {
       } catch {
         setFailure({
           category: "unavailable" as never,
-          message: "Extension service is unavailable.",
+          message: "Extensions could not be reached. Restart Octant and try again.",
         });
-        return "Extension service is unavailable.";
+        return "Extensions could not be reached. Restart Octant and try again.";
       } finally {
         setInstalling(false);
       }
@@ -1047,7 +1050,7 @@ export function ExtensionsSettingsView(props: ExtensionsSettingsViewProps) {
       setLibraryInspection({
         itemId: item.id,
         status: "failed",
-        message: "Extension service is unavailable.",
+        message: "Extensions could not be reached. Restart Octant and try again.",
       });
     }
   };

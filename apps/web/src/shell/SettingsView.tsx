@@ -335,15 +335,16 @@ const SECTION_DESCRIPTIONS: Readonly<Partial<Record<SettingsSectionId, string>>>
   notifications: "What Octant tells you while you are away, and where it sends it.",
   voice: "The providers that turn speech into text, text into speech, and prompts into images.",
   "computer-use": "Control applications through the bundled Computer use plugin.",
-  "device-tools": "Bundled simulator and emulator streaming tools and their updates.",
+  "device-tools":
+    "The iPhone simulator and Android emulator tools that come with Octant, and their updates.",
   providers:
     "Connect providers, manage authentication, pick default models, and see every provider Octant can set up.",
   harness:
-    "Octant's own agent loop for API-key and local models: which model does which job, including Navigator's.",
+    "Models you add by API key or run locally: which model does which job, including Navigator's.",
   skills:
     "Skills extend what agents can do. Review the source, then trust and enable only what you want.",
   github: "Connection and repository access on the selected host.",
-  host: "The host process: its status, startup, notifications, and maintenance.",
+  host: "Octant's background service: its status, startup, and maintenance.",
   permissions:
     "The files no agent may touch, and what you have already allowed: websites, extension tools, and public links.",
   memory:
@@ -3106,7 +3107,7 @@ function MaintenanceSection({
         ) : null}
         {diagnosticsExportClient !== undefined ? (
           <SettingRow
-            description="Exports a redacted report about one failed operation, found by its correlation ID. Review it before sharing."
+            description="Saves a redacted report about one failed action, found by the ID shown with the error. Review it before sharing."
             focused={focusedSetting === settingId("export-diagnostics")}
             label="Failure report"
             scope="host"

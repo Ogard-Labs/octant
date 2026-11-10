@@ -180,7 +180,9 @@ export function HostSettingsSection({
       setLifecycleMessage({
         kind: "refused",
         text:
-          error instanceof Error ? error.message : "The lifecycle request could not be delivered.",
+          error instanceof Error
+            ? error.message
+            : "Octant could not reach its background service. Try again, or restart Octant.",
       });
     } finally {
       setLifecycleBusy(false);
@@ -362,8 +364,8 @@ export function HostSettingsSection({
       <SettingsSection title="Lifecycle">
         <div className="setgroup">
           <SettingRow
-            description="Stop or restart the selected host process."
-            label="Host process"
+            description="Stop or restart Octant's background service on the selected host."
+            label="Background service"
             scope="host"
             settingId="host-lifecycle"
           >
