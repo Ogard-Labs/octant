@@ -48,12 +48,11 @@ export function OctantConfirmDialog(props: {
       {props.details === undefined ? null : (
         <div className="octant-confirmation__details">{props.details}</div>
       )}
-      <div className="flex flex-wrap justify-end gap-2">
+      <div className="octant-dialog__actions">
         <OctantButton
           ref={cancel}
           disabled={props.pending}
           onClick={props.onCancel}
-          size="sm"
           type="button"
           variant="outline"
         >
@@ -62,7 +61,6 @@ export function OctantConfirmDialog(props: {
         <OctantButton
           disabled={props.pending || props.confirmDisabled}
           onClick={props.onConfirm}
-          size="sm"
           type="button"
           variant={props.destructive ? "destructive" : "default"}
         >

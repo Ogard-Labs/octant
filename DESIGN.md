@@ -2744,6 +2744,26 @@ ordinary confirmations use the standard action treatment. Long paths in the
 description wrap within the shared dialog. Their existing host approvals,
 receipts, and observed-state checks remain separate and mandatory.
 
+Every dialog shares one frame. The shared popup insets its content 16px, the
+title is the 15px body step at the strong weight, and the answers sit in one
+row at the trailing edge: the answer that dismisses first, as an outline
+button, and the answer that acts last, filled (or in the destructive role),
+both at the default control height. A dialog that draws to its edges (the
+command palette, a player, a sheet with its own head and foot) sets its own
+inset with one class; no dialog sets its own title size or draws its answers
+at another height. A dialog wider than the 420px default says so with
+`--octant-dialog-width`, never with a width of its own: the shared popup caps
+any other width at the default, which had opened the rewind, synced-artifact,
+Continue elsewhere, planner-review, plugin-detail and thread-search dialogs
+narrower than they were written. Before this, dialog titles ran from 14px to
+17px at two weights, the dismissing answer was drawn bare, outlined or filled
+depending on the dialog, and a confirmation's buttons were one step shorter
+than every other dialog's.
+
+Product notices stack at the top trailing corner of the window, under the
+title bar. At the bottom trailing corner a notice covered the composer's model
+picker and Send.
+
 Settings connection removal uses the same confirmation while retaining its
 host command and GitHub's explicit local-logout confirmation.
 

@@ -2330,7 +2330,7 @@ function CodeProjectViewEditorDialog(props: {
             onClick={props.onClose}
             type="button"
             className="project-button project-button--quiet"
-            variant="ghost"
+            variant="outline"
           >
             Cancel
           </OctantButton>

@@ -101,7 +101,15 @@ async function attempt(
   const timeout = AbortSignal.timeout(timeoutMs);
   const signal = callerSignal === undefined ? timeout : AbortSignal.any([callerSignal, timeout]);
   try {
-    await fetchImpl(url, { method: "GET", redirect: "manual", signal });
+    const answer = await fetchImpl(url, { method: "GET", redirect: "manual", signal });
+    // The status line is the whole answer; the page is never read. Left
+    // unread, a page larger than the stream's buffer holds the connection
+    // paused, and a server that closes after sending (an HTTP/1.0 static
+    // server does) then ends a paused socket. The packaged host's runtime
+    // asserts on that and exits: with two such servers running it stopped
+    // four times in three minutes, each time straight after this probe's
+    // response. Cancelling the body closes the connection from this side.
+    await answer.body?.cancel().catch(() => undefined);
     return "listening";
   } catch (error) {
     // A dev server on HTTPS almost always presents a self-signed localhost

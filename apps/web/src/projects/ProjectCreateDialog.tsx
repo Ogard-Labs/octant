@@ -143,7 +143,12 @@ function ChatProjectCreateDialog(props: ProjectCreateDialogProps) {
           value={name}
         />
         <div className="project-dialog__actions">
-          <OctantButton disabled={submitting} onClick={requestClose} type="button" variant="ghost">
+          <OctantButton
+            disabled={submitting}
+            onClick={requestClose}
+            type="button"
+            variant="outline"
+          >
             Cancel
           </OctantButton>
           <OctantButton disabled={submitting || name.trim() === ""} type="submit">
@@ -397,7 +402,7 @@ function BoundProjectAddFolderDialog(props: ProjectCreateDialogProps) {
           </label>
         ) : null}
         <div className="project-dialog__actions">
-          <OctantButton onClick={requestClose} type="button" variant="ghost">
+          <OctantButton onClick={requestClose} type="button" variant="outline">
             Cancel
           </OctantButton>
           <OctantButton
@@ -431,7 +436,7 @@ function BoundProjectAddFolderDialog(props: ProjectCreateDialogProps) {
           </OctantButton>
         </div>
         <div className="project-dialog__actions">
-          <OctantButton onClick={requestClose} type="button" variant="ghost">
+          <OctantButton onClick={requestClose} type="button" variant="outline">
             Cancel
           </OctantButton>
         </div>
@@ -520,7 +525,7 @@ function BoundProjectAddFolderDialog(props: ProjectCreateDialogProps) {
           needs the native picker bridge.
         </OctantAlert>
         <div className="project-dialog__actions">
-          <OctantButton onClick={props.onClose} type="button" variant="ghost">
+          <OctantButton onClick={props.onClose} type="button" variant="outline">
             Close
           </OctantButton>
         </div>

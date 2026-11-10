@@ -149,7 +149,12 @@ export function MoveThreadToProjectDialog(props: MoveThreadToProjectDialogProps)
       )}
       {refusal === undefined ? null : <OctantAlert tone="danger">{refusal}</OctantAlert>}
       <div className="project-dialog__actions">
-        <OctantButton disabled={busy} onClick={() => props.onClose()} type="button" variant="ghost">
+        <OctantButton
+          disabled={busy}
+          onClick={() => props.onClose()}
+          type="button"
+          variant="outline"
+        >
           Cancel
         </OctantButton>
       </div>

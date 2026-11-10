@@ -83,7 +83,7 @@ describe("ProjectCreateDialog web folder parity", () => {
     expect(confirm.className).toContain("bg-primary");
     expect(confirm.className).not.toContain("project-button");
     const cancel = screen.getByRole("button", { name: "Cancel" });
-    expect(cancel).toHaveAttribute("data-variant", "ghost");
+    expect(cancel).toHaveAttribute("data-variant", "outline");
     expect(cancel.className).not.toContain("project-button");
   });
 
