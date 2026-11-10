@@ -92,7 +92,7 @@ export interface ShieldRuleInput {
    */
   readonly protectedSecretPath?: ((path: string) => boolean) | undefined;
   /**
-   * The places the person trusts for the thread's Project (Settings › Access ›
+   * The places the person trusts for the thread's Project (Settings › Permissions ›
    * Safe networks), given only while Network limits are on. A network call
    * whose every destination is one of them passes by rule.
    */

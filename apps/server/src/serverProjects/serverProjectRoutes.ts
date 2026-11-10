@@ -157,7 +157,7 @@ function catalogView(projects: ReadonlyArray<ServerProject>): ServerProjectsView
 
 const MESSAGES: Readonly<Record<ServerProjectsRefusalReason, string>> = {
   "needs-local-window": "Server Projects can be changed only at this computer.",
-  "server-not-registered": "That server is not registered in Settings › Access › Servers.",
+  "server-not-registered": "That server is not registered in Settings › Permissions › Servers.",
   "server-unreachable": "The server could not be reached, so nothing was bound.",
   "folder-not-found": "That folder does not exist on the server, or is not a folder.",
   "project-not-found": "That server Project does not exist.",

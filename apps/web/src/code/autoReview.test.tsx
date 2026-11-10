@@ -119,7 +119,7 @@ describe("who answers a thread's prompts at Auto, as the picker shows it", () =>
   });
 });
 
-describe("Settings › Access reviewer", () => {
+describe("Settings › Code › Access reviewer", () => {
   const settings = {
     defaultExecutionPolicy: "approval-gated",
     defaultPermissionPersistence: "current-session",

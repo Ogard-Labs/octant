@@ -839,7 +839,7 @@ export class ProjectTerminalService {
     if (login === undefined) {
       return refused(
         "unavailable",
-        "This Project's server is not registered. Register it again in Settings › Access › Servers.",
+        "This Project's server is not registered. Register it again in Settings › Permissions › Servers.",
       );
     }
     if (work)

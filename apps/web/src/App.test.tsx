@@ -4452,12 +4452,8 @@ describe("App", () => {
     );
     await waitFor(() => expect(macHost.list).toHaveBeenCalled());
     await openSettingsFromSidebar(user);
-    fireEvent.click(await screen.findByRole("button", { name: "Profile" }));
-    expect(
-      await screen.findByText(
-        "Choose how you appear inside Octant. Everything is optional and kept on this Mac.",
-      ),
-    ).toBeVisible();
+    fireEvent.click(await screen.findByRole("button", { name: "General" }));
+    expect(await screen.findByText("Everything is optional and kept on this Mac.")).toBeVisible();
   });
 
   it("uses the CSS translucent sidebar fallback when no native host is available", async () => {

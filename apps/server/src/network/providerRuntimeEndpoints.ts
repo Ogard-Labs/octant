@@ -12,7 +12,7 @@ import type { AcpProviderKind } from "../providers/acpProfiles";
  * endpoint the person configured) is added for that launch. Anything else the
  * runtime asks for, its own web fetch included, needs the Project's egress
  * rules or a safe network, and a refusal names the host so the person can
- * trust it in Settings › Access.
+ * trust it in Settings › Permissions.
  */
 
 const MODEL_PROVIDERS: ReadonlyArray<string> = [

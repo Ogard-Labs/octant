@@ -94,7 +94,7 @@ export function RemoteSetupGuide(props: {
                 </p>
                 <ol className="remote-setup__steps">
                   <li>
-                    Register the server's SSH alias and login user under Access › Servers.
+                    Register the server's SSH alias and login user under Permissions › Servers.
                     Registration does not test a connection.
                   </li>
                   <li>
