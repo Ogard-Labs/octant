@@ -180,6 +180,9 @@
      step under the well keeps the gap between the two corners even. */
   --oct-radius-inset: 8px;
   --oct-radius-lg: 14px;
+  /* The composer's tray: the composer's corner carried out by the tray's
+     4px inset, so the card's edge and the tray's run parallel. */
+  --oct-radius-tray: 18px;
   --oct-radius-pill: 9999px;
 
   --oct-motion-fast: 150ms;
@@ -4451,7 +4454,7 @@ input.switch:checked::after {
     inset 0 0 0 1px var(--oct-border);
   transition: box-shadow var(--oct-dur-base) var(--oct-ease-color);
 }
-.composer[data-drop-target="true"] > .thread-composer__surface {
+.composer[data-drop-target="true"] .thread-composer__surface {
   position: relative;
   box-shadow:
     var(--octant-shadow-md),
@@ -4584,7 +4587,7 @@ input.switch:checked::after {
   padding: 0;
   border-radius: var(--oct-radius-sm);
 }
-/* The thread's facts stand on the page under the card, as one quiet line
+/* The thread's facts stand in the tray under the card, as one quiet line
    with no fill or edge of its own: where the thread runs, the surface's row of
    controls, the plan's windows, and the thread's info. */
 .composer-under {
@@ -4783,15 +4786,37 @@ input.switch:checked::after {
 }
 
 /* Every composer keeps the message surface distinct from the thread's facts:
-   the row under it (controls, context and stats) sits on the page, and only
-   the surface where the person types is raised. Feedback appears only when
-   there is something to act on. */
+   the rows beside it (where the thread runs, its controls) are in the tray,
+   and only the surface where the person types is raised out of it. Feedback
+   appears only when there is something to act on. */
 .composer.composer--carded {
   display: grid;
   gap: var(--oct-space-1);
   background: transparent;
   border-radius: var(--oct-radius-lg);
   box-shadow: none;
+}
+/* The tray: one frame around the start row, the card and the line under it.
+   It is a raised surface a step under the card, with the card's corner
+   carried out by its own inset, so the two edges run parallel. The rows were
+   text standing on the page above and below the card, and the composer read
+   as a field with labels around it, not as one object. */
+.composer-frame {
+  display: grid;
+  gap: var(--oct-space-1);
+  min-width: 0;
+  padding: var(--oct-space-1);
+  border-radius: var(--oct-radius-tray);
+  background: var(--octant-tray);
+  box-shadow: var(--octant-shadow-xs);
+}
+/* A held thread has no card to frame; its line stands where it stood. */
+.composer-frame--held {
+  display: contents;
+}
+/* A row in the tray keeps clear of the tray's corner. */
+.composer-frame:not(.composer-frame--held) > :is(.composer-start, .composer-under) {
+  padding-inline: var(--oct-space-2);
 }
 .thread-composer__surface {
   min-width: 0;
@@ -4831,7 +4856,9 @@ input.switch:checked::after {
   align-items: center;
   min-height: 0;
   min-width: 0;
-  padding-inline: 12px;
+  /* Room under the line: without it a notice's descenders sat on the card's
+     bottom edge. */
+  padding: 0 12px var(--oct-space-2);
   overflow: auto;
 }
 .thread-composer__feedback:empty,
@@ -6581,13 +6608,14 @@ html[data-octant-reduced-transparency="true"] .code-home__card {
         inset 0 0 0 1px var(--oct-glass-stroke),
         var(--octant-shadow-md);
     }
-    /* A follow-up composer's strip sits on the page, so its wrapper takes no
-       glass; the surface where the person types takes the whole material the
-       composer has elsewhere: floor, thick tint, blur, ring, and shadow. */
+    /* The tray takes the whole material the composer has over a ground or
+       under Glass: floor, thick tint, blur, ring, and shadow. The card keeps
+       the raised card's own fill on it. When the card was the glass, it
+       blurred the tray it stood in and came out darker than the tray, a well
+       where a raised surface should be. */
     html:not([data-octant-reduced-transparency="true"])
       :is(.shell--app-backdrop, .shell--material-translucent)
-      .thread-composer__surface {
-      border-color: var(--oct-glass-stroke);
+      .composer-frame:not(.composer-frame--held) {
       background-color: var(--oct-glass-floor);
       background-image: linear-gradient(var(--oct-glass-thick), var(--oct-glass-thick));
       backdrop-filter: blur(var(--oct-glass-blur-thick)) saturate(150%);
@@ -6595,6 +6623,15 @@ html[data-octant-reduced-transparency="true"] .code-home__card {
       box-shadow:
         inset 0 0 0 1px var(--oct-glass-stroke),
         var(--octant-shadow-md);
+    }
+    /* The card's own ring is the glass stroke there: the opaque border is
+       near black and drew a dark outline around the card on the tray. */
+    html:not([data-octant-reduced-transparency="true"])
+      :is(.shell--app-backdrop, .shell--material-translucent)
+      .thread-composer__surface {
+      box-shadow:
+        var(--octant-shadow-md),
+        inset 0 0 0 1px var(--oct-glass-stroke);
     }
   }
 }

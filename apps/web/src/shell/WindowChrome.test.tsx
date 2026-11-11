@@ -835,14 +835,21 @@ describe("WindowChrome", () => {
     expect(glass).toContain("background-color: var(--oct-glass-floor);");
     expect(glass).toContain("background-image: linear-gradient(var(--oct-glass-thick)");
     expect(glass).toContain("backdrop-filter: blur(var(--oct-glass-blur-thick))");
-    // A composer's row sits on the page: the frame around the card takes no
-    // glass, and the surface where the person types takes the whole material.
+    // The composer's tray takes the whole material, and the card on it keeps
+    // the raised card's fill: a card that was glass too blurred the tray it
+    // stood in and came out darker than the tray.
+    const tray =
+      systemStyles.match(
+        /html:not\(\[data-octant-reduced-transparency="true"\]\) :is\(\.shell--app-backdrop, \.shell--material-translucent\) \.composer-frame:not\(\.composer-frame--held\) \{([^}]*)\}/,
+      )?.[1] ?? "";
+    expect(tray).toContain("background-color: var(--oct-glass-floor);");
+    expect(tray).toContain("backdrop-filter: blur(var(--oct-glass-blur-thick))");
     const surface =
       systemStyles.match(
         /html:not\(\[data-octant-reduced-transparency="true"\]\) :is\(\.shell--app-backdrop, \.shell--material-translucent\) \.thread-composer__surface \{([^}]*)\}/,
       )?.[1] ?? "";
-    expect(surface).toContain("background-color: var(--oct-glass-floor);");
-    expect(surface).toContain("backdrop-filter: blur(var(--oct-glass-blur-thick))");
+    expect(surface).not.toContain("backdrop-filter");
+    expect(surface).toContain("inset 0 0 0 1px var(--oct-glass-stroke)");
   });
 
   it("clears the workspace, pane, and reader page fills inside the window so the glass shows", () => {

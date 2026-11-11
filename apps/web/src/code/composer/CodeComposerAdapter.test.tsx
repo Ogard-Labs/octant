@@ -315,9 +315,10 @@ describe("CodeComposerAdapter", () => {
     if (frame === null || dock === null || row === null) {
       throw new Error("Composer stack is incomplete.");
     }
-    // The card holds the prompt and its toolbar; where the thread runs stands
-    // on the page above it.
-    expect(frame.contains(dock)).toBe(false);
+    // The card holds the prompt; where the thread runs is a row of the
+    // composer's tray above it.
+    expect(frame.contains(dock)).toBe(true);
+    expect(container.querySelector(".thread-composer__surface")?.contains(dock)).toBe(false);
     expect(
       dock.compareDocumentPosition(screen.getByRole("textbox", { name: "First message" })) &
         Node.DOCUMENT_POSITION_FOLLOWING,
@@ -448,7 +449,8 @@ describe("CodeComposerAdapter", () => {
     const dock = container.querySelector(".composer-tray");
     expect(frame).not.toBeNull();
     expect(dock).not.toBeNull();
-    expect(frame?.contains(dock)).toBe(false);
+    expect(frame?.contains(dock)).toBe(true);
+    expect(container.querySelector(".thread-composer__surface")?.contains(dock)).toBe(false);
     expect(dock?.closest(".composer-stack")).toBe(frame?.closest(".composer-stack"));
     expect(dock?.textContent).toContain("development");
     expect(container.querySelector('[class*="context-strip"]')).toBeNull();

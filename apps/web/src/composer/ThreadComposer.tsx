@@ -203,8 +203,8 @@ function ComposerSurface(props: ThreadComposerProps & { readonly held: boolean }
   const baseClassName = props.className === undefined ? "composer" : `composer ${props.className}`;
   const followUp = props.presentation === "follow-up";
   const frameClassName = `${baseClassName} composer--carded${followUp ? " composer--follow-up" : ""}${notice == null || (!followUp && props.startContext !== undefined) ? "" : " composer--has-notice"}`;
-  // Where a new thread runs and how much of the plan is left stand on the
-  // page above the card, so the card holds only the prompt. Inside the card
+  // Where a new thread runs and how much of the plan is left stand in the
+  // tray above the card, so the card holds only the prompt. Inside the card
   // the row sat between the person and the prompt, and a control with more
   // than a label (a folder form) grew the card instead of opening over the
   // page.
@@ -300,23 +300,33 @@ function ComposerSurface(props: ThreadComposerProps & { readonly held: boolean }
   );
   // Suggested tasks stand above the composer, as the last thing in the
   // thread; inside the surface they made the box read as one tall composer.
-  // The stats line stands under the row, where a person reads the last turn's
-  // figures after sending.
+  // The stats line stands under the tray, where a person reads the last
+  // turn's figures after sending.
+  //
+  // The tray is the composer's outer layer: one recessed frame that holds the
+  // start row, the card and the line under it, so where a thread runs and how
+  // it runs read as parts of the composer and not as loose text on the page.
+  // The card is raised out of it. A held thread has no card, so the tray
+  // draws nothing then; it stays in the tree so the info panel in the line
+  // is never remounted.
   const body = (
     <>
       {held ? null : <ComposerFollowUpSuggestions />}
-      {held ? null : (
-        <div className="thread-composer__surface">
-          {followUp ? <ComposerOutsideContentNotice busy={props.threadBusy === true} /> : null}
-          {dropActive ? <ComposerThreadDropCue /> : null}
-          {message}
-          <div className="thread-composer__feedback">
-            {compactingNote}
-            {props.footer}
+      <div className={held ? "composer-frame composer-frame--held" : "composer-frame"}>
+        {held ? null : startRow}
+        {held ? null : (
+          <div className="thread-composer__surface">
+            {followUp ? <ComposerOutsideContentNotice busy={props.threadBusy === true} /> : null}
+            {dropActive ? <ComposerThreadDropCue /> : null}
+            {message}
+            <div className="thread-composer__feedback">
+              {compactingNote}
+              {props.footer}
+            </div>
           </div>
-        </div>
-      )}
-      {under}
+        )}
+        {under}
+      </div>
       {held ? null : followUp ? <ThreadStats windows={false} /> : <ThreadStats />}
     </>
   );
@@ -354,11 +364,10 @@ function ComposerSurface(props: ThreadComposerProps & { readonly held: boolean }
   ) : (
     <>
       {/* The notice rises from the card's top edge, where the row now stands,
-          so on a start screen it is anchored above the row instead. */}
+          so on a start screen it is anchored above the tray instead. */}
       {notice == null ? null : (
         <div className="composer-start-notice composer--has-notice">{notice}</div>
       )}
-      {startRow}
       {frame}
     </>
   );

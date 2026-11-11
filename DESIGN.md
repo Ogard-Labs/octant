@@ -235,6 +235,7 @@ this document names the token, not the number.
 | `--oct-radius-inset`  | 8px    | An object resting inside a card or well: a board card in its column                    |
 | `--oct-radius-md`     | 12px   | A card, panel, or well; a Settings section card; the window-frame cards; a user bubble |
 | `--oct-radius-lg`     | 14px   | Every composer and a dialog                                                            |
+| `--oct-radius-tray`   | 18px   | The composer's tray: the composer's corner carried out by the tray's 4px inset         |
 | `--oct-radius-pill`   | 9999px | Compact chips, meters, and circular icon controls only                                 |
 | `--radius` (`md`)     | 6px    | The recipes' compact step: xs and sm buttons, menu items (`rounded-md`)                |
 | `--radius-lg` / `-xl` | 8 / 12 | The recipes' control and card steps (`rounded-lg`, `rounded-xl`): a menu and a popover |
@@ -672,7 +673,7 @@ just before send, and send is the round accent-filled button with an up arrow.
 
 **Usage-limit warning.** On a start screen, when the chosen account has a window
 that is spent or at 80% used (the same levels the meters colour), a warning
-callout takes the full row above the context chips, on the page above the
+callout takes the full row above the context chips, in the tray above the
 card: which account, that it has
 reached or is close to its usage limit, and the reset time the provider gave.
 For each other ready account that has room (an observed window below the near
@@ -741,7 +742,18 @@ composer takes the narrowest pane's room, so composers side by side match
 instead of each filling its own pane. A start screen's composer docks 12px
 above the pane's foot, where a thread's sits, so the two line up across a
 split; a start screen's card is the same box, with its row of where-it-runs
-chips on the page above it. Nothing about the box changes while a turn runs.
+chips above it. Nothing about the box changes while a turn runs.
+The composer is one object in two layers. The outer layer is the tray: one
+frame (`--oct-radius-tray`, the tray fill, the smallest raised shadow, a 4px
+inset) around the start row, the card and the line under the card. The card
+is the raised card, a step lighter than the tray, so the surface a person
+types on is the highest thing in the composer. Over an application ground or
+under Window glass the tray is the glass surface (floor, thick tint, blur and
+stroke) and the card keeps the raised card's fill on it; a card that was glass
+too blurred the tray it stood in and came out darker than the tray. The
+figures of the last turn stand on the page under the tray. A held thread has
+no card and draws no tray. (The rows were text standing on the page above and
+below the card, and the composer read as a field with labels around it.)
 The card holds what acts on the message being written and nothing else: attach
 at its leading edge, the prompt, and send (with Stop while a response streams)
 at its trailing edge, the two controls riding the prompt's last line. Both are
@@ -750,7 +762,7 @@ fill until there is something to send, then the card's one solid control: the
 primary text colour as its fill, with the page colour on it. It is not the
 accent: a filled accent circle was the loudest thing on the page under an
 empty prompt, and the one round control on it. How the
-thread runs is one quiet line on the page under the card, with no fill or edge
+thread runs is one quiet line in the tray under the card, with no fill or edge
 of its own, in reading order: a thread's own context (Project, branch,
 checkout), the surface's row (image and access leading; the context ring, the
 model and the microphone trailing), the plan meters, and the Thread info icon
@@ -767,7 +779,7 @@ one line and 93px after.
 The model button names a chosen reasoning effort after the model in muted ink
 ("GPT-6 Astra Medium"); the provider default names none. Where the thread runs
 (Project, working folder, base branch, checkout, Environment, repository) is
-one row on the page just above the card, as quiet chips set together from the
+one row in the tray just above the card, as quiet chips set together from the
 left: meta ink and no fill at rest, a fill only under the pointer or while the
 chip's menu is open, the same as the access and model controls under the
 card. Plan meters keep the right end of that row. The card itself holds only
