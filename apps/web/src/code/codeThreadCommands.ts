@@ -77,3 +77,33 @@ export function wakeCodeThread(thread: CodeThread): CodeCommand {
     expectedVersion: thread.version,
   };
 }
+
+/** Make coordinator and Stop coordinating; the host refuses it for a worker. */
+export function setCodeThreadCoordinator(thread: CodeThread, coordinator: boolean): CodeCommand {
+  return {
+    kind: "set-code-thread-coordinator",
+    threadId: thread.id,
+    expectedVersion: thread.version,
+    coordinator,
+  };
+}
+
+/** The thread's Wake when a message arrives switch. */
+export function setCodeThreadMessageWake(thread: CodeThread, wake: boolean): CodeCommand {
+  return {
+    kind: "set-code-thread-message-wake",
+    threadId: thread.id,
+    expectedVersion: thread.version,
+    wake,
+  };
+}
+
+/** A worker's Wake for coordinator switch. */
+export function setCodeThreadCoordinatorWake(thread: CodeThread, wake: boolean): CodeCommand {
+  return {
+    kind: "set-code-thread-coordinator-wake",
+    threadId: thread.id,
+    expectedVersion: thread.version,
+    wake,
+  };
+}

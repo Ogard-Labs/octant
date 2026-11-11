@@ -1369,6 +1369,15 @@ export const CodeNavigationRuntime = Schema.Struct({
 }).annotations(strict);
 export type CodeNavigationRuntime = typeof CodeNavigationRuntime.Type;
 
+/**
+ * The visible threads their Project designated as its planner. The designated
+ * planner reads as a coordinator whose starts always need approval
+ * (docs/design/coordinator-threads.md). The host derives the list from the
+ * designation on every read, so it is not a field of the journaled thread;
+ * an older host omits it, and a reader treats an absent list as no planner.
+ */
+const CodePlannerThreadIds = Schema.optional(Schema.Array(CodeThreadId));
+
 export const CodeBootstrap = Schema.Struct({
   settings: CodeSettings,
   threads: Schema.Array(CodeThread),
@@ -1391,6 +1400,7 @@ export const CodeBootstrap = Schema.Struct({
    * sidebar stays quiet rather than refusing bootstrap.
    */
   runtime: Schema.optionalWith(Schema.Array(CodeNavigationRuntime), { default: () => [] }),
+  plannerThreadIds: CodePlannerThreadIds,
 }).annotations(strict);
 export type CodeBootstrap = typeof CodeBootstrap.Type;
 
@@ -1405,6 +1415,7 @@ export const CodeNavigation = Schema.Struct({
   threads: Schema.Array(CodeThread),
   activity: Schema.optionalWith(Schema.Array(CodeThreadActivity), { default: () => [] }),
   runtime: Schema.optionalWith(Schema.Array(CodeNavigationRuntime), { default: () => [] }),
+  plannerThreadIds: CodePlannerThreadIds,
 }).annotations(strict);
 export type CodeNavigation = typeof CodeNavigation.Type;
 

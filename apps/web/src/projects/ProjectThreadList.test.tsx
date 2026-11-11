@@ -1341,3 +1341,201 @@ describe("ProjectThreadRows display properties", () => {
     expect(onOpenPullRequest).toHaveBeenCalledWith(expect.objectContaining({ number: 12 }));
   });
 });
+
+describe("coordinator threads in a thread row's menu", () => {
+  async function openMenu(title: RegExp) {
+    await userEvent.pointer({
+      target: screen.getByRole("button", { name: title }),
+      keys: "[MouseRight]",
+    });
+  }
+
+  it("offers Make coordinator on an ordinary thread and Stop coordinating on a coordinator", async () => {
+    const onSetCoordinator = vi.fn();
+    const { rerender } = render(
+      <ProjectThreadRows
+        actions={{ onSetCoordinator }}
+        onSelectThread={vi.fn()}
+        threads={[thread]}
+      />,
+    );
+    await openMenu(/Controller foundation/);
+    expect(screen.queryByRole("menuitem", { name: "Stop coordinating" })).toBeNull();
+    await userEvent.click(await screen.findByRole("menuitem", { name: "Make coordinator" }));
+    expect(onSetCoordinator).toHaveBeenCalledWith("thread-one", true);
+
+    rerender(
+      <ProjectThreadRows
+        actions={{ onSetCoordinator }}
+        onSelectThread={vi.fn()}
+        threads={[{ ...thread, coordinator: true }]}
+      />,
+    );
+    await openMenu(/Controller foundation/);
+    await userEvent.click(await screen.findByRole("menuitem", { name: "Stop coordinating" }));
+    expect(onSetCoordinator).toHaveBeenLastCalledWith("thread-one", false);
+  });
+
+  it("turns Wake when a message arrives on and off from its checked state", async () => {
+    const onSetMessageWake = vi.fn();
+    const { rerender } = render(
+      <ProjectThreadRows
+        actions={{ onSetMessageWake }}
+        onSelectThread={vi.fn()}
+        threads={[thread]}
+      />,
+    );
+    await openMenu(/Controller foundation/);
+    const off = await screen.findByRole("menuitemcheckbox", {
+      name: "Wake when a message arrives",
+    });
+    expect(off).toHaveAttribute("aria-checked", "false");
+    await userEvent.click(off);
+    expect(onSetMessageWake).toHaveBeenCalledWith("thread-one", true);
+
+    rerender(
+      <ProjectThreadRows
+        actions={{ onSetMessageWake }}
+        onSelectThread={vi.fn()}
+        threads={[{ ...thread, messageWake: true }]}
+      />,
+    );
+    await openMenu(/Controller foundation/);
+    const on = await screen.findByRole("menuitemcheckbox", { name: "Wake when a message arrives" });
+    expect(on).toHaveAttribute("aria-checked", "true");
+    await userEvent.click(on);
+    expect(onSetMessageWake).toHaveBeenLastCalledWith("thread-one", false);
+  });
+
+  it("offers a worker Wake for coordinator in place of the coordinator role", async () => {
+    const onSetCoordinator = vi.fn();
+    const onSetCoordinatorWake = vi.fn();
+    const worker = { ...thread, coordinatorThreadId: "coordinator-one" };
+    const { rerender } = render(
+      <ProjectThreadRows
+        actions={{ onSetCoordinator, onSetCoordinatorWake }}
+        onSelectThread={vi.fn()}
+        threads={[worker]}
+      />,
+    );
+    await openMenu(/Controller foundation/);
+    expect(screen.queryByRole("menuitem", { name: "Make coordinator" })).toBeNull();
+    const wake = await screen.findByRole("menuitemcheckbox", { name: "Wake for coordinator" });
+    expect(wake).toHaveAttribute("aria-checked", "true");
+    await userEvent.click(wake);
+    expect(onSetCoordinatorWake).toHaveBeenCalledWith("thread-one", false);
+
+    rerender(
+      <ProjectThreadRows
+        actions={{ onSetCoordinator, onSetCoordinatorWake }}
+        onSelectThread={vi.fn()}
+        threads={[{ ...worker, coordinatorWakeOff: true }]}
+      />,
+    );
+    await openMenu(/Controller foundation/);
+    expect(
+      await screen.findByRole("menuitemcheckbox", { name: "Wake for coordinator" }),
+    ).toHaveAttribute("aria-checked", "false");
+  });
+
+  it("offers no coordinator role item on the designated planner, whose role follows its designation", async () => {
+    render(
+      <ProjectThreadRows
+        actions={{ onSetCoordinator: vi.fn(), onSetMessageWake: vi.fn() }}
+        onSelectThread={vi.fn()}
+        threads={[{ ...thread, coordinator: true, planner: true }]}
+      />,
+    );
+    await openMenu(/Controller foundation/);
+    await screen.findByRole("menuitemcheckbox", { name: "Wake when a message arrives" });
+    expect(screen.queryByRole("menuitem", { name: "Stop coordinating" })).toBeNull();
+    expect(screen.queryByRole("menuitem", { name: "Make coordinator" })).toBeNull();
+  });
+
+  it("never offers Wake for coordinator on a thread that no coordinator started", async () => {
+    render(
+      <ProjectThreadRows
+        actions={{ onSetCoordinator: vi.fn(), onSetCoordinatorWake: vi.fn() }}
+        onSelectThread={vi.fn()}
+        threads={[thread]}
+      />,
+    );
+    await openMenu(/Controller foundation/);
+    await screen.findByRole("menuitem", { name: "Make coordinator" });
+    expect(screen.queryByRole("menuitemcheckbox", { name: "Wake for coordinator" })).toBeNull();
+  });
+});
+
+describe("coordinators in a Project's thread list", () => {
+  const coordinator = { threadId: "coordinator", title: "Backlog", coordinator: true };
+  const working = {
+    threadId: "worker-working",
+    title: "Fix the flaky test",
+    coordinatorThreadId: "coordinator",
+    activity: "working" as const,
+  };
+  const asking = {
+    threadId: "worker-asking",
+    title: "Bump the parser",
+    coordinatorThreadId: "coordinator",
+    activity: "attention" as const,
+  };
+  const ordinary = { threadId: "ordinary", title: "Write the docs" };
+  const orphan = { threadId: "orphan", title: "Old worker", coordinatorThreadId: "gone" };
+
+  function renderList() {
+    return render(
+      <ProjectThreadList
+        groupCoordinators
+        onSelectThread={vi.fn()}
+        threads={[ordinary, working, coordinator, asking, orphan]}
+      />,
+    );
+  }
+
+  it("lists coordinators first with their workers beneath them and only there", () => {
+    sessionStorage.clear();
+    renderList();
+    const section = screen.getByRole("group", { name: "Coordinators" });
+    const ids = (root: ParentNode) =>
+      [...root.querySelectorAll<HTMLElement>("[data-thread-id]")].map(
+        (row) => row.dataset.threadId,
+      );
+    expect(ids(section)).toEqual(["coordinator", "worker-working", "worker-asking"]);
+    // A worker appears once; one whose coordinator is not listed stays an
+    // ordinary row rather than disappearing.
+    expect(ids(document)).toEqual([
+      "coordinator",
+      "worker-working",
+      "worker-asking",
+      "ordinary",
+      "orphan",
+    ]);
+    expect(
+      within(section).getByRole("img", { name: "Coordinator" }).closest("[data-thread-id]"),
+    ).toHaveAttribute("data-thread-id", "coordinator");
+  });
+
+  it("folds a coordinator's workers, reports what they are doing, and remembers the fold", async () => {
+    sessionStorage.clear();
+    const { unmount } = renderList();
+    const fold = screen.getByRole("button", { name: "Hide workers of Backlog" });
+    expect(fold).toHaveAttribute("aria-expanded", "true");
+    await userEvent.click(fold);
+
+    expect(screen.getByRole("button", { name: "Show workers of Backlog" })).toHaveAttribute(
+      "aria-expanded",
+      "false",
+    );
+    expect(screen.queryByRole("button", { name: /Fix the flaky test/ })).toBeNull();
+    expect(
+      screen.getByRole("img", { name: "Backlog: 1 needs attention, 1 working" }),
+    ).toBeVisible();
+
+    unmount();
+    renderList();
+    expect(screen.getByRole("button", { name: "Show workers of Backlog" })).toBeVisible();
+    expect(screen.queryByRole("button", { name: /Bump the parser/ })).toBeNull();
+    sessionStorage.clear();
+  });
+});

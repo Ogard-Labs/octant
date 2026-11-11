@@ -1854,7 +1854,7 @@ html[data-octant-native-host="true"]
   border-radius: var(--oct-radius-md);
 }
 
-.thread-row-context-menu [role="menuitem"] {
+.thread-row-context-menu :is([role="menuitem"], [role="menuitemcheckbox"]) {
   min-height: 26px;
   gap: var(--oct-space-2);
   padding: var(--oct-space-1) var(--oct-space-2);

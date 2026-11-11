@@ -1,5 +1,11 @@
 import type { ConversationInputPolicy } from "@octant/contracts/conversation-inputs";
-import type { SideChatDraftReturnReference, CodeReviewFindingReference } from "@octant/contracts";
+import type {
+  CodeReviewFindingReference,
+  CoordinatorOpenWorkerLimit,
+  CoordinatorStartingByProject,
+  CoordinatorStartingChoice,
+  SideChatDraftReturnReference,
+} from "@octant/contracts";
 import type { ExtensionSelection } from "@octant/contracts/extensions";
 import type { ProjectId } from "@octant/contracts/projects";
 import type { AutoReviewer, ShieldModelChoice } from "@octant/contracts/shield";
@@ -112,6 +118,9 @@ import {
   pinCodeThread,
   renameCodeThread,
   reopenCodeThread,
+  setCodeThreadCoordinator,
+  setCodeThreadCoordinatorWake,
+  setCodeThreadMessageWake,
   snoozeCodeThread,
   wakeCodeThread,
 } from "./codeThreadCommands";
@@ -186,6 +195,20 @@ export interface CodeThreadNavigationItem {
    * started on its own.
    */
   readonly lineageParentThreadId?: string;
+  /** Present on a coordinator thread (docs/design/coordinator-threads.md). */
+  readonly coordinator?: true;
+  /**
+   * The thread is its Project's designated planner, which reads as a
+   * coordinator whose starts always need approval. Its role follows the
+   * designation, so Make coordinator and Stop coordinating are not offered.
+   */
+  readonly planner?: true;
+  /** The coordinator that started this worker; the host records it at creation. */
+  readonly coordinatorThreadId?: CodeThreadId;
+  /** The thread's Wake when a message arrives switch is on. */
+  readonly messageWake?: true;
+  /** A person turned off this worker's Wake for coordinator. */
+  readonly coordinatorWakeOff?: true;
 }
 
 /**
@@ -270,6 +293,14 @@ export interface CodeThreadUsage {
 }
 
 const EMPTY_THREAD_USAGE: CodeThreadUsage = { limits: [] };
+
+/** A navigation read's planner list replaces the bootstrap's; an older host's absent list clears it. */
+function withNavigationPlanners(current: CodeBootstrap, next: CodeNavigation): CodeBootstrap {
+  const { plannerThreadIds: _previous, ...rest } = current;
+  return next.plannerThreadIds === undefined
+    ? rest
+    : { ...rest, plannerThreadIds: next.plannerThreadIds };
+}
 
 /**
  * The usage object already held while a re-read changed none of its figures,
@@ -827,11 +858,12 @@ export function useCodeController(options: CodeControllerOptions) {
           !(
             samePollingData(currentBootstrap.threads, next.threads) &&
             samePollingData(currentBootstrap.activity, next.activity) &&
-            samePollingData(currentBootstrap.runtime, next.runtime)
+            samePollingData(currentBootstrap.runtime, next.runtime) &&
+            samePollingData(currentBootstrap.plannerThreadIds, next.plannerThreadIds)
           )
         ) {
           bootstrapRef.current = {
-            ...currentBootstrap,
+            ...withNavigationPlanners(currentBootstrap, next),
             threads: next.threads,
             activity: next.activity,
             runtime: next.runtime,
@@ -843,12 +875,13 @@ export function useCodeController(options: CodeControllerOptions) {
         if (
           samePollingData(current.threads, next.threads) &&
           samePollingData(current.activity, next.activity) &&
-          samePollingData(current.runtime, next.runtime)
+          samePollingData(current.runtime, next.runtime) &&
+          samePollingData(current.plannerThreadIds, next.plannerThreadIds)
         ) {
           return current;
         }
         return {
-          ...current,
+          ...withNavigationPlanners(current, next),
           threads: next.threads,
           activity: next.activity,
           runtime: next.runtime,
@@ -2007,6 +2040,10 @@ export function useCodeController(options: CodeControllerOptions) {
   // transcript itself records what it renders, through `markRenderedActivity`
   // and `recordSeenActivity`.
   observedActivity.current = activityByThread;
+  const plannerThreadIds = useMemo(
+    () => new Set((bootstrap?.plannerThreadIds ?? []).map(String)),
+    [bootstrap],
+  );
 
   const navigation = useMemo(
     (): ReadonlyArray<CodeThreadNavigationItem> =>
@@ -2014,6 +2051,10 @@ export function useCodeController(options: CodeControllerOptions) {
         .filter((thread) => thread.lifecycle !== "archived")
         .map((thread) => {
           const runtime = runtimeByThread.get(String(thread.id));
+          // The designated planner reads as a coordinator whose starts need
+          // approval; a worker never does (docs/design/coordinator-threads.md).
+          const planner =
+            thread.coordinatorThreadId === undefined && plannerThreadIds.has(String(thread.id));
           return {
             executionPolicy: thread.executionPolicy,
             lifecycle: thread.lifecycle,
@@ -2042,6 +2083,13 @@ export function useCodeController(options: CodeControllerOptions) {
             ...(thread.forkedFrom === undefined
               ? {}
               : { lineageParentThreadId: String(thread.forkedFrom.threadId) }),
+            ...(thread.coordinator === true || planner ? { coordinator: true as const } : {}),
+            ...(planner ? { planner: true as const } : {}),
+            ...(thread.coordinatorThreadId === undefined
+              ? {}
+              : { coordinatorThreadId: thread.coordinatorThreadId }),
+            ...(thread.messageWake === true ? { messageWake: true as const } : {}),
+            ...(thread.coordinatorWakeOff === true ? { coordinatorWakeOff: true as const } : {}),
             updatedAt: thread.updatedAt,
           };
         })
@@ -2049,7 +2097,15 @@ export function useCodeController(options: CodeControllerOptions) {
         // Sorting the whole list by recency instead would move a pinned thread
         // the moment anything else ran, which is the opposite of pinning it.
         .sort((left, right) => Number(right.pinned ?? false) - Number(left.pinned ?? false)),
-    [activityByThread, bootstrap, followUps, markedUnreadThreads, readCursors, runtimeByThread],
+    [
+      activityByThread,
+      bootstrap,
+      followUps,
+      markedUnreadThreads,
+      plannerThreadIds,
+      readCursors,
+      runtimeByThread,
+    ],
   );
 
   // Only the thread in view streams, so the list is re-read on a timer to keep
@@ -2490,6 +2546,24 @@ export function useCodeController(options: CodeControllerOptions) {
       restCommand(threadId, (thread) => moveCodeThread(thread, projectId)),
     [restCommand],
   );
+  // The coordinator role and both wake switches are a person's choice from a
+  // local window; the host refuses the rest (a worker, a fifth coordinator)
+  // and the refusal comes back in its words, like a rest command's.
+  const setThreadCoordinator = useCallback(
+    (threadId: CodeThreadId, coordinator: boolean) =>
+      restCommand(threadId, (thread) => setCodeThreadCoordinator(thread, coordinator)),
+    [restCommand],
+  );
+  const setThreadMessageWake = useCallback(
+    (threadId: CodeThreadId, wake: boolean) =>
+      restCommand(threadId, (thread) => setCodeThreadMessageWake(thread, wake)),
+    [restCommand],
+  );
+  const setThreadCoordinatorWake = useCallback(
+    (threadId: CodeThreadId, wake: boolean) =>
+      restCommand(threadId, (thread) => setCodeThreadCoordinatorWake(thread, wake)),
+    [restCommand],
+  );
 
   /**
    * Hand a finished thread one more turn without opening it. The host starts
@@ -2597,6 +2671,9 @@ export function useCodeController(options: CodeControllerOptions) {
       readonly defaultAutoApprove?: boolean;
       readonly autoReviewer?: AutoReviewer;
       readonly shieldModel?: ShieldModelChoice | null;
+      readonly coordinatorStarting?: CoordinatorStartingChoice;
+      readonly coordinatorStartingByProject?: CoordinatorStartingByProject;
+      readonly coordinatorOpenWorkerLimit?: CoordinatorOpenWorkerLimit;
     }): Promise<boolean> => {
       if (bootstrap === undefined) return false;
       const result = await execute({
@@ -3192,6 +3269,9 @@ export function useCodeController(options: CodeControllerOptions) {
     markDraftStagedDropped: composerDraft.markStagedDropped,
     purgeThreadDraft: composerDraft.purge,
     pinThread,
+    setThreadCoordinator,
+    setThreadCoordinatorWake,
+    setThreadMessageWake,
     rebindThreadCheckout,
     renameThread,
     providerRequests,

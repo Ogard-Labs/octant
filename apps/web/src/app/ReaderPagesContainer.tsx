@@ -22,6 +22,7 @@ import type { useShellController } from "../shell/useShellController";
 import { WorkspaceRailLayers, type WorkspaceRailLayersProps } from "../shell/WorkspaceRailLayers";
 import type { useWorkThreadNavigation } from "../work/useWorkThreadNavigation";
 import type { CodeController } from "../code/useCodeController";
+import { codeBoardCoordinators, coordinatorTitleByWorker } from "../code/codeBoardGrouping";
 import type { createLaunchedShellClients } from "./createLaunchedShellClients";
 import type { ShellActions } from "./shellActions";
 
@@ -220,6 +221,11 @@ export const ReaderPagesContainer = memo(function ReaderPagesContainer(
     [chatClient, codeClient, workRequestClient, workTurnClient],
   );
 
+  // A worker's row names its coordinator, read from the window's thread list.
+  const workerCoordinatorTitles = useMemo(
+    () => coordinatorTitleByWorker(codeNavigationRows),
+    [codeNavigationRows],
+  );
   // The Inbox answers the decisions finished turns asked with the same
   // reader and send clients as the Needs you card; a remote window has none.
   const inboxDecisions = useMemo<InboxDecisionSource | undefined>(
@@ -228,6 +234,7 @@ export const ReaderPagesContainer = memo(function ReaderPagesContainer(
         ? undefined
         : {
             answerClients,
+            coordinatorTitles: workerCoordinatorTitles,
             feedRevision: navigationRevision,
             modes: DECISION_MODES,
             now,
@@ -248,6 +255,7 @@ export const ReaderPagesContainer = memo(function ReaderPagesContainer(
       answerClients,
       navigationRevision,
       now,
+      workerCoordinatorTitles,
       pendingRequestClient,
       projectNames,
       settings,
@@ -500,6 +508,7 @@ export const ReaderPagesContainer = memo(function ReaderPagesContainer(
         }}
         {...(selectedProjectPullRequestKey === undefined ? {} : { selectedProjectPullRequestKey })}
         onCloseWorkBoard={() => actions.setWorkBoardOpen(false)}
+        codeBoardCoordinators={codeBoardCoordinators(codeNavigationRows)}
         unreadThreadIds={
           new Set(
             (activeMode === "work" ? workNavigationRows : codeNavigationRows)

@@ -22,12 +22,14 @@ import {
   hydrateWorkThreadProjectionFromJournal,
 } from "../work/workThreadProjection";
 import { createOwnerPostureHost } from "./ownerPostureHost";
+import { createOwnerThreadWakeHost } from "./ownerThreadWakeHost";
 import {
   AppendEventsRequest,
   decodeCodeThread,
   decodeProject,
   decodeCodeCheckoutIdentity,
   decodeOwnerPosture,
+  decodeOwnerThreadWake,
   decodeWorkThread,
   ReplayCursor,
 } from "@octant/contracts";
@@ -1256,6 +1258,260 @@ describe("owner posture routes with the production Code and Project services", (
           });
         }),
       ).pipe(Effect.provide(makePersistenceLive({ dataDirectory: join(a.directory, "postures") }))),
+    );
+  });
+});
+
+describe("owner routes for a Code thread's wake switches", () => {
+  it("sets a wake switch only under a fresh unlock against the current thread, journaled as the owner device", async () => {
+    const { network, a, b, asPhone, openSession, unlock, phone } = await startWorld();
+    await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const persistence = yield* Persistence;
+          yield* Effect.promise(async () => {
+            const projectId = "51000000-0000-4000-8000-000000000001";
+            const revision = "51000000-0000-4000-8000-000000000002";
+            const coordinatorId = "51000000-0000-4000-8000-000000000003";
+            const workerId = "51000000-0000-4000-8000-000000000004";
+            const timestamp = new Date().toISOString();
+            const project = decodeProject({
+              id: projectId,
+              type: "code",
+              name: "Owner repository",
+              lifecycle: "active",
+              pinned: false,
+              rank: "0/1",
+              version: 1,
+              createdAt: timestamp,
+              updatedAt: timestamp,
+              binding: { canonicalRoot: "/owner-repository" },
+              codeAccessPersistence: "current-session",
+              bindingHistory: [
+                {
+                  revisionId: revision,
+                  revision: 1,
+                  currentBinding: { canonicalRoot: "/owner-repository" },
+                  actor: { kind: "local-user", actorId: projectId },
+                  changedAt: timestamp,
+                },
+              ],
+            });
+            const thread = (id: string, title: string, extra: object) =>
+              decodeCodeThread({
+                id,
+                projectId,
+                bindingRevisionId: revision,
+                repositoryId: `repo_${"a".repeat(64)}`,
+                checkoutId: "51000000-0000-4000-8000-000000000005",
+                title,
+                lifecycle: "active",
+                providerInstanceId: projectId,
+                modelId: "fixture",
+                executionPolicy: "approval-gated",
+                permissionPersistence: "current-session",
+                version: 1,
+                createdAt: timestamp,
+                updatedAt: timestamp,
+                deliveryTarget: {
+                  branchIntent: "feature/owner",
+                  remoteName: "origin",
+                  proposedBaseRepository: "octant/octant",
+                  proposedBaseBranch: "main",
+                  outcomeKind: "opened-pr",
+                  confirmedAt: timestamp,
+                },
+                ...extra,
+              });
+            const seed = (
+              aggregateType: string,
+              aggregateId: string,
+              eventName: string,
+              payload: unknown,
+            ) =>
+              persistence.journal.append(
+                Schema.decodeUnknownSync(AppendEventsRequest)({
+                  aggregate: { aggregateType, aggregateId },
+                  expectedVersion: 0,
+                  events: [
+                    {
+                      eventId: randomUUID(),
+                      eventName,
+                      eventVersion: 1,
+                      hostId: "local",
+                      correlationId: randomUUID(),
+                      actor: { kind: "system", actorId: projectId },
+                      occurredAt: timestamp,
+                      payload,
+                    },
+                  ],
+                }),
+              );
+            seed("project", projectId, "project.created@1", { project });
+            for (const created of [
+              thread(coordinatorId, "Coordinator", { coordinator: true, messageWake: true }),
+              thread(workerId, "Worker", { coordinatorThreadId: coordinatorId }),
+            ])
+              seed("code-thread", String(created.id), "code.thread-created@1", {
+                kind: "thread-created",
+                thread: created,
+              });
+            const unavailable = async (): Promise<never> => {
+              throw new Error("A wake change must not use a window or a file port.");
+            };
+            const code = new CodeService({
+              persistence,
+              access: { canBrowseProject: () => false, canAccessProject: () => false },
+              checkouts: { observe: unavailable },
+              roots: { resolve: unavailable },
+              files: { open: unavailable, save: unavailable },
+              tests: { discover: async () => [] },
+              content: new CodeContentStore(),
+              uuid: randomUUID,
+              clock: () => new Date().toISOString(),
+              workingDirectories: { resolve: unavailable },
+              onWorkingDirectoryChanged: unavailable,
+            });
+            const host = createOwnerThreadWakeHost({
+              readCodeThread: persistence.readCodeThread,
+              readProject: persistence.readProject,
+              code,
+            });
+            vi.spyOn(a.threadWakes, "read").mockImplementation(host.read);
+            vi.spyOn(a.threadWakes, "change").mockImplementation(host.change);
+            const read = async (threadId: string) => {
+              const answered = await asPhone(
+                a,
+                HUB_OWNER_ROUTES.threadWakeRead,
+                { threadId },
+                { unlock },
+              );
+              expect(answered.status).toBe(200);
+              return decodeOwnerThreadWake((answered.json as { wake: unknown }).wake);
+            };
+            const stored = (threadId: string) =>
+              persistence.readCodeThread(decodeThreadId(threadId));
+            const worker = await read(workerId);
+            expect(worker).toMatchObject({ messageWake: false, coordinatorWake: true });
+            expect((await read(coordinatorId)).coordinatorWake).toBeUndefined();
+            const request = {
+              threadId: workerId,
+              expectedVersion: worker.version,
+              switch: "message-wake",
+              wake: true,
+            };
+
+            // An open administration session, an unlock that went stale, no
+            // unlock, a member that is no owner, and a request to change the
+            // coordinator role all leave the thread as it was.
+            const session = await openSession(a);
+            expect(
+              (await asPhone(a, HUB_OWNER_ROUTES.threadWakeChange, request, { session })).json,
+            ).toEqual({ status: "refused", kind: "own-unlock-required" });
+            expect(
+              (
+                await asPhone(a, HUB_OWNER_ROUTES.threadWakeChange, request, {
+                  unlock: { ...unlock, delayMs: 61_000 },
+                })
+              ).status,
+            ).not.toBe(200);
+            a.clock.offset = 0;
+            expect((await asPhone(a, HUB_OWNER_ROUTES.threadWakeChange, request)).json).toEqual({
+              status: "refused",
+              kind: "unlock-required",
+            });
+            expect(
+              (
+                await ownerCall({
+                  device: b,
+                  network,
+                  target: a,
+                  route: HUB_OWNER_ROUTES.threadWakeChange,
+                  body: request,
+                  unlock,
+                })
+              ).json,
+            ).toEqual({ status: "refused", kind: "not-an-owner" });
+            for (const role of [
+              { ...request, switch: "coordinator" },
+              { ...request, coordinator: true },
+            ])
+              expect(
+                (await asPhone(a, HUB_OWNER_ROUTES.threadWakeChange, role, { unlock })).json,
+              ).toEqual({ status: "refused", kind: "invalid" });
+            expect(stored(workerId)?.version).toBe(1);
+            expect(stored(workerId)?.messageWake).toBeUndefined();
+            expect(changes(a, "owner-thread-wake-changed")).toEqual([]);
+
+            const changed = await asPhone(a, HUB_OWNER_ROUTES.threadWakeChange, request, {
+              unlock,
+            });
+            expect(changed.status).toBe(200);
+            expect(changed.json).toMatchObject({
+              status: "changed",
+              wake: { messageWake: true, coordinatorWake: true },
+            });
+            expect(stored(workerId)).toMatchObject({
+              messageWake: true,
+              coordinatorThreadId: coordinatorId,
+              version: 2,
+            });
+            expect(
+              (await asPhone(a, HUB_OWNER_ROUTES.threadWakeChange, request, { unlock })).json,
+            ).toEqual({ status: "refused", kind: "wake-stale" });
+
+            const current = await read(workerId);
+            expect(
+              (
+                await asPhone(
+                  a,
+                  HUB_OWNER_ROUTES.threadWakeChange,
+                  {
+                    threadId: workerId,
+                    expectedVersion: current.version,
+                    switch: "coordinator-wake",
+                    wake: false,
+                  },
+                  { unlock },
+                )
+              ).status,
+            ).toBe(200);
+            expect(stored(workerId)).toMatchObject({ messageWake: true, coordinatorWakeOff: true });
+            const coordinator = await read(coordinatorId);
+            expect(
+              (
+                await asPhone(
+                  a,
+                  HUB_OWNER_ROUTES.threadWakeChange,
+                  {
+                    threadId: coordinatorId,
+                    expectedVersion: coordinator.version,
+                    switch: "coordinator-wake",
+                    wake: false,
+                  },
+                  { unlock },
+                )
+              ).json,
+            ).toEqual({ status: "refused", kind: "not-a-worker" });
+            expect(stored(coordinatorId)).toMatchObject({ coordinator: true, version: 1 });
+
+            const ownerEvents = persistence.journal
+              .replay(Schema.decodeUnknownSync(ReplayCursor)({ afterSequence: 0, limit: 100 }))
+              .filter((event) => event.actor.kind === "owner-unlock");
+            expect(ownerEvents).toHaveLength(2);
+            expect(
+              ownerEvents.every(
+                (event) =>
+                  event.actor.kind === "owner-unlock" && event.actor.memberId === phone.hostId,
+              ),
+            ).toBe(true);
+            expect(changes(a, "owner-thread-wake-changed")).toHaveLength(2);
+            expect(changes(a, "owner-thread-wake-changed")[0]?.actingPrincipal.kind).toBe(
+              "owner-unlock",
+            );
+          });
+        }),
+      ).pipe(Effect.provide(makePersistenceLive({ dataDirectory: join(a.directory, "wakes") }))),
     );
   });
 });

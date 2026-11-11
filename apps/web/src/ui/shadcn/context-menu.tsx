@@ -1,5 +1,5 @@
 import { ContextMenu as ContextMenuPrimitive } from "@base-ui/react/context-menu";
-import { ChevronRight } from "lucide-react";
+import { Check, ChevronRight } from "lucide-react";
 import type { ComponentProps } from "react";
 import { cn } from "./utils";
 
@@ -68,6 +68,26 @@ export function ContextMenuItem({
       closeOnClick={closeOnClick}
       {...props}
     />
+  );
+}
+
+export function ContextMenuCheckboxItem({
+  className,
+  children,
+  closeOnClick = true,
+  ...props
+}: ComponentProps<typeof ContextMenuPrimitive.CheckboxItem>) {
+  return (
+    <ContextMenuPrimitive.CheckboxItem
+      className={cn(contextMenuItemClassName, className)}
+      closeOnClick={closeOnClick}
+      {...props}
+    >
+      {children}
+      <ContextMenuPrimitive.CheckboxItemIndicator className="ml-auto pl-2 text-foreground">
+        <Check aria-hidden="true" size={14} strokeWidth={1.8} />
+      </ContextMenuPrimitive.CheckboxItemIndicator>
+    </ContextMenuPrimitive.CheckboxItem>
   );
 }
 

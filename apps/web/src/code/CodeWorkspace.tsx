@@ -26,7 +26,7 @@ import {
 } from "@octant/domain";
 import { FolderGit2, LoaderCircle } from "lucide-react";
 import { documentIsVisible } from "../polling/documentVisibility";
-import { lazy, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { lazy, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { ShellState } from "../shell/ShellState";
 import { useTabActivatedThisSession } from "../shell/TabActivation";
 import {
@@ -195,6 +195,8 @@ export interface CodeWorkspaceProps {
    * Starts a new Code thread in the same Project — the recovery when the
    * provider refuses to resume this thread's session.
    */
+  /** A coordinator thread's proposed workers, shown above its composer. */
+  readonly coordinatorProposals?: ReactNode;
   readonly onNewThreadInProject?: (
     projectId: import("@octant/contracts/projects").ProjectId,
   ) => void;
@@ -276,6 +278,9 @@ export function CodeWorkspace(props: CodeWorkspaceProps) {
         {...(props.onNewThreadInProject === undefined
           ? {}
           : { onNewThreadInProject: props.onNewThreadInProject })}
+        {...(props.coordinatorProposals === undefined
+          ? {}
+          : { coordinatorProposals: props.coordinatorProposals })}
         {...(props.approvals?.updateAnchor === undefined
           ? {}
           : { updateApprovalAnchor: props.approvals.updateAnchor })}
