@@ -62,7 +62,6 @@ import { useComposerThreadDropRegistration } from "../../chat/composerThreadDrop
 import { TrackerReferenceComposerHints } from "../../tracker/TrackerReferenceComposerHints";
 import type { MentionableThreadId } from "@octant/contracts";
 import { WorkKindSwitch } from "../../shell/WorkKindSwitch";
-import { OctantAlert } from "../../ui/base/OctantAlert";
 
 export interface WorkComposerAdapterProps {
   /** Text to start the composer with; a new revision replaces the draft once. */
@@ -357,8 +356,56 @@ export function WorkComposerAdapter(props: WorkComposerAdapterProps) {
           <WelcomeHeading projectChosen={props.projectId !== undefined} />
         </div>
         <div className="composer-stack">
-          {folderDrops.notice}
           <ThreadComposer
+            notices={[
+              ...(folderDrops.notice === undefined ? [] : [folderDrops.notice]),
+              ...(images.message === undefined
+                ? []
+                : [{ key: "image", tone: "warning" as const, text: images.message }]),
+              ...(props.errorMessage !== undefined
+                ? [
+                    {
+                      key: "error",
+                      tone: "danger" as const,
+                      role: "alert" as const,
+                      text: props.errorMessage,
+                    },
+                  ]
+                : projectRequired && !hasFolder
+                  ? [
+                      {
+                        key: "project-required",
+                        tone: "danger" as const,
+                        role: "alert" as const,
+                        text: "Choose a Project to work in before sending. Work needs a confined folder.",
+                      },
+                    ]
+                  : []),
+              ...(props.creating
+                ? [
+                    {
+                      key: "first-turn",
+                      tone: "neutral" as const,
+                      role: "status" as const,
+                      text: props.pendingMessage ?? "Starting the first turn…",
+                      ...(props.onCancelFirstTurn === undefined
+                        ? {}
+                        : {
+                            action: (
+                              <OctantButton
+                                onClick={props.onCancelFirstTurn}
+                                size="sm"
+                                type="button"
+                                variant="ghost"
+                              >
+                                Cancel first turn
+                              </OctantButton>
+                            ),
+                          }),
+                    },
+                  ]
+                : []),
+            ]}
             {...(threadDropKey === undefined ? {} : { threadDropKey })}
             planUsage={{
               providerInstanceId:
@@ -412,7 +459,7 @@ export function WorkComposerAdapter(props: WorkComposerAdapterProps) {
                   onRemove={(threadId) => threadMentions.composer?.onRemoveChip(threadId)}
                 />
                 <TrackerReferenceComposerHints draft={prompt} />
-                <WorkImageAttachmentChips images={images} />
+                <WorkImageAttachmentChips images={images} withMessage={false} />
               </>
             }
             input={
@@ -539,33 +586,6 @@ export function WorkComposerAdapter(props: WorkComposerAdapterProps) {
         </div>
 
         {props.homeStart}
-
-        {props.errorMessage !== undefined ? (
-          <OctantAlert className="work-composer-adapter__error" tone="danger">
-            {props.errorMessage}
-          </OctantAlert>
-        ) : projectRequired && !hasFolder ? (
-          <OctantAlert className="work-composer-adapter__error" tone="danger">
-            Choose a Project to work in before sending. Work needs a confined folder.
-          </OctantAlert>
-        ) : null}
-        {props.creating ? (
-          <div>
-            <p aria-label="First-turn status" role="status">
-              {props.pendingMessage ?? "Starting the first turn…"}
-            </p>
-            {props.onCancelFirstTurn === undefined ? null : (
-              <OctantButton
-                onClick={props.onCancelFirstTurn}
-                size="sm"
-                type="button"
-                variant="ghost"
-              >
-                Cancel first turn
-              </OctantButton>
-            )}
-          </div>
-        ) : null}
       </div>
     </section>
   );

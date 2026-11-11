@@ -105,7 +105,7 @@ describe("dropped folder references", () => {
       });
       return (
         <>
-          {drops.notice}
+          {drops.notice?.text}
           <textarea
             aria-label="draft"
             ref={textarea}
@@ -130,6 +130,6 @@ describe("dropped folder references", () => {
     );
     await waitFor(() => expect(input).toHaveValue("new text @/project/日本語 folder/ "));
     expect(files).not.toHaveBeenCalled();
-    expect(screen.getByRole("status")).toHaveTextContent("contents were not read");
+    expect(screen.getByText(/contents were not read/)).toBeVisible();
   });
 });

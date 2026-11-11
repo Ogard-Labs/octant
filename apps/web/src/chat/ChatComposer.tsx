@@ -45,6 +45,7 @@ import { OctantSelectField } from "../ui/base/OctantSelect";
 import { OctantTextarea } from "../ui/base/OctantTextarea";
 import { ThreadComposer } from "../composer/ThreadComposer";
 import { ComposerVoiceButton } from "../voice/ComposerVoiceButton";
+import type { ComposerNoticeItem } from "../composer/ComposerNotice";
 import { appendTranscript } from "../voice/appendTranscript";
 import { ComposerModelPicker, isComposerReasoningOption } from "../providers/ComposerModelPicker";
 import { useOctantCommands } from "../palette/CommandRegistry";
@@ -193,6 +194,8 @@ export interface ChatComposerProps {
   readonly onResolveExtensionReference?: (draft: string) => Promise<boolean>;
   readonly sendDisabledReason?: string;
   readonly statusMessage?: string;
+  /** More for the notice card above the pill: the draft's own provenance. */
+  readonly notices?: ReadonlyArray<ComposerNoticeItem>;
   readonly stopDisabledReason?: string;
   /** The Create image action. Absent when the host serves no image generation. */
   readonly imageGeneration?: {
@@ -323,9 +326,9 @@ export function ChatComposer(props: ChatComposerProps) {
       ? {}
       : { mentionMessage: props.threadMentions.statusMessage }),
   });
-  // Persistent capability notices stay available to assistive technology but
-  // are visually hidden; only actionable state (errors, streaming) is loud.
-  const quietStatus = !status.loud;
+  // The full status text stays the prompt's description for assistive
+  // technology and is never drawn; only actionable state (errors, streaming)
+  // is a card above the pill, and announces itself there.
 
   // `.composer-input` sizes itself through `field-sizing: content` with the
   // system's 60–240px bounds; an inline height would override the stylesheet
@@ -919,15 +922,12 @@ export function ChatComposer(props: ChatComposerProps) {
       chips={chips}
       className={`thread-composer chat-composer thread-column${props.isSending ? " chat-composer--running" : ""}`}
       {...(props.threadDropKey === undefined ? {} : { threadDropKey: props.threadDropKey })}
-      footer={
+      notices={[...(props.notices ?? []), ...status.notices]}
+      description={
         <div
-          aria-live="polite"
-          className={`composer-status chat-composer__status${quietStatus ? " chat-composer__status--quiet" : ""}${
-            props.isSending && !quietStatus ? " chat-composer__status--live" : ""
-          }`}
+          className="chat-composer__status chat-composer__status--quiet"
           id={statusId}
-          role="status"
-          title={status.text}
+          {...(status.loud ? {} : { "aria-live": "polite", role: "status" })}
         >
           {status.text}
         </div>
@@ -981,39 +981,67 @@ function composeStatus(input: {
   readonly sendPending: boolean;
   readonly statusMessage?: string | undefined;
   readonly stopDisabledReason?: string | undefined;
-}): { readonly text: string; readonly loud: boolean } {
+}): {
+  readonly text: string;
+  readonly loud: boolean;
+  readonly notices: ReadonlyArray<ComposerNoticeItem>;
+} {
   // Quiet messages inform assistive technology without persistent visual
-  // noise; loud messages (failures, streaming state) must be visible.
+  // noise; loud messages (failures, streaming state) are cards above the pill.
   const quiet: string[] = [];
   const loud: string[] = [];
+  const notices: ComposerNoticeItem[] = [];
+  const say = (notice: ComposerNoticeItem & { readonly text: string }) => {
+    loud.push(notice.text);
+    notices.push(notice);
+  };
   if (input.attachment.kind === "unavailable") quiet.push(input.attachment.reason);
   // The image notice is only worth saying when attachments are otherwise
   // available; a provider that takes no attachments at all already said so.
   if (input.attachment.kind === "supported" && input.imageAttachment?.kind === "unavailable") {
     quiet.push(input.imageAttachment.reason);
   }
-  if (input.mentionMessage !== undefined) loud.push(input.mentionMessage);
+  if (input.mentionMessage !== undefined) {
+    say({ key: "mention", tone: "warning", role: "alert", text: input.mentionMessage });
+  }
   if (input.research.kind === "unavailable") {
-    loud.push(`Research unavailable: ${input.research.reason}`);
+    say({
+      key: "research",
+      tone: "warning",
+      role: "status",
+      text: `Research unavailable: ${input.research.reason}`,
+    });
   } else if (input.research.kind === "selected") {
     quiet.push(
       `Research uses ${input.research.backend === "searxng" ? "SearXNG" : "provider-native research"}.`,
     );
   }
-  if (input.statusMessage !== undefined) loud.push(input.statusMessage);
-  if (input.sendError !== undefined) loud.push(input.sendError);
+  if (input.statusMessage !== undefined) {
+    say({ key: "status", tone: "warning", role: "alert", text: input.statusMessage });
+  }
+  if (input.sendError !== undefined) {
+    say({ key: "send-error", tone: "danger", role: "alert", text: input.sendError });
+  }
   if (input.sendPending) {
-    loud.push("Sending message…");
+    say({ key: "sending", tone: "neutral", role: "status", text: "Sending message…" });
   } else if (input.isSending && input.stopDisabledReason !== undefined) {
-    loud.push(input.stopDisabledReason);
+    say({ key: "stop", tone: "warning", role: "status", text: input.stopDisabledReason });
   } else if (input.isSending) {
-    loud.push("Response is streaming. Submit to add a message to the host queue.");
+    say({
+      key: "streaming",
+      tone: "neutral",
+      role: "status",
+      text: "Response is streaming. Submit to add a message to the host queue.",
+    });
   } else if (input.sendDisabledReason !== undefined) {
     quiet.push(input.sendDisabledReason);
   }
-  const messages = [...new Set([...quiet, ...loud])];
+  // What is loud is a card above the pill and is not repeated in the
+  // description, so a reader never meets the same sentence twice.
+  const messages = [...new Set(quiet)];
   return {
-    text: messages.length > 0 ? messages.join(" ") : "Ready to send.",
+    text: messages.length > 0 ? messages.join(" ") : loud.length > 0 ? "" : "Ready to send.",
     loud: loud.length > 0,
+    notices,
   };
 }

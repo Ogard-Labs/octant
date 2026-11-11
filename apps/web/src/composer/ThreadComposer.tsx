@@ -1,9 +1,14 @@
 import { ComposerFollowUpSuggestions } from "../followUps/FollowUpSuggestionChips";
-import { useComposerNotice } from "./ComposerNotice";
+import {
+  ComposerNoticeSinkProvider,
+  useComposerNotice,
+  type ComposerNoticeItem,
+} from "./ComposerNotice";
+import { ComposerNoticeCard } from "./ComposerNoticeCard";
 import { useFrozenBar } from "./frozenBarScope";
 import { ComposerSubagents } from "./ComposerSubagents";
 import { ComposerOutsideContentNotice } from "./OutsideContentNotice";
-import { useId, type ReactNode } from "react";
+import { useCallback, useId, useState, type ReactNode } from "react";
 import { ArrowUp, Square } from "lucide-react";
 import { ComposerContextMeter } from "../context/ComposerContextMeter";
 import { useComposerCompacting } from "../context/composerContextMeterScope";
@@ -106,11 +111,11 @@ export interface ThreadComposerRow {
 
 /**
  * The one composer frame Chat, Work, and Code share. It owns the anatomy —
- * the `.composer` frame, and inside it the card (chips, then attach, the
- * block message label and send/stop on one line) with the `.composer-row` of
- * the surface's controls on the page under it — while every capability (chips,
- * typeaheads, pickers, status) is passed in by the surface and rendered only
- * when given. State, wiring, and the message control itself stay with the
+ * the `.composer` frame, and inside it the notice cards, the pill (chips, then
+ * attach, the block message label and send/stop on one line) and the
+ * `.composer-row` of the surface's controls on the page under it — while every
+ * capability (chips, typeaheads, pickers, notices) is passed in by the surface
+ * and rendered only when given. State, wiring, and the message control itself stay with the
  * surface: the component takes over markup, not behavior.
  */
 export interface ThreadComposerProps {
@@ -162,8 +167,17 @@ export interface ThreadComposerProps {
   /** Mention/command typeahead popovers anchored between input and row. */
   readonly typeahead?: ReactNode;
   readonly row: ThreadComposerRow;
-  /** Status line, context strip, or panels the surface shows under the row. */
-  readonly footer?: ReactNode;
+  /**
+   * What the surface has to say about its thread or about sending: a refusal,
+   * a failure, a status, a hint. They are drawn as cards directly above the
+   * pill, most severe first, never inside it.
+   */
+  readonly notices?: ReadonlyArray<ComposerNoticeItem>;
+  /**
+   * Text the prompt names as its description for assistive technology. It is
+   * visually hidden by the surface and adds nothing to the pill's height.
+   */
+  readonly description?: ReactNode;
   /**
    * When set, a sidebar thread dropped on this frame attaches a mention
    * instead of opening a pane. The key matches the registered composer.
@@ -194,21 +208,31 @@ export function ThreadComposer(props: ThreadComposerProps) {
 
 function ComposerSurface(props: ThreadComposerProps & { readonly held: boolean }) {
   const notice = useComposerNotice();
+  // A control inside the pill (the microphone) says its failure in the card
+  // too, where it wraps, instead of beside itself where it was cut to fit.
+  const [published, setPublished] = useState<ReadonlyMap<string, ComposerNoticeItem>>(new Map());
+  const publish = useCallback((item: ComposerNoticeItem | undefined, key: string) => {
+    setPublished((current) => {
+      if (item === undefined && !current.has(key)) return current;
+      const next = new Map(current);
+      if (item === undefined) next.delete(key);
+      else next.set(key, item);
+      return next;
+    });
+  }, []);
   // The host refuses a turn while the session compacts, so send waits too, and
   // says why under the row.
   const compacting = useComposerCompacting();
   const compactingNoteId = useId();
-  const compactingNote = compacting ? (
-    <p className="oct-meta thread-composer__compacting" data-compacting="" id={compactingNoteId}>
-      Compacting session
-    </p>
-  ) : null;
+  const compactingNotice: ComposerNoticeItem | undefined = compacting
+    ? { key: "compacting", tone: "neutral", id: compactingNoteId, text: "Compacting session" }
+    : undefined;
   const activeDropKey = useActiveComposerThreadDropKey();
   const dropKey = props.threadDropKey;
   const dropActive = dropKey !== undefined && activeDropKey === dropKey;
   const baseClassName = props.className === undefined ? "composer" : `composer ${props.className}`;
   const followUp = props.presentation === "follow-up";
-  const frameClassName = `${baseClassName} composer--carded${followUp ? " composer--follow-up" : ""}${notice == null || (!followUp && props.startContext !== undefined) ? "" : " composer--has-notice"}`;
+  const frameClassName = `${baseClassName} composer--carded${followUp ? " composer--follow-up" : ""}`;
   // Where a new thread runs and how much of the plan is left stand in the
   // tray above the card, so the card holds only the prompt. Inside the card
   // the row sat between the person and the prompt, and a control with more
@@ -231,6 +255,21 @@ function ComposerSurface(props: ThreadComposerProps & { readonly held: boolean }
         )}
       </div>
     );
+  // One group of cards directly above the pill, under the start row: what the
+  // thread did or what sending refused, then the Project offer and the
+  // outside-content mark.
+  const noticeCard = (
+    <ComposerNoticeCard
+      notices={[
+        ...(props.notices ?? []),
+        ...(compactingNotice === undefined ? [] : [compactingNotice]),
+        ...published.values(),
+      ]}
+    >
+      {notice}
+      {followUp ? <ComposerOutsideContentNotice busy={props.threadBusy === true} /> : null}
+    </ComposerNoticeCard>
+  );
   // The pill holds what acts on the message being written and nothing else:
   // attach, the prompt, the microphone and send. With the model, the access
   // level and the context ring in a toolbar inside it, it was a third taller
@@ -264,6 +303,7 @@ function ComposerSurface(props: ThreadComposerProps & { readonly held: boolean }
         />
       </div>
       {props.typeahead}
+      {props.description}
     </>
   );
   // Every child keeps its place whether or not the thread is held: only what
@@ -321,15 +361,11 @@ function ComposerSurface(props: ThreadComposerProps & { readonly held: boolean }
       {held ? null : <ComposerFollowUpSuggestions />}
       <div className={held ? "composer-frame composer-frame--held" : "composer-frame"}>
         {held ? null : startRow}
+        {held ? null : noticeCard}
         {held ? null : (
           <div className="thread-composer__surface">
-            {followUp ? <ComposerOutsideContentNotice busy={props.threadBusy === true} /> : null}
             {dropActive ? <ComposerThreadDropCue /> : null}
             {message}
-            <div className="thread-composer__feedback">
-              {compactingNote}
-              {props.footer}
-            </div>
           </div>
         )}
         {under}
@@ -347,7 +383,6 @@ function ComposerSurface(props: ThreadComposerProps & { readonly held: boolean }
           ? {}
           : { onFocusCapture: () => focusComposerThreadDrop(dropKey) })}
       >
-        {held || startRow !== null ? null : notice}
         {held ? null : <ComposerSubagents />}
         {body}
       </div>
@@ -361,23 +396,11 @@ function ComposerSurface(props: ThreadComposerProps & { readonly held: boolean }
           ? {}
           : { onFocusCapture: () => focusComposerThreadDrop(dropKey) })}
       >
-        {held || startRow !== null ? null : notice}
         {held ? null : <ComposerSubagents />}
         {body}
       </section>
     );
-  return startRow === null ? (
-    frame
-  ) : (
-    <>
-      {/* The notice rises from the card's top edge, where the row now stands,
-          so on a start screen it is anchored above the tray instead. */}
-      {notice == null ? null : (
-        <div className="composer-start-notice composer--has-notice">{notice}</div>
-      )}
-      {frame}
-    </>
-  );
+  return <ComposerNoticeSinkProvider set={publish}>{frame}</ComposerNoticeSinkProvider>;
 }
 
 function ComposerThreadDropCue() {

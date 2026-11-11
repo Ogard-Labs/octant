@@ -877,9 +877,12 @@ describe("DraftThreadWorkspace", () => {
         />,
       );
 
-      expect(screen.getByRole("status", { name: "First-turn status" })).toHaveTextContent(
-        "Checking the authoritative receipt",
-      );
+      // The first turn's status is a card above the pill, with its Cancel.
+      const status = screen.getByText("Checking the authoritative receipt…");
+      const card = status.closest(".composer-notices");
+      expect(card).not.toBeNull();
+      expect(card).toContainElement(screen.getByRole("button", { name: "Cancel first turn" }));
+      expect(card?.nextElementSibling).toHaveClass("thread-composer__surface");
       expect(screen.getByRole("textbox", { name: "First message" })).toHaveValue("Pending draft");
       await user.click(screen.getByRole("button", { name: "Cancel first turn" }));
       expect(onCancelFirstTurn).toHaveBeenCalledOnce();

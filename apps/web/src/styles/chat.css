@@ -3,7 +3,7 @@
  * chat vocabulary (`.thread-column`, `.transcript-scroll`, `.turn-user`/
  * `.bubble`, `.turn-time`, `.turn-agent`, `.approval-row`, `.composer`,
  * `.thread-composer`, `.composer-input`, `.composer-chips`, `.composer-row`,
- * `.composer-status`, `.chip`) from styles/octant.css; the welcome screen
+ * `.composer-notices`, `.chip`) from styles/octant.css; the welcome screen
  * rides the same composer vocabulary with hero-scale overrides. The reply
  * prose recipe (`.chat-rich-text`, `.code-block`) lives here and is shared
  * by every mode that renders a reply. What remains beyond that is either a
@@ -33,10 +33,6 @@
   flex-wrap: wrap;
   justify-content: center;
   gap: 8px;
-}
-
-.chat-welcome__retry {
-  align-self: center;
 }
 
 .chat-workspace__load-state {
@@ -727,8 +723,8 @@
 }
 
 /* The composer's frame, placement, focus state, input, chips row, bottom row,
-   status line, and send control are the system's (`.composer`,
-   `.thread-composer`, `.composer-status`); this block only pads the pieces
+   notice cards, and send control are the system's (`.composer`,
+   `.thread-composer`, `.composer-notices`); this block only pads the pieces
    the system does not know about. */
 .chat-composer {
   /* The frame owns the composer's ring and lift. Adding a shadow here drew a
@@ -737,40 +733,6 @@
   transition:
     background-color var(--oct-dur-base) var(--oct-ease-color),
     box-shadow var(--oct-dur-base) var(--oct-ease-color);
-}
-
-/* While a response is arriving the status is the only thing telling the user
-   the thread is alive, so it reads as a live strip with a marker rather than
-   a grey footnote under the box. The marker only pulses where motion is
-   welcome. */
-.chat-composer__status--live {
-  gap: var(--oct-space-2);
-  color: var(--oct-fg-2);
-}
-
-.chat-composer__status--live::before {
-  content: "";
-  width: 6px;
-  height: 6px;
-  flex: 0 0 6px;
-  border-radius: var(--oct-radius-pill);
-  background: var(--oct-accent);
-}
-
-@media (prefers-reduced-motion: no-preference) {
-  .chat-composer__status--live::before {
-    animation: chat-composer-live var(--oct-motion-pulse) ease-in-out infinite;
-  }
-}
-
-@keyframes chat-composer-live {
-  0%,
-  100% {
-    opacity: 1;
-  }
-  50% {
-    opacity: 0.35;
-  }
 }
 
 .chat-composer__status--quiet {

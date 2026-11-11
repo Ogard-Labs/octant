@@ -2,7 +2,7 @@ import { createFileMentionClient } from "@octant/client-runtime";
 import { decodeFileMentionRequestId, type FolderMentionScope } from "@octant/contracts";
 import { useEffect, useRef, useState, type DragEvent } from "react";
 import { getInjectedHostBridge, type OctantHostBridge } from "../shell/hostBridge";
-import { OctantAlert } from "../ui/base/OctantAlert";
+import type { ComposerNoticeItem } from "./ComposerNotice";
 
 export function insertFolderReferences(draft: string, caret: number, paths: ReadonlyArray<string>) {
   const references = [...new Set(paths)]
@@ -198,5 +198,12 @@ export function useDroppedFolderMentions(options: {
     })();
     return true;
   }
-  return { onDrop, notice: notice === undefined ? null : <OctantAlert>{notice}</OctantAlert> };
+  return {
+    onDrop,
+    /** For the composer's notice card: what the drop could not do. */
+    notice:
+      notice === undefined
+        ? undefined
+        : ({ key: "folder-drop", tone: "neutral", text: notice } satisfies ComposerNoticeItem),
+  };
 }

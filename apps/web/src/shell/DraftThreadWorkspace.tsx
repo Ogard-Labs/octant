@@ -118,7 +118,6 @@ import {
   useServerCodeProjects,
 } from "../projects/serverProjectEntries";
 import { WorkKindSwitch } from "./WorkKindSwitch";
-import { OctantAlert } from "../ui/base/OctantAlert";
 import {
   createTerminalSessionClient,
   type TerminalSessionClient,
@@ -1245,6 +1244,11 @@ export function DraftThreadWorkspace(props: DraftThreadWorkspaceProps) {
         <div className="draft-thread__composer composer-stack">
           {createFromControl}
           <ThreadComposer
+            notices={
+              props.errorMessage === undefined
+                ? []
+                : [{ key: "error", tone: "danger", role: "alert", text: props.errorMessage }]
+            }
             planUsage={{
               providerInstanceId:
                 props.selectedProviderInstanceId === undefined
@@ -1388,11 +1392,6 @@ export function DraftThreadWorkspace(props: DraftThreadWorkspaceProps) {
               },
             }}
           />
-          {props.errorMessage === undefined ? null : (
-            <OctantAlert className="draft-thread__error" tone="danger">
-              {props.errorMessage}
-            </OctantAlert>
-          )}
           <p className="draft-thread__hint">
             Press Enter to start · Shift+Enter for a new line · Escape to close
           </p>

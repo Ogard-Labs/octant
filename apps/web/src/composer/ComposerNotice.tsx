@@ -42,3 +42,68 @@ export function useComposerNotice(): ReactNode {
   useLayoutEffect(() => register?.(), [register]);
   return slot?.content;
 }
+
+/**
+ * One thing a composer has to say about its thread or about sending. The
+ * notice card above the pill draws it with the system's callout, so a surface
+ * hands over words, a tone and an action, never markup of its own.
+ */
+export interface ComposerNoticeItem {
+  readonly key: string;
+  /** `neutral` is a fact or a hint, `warning` needs a look, `danger` is a refusal or failure. */
+  readonly tone: "neutral" | "warning" | "danger";
+  /** A refusal is announced as an alert; the default follows the tone. */
+  readonly role?: "alert" | "status";
+  /** The element id, for a control that names this notice as its description. */
+  readonly id?: string;
+  readonly text: ReactNode;
+  readonly action?: ReactNode;
+}
+
+const SEVERITY: Record<ComposerNoticeItem["tone"], number> = { danger: 0, warning: 1, neutral: 2 };
+
+/** Most severe first; notices of one tone keep the order the surface gave. */
+export function bySeverity(
+  notices: ReadonlyArray<ComposerNoticeItem>,
+): ReadonlyArray<ComposerNoticeItem> {
+  return notices
+    .map((notice, index) => ({ notice, index }))
+    .sort((a, b) => SEVERITY[a.notice.tone] - SEVERITY[b.notice.tone] || a.index - b.index)
+    .map(({ notice }) => notice);
+}
+
+interface ComposerNoticeSink {
+  readonly set: (item: ComposerNoticeItem | undefined, key: string) => void;
+}
+const SinkContext = createContext<ComposerNoticeSink | undefined>(undefined);
+
+/**
+ * Lets a control inside the pill (the microphone) say a failure in the notice
+ * card instead of beside itself, where a long message was cut to fit. Absent
+ * outside a thread composer, so the control keeps saying it where it stands.
+ */
+export function ComposerNoticeSinkProvider(props: {
+  readonly set: ComposerNoticeSink["set"];
+  readonly children: ReactNode;
+}) {
+  const value = useMemo(() => ({ set: props.set }), [props.set]);
+  return <SinkContext.Provider value={value}>{props.children}</SinkContext.Provider>;
+}
+
+/**
+ * Publishes `item` to the composer's notice card while it is defined and
+ * reports whether a card took it (false: the caller draws it itself).
+ */
+export function useComposerNoticeSink(key: string, item: ComposerNoticeItem | undefined): boolean {
+  const sink = useContext(SinkContext);
+  const set = sink?.set;
+  // The item is rebuilt on every render; its words are what identify it.
+  const signature =
+    item === undefined ? undefined : `${item.tone}:${item.role ?? ""}:${String(item.text)}`;
+  useLayoutEffect(() => {
+    if (set === undefined) return undefined;
+    set(item, key);
+    return () => set(undefined, key);
+  }, [set, key, signature]);
+  return sink !== undefined;
+}

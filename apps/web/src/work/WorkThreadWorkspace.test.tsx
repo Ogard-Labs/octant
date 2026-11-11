@@ -2912,10 +2912,12 @@ describe("WorkThreadWorkspace", () => {
     fireEvent.paste(screen.getByLabelText("Work prompt"), {
       clipboardData: { files: [file], items: [] },
     });
-    const attached = await screen.findByLabelText("Attached images");
-    expect(attached).toHaveTextContent(
+    // The refusal is a card above the pill, not a line among the chips.
+    const refusal = await screen.findByText(
       "The selected model does not accept images. Choose an image-capable model.",
     );
+    expect(refusal.closest(".composer-notices")).not.toBeNull();
+    expect(screen.queryByLabelText("Attached images")).toBeNull();
     expect(screen.queryByAltText("pasted.png")).not.toBeInTheDocument();
   });
 

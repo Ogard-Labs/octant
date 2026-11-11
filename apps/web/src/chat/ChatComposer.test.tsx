@@ -184,9 +184,13 @@ describe("ChatComposer", () => {
 
     await user.click(screen.getByRole("button", { name: "Send message" }));
 
-    expect(await screen.findByRole("status")).toHaveTextContent(
+    // A refusal is an alert in a card above the pill, never a line inside it.
+    const refusal = await screen.findByRole("alert");
+    expect(refusal).toHaveTextContent(
       "Message could not be sent. Your draft is still here; try again.",
     );
+    expect(refusal.closest(".composer-notices")).not.toBeNull();
+    expect(document.querySelector(".thread-composer__surface")).not.toContainElement(refusal);
     expect(screen.getByLabelText("Message")).toHaveValue("Try this again");
   });
 
@@ -247,14 +251,26 @@ describe("ChatComposer", () => {
   it("marks a running turn on the composer so the streaming state is visible", () => {
     renderComposer({ isSending: true });
 
-    expect(screen.getByRole("status")).toHaveClass("chat-composer__status--live");
+    // The streaming status is a card above the pill; the pill holds no text of it.
+    const cards = document.querySelector(".composer-notices");
+    expect(cards).not.toBeEmptyDOMElement();
+    expect(document.querySelector(".thread-composer__surface")).not.toContainElement(
+      cards as HTMLElement,
+    );
     expect(document.querySelector(".chat-composer--running")).not.toBeNull();
   });
 
   it("keeps the composer quiet when no turn is running", () => {
     renderComposer({ isSending: false });
 
-    expect(screen.getByRole("status")).not.toHaveClass("chat-composer__status--live");
+    // Nothing to say: no card, and the pill's description stays for assistive technology.
+    expect(document.querySelector(".composer-notices")).toBeEmptyDOMElement();
+    expect(
+      document.querySelector(
+        "#" +
+          CSS.escape(document.querySelector("textarea")?.getAttribute("aria-describedby") ?? ""),
+      ),
+    ).not.toBeNull();
     expect(document.querySelector(".chat-composer--running")).toBeNull();
   });
 
@@ -291,10 +307,11 @@ describe("ChatComposer", () => {
 
     expect(screen.getByRole("button", { name: "Add attachment" })).toBeEnabled();
     await user.click(screen.getByRole("button", { name: "Add attachment" }));
-    expect(screen.getByRole("status")).not.toHaveClass("chat-composer__status--quiet");
-    expect(screen.getByRole("status")).toHaveTextContent(
+    // The refusal is an alert card above the pill.
+    expect(screen.getByRole("alert")).toHaveTextContent(
       "The selected model cannot accept attachments.",
     );
+    expect(screen.getByRole("alert").closest(".composer-notices")).not.toBeNull();
 
     const file = new File(["image"], "diagram.png", { type: "image/png" });
     await user.upload(screen.getByLabelText("Choose attachment file"), file);
@@ -307,9 +324,9 @@ describe("ChatComposer", () => {
       attachment: { kind: "unavailable", reason: "Attachments are unavailable." },
     });
     await user.click(screen.getByRole("button", { name: "Add attachment" }));
-    expect(screen.getByRole("status")).toHaveTextContent("Attachments are unavailable.");
+    expect(screen.getByRole("alert")).toHaveTextContent("Attachments are unavailable.");
     rerender(<ChatComposer {...props} attachment={{ kind: "supported" }} />);
-    expect(screen.getByRole("status")).not.toHaveTextContent("Attachments are unavailable.");
+    expect(screen.queryByRole("alert")).toBeNull();
   });
 
   it("forwards the selected File without reading or exposing a file path", async () => {

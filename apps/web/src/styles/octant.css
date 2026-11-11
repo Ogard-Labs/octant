@@ -4565,10 +4565,9 @@ input.switch:checked::after {
   /* Centres a 28px control on a one-line prompt (one line and 24px of inset). */
   margin-bottom: calc((1lh - 4px) / 2);
 }
-/* The microphone says a failure beside itself. In the pill that line gives
-   way before the prompt does: in a 300px pane a 28-character failure took
-   the cell at full width and left the prompt some 30px. The buttons keep
-   their size; only the words are cut. */
+/* The microphone's failure is said in the notice card above the pill, where it
+   wraps; beside the control it was cut to fit, and a cut failure is not read.
+   The buttons keep their size and the cell gives way before the prompt does. */
 .composer-field__actions {
   flex: 0 1 auto;
   min-width: 0;
@@ -4580,16 +4579,6 @@ input.switch:checked::after {
 .composer-field__actions .composer-voice {
   flex: 0 1 auto;
   min-width: 0;
-}
-.composer-field__actions .composer-voice__error {
-  flex: 0 1 auto;
-  min-width: 0;
-}
-/* While a failure is said, the prompt keeps room for a few words. The floor
-   holds only then: as a standing rule it pushed send out of a narrow pill
-   when Stop and Force stop stood beside it. */
-.composer-field:has(.composer-voice__error) > .composer-field__prompt {
-  min-width: 96px;
 }
 /* The controls stand where the prompt's gutter was, so the prompt keeps only
    a small inset beside them. */
@@ -4865,6 +4854,46 @@ input.switch:checked::after {
     var(--octant-shadow-md),
     inset 0 0 0 1px var(--oct-border);
 }
+/* The notice card: what the composer has to say about its thread or about
+   sending, as the system's callout directly above the pill, in the pill's
+   width. A tinted bar inside the pill fought its corner (a rounded bar in a
+   rounded pill, with thin uneven gaps), made the pill a tall lopsided shape and
+   read as part of what was being typed. The card has the callout's own corner,
+   a step down from the pill's, and each notice is a card of its own, most
+   severe first, so three notices stay three short rows. The frame's gap and
+   this margin make the 8px between the last card and the pill. */
+.composer-notices {
+  display: grid;
+  gap: var(--oct-space-1);
+  min-width: 0;
+  margin-bottom: var(--oct-space-1);
+}
+.composer-notices:empty {
+  display: none;
+}
+/* The words wrap and the action takes the trailing edge; in a narrow
+   composer it drops under the words instead of crowding them. */
+.callout.composer-notice {
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: var(--oct-space-1) var(--oct-space-3);
+  padding: var(--oct-space-3) var(--oct-space-4);
+  font-size: var(--oct-text-detail);
+}
+/* The mark sits on the first line's axis, however many lines follow. */
+.callout.composer-notice > svg {
+  margin-top: calc((1lh - 16px) / 2);
+}
+.callout.composer-notice > .callout__body {
+  flex: 1 1 200px;
+}
+.callout.composer-notice > .callout__actions {
+  display: flex;
+  align-self: center;
+  flex-wrap: wrap;
+  gap: var(--oct-space-1);
+  margin-inline-start: auto;
+}
 /* While the empty composer shows the reply's suggested next message, a quiet
    key cap at its top-right says that Tab takes it. The prompt keeps clear of
    the cap. */
@@ -4888,39 +4917,11 @@ input.switch:checked::after {
   line-height: 18px;
   pointer-events: none;
 }
-.thread-composer__feedback {
-  position: relative;
-  display: flex;
-  align-items: center;
-  min-height: 0;
-  min-width: 0;
-  /* Room under the line: without it a notice's descenders sat on the pill's
-     bottom edge. The inset is the prompt's, clear of the pill's round corner. */
-  padding: 0 var(--oct-composer-gutter) var(--oct-space-2);
-  overflow: auto;
-}
 /* With the microphone beside send, the Tab cap keeps clear of both. */
 .thread-composer__surface:has(.composer-voice):has(
   .composer-input[data-suggested="true"]:placeholder-shown
 )::after {
   right: calc(var(--oct-space-2) * 2 + var(--oct-space-1) + 56px);
-}
-.thread-composer__feedback:empty,
-.thread-composer__feedback:has(> .composer-status:empty):not(:has(> .thread-composer__compacting)) {
-  display: none;
-}
-.thread-composer__compacting {
-  flex: none;
-  margin: 0 12px 0 0;
-  white-space: nowrap;
-}
-.thread-composer__feedback > .composer-status {
-  flex: 1 0 auto;
-  flex-wrap: nowrap;
-  min-height: 0;
-  margin: 0;
-  padding: 0;
-  white-space: nowrap;
 }
 .thread-composer__context {
   display: flex;
@@ -5139,49 +5140,6 @@ input.switch:checked::after {
 }
 .thread-info__panel > .guardrail-level {
   margin: 0;
-}
-/* The quiet line under the composer's toolbar: the keyboard hint or a
-   receipt on the left, spend and limits on the right. One recipe replaces
-   the three footers Chat, Work, and Code drew under the same frame (and, in
-   Work, outside it). */
-.composer-status {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  justify-content: space-between;
-  gap: 2px 12px;
-  min-height: 18px;
-  margin: 0;
-  padding: 0 var(--oct-composer-gutter) var(--oct-space-3);
-  color: var(--oct-meta);
-  font-family: var(--oct-font-display);
-  font-size: var(--oct-text-xs);
-  line-height: 1.35;
-}
-/* Idle, the line holds nothing, so its box collapses and an idle Work or
-   Code frame is the height of Chat's. The live region stays mounted and
-   displayed: toggling `display` on a live region drops its first
-   announcement in some readers. */
-.composer-status:empty {
-  min-height: 0;
-  padding-bottom: 0;
-}
-.composer-status__hint {
-  min-width: 0;
-  flex: 1 1 auto;
-}
-/* The status strip is one scrolling line, but a notice is an instruction the
-   person must read in full before acting (a paused thread says what to do
-   next), so it wraps. In a half-width pane the unwrapped line ran past the
-   frame and its last half, the next step, was off screen. */
-.thread-composer__feedback > .composer-status:has(> .composer-status__notice) {
-  flex: 1 1 auto;
-  min-width: 0;
-}
-.composer-status__notice {
-  min-width: 0;
-  color: var(--oct-danger-fg);
-  white-space: normal;
 }
 /* an attachment, a mentioned file, a scoped folder */
 .chip {
@@ -6665,6 +6623,32 @@ html[data-octant-reduced-transparency="true"] .code-home__card {
       box-shadow:
         var(--octant-shadow-md),
         inset 0 0 0 1px var(--oct-glass-stroke);
+    }
+    /* The notice card above the pill is the same glass: an opaque callout
+       ground beside a translucent pill read as a block. A tone is its tint
+       laid over the thick glass, so the card keeps the callout's colours. */
+    html:not([data-octant-reduced-transparency="true"])
+      :is(.shell--app-backdrop, .shell--material-translucent)
+      .callout.composer-notice {
+      border-color: var(--oct-glass-stroke);
+      background-color: var(--oct-glass-floor);
+      background-image: linear-gradient(var(--oct-glass-thick), var(--oct-glass-thick));
+      backdrop-filter: blur(var(--oct-glass-blur-thick)) saturate(150%);
+      -webkit-backdrop-filter: blur(var(--oct-glass-blur-thick)) saturate(150%);
+    }
+    html:not([data-octant-reduced-transparency="true"])
+      :is(.shell--app-backdrop, .shell--material-translucent)
+      .callout.composer-notice[data-tone="warning"] {
+      background-image:
+        linear-gradient(var(--oct-warn-soft), var(--oct-warn-soft)),
+        linear-gradient(var(--oct-glass-thick), var(--oct-glass-thick));
+    }
+    html:not([data-octant-reduced-transparency="true"])
+      :is(.shell--app-backdrop, .shell--material-translucent)
+      .callout.composer-notice[data-tone="danger"] {
+      background-image:
+        linear-gradient(var(--oct-danger-soft), var(--oct-danger-soft)),
+        linear-gradient(var(--oct-glass-thick), var(--oct-glass-thick));
     }
     /* Under Window glass the pill takes the control tint in place of the
        floor, and keeps the blur and the stroke. The floor is the page colour

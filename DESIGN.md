@@ -821,8 +821,28 @@ send, then the pill's one solid control: the primary text colour as its fill,
 with the page colour on it. It is not the accent: a filled accent circle was
 the loudest thing on the page under an empty prompt. The microphone is in the
 pill because it writes into the prompt; in the line under it, it read as a
-fact about the thread. A notice about sending stays in the pill, under the
-prompt. How the
+fact about the thread. A notice is never in the pill. What the composer has to
+say about its thread or about sending (a refusal, a failure, a status, a hint,
+the mark that the thread read outside content with its Review action, the
+Project offer, a failed dictation) is the system's callout in a card directly
+above the pill, in the pill's width, and in its tone: the callout's own corner
+(12px, not the pill's 22px), 8px between the last card and the pill, the
+words wrapping and the action at the trailing edge, dropping under the words
+in a narrow composer. Each notice is a card of its own, the most severe first
+(a refusal or failure, then a warning, then a plain fact), so three notices are
+three short rows. A start screen's order from the top is the start row of
+chips, the notice cards, the pill, the line under it. A card is shown for as
+long as its notice applies, so what an agent may do and what a thread read are
+never less visible than they were in the pill; it takes no focus when it
+appears, and in tab order it comes before the prompt. A refusal is an alert and
+a status is a status. Over an application ground or under Window glass the card
+is the same glass as the pill with its tone laid over it, not the callout's
+opaque ground beside a translucent pill. A tinted bar inside the pill fought the
+pill's corners (a rounded bar in a rounded pill, with thin uneven gaps), made the
+pill a tall lopsided shape, and read as part of the message being typed; with
+the cards above it, the empty pill is 44px tall in every state, and the
+microphone's failure no longer has to be cut to fit beside it. The person's
+own attachments and the message queue are not notices and keep their place. How the
 thread runs is one quiet line under the pill, with no fill or edge
 of its own, in reading order: a thread's own context (Project, branch,
 checkout), the surface's row (image and access leading; the model and then
@@ -3357,7 +3377,7 @@ A new-task composer keeps its identity while its Project binding changes.
 Message text and local input state reset only for an explicit New task action.
 A refused binding keeps the prior authorized Project and draft. Cross-Project
 notices appear once beside the active draft composer, with a separate-window
-action when available, and reveal upward behind the message surface.
+action when available, as one of the composer's notice cards above the pill.
 Authority confirmations appear beside the owning composer in a trusted surface
 owned by the desktop main process;
 ordinary notice content cannot issue an approval receipt.

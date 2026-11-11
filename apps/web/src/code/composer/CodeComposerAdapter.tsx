@@ -101,7 +101,6 @@ import type { CodeCommand, CodeCommandResult, CodeWorktreeRef } from "@octant/co
 import type { OctantHostBridge } from "../../shell/hostBridge";
 import { boundsInsideViewport } from "../../browser/useNativeBrowserSurface";
 import { observeComposerPlacement } from "../codeWorkspaceApprovals";
-import { OctantAlert } from "../../ui/base/OctantAlert";
 
 export interface CodeComposerAdapterProps {
   readonly projectId?: ProjectId;
@@ -834,15 +833,74 @@ export function CodeComposerAdapter(props: CodeComposerAdapterProps) {
       <div className="welcome">
         <div className="welcome__heading">
           {props.heading ?? <WelcomeHeading projectChosen={props.projectId !== undefined} />}
-          {props.projectAvailable === false &&
-          props.projectId !== undefined &&
-          props.errorMessage === undefined ? (
-            <p role="status">The selected Project is unavailable. Choose another Project.</p>
-          ) : null}
         </div>
         <div className="composer-stack">
-          {folderDrops.notice}
           <ThreadComposer
+            notices={[
+              ...(folderDrops.notice === undefined ? [] : [folderDrops.notice]),
+              ...(images.message === undefined
+                ? []
+                : [{ key: "image", tone: "warning" as const, text: images.message }]),
+              ...(props.projectAvailable === false &&
+              props.projectId !== undefined &&
+              props.errorMessage === undefined
+                ? [
+                    {
+                      key: "project-unavailable",
+                      tone: "warning" as const,
+                      text: "The selected Project is unavailable. Choose another Project.",
+                    },
+                  ]
+                : []),
+              // A refusal answers the Send just pressed, so it is the card
+              // directly above the composer, not a line below the start screen.
+              ...(props.errorMessage !== undefined || sendNotice !== undefined
+                ? [
+                    {
+                      key: "error",
+                      tone: "danger" as const,
+                      role: "alert" as const,
+                      text: props.errorMessage ?? sendNotice ?? "",
+                    },
+                  ]
+                : []),
+              ...(props.createDisabledReason === undefined
+                ? []
+                : [
+                    {
+                      key: "create-disabled",
+                      tone: "neutral" as const,
+                      text: props.createDisabledReason,
+                    },
+                  ]),
+              ...(serverRefusal !== undefined && props.errorMessage === undefined
+                ? [{ key: "server-refusal", tone: "neutral" as const, text: serverRefusal }]
+                : []),
+              ...(props.creating
+                ? [
+                    {
+                      key: "first-turn",
+                      tone: "neutral" as const,
+                      role: "status" as const,
+                      text: props.pendingMessage ?? "Starting the first turn…",
+                      ...(props.onCancelFirstTurn === undefined
+                        ? {}
+                        : {
+                            action: (
+                              <OctantButton
+                                onClick={props.onCancelFirstTurn}
+                                size="sm"
+                                type="button"
+                                variant="ghost"
+                              >
+                                Cancel first turn
+                              </OctantButton>
+                            ),
+                          }),
+                    },
+                  ]
+                : []),
+            ]}
             {...(threadDropKey === undefined ? {} : { threadDropKey })}
             planUsage={{
               providerInstanceId:
@@ -903,7 +961,7 @@ export function CodeComposerAdapter(props: CodeComposerAdapterProps) {
                   onRemove={(threadId) => threadMentions.composer?.onRemoveChip(threadId)}
                 />
                 <TrackerReferenceComposerHints draft={prompt} />
-                <WorkImageAttachmentChips images={images} />
+                <WorkImageAttachmentChips images={images} withMessage={false} />
               </>
             }
             input={
@@ -1060,29 +1118,6 @@ export function CodeComposerAdapter(props: CodeComposerAdapterProps) {
           />
         </div>
 
-        {/* A refusal answers the Send just pressed, so it sits under the
-            composer rather than below the start screen's cards. */}
-        {props.errorMessage !== undefined ? (
-          <OctantAlert className="code-composer-adapter__error" tone="danger">
-            {props.errorMessage}
-          </OctantAlert>
-        ) : sendNotice !== undefined ? (
-          <OctantAlert className="code-composer-adapter__error" tone="danger">
-            {sendNotice}
-          </OctantAlert>
-        ) : null}
-        {props.createDisabledReason === undefined ? null : (
-          <p className="code-composer-adapter__notice" role="status">
-            {props.createDisabledReason}
-          </p>
-        )}
-
-        {serverRefusal !== undefined && props.errorMessage === undefined ? (
-          <p className="code-composer-adapter__notice" role="status">
-            {serverRefusal}
-          </p>
-        ) : null}
-
         {props.projectSetup}
 
         {/* Start from origin only decides where a new worktree branches from.
@@ -1135,23 +1170,6 @@ export function CodeComposerAdapter(props: CodeComposerAdapterProps) {
             a person most often came back to. */}
         {props.homeStart}
         {props.beneath}
-        {props.creating ? (
-          <div>
-            <p aria-label="First-turn status" role="status">
-              {props.pendingMessage ?? "Starting the first turn…"}
-            </p>
-            {props.onCancelFirstTurn === undefined ? null : (
-              <OctantButton
-                onClick={props.onCancelFirstTurn}
-                size="sm"
-                type="button"
-                variant="ghost"
-              >
-                Cancel first turn
-              </OctantButton>
-            )}
-          </div>
-        ) : null}
       </div>
     </section>
   );

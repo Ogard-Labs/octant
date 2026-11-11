@@ -90,7 +90,7 @@ export function OutsideContentNotice(props: OutsideContentThread & { readonly bu
               Review
             </OctantButton>
           }
-          className="outside-content-notice"
+          className="composer-notice outside-content-notice"
         >
           This thread has read outside content. Below Full access, some actions ask each time.
         </OctantAlert>

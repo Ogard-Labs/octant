@@ -126,7 +126,7 @@ describe("ThreadComposer", () => {
     expect(meters).toHaveTextContent("5h85%week43%");
   });
 
-  it("keeps follow-up feedback in the card and checkout context in the row under it", () => {
+  it("says a notice in a card above the pill and keeps the checkout context in the row under it", () => {
     const row = {
       actions: { kind: "send" as const, send: { ariaLabel: "Send", onSend: vi.fn() } },
     };
@@ -140,17 +140,24 @@ describe("ThreadComposer", () => {
         context={context}
         input={input}
         row={row}
-        footer={<span role="status">Usage notice</span>}
+        notices={[{ key: "usage", tone: "neutral", text: "Usage notice" }]}
       />,
     );
     const field = screen.getByRole("textbox", { name: "Message" });
     const surface = container.querySelector(".thread-composer__surface");
-    const feedback = container.querySelector(".thread-composer__feedback");
+    const cards = container.querySelector(".composer-notices");
     const under = container.querySelector(".composer-under");
     expect(surface).toContainElement(field);
-    expect(surface).toContainElement(feedback as HTMLElement);
-    // The line under the box holds the checkout context; the box itself holds
-    // only the message and what is said about sending it.
+    // The pill holds the message and nothing said about it: the notice is a
+    // card of its own, directly above the pill.
+    expect(surface).not.toContainElement(screen.getByText("Usage notice"));
+    expect(cards).toContainElement(screen.getByText("Usage notice"));
+    expect(cards?.nextElementSibling).toBe(surface);
+    expect(screen.getByText("Usage notice").closest(".callout")).toHaveAttribute(
+      "data-tone",
+      "neutral",
+    );
+    // The line under the pill holds the checkout context.
     expect(surface?.nextElementSibling).toBe(under);
     expect(under).toContainElement(container.querySelector(".thread-composer__context"));
     // The context is beside the surface's row, not in it: the row restyles
@@ -159,12 +166,68 @@ describe("ThreadComposer", () => {
       container.querySelector(".thread-composer__context"),
     );
     rerender(<ThreadComposer presentation="follow-up" context={context} input={input} row={row} />);
-    expect(container.querySelector(".thread-composer__feedback")).toBe(feedback);
+    expect(container.querySelector(".composer-notices")).toBe(cards);
+    expect(cards).toBeEmptyDOMElement();
     expect(screen.getByRole("textbox", { name: "Message" })).toBe(field);
     expect(field).toHaveValue("Keep my draft");
   });
 
-  it("offers the outside-content review inside a marked thread's composer and holds the clear while the thread is busy", async () => {
+  it("stacks several notices as separate cards, the most severe first, and announces a refusal as an alert", () => {
+    const { container } = render(
+      <ThreadComposer
+        input={<textarea aria-label="Message" className="composer-input" />}
+        row={{ actions: { kind: "send", send: { ariaLabel: "Send", onSend: vi.fn() } } }}
+        notices={[
+          { key: "hint", tone: "neutral", text: "A hint" },
+          { key: "warn", tone: "warning", text: "A warning" },
+          { key: "fail", tone: "danger", role: "alert", text: "A refusal" },
+        ]}
+      />,
+    );
+    const cards = [...(container.querySelector(".composer-notices")?.children ?? [])];
+    expect(cards.map((card) => card.textContent)).toEqual(["A refusal", "A warning", "A hint"]);
+    expect(cards.map((card) => card.getAttribute("data-tone"))).toEqual([
+      "danger",
+      "warning",
+      "neutral",
+    ]);
+    // A refusal and a warning are alerts, a plain fact is a status.
+    expect(screen.getAllByRole("alert").map((alert) => alert.textContent)).toEqual([
+      "A refusal",
+      "A warning",
+    ]);
+    expect(screen.getByRole("status")).toHaveTextContent("A hint");
+    expect(
+      container.querySelector(".thread-composer__surface")?.querySelector(".callout"),
+    ).toBeNull();
+  });
+
+  it("draws a notice's action at the card's trailing edge, after its words, and keeps the pill clear", async () => {
+    const onUndo = vi.fn();
+    const { container } = render(
+      <ThreadComposer
+        input={<textarea aria-label="Message" className="composer-input" />}
+        row={{ actions: { kind: "send", send: { ariaLabel: "Send", onSend: onUndo } } }}
+        notices={[
+          {
+            key: "restore",
+            tone: "neutral",
+            text: "Files were restored.",
+            action: <button type="button">Undo restore</button>,
+          },
+        ]}
+      />,
+    );
+    const card = container.querySelector(".composer-notices .callout");
+    expect(card?.lastElementChild).toHaveClass("callout__actions");
+    expect(card?.querySelector(".callout__body")).toHaveTextContent("Files were restored.");
+    expect(card).toContainElement(screen.getByRole("button", { name: "Undo restore" }));
+    expect(container.querySelector(".thread-composer__surface")).not.toContainElement(
+      screen.getByRole("button", { name: "Undo restore" }),
+    );
+  });
+
+  it("offers the outside-content review in a card above a marked thread's pill and holds the clear while the thread is busy", async () => {
     const threadId = "40000000-0000-4000-8000-000000000001";
     const marked = decodeThreadExternalContentState({
       threadId,
@@ -190,7 +253,12 @@ describe("ThreadComposer", () => {
     );
 
     const review = await screen.findByRole("button", { name: "Review" });
-    expect(container.querySelector(".thread-composer__surface")).toContainElement(review);
+    // The mark is a card above the pill, ahead of it in tab order, and the
+    // pill stays one line tall: nothing of it is inside.
+    const surface = container.querySelector(".thread-composer__surface");
+    expect(surface).not.toContainElement(review);
+    expect(container.querySelector(".composer-notices")).toContainElement(review);
+    expect(container.querySelector(".composer-notices")?.nextElementSibling).toBe(surface);
     await userEvent.setup().click(review);
     expect(await screen.findByRole("button", { name: "Clear the mark" })).toBeDisabled();
     await waitFor(() => expect(client.readExternalContent).toHaveBeenCalled());
@@ -210,17 +278,20 @@ describe("ThreadComposer", () => {
     // their markup — no empty rows or labels for capabilities it lacks.
     expect(container.querySelector("label")).toBeNull();
     expect(container.querySelector(".composer-field__attach")).toBeNull();
-    // The composer is its frame alone, and the frame holds the pill and the
+    // The composer is its frame alone, and the frame holds the notice cards
+    // (none here, so the group is empty and takes no room), the pill and the
     // line under it.
     expect(frame?.children).toHaveLength(1);
     const inner = frame?.children[0];
     expect(inner).toHaveClass("composer-frame");
-    expect(inner?.children).toHaveLength(2);
-    expect(inner?.children[0]).toBe(container.querySelector(".thread-composer__surface"));
-    expect(inner?.children[0]).toContainElement(screen.getByRole("textbox", { name: "Message" }));
-    expect(inner?.children[1]).toBe(container.querySelector(".composer-under"));
-    expect(inner?.children[1]?.children).toHaveLength(1);
-    expect(inner?.children[1]?.children[0]).toBe(container.querySelector(".composer-row"));
+    expect(inner?.children).toHaveLength(3);
+    expect(inner?.children[0]).toBe(container.querySelector(".composer-notices"));
+    expect(inner?.children[0]).toBeEmptyDOMElement();
+    expect(inner?.children[1]).toBe(container.querySelector(".thread-composer__surface"));
+    expect(inner?.children[1]).toContainElement(screen.getByRole("textbox", { name: "Message" }));
+    expect(inner?.children[2]).toBe(container.querySelector(".composer-under"));
+    expect(inner?.children[2]?.children).toHaveLength(1);
+    expect(inner?.children[2]?.children[0]).toBe(container.querySelector(".composer-row"));
   });
 
   it("keeps the message label a direct child of the prompt cell so the input stays full width", () => {

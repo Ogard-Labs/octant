@@ -171,14 +171,22 @@ export function ChatProjectOverview(props: ChatProjectOverviewProps) {
         <p className="chat-project-overview__scope">
           Starts an ordinary Chat thread in this Project.
         </p>
-        {!createAvailable ? (
-          <p role="status">Chat thread creation is unavailable for this Project.</p>
-        ) : null}
         <form noValidate onSubmit={(event) => void submit(event)}>
           <label className="sr-only" htmlFor={inputId}>
             Start a new Chat thread
           </label>
           <ThreadComposer
+            notices={
+              createAvailable
+                ? []
+                : [
+                    {
+                      key: "unavailable",
+                      tone: "neutral",
+                      text: "Chat thread creation is unavailable for this Project.",
+                    },
+                  ]
+            }
             input={
               <OctantTextarea
                 className="composer-input"

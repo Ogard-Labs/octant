@@ -688,9 +688,8 @@ describe("CodeThreadWorkspace", () => {
         threadId={threadId}
       />,
     );
-    // Idle, the status line says nothing and takes no height; the live
-    // region stays mounted so its first announcement is never dropped.
-    expect(container.querySelector(".composer-status")).toBeEmptyDOMElement();
+    // Idle, the notice cards say nothing and take no room.
+    expect(container.querySelector(".composer-notices")).toBeEmptyDOMElement();
   });
 
   it("offers earlier messages above a transcript that opened on its newest turns", () => {
@@ -1496,9 +1495,11 @@ describe("CodeThreadWorkspace", () => {
       ),
     );
     expect(screen.getByText("The restore was undone.")).toBeVisible();
-    // The message and the button are one live region; without a space between
-    // them a screen reader announces "undone.Undo restore" as a single word.
-    expect(screen.getByRole("status")).toHaveTextContent("The restore was undone. Undo restore");
+    // The message and its action are one card above the pill: the words, then
+    // the button at the trailing edge.
+    const card = screen.getByText("The restore was undone.").closest(".callout");
+    expect(card?.closest(".composer-notices")).not.toBeNull();
+    expect(within(card as HTMLElement).getByRole("button", { name: "Undo restore" })).toBeVisible();
   });
 
   it("keeps the Undo restore button when the host refuses an undo because another thread is writing", async () => {
@@ -2024,10 +2025,10 @@ describe("CodeThreadWorkspace", () => {
 
     pasteImage(screen.getByLabelText("Follow-up message"));
 
-    const attached = await screen.findByLabelText("Attached images");
-    expect(within(attached).getByRole("status")).toHaveTextContent(
+    const refusal = await screen.findByText(
       "Local OpenCode — Model One does not support images. Choose a vision model to attach one.",
     );
+    expect(refusal.closest(".composer-notices")).not.toBeNull();
     // Nothing is uploaded for a turn the host would refuse anyway.
     expect(putAttachment).not.toHaveBeenCalled();
   });
