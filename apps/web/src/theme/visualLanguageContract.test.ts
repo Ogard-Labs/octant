@@ -1163,6 +1163,25 @@ describe("the public-block visual language", () => {
       );
     });
 
+    it("draws a divider as a hairline that never keeps an accent line after a click", () => {
+      const rule = (selector: string) => body(selector);
+      expect(rule(".dock-tiles__divider::before")).toMatch(/background:\s*var\(--oct-border\)/);
+      const held = body(".dock-tiles__divider:hover::before,\n.dock-tiles__divider:active::before");
+      expect(held).toMatch(/--octant-border-strong/);
+      const dividerRules = dock.slice(
+        dock.indexOf(".dock-tiles__divider {"),
+        dock.indexOf(".dock-tiles__drag-shield"),
+      );
+      // Keyboard focus is the app's own outline, not a line of this rule's.
+      expect(dividerRules).not.toMatch(/accent/);
+      expect(dividerRules).not.toMatch(/focus-visible/);
+    });
+
+    it("gives every tile bar one height, so neighbouring tiles line up", () => {
+      expect(body(".dock-tile__bar")).toMatch(/height:\s*32px/);
+      expect(dock).not.toContain("dock-tile__caption");
+    });
+
     it("leaves a tile without a fill of its own, so a see-through theme shows through", () => {
       expect(body(".dock-tile")).not.toMatch(/background/);
       expect(body(".dock-tile > .right-utility-dock__tool")).not.toMatch(/background/);

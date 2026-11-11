@@ -195,6 +195,7 @@ describe("RightUtilityDock", () => {
                 layout,
                 narrow: false,
                 onHideTile: vi.fn(),
+                onMove: vi.fn(),
                 onOpenBeside: vi.fn(),
                 onResizeColumn: vi.fn(),
                 onResizeColumns: vi.fn(),

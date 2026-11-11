@@ -6,6 +6,7 @@ import {
   changeDisplayedUtilityState,
   closeUtilityTabState,
   hideUtilityTile,
+  moveUtilityTile,
   openThreadUtilityTab,
   openUtilityTabBesideState,
   openUtilityTabState,
@@ -357,6 +358,13 @@ describe("dock tool tiles", () => {
     state = showUtilityTabBeside(state, "files");
     state = selectUtilityTabState(state, "plan");
     return showUtilityTabBeside(state, "canvas");
+  }
+  /** Files and Plan stacked on the right, Canvas on the left; Plan focused. */
+  function twoColumnsForMoves() {
+    let state = opened("canvas", "files", "plan");
+    state = showUtilityTabBeside(selectUtilityTabState(state, "canvas"), "files");
+    state = selectUtilityTabState(state, "files");
+    return showUtilityTabBelow(state, "plan");
   }
   function sharesAddUp(state: ThreadUtilityDockState) {
     const columns = state.layout?.columns ?? [];
@@ -728,6 +736,67 @@ describe("dock tool tiles", () => {
       read({ tabs: ["files"], active: "files", lastBrowser: "files" }).lastBrowser,
     ).toBeUndefined();
     expect(read({ tabs: ["files"], active: "files", lastBrowser: 7 }).lastBrowser).toBeUndefined();
+  });
+
+  it("moves a tile up and down within its column, keeping each tile's share", () => {
+    let state = showUtilityTabBelow(opened("files", "canvas", "plan"), "files");
+    state = showUtilityTabBelow(selectUtilityTabState(state, "plan"), "canvas");
+    expect(columnsOf(state)).toEqual([["plan", "canvas", "files"]]);
+    expect(columnsOf(moveUtilityTile(state, "canvas", "up"))).toEqual([
+      ["canvas", "plan", "files"],
+    ]);
+    expect(columnsOf(moveUtilityTile(state, "canvas", "down"))).toEqual([
+      ["plan", "files", "canvas"],
+    ]);
+    expect(moveUtilityTile(state, "plan", "up")).toBe(state);
+    expect(moveUtilityTile(state, "files", "down")).toBe(state);
+  });
+
+  it("moves a tile to the other column, or makes the second column from a one-column layout", () => {
+    const two = showUtilityTabBelow(opened("files", "canvas"), "files");
+    expect(columnsOf(moveUtilityTile(two, "files", "right"))).toEqual([["canvas"], ["files"]]);
+    expect(columnsOf(moveUtilityTile(two, "files", "left"))).toEqual([["files"], ["canvas"]]);
+    sharesAddUp(moveUtilityTile(two, "files", "right"));
+    const sided = twoColumnsForMoves();
+    expect(columnsOf(moveUtilityTile(sided, "files", "left"))).toEqual([
+      ["files", "canvas"],
+      ["plan"],
+    ]);
+    expect(moveUtilityTile(sided, "plan", "right")).toBe(sided);
+    expect(moveUtilityTile(sided, "files", "up")).toBe(sided);
+  });
+
+  it("collapses to one column when the only tile of a column moves across", () => {
+    const sided = showUtilityTabBeside(opened("files", "canvas"), "files");
+    expect(columnsOf(sided)).toEqual([["canvas"], ["files"]]);
+    const moved = moveUtilityTile(sided, "files", "left");
+    expect(columnsOf(moved)).toEqual([["files", "canvas"]]);
+    expect(moved.layout?.columns).toHaveLength(1);
+    // A single tile in a one-column layout has nowhere to go sideways.
+    expect(
+      moveUtilityTile(hideUtilityTile(sided, "files"), "canvas", "right").layout,
+    ).toBeUndefined();
+  });
+
+  it("refuses a move into a full column, and moves the Browser tile like any other", () => {
+    let full = opened("ios-simulator", "canvas", "files", "plan");
+    full = showUtilityTabBelow(full, "files");
+    full = showUtilityTabBelow(full, "canvas");
+    full = showUtilityTabBeside(full, "ios-simulator");
+    expect(columnsOf(full)[0]).toHaveLength(3);
+    expect(columnsOf(full)[1]).toEqual(["ios-simulator"]);
+    // The right column holds one, the left three: a move left is refused.
+    expect(moveUtilityTile(full, "ios-simulator", "left")).toBe(full);
+    const pageId = "10000000-0000-4000-8000-000000000001";
+    const withBrowser = showUtilityTabBeside(
+      addUtilityTabState(opened("files"), "browser", pageId),
+      "files",
+    );
+    const moved = moveUtilityTile(withBrowser, pageId, "right");
+    // Its column had nothing else, so moving across joins the other and one column remains.
+    expect(columnsOf(moved)).toEqual([[pageId, "files"]]);
+    expect(moved.lastBrowser).toBe(pageId);
+    expect(columnsOf(moveUtilityTile(moved, pageId, "down"))).toEqual([["files", pageId]]);
   });
 
   it("counts the columns a state shows", () => {

@@ -863,7 +863,12 @@ Each tile resolves its own availability against the active pane, and the dock
 still never shows another pane's content. All Browser tabs are pages of one
 Browser tool and share one tile. The layout is window-local presentation in
 local storage: it grants nothing, starts nothing, and the bottom panel never
-has one. Columns stand side by side only when the tile area can give each 280px and
+has one. Each tile has one bar, the tool's own header (the Browser's bar is its page row),
+with an Arrange menu (Move left, right, up and down where the caps allow, Show
+alone, Hide from view) and Close at its trailing edge; the strip lists only the
+tools that are not shown. Stacked, a page showed four bars and named the tool
+three times. A divider is a hairline that shows a quiet strong role while hovered
+or held and keeps no accent line after a click. Columns stand side by side only when the tile area can give each 280px and
 otherwise stack. The thread keeps 440px beside two columns (560px beside one,
 from a 1100px window up), because at 560px two tools could never stand side by
 side in a 1440px window: with the sidebar open a second column widens the dock to

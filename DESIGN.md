@@ -2272,14 +2272,28 @@ testing an app in the simulator beside the page it served had to choose between
 them, so open tools can also be shown together as tiles, each one live, under
 the one tab strip. At most two columns of at most three tiles are shown; a
 request past either cap is refused, except that "beside" with two columns present
-puts the tool below in the last column. A tile is a region named for its tool,
-with a 26px caption bar (the tool's icon and name, as in the strip's tab recipe)
-and a **Hide <tool> from view** control that takes the tile out of view without closing the tool (the strip tab's own Hide control closes it). The
-focused tile (the one whose tab is selected) is told apart by its caption
+puts the tool below in the last column. A tile is a region named for its tool
+with **one bar**, the tool's own header, 32px high in every tile so neighbouring
+bars line up. Its leading edge names the tool once (the icon and name; for the
+Browser the bar is its row of pages, each with its close, and the new-page
+control, and with one page the page's title is the name) and its trailing edge
+holds the tile's controls: an **Arrange <tool>** menu button and a **Close
+<tool>** button that closes the tool as its strip tab's close does (every page
+for the Browser). Stacked, a page showed four bars (the strip, a "Browser"
+caption, the Browser's own page row and its toolbar) and named the tool three
+times, so the strip no longer repeats a shown tool and a tile has no caption
+over its bar. A tool alone has no bar of its own. The Arrange menu holds **Move
+left**, **Move right**, **Move up** and **Move down**, each present only when
+that move is possible within the caps (a one-column layout moved sideways makes the
+second column, and a column left empty goes), then **Show alone** and **Hide
+from view**; a move keeps every tool mounted and the native Browser page
+follows its tile. The focused tile (the one whose tab is selected) is told apart by its bar
 reading in the full ink, with no ring and no fill, so a see-through theme shows
 through every tile; the dock's own surface is the tiles' ground. Dividers
 between columns and between a column's tiles are hairline separators with a 7px
-hit area that resize by pointer drag or arrow keys (Home and End go to the ends
+hit area, a hairline at rest, in the quiet strong-divider role while hovered or
+held, and never an accent line after a click (only keyboard focus shows a mark,
+the app's own focus outline), that resize by pointer drag or arrow keys (Home and End go to the ends
 of the range the floors allow), each named for the two tools it sits between
 ("Resize Environment and Vitals") and reporting the range it can really reach; no tile
 is shorter than 140px or column narrower than 280px (the dock's own minimum
@@ -2302,17 +2316,17 @@ its own), and gives the tool a definite height to scroll within, so one tool's
 rows are never painted over the next tile. A tile resolves its own
 tool: one that cannot be described for the active pane says so inside its tile,
 never shows another pane's content, and leaves the other tiles on screen. The
-single-tool view is the same tile area with one caption-less tile, and tiles are
+single-tool view is the same tile area with one bar-less tile, and tiles are
 positioned children of one element, so a tool is never remounted when a
 neighbour joins or leaves, when it moves between columns, or when focus or a
 divider moves; only choosing another tool for a tile replaces it.
 
-In the strip, tabs that are shown in a tile read in the full ink and a shown tab
-that is not selected says "Shown" to assistive technology. A tab's context menu
-(right click or the menu key) offers **Show beside** and **Show below** for a
-tool that is not the focused tile, and **Show alone** and **Hide from view** for
-a tool that is shown while tiles exist; Shift+F10 opens the menu as the menu key
-does. A **Show another tool** button in the dock head, before Close, opens a
+With two or more tiles the strip lists only the open tools that are not
+shown, then Add tool and **Show another tool**; with every open tool shown it
+holds just those two controls, and with one tool shown it is the ordinary tab row.
+Its roving focus keeps working with fewer tabs, and choosing a hidden tab
+replaces the focused tile's tool. A hidden tab's context menu (right click, the
+menu key or Shift+F10) offers **Show beside** and **Show below**. A **Show another tool** button in the dock head, before Close, opens a
 menu of the same name that lists first the open tools that are not on screen and,
 after a separator, the other tools the thread can launch; it shows the choice
 with the focused tile in one step (opening it first when needed), beside it when

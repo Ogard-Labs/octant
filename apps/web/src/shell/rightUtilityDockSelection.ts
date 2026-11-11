@@ -274,6 +274,78 @@ export function hideUtilityTile(
   );
 }
 
+export type DockTileMove = "left" | "right" | "up" | "down";
+
+/**
+ * Moves a shown tile one step. Up and down swap it with its neighbour in the
+ * column; left and right take it to the other column, at the same row or the
+ * end of that column. A one-column layout sideways makes the second column,
+ * and a column left empty goes, so the layout can collapse to one column. A
+ * move the caps (two columns of three tiles) or the edges refuse returns the
+ * same state. The tool stays mounted: only its tile's place changes.
+ */
+export function moveUtilityTile(
+  state: ThreadUtilityDockState,
+  tabId: string,
+  direction: DockTileMove,
+): ThreadUtilityDockState {
+  const layout = state.layout;
+  if (layout === undefined) return state;
+  const columnIndex = layout.columns.findIndex((column) =>
+    column.tiles.some((tile) => tile.tabId === tabId),
+  );
+  const column = layout.columns[columnIndex];
+  if (column === undefined) return state;
+  const row = column.tiles.findIndex((tile) => tile.tabId === tabId);
+  const tile = column.tiles[row];
+  if (tile === undefined) return state;
+  const rebuilt = (columns: ReadonlyArray<DockTileColumn>) =>
+    settle(state.tabs, { columns }, state.active, undefined, state.lastBrowser);
+
+  if (direction === "up" || direction === "down") {
+    const other = row + (direction === "up" ? -1 : 1);
+    const neighbour = column.tiles[other];
+    if (neighbour === undefined) return state;
+    const tiles = column.tiles.map((candidate, index) =>
+      index === row ? neighbour : index === other ? tile : candidate,
+    );
+    return rebuilt(
+      layout.columns.map((candidate, index) =>
+        index === columnIndex ? { ...candidate, tiles } : candidate,
+      ),
+    );
+  }
+
+  const targetIndex = columnIndex + (direction === "left" ? -1 : 1);
+  const target = layout.columns[targetIndex];
+  if (target === undefined) {
+    // Past the last column: a new one, only from a column with something left.
+    if (layout.columns.length >= MAX_DOCK_TILE_COLUMNS || column.tiles.length < 2) return state;
+    const rest = column.tiles.filter((candidate) => candidate.tabId !== tabId);
+    const alone: DockTileColumn = {
+      share: 1 / (layout.columns.length + 1),
+      tiles: [{ tabId, share: 1 }],
+    };
+    const kept: DockTileColumn = { ...column, tiles: rest };
+    return rebuilt(direction === "left" ? [alone, kept] : [kept, alone]);
+  }
+  if (target.tiles.length >= MAX_DOCK_TILES_PER_COLUMN) return state;
+  const at = Math.min(row, target.tiles.length);
+  const count = target.tiles.length;
+  const scaled = target.tiles.map((candidate) => ({
+    ...candidate,
+    share: (candidate.share * count) / (count + 1),
+  }));
+  const joined = [...scaled.slice(0, at), { tabId, share: 1 / (count + 1) }, ...scaled.slice(at)];
+  const columns = layout.columns.flatMap((candidate, index) => {
+    if (index === targetIndex) return [{ ...candidate, tiles: joined }];
+    if (index !== columnIndex) return [candidate];
+    const tiles = candidate.tiles.filter((entry) => entry.tabId !== tabId);
+    return tiles.length === 0 ? [] : [{ ...candidate, tiles }];
+  });
+  return rebuilt(columns);
+}
+
 /** Sets the columns' fractions of the width, in column order. */
 export function resizeUtilityTileColumns(
   state: ThreadUtilityDockState,

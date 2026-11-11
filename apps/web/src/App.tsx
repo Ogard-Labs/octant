@@ -395,6 +395,7 @@ import {
   changeDisplayedUtilityState,
   closeUtilityTabState,
   hideUtilityTile,
+  moveUtilityTile,
   openThreadUtilityTab,
   openUtilityTabBesideState,
   openUtilityTabState,
@@ -411,6 +412,7 @@ import {
   threadUtilityDockState,
   threadUtilityDockKey,
   withoutTileLayout,
+  type DockTileMove,
   type ThreadUtilityDockKey,
   type ThreadUtilityDockState,
 } from "./shell/rightUtilityDockSelection";
@@ -4246,6 +4248,9 @@ function LaunchedShell(
   function hideDockTile(tabId: string) {
     changeDockTiles((state) => hideUtilityTile(state, tabId));
   }
+  function moveDockTile(tabId: string, direction: DockTileMove) {
+    changeDockTiles((state) => moveUtilityTile(state, tabId, direction));
+  }
   function resizeDockTileColumns(shares: ReadonlyArray<number>) {
     changeDockTiles((state) => resizeUtilityTileColumns(state, shares));
   }
@@ -5153,6 +5158,7 @@ function LaunchedShell(
       selectCodeThread,
       selectDockTab,
       hideDockTile,
+      moveDockTile,
       openDockTabBeside,
       resizeDockTileColumn,
       resizeDockTileColumns,
