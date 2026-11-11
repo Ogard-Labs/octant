@@ -2,6 +2,7 @@ import { useId, useRef, useState } from "react";
 import { Camera, FolderOpen, Plus } from "lucide-react";
 import { OctantButton, octantButtonClassName } from "../ui/base/OctantButton";
 import { OctantMenu } from "../ui/base/OctantMenu";
+import { OctantDialogPresence } from "../ui/base/OctantDialogPresence";
 import { WindowCaptureDialog, windowCaptureBridge } from "./WindowCaptureDialog";
 
 export interface ComposerAttachButtonProps {
@@ -91,16 +92,18 @@ export function ComposerAttachButton(props: ComposerAttachButtonProps) {
             triggerLabel="Add attachment"
             value=""
           />
-          {capturing ? (
-            <WindowCaptureDialog
-              bridge={capture}
-              onCaptured={(file) => {
-                if (canChoose()) props.onFileSelected(file);
-              }}
-              onClose={() => setCapturing(false)}
-              onNotice={props.onRefused}
-            />
-          ) : null}
+          <OctantDialogPresence>
+            {capturing ? (
+              <WindowCaptureDialog
+                bridge={capture}
+                onCaptured={(file) => {
+                  if (canChoose()) props.onFileSelected(file);
+                }}
+                onClose={() => setCapturing(false)}
+                onNotice={props.onRefused}
+              />
+            ) : null}
+          </OctantDialogPresence>
         </>
       )}
     </>

@@ -9,6 +9,7 @@ import { useSecretStoresClient } from "../settings/SecretStoresClientContext";
 import { OctantAlert } from "../ui/base/OctantAlert";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantDialog } from "../ui/base/OctantDialog";
+import { OctantDialogPresence } from "../ui/base/OctantDialogPresence";
 import { OctantInput } from "../ui/base/OctantInput";
 import { OctantToggleGroup, OctantToggleGroupItem } from "../ui/base/OctantToggleGroup";
 
@@ -79,17 +80,19 @@ export function McpClientSetupControl(props: Props) {
           {problem}
         </span>
       )}
-      {setup === undefined ? null : (
-        <McpClientSetupDialog
-          {...props}
-          onSaved={() => {
-            setProblem("Client setup saved.");
-            props.onSaved();
-          }}
-          onClose={() => setSetup(undefined)}
-          setup={setup}
-        />
-      )}
+      <OctantDialogPresence>
+        {setup === undefined ? null : (
+          <McpClientSetupDialog
+            {...props}
+            onSaved={() => {
+              setProblem("Client setup saved.");
+              props.onSaved();
+            }}
+            onClose={() => setSetup(undefined)}
+            setup={setup}
+          />
+        )}
+      </OctantDialogPresence>
     </>
   );
 }

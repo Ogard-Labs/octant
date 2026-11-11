@@ -15,6 +15,7 @@ import { GeneratedImageCard } from "./GeneratedImageCard";
 import { useImageJobChangeRevision } from "./ImageJobChangeRevision";
 import { ImageGenerationSheet } from "./ImageGenerationSheet";
 import type { ImageGenerationDraft } from "./ImageGenerationSheet";
+import { OctantDialogPresence } from "../ui/base/OctantDialogPresence";
 
 export interface GeneratedImageListProps {
   readonly client: ImageGenerationClient;
@@ -237,20 +238,22 @@ export function GeneratedImageJobs(
           )}
         </div>
       ))}
-      {revise === undefined ? null : (
-        <ImageGenerationSheet
-          onClose={() => setRevise(undefined)}
-          onSubmit={(draft) => void submitRevision(draft)}
-          open
-          parentArtifactRef={{
-            attachmentId: revise.artifact.attachmentId,
-            hash: revise.artifact.hash,
-            size: revise.artifact.size,
-            mime: revise.artifact.mime,
-          }}
-          profiles={props.profiles}
-        />
-      )}
+      <OctantDialogPresence>
+        {revise === undefined ? null : (
+          <ImageGenerationSheet
+            onClose={() => setRevise(undefined)}
+            onSubmit={(draft) => void submitRevision(draft)}
+            open
+            parentArtifactRef={{
+              attachmentId: revise.artifact.attachmentId,
+              hash: revise.artifact.hash,
+              size: revise.artifact.size,
+              mime: revise.artifact.mime,
+            }}
+            profiles={props.profiles}
+          />
+        )}
+      </OctantDialogPresence>
     </section>
   );
 }

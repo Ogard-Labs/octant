@@ -2839,10 +2839,30 @@ library closes at once, on a press of its trigger, does not fade over what the
 press opened. Under reduced motion, from the system or from the setting, there
 is no transition at all: an overlay is there or it is not. A recipe carries no
 arrival or departure classes of its own. A dialog that a feature renders only
-while it is open arrives the same way (`@starting-style`) and leaves at once,
-because a stylesheet cannot hold an element that is gone; a surface whose
-leaving should be seen stays mounted and is told when it is open, as Settings'
-sheet is.
+while it is open arrives the same way (`@starting-style`). A stylesheet cannot
+hold an element that is gone, so a surface leaves this way only while it stays
+mounted and is told it has closed. Settings' sheet and a dialog with an `open`
+of its own do that themselves, and such a dialog keeps `open` apart from what
+it shows: one whose words come from the state closing clears (a review, a
+comparison, Rewind) is rendered only while that state exists, like the rest.
+A dialog a feature renders only while it is
+open is wrapped in `OctantDialogPresence`, which keeps the last thing the
+feature rendered until the exit has finished and tells the dialog inside it
+has closed: a confirmation still names what it asked about after the feature
+has cleared that state, and the command palette keeps the rows it showed.
+Every confirmation, the command palette, the Code file search, the Navigator,
+the narrow dock, first run and the other dialogs a feature mounts on demand
+leave this way. Two cases still leave at once: a dialog whose owner goes with
+it (a row removed by the confirmation it showed), and one of two dialogs that
+share a presence when the other takes its place. In a window nobody can see
+there is no exit to show, so a dialog closed there is removed at once.
+
+A dialog that is leaving is only there to be seen. Its scrim and its controls
+take no press and no key (`inert`), so the page under it answers at once and a
+second press cannot repeat what the first did. Focus goes back to the opener
+as the exit starts, not when it ends, and when the exit ends focus is left
+where it is if the person, or a command they ran from the dialog, has moved it
+in the meantime.
 
 A press darkens a control's fill and moves nothing: no sink, no scale, on any
 control. Words in the chrome do not select when the pointer drags across them,

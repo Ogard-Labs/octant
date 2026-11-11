@@ -184,8 +184,6 @@ export function FirstRunOnboarding(props: FirstRunOnboardingProps) {
     panel.current?.scrollTo?.({ top: 0 });
   }, [step, handoffOpen]);
 
-  if (!controller.visible) return null;
-
   const steps = buildFirstRunSteps({
     current: step,
     hostPlatform,
@@ -341,7 +339,7 @@ export function FirstRunOnboarding(props: FirstRunOnboardingProps) {
       label="Welcome to Octant"
       labelledBy={titleId}
       onClose={skip}
-      open
+      open={controller.visible}
     >
       <div className="first-run__body">
         <nav aria-label="Setup steps" className="first-run__rail">
