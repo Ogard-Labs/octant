@@ -330,6 +330,7 @@ Status: Partly built. Since: 2026-10-31. Detail: [Architecture: Providers](../ar
 
 The first release is the technical preview for Apple-silicon Macs with the provider-neutral plugin and skill marketplace; signing, notarization and self-update ship as one deliverable, because an updater on an unsigned app is an unauthenticated code-delivery channel.
 
+- The first-install download is a disk image (`Octant-<version>-darwin-arm64.dmg`) beside the zip: app, Applications link and a committed Finder layout template, built with `hdiutil` and no Finder automation, signed and notarized exactly when the app is. The update feed keeps listing only the zip. Octant Nightly has no disk image. Owner: [architecture, Current Release Boundary](../architecture.md#current-release-boundary).
 - The first release counts as shipped when a maintainer approves the first stable version (a `vMAJOR.MINOR.PATCH` tag, approved in the `stable` environment); daily builds stay previews. That release is the Apple Silicon build, and Linux is not part of it.
 - A local package built without signing credentials a maintainer holds is unsigned.
 - macOS Swift helpers use explicit deployment targets independent of the compiler host ([packaging](../architecture.md#development-loop)).

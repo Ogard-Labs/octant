@@ -53,6 +53,7 @@ import { buildDesktopPeerStatus } from "./build-desktop-peer-status";
 import { buildDesktopPeerLinux } from "./build-desktop-peer-linux";
 import { buildKeychainHelper } from "./build-keychain-helper";
 import { buildWindowsNativeArtifacts } from "./build-windows-native-artifacts";
+import { buildDesktopDiskImage, diskImageFileName } from "./desktop-disk-image";
 import { prepareComputerUseDriver } from "./prepare-computer-use-driver";
 import { prepareManagedTools } from "./prepare-managed-tools";
 import {
@@ -2239,6 +2240,7 @@ if (import.meta.main) {
     if (outcome.kind === "signed") {
       console.log(`Packaged, signed, and notarized Apple Silicon app: ${packaged.artifactPath}`);
       console.log(`Release archive for the update feed: ${outcome.archivePath}`);
+      await packageDiskImage(repositoryRoot, packaged.artifactPath, outcome.kind === "signed");
     } else {
       // Said out loud rather than left to be discovered: this build cannot be
       // updated in place, because there is no signature for the platform updater
@@ -2247,6 +2249,7 @@ if (import.meta.main) {
       console.log(
         `Unsigned because ${outcome.missing.join(", ")} not set; it will not auto-update.`,
       );
+      await packageDiskImage(repositoryRoot, packaged.artifactPath, false);
     }
   } else if (packaged.target.platform === "win32") {
     console.log(`Packaged Windows QA archive: ${packaged.artifactPath}`);
@@ -2263,6 +2266,35 @@ if (import.meta.main) {
     }
     console.log(
       "In-app update replaces this image only after a signed feed and its hash verify, and only when it was launched from a writable path.",
+    );
+  }
+}
+
+/**
+ * The first-install disk image, built next to the zip once the app is final.
+ * It is not part of the update feed: the updater reads the zip.
+ */
+async function packageDiskImage(
+  repositoryRoot: string,
+  appPath: string,
+  signed: boolean,
+): Promise<void> {
+  const version = resolveReleaseVersion(process.env);
+  const identity = desktopIdentity(resolveDesktopPackageFlavor(process.env, version));
+  const resolution = resolveSigningCredentials(process.env);
+  const outcome = await buildDesktopDiskImage({
+    repositoryRoot,
+    appPath,
+    imagePath: join(dirname(appPath), diskImageFileName(identity.productName, version)),
+    credentials: signed && resolution.kind === "available" ? resolution.credentials : undefined,
+    run: (argv) => runCommand(argv),
+    runForOutput: (argv) => runCommandForOutput(argv),
+  });
+  if (outcome.kind === "skipped") {
+    console.log(`No disk image: ${outcome.reason}.`);
+  } else {
+    console.log(
+      `${outcome.signed ? "Signed and notarized" : "UNSIGNED"} disk image for first install: ${outcome.imagePath}`,
     );
   }
 }
