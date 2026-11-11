@@ -21,6 +21,7 @@ import { Surface, SurfaceHeader } from "../surface/SurfaceHeader";
 import { OctantButton, OctantIconButton } from "../ui/base/OctantButton";
 import { OctantCard } from "../ui/base/OctantCard";
 import { OctantTooltip } from "../ui/base/OctantTooltip";
+import { useMinuteTick } from "../polling/useMinuteTick";
 import { InboxPlanUsageRows, useInboxPlanUsage } from "./InboxPlanUsage";
 import { OctantToggleGroup, OctantToggleGroupItem } from "../ui/base/OctantToggleGroup";
 import {
@@ -218,12 +219,16 @@ export function InboxView(props: InboxViewProps) {
   const activeFilter = INBOX_FILTERS.find((entry) => entry.id === filter);
 
   const planUsage = useInboxPlanUsage();
+  // A page left open past midnight must change its date, in a remote window
+  // too, which has no decision source and so no app clock. The page keeps its
+  // own minute tick, cleared on unmount.
+  const today = useMinuteTick();
   const refreshing = github.kind === "refreshing" || linear.kind === "refreshing";
 
   return (
     <Surface ariaLabel="Inbox" className="inbox-page">
       <SurfaceHeader
-        detail={inboxStateSentence(counts.all, counts.urgent, decisions?.now ?? Date.now())}
+        detail={inboxStateSentence(counts.all, counts.urgent, today.getTime())}
         display
         onBack={props.onClose}
         title="Inbox"

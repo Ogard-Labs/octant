@@ -3387,7 +3387,6 @@ function LaunchedShell(
     () =>
       launchedClients.providerUsageLimitsClient === undefined ? undefined : (
         <RailUsageRings
-          client={launchedClients.providerUsageLimitsClient}
           instances={providerController.instances}
           onOpenUsage={() => void latestShellActions.current.openSettings({ section: "usage" })}
         />

@@ -1,8 +1,7 @@
 import { useMemo } from "react";
-import { usePlanUsageClient, usePlanUsageInstances } from "../usage/PlanUsageContext";
+import { usePlanUsageInstances, usePlanUsageReading } from "../usage/PlanUsageContext";
 import { PlanUsageMeters } from "../usage/PlanUsageMeters";
 import { railUsageReadings, resetPhrase, type RailUsageReading } from "../usage/railUsageReading";
-import { useProviderUsageSnapshot } from "../usage/useProviderUsageSnapshot";
 
 export interface InboxPlanUsageEntry {
   readonly name: string;
@@ -17,7 +16,7 @@ export interface InboxPlanUsageEntry {
  * nobody reported.
  */
 export function useInboxPlanUsage(): ReadonlyArray<InboxPlanUsageEntry> {
-  const { snapshot, now } = useProviderUsageSnapshot(usePlanUsageClient());
+  const { snapshot, now } = usePlanUsageReading();
   const instances = usePlanUsageInstances();
   return useMemo(() => {
     if (snapshot === undefined) return [];

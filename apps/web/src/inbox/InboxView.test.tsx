@@ -2,7 +2,9 @@ import type { ProviderUsageLimitsClient } from "@octant/client-runtime/provider-
 import { decodeProviderInstance, decodeProviderUsageLimitsSnapshot } from "@octant/contracts";
 import type { LinearIssueRow } from "@octant/contracts/linear-issues";
 import { PlanUsageProvider } from "../usage/PlanUsageContext";
-import { render, screen, waitFor, within } from "@testing-library/react";
+import { act, render, screen, waitFor, within } from "@testing-library/react";
+import { ComposerPlanUsage } from "../usage/ComposerPlanUsage";
+import { RailUsageRings } from "../usage/RailUsageRings";
 import userEvent from "@testing-library/user-event";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
@@ -421,16 +423,31 @@ function waitingThread(id: string) {
 
 describe("InboxView page", () => {
   it("says the date and that nothing waits when no thread needs the person", () => {
-    const source = {
-      ...decisionSource(decisionClients(), []),
-      now: Date.parse("2026-11-11T12:00:00Z"),
-    };
-    render(
-      <InboxView attentionItems={[]} decisions={source} onClose={vi.fn()} onOpenThread={vi.fn()} />,
-    );
-    const state = screen.getByText(/Nothing is waiting on you\./);
-    expect(state).toHaveTextContent(/Wednesday/);
-    expect(state).toHaveTextContent(/November/);
+    vi.useFakeTimers({ toFake: ["Date", "setInterval", "clearInterval"] });
+    vi.setSystemTime(new Date(2026, 10, 11, 12, 0, 0));
+    try {
+      render(<InboxView attentionItems={[]} onClose={vi.fn()} onOpenThread={vi.fn()} />);
+      const state = screen.getByText(/Nothing is waiting on you\./);
+      expect(state).toHaveTextContent(/Wednesday/);
+      expect(state).toHaveTextContent(/November/);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("changes its date after midnight in a window with no decision source", () => {
+    vi.useFakeTimers({ toFake: ["Date", "setInterval", "clearInterval"] });
+    vi.setSystemTime(new Date(2026, 10, 11, 23, 59, 30));
+    try {
+      render(<InboxView attentionItems={[]} onClose={vi.fn()} onOpenThread={vi.fn()} />);
+      expect(screen.getByText(/Nothing is waiting on you\./)).toHaveTextContent(/Wednesday/);
+      act(() => {
+        vi.advanceTimersByTime(60_000);
+      });
+      expect(screen.getByText(/Nothing is waiting on you\./)).toHaveTextContent(/Thursday/);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("counts one waiting thread in the singular and many in the plural", () => {
@@ -544,6 +561,68 @@ describe("InboxView page", () => {
     render(page([]));
     await waitFor(() => expect(screen.getByRole("region", { name: "Needs you" })).toBeVisible());
     expect(screen.queryByRole("region", { name: "Plan usage" })).toBeNull();
+  });
+
+  it("reads the plan limits once for the rail, a composer and the Inbox together", async () => {
+    const accountId = "10000000-0000-4000-8000-000000000001";
+    const observedAt = "2026-10-20T12:00:00.000Z";
+    const snapshot = decodeProviderUsageLimitsSnapshot({
+      version: 1,
+      refreshedAt: observedAt,
+      entries: [
+        {
+          providerInstanceId: accountId,
+          status: "available",
+          source: "provider-runtime",
+          observedAt,
+          limits: {
+            providerInstanceId: accountId,
+            scope: "account",
+            requests: { status: "unavailable" },
+            tokens: { status: "unavailable" },
+            concurrency: { status: "unavailable" },
+            retry: { status: "inactive" },
+            quota: "available",
+            source: "observed-evidence",
+            confidence: "high",
+            updatedAt: observedAt,
+            rateLimitWindows: [
+              { window: "five_hour", status: "allowed", utilization: 0.4, observedAt },
+            ],
+          },
+        },
+      ],
+    });
+    const account = decodeProviderInstance({
+      id: accountId,
+      displayName: "Claude Max",
+      driverKind: "claude",
+      configuration: {
+        kind: "claude-agent-sdk",
+        binaryPath: "/opt/homebrew/bin/claude",
+        authentication: "subscription",
+      },
+      enabled: true,
+      environmentPolicy: "inherit-host",
+      version: 1,
+      createdAt: observedAt,
+      updatedAt: observedAt,
+    });
+    const list = vi.fn(() => Promise.resolve(snapshot));
+    render(
+      <PlanUsageProvider
+        barStyle="smooth"
+        client={{ list } as unknown as ProviderUsageLimitsClient}
+        instances={[account]}
+      >
+        <RailUsageRings instances={[account]} />
+        <ComposerPlanUsage providerInstanceId={accountId} />
+        <InboxView attentionItems={[]} onClose={vi.fn()} onOpenThread={vi.fn()} />
+      </PlanUsageProvider>,
+    );
+    expect(await screen.findByRole("region", { name: "Plan usage" })).toHaveTextContent("60%");
+    expect(screen.getAllByLabelText("Plan usage left").length).toBeGreaterThan(1);
+    expect(list).toHaveBeenCalledTimes(1);
   });
 
   it("reads title, state, Needs you, GitHub in that order", async () => {
