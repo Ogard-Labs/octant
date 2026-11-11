@@ -4641,15 +4641,24 @@ input.switch:checked::after {
   .thread-composer__context:not(:empty, :has(> :only-child:empty)) ~ .composer-row {
     order: 1;
   }
-  /* A thread with no place to name leads with the row. At this width the row
+  /* A thread with no place to name (its context wrapper empty, which still stands first in the DOM) leads with the row. At this width the row
      is two lines, and the info fell to a third of its own. The row leaves the
      info room beside it, and the info stands at the end of the row's last
      line. */
-  .composer-under > .composer-row:first-child {
+  .composer-under
+    > :is(
+      .composer-row:first-child,
+      .thread-composer__context:is(:empty, :has(> :only-child:empty)) + .composer-row
+    ) {
     flex: 1 1 0;
     max-width: calc(100% - var(--oct-space-2) - 28px);
   }
-  .composer-under > .composer-row:first-child ~ .thread-info {
+  .composer-under
+    > :is(
+      .composer-row:first-child,
+      .thread-composer__context:is(:empty, :has(> :only-child:empty)) + .composer-row
+    )
+    ~ .thread-info {
     align-self: flex-end;
   }
 }
