@@ -3846,8 +3846,9 @@ approved by the maintainer on 2026-10-12. This section is the effective rule.
     otherwise. A message whose hop count is three or more is delivered but
     wakes nothing, so two agents answering each other stop waking each other
     after three rounds and continue only when a person runs a turn. The host
-    holds hop counts and the hourly count in memory, so a restart starts them
-    again from zero.
+    records wake turns and each thread's latest host turn with its hop in its
+    own store, so a restart keeps the hourly count and the hop count
+    ([Coordinator threads: Bounds](design/coordinator-threads.md#bounds)).
   - Turning the switch off stops new wake turns; one already running finishes
     like any turn, and cancelling it is the ordinary cancel.
 

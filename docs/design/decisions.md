@@ -37,7 +37,7 @@ The former decision archive is history in `docs/legacy/` and has no authority.
 | [App-managed tools](#app-managed-tools)                                               | 5         | 5       | 0            | 0                   |
 | [Canvas authority](#canvas-authority)                                                 | 2         | 2       | 0            | 0                   |
 | [Device transport](#device-transport)                                                 | 3         | 3       | 0            | 0                   |
-| [Modes, Projects and authority](#modes-projects-and-authority)                        | 15        | 13      | 2            | 0                   |
+| [Modes, Projects and authority](#modes-projects-and-authority)                        | 16        | 14      | 2            | 0                   |
 | [Agents and delegation](#agents-and-delegation)                                       | 5         | 5       | 0            | 0                   |
 | [Boards, pull requests and delivery](#boards-pull-requests-and-delivery)              | 6         | 3       | 2            | 1                   |
 | [Routines and timed turns](#routines-and-timed-turns)                                 | 4         | 3       | 1            | 0                   |
@@ -56,7 +56,7 @@ The former decision archive is history in `docs/legacy/` and has no authority.
 | [Design system](#design-system)                                                       | 10        | 10      | 0            | 0                   |
 | [Workspace](#workspace)                                                               | 14        | 14      | 0            | 0                   |
 | [Start screen](#start-screen)                                                         | 3         | 3       | 0            | 0                   |
-| [Canvas](#canvas)                                                                     | 9         | 8       | 1            | 0                   |
+| [Canvas](#canvas)                                                                     | 10        | 9       | 1            | 0                   |
 | [Artifact sync](#artifact-sync)                                                       | 5         | 5       | 0            | 0                   |
 | [Browser](#browser)                                                                   | 6         | 5       | 1            | 0                   |
 | [Provider runtimes](#provider-runtimes)                                               | 6         | 6       | 0            | 0                   |
@@ -628,6 +628,17 @@ Modes are server-enforced domain policy, not renderer flags. The shell shows two
 
 Status: Built. Since: —. Detail: [Architecture: Modes: Chat, Work, and Code](../architecture.md#modes-chat-work-and-code).
 
+### Projects pinned to the icon rail
+
+A person can pin a Project to the icon rail, and a pinned Project is a tile that opens it.
+
+- Pin and unpin are in the Project's own menu in the sidebar ("Pin to rail", "Unpin from rail") and in the context menu of the pinned tile; More never lists them, because it holds only the destinations the rail does not.
+- Pins are a saved shell preference stored and synced like the sidebar destinations, by Project id, in the order pinned. Settings saved before pins decode to none; a pin for a Project that no longer exists draws nothing and is dropped the next time pins are saved, but only once the Project list is loaded and complete; two quick pin actions both land.
+- A pinned tile shows in both rail placements, after the divider under the destinations. In the collapsed rail the pinned Projects come first and the automatic list fills what is left of six tiles without repeating one; the rail draws at most six pinned tiles so Settings and the usage rings stay in the window, and Pin to rail is disabled with its reason once six are pinned.
+- Opening a pinned tile is the same action as opening that Project anywhere else; pinning grants nothing.
+
+Status: Built. Since: 2026-11-11. Detail: [Workspace: Navigation and Projects](workspace.md#navigation-and-projects).
+
 ### Project icons
 
 A Project shows the favicon or app icon found inside its own folder wherever Projects are listed, and keeps its letter tile or folder glyph when there is none.
@@ -873,9 +884,10 @@ A person may make a Code thread a coordinator: a long-lived thread that starts w
 - At most six open workers per coordinator by default (person-set, 1–16) and twelve starts per hour; ordinary turn admission, capacity and spend ceilings apply.
 - A worker wakes for its own coordinator's messages unless a person turns that off; making a coordinator turns its own wake switch on. The host sends a coordinator closed-set state notices (turn ended, waiting for a person, Done) that do not mark it. Wake bounds and the three-round hop count apply.
 - A worker's approvals and questions are listed in its coordinator's composer; only the person answers them, never the coordinator agent. Needs you rows name the coordinator, pending proposals show as a card in the coordinator thread, and the board can be filtered by coordinator ([Workspace: Coordinators](workspace.md#coordinators)).
-- The wake switches (never the role) may also be set from an owner device through the owner routes, each change under its own fresh unlock and journaled as that device; no owner-device screen calls them yet.
+- The wake switches (never the role) may also be set from an owner device through the owner routes and the owner access recovery screen on the phone and in a browser, each change under its own fresh unlock and journaled as that device.
+- A coordinator proposal's review starts on the requested provider, model and level and offers no higher level; paired browsers and phones show pending proposals read-only, and approval stays at a local window.
 - Not yet run against a real provider or on the desktop app; the live checks are on the maintainer live-smoke list.
-- Wake, start and hop counts are held in host memory; a restart starts them again.
+- Wake, start and hop counts are kept in a host store (forward-only migration), so the hourly bounds and the hop count hold across a restart; the start count never reads fewer than the workers created in the last hour.
 - Work coordinators wait for a rule that lets a Work turn carry a message.
 - A coordinator's Agents dock lists its workers and draws each worker's subagents under it. A window that holds a current coordinator may read its workers' child runs as facts (task, state, route, effort, ordering links), never a reply, result, recovery text or control; every other caller is refused before a run is read, and the agent is offered none of it (maintainer request, 2026-11-11).
 
@@ -2139,13 +2151,16 @@ Octant looks like a calm, colourful workbench. Colour is the default (2026-11-02
 - The four count destinations keep one mark each wherever they show: icons in the rail, tiles when a wide window has no rail, and plain rows at 960px and narrower, the rail's own breakpoint. Icons in the rail and the rows stay in the sidebar ink in every style; only a tile's face carries its hue. The title band and the rail are both 44px.
 - Hierarchy comes from size, then weight, then colour. Text is sentence case, nothing is uppercase, and only the large title is bold. A title is never the size and the weight of the text it heads: a dialog's title is 17px at weight 600, and a reply's markdown headings are 20/17/15/14 at weight 600 with more room above than below.
 - Depth has three levels, each a step lighter than the one under it: the page, a raised surface (a card, a Settings group, a composer, a filled button) and a floating one (a menu, popover, hover card, toast, dialog). Raised and floating surfaces catch light along their top edge and cast a shadow; what sits on a floating surface takes its fills from that surface. Ghost buttons and plain rows stay flat.
+- Everything that opens over the window arrives and leaves one way, declared once: it fades in over 150ms and out over 100ms, a popup and a dialog settle from 98%, and Settings' sheet rises 8px. Nothing behind an overlay is laid out again. Reduced motion, from the system or from the setting, removes the transition. A dialog a feature renders only while open arrives this way and leaves at once.
+- A list a person picks from draws one row from shared tokens: 28px for one line, its words 8px in, the rows 4px in from the popup's edge. Menus, context menus, selects, comboboxes, the command palette, typeaheads and picker rows all take it; a described row grows to two lines.
+- There is one scrollbar, declared once: a thin thumb and no painted track, in a pane, a menu, a popup and a sheet alike. A feature may reserve its strip or hide it on a named sideways strip, and never recolours or widens it.
 - The code editor and the terminal draw their own scrollbars to the measure of every other pane's: a thin thumb with round ends in the same theme role, no painted track, no shadow at the scroll edge, and no strip beside a comparison. Their thumb cannot widen under the pointer and changes colour there instead, and the terminal's hides at rest even where the system keeps scrollbars on screen.
 - Text uses three greys only: primary, secondary and muted. An accent swatch is the person's choice and never recolours status; Mono is a swatch that sets the Mono style. Swatches cover chromatic hues and neutrals (Steel, Slate, Silver, Graphite, Carbon, White); a swatch that cannot be seen on one mode's page writes a mode-only override with a silver for that mode.
 - Counts and token figures use English separators whatever the system locale; dates and times follow the locale.
 - Copy about where something runs says "this Mac" only when the host reports macOS, and uses neutral words ("this computer", "credential store") otherwise. The window's own platform never decides it.
 - The phone app reads as a native app, not a web page: a bottom tab bar for its top places, large titles on tab roots, a centred nav bar on pushed screens, inset grouped lists, the system segmented control and sheets with a grabber. It uses the product radius scale with one 20px sheet, three count tiles that take the desktop tiles' hues and marks, and the transcript recipe: bare prose replies and a control-fill bubble for the person's message.
 
-Status: Built. Since: —. Detail: [DESIGN.md: Product character](../../DESIGN.md#product-character), [Voice](../../DESIGN.md#voice), [Accessibility and reliability](../../DESIGN.md#accessibility-and-reliability), and the [mobile design system](../../apps/mobile/design-system/README.md).
+Status: Built. Since: —. Detail: [DESIGN.md: Product character](../../DESIGN.md#product-character), [Voice](../../DESIGN.md#voice), [Motion and interaction](../../DESIGN.md#motion-and-interaction), [shadcn/Base recipes](../../DESIGN.md#shadcnbase-recipes), [Accessibility and reliability](../../DESIGN.md#accessibility-and-reliability), and the [mobile design system](../../apps/mobile/design-system/README.md).
 
 ### One theme authority and shared controls
 
@@ -2164,9 +2179,10 @@ Status: Built. Since: —. Detail: [DESIGN.md: Source of truth and CSS layers](.
 Every list, board, reader and preference page is one `Surface`. Settings groups its pages by what they change.
 
 - A setting lives on the page of the thing it changes, and a moved setting keeps answering links to its old page.
-- In a wide window Settings is a sheet over the app, which stays mounted and drawn behind a light scrim, so a change to how the app looks is seen as it is made. It closes from its own corner, with Escape, or with a press outside it. In a narrow window it covers the window and offers Back to app.
+- In a wide window Settings is a sheet over the app, which stays mounted and drawn behind a light scrim, so a change to how the app looks is seen as it is made. It closes from its own corner, with Escape, or with a press outside it, and it leaves the way it arrived. In a narrow window it covers the window and offers Back to app.
 - A page names its scope once, under its title. A page header holds one creation action and Back; filters sit in the toolbar.
 - A destination opens on one toolbar row at the Settings page title's size, pinned while the body scrolls, with an icon Back at the leading edge that does not move on press. It carries no description; its one line of detail is only a fact that changes and that a person needs. An empty page is the empty state alone, centred, with search and filters back once there is something to search.
+- A destination page and Settings show their own outline while they load (a title bar and rows; a rail and a page), not a line of text, so nothing changes place when they arrive. The words stay for assistive technology, and the skeleton's sheen stops under reduced motion.
 - Background refresh preserves loaded controls and active drafts; status slots are bounded so a changed status never pushes the form below it.
 
 Status: Built. Since: —. Detail: [DESIGN.md: Page shell](../../DESIGN.md#page-shell) and [Settings stability](../../DESIGN.md#settings-stability).
@@ -2502,6 +2518,18 @@ Diagram and flow boards are editable by a local person, and comments are journal
 - A drawn mark (an area, a pen line, a pinned note) is a comment's anchor and never an object of its own, so it follows the comment rules and adds no aggregate, command or route. A pen line is a `stroke` anchor of 2 to 128 points bounded to the block's box; a note is a `region` of no size. A build older than the `stroke` kind cannot read a comment that carries one.
 
 Status: Built. Since: —. Detail: [Canvas: Diagram boards and comments](canvas.md#diagram-boards-and-comments).
+
+### Choices answered in a Canvas
+
+A `choice` block asks the person a question inside a Canvas; their answer goes to the Canvas's own thread as their own ordinary message.
+
+- The block takes the inline questionnaire's question shape and bounds (one to four questions), carries no answer, and is decoded strictly on the host.
+- Choosing edits a local draft; only an explicit Send enqueues one message on the owning thread through its message queue from the person's window, so it runs or waits like a composer send under the thread's existing authority. It is never a host-initiated turn or an approval.
+- The message is host-framed text naming the Canvas, the block, and the chosen labels or written answer.
+- Where no thread can take the answer (no message queue in the window, a paired client, no host scope for the Canvas, an older version, the thread's own inline view, a shared snapshot or public share page, an export) the block reads only with a reason. A share never offers sending.
+- HTML design frames gain no submission ability.
+
+Status: Built. Since: 2026-11-11. Detail: [Canvas: Choice block](canvas.md#choice-block).
 
 ### Canvas shares and exports
 

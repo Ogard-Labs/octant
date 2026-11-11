@@ -617,6 +617,19 @@ export const ShellSettings = Schema.Struct({
     default: () => ({ order: [], visibility: [] }),
   }),
   /**
+   * Projects the person pinned to the icon rail, in the order they pinned
+   * them. A pin names a Project by id; one for a Project that no longer exists
+   * is ignored when the rail draws and dropped the next time pins are saved. A
+   * store persisted before pins shipped decodes to none.
+   */
+  sidebarPinnedProjects: Schema.optionalWith(
+    Schema.Array(ProjectId).pipe(
+      Schema.filter((ids) => new Set(ids).size === ids.length),
+      Schema.maxItems(64),
+    ),
+    { default: () => [] },
+  ),
+  /**
    * Whether the sidebar ends in a More row that reveals the destinations set
    * to "Menu only" (plus Customize sidebar) beside the rail. Off keeps them in
    * the account menu, the home they kept before the More row shipped. A store

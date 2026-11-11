@@ -34,6 +34,7 @@ import {
   type OwnerChallenge,
   type OwnerPostureChangeRequest,
   type OwnerPostureSubject,
+  type OwnerThreadWakeChangeRequest,
   type OwnerThreadMoveConfirmRequest,
   type OwnerThreadMoveTicketRequest,
   type ThreadMovePhoneConfirmation,
@@ -61,6 +62,8 @@ const OWNER_ROUTES = {
   session: "/api/hub/owner/session",
   postureRead: "/api/hub/owner/posture/read",
   postureChange: "/api/hub/owner/posture/change",
+  threadWakeRead: "/api/hub/owner/code-threads/wake/read",
+  threadWakeChange: "/api/hub/owner/code-threads/wake/change",
   credentialReceive: "/api/hub/owner/credentials/receive",
   credentialCopy: "/api/hub/owner/credentials/copy",
   provisionApply: "/api/hub/owner/provision/apply",
@@ -205,6 +208,13 @@ export interface OwnerAdministrationClient {
   readonly readPosture: (subject: OwnerPostureSubject) => Promise<OwnerActionResult>;
   /** Changes a posture. Full access asks for its own unlock; any other posture is covered by a session. */
   readonly changePosture: (request: OwnerPostureChangeRequest) => Promise<OwnerActionResult>;
+  /** A Code thread's wake switches on this host. Covered by a session. */
+  readonly readThreadWake: (threadId: string) => Promise<OwnerActionResult>;
+  /**
+   * Changes one wake switch. Always its own fresh unlock: a wake switch lets
+   * other threads start turns on this one, so a session never covers it.
+   */
+  readonly changeThreadWake: (request: OwnerThreadWakeChangeRequest) => Promise<OwnerActionResult>;
   /** The receiving host's half of a sign-in copy; see `copyApiKeySignIn`. */
   readonly receiveCredential: (input: {
     readonly sourceMemberId: string;
@@ -613,6 +623,10 @@ export function createOwnerClient(
         ? unlocked((signer) => act(OWNER_ROUTES.postureChange, body, signer))
         : administration(OWNER_ROUTES.postureChange, body);
     },
+    readThreadWake: (threadId) =>
+      administration(OWNER_ROUTES.threadWakeRead, JSON.stringify({ threadId })),
+    changeThreadWake: (request) =>
+      unlocked((signer) => act(OWNER_ROUTES.threadWakeChange, JSON.stringify(request), signer)),
     receiveCredential: (input) =>
       unlocked((signer) => act(OWNER_ROUTES.credentialReceive, JSON.stringify(input), signer)),
     sendCredential: (input) =>
@@ -799,6 +813,10 @@ const REFUSAL_COPY: Readonly<Record<string, string>> = {
   "too-many-challenges": "This computer is busy with other unlocks. Try again in a moment.",
   "posture-stale":
     "The task or Project changed. Refresh its level, then unlock again to apply your choice.",
+  "wake-stale":
+    "The thread or its Project changed. Read its wake switches again, then unlock again to apply your choice.",
+  "not-a-worker":
+    "That thread is not a coordinator's worker any more, so it has no Wake for coordinator switch.",
   unsupported: "This target does not support that change on this host.",
   "not-found": "That task or Project is no longer active. Refresh the list.",
   "device-revoked": "This computer revoked this device.",

@@ -5,9 +5,10 @@ import { cn } from "./utils";
 /*
  * The dialog's paint belongs to the token-driven chrome, not to Tailwind: the
  * `.octant-dialog__*` rules own position, scrim, surface, border, radius, and
- * shadow, and being unlayered they beat every layered utility anyway. Only
- * behavior that chrome does not express stays here as utilities: the
- * backdrop's enter/exit fade and the popup's default content padding.
+ * shadow, and being unlayered they beat every layered utility anyway. The
+ * way a dialog, a sheet and their scrims arrive and leave is the overlay
+ * motion in components.css. Only what chrome does not express stays here as
+ * a utility: the popup's default content padding.
  */
 export function Dialog(props: ComponentProps<typeof DialogPrimitive.Root>) {
   return <DialogPrimitive.Root {...props} />;
@@ -21,12 +22,7 @@ export function DialogBackdrop({
   className,
   ...props
 }: ComponentProps<typeof DialogPrimitive.Backdrop>) {
-  return (
-    <DialogPrimitive.Backdrop
-      className={cn("data-ending-style:opacity-0 data-starting-style:opacity-0", className)}
-      {...props}
-    />
-  );
+  return <DialogPrimitive.Backdrop className={cn(className)} {...props} />;
 }
 
 export function DialogViewport({

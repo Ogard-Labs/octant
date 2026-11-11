@@ -2,7 +2,8 @@
 
 This topic specification owns the Canvas agent tool's `describe`, `read`, and
 `preview` operations, document recipes, thread presentation, the closed block catalogue,
-diagram boards and comments, the `design` block, and a person's HTML import.
+diagram boards and comments, the `design` block, the `choice` block, and a
+person's HTML import.
 Architecture owns the
 Canvas boundary and authority rules
 ([Architecture: process topology](../architecture.md#process-topology)) and the
@@ -240,8 +241,8 @@ Canvas owned by its thread (a chat provenance with no Project) at version
 `title`, `subtitle`, and point `note` and `emphasis` at version 22, the
 `flow` block at version 23, the mockup library at version 24 (its new
 components, a node's `progress` and `defId` fields, and a block's
-`definitions`), the `deck` block at version 25, and flow callouts at
-version 26, so a document that
+`definitions`), the `deck` block at version 25, flow callouts at
+version 26, and the `choice` block at version 27, so a document that
 declares an earlier version and carries one is refused as a declared future
 version. Version 20 adds no block or field a share carries, so a share names a
 block authored at 20 as 19 under share version 10. Version 21 adds the
@@ -324,7 +325,8 @@ the column, so an article, a spec, or an HTML page brought into a Canvas as a
 document reads in the thread; a running one is drawn in the same sandboxed
 frame, under the same page policy and bridge limits, as in the sidebar, and
 waits for the person's **Run**. It refuses a request that holds a `plan`, a
-`mockup`, or a device-size `design` (phone, tablet, desktop, or slide), which
+`mockup`, a `choice` (answered in the sidebar, where its Send reaches the
+thread), or a device-size `design` (phone, tablet, desktop, or slide), which
 are worked on or reviewed at their own size. When an author asks for `inline`
 with such a block, the host records the request as asked, the Canvas is a
 sidebar Canvas (`effectiveCanvasPresentation`, and the card and the tool result
@@ -863,8 +865,9 @@ version-21 design and diagram fields, so it names blocks up to version 21.
 Version 22 adds only a chart's title, subtitle, and point callouts, which a
 share still strips: a shared chart leaves as its readings and is named as
 version 21. Share version 12 carries the flow block, so it names blocks up
-to Canvas version 23 (`CANVAS_SHARE_MAX_BLOCK_SCHEMA_VERSION`), and the share
-service must learn it before a desktop release publishes one.
+to Canvas version 23, and share version 16 carries the choice block, so it
+names blocks up to Canvas version 27 (`CANVAS_SHARE_MAX_BLOCK_SCHEMA_VERSION`);
+the share service must learn each before a desktop release publishes one.
 Share documents version independently of Canvas documents: a treemap, a
 heatmap, a bar list, a chart's or a table column's number format, a table
 column's display, and a board's layout arrive with share version 3, and a
@@ -877,7 +880,9 @@ design's frames with share version 10, and a brand and the richer diagram
 fields with share version 11 (frame notes never leave), the flow block
 with share version 12, the mockup library with share version 13, the deck
 block with share version 14 (a deck's presenter notes stay behind, as a
-design's frame notes do), and flow callouts with share version 15, so a share
+design's frame notes do), flow callouts with share version 15, and the
+choice block with share version 16 (whose blocks may name Canvas version 27),
+so a share
 that declares an older version
 and carries one is refused as a future version.
 A `tabs` block has 2 to 12 panes, each a short label and the block ids it
@@ -930,6 +935,69 @@ Start, which opens a new-thread draft in the Canvas's own Project with the task
 person sends the draft like any new thread, and the thread gets that mode's
 ordinary authority. A Chat Canvas offers no Start, because a Chat Project has no
 folder to bind.
+
+## Choice block
+
+A `choice` block asks the person to decide from inside the Canvas. It holds a
+prompt (at most 1,024 characters) and one to four questions in exactly the
+inline questionnaire's shape and bounds (`QuestionnaireQuestions`: a distinct
+id, a prompt, `single` or `multiple` selection, one to eight options with a
+label, an optional description and recommended flag, optional
+`minSelections` and `maxSelections`, and `allowCustom: false` to withhold a
+written answer; see
+[Workspace: inline questionnaires](workspace.md#inline-questionnaires)). The
+definition schema decodes it strictly, so a block that carries an answer or
+any other field is refused; it arrives with Canvas schema version 27. The
+block holds no answer, journals nothing, and grants nothing: it is a question,
+and the answer is the person's own message.
+
+The sidebar draws the questions with the questionnaire's controls. Choosing
+edits a draft in that view only; **Send to the Chat thread** (or Work, or
+Code) sends it. Sending enqueues one message on the Canvas's owning thread
+(the thread its provenance names) through that thread's message queue from
+the window the person is in, the same queue a composer send uses: an idle
+thread takes it as its next turn through the mode's ordinary turn admission,
+and a running turn keeps it queued behind with the queue's usual holds (see
+[Architecture: accepted message queue](../architecture.md#persistence)). It
+is never a host-initiated turn and never an approval, and it runs under the
+thread's existing authority. The message is host-framed text naming the
+Canvas by title and id, the block by id and prompt, and each question with
+the chosen labels or the written answer:
+
+```text
+My answer to "Which rollout should we take?" in the Canvas "Rollout plan" (canvasId <id>, choice block "pick-rollout"):
+- Rollout: Staged
+- Regions first: written answer: Start with staff.
+```
+
+A Chat thread also carries the Canvas as a whole-canvas context selection, as
+a comment sent to the agent does. The queued message's ids are derived from
+the Canvas, the block, the answer, and the count of this view's confirmed
+sends, so a retry after an unconfirmed send is the same message and the queue
+answers it as a duplicate, while a deliberate second send is a new one. After
+the host confirms, the block shows the sent answers; a refusal keeps the draft
+and shows the host's reason. A reload shows the question afresh, since the
+answer lives in the thread rather than the Canvas.
+
+The block reads only, listing its questions and options with one line saying
+why, wherever it cannot send: a window without a message queue for the thread
+(a paired or remote client, whose queue commands the host also refuses), a
+Canvas the host gave no workspace scope for (its thread cannot be reached from
+here), a version older than the head on screen, and every surface that draws a
+Canvas without its thread: the thread itself (a Canvas holding a choice is a
+sidebar Canvas, shown in the thread as a preview card), reference cards, Zen,
+and previews. A thread that is archived, completed, marked Done, deleted, or
+purged takes no new message, so the host refuses the enqueue and the block
+keeps the draft with that reason. A shared snapshot and a public share page
+show the questions and options with a note that answers are sent from the
+Canvas itself, never a control; the Markdown and HTML export lists each
+question's options. HTML design frames are unchanged and still submit nothing
+(see the [frames threat model](../security/canvas-html-frames-threat-model.md)).
+
+The agent learns the block from `describe`: its guidance says the answer
+arrives as the person's next message in the thread, to wait for it rather than
+assume one, and to use the ask-user questionnaire instead when the question
+belongs in the conversation.
 
 ## Diagram boards and comments
 

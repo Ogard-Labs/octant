@@ -807,6 +807,91 @@ describe("CoordinatorProposalCards", () => {
     expect(onCreateThread).not.toHaveBeenCalled();
   });
 
+  it("preselects the requested provider and model and offers no mode above the requested level", async () => {
+    const providerId = "60000000-0000-4000-8000-000000000009";
+    const onSelectProvider = vi.fn();
+    const providerGroups = [
+      {
+        driverLabel: "Local",
+        endpointHost: "local",
+        executionHost: "local",
+        instance: { id: providerId, displayName: "Requested provider" },
+        readiness: "ready",
+        sections: [{ label: "Models", models: [{ model: { id: "model-b", displayName: "B" } }] }],
+      },
+    ] as never;
+    render(
+      <CoordinatorProposalCards
+        controller={coordinatorController([
+          proposal("01", {
+            workerOptions: {
+              providerInstanceId: providerId,
+              modelId: "model-b",
+              executionPolicy: "approval-gated",
+            },
+          }),
+        ])}
+        coordinatorThreadId={ids.thread as never}
+        onCreateThread={vi.fn()}
+        onOpenThread={vi.fn()}
+        onSelectProvider={onSelectProvider}
+        projectId={ids.project as never}
+        providerGroups={providerGroups}
+      />,
+    );
+    const approve = await screen.findByRole("button", { name: "Review and approve" });
+    await waitFor(() => expect(approve).toBeEnabled());
+    fireEvent.click(approve);
+    const review = await screen.findByRole("dialog", { name: "Approve planner proposal" });
+    expect(
+      within(review).getByText(
+        "The coordinator asked for this worker on model-b at Ask first or lower.",
+      ),
+    ).toBeVisible();
+    await waitFor(() =>
+      expect(onSelectProvider).toHaveBeenCalledWith({
+        providerInstanceId: providerId,
+        modelId: "model-b",
+      }),
+    );
+    expect(onSelectProvider).toHaveBeenCalledTimes(1);
+    const mode = within(review).getByRole("button", { name: "Mode" });
+    expect(mode).toHaveTextContent("Ask first");
+    await userEvent.click(mode);
+    const choices = (await screen.findAllByRole("menuitemradio")).map((item) => item.textContent);
+    expect(choices.some((text) => text?.startsWith("Ask first"))).toBe(true);
+    expect(choices.some((text) => text?.startsWith("Accept edits"))).toBe(false);
+    expect(choices.some((text) => text?.startsWith("Full access"))).toBe(false);
+  });
+
+  it("leaves the window's selection alone when the requested model is not selectable here", async () => {
+    const onSelectProvider = vi.fn();
+    render(
+      <CoordinatorProposalCards
+        controller={coordinatorController([
+          proposal("01", {
+            workerOptions: {
+              providerInstanceId: "60000000-0000-4000-8000-00000000dead",
+              modelId: "gone",
+              executionPolicy: "full-access",
+            },
+          }),
+        ])}
+        coordinatorThreadId={ids.thread as never}
+        onCreateThread={vi.fn()}
+        onOpenThread={vi.fn()}
+        onSelectProvider={onSelectProvider}
+        projectId={ids.project as never}
+      />,
+    );
+    const approve = await screen.findByRole("button", { name: "Review and approve" });
+    await waitFor(() => expect(approve).toBeEnabled());
+    fireEvent.click(approve);
+    await screen.findByRole("dialog", { name: "Approve planner proposal" });
+    expect(onSelectProvider).not.toHaveBeenCalled();
+    expect(screen.getByRole("button", { name: "Mode" })).toHaveTextContent("Full access");
+  });
+
   it("shows nothing on a coordinator with no proposal waiting", async () => {
     const value = coordinatorController([proposal("02", { plannerThreadId: otherCoordinator })]);
     const { container } = render(

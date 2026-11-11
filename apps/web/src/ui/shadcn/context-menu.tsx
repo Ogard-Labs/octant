@@ -1,6 +1,7 @@
 import { ContextMenu as ContextMenuPrimitive } from "@base-ui/react/context-menu";
 import { Check, ChevronRight } from "lucide-react";
 import type { ComponentProps } from "react";
+import { menuGroupLabel, menuRow } from "./menu-row";
 import { cn } from "./utils";
 
 export function ContextMenu(props: ComponentProps<typeof ContextMenuPrimitive.Root>) {
@@ -29,7 +30,7 @@ export function ContextMenuContent({
         <ContextMenuPrimitive.Popup
           data-slot="context-menu-content"
           className={cn(
-            "window-no-drag min-w-48 rounded-xl bg-popover p-1 text-popover-foreground shadow-[var(--octant-shadow-overlay)] outline-none",
+            "window-no-drag min-w-48 rounded-xl bg-popover p-(--oct-menu-inset) text-popover-foreground shadow-[var(--octant-shadow-overlay)] outline-none",
             className,
           )}
           {...props}
@@ -49,14 +50,13 @@ export function ContextMenuLabel({
 }: ComponentProps<typeof ContextMenuPrimitive.GroupLabel>) {
   return (
     <ContextMenuPrimitive.GroupLabel
-      className={cn("truncate px-2 py-1.5 text-xs text-muted-foreground", className)}
+      className={cn(menuGroupLabel, "truncate", className)}
       {...props}
     />
   );
 }
 
-const contextMenuItemClassName =
-  "window-no-drag relative flex cursor-default items-center rounded-md px-2 py-1.5 text-xs outline-none select-none data-disabled:pointer-events-none data-disabled:opacity-50 data-highlighted:bg-accent data-highlighted:text-accent-foreground";
+const contextMenuItemClassName = cn(menuRow, "window-no-drag");
 
 export function ContextMenuItem({
   className,
@@ -128,7 +128,7 @@ export function ContextMenuSubContent({
         <ContextMenuPrimitive.Popup
           data-slot="context-menu-content"
           className={cn(
-            "window-no-drag min-w-48 rounded-xl bg-popover p-1 text-popover-foreground shadow-[var(--octant-shadow-overlay)] outline-none",
+            "window-no-drag min-w-48 rounded-xl bg-popover p-(--oct-menu-inset) text-popover-foreground shadow-[var(--octant-shadow-overlay)] outline-none",
             className,
           )}
           {...props}

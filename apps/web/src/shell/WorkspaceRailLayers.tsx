@@ -36,6 +36,7 @@ import type { BoardPendingRequestSource } from "../threadBoard/useBoardPendingRe
 import type { WorkThreadOpenTarget } from "../work/WorkThreadBoard";
 import type { ReviewPageProps } from "../review/ReviewPage";
 import type { ArchivedThreadEntry, ArchiveProject } from "./ArchiveView";
+import { SurfaceLoading } from "../surface/SurfaceLoading";
 import { ShellState } from "./ShellState";
 
 const ArchiveView = lazy(() =>
@@ -433,13 +434,7 @@ export function WorkspaceRailLayers(props: WorkspaceRailLayersProps) {
 
 function LazyRailSurface(props: { readonly label: string; readonly children: ReactNode }) {
   return (
-    <Suspense
-      fallback={
-        <div aria-label={`Opening ${props.label}`} className="workspace-rail-loading" role="status">
-          Opening {props.label}…
-        </div>
-      }
-    >
+    <Suspense fallback={<SurfaceLoading label={`Opening ${props.label}`} />}>
       {props.children}
     </Suspense>
   );

@@ -8,9 +8,15 @@ type CanvasBlock = CanvasDefinition["blocks"][number];
  * the thread shows a Canvas holding one as a preview card that opens there. A
  * diagram board is not here: the thread draws it without its layout runtime,
  * so it can be panned and zoomed but not rearranged, and dragging a node
- * happens in the sidebar.
+ * happens in the sidebar. A choice is answered in the sidebar, where the
+ * Canvas knows its thread and the person's Send reaches it; the thread draws
+ * Canvases without that runtime.
  */
-const SIDEBAR_ONLY_BLOCK_KINDS: ReadonlySet<CanvasBlock["kind"]> = new Set(["plan", "mockup"]);
+const SIDEBAR_ONLY_BLOCK_KINDS: ReadonlySet<CanvasBlock["kind"]> = new Set([
+  "plan",
+  "mockup",
+  "choice",
+]);
 
 /**
  * Why this block keeps the agent's Canvas out of the thread, or `undefined`

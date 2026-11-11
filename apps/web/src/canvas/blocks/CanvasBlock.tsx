@@ -25,6 +25,7 @@ import { MathBlock } from "./MathBlock";
 import type { CanvasActionRuntime } from "../canvasActionRuntime";
 import type { DesignAssetRuntime } from "./designDocument";
 import type { DesignRunRuntime } from "./designRunningFrame";
+import { ChoiceBlock, type CanvasChoiceRuntime } from "./ChoiceBlock";
 
 export function CanvasBlockRenderer({
   block,
@@ -33,6 +34,7 @@ export function CanvasBlockRenderer({
   actionRuntime,
   designAssetRuntime,
   designRunRuntime,
+  choiceRuntime,
   rowComments,
   nodeComments,
 }: {
@@ -50,6 +52,8 @@ export function CanvasBlockRenderer({
   readonly designAssetRuntime?: DesignAssetRuntime;
   /** Reaches the host to run a prototype; absent, a prototype cannot run here. */
   readonly designRunRuntime?: DesignRunRuntime;
+  /** Sends a choice to the Canvas's thread; absent, a choice reads only. */
+  readonly choiceRuntime?: CanvasChoiceRuntime;
   /** Comment markers on a table's rows that carry an id; absent where comments are not journaled. */
   readonly rowComments?: TableRowComments;
   /** Comment markers on a mockup's nodes; absent where comments are not journaled. */
@@ -131,6 +135,13 @@ export function CanvasBlockRenderer({
     case "plan":
       return (
         <PlanBlock block={block} {...(planRuntime === undefined ? {} : { runtime: planRuntime })} />
+      );
+    case "choice":
+      return (
+        <ChoiceBlock
+          block={block}
+          {...(choiceRuntime === undefined ? {} : { runtime: choiceRuntime })}
+        />
       );
     default:
       return null;

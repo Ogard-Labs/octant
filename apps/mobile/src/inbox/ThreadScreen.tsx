@@ -22,6 +22,7 @@ import {
   mobileThreadComposerCopy,
 } from "../copy";
 import { PullRequestReviewPanel } from "../review/PullRequestReviewPanel";
+import { CoordinatorProposalsPanel } from "../review/CoordinatorProposalsPanel";
 import { formatScreenshotSafeLabel } from "../security/screenshotSafeLabel";
 import { useMobileSession } from "../session/MobileSessionContext";
 import { usePlacementHostModels } from "../session/usePlacementHostModels";
@@ -359,6 +360,12 @@ export function ThreadScreen(props: ThreadScreenProps) {
             ) : null}
             {!offlineDemo && selected.mode === "code" && transport !== undefined ? (
               <PullRequestReviewPanel threadId={selected.threadId} transport={transport} />
+            ) : null}
+            {!offlineDemo &&
+            selected.mode === "code" &&
+            transport !== undefined &&
+            code.thread?.coordinator === true ? (
+              <CoordinatorProposalsPanel thread={code.thread} transport={transport} />
             ) : null}
             <ThreadTranscript
               allowProductMutations={staleGate.allowProductMutations}
