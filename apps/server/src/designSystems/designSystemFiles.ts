@@ -7,6 +7,7 @@ import {
   MAX_DESIGN_SYSTEM_FILE_BYTES,
   MAX_DESIGN_SYSTEM_SEARCH_DEPTH,
   MAX_DESIGN_SYSTEMS_PER_PROJECT,
+  type DesignSystemChoice,
   type DesignSystemDocument,
   type DesignSystemList,
   type DesignSystemListing,
@@ -53,6 +54,8 @@ export interface DesignSystemFolders {
   readonly extra: ReadonlyArray<string>;
   /** Names the system when nothing in a top-level file does. */
   readonly projectName: string;
+  /** The person's choice, when they made one; absent follows the automatic rule. */
+  readonly choice?: DesignSystemChoice;
 }
 
 /** The folders a Work or Code Project lends; a Chat Project has none. */
@@ -64,6 +67,7 @@ export function designSystemFolders(
         readonly name: string;
         readonly binding: { readonly canonicalRoot: string };
         readonly extraFolders?: ReadonlyArray<{ readonly canonicalRoot: string }> | undefined;
+        readonly designSystem?: DesignSystemChoice | undefined;
       },
 ): DesignSystemFolders | undefined {
   if (project.type === "chat") return undefined;
@@ -71,6 +75,7 @@ export function designSystemFolders(
     main: project.binding.canonicalRoot,
     extra: projectExtraFolderRoots(project),
     projectName: project.name,
+    ...(project.designSystem === undefined ? {} : { choice: project.designSystem }),
   };
 }
 
@@ -143,7 +148,21 @@ export class DesignSystemFiles {
       found.push(...result.found);
       truncated ||= result.truncated;
     }
-    const primary = primaryDesignSystem(found, folders.main);
+    // A chosen file deeper than the search reaches is still the Project's.
+    const choice = folders.choice;
+    let choiceMissing = false;
+    if (choice?.kind === "file" && lends(folders, choice.folder)) {
+      const listed = found.some(
+        (location) => location.folder === choice.folder && location.path === choice.path,
+      );
+      if (!listed) {
+        if ((await this.#readText(choice)) === undefined) choiceMissing = true;
+        else found.push({ folder: choice.folder, path: choice.path });
+      }
+    } else if (choice?.kind === "file") {
+      choiceMissing = true;
+    }
+    const primary = primaryDesignSystem(found, folders.main, choice);
     const systems: DesignSystemListing[] = [];
     for (const location of found) {
       const text = await this.#readText(location);
@@ -159,7 +178,12 @@ export class DesignSystemFiles {
         primary: location === primary,
       });
     }
-    return { systems, truncated };
+    return {
+      systems,
+      truncated,
+      ...(choice === undefined ? {} : { choice }),
+      ...(choiceMissing ? { choiceMissing } : {}),
+    };
   }
 
   async read(

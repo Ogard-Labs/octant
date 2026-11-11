@@ -25,7 +25,7 @@ afterEach(async () => {
   await rm(outside, { recursive: true, force: true });
 });
 
-function route() {
+function route(designSystem?: unknown) {
   const store = new WindowAuthorityStore();
   store.register({ windowId, capability, now: 0 });
   return createDesignSystemRouteHandler({
@@ -34,7 +34,13 @@ function route() {
       bootstrap: async () =>
         ({
           active: [
-            { id: projectId, type: "code", name: "Acme", binding: { canonicalRoot: root } },
+            {
+              id: projectId,
+              type: "code",
+              name: "Acme",
+              binding: { canonicalRoot: root },
+              ...(designSystem === undefined ? {} : { designSystem }),
+            },
             { id: chatProjectId, type: "chat", name: "Notes" },
           ],
         }) as never,
@@ -44,8 +50,8 @@ function route() {
   });
 }
 
-function get(path: string) {
-  return route()(
+function get(path: string, designSystem?: unknown) {
+  return route(designSystem)(
     new Request(`http://127.0.0.1${path}`, {
       headers: { "x-octant-window-capability": capability },
     }),
@@ -82,6 +88,27 @@ describe("design system routes", () => {
       ],
       truncated: false,
     });
+  });
+
+  it("follows the design system a person chose, says when it is missing, and can be off", async () => {
+    await writeFile(join(root, "DESIGN.md"), "# Acme\n");
+    await mkdir(join(root, "apps", "site"), { recursive: true });
+    await writeFile(join(root, "apps", "site", "DESIGN.md"), "# Site\n");
+    const listed = async (choice: unknown) =>
+      (await (await get(`/api/design-systems?projectId=${projectId}`, choice))?.json()) as {
+        systems: Array<{ path: string; primary: boolean }>;
+        choiceMissing?: boolean;
+      };
+
+    const site = await listed({ kind: "file", folder: root, path: "apps/site/DESIGN.md" });
+    expect(site.systems.filter((system) => system.primary).map((system) => system.path)).toEqual([
+      "apps/site/DESIGN.md",
+    ]);
+    const gone = await listed({ kind: "file", folder: root, path: "gone/DESIGN.md" });
+    expect(gone.choiceMissing).toBe(true);
+    expect(gone.systems.some((system) => system.primary)).toBe(false);
+    const off = await listed({ kind: "none" });
+    expect(off.systems.some((system) => system.primary)).toBe(false);
   });
 
   it("creates a design system, then saves only over the revision it was edited from", async () => {

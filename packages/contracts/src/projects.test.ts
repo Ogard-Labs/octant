@@ -584,6 +584,7 @@ describe("Project and memory event payload contracts", () => {
       "project.work-permission-mode-changed@1",
       "project.work-actions-changed@1",
       "project.brand-kit-changed@1",
+      "project.design-system-changed@1",
       "project.code-desktop-recipe-changed@1",
       "project.code-actions-changed@1",
       "project.extra-folder-added@1",

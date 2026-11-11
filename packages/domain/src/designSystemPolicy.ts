@@ -4,6 +4,7 @@ import {
 } from "@octant/contracts/canvas";
 import {
   DESIGN_SYSTEM_FILE_NAME,
+  type DesignSystemChoice,
   type DesignSystemFrontMatterState,
   type DesignSystemLocation,
   type DesignSystemReading,
@@ -267,14 +268,21 @@ export function designSystemFallbackName(path: string, projectName: string): str
 }
 
 /**
- * The Project's own design system: the `DESIGN.md` at the top of the main
- * folder, else the only one the Project has. Several nested ones with none at
- * the top govern their own folders and none speaks for the whole Project.
+ * The Project's own design system. A person's choice wins: a named file (when
+ * it is there) or none at all. Without one, it is the `DESIGN.md` at the top
+ * of the main folder, else the only one the Project has; several nested ones
+ * with none at the top govern their own folders and none speaks for the whole
+ * Project.
  */
 export function primaryDesignSystem<T extends DesignSystemLocation>(
   systems: ReadonlyArray<T>,
   mainFolder: string,
+  choice?: DesignSystemChoice,
 ): T | undefined {
+  if (choice?.kind === "none") return undefined;
+  if (choice?.kind === "file") {
+    return systems.find((system) => system.folder === choice.folder && system.path === choice.path);
+  }
   const top = systems.find(
     (system) => system.folder === mainFolder && system.path === DESIGN_SYSTEM_FILE_NAME,
   );

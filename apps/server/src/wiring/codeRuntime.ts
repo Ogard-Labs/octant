@@ -705,12 +705,24 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
           }),
         projectMemoryEntries: (thread) =>
           persistence.readProjectMemory(thread.projectId).active.map((entry) => entry.content),
-        designSystemContext: ({ thread, root, extraFolders }) =>
-          designSystemTurnContext(designSystemFiles, {
+        designSystemContext: ({ thread, root, extraFolders }) => {
+          const project = persistence.readProject(thread.projectId);
+          const choice = project?.type === "chat" ? undefined : project?.designSystem;
+          // A choice names a file under the Project's own folder; a worktree
+          // holds the same path under its own root.
+          const worktreeChoice =
+            choice?.kind === "file" &&
+            project?.type !== "chat" &&
+            choice.folder === project?.binding.canonicalRoot
+              ? { ...choice, folder: root }
+              : choice;
+          return designSystemTurnContext(designSystemFiles, {
             main: root,
             extra: extraFolders,
-            projectName: persistence.readProject(thread.projectId)?.name ?? "",
-          }),
+            projectName: project?.name ?? "",
+            ...(worktreeChoice === undefined ? {} : { choice: worktreeChoice }),
+          });
+        },
         chosenAutoReviewer: (thread) => {
           const project = persistence.readProject(thread.projectId);
           return chosenAutoReviewer({

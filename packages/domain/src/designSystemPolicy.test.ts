@@ -151,6 +151,14 @@ describe("a Project's DESIGN.md", () => {
     expect(
       primaryDesignSystem([{ folder: "/extra", path: "DESIGN.md" }, nested], "/p"),
     ).toBeUndefined();
+    // A person's choice wins over the top-level file, and none means none.
+    expect(
+      primaryDesignSystem([top, nested], "/p", { kind: "file", folder: "/p", path: nested.path }),
+    ).toBe(nested);
+    expect(primaryDesignSystem([top, nested], "/p", { kind: "none" })).toBeUndefined();
+    expect(
+      primaryDesignSystem([top], "/p", { kind: "file", folder: "/p", path: "gone/DESIGN.md" }),
+    ).toBeUndefined();
   });
 
   it("tells a turn where every other design system lives", () => {

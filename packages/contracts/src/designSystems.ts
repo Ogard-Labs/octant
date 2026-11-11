@@ -84,6 +84,18 @@ export const DesignSystemLocation = Schema.Struct({
 });
 export type DesignSystemLocation = typeof DesignSystemLocation.Type;
 
+/**
+ * Which design system a Project follows, chosen by a person. `file` names one
+ * of its `DESIGN.md` files; `none` turns design systems off for the Project.
+ * Absent on the Project record means the automatic rule: the top-level file,
+ * else the only one.
+ */
+export const DesignSystemChoice = Schema.Union(
+  Schema.Struct({ kind: Schema.Literal("file"), ...DesignSystemLocation.fields }),
+  Schema.Struct({ kind: Schema.Literal("none") }),
+);
+export type DesignSystemChoice = typeof DesignSystemChoice.Type;
+
 export const DesignSystemListing = Schema.Struct({
   ...DesignSystemLocation.fields,
   name: Schema.String,
@@ -95,6 +107,10 @@ export type DesignSystemListing = typeof DesignSystemListing.Type;
 
 export const DesignSystemList = Schema.Struct({
   systems: Schema.Array(DesignSystemListing),
+  /** The person's choice, when they made one; absent follows the automatic rule. */
+  choice: Schema.optional(DesignSystemChoice),
+  /** True when the chosen file is not there, so the Project follows none. */
+  choiceMissing: Schema.optional(Schema.Boolean),
   /** True when the search stopped at its limit and more may exist. */
   truncated: Schema.Boolean,
 });

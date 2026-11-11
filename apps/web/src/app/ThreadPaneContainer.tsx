@@ -144,6 +144,7 @@ export interface ThreadPaneContainerProps {
     | "setProjectPermissionMode"
     | "setProjectAutoReviewer"
     | "setProjectBrandKit"
+    | "setProjectDesignSystem"
     | "setProjectDesktopRecipe"
     | "setProjectActions"
     | "setProjectWorkStatusFile"
@@ -413,6 +414,7 @@ export const ThreadPaneContainer = memo(function ThreadPaneContainer(
     setProjectPermissionMode,
     setProjectAutoReviewer,
     setProjectBrandKit,
+    setProjectDesignSystem,
     setProjectDesktopRecipe,
     setProjectActions,
     setProjectWorkStatusFile,
@@ -781,6 +783,7 @@ export const ThreadPaneContainer = memo(function ThreadPaneContainer(
                 onProjectPermissionModeChange={setProjectPermissionMode}
                 onProjectAutoReviewerChange={setProjectAutoReviewer}
                 onBrandKitChange={setProjectBrandKit}
+                onDesignSystemChange={setProjectDesignSystem}
                 onDesktopRecipeChange={setProjectDesktopRecipe}
                 onActionsChange={setProjectActions}
                 onWorkStatusFileChange={(projectId, enabled) =>

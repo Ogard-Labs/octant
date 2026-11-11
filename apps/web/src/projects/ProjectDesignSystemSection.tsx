@@ -1,5 +1,6 @@
 import type { ProjectClient } from "@octant/client-runtime/project-client";
 import type {
+  DesignSystemChoice,
   DesignSystemDocument,
   DesignSystemList,
   DesignSystemListing,
@@ -24,6 +25,11 @@ export interface ProjectDesignSystemSectionProps {
     "listDesignSystems" | "readDesignSystem" | "saveDesignSystem"
   >;
   readonly disabled?: boolean;
+  /**
+   * Swap the design system the Project follows: a file, `none`, or `null` for
+   * the automatic rule. Absent when this window cannot change the Project.
+   */
+  readonly onChoose?: (choice: DesignSystemChoice | null) => Promise<boolean>;
 }
 
 type Loaded<T> =
@@ -177,6 +183,21 @@ export function ProjectDesignSystemSection(props: ProjectDesignSystemSectionProp
     }
   }
 
+  async function choose(choice: DesignSystemChoice | null) {
+    if (props.onChoose === undefined) return;
+    setPending(true);
+    setNotice(undefined);
+    try {
+      if (!(await props.onChoose(choice))) {
+        setNotice("The Project's design system was not changed.");
+        return;
+      }
+      await loadList();
+    } finally {
+      setPending(false);
+    }
+  }
+
   function create() {
     if (mainFolder === undefined) return;
     const folder = folderName;
@@ -254,6 +275,15 @@ export function ProjectDesignSystemSection(props: ProjectDesignSystemSectionProp
         </p>
       ) : null}
 
+      {list.status === "ready" ? (
+        <FollowsLine
+          disabled={disabled}
+          list={list.value}
+          mainFolder={mainFolder}
+          {...(props.onChoose === undefined ? {} : { onChoose: (choice) => void choose(choice) })}
+        />
+      ) : null}
+
       {notice === undefined ? null : <OctantAlert tone="warning">{notice}</OctantAlert>}
 
       {document?.status === "loading" ? (
@@ -269,6 +299,17 @@ export function ProjectDesignSystemSection(props: ProjectDesignSystemSectionProp
             document={document.value}
             onEdit={() => setDraft(document.value.text)}
             onReload={() => void loadDocument(document.value)}
+            {...(props.onChoose === undefined ||
+            systems.find((system) => sameLocation(system, document.value))?.primary === true
+              ? {}
+              : {
+                  onUse: () =>
+                    void choose({
+                      kind: "file",
+                      folder: document.value.folder,
+                      path: document.value.path,
+                    }),
+                })}
           />
         ) : (
           <div className="project-design-system__editor">
@@ -352,6 +393,8 @@ function DesignSystemView(props: {
   readonly disabled: boolean;
   readonly onEdit: () => void;
   readonly onReload: () => void;
+  /** Make this the Project's design system; absent when it already is, or no change is offered. */
+  readonly onUse?: () => void;
 }) {
   const reading = props.document.reading;
   const drawn = reading.tokens.filter((token) => token.status !== "refused");
@@ -435,7 +478,74 @@ function DesignSystemView(props: {
         >
           Reload
         </OctantButton>
+        {props.onUse === undefined ? null : (
+          <OctantButton
+            disabled={props.disabled}
+            onClick={props.onUse}
+            size="sm"
+            type="button"
+            variant="ghost"
+          >
+            Use for this Project
+          </OctantButton>
+        )}
       </div>
+    </div>
+  );
+}
+
+/**
+ * Which design system the Project follows, and the two ways to change that
+ * besides choosing a file: back to the automatic rule, or off.
+ */
+function FollowsLine(props: {
+  readonly list: DesignSystemList;
+  readonly mainFolder: string | undefined;
+  readonly disabled: boolean;
+  readonly onChoose?: (choice: DesignSystemChoice | null) => void;
+}) {
+  const primary = props.list.systems.find((system) => system.primary);
+  const choice = props.list.choice;
+  const follows =
+    choice?.kind === "none"
+      ? "Design systems are off for this Project: turns get no design system and Canvas uses the brand kit or the workspace colours."
+      : props.list.choiceMissing === true && choice?.kind === "file"
+        ? `The chosen ${placeOf(choice, props.mainFolder)} is missing, so this Project follows no design system until it is back or another is chosen.`
+        : primary === undefined
+          ? props.list.systems.length === 0
+            ? undefined
+            : "No design system speaks for the whole Project. Choose one, or add a DESIGN.md at the top."
+          : `This Project follows ${primary.name} (${placeOf(primary, props.mainFolder)})${choice === undefined ? ", the top-level file" : ""}.`;
+  if (follows === undefined && choice === undefined) return null;
+  return (
+    <div className="project-design-system__follows">
+      {follows === undefined ? null : <p className="project-provider-policy__hint">{follows}</p>}
+      {props.onChoose === undefined ? null : (
+        <div>
+          {choice === undefined ? null : (
+            <OctantButton
+              disabled={props.disabled}
+              onClick={() => props.onChoose?.(null)}
+              size="sm"
+              type="button"
+              variant="ghost"
+            >
+              Follow the top-level file
+            </OctantButton>
+          )}
+          {choice?.kind === "none" || props.list.systems.length === 0 ? null : (
+            <OctantButton
+              disabled={props.disabled}
+              onClick={() => props.onChoose?.({ kind: "none" })}
+              size="sm"
+              type="button"
+              variant="ghost"
+            >
+              Turn off design systems
+            </OctantButton>
+          )}
+        </div>
+      )}
     </div>
   );
 }

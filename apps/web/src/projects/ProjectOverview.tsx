@@ -1,4 +1,5 @@
 import type { KeyProviderDriverKinds, PermissionMode } from "@octant/contracts/providers";
+import type { DesignSystemChoice } from "@octant/contracts/design-systems";
 import type { AutoReviewer } from "@octant/contracts/shield";
 import { createDesktopPaneClient } from "@octant/client-runtime/desktop-pane-client";
 import { createProjectTerminalClient } from "@octant/client-runtime/project-terminal-client";
@@ -94,6 +95,11 @@ export interface ProjectOverviewProps {
   readonly onBrandKitChange?: (
     projectId: ProjectId,
     brandKit: CanvasDesignBrand,
+  ) => Promise<boolean>;
+  /** Absent when the host cannot accept the change; the panel then offers no choice. */
+  readonly onDesignSystemChange?: (
+    projectId: ProjectId,
+    designSystem: DesignSystemChoice | null,
   ) => Promise<boolean>;
   /** Absent when the host cannot accept the change; a Code Project's recipe is then not shown. */
   readonly onDesktopRecipeChange?: (
@@ -452,6 +458,12 @@ export function ProjectOverview(props: ProjectOverviewProps) {
               >
                 <ProjectDesignSystemSection
                   client={props.projectClient}
+                  {...(props.onDesignSystemChange === undefined
+                    ? {}
+                    : {
+                        onChoose: async (choice: DesignSystemChoice | null) =>
+                          (await props.onDesignSystemChange?.(props.project.id, choice)) ?? false,
+                      })}
                   disabled={archived || connectionStale}
                   project={props.project}
                 />

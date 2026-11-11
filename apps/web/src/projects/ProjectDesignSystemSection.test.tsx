@@ -74,7 +74,12 @@ function client(
       ],
       truncated: false,
     })),
-    readDesignSystem: vi.fn(async () => document("# Acme\n", "r1")),
+    readDesignSystem: vi.fn(
+      async (_projectId: string, location: { readonly folder: string; readonly path: string }) => ({
+        ...document("# Acme\n", "r1"),
+        ...location,
+      }),
+    ),
     saveDesignSystem: vi.fn(async () => ({
       status: "saved" as const,
       document: document("# Acme v2\n", "r2"),
@@ -101,6 +106,39 @@ describe("ProjectDesignSystemSection", () => {
     const left = screen.getByRole("list", { name: "Not used by Canvas" });
     expect(within(left).getByText("display")).toBeInTheDocument();
     expect(screen.getByText(/components/)).toBeInTheDocument();
+  });
+
+  it("swaps the Project to another design system, turns them off, and returns to the automatic rule", async () => {
+    const onChoose = vi.fn(async () => true);
+    render(<ProjectDesignSystemSection client={client()} onChoose={onChoose} project={project} />);
+    expect(
+      await screen.findByText(/follows Acme \(DESIGN\.md\), the top-level file/),
+    ).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "Site" }));
+    await userEvent.click(await screen.findByRole("button", { name: "Use for this Project" }));
+    expect(onChoose).toHaveBeenLastCalledWith({
+      kind: "file",
+      folder: root,
+      path: "apps/site/DESIGN.md",
+    });
+    await userEvent.click(screen.getByRole("button", { name: "Turn off design systems" }));
+    expect(onChoose).toHaveBeenLastCalledWith({ kind: "none" });
+  });
+
+  it("says when the chosen design system is missing and offers the automatic rule back", async () => {
+    const onChoose = vi.fn(async () => true);
+    const fake = client({
+      listDesignSystems: vi.fn(async () => ({
+        systems: [{ folder: root, path: "DESIGN.md", name: "Acme", tokenCount: 2, primary: false }],
+        truncated: false,
+        choice: { kind: "file" as const, folder: root, path: "gone/DESIGN.md" },
+        choiceMissing: true,
+      })),
+    });
+    render(<ProjectDesignSystemSection client={fake} onChoose={onChoose} project={project} />);
+    expect(await screen.findByText(/chosen gone\/DESIGN\.md is missing/)).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "Follow the top-level file" }));
+    expect(onChoose).toHaveBeenLastCalledWith(null);
   });
 
   it("saves an edit over the revision it was opened at", async () => {

@@ -1942,6 +1942,7 @@ html[data-octant-increased-contrast="true"] .project-row[data-active="true"] {
 }
 
 .project-design-system__view,
+.project-design-system__follows,
 .project-design-system__editor,
 .project-design-system__create,
 .project-design-system__group {
