@@ -13811,3 +13811,167 @@ const noSiblings: SiblingThreadSource = {
   projectThreads: () => [],
   readTranscript: async () => undefined,
 };
+
+describe("streamed reply text in a Code turn", () => {
+  async function streamingTurn(id: number) {
+    const queue = Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>());
+    const connection = providerConnection(queue);
+    const fixture = runtimeFixture({ provider: providerDriver(connection) });
+    await fixture.runtime.execute(windowId, {
+      kind: "start-provider-turn",
+      operationId: operationId(id),
+      threadId,
+      checkoutId,
+      sessionId,
+      prompt: fixture.prompt,
+    });
+    await vi.waitFor(() => expect(connection.send).toHaveBeenCalledOnce());
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    const evidenceBefore = fixture.evidenceValues.size;
+    const offer = async (...events: Array<Parameters<typeof providerEvent>[0]>) => {
+      for (const event of events) await Effect.runPromise(Queue.offer(queue, providerEvent(event)));
+      // Let the runtime consume the queue without moving the batch window.
+      for (let turn = 0; turn < 20; turn += 1) await vi.advanceTimersByTimeAsync(0);
+    };
+    const frames = () => {
+      const replay = fixture.operationEvents.replay({
+        threadId,
+        operationId: operationId(id),
+        afterCursor: 0,
+        limit: MAX_CODE_OPERATION_REPLAY_LIMIT,
+      });
+      if (replay.status !== "ok") throw new Error("journal replay failed");
+      return replay.frames;
+    };
+    const kinds = () => frames().map((frame) => frame.event.kind);
+    const texts = () =>
+      frames().flatMap((frame) =>
+        frame.event.kind === "provider-content"
+          ? [`${frame.event.channel}:${fixture.evidenceValues.get(frame.event.content.contentId)}`]
+          : [],
+      );
+    return {
+      fixture,
+      offer,
+      frames,
+      kinds,
+      texts,
+      evidenceRows: () => fixture.evidenceValues.size - evidenceBefore,
+      finish: async () => {
+        vi.useRealTimers();
+        await fixture.runtime.close();
+        fixture.close();
+      },
+    };
+  }
+
+  it("commits 50 chunks inside one window as one journal event and one evidence row", async () => {
+    const turn = await streamingTurn(301);
+    try {
+      const chunks = Array.from({ length: 50 }, (_, index) => `c${index} `);
+      await turn.offer(...chunks.map((text) => ({ kind: "text-delta" as const, text })));
+      expect(turn.kinds().filter((kind) => kind === "provider-content")).toHaveLength(0);
+      await vi.advanceTimersByTimeAsync(100);
+      expect(turn.texts()).toEqual([`message:${chunks.join("")}`]);
+      expect(turn.evidenceRows()).toBe(1);
+    } finally {
+      await turn.finish();
+    }
+  });
+
+  it("journals a tool event after the text that preceded it and before the text that follows", async () => {
+    const turn = await streamingTurn(302);
+    try {
+      await turn.offer(
+        { kind: "text-delta", text: "before " },
+        { kind: "text-delta", text: "tool" },
+        { kind: "tool-start", toolCallId: "tool-1", toolName: "read" },
+        { kind: "text-delta", text: "after" },
+      );
+      await vi.advanceTimersByTimeAsync(100);
+      const kinds = turn.kinds();
+      const first = kinds.indexOf("provider-content");
+      const tool = kinds.indexOf("tool-activity");
+      const last = kinds.lastIndexOf("provider-content");
+      expect(first).toBeGreaterThanOrEqual(0);
+      expect(tool).toBeGreaterThan(first);
+      expect(last).toBeGreaterThan(tool);
+      expect(turn.texts()).toEqual([
+        "message:before tool",
+        expect.stringMatching(/^message:\s*after$/),
+      ]);
+    } finally {
+      await turn.finish();
+    }
+  });
+
+  it("keeps message, reasoning and message as three events in that order", async () => {
+    const turn = await streamingTurn(303);
+    try {
+      await turn.offer(
+        { kind: "text-delta", text: "a" },
+        { kind: "reasoning-delta", text: "b" },
+        { kind: "text-delta", text: "c" },
+      );
+      await vi.advanceTimersByTimeAsync(100);
+      expect(turn.texts()).toEqual(["message:a", "reasoning:b", "message:c"]);
+    } finally {
+      await turn.finish();
+    }
+  });
+
+  it.each([
+    ["settles", { kind: "completed" as const }],
+    ["fails", { kind: "failed" as const, message: "Provider failed." }],
+    ["is interrupted", { kind: "interrupted" as const, message: "Stopped." }],
+  ])("journals the open text before the turn %s", async (_name, ending) => {
+    const turn = await streamingTurn(304);
+    try {
+      await turn.offer({ kind: "text-delta", text: "partial" }, ending);
+      const kinds = turn.kinds();
+      expect(turn.texts()).toEqual(["message:partial"]);
+      expect(kinds.indexOf("provider-content")).toBeLessThan(kinds.lastIndexOf("operation-state"));
+    } finally {
+      await turn.finish();
+    }
+  });
+
+  it("journals the open text before an abort ends the turn", async () => {
+    const turn = await streamingTurn(305);
+    try {
+      await turn.offer({ kind: "text-delta", text: "partial" });
+      await turn.fixture.runtime.execute(windowId, {
+        kind: "cancel-provider-turn",
+        operationId: operationId(399),
+        threadId,
+        checkoutId,
+      });
+      await turn.offer();
+      const kinds = turn.kinds();
+      expect(turn.texts()).toEqual(["message:partial"]);
+      expect(kinds.indexOf("provider-content")).toBeLessThan(kinds.lastIndexOf("operation-state"));
+    } finally {
+      await turn.finish();
+    }
+  });
+
+  it("stores the same conversation text a chunk-per-event journal would", async () => {
+    const turn = await streamingTurn(306);
+    try {
+      const chunks = ["Hel", "lo", ", ", "wor", "ld"];
+      for (const text of chunks) {
+        await turn.offer({ kind: "text-delta", text });
+        await vi.advanceTimersByTimeAsync(40);
+      }
+      await turn.offer({ kind: "completed" });
+      expect(
+        turn
+          .texts()
+          .map((text) => text.replace(/^message:/, ""))
+          .join(""),
+      ).toBe(chunks.join(""));
+    } finally {
+      await turn.finish();
+    }
+  });
+});

@@ -4419,8 +4419,9 @@ flowchart LR
   and `better-sqlite3` for the Node portability smoke — that pass the same
   conformance suite. Journal, migration, and projection code depend only on
   the port. Both adapters run the store in WAL mode with `synchronous = FULL`:
-  a Chat reply's streamed deltas batch into one journal commit per short burst,
-  so the authoritative journal fsyncs a bounded number of times per second
+  a Chat reply's and a Code turn's streamed deltas batch into one journal commit
+  per short burst (a Code burst also flushes before any other event of its turn
+  and when the turn ends), so the authoritative journal fsyncs a bounded number of times per second
   instead of once per token, and a power loss loses at most the burst that was
   still open — never a committed one.
   Settings → Data & storage exposes a read-only, server-authoritative data
