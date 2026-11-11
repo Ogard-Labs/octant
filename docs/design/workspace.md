@@ -174,11 +174,14 @@ Opening it is the same action as opening the Project in the sidebar. In the
 collapsed rail the pinned Projects lead and the automatic list fills what is
 left of six Project tiles without repeating a pinned one; the rail draws no more
 than six pinned tiles, so a long list of pins never pushes Settings or the usage
-rings out of the window, and the Projects page still lists every Project. Pins
+rings out of the window; once six Projects are pinned, Pin to rail in another
+Project's menu is disabled with the reason "The rail holds 6 Projects" and
+Unpin from rail stays available, and pins saved beyond six are kept, and the Projects page still lists every Project. Pins
 are the shell setting `sidebarPinnedProjects`, a list of Project ids saved the
 way the sidebar destinations are; a store saved before pins decodes to none, and
 a pin for a Project that no longer exists draws nothing and is dropped the next
-time pins are saved. The More menu does not list pins: it holds only the
+time pins are saved, but only once the Project list is loaded and complete; a save
+made while it loads keeps every other pin, and two quick pin actions both land. The More menu does not list pins: it holds only the
 destinations the rail does not show.
 
 **Project icons.** A Project shows its own icon wherever Projects are listed:

@@ -620,8 +620,8 @@ Status: Built. Since: —. Detail: [Architecture: Modes: Chat, Work, and Code](.
 A person can pin a Project to the icon rail, and a pinned Project is a tile that opens it.
 
 - Pin and unpin are in the Project's own menu in the sidebar ("Pin to rail", "Unpin from rail") and in the context menu of the pinned tile; More never lists them, because it holds only the destinations the rail does not.
-- Pins are a saved shell preference stored and synced like the sidebar destinations, by Project id, in the order pinned. Settings saved before pins decode to none; a pin for a Project that no longer exists draws nothing and is dropped the next time pins are saved.
-- A pinned tile shows in both rail placements, after the divider under the destinations. In the collapsed rail the pinned Projects come first and the automatic list fills what is left of six tiles without repeating one; the rail draws at most six pinned tiles so Settings and the usage rings stay in the window.
+- Pins are a saved shell preference stored and synced like the sidebar destinations, by Project id, in the order pinned. Settings saved before pins decode to none; a pin for a Project that no longer exists draws nothing and is dropped the next time pins are saved, but only once the Project list is loaded and complete; two quick pin actions both land.
+- A pinned tile shows in both rail placements, after the divider under the destinations. In the collapsed rail the pinned Projects come first and the automatic list fills what is left of six tiles without repeating one; the rail draws at most six pinned tiles so Settings and the usage rings stay in the window, and Pin to rail is disabled with its reason once six are pinned.
 - Opening a pinned tile is the same action as opening that Project anywhere else; pinning grants nothing.
 
 Status: Built. Since: 2026-11-11. Detail: [Workspace: Navigation and Projects](workspace.md#navigation-and-projects).

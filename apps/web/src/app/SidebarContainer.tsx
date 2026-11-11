@@ -40,7 +40,8 @@ import {
 } from "../shell/pluginSidebarDestinationRegistry";
 import type { projectThreadsAccessForMode } from "../shell/shellModeRouting";
 import { ShellSidebar, type ShellSidebarProps } from "../shell/ShellSidebar";
-import { resolveRailPins, savedRailPins } from "../shell/SidebarRail";
+import { resolveRailPins } from "../shell/SidebarRail";
+import { useRailPinSetter } from "../shell/useRailPinSetter";
 import type { countSidebarTiles } from "../shell/sidebarTileCounts";
 import { githubPullRequestUrl } from "../threadBoard/githubPullRequestUrl";
 import { exportThreadBundle, type resolveThreadExportClient } from "../thread/threadExport";
@@ -534,12 +535,21 @@ export const SidebarContainer = memo(function SidebarContainer(props: SidebarCon
       allProjects.filter((project) => project.lifecycle === "active"),
     );
   }, [allProjects, railPinnedSetting]);
-  const setRailPin = (projectId: ProjectId, pinned: boolean) => {
-    const existing = new Set<string>(allProjects.map((project) => project.id));
-    void updateSettings({
-      sidebarPinnedProjects: savedRailPins(railPinnedSetting, existing, projectId, pinned),
-    });
-  };
+  // The Project list starts empty and is replaced wholesale on each load, so
+  // only a "ready" list may prune pins; otherwise a pin saved during a load
+  // would drop every other one.
+  const completeProjectIds = useMemo(
+    () =>
+      projectStatus === "ready"
+        ? new Set<string>(allProjects.map((project) => project.id))
+        : undefined,
+    [projectStatus, allProjects],
+  );
+  const setRailPin = useRailPinSetter<ProjectId>(
+    railPinnedSetting,
+    completeProjectIds,
+    (sidebarPinnedProjects) => void updateSettings({ sidebarPinnedProjects }),
+  );
   const workSideArchivedProjects = useMemo(
     () =>
       allProjects.filter(

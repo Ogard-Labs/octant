@@ -657,6 +657,45 @@ describe("ProjectSidebarSection rail pins", () => {
   });
 });
 
+describe("ProjectSidebarSection full rail", () => {
+  it("disables Pin to rail with its reason when the rail already holds six, and still unpins", async () => {
+    const user = userEvent.setup();
+    const onChange = vi.fn();
+    const six = new Set(["1", "2", "3", "4", "5", "6"]);
+    const props = {
+      archivedProjects: [],
+      availabilityByProject: new Map(),
+      onArchive: vi.fn(),
+      onMove: vi.fn(),
+      onProjectOpen: vi.fn(),
+      onReorder: vi.fn(),
+      onRestore: vi.fn(),
+      projects: [chatProjectA],
+    };
+    const { rerender } = render(
+      <ProjectSidebarSection {...props} railPins={{ pinnedIds: six, onChange }} />,
+    );
+    screen.getByRole("button", { name: `Project actions for ${chatProjectA.name}` }).focus();
+    await user.keyboard("{ArrowDown}");
+    const pin = await screen.findByRole("menuitem", { name: "Pin to rail" });
+    expect(pin).toHaveAttribute("aria-disabled", "true");
+    expect(pin).toHaveAttribute("aria-description", "The rail holds 6 Projects");
+    expect(pin).toHaveAttribute("title", "The rail holds 6 Projects");
+    await user.keyboard("{Escape}");
+
+    rerender(
+      <ProjectSidebarSection
+        {...props}
+        railPins={{ pinnedIds: new Set([...six, String(chatProjectA.id)]), onChange }}
+      />,
+    );
+    screen.getByRole("button", { name: `Project actions for ${chatProjectA.name}` }).focus();
+    await user.keyboard("{ArrowDown}");
+    const unpin = await screen.findByRole("menuitem", { name: "Unpin from rail" });
+    expect(unpin).not.toHaveAttribute("aria-disabled", "true");
+  });
+});
+
 describe("ProjectSidebarSection archive", () => {
   it("archives a Project from its row menu", async () => {
     const user = userEvent.setup();

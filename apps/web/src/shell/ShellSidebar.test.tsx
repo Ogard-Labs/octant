@@ -1209,6 +1209,7 @@ describe("ShellSidebar", () => {
           "thread-board": vi.fn(),
           projects: vi.fn(),
           agents: vi.fn(),
+          plugins: vi.fn(),
         },
       },
       onAddFolder: vi.fn(),
@@ -1225,12 +1226,13 @@ describe("ShellSidebar", () => {
     await user.click(within(beside).getByRole("button", { name: "Harbor" }));
     expect(onOpen).toHaveBeenCalledOnce();
     // Pinning adds no check items to More: it lists destinations only.
-    const more = within(beside).queryByRole("button", { name: "More destinations" });
-    if (more !== null) {
-      await user.click(more);
-      expect(screen.queryByRole("menuitemcheckbox")).toBeNull();
-      expect(screen.queryByRole("menuitem", { name: /rail/i })).toBeNull();
-    }
+    await user.click(within(beside).getByRole("button", { name: "More destinations" }));
+    expect(await screen.findByRole("menuitem", { name: "Plugins" })).toBeVisible();
+    expect(screen.getByRole("menuitem", { name: "Customize sidebar" })).toBeVisible();
+    expect(screen.getAllByRole("menuitem").map((item) => item.textContent)).not.toContain("Harbor");
+    expect(screen.queryByRole("menuitemcheckbox")).toBeNull();
+    expect(screen.queryByRole("menuitem", { name: /rail/i })).toBeNull();
+    await user.keyboard("{Escape}");
     unmount();
 
     render(<ShellSidebar {...common} rail={{ projects: [] }} />);

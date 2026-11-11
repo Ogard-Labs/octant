@@ -49,6 +49,7 @@ import { ProjectIcon } from "./ProjectIcon";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantCheckbox } from "../ui/base/OctantCheckbox";
 import { OctantContextMenu } from "../ui/base/OctantContextMenu";
+import { RAIL_PROJECT_LIMIT } from "../shell/SidebarRail";
 import { OctantDialog } from "../ui/base/OctantDialog";
 import { OctantField, OctantFieldLabel } from "../ui/base/OctantField";
 import { OctantInput } from "../ui/base/OctantInput";
@@ -236,6 +237,9 @@ function CodeProjectViewGlyph(props: {
  */
 const FILTERED_THREADS_EMPTY_MESSAGE =
   "No threads match the current filters. Nothing was deleted — clear search or filters to see more.";
+
+/** Why Pin to rail is disabled once the rail holds as many Projects as it draws. */
+const RAIL_FULL_REASON = `The rail holds ${RAIL_PROJECT_LIMIT} Projects`;
 
 const PROJECT_SORT_ITEMS: ReadonlyArray<OctantMenuItem> = [
   {
@@ -1305,6 +1309,7 @@ function ProjectActionsMenu(props: {
   // An archived Project has no rail tile to pin.
   const railPins = project.lifecycle === "archived" ? undefined : props.railPins;
   const railPinned = railPins?.pinnedIds.has(String(project.id)) === true;
+  const railFull = !railPinned && (railPins?.pinnedIds.size ?? 0) >= RAIL_PROJECT_LIMIT;
   const archived = project.lifecycle === "archived";
   // An archived Project is read-only, so its colour is as fixed as its name.
   const onColorChange = archived ? undefined : props.onColorChange;
@@ -1335,7 +1340,13 @@ function ProjectActionsMenu(props: {
               {project.pinned ? "Unpin Project" : "Pin Project"}
             </OctantMenuActionItem>
             {railPins === undefined ? null : (
-              <OctantMenuActionItem onClick={() => railPins.onChange(project.id, !railPinned)}>
+              <OctantMenuActionItem
+                disabled={railFull}
+                onClick={() => railPins.onChange(project.id, !railPinned)}
+                {...(railFull
+                  ? { "aria-description": RAIL_FULL_REASON, title: RAIL_FULL_REASON }
+                  : {})}
+              >
                 {railPinned ? "Unpin from rail" : "Pin to rail"}
               </OctantMenuActionItem>
             )}

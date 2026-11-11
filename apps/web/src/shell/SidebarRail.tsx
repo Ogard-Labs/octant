@@ -87,7 +87,7 @@ const TILE_RAIL: Readonly<
  * in the collapsed rail, and the beside rail draws no more than this many of
  * them: the sidebar next to it lists every Project anyway.
  */
-const RAIL_PROJECT_LIMIT = 6;
+export const RAIL_PROJECT_LIMIT = 6;
 
 /**
  * The pinned Projects that still exist, in pin order. A pin for a Project that
@@ -106,15 +106,20 @@ export function resolveRailPins<P extends { readonly id: string }>(
 
 /**
  * The pin list to save after pinning or unpinning one Project. Pins for
- * Projects that no longer exist are dropped here, the next time pins are saved.
+ * Projects that no longer exist are dropped here, the next time pins are saved,
+ * but only when `existingIds` is the complete, loaded Project list. Without it
+ * (still loading, or refused) every other pin is kept: an empty list is not
+ * evidence that a Project is gone.
  */
 export function savedRailPins<Id extends string>(
   saved: ReadonlyArray<Id>,
-  existingIds: ReadonlySet<string>,
+  existingIds: ReadonlySet<string> | undefined,
   projectId: Id,
   pinned: boolean,
 ): ReadonlyArray<Id> {
-  const kept = saved.filter((id) => existingIds.has(id) && id !== projectId);
+  const kept = saved.filter(
+    (id) => id !== projectId && (existingIds === undefined || existingIds.has(id)),
+  );
   return pinned ? [...kept, projectId] : kept;
 }
 
