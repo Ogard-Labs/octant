@@ -1126,11 +1126,12 @@
   overflow-wrap: anywhere;
 }
 
-/* With a Canvas open, the narrow dock sheet stands at its full height, as the
-   docked column does, so the document scrolls inside itself. Sized to its
-   content instead, the sheet scrolled as a whole: the comments drawer
-   scrolled away with the document and its Comment button with it. */
-.octant-dialog__popup:has(> .right-utility-dock__surface .canvas-workspace-tab) {
+/* The narrow dock sheet stands at its full height, as the docked column does,
+   so the tool scrolls inside itself. Tiles are positioned by percentages of
+   the tile area, and a sheet sized to its content gave them no height at all
+   (a 78px dialog holding only the tab strip). A Canvas had the same need, so
+   the document scrolls inside itself and its comments drawer stays put. */
+.octant-dialog__popup:has(> .right-utility-dock__surface) {
   height: min(var(--octant-dialog-height, 640px), calc(100vh - 48px));
 }
 

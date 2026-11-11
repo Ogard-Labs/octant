@@ -57,6 +57,9 @@ export function RightUtilityDock(props: RightUtilityDockProps) {
   const closeButton = useRef<HTMLButtonElement>(null);
   const dock = useRef<HTMLElement>(null);
   const [workspaceWidth, setWorkspaceWidth] = useState<number>();
+  // What is drawn, not what is stored: the stylesheet clamps the stored width
+  // to the room the thread leaves, and the separator announced the stored one.
+  const [drawnWidth, setDrawnWidth] = useState<number>();
   const ceiling = dockWidthCeiling(workspaceWidth, {
     tileColumns: props.isNarrow ? 1 : (props.tiles?.layout?.columns.length ?? 1),
     viewportWidth: typeof window === "undefined" ? undefined : window.innerWidth,
@@ -72,11 +75,14 @@ export function RightUtilityDock(props: RightUtilityDockProps) {
         (Number.parseFloat(style.paddingInlineStart) || 0) -
         (Number.parseFloat(style.paddingInlineEnd) || 0);
       setWorkspaceWidth(width > 0 ? width : undefined);
+      const drawn = dock.current?.getBoundingClientRect().width ?? 0;
+      setDrawnWidth(drawn > 0 ? Math.round(drawn) : undefined);
     };
     measure();
     if (typeof ResizeObserver === "undefined") return;
     const observer = new ResizeObserver(measure);
     observer.observe(workspace);
+    if (dock.current !== null) observer.observe(dock.current);
     return () => observer.disconnect();
   }, [props.isNarrow, props.open]);
 
@@ -162,7 +168,7 @@ export function RightUtilityDock(props: RightUtilityDockProps) {
           : { onCancel: props.onCancelWidthPreview })}
         onCommit={props.onCommitWidth}
         onPreview={props.onPreviewWidth}
-        value={Math.min(props.width, ceiling)}
+        value={Math.min(drawnWidth ?? props.width, ceiling)}
       />
       {surface}
     </aside>

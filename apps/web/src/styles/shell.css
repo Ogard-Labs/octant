@@ -205,7 +205,10 @@ html[data-octant-native-host="true"]
     var(--octant-window-chrome-reserved-width, 148px),
     min(
       var(--octant-context-sidebar-width, 0px),
-      calc(100% - var(--octant-rendered-sidebar-width, 0px) - var(--octant-wide-primary-min))
+      calc(
+        100% - var(--octant-rendered-sidebar-width, 0px) -
+          var(--octant-tiled-primary-min, var(--octant-wide-primary-min))
+      )
     )
   );
 }
@@ -2176,6 +2179,12 @@ html[data-octant-native-host="true"]
 @media (min-width: 1100px) {
   .shell.shell-frame.shell--wide-context-open {
     --octant-wide-primary-min: 560px;
+  }
+}
+
+@media (min-width: 1100px) {
+  .shell.shell-frame.shell--wide-context-open[data-dock-tile-columns="2"] {
+    --octant-tiled-primary-min: 440px;
   }
 }
 

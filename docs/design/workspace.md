@@ -864,8 +864,10 @@ still never shows another pane's content. All Browser tabs are pages of one
 Browser tool and share one tile. The layout is window-local presentation in
 local storage: it grants nothing, starts nothing, and the bottom panel never
 has one. Columns stand side by side only when the tile area can give each 280px and
-otherwise stack (at 1440px with the sidebar open the dock is 500px, so they
-stack), and stacked columns stay resizable. A tool the bottom panel takes, or one
+otherwise stack. The thread keeps 440px beside two columns (560px beside one,
+from a 1100px window up), because at 560px two tools could never stand side by
+side in a 1440px window: with the sidebar open a second column widens the dock to
+about 620px, about 306px per column. Stacked columns stay resizable. A tool the bottom panel takes, or one
 that becomes unavailable, loses its tile and returns as a tab. Opening a dock tool leaves the bottom panel open; only a tool the panel
 already shows leaves it for the dock.
 The shell loads each tool through `dockModuleRegistry`; modules under

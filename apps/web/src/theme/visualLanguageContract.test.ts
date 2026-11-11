@@ -1105,6 +1105,13 @@ describe("the public-block visual language", () => {
       ).toMatch(/min-height:\s*0[\s\S]*flex:\s*1 1 0/);
     });
 
+    it("stands the narrow dock sheet at a definite height, so the tool fills it and scrolls inside", () => {
+      const sheet = body(".octant-dialog__popup:has(> .right-utility-dock__surface)");
+      expect(sheet).toMatch(
+        /height:\s*min\(var\(--octant-dialog-height, 640px\), calc\(100vh - 48px\)\)/,
+      );
+    });
+
     it("leaves a tile without a fill of its own, so a see-through theme shows through", () => {
       expect(body(".dock-tile")).not.toMatch(/background/);
       expect(body(".dock-tile > .right-utility-dock__tool")).not.toMatch(/background/);

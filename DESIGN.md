@@ -2162,9 +2162,12 @@ On wide windows it may use at most half of the workspace beside the sidebar
 (`dockWidthCeiling`, never under the sidebar minimum or over its maximum), which
 keeps the thread readable beside any tool, and the resize handle stops there
 too; with two columns of tool tiles shown it may take all the thread's own
-minimum leaves (560px from 1100px up, 360px below, the same minimum the
-stylesheet's grid uses); the bottom panel may use at most 38 percent of the
-viewport height while preserving 320px for the primary workspace. It can host
+minimum leaves (the thread keeps 440px beside two columns from 1100px up and
+360px below, which the stylesheet's grid mirrors as `--octant-tiled-primary-min`;
+one column keeps 560px from 1100px up. At 560px two tools could never stand side by
+side in a 1440px window, so a second column asks the thread for less); the bottom panel may use at most 38 percent of the
+viewport height while preserving 320px for the primary workspace, and it hosts
+exactly Review, Terminal, Browser, Files and Side chat. The dock can host
 Review, Pull requests (open rows for a Code thread's Project), Files, Document
 (only once a turn has written one), Browser, Terminal, Canvas, Plan (only for a
 real plan artifact), Delivery (only for a configured target), Agents (when
@@ -2240,8 +2243,10 @@ of the range the floors allow), each named for the two tools it sits between
 is shorter than 140px or column narrower than 280px (the dock's own minimum
 width) while the dock has the room, and the columns stack when the tile area
 cannot give two columns 280px each. Columns therefore stand side by side only
-when the tile area has the width: at 1440px with the sidebar open the dock is
-500px and "beside" stacks, which is why the head control promises no direction;
+when the tile area has the width: at 1440px with the sidebar open a second
+column widens the dock to about 620px and the columns stand side by side at about
+306px each (they stacked at 500px while the thread kept 560px), and in a narrower
+window "beside" stacks, which is why the head control promises no direction;
 the strip menu keeps explicit Show beside and Show below. Stacked columns stay
 resizable by a separator between them along the vertical axis, and no tile is
 ever under its floor: when stacked tiles cannot all fit the dock, the tile area

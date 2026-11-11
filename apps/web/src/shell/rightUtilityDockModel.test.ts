@@ -376,16 +376,23 @@ describe("multi-instance dock surfaces", () => {
 });
 
 describe("how wide the dock may get with two columns of tools", () => {
+  // Workspace widths are the window less a 260px sidebar.
   it("keeps half of the workspace for one column", () => {
-    expect(dockWidthCeiling(1000, { viewportWidth: 1440 })).toBe(500);
-    expect(dockWidthCeiling(1000, { tileColumns: 1, viewportWidth: 1440 })).toBe(500);
+    expect(dockWidthCeiling(840, { tileColumns: 1, viewportWidth: 1100 })).toBe(420);
+    expect(dockWidthCeiling(1180, { tileColumns: 1, viewportWidth: 1440 })).toBe(590);
+    expect(dockWidthCeiling(1468, { tileColumns: 1, viewportWidth: 1728 })).toBe(
+      Math.min(MAX_CONTEXT_SIDEBAR_WIDTH, 734),
+    );
+    expect(dockWidthCeiling(1180, { viewportWidth: 1440 })).toBe(590);
   });
 
-  it("leaves a thread only its own minimum for two columns", () => {
-    // 1440px with the sidebar open leaves a 1180px workspace: half gave two
-    // columns of 243px; the thread's 560px minimum leaves 620px.
-    expect(dockWidthCeiling(1180, { tileColumns: 2, viewportWidth: 1440 })).toBe(620);
-    expect(dockWidthCeiling(1180, { tileColumns: 1, viewportWidth: 1440 })).toBe(590);
+  it("leaves a thread 440px beside two columns from 1100px up", () => {
+    // At 560px two tools could never stand side by side in a 1440px window.
+    expect(dockWidthCeiling(840, { tileColumns: 2, viewportWidth: 1100 })).toBe(400);
+    expect(dockWidthCeiling(1180, { tileColumns: 2, viewportWidth: 1440 })).toBe(740);
+    expect(dockWidthCeiling(1468, { tileColumns: 2, viewportWidth: 1728 })).toBe(
+      Math.min(MAX_CONTEXT_SIDEBAR_WIDTH, 1028),
+    );
   });
 
   it("uses the smaller thread minimum below 1100px, as the stylesheet does", () => {
