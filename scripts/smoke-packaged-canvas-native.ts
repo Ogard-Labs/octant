@@ -969,8 +969,9 @@ const timer = setInterval(() => {
         `${stage}-canvas-tab`,
         (snapshot) => hasText(snapshot, "v1") && hasText(snapshot, "Signups this week"),
       );
-      await nativeInput(`${stage}-focus-actions`, "focus-before-text", "Signups this week");
-      await nativeInput(`${stage}-open-actions`, "enter", "Signups this week");
+      // By name, as the first opening of this menu is: the control before the
+      // Canvas's first text is a tool now.
+      await nativeInput(`${stage}-open-actions`, "click-described", "More Canvas actions");
       await observeUntil(`${stage}-actions`, (snapshot) => hasText(snapshot, "Share"));
       await nativeInput(`${stage}-share`, "choose-native-menu-item", "Share", "Share…");
       await observeUntil(`${stage}-share-dialog`, (snapshot) => hasExactText(snapshot, "Share"));
