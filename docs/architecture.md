@@ -3470,8 +3470,13 @@ the thread it came from.
   saying paused or scheduled and opening the routine in Automation Center
   where the host can (the phone shows the card without Open). The desktop and
   web thread's Environment lists the routine in its Routines row, paused or
-  not, as it lists any routine made from the thread; the phone has no
-  Environment, and a paired device cannot read routines.
+  not, as it lists any routine made from the thread. The phone has no
+  Environment, so its Work and Code thread screen shows a read-only
+  **Scheduled** list of the routines the thread set up (name, schedule, and
+  whether it is paused). A paired device may read routines, because the remote
+  route policy classifies an Automation list as a Project overview read and
+  forwards it for the device's own host; it may not resume or edit one from the
+  phone, so a paused routine says to resume it at a window on this computer.
   The host holds it for ten minutes as a suggestion chip at the foot of the
   thread, listed and
   answerable only by the window or paired device whose turn raised it; with
