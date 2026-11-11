@@ -164,4 +164,38 @@ describe("Project icon lookup", () => {
 
     expect((await findProjectIcon(root)).status).toBe("found");
   });
+
+  it("accepts an SVG whose doctype carries an internal subset", async () => {
+    const root = await folder();
+    await writeFile(
+      join(root, "logo.svg"),
+      `<?xml version="1.0"?>\n<!DOCTYPE svg [ <!ENTITY mark "a > b"> ]>\n<!-- mark -->\n${SVG}`,
+    );
+
+    expect((await findProjectIcon(root)).status).toBe("found");
+  });
+
+  it("refuses text that never reaches an svg root", async () => {
+    const root = await folder();
+    await writeFile(join(root, "favicon.svg"), `<?xml version="1.0"?>\n<!-- mark -->\n<svgx/>`);
+    await writeFile(join(root, "icon.svg"), `<!-- never closed ${SVG}`);
+    await writeFile(join(root, "logo.svg"), `<!DOCTYPE svg [ never closed ${SVG}`);
+
+    expect((await findProjectIcon(root)).status).toBe("none");
+  });
+
+  it("answers at once for a file of repeated comment or doctype openers", async () => {
+    // Both shapes made a single pattern for the prologue backtrack without
+    // end; each is about as large as an icon may be.
+    const root = await folder();
+    await writeFile(join(root, "favicon.svg"), `<!--${"--><!--".repeat(30_000)}`);
+    await writeFile(join(root, "icon.svg"), `<!doctype[${"]><!doctype[".repeat(20_000)}`);
+    await writeFile(join(root, "logo.svg"), `${"<!doctype x>".repeat(20_000)}<html>`);
+
+    const started = performance.now();
+    const found = await findProjectIcon(root);
+
+    expect(found.status).toBe("none");
+    expect(performance.now() - started).toBeLessThan(2000);
+  });
 });
