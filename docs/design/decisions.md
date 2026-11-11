@@ -2298,6 +2298,8 @@ What is true about a thread but is not part of its conversation has one home, a 
 
 - Its rows are the access level in force with Access details, Reply detail, document delivery, Provider tools, Credential commands, Provider cloud sessions and Continue elsewhere, each only where it applies. The row under the composer's card keeps only what changes from one message to the next. Nothing else about the thread is drawn on the thread page outside the transcript and the composer.
 - Rows stay mounted while the panel is closed, and a row that waits for the person marks the panel's button.
+- The button is an icon named Thread info. The line under the composer's card is one row in a split pane and two at a phone's width, and the panel is never wider than that line.
+- The panel is a menu drawn like the line's other menus: full-width 30px rows, each its name leading with its value and arrow trailing, headed by the level in force.
 
 Status: Built. Since: —. Detail: [Workspace: Thread info](workspace.md#thread-info).
 

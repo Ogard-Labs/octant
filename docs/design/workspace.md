@@ -68,9 +68,21 @@ single-click continuation, and preservation of the composer draft.
 ## Thread info
 
 What is true about a thread but is not part of its conversation has one home:
-a quiet **Thread info** button at the end of the row under the follow-up
-composer, after the plan meters and the model. It opens one floating card above the row,
-at most 440px wide, whose rows are, in order and each only where it applies:
+a quiet icon button named **Thread info** at the end of the line under the
+follow-up composer, after the plan meters and the model. Its name is its
+tooltip and its accessible name; written out, its two words wrapped the line in
+a split pane and left the button on a line of its own. It opens one menu above
+the line, drawn as every other menu the line opens: the same edge, corner and
+4px inset, 288px wide and never wider than the line, with rows 30px tall that
+answer the pointer across their whole width. A row is its name leading, and at
+the trailing edge its current value in muted ink and its arrow. The level in
+force heads the menu, its name over where it came from ("Matches your
+default"), and a hairline closes that group. A row that opens in place
+(**Access details**, **Credential commands**, **Provider cloud sessions**)
+turns its arrow and puts its content under it; the access report is a list of
+facts, each name leading and its value trailing, and the menu widens to 440px
+while it is open. As a padded card of loose text links the panel read as a
+piece of a web page. Its rows are, in order and each only where it applies:
 the access level in force and where it came from (Work and Code) with its
 **Access details**, **Reply detail**, how the thread delivers documents
 (Code), **Provider tools** (a key provider's own setup for this thread),
@@ -85,8 +97,8 @@ places, two of them outside the reading column.
 
 The rows stay mounted while the card is closed, so a read or a review in one
 of them does not restart when it opens. A row that waits for the person (a
-credential command awaiting review) marks the button "Review required" in the
-warning ink. A control elsewhere that leads to a row (the access shortcut)
+credential command awaiting review) writes "Review required" on the button in
+the warning ink, the one thing the button says in words. A control elsewhere that leads to a row (the access shortcut)
 opens the card. Escape or a press outside closes it and returns focus to the
 button; a dialog or menu a row opened does not count as outside, and Escape
 inside one closes only that. While a move holds the thread and its composer

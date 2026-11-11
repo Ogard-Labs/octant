@@ -4,7 +4,7 @@ import {
   type ProviderInstance,
   type ThreadNativeSetupChoice,
 } from "@octant/contracts";
-import { ChevronDown, Blocks } from "lucide-react";
+import { ChevronDown } from "lucide-react";
 import { createContext, useContext, useEffect, useId, useState, type ReactNode } from "react";
 import { OctantButton } from "../ui/base/OctantButton";
 import {
@@ -114,13 +114,9 @@ export function ThreadNativeSetupControl(props: {
         render={<OctantButton size="sm" variant="ghost" />}
         title={selected.detail}
       >
-        <Blocks aria-hidden="true" />
-        <span>
-          {choice === "inherit"
-            ? "Provider tools"
-            : `Provider tools ${selected.label.toLowerCase()}`}
-        </span>
-        <ChevronDown aria-hidden="true" />
+        <span>Provider tools</span>
+        {choice === "inherit" ? null : <span className="thread-info__value">{selected.label}</span>}
+        <ChevronDown aria-hidden="true" size={12} />
       </OctantMenuTrigger>
       <OctantMenuPortal>
         <OctantMenuPositioner side="top">

@@ -107,7 +107,10 @@ export function ContinueElsewhere(props: {
           setOpen(true);
         }}
       >
-        Continue elsewhere{props.policy === "text-only" ? " · text only" : ""}
+        <span>Continue elsewhere</span>
+        {props.policy === "text-only" ? (
+          <span className="thread-info__value">Text only</span>
+        ) : null}
       </OctantButton>
       <OctantDialog
         label="Continue elsewhere"

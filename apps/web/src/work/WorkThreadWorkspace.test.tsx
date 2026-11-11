@@ -273,6 +273,40 @@ describe("WorkThreadWorkspace", () => {
     },
   );
 
+  it("says the folder once when the Project carries its folder's name", async () => {
+    const thread = workThread({ workingDirectory: "." });
+    const project = decodeProjectSummary({
+      id: thread.projectId,
+      type: "work",
+      name: "Research",
+      lifecycle: "active",
+      pinned: false,
+      rank: "0/1",
+      version: 1,
+      createdAt: thread.createdAt,
+      updatedAt: thread.updatedAt,
+      binding: { canonicalRoot: "/Users/example/Research" },
+      bindingRevisionId: thread.bindingRevisionId,
+    });
+    render(
+      <WorkThreadWorkspace
+        initialThread={thread}
+        projects={[project]}
+        threadClient={{
+          bootstrap: vi.fn(),
+          navigation: vi.fn(),
+          execute: vi.fn(),
+          queryBoard: vi.fn(),
+        }}
+        threadId={thread.id}
+        title={thread.title}
+      />,
+    );
+    const strip = await screen.findByRole("group", { name: "Project and folder" });
+    // One "Research", and hovering it still tells where the folder is.
+    expect(within(strip).getByText("Research")).toHaveAttribute("title", "/Users/example/Research");
+  });
+
   it("names the server and folder a thread on a server works in", async () => {
     const thread = workThread({ workingDirectory: "." });
     render(

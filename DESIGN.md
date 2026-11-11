@@ -691,7 +691,12 @@ empty prompt, and the one round control on it. How the
 thread runs is one quiet line on the page under the card, with no fill or edge
 of its own, in reading order: a thread's own context (Project, branch,
 checkout), the surface's row (image and access leading; the context ring, the
-model and the microphone trailing), the plan meters, and Thread info. Only the
+model and the microphone trailing), the plan meters, and the Thread info icon
+button. The line is one row in a split pane as narrow as 520px: a Work
+Project made from a folder names that folder once, not as Project and folder
+both, and a context with nothing in it holds no place. At a phone's width the
+line is two rows, the context with Thread info at its trailing edge and the
+surface's row under them. Only the
 surface's row gives its controls the row's one quiet treatment; the checkout's
 actions and the info panel's fields keep their own. With that row inside
 it the card was a third taller than its prompt and read as a form; an empty
@@ -1056,9 +1061,9 @@ Code, wherever `TurnActivityRows` and `AssistantMessageBody` draw a turn:
   decides whether the partial answer shows, at every level.
 
 The thread's own choice is a row of the thread's
-[info panel](docs/design/workspace.md#thread-info) in Chat, Work, and Code. Its
-trigger writes the level in effect ("Reply detail: Low") beside the
-`ListCollapse` glyph, and its name also says whose the level is ("Reply
+[info panel](docs/design/workspace.md#thread-info) in Chat, Work, and Code. The
+row reads "Reply detail" with the level in effect ("Low") at its trailing
+edge, and its accessible name also says whose the level is ("Reply
 detail: High, this thread's own" or "Reply detail: Low, the default"). As a
 bare glyph in the composer row it read as one of two unexplained list icons.
 Its radio items are **Use default (Low)**
