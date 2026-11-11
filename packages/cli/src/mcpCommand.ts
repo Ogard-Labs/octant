@@ -103,8 +103,8 @@ export interface McpCommandPorts {
   readonly stderr: { readonly write: (chunk: string) => unknown };
 }
 
-type JsonObject = Readonly<Record<string, unknown>>;
-type JsonRpcId = string | number;
+export type JsonObject = Readonly<Record<string, unknown>>;
+export type JsonRpcId = string | number;
 
 /**
  * Runs until the caller closes its input or the host ends the grant. Returns 0
@@ -414,7 +414,7 @@ function serverSentMessages(onMessage: (message: JsonObject) => void): BodyReade
   };
 }
 
-type ParsedMessage =
+export type ParsedMessage =
   | {
       readonly kind: "message";
       readonly body: string;
@@ -424,7 +424,7 @@ type ParsedMessage =
     }
   | { readonly kind: "malformed"; readonly answer: JsonObject };
 
-async function* messagesFrom(input: AsyncIterable<string | Uint8Array>) {
+export async function* messagesFrom(input: AsyncIterable<string | Uint8Array>) {
   const decoder = new TextDecoder();
   let buffered = "";
   for await (const chunk of input) {
@@ -471,7 +471,7 @@ function parseObject(text: string): JsonObject | undefined {
   }
 }
 
-function asObject(value: unknown): JsonObject | undefined {
+export function asObject(value: unknown): JsonObject | undefined {
   return typeof value === "object" && value !== null && !Array.isArray(value)
     ? (value as JsonObject)
     : undefined;
@@ -497,11 +497,11 @@ function isUnauthorizedAnswer(message: JsonObject): boolean {
   });
 }
 
-function result(id: JsonRpcId, value: JsonObject): JsonObject {
+export function result(id: JsonRpcId, value: JsonObject): JsonObject {
   return { jsonrpc: "2.0", id, result: value };
 }
 
-function failure(id: JsonRpcId | null, code: number, message: string): JsonObject {
+export function failure(id: JsonRpcId | null, code: number, message: string): JsonObject {
   return { jsonrpc: "2.0", id, error: { code, message } };
 }
 

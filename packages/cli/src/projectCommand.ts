@@ -82,40 +82,17 @@ export interface RunProjectCliCommandInput {
 export async function runProjectCliCommand(input: RunProjectCliCommandInput): Promise<number> {
   const { command, session } = input;
   if (command.action === "add") {
-    const path = resolve(input.cwd, command.path);
-    const receipt = await session.send({
-      path: "/api/desktop/project-binding-receipts",
-      method: "POST",
-      body: { windowId: session.windowId, projectType: command.projectType, path },
+    const added = await addProject(session, {
+      path: resolve(input.cwd, command.path),
+      projectType: command.projectType,
+      ...(command.name === undefined ? {} : { name: command.name }),
     });
-    if (receipt.status !== 201) {
-      input.stderr.write(`${failureMessage(receipt, "Octant refused this Project root.")}\n`);
+    if (added.kind === "refused") {
+      input.stderr.write(`${added.message}\n`);
       return 1;
     }
-    const receiptId = receiptIdOf(receipt.body);
-    if (receiptId === undefined) {
-      input.stderr.write("Octant returned an unusable Project binding receipt.\n");
-      return 1;
-    }
-    const name = command.name ?? basename(path);
-    const executed = await session.send({
-      path: "/api/projects/commands",
-      method: "POST",
-      body: {
-        kind: command.projectType === "work" ? "create-work-project" : "create-code-project",
-        projectId: randomUUID(),
-        expectedVersion: 0,
-        name,
-        receiptId,
-        hostId: LOCAL_HOST_ID,
-      },
-    });
-    if (executed.status !== 200) {
-      input.stderr.write(`${failureMessage(executed, "Octant refused this Project.")}\n`);
-      return 1;
-    }
-    input.stdout.write(`${command.projectType === "work" ? "Work" : "Code"} Project ${name}\n`);
-    input.stdout.write(`${path}\n`);
+    input.stdout.write(`${added.projectType === "work" ? "Work" : "Code"} Project ${added.name}\n`);
+    input.stdout.write(`${added.path}\n`);
     return 0;
   }
 
@@ -203,6 +180,61 @@ export async function runProjectCliCommand(input: RunProjectCliCommandInput): Pr
       : `Renamed Project ${project.name} to ${command.newName}.\n`,
   );
   return 0;
+}
+
+/**
+ * Binds an absolute folder as a new Work or Code Project, through the same
+ * receipt-then-create pair the app's folder picker sends, so the host decides
+ * whether the folder may be a Project root.
+ */
+export async function addProject(
+  session: OpenedLocalControlSession,
+  input: {
+    readonly path: string;
+    readonly projectType: "work" | "code";
+    readonly name?: string;
+  },
+): Promise<
+  | {
+      readonly kind: "added";
+      readonly name: string;
+      readonly path: string;
+      readonly projectType: "work" | "code";
+    }
+  | { readonly kind: "refused"; readonly message: string }
+> {
+  const receipt = await session.send({
+    path: "/api/desktop/project-binding-receipts",
+    method: "POST",
+    body: { windowId: session.windowId, projectType: input.projectType, path: input.path },
+  });
+  if (receipt.status !== 201) {
+    return {
+      kind: "refused",
+      message: failureMessage(receipt, "Octant refused this Project root."),
+    };
+  }
+  const receiptId = receiptIdOf(receipt.body);
+  if (receiptId === undefined) {
+    return { kind: "refused", message: "Octant returned an unusable Project binding receipt." };
+  }
+  const name = input.name ?? basename(input.path);
+  const executed = await session.send({
+    path: "/api/projects/commands",
+    method: "POST",
+    body: {
+      kind: input.projectType === "work" ? "create-work-project" : "create-code-project",
+      projectId: randomUUID(),
+      expectedVersion: 0,
+      name,
+      receiptId,
+      hostId: LOCAL_HOST_ID,
+    },
+  });
+  if (executed.status !== 200) {
+    return { kind: "refused", message: failureMessage(executed, "Octant refused this Project.") };
+  }
+  return { kind: "added", name, path: input.path, projectType: input.projectType };
 }
 
 async function readProjects(

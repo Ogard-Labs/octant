@@ -52,7 +52,9 @@ import {
   type AgentThreadPort,
   createAgentThread,
   isAgentSnapshotRunning,
+  projectHolding,
 } from "./agentThread";
+import { openAndReadAgentThread, readActiveProjects, startAgentTurn } from "./agentStart";
 import { runAgentTui } from "./agentTui";
 import {
   defaultCheckpointLabel,
@@ -86,7 +88,13 @@ export type AgentCliCommand =
       readonly access?: AgentAccessMode;
       /** Keep the OS sandbox and proxied network on at Full access (needs --access full-access). */
       readonly sandbox?: boolean;
+      /**
+       * Start the prompt's turn and return once the host lists it, without
+       * waiting for the reply; approvals and questions wait in Octant.
+       */
+      readonly detach?: true;
     }
+  | { readonly action: "agent-status"; readonly threadId: string; readonly json: boolean }
   | { readonly action: "harness-slots"; readonly json: boolean }
   | { readonly action: "harness-session"; readonly threadId: string; readonly json: boolean }
   | {
@@ -118,6 +126,7 @@ const AGENT_FLAGS: ReadonlyArray<string> = [
   "model",
   "access",
   "sandbox",
+  "detach",
 ];
 
 export function resolveAgentCliCommand(
@@ -125,6 +134,12 @@ export function resolveAgentCliCommand(
   positional: readonly string[],
   flags: Readonly<Record<string, string | boolean>>,
 ): AgentCliCommand | undefined {
+  if (command === "agent" && positional[0] === "status") {
+    const threadId = positional[1];
+    if (threadId === undefined || positional.length !== 2) return undefined;
+    if (Object.keys(flags).some((flag) => flag !== "json")) return undefined;
+    return { action: "agent-status", threadId, json: flags.json === true };
+  }
   if (command === "agent") {
     if (positional.length > 0) return undefined;
     if (Object.keys(flags).some((flag) => !AGENT_FLAGS.includes(flag))) return undefined;
@@ -144,6 +159,10 @@ export function resolveAgentCliCommand(
     if (flags.sandbox !== undefined && (flags.sandbox !== true || access !== "full-access")) {
       return undefined;
     }
+    // Detaching starts one turn, so it needs the prompt to start it with.
+    if (flags.detach !== undefined && (flags.detach !== true || prompt === undefined)) {
+      return undefined;
+    }
     const mode = text("mode") ?? "auto";
     if (mode !== "chat" && mode !== "work" && mode !== "code" && mode !== "auto") return undefined;
     return {
@@ -155,6 +174,7 @@ export function resolveAgentCliCommand(
       ...(model === undefined ? {} : { model }),
       ...(access === undefined ? {} : { access }),
       ...(flags.sandbox === true ? { sandbox: true } : {}),
+      ...(flags.detach === true ? { detach: true as const } : {}),
       json: flags.json === true,
       plain: flags.plain === true,
       last: flags.last === true,
@@ -327,10 +347,22 @@ export async function runAgentCliCommand(input: RunAgentCliCommandInput): Promis
     );
   }
 
+  if (input.command.action === "agent-status") {
+    return await showThreadState(input, input.command.threadId, input.command.json);
+  }
+
+  if (input.command.detach === true && (await detachWouldStartChat(input))) {
+    input.stderr.write(DETACH_NEEDS_WORK_OR_CODE);
+    return 1;
+  }
   const threadId = await resolveThread(input);
   if (threadId === undefined) return 1;
   if (input.command.json) input.stdout.write(`${JSON.stringify({ kind: "thread", threadId })}\n`);
   else input.stdout.write(`Thread ${threadId}\n`);
+
+  if (input.command.detach === true && input.command.prompt !== undefined) {
+    return await startDetached(input, threadId, input.command.prompt);
+  }
 
   if (
     input.command.prompt === undefined &&
@@ -407,6 +439,101 @@ export async function runAgentCliCommand(input: RunAgentCliCommandInput): Promis
   } finally {
     lines.close();
   }
+}
+
+const DETACH_NEEDS_WORK_OR_CODE =
+  "--detach starts Work and Code turns. A Chat turn answers only when it ends, so run it without --detach.\n";
+
+/**
+ * Whether `--detach` would land on a Chat thread, decided before anything is
+ * created: an explicit `--mode chat`, or `auto` with no Project here or named.
+ * An existing thread is checked once it is opened.
+ */
+async function detachWouldStartChat(input: RunAgentCliCommandInput): Promise<boolean> {
+  if (input.command.action !== "agent") return false;
+  if (input.command.mode === "chat") return true;
+  if (input.command.mode !== "auto") return false;
+  if (input.command.threadId !== undefined || input.command.last) return false;
+  if (input.command.project !== undefined) return false;
+  const projects = await readActiveProjects(input.session);
+  return projects.kind === "read" && projectHolding(projects.active, process.cwd()) === undefined;
+}
+
+/**
+ * `--detach`: sends the turn and returns once the host lists it. The thread
+ * runs on the host like any other; the person answers its approvals in Octant,
+ * and `octant agent status` reads where it got to.
+ */
+async function startDetached(
+  input: RunAgentCliCommandInput,
+  threadId: string,
+  prompt: string,
+): Promise<number> {
+  const mode = modeOf(input.command);
+  if (mode === "chat") {
+    input.stderr.write(DETACH_NEEDS_WORK_OR_CODE);
+    return 1;
+  }
+  const started = await startAgentTurn(
+    agentThreadPort(input.session, mode, threadId),
+    prompt,
+    input.pollIntervalMs === undefined ? {} : { pollIntervalMs: input.pollIntervalMs },
+  );
+  if (started.kind === "refused") {
+    input.stderr.write(`${started.message}\n`);
+    return 1;
+  }
+  await started.settled;
+  if (input.command.json) {
+    input.stdout.write(
+      `${JSON.stringify({ kind: "started", ...(started.turnId === undefined ? {} : { turnId: started.turnId }) })}\n`,
+    );
+  } else {
+    input.stdout.write(`Started. Follow it with: octant agent status ${threadId}\n`);
+  }
+  return 0;
+}
+
+/** `octant agent status <thread>`: where the thread got to and what it waits on. */
+async function showThreadState(
+  input: Pick<RunAgentCliCommandInput, "session" | "stdout" | "stderr">,
+  threadId: string,
+  json: boolean,
+): Promise<number> {
+  const read = await openAndReadAgentThread(input.session, threadId);
+  if (read.kind === "refused") {
+    input.stderr.write(`${read.message}\n`);
+    return 1;
+  }
+  const { state } = read;
+  if (json) {
+    input.stdout.write(`${JSON.stringify({ kind: "thread-state", state })}\n`);
+    return 0;
+  }
+  const where =
+    state.mode === "chat"
+      ? "Chat thread"
+      : `${state.mode === "code" ? "Code" : "Work"} thread in ${state.projectName ?? "its Project"}`;
+  input.stdout.write(`${state.title} · ${where} · ${state.status}\n`);
+  const turn = state.turns.at(-1);
+  if (turn !== undefined) {
+    input.stdout.write(`> ${turn.prompt.split("\n")[0] ?? ""}\n`);
+    const reply = withoutFollowUpBlocks(turn.reply, { streaming: state.status === "running" });
+    if (reply.length > 0) input.stdout.write(`${reply}${reply.endsWith("\n") ? "" : "\n"}`);
+    if (turn.outcome !== "completed" && state.status === "idle") {
+      input.stdout.write(`Turn ended: ${turn.outcome}.\n`);
+    }
+  }
+  for (const question of state.questions) {
+    input.stdout.write(`? ${question.prompt}\n`);
+    question.options.forEach((option, index) => input.stdout.write(`  ${index + 1}. ${option}\n`));
+  }
+  for (const request of state.waitingInOctant) {
+    input.stdout.write(
+      `! Waits on you in Octant: ${request.kind}${request.text === undefined ? "" : ` — ${request.text}`}\n`,
+    );
+  }
+  return 0;
 }
 
 /**
