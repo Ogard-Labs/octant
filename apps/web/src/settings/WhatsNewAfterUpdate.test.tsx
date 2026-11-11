@@ -1,8 +1,10 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { SidebarWhatsNew } from "../shell/SidebarWhatsNew";
 import type { BundledWhatsNew, OctantHostBridge } from "../shell/hostBridge";
+import { AppUpdateSettings } from "./AppUpdateSettings";
 import { WhatsNewAfterUpdate } from "./WhatsNewAfterUpdate";
+import { resetWhatsNewAcknowledgement } from "./whatsNewAcknowledgement";
 import { useWhatsNewAfterUpdate, whatsNewCardContent } from "./useWhatsNewAfterUpdate";
 
 const NOTES =
@@ -56,7 +58,39 @@ function bridge(document: BundledWhatsNew) {
   };
 }
 
+/** Settings' Updates row beside the shell, sharing one desktop bridge. */
+function WithSettings(props: { readonly hostBridge: OctantHostBridge }) {
+  return (
+    <>
+      <Harness hostBridge={props.hostBridge} />
+      <AppUpdateSettings
+        automaticChecks
+        hostBridge={props.hostBridge}
+        onAutomaticChecksChange={vi.fn()}
+        onUpdateChannelChange={vi.fn()}
+        updateChannel={undefined}
+      />
+    </>
+  );
+}
+
+function settingsBridge(document: BundledWhatsNew) {
+  const base = bridge(document);
+  const idle = vi.fn(async () => undefined);
+  const hostBridge = {
+    ...base.hostBridge,
+    downloadAppUpdate: idle,
+    installAppUpdate: idle,
+    setAutomaticAppUpdateChecks: idle,
+    setAppUpdateRing: idle,
+    subscribeAppUpdateState: vi.fn(() => () => undefined),
+  } as unknown as OctantHostBridge;
+  return { ...base, hostBridge };
+}
+
 describe("What's new after an update", () => {
+  beforeEach(resetWhatsNewAcknowledgement);
+
   it("shows a card with the version, a headline and a two-line summary when notes are due", async () => {
     const { hostBridge, checkForAppUpdate } = bridge(dueNotes());
     render(<Harness hostBridge={hostBridge} />);
@@ -213,5 +247,51 @@ describe("What's new after an update", () => {
     await waitFor(() =>
       expect(document.activeElement).toBe(screen.getByRole("button", { name: /^Account menu/ })),
     );
+  });
+
+  it("hides the card after the notes are opened from Settings, with one acknowledgement", async () => {
+    const { hostBridge, acknowledgeWhatsNew } = settingsBridge(dueNotes());
+    render(<WithSettings hostBridge={hostBridge} />);
+    expect(await screen.findByText("New · v0.2.0")).toBeTruthy();
+
+    fireEvent.click(screen.getByRole("button", { name: "What's new" }));
+
+    await waitFor(() => expect(screen.queryByText("New · v0.2.0")).toBeNull());
+    await waitFor(() => expect(acknowledgeWhatsNew).toHaveBeenCalledOnce());
+  });
+
+  it("does not acknowledge again when the notes are opened from Settings after the card was dismissed", async () => {
+    const { hostBridge, acknowledgeWhatsNew } = settingsBridge(dueNotes());
+    render(<WithSettings hostBridge={hostBridge} />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Dismiss" }));
+    await waitFor(() => expect(acknowledgeWhatsNew).toHaveBeenCalledOnce());
+    fireEvent.click(screen.getByRole("button", { name: "What's new" }));
+
+    expect(await screen.findByText("Octant 0.2.0")).toBeTruthy();
+    expect(acknowledgeWhatsNew).toHaveBeenCalledOnce();
+  });
+
+  it("does not show the announcement after Settings acknowledged the update", async () => {
+    const { hostBridge, acknowledgeWhatsNew, readBundledWhatsNew } = settingsBridge(
+      dueNotes({ announcement: { title: "Comment on a Canvas", body: "Point at a block." } }),
+    );
+    render(
+      <AppUpdateSettings
+        automaticChecks
+        hostBridge={hostBridge}
+        onAutomaticChecksChange={vi.fn()}
+        onUpdateChannelChange={vi.fn()}
+        updateChannel={undefined}
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "What's new" }));
+    await waitFor(() => expect(acknowledgeWhatsNew).toHaveBeenCalledOnce());
+
+    render(<Harness hostBridge={hostBridge} />);
+
+    await waitFor(() => expect(readBundledWhatsNew).toHaveBeenCalledTimes(2));
+    expect(screen.queryByRole("dialog", { name: "Comment on a Canvas" })).toBeNull();
+    expect(acknowledgeWhatsNew).toHaveBeenCalledOnce();
   });
 });

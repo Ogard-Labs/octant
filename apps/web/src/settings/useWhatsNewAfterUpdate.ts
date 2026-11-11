@@ -1,4 +1,16 @@
-import { useCallback, useEffect, useRef, useState, type RefObject } from "react";
+import {
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  useSyncExternalStore,
+  type RefObject,
+} from "react";
+import {
+  acknowledgeWhatsNewOnce,
+  acknowledgedWhatsNewVersion,
+  subscribeWhatsNewAcknowledgement,
+} from "./whatsNewAcknowledgement";
 import { SIDEBAR_ACCOUNT_TRIGGER_SELECTOR } from "../shell/SidebarProfile";
 import type {
   BundledWhatsNew,
@@ -71,7 +83,11 @@ export function useWhatsNewAfterUpdate(options: {
   const read = options.hostBridge?.readBundledWhatsNew;
   const acknowledge = options.hostBridge?.acknowledgeWhatsNew;
   const [document, setDocument] = useState<BundledWhatsNew>();
-  const [answered, setAnswered] = useState(false);
+  // Shared with Settings, which acknowledges the same update on its own.
+  const acknowledgedVersion = useSyncExternalStore(
+    subscribeWhatsNewAcknowledgement,
+    acknowledgedWhatsNewVersion,
+  );
   const [notesOpen, setNotesOpen] = useState(false);
 
   useEffect(() => {
@@ -97,11 +113,10 @@ export function useWhatsNewAfterUpdate(options: {
     restoreFocus.current = globalThis.document.querySelector<HTMLElement>(
       SIDEBAR_ACCOUNT_TRIGGER_SELECTOR,
     );
-    setAnswered(true);
-    // Hiding it for this session is right even if the write fails: the person
-    // answered, and a failed write only means it may show once more.
-    void Promise.resolve(acknowledge?.()).catch(() => undefined);
-  }, [acknowledge]);
+    if (document !== undefined) {
+      acknowledgeWhatsNewOnce(document.version, () => acknowledge?.());
+    }
+  }, [acknowledge, document]);
   const openNotes = useCallback(() => {
     setNotesOpen(true);
     dismiss();
@@ -109,7 +124,11 @@ export function useWhatsNewAfterUpdate(options: {
   const closeNotes = useCallback(() => setNotesOpen(false), []);
 
   const due =
-    document?.kind === "notes" && document.showAfterApply && !answered ? document : undefined;
+    document?.kind === "notes" &&
+    document.showAfterApply &&
+    document.version !== acknowledgedVersion
+      ? document
+      : undefined;
   return {
     announcement: due?.announcement,
     card:
