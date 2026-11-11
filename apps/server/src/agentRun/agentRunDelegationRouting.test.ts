@@ -195,6 +195,7 @@ function delegationPair(
           poolDerived: false,
         },
         version: stored.version,
+        createdAt: stored.createdAt,
         updatedAt: stored.updatedAt,
         role: stored.role,
         task: "Look",

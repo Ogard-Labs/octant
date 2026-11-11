@@ -80,9 +80,12 @@ export function AgentRunDetail(props: {
   const latestTime = recordedTime.at(-1);
   const recordedTotalMs = recordedTime.reduce((sum, item) => sum + item.totalActiveMs, 0);
   const recordedAttempts = recordedTime.reduce((sum, item) => sum + item.attempts, 0);
-  const facts = [subagentRoleWord(row.role), row.model, relativeTimeLabel(row.updatedAt)].filter(
-    (part): part is string => part !== undefined,
-  );
+  const facts = [
+    subagentRoleWord(row.role),
+    row.model,
+    row.effort,
+    relativeTimeLabel(row.updatedAt),
+  ].filter((part): part is string => part !== undefined);
 
   return (
     <section aria-label="Subagent" className="agent-run-detail">
@@ -106,6 +109,11 @@ export function AgentRunDetail(props: {
           <span className="agent-run-detail__state">{subagentStatusWord(status)}</span>
           <span>· {facts.join(" · ")}</span>
         </p>
+        {row.runsAfter.length === 0 ? null : (
+          <p className="agent-run-detail__fact">
+            Runs after {row.runsAfter.map((run) => run.task).join(", ")}
+          </p>
+        )}
         {row.routeLabel !== undefined && row.routeLabel !== row.model ? (
           <p className="agent-run-detail__fact">Route: {row.routeLabel}</p>
         ) : null}

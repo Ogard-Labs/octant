@@ -1111,9 +1111,20 @@ Harness `delegate` tool, and collects its result. The list has one title, then
 Working and Finished sections of one-button rows —
 status icon, task, and state, role, model, and age in words — with finished
 rows newest first and an unreviewed result marked "Needs review" unless the
-parent already received it. A row opens
+parent already received it. On a thread with at least one subagent, a List and
+Graph switch sits beside the title. **Graph** arranges the same subagents by
+what waits for what: a run sits below every run it runs after and below the run
+that started it, with an arrow from each run it waits for and a dashed line
+from the run that started it, and a row keeps the order its runs were requested
+in. A card carries the task, the provider's mark and the model, the effort and
+role, and the state in words, which reads "Waiting on N" while the host holds
+the run for N unfinished runs; it opens the page a row opens, and Back returns
+to the graph. A row of cards wider than the dock scrolls sideways.
+Provider-observed children have no such links and stay a list above the graph.
+The host names a run another run waits for only when the window may read that
+run. A row opens
 that subagent's page in place of the list, with a back control: its task as
-the title, a status line, and a small transcript that starts with the task as
+the title, a status line, the runs it runs after, and a small transcript that starts with the task as
 the brief, then the replies as rendered Markdown and status events as quiet
 lines, live while it runs. When the live read is unavailable or gone after
 completion, the retained final reply stands in; when neither exists the page

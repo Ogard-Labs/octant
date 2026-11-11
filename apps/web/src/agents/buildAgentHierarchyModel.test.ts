@@ -52,6 +52,58 @@ describe("buildAgentHierarchyModel", () => {
     expect(model.finished.map((row) => row.runId)).toEqual(["newer", "older"]);
   });
 
+  it("names the listed runs a run waits for and counts the ones it is still held for", () => {
+    const base = entries[0];
+    const model = buildAgentHierarchyModel({
+      entries: [
+        { ...base, runId: "tokens", task: "Color tokens", lifecycleStatus: "completed" },
+        { ...base, runId: "toggle", task: "Theme toggle", lifecycleStatus: "running" },
+        {
+          ...base,
+          runId: "verify",
+          task: "Verify",
+          lifecycleStatus: "waiting",
+          recoveryReason: "waiting-on-dependencies",
+          // The host leaves out a run this window may not read; a wait on one
+          // names nothing and is not counted.
+          dependsOn: ["tokens", "toggle", "not-listed"],
+          normalizedReasoning: "high",
+        },
+      ],
+    });
+
+    const verify = model.working.find((row) => row.runId === "verify");
+    expect(verify?.runsAfter).toEqual([
+      { runId: "tokens", task: "Color tokens" },
+      { runId: "toggle", task: "Theme toggle" },
+    ]);
+    expect(verify?.waitingOn).toBe(1);
+    expect(verify?.effort).toBe("high");
+    expect(model.working.find((row) => row.runId === "toggle")?.runsAfter).toEqual([]);
+  });
+
+  it("does not count a wait the host is not holding the run for", () => {
+    const base = entries[0];
+    const model = buildAgentHierarchyModel({
+      entries: [
+        { ...base, runId: "tokens", task: "Color tokens" },
+        // Started already, then paused for something else: the arrow stays,
+        // the "waiting on" count does not.
+        {
+          ...base,
+          runId: "styles",
+          lifecycleStatus: "waiting",
+          recoveryReason: "provider-reconnect",
+          dependsOn: ["tokens"],
+        },
+      ],
+    });
+
+    const styles = model.working.find((row) => row.runId === "styles");
+    expect(styles?.runsAfter).toHaveLength(1);
+    expect(styles).not.toHaveProperty("waitingOn");
+  });
+
   it("explains an empty thread when posture is Off", () => {
     const model = buildAgentHierarchyModel({ entries: [], creationPosture: "off" });
     expect(model.emptyReason).toMatch(/Off/i);

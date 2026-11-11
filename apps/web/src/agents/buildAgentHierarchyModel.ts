@@ -1,4 +1,5 @@
 import type { AgentRunResultPacket } from "@octant/contracts";
+import { AGENT_RUN_DEPENDENCY_WAITING_REASON } from "@octant/domain";
 
 export interface AgentHierarchyInputRoute {
   readonly requestedProviderInstanceId: string;
@@ -15,6 +16,8 @@ export interface AgentHierarchyInputEntry {
   readonly resultsTruncated?: boolean;
   readonly runId: string;
   readonly parentRunId?: string;
+  /** The sibling runs this one waits for, as the host listed them. */
+  readonly dependsOn?: ReadonlyArray<string>;
   readonly role: string;
   readonly task: string;
   readonly lifecycleStatus: string;
@@ -26,6 +29,8 @@ export interface AgentHierarchyInputEntry {
     readonly followUpReason?: string;
   };
   readonly route?: AgentHierarchyInputRoute;
+  /** The effort the run was asked to use, when the host recorded one. */
+  readonly normalizedReasoning?: string;
   readonly recoveryReason?: string;
   /** How the host settled delivering this result to the parent; absent while owed. */
   readonly resultDeliveryOutcome?: "delivered" | "consumed" | "invalidated" | "failed";
@@ -46,7 +51,15 @@ export interface AgentHierarchyInputEntry {
     readonly truncated: boolean;
   };
   readonly version: number;
+  /** When the run was requested. Absent from a host that predates the field. */
+  readonly createdAt?: string;
   readonly updatedAt: string;
+}
+
+/** A run another run waits for, named by its task so a reader need not match ids. */
+export interface AgentHierarchyRunReference {
+  readonly runId: string;
+  readonly task: string;
 }
 
 export interface AgentHierarchyRow {
@@ -71,11 +84,23 @@ export interface AgentHierarchyRow {
   readonly usageResume?: AgentHierarchyInputEntry["usageResume"];
   /** The model the host ran, for a row's one-line facts. */
   readonly model?: string;
+  /** The provider instance that ran it, which a surface may draw as that provider's mark. */
+  readonly providerInstanceId?: string;
+  /** The effort the run was asked to use. */
+  readonly effort?: string;
+  /** The listed runs this one waits for, in the host's order. Empty when it waits for none. */
+  readonly runsAfter: ReadonlyArray<AgentHierarchyRunReference>;
+  /**
+   * How many of those have not finished, while the host holds this run for
+   * them. Absent once it started or when it waits for something else.
+   */
+  readonly waitingOn?: number;
   readonly routeLabel?: string;
   readonly routeReason?: string;
   readonly nativeReadOnly: boolean;
   readonly result?: AgentHierarchyInputEntry["result"];
   readonly version: number;
+  readonly createdAt?: string;
   readonly updatedAt: string;
 }
 
@@ -123,7 +148,8 @@ export function buildAgentHierarchyModel(input: {
   readonly creationPosture?: "off" | "ask" | "automatic";
 }): AgentHierarchyModel {
   const creationPosture = input.creationPosture ?? "automatic";
-  const rows = input.entries.map((entry) => toRow(entry, depthOf(entry, input.entries)));
+  const byId = new Map(input.entries.map((entry) => [entry.runId, entry]));
+  const rows = input.entries.map((entry) => toRow(entry, depthOf(entry, input.entries), byId));
   const working = rows.filter((row) => row.bucket === "active");
   const finished = rows
     .filter((row) => row.bucket === "history")
@@ -146,8 +172,21 @@ export function buildAgentHierarchyModel(input: {
   };
 }
 
-function toRow(entry: AgentHierarchyInputEntry, depth: number): AgentHierarchyRow {
+function toRow(
+  entry: AgentHierarchyInputEntry,
+  depth: number,
+  byId: ReadonlyMap<string, AgentHierarchyInputEntry>,
+): AgentHierarchyRow {
   const bucket = ACTIVE.has(entry.lifecycleStatus) ? "active" : "history";
+  // Only a listed run is named: the host leaves out one this window may not
+  // read, and a reader cannot open what is not in the list.
+  const awaited = (entry.dependsOn ?? []).flatMap((runId) => {
+    const run = runId === entry.runId ? undefined : byId.get(runId);
+    return run === undefined ? [] : [run];
+  });
+  const heldForDependencies =
+    entry.lifecycleStatus === "waiting" &&
+    entry.recoveryReason === AGENT_RUN_DEPENDENCY_WAITING_REASON;
   return {
     runId: entry.runId,
     ...(entry.parentRunId === undefined ? {} : { parentRunId: entry.parentRunId }),
@@ -172,10 +211,20 @@ function toRow(entry: AgentHierarchyInputEntry, depth: number): AgentHierarchyRo
     ...(entry.resultsTruncated === undefined ? {} : { resultsTruncated: entry.resultsTruncated }),
     ...(entry.route === undefined
       ? {}
-      : { model: entry.route.executionModelId, routeLabel: routeLabel(entry.route) }),
+      : {
+          model: entry.route.executionModelId,
+          providerInstanceId: entry.route.executionProviderInstanceId,
+          routeLabel: routeLabel(entry.route),
+        }),
+    ...(entry.normalizedReasoning === undefined ? {} : { effort: entry.normalizedReasoning }),
+    runsAfter: awaited.map((run) => ({ runId: run.runId, task: run.task })),
+    ...(heldForDependencies
+      ? { waitingOn: awaited.filter((run) => run.lifecycleStatus !== "completed").length }
+      : {}),
     ...(entry.route?.routingReason === undefined ? {} : { routeReason: entry.route.routingReason }),
     nativeReadOnly: entry.executionKind === "provider-native",
     version: entry.version,
+    ...(entry.createdAt === undefined ? {} : { createdAt: entry.createdAt }),
     updatedAt: entry.updatedAt,
   };
 }

@@ -45,6 +45,7 @@ export const dockModuleInputs = {
     "onAgentViewRequestHandled",
     "requestedAgentView",
     "onReviewAgentChanges",
+    "providerController",
     "subject",
   ],
   "side-chat": [

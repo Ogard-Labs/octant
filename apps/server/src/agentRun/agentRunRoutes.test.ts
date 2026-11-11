@@ -1029,6 +1029,57 @@ describe("agentRunRoutes", () => {
     expect(settledBody.entries[0]?.resultDeliveryOutcome).toBe("consumed");
   });
 
+  it.each(["readable", "hidden"])(
+    "names the run a run waits for in the parent summary only while that run is %s to the window",
+    async (visibility) => {
+      let first: AgentRun["id"] | undefined;
+      const { handler, persistence, token } = createHandler({
+        authorizeCancellation: ({ run }) =>
+          visibility === "readable" || String(run.id) !== String(first),
+      });
+      const request = (requestId: string, task: string, dependsOn?: ReadonlyArray<string>) =>
+        persistence.requestRun({
+          command: {
+            kind: "request-agent-run",
+            requestId,
+            parentThreadId: ids.thread,
+            ...(dependsOn === undefined ? {} : { dependsOn }),
+            role: "research",
+            task,
+            creationPosture: "automatic",
+            requestedAuthority: authority,
+            routingReceipt: routing,
+            workspaceReceipt: { kind: "chat-virtual", mode: "chat" },
+          } as never,
+          parentAuthority: { ...authority, subagents: true },
+          confirmed: true,
+        });
+      const earlier = request(ids.request, "Gather the facts");
+      if (earlier.kind !== "run-accepted") throw new Error("Admission failed");
+      first = earlier.run.id;
+      const later = request("bcbcbcbc-bcbc-4cbc-8cbc-bcbcbcbcbcbc", "Check the facts", [first]);
+      if (later.kind !== "run-accepted") throw new Error("Admission failed");
+
+      const response = await handler(
+        new Request(`http://127.0.0.1/api/agent-runs/parent-summary?parentThreadId=${ids.thread}`, {
+          headers: { "x-octant-window-capability": token },
+        }),
+      );
+      const body = (await response!.json()) as {
+        entries: Array<{ runId: string; dependsOn?: ReadonlyArray<string> }>;
+      };
+      const dependent = body.entries.find((entry) => entry.runId === String(later.run.id));
+      if (visibility === "readable") {
+        expect(dependent?.dependsOn).toEqual([String(first)]);
+      } else {
+        // The summary leaves out a run this window may not read, so it must
+        // not name that run through the one that waits for it either.
+        expect(body.entries.map((entry) => entry.runId)).toEqual([String(later.run.id)]);
+        expect(dependent).not.toHaveProperty("dependsOn");
+      }
+    },
+  );
+
   it.each(["parent", "child"])("refuses child data when %s scope is denied", async (scope) => {
     const { handler, persistence, token, liveConversations } = createHandler({
       authorizeCancellation: () => scope !== "child",
