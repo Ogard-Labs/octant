@@ -86,7 +86,7 @@
   pointer-events: auto;
 }
 
-.browser-markup__problem {
+.browser-markup__notice {
   max-width: 100%;
 }
 
@@ -100,7 +100,7 @@
   flex-wrap: wrap;
   align-items: center;
   justify-content: center;
-  gap: var(--oct-space-2) var(--oct-space-3);
+  gap: var(--oct-space-1) var(--oct-space-2);
   width: max-content;
   max-width: 100%;
   padding: var(--oct-space-1) var(--oct-space-2);
@@ -116,24 +116,63 @@
   gap: var(--oct-space-1);
 }
 
-.browser-markup__swatch-button {
-  display: inline-grid;
-  place-content: center;
+/* Add to chat and Discard wrap together, as a pair. */
+.browser-markup__group--trailing {
+  margin-inline-start: var(--oct-space-1);
 }
 
-/* A dot of the ink; the chosen one is ringed with the text colour. */
+/*
+ * The bar's own icon controls are 28px like the toolbar's, so the whole bar is
+ * one row down to a 500px dock. They paint themselves (the bare variant draws
+ * nothing): a chosen tool or width is a raised tile on the floating surface, the
+ * role a selected row wears, which tells chosen from not chosen at a glance.
+ */
+.browser-markup__button {
+  display: grid;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  place-items: center;
+  border-radius: var(--oct-radius-sm);
+  color: inherit;
+}
+
+.browser-markup__button:hover:not(:disabled) {
+  background: var(--octant-float-hover);
+}
+
+.browser-markup__button[aria-pressed="true"] {
+  background: var(--octant-float-pressed);
+  box-shadow: var(--octant-shadow-selected);
+}
+
+.browser-markup__button:disabled {
+  opacity: 0.4;
+}
+
+/* A dot of ink. Its hairline edge keeps white visible on a light bar and black on a dark one. */
 .browser-markup__swatch {
   display: block;
   width: 16px;
   height: 16px;
   border-radius: 50%;
-  box-shadow: inset 0 0 0 1px var(--octant-float-line);
+  box-shadow: 0 0 0 1px var(--octant-border-strong);
 }
 
-.browser-markup__swatch--chosen {
+.browser-markup__button[aria-checked="true"] .browser-markup__swatch {
   box-shadow:
-    0 0 0 2px var(--octant-float),
+    0 0 0 1px var(--octant-border-strong),
+    0 0 0 3px var(--octant-float),
     0 0 0 4px var(--octant-text-primary);
+}
+
+.browser-markup__ink-popup {
+  padding: var(--oct-space-1);
+}
+
+.browser-markup__inks {
+  display: flex;
+  gap: var(--oct-space-1);
 }
 
 .browser-markup__stroke {

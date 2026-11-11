@@ -211,7 +211,10 @@ The marked-up picture is an attachment of that message, not a capture.
   window to be allowed to act on the thread's Browser, read needs it to be able
   to open the thread. If the take succeeds and the read is refused, the capture
   stays kept, and the toolbar says the kept screenshot could not be opened for
-  drawing. Nothing else reads the page's pixels: the native page's view is
+  drawing. When no screenshot is kept, the notice says there is nothing to draw
+  on and why (for a page the Browser gave no picture of, that a page with a
+  sign-in field is never pictured); Screenshot keeps its own wording. While an
+  element is being pointed at the button is disabled and its tooltip says so. Nothing else reads the page's pixels: the native page's view is
   never read.
   Rationale: one source of pictures means one place that decides whether a page
   may be pictured. Private and stored-profile pages follow whatever the
@@ -231,15 +234,20 @@ The marked-up picture is an attachment of that message, not a capture.
   it would no longer mark what the person saw.
 - **Tools.** A bar floats at the bottom centre of the page area
   (`role="toolbar"`, "Drawing tools"): **Select** (move a mark), **Pen**,
-  **Box**, **Arrow**, **Text**, an ink choice (red by default, then yellow,
-  green, blue, white, black), **Thin stroke** and **Thick stroke**, **Undo**,
-  **Redo**, **Delete** (the selected mark; disabled with none), **Add to chat**,
-  and **Discard drawing**. Cmd/Ctrl+Z and Shift+Cmd/Ctrl+Z undo and redo,
+  **Box**, **Arrow**, **Text**, one ink control ("Ink colour: Red") that opens
+  the six inks (red by default, then yellow, green, blue, white, black), one
+  stroke toggle ("Thick stroke"), **Undo**, **Redo**, **Delete** (the selected
+  mark; disabled with none), and, as the trailing pair, **Add to chat** and
+  **Discard drawing**. Rationale: with every ink and width on the bar it was
+  too wide for a dock and left Discard alone on a second row. Cmd/Ctrl+Z and Shift+Cmd/Ctrl+Z undo and redo,
   Delete or Backspace removes the selected mark, and Escape drops a stroke in
   progress or the selection and nothing more; an Escape that did something
   stops there, and one that did nothing goes on to whatever listens above. The
-  layer says that drawing needs a pointer and names these keys. Discarding
-  returns focus to the **Draw on page** button.
+  layer says that drawing needs a pointer and names these keys, and it takes
+  focus when drawing opens, so the keys work at once. While the layer or its text
+  field has focus these chords belong to it and not to the window (Shift+Cmd+Z
+  there is redo, never the Zen toggle). Discarding returns focus to the
+  **Draw on page** button.
   Text is typed at the clicked point (Enter or leaving the field keeps it,
   Escape cancels, empty text adds nothing) in the interface font with a thin
   outline contrasting with its ink so it reads on any page.
@@ -260,7 +268,8 @@ The marked-up picture is an attachment of that message, not a capture.
   An attached picture ends drawing, the toolbar says "Added to the message", and
   the thread's prompt takes focus. A refused picture leaves the drawing open
   with its marks, and the toolbar says the picture was not added, with the
-  composer's own reason. Rationale: ending the drawing on a refusal would throw
+  composer's own reason, in a notice above the bar that is announced and returns
+  focus to the drawing, so it never moves the still. Rationale: ending the drawing on a refusal would throw
   away the person's marks for a picture that never reached the message.
 - **Waiting.** If the thread's composer is not open, the picture waits in this
   window's memory for it and is attached when the composer opens; the toolbar
@@ -272,6 +281,11 @@ The marked-up picture is an attachment of that message, not a capture.
   stored on the host, in the journal, or in the data directory: the marked-up
   picture exists only as the message's attachment, and the capture beneath it
   stays the thread's only record of the page.
+- **Known cost.** Every press of Draw on page keeps one more capture in the
+  thread's "Browser captures" strip, including when the drawing is discarded,
+  because the still is an ordinary kept capture. Drawing on a kept capture trades
+  this for one source of pictures and one place that decides whether a page may
+  be pictured; a thread's newest 32 captures window ages them out as usual.
 - **Sharpness.** The still is the bounded capture picture (about 40 KiB, up to
   1280 pixels wide), so it is soft beside the page: small text on it can blur.
   Drawing does not raise its quality.

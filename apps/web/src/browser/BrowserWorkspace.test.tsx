@@ -902,7 +902,10 @@ describe("BrowserWorkspace", () => {
           "true",
         );
         expect(within(bar).getByRole("button", { name: "Add to chat" })).toBeEnabled();
-        expect(screen.getByRole("application", { name: "Page capture to draw on" })).toBeVisible();
+        const layer = screen.getByRole("application", { name: "Page capture to draw on" });
+        expect(layer).toBeVisible();
+        // Drawing opens ready for keys, not with focus left on the page body.
+        expect(layer).toHaveFocus();
         // The page's own click-through preview is not mounted while the picture is drawn on.
         expect(
           screen.queryByRole("article", { name: "Interactive headless Browser preview" }),
@@ -925,7 +928,7 @@ describe("BrowserWorkspace", () => {
         fireEvent.click(await screen.findByRole("button", { name: "Draw on page" }));
         expect(
           await screen.findByText(
-            "This screenshot could not be kept: the Browser gave no picture of this page.",
+            "There is nothing to draw on: the Browser gave no picture of this page. A page with a sign-in field is never pictured.",
           ),
         ).toBeVisible();
         expect(screen.queryByRole("toolbar", { name: "Drawing tools" })).toBeNull();
@@ -970,7 +973,11 @@ describe("BrowserWorkspace", () => {
           const [file] = taken.mock.calls[0] as [File];
           expect(file.type).toBe("image/png");
           expect(file.name).toBe("browser-markup.png");
-          expect(await screen.findByText("Added to the message")).toBeVisible();
+          const added = await screen.findByText("Added to the message");
+          expect(added).toBeVisible();
+          // A confirmation, not a warning: a status in the success tone.
+          expect(added.closest("[data-tone]")).toHaveAttribute("data-tone", "success");
+          expect(added.closest("[role]")).toHaveAttribute("role", "status");
           expect(screen.queryByRole("toolbar", { name: "Drawing tools" })).toBeNull();
           expect(document.querySelector(RENDERER_OVERLAY_SELECTOR)).toBeNull();
         } finally {
@@ -1020,6 +1027,11 @@ describe("BrowserWorkspace", () => {
           expect(screen.getByRole("toolbar", { name: "Drawing tools" })).toBeVisible();
           expect(layer.querySelectorAll("polyline")).toHaveLength(1);
           expect(screen.queryByText("Added to the message")).toBeNull();
+          // The refusal is announced, and the keys still work: focus is back on the layer.
+          expect(screen.getByRole("alert")).toHaveTextContent("The picture was not added");
+          expect(layer).toHaveFocus();
+          // It sits in the stage, so it does not move the still.
+          expect(screen.getByRole("alert").closest(".browser-markup")).not.toBeNull();
           await waitFor(() =>
             expect(within(bar).getByRole("button", { name: "Add to chat" })).toBeEnabled(),
           );
@@ -1098,7 +1110,13 @@ describe("BrowserWorkspace", () => {
         pointing.armed = true;
         const browser = drawable();
         render(<BrowserWorkspace canDrawOnPage client={browser} tab={tab} />);
-        expect(await screen.findByRole("button", { name: "Draw on page" })).toBeDisabled();
+        const draw = await screen.findByRole("button", { name: "Draw on page" });
+        expect(draw).toBeDisabled();
+        // It says why, for a pointer and for assistive technology.
+        expect(draw).toHaveAttribute(
+          "title",
+          "Finish or cancel pointing at an element before drawing on the page",
+        );
         cleanup();
 
         pointing.armed = false;

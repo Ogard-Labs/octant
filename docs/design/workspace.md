@@ -1152,8 +1152,8 @@ Screenshot button (a camera icon beside Open in default browser) that keeps the
 page's picture with the thread, and, in a Work or Code thread's Browser, a
 **Draw on page** button (a pen-line icon beside it) that keeps the same capture,
 shows it still in place of the page, and floats a drawing bar ("Drawing tools":
-Select, Pen, Box, Arrow, Text, ink, stroke width, Undo, Redo, Delete, **Add to
-chat**, **Discard drawing**) over its bottom centre; **Add to chat** puts the
+Select, Pen, Box, Arrow, Text, one ink control, one stroke toggle, Undo, Redo,
+Delete, then **Add to chat** and **Discard drawing**) over its bottom centre; **Add to chat** puts the
 marked-up picture in that thread's composer as an ordinary image and sends
 nothing, and a thread that kept screenshots shows a
 _Browser captures_ strip in its transcript beside the generated images, and a

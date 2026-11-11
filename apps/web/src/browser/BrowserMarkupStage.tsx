@@ -36,6 +36,13 @@ export interface BrowserMarkupStageProps {
   /** Resolves once the composer has answered; the bar stays busy until then. */
   readonly onAddToChat: (file: File) => void | Promise<void>;
   readonly onClose: () => void;
+  /** A notice about adding the picture, drawn above the bar so it never moves the picture. */
+  readonly notice?: MarkupNotice | undefined;
+}
+
+export interface MarkupNotice {
+  readonly text: string;
+  readonly tone: "danger" | "neutral" | "success";
 }
 
 interface Picture {
@@ -100,6 +107,12 @@ export function BrowserMarkupStage(props: BrowserMarkupStageProps) {
   const gesture = useRef<Gesture | undefined>(undefined);
   const entryText = useRef("");
   const entryOpen = useRef<TextEntry | undefined>(undefined);
+
+  // Drawing opens ready for keys: undo, redo, delete and Escape work at once.
+  const ready = picture.status === "ready";
+  useEffect(() => {
+    if (ready) layer.current?.focus();
+  }, [ready]);
 
   useEffect(() => {
     const image = new Image();
@@ -332,6 +345,8 @@ export function BrowserMarkupStage(props: BrowserMarkupStageProps) {
     setExporting(true);
     await props.onAddToChat(new File([blob], MARKUP_FILE_NAME, { type: "image/png" }));
     setExporting(false);
+    // Still here: the composer refused the picture. Keys go on working.
+    layer.current?.focus();
   }
 
   const shown: ReadonlyArray<Mark> = state.marks.map((mark) =>
@@ -345,6 +360,7 @@ export function BrowserMarkupStage(props: BrowserMarkupStageProps) {
         <svg
           ref={layer}
           aria-describedby={helpId}
+          data-owns-chords=""
           aria-label="Page capture to draw on"
           className={`browser-markup__layer browser-markup__layer--${tool}`}
           onKeyDown={onKeyDown}
@@ -429,10 +445,14 @@ export function BrowserMarkupStage(props: BrowserMarkupStageProps) {
       {picture.status !== "ready" ? null : (
         <div className="browser-markup__dock">
           {exportFailed ? (
-            <OctantAlert className="browser-markup__problem" tone="danger">
+            <OctantAlert className="browser-markup__notice" tone="danger">
               The marked-up picture could not be made. Try again.
             </OctantAlert>
-          ) : null}
+          ) : props.notice === undefined ? null : (
+            <OctantAlert className="browser-markup__notice" tone={props.notice.tone}>
+              {props.notice.text}
+            </OctantAlert>
+          )}
           <BrowserMarkupBar
             busy={exporting}
             canDelete={state.selectedId !== undefined}

@@ -1306,6 +1306,12 @@ become one and the row goes away, with the reader's row where it was; Jump to
 latest, or sending a message, returns to the newest messages at the end. A
 jump happens once: after its message has been shown, nothing jumps back to it.
 
+The Browser toolbar is two groups, navigation and the address first, then the
+page's status and the tools. They share one row when the dock is wide enough and
+stack when it is not, so no control is ever clipped or overlaid at any dock width
+from 280px up; the status labels shorten with an ellipsis before a control would
+wrap, and every label keeps its full text as a tooltip.
+
 A thread's Browser captures are a plain list of rows under a sentence-case
 section label (`oct-section-label`, "Browser captures"), not a card group: each
 row is a hairline-ringed object with a 72 x 48 picture, the page title in the
@@ -1324,12 +1330,20 @@ the Browser toolbar, offered only in a Work or Code thread's Browser. While a
 picture is drawn on, its still fills the page area, fitted and centred on the
 canvas colour, and one floating bar sits at the bottom centre
 (`role="toolbar"`, "Drawing tools") on the floating surface and the overlay
-shadow of a menu, with no outline and no blur. Its controls are 16px icon
-buttons with a tooltip, the chosen tool and width pressed (`aria-pressed`):
-Select, Pen, Box, Arrow, Text; six ink dots named Red, Yellow, Green, Blue,
-White and Black, the chosen one ringed in the text colour; Thin and Thick
-stroke; Undo, Redo and Delete; then **Add to chat**, the bar's one labelled
-button, and **Discard drawing**. The ink colours are drawn into a picture that
+shadow of a menu, with no outline and no blur. Its controls are 28px icon
+buttons with a 16px glyph and a tooltip, one row down to a 500px dock: Select,
+Pen, Box, Arrow, Text (the chosen one pressed, `aria-pressed`); one ink control
+named for its colour ("Ink colour: Red") that opens a small popover of six named
+swatches (Red, Yellow, Green, Blue, White, Black; arrows move, Enter picks,
+Escape closes and returns focus); one width toggle ("Thick stroke", pressed when
+thick); Undo, Redo and Delete; then **Add to chat**, the bar's one labelled
+button, and **Discard drawing** as the trailing pair, which wrap together on a
+narrower dock. A pressed control is the raised tile a selected row wears
+(`--octant-float-pressed` with `--octant-shadow-selected`), not an accent ring,
+and every swatch has a hairline edge (`--octant-border-strong`) so white shows
+on a light bar and black on a dark one. A notice about adding the picture is
+drawn in a column above the bar, inside the stage, so it never moves the still;
+a refusal is an alert and focus returns to the drawing. The ink colours are drawn into a picture that
 leaves the app, so they are fixed values in code
 (`apps/web/src/theme/markupInk.ts`), the one place the renderer draws a
 colour that no theme changes. A selected mark is outlined with a dashed accent
