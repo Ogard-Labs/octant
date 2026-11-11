@@ -13,6 +13,8 @@
     "./terminal-launcher": "./src/terminalLauncher.ts"
   },
   "scripts": {
+    "fmt": "oxfmt",
+    "fmt:check": "oxfmt --check",
     "build": "tsdown",
     "test": "vitest run --testTimeout=15000",
     "typecheck": "tsc -p tsconfig.json"

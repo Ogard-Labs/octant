@@ -6,6 +6,8 @@
   },
   "type": "module",
   "scripts": {
+    "fmt": "oxfmt",
+    "fmt:check": "oxfmt --check",
     "start": "bun src/main.ts",
     "smoke": "bun src/shareService.smoke.ts",
     "takedown": "bun src/takedown.ts",
