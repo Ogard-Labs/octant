@@ -683,10 +683,12 @@ fill until there is something to send, then the card's one solid control: the
 primary text colour as its fill, with the page colour on it. It is not the
 accent: a filled accent circle was the loudest thing on the page under an
 empty prompt, and the one round control on it. How the
-thread runs is one quiet row on the page under the card, with no fill or edge
-of its own: image and access on the leading side with a thread's own context
-(Project, branch, checkout) beside them, and the plan meters, the context
-ring, the model, the microphone and Thread info trailing. With that row inside
+thread runs is one quiet line on the page under the card, with no fill or edge
+of its own, in reading order: a thread's own context (Project, branch,
+checkout), the surface's row (image and access leading; the context ring, the
+model and the microphone trailing), the plan meters, and Thread info. Only the
+surface's row gives its controls the row's one quiet treatment; the checkout's
+actions and the info panel's fields keep their own. With that row inside
 it the card was a third taller than its prompt and read as a form; an empty
 reply box now stands 51px tall, where it stood 114px before the prompt went to
 one line and 93px after.
@@ -1520,14 +1522,15 @@ control is one menu: saved Projects to search, then New Project from folder
 and New Project from GitHub repository. Choosing GitHub swaps the menu's body
 for the managed-clone flow in place, so there is no second repository control
 beside the Project. Access is
-a titled menu on the prompt card, next to the model picker, and carries the
+a titled menu in the row under the prompt card, and carries the
 "Remember for this Project" switch.
-Every composer's control row is two groups with the row's free space between
-them, in one order on a new task and in the thread it becomes: what the person
-adds on the left (attach, Create image in an open thread once an image
-profile is ready, dictation, a
-surface's own extras such as Web or Task actions), then how the turn runs on the right (model, access, the context
-meter, send). A control never changes sides between the two composers.
+Every composer's row under the card is two groups with the row's free space
+between them, in one order on a new task and in the thread it becomes: what
+the person adds on the left (Create image in an open thread once an image
+profile is ready, access, a surface's own extras such as Web or Task actions),
+then how the turn runs on the right (the context meter, the model,
+dictation). Attach and send are in the card. A control never changes sides
+between the two composers.
 All six composers use `ComposerAttachButton` for their file chooser. The visible
 button is the only tab stop; an unsupported model keeps the button reachable
 and explains the refusal in the surface's status line. It never opens the file

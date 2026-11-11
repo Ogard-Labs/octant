@@ -483,7 +483,7 @@ faster, with no fixed floor so a narrow pane keeps its status pill); without a
 Project the breadcrumb is the title alone. A header narrower than 520px (a
 pane in a split) drops the Project step too and names it in the title's
 tooltip, so the title is read whole instead of both steps being cut. The branch is not repeated here: it
-is in the composer's strip, beside the thread it runs. While the host projects the thread as executing, a "Running" pill (a neutral wash, not the theme's tint) with
+is in the line under the composer, beside the thread it runs. While the host projects the thread as executing, a "Running" pill (a neutral wash, not the theme's tint) with
 a spinner follows them; it carries no elapsed time because the host does not
 report when the turn began. A thread whose turn is parked on the agent's own
 approval, or on a question the turn asked, is not running: the pill reads
@@ -491,11 +491,11 @@ approval, or on a question the turn asked, is not running: the pill reads
 With content tabs open the bar holds the drag handle and the tabs alone: the
 Project and the Running or Needs you pill leave it. A Project name ahead of
 the tabs read as one more tab, so it moves into the handle's tooltip ("Project
-· Drag to move or split"), and the composer's strip still names it; each tab
+· Drag to move or split"), and the line under the composer still names it; each tab
 carries its own thread's state, a spinner in place of its provider mark while
 it runs and a small warning dot after its title while it waits on the person.
 At phone width (680px and below) the title row drops both chips so the title
-stays readable; the composer's context strip below the thread names the
+stays readable; the line under the composer names the
 Project and branch there.
 The model stays in the composer, not the title row. The tile holds its glyph
 so a later per-environment icon can replace it in place. Tab

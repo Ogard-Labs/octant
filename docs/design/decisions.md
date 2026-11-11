@@ -2296,7 +2296,7 @@ Status: Built. Since: —. Detail: [Workspace: Panes and content navigation](wor
 
 What is true about a thread but is not part of its conversation has one home, a panel opened from the row under the follow-up composer.
 
-- Its rows are the access level in force with Access details, Reply detail, document delivery, Provider tools, Credential commands, Provider cloud sessions and Continue elsewhere, each only where it applies. The composer's toolbar keeps only what changes from one message to the next. Nothing else about the thread is drawn on the thread page outside the transcript and the composer.
+- Its rows are the access level in force with Access details, Reply detail, document delivery, Provider tools, Credential commands, Provider cloud sessions and Continue elsewhere, each only where it applies. The row under the composer's card keeps only what changes from one message to the next. Nothing else about the thread is drawn on the thread page outside the transcript and the composer.
 - Rows stay mounted while the panel is closed, and a row that waits for the person marks the panel's button.
 
 Status: Built. Since: —. Detail: [Workspace: Thread info](workspace.md#thread-info).

@@ -448,6 +448,12 @@ h4 {
 .octant-checkbox:checked:focus-visible {
   outline-color: var(--oct-focus-edge-on-accent);
 }
+/* A control filled with the primary text colour is the other place the edge
+   lands on its own ink (a composer's send). There it is drawn in the page
+   colour the control's glyph already uses. */
+[data-slot="button"][data-variant="solid"]:focus-visible {
+  outline-color: color-mix(in srgb, var(--octant-workspace) 62%, transparent);
+}
 
 /* A drawn SVG mark is a shape, not a box: an inset edge would cover a small
    dot or a thin band, so the edge sits just outside it instead. */
@@ -4578,16 +4584,40 @@ input.switch:checked::after {
   padding: 0;
   border-radius: var(--oct-radius-sm);
 }
-/* The thread's controls stand on the page under the card, as one quiet row
-   with no fill or edge of its own: what the thread may do and where it runs
-   on the leading side, the model, the plan and the context ring trailing. */
-.composer-row {
+/* The thread's facts stand on the page under the card, as one quiet line
+   with no fill or edge of its own: where the thread runs, the surface's row of
+   controls, the plan's windows, and the thread's info. */
+.composer-under {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
+  gap: 0 var(--oct-space-2);
+  min-width: 0;
+  min-height: 28px;
+  padding: 0 var(--oct-space-1);
+}
+.composer-under:empty {
+  display: none;
+}
+.composer-under > .thread-plan-windows {
+  flex: 0 1 auto;
+}
+/* In a narrow pane the line wraps; the thread's info then keeps the trailing
+   edge it has on one line, not the start of a line of its own. */
+.composer-under > .thread-info {
+  margin-inline-start: auto;
+}
+/* The surface's own row: what the thread may do leading, the context ring
+   and the model trailing. It takes the line's free space, so the plan's
+   windows and the thread's info stay at the trailing edge. */
+.composer-row {
+  display: flex;
+  flex: 1 1 auto;
+  flex-wrap: wrap;
+  align-items: center;
+  min-width: 0;
   min-height: 28px;
   gap: var(--oct-space-1);
-  padding: 0 var(--oct-space-1);
   border-top: 0;
 }
 .composer-actions {
@@ -4632,12 +4662,13 @@ input.switch:checked::after {
   border-color: transparent;
   box-shadow: none;
 }
-/* The send control is the row's one filled affordance, so it stays a circle. */
+/* An icon control in the row is a square tile with the control corner, as
+   attach and send are in the card. */
 .composer-row button[data-size="icon"] {
   width: 28px;
   min-width: 28px;
   padding: 0;
-  border-radius: var(--oct-radius-pill);
+  border-radius: var(--oct-radius-sm);
 }
 /* Controls riding the composer row are one treatment across Chat, Work, and
    Code; a surface may position them, never restyle them. Selects
@@ -4764,12 +4795,13 @@ input.switch:checked::after {
   position: relative;
 }
 .composer-input[data-suggested="true"]:placeholder-shown {
-  padding-inline-end: 64px;
+  padding-inline-end: 52px;
 }
 .thread-composer__surface:has(.composer-input[data-suggested="true"]:placeholder-shown)::after {
   position: absolute;
   top: 16px;
-  right: var(--oct-composer-gutter);
+  /* Clear of the send tile at the card's trailing edge. */
+  right: calc(var(--oct-space-2) * 2 + 28px);
   padding: 1px var(--oct-space-2);
   border-radius: var(--oct-radius-pill);
   box-shadow: inset 0 0 0 1px var(--oct-border);
@@ -4816,10 +4848,6 @@ input.switch:checked::after {
 }
 .thread-composer__context:empty {
   display: none;
-}
-/* The plan's windows lead the row's trailing group, before the context ring. */
-.composer-row > .composer-actions > .thread-plan-windows {
-  padding: 0 var(--oct-space-2);
 }
 /* The thread's info panel: a quiet button at the end of the row and one
    floating card above it. What it holds (access level, credential commands,

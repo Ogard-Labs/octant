@@ -39,7 +39,8 @@ describe("ThreadComposer", () => {
     expect(field?.children[2]).toContainElement(screen.getByRole("button", { name: "Send" }));
     // How the thread runs stands on the page under the card, access leading
     // and the model trailing.
-    expect(card?.nextElementSibling).toBe(row);
+    expect(card?.nextElementSibling).toBe(row?.parentElement);
+    expect(row?.parentElement).toHaveClass("composer-under");
     expect(row).toContainElement(screen.getByText("Access"));
     expect(row).not.toContainElement(screen.getByRole("button", { name: "Send" }));
     const trailing = container.querySelector(".composer-actions");
@@ -145,13 +146,18 @@ describe("ThreadComposer", () => {
     const field = screen.getByRole("textbox", { name: "Message" });
     const surface = container.querySelector(".thread-composer__surface");
     const feedback = container.querySelector(".thread-composer__feedback");
-    const under = container.querySelector(".composer-row");
+    const under = container.querySelector(".composer-under");
     expect(surface).toContainElement(field);
     expect(surface).toContainElement(feedback as HTMLElement);
-    // The row under the box holds the checkout context; the box itself holds
+    // The line under the box holds the checkout context; the box itself holds
     // only the message and what is said about sending it.
     expect(surface?.nextElementSibling).toBe(under);
     expect(under).toContainElement(container.querySelector(".thread-composer__context"));
+    // The context is beside the surface's row, not in it: the row restyles
+    // every control inside it, and the checkout's actions keep their own.
+    expect(container.querySelector(".composer-row")).not.toContainElement(
+      container.querySelector(".thread-composer__context"),
+    );
     rerender(<ThreadComposer presentation="follow-up" context={context} input={input} row={row} />);
     expect(container.querySelector(".thread-composer__feedback")).toBe(feedback);
     expect(screen.getByRole("textbox", { name: "Message" })).toBe(field);
@@ -207,7 +213,9 @@ describe("ThreadComposer", () => {
     expect(frame?.children).toHaveLength(2);
     expect(frame?.children[0]).toBe(container.querySelector(".thread-composer__surface"));
     expect(frame?.children[0]).toContainElement(screen.getByRole("textbox", { name: "Message" }));
-    expect(frame?.children[1]).toBe(container.querySelector(".composer-row"));
+    expect(frame?.children[1]).toBe(container.querySelector(".composer-under"));
+    expect(frame?.children[1]?.children).toHaveLength(1);
+    expect(frame?.children[1]?.children[0]).toBe(container.querySelector(".composer-row"));
   });
 
   it("keeps the message label a direct child of the prompt cell so the input stays full width", () => {

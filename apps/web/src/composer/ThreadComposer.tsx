@@ -266,29 +266,36 @@ function ComposerSurface(props: ThreadComposerProps & { readonly held: boolean }
     props.row.actions.kind === "send-or-stop"
       ? `composer-actions ${props.row.actions.cellClassName}`
       : "composer-actions";
-  // One row under the card: what the thread may do on the leading side, where
-  // it runs beside that, and the model, the plan, the context ring and the
-  // thread's info at the trailing edge.
+  // One line under the card, in reading order: where the thread runs, the
+  // surface's own row (what the thread may do leading, the context ring and
+  // the model trailing), the plan's windows, and the thread's info. Only the
+  // surface's controls are inside `.composer-row`: the row restyles every
+  // control in it to one quiet treatment, which the info panel's fields and
+  // the checkout's actions must not take.
   const under = (
-    <div
-      {...(props.row.ariaLabel === undefined ? {} : { "aria-label": props.row.ariaLabel })}
-      className={
-        props.row.className === undefined
-          ? "composer-row composer-row--under"
-          : `composer-row composer-row--under ${props.row.className}`
-      }
-      {...(props.row.toolbar === true ? { role: "toolbar" } : {})}
-    >
-      {held ? null : props.row.leading}
+    <div className="composer-under">
       {held || !followUp || props.context === undefined ? null : (
         <div className="thread-composer__context">{props.context}</div>
       )}
-      <div className={trailingClassName}>
-        {held || !followUp ? null : <ThreadPlanWindows />}
-        {held ? null : <ComposerContextMeter />}
-        {held ? null : props.row.trailing}
-        {followUp ? props.info : null}
-      </div>
+      {held ? null : (
+        <div
+          {...(props.row.ariaLabel === undefined ? {} : { "aria-label": props.row.ariaLabel })}
+          className={
+            props.row.className === undefined
+              ? "composer-row"
+              : `composer-row ${props.row.className}`
+          }
+          {...(props.row.toolbar === true ? { role: "toolbar" } : {})}
+        >
+          {props.row.leading}
+          <div className={trailingClassName}>
+            <ComposerContextMeter />
+            {props.row.trailing}
+          </div>
+        </div>
+      )}
+      {held || !followUp ? null : <ThreadPlanWindows />}
+      {followUp ? props.info : null}
     </div>
   );
   // Suggested tasks stand above the composer, as the last thing in the
