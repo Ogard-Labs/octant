@@ -14,6 +14,7 @@ import { providerCapability, setupMessage } from "../desktop/desktopPaneModel";
 import { hostCredentialStore, useHostPlatform } from "../platform";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantConfirmDialog } from "../ui/base/OctantConfirmDialog";
+import { OctantDialogPresence } from "../ui/base/OctantDialogPresence";
 import { OctantFieldError } from "../ui/base/OctantField";
 import { OctantInput } from "../ui/base/OctantInput";
 import { OctantSelectField, type OctantSelectOption } from "../ui/base/OctantSelect";
@@ -836,37 +837,41 @@ export function ProjectDesktopRecipeSection(props: ProjectDesktopRecipeSectionPr
           </OctantButton>
         )}
       </div>
-      {confirmRemove ? (
-        <OctantConfirmDialog
-          confirmLabel="Remove recipe"
-          destructive
-          onCancel={() => setConfirmRemove(false)}
-          onConfirm={() => {
-            setConfirmRemove(false);
-            void commit(null);
-          }}
-          title="Remove the desktop recipe?"
-        >
-          This Project's threads can't start a desktop until a recipe is set again, and any desktop
-          running from it now is destroyed.
-        </OctantConfirmDialog>
-      ) : null}
-      {confirmKeyRemoval && saved !== undefined ? (
-        <OctantConfirmDialog
-          confirmLabel="Remove key"
-          destructive
-          onCancel={() => setConfirmKeyRemoval(false)}
-          onConfirm={() => {
-            setConfirmKeyRemoval(false);
-            void commit(saved, { action: "remove" });
-          }}
-          title="Remove the desktop key?"
-        >
-          The recipe stays, but this Project's threads can't start a desktop until a key is entered
-          again. Any desktop running from it now is destroyed, and the key is deleted from{" "}
-          {hostCredentialStore(hostPlatform)} once that desktop is gone.
-        </OctantConfirmDialog>
-      ) : null}
+      <OctantDialogPresence>
+        {confirmRemove ? (
+          <OctantConfirmDialog
+            confirmLabel="Remove recipe"
+            destructive
+            onCancel={() => setConfirmRemove(false)}
+            onConfirm={() => {
+              setConfirmRemove(false);
+              void commit(null);
+            }}
+            title="Remove the desktop recipe?"
+          >
+            This Project's threads can't start a desktop until a recipe is set again, and any
+            desktop running from it now is destroyed.
+          </OctantConfirmDialog>
+        ) : null}
+      </OctantDialogPresence>
+      <OctantDialogPresence>
+        {confirmKeyRemoval && saved !== undefined ? (
+          <OctantConfirmDialog
+            confirmLabel="Remove key"
+            destructive
+            onCancel={() => setConfirmKeyRemoval(false)}
+            onConfirm={() => {
+              setConfirmKeyRemoval(false);
+              void commit(saved, { action: "remove" });
+            }}
+            title="Remove the desktop key?"
+          >
+            The recipe stays, but this Project's threads can't start a desktop until a key is
+            entered again. Any desktop running from it now is destroyed, and the key is deleted from{" "}
+            {hostCredentialStore(hostPlatform)} once that desktop is gone.
+          </OctantConfirmDialog>
+        ) : null}
+      </OctantDialogPresence>
     </section>
   );
 }

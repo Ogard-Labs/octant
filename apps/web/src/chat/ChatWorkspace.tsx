@@ -104,6 +104,7 @@ import {
 import { samePollingData } from "../polling/samePollingData";
 import { useVisibleRefresh } from "../polling/useVisibleRefresh";
 import { OctantAlert } from "../ui/base/OctantAlert";
+import { OctantDialogPresence } from "../ui/base/OctantDialogPresence";
 import {
   ThreadConnectionLostContext,
   ThreadConnectionNotice,
@@ -1472,20 +1473,24 @@ export function ChatWorkspace(props: ChatWorkspaceProps) {
               summary={browserApprovalSummary(pendingBrowserApproval)}
             />
           )}
-          <RewindDialog
-            busy={rewind?.busy === true}
-            files={{
-              kind: "unavailable",
-              reason: "Chat has no files, so only the conversation can be rewound.",
-            }}
-            {...(rewind?.message === undefined ? {} : { message: rewind.message })}
-            onClose={() => {
-              if (rewind?.busy !== true) setRewind(undefined);
-            }}
-            onRewind={() => void runRewind()}
-            open={rewind !== undefined}
-            removedTurns={rewind?.removedTurns}
-          />
+          <OctantDialogPresence>
+            {rewind !== undefined ? (
+              <RewindDialog
+                busy={rewind?.busy === true}
+                files={{
+                  kind: "unavailable",
+                  reason: "Chat has no files, so only the conversation can be rewound.",
+                }}
+                {...(rewind?.message === undefined ? {} : { message: rewind.message })}
+                onClose={() => {
+                  if (rewind?.busy !== true) setRewind(undefined);
+                }}
+                onRewind={() => void runRewind()}
+                open
+                removedTurns={rewind?.removedTurns}
+              />
+            ) : null}
+          </OctantDialogPresence>
           <ChatComposer
             notices={sideChatNotice === undefined ? [] : [sideChatNotice]}
             key={String(thread.id)}

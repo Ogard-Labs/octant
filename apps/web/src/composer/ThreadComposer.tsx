@@ -420,6 +420,13 @@ function sendVariant(refused: boolean): "secondary" | "solid" {
   return refused ? "secondary" : "solid";
 }
 
+/**
+ * A refused send keeps its quiet fill at full strength and dims only the
+ * arrow: the blanket disabled opacity left the circle at 1.07:1 on the page,
+ * so the pill no longer showed where send is.
+ */
+const SEND_REFUSED_PAINT = "disabled:opacity-100 disabled:[&_svg]:opacity-50";
+
 function sendRefused(send: ThreadComposerSend, compactingNoteId: string | undefined): boolean {
   return (
     compactingNoteId !== undefined || send.disabled === true || send.disabledReason !== undefined
@@ -445,6 +452,7 @@ function ComposerSendCell(props: {
         <OctantButton
           aria-describedby={props.compactingNoteId}
           aria-label={send.ariaLabel}
+          className={SEND_REFUSED_PAINT}
           disabled={refused}
           {...(send.onSend === undefined ? {} : { onClick: send.onSend })}
           size="icon"
@@ -486,6 +494,7 @@ function ComposerSendCell(props: {
       <OctantButton
         aria-describedby={props.compactingNoteId}
         aria-label={send.ariaLabel}
+        className={SEND_REFUSED_PAINT}
         disabled={refused}
         {...(send.onSend === undefined ? {} : { onClick: send.onSend })}
         size="icon"

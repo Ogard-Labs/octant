@@ -29,6 +29,7 @@ import {
 } from "@octant/contracts/canvas";
 import { OctantButton } from "../../ui/base/OctantButton";
 import { OctantDialog } from "../../ui/base/OctantDialog";
+import { OctantDialogPresence } from "../../ui/base/OctantDialogPresence";
 import {
   designAssetUrls,
   designDocument,
@@ -298,16 +299,18 @@ function DesignBoard({
           </figure>
         ))}
       </div>
-      {playing === undefined ? null : (
-        <DesignPlayer
-          block={block}
-          onClose={() => setPlaying(undefined)}
-          restoreFocus={playButton}
-          size={size}
-          startFrameId={playing}
-          frame={inputs}
-        />
-      )}
+      <OctantDialogPresence>
+        {playing === undefined ? null : (
+          <DesignPlayer
+            block={block}
+            onClose={() => setPlaying(undefined)}
+            restoreFocus={playButton}
+            size={size}
+            startFrameId={playing}
+            frame={inputs}
+          />
+        )}
+      </OctantDialogPresence>
     </section>
   );
 }

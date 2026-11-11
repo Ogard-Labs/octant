@@ -1211,11 +1211,12 @@ input.switch:checked::after {
 .octant-switch[data-slot="switch"] {
   width: 38px;
   height: 22px;
-  /* The off edge is a border, not an inset shadow: the track keeps no
-     box-shadow so a focus halo cannot creep back in (visual language
-     contract). Both states keep the 1px border so the knob's travel is the
-     same; on paints it the fill colour. */
-  border: 1px solid var(--octant-border-strong);
+  /* The off edge is the strong divider: the strong border measured 1.65:1 on
+     a card in light, too faint to find an off switch. It is a border, not an
+     inset shadow: the track keeps no box-shadow so a focus halo cannot creep
+     back in (visual language contract). Both states keep the 1px border so
+     the knob's travel is the same; on paints it the fill colour. */
+  border: 1px solid var(--octant-divider-strong);
   border-radius: var(--oct-radius-pill);
   background: var(--octant-control);
   box-shadow: none;
@@ -1236,7 +1237,7 @@ input.switch:checked::after {
   height: 16px;
   border-radius: var(--oct-radius-pill);
   background: var(--oct-bg);
-  box-shadow: 0 0 0 1px var(--octant-border-strong);
+  box-shadow: 0 0 0 1px var(--octant-divider-strong);
   translate: 2px 0;
   transition: translate var(--oct-motion-base) var(--oct-ease-standard);
 }
@@ -2101,7 +2102,11 @@ input.switch:checked::after {
   border-radius: var(--oct-radius-sm);
   background: var(--oct-fg);
   color: var(--oct-surface);
-  box-shadow: var(--oct-elev-raised);
+  /* No inset bevel: the raised elevation's white top line drew on the dark
+     pill in light. */
+  box-shadow:
+    0 1px 2px color-mix(in srgb, var(--octant-scrim) 20%, transparent),
+    0 8px 20px -10px color-mix(in srgb, var(--octant-scrim) 40%, transparent);
   font-size: var(--oct-text-sm);
   line-height: 1.25;
 }
@@ -4156,8 +4161,8 @@ input.switch:checked::after {
 }
 /* Work and Code: two compact icon buttons in a faint tray. The labels stay
    clipped for the accessible name; a tooltip names the mode on hover and
-   focus. The active button keeps the same fill and hairline .mode already
-   uses, so "you are here" does not depend on hue. */
+   focus. The active button takes a stronger tint than the tray and the
+   hairline .mode already uses, so "you are here" does not depend on hue. */
 .modeswitch__tray {
   display: inline-flex;
   flex: 0 0 auto;
@@ -4165,6 +4170,12 @@ input.switch:checked::after {
   padding: 2px;
   border-radius: var(--oct-radius-sm);
   background: color-mix(in oklab, var(--oct-fg) 6%, transparent);
+}
+/* The selection role is the tray's own tint, so the chosen segment drew as
+   the tray (1.01:1 in light). A 12% tint of the ink reads one step stronger
+   than the tray, in either mode, and stays translucent under Glass. */
+.modeswitch__tray > .mode[aria-current="page"] {
+  background: color-mix(in srgb, var(--oct-fg) 12%, transparent);
 }
 .mode-switcher__solo {
   display: flex;
@@ -4760,6 +4771,19 @@ input.switch:checked::after {
 
 .composer-row .composer-model-picker__trigger {
   border-radius: var(--oct-radius-sm);
+}
+
+/* A thread whose model cannot change (a completed one) is still a fact the
+   person reads, so its name keeps the ordinary meta ink (the blanket disabled
+   opacity left it at 2.11:1 on the page). It does not look pressable: the
+   button ignores the pointer, shows the default cursor and takes no hover
+   fill, and only the chevron is dimmed. Every other disabled picker keeps the
+   ordinary disabled look. */
+.composer-model-picker__trigger--locked:disabled {
+  opacity: 1;
+}
+.composer-model-picker__trigger--locked:disabled .composer-model-picker__chevron {
+  opacity: 0.4;
 }
 
 /* An unavailable provider is still a toolbar item, not a second outlined

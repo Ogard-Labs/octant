@@ -3,6 +3,7 @@ import type { DesktopPaneClient } from "@octant/client-runtime/desktop-pane-clie
 import type { DesktopPreviewAnswer, DesktopPreviewRequest } from "@octant/contracts";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantConfirmDialog } from "../ui/base/OctantConfirmDialog";
+import { OctantDialogPresence } from "../ui/base/OctantDialogPresence";
 import { OctantField, OctantFieldGroup, OctantFieldLabel } from "../ui/base/OctantField";
 import { OctantInput } from "../ui/base/OctantInput";
 
@@ -188,22 +189,24 @@ export function DesktopPreview(props: {
       <p aria-live="polite" className="oct-row-detail" id={`${fieldId}-notice`} role="status">
         {notice}
       </p>
-      {review === undefined ? null : (
-        <OctantConfirmDialog
-          title="Share this dev server with the desktop?"
-          confirmLabel="Share preview"
-          pending={pending}
-          onCancel={() => setReview(undefined)}
-          onConfirm={() =>
-            void act({ kind: "preview-grant", threadId, leaseId, reviewId: review.reviewId })
-          }
-        >
-          Allow this desktop to reach {review.processName} on this computer at port {review.port}{" "}
-          until {new Date(review.expiresAt).toLocaleTimeString()}. Other host ports stay
-          unavailable. Stopping the preview ends new requests; requests already sent may have taken
-          effect.
-        </OctantConfirmDialog>
-      )}
+      <OctantDialogPresence>
+        {review === undefined ? null : (
+          <OctantConfirmDialog
+            title="Share this dev server with the desktop?"
+            confirmLabel="Share preview"
+            pending={pending}
+            onCancel={() => setReview(undefined)}
+            onConfirm={() =>
+              void act({ kind: "preview-grant", threadId, leaseId, reviewId: review.reviewId })
+            }
+          >
+            Allow this desktop to reach {review.processName} on this computer at port {review.port}{" "}
+            until {new Date(review.expiresAt).toLocaleTimeString()}. Other host ports stay
+            unavailable. Stopping the preview ends new requests; requests already sent may have
+            taken effect.
+          </OctantConfirmDialog>
+        )}
+      </OctantDialogPresence>
     </section>
   );
 }

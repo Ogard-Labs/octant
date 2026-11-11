@@ -17,6 +17,7 @@ import type {
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantCheckbox } from "../ui/base/OctantCheckbox";
 import { OctantConfirmDialog } from "../ui/base/OctantConfirmDialog";
+import { OctantDialogPresence } from "../ui/base/OctantDialogPresence";
 import { OctantField, OctantFieldLabel } from "../ui/base/OctantField";
 import { OctantInput } from "../ui/base/OctantInput";
 import { OctantSwitch } from "../ui/base/OctantSwitch";
@@ -1434,20 +1435,22 @@ export function HubSettingsSection({ hub, pairing, ownerUnlock, now }: HubSettin
               ))}
             </ul>
           )}
-          {removing === undefined ? null : (
-            <OctantConfirmDialog
-              cancelLabel="Keep it"
-              destructive
-              confirmLabel={`Remove ${removing.name}`}
-              onCancel={() => setRemoving(undefined)}
-              onConfirm={() => void removeMember(removing)}
-              restoreFocus={removeOpener}
-              title={`Remove ${removing.name} from this hub?`}
-            >
-              It loses its place in the roster. Every other member drops what it held for it at the
-              next roster. It can join again with a new code.
-            </OctantConfirmDialog>
-          )}
+          <OctantDialogPresence>
+            {removing === undefined ? null : (
+              <OctantConfirmDialog
+                cancelLabel="Keep it"
+                destructive
+                confirmLabel={`Remove ${removing.name}`}
+                onCancel={() => setRemoving(undefined)}
+                onConfirm={() => void removeMember(removing)}
+                restoreFocus={removeOpener}
+                title={`Remove ${removing.name} from this hub?`}
+              >
+                It loses its place in the roster. Every other member drops what it held for it at
+                the next roster. It can join again with a new code.
+              </OctantConfirmDialog>
+            )}
+          </OctantDialogPresence>
         </SettingsSection>
       )}
 
@@ -1965,18 +1968,20 @@ export function HubSettingsSection({ hub, pairing, ownerUnlock, now }: HubSettin
                   </OctantButton>
                 </div>
               )}
-              {!promoting ? null : (
-                <OctantConfirmDialog
-                  cancelLabel="Not now"
-                  confirmLabel="Make this the hub"
-                  onCancel={() => setPromoting(false)}
-                  onConfirm={() => void promote()}
-                  restoreFocus={promoteOpener}
-                  title="Make this computer the hub for good?"
-                >
-                  {`${linked.hubName} leaves the roster and this computer becomes the hub. Nothing follows by itself: each other computer's person accepts this one from their own window.`}
-                </OctantConfirmDialog>
-              )}
+              <OctantDialogPresence>
+                {!promoting ? null : (
+                  <OctantConfirmDialog
+                    cancelLabel="Not now"
+                    confirmLabel="Make this the hub"
+                    onCancel={() => setPromoting(false)}
+                    onConfirm={() => void promote()}
+                    restoreFocus={promoteOpener}
+                    title="Make this computer the hub for good?"
+                  >
+                    {`${linked.hubName} leaves the roster and this computer becomes the hub. Nothing follows by itself: each other computer's person accepts this one from their own window.`}
+                  </OctantConfirmDialog>
+                )}
+              </OctantDialogPresence>
               {linked.roster.length === 0 ? null : (
                 <ul aria-label="Members of this hub" className="setgroup">
                   {linked.roster.map((member) => (
@@ -2150,20 +2155,22 @@ export function HubSettingsSection({ hub, pairing, ownerUnlock, now }: HubSettin
                   Leave the hub…
                 </OctantButton>
               </div>
-              {!leaving ? null : (
-                <OctantConfirmDialog
-                  cancelLabel="Stay"
-                  destructive
-                  confirmLabel="Leave the hub"
-                  onCancel={() => setLeaving(false)}
-                  onConfirm={() => void leave()}
-                  restoreFocus={leaveOpener}
-                  title={`Leave ${linked.hubName}?`}
-                >
-                  The hub stops acting here and forgets this computer. Your threads, Projects, and
-                  sign-ins stay as they are.
-                </OctantConfirmDialog>
-              )}
+              <OctantDialogPresence>
+                {!leaving ? null : (
+                  <OctantConfirmDialog
+                    cancelLabel="Stay"
+                    destructive
+                    confirmLabel="Leave the hub"
+                    onCancel={() => setLeaving(false)}
+                    onConfirm={() => void leave()}
+                    restoreFocus={leaveOpener}
+                    title={`Leave ${linked.hubName}?`}
+                  >
+                    The hub stops acting here and forgets this computer. Your threads, Projects, and
+                    sign-ins stay as they are.
+                  </OctantConfirmDialog>
+                )}
+              </OctantDialogPresence>
             </div>
           ) : join.phase === "grant" ? (
             <div className="settings-panel__stack">

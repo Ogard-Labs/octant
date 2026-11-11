@@ -10,6 +10,7 @@ import { absoluteTimeFormatter } from "../lib/relativeTime";
 import { OctantAlert } from "../ui/base/OctantAlert";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantConfirmDialog } from "../ui/base/OctantConfirmDialog";
+import { OctantDialogPresence } from "../ui/base/OctantDialogPresence";
 import { describeOutsideContentReads, describeSource } from "@octant/domain";
 import "./outside-content-notice.css";
 
@@ -95,21 +96,23 @@ export function OutsideContentNotice(props: OutsideContentThread & { readonly bu
           This thread has read outside content. Below Full access, some actions ask each time.
         </OctantAlert>
       ) : null}
-      {reviewing === undefined ? null : (
-        <ReviewOutsideContentDialog
-          busy={busy}
-          client={client}
-          initial={reviewing}
-          mode={mode}
-          onClose={() => setReviewing(undefined)}
-          onSettled={(next) => {
-            accept(next);
-            setReviewing(undefined);
-          }}
-          restoreFocus={reviewButton}
-          threadId={threadId}
-        />
-      )}
+      <OctantDialogPresence>
+        {reviewing === undefined ? null : (
+          <ReviewOutsideContentDialog
+            busy={busy}
+            client={client}
+            initial={reviewing}
+            mode={mode}
+            onClose={() => setReviewing(undefined)}
+            onSettled={(next) => {
+              accept(next);
+              setReviewing(undefined);
+            }}
+            restoreFocus={reviewButton}
+            threadId={threadId}
+          />
+        )}
+      </OctantDialogPresence>
     </>
   );
 }

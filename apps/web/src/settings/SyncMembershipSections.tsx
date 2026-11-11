@@ -17,6 +17,7 @@ import { useCallback, useEffect, useId, useState, type ReactNode } from "react";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantCheckbox } from "../ui/base/OctantCheckbox";
 import { OctantConfirmDialog } from "../ui/base/OctantConfirmDialog";
+import { OctantDialogPresence } from "../ui/base/OctantDialogPresence";
 import { OctantInput } from "../ui/base/OctantInput";
 import { SettingRow, SettingsFactList, SettingsSection, SettingsState } from "./primitives";
 
@@ -535,16 +536,18 @@ export function SyncMembershipSections(props: SyncMembershipSectionsProps) {
         </SettingsSection>
       )}
 
-      {leaving === undefined || here.kind === "none" ? null : (
-        <OctantConfirmDialog
-          confirmLabel="Leave replica"
-          destructive
-          onCancel={() => setLeaving(undefined)}
-          onConfirm={() => {
-            const withoutStore = leaving === "without-store";
-            setLeaving(undefined);
-            void run(withoutStore ? { kind: "leave", withoutStore: true } : { kind: "leave" }).then(
-              (result) => {
+      <OctantDialogPresence>
+        {leaving === undefined || here.kind === "none" ? null : (
+          <OctantConfirmDialog
+            confirmLabel="Leave replica"
+            destructive
+            onCancel={() => setLeaving(undefined)}
+            onConfirm={() => {
+              const withoutStore = leaving === "without-store";
+              setLeaving(undefined);
+              void run(
+                withoutStore ? { kind: "leave", withoutStore: true } : { kind: "leave" },
+              ).then((result) => {
                 if (result === undefined) return;
                 if (result.kind !== "left") {
                   // Sync off, an unreachable store, and a key that cannot sign
@@ -569,57 +572,63 @@ export function SyncMembershipSections(props: SyncMembershipSectionsProps) {
                       },
                 );
                 onMembershipChange();
-              },
-            );
-          }}
-          pending={busy}
-          title={leaving === "without-store" ? "Leave without telling them?" : "Leave the replica?"}
-        >
-          {leaveSentence(here.kind, leaving)}
-        </OctantConfirmDialog>
-      )}
-
-      {approving === undefined ? null : (
-        <OctantConfirmDialog
-          confirmLabel="Codes match, approve"
-          details={<MatchingCode code={approving.matchingCode} large />}
-          onCancel={() => setApproving(undefined)}
-          onConfirm={() => {
-            const request = approving;
-            setApproving(undefined);
-            void run({
-              kind: "approve-join",
-              joinRequest: request.request,
-              confirmationCode: request.matchingCode,
-            }).then((result) => {
-              if (result?.kind !== "join-approved") return;
-              setFeedback({
-                kind: "success",
-                message: `Approved ${request.request.origin.displayName}. Confirm on that computer.`,
               });
-            });
-          }}
-          pending={busy}
-          title={`Approve ${approving.request.origin.displayName}?`}
-        >
-          Approve only if {approving.request.origin.displayName} shows this same code. If it shows
-          another code, cancel: the request in the store may not be the one you made.
-        </OctantConfirmDialog>
-      )}
+            }}
+            pending={busy}
+            title={
+              leaving === "without-store" ? "Leave without telling them?" : "Leave the replica?"
+            }
+          >
+            {leaveSentence(here.kind, leaving)}
+          </OctantConfirmDialog>
+        )}
+      </OctantDialogPresence>
 
-      {revoking === undefined ? null : (
-        <RevokeDialog
-          client={client}
-          member={revoking.member}
-          nameOf={nameOf}
-          preview={revoking.preview}
-          onClose={(result) => {
-            setRevoking(undefined);
-            if (result !== undefined) setFeedback(result);
-            void load();
-          }}
-        />
-      )}
+      <OctantDialogPresence>
+        {approving === undefined ? null : (
+          <OctantConfirmDialog
+            confirmLabel="Codes match, approve"
+            details={<MatchingCode code={approving.matchingCode} large />}
+            onCancel={() => setApproving(undefined)}
+            onConfirm={() => {
+              const request = approving;
+              setApproving(undefined);
+              void run({
+                kind: "approve-join",
+                joinRequest: request.request,
+                confirmationCode: request.matchingCode,
+              }).then((result) => {
+                if (result?.kind !== "join-approved") return;
+                setFeedback({
+                  kind: "success",
+                  message: `Approved ${request.request.origin.displayName}. Confirm on that computer.`,
+                });
+              });
+            }}
+            pending={busy}
+            title={`Approve ${approving.request.origin.displayName}?`}
+          >
+            Approve only if {approving.request.origin.displayName} shows this same code. If it shows
+            another code, cancel: the request in the store may not be the one you made.
+          </OctantConfirmDialog>
+        )}
+      </OctantDialogPresence>
+
+      <OctantDialogPresence>
+        {revoking === undefined ? null : (
+          <RevokeDialog
+            client={client}
+            member={revoking.member}
+            nameOf={nameOf}
+            preview={revoking.preview}
+            onClose={(result) => {
+              setRevoking(undefined);
+              if (result !== undefined) setFeedback(result);
+              void load();
+            }}
+          />
+        )}
+      </OctantDialogPresence>
     </>
   );
 }

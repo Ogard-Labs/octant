@@ -661,7 +661,7 @@
 .project-overview__name {
   color: var(--oct-fg);
   background: var(--oct-surface);
-  border: 1px solid var(--oct-border);
+  border: 1px solid var(--input);
   border-radius: var(--oct-radius-sm);
   font: inherit;
   font-size: var(--oct-text-sm);

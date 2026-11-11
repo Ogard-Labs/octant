@@ -4,6 +4,7 @@ import { useEffect, useRef, useState, type ReactNode } from "react";
 import { homeRelativePath } from "../lib/homeRelativePath";
 import type { OctantHostBridge } from "../shell/hostBridge";
 import { OctantButton } from "../ui/base/OctantButton";
+import { OctantDialogPresence } from "../ui/base/OctantDialogPresence";
 import { FolderPicker } from "./FolderPicker";
 import type { ProjectChange } from "./useProjectController";
 
@@ -166,19 +167,21 @@ export function ProjectFoldersSection(props: ProjectFoldersSectionProps) {
       >
         {notice.kind === "none" ? "" : notice.message}
       </p>
-      {picking && props.folderBrowseClient !== undefined && props.hostId !== undefined ? (
-        <FolderPicker
-          client={props.folderBrowseClient}
-          hostId={props.hostId}
-          mode={mode}
-          onCancel={() => setPicking(false)}
-          onSelect={(receiptId) => {
-            void add(receiptId);
-          }}
-          showGitInit={false}
-          title="Add a folder to this Project"
-        />
-      ) : null}
+      <OctantDialogPresence>
+        {picking && props.folderBrowseClient !== undefined && props.hostId !== undefined ? (
+          <FolderPicker
+            client={props.folderBrowseClient}
+            hostId={props.hostId}
+            mode={mode}
+            onCancel={() => setPicking(false)}
+            onSelect={(receiptId) => {
+              void add(receiptId);
+            }}
+            showGitInit={false}
+            title="Add a folder to this Project"
+          />
+        ) : null}
+      </OctantDialogPresence>
     </div>
   );
 }

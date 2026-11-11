@@ -8,6 +8,7 @@ import { CanvasExportPanel } from "../canvas/CanvasExportPanel";
 import { withWorkspaceFrameTheme } from "../canvas/blocks/designDocument";
 import { useCanvasExportFolder } from "../canvas/useCanvasExportFolder";
 import { OctantDialog } from "../ui/base/OctantDialog";
+import { OctantDialogPresence } from "../ui/base/OctantDialogPresence";
 import { Surface } from "../surface/SurfaceHeader";
 import {
   ARTIFACT_LIBRARY_VIEW_GALLERY,
@@ -168,84 +169,94 @@ export function ArtifactLibrarySurface(props: ArtifactLibrarySurfaceProps) {
         projects={mirror.projects}
         settings={mirror.settings}
       />
-      <SyncedArtifactDialog
-        busy={synced.busy}
-        detail={synced.detail}
-        {...(synced.message === undefined ? {} : { message: synced.message })}
-        observedAt={observedAt}
-        onClose={synced.close}
-        {...(props.onCreate === undefined ? {} : { onCreate: props.onCreate })}
-        onKeep={(versionId) =>
-          void synced.runOnSelected((canvasId) => ({ kind: "keep", canvasId, versionId }))
-        }
-        onMerge={(threadId) =>
-          void synced.runOnSelected((canvasId) => ({
-            kind: "merge",
-            canvasId,
-            ...(threadId === undefined ? {} : { threadId }),
-          }))
-        }
-        onOpenIn={(threadId) =>
-          void synced.runOnSelected((canvasId) => ({ kind: "open", canvasId, threadId }))
-        }
-        onBackfill={(versionIds, previewToken) =>
-          void synced.runOnSelected((canvasId) => ({
-            kind: "backfill",
-            canvasId,
-            versionIds,
-            previewToken,
-            backfillId: crypto.randomUUID(),
-            confirmed: true,
-          }))
-        }
-        onBackfillControl={(backfillId, running) =>
-          void synced.runOnSelected((canvasId) => ({
-            kind: running ? "resume-backfill" : "pause-backfill",
-            canvasId,
-            backfillId,
-          }))
-        }
-        onDeleteSynced={(previewToken) =>
-          void synced.runOnSelected((canvasId) => ({
-            kind: "delete-synced",
-            canvasId,
-            previewToken,
-            confirmed: true,
-          }))
-        }
-        onRestore={() => void synced.runOnSelected((canvasId) => ({ kind: "restore", canvasId }))}
-        open={synced.selected !== undefined}
-      />
-      <OctantDialog
-        className="canvas-workspace-tab__share-dialog"
-        describedBy="canvas-export-description"
-        label="Export artifact"
-        labelledBy="canvas-export-title"
-        onClose={() => {
-          exportToken.current += 1;
-          setExportOffers(undefined);
-          setExportMessage(undefined);
-          setExportEntry(undefined);
-        }}
-        open={exportOffers !== undefined || exportMessage !== undefined}
-      >
-        {exportOffers !== undefined &&
-        prepareExport !== undefined &&
-        exportClient?.decideExport !== undefined ? (
-          <CanvasExportPanel
-            key={String(exportOffers.canvasId)}
-            folder={exportFolder}
-            offers={exportOffers}
-            onDecide={exportClient.decideExport}
-            onExportFolderChosen={() => {
-              if (exportEntry !== undefined) void openExport(exportEntry);
-            }}
-            onPrepare={(request) => prepareExport(withWorkspaceFrameTheme(request))}
+      <OctantDialogPresence>
+        {synced.selected !== undefined ? (
+          <SyncedArtifactDialog
+            busy={synced.busy}
+            detail={synced.detail}
+            {...(synced.message === undefined ? {} : { message: synced.message })}
+            observedAt={observedAt}
+            onClose={synced.close}
+            {...(props.onCreate === undefined ? {} : { onCreate: props.onCreate })}
+            onKeep={(versionId) =>
+              void synced.runOnSelected((canvasId) => ({ kind: "keep", canvasId, versionId }))
+            }
+            onMerge={(threadId) =>
+              void synced.runOnSelected((canvasId) => ({
+                kind: "merge",
+                canvasId,
+                ...(threadId === undefined ? {} : { threadId }),
+              }))
+            }
+            onOpenIn={(threadId) =>
+              void synced.runOnSelected((canvasId) => ({ kind: "open", canvasId, threadId }))
+            }
+            onBackfill={(versionIds, previewToken) =>
+              void synced.runOnSelected((canvasId) => ({
+                kind: "backfill",
+                canvasId,
+                versionIds,
+                previewToken,
+                backfillId: crypto.randomUUID(),
+                confirmed: true,
+              }))
+            }
+            onBackfillControl={(backfillId, running) =>
+              void synced.runOnSelected((canvasId) => ({
+                kind: running ? "resume-backfill" : "pause-backfill",
+                canvasId,
+                backfillId,
+              }))
+            }
+            onDeleteSynced={(previewToken) =>
+              void synced.runOnSelected((canvasId) => ({
+                kind: "delete-synced",
+                canvasId,
+                previewToken,
+                confirmed: true,
+              }))
+            }
+            onRestore={() =>
+              void synced.runOnSelected((canvasId) => ({ kind: "restore", canvasId }))
+            }
+            open
           />
-        ) : exportMessage === undefined ? null : (
-          <p className="canvas-export__note">{exportMessage}</p>
-        )}
-      </OctantDialog>
+        ) : null}
+      </OctantDialogPresence>
+      <OctantDialogPresence>
+        {exportOffers !== undefined || exportMessage !== undefined ? (
+          <OctantDialog
+            className="canvas-workspace-tab__share-dialog"
+            describedBy="canvas-export-description"
+            label="Export artifact"
+            labelledBy="canvas-export-title"
+            onClose={() => {
+              exportToken.current += 1;
+              setExportOffers(undefined);
+              setExportMessage(undefined);
+              setExportEntry(undefined);
+            }}
+            open
+          >
+            {exportOffers !== undefined &&
+            prepareExport !== undefined &&
+            exportClient?.decideExport !== undefined ? (
+              <CanvasExportPanel
+                key={String(exportOffers.canvasId)}
+                folder={exportFolder}
+                offers={exportOffers}
+                onDecide={exportClient.decideExport}
+                onExportFolderChosen={() => {
+                  if (exportEntry !== undefined) void openExport(exportEntry);
+                }}
+                onPrepare={(request) => prepareExport(withWorkspaceFrameTheme(request))}
+              />
+            ) : exportMessage === undefined ? null : (
+              <p className="canvas-export__note">{exportMessage}</p>
+            )}
+          </OctantDialog>
+        ) : null}
+      </OctantDialogPresence>
     </Surface>
   );
 }

@@ -3,6 +3,7 @@ import { useState } from "react";
 import { OctantAlert } from "../ui/base/OctantAlert";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantSelectField } from "../ui/base/OctantSelect";
+import { OctantDialogPresence } from "../ui/base/OctantDialogPresence";
 import type { CodeOverviewProps } from "./CodeOverview";
 import type { PlannerProposalReview } from "./plannerProposalCreation";
 import { readPlannerAttempt } from "./plannerProposalAttempt";
@@ -233,15 +234,17 @@ export function CodeProjectPlanner(
       {(view?.proposals.length ?? 0) > 50 ? (
         <p className="oct-meta">Showing the first fifty proposals, with pending decisions first.</p>
       ) : null}
-      {review === undefined ? null : (
-        <PlannerProposalReviewDialog
-          {...props}
-          heading="Review the planner's proposal"
-          onClose={() => setReview(undefined)}
-          planner={plannerState}
-          review={review}
-        />
-      )}
+      <OctantDialogPresence>
+        {review === undefined ? null : (
+          <PlannerProposalReviewDialog
+            {...props}
+            heading="Review the planner's proposal"
+            onClose={() => setReview(undefined)}
+            planner={plannerState}
+            review={review}
+          />
+        )}
+      </OctantDialogPresence>
     </section>
   );
 }

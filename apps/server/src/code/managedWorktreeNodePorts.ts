@@ -15,6 +15,7 @@ import type {
   ManagedWorktreeRepositoryPort,
 } from "./managedWorktreeService";
 import { childProcessEnvironment } from "../childProcessEnvironment";
+import { readWorktreeStatus } from "./hostGitReads";
 
 const execFileAsync = promisify(execFile);
 // Git runs hooks and configured programs from the repository it is pointed at,
@@ -219,14 +220,15 @@ export function createManagedWorktreeNodePorts(): {
       return { status: result.exitCode === 0 ? "created" : "rejected" };
     },
     isDirty: async (targetPath, signal) => {
-      const result = await run(
-        "git",
-        ["-C", targetPath, "status", "--porcelain=v1", "-z", "--untracked-files=normal"],
-        signal,
-      );
-      return result.exitCode === 0
-        ? { status: "observed", dirty: result.stdout.length > 0 }
-        : { status: "failed" };
+      // Read without running anything the repository configured: removal on
+      // archive calls this with no person watching, outside any sandbox. A
+      // repository whose own config sets a filter command is never read, so
+      // its worktree is not found clean and stays.
+      const reading = await readWorktreeStatus(targetPath, signal);
+      if (reading.status === "observed") {
+        return { status: "observed", dirty: reading.changedPaths > 0 };
+      }
+      return reading.status === "runs-filters" ? { status: "unavailable" } : { status: "failed" };
     },
     isDelivered: async (input, signal) => {
       const result = await run(

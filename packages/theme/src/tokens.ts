@@ -108,7 +108,7 @@ const BASE_THEME_TOKEN_ROLES: ReadonlyArray<ThemeTokenRoleDefinition> = [
     category: "control",
     contrastTarget: "workspace",
     contrastLevel: "non-text",
-    defaultLight: "#e8e8e6",
+    defaultLight: "#e2e2e1",
     defaultDark: "#333333",
   },
   {
@@ -117,7 +117,7 @@ const BASE_THEME_TOKEN_ROLES: ReadonlyArray<ThemeTokenRoleDefinition> = [
     category: "control",
     contrastTarget: "workspace",
     contrastLevel: "non-text",
-    defaultLight: "#dfdfdd",
+    defaultLight: "#d3d3d2",
     defaultDark: "#3b3b3b",
   },
   {
