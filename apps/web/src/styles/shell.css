@@ -1223,6 +1223,7 @@ html[data-octant-native-host="true"]
 .sidebar-navigation__thread[aria-current="page"] {
   color: var(--oct-fg);
   background: color-mix(in oklab, var(--oct-fg) 9%, transparent);
+  box-shadow: var(--octant-shadow-selected);
 }
 
 /* A window can show several threads at once, and exactly one marked row

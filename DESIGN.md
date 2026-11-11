@@ -271,6 +271,10 @@ never told from the page by an outline alone.
   (`--octant-shadow-control-pressed`). Ghost, link, bare and chip buttons draw
   no tile and stay flat, as do the quiet controls of a row (the line under a
   composer).
+- **The row a list is showing is a raised tile** (`--octant-shadow-selected`):
+  a light rim, brighter along its top, and a short shadow, on the thread list,
+  the sidebar and the Settings rail. The row under the pointer stays a flat
+  wash, so "here" and "pointed at" are two states.
 - **On Window glass** a raised surface takes a light rim and a shadow that
   can be seen on the desktop behind it (`--octant-shadow-raised-glass`); the
   opaque border is near black and drew a heavy outline there.

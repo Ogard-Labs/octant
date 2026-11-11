@@ -3969,7 +3969,7 @@ input.switch:checked::after {
 }
 .sidebar-item[aria-current="page"] {
   background: var(--oct-selection);
-  box-shadow: inset 0 0 0 1px var(--oct-border);
+  box-shadow: var(--octant-shadow-selected);
   color: var(--oct-fg);
 }
 .sidebar-item .count {
@@ -4073,7 +4073,7 @@ input.switch:checked::after {
 }
 .mode[aria-current="page"] {
   background: var(--oct-selection);
-  box-shadow: inset 0 0 0 1px var(--oct-border);
+  box-shadow: var(--octant-shadow-selected);
   color: var(--oct-fg);
 }
 .mode .count {
@@ -7837,6 +7837,7 @@ html[data-octant-reduced-transparency="true"] .code-home__card {
    Onyx the open page read as a green slab on the glass. */
 .setnav-item[aria-current="page"] {
   background: color-mix(in oklab, var(--oct-fg) 9%, transparent);
+  box-shadow: var(--octant-shadow-selected);
   color: var(--oct-fg);
 }
 

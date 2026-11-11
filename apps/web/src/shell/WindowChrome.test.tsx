@@ -384,7 +384,8 @@ describe("WindowChrome", () => {
     // two marks the thread tab strip gives the tab in front; the hover state
     // is the softer ink wash, so pointing never looks like being there.
     expect(activeMode).toContain("var(--oct-selection)");
-    expect(activeMode).toContain("box-shadow: inset 0 0 0 1px var(--oct-border);");
+    // The edge is the raised tile's lit rim, still without a hue.
+    expect(activeMode).toContain("box-shadow: var(--octant-shadow-selected);");
     expect(activeMode).not.toMatch(/--octant-accent|purple/i);
     // The Project header is a quiet section label, so its active state is
     // carried by ink alone rather than a filled pill.

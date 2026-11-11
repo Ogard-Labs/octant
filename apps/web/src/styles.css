@@ -125,6 +125,12 @@
     inset 0 1px 0 var(--octant-bevel-strong), 0 0 0 1px rgb(255 255 255 / 9%),
     0 1px 2px rgb(0 0 0 / 18%), 0 10px 24px -14px rgb(0 0 0 / 36%);
   --octant-shadow-control: inset 0 1px 0 var(--octant-bevel), 0 1px 2px rgb(0 0 0 / 44%);
+  /* The row a list is showing is a tile raised out of the list: a light rim,
+     brighter along its top, and a short shadow. As a flat wash it was told
+     from the row under the pointer only by being a little darker. */
+  --octant-shadow-selected:
+    inset 0 1px 0 var(--octant-bevel-strong), inset 0 0 0 1px var(--octant-bevel),
+    0 1px 2px rgb(0 0 0 / 30%);
   --octant-shadow-control-pressed: inset 0 1px 2px rgb(0 0 0 / 46%);
   /* Something that floats: a light rim inside the edge and brighter along
      the top, a dark line outside it, and two shadows (a short one that seats
@@ -270,6 +276,7 @@ html[data-octant-theme-mode="light"] {
   --octant-shadow-control:
     inset 0 1px 0 var(--octant-bevel), 0 0 0 1px rgb(16 24 40 / 6%), 0 1px 2px rgb(16 24 40 / 10%);
   --octant-shadow-control-pressed: inset 0 1px 2px rgb(16 24 40 / 16%);
+  --octant-shadow-selected: inset 0 0 0 1px rgb(16 24 40 / 7%), 0 1px 2px rgb(16 24 40 / 8%);
   --octant-shadow-overlay:
     inset 0 1px 0 var(--octant-bevel-strong), 0 0 0 1px rgb(16 24 40 / 10%),
     0 6px 14px -6px rgb(16 24 40 / 14%), 0 24px 56px -14px rgb(16 24 40 / 24%);
