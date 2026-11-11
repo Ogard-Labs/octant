@@ -68,15 +68,15 @@ single-click continuation, and preservation of the composer draft.
 ## Thread info
 
 What is true about a thread but is not part of its conversation has one home:
-a quiet **Thread info** button at the end of the strip above the follow-up
-composer, after the plan meters. It opens one floating card above the strip,
+a quiet **Thread info** button at the end of the row under the follow-up
+composer, after the plan meters and the model. It opens one floating card above the row,
 at most 440px wide, whose rows are, in order and each only where it applies:
 the access level in force and where it came from (Work and Code) with its
 **Access details**, **Reply detail**, how the thread delivers documents
 (Code), **Provider tools** (a key provider's own setup for this thread),
 **Credential commands** (Code), **Provider cloud sessions** (Code, local
 host), and **Continue elsewhere**. A choice made once for the thread lives
-here, not in the composer's toolbar: the toolbar holds what a person changes
+here, not in the composer's row: the row holds what a person changes
 from one message to the next (attach, access, model) and had grown to eleven
 controls, several of them bare glyphs. Nothing else about
 the thread is drawn on the thread page outside the transcript and the
@@ -483,7 +483,7 @@ faster, with no fixed floor so a narrow pane keeps its status pill); without a
 Project the breadcrumb is the title alone. A header narrower than 520px (a
 pane in a split) drops the Project step too and names it in the title's
 tooltip, so the title is read whole instead of both steps being cut. The branch is not repeated here: it
-is in the composer's strip, beside the thread it runs. While the host projects the thread as executing, a "Running" pill (a neutral wash, not the theme's tint) with
+is in the line under the composer, beside the thread it runs. While the host projects the thread as executing, a "Running" pill (a neutral wash, not the theme's tint) with
 a spinner follows them; it carries no elapsed time because the host does not
 report when the turn began. A thread whose turn is parked on the agent's own
 approval, or on a question the turn asked, is not running: the pill reads
@@ -491,11 +491,11 @@ approval, or on a question the turn asked, is not running: the pill reads
 With content tabs open the bar holds the drag handle and the tabs alone: the
 Project and the Running or Needs you pill leave it. A Project name ahead of
 the tabs read as one more tab, so it moves into the handle's tooltip ("Project
-· Drag to move or split"), and the composer's strip still names it; each tab
+· Drag to move or split"), and the line under the composer still names it; each tab
 carries its own thread's state, a spinner in place of its provider mark while
 it runs and a small warning dot after its title while it waits on the person.
 At phone width (680px and below) the title row drops both chips so the title
-stays readable; the composer's context strip below the thread names the
+stays readable; the line under the composer names the
 Project and branch there.
 The model stays in the composer, not the title row. The tile holds its glyph
 so a later per-environment icon can replace it in place. Tab
@@ -512,12 +512,23 @@ kept tab stays when another thread opens in the pane, which then opens beside
 it as a new tab. A tab opened from anywhere else (a link, a search result, a
 drop) is kept.
 
+A thread row drags out of the sidebar the same way from either arrangement,
+Status or the Project tree. Chat and Work threads share that list but not a
+layout, so a row is dragged as the kind of thread it is, and a row of the
+other mode dropped on a pane opens the way its click does, the window
+following it to that mode, where the host would refuse to place it.
+
 **Moving tabs and showing them side by side.** A tab drags the way a pane's
 title row does, through the same drop rules: dropped on another pane's edge it
 splits that pane and opens there, dropped on a pane's centre it opens in that
-pane, and a tab that is not the pane's open one may split its own pane, so a
-tab dragged to its pane's right edge lands beside the open thread. A tab that
-moved out of a pane leaves that pane's tab row. ⌘-click (Ctrl-click off Apple
+pane, and any tab of a pane that holds more than one may split its own pane,
+so a tab dragged to its pane's right edge lands beside the thread the pane
+shows. The pane's open tab does so too: the pane first shows the neighbour a
+close would show, then the tab is placed. (Carried with its pane, the open tab
+had no drop target anywhere in the pane it was in, and dropped on another pane
+it took the whole pane, its other tabs with it.) A pane's only tab moves its
+pane, as the title row does. A tab that moved out of a pane leaves that pane's
+tab row. ⌘-click (Ctrl-click off Apple
 platforms) adds a tab to a selection or takes it out; Shift-click selects the
 run of tabs from the open one to the clicked one; a plain click clears the
 selection and opens the tab. Selected tabs carry a wash between the plain and
@@ -1290,7 +1301,7 @@ owns budget enforcement, provenance, native-session identity, and journal rules.
 Under the composer of every thread, in Chat, Work, and Code and for every provider, a
 quiet stats line states what the thread used: its turns, input and output tokens,
 thinking tokens when reported, the cache hit, output speed, time to first token, and
-cost. The provider's account limit windows stand in the strip above the box, right of
+cost. The provider's account limit windows stand in the row under the box, right of
 the thread's context, one bar per window showing the share left; the stats line's
 switch hides the figures, not those bars
 (`composerLimitWindows` in `apps/web/src/context`, read from the context snapshot and

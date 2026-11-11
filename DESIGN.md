@@ -177,12 +177,17 @@ success. Purple's light-page text value had to be darkened until it read close
 to the plain ink, which loses the point of an accent.
 
 Appearance › Accent offers a one-click accent colour: Blue (the theme's own),
-Clay, Amber, Green, Purple, or Mono. Mono is the grey look: it sets Style to
-Mono, because the ink accent needs different values in light and dark, which a
-single override cannot hold. A colour swatch overrides the accent fill and
-puts dark ink on it (`accent-foreground` and `primary-foreground`), and leaves accent text on the
+Sky, Teal, Green, Lime, Amber, Orange, Clay, Rose, Pink, Purple, Indigo, the
+neutrals Steel, Slate, Silver, Graphite, Carbon and White, or Mono. Mono is the
+grey look: it sets Style to Mono and its ink accent. A swatch overrides the
+accent fill and the ink on it (`accent-foreground` and `primary-foreground`):
+dark ink on most, white on Slate, Graphite and light-mode Carbon, each clearing
+normal-text contrast on its fill (`accentSwatches.ts`). Accent text stays on the
 preset's ink, because no swatch clears normal-text contrast on the light page.
-The accent colours switches, the send button, selected states, and sliders;
+White would vanish on the light page and Carbon on the dark one, so each takes a
+silver in that mode, written as a mode-only override: an override's optional
+`mode` limits it to the light or the dark theme.
+The accent colours switches, selected states, and sliders;
 status colours stay their own. Hairlines separate; fills select. Selected and expanded fills carry
 state; keyboard focus follows the rule in "Accessibility and reliability". See
 "Colour system" for the token table. On the marketing site the same three
@@ -584,8 +589,8 @@ hover; a figure the provider did not report is absent, never zero. The whole lin
 button that opens the per-turn detail dialog, a plain definition list of tokens, timing,
 and cost with Previous and Next turn controls.
 
-**Plan meters.** Remaining plan usage stands above the composer, right-aligned on
-the same row as where the work runs: the strip above a thread's box, and on a
+**Plan meters.** Remaining plan usage stands beside the composer, right-aligned on
+the same row as where the work runs: the row under a thread's box, and on a
 start screen the end of the context-chip row above the card (it drops to its
 own right-aligned line when the chips leave no room). Two compact meters read
 `5h ▬▬▬ 85%  wk ▬▬ 43%`: the shortest window the provider reported and the
@@ -678,17 +683,33 @@ composer takes the narrowest pane's room, so composers side by side match
 instead of each filling its own pane. A start screen's composer docks 12px
 above the pane's foot, where a thread's sits, so the two line up across a
 split; a start screen's card is the same box, with its row of where-it-runs
-chips on the page above it. Nothing about the box changes while a turn runs. The composer is prompt first; its toolbar row holds how the thread runs (attach, image and access
-on the left; the context ring, model and microphone on the right, next to send).
+chips on the page above it. Nothing about the box changes while a turn runs.
+The card holds what acts on the message being written and nothing else: attach
+at its leading edge, the prompt, and send (with Stop while a response streams)
+at its trailing edge, the two controls riding the prompt's last line. Both are
+28px square tiles with the control corner. Send is a quiet tile in the control
+fill until there is something to send, then the card's one solid control: the
+primary text colour as its fill, with the page colour on it. It is not the
+accent: a filled accent circle was the loudest thing on the page under an
+empty prompt, and the one round control on it. How the
+thread runs is one quiet line on the page under the card, with no fill or edge
+of its own, in reading order: a thread's own context (Project, branch,
+checkout), the surface's row (image and access leading; the context ring, the
+model and the microphone trailing), the plan meters, and Thread info. Only the
+surface's row gives its controls the row's one quiet treatment; the checkout's
+actions and the info panel's fields keep their own. With that row inside
+it the card was a third taller than its prompt and read as a form; an empty
+reply box now stands 51px tall, where it stood 114px before the prompt went to
+one line and 93px after.
 The model button names a chosen reasoning effort after the model in muted ink
 ("GPT-6 Astra Medium"); the provider default names none. Where the thread runs
 (Project, working folder, base branch, checkout, Environment, repository) is
 one row on the page just above the card, as quiet chips set together from the
 left: meta ink and no fill at rest, a fill only under the pointer or while the
 chip's menu is open, the same as the access and model controls under the
-prompt. Plan meters keep the right end of that row. The card itself holds only
-the prompt and its toolbar, so a start screen's composer and a thread's are
-the same object with the same strip above it. Inside the card the row stood
+card. Plan meters keep the right end of that row. The card itself holds only
+attach, the prompt and send, so a start screen's composer and a thread's are
+the same object with the same row under it. Inside the card the row stood
 between the person and the prompt, and a control that was more than a label
 grew the card: a Project with extra folders drew a select, a labelled field
 and a paragraph there. That choice is one chip now ("Main folder", or "Main
@@ -1510,14 +1531,15 @@ control is one menu: saved Projects to search, then New Project from folder
 and New Project from GitHub repository. Choosing GitHub swaps the menu's body
 for the managed-clone flow in place, so there is no second repository control
 beside the Project. Access is
-a titled menu on the prompt card, next to the model picker, and carries the
+a titled menu in the row under the prompt card, and carries the
 "Remember for this Project" switch.
-Every composer's control row is two groups with the row's free space between
-them, in one order on a new task and in the thread it becomes: what the person
-adds on the left (attach, Create image in an open thread once an image
-profile is ready, dictation, a
-surface's own extras such as Web or Task actions), then how the turn runs on the right (model, access, the context
-meter, send). A control never changes sides between the two composers.
+Every composer's row under the card is two groups with the row's free space
+between them, in one order on a new task and in the thread it becomes: what
+the person adds on the left (Create image in an open thread once an image
+profile is ready, access, a surface's own extras such as Web or Task actions),
+then how the turn runs on the right (the context meter, the model,
+dictation). Attach and send are in the card. A control never changes sides
+between the two composers.
 All six composers use `ComposerAttachButton` for their file chooser. The visible
 button is the only tab stop; an unsupported model keeps the button reachable
 and explains the refusal in the surface's status line. It never opens the file
@@ -1585,7 +1607,10 @@ its Tint slider. It takes effect only when the host resolved the material
 translucent, so every accessibility, performance, and host-support gate
 applies; then the frame (the sidebar colour) and the sheet (the workspace
 colour) are each at the Tint's opacity over the native material, and reduced
-transparency or an unsupported host leaves them opaque. Menus, dialogs, popovers, and other controls drawn
+transparency or an unsupported host leaves them opaque. A browser is such a
+host: with no native material behind the page, Glass would leave the frame and
+the sheet as the page colour and take the sidebar's own colour away, so a
+browser window always paints the theme's opaque surfaces. Menus, dialogs, popovers, and other controls drawn
 over it stay opaque semantic surfaces. The older `workspaceMaterial` setting
 is still read and stored but no longer changes anything: the whole window is
 glass or none of it is.
