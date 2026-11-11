@@ -1,3 +1,5 @@
+import { createArchivedWorktreeRouteHandler } from "../archivedWorktreeRoutes";
+import { createArchivedWorktrees } from "../code/archivedWorktrees";
 import { decodeThreadWorkingDirectory } from "@octant/contracts";
 import type { ThreadMoveHolds } from "../hub/threadMoveHolds";
 import { approvedWorkingFolderRoot } from "../approvedWorkingFolders";
@@ -609,6 +611,7 @@ export type CodeDependencies = Pick<ServerStart, "options" | "persistence"> &
   Pick<
     ProvidersWiring,
     | "managedCodeThreadCreation"
+    | "managedWorktreeService"
     | "managedWorktreeRefsList"
     | "managedWorktreeSourcePreview"
     | "probeProviderForThreads"
@@ -638,6 +641,7 @@ export function wireCode(deps: CodeDependencies) {
     managedCodeThreadCreation,
     managedWorktreeReceipts,
     managedWorktreeRefsList,
+    managedWorktreeService,
     managedWorktreeSourcePreview,
     onGithubPullRequestsUnreadable,
     onWindowRevoked,
@@ -653,6 +657,17 @@ export function wireCode(deps: CodeDependencies) {
     windowAuthorityStore,
   } = deps;
   return Effect.gen(function* () {
+    const archivedWorktrees = createArchivedWorktrees({
+      readCodeThreads: () => persistence.readCodeThreads(),
+      readCodeThread: (threadId) => persistence.readCodeThread(threadId),
+      readCodeCheckout: (checkoutId) => persistence.readCodeCheckout(checkoutId),
+      loadReceipt: (receiptId) => managedWorktreeReceipts.load(receiptId),
+      cleanup: (input, signal) => managedWorktreeService.cleanup(input, signal),
+    });
+    const archivedWorktreeRoutes = createArchivedWorktreeRouteHandler({
+      worktrees: archivedWorktrees,
+      windowAuthorityStore,
+    });
     const codeContent = new CodeContentStore();
     const codeAttachments = new CodeAttachmentStore(persistence.dataDirectory);
     const workAttachments = new WorkAttachmentStore(persistence.dataDirectory);
@@ -987,6 +1002,7 @@ export function wireCode(deps: CodeDependencies) {
             },
           },
           onWorkingDirectoryChanged: async () => refreshStandaloneSkills(),
+          onThreadArchived: (threadId) => void archivedWorktrees.reclaimOnArchive(threadId),
           waitForThreadChange: (signal) => machineChangeFeed.waitFor("code-navigation", signal),
           probeProvider: (providerInstanceId) => probeProviderForThreads(providerInstanceId),
           isProviderModelAllowed: isCodeProviderModelAllowed,
@@ -1137,6 +1153,7 @@ export function wireCode(deps: CodeDependencies) {
     projectPullRequestCadence.start();
     return {
       agentProfileRoutes,
+      archivedWorktreeRoutes,
       buildCodeService,
       canAccessCodeProject,
       codeAttachments,

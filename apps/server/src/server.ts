@@ -636,6 +636,7 @@ export function startOctantServer(
     yield* Effect.promise(recoverGoogleCliCommands);
     const {
       agentProfileRoutes,
+      archivedWorktreeRoutes,
       buildCodeService,
       canAccessCodeProject,
       codeAttachments,
@@ -665,6 +666,7 @@ export function startOctantServer(
       selectCodeConversation,
       managedCodeThreadCreation,
       managedWorktreeRefsList,
+      managedWorktreeService,
       managedWorktreeSourcePreview,
       probeProviderForThreads,
       refreshStandaloneSkills,
@@ -1664,6 +1666,7 @@ export function startOctantServer(
       credentialRequestRoutes,
       agentMessageRoutes,
       agentProfileRoutes,
+      archivedWorktreeRoutes,
       agentRunRouteDependencies,
       agentRunSettingsRoutes,
       androidToolchainRoutes,

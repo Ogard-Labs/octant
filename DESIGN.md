@@ -2670,6 +2670,16 @@ files; the host journals the confirmed removal. Paths the person added follow
 as rows with Remove (no confirmation), then one "Protect another path" row with
 a text field and an **Add** button; a refused path is said in the section's
 feedback line. A paired device sees the section as set on the host machine.
+**Worktrees** in Settings › Code, above Open in applications, lists the managed
+worktrees archived threads still keep, largest first: the thread's title, then
+a line of Project, branch in mono, and size ("more than" when the count stopped
+early), then the folder in mono. Each row's secondary **Remove** opens
+`OctantConfirmDialog` in the destructive role ("Remove this worktree?", Cancel
+focused, **Remove worktree**), saying the folder and its ignored files go and
+the branch and its commits stay. A refusal (uncommitted changes) is said in the
+section's feedback line and the row stays. With none kept it says so in one
+line; a paired device sees the section as managed on the host machine
+([rules](docs/architecture.md#modes-chat-work-and-code)).
 A Code, Chat, or Work tool row whose result was outside content carries an
 "Outside content" tag, followed by what Octant Shield's Watcher found in it in
 the warning role, and a Code thread's board card a small mark; at Full access

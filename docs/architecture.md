@@ -1772,6 +1772,26 @@ does not survive the move; the thread lands on its persisted posture. A thread
 that owns a managed worktree is refused, because that checkout is the thread's
 own tree rather than the Project's.
 
+Archiving a Code thread, by a person or the host's completed-thread timer,
+keeps the thread and tells the host once the journal records it. The host then
+asks `ManagedWorktreeService.cleanup` to remove the thread's managed worktree
+with `onArchive`, which stands in for a person's confirmation only when the
+worktree has no uncommitted or untracked changes and its commit is delivered:
+contained in a remote-tracking branch (pushed) or in a local branch other than
+its own (merged), as `git for-each-ref --contains HEAD` reports. Anything else
+is refused before anything is touched and the worktree stays. Removal keeps the
+branch, so committed work is never lost; a squash or rebase merge leaves the
+original commit uncontained, and that worktree stays for a person to remove.
+Settings › Code › Worktrees lists the managed worktrees archived threads still
+keep, largest first, with the Project, branch, folder, and a bounded size
+(200,000 entries, then "more than"). Remove asks once and runs the same
+cleanup as a confirmed local-user request: it refuses uncommitted changes and
+an active thread, and keeps the branch. Listing and removing are a local
+window's alone, because the list names folders on this computer and removal
+deletes from its disk; a paired device is refused both. The receipt's
+`cleanup-pending` and `removed` states record each removal, as they do for the
+other cleanup callers.
+
 A Code fork (`fork-code-thread`) is a managed-worktree creation the host
 resolves itself: the client names the source thread and a finished turn, and
 the host picks the files from its own record — the checkpoint the next writing

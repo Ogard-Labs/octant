@@ -228,6 +228,31 @@ export function createManagedWorktreeNodePorts(): {
         ? { status: "observed", dirty: result.stdout.length > 0 }
         : { status: "failed" };
     },
+    isDelivered: async (input, signal) => {
+      const result = await run(
+        "git",
+        [
+          "-C",
+          input.targetPath,
+          "for-each-ref",
+          "--contains",
+          "HEAD",
+          "--format=%(refname)",
+          "refs/remotes",
+          "refs/heads",
+        ],
+        signal,
+      );
+      if (result.exitCode !== 0) return { status: "failed" };
+      const own = `refs/heads/${input.branch}`;
+      return {
+        status: "observed",
+        delivered: result.stdout
+          .split("\n")
+          .map((line) => line.trim())
+          .some((name) => name.length > 0 && name !== own),
+      };
+    },
     fetchRemote: async (repositoryRoot, remoteName, branchName, signal) => {
       const result = await run(
         "git",

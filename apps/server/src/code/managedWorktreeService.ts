@@ -87,6 +87,16 @@ export interface ManagedWorktreeGitPort {
     signal: AbortSignal,
   ): Promise<Readonly<{ status: "removed" | "rejected" }>>;
   /**
+   * Whether the worktree's commit is safe somewhere else: on a remote-tracking
+   * branch (pushed) or on a local branch other than its own (merged). Only a
+   * removal on archive asks; a port without it delivers nothing, so that
+   * removal is refused.
+   */
+  isDelivered?(
+    input: Readonly<{ targetPath: string; branch: string }>,
+    signal: AbortSignal,
+  ): Promise<Readonly<{ status: "observed"; delivered: boolean }> | Readonly<{ status: "failed" }>>;
+  /**
    * Deletes one local branch by its exact name (`git branch -D`). Only a
    * discarding cleanup calls it; a port without it cannot discard.
    */
@@ -665,12 +675,22 @@ export class ManagedWorktreeService {
     input: Readonly<{
       receiptId: string;
       confirmedByLocalUser: boolean;
+      /**
+       * The host removes the worktree because its thread was just archived,
+       * with no person confirming. It stands in for that confirmation only
+       * when the work is delivered (pushed or merged) as well as clean, and
+       * never discards anything.
+       */
+      onArchive?: true;
       discardChanges?: Readonly<{ branch: string }>;
     }>,
     signal: AbortSignal,
   ): Promise<ManagedWorktreeCleanupResult> {
-    if (!input.confirmedByLocalUser) {
+    if (!input.confirmedByLocalUser && input.onArchive !== true) {
       return { status: "refused", reason: "confirmation-required" };
+    }
+    if (input.onArchive === true && input.discardChanges !== undefined) {
+      return { status: "refused", reason: "mismatched" };
     }
     const discard = input.discardChanges?.branch;
     if (
@@ -798,6 +818,19 @@ export class ManagedWorktreeService {
       }
       if (dirty.status !== "observed") return { status: "waiting", receipt };
       if (dirty.dirty) return { status: "refused", reason: "dirty" };
+    }
+    if (input.onArchive === true) {
+      let delivered: Awaited<ReturnType<NonNullable<ManagedWorktreeGitPort["isDelivered"]>>>;
+      try {
+        delivered = (await this.#git.isDelivered?.(
+          { targetPath: receipt.canonicalWorktreePath, branch: receipt.branchIntent },
+          signal,
+        )) ?? { status: "observed", delivered: false };
+      } catch {
+        return { status: "interrupted", receipt };
+      }
+      if (delivered.status !== "observed") return { status: "waiting", receipt };
+      if (!delivered.delivered) return { status: "refused", reason: "undelivered" };
     }
 
     try {
