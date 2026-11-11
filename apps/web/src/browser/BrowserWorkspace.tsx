@@ -163,6 +163,12 @@ export function BrowserWorkspace(props: BrowserWorkspaceProps) {
   // The person's own kept capture while it is being drawn on; its marks live in
   // the stage and are dropped with it.
   const [markupPicture, setMarkupPicture] = useState<string>();
+  // Each Draw on page press holds a number; leaving the page, changing context,
+  // or unmounting moves it on, so a still that arrives late is not opened over a
+  // page the person has already left.
+  const markupRequest = useRef(0);
+  const drawButton = useRef<HTMLButtonElement>(null);
+  const focusDrawButton = useRef(false);
   const [starting, setStarting] = useState(false);
   const [ownedContextId, setOwnedContextId] = useState<BrowserContextId | undefined>(
     props.tab.contextId,
@@ -313,8 +319,25 @@ export function BrowserWorkspace(props: BrowserWorkspaceProps) {
   const nativeState = nativeSurface.state;
   // A page that is gone leaves nothing to draw on.
   useEffect(() => {
-    if (!activeContext) setMarkupPicture(undefined);
+    if (!activeContext) leaveMarkup();
   }, [activeContext]);
+  const markupContextId = snapshot?.context?.contextId;
+  useEffect(() => {
+    markupRequest.current += 1;
+  }, [markupContextId]);
+  useEffect(
+    () => () => {
+      markupRequest.current += 1;
+    },
+    [],
+  );
+  // Close and a picture left waiting for its composer hand focus back to the
+  // button that opened drawing, instead of letting it fall to the page body.
+  useEffect(() => {
+    if (markupPicture !== undefined || !focusDrawButton.current) return;
+    focusDrawButton.current = false;
+    drawButton.current?.focus();
+  }, [markupPicture]);
   const feedbackSelectionUnavailable =
     markupPicture !== undefined
       ? "Finish or discard the drawing before choosing an element."
@@ -672,7 +695,7 @@ export function BrowserWorkspace(props: BrowserWorkspaceProps) {
   ): Promise<void> {
     if (snapshot?.context === undefined || scope === undefined) return;
     // The page is about to change under the picture: the marks go with it.
-    setMarkupPicture(undefined);
+    leaveMarkup();
     localFailure.current = false;
     setStatus("waiting");
     setMessage(undefined);
@@ -755,31 +778,56 @@ export function BrowserWorkspace(props: BrowserWorkspaceProps) {
     const readCapture = props.client.readCapture;
     const threadId = props.tab.threadId;
     if (readCapture === undefined || threadId === undefined) return;
+    const request = ++markupRequest.current;
     const captureId = await keepScreenshot();
-    if (captureId === undefined) return;
+    if (captureId === undefined || request !== markupRequest.current) return;
     try {
       const image = await readCapture.call(props.client, { threadId, captureId });
-      setMarkupPicture(image.dataUrl);
+      if (request === markupRequest.current) setMarkupPicture(image.dataUrl);
     } catch {
-      setCaptureNotice("The kept screenshot could not be opened for drawing.");
+      if (request === markupRequest.current) {
+        setCaptureNotice("The kept screenshot could not be opened for drawing.");
+      }
     }
   }
 
-  function addMarkupToMessage(file: File): void {
+  /** Drop the drawing and any still on its way; its marks go with it. */
+  function leaveMarkup(): void {
+    markupRequest.current += 1;
+    setMarkupPicture(undefined);
+  }
+
+  function closeMarkup(): void {
+    focusDrawButton.current = true;
+    leaveMarkup();
+  }
+
+  /**
+   * Hand the marked-up picture to the thread's composer and say what it made of
+   * it. Only a picture the composer attached ends drawing; a refusal leaves the
+   * drawing as it is, with the composer's reason.
+   */
+  async function addMarkupToMessage(file: File): Promise<void> {
     if (props.tab.threadId === undefined) return;
-    const result = threadImageOffers.offer(
+    const result = await threadImageOffers.offer(
       threadImageOfferKey(props.tab.mode, String(props.tab.threadId)),
       file,
     );
-    if (result === "full") {
+    if (result.status === "full") {
       setCaptureNotice(
         `This thread already has ${String(MAX_WAITING_OFFERS)} pictures waiting for its message. Open the thread and send or remove one first.`,
       );
       return;
     }
-    setMarkupPicture(undefined);
+    if (result.status === "refused") {
+      setCaptureNotice(`The picture was not added to the message: ${result.reason}`);
+      return;
+    }
+    // A composer that is open takes focus for its prompt; otherwise it stays here.
+    if (result.status === "waiting") focusDrawButton.current = true;
+    leaveMarkup();
     setCaptureNotice(
-      result === "taken"
+      result.status === "added"
         ? "Added to the message"
         : "Added to the message when you open this thread",
     );
@@ -1026,7 +1074,7 @@ export function BrowserWorkspace(props: BrowserWorkspaceProps) {
   function nativeCommand(command: "back" | "forward" | "reload" | "stop"): void {
     if (snapshot?.context === undefined || props.hostBridge?.commandBrowserSurface === undefined)
       return;
-    setMarkupPicture(undefined);
+    leaveMarkup();
     void props.hostBridge
       .commandBrowserSurface({
         contextId: snapshot.context.contextId,
@@ -1318,6 +1366,7 @@ export function BrowserWorkspace(props: BrowserWorkspaceProps) {
         props.client.takeCapture !== undefined &&
         props.client.readCapture !== undefined ? (
           <OctantButton
+            ref={drawButton}
             aria-label="Draw on page"
             className="browser-workspace__close"
             disabled={capturing || markupPicture !== undefined || feedbackPointing.pointing}
@@ -1327,7 +1376,7 @@ export function BrowserWorkspace(props: BrowserWorkspaceProps) {
             type="button"
             variant="ghost"
           >
-            <PenLine aria-hidden="true" size={16} />
+            <PenLine aria-hidden="true" size={14} />
           </OctantButton>
         ) : null}
         {activeContext ? (
@@ -1540,7 +1589,7 @@ export function BrowserWorkspace(props: BrowserWorkspaceProps) {
             <BrowserMarkupStage
               dataUrl={markupPicture}
               onAddToChat={addMarkupToMessage}
-              onClose={() => setMarkupPicture(undefined)}
+              onClose={closeMarkup}
             />
           )}
           {nativeSurface.failed ? (
@@ -1559,7 +1608,7 @@ export function BrowserWorkspace(props: BrowserWorkspaceProps) {
           <BrowserMarkupStage
             dataUrl={markupPicture}
             onAddToChat={addMarkupToMessage}
-            onClose={() => setMarkupPicture(undefined)}
+            onClose={closeMarkup}
           />
         </div>
       ) : (

@@ -2909,9 +2909,7 @@ describe("WorkThreadWorkspace", () => {
       />,
     );
     await screen.findByLabelText("Bound provider and model");
-    act(() => {
-      offer();
-    });
+    await expect(act(async () => offer())).resolves.toEqual({ status: "added" });
     expect(await screen.findByAltText("browser-markup.png")).toBeInTheDocument();
     expect(screen.getByLabelText("Work prompt")).toHaveFocus();
     first.unmount();
@@ -2925,8 +2923,10 @@ describe("WorkThreadWorkspace", () => {
       />,
     );
     await screen.findByLabelText("Bound provider and model");
-    act(() => {
-      offer();
+    const refused = await act(async () => offer());
+    expect(refused).toEqual({
+      status: "refused",
+      reason: "Choose an image-capable model to attach images.",
     });
     expect(await screen.findByLabelText("Attached images")).toHaveTextContent(
       "Choose an image-capable model to attach images.",

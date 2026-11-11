@@ -64,11 +64,30 @@
   line-height: 1.2;
 }
 
-.browser-markup__problem {
+/*
+ * The notice and the bar sit in one column anchored at the bottom, so a notice
+ * stacks above the bar however the bar wraps. The column lets the picture's
+ * pointer events through; only the notice and the bar take them.
+ */
+.browser-markup__dock {
   position: absolute;
-  right: var(--oct-space-4);
-  bottom: calc(var(--oct-space-4) + 56px);
-  left: var(--oct-space-4);
+  right: 0;
+  bottom: 0;
+  left: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--oct-space-2);
+  padding: var(--oct-space-4) var(--oct-space-2);
+  pointer-events: none;
+}
+
+.browser-markup__dock > * {
+  pointer-events: auto;
+}
+
+.browser-markup__problem {
+  max-width: 100%;
 }
 
 /*
@@ -77,22 +96,18 @@
  * would show an opaque fill as a black block, so this is the menu's own fill).
  */
 .browser-markup__bar {
-  position: absolute;
-  bottom: var(--oct-space-4);
-  left: 50%;
   display: flex;
   flex-wrap: wrap;
   align-items: center;
   justify-content: center;
   gap: var(--oct-space-2) var(--oct-space-3);
   width: max-content;
-  max-width: calc(100% - var(--oct-space-4));
+  max-width: 100%;
   padding: var(--oct-space-1) var(--oct-space-2);
   background: var(--octant-float);
   border-radius: var(--oct-radius-md);
   box-shadow: var(--octant-shadow-overlay);
   color: var(--octant-text-primary);
-  transform: translateX(-50%);
 }
 
 .browser-markup__group {

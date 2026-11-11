@@ -955,7 +955,7 @@ describe("BrowserWorkspace", () => {
       });
 
       it("offers one PNG to this thread's message and leaves drawing mode", async () => {
-        const taken = vi.fn();
+        const taken = vi.fn((_file: File) => ({ status: "accepted" as const }));
         const unsubscribe = threadImageOffers.subscribe(`work:${threadId}`, taken);
         try {
           const browser = drawable();
@@ -979,7 +979,7 @@ describe("BrowserWorkspace", () => {
       });
 
       it("discards the drawing on Close without offering anything", async () => {
-        const taken = vi.fn();
+        const taken = vi.fn((_file: File) => ({ status: "accepted" as const }));
         const unsubscribe = threadImageOffers.subscribe(`work:${threadId}`, taken);
         try {
           const browser = drawable();
@@ -999,6 +999,84 @@ describe("BrowserWorkspace", () => {
         await waitFor(() =>
           expect(screen.queryByRole("toolbar", { name: "Drawing tools" })).toBeNull(),
         );
+      });
+
+      it("stays in drawing mode with the marks and says why when the composer refuses the picture", async () => {
+        const unsubscribe = threadImageOffers.subscribe(`work:${threadId}`, () => ({
+          status: "refused" as const,
+          reason: "Choose an image-capable model to attach images.",
+        }));
+        try {
+          const browser = drawable();
+          const bar = await openDrawing(browser);
+          const layer = screen.getByRole("application", { name: "Page capture to draw on" });
+          drag(layer, [20, 20], [120, 60]);
+          fireEvent.click(within(bar).getByRole("button", { name: "Add to chat" }));
+          expect(
+            await screen.findByText(
+              "The picture was not added to the message: Choose an image-capable model to attach images.",
+            ),
+          ).toBeVisible();
+          expect(screen.getByRole("toolbar", { name: "Drawing tools" })).toBeVisible();
+          expect(layer.querySelectorAll("polyline")).toHaveLength(1);
+          expect(screen.queryByText("Added to the message")).toBeNull();
+          await waitFor(() =>
+            expect(within(bar).getByRole("button", { name: "Add to chat" })).toBeEnabled(),
+          );
+        } finally {
+          unsubscribe();
+        }
+      });
+
+      it("says the picture waits for the thread when its composer is not open", async () => {
+        const browser = drawable();
+        const bar = await openDrawing(browser);
+        fireEvent.click(within(bar).getByRole("button", { name: "Add to chat" }));
+        expect(
+          await screen.findByText("Added to the message when you open this thread"),
+        ).toBeVisible();
+        expect(screen.queryByRole("toolbar", { name: "Drawing tools" })).toBeNull();
+        await waitFor(() =>
+          expect(screen.getByRole("button", { name: "Draw on page" })).toHaveFocus(),
+        );
+        // Leave nothing waiting for the next test's thread composer.
+        threadImageOffers.subscribe(`work:${threadId}`, () => ({ status: "accepted" as const }))();
+      });
+
+      it("returns focus to the Draw on page button when the drawing is discarded", async () => {
+        const browser = drawable();
+        await openDrawing(browser);
+        fireEvent.click(screen.getByRole("button", { name: "Discard drawing" }));
+        await waitFor(() =>
+          expect(screen.getByRole("button", { name: "Draw on page" })).toHaveFocus(),
+        );
+      });
+
+      it("does not open drawing over a page the person left while the capture was being taken", async () => {
+        let finish: (value: unknown) => void = () => undefined;
+        const takeCapture = vi.fn(
+          () =>
+            new Promise((resolve) => {
+              finish = resolve;
+            }) as any,
+        );
+        const browser = drawable(takeCapture);
+        render(<BrowserWorkspace canDrawOnPage client={browser} tab={tab} />);
+        fireEvent.click(await screen.findByRole("button", { name: "Draw on page" }));
+        await waitFor(() => expect(takeCapture).toHaveBeenCalledOnce());
+        fireEvent.click(screen.getByRole("button", { name: "Reload" }));
+        await waitFor(() => expect(browser.act).toHaveBeenCalled());
+        await act(async () => {
+          finish({
+            status: "running",
+            threadId,
+            context,
+            observation: observation({ capture: { status: "kept", captureId } }),
+            evidence: [],
+          });
+        });
+        expect(screen.queryByRole("toolbar", { name: "Drawing tools" })).toBeNull();
+        expect(browser.readCapture).not.toHaveBeenCalled();
       });
 
       it("is absent where the Screenshot control is absent and where the thread has no composer", async () => {

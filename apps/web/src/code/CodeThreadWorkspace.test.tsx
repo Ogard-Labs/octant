@@ -1949,12 +1949,25 @@ describe("CodeThreadWorkspace", () => {
     expect(await screen.findByAltText("browser-markup.png")).toBeInTheDocument();
     expect(putAttachment).toHaveBeenCalledOnce();
     // A later offer to the open composer is taken at once and focuses its prompt.
-    threadImageOffers.offer(
+    const live = await threadImageOffers.offer(
       threadImageOfferKey("code", String(threadId)),
       new File(["png"], "browser-markup.png", { type: "image/png" }),
     );
-    await waitFor(() => expect(putAttachment).toHaveBeenCalledTimes(2));
+    expect(live).toEqual({ status: "added" });
+    expect(putAttachment).toHaveBeenCalledTimes(2);
     expect(screen.getByLabelText("Follow-up message")).toHaveFocus();
+  });
+
+  it("answers an offered picture with the composer's refusal when the host takes no attachments", async () => {
+    render(<CodeThreadWorkspace controller={controller({})} threadId={threadId} />);
+    const result = await threadImageOffers.offer(
+      threadImageOfferKey("code", String(threadId)),
+      new File(["png"], "browser-markup.png", { type: "image/png" }),
+    );
+    expect(result).toEqual({
+      status: "refused",
+      reason: "Image attachments are unavailable on this host.",
+    });
   });
 
   it("uploads an image chosen from the composer before the turn and sends it by the host's own reference", async () => {

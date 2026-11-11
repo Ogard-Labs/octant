@@ -1,5 +1,6 @@
 import {
   useEffect,
+  useId,
   useReducer,
   useRef,
   useState,
@@ -32,7 +33,8 @@ const PICK_SLOP_PX = 6;
 export interface BrowserMarkupStageProps {
   /** The person's own kept capture, as the host answered the read. */
   readonly dataUrl: string;
-  readonly onAddToChat: (file: File) => void;
+  /** Resolves once the composer has answered; the bar stays busy until then. */
+  readonly onAddToChat: (file: File) => void | Promise<void>;
   readonly onClose: () => void;
 }
 
@@ -93,6 +95,7 @@ export function BrowserMarkupStage(props: BrowserMarkupStageProps) {
     () => globalThis.getComputedStyle(document.body).fontFamily || "sans-serif",
   );
   const layer = useRef<SVGSVGElement>(null);
+  const helpId = useId();
   const nextId = useRef(0);
   const gesture = useRef<Gesture | undefined>(undefined);
   const entryText = useRef("");
@@ -296,9 +299,17 @@ export function BrowserMarkupStage(props: BrowserMarkupStageProps) {
     } else if (event.key === "Escape") {
       // Nothing here is destructive: a stroke in progress is dropped, otherwise
       // the selection is, and the picture and the other marks stay as they are.
+      // Escape that did something stops here, so it does not also close a panel
+      // above; with nothing to do it goes on to whatever is listening.
+      if (gesture.current !== undefined) {
+        onPointerCancel();
+      } else if (state.selectedId !== undefined) {
+        dispatch({ type: "select", id: undefined });
+      } else {
+        return;
+      }
       event.preventDefault();
-      if (gesture.current !== undefined) onPointerCancel();
-      else dispatch({ type: "select", id: undefined });
+      event.stopPropagation();
     }
   }
 
@@ -318,7 +329,9 @@ export function BrowserMarkupStage(props: BrowserMarkupStageProps) {
       setExportFailed(true);
       return;
     }
-    props.onAddToChat(new File([blob], MARKUP_FILE_NAME, { type: "image/png" }));
+    setExporting(true);
+    await props.onAddToChat(new File([blob], MARKUP_FILE_NAME, { type: "image/png" }));
+    setExporting(false);
   }
 
   const shown: ReadonlyArray<Mark> = state.marks.map((mark) =>
@@ -331,6 +344,7 @@ export function BrowserMarkupStage(props: BrowserMarkupStageProps) {
       {picture.status === "ready" ? (
         <svg
           ref={layer}
+          aria-describedby={helpId}
           aria-label="Page capture to draw on"
           className={`browser-markup__layer browser-markup__layer--${tool}`}
           onKeyDown={onKeyDown}
@@ -377,6 +391,11 @@ export function BrowserMarkupStage(props: BrowserMarkupStageProps) {
           Opening the picture…
         </p>
       )}
+      <p className="sr-only" id={helpId}>
+        Drawing needs a pointer. From the keyboard you can undo with Command or Control Z, redo with
+        Shift added, delete the selected mark with Delete or Backspace, and press Escape to cancel a
+        stroke or clear the selection.
+      </p>
       {entry === undefined ? null : (
         <OctantInput
           aria-label="Text for the drawing"
@@ -408,7 +427,7 @@ export function BrowserMarkupStage(props: BrowserMarkupStageProps) {
         />
       )}
       {picture.status !== "ready" ? null : (
-        <>
+        <div className="browser-markup__dock">
           {exportFailed ? (
             <OctantAlert className="browser-markup__problem" tone="danger">
               The marked-up picture could not be made. Try again.
@@ -434,7 +453,7 @@ export function BrowserMarkupStage(props: BrowserMarkupStageProps) {
             stroke={stroke}
             tool={tool}
           />
-        </>
+        </div>
       )}
     </div>
   );

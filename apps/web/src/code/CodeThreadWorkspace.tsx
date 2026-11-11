@@ -101,7 +101,11 @@ import type { HostId } from "@octant/contracts/host";
 import type { AutomationClient, CodeClient, ThreadMentionClient } from "@octant/client-runtime";
 import type { ExtensionClient } from "@octant/client-runtime/extension-client";
 import { useCodeAttachments } from "./useCodeAttachments";
-import { threadImageOfferKey, useThreadImageOffers } from "../composer/threadImageOffers";
+import {
+  threadImageOfferKey,
+  useThreadImageOffers,
+  type ThreadImageVerdict,
+} from "../composer/threadImageOffers";
 import type { CodeThreadControllers } from "./codeThreadControllers";
 import {
   ThreadMentionChips,
@@ -693,16 +697,24 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
   });
   // A picture marked up in this thread's Browser arrives here as a file and
   // meets the same checks as one dropped on the composer.
-  useThreadImageOffers(threadImageOfferKey("code", String(props.threadId)), (file, arrival) => {
-    if (props.attachmentClient === undefined) {
-      attachments.refuse("Image attachments are unavailable on this host.");
-    } else if (boundModelReadsImages(providerGroups, thread) === false) {
-      attachments.refuse("Choose a vision model to attach images.");
-    } else {
-      void attachments.attach([file]);
-    }
-    if (arrival === "live") textareaRef.current?.focus();
-  });
+  useThreadImageOffers(
+    threadImageOfferKey("code", String(props.threadId)),
+    async (file, arrival): Promise<ThreadImageVerdict> => {
+      let reason: string | undefined;
+      if (props.attachmentClient === undefined) {
+        reason = "Image attachments are unavailable on this host.";
+        attachments.refuse(reason);
+      } else if (boundModelReadsImages(providerGroups, thread) === false) {
+        reason = "Choose a vision model to attach images.";
+        attachments.refuse(reason);
+      } else {
+        reason = await attachments.attach([file]);
+      }
+      if (reason !== undefined) return { status: "refused", reason };
+      if (arrival === "live") textareaRef.current?.focus();
+      return { status: "accepted" };
+    },
+  );
   if (props.controller.status === "disconnected") {
     return (
       <section aria-label="Code thread" className="code-thread-workspace">
