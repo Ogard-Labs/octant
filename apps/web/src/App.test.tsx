@@ -4456,7 +4456,7 @@ describe("App", () => {
     expect(await screen.findByText("Everything is optional and kept on this Mac.")).toBeVisible();
   });
 
-  it("uses the CSS translucent sidebar fallback when no native host is available", async () => {
+  it("paints the theme's own opaque surfaces in a browser, where no native host can resolve Glass", async () => {
     render(
       <App
         launch={{ serverUrl: "http://127.0.0.1:13773", windowId }}
@@ -4467,9 +4467,10 @@ describe("App", () => {
     );
 
     await screen.findByRole("button", { name: "Account menu, Set your name" });
-    await waitFor(() =>
-      expect(document.querySelector(".shell")).toHaveClass("shell--material-translucent"),
-    );
+    // The stored preference is Glass (system); with nothing behind the page
+    // the frame and sheet would only be the page colour.
+    expect(document.querySelector(".shell")).toHaveClass("shell--material-opaque");
+    expect(document.querySelector(".shell")).not.toHaveClass("shell--material-translucent");
   });
 
   it("reserves the native titlebar inset only for a host that hides its own title bar", async () => {

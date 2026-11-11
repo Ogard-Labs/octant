@@ -12,7 +12,11 @@ export function useResolvedMaterial(
   const [material, setMaterial] = useState<ResolvedSidebarMaterial>("opaque");
   useEffect(() => {
     if (hostBridge === undefined) {
-      setMaterial(preference === "system" ? "translucent" : "opaque");
+      // A browser has no native material behind the page, so Glass has
+      // nothing to show: the frame and the sheet at the Tint's opacity are
+      // just the page colour, and the sidebar loses the colour its theme
+      // gives it. Only a host that resolved the material turns Glass on.
+      setMaterial("opaque");
       return;
     }
     let disposed = false;
