@@ -1040,6 +1040,35 @@ describe("BrowserWorkspace", () => {
         }
       });
 
+      it("leaves a new drawing alone when an earlier picture's hand-off finishes", async () => {
+        let answer: (verdict: { status: "accepted" }) => void = () => undefined;
+        const unsubscribe = threadImageOffers.subscribe(
+          `work:${threadId}`,
+          () =>
+            new Promise<{ status: "accepted" }>((resolve) => {
+              answer = resolve;
+            }),
+        );
+        try {
+          const browser = drawable();
+          const bar = await openDrawing(browser);
+          fireEvent.click(within(bar).getByRole("button", { name: "Add to chat" }));
+          // The composer is still uploading; the person discards and draws again.
+          fireEvent.click(screen.getByRole("button", { name: "Discard drawing" }));
+          fireEvent.click(await screen.findByRole("button", { name: "Draw on page" }));
+          await screen.findByRole("toolbar", { name: "Drawing tools" });
+          const layer = screen.getByRole("application", { name: "Page capture to draw on" });
+          drag(layer, [20, 20], [120, 60]);
+          answer({ status: "accepted" });
+          await new Promise((resolve) => setTimeout(resolve, 0));
+          expect(screen.getByRole("toolbar", { name: "Drawing tools" })).toBeVisible();
+          expect(layer.querySelectorAll("polyline")).toHaveLength(1);
+          expect(screen.queryByText("Added to the message")).toBeNull();
+        } finally {
+          unsubscribe();
+        }
+      });
+
       it("says the picture waits for the thread when its composer is not open", async () => {
         const browser = drawable();
         const bar = await openDrawing(browser);

@@ -55,14 +55,40 @@ export function createThreadImageOffers(): ThreadImageOffers {
   // Oldest first, across every thread.
   let waiting: ReadonlyArray<{ readonly key: ThreadImageOfferKey; readonly file: File }> = [];
   const takers = new Map<ThreadImageOfferKey, Set<Taker>>();
+  // One composer takes a picture: two open on the same thread would attach it twice.
+  const takerOf = (key: ThreadImageOfferKey) => takers.get(key)?.values().next().value;
+  const keep = (key: ThreadImageOfferKey, file: File) => {
+    waiting = [...waiting, { key, file }].slice(-MAX_WAITING_OFFERS_IN_ALL);
+  };
+  // A thread's pictures are handed over one at a time. The Code composer
+  // uploads each picture and reads as busy only until one upload ends, so
+  // pictures handed over together let a message go out with the first and
+  // left the rest attached to the next.
+  const turns = new Map<ThreadImageOfferKey, Promise<void>>();
+  function inTurn<T>(key: ThreadImageOfferKey, deliver: () => T | Promise<T>): Promise<T> {
+    const before = turns.get(key);
+    // With nothing ahead of it a delivery starts at once, in the same tick.
+    const delivered: Promise<T> =
+      before === undefined ? (async () => deliver())() : before.then(deliver);
+    const settled = delivered.then(
+      () => undefined,
+      () => undefined,
+    );
+    turns.set(key, settled);
+    void settled.then(() => {
+      if (turns.get(key) === settled) turns.delete(key);
+    });
+    return delivered;
+  }
   return {
     async offer(key, file) {
-      // One composer takes it: two open on the same thread would attach it twice.
-      const taker = takers.get(key)?.values().next().value;
-      if (taker !== undefined) {
+      if (takerOf(key) !== undefined) {
         try {
-          const verdict = await taker(file, "live");
-          return verdict.status === "accepted" ? { status: "added" } : verdict;
+          // The composer may have closed while earlier pictures were handed over.
+          const verdict = await inTurn(key, () => takerOf(key)?.(file, "live"));
+          if (verdict !== undefined) {
+            return verdict.status === "accepted" ? { status: "added" } : verdict;
+          }
         } catch {
           return { status: "refused", reason: "The picture could not be added." };
         }
@@ -70,7 +96,7 @@ export function createThreadImageOffers(): ThreadImageOffers {
       if (waiting.filter((entry) => entry.key === key).length >= MAX_WAITING_OFFERS) {
         return { status: "full" };
       }
-      waiting = [...waiting, { key, file }].slice(-MAX_WAITING_OFFERS_IN_ALL);
+      keep(key, file);
       return { status: "waiting" };
     },
     subscribe(key, taker) {
@@ -84,7 +110,12 @@ export function createThreadImageOffers(): ThreadImageOffers {
         // A refusal of a waiting picture is the composer's to show: it says so
         // itself where the person is, so the verdict is not needed here.
         for (const entry of queued) {
-          void Promise.resolve(taker(entry.file, "waiting")).catch(() => undefined);
+          void inTurn(key, () => {
+            // A composer that closed before a picture's turn leaves it waiting.
+            const current = takerOf(key);
+            if (current === undefined) return keep(key, entry.file);
+            return current(entry.file, "waiting");
+          }).catch(() => undefined);
         }
       }
       return () => {

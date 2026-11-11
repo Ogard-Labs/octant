@@ -274,7 +274,12 @@ The marked-up picture is an attachment of that message, not a capture.
 - **Waiting.** If the thread's composer is not open, the picture waits in this
   window's memory for it and is attached when the composer opens; the toolbar
   says it will be, and focus returns to the **Draw on page** button. If the
-  composer then refuses it, the composer shows its ordinary refusal. A thread
+  composer then refuses it, the composer shows its ordinary refusal. A thread's
+  pictures are handed to its composer one at a time, each after the composer
+  answered for the last: handed over together, the Code composer's uploads
+  overlapped and a message could go out with only the first. A drawing the
+  person closed while a picture was still being attached is not reopened,
+  closed again or told about that picture's outcome. A thread
   holds at most 8 waiting pictures and all threads together at most 16, the
   oldest dropped first, so a thread nobody reopens cannot hold memory for the
   life of the window. A reload drops them. Nothing is

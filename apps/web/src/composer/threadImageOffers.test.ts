@@ -94,10 +94,60 @@ describe("pictures offered to a thread's message", () => {
         return accepted;
       });
     }
-    expect(names).toHaveLength(MAX_WAITING_OFFERS_IN_ALL);
+    // A thread's second picture is handed over once its first was answered.
+    await vi.waitFor(() => expect(names).toHaveLength(MAX_WAITING_OFFERS_IN_ALL));
     expect(names).not.toContain("0.png");
     expect(names).not.toContain("2.png");
     expect(names).toContain(`${String(total - 1)}.png`);
+  });
+
+  it("hands pictures to the composer one at a time, each after the last was answered", async () => {
+    const offers = createThreadImageOffers();
+    await offers.offer("code:t1", file("a.png"));
+    await offers.offer("code:t1", file("b.png"));
+    const answers: Array<(verdict: ThreadImageVerdict) => void> = [];
+    const taken = vi.fn(
+      (_file: File) =>
+        new Promise<ThreadImageVerdict>((resolve) => {
+          answers.push(resolve);
+        }),
+    );
+    offers.subscribe("code:t1", taken);
+    expect(taken).toHaveBeenCalledOnce();
+    // A picture offered while the first is still being attached waits its turn too.
+    const live = offers.offer("code:t1", file("c.png"));
+    await Promise.resolve();
+    expect(taken).toHaveBeenCalledOnce();
+    answers[0]?.(accepted);
+    await vi.waitFor(() => expect(taken).toHaveBeenCalledTimes(2));
+    expect(taken.mock.calls[1]?.[0]).toMatchObject({ name: "b.png" });
+    answers[1]?.(accepted);
+    await vi.waitFor(() => expect(taken).toHaveBeenCalledTimes(3));
+    expect(taken.mock.calls[2]?.[0]).toMatchObject({ name: "c.png" });
+    answers[2]?.(accepted);
+    await expect(live).resolves.toEqual({ status: "added" });
+  });
+
+  it("keeps the pictures a composer had not reached when it closes", async () => {
+    const offers = createThreadImageOffers();
+    await offers.offer("code:t1", file("a.png"));
+    await offers.offer("code:t1", file("b.png"));
+    let answer: (verdict: ThreadImageVerdict) => void = () => undefined;
+    const first = vi.fn(
+      (_file: File) =>
+        new Promise<ThreadImageVerdict>((resolve) => {
+          answer = resolve;
+        }),
+    );
+    const close = offers.subscribe("code:t1", first);
+    close();
+    answer(accepted);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(first).toHaveBeenCalledOnce();
+    const next = vi.fn(() => accepted);
+    offers.subscribe("code:t1", next);
+    expect(next).toHaveBeenCalledOnce();
+    expect(next).toHaveBeenCalledWith(expect.objectContaining({ name: "b.png" }), "waiting");
   });
 
   it("waits again once the composer has closed", async () => {

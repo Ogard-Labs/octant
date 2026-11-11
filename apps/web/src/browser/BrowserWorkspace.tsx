@@ -822,10 +822,15 @@ export function BrowserWorkspace(props: BrowserWorkspaceProps) {
   async function addMarkupToMessage(file: File): Promise<void> {
     if (props.tab.threadId === undefined) return;
     setMarkupNotice(undefined);
+    // The hand-off can outlast this drawing: the Code composer uploads the
+    // picture before it answers. A drawing the person closed meanwhile, or a
+    // new one they opened, is not closed or told about the old picture.
+    const drawing = markupRequest.current;
     const result = await threadImageOffers.offer(
       threadImageOfferKey(props.tab.mode, String(props.tab.threadId)),
       file,
     );
+    if (drawing !== markupRequest.current) return;
     if (result.status === "full") {
       setMarkupNotice({
         tone: "danger",
