@@ -309,6 +309,35 @@ describe("authorizePreviewHandoff", () => {
 });
 
 describe("resolvePreviewCapabilities", () => {
+  it("allows a person's Work text and Markdown edit without widening Plan or unsupported formats", () => {
+    for (const kind of ["text", "markdown"] as const) {
+      expect(
+        resolvePreviewCapabilities({
+          mode: "work",
+          posture: "approval-gated",
+          kind,
+          baseCapabilities: fullCapabilities,
+        }).canEditInMonaco,
+      ).toBe(true);
+      expect(
+        resolvePreviewCapabilities({
+          mode: "work",
+          posture: "plan",
+          kind,
+          baseCapabilities: fullCapabilities,
+        }).canEditInMonaco,
+      ).toBe(false);
+    }
+    expect(
+      resolvePreviewCapabilities({
+        mode: "work",
+        posture: "approval-gated",
+        kind: "pdf",
+        baseCapabilities: fullCapabilities,
+      }).canEditInMonaco,
+    ).toBe(false);
+  });
+
   it("preserves in-renderer read-only capabilities in plan mode but removes edit and all host handoff", () => {
     const resolved = resolvePreviewCapabilities({
       mode: "code",

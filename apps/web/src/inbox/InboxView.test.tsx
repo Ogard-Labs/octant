@@ -1,5 +1,10 @@
+import type { ProviderUsageLimitsClient } from "@octant/client-runtime/provider-usage-limits-client";
+import { decodeProviderInstance, decodeProviderUsageLimitsSnapshot } from "@octant/contracts";
 import type { LinearIssueRow } from "@octant/contracts/linear-issues";
-import { render, screen, waitFor, within } from "@testing-library/react";
+import { PlanUsageProvider } from "../usage/PlanUsageContext";
+import { act, render, screen, waitFor, within } from "@testing-library/react";
+import { ComposerPlanUsage } from "../usage/ComposerPlanUsage";
+import { RailUsageRings } from "../usage/RailUsageRings";
 import userEvent from "@testing-library/user-event";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
@@ -123,7 +128,9 @@ describe("InboxView decisions", () => {
     const row = await screen.findByRole("group", { name: "Fix the parser asks you to decide" });
     await user.click(within(row).getByRole("button", { name: /Wait for review/ }));
     expect(await within(row).findByRole("status")).toHaveTextContent("A turn is already running.");
-    expect(screen.queryByText("No thread is waiting on you")).not.toBeInTheDocument();
+    expect(
+      screen.queryByText("Threads that need an answer, an approval or a look show up here."),
+    ).not.toBeInTheDocument();
   });
 });
 
@@ -215,9 +222,7 @@ describe("InboxView triage", () => {
 
     const group = await screen.findByRole("region", { name: "octant" });
     expect(within(group).getByRole("heading")).toHaveTextContent("octant21 urgent");
-    expect(screen.getByText("2 waiting", { exact: false })).toHaveTextContent(
-      "2 waiting · 1 urgent",
-    );
+    expect(screen.getByText(/2 threads are waiting on you\./)).toHaveTextContent("1 urgent.");
   });
 });
 
@@ -236,7 +241,9 @@ describe("InboxView waiting subagents", () => {
     expect(within(row).getByText("Research subagent needs your approval")).toBeInTheDocument();
     expect(within(row).getByText("octant")).toBeInTheDocument();
     expect(screen.getByRole("group", { name: "Fix the parser asks you to decide" })).toBeVisible();
-    expect(screen.queryByText("No thread is waiting on you")).not.toBeInTheDocument();
+    expect(
+      screen.queryByText("Threads that need an answer, an approval or a look show up here."),
+    ).not.toBeInTheDocument();
     expect(within(row).queryByRole("button", { name: /Approve|Deny/ })).toBeNull();
 
     await user.click(within(row).getByRole("button", { name: "Review request" }));
@@ -256,7 +263,9 @@ describe("InboxView waiting agent approvals", () => {
 
     const row = await screen.findByRole("group", { name: "Quarterly report needs your approval" });
     expect(within(row).getByText("edit: summary.md")).toBeInTheDocument();
-    expect(screen.queryByText("No thread is waiting on you")).not.toBeInTheDocument();
+    expect(
+      screen.queryByText("Threads that need an answer, an approval or a look show up here."),
+    ).not.toBeInTheDocument();
     expect(within(row).queryByRole("button", { name: /Approve|Deny/ })).toBeNull();
 
     await user.click(within(row).getByRole("button", { name: "Review request" }));
@@ -358,7 +367,9 @@ describe("InboxView", () => {
       />,
     );
 
-    expect(screen.getByRole("status")).toHaveTextContent("No thread is waiting on you");
+    expect(screen.getByRole("status")).toHaveTextContent(
+      "Threads that need an answer, an approval or a look show up here.",
+    );
     await user.click(screen.getByRole("button", { name: "Open the Board" }));
     expect(onOpenBoard).toHaveBeenCalledOnce();
   });
@@ -428,6 +439,246 @@ describe("InboxView", () => {
     expect(await screen.findByText(/Showing the first 1 assigned issues\./)).toBeVisible();
     await screen.getByRole("button", { name: "Open Linear" }).click();
     expect(onOpenLinearIssues).toHaveBeenCalledOnce();
+  });
+});
+
+function waitingThread(id: string) {
+  return {
+    signal: {
+      threadId: id,
+      reason: "approval-required" as const,
+      title: `Thread ${id}`,
+      source: "work" as const,
+    },
+  };
+}
+
+describe("InboxView page", () => {
+  it("says the date and that nothing waits when no thread needs the person", () => {
+    vi.useFakeTimers({ toFake: ["Date", "setInterval", "clearInterval"] });
+    vi.setSystemTime(new Date(2026, 10, 11, 12, 0, 0));
+    try {
+      render(<InboxView attentionItems={[]} onClose={vi.fn()} onOpenThread={vi.fn()} />);
+      const state = screen.getByText(/Nothing is waiting on you\./);
+      expect(state).toHaveTextContent(/Wednesday/);
+      expect(state).toHaveTextContent(/November/);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("changes its date after midnight in a window with no decision source", () => {
+    vi.useFakeTimers({ toFake: ["Date", "setInterval", "clearInterval"] });
+    vi.setSystemTime(new Date(2026, 10, 11, 23, 59, 30));
+    try {
+      render(<InboxView attentionItems={[]} onClose={vi.fn()} onOpenThread={vi.fn()} />);
+      expect(screen.getByText(/Nothing is waiting on you\./)).toHaveTextContent(/Wednesday/);
+      act(() => {
+        vi.advanceTimersByTime(60_000);
+      });
+      expect(screen.getByText(/Nothing is waiting on you\./)).toHaveTextContent(/Thursday/);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("counts one waiting thread in the singular and many in the plural", () => {
+    const { unmount } = render(
+      <InboxView attentionItems={[waitingThread("a")]} onClose={vi.fn()} onOpenThread={vi.fn()} />,
+    );
+    expect(screen.getByText(/1 thread is waiting on you\./)).toBeVisible();
+    unmount();
+    render(
+      <InboxView
+        attentionItems={[waitingThread("a"), waitingThread("b"), waitingThread("c")]}
+        onClose={vi.fn()}
+        onOpenThread={vi.fn()}
+      />,
+    );
+    expect(screen.getByText(/3 threads are waiting on you\./)).toBeVisible();
+  });
+
+  it("says in one sentence what each GitHub state is", async () => {
+    const view = (load: () => Promise<never>) => (
+      <InboxView
+        attentionItems={[]}
+        loadAssignedGithubWork={load}
+        onClose={vi.fn()}
+        onOpenThread={vi.fn()}
+      />
+    );
+    const { unmount } = render(view(() => new Promise(() => undefined)));
+    expect(
+      within(screen.getByRole("region", { name: "GitHub" })).getByRole("status"),
+    ).toHaveTextContent("Loading assigned work…");
+    unmount();
+    render(
+      <InboxView
+        attentionItems={[]}
+        loadAssignedGithubWork={async () => ({
+          kind: "assigned-work" as const,
+          page: { items: [], freshness: { status: "fresh" as const } },
+        })}
+        onClose={vi.fn()}
+        onOpenThread={vi.fn()}
+      />,
+    );
+    expect(await screen.findByText("Nothing is assigned to you.")).toBeVisible();
+  });
+
+  it("shows a Plan usage card only for an account that reports a window", async () => {
+    const accountId = "10000000-0000-4000-8000-000000000001";
+    const observedAt = "2026-10-20T12:00:00.000Z";
+    const snapshot = (windows: ReadonlyArray<unknown>) =>
+      decodeProviderUsageLimitsSnapshot({
+        version: 1,
+        refreshedAt: observedAt,
+        entries: [
+          {
+            providerInstanceId: accountId,
+            status: "available",
+            source: "provider-runtime",
+            observedAt,
+            limits: {
+              providerInstanceId: accountId,
+              scope: "account",
+              requests: { status: "unavailable" },
+              tokens: { status: "unavailable" },
+              concurrency: { status: "unavailable" },
+              retry: { status: "inactive" },
+              quota: "available",
+              source: "observed-evidence",
+              confidence: "high",
+              updatedAt: observedAt,
+              rateLimitWindows: windows,
+            },
+          },
+        ],
+      });
+    const account = decodeProviderInstance({
+      id: accountId,
+      displayName: "Claude Max",
+      driverKind: "claude",
+      configuration: {
+        kind: "claude-agent-sdk",
+        binaryPath: "/opt/homebrew/bin/claude",
+        authentication: "subscription",
+      },
+      enabled: true,
+      environmentPolicy: "inherit-host",
+      version: 1,
+      createdAt: observedAt,
+      updatedAt: observedAt,
+    });
+    const page = (windows: ReadonlyArray<unknown>) => (
+      <PlanUsageProvider
+        barStyle="smooth"
+        client={
+          {
+            list: vi.fn(() => Promise.resolve(snapshot(windows))),
+          } as unknown as ProviderUsageLimitsClient
+        }
+        instances={[account]}
+      >
+        <InboxView attentionItems={[]} onClose={vi.fn()} onOpenThread={vi.fn()} />
+      </PlanUsageProvider>
+    );
+    const { unmount } = render(
+      page([{ window: "five_hour", status: "allowed", utilization: 0.4, observedAt }]),
+    );
+    const card = await screen.findByRole("region", { name: "Plan usage" });
+    expect(card).toHaveTextContent("Claude Max");
+    expect(card).toHaveTextContent("60%");
+    unmount();
+    render(page([]));
+    await waitFor(() => expect(screen.getByRole("region", { name: "Needs you" })).toBeVisible());
+    expect(screen.queryByRole("region", { name: "Plan usage" })).toBeNull();
+  });
+
+  it("reads the plan limits once for the rail, a composer and the Inbox together", async () => {
+    const accountId = "10000000-0000-4000-8000-000000000001";
+    const observedAt = "2026-10-20T12:00:00.000Z";
+    const snapshot = decodeProviderUsageLimitsSnapshot({
+      version: 1,
+      refreshedAt: observedAt,
+      entries: [
+        {
+          providerInstanceId: accountId,
+          status: "available",
+          source: "provider-runtime",
+          observedAt,
+          limits: {
+            providerInstanceId: accountId,
+            scope: "account",
+            requests: { status: "unavailable" },
+            tokens: { status: "unavailable" },
+            concurrency: { status: "unavailable" },
+            retry: { status: "inactive" },
+            quota: "available",
+            source: "observed-evidence",
+            confidence: "high",
+            updatedAt: observedAt,
+            rateLimitWindows: [
+              { window: "five_hour", status: "allowed", utilization: 0.4, observedAt },
+            ],
+          },
+        },
+      ],
+    });
+    const account = decodeProviderInstance({
+      id: accountId,
+      displayName: "Claude Max",
+      driverKind: "claude",
+      configuration: {
+        kind: "claude-agent-sdk",
+        binaryPath: "/opt/homebrew/bin/claude",
+        authentication: "subscription",
+      },
+      enabled: true,
+      environmentPolicy: "inherit-host",
+      version: 1,
+      createdAt: observedAt,
+      updatedAt: observedAt,
+    });
+    const list = vi.fn(() => Promise.resolve(snapshot));
+    render(
+      <PlanUsageProvider
+        barStyle="smooth"
+        client={{ list } as unknown as ProviderUsageLimitsClient}
+        instances={[account]}
+      >
+        <RailUsageRings instances={[account]} />
+        <ComposerPlanUsage providerInstanceId={accountId} />
+        <InboxView attentionItems={[]} onClose={vi.fn()} onOpenThread={vi.fn()} />
+      </PlanUsageProvider>,
+    );
+    expect(await screen.findByRole("region", { name: "Plan usage" })).toHaveTextContent("60%");
+    expect(screen.getAllByLabelText("Plan usage left").length).toBeGreaterThan(1);
+    expect(list).toHaveBeenCalledTimes(1);
+  });
+
+  it("reads title, state, Needs you, GitHub in that order", async () => {
+    render(
+      <InboxView
+        attentionItems={[]}
+        loadAssignedGithubWork={async () => ({
+          kind: "assigned-work" as const,
+          page: { items: [], freshness: { status: "fresh" as const } },
+        })}
+        onClose={vi.fn()}
+        onOpenThread={vi.fn()}
+      />,
+    );
+    const title = screen.getByRole("heading", { level: 1, name: "Inbox" });
+    const state = screen.getByText(/Nothing is waiting on you\./);
+    const needs = screen.getByRole("heading", { level: 2, name: "Needs you" });
+    const github = screen.getByRole("heading", { level: 2, name: "GitHub" });
+    const follows = (a: Element, b: Element) =>
+      Boolean(a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING);
+    expect(follows(title, state)).toBe(true);
+    expect(follows(state, needs)).toBe(true);
+    expect(follows(needs, github)).toBe(true);
+    await screen.findByText("Nothing is assigned to you.");
   });
 });
 

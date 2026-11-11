@@ -675,7 +675,10 @@ describe("a Chat thread in the terminal's window", () => {
 
   it("is opened for a bare thread id that no Work or Code Project holds", async () => {
     const fake = chatHost();
-    expect(await openAgentThreadById(fake.session, chatThread.id)).toEqual({ kind: "opened" });
+    expect(await openAgentThreadById(fake.session, chatThread.id)).toEqual({
+      kind: "opened",
+      mode: "chat",
+    });
     expect(fake.shell).toEqual([{ mode: "chat", kind: "chat-thread" }]);
     expect(await openAgentThreadById(fake.session, "no-such-thread")).toMatchObject({
       kind: "refused",

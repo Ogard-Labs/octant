@@ -1,6 +1,6 @@
 import { createHash, randomUUID } from "node:crypto";
 import { constants } from "node:fs";
-import { lstat, mkdir, open, readdir, rm, stat, type FileHandle } from "node:fs/promises";
+import { lstat, mkdir, open, readdir, rename, rm, stat, type FileHandle } from "node:fs/promises";
 import { homedir } from "node:os";
 import { extname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import {
@@ -1009,6 +1009,9 @@ export class AppleToolchainService {
     let artifacts: AppleBuildEvidence["artifacts"] = [];
     let cleanup: AppleBuildEvidence["cleanup"] = "complete";
     let terminal: AppleProcessResult;
+    // Set once a build makes its derived-data directory, so the action removes
+    // it however it ends.
+    let derivedRoot: string | undefined;
     try {
       if (request.kind === "boot") {
         this.#advance(active, "preparing-destination");
@@ -1327,7 +1330,7 @@ export class AppleToolchainService {
           this.#options.realpath,
         );
         this.#advance(active, request.kind === "test" ? "testing" : "building");
-        const derivedRoot = resolve(context.artifactRoot, `derived-${request.actionId}`);
+        derivedRoot = resolve(context.artifactRoot, `derived-${request.actionId}`);
         await mkdir(derivedRoot, { recursive: true, mode: 0o700 });
         const resultBundle = resolve(derivedRoot, "results.xcresult");
         const buildGrants = { additionalWriteRoots: [derivedRoot] };
@@ -1468,6 +1471,21 @@ export class AppleToolchainService {
         [{ kind: "log", reference: logReference }],
         "uncertain",
       );
+    } finally {
+      // Nothing reads a build's derived data once its action ends: a run's app
+      // is already copied into the Simulator, and every action builds into its
+      // own directory, so keeping one buys no incremental build either. Kept,
+      // each build left a full Xcode build tree behind. A process that outlived
+      // its action can recreate part of it; the host sweeps that at start.
+      if (derivedRoot !== undefined) {
+        if (request.kind === "test") {
+          await keepResultBundle(
+            resolve(derivedRoot, "results.xcresult"),
+            resolve(context.artifactRoot, `apple-xcresult-${request.actionId}`),
+          );
+        }
+        await rm(derivedRoot, { recursive: true, force: true }).catch(() => undefined);
+      }
     }
   }
 
@@ -2720,6 +2738,21 @@ const capturesInProgress = new Set<string>();
 const STALE_CAPTURE_MS = 60_000;
 /** When an action returns for a file its unconfirmed process may still write. */
 const CAPTURE_RETURN_VISITS_MS = [60_000, 5 * 60_000, 15 * 60_000] as const;
+
+/**
+ * A test run's result bundle is its evidence, so it moves out of the derived
+ * data before that is removed. Build scripts from the checkout can write in
+ * the derived data, so only a real directory moves, never a link planted in
+ * its place; a run that made no bundle simply keeps none.
+ */
+async function keepResultBundle(bundle: string, kept: string): Promise<void> {
+  try {
+    if (!(await lstat(bundle)).isDirectory()) return;
+    await rename(bundle, kept);
+  } catch {
+    // No bundle, or it could not move; the run's log still records the verdict.
+  }
+}
 
 /** Removes this host's capture files that no running action still owns. */
 async function sweepStaleCaptures(

@@ -585,7 +585,16 @@ export function wireWork(deps: WorkDependencies) {
         const routineTools = !browserSupported
           ? undefined
           : combineAppManagedToolSets(
-              createRoutineProposalTools({ ...routineTurn, proposals: routineProposalService }),
+              createRoutineProposalTools({
+                ...routineTurn,
+                proposals: routineProposalService,
+                readPosture: () => {
+                  const access = runningWorkTurns.get(String(input.thread.id))?.access;
+                  return access === undefined
+                    ? undefined
+                    : workThreadAccessOf(access).executionPolicy;
+                },
+              }),
               createRoutineTools({
                 ...routineTurn,
                 ...(input.routineRun === undefined ? {} : { routineRun: input.routineRun }),

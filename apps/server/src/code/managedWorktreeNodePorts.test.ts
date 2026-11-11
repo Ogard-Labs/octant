@@ -290,6 +290,32 @@ describe("managed worktree Node ports", () => {
     });
   });
 
+  it("counts a worktree delivered only once its commit is on another branch or a remote", async () => {
+    const fixture = await createRepository();
+    const git = (...args: string[]) =>
+      execFileAsync(
+        "git",
+        ["-c", "user.name=Octant Test", "-c", "user.email=test@octant.local", ...args],
+        { env: { ...process.env, GIT_CONFIG_NOSYSTEM: "1" } },
+      );
+    const worktree = join(fixture.root, "worktree");
+    await git("-C", fixture.repository, "worktree", "add", "-b", "feature/x", worktree);
+    const { git: port } = createManagedWorktreeNodePorts();
+    const delivered = () =>
+      port.isDelivered?.({ targetPath: worktree, branch: "feature/x" }, signal);
+
+    // Nothing new yet: the commit is the one development already has.
+    await expect(delivered()).resolves.toEqual({ status: "observed", delivered: true });
+    await git("-C", worktree, "commit", "--allow-empty", "-m", "work");
+    await expect(delivered()).resolves.toEqual({ status: "observed", delivered: false });
+    await git("-C", fixture.repository, "merge", "--ff-only", "feature/x");
+    await expect(delivered()).resolves.toEqual({ status: "observed", delivered: true });
+    await git("-C", worktree, "commit", "--allow-empty", "-m", "more work");
+    await expect(delivered()).resolves.toEqual({ status: "observed", delivered: false });
+    await git("-C", fixture.repository, "update-ref", "refs/remotes/origin/feature/x", "feature/x");
+    await expect(delivered()).resolves.toEqual({ status: "observed", delivered: true });
+  });
+
   it("rejects invalid branch names before invoking worktree mutation", async () => {
     const fixture = await createRepository();
     const ports = createManagedWorktreeNodePorts();

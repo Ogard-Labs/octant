@@ -11,6 +11,7 @@ import { MarkdownLinkActionsContext } from "../markdown/Markdown";
 import type { ReplyDetailLevel } from "@octant/contracts/shell";
 import type { ReactNode } from "react";
 import { ReplyDetailContext } from "./replyDetail";
+import { RoutineOpenContext } from "./RoutineReceiptCard";
 
 const mixed: TurnActivity = {
   reasoning: "Check the failing suite first.",
@@ -701,5 +702,55 @@ describe("the Reply detail level", () => {
       atLevel("medium", <TurnActivityRows activity={settledTurn} running={false} settled />),
     );
     expect(disclosure(fold).open).toBe(false);
+  });
+});
+
+describe("a routine a tool call created", () => {
+  const receipt = {
+    routineId: "20000000-0000-4000-8000-0000000000a1",
+    name: "Demo: Workspace Summary",
+    trigger: {
+      kind: "weekly-local" as const,
+      weekdays: [1, 2, 3, 4, 5],
+      localTime: "09:00",
+      timeZone: "America/Los_Angeles",
+    },
+    firstRunAt: "2026-11-12T17:00:00.000Z",
+    paused: true,
+  };
+  const created = (paused: boolean): TurnActivity => ({
+    reasoning: "",
+    rows: [
+      {
+        kind: "tool",
+        id: "call-routine",
+        toolName: "octant_propose_routine",
+        state: "completed",
+        routine: { ...receipt, paused } as never,
+      },
+    ],
+  });
+
+  it("shows a receipt that says the routine is paused and opens it in Automation Center", async () => {
+    const opened: Array<string> = [];
+    render(
+      <RoutineOpenContext.Provider value={(id) => opened.push(id)}>
+        <TurnActivityRows activity={created(true)} running={false} settled />
+      </RoutineOpenContext.Provider>,
+    );
+    const list = screen.getByRole("list", { name: "Created automations" });
+    expect(within(list).getByText("Created automation")).toBeTruthy();
+    expect(within(list).getByText("Demo: Workspace Summary")).toBeTruthy();
+    expect(within(list).getByText(/· created paused$/)).toBeTruthy();
+    await userEvent.click(within(list).getByRole("button", { name: "Open" }));
+    expect(opened).toEqual([receipt.routineId]);
+  });
+
+  it("does not say paused for a routine the person confirmed, and offers no Open where the host cannot open one", () => {
+    render(<TurnActivityRows activity={created(false)} running={false} settled />);
+    const list = screen.getByRole("list", { name: "Created automations" });
+    expect(within(list).queryByText(/paused/)).toBeNull();
+    expect(within(list).getByText(/^Weekdays at 9:00$/)).toBeTruthy();
+    expect(within(list).queryByRole("button", { name: "Open" })).toBeNull();
   });
 });

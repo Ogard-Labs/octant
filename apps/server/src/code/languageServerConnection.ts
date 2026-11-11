@@ -30,7 +30,12 @@ export type LanguageServerClientRequest =
   | "textDocument/definition"
   | "textDocument/rename"
   | "textDocument/codeAction"
-  | "textDocument/references";
+  | "textDocument/references"
+  | "textDocument/completion"
+  | "textDocument/hover"
+  | "textDocument/signatureHelp"
+  | "textDocument/documentSymbol"
+  | "textDocument/formatting";
 
 export type LanguageServerClientNotification =
   | "initialized"
@@ -49,6 +54,11 @@ const CLIENT_REQUESTS: ReadonlySet<string> = new Set<LanguageServerClientRequest
   "textDocument/rename",
   "textDocument/codeAction",
   "textDocument/references",
+  "textDocument/completion",
+  "textDocument/hover",
+  "textDocument/signatureHelp",
+  "textDocument/documentSymbol",
+  "textDocument/formatting",
 ]);
 const CLIENT_NOTIFICATIONS: ReadonlySet<string> = new Set<LanguageServerClientNotification>([
   "initialized",

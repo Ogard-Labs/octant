@@ -1,4 +1,9 @@
 import {
+  PreviewTextReply,
+  decodePreviewTextRequest,
+  type PreviewTextRequest,
+} from "@octant/contracts/previews";
+import {
   decodePreviewChunksRequest,
   decodePreviewCancelRequest,
   decodePreviewHandoffRequest,
@@ -28,6 +33,7 @@ export interface PreviewClientOptions {
 }
 
 export interface PreviewClient {
+  text?: (request: PreviewTextRequest) => Promise<typeof PreviewTextReply.Type>;
   open(target: PreviewTarget, knownVersion?: PreviewSourceVersion): Promise<PreviewOutcome>;
   refresh(target: PreviewTarget, knownVersion: PreviewSourceVersion): Promise<PreviewOutcome>;
   readChunks(
@@ -66,6 +72,15 @@ export function createPreviewClient(options: PreviewClientOptions): PreviewClien
   validateLoopbackBaseUrl(options.baseUrl);
   const maxChunksPerPage = options.maxChunksPerPage ?? 16;
   return {
+    async text(request) {
+      return postJson(
+        resolved,
+        "/api/preview/text",
+        decodePreviewTextRequest(request),
+        decodeHostAnswer(PreviewTextReply),
+        AbortSignal.timeout(15_000),
+      );
+    },
     async open(target, knownVersion) {
       const body = decodePreviewOpenRequest(
         knownVersion === undefined ? { target } : { target, knownVersion },

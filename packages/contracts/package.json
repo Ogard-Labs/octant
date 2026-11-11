@@ -81,6 +81,7 @@
     "./guardrail-lowering": "./src/guardrailLowering.ts",
     "./provider-tooling": "./src/providerTooling.ts",
     "./protected-files": "./src/protectedFiles.ts",
+    "./archived-worktrees": "./src/archivedWorktrees.ts",
     "./person-memory": "./src/personMemory.ts",
     "./computer-use": "./src/computerUse.ts",
     "./diagnostics": "./src/diagnostics.ts",

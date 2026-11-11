@@ -33,7 +33,7 @@ The former decision archive is history in `docs/legacy/` and has no authority.
 | [Guardrails and review](#guardrails-and-review)                                       | 8         | 2       | 6            | 0                   |
 | [Key providers](#key-providers)                                                       | 1         | 0       | 1            | 0                   |
 | [Release scope](#release-scope)                                                       | 4         | 1       | 3            | 0                   |
-| [Process topology and local trust](#process-topology-and-local-trust)                 | 6         | 6       | 0            | 0                   |
+| [Process topology and local trust](#process-topology-and-local-trust)                 | 7         | 7       | 0            | 0                   |
 | [App-managed tools](#app-managed-tools)                                               | 5         | 5       | 0            | 0                   |
 | [Canvas authority](#canvas-authority)                                                 | 2         | 2       | 0            | 0                   |
 | [Device transport](#device-transport)                                                 | 3         | 3       | 0            | 0                   |
@@ -67,7 +67,7 @@ The former decision archive is history in `docs/legacy/` and has no authority.
 | [Code tooling](#code-tooling)                                                         | 2         | 1       | 1            | 0                   |
 | [Disposable desktops](#disposable-desktops)                                           | 4         | 3       | 1            | 0                   |
 | [Bots](#bots)                                                                         | 1         | 0       | 0            | 1                   |
-| **All areas**                                                                         | **230**   | **194** | **32**       | **4**               |
+| **All areas**                                                                         | **231**   | **195** | **32**       | **4**               |
 
 ## Principles and hard lines
 
@@ -474,6 +474,18 @@ The host watches its own size and the system's memory pressure and eases itself 
 
 Status: Built. Since: —. Detail: [Architecture: Process topology](../architecture.md#process-topology).
 
+### Other agents start work through the local CLI
+
+Another agent on the host's machine starts and follows Octant threads through `octant agent mcp`, a stdio MCP server, or the `octant agent` command line. Both are ordinary local clients under the bridge secret, so the host keeps every authority decision.
+
+- `start_work` takes a prompt and an absolute folder or a Project name; the folder's Project decides Code or Work, and none means Chat. `send_message`, `read_thread`, `answer_question`, `stop_turn`, `list_projects`, `add_project`, `list_threads` and `list_waiting` (everything on the person's Needs you list) follow and continue the work.
+- The caller is not the person: the server never answers an approval or other request listed for the person, never starts a thread at Full access, and adds a folder as a Project only when the call says the person asked to work there.
+- Each tool call opens its own window authority and revokes it when the call ends; a Chat send keeps its window until the send answers, and a turn keeps running after the window that started it is gone.
+- `octant agent --detach` starts a Work or Code turn and returns once the host lists it; `octant agent status <thread>` reads where it got to and what waits on the person.
+- Remote callers have no path here; a scoped grant for a bot on another machine would be its own decision.
+
+Status: Built. Since: 2026-11-11. Detail: [Architecture: Native harness, scripted callers and other agents](../architecture.md#native-harness).
+
 ## App-managed tools
 
 ### Tool families and transport
@@ -569,6 +581,7 @@ Apple development is simulator-only. Physical devices and store upload, submissi
 - Journals with earlier device or distribution validation events replay unchanged; leftover files and the stored store key are left in place and nothing reads them.
 - Apple discovery is derived and refreshable from the checkout; Octant never rewrites projects, schemes, build settings or manifests to make discovery pass. _Here only._
 - A test run preserves its result bundle and logs as evidence and reports a structured verdict. If parsing fails it keeps the raw artifact and reports the verdict incomplete. _Here only._
+- A build's derived data is private to its action and removed when the action ends; a test run's result bundle is kept as its artifact first, and the host clears any leftover derived data at start (maintainer request, 2026-11-10). _Here only._
 - After a restart, ambiguous device work is waiting or inconclusive, never verified. _Here only._
 
 Status: Built. Since: 2026-10-29. Detail: [Architecture: Device transport and evidence](../architecture.md#device-transport-and-evidence) and [Device workbench](device-workbench.md).
@@ -687,7 +700,8 @@ Status: Partly built. Since: 2026-10-31. Detail: [Architecture: Modes: Chat, Wor
 
 A repository is identified by an opaque digest of its canonical Git common directory, not a path. File, terminal, test and Git operations are server-owned services; panes are clients, never owners.
 
-- Managed worktrees live under a sibling root that needs its own confirmed grant and receive an ownership receipt before use; they are never silently reset, pruned or reused. _Here only._
+- Managed worktrees live under a sibling root that needs its own confirmed grant and receive an ownership receipt before use; they are never silently reset or reused. _Here only._
+- Archiving a Code thread removes its managed worktree only when it has no uncommitted changes, its commit is pushed or merged, and no turn of the thread is still in progress; the branch stays. Settings › Code › Worktrees lists what archiving kept, with sizes, and Remove asks once, refuses uncommitted changes or a turn still in progress, and keeps the branch. Only a local window lists or removes them (maintainer request, 2026-11-11). _Here only._
 - Operations use checkout-relative targets, symlink and identity verification, atomic writes, bounded output and structured verdicts. _Here only._
 - Rebinding a Code Project leaves old threads unavailable until a person explicitly rebinds them; a session grant of Full access does not survive, and a thread with its own worktree is refused.
 - Repository tests stay cancellable during command discovery.
@@ -955,7 +969,7 @@ A routine is a host-owned, Project-bound definition that starts an ordinary Work
 
 - The dispatcher revalidates host, Project, binding, profile, provider, model and authority at every occurrence, and a stale definition never adopts replacement authority.
 - A routine runs as the host, so it works with no window open; automation-origin execution cannot create, edit, run, pause or archive a routine.
-- An agent can only propose a routine; a person confirms, and the host builds the definition from the thread's live facts with an approval-gated profile.
+- An agent can only propose a routine; a person confirms, and the host builds the definition from the thread's live facts with an approval-gated profile. When the person's own message asked for the routine, the agent sets `requestedByPerson` and the host creates it at once, paused, through the same draft and create path with no card; a self-suggested routine, a follow-up, and a turn in Plan still wait for the card. Either way the call's tool step keeps a receipt that every client draws as a **Created automation** card in the thread, and the thread's Environment lists the routine.
 - A turn in Plan may propose, as it may offer a side task, and a thread in Plan does not refuse the confirm; a turn the host runs (a routine's run, a usage-limit resume) is still refused. The routine takes none of the thread's posture: it asks first, never runs in Plan, and the card's confirm is unchanged.
 - Built: a Work or Code thread's agent may list and read its Project's routines of the same mode with their recent runs, and ask the person to pause or archive a routine that is its thread's own (proposed or created from the thread, or whose run started it). The request waits as a card like a proposal and only the person's confirmation, as their own principal at the version the agent saw, changes it. Plan and every host-run turn, the routine's own run included, are refused: nobody is there to confirm. Resume, edit, run now and cancel stay the person's.
 - Built: the turn the dispatcher started for a run, named by the run identity the dispatcher passes in host-only start options, may report the run's result once (succeeded, nothing-to-do, needs-attention or failed, with a summary of at most 1 KB). It is journaled on the run, shown in Automation Center beside the run's status, and never changes the run's lifecycle or reaches a push notification.
@@ -2362,7 +2376,7 @@ Status: Built. Since: —. Detail: [Workspace: Tool lifecycles](workspace.md#too
 
 ### Routines and subagents
 
-Agents may propose routines and delegate work, but only a person creates a routine, and only the thread's agent starts a subagent.
+Agents may propose routines and delegate work, but a routine exists only through a person's confirmation or request (created paused, so it runs only once the person enables it), and only the thread's agent starts a subagent.
 
 - A proposed routine or follow-up waits as a suggestion chip; dismissing it declines. A routine's runs get at most the creating thread's access.
 - An agent's request to pause or archive its thread's routine (cancel, for a follow-up) waits as the same kind of card with the agent's reason; dismissing it keeps the routine. What a run's agent reported is shown beside that run in Automation Center.
@@ -2429,6 +2443,7 @@ Status: Built. Since: —. Detail: [Workspace: Start-screen cards](workspace.md#
 Waiting requests appear on several surfaces from one host list, at a local window only.
 
 - The start screen, board cards, palette, Inbox and Review page read the same list and answer through the mode's own command.
+- The Inbox page is raised cards in one 980px column, with its state in one line beside the title; see [Inbox page](workspace.md#inbox-page).
 - A remote window has no source. The desktop menu bar lists waiting threads but only opens them.
 
 Status: Built. Since: —. Detail: [Start screen: Needs you across surfaces](start-screen.md#needs-you-across-surfaces).
@@ -3084,6 +3099,7 @@ A Code thread's editor gets diagnostics and go-to-definition from separately lau
 - Paired devices may read results; starting a `repo-tooling` server stays local-host only.
 - Agents get one read-only tool, `octant_code`, with `diagnostics`, `definition` and `references` operations, available in Plan and asking nothing, that never starts or reads through a `repo-tooling` server (real-provider smoke owed).
 - `octant_code` is offered on a Code turn only when an effective `static` server covers a file a bounded scan finds in the turn's checkout or extra folders; `references` returns at most 200 places, `references` and `diagnostics` stop before their list passes 48 KiB so a result fits the provider's tool result budget, and each says when it was cut.
+- The editor's acknowledged-document read seam also serves capability-checked completion, hover, signatures, symbols and formatting; replies contain bounded text and ranges, never server commands or edits to other files. Shared Work/Code editing, recovery, conflict comparison, reviewed replacements and selection-to-agent drafts follow [Workspace: File editing](workspace.md#file-editing).
 - Octant hosts no other editor's extension API.
 
 Status: Built. Since: 2026-10-26. Detail: [Language services: launch classes](language-services.md#launch-classes), [authority](language-services.md#authority) and [maintainer decisions](language-services.md#maintainer-decisions).

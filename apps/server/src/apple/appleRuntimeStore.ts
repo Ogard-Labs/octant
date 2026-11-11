@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { constants } from "node:fs";
-import { mkdir, open, rename, writeFile } from "node:fs/promises";
+import { mkdir, open, readdir, rename, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import {
   decodeAppleActionKind,
@@ -21,6 +21,7 @@ const MAX_RECEIPT_BYTES = 1024 * 1024;
 export const MAX_APPLE_ARTIFACT_BYTES = 16 * 1024 * 1024;
 const MAX_ARTIFACT_BYTES = MAX_APPLE_ARTIFACT_BYTES;
 const SAFE_REFERENCE = /^apple-[a-z0-9-]{1,500}$/;
+const LEFTOVER_BUILD_DATA = /^derived-[A-Za-z0-9-]{1,500}$/;
 const decodeCorrelationId = Schema.decodeUnknownSync(CorrelationId);
 const decodeTimestamp = Schema.decodeUnknownSync(UtcTimestamp);
 
@@ -57,6 +58,30 @@ export class AppleRuntimeStore {
     } catch {
       return undefined;
     }
+  }
+
+  /**
+   * Removes every build's derived-data directory. An action removes its own
+   * when it ends, so one is left only by a host that stopped mid-build or a
+   * build process that outlived its action. Call it only while no Apple action
+   * runs, as the host does at start before it serves requests.
+   */
+  async removeLeftoverBuildData(): Promise<void> {
+    let names: ReadonlyArray<string>;
+    try {
+      names = await readdir(this.#artifactRoot);
+    } catch {
+      return;
+    }
+    await Promise.all(
+      names
+        .filter((name) => LEFTOVER_BUILD_DATA.test(name))
+        .map((name) =>
+          rm(join(this.#artifactRoot, name), { recursive: true, force: true }).catch(
+            () => undefined,
+          ),
+        ),
+    );
   }
 
   async persistReceipts(receipts: ReadonlyArray<AppleRuntimeReceipt>): Promise<void> {

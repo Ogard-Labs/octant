@@ -195,6 +195,18 @@
   gap: var(--oct-space-2);
 }
 
+/* A display header opens a page as a place: the title keeps its own size and
+   the one line of state sits on its baseline, in the meta ink. */
+.surface-header--display > .surface-header__copy > h1 {
+  flex: none;
+  /* A step under the large title and at the strong weight: at 28px and the
+     title weight the one word outweighed everything on the page under it. */
+  font-size: var(--oct-text-2xl);
+  font-weight: var(--oct-weight-strong);
+  letter-spacing: var(--oct-tracking-tight);
+  line-height: 1.15;
+}
+
 .surface-header__detail {
   overflow: hidden;
   min-width: 0;

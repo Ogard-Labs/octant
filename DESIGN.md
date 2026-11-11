@@ -1758,7 +1758,11 @@ stage), defined once on every shell in `shell.css`:
   card is the card step below.
 - **Destination pages** (Inbox, Board, Archive, Review, Projects, Agents,
   Automations, Artifacts, Image generator) are clear over the sheet, and their
-  cards drawn with the raised step (`--oct-surface`) take the card step.
+  cards drawn with the raised step (`--oct-surface`) take the card step. The
+  Inbox is the model: a display-size page title (the `oct-title` size) with its one line of state
+  on the baseline, then raised cards in a 980px left-aligned column, two
+  columns by container query and one when narrow, rows without rules (see
+  [Inbox page](docs/design/workspace.md#inbox-page)).
 - **A card** (`--octant-card`, the recipe's `bg-card`) is one step of ink over
   the sheet: the primary text at 4%.
 - **An outline button** rests on that card step instead of the page colour
@@ -2117,6 +2121,17 @@ progress across relaunch. Setup is optional and never grants an agent app access
 it changes no setting or readiness answer. It adds no step or progress count.
 [Start screen](docs/design/start-screen.md#optional-capability-card-in-your-first-task)
 owns its behavior.
+
+File editors share a compact command toolbar and one Editor settings disclosure.
+The primary Save and the unsaved/saving/error state stay visible above the
+source; preferences are secondary. Source/preview switching retains selection
+and undo, and a Markdown split stacks at narrow widths. Each source/preview
+region owns its scrolling. Conflicts show a bounded disk-versus-draft comparison
+with explicit keep-draft or discard actions. A selection proposal or replacement
+review remains a separate disclosure above the editor, with its own before/after
+comparison and an explicit apply action. Colors and typography come from the
+existing editor projection and shared controls. Behavioral detail is in
+[Workspace: File editing](docs/design/workspace.md#file-editing).
 
 The right dock follows the active pane and never leaks another pane's content.
 The dock and the bottom panel both step aside while a reader route (Board,
@@ -2832,6 +2847,17 @@ files; the host journals the confirmed removal. Paths the person added follow
 as rows with Remove (no confirmation), then one "Protect another path" row with
 a text field and an **Add** button; a refused path is said in the section's
 feedback line. A paired device sees the section as set on the host machine.
+**Worktrees** in Settings › Code, above Open in applications, lists the managed
+worktrees archived threads still keep, largest first: the thread's title, then
+a line of Project, branch in mono, and size ("more than" when the count stopped
+early), then the folder in mono. Each row's secondary **Remove** opens
+`OctantConfirmDialog` in the destructive role ("Remove this worktree?", Cancel
+focused, **Remove worktree**), saying the folder and its ignored files go and
+the branch and its commits stay. A refusal (uncommitted changes, or a turn
+still running in the thread) is said in the
+section's feedback line and the row stays. With none kept it says so in one
+line; a paired device sees the section as managed on the host machine
+([rules](docs/architecture.md#modes-chat-work-and-code)).
 A Code, Chat, or Work tool row whose result was outside content carries an
 "Outside content" tag, followed by what Octant Shield's Watcher found in it in
 the warning role, and a Code thread's board card a small mark; at Full access

@@ -176,6 +176,8 @@ export const MOBILE_COPY = {
   transcriptEmpty: "No turns yet.",
   codeEarlierTurns: "Showing the newest turns. Open the thread on the desktop for earlier ones.",
   turnRunning: "Working on your computer…",
+  routineReceiptLabel: "Created automation",
+  routineReceiptPaused: "created paused",
   approvalDesktopOnly:
     "Approve or reject on the desktop host. High-risk approval challenges stay local-host-only.",
   approvalAllow: "Allow",

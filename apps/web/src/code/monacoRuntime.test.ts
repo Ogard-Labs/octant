@@ -60,6 +60,8 @@ const mocks = vi.hoisted(() => ({
   }>,
 }));
 
+vi.mock("./monacoIntelligence", () => ({ installMonacoIntelligence: vi.fn() }));
+
 const modelUri = {
   scheme: "octant-code",
   path: "/file",
@@ -132,6 +134,7 @@ vi.mock("monaco-editor", () => ({
       const side = { updateOptions: vi.fn() };
       return {
         dispose: vi.fn(),
+        createViewModel: () => ({ dispose: vi.fn() }),
         setModel: vi.fn(),
         getOriginalEditor: () => side,
         getModifiedEditor: () => side,

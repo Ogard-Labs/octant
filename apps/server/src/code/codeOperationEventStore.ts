@@ -1510,6 +1510,7 @@ function foldTurnFrame(
       ...(frame.event.outsideContent === undefined
         ? {}
         : { outsideContent: frame.event.outsideContent }),
+      ...(frame.event.routine === undefined ? {} : { routine: frame.event.routine }),
     };
     if (existing === -1) appendStep(builder, step);
     else builder.steps[existing] = step;

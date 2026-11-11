@@ -1,5 +1,10 @@
 import type { ReviewDecision, ToolOutsideContentMark } from "@octant/contracts/shield";
-import type { HarnessRetryNotice, ThreadPublishedPage, ThreadToolStep } from "@octant/contracts";
+import type {
+  HarnessRetryNotice,
+  ThreadPublishedPage,
+  ThreadRoutineReceipt,
+  ThreadToolStep,
+} from "@octant/contracts";
 
 /**
  * What a running turn is doing, beyond the message it is writing.
@@ -24,6 +29,8 @@ export type TurnActivityRow =
       readonly published?: ThreadPublishedPage;
       /** The call's result brought outside content into the thread. */
       readonly outsideContent?: ToolOutsideContentMark;
+      /** The routine the call created, shown as a receipt card under the turn. */
+      readonly routine?: ThreadRoutineReceipt;
     }
   | {
       readonly kind: "task";
@@ -88,6 +95,7 @@ export function toolStepsActivity(
             ...(step.summary === undefined ? {} : { summary: step.summary }),
             ...(step.published === undefined ? {} : { published: step.published }),
             ...(step.outsideContent === undefined ? {} : { outsideContent: step.outsideContent }),
+            ...(step.routine === undefined ? {} : { routine: step.routine }),
           },
     ),
     reasoning: "",

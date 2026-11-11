@@ -2,6 +2,7 @@ import type { ProviderRuntimeEvent } from "@octant/contracts";
 import { describe, expect, it } from "vitest";
 import {
   markThreadToolStepOutsideContent,
+  markThreadToolStepRoutine,
   recordThreadShieldReview,
   recordThreadToolStep,
   type ThreadToolSteps,
@@ -175,6 +176,49 @@ describe("Octant Shield's decisions among a turn's tool steps", () => {
     decidedAt: "2026-10-31T10:00:00.000Z",
   } as unknown as Parameters<typeof recordThreadShieldReview>[1]["decision"];
   const review = { requestId: "approval-1", toolName: "Bash", summary: "git status", decision };
+
+  it("keeps the routine a call created through the call's later progress and result", () => {
+    const routine = {
+      routineId: "20000000-0000-4000-8000-0000000000a1",
+      name: "Daily summary",
+      trigger: { kind: "once" as const, scheduledAt: "2026-11-12T09:00:00.000Z" },
+      firstRunAt: "2026-11-12T09:00:00.000Z",
+      paused: true,
+    };
+    const started = fold([
+      event({ kind: "tool-start", toolCallId: "r", toolName: "octant_propose_routine" }),
+    ]);
+    const marked = markThreadToolStepRoutine(started, {
+      toolCallId: "r",
+      toolName: "octant_propose_routine",
+      routine: routine as never,
+    });
+    expect(marked?.steps[0]?.routine).toMatchObject({ name: "Daily summary", paused: true });
+    const finished = recordThreadToolStep(
+      recordThreadToolStep(
+        marked,
+        event({ kind: "tool-progress", toolCallId: "r", message: "working" }),
+      ),
+      event({ kind: "tool-success", toolCallId: "r", summary: "done" }),
+    );
+    expect(finished?.steps[0]).toMatchObject({ state: "completed", routine: { paused: true } });
+  });
+
+  it("gives a call that announced no start a completed row to carry its routine", () => {
+    const marked = markThreadToolStepRoutine(undefined, {
+      toolCallId: "r",
+      toolName: "octant_propose_routine",
+      routine: {
+        routineId: "20000000-0000-4000-8000-0000000000a1",
+        name: "Daily summary",
+        trigger: { kind: "once", scheduledAt: "2026-11-12T09:00:00.000Z" },
+        firstRunAt: "2026-11-12T09:00:00.000Z",
+        paused: false,
+      } as never,
+    });
+    expect(marked?.steps).toHaveLength(1);
+    expect(marked?.steps[0]).toMatchObject({ state: "completed", routine: { paused: false } });
+  });
 
   it("shows a decision as a completed step of its own beside the tool's", () => {
     const tool = fold([event({ kind: "tool-start", toolCallId: "a", toolName: "Bash" })]);
