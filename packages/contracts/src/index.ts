@@ -72,6 +72,7 @@ export * from "./guardrailLowering";
 export * from "./providerTooling";
 export * from "./protectedFiles";
 export * from "./archivedWorktrees";
+export * from "./diskCleanup";
 export * from "./computerUse";
 export * from "./diagnostics";
 export * from "./supportBundle";

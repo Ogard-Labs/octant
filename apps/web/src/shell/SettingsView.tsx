@@ -101,6 +101,7 @@ import type { HostControlClient } from "@octant/client-runtime/host-control-clie
 import type { PersonMemoryClient } from "@octant/client-runtime/person-memory-client";
 import type { ProtectedFilesClient } from "@octant/client-runtime/protected-files-client";
 import type { ArchivedWorktreesClient } from "@octant/client-runtime/archived-worktrees-client";
+import type { DiskCleanupClient } from "@octant/client-runtime/disk-cleanup-client";
 import type { SafeNetworksClient } from "@octant/client-runtime/safe-networks-client";
 import { SafeNetworksSettings } from "../settings/SafeNetworksSettings";
 import type { HostFederationLifecycle } from "@octant/client-runtime/host-federation-lifecycle";
@@ -121,6 +122,8 @@ import { AutomaticModelSettings } from "../settings/AutomaticModelSettings";
 import { PersonMemorySettings } from "../settings/PersonMemorySettings";
 import { ProtectedFilesSettings } from "../settings/ProtectedFilesSettings";
 import { ArchivedWorktreesSettings } from "../settings/ArchivedWorktreesSettings";
+import { HostWorktreesSettings } from "../settings/HostWorktreesSettings";
+import { XcodeBuildDataSettings } from "../settings/XcodeBuildDataSettings";
 import { SyncSettingsSection } from "../settings/SyncSettingsSection";
 import type { FolderBrowseClient } from "@octant/client-runtime/folder-browse-client";
 import type { ReplicaMembershipClient } from "@octant/client-runtime/replica-membership-client";
@@ -269,6 +272,7 @@ export interface SettingsViewProps {
   /** Settings › Permissions › Protected files; absent where the host publishes no list. */
   readonly protectedFilesClient?: ProtectedFilesClient;
   readonly archivedWorktreesClient?: ArchivedWorktreesClient;
+  readonly diskCleanupClient?: DiskCleanupClient;
   readonly personMemoryClient?: PersonMemoryClient;
   /** Settings › Data & privacy › Public links; absent where the host has no such surface. */
   readonly canvasClient?: Pick<CanvasClient, "publicLinkSettings" | "setPublicLinkSettings">;
@@ -1105,6 +1109,11 @@ function ActiveSectionContent({
             client={props.archivedWorktreesClient}
             focusedSetting={focusedSetting}
             projectNames={props.projectNames ?? NO_PROJECT_NAMES}
+          />
+          <HostWorktreesSettings client={props.diskCleanupClient} focusedSetting={focusedSetting} />
+          <XcodeBuildDataSettings
+            client={props.diskCleanupClient}
+            focusedSetting={focusedSetting}
           />
           <OpenInApplicationSettings
             applications={props.settings.openInApplications}
