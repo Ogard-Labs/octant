@@ -49,8 +49,14 @@ export interface WorkspaceSurfaceDragSource {
   readonly paneId?: PaneId;
   readonly surface: WorkspaceTab;
   readonly title: string;
-  /** A tab that is not its pane's open one: it leaves that pane's row once placed. */
+  /** A tab leaving its pane's row once placed: any tab but the only one a pane holds. */
   readonly fromTab?: { readonly paneId: PaneId; readonly tabId: WorkspaceTab["id"] };
+  /**
+   * Set when the dragged tab is its pane's open one and the pane holds other
+   * tabs. The pane shows another of them before the tab is placed, so the tab
+   * leaves like any other and the pane keeps the rest of its row.
+   */
+  readonly openTab?: { readonly paneId: PaneId };
   /** Two to four selected tabs dragged together; they lay out side by side where dropped. */
   readonly surfaces?: ReadonlyArray<WorkspaceTab>;
 }
@@ -89,8 +95,11 @@ export function resolveWorkspaceSurfaceDropDestination(
   if (target === undefined) return null;
   const sourcePaneId = input.source.paneId;
   if (isCenter(target.rect, input.point)) {
-    // Dropping a pane's surface back onto its own pane changes nothing.
+    // Dropping a pane's surface back onto its own pane changes nothing, and
+    // neither does dropping a pane's open tab on the pane that already shows it.
     if (sourcePaneId !== undefined && String(sourcePaneId) === String(target.paneId)) return null;
+    const openIn = input.source.openTab?.paneId;
+    if (openIn !== undefined && String(openIn) === String(target.paneId)) return null;
     return { kind: "center", targetPaneId: target.paneId };
   }
   const edge = nearestEdge(target.rect, input.point);
@@ -146,15 +155,16 @@ function canUseEdge(
 
 /**
  * A sidebar thread dropped on a composer attaches context instead of opening
- * a pane. A pane grip keeps the pane destination even when the pointer is
- * over a composer, so moving a pane is unchanged.
+ * a pane. A pane grip or a tab keeps the pane destination even when the
+ * pointer is over a composer, so moving a pane or a tab is unchanged: a tab
+ * names no sidebar row, and resolved to a composer it attached nothing.
  */
 export function resolveSidebarComposerDrop(input: {
   readonly point: WorkspaceDragPoint;
   readonly source: WorkspaceSurfaceDragSource;
   readonly composerZones: ReadonlyArray<ComposerThreadDropZone>;
 }): WorkspaceSurfaceDropDestination | null {
-  if (input.source.paneId !== undefined) return null;
+  if (input.source.paneId !== undefined || input.source.fromTab !== undefined) return null;
   const zone = input.composerZones.find((candidate) => containsPoint(candidate.rect, input.point));
   return zone === undefined ? null : { kind: "composer", composerKey: zone.key };
 }
