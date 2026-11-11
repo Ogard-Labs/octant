@@ -741,15 +741,16 @@ describe("a routine a tool call created", () => {
     const list = screen.getByRole("list", { name: "Created automations" });
     expect(within(list).getByText("Created automation")).toBeTruthy();
     expect(within(list).getByText("Demo: Workspace Summary")).toBeTruthy();
-    expect(within(list).getByText(/· paused$/)).toBeTruthy();
+    expect(within(list).getByText(/· created paused$/)).toBeTruthy();
     await userEvent.click(within(list).getByRole("button", { name: "Open" }));
     expect(opened).toEqual([receipt.routineId]);
   });
 
-  it("calls a routine the person confirmed scheduled, and offers no Open where the host cannot open one", () => {
+  it("does not say paused for a routine the person confirmed, and offers no Open where the host cannot open one", () => {
     render(<TurnActivityRows activity={created(false)} running={false} settled />);
     const list = screen.getByRole("list", { name: "Created automations" });
-    expect(within(list).getByText(/· scheduled$/)).toBeTruthy();
+    expect(within(list).queryByText(/paused/)).toBeNull();
+    expect(within(list).getByText(/^Weekdays at 9:00$/)).toBeTruthy();
     expect(within(list).queryByRole("button", { name: "Open" })).toBeNull();
   });
 });

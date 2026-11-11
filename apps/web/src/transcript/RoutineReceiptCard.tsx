@@ -12,8 +12,10 @@ export const RoutineOpenContext = createContext<((routineId: string) => void) | 
 /**
  * What a thread's tool call set up, as a card under the turn: the routine's
  * name, when it runs, and whether it waits for the person. A routine made
- * because the person asked is paused, and the card says so, because nothing
- * runs until they resume it.
+ * because the person asked is paused, and the card says it was created paused,
+ * because nothing runs until they resume it. The card is a receipt of what was
+ * created, so it never claims the routine's current state: the thread's
+ * Environment lists the live one.
  */
 export function RoutineReceiptCard(props: { readonly routine: ThreadRoutineReceipt }) {
   const open = useContext(RoutineOpenContext);
@@ -30,7 +32,8 @@ export function RoutineReceiptCard(props: { readonly routine: ThreadRoutineRecei
         <span className="routine-receipt-card__label">Created automation</span>
         <span className="routine-receipt-card__title">{routine.name}</span>
         <span className="routine-receipt-card__detail">
-          {routineScheduleLabel(routine.trigger)} · {routine.paused ? "paused" : "scheduled"}
+          {routineScheduleLabel(routine.trigger)}
+          {routine.paused ? " · created paused" : ""}
         </span>
       </span>
       {open === undefined ? null : (
