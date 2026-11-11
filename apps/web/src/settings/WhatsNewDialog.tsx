@@ -1,4 +1,4 @@
-import { useId } from "react";
+import { useId, type RefObject } from "react";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantDialog } from "../ui/base/OctantDialog";
 import type { BundledWhatsNew } from "../shell/hostBridge";
@@ -7,6 +7,7 @@ export interface WhatsNewDialogProps {
   readonly open: boolean;
   readonly onClose: () => void;
   readonly document: BundledWhatsNew | undefined;
+  readonly restoreFocus?: RefObject<HTMLElement | null>;
 }
 
 /**
@@ -22,6 +23,7 @@ export function WhatsNewDialog(props: WhatsNewDialogProps) {
       labelledBy={titleId}
       onClose={props.onClose}
       open={props.open}
+      {...(props.restoreFocus === undefined ? {} : { restoreFocus: props.restoreFocus })}
     >
       <h2 className="octant-dialog__title" id={titleId}>
         What's new

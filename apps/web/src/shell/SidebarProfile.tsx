@@ -30,6 +30,13 @@ import {
 } from "../ui/base/OctantMenu";
 import type { SidebarAppMenuDescriptorId } from "./navigationModel";
 
+/**
+ * The profile row's trigger: the stable control at the foot of the sidebar that
+ * focus returns to when a card above it, or a dialog it opened, goes away.
+ */
+export const SIDEBAR_ACCOUNT_TRIGGER_SELECTOR =
+  "[data-octant-sidebar] [aria-label^='Account menu']";
+
 export interface SidebarSecondaryAction {
   readonly id: SidebarAppMenuDescriptorId;
   readonly label: string;

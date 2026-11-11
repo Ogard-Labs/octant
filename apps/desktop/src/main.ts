@@ -160,9 +160,11 @@ import { resolveUpdateFeedBaseUrl } from "./appUpdateFeed";
 import {
   acknowledgeWhatsNew,
   loadBundledWhatsNew,
+  resolveBundledAnnouncementPath,
   resolveBundledWhatsNewPath,
   resolveWhatsNewStatePath,
 } from "./bundledWhatsNew";
+import { readAtMost } from "./bundledWhatsNewAnnouncement";
 import {
   createBrowserSurfaceHost,
   type BrowserSurfaceTabCommand,
@@ -4138,6 +4140,10 @@ function bundledWhatsNewOptions(): {
   readonly statePath: string;
   readonly readFile: (path: string) => Promise<string>;
   readonly writeFile: (path: string, contents: string) => Promise<void>;
+  readonly announcement: {
+    readonly path: string;
+    readonly readBounded: (path: string, maxBytes: number) => Promise<Uint8Array>;
+  };
 } {
   const statePath = resolveWhatsNewStatePath(app.getPath("userData"));
   return {
@@ -4152,6 +4158,14 @@ function bundledWhatsNewOptions(): {
     writeFile: async (path, contents) => {
       await mkdir(dirname(path), { recursive: true });
       await writeFile(path, contents, "utf8");
+    },
+    announcement: {
+      path: resolveBundledAnnouncementPath({
+        packaged: app.isPackaged,
+        appPath: app.getAppPath(),
+        moduleUrl: import.meta.url,
+      }),
+      readBounded: readAtMost,
     },
   };
 }
