@@ -8430,7 +8430,22 @@ the model at another size.
   the harness calls, `agentTuiModel.ts` the pure presentation (transcript,
   footer, palette projected from `@octant/theme` tokens), and `agentTui.ts`
   the OpenTUI screen, loaded only when stdout is a terminal and `--plain` or
-  `--json` was not asked for. The terminal registers a window authority with
+  `--json` was not asked for. Starting needs no subcommand: `octant` alone at
+  a terminal, a run that begins with one of the agent's flags
+  (`octant --last`), or a quoted prompt (`octant "fix the tests"`, which no
+  command name can be because none has a space) is `octant agent`; without a
+  terminal a bare `octant` still prints the usage. A bare prompt is the
+  session's first message, sent through the composer as if typed, and the
+  session stays open; `--prompt` keeps running one turn and exiting, and the
+  two are refused together. The folder decides the thread: a Code or Work
+  Project holding the working directory gets a thread of its kind, anywhere
+  else a Chat thread. Started at a terminal inside a Git checkout that no
+  Project holds, without `--project` or `--json`, the terminal asks whether
+  to add the checkout's root as a Code Project. A yes sends the same
+  bind-and-create `octant project add` sends, so the host checks the folder
+  before binding it. A no adds nothing and keeps what the folder gave before:
+  Chat, or `--mode code`'s refusal. The question is asked again on the next
+  start, because declining records nothing. The terminal registers a window authority with
   a renderer identity, like the desktop renderer, and `agentWindow.ts` opens
   the Project and then the thread in that window before driving it, because
   Code checkouts, goals, and harness approvals are authorized against what a
@@ -15993,7 +16008,7 @@ Work and Code remain refused until their native confinement boundary is proven.
   release outside CI.
 - Release notes for an offered update ride inside the signed release (at
   most 4,096 characters) and fail with it; notes for the running build are a
-  bundled file read from disk, so What's New never adds a request.
+  bundled file read from disk (with an optional bundled announcement and picture read the same way), so What's New never adds a request.
 - The person controls application: an update is staged and applied on a
   relaunch they start, and install waits while agents are active (a thread
   parked on an approval or question is still an active agent) or while the

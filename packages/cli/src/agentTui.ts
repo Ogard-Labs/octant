@@ -96,6 +96,8 @@ export interface RunAgentTuiInput {
   readonly verbose?: boolean;
   /** No desktop notification when a turn ends. */
   readonly quiet?: boolean;
+  /** Sent as the first message once the thread has been read, as if typed. */
+  readonly openingPrompt?: string;
 }
 
 const MAX_FILE_SUGGESTIONS = 8;
@@ -369,6 +371,15 @@ class AgentScreen {
       this.#renderer.on("destroy", stop);
       this.#follow(this.#mode);
       void this.#redrawOnChange(stopped.signal);
+      const opening = this.#input.openingPrompt;
+      if (opening !== undefined) {
+        // Through the composer, so @file mentions and slash commands in the
+        // opening prompt behave exactly as they would typed.
+        void this.refresh().then(() => {
+          this.#composer.setText(opening);
+          return this.#submit();
+        });
+      }
     });
   }
 

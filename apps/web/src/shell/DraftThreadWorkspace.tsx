@@ -1372,13 +1372,15 @@ export function DraftThreadWorkspace(props: DraftThreadWorkspaceProps) {
                       ? {}
                       : { selectedProviderInstanceId: props.selectedProviderInstanceId })}
                   />
-                  <ComposerVoiceButton
-                    disabled={props.creating}
-                    onTranscript={(transcript) =>
-                      setPrompt((current) => appendTranscript(current, transcript))
-                    }
-                  />
                 </>
+              ),
+              dictate: (
+                <ComposerVoiceButton
+                  disabled={props.creating}
+                  onTranscript={(transcript) =>
+                    setPrompt((current) => appendTranscript(current, transcript))
+                  }
+                />
               ),
               actions: {
                 kind: "send",

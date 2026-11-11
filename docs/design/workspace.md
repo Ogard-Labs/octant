@@ -163,6 +163,34 @@ replaces that directory with the Project overview; Projects in primary navigatio
 returns to the directory. Neither view adds a second sidebar. Other destinations
 replace the directory while preserving the underlying Project selection.
 
+**Project icons.** A Project shows its own icon wherever Projects are listed:
+the sidebar's Project rows, the icon rail's Project tiles, the Projects
+directory, the Project options in the composer's Project picker and in the move
+dialog, the Project chip on a thread row, the Work overview's Project line, the
+Inbox's Project group headings, and the Continue cards on Code Home. The icon is
+the favicon or app icon in the Project's folder. The host finds it, because the
+renderer never reads disk: it tries a short fixed list of well-known relative
+paths (`favicon.*`, `public/`, `static/`, `app/`, `src/app/`, `assets/` and
+`docs/public/` variants, then `icon.*` and `logo.svg`) and the first valid file
+wins, with no directory walk and no pattern search. A file is used only when its
+no component of its path below the Project's folder is a symbolic link (the
+open is anchored to the folder and refuses a link at any depth, so an icon
+reached through a link, even one inside the folder, is not used; platforms
+without such an open find no icon), it is a regular file of at most 256 KB, and its first bytes agree with
+its extension (PNG and ICO signatures; an SVG must open as an SVG document). The
+host serves it on the authenticated Project API at `GET /api/projects/{id}/icon`
+with `nosniff`, a content security policy that forbids script, and an ETag, and
+answers a plain 404 when there is none. The renderer draws it as an `<img>` at
+the row's own icon size (12, 14, 16, 20 or 24px) with a small radius; it never
+inlines SVG markup. The picture is fetched once per Project per session, not
+per render or per navigation poll. The row's letter tile or folder glyph shows
+while it loads, when the Project has none, and when the image fails. A Project's
+colour still shows in its overview and menus but not on a row that shows an
+icon. A thread with no Project keeps the folder glyph and asks for nothing, and
+many rows in one Project share the one request. Nothing is fetched from a
+network, and a thread's authority does not change: the host shows the person
+their own files.
+
 The Project overview is one reading column in the 880px measure, starting
 below the title band. The header sits on the page: the Project tile at 40px
 (the colour picker), the name as the editable title with the kind ("Code

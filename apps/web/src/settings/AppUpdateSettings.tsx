@@ -21,6 +21,7 @@ import type {
   OctantHostBridge,
 } from "../shell/hostBridge";
 import { SettingRow, SettingsDisclosure } from "./primitives";
+import { acknowledgeWhatsNewOnce } from "./whatsNewAcknowledgement";
 import { WhatsNewDialog } from "./WhatsNewDialog";
 
 export interface AppUpdateSettingsProps {
@@ -130,7 +131,7 @@ export function AppUpdateSettings(props: AppUpdateSettingsProps) {
     void readWhatsNew()
       .then((document) => {
         setWhatsNew(document);
-        void acknowledgeWhatsNew?.();
+        acknowledgeWhatsNewOnce(document.version, () => acknowledgeWhatsNew?.());
       })
       .catch(() => {
         setWhatsNew({ kind: "empty", version: state?.currentVersion ?? "", showAfterApply: false });

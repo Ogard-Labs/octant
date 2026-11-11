@@ -1,5 +1,5 @@
 import { useId, useRef, useState } from "react";
-import { Camera, FolderOpen, Paperclip } from "lucide-react";
+import { Camera, FolderOpen, Plus } from "lucide-react";
 import { OctantButton, octantButtonClassName } from "../ui/base/OctantButton";
 import { OctantMenu } from "../ui/base/OctantMenu";
 import { WindowCaptureDialog, windowCaptureBridge } from "./WindowCaptureDialog";
@@ -14,9 +14,11 @@ export interface ComposerAttachButtonProps {
 
 /**
  * The visible control owns the only tab stop; refusals use the caller's status
- * line. In the macOS desktop app the paperclip opens a menu of two ways to
- * attach, a file or a capture of an open window; everywhere else it opens the
- * file chooser directly.
+ * line. In the macOS desktop app the plus opens a menu of two ways to attach,
+ * a file or a capture of an open window; everywhere else it opens the file
+ * chooser directly. It is a plus on a quiet round fill: it adds to the
+ * message, by more than one route, and it mirrors send at the pill's other
+ * end.
  */
 export function ComposerAttachButton(props: ComposerAttachButtonProps) {
   const input = useRef<HTMLInputElement>(null);
@@ -58,9 +60,9 @@ export function ComposerAttachButton(props: ComposerAttachButtonProps) {
           size="icon"
           title={props.refusedReason ?? "Add attachment"}
           type="button"
-          variant="ghost"
+          variant="secondary"
         >
-          <Paperclip aria-hidden="true" size={16} strokeWidth={1.8} />
+          <Plus aria-hidden="true" size={16} strokeWidth={1.8} />
         </OctantButton>
       ) : (
         <>
@@ -83,8 +85,8 @@ export function ComposerAttachButton(props: ComposerAttachButtonProps) {
               else if (value === "capture-window") setCapturing(true);
             }}
             selectionMode="action"
-            trigger={<Paperclip aria-hidden="true" size={16} strokeWidth={1.8} />}
-            triggerClassName={octantButtonClassName({ variant: "ghost", size: "icon" })}
+            trigger={<Plus aria-hidden="true" size={16} strokeWidth={1.8} />}
+            triggerClassName={octantButtonClassName({ variant: "secondary", size: "icon" })}
             triggerDisabled={props.busy === true}
             triggerLabel="Add attachment"
             value=""

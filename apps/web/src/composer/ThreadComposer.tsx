@@ -91,10 +91,16 @@ export interface ThreadComposerRow {
   /** Surface-specific controls: pickers, access policy, profile. */
   readonly leading?: ReactNode;
   /**
-   * The model, then the microphone, right of the context ring and before
-   * send. Access and approval choices lead the row instead, beside attach.
+   * The model, right of the context ring. Access and approval choices lead
+   * the row instead.
    */
   readonly trailing?: ReactNode;
+  /**
+   * The microphone, in the pill just before send: it writes into the prompt,
+   * so it stands with the two other controls that act on the message. In the
+   * row under the pill it read as a fact about the thread.
+   */
+  readonly dictate?: ReactNode;
   readonly actions: ThreadComposerActions;
 }
 
@@ -225,11 +231,11 @@ function ComposerSurface(props: ThreadComposerProps & { readonly held: boolean }
         )}
       </div>
     );
-  // The card holds what acts on the message being written and nothing else:
-  // attach, the prompt, and send. With the model, the access level and the
-  // context ring in a toolbar inside it, the card was a third taller than its
-  // prompt and read as a form; those describe the thread, so they stand on the
-  // page under the card with the thread's other facts.
+  // The pill holds what acts on the message being written and nothing else:
+  // attach, the prompt, the microphone and send. With the model, the access
+  // level and the context ring in a toolbar inside it, it was a third taller
+  // than its prompt and read as a form; those describe the thread, so they
+  // stand on the page under the pill with the thread's other facts.
   const message = (
     <>
       {props.queue}
@@ -254,6 +260,7 @@ function ComposerSurface(props: ThreadComposerProps & { readonly held: boolean }
         <ComposerSendCell
           actions={props.row.actions}
           compactingNoteId={compacting ? compactingNoteId : undefined}
+          dictate={props.row.dictate}
         />
       </div>
       {props.typeahead}
@@ -266,9 +273,11 @@ function ComposerSurface(props: ThreadComposerProps & { readonly held: boolean }
     props.row.actions.kind === "send-or-stop"
       ? `composer-actions ${props.row.actions.cellClassName}`
       : "composer-actions";
-  // One line under the card, in reading order: where the thread runs, the
-  // surface's own row (what the thread may do leading, the context ring and
-  // the model trailing), the plan's windows, and the thread's info. Only the
+  // One line under the pill, in reading order: where the thread runs, the
+  // surface's own row (what the thread may do leading, the model and then the
+  // context ring trailing), the plan's windows, and the thread's info. The
+  // ring ends the run: it is the one figure there, and at the end it does not
+  // shift when the model's name changes length. Only the
   // surface's controls are inside `.composer-row`: the row restyles every
   // control in it to one quiet treatment, which the info panel's fields and
   // the checkout's actions must not take.
@@ -289,8 +298,8 @@ function ComposerSurface(props: ThreadComposerProps & { readonly held: boolean }
         >
           {props.row.leading}
           <div className={trailingClassName}>
-            <ComposerContextMeter />
             {props.row.trailing}
+            <ComposerContextMeter />
           </div>
         </div>
       )}
@@ -300,15 +309,13 @@ function ComposerSurface(props: ThreadComposerProps & { readonly held: boolean }
   );
   // Suggested tasks stand above the composer, as the last thing in the
   // thread; inside the surface they made the box read as one tall composer.
-  // The stats line stands under the tray, where a person reads the last
+  // The stats line stands under the composer, where a person reads the last
   // turn's figures after sending.
   //
-  // The tray is the composer's outer layer: one recessed frame that holds the
-  // start row, the card and the line under it, so where a thread runs and how
-  // it runs read as parts of the composer and not as loose text on the page.
-  // The card is raised out of it. A held thread has no card, so the tray
-  // draws nothing then; it stays in the tree so the info panel in the line
-  // is never remounted.
+  // The frame groups the start row, the pill and the line under it, and
+  // draws nothing: the pill is the one raised thing and the rows are quiet
+  // lines on the page. A held thread has no pill; the frame stays in the tree
+  // so the info panel in the line is never remounted.
   const body = (
     <>
       {held ? null : <ComposerFollowUpSuggestions />}
@@ -396,17 +403,22 @@ function sendRefused(send: ThreadComposerSend, compactingNoteId: string | undefi
   );
 }
 
-/** Send, and Stop while a response streams: the card's trailing edge. */
+/**
+ * The pill's trailing edge: the microphone, then Send, and Stop while a
+ * response streams.
+ */
 function ComposerSendCell(props: {
   readonly actions: ThreadComposerActions;
   /** Set while the session compacts: send is held, and this note says why. */
   readonly compactingNoteId: string | undefined;
+  readonly dictate: ReactNode;
 }) {
   const refused = sendRefused(props.actions.send, props.compactingNoteId);
   if (props.actions.kind === "send") {
     const { send } = props.actions;
     return (
       <div className="composer-field__actions">
+        {props.dictate}
         <OctantButton
           aria-describedby={props.compactingNoteId}
           aria-label={send.ariaLabel}
@@ -424,6 +436,7 @@ function ComposerSendCell(props: {
   const { sending, send, stop } = props.actions;
   return (
     <div className="composer-field__actions">
+      {props.dictate}
       {sending && stop.forceStop !== undefined ? (
         <OctantButton
           onClick={stop.forceStop.onForceStop}

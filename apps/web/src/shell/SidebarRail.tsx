@@ -15,6 +15,7 @@ import { iconForVisibleMode, modeLabels } from "./ModeSwitcher";
 import { visibleModeOf, visibleModes, type VisibleMode } from "./workKind";
 import { TILE_ICONS, type SidebarTile, type SidebarTileId } from "./SidebarCountTiles";
 import { navigationIcon } from "./SidebarNavigation";
+import { ProjectIcon } from "../projects/ProjectIcon";
 import type { SidebarNavigationDescriptorId } from "./navigationModel";
 
 export interface SidebarRailProject {
@@ -177,9 +178,15 @@ export function SidebarRail(props: SidebarRailProps) {
             label={project.name}
             onSelect={project.onOpen}
           >
-            <span aria-hidden="true" className="sidebar-rail__project">
-              {projectInitial(project.name)}
-            </span>
+            <ProjectIcon
+              fallback={
+                <span aria-hidden="true" className="sidebar-rail__project">
+                  {projectInitial(project.name)}
+                </span>
+              }
+              projectId={String(project.id)}
+              size={20}
+            />
           </RailButton>
         ))}
         {props.onOpenActivity === undefined ? null : (

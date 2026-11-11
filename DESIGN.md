@@ -229,16 +229,16 @@ warning is wrong.
 Radius has one number per role. This table is its one statement; elsewhere
 this document names the token, not the number.
 
-| Token                 | Value  | Role                                                                                   |
-| --------------------- | ------ | -------------------------------------------------------------------------------------- |
-| `--oct-radius-sm`     | 8px    | A control or a row; a composer context chip                                            |
-| `--oct-radius-inset`  | 8px    | An object resting inside a card or well: a board card in its column                    |
-| `--oct-radius-md`     | 12px   | A card, panel, or well; a Settings section card; the window-frame cards; a user bubble |
-| `--oct-radius-lg`     | 14px   | Every composer and a dialog                                                            |
-| `--oct-radius-tray`   | 18px   | The composer's tray: the composer's corner carried out by the tray's 4px inset         |
-| `--oct-radius-pill`   | 9999px | Compact chips, meters, and circular icon controls only                                 |
-| `--radius` (`md`)     | 6px    | The recipes' compact step: xs and sm buttons, menu items (`rounded-md`)                |
-| `--radius-lg` / `-xl` | 8 / 12 | The recipes' control and card steps (`rounded-lg`, `rounded-xl`): a menu and a popover |
+| Token                   | Value  | Role                                                                                   |
+| ----------------------- | ------ | -------------------------------------------------------------------------------------- |
+| `--oct-radius-sm`       | 8px    | A control or a row; a composer context chip                                            |
+| `--oct-radius-inset`    | 8px    | An object resting inside a card or well: a board card in its column                    |
+| `--oct-radius-md`       | 12px   | A card, panel, or well; a Settings section card; the window-frame cards; a user bubble |
+| `--oct-radius-lg`       | 14px   | A dialog; an inset inside the composer's pill                                          |
+| `--oct-radius-composer` | 22px   | The composer's pill: half its one-line height, so the empty composer has round ends    |
+| `--oct-radius-pill`     | 9999px | Compact chips, meters, and circular icon controls only                                 |
+| `--radius` (`md`)       | 6px    | The recipes' compact step: xs and sm buttons, menu items (`rounded-md`)                |
+| `--radius-lg` / `-xl`   | 8 / 12 | The recipes' control and card steps (`rounded-lg`, `rounded-xl`): a menu and a popover |
 
 The `--oct-radius-*` tokens live in `octant.css`. The shadcn recipes derive
 their scale in `tailwind.css` from `--radius`, which `shadcn-theme.css` sets to
@@ -652,11 +652,17 @@ and cost with Previous and Next turn controls.
 **Plan meters.** Remaining plan usage stands beside the composer, right-aligned on
 the same row as where the work runs: the row under a thread's box, and on a
 start screen the end of the context-chip row above the card (it drops to its
-own right-aligned line when the chips leave no room). Two compact meters read
-`5h ▬▬▬ 85%  wk ▬▬ 43%`: the shortest window the provider reported and the
-longest, each a short name (`wk` for a week, `mo` for a month) in the primary
-ink, a bar about 52px wide, and the share **left** in tabular numerals, all at
-the 12px meta step in meta ink with no fill behind the row. They describe the
+own right-aligned line when the chips leave no room). A meter is a bar and the
+share **left**: `▬▬▬ 28%`. The bar is a 56px groove 6px tall with a raised
+fill (the pressed-control inset on the track, the bevel's highlight on the
+fill); the figure is in the primary ink at medium weight, in tabular numerals,
+at the 12px meta step, with no fill behind the row. One meter carries no name:
+the bar and its figure say what it is, and its tooltip and accessible name say
+which window ("7-day limit, 28% left"). When a provider reports two windows
+the shortest and the longest stand side by side, and only then does each lead
+with a quiet name in words, `5h ▬▬▬ 85%  week ▬▬ 43%`, because two bare
+figures cannot be told apart. (The single meter read `wk ▬ 28%`: a code to
+look up beside a hairline.) They describe the
 provider the composer will send to (a start screen follows the model menu's
 choice) and read the same host observation as the rail's rings, picked by window
 length (`windowSpan`). A provider that reports no window gets no meters, never
@@ -674,7 +680,7 @@ just before send, and send is the round accent-filled button with an up arrow.
 
 **Usage-limit warning.** On a start screen, when the chosen account has a window
 that is spent or at 80% used (the same levels the meters colour), a warning
-callout takes the full row above the context chips, in the tray above the
+callout takes the full row above the context chips, in the row above the
 card: which account, that it has
 reached or is close to its usage limit, and the reset time the provider gave.
 For each other ready account that has room (an observed window below the near
@@ -733,60 +739,68 @@ showed the question above a fixed proposal read as an invitation to write a
 different task.
 
 Every composer has one shape, on a start screen or under a thread, in Chat,
-Work, and Code: the same width, corner (`--oct-radius-lg`), hairline ring and
-mid shadow, the same insets, and the transcript's own type size, so a message
-looks the same in the box as in the bubble it becomes. The empty prompt is two
-lines tall on a start screen and one line under a thread, and grows as the
-person types: at two lines the empty reply box stood 114px tall under every
-conversation. Its width is the reading measure; in a split every
+Work, and Code: the same width, corner (`--oct-radius-composer`), hairline ring
+and mid shadow, the same insets, and the transcript's own type size, so a
+message looks the same in the box as in the bubble it becomes. The empty
+prompt is one line everywhere and grows as the person types: one line with
+12px above and under it is a 44px pill with half-circle ends, and a longer
+message keeps the same 22px corner. Its width is the reading measure; in a split every
 composer takes the narrowest pane's room, so composers side by side match
 instead of each filling its own pane. A start screen's composer docks 12px
 above the pane's foot, where a thread's sits, so the two line up across a
 split; a start screen's card is the same box, with its row of where-it-runs
 chips above it. Nothing about the box changes while a turn runs.
-The composer is one object in two layers. The outer layer is the tray: one
-frame (`--oct-radius-tray`, the tray fill, the smallest raised shadow, a 4px
-inset) around the start row, the card and the line under the card. The card
-is the raised card, a step lighter than the tray, so the surface a person
-types on is the highest thing in the composer. Over an application ground or
-under Window glass the tray is the glass surface (floor, thick tint, blur and
-stroke) and the card keeps the raised card's fill on it; a card that was glass
-too blurred the tray it stood in and came out darker than the tray. Under
-Window glass the card takes the control tint, a clear step over the tray: at
-the card tint the two read as one grey in the packaged app. The
-figures of the last turn stand on the page under the tray. A held thread has
-no card and draws no tray. (The rows were text standing on the page above and
-below the card, and the composer read as a field with labels around it.)
-The card holds what acts on the message being written and nothing else: attach
-at its leading edge, the prompt, and send (with Stop while a response streams)
-at its trailing edge, the two controls riding the prompt's last line. Both are
-28px square tiles with the control corner. Send is a quiet tile in the control
-fill until there is something to send, then the card's one solid control: the
-primary text colour as its fill, with the page colour on it. It is not the
-accent: a filled accent circle was the loudest thing on the page under an
-empty prompt, and the one round control on it. How the
-thread runs is one quiet line in the tray under the card, with no fill or edge
+The composer is the pill and two quiet lines. The pill is the one raised
+surface: the raised card's fill, the hairline ring and the mid shadow. The
+start row above it and the line under it stand on the page with no fill or
+edge, as the figures of the last turn do, so the pill is the one thing a
+person aims at. Over an application ground the pill is the glass surface
+(floor, thick tint, blur, and the glass stroke as its ring). Under Window
+glass it keeps the blur and the stroke and takes the control tint in place of
+the floor: the floor made it darker than the glass around it, a well where a
+raised surface should be.
+A held thread has no pill. (A tray drawn around the rows and the pill made
+the composer a block three rows tall, with the pill a box inside a box.)
+The pill holds what acts on the message being written and nothing else: attach
+at its leading edge, the prompt, then the microphone and send (with Stop while
+a response streams) at its trailing edge, the controls riding the prompt's
+last line. They are 28px circles, 8px in from the pill's ends, so each is
+concentric with the half circle it stands in; a square tile there left a wedge
+of the pill between its corner and the curve. Attach is a plus on the quiet
+control fill: it adds to the message, by more than one route in the desktop
+app. Send is a quiet circle in the control fill until there is something to
+send, then the pill's one solid control: the primary text colour as its fill,
+with the page colour on it. It is not the accent: a filled accent circle was
+the loudest thing on the page under an empty prompt. The microphone is in the
+pill because it writes into the prompt; in the line under it, it read as a
+fact about the thread. A notice about sending stays in the pill, under the
+prompt. How the
+thread runs is one quiet line under the pill, with no fill or edge
 of its own, in reading order: a thread's own context (Project, branch,
-checkout), the surface's row (image and access leading; the context ring, the
-model and the microphone trailing), the plan meters, and the Thread info icon
-button. The line is one row in a split pane as narrow as 520px: a Work
+checkout), the surface's row (image and access leading; the model and then
+the context ring trailing), the plan meters, and the Thread info icon
+button. The context ring ends the row's run: it is the one figure there, and
+at the end it does not move when the model's name changes length. Icon
+controls in the line stay square tiles with the control corner; only the
+pill's own controls are round. The line is one row in a split pane as narrow as 520px: a Work
 Project made from a folder names that folder once, not as Project and folder
 both, and a context with nothing in it holds no place. At a phone's width the
 line is two rows, the context with Thread info at its trailing edge and the
-surface's row under them. Only the
+surface's row under them. A thread with no place to name is two rows there too: the
+surface's row on two lines, with Thread info at the end of the second. Only the
 surface's row gives its controls the row's one quiet treatment; the checkout's
 actions and the info panel's fields keep their own. With that row inside
 it the card was a third taller than its prompt and read as a form; an empty
-reply box now stands 51px tall, where it stood 114px before the prompt went to
-one line and 93px after.
+composer now stands 44px tall, where a reply box stood 114px before the prompt
+went to one line.
 The model button names a chosen reasoning effort after the model in muted ink
 ("GPT-6 Astra Medium"); the provider default names none. Where the thread runs
 (Project, working folder, base branch, checkout, Environment, repository) is
-one row in the tray just above the card, as quiet chips set together from the
+one row just above the pill, as quiet chips set together from the
 left: meta ink and no fill at rest, a fill only under the pointer or while the
 chip's menu is open, the same as the access and model controls under the
-card. Plan meters keep the right end of that row. The card itself holds only
-attach, the prompt and send, so a start screen's composer and a thread's are
+pill. Plan meters keep the right end of that row. The pill itself holds only
+attach, the prompt, the microphone and send, so a start screen's composer and a thread's are
 the same object with the same row under it. Inside the card the row stood
 between the person and the prompt, and a control that was more than a label
 grew the card: a Project with extra folders drew a select, a labelled field
@@ -1072,7 +1086,14 @@ pressed control tint and its thumb, off, the primary text at 62%, so it is
 never the page's black on a dark track; a toned notice's ground is its tone at
 14%, and a plain notice takes the control tint. The shell's own loading state
 (Opening Settings) is clear on the shell's surface, where the opaque page
-colour turned the whole window black for the moment Settings took to load. On an OLED
+colour turned the whole window black for the moment Settings took to load. The
+window's own loading state, before any shell exists, is clear on the document's
+ground (the page colour in a browser, the app ground in a native window, the
+desktop through the glass once the host's glass is on), and the first frame is
+drawn in the mode the last window used, remembered in the renderer's storage,
+so a light theme never opens on the dark default. A native window is shown
+only when its first frame is ready; a glass window is created clear, and an
+opaque one keeps the window's own dark fill until the renderer paints. On an OLED
 preset over a bright desktop the opaque fills stood as near-black blocks on
 mid-grey glass: every Settings button, each message and the composer. Menus,
 popovers and dialogs sit outside the shell and stay opaque, and reduced
@@ -1264,31 +1285,30 @@ fallback; `Dark` and `Light` are the same values pinned to one mode.
 
 ### Semantic roles
 
-| Role                   | CSS variable                                        | Dark      | Light       | Use                                                        |
-| ---------------------- | --------------------------------------------------- | --------- | ----------- | ---------------------------------------------------------- |
-| Application background | `--octant-app-background`                           | `#151515` | `#fafaf9`   | Page ground: welcome, lists, Settings                      |
-| Chrome                 | `--octant-chrome`                                   | `#151515` | `#fafaf9`   | Title bars and shell chrome                                |
-| Sidebar                | `--octant-sidebar` / `--octant-sidebar-opaque`      | `#101010` | `#fafaf9`   | Navigation surface, on the page ground                     |
-| Workspace              | `--octant-workspace`                                | `#1a1a1a` | `#ffffff`   | Reading surface: transcript, editor                        |
-| Floating               | `--octant-floating` / `--octant-surface-raised`     | `#232323` | `#fdfdfc`   | Menus, popovers, dialogs                                   |
-| Card                   | `--octant-card` (derived)                           | floating  | workspace   | Raised objects: composer, setup, profiles                  |
-| Tray                   | `--octant-tray` (derived)                           | workspace | control mix | Recessed ground under a raised object (follow-up composer) |
-| Control                | `--octant-control` / `--octant-surface-muted`       | `#2b2b2b` | `#f0f0ef`   | Quiet control fill, secondary buttons                      |
-| Control hover          | `--octant-control-hover` / `--octant-surface-hover` | `#333333` | `#e8e8e6`   | Hover and highlighted rows                                 |
-| Control pressed        | `--octant-control-pressed`                          | `#3b3b3b` | `#dfdfdd`   | Pressed state                                              |
-| Border                 | `--octant-border`                                   | `#303030` | `#e0e0de`   | Hairline separation                                        |
-| Strong border          | `--octant-border-strong`                            | `#4d4d4d` | `#bdbdbb`   | Input and outline-button edges                             |
-| Strong divider         | `--octant-divider-strong`                           | `#808080` | `#6f6f6d`   | Rare structural divider                                    |
-| Primary text           | `--octant-text-primary`                             | `#f5f5f7` | `#141414`   | Body and control text                                      |
-| Secondary text         | `--octant-text-secondary`                           | `#bcbcc2` | `#45454a`   | Supporting copy                                            |
-| Muted text             | `--octant-text-muted`                               | `#949494` | `#666666`   | Metadata and hints at 12px; AA on the control fill         |
-| Primary foreground     | `--octant-primary-foreground`                       | `#171717` | `#ffffff`   | Text on primary fill                                       |
-| Focus role             | `--octant-focus-ring`                               | `#4d9ec8` | `#1f6f96`   | Theme compatibility and accent tints                       |
-| Selection              | `--octant-selection` / `--octant-surface-selected`  | `#2c2c2c` | `#ebebea`   | Selected rows and active controls                          |
-| Accent fill            | `--octant-accent`                                   | `#f5f5f7` | `#141414`   | One primary action or active mark                          |
-| Accent foreground      | `--octant-accent-foreground`                        | `#171717` | `#ffffff`   | Text on accent fill                                        |
-| Accent text            | `--octant-accent-text`                              | `#f5f5f7` | `#141414`   | Accent used as text; normal-text contrast                  |
-| Scrim                  | `--octant-scrim`                                    | `#000000` | `#000000`   | Opaque by contract; the bridge mixes it to a wash          |
+| Role                   | CSS variable                                        | Dark      | Light     | Use                                                |
+| ---------------------- | --------------------------------------------------- | --------- | --------- | -------------------------------------------------- |
+| Application background | `--octant-app-background`                           | `#151515` | `#fafaf9` | Page ground: welcome, lists, Settings              |
+| Chrome                 | `--octant-chrome`                                   | `#151515` | `#fafaf9` | Title bars and shell chrome                        |
+| Sidebar                | `--octant-sidebar` / `--octant-sidebar-opaque`      | `#101010` | `#fafaf9` | Navigation surface, on the page ground             |
+| Workspace              | `--octant-workspace`                                | `#1a1a1a` | `#ffffff` | Reading surface: transcript, editor                |
+| Floating               | `--octant-floating` / `--octant-surface-raised`     | `#232323` | `#fdfdfc` | Menus, popovers, dialogs                           |
+| Card                   | `--octant-card` (derived)                           | floating  | workspace | Raised objects: composer, setup, profiles          |
+| Control                | `--octant-control` / `--octant-surface-muted`       | `#2b2b2b` | `#f0f0ef` | Quiet control fill, secondary buttons              |
+| Control hover          | `--octant-control-hover` / `--octant-surface-hover` | `#333333` | `#e8e8e6` | Hover and highlighted rows                         |
+| Control pressed        | `--octant-control-pressed`                          | `#3b3b3b` | `#dfdfdd` | Pressed state                                      |
+| Border                 | `--octant-border`                                   | `#303030` | `#e0e0de` | Hairline separation                                |
+| Strong border          | `--octant-border-strong`                            | `#4d4d4d` | `#bdbdbb` | Input and outline-button edges                     |
+| Strong divider         | `--octant-divider-strong`                           | `#808080` | `#6f6f6d` | Rare structural divider                            |
+| Primary text           | `--octant-text-primary`                             | `#f5f5f7` | `#141414` | Body and control text                              |
+| Secondary text         | `--octant-text-secondary`                           | `#bcbcc2` | `#45454a` | Supporting copy                                    |
+| Muted text             | `--octant-text-muted`                               | `#949494` | `#666666` | Metadata and hints at 12px; AA on the control fill |
+| Primary foreground     | `--octant-primary-foreground`                       | `#171717` | `#ffffff` | Text on primary fill                               |
+| Focus role             | `--octant-focus-ring`                               | `#4d9ec8` | `#1f6f96` | Theme compatibility and accent tints               |
+| Selection              | `--octant-selection` / `--octant-surface-selected`  | `#2c2c2c` | `#ebebea` | Selected rows and active controls                  |
+| Accent fill            | `--octant-accent`                                   | `#f5f5f7` | `#141414` | One primary action or active mark                  |
+| Accent foreground      | `--octant-accent-foreground`                        | `#171717` | `#ffffff` | Text on accent fill                                |
+| Accent text            | `--octant-accent-text`                              | `#f5f5f7` | `#141414` | Accent used as text; normal-text contrast          |
+| Scrim                  | `--octant-scrim`                                    | `#000000` | `#000000` | Opaque by contract; the bridge mixes it to a wash  |
 
 The ladder is deliberate: in dark the page is near-black, the sidebar a step
 darker, the reading surface a step lighter, and cards lift one more step. In light the sidebar and the page share one near-white ground and the
@@ -1589,7 +1609,7 @@ a Settings section's group is the same hairline-ringed shape in its own fill,
 and neither draws a shadow —
 a card sits in the page, and shadow is reserved for something that floats
 above it. Welcome composers keep their raised frame.
-Chat, Work, and Code welcome composers share the `.composer` frame (`--oct-radius-lg`,
+Chat, Work, and Code welcome composers share the composer's pill (`--oct-radius-composer`,
 `--octant-shadow-md`) and one first-read hierarchy: one question, then the
 composer. Starter actions appear only when recent work does not already give
 the person a next step. In light the card is workspace white on the
@@ -1871,6 +1891,9 @@ rounded letter tile: the Project's first letter, white, on the colour the person
 picked from the theme palette, or a neutral tile when none is set. The same tile
 heads the Project overview, where it is the colour picker; the row's actions menu
 offers Colour with a No colour choice, and an archived Project cannot change it.
+A Project whose folder holds a favicon or app icon shows that picture, drawn as
+an image at the same 20px, in place of the tile (and in place of the folder
+glyph in lists); the tile and glyph remain for a Project without one.
 The colour is identity, never status: it never stands in for a warning, a
 selection, or an activity mark. One fixed trailing
 status position shows a working spinner, an attention symbol, a clock when a
@@ -3129,6 +3152,32 @@ cards. The rule for what the file holds is in
   diffs use the shared code block.
 - Surface actions wrap before titles are squeezed into narrow columns. Settings
   navigation remains a vertical, full-width list inside its narrow drawer.
+
+### What's new card and announcement
+
+After an update the person chose finishes applying, the full sidebar shows one
+small raised card above the profile row. A 64px band carries the Octant
+aperture on a soft wash of the theme's ink with a hint of the accent, so the
+card is depth and not an accent banner. Under it sit a "New · v{version}" line,
+the notes' first line as a one-line strong headline, the next paragraph as a
+muted two-line summary, and a quiet "Find out what's new" button with a
+trailing arrow that opens the notes dialog. A "Dismiss" icon button sits top
+right. Either one acknowledges
+the update, so the card shows once. The collapsed icon rail never draws the
+card and does not acknowledge it; it waits for the sidebar to open. A browser
+or remote client has no card.
+
+A release may bundle one announcement beside its notes. It replaces the card as
+a modal dialog laid out as a poster: a 200px picture running to the dialog's
+edges at its top (the aperture band with the mark at 56px when there is none),
+then a title, a body and the two answers, all centred. "Not now" is the quiet
+filled button and the primary button opens the notes, labelled "See what's
+new" unless the release names its own; the dialog opens with focus on the
+primary button. (With the picture inset and the text ranged left it read as a
+settings dialog that happened to hold an image.) Any answer acknowledges the
+update and the card is not shown afterwards. The announcement is a bounded file
+and an optional bundled picture; an invalid one is simply absent. The rule is in
+[Decisions and requirements](docs/design/decisions.md#whats-new-after-an-update).
 
 ### Mode-specific utility chrome
 
