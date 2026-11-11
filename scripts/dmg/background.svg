@@ -47,6 +47,22 @@
     <path d="M 372 178 L 391 178 L 387 158" transform="rotate(8 391 178)" />
   </g>
 
+  <!--
+    Plates under the two icon names. Finder draws a name in dark text whenever
+    a window has a background picture, so the dark name needs a light ground.
+    Measured in a real window: the name's centre sits 84 points under the
+    icon's centre, here y = 170 + 84 = 254.
+  -->
+  <defs>
+    <filter id="plate-shadow" x="-10%" y="-30%" width="120%" height="180%">
+      <feDropShadow dx="0" dy="1" stdDeviation="2" flood-color="#000" flood-opacity="0.25" />
+    </filter>
+  </defs>
+  <g fill="#ffffff" fill-opacity="0.88" filter="url(#plate-shadow)">
+    <rect x="116" y="242" width="128" height="24" rx="12" />
+    <rect x="416" y="242" width="128" height="24" rx="12" />
+  </g>
+
   <text x="330" y="338" text-anchor="middle" fill="#f4f5f6" fill-opacity="0.72"
         font-family="-apple-system, 'SF Pro Text', 'Helvetica Neue', Arial, sans-serif"
         font-size="15" letter-spacing="0.2">Drag to Applications to install</text>
