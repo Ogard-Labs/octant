@@ -66,6 +66,7 @@ export type RoutesDependencies = {
     CodeWiring,
     | "agentProfileRoutes"
     | "archivedWorktreeRoutes"
+    | "diskCleanupRoutes"
     | "codeProjectAccess"
     | "folderBrowseRoutes"
     | "projectRoutes"
@@ -161,6 +162,7 @@ export function wireRoutes(deps: RoutesDependencies) {
     agentMessageRoutes,
     agentProfileRoutes,
     archivedWorktreeRoutes,
+    diskCleanupRoutes,
     agentRunRouteDependencies,
     agentRunSettingsRoutes,
     androidToolchainRoutes,
@@ -350,6 +352,7 @@ export function wireRoutes(deps: RoutesDependencies) {
     (await spendCeilingRoutes(request)) ??
     (await protectedFilesRoutes(request)) ??
     (await archivedWorktreeRoutes(request)) ??
+    (await diskCleanupRoutes(request)) ??
     (await personMemoryRoutes(request)) ??
     (await usageDashboardRoutes(request)) ??
     (await localUsageHistoryRoutes(request)) ??

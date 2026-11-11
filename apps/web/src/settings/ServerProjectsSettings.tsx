@@ -22,6 +22,7 @@ import { OctantButton } from "../ui/base/OctantButton";
 import { OctantInput } from "../ui/base/OctantInput";
 import { OctantSelectField } from "../ui/base/OctantSelect";
 import { OctantSwitch } from "../ui/base/OctantSwitch";
+import { OctantDialogPresence } from "../ui/base/OctantDialogPresence";
 import { SettingsPanel, SettingsState, revealSettingsWithin } from "./primitives";
 import { ShieldServersSettings } from "./ShieldServersSettings";
 
@@ -349,16 +350,18 @@ export function ServerProjectsSettings(props: ServerProjectsSettingsProps) {
           </ul>
         )}
       </SettingsPanel>
-      {actionTarget === undefined || props.terminalClient === undefined ? null : (
-        <ProjectActionRunDialog
-          key={`${actionTarget.projectId}:${actionTarget.actionId}`}
-          client={props.terminalClient}
-          target={actionTarget}
-          open={true}
-          storageKey={`${props.actionStoragePrefix ?? "octant.server-action-run"}:${actionTarget.projectId}:${actionTarget.actionId}`}
-          onClose={() => setActionTarget(undefined)}
-        />
-      )}
+      <OctantDialogPresence>
+        {actionTarget === undefined || props.terminalClient === undefined ? null : (
+          <ProjectActionRunDialog
+            key={`${actionTarget.projectId}:${actionTarget.actionId}`}
+            client={props.terminalClient}
+            target={actionTarget}
+            open={true}
+            storageKey={`${props.actionStoragePrefix ?? "octant.server-action-run"}:${actionTarget.projectId}:${actionTarget.actionId}`}
+            onClose={() => setActionTarget(undefined)}
+          />
+        )}
+      </OctantDialogPresence>
       <SettingsPanel
         collapse={{ summary: "Bind a folder on a registered server" }}
         description="Octant checks the folder on the server before it binds it."

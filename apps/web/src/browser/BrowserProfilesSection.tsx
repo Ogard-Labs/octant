@@ -13,6 +13,7 @@ import { useCallback, useEffect, useState } from "react";
 import { SettingRow, SettingsSection, SettingsState } from "../settings/primitives";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantConfirmDialog } from "../ui/base/OctantConfirmDialog";
+import { OctantDialogPresence } from "../ui/base/OctantDialogPresence";
 import { BrowserCookieImportDialog } from "./BrowserCookieImportDialog";
 import { formatProfileSize } from "./browserProfileCopy";
 import { BrowserSessionGrantsSection } from "./BrowserSessionGrantsSection";
@@ -154,35 +155,37 @@ export function BrowserProfilesSection(props: BrowserProfilesSectionProps) {
             </OctantButton>
           </SettingRow>
         )}
-        {newName === undefined ? null : (
-          <OctantConfirmDialog
-            title="New account profile"
-            confirmLabel="Create profile"
-            confirmDisabled={newName.trim().length === 0 || newName.trim().length > 80}
-            pending={creating}
-            onCancel={() => setNewName(undefined)}
-            onConfirm={() => void createAccount()}
-            details={
-              <>
-                <label className="field">
-                  <span className="field__label">Profile name</span>
-                  <OctantInput
-                    aria-label="Profile name"
-                    value={newName}
-                    maxLength={80}
-                    onChange={(event) => setNewName(event.target.value)}
-                  />
-                </label>
-                {createError === undefined ? null : (
-                  <OctantAlert tone="danger">{createError}</OctantAlert>
-                )}
-              </>
-            }
-          >
-            This profile keeps its own sign-ins on this host. It is not exported or synced. Select
-            it explicitly before using it in a task.
-          </OctantConfirmDialog>
-        )}
+        <OctantDialogPresence>
+          {newName === undefined ? null : (
+            <OctantConfirmDialog
+              title="New account profile"
+              confirmLabel="Create profile"
+              confirmDisabled={newName.trim().length === 0 || newName.trim().length > 80}
+              pending={creating}
+              onCancel={() => setNewName(undefined)}
+              onConfirm={() => void createAccount()}
+              details={
+                <>
+                  <label className="field">
+                    <span className="field__label">Profile name</span>
+                    <OctantInput
+                      aria-label="Profile name"
+                      value={newName}
+                      maxLength={80}
+                      onChange={(event) => setNewName(event.target.value)}
+                    />
+                  </label>
+                  {createError === undefined ? null : (
+                    <OctantAlert tone="danger">{createError}</OctantAlert>
+                  )}
+                </>
+              }
+            >
+              This profile keeps its own sign-ins on this host. It is not exported or synced. Select
+              it explicitly before using it in a task.
+            </OctantConfirmDialog>
+          )}
+        </OctantDialogPresence>
         {loaded.kind === "ready" ? (
           <div className="setgroup">
             {loaded.profiles.map((summary, index) => (
@@ -232,35 +235,39 @@ export function BrowserProfilesSection(props: BrowserProfilesSectionProps) {
           </div>
         ) : null}
         {notice === undefined ? null : <SettingsState kind="empty">{notice}</SettingsState>}
-        {importingInto === undefined ? null : (
-          <BrowserCookieImportDialog
-            client={client}
-            onClose={(outcome) => {
-              setImportingInto(undefined);
-              if (outcome !== undefined) setNotice(outcome);
-              void refresh();
-            }}
-            profile={importingInto}
-          />
-        )}
-        {confirming === undefined ? null : (
-          <OctantConfirmDialog
-            confirmLabel={confirming.scope === "all" ? "Sign out" : "Clear cookies"}
-            destructive
-            onCancel={() => setConfirming(undefined)}
-            onConfirm={() => void clear(confirming.summary.profile, confirming.scope)}
-            pending={clearing}
-            title={
-              confirming.scope === "all"
-                ? `Sign out of ${confirming.summary.label}?`
-                : `Clear cookies in ${confirming.summary.label}?`
-            }
-          >
-            {confirming.scope === "all"
-              ? "Every page in this profile closes, and its cookies, site storage and cache are removed. Sites you were signed in to will ask you to sign in again."
-              : "Every page in this profile closes and its cookies are removed. Other site storage stays. Sites you were signed in to will ask you to sign in again."}
-          </OctantConfirmDialog>
-        )}
+        <OctantDialogPresence>
+          {importingInto === undefined ? null : (
+            <BrowserCookieImportDialog
+              client={client}
+              onClose={(outcome) => {
+                setImportingInto(undefined);
+                if (outcome !== undefined) setNotice(outcome);
+                void refresh();
+              }}
+              profile={importingInto}
+            />
+          )}
+        </OctantDialogPresence>
+        <OctantDialogPresence>
+          {confirming === undefined ? null : (
+            <OctantConfirmDialog
+              confirmLabel={confirming.scope === "all" ? "Sign out" : "Clear cookies"}
+              destructive
+              onCancel={() => setConfirming(undefined)}
+              onConfirm={() => void clear(confirming.summary.profile, confirming.scope)}
+              pending={clearing}
+              title={
+                confirming.scope === "all"
+                  ? `Sign out of ${confirming.summary.label}?`
+                  : `Clear cookies in ${confirming.summary.label}?`
+              }
+            >
+              {confirming.scope === "all"
+                ? "Every page in this profile closes, and its cookies, site storage and cache are removed. Sites you were signed in to will ask you to sign in again."
+                : "Every page in this profile closes and its cookies are removed. Other site storage stays. Sites you were signed in to will ask you to sign in again."}
+            </OctantConfirmDialog>
+          )}
+        </OctantDialogPresence>
       </SettingsSection>
       <BrowserSessionGrantsSection
         client={client}

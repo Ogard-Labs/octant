@@ -20,6 +20,10 @@ import {
   type ArchivedWorktreesClient,
 } from "@octant/client-runtime/archived-worktrees-client";
 import {
+  createDiskCleanupClient,
+  type DiskCleanupClient,
+} from "@octant/client-runtime/disk-cleanup-client";
+import {
   createPersonMemoryClient,
   type PersonMemoryClient,
 } from "@octant/client-runtime/person-memory-client";
@@ -230,6 +234,7 @@ export interface LaunchedShellClients {
   readonly spendCeilingClient: ReturnType<typeof createSpendCeilingClient>;
   readonly protectedFilesClient: ProtectedFilesClient;
   readonly archivedWorktreesClient: ArchivedWorktreesClient;
+  readonly diskCleanupClient: DiskCleanupClient;
   readonly personMemoryClient: PersonMemoryClient;
   readonly workMutationClient: ReturnType<typeof createWorkMutationClient>;
   readonly workOverviewClient: ReturnType<typeof createWorkOverviewClient>;
@@ -400,6 +405,7 @@ export function createLaunchedShellClients(
     spendCeilingClient: createSpendCeilingClient(port),
     protectedFilesClient: createProtectedFilesClient(port),
     archivedWorktreesClient: createArchivedWorktreesClient(port),
+    diskCleanupClient: createDiskCleanupClient(port),
     personMemoryClient: createPersonMemoryClient(port),
     localUsageHistoryClient:
       providerUsageLimitsClient === undefined ? undefined : createLocalUsageHistoryClient(port),

@@ -2,6 +2,7 @@ import type { CodeThreadId } from "@octant/contracts";
 import { useState } from "react";
 import { OctantAlert } from "../ui/base/OctantAlert";
 import { OctantButton } from "../ui/base/OctantButton";
+import { OctantDialogPresence } from "../ui/base/OctantDialogPresence";
 import type { PlannerProposalReview } from "./plannerProposalCreation";
 import { readPlannerAttempt } from "./plannerProposalAttempt";
 import {
@@ -132,15 +133,17 @@ export function CoordinatorProposalCards(
           </article>
         );
       })}
-      {review === undefined || reviewing === undefined ? null : (
-        <PlannerProposalReviewDialog
-          {...props}
-          heading="Review the proposed worker"
-          onClose={() => setReview(undefined)}
-          planner={planner}
-          review={review}
-        />
-      )}
+      <OctantDialogPresence>
+        {review === undefined || reviewing === undefined ? null : (
+          <PlannerProposalReviewDialog
+            {...props}
+            heading="Review the proposed worker"
+            onClose={() => setReview(undefined)}
+            planner={planner}
+            review={review}
+          />
+        )}
+      </OctantDialogPresence>
     </section>
   );
 }

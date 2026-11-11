@@ -5,6 +5,7 @@ import { SettingRow, SettingsSection, SettingsState } from "../settings/primitiv
 import type { PairedComputer, PairedComputersBridge } from "../shell/hostBridge";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantConfirmDialog } from "../ui/base/OctantConfirmDialog";
+import { OctantDialogPresence } from "../ui/base/OctantDialogPresence";
 import { OctantField, OctantFieldLabel } from "../ui/base/OctantField";
 import { OctantTextarea } from "../ui/base/OctantTextarea";
 import { PairedComputerClaim, type PairedComputerPairing } from "./PairedComputerClaim";
@@ -230,21 +231,23 @@ export function PairedComputersSettingsSection({
           </SettingRow>
         ))}
       </div>
-      {forgetting === undefined ? null : (
-        <OctantConfirmDialog
-          cancelLabel="Keep it"
-          confirmLabel="Forget computer"
-          destructive
-          onCancel={() => setForgetting(undefined)}
-          onConfirm={() => void forget(forgetting)}
-          restoreFocus={forgetOpener}
-          title={`Forget ${forgetting.displayName}?`}
-        >
-          Octant removes this app's saved key for it, closes the pages of its servers opened here,
-          and stops reaching it. To pair again, make a new pairing code on that computer. That
-          computer keeps listing this device until you revoke it there.
-        </OctantConfirmDialog>
-      )}
+      <OctantDialogPresence>
+        {forgetting === undefined ? null : (
+          <OctantConfirmDialog
+            cancelLabel="Keep it"
+            confirmLabel="Forget computer"
+            destructive
+            onCancel={() => setForgetting(undefined)}
+            onConfirm={() => void forget(forgetting)}
+            restoreFocus={forgetOpener}
+            title={`Forget ${forgetting.displayName}?`}
+          >
+            Octant removes this app's saved key for it, closes the pages of its servers opened here,
+            and stops reaching it. To pair again, make a new pairing code on that computer. That
+            computer keeps listing this device until you revoke it there.
+          </OctantConfirmDialog>
+        )}
+      </OctantDialogPresence>
       {message === undefined ? null : (
         <SettingsState kind={message.kind}>{message.text}</SettingsState>
       )}

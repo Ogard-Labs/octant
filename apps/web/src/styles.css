@@ -208,9 +208,9 @@ html[data-octant-theme-mode="light"] {
   --octant-surface-raised: #fdfdfc;
   --octant-control: #f0f0ef;
   --octant-surface-muted: #f0f0ef;
-  --octant-control-hover: #e8e8e6;
-  --octant-surface-hover: #e8e8e6;
-  --octant-control-pressed: #dfdfdd;
+  --octant-control-hover: #e2e2e1;
+  --octant-surface-hover: #e2e2e1;
+  --octant-control-pressed: #d3d3d2;
   --octant-border: #e0e0de;
   --octant-border-subtle: #e0e0de;
   --octant-border-strong: #bdbdbb;

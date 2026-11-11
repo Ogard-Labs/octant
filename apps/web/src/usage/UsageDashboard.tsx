@@ -23,6 +23,7 @@ import {
 import { useCallback, useEffect, useRef, useState } from "react";
 import { SurfaceEmpty, SurfaceHeader, SurfaceSection } from "../surface/SurfaceHeader";
 import { OctantConfirmDialog } from "../ui/base/OctantConfirmDialog";
+import { OctantDialogPresence } from "../ui/base/OctantDialogPresence";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantInput } from "../ui/base/OctantInput";
 import { OctantSelectField } from "../ui/base/OctantSelect";
@@ -468,23 +469,25 @@ export function UsageDashboard(props: UsageDashboardProps) {
         {data.hasMore ? " · More data available" : ""}
       </p>
 
-      {confirmAction !== null ? (
-        <ConfirmDialog
-          action={confirmAction}
-          onCancel={() => setConfirmAction(null)}
-          onConfirm={async () => {
-            const action = confirmAction;
-            setConfirmAction(null);
-            if (action.kind === "export") {
-              await runExport(action.format);
-            } else if (action.kind === "reset") {
-              await runReset();
-            } else {
-              await runRetain();
-            }
-          }}
-        />
-      ) : null}
+      <OctantDialogPresence>
+        {confirmAction !== null ? (
+          <ConfirmDialog
+            action={confirmAction}
+            onCancel={() => setConfirmAction(null)}
+            onConfirm={async () => {
+              const action = confirmAction;
+              setConfirmAction(null);
+              if (action.kind === "export") {
+                await runExport(action.format);
+              } else if (action.kind === "reset") {
+                await runReset();
+              } else {
+                await runRetain();
+              }
+            }}
+          />
+        ) : null}
+      </OctantDialogPresence>
     </section>
   );
 }
