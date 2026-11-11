@@ -27,7 +27,7 @@
   height: 30px;
   padding: 0 var(--oct-space-2);
   color: var(--oct-meta);
-  border: 1px solid var(--oct-border);
+  border: 1px solid var(--input);
   border-radius: var(--oct-radius-sm);
   background: var(--octant-control);
 }

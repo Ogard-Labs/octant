@@ -364,7 +364,7 @@ html:not([data-octant-reduced-transparency="true"])
 .code-file-explorer__search input {
   height: 30px;
   padding: 0 32px 0 var(--oct-space-8);
-  border-color: var(--oct-border);
+  border-color: var(--input);
   background: var(--oct-surface);
 }
 
@@ -2482,7 +2482,7 @@ html[data-octant-increased-contrast="true"] .github-picker__option[aria-selected
 .code-project-pull-requests__search input {
   height: 30px;
   padding-right: 32px;
-  border-color: var(--oct-border);
+  border-color: var(--input);
   border-radius: var(--oct-radius-sm);
   background: var(--oct-surface);
 }
