@@ -941,7 +941,7 @@ A routine is a host-owned, Project-bound definition that starts an ordinary Work
 
 - The dispatcher revalidates host, Project, binding, profile, provider, model and authority at every occurrence, and a stale definition never adopts replacement authority.
 - A routine runs as the host, so it works with no window open; automation-origin execution cannot create, edit, run, pause or archive a routine.
-- An agent can only propose a routine; a person confirms, and the host builds the definition from the thread's live facts with an approval-gated profile.
+- An agent can only propose a routine; a person confirms, and the host builds the definition from the thread's live facts with an approval-gated profile. When the person's own message asked for the routine, the agent sets `requestedByPerson` and the host creates it at once, paused, through the same draft and create path with no card; a self-suggested routine, a follow-up, and a turn in Plan still wait for the card.
 - A turn in Plan may propose, as it may offer a side task, and a thread in Plan does not refuse the confirm; a turn the host runs (a routine's run, a usage-limit resume) is still refused. The routine takes none of the thread's posture: it asks first, never runs in Plan, and the card's confirm is unchanged.
 - Built: a Work or Code thread's agent may list and read its Project's routines of the same mode with their recent runs, and ask the person to pause or archive a routine that is its thread's own (proposed or created from the thread, or whose run started it). The request waits as a card like a proposal and only the person's confirmation, as their own principal at the version the agent saw, changes it. Plan and every host-run turn, the routine's own run included, are refused: nobody is there to confirm. Resume, edit, run now and cancel stay the person's.
 - Built: the turn the dispatcher started for a run, named by the run identity the dispatcher passes in host-only start options, may report the run's result once (succeeded, nothing-to-do, needs-attention or failed, with a summary of at most 1 KB). It is journaled on the run, shown in Automation Center beside the run's status, and never changes the run's lifecycle or reaches a push notification.
@@ -2339,7 +2339,7 @@ Status: Built. Since: —. Detail: [Workspace: Tool lifecycles](workspace.md#too
 
 ### Routines and subagents
 
-Agents may propose routines and delegate work, but only a person creates a routine, and only the thread's agent starts a subagent.
+Agents may propose routines and delegate work, but a routine exists only through a person's confirmation or request (created paused, so it runs only once the person enables it), and only the thread's agent starts a subagent.
 
 - A proposed routine or follow-up waits as a suggestion chip; dismissing it declines. A routine's runs get at most the creating thread's access.
 - An agent's request to pause or archive its thread's routine (cancel, for a follow-up) waits as the same kind of card with the agent's reason; dismissing it keeps the routine. What a run's agent reported is shown beside that run in Automation Center.
