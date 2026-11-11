@@ -2179,18 +2179,22 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
             />
           </SelectionThreadScope>
         )}
-        <RewindDialog
-          busy={rewind?.busy === true}
-          files={rewind?.files ?? { kind: "loading" }}
-          {...(rewind?.message === undefined ? {} : { message: rewind.message })}
-          onClose={() => {
-            if (rewind?.busy !== true) setRewind(undefined);
-          }}
-          onRewind={(scope) => void runRewind(scope)}
-          open={rewind !== undefined}
-          removedTurns={rewind?.removedTurns}
-          {...(rewind?.rollback === undefined ? {} : { rollback: rewind.rollback })}
-        />
+        <OctantDialogPresence>
+          {rewind !== undefined ? (
+            <RewindDialog
+              busy={rewind?.busy === true}
+              files={rewind?.files ?? { kind: "loading" }}
+              {...(rewind?.message === undefined ? {} : { message: rewind.message })}
+              onClose={() => {
+                if (rewind?.busy !== true) setRewind(undefined);
+              }}
+              onRewind={(scope) => void runRewind(scope)}
+              open
+              removedTurns={rewind?.removedTurns}
+              {...(rewind?.rollback === undefined ? {} : { rollback: rewind.rollback })}
+            />
+          ) : null}
+        </OctantDialogPresence>
 
         {props.canvasClient === undefined || view === undefined ? null : (
           <div className="thread-column">

@@ -2618,21 +2618,25 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
             }
           />
         </SelectionThreadScope>
-        <RewindDialog
-          busy={rewind?.busy === true}
-          files={{
-            kind: "unavailable",
-            reason:
-              "Work takes no file checkpoints, so only the conversation can be rewound. Files stay as they are.",
-          }}
-          {...(rewind?.message === undefined ? {} : { message: rewind.message })}
-          onClose={() => {
-            if (rewind?.busy !== true) setRewind(undefined);
-          }}
-          onRewind={() => void runRewind()}
-          open={rewind !== undefined}
-          removedTurns={rewind?.removedTurns}
-        />
+        <OctantDialogPresence>
+          {rewind !== undefined ? (
+            <RewindDialog
+              busy={rewind?.busy === true}
+              files={{
+                kind: "unavailable",
+                reason:
+                  "Work takes no file checkpoints, so only the conversation can be rewound. Files stay as they are.",
+              }}
+              {...(rewind?.message === undefined ? {} : { message: rewind.message })}
+              onClose={() => {
+                if (rewind?.busy !== true) setRewind(undefined);
+              }}
+              onRewind={() => void runRewind()}
+              open
+              removedTurns={rewind?.removedTurns}
+            />
+          ) : null}
+        </OctantDialogPresence>
 
         {props.canvasClient === undefined ? null : (
           <div className="thread-column">
