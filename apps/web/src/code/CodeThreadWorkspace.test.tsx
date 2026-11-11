@@ -404,7 +404,7 @@ describe("Code host queue", () => {
 });
 
 describe("CodeThreadWorkspace", () => {
-  it("keeps the thread's guardrail level and its other facts in one info panel above the composer", async () => {
+  it("keeps the thread's guardrail level and its other facts in one info panel opened from the line under the composer", async () => {
     const user = userEvent.setup();
     const { container } = render(
       <CodeThreadWorkspace controller={controller()} threadId={threadId} />,
@@ -418,7 +418,10 @@ describe("CodeThreadWorkspace", () => {
     // details and continuing elsewhere are rows of the one panel.
     expect(panel).toContainElement(level);
     expect(level).not.toBeVisible();
-    expect(container.querySelector(".thread-composer__strip")).toContainElement(panel);
+    expect(container.querySelector(".composer-under")).toContainElement(panel);
+    // The panel is beside the composer's row, not in it: the row restyles
+    // every control inside it, and the panel's fields keep their own.
+    expect(container.querySelector(".composer-row")).not.toContainElement(panel);
     expect(
       screen.getByRole("button", { name: /Continue elsewhere/, hidden: true }),
     ).not.toBeVisible();

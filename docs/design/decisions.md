@@ -2111,7 +2111,7 @@ Octant looks like a calm, colourful workbench. Colour is the default (2026-11-02
 - Colour is the default and applies to everyone: a blue accent, amber warning, red failure, green success, coloured count tiles, board marks and connector marks. Colour never stands alone: a state also has a shape or a word. The Mono style draws the grey look; plain empty, loading and informational messages stay neutral in both.
 - The four count destinations keep one mark each wherever they show: icons in the rail, tiles when a wide window has no rail, and plain rows at 960px and narrower, the rail's own breakpoint. Icons in the rail and the rows stay in the sidebar ink in every style; only a tile's face carries its hue. The title band and the rail are both 44px.
 - Hierarchy comes from size, then weight, then colour. Text is sentence case, nothing is uppercase, and only the large title is bold.
-- Text uses three greys only: primary, secondary and muted. An accent swatch is the person's choice and never recolours status; Mono is a swatch that sets the Mono style.
+- Text uses three greys only: primary, secondary and muted. An accent swatch is the person's choice and never recolours status; Mono is a swatch that sets the Mono style. Swatches cover chromatic hues and neutrals (Steel, Slate, Silver, Graphite, Carbon, White); a swatch that cannot be seen on one mode's page writes a mode-only override with a silver for that mode.
 - Counts and token figures use English separators whatever the system locale; dates and times follow the locale.
 - Copy about where something runs says "this Mac" only when the host reports macOS, and uses neutral words ("this computer", "credential store") otherwise. The window's own platform never decides it.
 
@@ -2296,9 +2296,9 @@ Status: Built. Since: —. Detail: [Workspace: Panes and content navigation](wor
 
 ### Thread info
 
-What is true about a thread but is not part of its conversation has one home, a panel opened from the strip above the follow-up composer.
+What is true about a thread but is not part of its conversation has one home, a panel opened from the row under the follow-up composer.
 
-- Its rows are the access level in force with Access details, Reply detail, document delivery, Provider tools, Credential commands, Provider cloud sessions and Continue elsewhere, each only where it applies. The composer's toolbar keeps only what changes from one message to the next. Nothing else about the thread is drawn on the thread page outside the transcript and the composer.
+- Its rows are the access level in force with Access details, Reply detail, document delivery, Provider tools, Credential commands, Provider cloud sessions and Continue elsewhere, each only where it applies. The row under the composer's card keeps only what changes from one message to the next. Nothing else about the thread is drawn on the thread page outside the transcript and the composer.
 - Rows stay mounted while the panel is closed, and a row that waits for the person marks the panel's button.
 
 Status: Built. Since: —. Detail: [Workspace: Thread info](workspace.md#thread-info).
@@ -2398,7 +2398,7 @@ Every start screen shows one question and its composer. Code Home adds one card 
 - The composer paints first. Cards mount after the first commit, read only what the window's own authority returns, and are never mounted when off or unavailable.
 - Answers, Open, Stop and Start a fix go through the commands the open thread already uses. An option is words sent as the next turn; Start a fix only opens a draft.
 - An empty card shows one quiet line, never fake rows. Customize is stored in one shell setting and ignores unknown card ids.
-- A start screen's composer card holds only the prompt and its toolbar. Where the thread runs is one row of chips on the page above it, the working folder among them as a chip that opens its fields over the page.
+- A composer's card holds only attach, the prompt and send, on a start screen and under a thread alike. How the thread runs (access, the model, the context ring) is one row on the page under the card. Where a new thread runs is one row of chips on the page above it, the working folder among them as a chip that opens its fields over the page.
 - Suggestions sit directly under the composer, and everything below ends on the composer's edges.
 
 Status: Built. Since: —. Detail: [Workspace: Start-screen cards](workspace.md#start-screen-cards) and [Start screen: Card registry](start-screen.md#card-registry).

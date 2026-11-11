@@ -68,15 +68,15 @@ single-click continuation, and preservation of the composer draft.
 ## Thread info
 
 What is true about a thread but is not part of its conversation has one home:
-a quiet **Thread info** button at the end of the strip above the follow-up
-composer, after the plan meters. It opens one floating card above the strip,
+a quiet **Thread info** button at the end of the row under the follow-up
+composer, after the plan meters and the model. It opens one floating card above the row,
 at most 440px wide, whose rows are, in order and each only where it applies:
 the access level in force and where it came from (Work and Code) with its
 **Access details**, **Reply detail**, how the thread delivers documents
 (Code), **Provider tools** (a key provider's own setup for this thread),
 **Credential commands** (Code), **Provider cloud sessions** (Code, local
 host), and **Continue elsewhere**. A choice made once for the thread lives
-here, not in the composer's toolbar: the toolbar holds what a person changes
+here, not in the composer's row: the row holds what a person changes
 from one message to the next (attach, access, model) and had grown to eleven
 controls, several of them bare glyphs. Nothing else about
 the thread is drawn on the thread page outside the transcript and the
@@ -483,7 +483,7 @@ faster, with no fixed floor so a narrow pane keeps its status pill); without a
 Project the breadcrumb is the title alone. A header narrower than 520px (a
 pane in a split) drops the Project step too and names it in the title's
 tooltip, so the title is read whole instead of both steps being cut. The branch is not repeated here: it
-is in the composer's strip, beside the thread it runs. While the host projects the thread as executing, a "Running" pill (a neutral wash, not the theme's tint) with
+is in the line under the composer, beside the thread it runs. While the host projects the thread as executing, a "Running" pill (a neutral wash, not the theme's tint) with
 a spinner follows them; it carries no elapsed time because the host does not
 report when the turn began. A thread whose turn is parked on the agent's own
 approval, or on a question the turn asked, is not running: the pill reads
@@ -491,11 +491,11 @@ approval, or on a question the turn asked, is not running: the pill reads
 With content tabs open the bar holds the drag handle and the tabs alone: the
 Project and the Running or Needs you pill leave it. A Project name ahead of
 the tabs read as one more tab, so it moves into the handle's tooltip ("Project
-· Drag to move or split"), and the composer's strip still names it; each tab
+· Drag to move or split"), and the line under the composer still names it; each tab
 carries its own thread's state, a spinner in place of its provider mark while
 it runs and a small warning dot after its title while it waits on the person.
 At phone width (680px and below) the title row drops both chips so the title
-stays readable; the composer's context strip below the thread names the
+stays readable; the line under the composer names the
 Project and branch there.
 The model stays in the composer, not the title row. The tile holds its glyph
 so a later per-environment icon can replace it in place. Tab
@@ -1301,7 +1301,7 @@ owns budget enforcement, provenance, native-session identity, and journal rules.
 Under the composer of every thread, in Chat, Work, and Code and for every provider, a
 quiet stats line states what the thread used: its turns, input and output tokens,
 thinking tokens when reported, the cache hit, output speed, time to first token, and
-cost. The provider's account limit windows stand in the strip above the box, right of
+cost. The provider's account limit windows stand in the row under the box, right of
 the thread's context, one bar per window showing the share left; the stats line's
 switch hides the figures, not those bars
 (`composerLimitWindows` in `apps/web/src/context`, read from the context snapshot and
