@@ -2708,6 +2708,15 @@ and Tooltip. Composition rules:
   layer, so the one opened last paints on top: a menu or popover opened inside
   a dialog or the narrow dock sheet appears above it, and Escape closes the
   innermost surface first.
+- Layers are tokens: page chrome stays at or below `--oct-z-overlay` (40), a
+  notice sits at `--oct-z-toast` (45), dialogs, sheets, menus and popovers at
+  `--oct-z-floating` (50), and selects, tooltips and hover cards at
+  `--oct-z-modal` (60). A notice therefore lies above the page and under
+  everything the person opens, and the `.toast-stack` column takes no press
+  outside its notices. A notice that said the app had stopped unexpectedly
+  once sat above an open menu in the right dock's header and took the clicks
+  meant for its items. A new floating surface takes one of these tokens, never
+  a number of its own, and nothing in the workspace goes above z-index 7.
 - A list a person picks from draws one row. One line is 28px
   (`--oct-menu-row-h`), its words stand 8px in from the row's edge
   (`--oct-menu-row-inset`), and the rows stand 4px in from the popup's edge

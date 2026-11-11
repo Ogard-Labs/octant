@@ -1085,4 +1085,58 @@ describe("the public-block visual language", () => {
       );
     });
   });
+
+  describe("the layer a notice sits on", () => {
+    // A notice that said the app had stopped unexpectedly landed on an open
+    // menu in the right dock's header and took the clicks meant for its
+    // items. jsdom does not stack, so this pins the numbers that decide it;
+    // the order was measured in a browser with `elementFromPoint`.
+    const system = readFileSync(join(webRoot, "styles", "octant.css"), "utf8");
+    const dock = readFileSync(join(webRoot, "styles", "dock.css"), "utf8");
+    const base = readFileSync(join(webRoot, "styles.css"), "utf8");
+    const layer = (name: string) =>
+      Number(new RegExp(`--oct-z-${name}:\\s*(\\d+);`).exec(system)?.[1]);
+    const ruleBody = (css: string, selector: string) =>
+      new RegExp(`(?:^|\\})\\s*${selector.replace(/[.]/g, "\\.")}\\s*\\{([^}]*)\\}`, "m").exec(
+        css,
+      )?.[1] ?? "";
+
+    it("puts a notice above the page and below everything the person opens", () => {
+      expect(layer("toast")).toBeGreaterThan(layer("sticky"));
+      expect(layer("toast")).toBeGreaterThan(layer("overlay"));
+      expect(layer("toast")).toBeLessThan(layer("floating"));
+      expect(layer("floating")).toBeLessThan(layer("modal"));
+    });
+
+    it("keeps the shadcn popups on the floating layer", () => {
+      for (const recipe of ["dropdown-menu", "popover", "select", "combobox"]) {
+        const source = readFileSync(join(webRoot, "ui", "shadcn", `${recipe}.tsx`), "utf8");
+        expect(source).toContain(`"z-${layer("floating")} `);
+      }
+    });
+
+    it("draws dialogs and sheets on the floating layer", () => {
+      for (const part of [
+        ".octant-dialog__backdrop",
+        ".octant-dialog__viewport",
+        ".octant-sheet__backdrop",
+        ".octant-sheet__viewport",
+      ]) {
+        expect(ruleBody(dock, part)).toContain("z-index: var(--oct-z-floating);");
+      }
+    });
+
+    it("puts a tooltip and a hover card above the notices they may overlap", () => {
+      for (const part of [".octant-tooltip__positioner", ".octant-preview-card__positioner"]) {
+        expect(ruleBody(system, part)).toContain("z-index: var(--oct-z-modal);");
+      }
+    });
+
+    it("stacks every notice on the toast layer and lets only a notice take a press", () => {
+      expect(ruleBody(system, ".toast-stack")).toContain("z-index: var(--oct-z-toast);");
+      expect(ruleBody(system, ".toast-stack")).toContain("pointer-events: none;");
+      expect(ruleBody(system, ".toast")).toContain("pointer-events: auto;");
+      expect(ruleBody(base, ".computer-use-activity")).toContain("z-index: var(--oct-z-toast);");
+    });
+  });
 });

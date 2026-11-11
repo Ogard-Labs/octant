@@ -713,14 +713,14 @@
    history and More menu opened behind the sheet, out of reach. */
 .octant-dialog__backdrop {
   position: fixed;
-  z-index: 50;
+  z-index: var(--oct-z-floating);
   inset: 0;
   background: var(--oct-scrim);
 }
 
 .octant-dialog__viewport {
   position: fixed;
-  z-index: 50;
+  z-index: var(--oct-z-floating);
   inset: 0;
   display: flex;
   align-items: center;
@@ -761,14 +761,14 @@
    its own; what it holds lays itself out to the edges. */
 .octant-sheet__backdrop {
   position: fixed;
-  z-index: 50;
+  z-index: var(--oct-z-floating);
   inset: 0;
   background: color-mix(in srgb, var(--octant-scrim) 34%, transparent);
 }
 
 .octant-sheet__viewport {
   position: fixed;
-  z-index: 50;
+  z-index: var(--oct-z-floating);
   inset: 0;
   display: flex;
   align-items: center;

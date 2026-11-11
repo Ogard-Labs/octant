@@ -817,7 +817,7 @@ html[data-octant-native-host="true"]:not([data-octant-host-vibrancy="active"]) b
   position: fixed;
   right: 16px;
   bottom: 16px;
-  z-index: 80;
+  z-index: var(--oct-z-toast);
   display: grid;
   width: min(340px, calc(100vw - 32px));
   max-height: min(440px, calc(100vh - 32px));
