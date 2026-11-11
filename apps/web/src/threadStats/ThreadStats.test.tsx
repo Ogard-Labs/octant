@@ -315,7 +315,11 @@ describe("the stats line in a thread's composer", () => {
     const under = container.querySelector(".composer-under");
     const line = screen.getByTestId("thread-stats-line");
     expect(container.querySelector(".thread-composer__surface")?.nextElementSibling).toBe(under);
-    expect(under?.nextElementSibling).toBe(line);
+    // The line of facts is the last row of the tray; the figures stand on the
+    // page under the tray.
+    const tray = under?.parentElement;
+    expect(tray).toHaveClass("composer-frame");
+    expect(tray?.nextElementSibling).toBe(line);
     expect(figures(line).join(" · ")).toContain("↑ 48k in · ↓ 3.1k out · cache 92%");
     expect(within(line).queryByText("5h")).not.toBeInTheDocument();
     expect(under).toHaveTextContent("Project · branch");

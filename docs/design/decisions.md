@@ -2399,7 +2399,7 @@ Every start screen shows one question and its composer. Code Home adds one card 
 - The composer paints first. Cards mount after the first commit, read only what the window's own authority returns, and are never mounted when off or unavailable.
 - Answers, Open, Stop and Start a fix go through the commands the open thread already uses. An option is words sent as the next turn; Start a fix only opens a draft.
 - An empty card shows one quiet line, never fake rows. Customize is stored in one shell setting and ignores unknown card ids.
-- A composer's card holds only attach, the prompt and send, on a start screen and under a thread alike. How the thread runs (access, the model, the context ring) is one row on the page under the card. Where a new thread runs is one row of chips on the page above it, the working folder among them as a chip that opens its fields over the page.
+- A composer's card holds only attach, the prompt and send, on a start screen and under a thread alike. How the thread runs (access, the model, the context ring) is one row under the card. Where a new thread runs is one row of chips above it. Both rows and the card are held by the composer's tray, one raised frame a step under the card, so the composer is one object in two layers; the tray is the glass surface over a ground or under Window glass. The working folder is one of the chips above the card, and opens its fields over the page.
 - Suggestions sit directly under the composer, and everything below ends on the composer's edges.
 
 Status: Built. Since: —. Detail: [Workspace: Start-screen cards](workspace.md#start-screen-cards) and [Start screen: Card registry](start-screen.md#card-registry).
