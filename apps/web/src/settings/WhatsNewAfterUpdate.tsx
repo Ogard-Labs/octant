@@ -1,51 +1,25 @@
-import { useEffect, useState } from "react";
-import type { BundledWhatsNew, OctantHostBridge } from "../shell/hostBridge";
+import { WhatsNewAnnouncementDialog } from "./WhatsNewAnnouncementDialog";
 import { WhatsNewDialog } from "./WhatsNewDialog";
-
-export interface WhatsNewAfterUpdateProps {
-  readonly hostBridge?: OctantHostBridge;
-  readonly firstRunVisible: boolean;
-}
+import type { WhatsNewController } from "./useWhatsNewAfterUpdate";
 
 /**
- * After a version the person chose to install finishes applying on relaunch,
- * show what that version changed. First-run setup stays out of it.
+ * The shell's two modal surfaces for a release: the announcement, when one is
+ * bundled, and the notes dialog either one opens. The sidebar draws the card.
  */
-export function WhatsNewAfterUpdate(props: WhatsNewAfterUpdateProps) {
-  const read = props.hostBridge?.readBundledWhatsNew;
-  const acknowledge = props.hostBridge?.acknowledgeWhatsNew;
-  const [document, setDocument] = useState<BundledWhatsNew>();
-  const [open, setOpen] = useState(false);
-
-  useEffect(() => {
-    if (read === undefined || props.firstRunVisible) return;
-    let cancelled = false;
-    void read()
-      .then((next) => {
-        if (cancelled) return;
-        setDocument(next);
-        if (next.kind === "notes" && next.showAfterApply) setOpen(true);
-      })
-      .catch(() => {
-        if (!cancelled) {
-          setDocument({ kind: "empty", version: "", showAfterApply: false });
-        }
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [props.firstRunVisible, read]);
-
-  if (read === undefined) return null;
-
+export function WhatsNewAfterUpdate(props: { readonly controller: WhatsNewController }) {
+  const controller = props.controller;
   return (
-    <WhatsNewDialog
-      document={document}
-      onClose={() => {
-        setOpen(false);
-        void acknowledge?.();
-      }}
-      open={open}
-    />
+    <>
+      <WhatsNewAnnouncementDialog
+        announcement={controller.announcement}
+        onNotNow={controller.dismiss}
+        onOpenNotes={controller.openNotes}
+      />
+      <WhatsNewDialog
+        document={controller.document}
+        onClose={controller.closeNotes}
+        open={controller.notesOpen}
+      />
+    </>
   );
 }

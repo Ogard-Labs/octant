@@ -40,6 +40,7 @@ import type {
   BrowserSurfaceTabCommand,
   BrowserSurfaceTabState,
   BundledWhatsNew,
+  BundledWhatsNewAnnouncement,
   CanvasPrototypeOpenRequest,
   CanvasPrototypeOpenResult,
   CanvasPrototypeSurfacePreparation,
@@ -2686,11 +2687,54 @@ function decodeBundledWhatsNew(value: unknown): BundledWhatsNew {
   ) {
     throw new TypeError("Invalid What's new document.");
   }
+  const announcement =
+    value.announcement === undefined ? undefined : decodeWhatsNewAnnouncement(value.announcement);
   return Object.freeze({
     kind: "notes",
     version: value.version,
     text: value.text,
     showAfterApply: value.showAfterApply,
+    ...(announcement === undefined ? {} : { announcement }),
+  });
+}
+
+/**
+ * Re-checks what main already bounded: a compromised or confused main process
+ * must not hand the renderer an unbounded string or a picture that is not an
+ * inline image.
+ */
+function decodeWhatsNewAnnouncement(value: unknown): BundledWhatsNewAnnouncement {
+  const bounded = (field: unknown, max: number): field is string =>
+    typeof field === "string" && field.length > 0 && field.length <= max;
+  if (
+    !isRecord(value) ||
+    !bounded(value.title, 80) ||
+    !bounded(value.body, 600) ||
+    (value.actionLabel !== undefined && !bounded(value.actionLabel, 32))
+  ) {
+    throw new TypeError("Invalid What's new announcement.");
+  }
+  let picture: BundledWhatsNewAnnouncement["picture"];
+  if (value.picture !== undefined) {
+    if (
+      !isRecord(value.picture) ||
+      typeof value.picture.dataUrl !== "string" ||
+      value.picture.dataUrl.length > 720_000 ||
+      !/^data:image\/(png|jpeg|webp);base64,[A-Za-z0-9+/]+=*$/.test(value.picture.dataUrl) ||
+      (value.picture.alt !== undefined && !bounded(value.picture.alt, 160))
+    ) {
+      throw new TypeError("Invalid What's new announcement.");
+    }
+    picture = Object.freeze({
+      dataUrl: value.picture.dataUrl,
+      ...(value.picture.alt === undefined ? {} : { alt: value.picture.alt }),
+    });
+  }
+  return Object.freeze({
+    title: value.title,
+    body: value.body,
+    ...(value.actionLabel === undefined ? {} : { actionLabel: value.actionLabel }),
+    ...(picture === undefined ? {} : { picture }),
   });
 }
 

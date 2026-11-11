@@ -4273,6 +4273,127 @@ html:not([data-octant-reduced-transparency="true"], [data-octant-increased-contr
   color: var(--octant-text-secondary);
 }
 
+/* The aperture on a wash of the theme's own ink and accent. The accent is a
+   tint here, never a fill, so the band reads as depth rather than a banner. */
+.aperture-art {
+  display: grid;
+  place-items: center;
+  color: var(--octant-text-secondary);
+  background:
+    radial-gradient(
+      120% 140% at 50% 0%,
+      color-mix(in oklab, var(--oct-accent) 18%, transparent),
+      transparent 70%
+    ),
+    linear-gradient(
+      135deg,
+      color-mix(in oklab, var(--octant-text-primary) 6%, transparent),
+      color-mix(in oklab, var(--octant-text-primary) 2%, transparent)
+    );
+}
+
+.aperture-art__mark {
+  display: block;
+}
+
+/* Above the profile row, which keeps the foot of the sidebar. */
+.whats-new-card {
+  position: relative;
+  margin-top: auto;
+  margin-bottom: var(--oct-space-2);
+  overflow: hidden;
+  border-radius: var(--oct-radius-md);
+  background: var(--octant-card);
+  box-shadow: var(--octant-shadow-sm);
+}
+
+.whats-new-card + .sidebar-foot {
+  margin-top: 0;
+}
+
+.whats-new-card__art {
+  height: 64px;
+}
+
+.whats-new-card__dismiss {
+  position: absolute;
+  top: var(--oct-space-1);
+  right: var(--oct-space-1);
+}
+
+.whats-new-card__body {
+  display: grid;
+  justify-items: start;
+  gap: var(--oct-space-1);
+  padding: var(--oct-space-3);
+}
+
+.whats-new-card__body > p {
+  margin: 0;
+  max-width: 100%;
+}
+
+.whats-new-card__kicker {
+  color: var(--octant-text-secondary);
+  font-size: var(--oct-text-xs);
+}
+
+.whats-new-card__headline {
+  overflow: hidden;
+  color: var(--octant-text-primary);
+  font-size: var(--oct-text-sm);
+  font-weight: var(--oct-weight-strong);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.whats-new-card__summary {
+  display: -webkit-box;
+  overflow: hidden;
+  color: var(--octant-text-secondary);
+  font-size: var(--oct-text-xs);
+  line-height: 1.4;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.whats-new-card__body > button {
+  margin-top: var(--oct-space-1);
+  margin-left: calc(-1 * var(--oct-space-2));
+}
+
+.whats-new-announcement {
+  --octant-dialog-width: 440px;
+  display: grid;
+  gap: var(--oct-space-3);
+  overflow: hidden;
+}
+
+.whats-new-announcement__art,
+.whats-new-announcement__picture {
+  width: 100%;
+  height: 180px;
+  border-radius: var(--oct-radius-md);
+}
+
+.whats-new-announcement__picture {
+  display: block;
+  object-fit: cover;
+}
+
+.whats-new-announcement__body {
+  margin: 0;
+  color: var(--octant-text-secondary);
+  font-size: var(--oct-text-sm);
+  line-height: 1.45;
+}
+
+.whats-new-announcement__actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--oct-space-2);
+}
+
 .code-home__project-setup {
   display: flex;
   flex-wrap: wrap;

@@ -3126,6 +3126,27 @@ cards. The rule for what the file holds is in
 - Surface actions wrap before titles are squeezed into narrow columns. Settings
   navigation remains a vertical, full-width list inside its narrow drawer.
 
+### What's new card and announcement
+
+After an update the person chose finishes applying, the full sidebar shows one
+small raised card above the profile row. A 64px band carries the Octant
+aperture on a soft wash of the theme's ink with a hint of the accent, so the
+card is depth and not an accent banner. Under it sit a "New · v{version}" line,
+the notes' first line as a one-line strong headline, the next paragraph as a
+muted two-line summary, and a quiet "Find out what's new" button that opens the
+notes dialog. A "Dismiss" icon button sits top right. Either one acknowledges
+the update, so the card shows once. The collapsed icon rail never draws the
+card and does not acknowledge it; it waits for the sidebar to open. A browser
+or remote client has no card.
+
+A release may bundle one announcement beside its notes. It replaces the card as
+a modal dialog: a picture on top (the aperture band when there is none), a
+title, a body, "Not now", and a primary button that opens the notes, labelled
+"See what's new" unless the release names its own. Any answer acknowledges the
+update and the card is not shown afterwards. The announcement is a bounded file
+and an optional bundled picture; an invalid one is simply absent. The rule is in
+[Decisions and requirements](docs/design/decisions.md#whats-new-after-an-update).
+
 ### Mode-specific utility chrome
 
 Chat admits only the Agents dock when helpers exist, it was explicitly requested,

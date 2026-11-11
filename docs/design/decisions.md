@@ -2077,6 +2077,7 @@ Release notes show once after an update the person chose finishes applying, and 
 
 - Settings > General > Updates links the notes for the running build. _Here only._
 - First-run setup never shows release notes, and opening What's New is never counted or reported. _Here only._
+- When the notes are due, the full sidebar shows a What's new card at its foot (version, the notes' first line, the next paragraph, and a button that opens the notes); the collapsed icon rail neither draws nor acknowledges it. A release may bundle one announcement (`whats-new-announcement.json`, strict and size-bounded, with an optional picture beside it whose name cannot leave the folder); it shows once as a dialog instead of the card. Dismissing the card, answering the announcement, or opening the notes acknowledges the update. An invalid announcement is treated as absent. Nothing here contacts a network, and a browser or remote client shows neither. _Here only._
 
 Status: Built. Since: —. Detail: [Architecture: Current Release Boundary](../architecture.md#current-release-boundary).
 

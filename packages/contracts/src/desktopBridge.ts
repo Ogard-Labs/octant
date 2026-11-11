@@ -187,6 +187,22 @@ export type AppUpdateInstallOutcome =
   | { readonly kind: "not-ready" };
 
 /**
+ * One feature announcement a release bundles beside its notes. Desktop reads
+ * and bounds it; the picture arrives as a data URL so the renderer never
+ * reads disk or fetches anything.
+ */
+export interface BundledWhatsNewAnnouncement {
+  readonly title: string;
+  readonly body: string;
+  readonly actionLabel?: string;
+  readonly picture?: {
+    readonly dataUrl: string;
+    /** Absent means the picture is decorative. */
+    readonly alt?: string;
+  };
+}
+
+/**
  * Bundled notes for the running desktop build. Absent on a remote client,
  * which must not fetch notes or pretend to update the Machine.
  */
@@ -196,6 +212,8 @@ export type BundledWhatsNew =
       readonly version: string;
       readonly text: string;
       readonly showAfterApply: boolean;
+      /** Present only when notes are due and the release bundles a valid announcement. */
+      readonly announcement?: BundledWhatsNewAnnouncement;
     }
   | {
       readonly kind: "empty";
