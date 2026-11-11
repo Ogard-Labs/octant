@@ -13,12 +13,23 @@ import { GitHubRepositoryPicker } from "../code/GitHubRepositoryPicker";
 import { absoluteTimeFormatter, relativeTimeLabel } from "../lib/relativeTime";
 import { useDebouncedValue } from "../lib/useDebouncedValue";
 import { Surface, SurfaceHeader } from "../surface/SurfaceHeader";
+import {
+  WorkList,
+  WorkListGroup,
+  WorkListRow,
+  WorkListSortMenu,
+  type WorkListState,
+} from "../surface/WorkList";
+import {
+  defaultBoardStorage,
+  readStoredValue,
+  writeStoredValue,
+} from "../threadBoard/threadBoardState";
 import { OctantAlert } from "../ui/base/OctantAlert";
 import { OctantBadge } from "../ui/base/OctantBadge";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantInput } from "../ui/base/OctantInput";
 import { OctantPopover } from "../ui/base/OctantPopover";
-import { OctantSelectField } from "../ui/base/OctantSelect";
 import { OctantToggleGroup, OctantToggleGroupItem } from "../ui/base/OctantToggleGroup";
 import { describeGithubRemediation } from "./githubRemediation";
 import {
@@ -45,7 +56,11 @@ export interface GitHubIssueBrowserProps {
   readonly onClose?: () => void;
   /** Hands the issue being read to a new Code thread as its context. */
   readonly onStartThread?: (issue: RepositoryIssueRow) => void;
+  /** Injectable for tests; defaults to `window.localStorage` when available. */
+  readonly storage?: Pick<Storage, "getItem" | "setItem">;
 }
+
+const GROUP_STORAGE_KEY = "octant.github.issues.group-by-repository";
 
 type IssueScope = "all" | "repository";
 
@@ -138,6 +153,10 @@ export function GitHubIssueBrowser(props: GitHubIssueBrowserProps) {
   const [repositoryPickerOpen, setRepositoryPickerOpen] = useState(false);
   const [stateFilter, setStateFilter] = useState<GithubIssueStateFilter>("open");
   const [sort, setSort] = useState<IssueSort>(DEFAULT_ISSUE_SORT);
+  const storage = props.storage ?? defaultBoardStorage();
+  const [grouped, setGrouped] = useState<boolean>(
+    () => readStoredValue(storage, GROUP_STORAGE_KEY, (value) => value) === "true",
+  );
   const [search, setSearch] = useState("");
   const debouncedSearch = useDebouncedValue(search.trim(), SEARCH_DEBOUNCE_MS);
   const [list, setList] = useState<IssueListState>({ kind: "idle" });
@@ -369,6 +388,11 @@ export function GitHubIssueBrowser(props: GitHubIssueBrowserProps) {
     return [];
   }, [across, list, repository, scope, sort]);
 
+  // Repository order and grouping only mean something across repositories.
+  const sortOptions = ISSUE_SORT_OPTIONS.filter(
+    (option) => scope === "all" || option.id !== "repository",
+  ).map((option) => ({ value: option.id, label: option.label }));
+  const groupRows = grouped && scope === "all";
   const hasRecents = recents !== undefined && recents.length > 0;
   const browsing = scope === "all" || repository !== undefined;
   const repositoryLabel =
@@ -437,11 +461,60 @@ export function GitHubIssueBrowser(props: GitHubIssueBrowserProps) {
     else void loadList();
   };
 
+  const renderRows = (list: ReadonlyArray<RepositoryIssueRow>) => (
+    <WorkList ariaLabel="GitHub issues">
+      {list.map((row) => {
+        const current =
+          selected !== undefined &&
+          selected.owner === row.owner &&
+          selected.name === row.name &&
+          selected.number === row.number;
+        return (
+          <li key={`${row.owner}/${row.name}#${row.number}`}>
+            <WorkListRow
+              author={row.author}
+              number={row.number}
+              onSelect={() => setSelected({ owner: row.owner, name: row.name, number: row.number })}
+              {...(scope === "all" ? { repository: row.name } : {})}
+              selected={current}
+              selection="current"
+              state={issueStateGlyph(row.state)}
+              title={row.title}
+              updatedAt={row.updatedAt}
+            />
+          </li>
+        );
+      })}
+    </WorkList>
+  );
+
   return (
     <Surface ariaLabel="GitHub issues" className="github-issue-browser" measure="wide">
       <SurfaceHeader
+        {...(listReady ? { detail: issueCountCopy(rows.length) } : {})}
         title="Issues"
         {...(props.onClose === undefined ? {} : { onBack: props.onClose })}
+        {...(browsing
+          ? {
+              actions: (
+                <WorkListSortMenu
+                  label="Sort issues"
+                  onValueChange={setSort}
+                  options={sortOptions}
+                  value={sort}
+                  {...(scope === "all"
+                    ? {
+                        grouped,
+                        onGroupedChange: (next: boolean) => {
+                          setGrouped(next);
+                          writeStoredValue(storage, GROUP_STORAGE_KEY, String(next));
+                        },
+                      }
+                    : {})}
+                />
+              ),
+            }
+          : {})}
       />
 
       <div aria-label="Issue controls" className="surface-toolbar" role="group">
@@ -464,18 +537,6 @@ export function GitHubIssueBrowser(props: GitHubIssueBrowserProps) {
                 </OctantToggleGroupItem>
               ))}
             </OctantToggleGroup>
-
-            <OctantSelectField
-              aria-label="Sort issues"
-              onValueChange={(value) => {
-                if (isIssueSort(value)) setSort(value);
-              }}
-              options={ISSUE_SORT_OPTIONS.filter(
-                (option) => scope === "all" || option.id !== "repository",
-              )}
-              triggerClassName="github-issue-browser__sort"
-              value={sort}
-            />
 
             <label className="surface-toolbar__search github-issue-browser__search">
               <Search aria-hidden="true" size={14} strokeWidth={1.7} />
@@ -546,54 +607,14 @@ export function GitHubIssueBrowser(props: GitHubIssueBrowserProps) {
                   <p className="github-issue-browser__note github-issue-browser__pad" role="status">
                     No issues match.
                   </p>
+                ) : groupRows ? (
+                  groupIssuesByRepository(rows).map((group) => (
+                    <WorkListGroup count={group.rows.length} key={group.title} title={group.title}>
+                      {renderRows(group.rows)}
+                    </WorkListGroup>
+                  ))
                 ) : (
-                  <ul aria-label="GitHub issues" className="github-issue-browser__list">
-                    {rows.map((row) => {
-                      const current =
-                        selected !== undefined &&
-                        selected.owner === row.owner &&
-                        selected.name === row.name &&
-                        selected.number === row.number;
-                      return (
-                        <li key={`${row.owner}/${row.name}#${row.number}`}>
-                          <OctantButton
-                            aria-current={current ? "true" : undefined}
-                            className="github-issue-browser__row"
-                            onClick={() =>
-                              setSelected({
-                                owner: row.owner,
-                                name: row.name,
-                                number: row.number,
-                              })
-                            }
-                            type="button"
-                            variant="bare"
-                          >
-                            <IssueStateIcon state={row.state} />
-                            <span className="github-issue-browser__row-copy">
-                              <span className="github-issue-browser__row-title">
-                                <span className="github-issue-browser__row-number">
-                                  #{row.number}
-                                </span>{" "}
-                                {row.title}
-                              </span>
-                              <span className="github-issue-browser__row-meta">
-                                {scope === "all" ? (
-                                  <span className="github-issue-browser__row-repository">
-                                    {row.owner}/{row.name}
-                                  </span>
-                                ) : null}
-                                <span>{row.author}</span>
-                                <span title={absoluteTimeFormatter.format(new Date(row.updatedAt))}>
-                                  {relativeTimeLabel(row.updatedAt)}
-                                </span>
-                              </span>
-                            </span>
-                          </OctantButton>
-                        </li>
-                      );
-                    })}
-                  </ul>
+                  renderRows(rows)
                 )}
                 {scope === "repository" && list.kind === "ready" && list.hasNextPage ? (
                   <OctantButton
@@ -675,18 +696,28 @@ function IssueStateBadge(props: { readonly state: GithubIssueRow["state"] }) {
   );
 }
 
-function IssueStateIcon(props: { readonly state: GithubIssueRow["state"] }) {
-  const Icon = props.state === "open" ? CircleDot : CircleCheck;
-  return (
-    <Icon
-      aria-label={props.state === "open" ? "Open" : "Closed"}
-      className="github-issue-browser__row-state"
-      data-state={props.state}
-      role="img"
-      size={16}
-      strokeWidth={1.8}
-    />
-  );
+function issueStateGlyph(state: GithubIssueRow["state"]): WorkListState {
+  return state === "open"
+    ? { label: "Open", tone: "open", Icon: CircleDot }
+    : { label: "Closed", tone: "closed", Icon: CircleCheck };
+}
+
+function groupIssuesByRepository(rows: ReadonlyArray<RepositoryIssueRow>): ReadonlyArray<{
+  readonly title: string;
+  readonly rows: ReadonlyArray<RepositoryIssueRow>;
+}> {
+  const groups: Array<{ title: string; rows: RepositoryIssueRow[] }> = [];
+  for (const row of rows) {
+    const title = `${row.owner}/${row.name}`;
+    const existing = groups.find((group) => group.title === title);
+    if (existing === undefined) groups.push({ title, rows: [row] });
+    else existing.rows.push(row);
+  }
+  return groups;
+}
+
+function issueCountCopy(count: number): string {
+  return count === 1 ? "1 issue" : `${String(count)} issues`;
 }
 
 function IssueDetailPane(props: {

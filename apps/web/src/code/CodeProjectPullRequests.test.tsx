@@ -20,7 +20,9 @@ const workProjectId = decodeProjectId("10000000-0000-4000-8000-000000000003");
 const threadId = "20000000-0000-4000-8000-000000000001";
 const generatedAt = "2026-08-22T08:00:00.000Z";
 
-const stylesheet = readFileSync(resolve(import.meta.dirname, "../styles/code.css"), "utf8");
+const stylesheet = ["code.css", "work-list.css"]
+  .map((file) => readFileSync(resolve(import.meta.dirname, "../styles", file), "utf8"))
+  .join("\n");
 
 function ruleBody(css: string, selector: string): string {
   const escaped = selector.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
@@ -132,13 +134,16 @@ function threeRepositoryView(): CodeProjectPullRequestView {
 }
 
 /** Opens a header menu once any menu that was open has finished closing. */
-async function openMenu(user: ReturnType<typeof userEvent.setup>, name: string): Promise<void> {
+async function openMenu(
+  user: ReturnType<typeof userEvent.setup>,
+  name: string | RegExp,
+): Promise<void> {
   await waitFor(() => expect(screen.queryByRole("menu")).toBeNull());
   await user.click(screen.getByRole("button", { name }));
 }
 
 function titlesInOrder(): ReadonlyArray<string> {
-  return Array.from(document.querySelectorAll(".code-project-pull-requests__title")).map(
+  return Array.from(document.querySelectorAll(".work-list__title")).map(
     (element) => element.textContent ?? "",
   );
 }
@@ -240,18 +245,16 @@ describe("CodeProjectPullRequests", () => {
     renderWorkspace();
 
     const row = await screen.findByRole("button", { name: /List active pull requests/i });
-    expect(within(row).getByText("List active pull requests")).toHaveClass(
-      "code-project-pull-requests__title",
-    );
-    const meta = row.querySelector(".code-project-pull-requests__meta");
+    expect(within(row).getByText("List active pull requests")).toHaveClass("work-list__title");
+    const meta = row.querySelector(".work-list__meta");
     expect(meta).not.toBeNull();
     expect(within(row).getByRole("img", { name: "Open" })).toBeInTheDocument();
     expect(within(meta as HTMLElement).getByText("octant")).toBeVisible();
     expect(within(meta as HTMLElement).getByText("octocat")).toBeVisible();
     expect(within(meta as HTMLElement).getByText(/^(\d+[mhd]|now)$/)).toBeVisible();
-    expect(within(row).getByText("#12")).toHaveClass("code-project-pull-requests__number");
+    expect(within(row).getByText("#12")).toHaveClass("work-list__number");
     // Nothing is wrong with it, so nothing is said but a check.
-    expect(row.querySelector(".code-project-pull-requests__ok")).not.toBeNull();
+    expect(row.querySelector(".work-list__ok")).not.toBeNull();
     expect(within(row).queryByText("Checks passing")).toBeNull();
     expect(
       within(row).getByText("Checks passing. Review approved. Mergeable.", {
@@ -440,7 +443,7 @@ describe("CodeProjectPullRequests", () => {
     });
     await screen.findByText("List active pull requests");
 
-    await openMenu(user, "Repository settings");
+    await openMenu(user, /^Repository settings/);
     await user.click(
       await screen.findByRole("menuitemcheckbox", { name: "Auto-refresh Octant pull requests" }),
     );
@@ -448,7 +451,7 @@ describe("CodeProjectPullRequests", () => {
     // A checked item leaves the menu open, so the next toggle is in the same one.
     await user.keyboard("{Escape}");
 
-    await openMenu(user, "Repository settings");
+    await openMenu(user, /^Repository settings/);
     const merge = await screen.findByRole("menuitemcheckbox", {
       name: "Let agents merge Octant pull requests",
     });
@@ -663,6 +666,80 @@ describe("CodeProjectPullRequests", () => {
     );
   });
 
+  it("shows on the group header that agents may merge, without opening a menu", async () => {
+    renderWorkspace({
+      agentMerge: {
+        enabledFor: (projectId) => String(projectId) === projectA,
+        setEnabled: vi.fn(async () => true),
+      },
+      storage: memoryStorage({ "octant.code.pull-requests.group-by-repository": "true" }),
+    });
+
+    const group = await screen.findByRole("region", { name: "octant/octant" });
+    const chip = within(group).getByText("Agents may merge");
+    // The existing quiet chip, not an accent: it is a fact, not a call to act.
+    expect(chip.closest("[data-status]")).toHaveAttribute("data-status", "neutral");
+  });
+
+  it("shows no merge chip on a repository where agents may not merge", async () => {
+    renderWorkspace({
+      agentMerge: { enabledFor: () => false, setEnabled: vi.fn(async () => true) },
+      storage: memoryStorage({ "octant.code.pull-requests.group-by-repository": "true" }),
+    });
+
+    const group = await screen.findByRole("region", { name: "octant/octant" });
+    expect(within(group).queryByText("Agents may merge")).toBeNull();
+  });
+
+  it("marks the Repository settings button and names where agents may merge when not grouped", async () => {
+    const user = userEvent.setup();
+    renderWorkspace({
+      agentMerge: { enabledFor: () => true, setEnabled: vi.fn(async () => true) },
+    });
+    await screen.findByText("List active pull requests");
+
+    const button = screen.getByRole("button", {
+      name: "Repository settings, agents may merge in octant/octant",
+    });
+    expect(button.querySelector(".work-list__active-dot")).not.toBeNull();
+    await user.hover(button);
+    expect(await screen.findByRole("tooltip")).toHaveTextContent(
+      "Repository settings. Agents may merge in octant/octant",
+    );
+  });
+
+  it("leaves the Repository settings button unmarked when no agent may merge", async () => {
+    renderWorkspace({
+      agentMerge: { enabledFor: () => false, setEnabled: vi.fn(async () => true) },
+    });
+    await screen.findByText("List active pull requests");
+
+    const button = screen.getByRole("button", { name: "Repository settings" });
+    expect(button.querySelector(".work-list__active-dot")).toBeNull();
+  });
+
+  it("draws a checked Auto-refresh and Agents may merge item with a visible mark", async () => {
+    const user = userEvent.setup();
+    renderWorkspace({
+      backgroundRefresh: { enabledFor: () => true, setEnabled: vi.fn(async () => true) },
+      agentMerge: { enabledFor: () => false, setEnabled: vi.fn(async () => true) },
+      storage: memoryStorage({ "octant.code.pull-requests.group-by-repository": "true" }),
+    });
+    await screen.findByText("List active pull requests");
+
+    await user.click(screen.getByRole("button", { name: "octant/octant settings" }));
+    const on = await screen.findByRole("menuitemcheckbox", {
+      name: "Auto-refresh Octant pull requests",
+    });
+    expect(on).toHaveAttribute("aria-checked", "true");
+    expect(on.querySelector("svg")).not.toBeNull();
+    const off = screen.getByRole("menuitemcheckbox", {
+      name: "Let agents merge Octant pull requests",
+    });
+    expect(off).toHaveAttribute("aria-checked", "false");
+    expect(off.querySelector("svg")).toBeNull();
+  });
+
   it("scopes the dock presentation to one Project and drops the page shell", async () => {
     const user = userEvent.setup();
     const onSelectRow = vi.fn();
@@ -815,20 +892,20 @@ describe("CodeProjectPullRequests", () => {
   });
 
   it("sizes a row from its two lines and cuts the title after two", () => {
-    const row = ruleBody(stylesheet, ".code-project-pull-requests__row");
+    const row = ruleBody(stylesheet, ".work-list__row");
     expect(row).toMatch(/height:\s*auto/);
     expect(row).toMatch(/padding:\s*var\(--oct-space-2\)/);
     expect(row).not.toMatch(/border-bottom/);
-    const title = ruleBody(stylesheet, ".code-project-pull-requests__title");
+    const title = ruleBody(stylesheet, ".work-list__title");
     expect(title).toMatch(/-webkit-line-clamp:\s*2/);
     expect(title).toMatch(/font-weight:\s*var\(--oct-weight-medium\)/);
-    expect(ruleBody(stylesheet, ".code-project-pull-requests__number")).toMatch(
+    expect(ruleBody(stylesheet, ".work-list__number")).toMatch(
       /font-variant-numeric:\s*tabular-nums/,
     );
-    expect(ruleBody(stylesheet, ".code-project-pull-requests__row:hover")).toContain(
+    expect(ruleBody(stylesheet, ".work-list__row:hover")).toContain(
       "background: var(--octant-control-hover);",
     );
-    expect(ruleBody(stylesheet, '.code-project-pull-requests__row[aria-pressed="true"]')).toContain(
+    expect(ruleBody(stylesheet, '.work-list__row[aria-pressed="true"]')).toContain(
       "background: var(--oct-selection);",
     );
   });

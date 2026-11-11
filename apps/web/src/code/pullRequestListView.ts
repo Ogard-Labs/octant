@@ -1,5 +1,4 @@
 import type { CodeProjectPullRequestRow } from "@octant/contracts";
-import { relativeTimeLabel } from "../lib/relativeTime";
 
 /**
  * The page's ordering and narrowing of the cached rows. The rows carry the time
@@ -224,10 +223,4 @@ export function pullRequestStatusSentence(row: CodeProjectPullRequestRow): strin
     mergeabilityCopy(row.mergeability),
   ];
   return `${parts.join(". ")}.`;
-}
-
-/** "5m", "2h", "5d": the compact age of the row's meta line. */
-export function compactAge(at: string, now: number = Date.now()): string {
-  const label = relativeTimeLabel(at, now);
-  return label === "just now" ? "now" : label.replace(/ ago$/, "");
 }

@@ -1202,7 +1202,7 @@ sees a per-poll event; it stores only the user's opt-in toggle and exact PR
 identities already produced by Code operations. The bounded list cache survives
 host restart and is cleared when GitHub authority is revoked.
 
-**The Pull requests list.** The page is a dense, calm list in the reading
+**The Pull requests and Issues lists.** The Pull requests page is a dense, calm list in the reading
 measure, at most 720px and left-aligned in the page. Its title band carries the
 count; at the trailing edge sit a Sort menu, a Filter menu, Repository settings
 (only while the list is not grouped) and Refresh, each an icon button with a
@@ -1236,13 +1236,30 @@ and **Agents may merge**, with the same labels and the same setters as before,
 and Refresh. With grouping off those switches are in the page's **Repository
 settings** menu, one group per connected repository, because they act on a
 Project and must stay one step from the list; they are never in Filter, which
-only narrows what is shown. The server still owns both settings, refuses a
+only narrows what is shown. The permission is readable without opening a menu: where Agents may merge is
+on, that repository's group header shows the quiet chip "Agents may merge"
+beside the count, and, with grouping off, the Repository settings button carries
+the same dot as a narrowing filter and its tooltip names those repositories;
+Auto-refresh is not an authority and has no chip, only the check in the menu.
+The server still owns both settings, refuses a
 device that may not set them, and enforces the merge choice at the merge. A
 Project that is not on GitHub is not drawn as an empty block: one quiet line at
 the foot says how many, with their names in a disclosure. A connected Project
 never refreshed is named in one line (flat) or keeps its group with the empty
 sentence (grouped). The dock's Pull requests tool uses the same rows in one
 flat list with the search and count, and none of the page's menus.
+
+The Issues place draws the same row, so one component serves both lists: the
+title, the 12px meta line (state glyph, repository name when the list spans
+repositories, author, age, number at the trailing edge), the quiet hover and
+the same slim group head. Its list column keeps the 720px measure beside the
+detail pane. Its header carries the count and the Sort icon menu (Recently
+updated, Least recently updated, Highest number, and Repository and **Group by
+repository** only across repositories, since one repository has nothing to group
+by); grouping is remembered in the window's local storage. An issue's list read
+carries no labels, so the row shows none; they stay in the detail pane. A row's
+click, the state toggle, the repository chooser, search and the detail pane's
+Start a Code thread are unchanged.
 
 **Answering from a Board card.** A Work or Code card whose thread waits on the
 person shows what it asks and the answers, so a column of waiting cards is

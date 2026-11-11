@@ -116,6 +116,14 @@ function makeClient(
   };
 }
 
+function memoryStorage(): Pick<Storage, "getItem" | "setItem"> {
+  const values = new Map<string, string>();
+  return {
+    getItem: (key) => values.get(key) ?? null,
+    setItem: (key, value) => void values.set(key, value),
+  };
+}
+
 async function selectFirstRepository() {
   const user = userEvent.setup();
   await user.click(await screen.findByRole("button", { name: "Repository: Choose a repository" }));
@@ -162,12 +170,12 @@ describe("GitHubIssueBrowser", () => {
     const list = await screen.findByRole("list", { name: "GitHub issues" });
     const rows = within(list).getAllByRole("button");
     expect(rows.map((row) => row.textContent)).toEqual([
-      expect.stringContaining("#40 Newest in repo-2"),
-      expect.stringContaining("#1 Issue 1"),
-      expect.stringContaining("#2 Login timeout"),
+      expect.stringContaining("Newest in repo-2"),
+      expect.stringContaining("Issue 1"),
+      expect.stringContaining("Login timeout"),
     ]);
-    expect(rows[0]).toHaveTextContent("octant/repo-2");
-    expect(rows[1]).toHaveTextContent("octant/repo-1");
+    expect(rows[0]).toHaveTextContent("repo-2");
+    expect(rows[1]).toHaveTextContent("repo-1");
     expect(
       screen.getByRole("button", { name: "Repository: All recent repositories" }),
     ).toBeVisible();
@@ -208,7 +216,7 @@ describe("GitHubIssueBrowser", () => {
     expect(readCatalogue).not.toHaveBeenCalledWith(expect.objectContaining({ kind: "issues" }));
 
     await selectFirstRepository();
-    fireEvent.click(await screen.findByRole("button", { name: /#2 Login timeout/ }));
+    fireEvent.click(await screen.findByRole("button", { name: /Login timeout/ }));
     const detail = await screen.findByRole("article", { name: "Issue #2" });
     fireEvent.click(within(detail).getByRole("button", { name: "Start a Code thread" }));
     expect(onStartThread).toHaveBeenCalledWith({
@@ -240,8 +248,8 @@ describe("GitHubIssueBrowser", () => {
     render(<GitHubIssueBrowser client={makeClient(readCatalogue)} />);
 
     await selectFirstRepository();
-    expect(await screen.findByRole("button", { name: /#1 Issue 1/ })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /#2 Login timeout/ })).toBeInTheDocument();
+    expect(await screen.findByRole("button", { name: /Issue 1/ })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Login timeout/ })).toBeInTheDocument();
     expect(readCatalogue).toHaveBeenCalledWith(
       expect.objectContaining({
         kind: "issues",
@@ -251,7 +259,7 @@ describe("GitHubIssueBrowser", () => {
       }),
     );
 
-    fireEvent.click(screen.getByRole("button", { name: /#1 Issue 1/ }));
+    fireEvent.click(screen.getByRole("button", { name: /Issue 1/ }));
     const detail = await screen.findByRole("article", { name: "Issue #1" });
     expect(detail).toHaveTextContent("Body of issue 1.");
     expect(detail).toHaveTextContent("https://github.com/octant/repo-1/issues/1");
@@ -280,7 +288,7 @@ describe("GitHubIssueBrowser", () => {
     });
     render(<GitHubIssueBrowser client={makeClient(readCatalogue)} />);
     await selectFirstRepository();
-    await screen.findByRole("button", { name: /#1 Issue 1/ });
+    await screen.findByRole("button", { name: /Issue 1/ });
 
     await user.type(screen.getByRole("searchbox", { name: "Search GitHub issues" }), "login");
     await waitFor(() =>
@@ -288,8 +296,8 @@ describe("GitHubIssueBrowser", () => {
         expect.objectContaining({ kind: "issues", search: "login" }),
       ),
     );
-    expect(await screen.findByRole("button", { name: /#2 Login timeout/ })).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: /#1 Issue 1/ })).not.toBeInTheDocument();
+    expect(await screen.findByRole("button", { name: /Login timeout/ })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Issue 1/ })).not.toBeInTheDocument();
   });
 
   it("paginates with the opaque catalogue cursor", async () => {
@@ -303,11 +311,11 @@ describe("GitHubIssueBrowser", () => {
     });
     render(<GitHubIssueBrowser client={makeClient(readCatalogue)} />);
     await selectFirstRepository();
-    await screen.findByRole("button", { name: /#1 Issue 1/ });
+    await screen.findByRole("button", { name: /Issue 1/ });
 
     await user.click(screen.getByRole("button", { name: "Load more issues" }));
-    expect(await screen.findByRole("button", { name: /#3 Third page row/ })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /#1 Issue 1/ })).toBeInTheDocument();
+    expect(await screen.findByRole("button", { name: /Third page row/ })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Issue 1/ })).toBeInTheDocument();
     expect(readCatalogue).toHaveBeenCalledWith(
       expect.objectContaining({ kind: "issues", cursor: "cursor-issues-2" }),
     );
@@ -337,17 +345,17 @@ describe("GitHubIssueBrowser", () => {
     });
     render(<GitHubIssueBrowser client={makeClient(readCatalogue)} />);
     await selectFirstRepository();
-    await screen.findByRole("button", { name: /#1 Issue 1/ });
+    await screen.findByRole("button", { name: /Issue 1/ });
 
     await user.click(screen.getByRole("button", { name: "Load more issues" }));
     expect(await screen.findByRole("alert")).toHaveTextContent(
       "Could not load more issues. Wait before loading more issues. Retry after 20 seconds.",
     );
-    expect(screen.getByRole("button", { name: /#1 Issue 1/ })).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: /#3 Third page row/ })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Issue 1/ })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Third page row/ })).not.toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: "Retry" }));
-    expect(await screen.findByRole("button", { name: /#3 Third page row/ })).toBeInTheDocument();
+    expect(await screen.findByRole("button", { name: /Third page row/ })).toBeInTheDocument();
     expect(screen.queryByRole("alert")).not.toBeInTheDocument();
   });
 
@@ -387,13 +395,13 @@ describe("GitHubIssueBrowser", () => {
     });
     render(<GitHubIssueBrowser client={makeClient(readCatalogue)} />);
     await selectFirstRepository();
-    fireEvent.click(await screen.findByRole("button", { name: /#1 Issue 1/ }));
+    fireEvent.click(await screen.findByRole("button", { name: /Issue 1/ }));
     expect(await screen.findByRole("article", { name: "Issue #1" })).toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: "Repository: octant/repo-1" }));
     fireEvent.click(await screen.findByRole("option", { name: /octant\/repo-2/ }));
 
-    expect(await screen.findByRole("button", { name: /#9 Other repo/ })).toBeInTheDocument();
+    expect(await screen.findByRole("button", { name: /Other repo/ })).toBeInTheDocument();
     expect(screen.queryByRole("article", { name: "Issue #1" })).not.toBeInTheDocument();
     expect(screen.getByText("Select an issue to read it.")).toBeInTheDocument();
     expect(
@@ -425,7 +433,7 @@ describe("GitHubIssueBrowser", () => {
     render(<GitHubIssueBrowser client={makeClient(readCatalogue)} />);
     await selectFirstRepository();
 
-    expect(await screen.findByRole("button", { name: /#1 Issue 1/ })).toBeInTheDocument();
+    expect(await screen.findByRole("button", { name: /Issue 1/ })).toBeInTheDocument();
     expect(screen.getByText(/Results may be stale/)).toBeInTheDocument();
     expect(screen.getByText(/rate limit/)).toBeInTheDocument();
     const issuesCalls = () =>
@@ -461,7 +469,7 @@ describe("GitHubIssueBrowser", () => {
     });
     render(<GitHubIssueBrowser client={makeClient(readCatalogue)} />);
     await selectFirstRepository();
-    fireEvent.click(await screen.findByRole("button", { name: /#1 Issue 1/ }));
+    fireEvent.click(await screen.findByRole("button", { name: /Issue 1/ }));
     expect(await screen.findByText("Loading issue…")).toBeInTheDocument();
 
     await user.type(screen.getByRole("searchbox", { name: "Search GitHub issues" }), "login");
@@ -470,7 +478,7 @@ describe("GitHubIssueBrowser", () => {
         expect.objectContaining({ kind: "issues", search: "login" }),
       ),
     );
-    expect(await screen.findByRole("button", { name: /#2 Login timeout/ })).toBeInTheDocument();
+    expect(await screen.findByRole("button", { name: /Login timeout/ })).toBeInTheDocument();
 
     releaseDetail?.({
       kind: "issue",
@@ -509,8 +517,112 @@ describe("GitHubIssueBrowser", () => {
   it("marks the current issue with fill and text emphasis in increased contrast", () => {
     const stylesheet = readFileSync(resolve(import.meta.dirname, "../styles/github.css"), "utf8");
     expect(stylesheet).toMatch(
-      /\[data-octant-increased-contrast="true"\] \.github-issue-browser__row[^{]*\{[^}]*?background:\s*var\(--octant-control-hover\);[\s\S]*?text-decoration:\s*underline/,
+      /\[data-octant-increased-contrast="true"\] \.work-list__row[^{]*\{[^}]*?background:\s*var\(--octant-control-hover\);[\s\S]*?text-decoration:\s*underline/,
     );
     expect(stylesheet).not.toMatch(/box-shadow:\s*inset 0 0 0 2px/);
+  });
+
+  describe("the shared list", () => {
+    function acrossClient() {
+      return makeClient(async (request: GithubCatalogueReadRequest) => {
+        if (request.kind === "recent-repositories") {
+          return {
+            kind: "recent-repositories",
+            rows: [repositoryRow(1), repositoryRow(2)],
+          } satisfies GithubCatalogueReadResponse;
+        }
+        if (request.kind === "issues" && request.name === "repo-2") {
+          return {
+            kind: "issues",
+            page: {
+              rows: [
+                issueRow(40, { title: "Newest in repo-2", updatedAt: "2026-09-01T09:00:00.000Z" }),
+              ],
+              sort: "updated-desc",
+              hasNextPage: false,
+              freshness: { status: "fresh" },
+            },
+          } satisfies GithubCatalogueReadResponse;
+        }
+        if (request.kind === "issues") {
+          return {
+            kind: "issues",
+            page: {
+              rows: [
+                issueRow(1, { updatedAt: "2026-08-20T09:00:00.000Z" }),
+                issueRow(2, { title: "Closed one", state: "closed" }),
+              ],
+              sort: "updated-desc",
+              hasNextPage: false,
+              freshness: { status: "fresh" },
+            },
+          } satisfies GithubCatalogueReadResponse;
+        }
+        throw new Error(`unexpected ${request.kind}`);
+      });
+    }
+
+    function titles(): ReadonlyArray<string> {
+      return Array.from(document.querySelectorAll(".work-list__title")).map(
+        (element) => element.textContent ?? "",
+      );
+    }
+
+    it("draws an issue as a title and one meta line with the number at the trailing edge", async () => {
+      render(<GitHubIssueBrowser client={acrossClient()} storage={memoryStorage()} />);
+
+      const row = await screen.findByRole("button", { name: /Newest in repo-2/ });
+      expect(within(row).getByText("Newest in repo-2")).toHaveClass("work-list__title");
+      expect(within(row).getByRole("img", { name: "Open" })).toBeInTheDocument();
+      expect(within(row).getByText("repo-2")).toBeVisible();
+      expect(within(row).getByText("octocat")).toBeVisible();
+      expect(within(row).getByText("#40")).toHaveClass("work-list__number");
+      expect(
+        within(screen.getByRole("button", { name: /Closed one/ })).getByRole("img", {
+          name: "Closed",
+        }),
+      ).toBeInTheDocument();
+      expect(await screen.findByText("3 issues")).toBeVisible();
+    });
+
+    it("sorts from an icon menu and offers Repository only across repositories", async () => {
+      const user = userEvent.setup();
+      render(<GitHubIssueBrowser client={acrossClient()} storage={memoryStorage()} />);
+      await screen.findByText("Newest in repo-2");
+
+      await user.click(screen.getByRole("button", { name: "Sort issues" }));
+      expect((await screen.findAllByRole("menuitemradio")).map((item) => item.textContent)).toEqual(
+        ["Recently updated", "Least recently updated", "Highest number", "Repository"],
+      );
+      await user.click(
+        await screen.findByRole("menuitemradio", { name: "Least recently updated" }),
+      );
+      expect(titles()[0]).toBe("Issue 1");
+    });
+
+    it("groups by repository under a slim header and remembers the choice", async () => {
+      const user = userEvent.setup();
+      const storage = memoryStorage();
+      const first = render(<GitHubIssueBrowser client={acrossClient()} storage={storage} />);
+      await screen.findByText("Newest in repo-2");
+
+      await user.click(screen.getByRole("button", { name: "Sort issues" }));
+      await user.click(
+        await screen.findByRole("menuitemcheckbox", { name: "Group by repository" }),
+      );
+      const group = await screen.findByRole("region", { name: "octant/repo-2" });
+      expect(within(group).getByRole("heading", { name: "octant/repo-2" })).toBeVisible();
+      expect(within(group).getByText("1")).toBeVisible();
+      expect(within(group).queryByText("Issue 1")).toBeNull();
+      first.unmount();
+
+      render(<GitHubIssueBrowser client={acrossClient()} storage={storage} />);
+      expect(await screen.findByRole("region", { name: "octant/repo-1" })).toBeVisible();
+    });
+
+    it("keeps an issue to the list's own measure beside its detail pane", () => {
+      const stylesheet = readFileSync(resolve(import.meta.dirname, "../styles/github.css"), "utf8");
+      expect(stylesheet).toMatch(/grid-template-columns:\s*minmax\(320px,\s*min\(720px,\s*46%\)\)/);
+    });
   });
 });

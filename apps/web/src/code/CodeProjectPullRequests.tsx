@@ -20,7 +20,6 @@ import {
   RefreshCw,
   Search,
   Settings2,
-  ArrowUpDown,
   X,
 } from "lucide-react";
 import { useEffect, useRef, useState, type ReactNode } from "react";
@@ -32,7 +31,7 @@ import {
 } from "../threadBoard/threadBoardState";
 import { Surface, SurfaceEmpty, SurfaceHeader } from "../surface/SurfaceHeader";
 import { OctantBadge, type OctantBadgeProps } from "../ui/base/OctantBadge";
-import { OctantButton, octantButtonClassName } from "../ui/base/OctantButton";
+import { OctantButton } from "../ui/base/OctantButton";
 import { OctantInput } from "../ui/base/OctantInput";
 import {
   OctantMenuCheckboxItem,
@@ -46,9 +45,16 @@ import {
   OctantMenuRadioItem,
   OctantMenuRoot,
   OctantMenuSeparator,
-  OctantMenuTrigger,
 } from "../ui/base/OctantMenu";
 import { OctantTooltip } from "../ui/base/OctantTooltip";
+import {
+  WorkList,
+  WorkListGroup,
+  WorkListMenuTrigger,
+  WorkListRow,
+  WorkListSortMenu,
+  type WorkListState,
+} from "../surface/WorkList";
 import { relativeTimeLabel } from "../lib/relativeTime";
 import { OctantAlert } from "../ui/base/OctantAlert";
 import {
@@ -59,7 +65,6 @@ import {
   PULL_REQUEST_STATE_OPTIONS,
   activeFilterCount,
   blockingFact,
-  compactAge,
   filterPullRequests,
   groupPullRequestsByRepository,
   mergeabilityCopy,
@@ -475,7 +480,7 @@ export function CodeProjectPullRequests(props: CodeProjectPullRequestsProps) {
             </p>
           ) : null}
           {showGroups ? (
-            <div className="code-project-pull-requests__groups">
+            <div className="work-list__groups">
               {groups.map((group) => (
                 <RepositoryGroup
                   busy={busy}
@@ -557,11 +562,13 @@ export function CodeProjectPullRequests(props: CodeProjectPullRequestsProps) {
           ? {
               actions: (
                 <>
-                  <SortMenu
+                  <WorkListSortMenu
                     grouped={grouped}
+                    label="Sort pull requests"
                     onGroupedChange={chooseGrouped}
-                    onSortChange={chooseSort}
-                    sort={sort}
+                    onValueChange={chooseSort}
+                    options={PULL_REQUEST_SORT_OPTIONS}
+                    value={sort}
                   />
                   <FilterMenu filters={filters} onChange={chooseFilters} />
                   {grouped ? null : (
@@ -580,7 +587,7 @@ export function CodeProjectPullRequests(props: CodeProjectPullRequestsProps) {
                   <OctantTooltip label="Refresh all pull requests">
                     <OctantButton
                       aria-label="Refresh all"
-                      className="code-project-pull-requests__icon-button"
+                      className="work-list__icon-button"
                       disabled={busy}
                       onClick={() => void runRefresh({ kind: "refresh-all" })}
                       size="icon"
@@ -608,78 +615,6 @@ export function CodeProjectPullRequests(props: CodeProjectPullRequestsProps) {
   }
 }
 
-function IconMenuTrigger(props: {
-  readonly label: string;
-  readonly tooltip: string;
-  readonly active?: boolean;
-  readonly children: ReactNode;
-}) {
-  return (
-    <OctantTooltip label={props.tooltip}>
-      <OctantMenuTrigger
-        aria-label={props.label}
-        className={`${octantButtonClassName({ variant: "ghost", size: "icon" })} code-project-pull-requests__icon-button`}
-      >
-        {props.children}
-        {props.active === true ? (
-          <span aria-hidden="true" className="code-project-pull-requests__active-dot" />
-        ) : null}
-      </OctantMenuTrigger>
-    </OctantTooltip>
-  );
-}
-
-function SortMenu(props: {
-  readonly sort: PullRequestSort;
-  readonly grouped: boolean;
-  readonly onSortChange: (sort: PullRequestSort) => void;
-  readonly onGroupedChange: (grouped: boolean) => void;
-}) {
-  return (
-    <OctantMenuRoot>
-      <IconMenuTrigger label="Sort pull requests" tooltip="Sort and group">
-        <ArrowUpDown aria-hidden="true" size={16} strokeWidth={1.5} />
-      </IconMenuTrigger>
-      <OctantMenuPortal>
-        <OctantMenuPositioner align="end" className="z-50 outline-none window-no-drag">
-          <OctantMenuPopup aria-label="Sort pull requests" className="min-w-56">
-            <OctantMenuGroup>
-              <OctantMenuGroupLabel>Sort by</OctantMenuGroupLabel>
-              <OctantMenuRadioGroup
-                onValueChange={(value) => {
-                  const next = oneOf(PULL_REQUEST_SORT_OPTIONS)(String(value));
-                  if (next !== undefined) props.onSortChange(next);
-                }}
-                value={props.sort}
-              >
-                {PULL_REQUEST_SORT_OPTIONS.map((option) => (
-                  <OctantMenuRadioItem
-                    closeOnClick
-                    key={option.value}
-                    label={option.label}
-                    value={option.value}
-                  >
-                    {option.label}
-                  </OctantMenuRadioItem>
-                ))}
-              </OctantMenuRadioGroup>
-            </OctantMenuGroup>
-            <OctantMenuSeparator />
-            <OctantMenuCheckboxItem
-              checked={props.grouped}
-              closeOnClick={false}
-              label="Group by repository"
-              onCheckedChange={(checked) => props.onGroupedChange(checked)}
-            >
-              Group by repository
-            </OctantMenuCheckboxItem>
-          </OctantMenuPopup>
-        </OctantMenuPositioner>
-      </OctantMenuPortal>
-    </OctantMenuRoot>
-  );
-}
-
 function FilterMenu(props: {
   readonly filters: PullRequestFilters;
   readonly onChange: (filters: PullRequestFilters) => void;
@@ -687,7 +622,7 @@ function FilterMenu(props: {
   const count = activeFilterCount(props.filters);
   return (
     <OctantMenuRoot>
-      <IconMenuTrigger
+      <WorkListMenuTrigger
         active={count > 0}
         label={
           count === 0 ? "Filter pull requests" : `Filter pull requests, ${String(count)} active`
@@ -695,7 +630,7 @@ function FilterMenu(props: {
         tooltip="Filter"
       >
         <ListFilter aria-hidden="true" size={16} strokeWidth={1.5} />
-      </IconMenuTrigger>
+      </WorkListMenuTrigger>
       <OctantMenuPortal>
         <OctantMenuPositioner align="end" className="z-50 outline-none window-no-drag">
           <OctantMenuPopup aria-label="Filter pull requests" className="min-w-56">
@@ -833,11 +768,27 @@ function RepositorySettingsMenu(props: {
   readonly backgroundRefresh?: ProjectSetting;
   readonly agentMerge?: ProjectSetting;
 }) {
+  // A permission someone gave is read off the closed button, not found in the menu.
+  const mergeRepositories = props.projects
+    .filter((project) => props.agentMerge?.enabledFor(project.projectId) === true)
+    .map((project) => `${project.repositoryOwner}/${project.repositoryName}`);
   return (
     <OctantMenuRoot>
-      <IconMenuTrigger label="Repository settings" tooltip="Repository settings">
+      <WorkListMenuTrigger
+        active={mergeRepositories.length > 0}
+        label={
+          mergeRepositories.length === 0
+            ? "Repository settings"
+            : `Repository settings, agents may merge in ${mergeRepositories.join(", ")}`
+        }
+        tooltip={
+          mergeRepositories.length === 0
+            ? "Repository settings"
+            : `Repository settings. Agents may merge in ${mergeRepositories.join(", ")}`
+        }
+      >
         <Settings2 aria-hidden="true" size={16} strokeWidth={1.5} />
-      </IconMenuTrigger>
+      </WorkListMenuTrigger>
       <OctantMenuPortal>
         <OctantMenuPositioner align="end" className="z-50 outline-none window-no-drag">
           <OctantMenuPopup aria-label="Repository settings" className="min-w-56">
@@ -881,18 +832,19 @@ function RepositoryGroup(props: {
   readonly agentMerge?: ProjectSetting;
 }) {
   const note = backgroundRefreshCopy(props.backgroundRefreshState);
+  // A permission someone gave is read off the header, not found in a menu.
+  const agentsMayMerge =
+    props.project !== undefined && props.agentMerge?.enabledFor(props.project.projectId) === true;
   return (
-    <section aria-label={props.title} className="code-project-pull-requests__group">
-      <div className="code-project-pull-requests__group-head">
-        <h2 className="code-project-pull-requests__group-title">{props.title}</h2>
-        <span className="oct-meta code-project-pull-requests__group-count">
-          {props.rows.length}
-        </span>
-        {props.project === undefined ? null : (
+    <WorkListGroup
+      count={props.rows.length}
+      marks={agentsMayMerge ? <StatusChip label="Agents may merge" status="neutral" /> : null}
+      menu={
+        props.project === undefined ? undefined : (
           <OctantMenuRoot>
-            <IconMenuTrigger label={`${props.title} settings`} tooltip="Repository settings">
+            <WorkListMenuTrigger label={`${props.title} settings`} tooltip="Repository settings">
               <MoreHorizontal aria-hidden="true" size={14} strokeWidth={1.5} />
-            </IconMenuTrigger>
+            </WorkListMenuTrigger>
             <OctantMenuPortal>
               <OctantMenuPositioner align="end" className="z-50 outline-none window-no-drag">
                 <OctantMenuPopup aria-label={`${props.title} settings`} className="min-w-56">
@@ -912,8 +864,10 @@ function RepositoryGroup(props: {
               </OctantMenuPositioner>
             </OctantMenuPortal>
           </OctantMenuRoot>
-        )}
-      </div>
+        )
+      }
+      title={props.title}
+    >
       {note === undefined ? null : (
         <p className="code-project-pull-requests__status" role="status">
           {note}
@@ -930,7 +884,7 @@ function RepositoryGroup(props: {
           selectedRowKey={props.selectedRowKey}
         />
       )}
-    </section>
+    </WorkListGroup>
   );
 }
 
@@ -940,7 +894,7 @@ function PullRequestRows(props: {
   readonly onSelectRow: ((row: CodeProjectPullRequestRow) => void) | undefined;
 }) {
   return (
-    <ul className="code-project-pull-requests__list">
+    <WorkList>
       {props.rows.map((row) => {
         const rowKey = projectPullRequestKey(row);
         return (
@@ -953,34 +907,26 @@ function PullRequestRows(props: {
           </li>
         );
       })}
-    </ul>
+    </WorkList>
   );
 }
 
-function stateGlyph(row: CodeProjectPullRequestRow): {
-  readonly label: string;
-  readonly tone: "open" | "draft" | "merged" | "closed";
-  readonly Icon: typeof GitPullRequest;
-} {
+function stateGlyph(row: CodeProjectPullRequestRow): WorkListState {
   if (row.state === "merged") return { label: "Merged", tone: "merged", Icon: GitMerge };
-  if (row.state === "closed")
+  if (row.state === "closed") {
     return { label: "Closed", tone: "closed", Icon: GitPullRequestClosed };
+  }
   if (row.draft) return { label: "Draft", tone: "draft", Icon: GitPullRequestDraft };
   return { label: "Open", tone: "open", Icon: GitPullRequest };
 }
 
-/**
- * One pull request: the title, what needs attention, then one quiet line of
- * where it lives and how old it is. The row is the only control; opening it is
- * the shell's decision.
- */
+/** A pull request in the shared row: what needs attention goes at the title's edge. */
 function PullRequestRow(props: {
   readonly row: CodeProjectPullRequestRow;
   readonly selected: boolean;
   readonly onSelect: () => void;
 }) {
   const { row } = props;
-  const glyph = stateGlyph(row);
   const attention = pullRequestAttention(row);
   const sentence = pullRequestStatusSentence(row);
   const resolved = attention === undefined && row.mergeability === "mergeable";
@@ -992,34 +938,37 @@ function PullRequestRow(props: {
         </span>
       )}
       {resolved ? (
-        <Check
-          aria-hidden="true"
-          className="code-project-pull-requests__ok"
-          size={14}
-          strokeWidth={1.8}
-        />
+        <Check aria-hidden="true" className="work-list__ok" size={14} strokeWidth={1.8} />
       ) : null}
       <span className="sr-only">{sentence}</span>
     </>
   );
+  const linked = row.linkedThreads.map((thread) => thread.title).join(", ");
   return (
-    <OctantButton
-      aria-pressed={props.selected}
-      className="code-project-pull-requests__row"
-      onClick={props.onSelect}
-      type="button"
-      variant="bare"
-    >
-      <span className="code-project-pull-requests__title" title={row.title}>
-        {row.title}
-      </span>
-      <span className="code-project-pull-requests__status-cell">
-        {attention === undefined && !resolved ? (
+    <WorkListRow
+      author={row.author}
+      extras={
+        row.linkedThreads.length === 0 ? null : (
+          <span className="work-list__linked" title={`Linked: ${linked}`}>
+            <Link2 aria-hidden="true" size={12} strokeWidth={1.7} />
+            <span className="sr-only">Linked: {linked}</span>
+          </span>
+        )
+      }
+      number={row.number}
+      onSelect={props.onSelect}
+      repository={row.repositoryName}
+      selected={props.selected}
+      selection="pressed"
+      state={stateGlyph(row)}
+      title={row.title}
+      trailing={
+        attention === undefined && !resolved ? (
           summary
         ) : (
           <OctantTooltip
             label={
-              <span className="code-project-pull-requests__tooltip">
+              <span className="work-list__tooltip">
                 <span>{sentence}</span>
                 <span>
                   {row.headBranch} → {row.baseBranch}
@@ -1028,42 +977,12 @@ function PullRequestRow(props: {
             }
             side="top"
           >
-            <span className="code-project-pull-requests__status-trigger">{summary}</span>
+            <span className="work-list__status-trigger">{summary}</span>
           </OctantTooltip>
-        )}
-      </span>
-      <span className="code-project-pull-requests__meta">
-        <span
-          aria-label={glyph.label}
-          className="code-project-pull-requests__state"
-          data-state={glyph.tone}
-          role="img"
-        >
-          <glyph.Icon aria-hidden="true" size={14} strokeWidth={1.7} />
-        </span>
-        <span className="code-project-pull-requests__meta-text">{row.repositoryName}</span>
-        <span className="code-project-pull-requests__meta-text">{row.author}</span>
-        <time
-          className="code-project-pull-requests__meta-text"
-          dateTime={row.updatedAt}
-          title={formatUpdatedAt(row.updatedAt)}
-        >
-          {compactAge(row.updatedAt)}
-        </time>
-        {row.linkedThreads.length === 0 ? null : (
-          <span
-            className="code-project-pull-requests__linked"
-            title={`Linked: ${row.linkedThreads.map((thread) => thread.title).join(", ")}`}
-          >
-            <Link2 aria-hidden="true" size={12} strokeWidth={1.7} />
-            <span className="sr-only">
-              Linked: {row.linkedThreads.map((thread) => thread.title).join(", ")}
-            </span>
-          </span>
-        )}
-      </span>
-      <span className="code-project-pull-requests__number">#{row.number}</span>
-    </OctantButton>
+        )
+      }
+      updatedAt={row.updatedAt}
+    />
   );
 }
 
