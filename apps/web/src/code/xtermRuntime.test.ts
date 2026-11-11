@@ -218,6 +218,41 @@ describe("Xterm runtime", () => {
     session.dispose();
   });
 
+  it("draws the terminal's scrollbar thumb in the theme roles a pane's takes, and follows a live switch", () => {
+    const session = mount(document.createElement("div"), {
+      colors: darkColors,
+      interactive: false,
+      onData: vi.fn(),
+      onResize: vi.fn(),
+      output: "",
+    });
+
+    expect(mocks.terminal).toHaveBeenCalledWith(
+      expect.objectContaining({
+        theme: expect.objectContaining({
+          scrollbarSliderBackground: "#4d4d4d",
+          scrollbarSliderHoverBackground: "#808080",
+          scrollbarSliderActiveBackground: "#808080",
+        }),
+      }),
+    );
+    // Narrowing the lane would take the engine's overview ruler, which stops
+    // the terminal opening where its canvas has no 2D context.
+    expect(mocks.terminal).not.toHaveBeenCalledWith(
+      expect.objectContaining({ overviewRuler: expect.anything() }),
+    );
+
+    session.setColors?.(lightColors);
+    expect(mocks.terminalOptions).toMatchObject({
+      theme: expect.objectContaining({
+        scrollbarSliderBackground: "#bdbdbb",
+        scrollbarSliderHoverBackground: "#6f6f6d",
+        scrollbarSliderActiveBackground: "#6f6f6d",
+      }),
+    });
+    session.dispose();
+  });
+
   it("repaints an open terminal on a live light/dark or contrast switch", () => {
     const session = mount(document.createElement("div"), {
       colors: darkColors,

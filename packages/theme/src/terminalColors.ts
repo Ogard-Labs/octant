@@ -45,6 +45,14 @@ export interface TerminalPalette {
 export interface TerminalColorProjection {
   readonly palette: TerminalPalette;
   readonly minimumContrastRatio: number;
+  /**
+   * The terminal draws its scrollbar as elements of its own, out of reach of
+   * the stylesheet's one scrollbar rule, so the thumb's colour travels here:
+   * the role that rule names, and the one it names for a thumb under the
+   * pointer.
+   */
+  readonly scrollbarThumb: string;
+  readonly scrollbarThumbHover: string;
 }
 
 /** WCAG's enhanced (AAA) ratio for body text, the floor increased contrast asks for. */
@@ -104,6 +112,8 @@ export function resolveTerminalColorProjection(
     minimumContrastRatio: increased
       ? INCREASED_CONTRAST_TEXT_RATIO
       : MINIMUM_CONTRAST["normal-text"],
+    scrollbarThumb: role("border-strong"),
+    scrollbarThumbHover: role("divider-strong"),
   };
 }
 

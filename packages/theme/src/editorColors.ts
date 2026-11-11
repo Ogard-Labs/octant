@@ -24,6 +24,14 @@ export interface EditorColorProjection {
   readonly error: string;
   readonly inserted: string;
   readonly removed: string;
+  /**
+   * The editor draws its scrollbar as elements of its own, out of reach of
+   * the stylesheet's one scrollbar rule, so the thumb's colour travels here:
+   * the role that rule names, and the one it names for a thumb under the
+   * pointer.
+   */
+  readonly scrollbarThumb: string;
+  readonly scrollbarThumbHover: string;
 }
 
 /**
@@ -62,6 +70,8 @@ export function resolveEditorColorProjection(
     error: role("danger-text"),
     inserted: role("addition-text"),
     removed: role("deletion-text"),
+    scrollbarThumb: role("border-strong"),
+    scrollbarThumbHover: role("divider-strong"),
   };
 }
 

@@ -1398,8 +1398,8 @@ so an edge is never guessed. The renderer fallback in
 
 The code editor and its diff draw from the same resolved roles through the
 editor projection in `packages/theme/src/editorColors.ts`: the workspace
-ground, primary ink, muted line numbers, the selection role, and floating
-widgets. Under increased contrast it takes the same high-contrast ink as the
+ground, primary ink, muted line numbers, the selection role, floating
+widgets, and the two border roles of its scrollbar thumb. Under increased contrast it takes the same high-contrast ink as the
 rest of the window. Syntax colours come from the editor's own light or dark
 base, because the palette roles are checked only for interface contrast. A
 theme, mode, contrast, or system appearance change repaints open editors in
@@ -1407,8 +1407,8 @@ place.
 
 The terminal draws from the terminal projection in
 `packages/theme/src/terminalColors.ts`: the workspace ground (the Glass plate
-under translucency), primary ink, the selection role, and the palette roles
-as its ANSI hues, with ANSI black and white kept dark and light in either
+under translucency), primary ink, the selection role, the two border roles of
+its scrollbar thumb, and the palette roles as its ANSI hues, with ANSI black and white kept dark and light in either
 mode and bright black as the muted ink. Because the palette roles are only
 checked as interface marks, the projection also sets a contrast floor the
 terminal engine enforces per cell against the background it is drawn on:
@@ -3082,9 +3082,32 @@ request from the person.
   engine that does not know the properties. Feature CSS may reserve the strip
   (`scrollbar-gutter`) so a page does not shift when it starts to scroll, and
   hides a scrollbar only on the named strips of tabs and icons that scroll
-  sideways; it never sets a scrollbar colour or another width. The code
-  editor and the terminal draw their own scrollbars and are not on this
-  treatment yet.
+  sideways; it never sets a scrollbar colour or another width.
+- The code editor and the terminal draw their scrollbars as elements of their
+  own, out of reach of that rule, and are set to the same picture through each
+  library's own options and theme colours: a thumb 6px wide with round ends,
+  standing 2px in from the edge, in the strong border role. The role travels
+  through the editor and terminal projections, so both modes and a custom
+  theme reach it.
+  Nothing else is painted at the edge: no track, no shadow where the text has
+  scrolled, no outline or cursor mark on the editor's ruler, and no strip
+  beside a comparison for a map of its changes. The editor's ruler still marks
+  errors and search matches under the thumb. Where the system floats
+  scrollbars the thumb shows while the surface scrolls or the pointer is over
+  it and hides at rest; where the system keeps a strip for them the editor's
+  thumb stays for as long as its text overflows. Three things still differ
+  from a pane, because neither library has an option for them. The thumb
+  cannot widen under the pointer as a floating system thumb does, so it takes
+  the strong divider role there and while it is dragged. The terminal's thumb
+  hides at rest even where the system keeps scrollbars on screen. And the
+  terminal keeps its engine's 14px lane clear of text, where a pane's text
+  runs under a floating thumb: the one option that narrows that lane stops the
+  terminal opening where a canvas is refused. A fourth is not built: under
+  forced colours a pane's scrollbar falls back to the system's, and theirs
+  keeps the theme's roles. The measurements are in
+  `apps/web/src/code/scrollbarTreatment.ts`; the two rules that shape the
+  thumb where no option exists are in `styles/code.css` and name the library
+  classes they hold on.
 - Normal text targets 4.5:1 contrast; large text 3:1; non-text UI marks 3:1.
 - Status, diff, provider, and activity states always include text, shape,
   pattern, or an accessible label in addition to colour.

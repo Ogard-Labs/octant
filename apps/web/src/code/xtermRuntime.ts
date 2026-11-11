@@ -131,7 +131,24 @@ function attachGpuRenderer(terminal: Terminal): { readonly dispose: () => void }
  */
 function terminalTheme(element: HTMLElement, colors: TerminalColorProjection): ITheme {
   const plate = glassPlate(element, colors.palette.background, colors.palette.foreground);
-  return { ...colors.palette, background: plate, cursorAccent: plate };
+  return {
+    ...colors.palette,
+    background: plate,
+    cursorAccent: plate,
+    // The engine draws its own scrollbar, out of reach of the one scrollbar
+    // rule in styles.css. Its stock thumb is the text colour at a fifth; a
+    // pane's is the role that rule names.
+    //
+    // The thumb's width and round ends are cut in styles/code.css, for want
+    // of an option. The engine's one way to narrow the lane is the width of
+    // its overview ruler, and asking for that ruler makes the engine open a
+    // second canvas and refuse to open the terminal at all where that canvas
+    // has no 2D context (observed in the keyboard tests, which run the real
+    // engine). The lane keeps the engine's own width.
+    scrollbarSliderBackground: colors.scrollbarThumb,
+    scrollbarSliderHoverBackground: colors.scrollbarThumbHover,
+    scrollbarSliderActiveBackground: colors.scrollbarThumbHover,
+  };
 }
 
 function applyTerminalTypography(
