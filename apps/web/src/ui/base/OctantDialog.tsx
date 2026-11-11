@@ -73,6 +73,14 @@ export function OctantDialog(props: OctantDialogProps) {
     }
     if (!wasOpen.current) return;
     wasOpen.current = false;
+    // The library calls an exit finished from an animation frame on the popup.
+    // A window nobody can see runs no frames, and a popup that never mounted
+    // has none to wait on, so there the hold would outlive the dialog: it is
+    // given up at once, and there is no exit to miss.
+    if (popup.current === null || document.visibilityState === "hidden") {
+      release.current?.();
+      release.current = undefined;
+    }
     if (focusHasMovedOn(popup.current)) return;
     (restoreFocus.current?.current ?? focusedBefore.current)?.focus({ preventScroll: true });
   }, [open]);

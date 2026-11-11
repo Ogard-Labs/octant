@@ -1,7 +1,7 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { act, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { useRef, useState } from "react";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { OctantButton } from "./OctantButton";
 import { OctantConfirmDialog } from "./OctantConfirmDialog";
 import { OctantDialog } from "./OctantDialog";
@@ -128,7 +128,7 @@ describe("OctantDialogPresence", () => {
     expect(screen.getByText("Deleted 0")).toBeInTheDocument();
   });
 
-  it("is gone in the same turn when no transition runs, as under reduced motion", async () => {
+  it("is gone without a wait of its own when no transition runs, as under reduced motion", async () => {
     const user = userEvent.setup();
     render(<DeleteFile />);
 
@@ -136,8 +136,69 @@ describe("OctantDialogPresence", () => {
     await screen.findByRole("dialog", { name: "Delete report.txt?" });
     await user.click(screen.getByRole("button", { name: "Cancel" }));
 
-    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
     expect(screen.queryByText("Delete report.txt?")).not.toBeInTheDocument();
+  });
+
+  it("does not keep a dialog nobody can see: in a hidden window it is removed at once", async () => {
+    // The exit never finishes here, as in a window that runs no frames.
+    runExitTransitions();
+    const hidden = vi.spyOn(document, "visibilityState", "get").mockReturnValue("hidden");
+    const user = userEvent.setup();
+    render(<DeleteFile />);
+
+    await user.click(screen.getByRole("button", { name: "Delete report.txt" }));
+    await screen.findByRole("dialog", { name: "Delete report.txt?" });
+    await user.click(screen.getByRole("button", { name: "Cancel" }));
+
+    expect(screen.queryByText("Delete report.txt?")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("octant-dialog-backdrop")).not.toBeInTheDocument();
+    hidden.mockRestore();
+  });
+
+  it("is removed when the feature shows and withdraws its dialog before a frame has passed", async () => {
+    // Transitions are reported the way a browser reports them, so the library
+    // waits for a frame before it calls the exit finished.
+    const exit = runExitTransitions();
+    exit.finish();
+    let show = (_file: string | undefined): void => undefined;
+    function Fixture() {
+      const [pending, setPending] = useState<string | undefined>(undefined);
+      show = setPending;
+      return (
+        <OctantDialogPresence>
+          {pending === undefined ? null : (
+            <OctantConfirmDialog
+              confirmLabel="Delete"
+              onCancel={() => setPending(undefined)}
+              onConfirm={() => setPending(undefined)}
+              title={`Delete ${pending}?`}
+            >
+              Gone for good.
+            </OctantConfirmDialog>
+          )}
+        </OctantDialogPresence>
+      );
+    }
+    render(<Fixture />);
+
+    // Shown and withdrawn in one batch: the dialog is never rendered.
+    act(() => {
+      show("report.txt");
+      show(undefined);
+    });
+    expect(screen.queryByText("Delete report.txt?")).not.toBeInTheDocument();
+
+    // Shown in one commit and withdrawn in the next, with no frame between.
+    act(() => show("report.txt"));
+    act(() => show(undefined));
+    await waitFor(() => expect(screen.queryByText("Delete report.txt?")).not.toBeInTheDocument());
+    expect(screen.queryByTestId("octant-dialog-backdrop")).not.toBeInTheDocument();
+    expect(document.querySelector("[inert]")).toBeNull();
+
+    // And the next opening still works.
+    act(() => show("notes.txt"));
+    expect(await screen.findByRole("dialog", { name: "Delete notes.txt?" })).toBeVisible();
   });
 
   it("leaves focus where the person put it while the dialog was leaving", async () => {

@@ -2828,7 +2828,10 @@ arrival or departure classes of its own. A dialog that a feature renders only
 while it is open arrives the same way (`@starting-style`). A stylesheet cannot
 hold an element that is gone, so a surface leaves this way only while it stays
 mounted and is told it has closed. Settings' sheet and a dialog with an `open`
-of its own do that themselves. A dialog a feature renders only while it is
+of its own do that themselves, and such a dialog keeps `open` apart from what
+it shows: one whose words come from the state closing clears (a review, a
+comparison, Rewind) is rendered only while that state exists, like the rest.
+A dialog a feature renders only while it is
 open is wrapped in `OctantDialogPresence`, which keeps the last thing the
 feature rendered until the exit has finished and tells the dialog inside it
 has closed: a confirmation still names what it asked about after the feature
@@ -2837,7 +2840,8 @@ Every confirmation, the command palette, the Code file search, the Navigator,
 the narrow dock, first run and the other dialogs a feature mounts on demand
 leave this way. Two cases still leave at once: a dialog whose owner goes with
 it (a row removed by the confirmation it showed), and one of two dialogs that
-share a presence when the other takes its place.
+share a presence when the other takes its place. In a window nobody can see
+there is no exit to show, so a dialog closed there is removed at once.
 
 A dialog that is leaving is only there to be seen. Its scrim and its controls
 take no press and no key (`inert`), so the page under it answers at once and a
