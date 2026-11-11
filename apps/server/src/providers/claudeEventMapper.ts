@@ -141,6 +141,8 @@ export interface ClaudeEventContext {
   compactionRequested?: boolean;
   /** When the last liveness event went out, in epoch milliseconds. */
   lastLivenessAt?: number;
+  /** Where the agent's own text stands in this turn; unset until it writes any. */
+  agentText?: { toolStepSince: boolean; endsWithNewline: boolean };
   /**
    * Each model call's usage this turn, by Claude message id. An assistant
    * message reports only its own call, so the turn's usage so far is their
@@ -262,6 +264,27 @@ function streamedEvents(
     );
   }
   return results;
+}
+
+// A text block carries no break at its edges, and a turn's deltas are joined
+// into one transcript, so an agent's note before a tool call and its text
+// after the result read as one sentence ("…the repository.Let me…"). The
+// first text after a tool step therefore opens a new paragraph, unless a line
+// break is already there. Reasoning and usage arrive inside a message and end
+// nothing.
+function agentText(context: ClaudeEventContext, text: string): ReadonlyArray<ClaudeMappedMessage> {
+  if (text.length === 0) return [{ kind: "ignored" }];
+  const previous = context.agentText;
+  const separator =
+    previous?.toolStepSince === true && !previous.endsWithNewline && !text.startsWith("\n")
+      ? "\n\n"
+      : "";
+  context.agentText = { toolStepSince: false, endsWithNewline: text.endsWith("\n") };
+  return streamedEvents(context, "text-delta", `${separator}${text}`);
+}
+
+function endAgentMessage(context: ClaudeEventContext): void {
+  if (context.agentText !== undefined) context.agentText.toolStepSince = true;
 }
 
 function usageEvent(
@@ -442,6 +465,7 @@ function mapToolUse(
   authoritativeInput: boolean,
   authoritativeFileChange?: ClaudeFileChange,
 ): ReadonlyArray<ClaudeMappedMessage> {
+  endAgentMessage(context);
   const resolved = toolState(context, content.toolUseId, content.toolName, content.disabled);
   if (resolved === undefined) {
     return [failure("Claude returned invalid tool correlation metadata.")];
@@ -721,6 +745,7 @@ function mapToolResults(
   context: ClaudeEventContext,
   message: Extract<ClaudeDecodedMessage, { readonly kind: "tool-results" }>,
 ): ReadonlyArray<ClaudeMappedMessage> {
+  endAgentMessage(context);
   const providerToolUseIds = new Set<string>();
   for (const result of message.results) {
     if (providerToolUseIds.has(result.toolUseId)) {
@@ -1134,7 +1159,7 @@ function mapStreamEvent(
 ): ReadonlyArray<ClaudeMappedMessage> {
   switch (message.event.kind) {
     case "text-delta":
-      return streamedEvents(context, "text-delta", message.event.text);
+      return agentText(context, message.event.text);
     case "reasoning-delta":
       return streamedEvents(context, "reasoning-delta", message.event.text);
     case "content-start":
