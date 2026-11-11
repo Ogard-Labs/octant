@@ -180,11 +180,12 @@ export function CanvasWorkspaceTab(props: CanvasWorkspaceTabProps): ReactNode {
   // earlier pick's neighbour against the version that then arrived.
   const [loading, setLoading] = useState(false);
   const commentsReturnFocus = useRef<HTMLElement | null>(null);
-  // The identity of the choice send the host has not confirmed yet. A retry of
-  // the same answer reuses it, so the queue recognises the duplicate; any other
-  // send, including the same answer after the tab reopens, takes a fresh one,
-  // since the queue keeps identities it has seen and would refuse a reused one.
-  const unconfirmedChoiceSend = useRef<{ readonly answer: string; readonly id: string }>(undefined);
+  // The identities of choice sends the host has not confirmed yet, by answer. A
+  // retry of the same answer reuses its identity, so the queue recognises the
+  // duplicate, whatever was sent from other choices meanwhile; any other send,
+  // including the same answer after the tab reopens, takes a fresh one, since
+  // the queue keeps identities it has seen and would refuse a reused one.
+  const unconfirmedChoiceSends = useRef(new Map<string, string>());
   const closeCommentsButton = useRef<HTMLButtonElement | null>(null);
 
   const loadCanvas = useCallback(
@@ -838,9 +839,8 @@ export function CanvasWorkspaceTab(props: CanvasWorkspaceTabProps): ReactNode {
                   String(block.blockId),
                   JSON.stringify(response),
                 ].join(":");
-                const pending = unconfirmedChoiceSend.current;
-                const id = pending?.answer === answer ? pending.id : crypto.randomUUID();
-                unconfirmedChoiceSend.current = { answer, id };
+                const id = unconfirmedChoiceSends.current.get(answer) ?? crypto.randomUUID();
+                unconfirmedChoiceSends.current.set(answer, id);
                 const attemptKey = `${answer}:${id}`;
                 const sent = await enqueueCanvasCommentTurn(queueClient, {
                   mode: reviseBase.mode,
@@ -860,7 +860,7 @@ export function CanvasWorkspaceTab(props: CanvasWorkspaceTabProps): ReactNode {
                     scope: "whole-canvas",
                   },
                 });
-                if (sent.status === "sent") unconfirmedChoiceSend.current = undefined;
+                if (sent.status === "sent") unconfirmedChoiceSends.current.delete(answer);
                 return sent;
               },
             };
