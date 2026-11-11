@@ -2,6 +2,7 @@ import { coordinatorWorkersOf } from "../agents/coordinatorWorkers";
 import { requestThreadControl } from "../composer/threadControlNavigation";
 import type { CodeReviewFileRequest } from "../code/codeReviewNavigation";
 import type { ChatThreadId } from "@octant/contracts/chat";
+import { decodeBrowserThreadId } from "@octant/contracts/browser-automation";
 import {
   decodeCodeThreadId,
   type CodeCheckoutId,
@@ -29,6 +30,10 @@ import {
 import type { AgentResultReviewRequest } from "../gitHistory/SavedAgentReview";
 import type { ProviderController } from "../providers/useProviderController";
 import { BottomUtilityPanel } from "../shell/BottomUtilityPanel";
+import { DockBrowserCard } from "../shell/DockBrowserCard";
+import { dockShelfEntries, type DockShelfEntry } from "../shell/DockShelf";
+import { DockTerminalCard } from "../shell/DockTerminalCard";
+import { dismissLiveBrowserCard, useAgentBrowserCard } from "../threadActivity/browserCardActivity";
 import { DockThreadOverviewContent } from "../shell/DockThreadOverviewContent";
 import { runningNowThreads } from "../shell/dockThreadOverviewModel";
 import { remoteAccessAdministrationOf, type OctantHostBridge } from "../shell/hostBridge";
@@ -39,6 +44,7 @@ import type {
   RightUtilityDockSurfaceId,
 } from "../shell/rightUtilityDockModel";
 import {
+  minimisedUtilityTabIds,
   updateThreadUtilityTabBrowserContext,
   updateUtilityTabBrowserContext,
   type ThreadUtilityDockKey,
@@ -70,6 +76,7 @@ export interface DockContainerProps {
     | "closeDock"
     | "closeDockTab"
     | "hideDockTile"
+    | "minimiseDockTool"
     | "openDockTabBeside"
     | "loadCodeBoard"
     | "mergeProjectPullRequest"
@@ -581,6 +588,29 @@ export const DockContainer = memo(function DockContainer(props: DockContainerPro
     );
   })();
 
+  // The shelf: a card for each minimised tool, and for the agent's live Browser
+  // while it is out of sight. A Browser card is only a preview: it never counts
+  // as the Browser being in sight, which is the pane's and the tiles' to say.
+  const agentBrowserContext = useAgentBrowserCard(
+    activeMode === "chat" ? undefined : dockThread?.threadId,
+  );
+  const agentBrowserLive = agentBrowserContext !== undefined;
+  const shelfEntries = useMemo(
+    () => dockShelfEntries(displayedDockState, agentBrowserLive),
+    [agentBrowserLive, displayedDockState],
+  );
+
+  function closeTool(entry: DockShelfEntry) {
+    // Closing a card does what closing the tool's strip tab does: every page of
+    // the Browser, and a Terminal's tabs while its shell keeps running.
+    for (const tab of displayedDockState.tabs) {
+      if (tab.surface === entry.surface) actions.closeDockTab(tab.id);
+    }
+    if (entry.surface === "browser" && dockThread !== undefined) {
+      dismissLiveBrowserCard(dockThread.threadId);
+    }
+  }
+
   return (
     <>
       <RightUtilityDock
@@ -657,7 +687,15 @@ export const DockContainer = memo(function DockContainer(props: DockContainerPro
         launchableSurfaces={launchableDockSurfaces}
         launchableReferences={launchableDockReferences}
         onClose={actions.closeDock}
-        onCloseTab={actions.closeDockTab}
+        onCloseTab={(tabId) => {
+          // Closing the Browser tab dismisses the live session's card too, so
+          // reopening the tab and hiding it again does not bring the card back.
+          const closed = displayedDockState.tabs.find((tab) => tab.id === tabId);
+          if (closed?.surface === "browser" && dockThread !== undefined) {
+            dismissLiveBrowserCard(dockThread.threadId);
+          }
+          actions.closeDockTab(tabId);
+        }}
         onCommitWidth={(width) => {
           actions.setPreviewContextWidth(width);
           actions.setDockWidthChosen(true);
@@ -673,6 +711,30 @@ export const DockContainer = memo(function DockContainer(props: DockContainerPro
           bottomPanelOpen && activeBottomSurface?.id === "plan" ? undefined : threadUtility("plan")
         }
         resolution={dockResolution}
+        {...(dockThread === undefined || activeMode === "chat"
+          ? {}
+          : {
+              shelf: {
+                entries: shelfEntries,
+                renderCard: (entry: DockShelfEntry) =>
+                  entry.surface === "browser" ? (
+                    <DockBrowserCard
+                      client={browserAutomationClient}
+                      onClose={() => closeTool(entry)}
+                      onExpand={() => actions.selectDockTab(entry.tabId)}
+                      threadId={decodeBrowserThreadId(dockThread.threadId)}
+                    />
+                  ) : dockThread.mode === "code" ? (
+                    <DockTerminalCard
+                      checkoutId={dockThread.checkoutId}
+                      client={codeClient}
+                      onClose={() => closeTool(entry)}
+                      onExpand={() => actions.selectDockTab(entry.tabId)}
+                      threadId={decodeCodeThreadId(dockThread.threadId)}
+                    />
+                  ) : null,
+              },
+            })}
         renderTab={(descriptor) => {
           const utilityTab = displayedDockState.tabs.find((tab) => tab.id === descriptor.id);
           if (utilityTab === undefined) return null;
@@ -723,8 +785,10 @@ export const DockContainer = memo(function DockContainer(props: DockContainerPro
         tabs={dockTabs}
         tiles={{
           ...(displayedDockState.layout === undefined ? {} : { layout: displayedDockState.layout }),
+          minimised: minimisedUtilityTabIds(displayedDockState),
           narrow: isNarrow,
           onHideTile: actions.hideDockTile,
+          onMinimise: actions.minimiseDockTool,
           onOpenBeside: actions.openDockTabBeside,
           onResizeColumn: actions.resizeDockTileColumn,
           onResizeColumns: actions.resizeDockTileColumns,

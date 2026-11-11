@@ -1,4 +1,5 @@
 import { QuestionnaireDraftsProvider } from "./transcript/questionnaireDrafts";
+import { useAgentBrowserCard } from "./threadActivity/browserCardActivity";
 import {
   WorktreePreparationDialog,
   type PreparationTarget,
@@ -394,6 +395,7 @@ import {
   changeDisplayedUtilityState,
   closeUtilityTabState,
   hideUtilityTile,
+  minimiseUtilityTool,
   openThreadUtilityTab,
   openUtilityTabBesideState,
   openUtilityTabState,
@@ -3395,6 +3397,15 @@ function LaunchedShell(
     bottomPanelOpen &&
     activeBottomSurface?.id === "browser" &&
     activeBottomTab?.browserContextId === undefined;
+  // The agent's Browser is live, out of sight, and has a tab the dock's card
+  // would stand for: with the dock closed that card is invisible, so the toggle
+  // says so. Only a thread's own Browser tab counts as the card's tab.
+  const agentBrowserContext = useAgentBrowserCard(
+    activeMode === "chat" || dockThreadId === undefined ? undefined : String(dockThreadId),
+  );
+  const dockBrowserActive =
+    agentBrowserContext !== undefined &&
+    displayedDockState.tabs.some((tab) => tab.surface === "browser");
   const bottomPanelHeight = previewBottomPanelHeight ?? bottomPanelPresentation.height;
   const providerController = useProviderController({
     ...(props.providerClient === undefined ? {} : { client: props.providerClient }),
@@ -4244,6 +4255,9 @@ function LaunchedShell(
   }
   function hideDockTile(tabId: string) {
     changeDockTiles((state) => hideUtilityTile(state, tabId));
+  }
+  function minimiseDockTool(tabId: string) {
+    changeDockTiles((state) => minimiseUtilityTool(state, tabId));
   }
   function resizeDockTileColumns(shares: ReadonlyArray<number>) {
     changeDockTiles((state) => resizeUtilityTileColumns(state, shares));
@@ -5152,6 +5166,7 @@ function LaunchedShell(
       selectCodeThread,
       selectDockTab,
       hideDockTile,
+      minimiseDockTool,
       openDockTabBeside,
       resizeDockTileColumn,
       resizeDockTileColumns,
@@ -7463,6 +7478,7 @@ function LaunchedShell(
             bottomPanelAvailable={bottomPanelAvailable}
             bottomPanelPresentedOpen={bottomPanelPresentedOpen}
             dockAvailable={dockAvailable}
+            dockBrowserActive={dockBrowserActive}
             dockPresentedOpen={dockPresentedOpen}
             {...(props.hostBridge === undefined ? {} : { hostBridge: props.hostBridge })}
             hostReservesTitlebarInset={hostReservesTitlebarInset}

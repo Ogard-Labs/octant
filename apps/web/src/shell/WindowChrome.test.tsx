@@ -161,6 +161,34 @@ function atRuleBlock(atRule: string, source = styles): string {
 }
 
 describe("WindowChrome", () => {
+  it("marks the dock toggle with one quiet dot, described in words, while the agent's Browser is active", () => {
+    const { rerender, props } = renderChrome({ dockAvailable: true });
+    const toggle = screen.getByRole("button", { name: "Open Right sidebar" });
+    expect(toggle).not.toHaveAttribute("aria-description");
+    expect(toggle).not.toHaveAttribute("data-activity");
+
+    rerender(<WindowChrome {...props} dockBrowserActive />);
+    const marked = screen.getByRole("button", { name: "Open Right sidebar" });
+    expect(marked).toHaveAccessibleDescription("Browser is active");
+    expect(marked).toHaveAttribute("data-activity", "browser");
+    // A dot, not a count: nothing is added to the button's text.
+    expect(marked).toHaveTextContent("");
+    expect(shellStyles).toMatch(
+      /\.window-chrome__button\[data-activity="browser"\]::after\s*\{[^}]*width:\s*6px/,
+    );
+  });
+
+  it("marks the overflow button that holds the dock toggle in the narrow window", () => {
+    const { rerender, props } = renderChrome({ dockAvailable: true, isNarrow: true });
+    expect(screen.getByRole("button", { name: "More window actions" })).not.toHaveAttribute(
+      "data-activity",
+    );
+    rerender(<WindowChrome {...props} dockBrowserActive />);
+    expect(screen.getByRole("button", { name: "More window actions" })).toHaveAccessibleDescription(
+      "Browser is active",
+    );
+  });
+
   it("offers Back and Forward beside Show sidebar while the sidebar is hidden, off at either end", async () => {
     const user = userEvent.setup();
     const history = {

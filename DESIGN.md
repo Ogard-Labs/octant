@@ -1734,9 +1734,9 @@ read through:
   fill its characters ran through the cards at full strength while the
   composer beside them was frosted);
 - Zen's windows, dock, pills, and sheets (glass cards);
-- the floating activity picture-in-picture, and the Browser's live preview,
-  which shows the page itself and frosts only its caption, count, and close
-  control, never the page;
+- the floating Computer Use activity picture-in-picture (the Browser's live
+  preview is no longer floating: it is a card in the dock, drawn as the dock's
+  other cards are, with no frosted parts);
 - the phone's glass surfaces.
 
 Its tint, stroke, and highlight are theme roles, and its floor is the theme's
@@ -2281,6 +2281,36 @@ made on the tools on screen, so a tool the bottom panel holds never counts
 toward a cap or a divider's shares. A tool the bottom panel takes, or one that
 becomes unavailable, loses its tile and comes back as a tab, not as a tile.
 
+**Minimised tools.** A thread's Browser and Terminal can stand as small live
+cards at the foot of the dock, so a page or a shell can be watched while another
+tool, or only the overview, is in front. A floating preview drawn over the thread
+covered the thread's own text and could not show a shell at all, so it is gone;
+the cards replace it. The shelf is a group named **Minimised tools** at the foot
+of the dock body, under the overview when no tool is shown and under the tiles
+when tools are shown (the tiles measure what is left and keep their floors). It
+takes its natural height, holds at most two cards (Browser, then Terminal), is
+never more than two fifths of the dock (it scrolls inside past that) and is not
+drawn in the narrow modal dock, where the state is kept and the minimised tool's
+tab stays in the strip. A card is a `.dock-card` like the overview's, with no
+frosted parts and no new fill: a head with the tool's icon, a title (the page's
+title or host with the profile name beside it where the page lives in one, or
+"Terminal"), a detail word (such as "Exited (1)"), a quiet 6px dot named "New
+output" for a shell that printed while nobody looked, an expand icon button
+(**Show Browser**, **Show Terminal**) and a close icon button (**Close Browser**,
+**Close Terminal**), then a preview that is itself the expand button (named
+"Show Browser, live preview"). The Browser's picture is fitted to the card's
+width, top aligned, at 9:5, a neutral skeleton while stale or missing; the
+Terminal shows about six rows of the smallest terminal type, read-only, or "No
+terminal running" or "Preview unavailable". The picture and the terminal keep
+their own content fill, inside the card. A minimised tool leaves the strip, since
+its card stands for it, and **Show another tool** lists it with the open tools not
+on screen. A Browser or Terminal tab's menu offers **Minimise**, and a tile
+caption offers a **Minimise <tool>** icon button before **Hide <tool> from view**.
+While an agent's Browser session is live and the thread's Browser is out of sight
+the Browser shows as a card without being minimised; with the dock closed, the
+window's dock toggle carries one quiet dot described as "Browser is active". The
+rules, reads and limits are in [Workspace](docs/design/workspace.md#tool-lifecycles).
+
 Without a saved show or hide choice, a wide window starts with the right dock open and a narrow window starts with it closed. The bottom panel starts closed. An explicit dock show or hide is restored per window; merely mounting the default records no choice, so an initial narrow frame does not become a saved close. The active-pane eligibility rules below still determine whether dock chrome is shown.
 
 A welcome, Project, or other pane with neither a bound thread nor a valid
@@ -2324,7 +2354,8 @@ Other servers stay behind a nested disclosure; none are stopped or removed by
 hiding them. The cards sit one step above the dock's own background. Sources list the current thread's journaled image attachments when present.
 Computer use offers Picture in Picture show/hide for its live activity card
 that floats over the main conversation. The Browser's live preview is separate:
-it follows the thread's Browser, not this control (see
+it is a card on the dock's shelf and follows the thread's Browser, not this
+control (see [Shell and layout](#shell-and-layout) and
 [Workspace](docs/design/workspace.md#tool-lifecycles)). Neither preview occupies
 Environment, and hiding one never stops its session. Computer-use approval and
 stop controls stay with its card. It does not duplicate the Agents dock. Missing checkout context

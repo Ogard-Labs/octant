@@ -6,6 +6,9 @@ import {
   changeDisplayedUtilityState,
   closeUtilityTabState,
   hideUtilityTile,
+  minimiseUtilityTool,
+  minimisedUtilityTabIds,
+  MINIMISABLE_DOCK_SURFACES,
   openThreadUtilityTab,
   openUtilityTabBesideState,
   openUtilityTabState,
@@ -14,6 +17,7 @@ import {
   readUtilityDockOpen,
   readUtilityDockPresentation,
   removeUtilityTabs,
+  restoreUtilityTool,
   resizeUtilityTileColumn,
   resizeUtilityTileColumns,
   retainAvailableUtilityTabs,
@@ -691,6 +695,315 @@ describe("dock tool tiles", () => {
     );
     expect(columnsOf(added).flat()).toContain("plan");
     expect(changeDisplayedUtilityState(stored, displayed, (state) => state)).toBe(stored);
+  });
+});
+
+describe("minimised dock tools", () => {
+  const pageOne = "10000000-0000-4000-8000-000000000001";
+  const pageTwo = "10000000-0000-4000-8000-000000000002";
+  const shellTab = "10000000-0000-4000-8000-000000000003";
+  function opened(...ids: ReadonlyArray<"browser" | "terminal" | "files" | "canvas" | "plan">) {
+    let state: ThreadUtilityDockState = { tabs: [] };
+    for (const id of ids) state = openUtilityTabState(state, id);
+    return state;
+  }
+  function columnsOf(state: ThreadUtilityDockState): ReadonlyArray<ReadonlyArray<string>> {
+    return (state.layout?.columns ?? []).map((column) => column.tiles.map((tile) => tile.tabId));
+  }
+  /** The invariants every state must keep, whatever function produced it. */
+  function holdsInvariants(state: ThreadUtilityDockState) {
+    const cards = minimisedUtilityTabIds(state);
+    const open = state.tabs.map((tab) => tab.id);
+    expect(new Set(cards).size).toBe(cards.length);
+    for (const id of cards) {
+      expect(open).toContain(id);
+      expect(shownUtilityTabIds(state)).not.toContain(id);
+      expect(state.active).not.toBe(id);
+      const surface = state.tabs.find((tab) => tab.id === id)?.surface;
+      expect(surface !== undefined && MINIMISABLE_DOCK_SURFACES.has(surface)).toBe(true);
+      // A tool is a card whole.
+      for (const tab of state.tabs.filter((candidate) => candidate.surface === surface)) {
+        expect(cards).toContain(tab.id);
+      }
+    }
+  }
+
+  it("minimises only the Browser and the Terminal", () => {
+    const state = opened("files", "browser");
+    expect(minimiseUtilityTool(state, "files")).toBe(state);
+    expect(minimiseUtilityTool(state, "missing")).toBe(state);
+    expect([...MINIMISABLE_DOCK_SURFACES].sort()).toEqual(["browser", "terminal"]);
+  });
+
+  it("brings the overview back when the only shown tool is minimised and keeps the other tabs open", () => {
+    const state = minimiseUtilityTool(opened("files", "browser"), "browser");
+    expect(state.active).toBeUndefined();
+    expect(shownUtilityTabIds(state)).toEqual([]);
+    expect(state.tabs.map((tab) => tab.id)).toEqual(["files", "browser"]);
+    expect(minimisedUtilityTabIds(state)).toEqual(["browser"]);
+    holdsInvariants(state);
+  });
+
+  it("leaves the other tile when one of two shown tools is minimised, and focus follows", () => {
+    let state = showUtilityTabBeside(opened("canvas", "browser", "terminal"), "browser");
+    state = selectUtilityTabState(state, "browser");
+    expect(columnsOf(state)).toHaveLength(2);
+    const minimised = minimiseUtilityTool(state, "browser");
+    expect(minimised.layout).toBeUndefined();
+    expect(shownUtilityTabIds(minimised)).toEqual(["terminal"]);
+    expect(minimised.active).toBe("terminal");
+    expect(minimisedUtilityTabIds(minimised)).toEqual(["browser"]);
+    holdsInvariants(minimised);
+  });
+
+  it("keeps a layout of the remaining tiles when one of three is minimised", () => {
+    let state = opened("canvas", "browser", "terminal", "files");
+    state = showUtilityTabBeside(state, "browser");
+    state = showUtilityTabBelow(state, "canvas");
+    expect(shownUtilityTabIds(state)).toHaveLength(3);
+    const minimised = minimiseUtilityTool(state, "browser");
+    expect(shownUtilityTabIds(minimised)).toHaveLength(2);
+    expect(minimised.layout).toBeDefined();
+    holdsInvariants(minimised);
+  });
+
+  it("minimises every page of the Browser and every Terminal of the thread together", () => {
+    let state: ThreadUtilityDockState = { tabs: [] };
+    state = addUtilityTabState(state, "browser", pageOne);
+    state = addUtilityTabState(state, "browser", pageTwo);
+    state = addUtilityTabState(state, "terminal", shellTab);
+    state = addUtilityTabState(state, "files", "files-id");
+    const minimised = minimiseUtilityTool(state, pageTwo);
+    expect(minimisedUtilityTabIds(minimised)).toEqual([pageOne, pageTwo]);
+    expect(minimiseUtilityTool(minimised, pageOne)).toBe(minimised);
+    holdsInvariants(minimised);
+    const both = minimiseUtilityTool(minimised, shellTab);
+    expect(minimisedUtilityTabIds(both)).toEqual([pageOne, pageTwo, shellTab]);
+    holdsInvariants(both);
+  });
+
+  it("restores a tool as the one tool shown, or as the focused tile's tool", () => {
+    const alone = minimiseUtilityTool(opened("files", "browser"), "browser");
+    const restoredAlone = restoreUtilityTool(alone, "browser");
+    expect(restoredAlone.active).toBe("browser");
+    expect(minimisedUtilityTabIds(restoredAlone)).toEqual([]);
+    expect(restoredAlone.minimised).toBeUndefined();
+
+    let tiled = showUtilityTabBeside(opened("canvas", "browser", "files"), "browser");
+    tiled = selectUtilityTabState(tiled, "files");
+    const parked = minimiseUtilityTool(tiled, "browser");
+    const back = restoreUtilityTool(parked, "browser");
+    expect(back.active).toBe("browser");
+    expect(shownUtilityTabIds(back)).toEqual(["browser"]);
+    expect(minimisedUtilityTabIds(back)).toEqual([]);
+    expect(restoreUtilityTool(back, "browser")).toBe(back);
+    holdsInvariants(back);
+  });
+
+  it("restores every page of a minimised Browser when any of its tabs is selected or opened", () => {
+    let state: ThreadUtilityDockState = { tabs: [] };
+    state = addUtilityTabState(state, "browser", pageOne);
+    state = addUtilityTabState(state, "browser", pageTwo);
+    const minimised = minimiseUtilityTool(state, pageOne);
+    expect(selectUtilityTabState(minimised, pageTwo).minimised).toBeUndefined();
+    expect(selectUtilityTabState(minimised, pageTwo).active).toBe(pageTwo);
+    const another = addUtilityTabState(
+      minimised,
+      "browser",
+      "10000000-0000-4000-8000-000000000009",
+    );
+    expect(another.minimised).toBeUndefined();
+    expect(openUtilityTabState(minimised, "browser").minimised).toBeUndefined();
+  });
+
+  it("restores a minimised tool when it is shown beside, below or alone", () => {
+    let state = minimiseUtilityTool(opened("files", "canvas", "browser"), "browser");
+    state = selectUtilityTabState(state, "files");
+    for (const show of [showUtilityTabBeside, showUtilityTabBelow, showUtilityTabAlone]) {
+      const shown = show(state, "browser");
+      expect(shown.minimised).toBeUndefined();
+      expect(shownUtilityTabIds(shown)).toContain("browser");
+      holdsInvariants(shown);
+    }
+  });
+
+  it("restores a tool opened beside while a card stands for its tool", () => {
+    const state = minimiseUtilityTool(opened("files", "terminal"), "terminal");
+    const next = openUtilityTabBesideState(
+      selectUtilityTabState(state, "files"),
+      "terminal",
+      shellTab,
+    );
+    expect(next.minimised).toBeUndefined();
+    expect(shownUtilityTabIds(next)).toContain(shellTab);
+    holdsInvariants(next);
+  });
+
+  it("closing a card's tab removes it, and the remaining tabs keep the overview", () => {
+    const parked = minimiseUtilityTool(opened("files", "terminal", "browser"), "browser");
+    expect(parked.active).toBeUndefined();
+    const closed = closeUtilityTabState(parked, "browser");
+    expect(closed.tabs.map((tab) => tab.id)).toEqual(["files", "terminal"]);
+    expect(closed.minimised).toBeUndefined();
+    expect(closed.active).toBeUndefined();
+    holdsInvariants(closed);
+  });
+
+  it("closing the shown tool moves to a tab that is not a card", () => {
+    // Browser (card), Files shown, Canvas: closing Files must not pick the card.
+    let state = opened("browser", "files", "canvas");
+    state = minimiseUtilityTool(selectUtilityTabState(state, "browser"), "browser");
+    state = selectUtilityTabState(state, "files");
+    const closed = closeUtilityTabState(state, "files");
+    expect(closed.active).toBe("canvas");
+    holdsInvariants(closed);
+    const onlyCard = closeUtilityTabState(closeUtilityTabState(state, "files"), "canvas");
+    expect(onlyCard.active).toBeUndefined();
+    expect(minimisedUtilityTabIds(onlyCard)).toEqual(["browser"]);
+  });
+
+  it("keeps the invariants when tools are removed, retained or hidden", () => {
+    let state = showUtilityTabBeside(opened("canvas", "browser", "terminal", "files"), "terminal");
+    state = minimiseUtilityTool(state, "browser");
+    holdsInvariants(removeUtilityTabs(state, new Set(["files"])));
+    const withoutShell = removeUtilityTabs(state, new Set(["terminal"]));
+    expect(withoutShell.tabs.map((tab) => tab.surface)).not.toContain("terminal");
+    expect(minimisedUtilityTabIds(withoutShell)).toEqual(["browser"]);
+    holdsInvariants(retainAvailableUtilityTabs(state, new Set(["canvas", "files", "terminal"])));
+    expect(
+      retainAvailableUtilityTabs(state, new Set(["canvas", "files", "terminal"])).minimised,
+    ).toBeUndefined();
+    holdsInvariants(hideUtilityTile(state, "terminal"));
+  });
+
+  it("keeps a card when the bottom panel holds its tool and a tile change is made on what is shown", () => {
+    const stored = minimiseUtilityTool(opened("files", "canvas", "terminal"), "terminal");
+    const displayed = removeUtilityTabs(stored, new Set(["terminal"]));
+    expect(minimisedUtilityTabIds(displayed)).toEqual([]);
+    const changed = changeDisplayedUtilityState(stored, displayed, (state) =>
+      showUtilityTabBeside(state, "files"),
+    );
+    expect(minimisedUtilityTabIds(changed)).toEqual(["terminal"]);
+    expect(changed.tabs.map((tab) => tab.id)).toContain("terminal");
+    holdsInvariants(changed);
+  });
+
+  it("keeps the cards through a stored round trip, the overview included", () => {
+    const localStorage = memoryStorage();
+    const key = threadUtilityDockKey("code", "thread-a");
+    let state = minimiseUtilityTool(opened("files", "browser", "terminal"), "browser");
+    state = minimiseUtilityTool(state, "terminal");
+    writeUtilityDockPresentation({ localStorage }, "window-a", {
+      open: true,
+      threads: new Map([[key, state]]),
+    });
+    const read = threadUtilityDockState(
+      readUtilityDockPresentation({ localStorage }, "window-a").threads,
+      key,
+    );
+    expect(read).toEqual(state);
+    expect(read.active).toBeUndefined();
+  });
+
+  it("reads an old record, with no cards, as before", () => {
+    const localStorage = memoryStorage();
+    const key = threadUtilityDockKey("code", "thread-a");
+    localStorage.setItem(
+      "octant.shell.utility-dock.window-a.v1",
+      JSON.stringify({
+        open: true,
+        threads: { [key]: { tabs: ["browser", "files"], active: "files" } },
+      }),
+    );
+    expect(
+      threadUtilityDockState(
+        readUtilityDockPresentation({ localStorage }, "window-a").threads,
+        key,
+      ),
+    ).toEqual({
+      tabs: [
+        { id: "browser", surface: "browser" },
+        { id: "files", surface: "files" },
+      ],
+      active: "files",
+    });
+  });
+
+  it("drops stored cards that are unknown, repeated, not minimisable, or shown", () => {
+    const localStorage = memoryStorage();
+    const key = threadUtilityDockKey("code", "thread-a");
+    localStorage.setItem(
+      "octant.shell.utility-dock.window-a.v1",
+      JSON.stringify({
+        open: true,
+        threads: {
+          [key]: {
+            tabs: ["files", "browser", "terminal", "canvas"],
+            active: "browser",
+            minimised: ["files", "ghost", "terminal", "terminal", 7, { id: "browser" }],
+          },
+        },
+      }),
+    );
+    const read = threadUtilityDockState(
+      readUtilityDockPresentation({ localStorage }, "window-a").threads,
+      key,
+    );
+    expect(minimisedUtilityTabIds(read)).toEqual(["terminal"]);
+    expect(read.active).toBe("browser");
+    holdsInvariants(read);
+  });
+
+  it("never lets a stored card be the active tab or sit in a tile", () => {
+    const localStorage = memoryStorage();
+    const key = threadUtilityDockKey("code", "thread-a");
+    localStorage.setItem(
+      "octant.shell.utility-dock.window-a.v1",
+      JSON.stringify({
+        open: true,
+        threads: {
+          [key]: {
+            tabs: ["files", "browser", "canvas"],
+            active: "browser",
+            minimised: ["browser"],
+            layout: {
+              columns: [
+                { share: 0.5, tiles: [{ tabId: "files", share: 1 }] },
+                {
+                  share: 0.5,
+                  tiles: [
+                    { tabId: "browser", share: 0.5 },
+                    { tabId: "canvas", share: 0.5 },
+                  ],
+                },
+              ],
+            },
+          },
+        },
+      }),
+    );
+    const read = threadUtilityDockState(
+      readUtilityDockPresentation({ localStorage }, "window-a").threads,
+      key,
+    );
+    holdsInvariants(read);
+    expect(shownUtilityTabIds(read)).toEqual(["files", "canvas"]);
+  });
+
+  it("never stores or reads a card for the bottom panel", () => {
+    const localStorage = memoryStorage();
+    const key = threadUtilityDockKey("code", "thread-a");
+    const state = minimiseUtilityTool(opened("files", "browser"), "browser");
+    writeBottomPanelToolPresentation({ localStorage }, "window-a", new Map([[key, state]]));
+    expect(
+      JSON.parse(localStorage.getItem("octant.shell.bottom-panel-tools.window-a.v1") ?? "{}"),
+    ).not.toHaveProperty("threads.code:thread-a.minimised");
+    const read = threadUtilityDockState(
+      readBottomPanelToolPresentation({ localStorage }, "window-a"),
+      key,
+    );
+    expect(read.minimised).toBeUndefined();
+    expect(withoutTileLayout(state).minimised).toBeUndefined();
   });
 });
 

@@ -225,6 +225,8 @@ export type ShellActions = {
   readonly selectDockTab: (tabId: string) => void;
   /** Takes a tile out of view; the tool stays open in the strip. */
   readonly hideDockTile: (tabId: string) => void;
+  /** Takes a Browser or Terminal tool out of its tile as a small live card at the foot of the dock. */
+  readonly minimiseDockTool: (tabId: string) => void;
   /** Opens a tool and shows it beside the focused tile in one step. */
   readonly openDockTabBeside: (surface: RightUtilityDockSurfaceId) => void;
   readonly resizeDockTileColumn: (columnIndex: number, shares: ReadonlyArray<number>) => void;

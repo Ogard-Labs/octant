@@ -15,6 +15,8 @@ export interface WindowChromeContainerProps {
   readonly bottomPanelAvailable: boolean;
   readonly bottomPanelPresentedOpen: boolean;
   readonly dockAvailable: boolean;
+  /** The agent's Browser is live and has a card the closed dock is holding. */
+  readonly dockBrowserActive: boolean;
   readonly dockPresentedOpen: boolean;
   readonly hostBridge?: OctantHostBridge;
   readonly hostReservesTitlebarInset: boolean;
@@ -43,6 +45,7 @@ export const WindowChromeContainer = memo(function WindowChromeContainer(
     bottomPanelAvailable,
     bottomPanelPresentedOpen,
     dockAvailable,
+    dockBrowserActive,
     dockPresentedOpen,
     hostReservesTitlebarInset,
     isNarrow,
@@ -58,6 +61,7 @@ export const WindowChromeContainer = memo(function WindowChromeContainer(
       bottomPanelAvailable={bottomPanelAvailable && !isNarrow}
       bottomPanelExpanded={bottomPanelPresentedOpen}
       dockAvailable={dockAvailable}
+      dockBrowserActive={dockBrowserActive && !dockPresentedOpen}
       dockExpanded={dockPresentedOpen}
       dockLabel="Right sidebar"
       {...(props.hostBridge === undefined ? {} : { hostBridge: props.hostBridge })}

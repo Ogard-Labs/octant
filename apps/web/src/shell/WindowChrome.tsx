@@ -9,6 +9,11 @@ import { WindowHistoryButtons } from "./WindowHistoryButtons";
 
 export interface WindowChromeProps {
   readonly activeSurface: string;
+  /**
+   * The agent's Browser is live and the dock, closed, holds its card: the
+   * toggle carries one quiet dot, so a page being driven is not silent.
+   */
+  readonly dockBrowserActive?: boolean;
   readonly dockAvailable: boolean;
   readonly dockExpanded: boolean;
   readonly dockLabel: string;
@@ -132,6 +137,7 @@ export function WindowChrome(props: WindowChromeProps) {
         {props.isNarrow ? (
           <NarrowOverflow
             dockAvailable={props.dockAvailable}
+            dockBrowserActive={props.dockBrowserActive === true}
             dockExpanded={props.dockExpanded}
             dockLabel={props.dockLabel}
             bottomPanelAvailable={props.bottomPanelAvailable === true}
@@ -162,6 +168,7 @@ export function WindowChrome(props: WindowChromeProps) {
               <IconButton
                 aria-controls="right-utility-dock"
                 aria-expanded={props.dockExpanded}
+                {...dockActivityAttributes(props.dockBrowserActive === true)}
                 className="window-chrome__button"
                 data-dock-opener="true"
                 icon={PanelRight}
@@ -176,10 +183,18 @@ export function WindowChrome(props: WindowChromeProps) {
   );
 }
 
+/** The mark and its words, for the toggle that holds the dock's closed card. */
+function dockActivityAttributes(active: boolean) {
+  return active
+    ? ({ "aria-description": "Browser is active", "data-activity": "browser" } as const)
+    : {};
+}
+
 function NarrowOverflow(props: {
   readonly bottomPanelAvailable: boolean;
   readonly bottomPanelExpanded: boolean;
   readonly dockAvailable: boolean;
+  readonly dockBrowserActive: boolean;
   readonly dockExpanded: boolean;
   readonly dockLabel: string;
   readonly onRecoverZen?: () => void;
@@ -213,6 +228,7 @@ function NarrowOverflow(props: {
       <IconButton
         aria-controls={disclosureId}
         aria-expanded={open}
+        {...dockActivityAttributes(props.dockAvailable && props.dockBrowserActive)}
         className="window-chrome__button"
         data-dock-opener={props.dockAvailable ? "true" : undefined}
         icon={MoreHorizontal}

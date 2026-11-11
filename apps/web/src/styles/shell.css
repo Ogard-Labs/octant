@@ -4552,3 +4552,20 @@ html[data-octant-increased-contrast="true"] .whats-new-card {
     display: none;
   }
 }
+
+/* A live agent Browser the dock would show as a card while the dock is closed:
+   one quiet dot on the dock toggle, the same mark the dock's cards use. */
+.window-chrome__button[data-activity="browser"] {
+  position: relative;
+}
+
+.window-chrome__button[data-activity="browser"]::after {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  width: 6px;
+  height: 6px;
+  border-radius: var(--oct-radius-pill);
+  background: var(--oct-fg);
+  content: "";
+}

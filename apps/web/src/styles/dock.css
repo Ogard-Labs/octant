@@ -757,7 +757,8 @@
   white-space: nowrap;
 }
 
-.dock-tile__hide {
+.dock-tile__hide,
+.dock-tile__minimise {
   width: 22px;
   min-width: 22px;
   height: 22px;
@@ -768,7 +769,10 @@
 
 .dock-tile:hover .dock-tile__hide,
 .dock-tile:focus-within .dock-tile__hide,
-.dock-tile[data-focused="true"] .dock-tile__hide {
+.dock-tile[data-focused="true"] .dock-tile__hide,
+.dock-tile:hover .dock-tile__minimise,
+.dock-tile:focus-within .dock-tile__minimise,
+.dock-tile[data-focused="true"] .dock-tile__minimise {
   opacity: 1;
 }
 
@@ -1249,4 +1253,159 @@ html[data-octant-increased-contrast="true"] .navigator-panel__capability {
 .dock-browser-pages__page-body {
   flex: 1 1 auto;
   min-height: 0;
+}
+
+/* The shelf: minimised tools as small live cards at the foot of the dock body,
+   under the overview or the tiles. It takes its natural height and never more
+   than two fifths of the dock, scrolling inside past that; the area above
+   measures what is left and keeps its own floors. */
+.right-utility-dock__content[data-shelf="true"] {
+  display: flex;
+  flex-direction: column;
+}
+
+.right-utility-dock__content[data-shelf="true"]:has(> .dock-start) {
+  padding: 0;
+  overflow: hidden;
+}
+
+.right-utility-dock__content[data-shelf="true"] > .dock-start {
+  min-height: 0;
+  flex: 1 1 0;
+  padding: 0 var(--oct-space-3) var(--oct-space-3);
+  overflow-y: auto;
+}
+
+.right-utility-dock__content[data-shelf="true"] > .dock-tiles {
+  height: auto;
+  min-height: 0;
+  flex: 1 1 0;
+}
+
+.dock-shelf {
+  display: grid;
+  max-height: 40%;
+  flex: none;
+  gap: var(--oct-space-2);
+  padding: var(--oct-space-2) var(--oct-space-3) var(--oct-space-3);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.dock-shelf__slot {
+  min-width: 0;
+}
+
+/* A card is one of the dock's cards: its own wash over the dock's ground. The
+   picture and the terminal bring their own content fill, which is opaque on
+   purpose and sits inside the card, never under it. */
+.dock-mini-card {
+  gap: var(--oct-space-2);
+}
+
+.dock-mini-card__head {
+  display: flex;
+  min-width: 0;
+  min-height: 24px;
+  align-items: center;
+  gap: var(--oct-space-1);
+}
+
+.dock-mini-card__title {
+  min-width: 0;
+  flex: 1 1 auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.dock-mini-card__detail {
+  flex: none;
+  color: var(--oct-meta);
+  font-size: var(--oct-text-xs);
+  white-space: nowrap;
+}
+
+/* New output: a quiet mark, the same dot the dock toggle carries, named for
+   assistive technology and gone as soon as the card has been looked at. */
+.dock-mini-card__dot {
+  width: 6px;
+  height: 6px;
+  flex: none;
+  border-radius: var(--oct-radius-pill);
+  background: var(--oct-fg);
+}
+
+.dock-mini-card__action {
+  width: 22px;
+  min-width: 22px;
+  height: 22px;
+  min-height: 22px;
+  flex: none;
+  padding: 0;
+}
+
+.dock-mini-card__preview {
+  position: relative;
+  min-width: 0;
+  overflow: hidden;
+  background: var(--octant-surface-inset);
+  border-radius: var(--oct-radius-sm);
+}
+
+.dock-mini-card__picture,
+.dock-mini-card__skeleton {
+  display: block;
+  width: 100%;
+  aspect-ratio: 9 / 5;
+}
+
+.dock-mini-card__picture {
+  object-fit: cover;
+  object-position: top center;
+  user-select: none;
+}
+
+.dock-mini-card__skeleton {
+  border-radius: 0;
+}
+
+/* The shell's tail is about six rows of the smallest terminal type. */
+.dock-mini-card__terminal,
+.dock-mini-card__skeleton--terminal,
+.dock-mini-card__note {
+  display: block;
+  height: 72px;
+  aspect-ratio: auto;
+}
+
+.dock-mini-card__terminal {
+  overflow: hidden;
+}
+
+.dock-mini-card__terminal > section {
+  height: 100%;
+}
+
+.dock-mini-card__terminal .terminal-leave-hint {
+  display: none;
+}
+
+.dock-mini-card__note {
+  display: grid;
+  margin: 0;
+  padding: var(--oct-space-3);
+  place-items: center;
+  color: var(--oct-meta);
+  font-size: var(--oct-text-xs);
+}
+
+/* The whole preview is the expand control; it sits over the inert picture. */
+.dock-mini-card__expand {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  padding: 0;
+  border-radius: inherit;
 }

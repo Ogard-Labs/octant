@@ -8,6 +8,7 @@ import {
   type ReactNode,
   type Ref,
 } from "react";
+import { DockShelf, type DockShelfEntry } from "./DockShelf";
 import { DockTiles, type DockTileContent } from "./DockTiles";
 import { DockShowBesideMenu } from "./DockShowBesideMenu";
 import { DockUtilityLauncher, type DockUtilityLauncherReference } from "./DockUtilityLauncher";
@@ -21,6 +22,7 @@ import { MULTI_INSTANCE_DOCK_SURFACES } from "./rightUtilityDockModel";
 import {
   MAX_DOCK_TILE_COLUMNS,
   MAX_DOCK_TILES_PER_COLUMN,
+  MINIMISABLE_DOCK_SURFACES,
   showUtilityTabBelow,
   showUtilityTabBeside,
   type DockTileLayout,
@@ -51,7 +53,14 @@ export interface DockTileControls {
   readonly narrow: boolean;
   /** Each tile answers for its own tool: the dock's one resolution is the focused tile's. */
   readonly resolveSurface: (surface: RightUtilityDockSurfaceId) => RightUtilityDockResolution;
+  /**
+   * The open tabs whose tool stands as a card on the shelf instead of in the
+   * strip. The modal presentation draws no shelf, so there they stay in the strip.
+   */
+  readonly minimised?: ReadonlyArray<string>;
   readonly onHideTile: (tabId: string) => void;
+  /** Takes a Browser or Terminal tool out of view as a card on the shelf. */
+  readonly onMinimise: (tabId: string) => void;
   /** Opens a tool and shows it beside the focused tile in one step. */
   readonly onOpenBeside: (surface: RightUtilityDockSurfaceId) => void;
   readonly onResizeColumn: (columnIndex: number, shares: ReadonlyArray<number>) => void;
@@ -87,6 +96,15 @@ export interface RightUtilityDockSurfaceProps {
   readonly overview?: ReactNode;
   readonly plan?: ReactNode;
   readonly resolution: RightUtilityDockResolution;
+  /**
+   * The cards at the foot of the dock, and how each is drawn. The surface owns
+   * where the shelf stands and when it is absent; the cards' own reads belong
+   * to whoever renders them.
+   */
+  readonly shelf?: {
+    readonly entries: ReadonlyArray<DockShelfEntry>;
+    readonly renderCard: (entry: DockShelfEntry) => ReactNode;
+  };
   readonly sideChat?: ReactNode;
   readonly renderTab?: (tab: RightUtilityDockTabDescriptor) => ReactNode;
   readonly tabs: ReadonlyArray<RightUtilityDockSurfaceDescriptor | RightUtilityDockTabDescriptor>;
@@ -106,6 +124,12 @@ export function RightUtilityDockSurface(props: RightUtilityDockSurfaceProps) {
   const activeSurface = props.resolution.kind === "closed" ? undefined : props.resolution.surface;
   const activeTabId = props.activeTabId ?? activeSurface?.id;
   const activeTab = props.tabs.find((tab) => tab.id === activeTabId);
+  // A minimised tool is stood for by its card; the strip lists the tabs the
+  // person can still pick. With no shelf drawn they stay listed, or nothing
+  // would lead back to them.
+  const shelfDrawn = props.tiles !== undefined && !props.tiles.narrow;
+  const minimisedIds = new Set(shelfDrawn ? (props.tiles?.minimised ?? []) : []);
+  const openTabs = props.tabs.filter((tab) => !minimisedIds.has(tab.id));
   const quickToolsProjectId = useContext(StartQuickToolsPlacementContext)?.projectId;
   const remaining = props.launchableSurfaces.filter(
     (surface) =>
@@ -123,13 +147,13 @@ export function RightUtilityDockSurface(props: RightUtilityDockSurfaceProps) {
   // beside a Terminal and Environment crowded the title band with "Browser 1"
   // and "Browser 2"; the band now names the Browser once and the pages sit in
   // their own row inside it.
-  const browserTabs = props.tabs.filter((tab) => dockTabSurface(tab).id === "browser");
+  const browserTabs = openTabs.filter((tab) => dockTabSurface(tab).id === "browser");
   // The Browser keeps the first page's place in the strip, whichever page is
   // showing: standing in for the selected page, it moved past the Terminal and
   // back as pages were chosen.
   const browserRepresentative = browserTabs[0];
   const browserActive = activeTab !== undefined && dockTabSurface(activeTab).id === "browser";
-  const stripTabs = props.tabs.flatMap((tab) => {
+  const stripTabs = openTabs.flatMap((tab) => {
     if (dockTabSurface(tab).id !== "browser") return [tab];
     if (tab !== browserRepresentative) return [];
     return [browserTabs.length > 1 && "surface" in tab ? { ...tab, label: "Browser" } : tab];
@@ -164,9 +188,23 @@ export function RightUtilityDockSurface(props: RightUtilityDockSurfaceProps) {
   const root = useRef<HTMLDivElement>(null);
   // Hiding a tile or closing a tab unmounts the control that held keyboard
   // focus; the tab strip takes it, so the keyboard keeps its place.
-  const [refocus, setRefocus] = useState<{ readonly tab?: string }>();
+  const [refocus, setRefocus] = useState<{
+    readonly tab?: string;
+    /** A tool that became a card: its card's first control takes the focus. */
+    readonly card?: RightUtilityDockSurfaceId;
+  }>();
   useEffect(() => {
     if (refocus === undefined) return;
+    if (refocus.card !== undefined) {
+      const card = root.current?.querySelector<HTMLElement>(
+        `[data-dock-card="${refocus.card}"] .dock-mini-card__action`,
+      );
+      if (card !== null && card !== undefined) {
+        card.focus();
+        setRefocus(undefined);
+        return;
+      }
+    }
     const tabs = [...(root.current?.querySelectorAll<HTMLElement>("[data-dock-tab]") ?? [])];
     // The tool's own tab, else the selected one, else the overflow count:
     // a tab in the overflow list is not rendered, and the active tab never is.
@@ -203,12 +241,13 @@ export function RightUtilityDockSurface(props: RightUtilityDockSurfaceProps) {
     tabs: props.tabs.map((tab) => ({ id: tab.id, surface: dockTabSurface(tab).id })),
     ...(activeTabId === undefined ? {} : { active: activeTabId }),
     ...(layout === undefined ? {} : { layout }),
+    ...(minimisedIds.size === 0 ? {} : { minimised: [...minimisedIds] }),
   };
   function tabMenu(stripId: string): ReadonlyArray<OctantMenuItem> {
-    if (tiles === undefined || tiles.narrow || props.resolution.kind !== "surface") return [];
+    if (tiles === undefined || tiles.narrow) return [];
     const id = toolOf(stripId);
     const items: OctantMenuItem[] = [];
-    if (id !== activeTabId) {
+    if (props.resolution.kind === "surface" && id !== activeTabId) {
       items.push(
         {
           label: "Show beside",
@@ -222,11 +261,15 @@ export function RightUtilityDockSurface(props: RightUtilityDockSurfaceProps) {
         },
       );
     }
-    if (layout !== undefined && shownIds.includes(id)) {
+    if (props.resolution.kind === "surface" && layout !== undefined && shownIds.includes(id)) {
       items.push(
         { label: "Show alone", value: "alone" },
         { label: "Hide from view", value: "hide" },
       );
+    }
+    const surface = props.tabs.find((tab) => tab.id === id);
+    if (surface !== undefined && MINIMISABLE_DOCK_SURFACES.has(dockTabSurface(surface).id)) {
+      items.push({ label: "Minimise", value: "minimise" });
     }
     return items;
   }
@@ -236,6 +279,11 @@ export function RightUtilityDockSurface(props: RightUtilityDockSurfaceProps) {
     else if (value === "below") tiles?.onShowBelow(id);
     else if (value === "alone") tiles?.onShowAlone(id);
     else if (value === "hide") tiles?.onHideTile(id);
+    else if (value === "minimise") {
+      const tab = props.tabs.find((candidate) => candidate.id === id);
+      if (focusInside() && tab !== undefined) setRefocus({ card: dockTabSurface(tab).id });
+      tiles?.onMinimise(id);
+    }
   }
   function zoneAt(event: DragEvent<HTMLElement>): "beside" | "below" | "replace" {
     const rect = event.currentTarget.getBoundingClientRect();
@@ -310,6 +358,7 @@ export function RightUtilityDockSurface(props: RightUtilityDockSurfaceProps) {
       surface: tool.id,
       bodyClassName: `right-utility-dock__tool${pages ? " right-utility-dock__tool--pages" : ""}`,
       inset: tool.id === "plan" || tool.id === "delivery" || tool.id === "agents",
+      minimisable: shelfDrawn && MINIMISABLE_DOCK_SURFACES.has(tool.id),
       children:
         available.kind === "surface" ? (
           renderToolBody(tab, tab.id, pages)
@@ -360,6 +409,9 @@ export function RightUtilityDockSurface(props: RightUtilityDockSurfaceProps) {
   const browserOnScreen = [...onScreenInStrip].some((id) =>
     browserTabs.some((tab) => tab.id === id),
   );
+  // The shelf is the modal presentation's one omission: there is no room, and
+  // the state is kept for the dock that has.
+  const shelfEntries = shelfDrawn ? (props.shelf?.entries ?? []) : [];
   const showBeside =
     tiles === undefined ||
     tiles.narrow ||
@@ -381,9 +433,11 @@ export function RightUtilityDockSurface(props: RightUtilityDockSurfaceProps) {
           setRefocus({ tab: stripId });
           tiles.onShowBeside(toolOf(stripId));
         }}
-        open={stripTabs
-          .filter((tab) => !onScreenInStrip.has(tab.id))
-          .map((tab) => ({ id: tab.id, label: tab.label, surface: dockTabSurface(tab).id }))}
+        open={[
+          ...stripTabs.filter((tab) => !onScreenInStrip.has(tab.id)),
+          // A minimised tool is open but out of view, like a hidden tab.
+          ...minimisedRepresentatives(props.tabs, minimisedIds),
+        ].map((tab) => ({ id: tab.id, label: tab.label, surface: dockTabSurface(tab).id }))}
       />
     );
 
@@ -395,7 +449,7 @@ export function RightUtilityDockSurface(props: RightUtilityDockSurfaceProps) {
     >
       <header className="dock-head right-utility-dock__toolbar">
         <div className="right-utility-dock__tabs">
-          {props.tabs.length === 0 ? (
+          {openTabs.length === 0 ? (
             <DockQuickTools
               {...(props.toolsAwaitingThread === undefined
                 ? {}
@@ -460,7 +514,10 @@ export function RightUtilityDockSurface(props: RightUtilityDockSurfaceProps) {
           )}
         </div>
       </header>
-      <div className="dock-body right-utility-dock__content">
+      <div
+        className="dock-body right-utility-dock__content"
+        data-shelf={shelfEntries.length === 0 ? undefined : "true"}
+      >
         {props.toolsAwaitingThread !== undefined && props.resolution.kind !== "surface" ? (
           quickToolsProjectId === undefined ? (
             <ShellState state="neutral" title="Tools open once the task starts" />
@@ -490,6 +547,11 @@ export function RightUtilityDockSurface(props: RightUtilityDockSurfaceProps) {
               if (focusInside()) setRefocus({ tab: stripIdOf(tabId) });
               tiles?.onHideTile(tabId);
             }}
+            onMinimiseTile={(tabId) => {
+              const tab = props.tabs.find((candidate) => candidate.id === tabId);
+              if (focusInside() && tab !== undefined) setRefocus({ card: dockTabSurface(tab).id });
+              tiles?.onMinimise(tabId);
+            }}
             onResizeColumn={(index, shares) => tiles?.onResizeColumn(index, shares)}
             onResizeColumns={(shares) => tiles?.onResizeColumns(shares)}
             panelRef={toolPanel}
@@ -517,9 +579,26 @@ export function RightUtilityDockSurface(props: RightUtilityDockSurfaceProps) {
             )}
           </div>
         ) : null}
+        {shelfEntries.length === 0 || props.shelf === undefined ? null : (
+          <DockShelf entries={shelfEntries} renderCard={props.shelf.renderCard} />
+        )}
       </div>
     </div>
   );
+}
+
+/** One open tab for each minimised tool, the first, since a tool is one entry however many tabs it has. */
+function minimisedRepresentatives(
+  tabs: RightUtilityDockSurfaceProps["tabs"],
+  minimised: ReadonlySet<string>,
+): RightUtilityDockSurfaceProps["tabs"] {
+  const seen = new Set<RightUtilityDockSurfaceId>();
+  return tabs.filter((tab) => {
+    const surface = dockTabSurface(tab).id;
+    if (!minimised.has(tab.id) || seen.has(surface)) return false;
+    seen.add(surface);
+    return true;
+  });
 }
 
 function dockTabSurface(

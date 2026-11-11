@@ -1,4 +1,4 @@
-import { X } from "lucide-react";
+import { Minimize2, X } from "lucide-react";
 import {
   useEffect,
   useLayoutEffect,
@@ -37,6 +37,8 @@ export interface DockTileContent {
   /** The tool's own panel: its class names and inset marker. */
   readonly bodyClassName: string;
   readonly inset: boolean;
+  /** The tool can stand as a card on the shelf, so its caption offers to minimise it. */
+  readonly minimisable?: boolean;
 }
 
 export interface DockTilesProps {
@@ -49,6 +51,7 @@ export interface DockTilesProps {
   readonly renderTile: (tabId: string) => DockTileContent | undefined;
   readonly onFocusTile: (tabId: string) => void;
   readonly onHideTile: (tabId: string) => void;
+  readonly onMinimiseTile?: (tabId: string) => void;
   readonly onResizeColumns: (shares: ReadonlyArray<number>) => void;
   readonly onResizeColumn: (columnIndex: number, shares: ReadonlyArray<number>) => void;
 }
@@ -281,6 +284,9 @@ export function DockTiles(props: DockTilesProps) {
                 if (tabId !== props.focusedTabId) props.onFocusTile(tabId);
               }}
               onHide={() => props.onHideTile(tabId)}
+              {...(props.onMinimiseTile === undefined || content.minimisable !== true
+                ? {}
+                : { onMinimise: () => props.onMinimiseTile?.(tabId) })}
               panelRef={tabId === props.focusedTabId ? props.panelRef : undefined}
               single={tileCount === 1}
             />
@@ -354,6 +360,7 @@ function Tile(props: {
   readonly focused: boolean;
   readonly onFocusTile: () => void;
   readonly onHide: () => void;
+  readonly onMinimise?: () => void;
   readonly panelRef: Ref<HTMLElement> | undefined;
   readonly single: boolean;
 }) {
@@ -400,6 +407,14 @@ function Tile(props: {
         <div className="dock-tile__caption">
           <DockToolIcon surface={content.surface} />
           <span className="dock-tile__name">{content.label}</span>
+          {props.onMinimise === undefined ? null : (
+            <IconButton
+              className="dock-tile__minimise text-muted-foreground"
+              icon={Minimize2}
+              label={`Minimise ${content.label}`}
+              onClick={props.onMinimise}
+            />
+          )}
           <IconButton
             className="dock-tile__hide text-muted-foreground"
             icon={X}
