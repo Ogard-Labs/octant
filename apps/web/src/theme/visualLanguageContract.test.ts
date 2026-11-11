@@ -139,7 +139,7 @@ describe("the public-block visual language", () => {
       );
       expect(source).toMatch(
         new RegExp(
-          `${handle.replace(/\./g, "\\.")}:active::before \\{\\s*(?:width|height): 2px;\\s*background: var\\(--oct-meta\\);`,
+          `${handle.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}:active::before \\{\\s*(?:width|height): 2px;\\s*background: var\\(--oct-meta\\);`,
         ),
       );
     }
