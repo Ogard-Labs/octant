@@ -15,7 +15,8 @@ import {
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ShellState } from "../shell/ShellState";
 import { scheduleVisibleInterval } from "../polling/documentVisibility";
-import { AgentHierarchyPanel } from "./AgentHierarchyPanel";
+import { AgentHierarchyPanel, type AgentHierarchyView } from "./AgentHierarchyPanel";
+import type { SubagentProviderIdentity } from "./AgentRunDependencyGraph";
 import { ObservedChildDetail, observedChildSelectionId } from "./ObservedChildActivity";
 import { AgentRunDetail } from "./AgentRunDetail";
 import { buildAgentHierarchyModel, isActiveAgentHierarchyStatus } from "./buildAgentHierarchyModel";
@@ -43,8 +44,13 @@ export function AgentRunHierarchy(props: {
   readonly requestedView?: AgentRunViewRequest;
   readonly onRequestedViewHandled?: () => void;
   readonly onReviewChanges?: (request: AgentResultReviewRequest) => void;
+  /** Provider instances by id, for the mark on each graph card. */
+  readonly providers?: ReadonlyMap<string, SubagentProviderIdentity>;
 }) {
   const [read, setRead] = useState<AgentRunParentSummaryResponse>();
+  // Kept here, above the list and a subagent's page, so Back from a page
+  // opened from the graph returns to the graph.
+  const [view, setView] = useState<AgentHierarchyView>("list");
   const currentRead = read?.parentThreadId === props.parentThreadId ? read : undefined;
   const entries = currentRead?.entries ?? [];
   const observations = currentRead?.observations ?? [];
@@ -350,7 +356,10 @@ export function AgentRunHierarchy(props: {
         observations={observations}
         observationsTruncated={currentRead?.observationsTruncated === true}
         onOpen={setSelectedRunId}
+        onViewChange={setView}
+        {...(props.providers === undefined ? {} : { providers: props.providers })}
         reconnecting={status === "refreshing"}
+        view={view}
       />
     </>
   );

@@ -63,12 +63,19 @@ export interface AgentRunParentSummaryEntry {
   readonly requestId: AgentRunRequestId;
   readonly parentThreadId: AgentRunParentThreadId;
   readonly parentRunId?: AgentRunId;
+  /**
+   * The sibling runs this one waits for. They belong to the same parent
+   * thread, so a reader of this summary may already read each of them.
+   */
+  readonly dependsOn?: AgentRun["dependsOn"];
   readonly role: AgentRun["role"];
   readonly task: string;
   readonly lifecycleStatus: AgentRunLifecycleStatus;
   readonly executionKind: AgentRun["executionKind"];
   readonly usageQuality: AgentRun["routingReceipt"]["usageQuality"];
   readonly route: AgentRunParentSummaryRoute;
+  /** The effort the run was asked to use, as its routing receipt recorded it. */
+  readonly normalizedReasoning?: AgentRun["routingReceipt"]["normalizedReasoning"];
   readonly resultAcknowledgement: AgentRunResultAcknowledgement;
   /** The completed child's reply identity, readable by the parent thread. */
   readonly result?: AgentRunResult;
@@ -88,6 +95,8 @@ export interface AgentRunParentSummaryEntry {
   readonly usageLimit?: AgentRun["usageLimit"];
   readonly usageResume?: AgentRun["usageResume"];
   readonly version: AgentRun["version"];
+  /** When the run was requested; it never moves, so it orders a thread's runs stably. */
+  readonly createdAt: UtcTimestamp;
   readonly updatedAt: UtcTimestamp;
 }
 
@@ -419,12 +428,16 @@ export class AgentRunProjection implements Projection {
         requestId: run.requestId,
         parentThreadId: run.parentThreadId,
         ...(run.parentRunId === undefined ? {} : { parentRunId: run.parentRunId }),
+        ...(run.dependsOn === undefined ? {} : { dependsOn: run.dependsOn }),
         role: run.role,
         task: run.task,
         lifecycleStatus: run.lifecycleStatus,
         executionKind: run.executionKind,
         usageQuality: run.routingReceipt.usageQuality,
         route: summaryRoute(run.routingReceipt),
+        ...(run.routingReceipt.normalizedReasoning === undefined
+          ? {}
+          : { normalizedReasoning: run.routingReceipt.normalizedReasoning }),
         resultAcknowledgement: run.resultAcknowledgement,
         ...(run.result === undefined ? {} : { result: run.result }),
         ...(run.recoveryReason === undefined ? {} : { recoveryReason: run.recoveryReason }),
@@ -434,6 +447,7 @@ export class AgentRunProjection implements Projection {
         ...(run.usageLimit === undefined ? {} : { usageLimit: run.usageLimit }),
         ...(run.usageResume === undefined ? {} : { usageResume: run.usageResume }),
         version: run.version,
+        createdAt: run.createdAt,
         updatedAt: run.updatedAt,
       });
     }

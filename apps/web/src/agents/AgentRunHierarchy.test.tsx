@@ -864,6 +864,42 @@ describe("AgentRunHierarchy", () => {
     expect(screen.getByRole("heading", { name: "Working · 1" })).toBeVisible();
   });
 
+  it("opens a subagent from the graph, says what it runs after, and goes back to the graph", async () => {
+    const user = userEvent.setup();
+    const earlier = decodeAgentRunId("33333333-3333-4333-8333-333333333333");
+    const client = emptyClient({
+      parentSummary: vi.fn(async () => ({
+        parentThreadId,
+        entries: [
+          {
+            ...summaryEntry({ lifecycleStatus: "running", task: "Color tokens" }),
+            runId: earlier,
+            createdAt: "2026-08-01T15:00:00.000Z",
+          },
+          {
+            ...summaryEntry({ lifecycleStatus: "waiting", task: "Contrast check" }),
+            recoveryReason: "waiting-on-dependencies",
+            dependsOn: [earlier],
+            createdAt: "2026-08-01T15:00:30.000Z",
+          },
+        ],
+      })),
+    });
+    render(<AgentRunHierarchy client={client} parentThreadId={parentThreadId} />);
+
+    await user.click(await screen.findByRole("button", { name: "Graph" }));
+    const graph = screen.getByRole("group", { name: "Subagent graph" });
+    await user.click(within(graph).getByRole("button", { name: /Contrast check/ }));
+
+    const page = screen.getByRole("region", { name: "Subagent" });
+    expect(page).toHaveTextContent("Runs after Color tokens");
+    expect(page).toHaveTextContent("Starts when the runs it comes after finish.");
+
+    await user.click(screen.getByRole("button", { name: "Back to subagents" }));
+
+    expect(screen.getByRole("group", { name: "Subagent graph" })).toBeInTheDocument();
+  });
+
   it("answers with the retained reply when the live conversation is gone after completion", async () => {
     const user = userEvent.setup();
     const client = emptyClient({

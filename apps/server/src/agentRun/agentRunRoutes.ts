@@ -1101,17 +1101,35 @@ async function mutateLiveRun(
  * a decision the caller never requested.
  */
 function serializeEntries(entries: ReadonlyArray<AgentRunParentSummaryEntry>) {
-  return entries.map((entry) => ({
+  // A dependency is named only when the same response carries it: the caller
+  // already filtered out the runs this window may not read, and a run that
+  // waits for one of them must not disclose it.
+  const listed = new Set(entries.map((entry) => String(entry.runId)));
+  return entries.map((entry) => {
+    const dependsOn = (entry.dependsOn ?? []).filter((runId) => listed.has(String(runId)));
+    return serializeEntry(entry, dependsOn);
+  });
+}
+
+function serializeEntry(
+  entry: AgentRunParentSummaryEntry,
+  dependsOn: ReadonlyArray<AgentRunParentSummaryEntry["runId"]>,
+) {
+  return {
     runId: entry.runId,
     requestId: entry.requestId,
     parentThreadId: entry.parentThreadId,
     ...(entry.parentRunId === undefined ? {} : { parentRunId: entry.parentRunId }),
+    ...(dependsOn.length === 0 ? {} : { dependsOn }),
     role: entry.role,
     task: entry.task,
     lifecycleStatus: entry.lifecycleStatus,
     executionKind: entry.executionKind,
     usageQuality: entry.usageQuality,
     route: entry.route,
+    ...(entry.normalizedReasoning === undefined
+      ? {}
+      : { normalizedReasoning: entry.normalizedReasoning }),
     resultAcknowledgement: entry.resultAcknowledgement,
     // The completed child's reply travels with the run it belongs to, and the
     // route refuses the summary before this serializer runs unless the window
@@ -1134,8 +1152,9 @@ function serializeEntries(entries: ReadonlyArray<AgentRunParentSummaryEntry>) {
     ...(entry.usageLimit === undefined ? {} : { usageLimit: entry.usageLimit }),
     ...(entry.usageResume === undefined ? {} : { usageResume: entry.usageResume }),
     version: entry.version,
+    createdAt: entry.createdAt,
     updatedAt: entry.updatedAt,
-  }));
+  };
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

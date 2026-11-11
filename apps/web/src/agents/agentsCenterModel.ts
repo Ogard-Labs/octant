@@ -6,7 +6,7 @@ import type {
   OctantMode,
 } from "@octant/contracts";
 import type { AgentRunCenterQueryInput } from "@octant/client-runtime/agent-run-client";
-import { isAgentRunActiveStatus } from "@octant/domain";
+import { AGENT_RUN_DEPENDENCY_WAITING_REASON, isAgentRunActiveStatus } from "@octant/domain";
 
 export type AgentsCenterStatusFilter = AgentRunCenterStatusFilter;
 export type AgentsCenterModeFilter = AgentRunCenterQueryInput["mode"];
@@ -96,6 +96,9 @@ export function agentRunRecoveryLabel(recoveryReason: string | undefined): strin
   if (recoveryReason === undefined) return undefined;
   if (recoveryReason === "Managed AgentRun turn exceeded its runtime deadline.")
     return "Reached the 30-minute working-time limit. Retry or Resume starts a fresh window; approval and answer waits do not count.";
+  if (recoveryReason === AGENT_RUN_DEPENDENCY_WAITING_REASON) {
+    return "Starts when the runs it comes after finish.";
+  }
   if (recoveryReason === "host-restart") return "Recovered after host restart";
   if (recoveryReason === "journal-replay") return "Recovered after journal replay";
   if (recoveryReason === "provider-reconnect") return "Waiting after provider reconnect";

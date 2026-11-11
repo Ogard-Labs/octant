@@ -3,6 +3,8 @@ import { ObservedChildRow } from "./ObservedChildActivity";
 import { useMemo } from "react";
 import { relativeTimeLabel } from "../lib/relativeTime";
 import { OctantButton } from "../ui/base/OctantButton";
+import { OctantToggleGroup, OctantToggleGroupItem } from "../ui/base/OctantToggleGroup";
+import { AgentRunDependencyGraph, type SubagentProviderIdentity } from "./AgentRunDependencyGraph";
 import {
   buildAgentHierarchyModel,
   type AgentHierarchyInputEntry,
@@ -21,7 +23,18 @@ import "./agent-hierarchy.css";
  * controls live. Nothing here starts a subagent: the thread's agent does, when
  * it hands off part of its work, because only then does the result come back
  * to it.
+ *
+ * Graph is the same rows arranged by what waits for what. It is offered when
+ * the caller keeps the choice (`onViewChange`), and a card opens the page a
+ * row does.
  */
+export type AgentHierarchyView = "list" | "graph";
+
+const VIEWS = [
+  { value: "list", label: "List" },
+  { value: "graph", label: "Graph" },
+] as const;
+
 export function AgentHierarchyPanel(props: {
   readonly entries: ReadonlyArray<AgentHierarchyInputEntry>;
   readonly observations?: ReadonlyArray<AgentObservedChild>;
@@ -29,6 +42,10 @@ export function AgentHierarchyPanel(props: {
   readonly creationPosture?: "off" | "ask" | "automatic";
   readonly reconnecting?: boolean;
   readonly onOpen?: (runId: string) => void;
+  readonly view?: AgentHierarchyView;
+  readonly onViewChange?: (view: AgentHierarchyView) => void;
+  /** Provider instances by id, so a graph card can draw the mark of what ran it. */
+  readonly providers?: ReadonlyMap<string, SubagentProviderIdentity>;
 }) {
   const model = useMemo(
     () =>
@@ -39,6 +56,12 @@ export function AgentHierarchyPanel(props: {
     [props.entries, props.creationPosture],
   );
 
+  const onViewChange = props.onViewChange;
+  const graphRows = useMemo(() => [...model.working, ...model.finished], [model]);
+  // An observed child has no dependency facts, so a thread with only those
+  // has nothing to arrange and keeps the list.
+  const showGraph = props.view === "graph" && graphRows.length > 0;
+
   return (
     <section
       aria-label="Subagents"
@@ -46,6 +69,23 @@ export function AgentHierarchyPanel(props: {
     >
       <header className="agent-hierarchy__header">
         <h2>Subagents</h2>
+        {onViewChange === undefined || graphRows.length === 0 ? null : (
+          <OctantToggleGroup<AgentHierarchyView>
+            aria-label="View"
+            className="segmented"
+            onValueChange={(value) => {
+              const selected = value[0];
+              if (selected !== undefined) onViewChange(selected);
+            }}
+            value={[props.view ?? "list"]}
+          >
+            {VIEWS.map((view) => (
+              <OctantToggleGroupItem className="segment" key={view.value} value={view.value}>
+                {view.label}
+              </OctantToggleGroupItem>
+            ))}
+          </OctantToggleGroup>
+        )}
       </header>
 
       {props.reconnecting ? (
@@ -79,8 +119,18 @@ export function AgentHierarchyPanel(props: {
       {props.observationsTruncated ? (
         <p className="agent-hierarchy__banner">Earlier observed children are not retained.</p>
       ) : null}
-      <AgentHierarchySection label="Working" onOpen={props.onOpen} rows={model.working} />
-      <AgentHierarchySection label="Finished" onOpen={props.onOpen} rows={model.finished} />
+      {showGraph ? (
+        <AgentRunDependencyGraph
+          rows={graphRows}
+          {...(props.onOpen === undefined ? {} : { onOpen: props.onOpen })}
+          {...(props.providers === undefined ? {} : { providers: props.providers })}
+        />
+      ) : (
+        <>
+          <AgentHierarchySection label="Working" onOpen={props.onOpen} rows={model.working} />
+          <AgentHierarchySection label="Finished" onOpen={props.onOpen} rows={model.finished} />
+        </>
+      )}
     </section>
   );
 }

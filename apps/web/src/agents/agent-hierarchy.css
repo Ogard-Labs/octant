@@ -117,6 +117,117 @@
   font-weight: normal;
 }
 
+/* The graph is the same list arranged by what waits for what. A row wider
+   than the dock scrolls sideways: shrinking the cards would cut the task to a
+   word. */
+.agent-run-graph__scroll {
+  min-width: 0;
+  overflow-x: auto;
+}
+
+.agent-run-graph {
+  position: relative;
+  margin-inline: auto;
+}
+
+.agent-run-graph__edges {
+  position: absolute;
+  inset: 0;
+  color: var(--oct-muted);
+  pointer-events: none;
+}
+
+/* The cards paint a surface so an arrow that passes a row it does not stop at
+   runs behind that row's cards, not through their text. */
+.agent-run-graph__card {
+  position: absolute;
+  display: flex;
+  border: 1px solid var(--oct-border);
+  border-inline-start-width: 2px;
+  border-radius: var(--oct-radius-md);
+  background: var(--oct-surface);
+}
+
+/* The edge colour repeats the state; the icon and the word beside it carry it
+   for the Mono theme, where these roles are grey. */
+.agent-run-graph__card[data-phase="working"] {
+  border-inline-start-color: var(--oct-accent);
+}
+
+.agent-run-graph__card[data-phase="done"] {
+  border-inline-start-color: var(--oct-success);
+}
+
+.agent-run-graph__card[data-phase="stopped"] {
+  border-inline-start-color: var(--oct-danger);
+}
+
+/* One control per card. The button recipe's fixed height and centred single
+   line would clip a four-line card, so it fills the card and stacks. */
+.agent-run-graph__open {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  width: 100%;
+  height: 100%;
+  min-width: 0;
+  align-items: stretch;
+  justify-content: flex-start;
+  gap: 2px;
+  overflow: hidden;
+  padding: var(--oct-space-2);
+  text-align: start;
+  white-space: normal;
+}
+
+/* Lines keep their height: left to shrink, a two-line task gave up half its
+   second line to the lines under it. */
+.agent-run-graph__open > * {
+  flex: 0 0 auto;
+}
+
+.agent-run-graph__task {
+  display: -webkit-box;
+  overflow: hidden;
+  color: var(--oct-fg);
+  font-size: var(--oct-text-sm);
+  font-weight: var(--oct-weight-medium);
+  line-height: var(--oct-leading-body);
+  overflow-wrap: anywhere;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.agent-run-graph__model,
+.agent-run-graph__state {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: var(--oct-space-1);
+}
+
+.agent-run-graph__model-name,
+.agent-run-graph__meta,
+.agent-run-graph__state-text {
+  overflow: hidden;
+  color: var(--oct-muted);
+  font-size: var(--oct-text-xs);
+  font-weight: normal;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* The state sits on the card's last line whatever the task's length, so a
+   row of cards reads across. */
+.agent-run-graph__state {
+  margin-top: auto;
+}
+
+.agent-run-graph__state-text {
+  color: var(--oct-fg-2);
+  font-variant-numeric: tabular-nums;
+}
+
 .agent-run-settings-panel {
   display: flex;
   flex-direction: column;

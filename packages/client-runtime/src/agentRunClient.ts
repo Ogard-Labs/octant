@@ -80,12 +80,16 @@ export interface AgentRunParentSummaryClientEntry {
   readonly requestId: string;
   readonly parentThreadId: AgentRunParentThreadId;
   readonly parentRunId?: AgentRunId;
+  /** The sibling runs this one waits for, under the same parent thread. */
+  readonly dependsOn?: ReadonlyArray<AgentRunId>;
   readonly role: string;
   readonly task: string;
   readonly lifecycleStatus: string;
   readonly executionKind: string;
   readonly usageQuality: string;
   readonly route?: AgentRunClientRoute;
+  /** The effort the run was asked to use, when its routing receipt recorded one. */
+  readonly normalizedReasoning?: string;
   readonly resultAcknowledgement: {
     readonly required: boolean;
     readonly acknowledged: boolean;
@@ -109,6 +113,8 @@ export interface AgentRunParentSummaryClientEntry {
   /** An armed or settled usage-resume opt-in, when one exists. */
   readonly usageResume?: UsageResumeThreadState;
   readonly version: number;
+  /** When the run was requested. Absent from a host that predates the field. */
+  readonly createdAt?: string;
   readonly updatedAt: string;
 }
 

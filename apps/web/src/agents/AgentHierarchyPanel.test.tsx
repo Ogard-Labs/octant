@@ -115,6 +115,74 @@ describe("AgentHierarchyPanel", () => {
     expect(onOpen).toHaveBeenCalledWith("run-newer");
   });
 
+  it("offers the graph only when the caller keeps the choice and the thread has subagents", () => {
+    const { rerender } = render(<AgentHierarchyPanel entries={entries} />);
+    expect(screen.queryByRole("group", { name: "View" })).not.toBeInTheDocument();
+
+    rerender(<AgentHierarchyPanel entries={[]} onViewChange={vi.fn()} view="graph" />);
+    expect(screen.queryByRole("group", { name: "View" })).not.toBeInTheDocument();
+    expect(screen.getByRole("status")).toHaveTextContent("No subagents yet.");
+
+    rerender(<AgentHierarchyPanel entries={entries} onViewChange={vi.fn()} view="list" />);
+    expect(screen.getByRole("group", { name: "View" })).toBeInTheDocument();
+    expect(screen.queryByRole("group", { name: "Subagent graph" })).not.toBeInTheDocument();
+  });
+
+  it("asks for the graph when Graph is chosen", async () => {
+    const user = userEvent.setup();
+    const onViewChange = vi.fn();
+    render(<AgentHierarchyPanel entries={entries} onViewChange={onViewChange} view="list" />);
+
+    await user.click(screen.getByRole("button", { name: "Graph" }));
+
+    expect(onViewChange).toHaveBeenCalledWith("graph");
+  });
+
+  it("draws the thread's subagents as cards that say what each waits for, and opens one", async () => {
+    const user = userEvent.setup();
+    const onOpen = vi.fn();
+    const live = entries[0];
+    if (live === undefined) throw new Error("fixture lost its working row");
+    render(
+      <AgentHierarchyPanel
+        entries={[
+          { ...live, runId: "tokens", task: "Color tokens", lifecycleStatus: "completed" },
+          { ...live, runId: "toggle", task: "Theme toggle" },
+          {
+            ...live,
+            runId: "verify",
+            task: "Verify and open PR",
+            lifecycleStatus: "waiting",
+            recoveryReason: "waiting-on-dependencies",
+            dependsOn: ["tokens", "toggle"],
+            normalizedReasoning: "high",
+          },
+        ]}
+        onOpen={onOpen}
+        onViewChange={vi.fn()}
+        providers={new Map([["provider-a", { driverKind: "codex", displayName: "Codex" }]])}
+        view="graph"
+      />,
+    );
+
+    const graph = screen.getByRole("group", { name: "Subagent graph" });
+    // The graph replaces the two list sections; it does not sit beside them.
+    expect(screen.queryByRole("region", { name: "Working" })).not.toBeInTheDocument();
+    expect(within(graph).getAllByRole("button")).toHaveLength(3);
+    const verify = within(graph).getByRole("button", { name: /Verify and open PR/ });
+    expect(verify).toHaveTextContent("gpt-6-astra");
+    expect(verify).toHaveTextContent("high · Research");
+    expect(verify).toHaveTextContent("Waiting on 1");
+    expect(verify).toHaveTextContent("Runs after Color tokens, Theme toggle.");
+    expect(verify.querySelector('[data-driver-kind="codex"]')).not.toBeNull();
+    // One arrow per wait.
+    expect(graph.querySelectorAll('path[data-kind="after"]')).toHaveLength(2);
+
+    await user.click(verify);
+
+    expect(onOpen).toHaveBeenCalledWith("verify");
+  });
+
   it("says where subagents come from on a thread with none", () => {
     render(<AgentHierarchyPanel entries={[]} />);
 

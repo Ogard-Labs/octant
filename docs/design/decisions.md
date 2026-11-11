@@ -2348,6 +2348,7 @@ Agents may propose routines and delegate work, but only a person creates a routi
 - A proposed routine or follow-up waits as a suggestion chip; dismissing it declines. A routine's runs get at most the creating thread's access.
 - An agent's request to pause or archive its thread's routine (cancel, for a follow-up) waits as the same kind of card with the agent's reason; dismissing it keeps the routine. What a run's agent reported is shown beside that run in Automation Center.
 - The Agents dock shows and controls subagents without starting them. A provider-observed child is labelled observation-only and has no managed controls.
+- The Agents dock draws a thread's subagents as a list or as a graph of which runs each one waits for; a graph card opens the page a list row opens, and the host names a dependency only when the window may read that run.
 
 Status: Built. Since: —. Detail: [Workspace: Routines](workspace.md#routines) and [Subagents](workspace.md#subagents).
 

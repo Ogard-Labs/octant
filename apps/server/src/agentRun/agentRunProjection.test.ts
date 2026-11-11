@@ -302,6 +302,31 @@ describe("AgentRunProjection", () => {
     });
   });
 
+  it("names the runs a run waits for and the effort it was asked to use in the parent summary", () => {
+    const projection = new AgentRunProjection();
+    const receipt = baseRun().routingReceipt;
+    projection.applyRequested(baseRun());
+    projection.applyRequested(
+      baseRun({
+        id: ids.runB,
+        requestId: ids.requestB,
+        task: "Check the summary",
+        dependsOn: [ids.run],
+        routingReceipt: { ...receipt, normalizedReasoning: "high" } as never,
+      }),
+    );
+
+    const summary = projection.parentSummary(ids.thread);
+    const first = summary.find((entry) => entry.runId === ids.run);
+    expect(first).not.toHaveProperty("dependsOn");
+    expect(first).not.toHaveProperty("normalizedReasoning");
+    expect(summary.find((entry) => entry.runId === ids.runB)).toMatchObject({
+      dependsOn: [ids.run],
+      normalizedReasoning: "high",
+      createdAt: now,
+    });
+  });
+
   it("surfaces honest route receipt data in the parent summary", () => {
     const projection = new AgentRunProjection();
     const receipt = baseRun().routingReceipt;

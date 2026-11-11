@@ -1,3 +1,4 @@
+import { useMemo } from "react";
 import type { ThreadUtilityDockContentProps } from "../shell/dockModuleContext";
 import { unavailable } from "./moduleState";
 import { AgentRunHierarchy } from "../agents/AgentRunHierarchy";
@@ -13,10 +14,24 @@ type Props = Pick<
   | "onAgentViewRequestHandled"
   | "requestedAgentView"
   | "onReviewAgentChanges"
+  | "providerController"
   | "subject"
 >;
 
 export default function AgentsModule(props: Props) {
+  const instances = props.providerController?.instances;
+  const providers = useMemo(
+    () =>
+      instances === undefined
+        ? undefined
+        : new Map(
+            instances.map((instance) => [
+              String(instance.id),
+              { driverKind: instance.driverKind, displayName: instance.displayName },
+            ]),
+          ),
+    [instances],
+  );
   if (props.agentRunClient === undefined) {
     return unavailable("Agents", "This thread has no AgentRun service available.");
   }
@@ -46,6 +61,7 @@ export default function AgentsModule(props: Props) {
         {...(props.onAgentViewRequestHandled === undefined
           ? {}
           : { onRequestedViewHandled: props.onAgentViewRequestHandled })}
+        {...(providers === undefined ? {} : { providers })}
         {...(props.agentRunSettingsClient === undefined
           ? {}
           : { settingsClient: props.agentRunSettingsClient })}
