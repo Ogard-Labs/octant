@@ -1,4 +1,4 @@
-import { render, screen, within } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import {
@@ -6,6 +6,7 @@ import {
   scopeLabel,
   SettingGroup,
   SettingRow,
+  SettingsCompactRow,
   SettingsDisclosure,
   SettingsFactList,
   SettingsOutlineRegistration,
@@ -299,6 +300,65 @@ describe("SettingsDisclosure", () => {
     expect(details).toHaveClass("settings-disclosure--inline");
     expect(details.querySelector(".settings-disclosure__body")).toContainElement(
       screen.getByText("Disclosure body"),
+    );
+  });
+
+  it("keeps a compact row's state on its line and opens its detail from the name", async () => {
+    const user = userEvent.setup();
+    const onRemove = vi.fn();
+    render(
+      <SettingsCompactRow
+        detail={<p>~/.kube/config</p>}
+        label="Cluster configuration"
+        meta="Protected"
+      >
+        <button onClick={onRemove} type="button">
+          Remove
+        </button>
+      </SettingsCompactRow>,
+    );
+    expect(screen.getByText("Protected")).toBeVisible();
+    const toggle = screen.getByRole("button", { name: "Cluster configuration" });
+    expect(toggle).toHaveAttribute("aria-expanded", "false");
+    expect(screen.queryByText("~/.kube/config")).toBeNull();
+    await user.click(toggle);
+    expect(toggle).toHaveAttribute("aria-expanded", "true");
+    expect(toggle).toHaveFocus();
+    expect(screen.getByText("~/.kube/config")).toBeVisible();
+    await user.click(screen.getByRole("button", { name: "Remove" }));
+    expect(onRemove).toHaveBeenCalledOnce();
+  });
+
+  it("opens a collapsed section from its label and says what it holds while closed", async () => {
+    const user = userEvent.setup();
+    render(
+      <SettingsSection collapse={{ summary: "None remembered" }} title="Remembered websites">
+        <p>Body</p>
+      </SettingsSection>,
+    );
+    const toggle = screen.getByRole("button", { name: "Remembered websites" });
+    expect(toggle).toHaveAttribute("aria-expanded", "false");
+    expect(screen.getByText("None remembered")).toBeVisible();
+    expect(toggle.closest("section")).toHaveClass("settings-card-section--collapsed");
+    await user.click(toggle);
+    expect(toggle).toHaveAttribute("aria-expanded", "true");
+    expect(toggle.closest("section")).not.toHaveClass("settings-card-section--collapsed");
+  });
+
+  it("opens a collapsed section when a deep link lands on a row inside it", async () => {
+    render(
+      <SettingsSection collapse={{ summary: "None remembered" }} title="Remembered websites">
+        <SettingRow focused label="Forget" scope="host" settingId="x">
+          <button type="button">Forget</button>
+        </SettingRow>
+      </SettingsSection>,
+    );
+    const toggle = screen.getByRole("button", { name: "Remembered websites" });
+    await waitFor(() => expect(toggle).toHaveAttribute("aria-expanded", "true"));
+    await waitFor(() =>
+      expect(
+        within(screen.getByRole("group", { name: "Forget setting" })).getByRole("button"),
+      ).toHaveFocus(),
     );
   });
 });

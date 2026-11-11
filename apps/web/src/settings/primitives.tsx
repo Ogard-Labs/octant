@@ -6,10 +6,13 @@ import {
   useId,
   useLayoutEffect,
   useRef,
+  useState,
   type ReactNode,
+  type RefObject,
 } from "react";
 import type { SettingsScope } from "./registry";
 import { OctantAlert } from "../ui/base/OctantAlert";
+import { OctantButton } from "../ui/base/OctantButton";
 
 const SCOPE_LABELS: Readonly<Record<SettingsScope, string>> = {
   app: "This app",
@@ -53,6 +56,72 @@ export function ScopeIndicator({ scope, id }: ScopeIndicatorProps) {
   );
 }
 
+/** Sent to a folded section so a deep link or an index link opens it. */
+const SETTINGS_REVEAL_EVENT = "settings-reveal";
+
+/**
+ * Opens every closed disclosure and folded section that holds `element`, so a
+ * deep link never lands on something hidden. A fold is React state, so it
+ * opens on the next frame: the return value says whether the caller must wait
+ * for it before it moves focus or scrolls.
+ */
+export function revealSettingsAncestors(element: HTMLElement): boolean {
+  let waits = false;
+  for (
+    let ancestor: HTMLElement | null = element;
+    ancestor !== null;
+    ancestor = ancestor.parentElement
+  ) {
+    if (ancestor instanceof HTMLDetailsElement) ancestor.open = true;
+    if (ancestor.dataset["settingsFold"] === "closed") {
+      ancestor.dispatchEvent(new CustomEvent(SETTINGS_REVEAL_EVENT));
+      waits = true;
+    }
+  }
+  return waits;
+}
+
+/**
+ * Opens the collapsed sections inside `root`, for a deep link that names a
+ * whole panel rather than one row. Like {@link revealSettingsAncestors}, it
+ * returns whether the caller must wait a frame.
+ */
+export function revealSettingsWithin(root: HTMLElement): boolean {
+  const closed = root.querySelectorAll<HTMLElement>('[data-settings-fold="closed"]');
+  for (const section of closed) section.dispatchEvent(new CustomEvent(SETTINGS_REVEAL_EVENT));
+  return closed.length > 0;
+}
+
+/**
+ * When a deep link landed on a row, reveal what holds it and focus its first
+ * control (or the row), so keyboard and screen-reader users land on the exact
+ * destination.
+ */
+function useRevealedFocus(rowRef: RefObject<HTMLElement | null>, focused: boolean) {
+  useEffect(() => {
+    const row = rowRef.current;
+    if (!focused || row === null) return;
+    const land = () => {
+      const control = row.querySelector<HTMLElement>(
+        ':is(button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])):not(:disabled):not([aria-disabled="true"])',
+      );
+      if (control !== null) {
+        control.focus();
+        control.scrollIntoView?.({ block: "center" });
+      } else {
+        row.focus();
+        row.scrollIntoView?.({ block: "center" });
+      }
+    };
+    if (!revealSettingsAncestors(row)) {
+      land();
+      return;
+    }
+    const frame = requestAnimationFrame(land);
+    return () => cancelAnimationFrame(frame);
+  }, [focused, rowRef]);
+}
+
 export interface SettingRowProps {
   readonly settingId: string;
   readonly label: ReactNode;
@@ -90,25 +159,7 @@ export function SettingRow({
   const rowRef = useRef<HTMLDivElement>(null);
   const pageScope = useContext(SettingsPageScope);
 
-  useEffect(() => {
-    if (!focused || rowRef.current === null) return;
-    // Deep links must reveal their destination before moving keyboard focus.
-    let ancestor = rowRef.current.parentElement;
-    while (ancestor !== null) {
-      if (ancestor instanceof HTMLDetailsElement) ancestor.open = true;
-      ancestor = ancestor.parentElement;
-    }
-    const control = rowRef.current.querySelector<HTMLElement>(
-      ':is(button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])):not(:disabled):not([aria-disabled="true"])',
-    );
-    if (control !== null) {
-      control.focus();
-      control.scrollIntoView?.({ block: "center" });
-    } else {
-      rowRef.current.focus();
-      rowRef.current.scrollIntoView?.({ block: "center" });
-    }
-  }, [focused]);
+  useRevealedFocus(rowRef, focused);
 
   return (
     <div
@@ -173,6 +224,85 @@ export function SettingGroup({ label, description, children }: SettingGroupProps
   );
 }
 
+export interface SettingsCompactRowProps {
+  /** The item's name; also what a screen reader announces the row as. */
+  readonly label: string;
+  /** Its short state, in the meta ink: enabled, protected, needs review, from where. */
+  readonly meta?: ReactNode;
+  /** Paths, permissions and secondary actions, opened by the name. */
+  readonly detail?: ReactNode;
+  /** Lets the meta run onto a second line, for a list whose meta names a source that must not be cut. */
+  readonly metaWraps?: boolean;
+  /**
+   * Lets the name run onto further lines. For a row whose name is the fact
+   * itself (a path a person added) and that has no detail to open: cut with
+   * an ellipsis, two long paths under one folder could not be told apart.
+   */
+  readonly labelWraps?: boolean;
+  /** The row needs a decision; it is drawn above the rest by its caller and marked here. */
+  readonly attention?: boolean;
+  /** Deep links and search land on the row's first control by this id. */
+  readonly settingId?: string;
+  readonly focused?: boolean;
+  /** The row's one main control, at the trailing edge. */
+  readonly children?: ReactNode;
+}
+
+/**
+ * One line per item in a long list: the name, a short state, and the one main
+ * control. Every row in a list has the same height, so what is wrapped or long
+ * lives in the detail the name opens. The state stays on the line, because a
+ * closed row must still say what is on, trusted or protected.
+ */
+export function SettingsCompactRow(props: SettingsCompactRowProps) {
+  const rowRef = useRef<HTMLDivElement>(null);
+  const detailId = useId();
+  const [open, setOpen] = useState(false);
+  useRevealedFocus(rowRef, props.focused === true);
+  return (
+    <div
+      aria-label={`${props.label} setting`}
+      className="crow"
+      data-attention={props.attention === true ? "true" : undefined}
+      data-label={props.labelWraps === true ? "wrap" : undefined}
+      data-meta={props.metaWraps === true ? "wrap" : undefined}
+      data-open={open ? "true" : "false"}
+      {...(props.settingId === undefined ? {} : { "data-setting-id": props.settingId })}
+      ref={rowRef}
+      role="group"
+      tabIndex={-1}
+    >
+      <div className="crow__line">
+        {props.detail === undefined ? (
+          <span className="crow__name">{props.label}</span>
+        ) : (
+          <OctantButton
+            aria-controls={open ? detailId : undefined}
+            aria-expanded={open}
+            className="crow__toggle"
+            onClick={() => setOpen(!open)}
+            size="sm"
+            type="button"
+            variant="ghost"
+          >
+            <ChevronRight aria-hidden="true" className="crow__chevron" size={12} />
+            <span className="crow__name">{props.label}</span>
+          </OctantButton>
+        )}
+        {props.meta === undefined ? null : <span className="crow__meta">{props.meta}</span>}
+        {props.children === undefined ? null : (
+          <div className="crow__control">{props.children}</div>
+        )}
+      </div>
+      {props.detail === undefined || !open ? null : (
+        <div className="crow__detail" id={detailId}>
+          {props.detail}
+        </div>
+      )}
+    </div>
+  );
+}
+
 /** One section as the "On this page" row names it. */
 export interface SettingsOutlineEntry {
   readonly id: string;
@@ -212,6 +342,20 @@ export interface SettingsSectionProps {
    * provider list is labelled "Configured providers" and named "Providers".
    */
   readonly ariaLabel?: string;
+  /**
+   * Makes the section collapsible: its label becomes a button, and everything
+   * under it stays out of the way until opened. Only reference material
+   * collapses. What is switched on, trusted or allowed stays readable in the
+   * closed state, so the `summary` states it on the label's own line.
+   */
+  readonly collapse?: SettingsCollapse;
+}
+
+export interface SettingsCollapse {
+  /** What the closed section says: its count, its state, what needs a look. */
+  readonly summary?: ReactNode;
+  /** Whether it starts open; once the person opens or closes it, that choice holds. */
+  readonly open?: boolean;
 }
 
 /**
@@ -228,12 +372,25 @@ export function SettingsSection({
   tone,
   actions,
   ariaLabel,
+  collapse,
 }: SettingsSectionProps) {
   const titleId = useId();
   const generatedId = useId();
   const anchorId = id ?? generatedId;
   const register = useContext(SettingsOutlineRegistration);
   const element = useRef<HTMLElement>(null);
+  const [chosen, setChosen] = useState<boolean>();
+  const collapsible = collapse !== undefined;
+  const open = collapse === undefined ? true : (chosen ?? collapse.open ?? false);
+  // A layout effect: a row inside this section announces itself from a passive
+  // effect in the same commit, so the listener has to be there first.
+  useLayoutEffect(() => {
+    const section = element.current;
+    if (!collapsible || section === null) return;
+    const reveal = () => setChosen(true);
+    section.addEventListener(SETTINGS_REVEAL_EVENT, reveal);
+    return () => section.removeEventListener(SETTINGS_REVEAL_EVENT, reveal);
+  }, [collapsible]);
   useLayoutEffect(() => {
     if (register === undefined || element.current === null) return;
     return register({ id: anchorId, title, element: element.current });
@@ -242,13 +399,36 @@ export function SettingsSection({
     <section
       {...(ariaLabel === undefined ? { "aria-labelledby": titleId } : { "aria-label": ariaLabel })}
       className={`settings-card-section settings-card-section--open${
-        className === undefined ? "" : ` ${className}`
-      }`}
+        collapsible && !open ? " settings-card-section--collapsed" : ""
+      }${className === undefined ? "" : ` ${className}`}`}
+      data-settings-fold={collapsible ? (open ? "open" : "closed") : undefined}
       data-tone={tone}
       id={anchorId}
       ref={element}
     >
-      {actions === undefined ? (
+      {collapse !== undefined ? (
+        <div className="settings-section-head settings-section-head--collapsible">
+          <h2 id={titleId}>
+            <OctantButton
+              aria-expanded={open}
+              className="settings-collapse__toggle"
+              onClick={() => setChosen(!open)}
+              size="sm"
+              type="button"
+              variant="ghost"
+            >
+              <ChevronRight aria-hidden="true" className="settings-collapse__chevron" size={12} />
+              {title}
+            </OctantButton>
+          </h2>
+          {collapse.summary === undefined ? null : (
+            <span className="settings-collapse__state">{collapse.summary}</span>
+          )}
+          {actions === undefined || !open ? null : (
+            <div className="settings-section-head__actions">{actions}</div>
+          )}
+        </div>
+      ) : actions === undefined ? (
         <h2 id={titleId}>{title}</h2>
       ) : (
         <div className="settings-section-head">
@@ -274,10 +454,12 @@ export function SettingsPanel(props: {
   readonly children: ReactNode;
   readonly id?: string;
   readonly tone?: "default" | "danger";
+  readonly collapse?: SettingsCollapse;
 }) {
   return (
     <SettingsSection
       className="settings-panel"
+      {...(props.collapse === undefined ? {} : { collapse: props.collapse })}
       {...(props.description === undefined ? {} : { description: props.description })}
       {...(props.id === undefined ? {} : { id: props.id })}
       {...(props.tone === "danger" ? { tone: "danger" as const } : {})}

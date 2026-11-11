@@ -22,7 +22,7 @@ import { OctantButton } from "../ui/base/OctantButton";
 import { OctantInput } from "../ui/base/OctantInput";
 import { OctantSelectField } from "../ui/base/OctantSelect";
 import { OctantSwitch } from "../ui/base/OctantSwitch";
-import { SettingsPanel, SettingsState } from "./primitives";
+import { SettingsPanel, SettingsState, revealSettingsWithin } from "./primitives";
 import { ShieldServersSettings } from "./ShieldServersSettings";
 
 export interface ServerProjectsSettingsProps {
@@ -95,9 +95,20 @@ export function ServerProjectsSettings(props: ServerProjectsSettingsProps) {
   const loaded = view !== undefined;
   useEffect(() => {
     if (!loaded || props.focusedSetting !== "server-projects") return;
-    const target = root.current?.querySelector<HTMLInputElement>("form input");
-    (target ?? root.current)?.focus();
-    root.current?.scrollIntoView?.({ block: "center" });
+    const panel = root.current;
+    if (panel === null) return;
+    const land = () => {
+      const target = panel.querySelector<HTMLInputElement>("form input");
+      (target ?? panel).focus();
+      panel.scrollIntoView?.({ block: "center" });
+    };
+    // The bind form sits in a collapsed section; it opens on the next frame.
+    if (!revealSettingsWithin(panel)) {
+      land();
+      return;
+    }
+    const frame = requestAnimationFrame(land);
+    return () => cancelAnimationFrame(frame);
   }, [loaded, props.focusedSetting]);
 
   async function send(command: ServerProjectsCommand): Promise<boolean> {
@@ -162,7 +173,19 @@ export function ServerProjectsSettings(props: ServerProjectsSettingsProps) {
 
   return (
     <div className="shield-servers" data-setting-id="server-projects" ref={root} tabIndex={-1}>
-      <SettingsPanel description={SERVER_PROJECTS_INTRO} title="Projects on your servers">
+      <SettingsPanel
+        collapse={{
+          open: view.projects.length > 0,
+          summary:
+            view.projects.length === 0
+              ? "No folders on a server are bound"
+              : view.projects.length === 1
+                ? "1 folder bound"
+                : `${view.projects.length} folders bound`,
+        }}
+        description={SERVER_PROJECTS_INTRO}
+        title="Projects on your servers"
+      >
         {view.projects.length === 0 ? (
           <p className="shield-servers__empty">No folders on a server are bound.</p>
         ) : (
@@ -337,6 +360,7 @@ export function ServerProjectsSettings(props: ServerProjectsSettingsProps) {
         />
       )}
       <SettingsPanel
+        collapse={{ summary: "Bind a folder on a registered server" }}
         description="Octant checks the folder on the server before it binds it."
         title="Bind a folder on a server"
       >
