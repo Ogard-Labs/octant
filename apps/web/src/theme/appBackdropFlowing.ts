@@ -184,6 +184,8 @@ function createGlPainter(canvas: HTMLCanvasElement, gl: WebGL2RenderingContext):
   let program: WebGLProgram | undefined;
   let vertexArray: WebGLVertexArrayObject | null = null;
   let lost = false;
+  let lastTime = STILL_TIME;
+  let lastPalette: FlowingPalette | undefined;
   const u: Record<string, WebGLUniformLocation | null> = {};
 
   const build = () => {
@@ -207,6 +209,23 @@ function createGlPainter(canvas: HTMLCanvasElement, gl: WebGL2RenderingContext):
     vertexArray = gl.createVertexArray();
   };
 
+  const paint = (time: number, palette: FlowingPalette) => {
+    if (lost || program === undefined) return;
+    lastTime = time;
+    lastPalette = palette;
+    const rgb = flowingPaletteRgb(palette);
+    gl.useProgram(program);
+    gl.bindVertexArray(vertexArray);
+    gl.viewport(0, 0, canvas.width, canvas.height);
+    gl.uniform2f(u["uResolution"] ?? null, canvas.width, canvas.height);
+    gl.uniform1f(u["uTime"] ?? null, time);
+    gl.uniform3f(u["uDeep"] ?? null, rgb.deep[0], rgb.deep[1], rgb.deep[2]);
+    gl.uniform3f(u["uMid"] ?? null, rgb.mid[0], rgb.mid[1], rgb.mid[2]);
+    gl.uniform3f(u["uLight"] ?? null, rgb.light[0], rgb.light[1], rgb.light[2]);
+    gl.uniform3f(u["uGlow"] ?? null, rgb.glow[0], rgb.glow[1], rgb.glow[2]);
+    gl.drawArrays(gl.TRIANGLES, 0, 3);
+  };
+
   build();
   const onLost = (event: Event) => {
     event.preventDefault();
@@ -215,25 +234,15 @@ function createGlPainter(canvas: HTMLCanvasElement, gl: WebGL2RenderingContext):
   const onRestored = () => {
     lost = false;
     build();
+    // A still field has no scheduled frames, so a restore has to paint once
+    // or the canvas stays cleared until a resize or a theme change.
+    if (lastPalette !== undefined) paint(lastTime, lastPalette);
   };
   canvas.addEventListener("webglcontextlost", onLost);
   canvas.addEventListener("webglcontextrestored", onRestored);
 
   return {
-    draw: (time, palette) => {
-      if (lost || program === undefined) return;
-      const rgb = flowingPaletteRgb(palette);
-      gl.useProgram(program);
-      gl.bindVertexArray(vertexArray);
-      gl.viewport(0, 0, canvas.width, canvas.height);
-      gl.uniform2f(u["uResolution"] ?? null, canvas.width, canvas.height);
-      gl.uniform1f(u["uTime"] ?? null, time);
-      gl.uniform3f(u["uDeep"] ?? null, rgb.deep[0], rgb.deep[1], rgb.deep[2]);
-      gl.uniform3f(u["uMid"] ?? null, rgb.mid[0], rgb.mid[1], rgb.mid[2]);
-      gl.uniform3f(u["uLight"] ?? null, rgb.light[0], rgb.light[1], rgb.light[2]);
-      gl.uniform3f(u["uGlow"] ?? null, rgb.glow[0], rgb.glow[1], rgb.glow[2]);
-      gl.drawArrays(gl.TRIANGLES, 0, 3);
-    },
+    draw: paint,
     dispose: () => {
       canvas.removeEventListener("webglcontextlost", onLost);
       canvas.removeEventListener("webglcontextrestored", onRestored);

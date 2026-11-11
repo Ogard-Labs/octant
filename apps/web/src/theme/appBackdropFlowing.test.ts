@@ -155,6 +155,21 @@ describe("flowing ground", () => {
     expect(calls.drawArrays.mock.calls.length).toBe(drawsAtStop);
   });
 
+  it("repaints a still field after the GPU context is restored", () => {
+    const { gl, calls } = fakeWebGl2();
+    vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockImplementation((id) =>
+      id === "webgl2" ? (gl as WebGL2RenderingContext) : null,
+    );
+    const { root, canvas } = mount();
+    const stop = runFlowingField(canvas, root, false);
+    const drawsBefore = calls.drawArrays.mock.calls.length;
+    expect(drawsBefore).toBeGreaterThan(0);
+    canvas.dispatchEvent(new Event("webglcontextlost", { cancelable: true }));
+    canvas.dispatchEvent(new Event("webglcontextrestored"));
+    expect(calls.drawArrays.mock.calls.length).toBe(drawsBefore + 1);
+    stop();
+  });
+
   it("does not schedule frames while the document is hidden", () => {
     vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "performance"] });
     const { gl, calls } = fakeWebGl2();
