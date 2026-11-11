@@ -80,6 +80,10 @@ export const RENDERER_OVERLAY_SELECTOR = [
   ".octant-dialog__backdrop",
   ".octant-dialog__viewport",
   ".octant-dialog__popup",
+  // Settings floats over a workspace that stays mounted, Browser pane and all.
+  ".octant-sheet__backdrop",
+  ".octant-sheet__viewport",
+  ".octant-sheet__popup",
 ].join(", ");
 
 const BROWSER_REFRESH_INTERVAL_MS = 500;

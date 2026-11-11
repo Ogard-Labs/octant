@@ -307,6 +307,7 @@ describe("the public-block visual language", () => {
       ".zen-surface",
       ".browser-workspace__remote",
       ".octant-dialog__popup",
+      ".octant-sheet__popup",
       ".folder-picker__search input",
       ".octant-popover-search input",
       ".artifact-library__search-input",

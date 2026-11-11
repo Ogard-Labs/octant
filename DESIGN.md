@@ -328,6 +328,25 @@ starts closed on every load, closes on Escape, on a tap outside it, and on
 choosing somewhere to go, and never changes the saved wide-window choice.
 Settings keeps its own narrow layout, a drawer with a flat page, at 960px and below (see [breakpoints](#breakpoints)).
 
+Settings opens as a sheet over the app (`OctantSheet`): a floating surface
+at most 1040 by 760px, on the float fill with the pop shadow, over a light
+scrim through which the window stays drawn. The app behind it is mounted and
+live, so a change to the theme, the accent, the type or the sidebar shows
+where it lands while the control is still under the pointer. As a page that
+replaced the window, Settings showed none of what a change did until a person
+went back. The sheet holds the Settings rail and the page, divided by one
+line; the rail is 232px wide there and is not resized (the saved sidebar
+width is the full-window page's). A section's card steps up from the sheet's
+own fill. A native Browser page leaves the window while the sheet is up, as it
+does for a dialog. It closes with the
+close control in its corner, with Escape, or with a press on the window behind
+it, and focus returns to where it was. It carries no "Back to app": the person
+never left. The presentation is decided when Settings opens and kept until it
+closes. In a window at the narrow breakpoint Settings covers the window, as
+before, with "Back to app"; a sheet open while the window is made narrow
+fills the window and keeps its page. The Usage page still covers the
+workspace at every width.
+
 ### Page shell
 
 Every list, board, reader, and preference page is a `Surface`:

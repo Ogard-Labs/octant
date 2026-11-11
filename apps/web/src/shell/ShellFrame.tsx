@@ -31,6 +31,11 @@ export interface ShellFrameProps {
   readonly sidebarWidth: number;
   readonly standaloneSurface?: ReactNode;
   /**
+   * A surface that floats over the shell instead of replacing it (Settings in
+   * a wide window). The shell stays mounted and drawn behind it.
+   */
+  readonly sheet?: ReactNode;
+  /**
    * The application ground drawn under the whole shell when its scope is
    * everywhere. The workspace and its panes go transparent over it; the
    * sidebar does too only when `backdropCoversSidebar` says so.
@@ -152,6 +157,7 @@ export function ShellFrame(props: ShellFrameProps) {
           </>
         )}
         {props.children}
+        {props.sheet}
       </div>
     </ShellThemeRoot>
   );

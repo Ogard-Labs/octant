@@ -1973,7 +1973,9 @@ textarea.settings-view__text-input {
   min-height: 120px;
 }
 
-.shell--material-translucent .settings-view__effective-note {
+/* The sheet is drawn outside the shell, so it carries the fact itself. */
+.shell--material-translucent .settings-view__effective-note,
+.octant-sheet--over-glass .settings-view__effective-note {
   display: none;
 }
 
@@ -3860,4 +3862,55 @@ html[data-octant-increased-contrast="true"]
 .settings-view__content-inner:has(.provider-settings[data-provider-detail="true"])
   .settings-view__outline {
   display: none;
+}
+
+/* Settings as a sheet over the app. The sheet is the floating surface, so
+   the rail and the page are clear on it and divided by one line, and a
+   section's card steps up from the sheet's own fill. The page's window
+   chrome (the traffic-light inset, the bordered workspace panel, "Back to
+   app") belongs to Settings as a whole window and is not drawn here. */
+.settings-view.settings-view--sheet {
+  width: 100%;
+  max-width: none;
+  height: 100%;
+  grid-template-columns: 232px minmax(0, 1fr);
+  background: transparent;
+  --oct-settings-card-fill: var(--octant-float-control);
+  --oct-settings-gutter: var(--oct-space-8);
+}
+
+.settings-view.settings-view--sheet > .settings-view__sidebar {
+  background: transparent;
+  border-right: 1px solid var(--octant-float-line);
+}
+
+.settings-view--sheet .settings-view__sidebar-content {
+  padding-top: var(--oct-space-3);
+}
+
+.settings-view.settings-view--sheet > .settings-view__workspace {
+  margin: 0;
+  background: transparent;
+  border: 0;
+  border-radius: 0;
+}
+
+.settings-view--sheet .settings-view__workspace-titlebar {
+  padding-inline-end: var(--oct-space-3);
+}
+
+.settings-view--sheet .settings-view__content-inner {
+  padding-top: var(--oct-space-2);
+}
+
+.settings-view__close {
+  flex: 0 0 auto;
+  margin-inline-start: var(--oct-space-2);
+}
+
+/* Settings fills the sheet it is in, whichever layout it draws there. */
+.octant-sheet__popup > .settings-view,
+.octant-sheet__popup .settings-view {
+  height: 100%;
+  max-width: none;
 }

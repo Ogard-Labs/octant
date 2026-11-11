@@ -2133,6 +2133,7 @@ Status: Built. Since: —. Detail: [DESIGN.md: Source of truth and CSS layers](.
 Every list, board, reader and preference page is one `Surface`. Settings groups its pages by what they change.
 
 - A setting lives on the page of the thing it changes, and a moved setting keeps answering links to its old page.
+- In a wide window Settings is a sheet over the app, which stays mounted and drawn behind a light scrim, so a change to how the app looks is seen as it is made. It closes from its own corner, with Escape, or with a press outside it. In a narrow window it covers the window and offers Back to app.
 - A page names its scope once, under its title. A page header holds one creation action and Back; filters sit in the toolbar.
 - A destination opens on one toolbar row at the Settings page title's size, pinned while the body scrolls, with an icon Back at the leading edge that does not move on press. It carries no description; its one line of detail is only a fact that changes and that a person needs. An empty page is the empty state alone, centred, with search and filters back once there is something to search.
 - Background refresh preserves loaded controls and active drafts; status slots are bounded so a changed status never pushes the form below it.

@@ -365,6 +365,24 @@ describe("SettingsView", () => {
     expect(onBack).toHaveBeenCalledOnce();
   });
 
+  it("closes from its own corner when it floats over the app, and offers no way back to a place the person never left", async () => {
+    const user = userEvent.setup();
+    const onBack = vi.fn();
+    renderSettings({ onBack, presentation: "sheet" });
+
+    expect(screen.queryByRole("button", { name: "Back to app" })).toBeNull();
+    await user.click(screen.getByRole("button", { name: "Close Settings" }));
+
+    expect(onBack).toHaveBeenCalledOnce();
+  });
+
+  it("keeps Back to app in a narrow sheet, where the sheet fills the window", () => {
+    renderSettings({ isNarrow: true, onBack: vi.fn(), presentation: "sheet" });
+
+    expect(screen.getByRole("button", { name: "Back to app" })).toBeVisible();
+    expect(screen.queryByRole("button", { name: "Close Settings" })).toBeNull();
+  });
+
   it("marks the active section in the navigator and switches on click", () => {
     renderSettings();
 

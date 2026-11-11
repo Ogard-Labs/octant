@@ -1,11 +1,11 @@
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
-import { render, screen, waitFor, within } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { useState, type ReactNode } from "react";
 import { describe, expect, it, vi } from "vitest";
 import type { ContextEntryId } from "@octant/contracts/context";
-import { ComposerContextMeter } from "./ComposerContextMeter";
+import { ComposerContextMeter, ComposerContextMeterShortcut } from "./ComposerContextMeter";
 import {
   ComposerContextMeterGate,
   ComposerContextMeterProvider,
@@ -247,6 +247,29 @@ describe("ComposerContextMeter", () => {
     await user.click(screen.getByRole("button", { name: "Shortcut" }));
     expect(screen.getByRole("dialog", { name: "Context window" })).toBeVisible();
     expect(inspect).not.toHaveBeenCalled();
+  });
+
+  it("opens from its chord, and stays shut while a sheet covers the workspace it is in", async () => {
+    render(
+      <Harness>
+        <ComposerContextMeterShortcut />
+      </Harness>,
+    );
+    const chord = { key: "u", code: "KeyU", ctrlKey: true, shiftKey: true };
+    // Settings floats over a workspace that stays mounted; the chord would
+    // open this popover behind the scrim and take the keyboard out of it.
+    const sheet = document.createElement("div");
+    sheet.className = "octant-sheet__popup";
+    document.body.append(sheet);
+    try {
+      fireEvent.keyDown(window, chord);
+      expect(screen.queryByRole("dialog", { name: "Context window" })).toBeNull();
+    } finally {
+      sheet.remove();
+    }
+
+    fireEvent.keyDown(window, chord);
+    expect(await screen.findByRole("dialog", { name: "Context window" })).toBeVisible();
   });
 
   it("says so when a category is unknown and restores focus after Escape", async () => {
