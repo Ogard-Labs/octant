@@ -1590,9 +1590,11 @@ generator images, Plugins blocks, and the Activity feed a pulse line.
 
 **Sidebar header width.** The mode tray never shrinks. Where the sidebar header
 (modes, Home when no rail stands beside it, Search, New thread, Hide, Back and
-Forward) cannot fit one row, which is the 220-236px sidebar of a 681-960px
-browser window, the actions wrap to a second row under the tray instead of
-sliding beneath it. The tray's row stays first at the top of the sidebar.
+Forward) cannot fit one row, which is a sidebar of 220-236px (also the width a
+1100px window leaves it beside an open dock), the actions wrap to a second row
+under the tray instead of sliding beneath it. The tray's row stays first at the
+top of the sidebar, and the header keeps its full wrapped height however long
+the thread list is, so the list always starts under both rows.
 
 **Usage rings.** Above Settings, at the foot of either rail, each provider
 that reports a plan window with a figure gets a ring in its identity colour

@@ -848,6 +848,22 @@ describe("the public-block visual language", () => {
     const tray = rule("\\.sidebar__chrome \\.modeswitch");
     expect(tray).toMatch(/flex:\s*1 0 auto/);
     expect(tray).toMatch(/min-width:\s*min-content/);
+    // The row sits in a scrolling column: a long thread list shrank it to its
+    // min-height and left the wrapped second row of buttons under the list.
+    expect(rule("\\.sidebar__chrome")).toMatch(/flex:\s*0 0 auto/);
+  });
+
+  it("lets the dock's labelled quick tool ellipsize instead of clipping mid-word", () => {
+    const dock = readFileSync(join(webRoot, "styles/dock.css"), "utf8");
+    const rule = (selector: string) =>
+      dock.match(new RegExp(`(?:^|\\n)${selector}\\s*\\{([^}]*)\\}`))?.[1] ?? "";
+
+    const tool = rule('\\.dock-quick-tools > \\.dock-quick-tools__tool\\[data-labelled="true"\\]');
+    expect(tool).toMatch(/min-width:\s*0/);
+    expect(tool).toMatch(/flex:\s*0 1 auto/);
+    expect(rule('\\.dock-quick-tools__tool\\[data-labelled="true"\\] > span')).toMatch(
+      /text-overflow:\s*ellipsis/,
+    );
   });
 
   it("keeps Usage on the open grammar instead of stat cards", () => {
