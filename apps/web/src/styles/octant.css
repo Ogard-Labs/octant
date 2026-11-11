@@ -4636,6 +4636,17 @@ input.switch:checked::after {
   .thread-composer__context:not(:empty, :has(> :only-child:empty)) ~ .composer-row {
     order: 1;
   }
+  /* A thread with no place to name leads with the row. At this width the row
+     is two lines, and the info fell to a third of its own. The row leaves the
+     info room beside it, and the info stands at the end of the row's last
+     line. */
+  .composer-under > .composer-row:first-child {
+    flex: 1 1 0;
+    max-width: calc(100% - var(--oct-space-2) - 28px);
+  }
+  .composer-under > .composer-row:first-child ~ .thread-info {
+    align-self: flex-end;
+  }
 }
 .composer-under > .thread-plan-windows {
   flex: 0 1 auto;

@@ -786,7 +786,8 @@ pill's own controls are round. The line is one row in a split pane as narrow as 
 Project made from a folder names that folder once, not as Project and folder
 both, and a context with nothing in it holds no place. At a phone's width the
 line is two rows, the context with Thread info at its trailing edge and the
-surface's row under them. Only the
+surface's row under them. A thread with no place to name is two rows there too: the
+surface's row on two lines, with Thread info at the end of the second. Only the
 surface's row gives its controls the row's one quiet treatment; the checkout's
 actions and the info panel's fields keep their own. With that row inside
 it the card was a third taller than its prompt and read as a form; an empty
