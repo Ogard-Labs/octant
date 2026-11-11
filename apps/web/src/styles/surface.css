@@ -1067,6 +1067,38 @@ html:not([data-octant-reduced-transparency="true"], [data-octant-increased-contr
   opacity: 0.12;
 }
 
+/* ── Loading shape ─────────────────────────────────────────────────── */
+
+/* A page that is on its way shows its own outline: the title bar where the
+   title will be and a few rows under it, in the page's frame, so nothing
+   moves when the page arrives. The bars are the shared skeleton. */
+.surface-loading__title {
+  width: 128px;
+  height: 12px;
+}
+
+.surface-loading__rows {
+  display: grid;
+  gap: var(--oct-space-4);
+  padding-top: var(--oct-space-2);
+}
+
+.surface-loading__row {
+  height: 12px;
+}
+
+.surface-loading__row:nth-child(odd) {
+  width: 72%;
+}
+
+.surface-loading__row:nth-child(even) {
+  width: 56%;
+}
+
+.surface-loading__row:last-child {
+  width: 34%;
+}
+
 /* Where the veil meets the sheet's rounded corner, it rounds with it. */
 @media (min-width: 681px) {
   .shell--app-backdrop.shell-frame

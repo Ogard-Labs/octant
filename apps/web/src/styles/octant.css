@@ -219,6 +219,14 @@
   --oct-nav-head-h: 40px;
   --oct-nav-row-h: 32px;
   --oct-nav-inset: 12px;
+  /* One row for every list a person picks from: a menu, a context menu, a
+     select, a combobox, the command palette, a typeahead and a picker popup.
+     The row's words stand on the row inset, and the rows stand in from the
+     popup's edge by the menu inset. Before these, each recipe sized its own
+     row and the same line of text was 24, 26, 30 or 34px tall. */
+  --oct-menu-row-h: 28px;
+  --oct-menu-row-inset: var(--oct-space-2);
+  --oct-menu-inset: var(--oct-space-1);
   --oct-disabled-opacity: 0.45;
 
   --oct-icon-sm: 14px;
@@ -1849,13 +1857,8 @@ input.switch:checked::after {
 }
 
 /* ─── scrollbars ──────────────────────────────────────────────────────
-   Two properties, no vendor pseudo-elements, so it themes itself. */
-* {
-  scrollbar-color: var(--oct-border) transparent;
-}
-.scroll-thin {
-  scrollbar-width: thin;
-}
+   Declared once, in styles.css ("one quiet, visible scrollbar"). A second
+   colour stood here and lost to that rule on source order alone. */
 
 /* ─── avatar ────────────────────────────────────────────────────────── */
 .avatar {
@@ -9550,6 +9553,12 @@ html[data-octant-reduced-transparency="true"] .code-home__card {
   .skeleton::after {
     display: none;
   }
+}
+
+/* Octant's own Reduce motion setting stills the sheen as the system's does:
+   the shape stays, and nothing travels across it. */
+html[data-octant-reduced-motion="true"] .skeleton::after {
+  display: none;
 }
 
 /* Thread decisions share the question card's typography and neutral ground. */

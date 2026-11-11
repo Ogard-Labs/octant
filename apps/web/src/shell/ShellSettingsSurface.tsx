@@ -39,7 +39,7 @@ import type { ProviderController } from "../providers/useProviderController";
 import type { ThemeController } from "../theme/useThemeController";
 import { visuallyHiddenStyle } from "./shellCommandWiring";
 import { SettingsSurfaceErrorBoundary } from "./SettingsSurfaceErrorBoundary";
-import { ShellState } from "./ShellState";
+import { SettingsLoading } from "./SettingsLoading";
 import { ShellThemeRoot } from "./ShellFrame";
 import type { OctantHostBridge } from "./hostBridge";
 import type { BackgroundImageLibrary } from "../settings/AppBackgroundSettings";
@@ -134,14 +134,7 @@ export function ShellSettingsSurface(props: ShellSettingsSurfaceProps) {
       <SettingsSurfaceErrorBoundary onReload={() => globalThis.location.reload()}>
         <Suspense
           fallback={
-            <main className="shell-boundary">
-              <ShellState
-                eyebrow="Settings"
-                message="Loading the Octant settings surface."
-                state="loading"
-                title="Opening Settings"
-              />
-            </main>
+            <SettingsLoading narrow={props.isNarrow} sheet={props.presentation === "sheet"} />
           }
         >
           <LazySettingsView

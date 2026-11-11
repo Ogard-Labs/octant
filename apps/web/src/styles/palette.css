@@ -5,8 +5,8 @@
  * shape the user can read — `Enter` in the palette, the selected button variant
  * in the composer — so the active state never rests on colour alone. Values are
  * the design system's `--oct-*` tokens (octant.css, repointed at the runtime
- * theme by octant-bridge.css); rows carry the system's .menu-item metrics and
- * group labels the mono meta treatment. The selection fill and its strong
+ * theme by octant-bridge.css); rows take the shared menu row height and inset
+ * (`--oct-menu-row-*`) and group labels the mono meta treatment. The selection fill and its strong
  * border stay on app tokens because the system has no selection role.
  */
 
@@ -23,15 +23,19 @@
 .chat-composer__command-list {
   display: flex;
   flex-direction: column;
-  padding: var(--oct-space-1);
+  padding: var(--oct-menu-inset);
   margin: 0;
   list-style: none;
 }
 
+/* A typeahead row is the shared menu row: the button recipe's own small size
+   is a rem step, 24px at the default interface size. */
 .chat-composer__command-option > button {
   width: 100%;
+  height: var(--oct-menu-row-h);
   justify-content: flex-start;
   gap: var(--oct-space-1);
+  padding-inline: var(--oct-menu-row-inset);
 }
 
 .chat-composer__command-meta {
@@ -134,14 +138,14 @@
   overflow-y: auto;
 }
 
-/* Rows carry the system's .menu-item metrics. */
+/* Rows are the shared menu row. */
 .command-palette__result {
   display: flex;
   align-items: center;
   gap: var(--oct-space-2);
-  min-height: var(--oct-control-height-sm);
+  min-height: var(--oct-menu-row-h);
   padding-block: 0;
-  padding-inline: var(--oct-space-3);
+  padding-inline: var(--oct-menu-row-inset);
   border: 1px solid transparent;
   border-radius: var(--oct-radius-sm);
   font-size: var(--oct-text-sm);
