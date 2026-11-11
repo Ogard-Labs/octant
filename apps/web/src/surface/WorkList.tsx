@@ -1,5 +1,5 @@
 import type { LucideIcon } from "lucide-react";
-import type { ReactNode } from "react";
+import { memo, type ReactNode } from "react";
 import { ArrowUpDown } from "lucide-react";
 import { compactRelativeTimeLabel } from "../lib/relativeTime";
 import { OctantButton, octantButtonClassName } from "../ui/base/OctantButton";
@@ -42,10 +42,19 @@ export interface WorkListRowProps {
   readonly trailing?: ReactNode;
   /** After the age on the meta line: quiet marks such as a linked thread. */
   readonly extras?: ReactNode;
+  /** Text only a screen reader gets: the facts the row leaves out of sight. */
+  readonly description?: string;
+  /**
+   * Opens on hover and on keyboard focus of the whole row, so what the row
+   * leaves out is not a pointer-only fact.
+   */
+  readonly tooltip?: ReactNode;
   readonly selected: boolean;
   /** How the shell marks the row it has open. */
   readonly selection: "pressed" | "current";
-  readonly onSelect: () => void;
+  /** Receives `id`, so a parent can pass one stable callback to every row. */
+  readonly id: string;
+  readonly onSelect: (id: string) => void;
 }
 
 function formatUpdatedAt(value: string): string {
@@ -57,17 +66,17 @@ function formatUpdatedAt(value: string): string {
  * One item: the title, then one quiet line of where it lives and how old it
  * is. The row is the only control; what opening it does is the caller's.
  */
-export function WorkListRow(props: WorkListRowProps) {
+export const WorkListRow = memo(function WorkListRow(props: WorkListRowProps) {
   const { Icon } = props.state;
   const selection =
     props.selection === "pressed"
       ? { "aria-pressed": props.selected }
       : { "aria-current": props.selected ? ("true" as const) : undefined };
-  return (
+  const button = (
     <OctantButton
       {...selection}
       className="work-list__row"
-      onClick={props.onSelect}
+      onClick={() => props.onSelect(props.id)}
       type="button"
       variant="bare"
     >
@@ -98,9 +107,19 @@ export function WorkListRow(props: WorkListRowProps) {
         {props.extras}
       </span>
       <span className="work-list__number">#{props.number}</span>
+      {props.description === undefined ? null : (
+        <span className="sr-only">{props.description}</span>
+      )}
     </OctantButton>
   );
-}
+  return props.tooltip === undefined ? (
+    button
+  ) : (
+    <OctantTooltip label={props.tooltip} side="top">
+      {button}
+    </OctantTooltip>
+  );
+});
 
 export function WorkList(props: { readonly ariaLabel?: string; readonly children: ReactNode }) {
   return (

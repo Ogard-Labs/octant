@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { GithubClient } from "@octant/client-runtime/github-client";
 import type {
   GithubCatalogueFreshness,
@@ -461,30 +461,35 @@ export function GitHubIssueBrowser(props: GitHubIssueBrowserProps) {
     else void loadList();
   };
 
-  const renderRows = (list: ReadonlyArray<RepositoryIssueRow>) => (
-    <WorkList ariaLabel="GitHub issues">
-      {list.map((row) => {
-        const current =
-          selected !== undefined &&
-          selected.owner === row.owner &&
-          selected.name === row.name &&
-          selected.number === row.number;
-        return (
-          <li key={`${row.owner}/${row.name}#${row.number}`}>
-            <WorkListRow
-              author={row.author}
-              number={row.number}
-              onSelect={() => setSelected({ owner: row.owner, name: row.name, number: row.number })}
-              {...(scope === "all" ? { repository: row.name } : {})}
-              selected={current}
-              selection="current"
-              state={issueStateGlyph(row.state)}
-              title={row.title}
-              updatedAt={row.updatedAt}
-            />
-          </li>
-        );
-      })}
+  // One callback for every row, so re-rendering the page with the same rows
+  // renders none of them again.
+  const selectIssue = useCallback((row: RepositoryIssueRow) => {
+    setSelected({ owner: row.owner, name: row.name, number: row.number });
+  }, []);
+  // Several repositories on one ungrouped list would read alike by bare name
+  // (a/app, b/app), so the owner is named; a group head already says it.
+  const qualifyRepository =
+    scope === "all" &&
+    !groupRows &&
+    new Set(rows.map((row) => `${row.owner}/${row.name}`)).size > 1;
+  const renderRows = (list: ReadonlyArray<RepositoryIssueRow>, label: string, qualify: boolean) => (
+    <WorkList ariaLabel={label}>
+      {list.map((row) => (
+        <li key={`${row.owner}/${row.name}#${row.number}`}>
+          <IssueRow
+            onSelect={selectIssue}
+            qualifyRepository={qualify}
+            repositoryShown={scope === "all"}
+            row={row}
+            selected={
+              selected !== undefined &&
+              selected.owner === row.owner &&
+              selected.name === row.name &&
+              selected.number === row.number
+            }
+          />
+        </li>
+      ))}
     </WorkList>
   );
 
@@ -610,11 +615,11 @@ export function GitHubIssueBrowser(props: GitHubIssueBrowserProps) {
                 ) : groupRows ? (
                   groupIssuesByRepository(rows).map((group) => (
                     <WorkListGroup count={group.rows.length} key={group.title} title={group.title}>
-                      {renderRows(group.rows)}
+                      {renderRows(group.rows, group.title, false)}
                     </WorkListGroup>
                   ))
                 ) : (
-                  renderRows(rows)
+                  renderRows(rows, "GitHub issues", qualifyRepository)
                 )}
                 {scope === "repository" && list.kind === "ready" && list.hasNextPage ? (
                   <OctantButton
@@ -695,6 +700,32 @@ function IssueStateBadge(props: { readonly state: GithubIssueRow["state"] }) {
     </OctantBadge>
   );
 }
+
+const IssueRow = memo(function IssueRow(props: {
+  readonly row: RepositoryIssueRow;
+  readonly selected: boolean;
+  readonly repositoryShown: boolean;
+  readonly qualifyRepository: boolean;
+  readonly onSelect: (row: RepositoryIssueRow) => void;
+}) {
+  const { row } = props;
+  return (
+    <WorkListRow
+      author={row.author}
+      id={`${row.owner}/${row.name}#${row.number}`}
+      number={row.number}
+      onSelect={() => props.onSelect(row)}
+      {...(props.repositoryShown
+        ? { repository: props.qualifyRepository ? `${row.owner}/${row.name}` : row.name }
+        : {})}
+      selected={props.selected}
+      selection="current"
+      state={issueStateGlyph(row.state)}
+      title={row.title}
+      updatedAt={row.updatedAt}
+    />
+  );
+});
 
 function issueStateGlyph(state: GithubIssueRow["state"]): WorkListState {
   return state === "open"

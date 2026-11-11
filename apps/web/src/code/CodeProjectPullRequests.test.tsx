@@ -5,7 +5,7 @@ import {
   type CodeProjectPullRequestView,
 } from "@octant/contracts";
 import { decodeProjectId } from "@octant/contracts/projects";
-import { render, screen, waitFor, within } from "@testing-library/react";
+import { cleanup, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
@@ -228,7 +228,9 @@ describe("CodeProjectPullRequests", () => {
       expect(screen.queryByText("Mergeable")).toBeNull();
       expect(screen.queryByText("Review pending")).toBeNull();
       expect(
-        screen.getByText("Checks failing. Review pending. Mergeable.", { selector: ".sr-only" }),
+        screen.getByText(/^Checks failing\. Review pending\. Mergeable\. /, {
+          selector: ".sr-only",
+        }),
       ).toBeInTheDocument();
 
       // "22.8.2026, 09:00:00" is a fact nobody reads; the exact time stays on
@@ -257,9 +259,12 @@ describe("CodeProjectPullRequests", () => {
     expect(row.querySelector(".work-list__ok")).not.toBeNull();
     expect(within(row).queryByText("Checks passing")).toBeNull();
     expect(
-      within(row).getByText("Checks passing. Review approved. Mergeable.", {
-        selector: ".sr-only",
-      }),
+      within(row).getByText(
+        /^Checks passing\. Review approved\. Mergeable\. feature\/manual-refresh → development\.$/,
+        {
+          selector: ".sr-only",
+        },
+      ),
     ).toBeInTheDocument();
     expect(
       within(row).getByText("Linked: Manual refresh", { selector: ".sr-only" }),
@@ -738,6 +743,123 @@ describe("CodeProjectPullRequests", () => {
     });
     expect(off).toHaveAttribute("aria-checked", "false");
     expect(off.querySelector("svg")).toBeNull();
+  });
+
+  it("opens a row's facts and branches as a tooltip when the row has keyboard focus", async () => {
+    const user = userEvent.setup();
+    renderWorkspace();
+    const row = await screen.findByRole("button", { name: /List active pull requests/i });
+
+    for (let step = 0; step < 20 && document.activeElement !== row; step += 1) await user.tab();
+    expect(row).toHaveFocus();
+    const tooltip = await screen.findByRole("tooltip");
+    expect(tooltip).toHaveTextContent("Checks passing. Review approved. Mergeable.");
+    expect(tooltip).toHaveTextContent("feature/manual-refresh → development");
+  });
+
+  it("gives a row with nothing to flag the same branches as text and as a tooltip", async () => {
+    const user = userEvent.setup();
+    const base = view().rows[0];
+    if (base === undefined) throw new Error("fixture has a row");
+    const quiet = { ...base, mergeability: "unknown" as const, linkedThreads: [] };
+    renderWorkspace({ load: async () => ({ ...view(), rows: [quiet] }) });
+    const row = await screen.findByRole("button", { name: /List active pull requests/i });
+
+    // Nothing is wrong and nothing is known, so the trailing edge is empty.
+    expect(row.querySelector("[data-status]")).toBeNull();
+    expect(row.querySelector(".work-list__ok")).toBeNull();
+    expect(
+      within(row).getByText(/feature\/manual-refresh → development/, { selector: ".sr-only" }),
+    ).toBeInTheDocument();
+    for (let step = 0; step < 20 && document.activeElement !== row; step += 1) await user.tab();
+    expect(await screen.findByRole("tooltip")).toHaveTextContent(
+      "feature/manual-refresh → development",
+    );
+  });
+
+  it("keeps every connected repository's header, chip and menu when a filter empties its group", async () => {
+    const user = userEvent.setup();
+    renderWorkspace({
+      load: async () => threeRepositoryView(),
+      agentMerge: {
+        enabledFor: (projectId) => String(projectId) === projectB,
+        setEnabled: vi.fn(async () => true),
+      },
+      storage: memoryStorage({
+        "octant.code.pull-requests.group-by-repository": "true",
+        "octant.code.pull-requests.filter-checks": "failing",
+      }),
+    });
+
+    const aurora = await screen.findByRole("region", { name: "octant/aurora" });
+    const octant = screen.getByRole("region", { name: "octant/octant" });
+    expect(within(aurora).getByText("0")).toBeVisible();
+    expect(within(aurora).getByText("Nothing matches")).toBeVisible();
+    expect(within(octant).getByText("Nothing matches")).toBeVisible();
+    expect(within(aurora).getByText("Agents may merge")).toBeVisible();
+    expect(within(octant).queryByText("Agents may merge")).toBeNull();
+    await user.click(within(aurora).getByRole("button", { name: "octant/aurora settings" }));
+    expect(
+      await screen.findByRole("menuitemcheckbox", {
+        name: "Let agents merge Aurora pull requests",
+      }),
+    ).toHaveAttribute("aria-checked", "true");
+  });
+
+  it("names the owner on an ungrouped list across repositories, and not inside a group", async () => {
+    renderWorkspace({ load: async () => threeRepositoryView() });
+    await screen.findByText("Newest in octant");
+    const meta = () =>
+      Array.from(document.querySelectorAll(".work-list__row .work-list__meta-text"))
+        .map((element) => element.textContent)
+        .filter((text) => text?.includes("octant") === true || text === "aurora");
+    expect(meta()).toEqual(["octant/octant", "octant/aurora", "octant/octant"]);
+    cleanup();
+
+    renderWorkspace({
+      load: async () => threeRepositoryView(),
+      storage: memoryStorage({ "octant.code.pull-requests.group-by-repository": "true" }),
+    });
+    await screen.findByRole("region", { name: "octant/octant" });
+    expect(meta()).toEqual(["octant", "octant", "aurora"]);
+  });
+
+  it("changes the agent-merge permission once and closes its menu, returning focus to the trigger", async () => {
+    const user = userEvent.setup();
+    const setEnabled = vi.fn(async () => true);
+    renderWorkspace({
+      agentMerge: { enabledFor: () => false, setEnabled },
+      storage: memoryStorage({ "octant.code.pull-requests.group-by-repository": "true" }),
+    });
+    await screen.findByText("List active pull requests");
+
+    const trigger = screen.getByRole("button", { name: "octant/octant settings" });
+    await user.click(trigger);
+    await user.click(
+      await screen.findByRole("menuitemcheckbox", {
+        name: "Let agents merge Octant pull requests",
+      }),
+    );
+    expect(setEnabled).toHaveBeenCalledTimes(1);
+    await waitFor(() => expect(screen.queryByRole("menu")).toBeNull());
+    expect(trigger).toHaveFocus();
+  });
+
+  it("renders no row again when the page renders with the same rows", async () => {
+    const load = async () => view();
+    const refresh = async () => view();
+    const props = { load, refresh, storage: memoryStorage() };
+    const { rerender } = render(<CodeProjectPullRequests {...props} />);
+    await screen.findByText("List active pull requests");
+
+    // A row formats its exact time once per render, so this counts row renders.
+    const formatted = vi.spyOn(Date.prototype, "toLocaleString");
+    try {
+      rerender(<CodeProjectPullRequests {...props} />);
+      expect(formatted).not.toHaveBeenCalled();
+    } finally {
+      formatted.mockRestore();
+    }
   });
 
   it("scopes the dock presentation to one Project and drops the page shell", async () => {

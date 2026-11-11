@@ -22,7 +22,7 @@ import {
   Settings2,
   X,
 } from "lucide-react";
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { memo, useCallback, useEffect, useRef, useState } from "react";
 import { ShellState } from "../shell/ShellState";
 import {
   defaultBoardStorage,
@@ -309,13 +309,16 @@ export function CodeProjectPullRequests(props: CodeProjectPullRequestsProps) {
   const groups = showGroups ? groupPullRequestsByRepository(visibleRows) : [];
   // A connected Project with nothing to list still gets its group when grouping
   // is on, so its settings stay reachable and its empty state is told.
-  const emptyConnected =
-    showGroups && normalizedSearch === "" && filterCount === 0
-      ? connectedProjects.filter(
-          (project) =>
-            !groups.some((group) => String(group.projectId) === String(project.projectId)),
-        )
-      : [];
+  const emptyConnected = showGroups
+    ? connectedProjects.filter(
+        (project) => !groups.some((group) => String(group.projectId) === String(project.projectId)),
+      )
+    : [];
+  // Several repositories on one ungrouped list would read alike by bare name
+  // (a/app, b/app), so the owner is named; a group head already says it.
+  const qualifyRepository =
+    !showGroups &&
+    new Set(scopedRows.map((row) => `${row.repositoryOwner}/${row.repositoryName}`)).size > 1;
   const neverRefreshed = showGroups
     ? []
     : connectedProjects.filter((project) => {
@@ -505,7 +508,11 @@ export function CodeProjectPullRequests(props: CodeProjectPullRequestsProps) {
               {emptyConnected.map((project) => (
                 <RepositoryGroup
                   busy={busy}
-                  emptyCopy={projectEmptyCopy(projectFreshnessFor(view, project.projectId))}
+                  emptyCopy={
+                    normalizedSearch !== "" || filterCount > 0
+                      ? "Nothing matches"
+                      : projectEmptyCopy(projectFreshnessFor(view, project.projectId))
+                  }
                   key={String(project.projectId)}
                   onRefresh={() =>
                     void runRefresh({ kind: "refresh-project", projectId: project.projectId })
@@ -526,6 +533,7 @@ export function CodeProjectPullRequests(props: CodeProjectPullRequestsProps) {
           ) : visibleRows.length === 0 ? null : (
             <PullRequestRows
               onSelectRow={props.onSelectRow}
+              qualifyRepository={qualifyRepository}
               rows={visibleRows}
               selectedRowKey={props.selectedRowKey}
             />
@@ -735,7 +743,10 @@ function ProjectSettingsItems(props: {
         <OctantMenuCheckboxItem
           aria-label={`Let agents merge ${project.projectName} pull requests`}
           checked={props.agentMerge.enabledFor(project.projectId)}
-          closeOnClick={false}
+          // One activation, one change: a menu left open under the pointer let a
+          // second Enter flip the permission straight back. Auto-refresh stays open
+          // because it is not an authority and its check shows the change.
+          closeOnClick
           disabled={props.busy}
           label="Agents may merge"
           onCheckedChange={(enabled) =>
@@ -880,6 +891,7 @@ function RepositoryGroup(props: {
       ) : (
         <PullRequestRows
           onSelectRow={props.onSelectRow}
+          qualifyRepository={false}
           rows={props.rows}
           selectedRowKey={props.selectedRowKey}
         />
@@ -892,7 +904,19 @@ function PullRequestRows(props: {
   readonly rows: ReadonlyArray<CodeProjectPullRequestRow>;
   readonly selectedRowKey: string | undefined;
   readonly onSelectRow: ((row: CodeProjectPullRequestRow) => void) | undefined;
+  /** Name the owner too: the list spans repositories and no group head says it. */
+  readonly qualifyRepository: boolean;
 }) {
+  // One callback for every row, so a parent render with the same rows does not
+  // hand each of them a new function and render them all again.
+  const latest = useRef(props);
+  useEffect(() => {
+    latest.current = props;
+  });
+  const select = useCallback((key: string) => {
+    const row = latest.current.rows.find((candidate) => projectPullRequestKey(candidate) === key);
+    if (row !== undefined) latest.current.onSelectRow?.(row);
+  }, []);
   return (
     <WorkList>
       {props.rows.map((row) => {
@@ -900,8 +924,10 @@ function PullRequestRows(props: {
         return (
           <li key={rowKey}>
             <PullRequestRow
-              onSelect={() => props.onSelectRow?.(row)}
+              onSelect={select}
+              qualifyRepository={props.qualifyRepository}
               row={row}
+              rowKey={rowKey}
               selected={props.selectedRowKey === rowKey}
             />
           </li>
@@ -921,32 +947,26 @@ function stateGlyph(row: CodeProjectPullRequestRow): WorkListState {
 }
 
 /** A pull request in the shared row: what needs attention goes at the title's edge. */
-function PullRequestRow(props: {
+const PullRequestRow = memo(function PullRequestRow(props: {
   readonly row: CodeProjectPullRequestRow;
+  readonly rowKey: string;
   readonly selected: boolean;
-  readonly onSelect: () => void;
+  readonly qualifyRepository: boolean;
+  readonly onSelect: (key: string) => void;
 }) {
   const { row } = props;
   const attention = pullRequestAttention(row);
   const sentence = pullRequestStatusSentence(row);
+  const branches = `${row.headBranch} → ${row.baseBranch}`;
   const resolved = attention === undefined && row.mergeability === "mergeable";
-  const summary = (
-    <>
-      {attention === undefined ? null : (
-        <span aria-hidden="true">
-          <StatusChip label={attention.label} status={attention.tone} />
-        </span>
-      )}
-      {resolved ? (
-        <Check aria-hidden="true" className="work-list__ok" size={14} strokeWidth={1.8} />
-      ) : null}
-      <span className="sr-only">{sentence}</span>
-    </>
-  );
   const linked = row.linkedThreads.map((thread) => thread.title).join(", ");
   return (
     <WorkListRow
       author={row.author}
+      // The branches and every fact the one word leaves out are text for a
+      // screen reader, and the whole row opens them as a tooltip on hover and
+      // on keyboard focus, so none of it is pointer-only.
+      description={`${sentence} ${branches}.`}
       extras={
         row.linkedThreads.length === 0 ? null : (
           <span className="work-list__linked" title={`Linked: ${linked}`}>
@@ -955,36 +975,40 @@ function PullRequestRow(props: {
           </span>
         )
       }
+      id={props.rowKey}
       number={row.number}
       onSelect={props.onSelect}
-      repository={row.repositoryName}
+      repository={
+        props.qualifyRepository
+          ? `${row.repositoryOwner}/${row.repositoryName}`
+          : row.repositoryName
+      }
       selected={props.selected}
       selection="pressed"
       state={stateGlyph(row)}
       title={row.title}
+      tooltip={
+        <span className="work-list__tooltip">
+          <span>{sentence}</span>
+          <span>{branches}</span>
+        </span>
+      }
       trailing={
-        attention === undefined && !resolved ? (
-          summary
-        ) : (
-          <OctantTooltip
-            label={
-              <span className="work-list__tooltip">
-                <span>{sentence}</span>
-                <span>
-                  {row.headBranch} → {row.baseBranch}
-                </span>
-              </span>
-            }
-            side="top"
-          >
-            <span className="work-list__status-trigger">{summary}</span>
-          </OctantTooltip>
-        )
+        <>
+          {attention === undefined ? null : (
+            <span aria-hidden="true">
+              <StatusChip label={attention.label} status={attention.tone} />
+            </span>
+          )}
+          {resolved ? (
+            <Check aria-hidden="true" className="work-list__ok" size={14} strokeWidth={1.8} />
+          ) : null}
+        </>
       }
       updatedAt={row.updatedAt}
     />
   );
-}
+});
 
 export function StatusChip(props: {
   readonly label: string;

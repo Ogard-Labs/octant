@@ -1213,9 +1213,12 @@ requested, Checks pending, Review pending), or a small check when the pull
 request is mergeable and nothing blocks it. Line two is one meta line: a state
 glyph coloured by state, the repository's name, the author, the age ("2h",
 "5d") and a link mark when a thread is linked, with the number (`#2344`) in
-tabular numerals at the trailing edge. Every fact the chip leaves out is still
-text for assistive technology and in the chip's tooltip, with the head and base
-branches. A row has no hairline under it, the row under the pointer takes the
+tabular numerals at the trailing edge. The repository's name is the bare name
+in a group and `owner/name` on an ungrouped list that spans repositories, in both
+lists. Every row, flagged or not, is one tooltip trigger that opens on hover and
+on keyboard focus of the whole row, with the status sentence and then
+"head → base", and the same text is visually hidden text of the row, so no fact
+is pointer-only. A row has no hairline under it, the row under the pointer takes the
 control hover fill with the row radius, and clicking it opens the pull request
 exactly as before.
 
@@ -1246,7 +1249,12 @@ device that may not set them, and enforces the merge choice at the merge. A
 Project that is not on GitHub is not drawn as an empty block: one quiet line at
 the foot says how many, with their names in a disclosure. A connected Project
 never refreshed is named in one line (flat) or keeps its group with the empty
-sentence (grouped). The dock's Pull requests tool uses the same rows in one
+sentence (grouped). While grouped, every connected repository keeps its header,
+menu and chip even when a search or filter leaves it no rows: the count is 0 and
+one quiet line says "Nothing matches", so a granted permission is never hidden by
+a narrowed list. Choosing Agents may merge closes the menu and returns focus to its
+button, so one activation is one change; Auto-refresh stays open because it is not
+an authority and its check shows the change. The dock's Pull requests tool uses the same rows in one
 flat list with the search and count, and none of the page's menus.
 
 The Issues place draws the same row, so one component serves both lists: the

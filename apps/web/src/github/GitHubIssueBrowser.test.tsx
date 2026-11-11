@@ -574,7 +574,7 @@ describe("GitHubIssueBrowser", () => {
       const row = await screen.findByRole("button", { name: /Newest in repo-2/ });
       expect(within(row).getByText("Newest in repo-2")).toHaveClass("work-list__title");
       expect(within(row).getByRole("img", { name: "Open" })).toBeInTheDocument();
-      expect(within(row).getByText("repo-2")).toBeVisible();
+      expect(within(row).getByText("octant/repo-2")).toBeVisible();
       expect(within(row).getByText("octocat")).toBeVisible();
       expect(within(row).getByText("#40")).toHaveClass("work-list__number");
       expect(
@@ -618,6 +618,40 @@ describe("GitHubIssueBrowser", () => {
 
       render(<GitHubIssueBrowser client={acrossClient()} storage={storage} />);
       expect(await screen.findByRole("region", { name: "octant/repo-1" })).toBeVisible();
+    });
+
+    it("names the owner only on an ungrouped list across repositories", async () => {
+      const user = userEvent.setup();
+      render(<GitHubIssueBrowser client={acrossClient()} storage={memoryStorage()} />);
+      const row = await screen.findByRole("button", { name: /Newest in repo-2/ });
+      expect(within(row).getByText("octant/repo-2")).toBeVisible();
+
+      await user.click(screen.getByRole("button", { name: "Sort issues" }));
+      await user.click(
+        await screen.findByRole("menuitemcheckbox", { name: "Group by repository" }),
+      );
+      const group = await screen.findByRole("region", { name: "octant/repo-2" });
+      expect(
+        within(group).getByText("repo-2", { selector: ".work-list__meta-text" }),
+      ).toBeVisible();
+      // Each grouped list is named by its group, not "GitHub issues" twice.
+      expect(within(group).getByRole("list", { name: "octant/repo-2" })).toBeVisible();
+      expect(screen.queryByRole("list", { name: "GitHub issues" })).toBeNull();
+    });
+
+    it("renders no row again when the page renders with the same rows", async () => {
+      const client = acrossClient();
+      const storage = memoryStorage();
+      const { rerender } = render(<GitHubIssueBrowser client={client} storage={storage} />);
+      await screen.findByText("Newest in repo-2");
+
+      const formatted = vi.spyOn(Date.prototype, "toLocaleString");
+      try {
+        rerender(<GitHubIssueBrowser client={client} storage={storage} />);
+        expect(formatted).not.toHaveBeenCalled();
+      } finally {
+        formatted.mockRestore();
+      }
     });
 
     it("keeps an issue to the list's own measure beside its detail pane", () => {
