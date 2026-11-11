@@ -657,11 +657,13 @@ const timer = setInterval(() => {
         process.env,
         8000,
       );
+      // Settings is known by its own search field, as the later stage knows
+      // it. The route waited for the General page's description, a sentence
+      // that was rewritten when Profile and Notifications were folded into
+      // General, so the stage could never be observed.
       await observeUntil(
         "settings",
-        (snapshot) =>
-          hasText(snapshot, "Settings") &&
-          hasText(snapshot, "Choose app-wide defaults, updates, and network behavior."),
+        (snapshot) => hasText(snapshot, "Settings") && hasText(snapshot, "Search settings"),
       );
       await leaveSettings("back-to-app-target");
     }
