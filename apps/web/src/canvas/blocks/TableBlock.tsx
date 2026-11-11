@@ -345,7 +345,7 @@ export function TableBlock({
   const renderRow = ({ cells, index, rowId }: RowView) => (
     // A row that names itself keeps its element through a sort or a
     // revision, so a focused marker stays on the row it belongs to.
-    <tr key={rowId === undefined ? `index:${String(index)}` : `row:${rowId}`}>
+    <tr data-row-id={rowId} key={rowId === undefined ? `index:${String(index)}` : `row:${rowId}`}>
       {commentable ? (
         <td className="canvas-block__table-comment">
           {rowId === undefined || rowComments === undefined ? null : (

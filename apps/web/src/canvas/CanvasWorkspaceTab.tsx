@@ -41,7 +41,11 @@ import { OctantButton } from "../ui/base/OctantButton";
 import { OctantDialog } from "../ui/base/OctantDialog";
 import { OctantMenu } from "../ui/base/OctantMenu";
 import { OctantPopover } from "../ui/base/OctantPopover";
-import { CanvasCommentsPanel } from "./CanvasCommentsPanel";
+import { CanvasCommentsPanel, canvasCommentAnchorChoices } from "./CanvasCommentsPanel";
+import { CanvasToolRail } from "./CanvasToolRail";
+import { CanvasToolSurface } from "./CanvasToolSurface";
+import type { CanvasCommentArea, CanvasCommentPick, CanvasTool } from "./canvasTools";
+import type { CanvasBlockAreaMark } from "./CanvasDocument";
 import type { ThreadMessageQueueClient } from "../messageQueue/threadMessageQueueClient";
 import {
   canvasCommentAgentPrompt,
@@ -126,6 +130,11 @@ export function CanvasWorkspaceTab(props: CanvasWorkspaceTabProps): ReactNode {
   const [commentsOpen, setCommentsOpen] = useState(false);
   const [focusedBlockId, setFocusedBlockId] = useState<string | undefined>(undefined);
   const [focusedRowId, setFocusedRowId] = useState<string | undefined>(undefined);
+  const [focusedPart, setFocusedPart] = useState<
+    { readonly kind: "node" | "edge"; readonly id: string } | undefined
+  >(undefined);
+  const [tool, setTool] = useState<CanvasTool>("select");
+  const [draftArea, setDraftArea] = useState<CanvasCommentArea | undefined>(undefined);
   const [commentThreads, setCommentThreads] = useState<ReadonlyArray<CanvasCommentThread>>([]);
   const [versionsOpen, setVersionsOpen] = useState(false);
   const [dialog, setDialog] = useState<CanvasToolDialog | undefined>(undefined);
@@ -800,6 +809,7 @@ export function CanvasWorkspaceTab(props: CanvasWorkspaceTabProps): ReactNode {
   const openCounts = new Map<string, number>();
   const openRowCounts = new Map<string, Map<string, number>>();
   const openNodeCounts = new Map<string, Map<string, number>>();
+  const areas = new Map<string, ReadonlyArray<CanvasBlockAreaMark>>();
   for (const thread of openThreads) {
     const anchor = thread.comment.anchor;
     const blockId = String(anchor.blockId);
@@ -814,6 +824,24 @@ export function CanvasWorkspaceTab(props: CanvasWorkspaceTabProps): ReactNode {
       nodes.set(String(anchor.nodeId), (nodes.get(String(anchor.nodeId)) ?? 0) + 1);
       openNodeCounts.set(blockId, nodes);
     }
+    if (anchor.kind === "region") {
+      areas.set(blockId, [
+        ...(areas.get(blockId) ?? []),
+        {
+          key: String(anchor.regionId),
+          x: anchor.x,
+          y: anchor.y,
+          width: anchor.width,
+          height: anchor.height,
+        },
+      ]);
+    }
+  }
+  if (draftArea !== undefined) {
+    areas.set(draftArea.blockId, [
+      ...(areas.get(draftArea.blockId) ?? []),
+      { ...draftArea, key: "draft", draft: true },
+    ]);
   }
   const overflowItems = [
     ...(props.client?.revise !== undefined && reviseBase !== null && reviseBase.mode === "chat"
@@ -917,13 +945,39 @@ export function CanvasWorkspaceTab(props: CanvasWorkspaceTabProps): ReactNode {
   ];
 
   const openCommentsOn = (blockId: string | undefined, rowId?: string) => {
-    commentsReturnFocus.current =
-      document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    // A tool's pick moves no focus, so with the drawer already open focus is
+    // still inside it. The drawer is hidden on close and cannot take focus
+    // back; the place remembered when it opened stays the one to return to.
+    const active = document.activeElement;
+    const inDrawer = active?.closest(".canvas-workspace-tab__drawer") ?? null;
+    if (inDrawer === null) {
+      commentsReturnFocus.current = active instanceof HTMLElement ? active : null;
+    }
     setFocusedBlockId(blockId);
     setFocusedRowId(rowId);
+    setFocusedPart(undefined);
+    setDraftArea(undefined);
     setCommentsOpen(true);
   };
+  // The Comment tool: the drawer opens on the part the person pointed at.
+  const openCommentsOnPick = (pick: CanvasCommentPick) => {
+    openCommentsOn(pick.blockId, pick.part?.kind === "row" ? pick.part.id : undefined);
+    if (pick.part !== undefined && pick.part.kind !== "row") {
+      setFocusedPart({ kind: pick.part.kind, id: pick.part.id });
+    }
+  };
+  // The Area tool: the drawer opens on the block, with the area waiting for
+  // its comment.
+  const openCommentsOnArea = (area: CanvasCommentArea) => {
+    openCommentsOn(area.blockId);
+    setDraftArea(area);
+  };
+  // Every tool but Select ends in a comment, so a Canvas that takes none
+  // keeps the pointer it always had and shows no rail.
+  const activeTool: CanvasTool = commentsAvailable ? tool : "select";
+  const anchorIds = new Set(canvasCommentAnchorChoices(definition).map((choice) => choice.id));
   const closeComments = () => {
+    setDraftArea(undefined);
     setCommentsOpen(false);
     commentsReturnFocus.current?.focus();
     commentsReturnFocus.current = null;
@@ -1063,11 +1117,23 @@ export function CanvasWorkspaceTab(props: CanvasWorkspaceTabProps): ReactNode {
           </p>
         )}
       </header>
-      <div className="canvas-workspace-tab__body">
+      <div
+        className="canvas-workspace-tab__body"
+        data-tools={commentsAvailable ? "true" : "false"}
+        onKeyDown={(event) => {
+          if (event.key === "Escape" && activeTool !== "select") setTool("select");
+        }}
+      >
+        {commentsAvailable ? <CanvasToolRail onToolChange={setTool} tool={activeTool} /> : null}
         {/* The document scrolls on its own so the drawer beside it stays put,
             and it is its own stacking context so a sticky table header stays
             inside it rather than painting over the drawer's controls. */}
-        <div className="canvas-workspace-tab__document">
+        <CanvasToolSurface
+          isAnchor={(choiceId) => anchorIds.has(choiceId)}
+          onArea={openCommentsOnArea}
+          onPick={openCommentsOnPick}
+          tool={activeTool}
+        >
           <CanvasView
             input={definition}
             {...(actionRuntime === undefined ? {} : { actionRuntime })}
@@ -1081,12 +1147,13 @@ export function CanvasWorkspaceTab(props: CanvasWorkspaceTabProps): ReactNode {
                     openCounts,
                     openRowCounts,
                     openNodeCounts,
+                    areas,
                     onOpen: openCommentsOn,
                   },
                 }
               : {})}
           />
-        </div>
+        </CanvasToolSurface>
         {commentsClient !== undefined && reviseBase !== null ? (
           <aside
             aria-label="Comments"
@@ -1121,13 +1188,17 @@ export function CanvasWorkspaceTab(props: CanvasWorkspaceTabProps): ReactNode {
               onShowAllBlocks={() => {
                 setFocusedBlockId(undefined);
                 setFocusedRowId(undefined);
+                setFocusedPart(undefined);
               }}
+              onDraftAreaDone={() => setDraftArea(undefined)}
               onThreadsChange={setCommentThreads}
               send={commentsClient.send}
               history={history}
               {...(onSendToAgent === undefined ? {} : { onSendToAgent })}
               {...(focusedBlockId === undefined ? {} : { focusedBlockId })}
               {...(focusedRowId === undefined ? {} : { focusedRowId })}
+              {...(focusedPart === undefined ? {} : { focusedPart })}
+              {...(draftArea === undefined ? {} : { draftArea })}
             />
           </aside>
         ) : null}

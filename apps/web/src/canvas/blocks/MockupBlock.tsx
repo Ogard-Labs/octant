@@ -213,7 +213,11 @@ export function MockupBlock({
       {block.annotations === undefined || block.annotations.length === 0 ? null : (
         <ol className="canvas-mockup__callouts" aria-label={`Callouts on ${block.title}`}>
           {block.annotations.map((annotation, index) => (
-            <li key={String(annotation.nodeId)} className="canvas-mockup__callout">
+            <li
+              key={String(annotation.nodeId)}
+              className="canvas-mockup__callout"
+              data-node-id={annotation.nodeId}
+            >
               <span className="canvas-mockup__callout-mark" aria-hidden="true">
                 {index + 1}
               </span>
@@ -300,6 +304,7 @@ function MockupItem({
     "aria-disabled": true,
     "aria-label": spoken(node, callouts),
     "data-component": node.component,
+    "data-node-id": node.nodeId,
     ...(node.tone === undefined ? {} : { "data-tone": node.tone }),
   } as const;
   if (node.component === "window") {

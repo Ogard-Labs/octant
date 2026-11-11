@@ -55,6 +55,62 @@ describe("CanvasCommentsPanel", () => {
     expect(within(threads).getByText("You · paired device")).toBeInTheDocument();
   });
 
+  it("names a comment on an area by the block the area is on", async () => {
+    const onArea: CanvasCommentThread = {
+      comment: {
+        ...existing.comment,
+        anchor: {
+          kind: "region" as const,
+          blockId: "heading-1" as never,
+          regionId: "44444444-4444-4444-8444-444444444444" as never,
+          x: 10,
+          y: 20,
+          width: 30,
+          height: 40,
+        },
+      },
+      replies: [],
+    };
+    render(
+      <CanvasCommentsPanel
+        author={author}
+        canvasId={canvasId}
+        definition={canvasFixture}
+        load={async () => ready([onArea])}
+        send={vi.fn()}
+      />,
+    );
+    const threads = await screen.findByRole("list", { name: "Comment threads" });
+    expect(within(threads).getByText("Area · Q3 Overview")).toBeInTheDocument();
+  });
+
+  it("narrows the list to the board node a person pointed at", async () => {
+    const onOtherNode: CanvasCommentThread = {
+      comment: {
+        ...existing.comment,
+        commentId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa2" as never,
+        anchor: { kind: "node" as const, blockId: "diagram-1" as never, nodeId: "a" as never },
+        body: "Is Ingest batched?",
+      },
+      replies: [],
+    };
+    render(
+      <CanvasCommentsPanel
+        author={author}
+        canvasId={canvasId}
+        definition={canvasFixture}
+        focusedBlockId="diagram-1"
+        focusedPart={{ kind: "node", id: "b" }}
+        load={async () => ready([existing, onOtherNode])}
+        send={vi.fn()}
+      />,
+    );
+    const threads = await screen.findByRole("list", { name: "Comment threads" });
+    expect(within(threads).getByText("Should Report be a queue?")).toBeInTheDocument();
+    expect(within(threads).queryByText("Is Ingest batched?")).toBeNull();
+    expect(screen.getByText("On Board · Report")).toBeInTheDocument();
+  });
+
   it("names the computer a synced comment or reply was written on", async () => {
     render(
       <CanvasCommentsPanel

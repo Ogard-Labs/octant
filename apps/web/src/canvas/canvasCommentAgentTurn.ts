@@ -122,7 +122,8 @@ export function canvasCommentAnchorDescription(
     case "row":
       return `row "${String(anchor.rowId)}" in ${inBlock}`;
     case "region":
-      return `the region at x ${String(anchor.x)}, y ${String(anchor.y)}, ${String(anchor.width)} by ${String(anchor.height)} in ${inBlock}`;
+      // Percent of the block's drawn box, which is what the person marked.
+      return `the area ${String(anchor.x)}% from the left and ${String(anchor.y)}% from the top, ${String(anchor.width)}% wide and ${String(anchor.height)}% tall, of ${inBlock} as drawn`;
   }
 }
 

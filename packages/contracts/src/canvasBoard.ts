@@ -34,9 +34,9 @@ export type CanvasCommentReplyId = typeof CanvasCommentReplyId.Type;
 //
 // Comments are anchored to a specific thing inside a Canvas diagram or block so
 // a renderer can place them, but they are never stored inside the block itself.
-// A region anchor reserves space for freeform-area comments once the board
-// defines a stable coordinate space; until then a region anchor is surfaced
-// unanchored rather than dropped.
+// A region anchor is a freeform area of one block: x, y, width, and height
+// are percent of the block's drawn box from its top-left corner, so the area
+// stays on the same part of a block that scales with its pane.
 
 export const CanvasCommentBlockAnchor = Schema.Struct({
   kind: Schema.Literal("block"),

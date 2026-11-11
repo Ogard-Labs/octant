@@ -3262,6 +3262,115 @@
   font-weight: var(--oct-weight-medium);
 }
 
+/* The tool rail floats over the document's left gutter, so it keeps a fill
+   and an edge. The gutter is widened under it: at the document's own padding
+   the rail covered the first characters of every line. */
+.canvas-tool-rail {
+  position: absolute;
+  z-index: 1;
+  top: 50%;
+  left: var(--oct-space-2);
+  transform: translateY(-50%);
+  flex-direction: column;
+  gap: 2px;
+  padding: var(--oct-space-1);
+  border-radius: var(--oct-radius-md);
+  background: var(--octant-floating);
+  box-shadow: var(--octant-shadow-overlay);
+}
+
+.canvas-tool-rail__tool {
+  width: var(--oct-rail-button-h);
+  height: var(--oct-rail-button-h);
+  padding: 0;
+  border-radius: var(--oct-radius-sm);
+}
+
+.canvas-tool-rail__divider {
+  width: 16px;
+  height: 1px;
+  margin: 2px 0;
+  background: var(--oct-hairline-strong);
+}
+
+.canvas-workspace-tab__body[data-tools="true"] .canvas-view {
+  padding-left: calc(
+    var(--oct-space-2) + var(--oct-rail-button-h) + 2 * var(--oct-space-1) + var(--oct-space-4)
+  );
+}
+
+.canvas-tool-surface {
+  position: relative;
+  min-height: 100%;
+}
+
+/* A tool other than Select owns the pointer over the whole document, so the
+   cursor says which tool it is on every block, and a frame that would take
+   the pointer into its own page lets it through to the tool. */
+.canvas-tool-surface:not([data-tool="select"]) {
+  user-select: none;
+}
+
+.canvas-tool-surface:not([data-tool="select"]) :is(iframe, webview) {
+  pointer-events: none;
+}
+
+.canvas-tool-surface[data-tool="hand"],
+.canvas-tool-surface[data-tool="hand"] * {
+  cursor: grab;
+}
+
+.canvas-tool-surface[data-tool="hand"]:active,
+.canvas-tool-surface[data-tool="hand"]:active * {
+  cursor: grabbing;
+}
+
+.canvas-tool-surface:is([data-tool="comment"], [data-tool="area"]),
+.canvas-tool-surface:is([data-tool="comment"], [data-tool="area"]) * {
+  cursor: crosshair;
+}
+
+/* A board's picture moves under its block, so it takes no area. */
+.canvas-tool-surface[data-tool="area"] .canvas-board,
+.canvas-tool-surface[data-tool="area"] .canvas-board * {
+  cursor: not-allowed;
+}
+
+.canvas-tool-surface__target,
+.canvas-tool-surface__band,
+.canvas-block__area {
+  position: absolute;
+  pointer-events: none;
+  border-radius: var(--oct-radius-sm);
+}
+
+.canvas-tool-surface__target,
+.canvas-tool-surface__band {
+  z-index: calc(var(--oct-z-sticky) + 2);
+}
+
+/* Over the block's own raised parts, under its sticky header. */
+.canvas-block__area {
+  z-index: 1;
+}
+
+.canvas-tool-surface__target {
+  border: 1px solid var(--oct-accent-fg);
+  background: var(--oct-fill-2);
+}
+
+.canvas-tool-surface__band,
+.canvas-block__area {
+  border: 1px dashed var(--oct-accent-fg);
+}
+
+/* An area with its comment stays an outline, so the block under it reads;
+   one still being marked or waiting for its comment is washed. */
+.canvas-tool-surface__band,
+.canvas-block__area[data-draft="true"] {
+  background: var(--oct-accent-soft);
+}
+
 .canvas-workspace-tab__share-dialog {
   --octant-dialog-width: 560px;
 }

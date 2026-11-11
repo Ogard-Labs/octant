@@ -63,6 +63,33 @@ describe("canvasCommentAgentPrompt", () => {
     expect(prompt).toContain("Reply: Yes, a queue.");
   });
 
+  it("tells the agent where on the drawn block a marked area sits, in percent", () => {
+    const prompt = canvasCommentAgentPrompt({
+      definition: canvasFixture,
+      canvasId,
+      sequence: 3,
+      thread: {
+        ...thread,
+        comment: {
+          ...thread.comment,
+          anchor: {
+            kind: "region" as const,
+            blockId: "chart-1" as never,
+            regionId: "44444444-4444-4444-8444-444444444444" as never,
+            x: 25,
+            y: 10,
+            width: 50,
+            height: 30,
+          },
+        },
+      },
+      anchorLabel: "Area · Chart",
+    });
+    expect(prompt).toContain(
+      'Change only the area 25% from the left and 10% from the top, 50% wide and 30% tall, of the chart block "chart-1" as drawn.',
+    );
+  });
+
   it("says when the anchored block has left the canvas rather than inventing its kind", () => {
     const prompt = canvasCommentAgentPrompt({
       definition: { ...canvasFixture, blocks: [] },

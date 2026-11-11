@@ -1054,6 +1054,41 @@ belong to the Canvas rather than one version. A comparison matrix does not use
 the table row model; its criteria already anchor through node ids. Shared
 snapshots serialise the definition and so never carry comments.
 
+In the workspace tab a Canvas that takes comments shows a tool rail: a vertical
+toggle group floating over the document's left gutter, which is widened under
+it, with four tools of which exactly one is chosen. **Select** is the Canvas as
+it is without the rail. **Hand** drags the document to scroll it. **Comment**
+opens the comments drawer on the part a person clicks: the nearest node, edge,
+or table row around the pointer that the drawer's anchor picker offers (so a
+callout pinned to a mockup container is picked from anything inside it),
+otherwise its block, otherwise the block around it; that part is outlined under
+the pointer first. **Area** opens the drawer on a box a person drags over one block, and
+the next comment is anchored to it as a `region` unless the person picks
+another anchor, which gives the box up, as closing the drawer does. While any
+tool but Select is chosen the renderer takes pointer input before the blocks
+do, so no board pans, no control fires, and no frame takes the pointer into its
+own page; a click made from the keyboard still reaches its control. The margin
+markers and the drawer's anchor picker stay the keyboard path to every anchor
+the Comment tool reaches; an area has no keyboard path. Escape returns to
+Select. The rail and its tools are renderer state: nothing about them is
+journaled and they add no command, since a pick only chooses the anchor of an
+ordinary `canvas-comment-add`. A surface that offers no comments (the inline
+placement, a shared snapshot) shows no rail.
+
+A region's `x`, `y`, `width`, and `height` are percent of its block's drawn box
+from the top-left corner, kept inside the box and rounded to a tenth; a drag
+under 8px on either side marks nothing. Percent rather than pixels, because a
+block scales with its pane. A block whose text reflows at another width keeps
+the area on the same share of its box, not on the same words, which is why the
+Comment tool's named anchors come first wherever one exists. A board (a
+diagram's or a flow's) takes no area: its picture zooms and pans under its box,
+and its nodes and edges are anchors already. An open thread's area is drawn
+over its block as a dashed outline, and the one waiting for its comment is
+washed; a resolved thread's area is not drawn. In the drawer a region reads
+"Area · " and its block's name, and both the Send to agent prompt and the
+tool's requested-changes guidance state the percent reading, so the agent can
+place the area on the block it is shown.
+
 ## Artifact library and tags
 
 The **Artifacts** destination is the host-wide library of everything Canvas
