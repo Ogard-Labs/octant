@@ -22,7 +22,7 @@ const cardVariants = cva(
   {
     variants: {
       variant: {
-        default: "bg-card ring-1 ring-foreground/10",
+        default: "bg-card shadow-(--octant-shadow-xs)",
         glass: "",
       },
     },

@@ -14,8 +14,8 @@
   --oct-settings-reading-width: 920px;
   --oct-settings-control: 180px;
   --oct-settings-control-height: 28px;
-  /* One step above the workspace fill: a card on the page. */
-  --oct-settings-card-fill: color-mix(in oklab, var(--oct-fg) 3%, var(--oct-bg));
+  /* The raised card every surface draws: one step above the page. */
+  --oct-settings-card-fill: var(--octant-card);
   --oct-settings-tile-fill: color-mix(in oklab, var(--oct-fg) 8%, transparent);
   --oct-settings-row-inset: 16px;
 }
@@ -3107,9 +3107,11 @@ html[data-octant-increased-contrast="true"]
   > :is(.setgroup, .settings-fact-list, .settings-panel__body) {
   overflow: visible;
   background: var(--oct-settings-card-fill);
-  border: 1px solid var(--oct-hairline);
+  /* A raised card: its edge, the light its top catches and a short shadow
+     come from the one token, not from a border of its own. */
+  border: 0;
   border-radius: var(--oct-radius-md);
-  box-shadow: none;
+  box-shadow: var(--octant-shadow-xs);
 }
 
 .settings-view .settings-card-section--open > .setgroup {

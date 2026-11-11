@@ -27,7 +27,7 @@
      Octant's three steps line up with the app's three: the page ground,
      the card raised off it, and the neutral control surface. */
   --oct-bg: var(--octant-workspace);
-  --oct-surface: var(--octant-floating);
+  --oct-surface: var(--octant-card);
   --oct-surface-warm: var(--octant-control);
 
   /* ─── text ──────────────────────────────────────────────────────────
@@ -209,6 +209,11 @@ html:not([data-octant-reduced-transparency="true"]) .shell--material-translucent
   --muted: var(--octant-control);
   --accent: var(--octant-control-hover);
   --oct-surface-warm: var(--octant-control);
+  /* A shadow token is resolved where it is declared, with the opaque
+     border in it, so the raised steps are restated for the glass. */
+  --octant-shadow-xs: var(--octant-shadow-raised-glass);
+  --octant-shadow-sm: var(--octant-shadow-raised-glass);
+  --octant-shadow-md: var(--octant-shadow-raised-glass);
   /* What is chosen (the mode in the switch, a selected row) is one step
      above the control tint, for the same reason. */
   --octant-selection: color-mix(in srgb, var(--octant-text-primary) 12%, transparent);

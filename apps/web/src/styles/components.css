@@ -71,6 +71,32 @@
 
 /* ── Floating surfaces ─────────────────────────────────────────────── */
 
+/* Every floating surface re-bases the fills and lines of what it holds on
+   its own lifted fill. A custom property that names another is resolved
+   where it is declared, so the recipes' aliases are restated here. */
+[data-slot="dropdown-menu-content"],
+[data-slot="context-menu-content"],
+[data-slot="popover-content"],
+[data-slot="select-content"],
+[data-slot="combobox-content"],
+.octant-menu__popup,
+.octant-dialog__popup,
+.octant-preview-card,
+.window-chrome__disclosure,
+.project-dialog,
+.folder-picker,
+.thread-info__panel,
+.toast {
+  --octant-control: var(--octant-float-control);
+  --octant-control-hover: var(--octant-float-hover);
+  --octant-control-pressed: var(--octant-float-pressed);
+  --secondary: var(--octant-float-control);
+  --muted: var(--octant-float-control);
+  --accent: var(--octant-float-hover);
+  --border: var(--octant-float-line);
+  --oct-border: var(--octant-float-line);
+}
+
 /* Product menus and dialogs use the opaque shadcn popover recipe. */
 .octant-menu__popup,
 .octant-dialog__popup,
@@ -78,7 +104,9 @@
 .project-dialog,
 .folder-picker {
   background: var(--popover);
-  border: 1px solid var(--border);
+  /* The edge is the light rim of a floating surface; the dark line outside
+     it and the lift are the shadow's. */
+  border: 1px solid var(--octant-bevel);
   box-shadow: var(--octant-shadow-pop);
   backdrop-filter: none;
 }

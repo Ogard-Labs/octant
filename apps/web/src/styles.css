@@ -73,7 +73,24 @@
      workspace-coloured card would vanish into the page. */
   --octant-border-soft: color-mix(in srgb, var(--octant-border) 60%, var(--octant-workspace));
   --octant-success-border: color-mix(in srgb, var(--octant-success-text) 55%, transparent);
-  --octant-card: var(--octant-floating);
+  /* Depth has three levels, each a step lighter than the one under it: the
+     page, a raised card, and a floating menu or dialog. In dark a shadow
+     cannot be seen on a near-black page, so the lift is carried by the fill
+     and by the light an edge catches (the bevel), and the shadow only helps
+     where the surface crosses something lighter. A card and a popup drew
+     the theme's one floating colour, a hair off the page, and both read as
+     flat outlines. */
+  --octant-card: color-mix(in oklab, var(--octant-floating) 95%, var(--octant-text-primary));
+  --octant-float: color-mix(in oklab, var(--octant-floating) 91%, var(--octant-text-primary));
+  --octant-bevel: rgb(255 255 255 / 8%);
+  --octant-bevel-strong: rgb(255 255 255 / 13%);
+  /* What sits on a floating surface steps up from that surface: the page's
+     own control fills are darker than a lifted menu, so a pointed-at row
+     showed as a dent or not at all. */
+  --octant-float-control: color-mix(in oklab, var(--octant-float) 94%, var(--octant-text-primary));
+  --octant-float-hover: color-mix(in oklab, var(--octant-float) 89%, var(--octant-text-primary));
+  --octant-float-pressed: color-mix(in oklab, var(--octant-float) 84%, var(--octant-text-primary));
+  --octant-float-line: color-mix(in oklab, var(--octant-float) 88%, var(--octant-text-primary));
   --octant-tray: color-mix(in srgb, var(--octant-control) 75%, var(--octant-workspace));
   --octant-text-primary: #f5f5f7;
   --octant-text-secondary: #bcbcc2;
@@ -88,22 +105,37 @@
   --octant-divider-strong: #808080;
   --octant-destructive: #e17d96;
   --octant-shadow-hairline: 0 0 0 1px var(--octant-border);
-  --octant-shadow-xs: 0 0 0 1px var(--octant-border), 0 1px 2px rgb(0 0 0 / 24%);
+  --octant-shadow-xs:
+    inset 0 1px 0 var(--octant-bevel), 0 0 0 1px var(--octant-border), 0 1px 2px rgb(0 0 0 / 30%);
   --octant-shadow-sm:
-    0 0 0 1px var(--octant-border-strong), 0 1px 2px rgb(0 0 0 / 28%),
-    0 6px 18px -10px rgb(0 0 0 / 60%);
+    inset 0 1px 0 var(--octant-bevel), 0 0 0 1px var(--octant-border-strong),
+    0 1px 2px rgb(0 0 0 / 36%), 0 8px 20px -10px rgb(0 0 0 / 64%);
   --octant-shadow-md:
-    0 0 0 1px var(--octant-border), 0 4px 6px -4px rgb(0 0 0 / 36%),
-    0 10px 18px -8px rgb(0 0 0 / 60%);
+    inset 0 1px 0 var(--octant-bevel), 0 0 0 1px var(--octant-border),
+    0 2px 5px -2px rgb(0 0 0 / 44%), 0 12px 24px -8px rgb(0 0 0 / 64%);
   --octant-shadow-lg:
-    0 0 0 1px var(--octant-border), 0 10px 18px -8px rgb(0 0 0 / 50%),
-    0 22px 46px -16px rgb(0 0 0 / 68%);
-  /* The overlay's own edge is a hairline, as the popover recipe says and as the
-     light theme already draws it. In dark it used the strong border, so every
-     menu and popover had a heavier edge than a dialog, and a popup that also
-     set a border showed two. */
-  --octant-shadow-overlay: 0 0 0 1px var(--octant-border), 0 18px 48px -16px rgb(0 0 0 / 72%);
-  --octant-shadow-pop: 0 18px 48px -16px rgb(0 0 0 / 78%);
+    inset 0 1px 0 var(--octant-bevel), 0 0 0 1px var(--octant-border),
+    0 10px 18px -8px rgb(0 0 0 / 54%), 0 24px 48px -16px rgb(0 0 0 / 70%);
+  /* A control that is a filled tile: light on its top edge, a short shadow
+     under it; pressed, the light goes and the tile sinks. */
+  /* A raised card on the window's glass: the opaque border is near black
+     and drew a heavy outline on the grey a desktop shows through, so its
+     edge is a light rim there, and the shadow under it can be seen. */
+  --octant-shadow-raised-glass:
+    inset 0 1px 0 var(--octant-bevel-strong), 0 0 0 1px rgb(255 255 255 / 9%),
+    0 1px 2px rgb(0 0 0 / 18%), 0 10px 24px -14px rgb(0 0 0 / 36%);
+  --octant-shadow-control: inset 0 1px 0 var(--octant-bevel), 0 1px 2px rgb(0 0 0 / 44%);
+  --octant-shadow-control-pressed: inset 0 1px 2px rgb(0 0 0 / 46%);
+  /* Something that floats: a light rim inside the edge and brighter along
+     the top, a dark line outside it, and two shadows (a short one that seats
+     it, a long one that lifts it). The overlay's own edge is drawn here, so a
+     popup that also set a border showed two. */
+  --octant-shadow-overlay:
+    inset 0 1px 0 var(--octant-bevel-strong), inset 0 0 0 1px var(--octant-bevel),
+    0 0 0 1px rgb(0 0 0 / 72%), 0 8px 16px -6px rgb(0 0 0 / 56%), 0 24px 56px -12px rgb(0 0 0 / 76%);
+  --octant-shadow-pop:
+    inset 0 1px 0 var(--octant-bevel-strong), 0 0 0 1px rgb(0 0 0 / 72%),
+    0 12px 24px -8px rgb(0 0 0 / 60%), 0 40px 96px -24px rgb(0 0 0 / 80%);
   --octant-glass-blur: 24px;
   --octant-glass-saturate: 150%;
   --octant-glass-bg: color-mix(in srgb, var(--octant-floating) 72%, transparent);
@@ -207,22 +239,43 @@ html[data-octant-theme-mode="light"] {
   --octant-palette-pink: #b3356e;
   --octant-surface-inset: #f2f2f1;
   --octant-card: var(--octant-workspace);
+  /* In light the lift is the shadow's work: the surfaces are already the
+     lightest thing on the page. */
+  --octant-float: var(--octant-floating);
+  --octant-bevel: rgb(255 255 255 / 70%);
+  --octant-bevel-strong: rgb(255 255 255 / 90%);
+  --octant-float-control: var(--octant-control);
+  --octant-float-hover: var(--octant-control-hover);
+  --octant-float-pressed: var(--octant-control-pressed);
+  --octant-float-line: var(--octant-border);
   --octant-tray: color-mix(in srgb, var(--octant-control) 55%, var(--octant-workspace));
   --octant-text-primary-high-contrast: #0e0f11;
   --octant-text-secondary-high-contrast: #3a3a3a;
   --octant-text-muted-high-contrast: #565656;
   --octant-scrim: #000000;
-  --octant-shadow-xs: 0 0 0 1px rgb(16 24 40 / 6%), 0 1px 2px rgb(16 24 40 / 5%);
+  --octant-shadow-xs:
+    inset 0 1px 0 var(--octant-bevel), 0 0 0 1px rgb(16 24 40 / 7%), 0 1px 2px rgb(16 24 40 / 6%);
   --octant-shadow-sm:
-    0 0 0 1px rgb(16 24 40 / 8%), 0 1px 2px rgb(16 24 40 / 7%), 0 6px 18px -10px rgb(16 24 40 / 16%);
+    inset 0 1px 0 var(--octant-bevel), 0 0 0 1px rgb(16 24 40 / 8%), 0 1px 2px rgb(16 24 40 / 8%),
+    0 8px 20px -10px rgb(16 24 40 / 18%);
   --octant-shadow-md:
-    0 0 0 1px rgb(16 24 40 / 8%), 0 4px 6px -4px rgb(16 24 40 / 10%),
-    0 10px 15px -3px rgb(16 24 40 / 10%);
+    inset 0 1px 0 var(--octant-bevel), 0 0 0 1px rgb(16 24 40 / 8%),
+    0 2px 5px -2px rgb(16 24 40 / 12%), 0 12px 24px -8px rgb(16 24 40 / 14%);
   --octant-shadow-lg:
-    0 0 0 1px rgb(16 24 40 / 8%), 0 10px 15px -3px rgb(16 24 40 / 12%),
-    0 20px 38px -10px rgb(16 24 40 / 16%);
-  --octant-shadow-overlay: 0 0 0 1px var(--octant-border), 0 20px 50px -14px rgb(16 24 40 / 20%);
-  --octant-shadow-pop: 0 20px 50px -14px rgb(16 24 40 / 22%);
+    inset 0 1px 0 var(--octant-bevel), 0 0 0 1px rgb(16 24 40 / 8%),
+    0 10px 18px -6px rgb(16 24 40 / 14%), 0 24px 48px -14px rgb(16 24 40 / 18%);
+  --octant-shadow-raised-glass:
+    inset 0 1px 0 var(--octant-bevel-strong), 0 0 0 1px rgb(16 24 40 / 8%),
+    0 1px 2px rgb(16 24 40 / 8%), 0 10px 24px -14px rgb(16 24 40 / 18%);
+  --octant-shadow-control:
+    inset 0 1px 0 var(--octant-bevel), 0 0 0 1px rgb(16 24 40 / 6%), 0 1px 2px rgb(16 24 40 / 10%);
+  --octant-shadow-control-pressed: inset 0 1px 2px rgb(16 24 40 / 16%);
+  --octant-shadow-overlay:
+    inset 0 1px 0 var(--octant-bevel-strong), 0 0 0 1px rgb(16 24 40 / 10%),
+    0 6px 14px -6px rgb(16 24 40 / 14%), 0 24px 56px -14px rgb(16 24 40 / 24%);
+  --octant-shadow-pop:
+    inset 0 1px 0 var(--octant-bevel-strong), 0 0 0 1px rgb(16 24 40 / 10%),
+    0 12px 24px -8px rgb(16 24 40 / 16%), 0 40px 96px -24px rgb(16 24 40 / 28%);
   --octant-glass-bg: color-mix(in srgb, var(--octant-floating) 60%, transparent);
   --octant-glass-border: color-mix(in srgb, var(--octant-border-strong) 72%, transparent);
   --octant-glass-highlight: inset 0 1px 0 rgb(255 255 255 / 65%);
@@ -903,7 +956,7 @@ h6 {
   max-width: min(320px, calc(100vw - 16px));
   padding: 4px;
   color: var(--octant-text-primary);
-  background: var(--octant-floating);
+  background: var(--octant-float);
   border: 1px solid var(--octant-border-strong);
   border-radius: var(--oct-radius-sm);
   box-shadow: var(--octant-shadow-overlay);
@@ -1727,7 +1780,7 @@ html[data-octant-native-host="true"] .shell--sidebar-collapsed .workspace-pane__
 
 .workspace-drop-overlay > span {
   padding: var(--oct-space-1) var(--oct-space-2);
-  background: var(--octant-floating);
+  background: var(--octant-float);
   border: 1px solid var(--octant-border-strong);
   border-radius: var(--oct-radius-sm);
   font-size: var(--oct-text-xs);
@@ -1743,7 +1796,7 @@ html[data-octant-native-host="true"] .shell--sidebar-collapsed .workspace-pane__
   padding: var(--oct-space-1) var(--oct-space-2);
   overflow: hidden;
   color: var(--octant-text-primary);
-  background: var(--octant-floating);
+  background: var(--octant-float);
   border: 1px solid var(--octant-border-strong);
   border-radius: var(--oct-radius-sm);
   box-shadow: var(--octant-shadow-overlay);
@@ -1761,7 +1814,7 @@ html[data-octant-native-host="true"] .shell--sidebar-collapsed .workspace-pane__
   width: max-content;
   min-width: 196px;
   padding: 4px;
-  background: var(--octant-floating);
+  background: var(--octant-float);
   border: 1px solid var(--octant-border-strong);
   border-radius: var(--oct-radius-sm);
   box-shadow: var(--octant-shadow-overlay);

@@ -28,22 +28,24 @@
   overflow: auto;
   overflow-wrap: anywhere;
 }
-.continuation-dialog h2,
-.continuation-dialog h3 {
-  margin-block: var(--oct-space-3);
-}
+/* The title and each part's heading take the dialog recipe's sizes; this
+   dialog only spaces them, with more room above a part than under its
+   heading, so its four blocks of text read as four. */
 .continuation-dialog h2 {
-  margin-top: 0;
-  font-size: var(--oct-text-base);
-  font-weight: var(--oct-weight-strong);
+  margin-bottom: var(--oct-space-3);
 }
 .continuation-dialog h3 {
-  font-size: var(--oct-text-base);
+  margin-block: var(--oct-space-5) var(--oct-space-2);
+}
+.continuation-dialog p {
+  margin-block: var(--oct-space-2);
+  color: var(--oct-fg-2);
 }
 .continuation-dialog dl {
   display: grid;
-  gap: var(--oct-space-1) var(--oct-space-3);
+  gap: var(--oct-space-1) var(--oct-space-4);
   grid-template-columns: max-content minmax(0, 1fr);
+  margin-block: 0 var(--oct-space-3);
 }
 .continuation-dialog dd {
   margin: 0;

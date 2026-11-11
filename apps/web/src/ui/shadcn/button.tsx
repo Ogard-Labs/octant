@@ -18,21 +18,26 @@ import { cn } from "./utils";
  * glass of an OLED preset.
  */
 const buttonVariants = cva(
-  "group/button inline-flex shrink-0 cursor-default items-center justify-center rounded-lg border border-transparent bg-clip-padding text-sm font-medium whitespace-nowrap transition-[color,background-color,border-color] outline-none select-none disabled:pointer-events-none disabled:cursor-default disabled:opacity-50 aria-invalid:border-destructive [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4",
+  "group/button inline-flex shrink-0 cursor-default items-center justify-center rounded-lg border border-transparent bg-clip-padding text-sm font-medium whitespace-nowrap transition-[color,background-color,border-color,box-shadow] outline-none select-none disabled:pointer-events-none disabled:cursor-default disabled:opacity-50 aria-invalid:border-destructive [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4",
   {
     variants: {
       variant: {
-        default: "bg-primary text-primary-foreground hover:bg-primary/80 active:bg-primary/70",
+        // A filled button is a raised tile: the control shadow puts light on
+        // its top edge and a short shadow under it, and pressing sinks it.
+        // Ghost, link, bare and chip draw no tile, so they stay flat.
+        default:
+          "bg-primary text-primary-foreground shadow-(--octant-shadow-control) hover:bg-primary/80 active:bg-primary/70 active:shadow-(--octant-shadow-control-pressed)",
         // The primary text colour as a fill, with the page colour on it: the
         // one action a surface is for, where the accent would compete with
         // the content beside it (a composer's send, next to the prompt).
-        solid: "bg-foreground text-background hover:bg-foreground/85 active:bg-foreground/75",
+        solid:
+          "bg-foreground text-background shadow-(--octant-shadow-control) hover:bg-foreground/85 active:bg-foreground/75 active:shadow-(--octant-shadow-control-pressed)",
         destructive:
           "bg-destructive/10 text-destructive hover:bg-destructive/20 active:bg-destructive/25",
         outline:
-          "border-border bg-[var(--octant-outline-rest,var(--background))] hover:bg-muted active:bg-(--octant-control-pressed) hover:text-foreground focus-visible:bg-muted focus-visible:text-foreground aria-expanded:bg-muted aria-expanded:text-foreground [html[data-octant-increased-contrast=true]_&]:border-(--octant-border-strong)",
+          "border-border bg-[var(--octant-outline-rest,var(--background))] shadow-(--octant-shadow-control) active:shadow-(--octant-shadow-control-pressed) hover:bg-muted active:bg-(--octant-control-pressed) hover:text-foreground focus-visible:bg-muted focus-visible:text-foreground aria-expanded:bg-muted aria-expanded:text-foreground [html[data-octant-increased-contrast=true]_&]:border-(--octant-border-strong)",
         secondary:
-          "bg-secondary text-secondary-foreground hover:bg-[color-mix(in_oklch,var(--secondary),var(--foreground)_5%)] active:bg-[color-mix(in_oklch,var(--secondary),var(--foreground)_10%)] aria-expanded:bg-secondary aria-expanded:text-secondary-foreground",
+          "bg-secondary text-secondary-foreground shadow-(--octant-shadow-control) active:shadow-(--octant-shadow-control-pressed) hover:bg-[color-mix(in_oklch,var(--secondary),var(--foreground)_5%)] active:bg-[color-mix(in_oklch,var(--secondary),var(--foreground)_10%)] aria-expanded:bg-secondary aria-expanded:text-secondary-foreground",
         ghost:
           "hover:bg-muted active:bg-(--octant-control-pressed) hover:text-foreground focus-visible:bg-muted focus-visible:text-foreground aria-expanded:bg-muted aria-expanded:text-foreground",
         link: "h-auto p-0 text-foreground underline-offset-4 hover:underline",
