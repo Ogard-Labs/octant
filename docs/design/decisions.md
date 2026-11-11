@@ -478,7 +478,7 @@ Status: Built. Since: —. Detail: [Architecture: Process topology](../architect
 
 Another agent on the host's machine starts and follows Octant threads through `octant agent mcp`, a stdio MCP server, or the `octant agent` command line. Both are ordinary local clients under the bridge secret, so the host keeps every authority decision.
 
-- `start_work` takes a prompt and an absolute folder or a Project name; the folder's Project decides Code or Work, and none means Chat. `send_message`, `read_thread`, `answer_question`, `stop_turn`, `list_projects`, `add_project` and `list_threads` follow and continue the work.
+- `start_work` takes a prompt and an absolute folder or a Project name; the folder's Project decides Code or Work, and none means Chat. `send_message`, `read_thread`, `answer_question`, `stop_turn`, `list_projects`, `add_project`, `list_threads` and `list_waiting` (everything on the person's Needs you list) follow and continue the work.
 - The caller is not the person: the server never answers an approval or other request listed for the person, never starts a thread at Full access, and adds a folder as a Project only when the call says the person asked to work there.
 - Each tool call opens its own window authority and revokes it when the call ends; a Chat send keeps its window until the send answers, and a turn keeps running after the window that started it is gone.
 - `octant agent --detach` starts a Work or Code turn and returns once the host lists it; `octant agent status <thread>` reads where it got to and what waits on the person.

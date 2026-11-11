@@ -336,7 +336,7 @@ describe("octant agent mcp", () => {
     await server.end();
   });
 
-  it("answers the thread's question but leaves its approval to the person in Octant", async () => {
+  it("answers the thread's question but lists its approval as the person's to answer in Octant", async () => {
     const fake = host({
       harnessQuestions: [
         {
@@ -356,7 +356,6 @@ describe("octant agent mcp", () => {
           threadTitle: "Fix the flaky test",
           requestedAt: now,
           text: "Run the full test suite",
-          approvalId: "approval-1",
         },
       ],
     });
@@ -378,6 +377,22 @@ describe("octant agent mcp", () => {
           questionId: "80000000-0000-4000-8000-000000000001",
           prompt: "Which test runner?",
           options: ["vitest", "bun"],
+        },
+      ],
+      waitingInOctant: [{ kind: "lead-approval", text: "Run the full test suite" }],
+    });
+
+    const waiting = await server.call("list_waiting", {});
+    expect(waiting.value).toEqual({
+      waiting: [
+        {
+          threadId,
+          threadTitle: "Fix the flaky test",
+          mode: "work",
+          kind: "lead-approval",
+          text: "Run the full test suite",
+          waitingSince: now,
+          answerableHere: false,
         },
       ],
     });

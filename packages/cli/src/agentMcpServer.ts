@@ -4,6 +4,7 @@ import type { HostRefusal } from "./agentHost";
 import {
   answerAgentQuestion,
   listRecentAgentThreads,
+  listWaitingRequests,
   openAndReadAgentThread,
   projectRow,
   readActiveProjects,
@@ -221,6 +222,13 @@ export const AGENT_MCP_TOOLS: ReadonlyArray<JsonObject> = [
     },
   },
   {
+    name: "list_waiting",
+    title: "List what waits on the person in Octant",
+    description:
+      "Everything waiting on the person across Octant, oldest first: approvals, questions and decisions, each with its thread. Rows marked answerableHere are questions answer_question can answer once read_thread gives their questionId; the rest only the person answers, in Octant.",
+    inputSchema: { type: "object", properties: {}, additionalProperties: false },
+  },
+  {
     name: "list_threads",
     title: "List Octant threads",
     description:
@@ -402,6 +410,7 @@ type ToolCall =
     }
   | { readonly tool: "stop_turn"; readonly threadId: string }
   | { readonly tool: "list_projects" }
+  | { readonly tool: "list_waiting" }
   | {
       readonly tool: "add_project";
       readonly folder: string;
@@ -528,6 +537,8 @@ export function parseToolArguments(
         return { kind: "call", call: { tool: "stop_turn", threadId: required("threadId") } };
       case "list_projects":
         return { kind: "call", call: { tool: "list_projects" } };
+      case "list_waiting":
+        return { kind: "call", call: { tool: "list_waiting" } };
       case "add_project": {
         const at = folder();
         if (at === undefined) throw new InvalidArgument("`folder` must be a non-empty string.");
@@ -603,6 +614,15 @@ async function runTool(
       return projects.kind === "refused"
         ? refused(projects)
         : answered({ projects: projects.active.map(projectRow) });
+    }
+    case "list_waiting": {
+      const listed = await listWaitingRequests(session);
+      return listed.kind === "refused"
+        ? refused(listed)
+        : answered({
+            waiting: listed.requests,
+            ...(listed.truncated ? { truncated: true } : {}),
+          });
     }
     case "add_project": {
       const added = await addProject(session, {

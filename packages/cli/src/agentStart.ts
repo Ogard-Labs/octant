@@ -389,36 +389,86 @@ async function harnessQuestions(
     }));
 }
 
+/** One request on the host's Needs you list. */
+export interface AgentWaitingRequest {
+  readonly threadId: string;
+  readonly threadTitle: string;
+  readonly mode: OctantMode;
+  readonly kind: string;
+  readonly text?: string;
+  readonly waitingSince: string;
+  /**
+   * A harness question or a Chat turn's question, which `answer_question`
+   * may answer once `read_thread` gives its id; everything else is the
+   * person's to answer in Octant.
+   */
+  readonly answerableHere: boolean;
+}
+
 /**
- * What waits on the person for this thread, from the same list every Needs
- * you surface reads. A harness question and a Chat turn's question are left
- * out: they are listed as open questions instead.
+ * Everything waiting on the person, from the same list every Needs you
+ * surface reads, oldest first. `truncated` says the host held more than it
+ * returned.
+ */
+export async function listWaitingRequests(session: OpenedLocalControlSession): Promise<
+  | HostRefusal
+  | {
+      readonly kind: "read";
+      readonly requests: ReadonlyArray<AgentWaitingRequest>;
+      readonly truncated: boolean;
+    }
+> {
+  const response = await session.send({ path: "/api/pending-requests", method: "GET" });
+  if (response.status !== 200) {
+    return {
+      kind: "refused",
+      message: refusalMessage(response, "What waits on the person is unavailable on this host."),
+    };
+  }
+  const body = response.body as { readonly requests?: unknown; readonly truncated?: unknown };
+  const rows = Array.isArray(body?.requests) ? body.requests : [];
+  return {
+    kind: "read",
+    truncated: body?.truncated === true,
+    requests: rows.flatMap((raw: unknown) => {
+      let request: PendingRequest;
+      try {
+        request = decodeHostAnswer(PendingRequest)(raw);
+      } catch {
+        return [];
+      }
+      return [
+        {
+          threadId: String(request.threadId),
+          threadTitle: request.threadTitle,
+          mode: request.mode,
+          kind: request.kind,
+          ...("text" in request && typeof request.text === "string" ? { text: request.text } : {}),
+          waitingSince: String(request.requestedAt),
+          answerableHere:
+            request.kind === "lead-question" ||
+            (request.mode === "chat" && request.kind === "question"),
+        },
+      ];
+    }),
+  };
+}
+
+/**
+ * What waits on the person for this thread. A harness question and a Chat
+ * turn's question are left out: they are listed as open questions instead.
  */
 async function personRequests(
   session: OpenedLocalControlSession,
   threadId: string,
 ): Promise<ReadonlyArray<AgentPersonRequest>> {
-  const response = await session.send({ path: "/api/pending-requests", method: "GET" });
-  if (response.status !== 200) return [];
-  const rows = (response.body as { readonly requests?: unknown } | undefined)?.requests;
-  if (!Array.isArray(rows)) return [];
-  return rows.flatMap((raw: unknown) => {
-    let request: PendingRequest;
-    try {
-      request = decodeHostAnswer(PendingRequest)(raw);
-    } catch {
-      return [];
-    }
-    if (String(request.threadId) !== threadId) return [];
-    if (request.kind === "lead-question") return [];
-    if (request.mode === "chat" && request.kind === "question") return [];
-    return [
-      {
-        kind: request.kind,
-        ...("text" in request && typeof request.text === "string" ? { text: request.text } : {}),
-      },
-    ];
-  });
+  const listed = await listWaitingRequests(session);
+  if (listed.kind === "refused") return [];
+  return listed.requests.flatMap((request) =>
+    request.threadId !== threadId || request.answerableHere
+      ? []
+      : [{ kind: request.kind, ...(request.text === undefined ? {} : { text: request.text }) }],
+  );
 }
 
 function pause(ms: number, signal?: AbortSignal): Promise<void> {
