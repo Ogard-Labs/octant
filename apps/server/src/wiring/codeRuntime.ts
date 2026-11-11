@@ -77,6 +77,7 @@ import {
   codeSiblingThreadState,
 } from "../siblingThreads/codeSiblingThreadSource";
 import { CoordinatorService } from "../coordinator/coordinatorService";
+import { createCoordinatorCountStore } from "../coordinator/coordinatorCountStore";
 import { createThreadsTools } from "../siblingThreads/siblingThreadTools";
 import {
   readShieldWatcherLabels,
@@ -1718,6 +1719,7 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
           ? { status: "proposed", proposalId: String(outcome.proposal.id) }
           : outcome;
       },
+      counts: createCoordinatorCountStore(persistence.connection),
       uuid: randomUUID,
       now: () => Date.now(),
       onError: (message, error) => console.error(`[coordinators] ${message}`, error),

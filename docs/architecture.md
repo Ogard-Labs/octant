@@ -3846,8 +3846,9 @@ approved by the maintainer on 2026-10-12. This section is the effective rule.
     otherwise. A message whose hop count is three or more is delivered but
     wakes nothing, so two agents answering each other stop waking each other
     after three rounds and continue only when a person runs a turn. The host
-    holds hop counts and the hourly count in memory, so a restart starts them
-    again from zero.
+    records wake turns and each thread's latest host turn with its hop in its
+    own store, so a restart keeps the hourly count and the hop count
+    ([Coordinator threads: Bounds](design/coordinator-threads.md#bounds)).
   - Turning the switch off stops new wake turns; one already running finishes
     like any turn, and cancelling it is the ordinary cancel.
 
@@ -15717,6 +15718,15 @@ unauthenticated code-delivery channel, and on macOS Squirrel.Mac refuses a
 replacement that does not satisfy the running app's designated requirement. A
 ring publishes a signed feed or publishes none. A local package built without
 signing credentials a maintainer holds is unsigned.
+
+The Octant app also ships as a disk image for first install,
+`Octant-<version>-darwin-arm64.dmg`: the app, an Applications link, and a
+prebuilt Finder layout (picture background, fixed icon positions, volume
+`Octant`), made with `hdiutil` and files in `scripts/dmg/`, with no Finder
+automation at build time. The disk image is signed, notarized and stapled on
+the same condition as the app, and unsigned when the app is. The zip stays the
+only artifact the update feed lists; the disk image is a download, never an
+update source. Octant Nightly builds no disk image.
 
 Cross-platform desktop (macOS, Linux, Windows) remains authorized: the Linux
 desktop shell, then the Linux AppImage with its signed feed, then Windows, and

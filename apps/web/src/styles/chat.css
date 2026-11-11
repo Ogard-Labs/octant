@@ -918,15 +918,18 @@
 .thread-mention__list {
   display: flex;
   flex-direction: column;
-  padding: 4px;
+  padding: var(--oct-menu-inset);
   margin: 0;
   list-style: none;
 }
 
+/* The shared menu row, as in the `/` command typeahead. */
 .thread-mention__option > button {
   width: 100%;
+  height: var(--oct-menu-row-h);
   justify-content: flex-start;
   gap: var(--oct-space-1);
+  padding-inline: var(--oct-menu-row-inset);
 }
 
 .thread-mention__meta {

@@ -124,6 +124,179 @@
   backdrop-filter: none;
 }
 
+/* ── Overlay motion ────────────────────────────────────────────────── */
+
+/* Every overlay arrives and leaves one way. It fades, and it settles from
+   98% at the edge it opened from; a sheet rises a few pixels instead, since
+   a surface that size reads a scale as a zoom. In takes the base duration and
+   out the fast one: nobody waits for a thing to leave. Only opacity, scale
+   and translate change, and only on the overlay, so nothing behind it is laid
+   out again. No rest value is declared for scale or translate: a resting
+   `scale: 1` would make each popup the containing block of everything
+   position-fixed inside it.
+
+   Base UI marks a popup it opens with `data-starting-style` for one frame,
+   and one it closes with `data-ending-style` until the transition ends, then
+   takes it out of the document. A dialog or sheet that a feature mounts
+   already open gets no starting mark, so `@starting-style` gives it the same
+   arrival; one a feature unmounts to close leaves at once, because nothing
+   in a stylesheet can hold an element that is no longer there. */
+:is(
+  [data-slot="dropdown-menu-content"],
+  [data-slot="context-menu-content"],
+  [data-slot="popover-content"],
+  [data-slot="select-content"],
+  [data-slot="combobox-content"],
+  [data-slot="tooltip-content"],
+  [data-slot="preview-card-content"],
+  .octant-dialog__popup,
+  .octant-dialog__backdrop,
+  .octant-sheet__popup,
+  .octant-sheet__backdrop
+) {
+  transition:
+    opacity var(--oct-dur-base) var(--oct-ease-motion),
+    scale var(--oct-dur-base) var(--oct-ease-motion),
+    translate var(--oct-dur-base) var(--oct-ease-motion);
+}
+
+:is(
+  [data-slot="dropdown-menu-content"],
+  [data-slot="context-menu-content"],
+  [data-slot="popover-content"],
+  [data-slot="select-content"],
+  [data-slot="combobox-content"],
+  [data-slot="tooltip-content"],
+  [data-slot="preview-card-content"],
+  .octant-dialog__popup,
+  .octant-dialog__backdrop,
+  .octant-sheet__popup,
+  .octant-sheet__backdrop
+):is([data-starting-style], [data-ending-style]) {
+  opacity: 0;
+}
+
+:is(
+  [data-slot="dropdown-menu-content"],
+  [data-slot="context-menu-content"],
+  [data-slot="popover-content"],
+  [data-slot="select-content"],
+  [data-slot="combobox-content"],
+  [data-slot="tooltip-content"],
+  [data-slot="preview-card-content"],
+  .octant-dialog__popup,
+  .octant-dialog__backdrop,
+  .octant-sheet__popup,
+  .octant-sheet__backdrop
+)[data-ending-style] {
+  transition-duration: var(--oct-dur-fast);
+  transition-timing-function: var(--oct-ease-color);
+}
+
+/* A popup grows out of the point it is anchored to; a dialog has no anchor
+   and settles about its own centre. */
+:is(
+  [data-slot="dropdown-menu-content"],
+  [data-slot="context-menu-content"],
+  [data-slot="popover-content"],
+  [data-slot="select-content"],
+  [data-slot="combobox-content"],
+  [data-slot="tooltip-content"],
+  [data-slot="preview-card-content"],
+  .octant-dialog__popup
+) {
+  transform-origin: var(--transform-origin, center);
+}
+
+:is(
+  [data-slot="dropdown-menu-content"],
+  [data-slot="context-menu-content"],
+  [data-slot="popover-content"],
+  [data-slot="select-content"],
+  [data-slot="combobox-content"],
+  [data-slot="tooltip-content"],
+  [data-slot="preview-card-content"],
+  .octant-dialog__popup
+):is([data-starting-style], [data-ending-style]) {
+  scale: 0.98;
+}
+
+.octant-sheet__popup:is([data-starting-style], [data-ending-style]) {
+  translate: 0 var(--oct-space-2);
+}
+
+@starting-style {
+  :is(
+    [data-slot="dropdown-menu-content"],
+    [data-slot="context-menu-content"],
+    [data-slot="popover-content"],
+    [data-slot="select-content"],
+    [data-slot="combobox-content"],
+    [data-slot="tooltip-content"],
+    [data-slot="preview-card-content"],
+    .octant-dialog__popup,
+    .octant-dialog__backdrop,
+    .octant-sheet__popup,
+    .octant-sheet__backdrop
+  ) {
+    opacity: 0;
+  }
+
+  .octant-dialog__popup {
+    scale: 0.98;
+  }
+
+  .octant-sheet__popup {
+    translate: 0 var(--oct-space-2);
+  }
+}
+
+/* A tooltip or a card that the library closes because the person pressed its
+   trigger, or opens beside one that was just showing, has no time to fade:
+   it would still be on screen over what the press opened. */
+:is([data-slot="tooltip-content"], [data-slot="preview-card-content"])[data-instant] {
+  transition-duration: 0s;
+}
+
+/* Reduced motion, from the system or from Octant's own setting, takes the
+   whole transition away: an overlay is there or it is not. The setting also
+   stops an animation a feature put on the shared popup. */
+@media (prefers-reduced-motion: reduce) {
+  :is(
+    [data-slot="dropdown-menu-content"],
+    [data-slot="context-menu-content"],
+    [data-slot="popover-content"],
+    [data-slot="select-content"],
+    [data-slot="combobox-content"],
+    [data-slot="tooltip-content"],
+    [data-slot="preview-card-content"],
+    .octant-dialog__popup,
+    .octant-dialog__backdrop,
+    .octant-sheet__popup,
+    .octant-sheet__backdrop
+  ) {
+    transition: none;
+  }
+}
+
+html[data-octant-reduced-motion="true"]
+  :is(
+    [data-slot="dropdown-menu-content"],
+    [data-slot="context-menu-content"],
+    [data-slot="popover-content"],
+    [data-slot="select-content"],
+    [data-slot="combobox-content"],
+    [data-slot="tooltip-content"],
+    [data-slot="preview-card-content"],
+    .octant-dialog__popup,
+    .octant-dialog__backdrop,
+    .octant-sheet__popup,
+    .octant-sheet__backdrop
+  ) {
+  animation: none;
+  transition: none;
+}
+
 /*
  * The popup recipe the composer's pickers share: one search field, one row,
  * one group heading, one empty line. Before it, the Project picker drew a
@@ -173,7 +346,7 @@
 
 .octant-popover-group {
   margin: 0;
-  padding: var(--oct-space-2) var(--oct-space-2) var(--oct-space-1);
+  padding: var(--oct-space-2) var(--oct-menu-row-inset) var(--oct-space-1);
   color: var(--oct-meta);
   font-size: var(--oct-text-xs);
   font-weight: var(--oct-weight-medium);
@@ -186,8 +359,8 @@
   width: 100%;
   min-width: 0;
   height: auto;
-  min-height: 30px;
-  padding: var(--oct-space-1) var(--oct-space-2);
+  min-height: var(--oct-menu-row-h);
+  padding: var(--oct-space-1) var(--oct-menu-row-inset);
   color: var(--oct-fg);
   background: transparent;
   border: 0;
@@ -230,22 +403,6 @@
   padding: var(--oct-space-2);
   color: var(--oct-muted);
   font-size: var(--oct-text-xs);
-}
-
-.project-dialog {
-  animation: octant-dialog-enter var(--oct-motion-fast) cubic-bezier(0.2, 0, 0, 1);
-}
-
-@keyframes octant-dialog-enter {
-  from {
-    opacity: 0;
-    transform: translateY(6px) scale(0.98);
-  }
-
-  to {
-    opacity: 1;
-    transform: translateY(0) scale(1);
-  }
 }
 
 /* The native activity overlay may keep translucency because it floats above
@@ -331,13 +488,6 @@ html[data-octant-increased-contrast="true"] .thread-activity-pip__collapsed-cont
 html[data-octant-increased-contrast="true"] .project-dialog,
 html[data-octant-increased-contrast="true"] .folder-picker {
   border-color: var(--octant-border-strong);
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .project-dialog {
-    animation: none;
-    transition: none;
-  }
 }
 
 /* ── Turn action menu ──────────────────────────────────────────── */

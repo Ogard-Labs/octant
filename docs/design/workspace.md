@@ -398,7 +398,15 @@ where a coordinator and its workers appear. Built; rendered against mocked threa
 - **Proposals.** A coordinator's pending proposals show as cards above its
   composer (title, intent, **Review and approve**, **Decline**), beside the
   routine and memory proposal prompts, sharing the Project planner section's
-  read, review dialog, and one-decision-at-a-time guard.
+  read, review dialog, and one-decision-at-a-time guard. The review starts on
+  the requested provider, model, and level and offers no mode above that level.
+  A paired browser's Code workspace and the phone's Code thread screen show the
+  same cards read-only, with "Approve at a window on this computer" and no
+  decision.
+- **Owner devices.** The owner access recovery screen (phone, and a browser's
+  owner section) shows a chosen Code thread's **Wake when a message arrives**
+  and, on a worker, **Wake for coordinator**, each change under its own fresh
+  unlock; the coordinator role is never there.
 - **Needs you.** A worker's row in Needs you and the Inbox shows "via" its
   coordinator beside the worker's title, from the window's thread list.
 

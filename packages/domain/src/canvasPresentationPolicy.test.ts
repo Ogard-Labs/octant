@@ -80,4 +80,22 @@ describe("canvasInlineRefusal", () => {
     expect(canvasInlineRefusal([table, plan])).toContain("plan block");
     expect(canvasInlineRefusal([board, settingsScreenExampleBlock])).toContain("mockup block");
   });
+
+  it("keeps a choice in the sidebar, where its answer can be sent to the thread", () => {
+    const choice = decodeCanvasBlock({
+      blockId: "pick",
+      schemaVersion: 27,
+      kind: "choice",
+      prompt: "Which rollout?",
+      questions: [
+        {
+          id: "rollout",
+          prompt: "Rollout",
+          selection: "single",
+          options: [{ id: "staged", label: "Staged" }],
+        },
+      ],
+    });
+    expect(canvasInlineRefusal([table, choice])).toContain("choice block");
+  });
 });

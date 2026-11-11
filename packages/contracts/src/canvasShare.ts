@@ -3,6 +3,7 @@ export { isCanvasShareSafeText, isExportCredentialFreeText } from "./canvasExpor
 import { Schema } from "effect";
 import {
   CANVAS_MAX_BAR_LIST_ROWS,
+  CANVAS_MAX_CHOICE_PROMPT_LENGTH,
   CANVAS_MAX_DASHBOARD_CELLS,
   CANVAS_MAX_DESIGN_FRAMES,
   CANVAS_MAX_DIAGRAM_DETAIL_LENGTH,
@@ -76,6 +77,7 @@ import {
   type CanvasVersion,
 } from "./canvas";
 import { ActorId, UtcTimestamp } from "./events";
+import { QuestionnaireQuestions } from "./questionnaire";
 import { HostId } from "./host";
 import { ProjectId } from "./projects";
 
@@ -145,10 +147,12 @@ export const CANVAS_SHARE_FLOW_SCHEMA_VERSION = 12;
 export const CANVAS_SHARE_MOCKUP_LIBRARY_SCHEMA_VERSION = 13;
 // Version 14 carries the deck block: its slides are references to blocks the
 // same share holds, and its notes are the presenter's, which never leave.
-// Version 15 carries a flow's callouts.
+// Version 15 carries a flow's callouts. Version 16 carries the choice block,
+// which a reader of a share sees and cannot answer: a share has no thread.
 export const CANVAS_SHARE_DECK_SCHEMA_VERSION = 14;
 export const CANVAS_SHARE_FLOW_ANNOTATIONS_SCHEMA_VERSION = 15;
-export const CANVAS_SHARE_SCHEMA_VERSION = 15 as const;
+export const CANVAS_SHARE_CHOICE_SCHEMA_VERSION = 16;
+export const CANVAS_SHARE_SCHEMA_VERSION = 16 as const;
 // The newest Canvas block version a share at this version names. Canvas
 // version 13 added only the table row id, which a share drops, so share
 // version 6 named a block authored at 13 as 12. Version 14 adds chart types a
@@ -162,10 +166,11 @@ export const CANVAS_SHARE_SCHEMA_VERSION = 15 as const;
 // at 20 is shared as 19. Version 21 adds design notes and brand tokens and the
 // richer diagram fields, which a share carries, so share version 11 names
 // blocks up to 21. Version 23 adds the flow block, which a share carries
-// whole, so share version 12 names blocks up to 23. A later Canvas bump that
+// whole, so share version 12 names blocks up to 23. Version 27 adds the
+// choice block, so share version 16 names blocks up to 27. A later Canvas bump that
 // adds something a share
 // carries bumps the share version again.
-export const CANVAS_SHARE_MAX_BLOCK_SCHEMA_VERSION = 26 as const;
+export const CANVAS_SHARE_MAX_BLOCK_SCHEMA_VERSION = 27 as const;
 export const CanvasShareSchemaVersion = Schema.Literal(
   1,
   2,
@@ -181,6 +186,7 @@ export const CanvasShareSchemaVersion = Schema.Literal(
   12,
   13,
   14,
+  15,
   CANVAS_SHARE_SCHEMA_VERSION,
 );
 export type CanvasShareSchemaVersion = typeof CanvasShareSchemaVersion.Type;
@@ -994,6 +1000,28 @@ export const CanvasStaticExportBlock = Schema.Union(
       }).annotations(strict),
     ).pipe(Schema.minItems(2), Schema.maxItems(CANVAS_MAX_DECK_SLIDES)),
   }).annotations(strict),
+  // A choice leaves as its questions. It carries no answer, and the reader
+  // offers no send: a share has no thread to send to.
+  Schema.Struct({
+    ...exportBlockFields,
+    kind: Schema.Literal("choice"),
+    prompt: ExportNonEmptyText.pipe(Schema.maxLength(CANVAS_MAX_CHOICE_PROMPT_LENGTH)),
+    questions: QuestionnaireQuestions.pipe(
+      Schema.filter(
+        (questions) =>
+          questions.every(
+            (question) =>
+              exportTextHasNoSecrets(question.prompt) &&
+              question.options.every(
+                (option) =>
+                  exportTextHasNoSecrets(option.label) &&
+                  (option.description === undefined || exportTextHasNoSecrets(option.description)),
+              ),
+          ),
+        { message: () => "Canvas export questions must not contain secret-bearing text." },
+      ),
+    ),
+  }).annotations(strict),
   // A flow carries references, not content: the screens it names are shared
   // beside it, and a journaled placement is a number pair, so it leaves whole.
   Schema.Struct({
@@ -1151,10 +1179,12 @@ export const CanvasStaticExportDocument = Schema.Struct({
         (document.schemaVersion >= CANVAS_SHARE_DECK_SCHEMA_VERSION ||
           !document.blocks.some((block) => block.kind === "deck")) &&
         (document.schemaVersion >= CANVAS_SHARE_FLOW_ANNOTATIONS_SCHEMA_VERSION ||
-          !document.blocks.some((block) => canvasFlowUsesAnnotations(block))),
+          !document.blocks.some((block) => canvasFlowUsesAnnotations(block))) &&
+        (document.schemaVersion >= CANVAS_SHARE_CHOICE_SCHEMA_VERSION ||
+          !document.blocks.some((block) => block.kind === "choice")),
       {
         message: () =>
-          "Flow blocks require Canvas share version 12, the mockup library requires Canvas share version 13, a deck block requires Canvas share version 14, and flow callouts require Canvas share version 15.",
+          "Flow blocks require Canvas share version 12, the mockup library requires Canvas share version 13, a deck block requires Canvas share version 14, flow callouts require Canvas share version 15, and a choice block requires Canvas share version 16.",
       },
     ),
   );

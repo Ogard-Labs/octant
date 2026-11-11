@@ -933,4 +933,191 @@ describe("the public-block visual language", () => {
       expect(shell.lastIndexOf("@media", at)).toBeLessThan(shell.lastIndexOf("}\n\n", at));
     });
   });
+
+  describe("overlays and pick-lists", () => {
+    const components = readFileSync(join(webRoot, "styles", "components.css"), "utf8");
+    const system = readFileSync(join(webRoot, "styles", "octant.css"), "utf8");
+    const base = readFileSync(join(webRoot, "styles.css"), "utf8");
+    const overlays = [
+      '[data-slot="dropdown-menu-content"]',
+      '[data-slot="context-menu-content"]',
+      '[data-slot="popover-content"]',
+      '[data-slot="select-content"]',
+      '[data-slot="combobox-content"]',
+      '[data-slot="tooltip-content"]',
+      '[data-slot="preview-card-content"]',
+      ".octant-dialog__popup",
+      ".octant-dialog__backdrop",
+      ".octant-sheet__popup",
+      ".octant-sheet__backdrop",
+    ];
+    /** The rules whose selector list names every overlay, flattened to one line each. */
+    const overlayRules = [...components.matchAll(/([^{}]+)\{([^{}]*)\}/g)]
+      .map((match) => ({
+        selector: (match[1] ?? "")
+          .replace(/\/\*[\s\S]*?\*\//g, "")
+          .replace(/\s+/g, " ")
+          .trim(),
+        body: (match[2] ?? "").replace(/\s+/g, " ").trim(),
+      }))
+      .filter((rule) => overlays.every((overlay) => rule.selector.includes(overlay)));
+    const bodyOf = (selector: RegExp) => overlayRules.find((rule) => selector.test(rule.selector));
+
+    it("moves every overlay in and out the same way, on the motion tokens", () => {
+      // A menu and a popover settled in over 150ms while a context menu, a
+      // select, a tooltip, a dialog and Settings' sheet appeared and vanished
+      // in one frame. In is the base duration, out the fast one.
+      const rest = bodyOf(/^:is\([^)]*\)$/);
+      for (const property of ["opacity", "scale", "translate"]) {
+        expect(rest?.body).toContain(`${property} var(--oct-dur-base) var(--oct-ease-motion)`);
+      }
+      const hidden = bodyOf(/\):is\(\[data-starting-style\], \[data-ending-style\]\)$/);
+      expect(hidden?.body).toBe("opacity: 0;");
+      const leaving = bodyOf(/\)\[data-ending-style\]$/);
+      expect(leaving?.body).toContain("transition-duration: var(--oct-dur-fast);");
+      expect(leaving?.body).toContain("transition-timing-function: var(--oct-ease-color);");
+      // A popup and a dialog settle from 98%; the sheet rises instead.
+      expect(components).toMatch(
+        /\.octant-dialog__popup\s*\):is\(\[data-starting-style\], \[data-ending-style\]\) \{\s*scale: 0\.98;\s*\}/,
+      );
+      expect(components).toMatch(
+        /\.octant-sheet__popup:is\(\[data-starting-style\], \[data-ending-style\]\) \{\s*translate: 0 var\(--oct-space-2\);\s*\}/,
+      );
+      // No overlay rests on a scale or a translate of its own: `scale: 1`
+      // makes a popup the containing block of what is position-fixed in it.
+      expect(rest?.body).not.toMatch(/(?:^|; )(?:scale|translate|transform):/);
+    });
+
+    it("gives a dialog or sheet that is mounted already open the same arrival", () => {
+      // Most dialogs are rendered only while open, so the library never marks
+      // them as starting; `@starting-style` is their way in.
+      const starting = components.slice(components.indexOf("@starting-style {"));
+      const block = starting.slice(0, starting.indexOf("\n}\n"));
+      for (const overlay of overlays) expect(block).toContain(overlay);
+      expect(block).toMatch(/\.octant-dialog__popup \{\s*scale: 0\.98;/);
+      expect(block).toMatch(/\.octant-sheet__popup \{\s*translate: 0 var\(--oct-space-2\);/);
+    });
+
+    it("takes the motion away under reduced motion, from the system or from Octant's setting", () => {
+      const media = components.slice(components.indexOf("Reduced motion, from the system"));
+      const system = media.slice(media.indexOf("@media (prefers-reduced-motion: reduce) {"));
+      const systemBlock = system.slice(0, system.indexOf("\n}\n"));
+      for (const overlay of overlays) expect(systemBlock).toContain(overlay);
+      expect(systemBlock).toMatch(/\{\s*transition: none;\s*\}/);
+      const setting = bodyOf(/^html\[data-octant-reduced-motion="true"\] :is\(/);
+      expect(setting?.body).toContain("transition: none;");
+      // A feature's own animation on the shared popup stops with it.
+      expect(setting?.body).toContain("animation: none;");
+    });
+
+    it("leaves no recipe with an arrival or a departure of its own", () => {
+      // One definition: a recipe that carried its own classes animated while
+      // its neighbours did not, and none of them heard Octant's setting.
+      const own = /data-(?:starting|ending)-style:|transition-\[opacity|motion-reduce:/;
+      const strays = sourceFiles(join(webRoot, "ui"), ".tsx")
+        .filter((path) => !path.includes(".test."))
+        .filter((path) => own.test(readFileSync(path, "utf8")))
+        .map((path) => relative(webRoot, path));
+
+      expect(strays).toEqual([]);
+      expect(components).not.toContain("@keyframes octant-dialog-enter");
+    });
+
+    it("draws every pick-list row at one height and one inset", () => {
+      // The same one-line row was 24px in a menu, 26px in a context menu and
+      // a select, 30px in a combobox and a picker, 34px in the palette and
+      // 24px in a typeahead, on a 6.5, 8 or 12px inset.
+      expect(system).toMatch(/--oct-menu-row-h:\s*28px;/);
+      expect(system).toMatch(/--oct-menu-row-inset:\s*var\(--oct-space-2\);/);
+      expect(system).toMatch(/--oct-menu-inset:\s*var\(--oct-space-1\);/);
+
+      const row = readFileSync(join(webRoot, "ui/shadcn/menu-row.ts"), "utf8");
+      expect(row).toContain("min-h-(--oct-menu-row-h)");
+      expect(row).toContain("px-(--oct-menu-row-inset)");
+      for (const recipe of ["dropdown-menu", "context-menu", "select", "combobox"]) {
+        const source = readFileSync(join(webRoot, "ui/shadcn", `${recipe}.tsx`), "utf8");
+        expect(source, recipe).toContain("menuRow");
+        // The rows stand in from the popup's edge by one inset.
+        expect(source, recipe).toContain("p-(--oct-menu-inset)");
+        // No recipe sizes a row of its own beside the shared one.
+        expect(source, recipe).not.toMatch(/data-highlighted:bg-accent/);
+      }
+
+      const palette = readFileSync(join(webRoot, "styles", "palette.css"), "utf8");
+      const chat = readFileSync(join(webRoot, "styles", "chat.css"), "utf8");
+      const rule = (source: string, selector: string) =>
+        source.match(
+          new RegExp(`${selector.replace(/[.*+?^${}()|[\]\\>]/g, "\\$&")} \\{([^}]*)\\}`),
+        )?.[1] ?? "";
+      for (const body of [
+        rule(components, ".octant-popover-option"),
+        rule(palette, ".command-palette__result"),
+      ]) {
+        expect(body).toContain("min-height: var(--oct-menu-row-h);");
+        expect(body).toContain("var(--oct-menu-row-inset)");
+      }
+      for (const body of [
+        rule(palette, ".chat-composer__command-option > button"),
+        rule(chat, ".thread-mention__option > button"),
+      ]) {
+        expect(body).toContain("height: var(--oct-menu-row-h);");
+        expect(body).toContain("padding-inline: var(--oct-menu-row-inset);");
+      }
+    });
+
+    it("declares the scrollbar once and lets no stylesheet draw a second one", () => {
+      // A second colour stood in octant.css and lost on source order alone.
+      // The treatment is the two standard properties in styles.css; a feature
+      // may hide a scrollbar in a named place and may never recolour or widen one.
+      const hidden = [
+        ".code-project-views__inline",
+        ".dock-browser-pages",
+        ".phone-scroll",
+        ".setnav",
+        ".sidebar-rail__column",
+      ];
+      const strays: string[] = [];
+      for (const path of cssFiles(webRoot)) {
+        const name = relative(webRoot, path);
+        const css = readFileSync(path, "utf8").replace(/\/\*[\s\S]*?\*\//g, "");
+        for (const match of css.matchAll(/([^{}]+)\{([^{}]*)\}/g)) {
+          const selector = (match[1] ?? "").replace(/\s+/g, " ").trim();
+          const body = match[2] ?? "";
+          if (/scrollbar-color:/.test(body) && name !== "styles.css") {
+            strays.push(`${name}: ${selector} sets scrollbar-color`);
+          }
+          const width = body.match(/scrollbar-width:\s*([a-z]+)/)?.[1];
+          if (width === undefined || width === "thin") continue;
+          if (width === "none" && hidden.some((allowed) => selector.endsWith(allowed))) continue;
+          if (width === "auto" && name === "styles.css") continue;
+          strays.push(`${name}: ${selector} sets scrollbar-width: ${width}`);
+        }
+      }
+
+      expect(strays).toEqual([]);
+      expect(base).toMatch(
+        /:where\(\*\) \{\s*scrollbar-color: var\(--octant-border-strong\) transparent;\s*scrollbar-width: thin;\s*\}/,
+      );
+    });
+
+    it("styles Settings' loading outline from a stylesheet that is there before Settings is", () => {
+      // settings.css arrives in the same chunk as Settings. Styled from it,
+      // the outline was a blank panel for exactly the moment it covers.
+      const dock = readFileSync(join(webRoot, "styles", "dock.css"), "utf8");
+      const settings = readFileSync(join(webRoot, "styles", "settings.css"), "utf8");
+      const outline = readFileSync(join(webRoot, "shell", "SettingsLoading.tsx"), "utf8");
+      expect(dock).toMatch(/\.settings-loading \{[^}]*display: grid;/);
+      expect(settings).not.toContain(".settings-loading");
+      expect(outline).not.toMatch(/className="[^"]*settings-view/);
+    });
+
+    it("stills a skeleton's sheen under both reduced-motion signals", () => {
+      expect(system).toMatch(
+        /@media \(prefers-reduced-motion: reduce\) \{[\s\S]*?\.skeleton::after \{\s*display: none;/,
+      );
+      expect(system).toMatch(
+        /html\[data-octant-reduced-motion="true"\] \.skeleton::after \{\s*display: none;\s*\}/,
+      );
+    });
+  });
 });

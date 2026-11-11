@@ -201,3 +201,35 @@ describe("phone owner recovery across roster changes", () => {
     ).toBe(false);
   });
 });
+
+describe("phone owner wake switches", () => {
+  it("reads a worker's switches and changes one with its own request against the reading shown", async () => {
+    const { spoke } = fixture();
+    const threadId = "50000000-0000-4000-8000-00000000000b";
+    const readThreadWake = vi.fn<() => Promise<OwnerActionResult>>(async () => ({
+      status: "done",
+      body: {
+        status: "read",
+        wake: { threadId, messageWake: true, coordinatorWake: true, version: "d".repeat(64) },
+      },
+    }));
+    const changeThreadWake = vi.fn<() => Promise<OwnerActionResult>>(async () => ({
+      status: "refused",
+      kind: "wake-stale",
+    }));
+    mount([{ ...spoke, client: { ...spoke.client, readThreadWake, changeThreadWake } }]);
+    await press("Refresh access levels");
+    await press("Thread: Current task");
+    await press("Read wake switches");
+    expect(document.body.textContent).toContain("Wake for coordinator: On");
+    await press("Turn off Wake when a message arrives");
+    expect(changeThreadWake).toHaveBeenCalledWith({
+      threadId,
+      expectedVersion: "d".repeat(64),
+      switch: "message-wake",
+      wake: false,
+    });
+    expect(buttons("Turn off Wake for coordinator")).toHaveLength(0);
+    expect(document.body.textContent).toContain("Read its wake switches again");
+  });
+});

@@ -81,12 +81,15 @@ import {
 import { copyCanvasHtml, saveCanvasHtmlFile } from "./canvasHtmlFile";
 import { designRunRuntimeFor } from "./blocks/designRunningFrame";
 import type { PlanTaskRuntime } from "./blocks/PlanBlock";
+import type { CanvasChoiceRuntime } from "./blocks/ChoiceBlock";
+import { canvasChoiceMessage } from "./canvasChoiceMessage";
 import { createCanvasActionRuntime } from "./canvasActionRuntime";
 import { CanvasView } from "./CanvasView";
 import { CanvasVersionCompare } from "./CanvasVersionCompare";
 import { CanvasWorkspaceTabActions } from "./CanvasWorkspaceTabActions";
 
 const CANVAS_TOOL_DIALOGS = ["refine", "refresh", "share", "export"] as const;
+const CHOICE_MODE_NAMES = { chat: "Chat", work: "Work", code: "Code" } as const;
 type CanvasToolDialog = (typeof CANVAS_TOOL_DIALOGS)[number];
 
 export interface CanvasWorkspaceTabProps {
@@ -177,6 +180,10 @@ export function CanvasWorkspaceTab(props: CanvasWorkspaceTabProps): ReactNode {
   // earlier pick's neighbour against the version that then arrived.
   const [loading, setLoading] = useState(false);
   const commentsReturnFocus = useRef<HTMLElement | null>(null);
+  // Counts this tab's confirmed choice sends, so a retry of an unconfirmed
+  // send names the same queued message while a deliberate second send names
+  // a new one.
+  const choiceSends = useRef(0);
   const closeCommentsButton = useRef<HTMLButtonElement | null>(null);
 
   const loadCanvas = useCallback(
@@ -805,6 +812,54 @@ export function CanvasWorkspaceTab(props: CanvasWorkspaceTabProps): ReactNode {
             ? ({ status: "sent", canvasSequence: expectedSequence } as const)
             : sent;
         };
+  // A choice is answered from the head, in the Canvas's own thread, as the
+  // person's ordinary message: the same queue a composer send uses, so it runs
+  // now on an idle thread or waits behind a running turn, under that thread's
+  // own authority. Where the window holds no queue or the host gave no scope
+  // for the Canvas, its thread cannot be reached from here, and the choice
+  // says so instead of offering a send the host would refuse.
+  const choiceRuntime: CanvasChoiceRuntime =
+    queueClient === undefined
+      ? { kind: "read-only", reason: "This window cannot send to this Canvas's thread." }
+      : reviseBase === null || selectedVersionId === undefined
+        ? { kind: "read-only", reason: "This Canvas's thread cannot be reached from here." }
+        : String(selectedVersionId) !== tipVersionId || expectedSequence < headSequence
+          ? {
+              kind: "read-only",
+              reason: "An older version is on screen; answer on the current one.",
+            }
+          : {
+              kind: "can-send",
+              threadLabel: `the ${CHOICE_MODE_NAMES[reviseBase.mode]} thread`,
+              onSend: async (block, response) => {
+                const attemptKey = [
+                  String(props.tab.canvasId),
+                  String(block.blockId),
+                  String(choiceSends.current),
+                  JSON.stringify(response),
+                ].join(":");
+                const sent = await enqueueCanvasCommentTurn(queueClient, {
+                  mode: reviseBase.mode,
+                  threadId: String(reviseBase.originThreadId),
+                  prompt: canvasChoiceMessage({
+                    canvasTitle: definition.title,
+                    canvasId: String(props.tab.canvasId),
+                    block,
+                    response,
+                  }),
+                  attemptKey,
+                  canvasSelection: {
+                    canvasId: props.tab.canvasId,
+                    versionId: selectedVersionId,
+                    sequence: expectedSequence,
+                    displayName: definition.title,
+                    scope: "whole-canvas",
+                  },
+                });
+                if (sent.status === "sent") choiceSends.current += 1;
+                return sent;
+              },
+            };
   // Refine and Refresh write the next version on top of the head, and the host
   // refuses either from an older version as stale. Comments anchor to blocks of
   // the Canvas rather than to a version, so the host takes them from any
@@ -1146,6 +1201,7 @@ export function CanvasWorkspaceTab(props: CanvasWorkspaceTabProps): ReactNode {
             {...(planRuntime === undefined ? {} : { planRuntime })}
             {...(designAssetRuntime === undefined ? {} : { designAssetRuntime })}
             {...(designRunRuntime === undefined ? {} : { designRunRuntime })}
+            choiceRuntime={choiceRuntime}
             {...(commentsAvailable
               ? {
                   comments: {
