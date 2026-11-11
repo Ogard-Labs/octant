@@ -120,13 +120,17 @@ export function CanvasDesignSystemPanel(props: CanvasDesignSystemPanelProps) {
               props.current?.source === `${system.folder}/${system.path}`;
             return (
               <li key={`${system.folder}\u0000${system.path}`}>
+                {/* The applied one stays a button: the Canvas keeps a copy of the
+                    tokens, so choosing it again is how an edit to the file reaches it. */}
                 <OctantButton
                   aria-pressed={applied}
-                  disabled={pending || applied}
+                  disabled={pending}
                   onClick={() =>
                     void apply(
                       { folder: system.folder, path: system.path },
-                      `This Canvas now follows ${system.name}.`,
+                      applied
+                        ? `This Canvas now has the latest of ${system.name}.`
+                        : `This Canvas now follows ${system.name}.`,
                     )
                   }
                   size="sm"
@@ -135,7 +139,11 @@ export function CanvasDesignSystemPanel(props: CanvasDesignSystemPanelProps) {
                 >
                   {system.name}
                 </OctantButton>
-                <span className="canvas-design-system-panel__path">{system.path}</span>
+                <span className="canvas-design-system-panel__path">
+                  {applied
+                    ? `${system.path} · applied; choose it again after editing the file`
+                    : system.path}
+                </span>
               </li>
             );
           })}

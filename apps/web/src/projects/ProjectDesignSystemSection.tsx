@@ -344,7 +344,14 @@ export function ProjectDesignSystemSection(props: ProjectDesignSystemSectionProp
               </OctantButton>
               <OctantButton
                 disabled={pending}
-                onClick={() => void loadDocument(document.value)}
+                onClick={() => {
+                  // The draft was written against the old text; keeping it under
+                  // the new revision would let Save overwrite the change it was
+                  // refused for. Reload replaces it, as the stale notice says.
+                  setDraft(undefined);
+                  setNotice(undefined);
+                  void loadDocument(document.value);
+                }}
                 size="sm"
                 type="button"
                 variant="ghost"

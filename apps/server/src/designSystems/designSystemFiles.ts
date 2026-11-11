@@ -131,6 +131,8 @@ export function readDesignSystemText(text: string, fallbackName: string): Design
  */
 export class DesignSystemFiles {
   readonly #fs: DesignSystemFilesystem;
+  /** The save in flight for each file, so saves of one file run one at a time. */
+  readonly #writes = new Map<string, Promise<void>>();
 
   constructor(filesystem: DesignSystemFilesystem = liveDesignSystemFilesystem) {
     this.#fs = filesystem;
@@ -213,6 +215,30 @@ export class DesignSystemFiles {
   }
 
   async write(
+    folders: DesignSystemFolders,
+    location: DesignSystemLocation,
+    text: string,
+    baseRevision: string | undefined,
+  ): Promise<DesignSystemWriteResult> {
+    // Two windows saving from the same revision at once must not both pass the
+    // revision check: each save of one file waits for the one before it, so
+    // the second reads the first's text and is refused as stale.
+    const key = `${location.folder}\u0000${location.path}`;
+    const previous = this.#writes.get(key) ?? Promise.resolve();
+    const next = previous.then(() => this.#write(folders, location, text, baseRevision));
+    const settled = next.then(
+      () => undefined,
+      () => undefined,
+    );
+    this.#writes.set(key, settled);
+    try {
+      return await next;
+    } finally {
+      if (this.#writes.get(key) === settled) this.#writes.delete(key);
+    }
+  }
+
+  async #write(
     folders: DesignSystemFolders,
     location: DesignSystemLocation,
     text: string,

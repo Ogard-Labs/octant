@@ -139,6 +139,35 @@ describe("design system routes", () => {
     expect(await readFile(join(root, "DESIGN.md"), "utf8")).toBe("# Two\n");
   });
 
+  it("refuses the second of two saves made at once from the same revision", async () => {
+    // One handler, as the host has: its file service orders saves of one file.
+    const shared = route();
+    const post = (body: Record<string, unknown>) =>
+      shared(
+        new Request("http://127.0.0.1/api/design-systems/file", {
+          method: "POST",
+          headers: {
+            "x-octant-window-capability": capability,
+            "content-type": "application/json",
+          },
+          body: JSON.stringify({ projectId, folder: root, path: "DESIGN.md", ...body }),
+        }),
+      );
+    const created = await (await post({ text: "# One\n" }))?.json();
+    const base = created.document.revision;
+    const [first, second] = await Promise.all([
+      post({ text: "# From window A\n", baseRevision: base }),
+      post({ text: "# From window B\n", baseRevision: base }),
+    ]);
+    const results = [await first?.json(), await second?.json()].map((result) =>
+      result.status === "saved" ? "saved" : result.reason,
+    );
+    expect(results.sort()).toEqual(["saved", "stale"]);
+    expect(["# From window A\n", "# From window B\n"]).toContain(
+      await readFile(join(root, "DESIGN.md"), "utf8"),
+    );
+  });
+
   it("never writes through a linked directory or into a folder the Project does not lend", async () => {
     await symlink(outside, join(root, "linked"));
     expect(await (await save({ path: "linked/DESIGN.md", text: "# X\n" }))?.json()).toEqual({

@@ -64,10 +64,18 @@ describe("a Canvas's design system", () => {
         onApplied={onApplied}
       />,
     );
-    expect(await screen.findByRole("button", { name: "Acme" })).toHaveAttribute(
-      "aria-pressed",
-      "true",
+    const applied = await screen.findByRole("button", { name: "Acme" });
+    expect(applied).toHaveAttribute("aria-pressed", "true");
+    // The applied one can be chosen again, which is how an edit to the file reaches the Canvas.
+    expect(applied).toBeEnabled();
+    await userEvent.click(applied);
+    await waitFor(() =>
+      expect(fake.applyDesignSystem).toHaveBeenLastCalledWith(
+        expect.objectContaining({ designSystem: { folder: "/p", path: "DESIGN.md" } }),
+      ),
     );
+    expect(await screen.findByRole("status")).toHaveTextContent("latest of Acme");
+    onApplied.mockClear();
     await userEvent.click(screen.getByRole("button", { name: "Site" }));
     await waitFor(() => expect(onApplied).toHaveBeenCalledOnce());
     expect(fake.applyDesignSystem).toHaveBeenLastCalledWith(

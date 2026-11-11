@@ -32,6 +32,9 @@ export async function designSystemTurnContext(
   files: Pick<DesignSystemFiles, "primary">,
   folders: DesignSystemFolders,
 ): Promise<DesignSystemTurnContext | undefined> {
+  // A person who turned design systems off gets none in any turn: not the
+  // file, and not the rule naming the other DESIGN.md files either.
+  if (folders.choice?.kind === "none") return undefined;
   let found;
   try {
     found = await files.primary(folders);

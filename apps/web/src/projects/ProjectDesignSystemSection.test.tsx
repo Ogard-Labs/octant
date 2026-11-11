@@ -161,7 +161,18 @@ describe("ProjectDesignSystemSection", () => {
   });
 
   it("keeps the draft and explains when the file changed on disk meanwhile", async () => {
+    let onDisk = document("# Acme\n", "r1");
     const fake = client({
+      readDesignSystem: vi.fn(
+        async (
+          _projectId: string,
+          location: { readonly folder: string; readonly path: string },
+        ) => ({
+          ...onDisk,
+          folder: location.folder,
+          path: location.path,
+        }),
+      ),
       saveDesignSystem: vi.fn(async () => ({
         status: "refused" as const,
         reason: "stale" as const,
@@ -173,6 +184,14 @@ describe("ProjectDesignSystemSection", () => {
     await userEvent.click(screen.getByRole("button", { name: "Save" }));
     expect(await screen.findByText(/changed since you opened it/)).toBeInTheDocument();
     expect(screen.getByLabelText("Edit DESIGN.md")).toHaveValue("# Acme\nmore");
+
+    // Reload takes the newer text and drops the old draft, so the next Save
+    // cannot overwrite the change it was refused for.
+    onDisk = document("# Acme, changed elsewhere\n", "r9");
+    await userEvent.click(screen.getByRole("button", { name: "Reload from disk" }));
+    expect(screen.queryByLabelText("Edit DESIGN.md")).toBeNull();
+    await userEvent.click(await screen.findByRole("button", { name: "Edit" }));
+    expect(screen.getByLabelText("Edit DESIGN.md")).toHaveValue("# Acme, changed elsewhere\n");
   });
 
   it("creates a starter DESIGN.md at the top of a Project that has none", async () => {
