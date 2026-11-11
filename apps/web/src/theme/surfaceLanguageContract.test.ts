@@ -41,9 +41,9 @@ describe("surface language", () => {
     ]) {
       expect(surface).toContain(role);
     }
-    // Only the page title carries the strong weight.
+    // Only the large title and the display header's title carry the title weight.
     const title = surface.match(/font-weight: var\(--oct-weight-title\)/g) ?? [];
-    expect(title).toHaveLength(1);
+    expect(title).toHaveLength(2);
     expect(surface).not.toContain("text-transform: uppercase");
     expect(surface).not.toMatch(/font-size:\s*1[12]\.5px/);
   });

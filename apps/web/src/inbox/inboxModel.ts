@@ -110,7 +110,11 @@ export const INBOX_FILTERS: ReadonlyArray<{
   /** The line shown when the filter matches nothing. */
   readonly empty: string;
 }> = [
-  { id: "all", label: "All", empty: "No thread is waiting on you" },
+  {
+    id: "all",
+    label: "All",
+    empty: "Threads that need an answer, an approval or a look show up here.",
+  },
   { id: "urgent", label: "Urgent", empty: "Nothing urgent." },
   { id: "decide", label: "Decide", empty: "No decisions waiting." },
   { id: "stuck", label: "Stuck", empty: "Nothing stuck." },

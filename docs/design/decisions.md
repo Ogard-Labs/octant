@@ -2412,6 +2412,7 @@ Status: Built. Since: —. Detail: [Workspace: Start-screen cards](workspace.md#
 Waiting requests appear on several surfaces from one host list, at a local window only.
 
 - The start screen, board cards, palette, Inbox and Review page read the same list and answer through the mode's own command.
+- The Inbox page is raised cards in one 980px column, with its state in one line beside the title; see [Inbox page](workspace.md#inbox-page).
 - A remote window has no source. The desktop menu bar lists waiting threads but only opens them.
 
 Status: Built. Since: —. Detail: [Start screen: Needs you across surfaces](start-screen.md#needs-you-across-surfaces).

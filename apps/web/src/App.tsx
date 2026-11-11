@@ -8076,6 +8076,7 @@ function LaunchedShell(
                                           <PlanUsageProvider
                                             barStyle={controller.settings?.usageBars ?? "smooth"}
                                             client={launchedClients.providerUsageLimitsClient}
+                                            instances={providerController.instances}
                                           >
                                             <HostPlatformContext.Provider value={hostPlatform}>
                                               <ServerCodeProjectsContext.Provider

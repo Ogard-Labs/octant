@@ -2,8 +2,8 @@ import type { GithubCatalogueReadResponse } from "@octant/contracts";
 import type { PendingRequest } from "@octant/contracts/pending-requests";
 import type { GithubAssignedWorkPage } from "@octant/contracts";
 import type { AssignedLinearIssuesList } from "./loadAssignedLinearIssues";
-import { CircleDot, Folder, GitPullRequest, Inbox, ListTodo, RefreshCw } from "lucide-react";
-import { useEffect, useState } from "react";
+import { CircleDot, Folder, GitPullRequest, ListTodo, RefreshCw } from "lucide-react";
+import { useEffect, useId, useState, type ReactNode } from "react";
 import type { ThreadAttentionSignal } from "../notifications/threadAttention";
 import { PendingRequestRow } from "../pendingRequests/PendingRequestRow";
 import {
@@ -17,8 +17,11 @@ import {
   type PendingRequestRowEntry,
   type PendingRequestRowsSource,
 } from "../pendingRequests/usePendingRequestRows";
-import { Surface, SurfaceEmpty, SurfaceHeader, SurfaceSection } from "../surface/SurfaceHeader";
-import { OctantButton } from "../ui/base/OctantButton";
+import { Surface, SurfaceHeader } from "../surface/SurfaceHeader";
+import { OctantButton, OctantIconButton } from "../ui/base/OctantButton";
+import { OctantCard } from "../ui/base/OctantCard";
+import { OctantTooltip } from "../ui/base/OctantTooltip";
+import { InboxPlanUsageRows, useInboxPlanUsage } from "./InboxPlanUsage";
 import { OctantToggleGroup, OctantToggleGroupItem } from "../ui/base/OctantToggleGroup";
 import {
   ASSIGNED_WORK_CATEGORY_LABELS,
@@ -213,267 +216,312 @@ export function InboxView(props: InboxViewProps) {
     projectNames,
   );
   const activeFilter = INBOX_FILTERS.find((entry) => entry.id === filter);
-  const showAssigned = filter === "all";
+
+  const planUsage = useInboxPlanUsage();
+  const refreshing = github.kind === "refreshing" || linear.kind === "refreshing";
 
   return (
-    <Surface ariaLabel="Inbox" measure="wide">
+    <Surface ariaLabel="Inbox" className="inbox-page">
       <SurfaceHeader
+        detail={inboxStateSentence(counts.all, counts.urgent, decisions?.now ?? Date.now())}
+        display
         onBack={props.onClose}
         title="Inbox"
         {...(externalSectionsPresent
           ? {
               actions: (
-                <OctantButton
-                  onClick={() => setRefreshNonce((nonce) => nonce + 1)}
-                  size="sm"
-                  type="button"
-                  variant="ghost"
-                >
-                  <RefreshCw aria-hidden="true" className="icon" size={14} strokeWidth={1.5} />
-                  {github.kind === "refreshing" || linear.kind === "refreshing"
-                    ? "Refreshing…"
-                    : "Refresh"}
-                </OctantButton>
+                <OctantTooltip label={refreshing ? "Refreshing…" : "Refresh"}>
+                  <OctantIconButton
+                    label={refreshing ? "Refreshing…" : "Refresh"}
+                    onClick={() => setRefreshNonce((nonce) => nonce + 1)}
+                    title=""
+                    type="button"
+                  >
+                    <RefreshCw aria-hidden="true" size={16} strokeWidth={1.5} />
+                  </OctantIconButton>
+                </OctantTooltip>
               ),
             }
           : {})}
       />
-      <p className="oct-meta inbox-view__summary">
-        {`${counts.all} waiting`}
-        {counts.urgent === 0 ? null : (
-          <>
-            {" · "}
-            <span className="inbox-view__urgent">{`${counts.urgent} urgent`}</span>
-          </>
-        )}
-      </p>
-      <OctantToggleGroup<InboxFilter>
-        aria-label="Filter the Inbox"
-        className="inbox-view__filters"
-        onValueChange={(value) => {
-          const next = INBOX_FILTERS.find((entry) => entry.id === value[0]);
-          if (next !== undefined) setFilter(next.id);
-        }}
-        value={[filter]}
-      >
-        {INBOX_FILTERS.map((entry) => (
-          <OctantToggleGroupItem key={entry.id} value={entry.id}>
-            {entry.label}
-            <span className="oct-meta">{counts[entry.id]}</span>
-          </OctantToggleGroupItem>
-        ))}
-      </OctantToggleGroup>
-      <SurfaceSection label="Needs you">
-        {groups.length === 0 ? (
-          filter === "all" ? (
-            <SurfaceEmpty
-              icon={<Inbox size={20} strokeWidth={1.5} />}
-              title="No thread is waiting on you"
-              {...(props.onOpenBoard === undefined
-                ? {}
-                : {
-                    action: (
-                      <OctantButton
-                        onClick={props.onOpenBoard}
-                        size="sm"
-                        type="button"
-                        variant="outline"
-                      >
-                        Open the Board
-                      </OctantButton>
-                    ),
-                  })}
-            />
-          ) : (
-            <p className="surface-section__note" role="status">
-              {activeFilter?.empty}
-            </p>
-          )
-        ) : (
-          groups.map((group) => (
-            <section
-              aria-label={group.name}
-              className="inbox-group"
-              key={group.projectKey === "" ? "no-project" : group.projectKey}
+      <div className="inbox-page__cards">
+        <InboxCard
+          actions={
+            <OctantToggleGroup<InboxFilter>
+              aria-label="Filter the Inbox"
+              className="inbox-card__filters"
+              onValueChange={(value) => {
+                const next = INBOX_FILTERS.find((entry) => entry.id === value[0]);
+                if (next !== undefined) setFilter(next.id);
+              }}
+              value={[filter]}
             >
-              <h3 className="inbox-group__head">
-                <Folder aria-hidden="true" className="icon" size={14} strokeWidth={1.5} />
-                <span className="oct-row-label">{group.name}</span>
-                <span className="oct-meta">{group.items.length}</span>
-                {group.urgentCount === 0 ? null : (
-                  <span className="oct-meta inbox-view__urgent">{`${group.urgentCount} urgent`}</span>
-                )}
-              </h3>
-              <ul className="surface-list">
-                {group.items.map((item) =>
-                  item.kind === "request" ? (
-                    <li className="surface-row" key={item.key}>
-                      <PendingRequestRow
-                        coordinatorTitle={decisions?.coordinatorTitles?.get(
-                          String(item.entry.request.threadId),
-                        )}
-                        onDefer={defer}
-                        now={decisions?.now ?? 0}
-                        onAnswer={answer}
-                        onOpenThread={(request) => decisions?.onOpenThread(request)}
-                        projectName={decisions?.projectNames.get(
-                          String(item.entry.request.projectId),
-                        )}
-                        request={item.entry.request}
-                        settled={item.entry.unlisted}
-                      />
-                    </li>
-                  ) : (
-                    <li className="surface-row" key={item.key}>
-                      <OctantButton
-                        className="inbox-view__row"
-                        onClick={() => props.onOpenThread(item.item.signal)}
-                        type="button"
-                        variant="bare"
-                      >
-                        <span className="surface-row__copy">
-                          <span className="oct-row-label">{item.item.signal.title}</span>
-                          <span className="oct-meta">{inboxAttentionMeta(item.item)}</span>
-                          {item.item.signal.detail === undefined ? null : (
-                            <span className="oct-row-detail">{item.item.signal.detail}</span>
-                          )}
-                        </span>
-                      </OctantButton>
-                    </li>
-                  ),
-                )}
-              </ul>
-            </section>
-          ))
-        )}
-      </SurfaceSection>
-      {loadGithub === undefined || !showAssigned ? null : (
-        <SurfaceSection label="GitHub">
-          {github.kind === "loading" ? (
-            <p className="surface-section__note" role="status">
-              Loading assigned work…
-            </p>
-          ) : github.kind === "failed" ? (
-            <OctantAlert className="surface-section__note" tone="warning">
-              {github.message}
-            </OctantAlert>
-          ) : github.page.items.length === 0 ? (
-            <SurfaceEmpty title="Nothing is assigned to you" />
-          ) : (
-            <>
-              {github.page.freshness.status === "stale" ? (
-                <p className="surface-section__note" role="status">
-                  Showing the last loaded list; GitHub could not be reached.
-                </p>
+              {INBOX_FILTERS.map((entry) => (
+                <OctantToggleGroupItem key={entry.id} value={entry.id}>
+                  {entry.label}
+                  <span className="oct-meta">{counts[entry.id]}</span>
+                </OctantToggleGroupItem>
+              ))}
+            </OctantToggleGroup>
+          }
+          label="Needs you"
+        >
+          {groups.length === 0 ? (
+            <div className="inbox-card__empty" role="status">
+              <p className="oct-row-detail">{activeFilter?.empty}</p>
+              {filter === "all" && props.onOpenBoard !== undefined ? (
+                <OctantButton onClick={props.onOpenBoard} size="sm" type="button" variant="ghost">
+                  Open the Board
+                </OctantButton>
               ) : null}
-              <ul className="surface-list">
-                {github.page.items.map((item) => {
-                  const key = assignedWorkSeenKey(item);
-                  const Icon = item.category === "issue" ? CircleDot : GitPullRequest;
-                  return (
-                    <li className="surface-row" key={`${item.owner}/${item.name}#${item.number}`}>
-                      <a
-                        className="inbox-view__row"
-                        data-unseen={seenKeys.has(key) ? undefined : "true"}
-                        href={item.url}
-                        onClick={() => markSeen(key)}
-                        rel="noreferrer"
-                        target="_blank"
-                      >
-                        {seenKeys.has(key) ? null : <span className="sr-only">Unseen</span>}
-                        <span className="surface-row__copy">
-                          <span className="oct-row-label">
-                            <Icon aria-hidden="true" className="icon" size={14} strokeWidth={1.5} />
-                            {item.title}
-                          </span>
-                          <span className="oct-meta">
-                            {ASSIGNED_WORK_CATEGORY_LABELS[item.category]} · {item.owner}/
-                            {item.name}#{item.number}
-                          </span>
-                        </span>
-                      </a>
-                    </li>
-                  );
-                })}
-              </ul>
-            </>
-          )}
-        </SurfaceSection>
-      )}
-      {loadLinear === undefined || !showAssigned ? null : (
-        <SurfaceSection label="Linear">
-          {linear.kind === "loading" ? (
-            <p className="surface-section__note" role="status">
-              Loading assigned issues…
-            </p>
-          ) : linear.kind === "failed" ? (
-            <OctantAlert className="surface-section__note" tone="warning">
-              {linear.message}
-            </OctantAlert>
-          ) : linear.page.rows.length === 0 ? (
-            <SurfaceEmpty title="No Linear issues are assigned to you" />
+            </div>
           ) : (
-            <>
-              {linear.page.hasNextPage ? (
-                <p className="surface-section__note" role="status">
-                  Showing the first {linear.page.rows.length} assigned issues.
-                  {props.onOpenLinearIssues === undefined ? (
-                    " Open Linear for the rest."
-                  ) : (
-                    <>
-                      {" "}
-                      <OctantButton
-                        onClick={props.onOpenLinearIssues}
-                        size="sm"
-                        type="button"
-                        variant="ghost"
-                      >
-                        Open Linear
-                      </OctantButton>{" "}
-                      for the rest.
-                    </>
+            groups.map((group) => (
+              <section
+                aria-label={group.name}
+                className="inbox-group"
+                key={group.projectKey === "" ? "no-project" : group.projectKey}
+              >
+                <h3 className="inbox-group__head">
+                  <Folder aria-hidden="true" className="icon" size={14} strokeWidth={1.5} />
+                  <span className="oct-row-label">{group.name}</span>
+                  <span className="oct-meta">{group.items.length}</span>
+                  {group.urgentCount === 0 ? null : (
+                    <span className="oct-meta inbox-view__urgent">{`${group.urgentCount} urgent`}</span>
                   )}
-                </p>
-              ) : null}
-              <ul className="surface-list">
-                {linear.page.rows.map((row) => {
-                  const key = linearIssueSeenKey(row);
-                  return (
-                    <li className="surface-row" key={row.id}>
-                      <a
-                        className="inbox-view__row"
-                        data-unseen={seenKeys.has(key) ? undefined : "true"}
-                        href={row.url}
-                        onClick={() => markSeen(key)}
-                        rel="noreferrer"
-                        target="_blank"
-                      >
-                        {seenKeys.has(key) ? null : <span className="sr-only">Unseen</span>}
-                        <span className="surface-row__copy">
-                          <span className="oct-row-label">
-                            <ListTodo
-                              aria-hidden="true"
-                              className="icon"
-                              size={14}
-                              strokeWidth={1.5}
-                            />
-                            {row.title}
+                </h3>
+                <ul className="surface-list">
+                  {group.items.map((item) =>
+                    item.kind === "request" ? (
+                      <li className="surface-row inbox-row" key={item.key}>
+                        <PendingRequestRow
+                          coordinatorTitle={decisions?.coordinatorTitles?.get(
+                            String(item.entry.request.threadId),
+                          )}
+                          onDefer={defer}
+                          now={decisions?.now ?? 0}
+                          onAnswer={answer}
+                          onOpenThread={(request) => decisions?.onOpenThread(request)}
+                          projectName={decisions?.projectNames.get(
+                            String(item.entry.request.projectId),
+                          )}
+                          request={item.entry.request}
+                          settled={item.entry.unlisted}
+                        />
+                      </li>
+                    ) : (
+                      <li className="surface-row inbox-row" key={item.key}>
+                        <OctantButton
+                          className="inbox-view__row"
+                          onClick={() => props.onOpenThread(item.item.signal)}
+                          type="button"
+                          variant="bare"
+                        >
+                          <span className="surface-row__copy">
+                            <span className="oct-row-label">{item.item.signal.title}</span>
+                            <span className="oct-meta">{inboxAttentionMeta(item.item)}</span>
+                            {item.item.signal.detail === undefined ? null : (
+                              <span className="oct-row-detail">{item.item.signal.detail}</span>
+                            )}
                           </span>
-                          <span className="oct-meta">
-                            {row.identifier} · {row.state.name}
-                          </span>
-                        </span>
-                      </a>
-                    </li>
-                  );
-                })}
-              </ul>
-            </>
+                        </OctantButton>
+                      </li>
+                    ),
+                  )}
+                </ul>
+              </section>
+            ))
           )}
-        </SurfaceSection>
-      )}
+        </InboxCard>
+        <div className="inbox-page__side">
+          {loadGithub === undefined ? null : (
+            <InboxCard label="GitHub">
+              {github.kind === "loading" ? (
+                <p className="oct-row-detail inbox-card__note" role="status">
+                  Loading assigned work…
+                </p>
+              ) : github.kind === "failed" ? (
+                <OctantAlert className="inbox-card__note" tone="warning">
+                  {github.message}
+                </OctantAlert>
+              ) : github.page.items.length === 0 ? (
+                <p className="oct-row-detail inbox-card__note" role="status">
+                  Nothing is assigned to you.
+                </p>
+              ) : (
+                <>
+                  {github.page.freshness.status === "stale" ? (
+                    <p className="oct-row-detail inbox-card__note" role="status">
+                      Showing the last loaded list; GitHub could not be reached.
+                    </p>
+                  ) : null}
+                  <ul className="surface-list">
+                    {github.page.items.map((item) => {
+                      const key = assignedWorkSeenKey(item);
+                      const Icon = item.category === "issue" ? CircleDot : GitPullRequest;
+                      return (
+                        <li
+                          className="surface-row inbox-row"
+                          key={`${item.owner}/${item.name}#${item.number}`}
+                        >
+                          <a
+                            className="inbox-view__row"
+                            data-unseen={seenKeys.has(key) ? undefined : "true"}
+                            href={item.url}
+                            onClick={() => markSeen(key)}
+                            rel="noreferrer"
+                            target="_blank"
+                          >
+                            {seenKeys.has(key) ? null : <span className="sr-only">Unseen</span>}
+                            <span className="surface-row__copy">
+                              <span className="oct-row-label">
+                                <Icon
+                                  aria-hidden="true"
+                                  className="icon"
+                                  size={14}
+                                  strokeWidth={1.5}
+                                />
+                                {item.title}
+                              </span>
+                              <span className="oct-meta">
+                                {ASSIGNED_WORK_CATEGORY_LABELS[item.category]} · {item.owner}/
+                                {item.name}#{item.number}
+                              </span>
+                            </span>
+                          </a>
+                        </li>
+                      );
+                    })}
+                  </ul>
+                </>
+              )}
+            </InboxCard>
+          )}
+          {loadLinear === undefined ? null : (
+            <InboxCard label="Linear">
+              {linear.kind === "loading" ? (
+                <p className="oct-row-detail inbox-card__note" role="status">
+                  Loading assigned issues…
+                </p>
+              ) : linear.kind === "failed" ? (
+                <OctantAlert className="inbox-card__note" tone="warning">
+                  {linear.message}
+                </OctantAlert>
+              ) : linear.page.rows.length === 0 ? (
+                <p className="oct-row-detail inbox-card__note" role="status">
+                  No Linear issues are assigned to you.
+                </p>
+              ) : (
+                <>
+                  {linear.page.hasNextPage ? (
+                    <p className="oct-row-detail inbox-card__note" role="status">
+                      Showing the first {linear.page.rows.length} assigned issues.
+                      {props.onOpenLinearIssues === undefined ? (
+                        " Open Linear for the rest."
+                      ) : (
+                        <>
+                          {" "}
+                          <OctantButton
+                            onClick={props.onOpenLinearIssues}
+                            size="sm"
+                            type="button"
+                            variant="ghost"
+                          >
+                            Open Linear
+                          </OctantButton>{" "}
+                          for the rest.
+                        </>
+                      )}
+                    </p>
+                  ) : null}
+                  <ul className="surface-list">
+                    {linear.page.rows.map((row) => {
+                      const key = linearIssueSeenKey(row);
+                      return (
+                        <li className="surface-row inbox-row" key={row.id}>
+                          <a
+                            className="inbox-view__row"
+                            data-unseen={seenKeys.has(key) ? undefined : "true"}
+                            href={row.url}
+                            onClick={() => markSeen(key)}
+                            rel="noreferrer"
+                            target="_blank"
+                          >
+                            {seenKeys.has(key) ? null : <span className="sr-only">Unseen</span>}
+                            <span className="surface-row__copy">
+                              <span className="oct-row-label">
+                                <ListTodo
+                                  aria-hidden="true"
+                                  className="icon"
+                                  size={14}
+                                  strokeWidth={1.5}
+                                />
+                                {row.title}
+                              </span>
+                              <span className="oct-meta">
+                                {row.identifier} · {row.state.name}
+                              </span>
+                            </span>
+                          </a>
+                        </li>
+                      );
+                    })}
+                  </ul>
+                </>
+              )}
+            </InboxCard>
+          )}
+          {planUsage.length === 0 ? null : (
+            <InboxCard label="Plan usage">
+              <InboxPlanUsageRows usage={planUsage} />
+            </InboxCard>
+          )}
+        </div>
+      </div>
     </Surface>
   );
+}
+
+/**
+ * One raised card of the Inbox: its small label at the top in the meta ink,
+ * with the card's own controls at the trailing edge of that row.
+ */
+function InboxCard(props: {
+  readonly label: string;
+  readonly actions?: ReactNode;
+  readonly children: ReactNode;
+}) {
+  const headingId = useId();
+  return (
+    <OctantCard aria-labelledby={headingId} className="inbox-card">
+      <div className="inbox-card__head">
+        <h2 className="oct-section-label" id={headingId}>
+          {props.label}
+        </h2>
+        {props.actions}
+      </div>
+      <div className="inbox-card__body">{props.children}</div>
+    </OctantCard>
+  );
+}
+
+/**
+ * The page's state in one line beside the title: today's date in the person's
+ * locale and what waits. No greeting by time of day.
+ */
+export function inboxStateSentence(waiting: number, urgent: number, now: number): string {
+  const date = new Intl.DateTimeFormat(undefined, {
+    weekday: "long",
+    day: "numeric",
+    month: "long",
+  }).format(now);
+  const state =
+    waiting === 0
+      ? "Nothing is waiting on you."
+      : waiting === 1
+        ? "1 thread is waiting on you."
+        : `${waiting} threads are waiting on you.`;
+  return urgent === 0 ? `${date} · ${state}` : `${date} · ${state} ${urgent} urgent.`;
 }
 
 /** The threads whose listed request is of one find-only kind. */
