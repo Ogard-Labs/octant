@@ -166,6 +166,18 @@ jobs:
           echo "url=https://github.com/${GITHUB_REPOSITORY}/releases/download/${tag}/$(basename "$archive")" >> "$GITHUB_OUTPUT"
           echo "archive=${archive}" >> "$GITHUB_OUTPUT"
 
+      # The first-install disk image, built, signed, notarized and stapled by
+      # the packaging step above. It is attached for people to download and is
+      # not given to the feed step: the updater reads the zip.
+      - name: Publish the disk image
+        if: matrix.apple_signing
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          image=$(ls out/Octant-*-darwin-arm64.dmg)
+          gh release upload "${GITHUB_REF_NAME}" "$image" --clobber
+
       # What this Octant's host offers an Octant Nightly window, so a Nightly
       # build can be checked against the published Octant before it ships.
       # One row attaches it; the document does not depend on the platform.

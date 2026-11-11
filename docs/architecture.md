@@ -15603,6 +15603,15 @@ replacement that does not satisfy the running app's designated requirement. A
 ring publishes a signed feed or publishes none. A local package built without
 signing credentials a maintainer holds is unsigned.
 
+The Octant app also ships as a disk image for first install,
+`Octant-<version>-darwin-arm64.dmg`: the app, an Applications link, and a
+prebuilt Finder layout (picture background, fixed icon positions, volume
+`Octant`), made with `hdiutil` and files in `scripts/dmg/`, with no Finder
+automation at build time. The disk image is signed, notarized and stapled on
+the same condition as the app, and unsigned when the app is. The zip stays the
+only artifact the update feed lists; the disk image is a download, never an
+update source. Octant Nightly builds no disk image.
+
 Cross-platform desktop (macOS, Linux, Windows) remains authorized: the Linux
 desktop shell, then the Linux AppImage with its signed feed, then Windows, and
 Windows Work and Code only after an explicitly approved Windows confinement

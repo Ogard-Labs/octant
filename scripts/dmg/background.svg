@@ -1,0 +1,53 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Background picture of the macOS disk image: 660 x 400 points.
+
+  Layout contract with make-dmg-layout.py: the app icon is centred at
+  (180, 170), the Applications folder at (480, 170), icons 128 points wide.
+  The arrow runs between them; the line of text sits under both. Change a
+  position here and the same number in the layout script, then re-render.
+
+  The aperture mark is the Octant favicon geometry: one blade path rotated in
+  45-degree steps, redrawn here so the build needs no other repository.
+-->
+<svg xmlns="http://www.w3.org/2000/svg" width="660" height="400" viewBox="0 0 660 400">
+  <defs>
+    <radialGradient id="glow" cx="330" cy="150" r="380" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#1b1e24" />
+      <stop offset="1" stop-color="#0b0c0e" />
+    </radialGradient>
+    <path id="blade" d="M -2.272 -20.936 L 37.062 -21.118 A .975 .975 0 0 0 37.697 -22.831 L 15.328 -42.222 A .975 .975 0 0 0 13.952 -42.123 L -3.014 -22.551 A .975 .975 0 0 0 -2.272 -20.936 Z" />
+    <g id="aperture" transform="matrix(1.0461 -0.0134 -0.1278 1.0067 50 50)">
+      <use href="#blade" />
+      <use href="#blade" transform="rotate(45)" />
+      <use href="#blade" transform="rotate(90)" />
+      <use href="#blade" transform="rotate(135)" />
+      <use href="#blade" transform="rotate(180)" />
+      <use href="#blade" transform="rotate(225)" />
+      <use href="#blade" transform="rotate(270)" />
+      <use href="#blade" transform="rotate(315)" />
+    </g>
+  </defs>
+
+  <rect width="660" height="400" fill="url(#glow)" />
+
+  <!-- Large, faint mark behind everything. -->
+  <g transform="translate(330 205) scale(4.2) translate(-50 -50)" fill="#f4f5f6" fill-opacity="0.045">
+    <use href="#aperture" />
+  </g>
+
+  <!-- Small, crisp mark at the top. -->
+  <g transform="translate(330 44) scale(0.34) translate(-50 -50)" fill="#f4f5f6" fill-opacity="0.9">
+    <use href="#aperture" />
+  </g>
+
+  <!-- Curved arrow from the app icon towards Applications. -->
+  <g fill="none" stroke="#f4f5f6" stroke-opacity="0.55" stroke-width="3" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M 268 186 C 300 138 360 138 390 176" />
+    <path d="M 372 178 L 391 178 L 387 158" transform="rotate(8 391 178)" />
+  </g>
+
+  <text x="330" y="338" text-anchor="middle" fill="#f4f5f6" fill-opacity="0.72"
+        font-family="-apple-system, 'SF Pro Text', 'Helvetica Neue', Arial, sans-serif"
+        font-size="15" letter-spacing="0.2">Drag to Applications to install</text>
+</svg>
