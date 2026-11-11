@@ -143,7 +143,7 @@ describe("WorkComposerAdapter", () => {
     expect(html).not.toContain("Attach folder");
   });
 
-  it("carries host and Project context on the row above the composer card", () => {
+  it("carries host and Project context on the tray's row above the composer card", () => {
     const { container } = render(<WorkComposerAdapter {...baseProps} hosts={twoHosts} />);
     const frame = container.querySelector(".composer");
     const tray = container.querySelector(".composer-tray");
@@ -154,7 +154,9 @@ describe("WorkComposerAdapter", () => {
     if (frame === null || tray === null || row === null) {
       throw new Error("Composer stack is incomplete.");
     }
-    expect(frame.contains(tray)).toBe(false);
+    // The row is in the composer's tray, outside the card the person types in.
+    expect(frame.contains(tray)).toBe(true);
+    expect(container.querySelector(".thread-composer__surface")?.contains(tray)).toBe(false);
     expect(
       tray.compareDocumentPosition(screen.getByRole("textbox", { name: "First message" })) &
         Node.DOCUMENT_POSITION_FOLLOWING,

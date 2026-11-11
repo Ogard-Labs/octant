@@ -18,6 +18,8 @@ export class OpenCodeMessageParts {
   readonly #parts = new Map<string, Part>();
   readonly #families = new Map<string, "parts" | "next">();
   #characters = 0;
+  /** Where the agent's own text stands, once it has written any. */
+  #agentText: { toolStepSince: boolean; endsWithNewline: boolean } | undefined;
 
   accept(event: Event): ReadonlyArray<TextEvent | FailureEvent> | undefined {
     if (event.type === "message.updated") {
@@ -30,6 +32,7 @@ export class OpenCodeMessageParts {
     }
     if (event.type === "message.part.updated") {
       const incoming = event.properties.part;
+      if (incoming.type === "tool") this.#endAgentMessage();
       if (incoming.type !== "text" && incoming.type !== "reasoning") return [];
       if (incoming.type === "text" && (incoming.synthetic === true || incoming.ignored === true))
         return [];
@@ -77,7 +80,33 @@ export class OpenCodeMessageParts {
       if (this.#families.get(id) === "parts") return [];
       this.#families.set(id, "next");
     }
+    if (event.type.startsWith("session.next.tool.")) this.#endAgentMessage();
     return undefined;
+  }
+
+  /**
+   * The agent's text as it is delivered. OpenCode puts no break between one
+   * agent message and the next, and a turn's deltas are joined into one
+   * transcript, so an agent's note before a tool step and its text after it
+   * read as one sentence ("…the repository.Let me…"). The first text after a
+   * tool step therefore opens a new paragraph, unless a line break is already
+   * there. Text that continues a part already streaming is never broken.
+   */
+  withMessageBreak(text: string, continuesPart = false): string {
+    const previous = this.#agentText;
+    const separator =
+      previous?.toolStepSince === true &&
+      !continuesPart &&
+      !previous.endsWithNewline &&
+      !text.startsWith("\n")
+        ? "\n\n"
+        : "";
+    this.#agentText = { toolStepSince: false, endsWithNewline: text.endsWith("\n") };
+    return `${separator}${text}`;
+  }
+
+  #endAgentMessage(): void {
+    if (this.#agentText !== undefined) this.#agentText.toolStepSince = true;
   }
 
   #emit(part: Part): ReadonlyArray<TextEvent> {
@@ -90,8 +119,11 @@ export class OpenCodeMessageParts {
     if (this.#families.get(part.messageId) === "next") return [];
     this.#families.set(part.messageId, "parts");
     const text = part.text.slice(part.emitted);
+    const continuesPart = part.emitted > 0;
     part.emitted = part.text.length;
-    return [{ kind: part.kind === "text" ? "text-delta" : "reasoning-delta", text }];
+    return part.kind === "text"
+      ? [{ kind: "text-delta", text: this.withMessageBreak(text, continuesPart) }]
+      : [{ kind: "reasoning-delta", text }];
   }
 
   #overflow(): ReadonlyArray<FailureEvent> {

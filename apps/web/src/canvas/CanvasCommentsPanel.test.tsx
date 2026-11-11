@@ -55,6 +55,102 @@ describe("CanvasCommentsPanel", () => {
     expect(within(threads).getByText("You · paired device")).toBeInTheDocument();
   });
 
+  it("names a comment on an area by the block the area is on", async () => {
+    const onArea: CanvasCommentThread = {
+      comment: {
+        ...existing.comment,
+        anchor: {
+          kind: "region" as const,
+          blockId: "heading-1" as never,
+          regionId: "44444444-4444-4444-8444-444444444444" as never,
+          x: 10,
+          y: 20,
+          width: 30,
+          height: 40,
+        },
+      },
+      replies: [],
+    };
+    render(
+      <CanvasCommentsPanel
+        author={author}
+        canvasId={canvasId}
+        definition={canvasFixture}
+        load={async () => ready([onArea])}
+        send={vi.fn()}
+      />,
+    );
+    const threads = await screen.findByRole("list", { name: "Comment threads" });
+    expect(within(threads).getByText("Area · Q3 Overview")).toBeInTheDocument();
+  });
+
+  it("names a pen line and a pinned note by the block they are on", async () => {
+    const drawn = (commentId: string, anchor: CanvasCommentThread["comment"]["anchor"]) => ({
+      comment: { ...existing.comment, commentId: commentId as never, anchor },
+      replies: [],
+    });
+    render(
+      <CanvasCommentsPanel
+        author={author}
+        canvasId={canvasId}
+        definition={canvasFixture}
+        load={async () =>
+          ready([
+            drawn("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa3", {
+              kind: "stroke",
+              blockId: "heading-1" as never,
+              strokeId: "44444444-4444-4444-8444-444444444445" as never,
+              points: [
+                { x: 10, y: 10 },
+                { x: 40, y: 30 },
+              ],
+            }),
+            drawn("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa4", {
+              kind: "region",
+              blockId: "heading-1" as never,
+              regionId: "44444444-4444-4444-8444-444444444446" as never,
+              x: 10,
+              y: 20,
+              width: 0,
+              height: 0,
+            }),
+          ])
+        }
+        send={vi.fn()}
+      />,
+    );
+    const threads = await screen.findByRole("list", { name: "Comment threads" });
+    expect(within(threads).getByText("Pen mark · Q3 Overview")).toBeInTheDocument();
+    expect(within(threads).getByText("Note · Q3 Overview")).toBeInTheDocument();
+  });
+
+  it("narrows the list to the board node a person pointed at", async () => {
+    const onOtherNode: CanvasCommentThread = {
+      comment: {
+        ...existing.comment,
+        commentId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa2" as never,
+        anchor: { kind: "node" as const, blockId: "diagram-1" as never, nodeId: "a" as never },
+        body: "Is Ingest batched?",
+      },
+      replies: [],
+    };
+    render(
+      <CanvasCommentsPanel
+        author={author}
+        canvasId={canvasId}
+        definition={canvasFixture}
+        focusedBlockId="diagram-1"
+        focusedPart={{ kind: "node", id: "b" }}
+        load={async () => ready([existing, onOtherNode])}
+        send={vi.fn()}
+      />,
+    );
+    const threads = await screen.findByRole("list", { name: "Comment threads" });
+    expect(within(threads).getByText("Should Report be a queue?")).toBeInTheDocument();
+    expect(within(threads).queryByText("Is Ingest batched?")).toBeNull();
+    expect(screen.getByText("On Board · Report")).toBeInTheDocument();
+  });
+
   it("names the computer a synced comment or reply was written on", async () => {
     render(
       <CanvasCommentsPanel

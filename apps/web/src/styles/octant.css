@@ -180,6 +180,9 @@
      step under the well keeps the gap between the two corners even. */
   --oct-radius-inset: 8px;
   --oct-radius-lg: 14px;
+  /* The composer's tray: the composer's corner carried out by the tray's
+     4px inset, so the card's edge and the tray's run parallel. */
+  --oct-radius-tray: 18px;
   --oct-radius-pill: 9999px;
 
   --oct-motion-fast: 150ms;
@@ -2122,9 +2125,9 @@ input.switch:checked::after {
   /* No border of its own: the overlay shadow already carries the hairline, and
      the two together drew a double ring. */
   border-radius: var(--oct-radius-md);
-  background: var(--oct-surface);
+  background: var(--octant-float);
   color: var(--oct-fg);
-  box-shadow: var(--oct-elev-overlay, var(--oct-elev-raised));
+  box-shadow: var(--octant-shadow-overlay);
   font-size: var(--oct-text-sm);
   line-height: 1.25;
   outline: none;
@@ -2227,7 +2230,7 @@ input.switch:checked::after {
   padding: var(--oct-space-3);
   border: 0;
   border-radius: var(--oct-radius-md);
-  background: var(--octant-floating);
+  background: var(--octant-float);
   box-shadow: var(--octant-shadow-overlay);
   font-size: var(--oct-text-detail);
   line-height: 1.45;
@@ -3969,7 +3972,7 @@ input.switch:checked::after {
 }
 .sidebar-item[aria-current="page"] {
   background: var(--oct-selection);
-  box-shadow: inset 0 0 0 1px var(--oct-border);
+  box-shadow: var(--octant-shadow-selected);
   color: var(--oct-fg);
 }
 .sidebar-item .count {
@@ -4073,7 +4076,7 @@ input.switch:checked::after {
 }
 .mode[aria-current="page"] {
   background: var(--oct-selection);
-  box-shadow: inset 0 0 0 1px var(--oct-border);
+  box-shadow: var(--octant-shadow-selected);
   color: var(--oct-fg);
 }
 .mode .count {
@@ -4451,7 +4454,7 @@ input.switch:checked::after {
     inset 0 0 0 1px var(--oct-border);
   transition: box-shadow var(--oct-dur-base) var(--oct-ease-color);
 }
-.composer[data-drop-target="true"] > .thread-composer__surface {
+.composer[data-drop-target="true"] .thread-composer__surface {
   position: relative;
   box-shadow:
     var(--octant-shadow-md),
@@ -4471,7 +4474,7 @@ input.switch:checked::after {
 }
 .composer-thread-drop-cue > span {
   padding: var(--oct-space-1) var(--oct-space-2);
-  background: var(--octant-floating);
+  background: var(--octant-float);
   border: 1px solid var(--octant-border-strong);
   border-radius: var(--oct-radius-sm);
   font-size: var(--oct-text-xs);
@@ -4584,7 +4587,7 @@ input.switch:checked::after {
   padding: 0;
   border-radius: var(--oct-radius-sm);
 }
-/* The thread's facts stand on the page under the card, as one quiet line
+/* The thread's facts stand in the tray under the card, as one quiet line
    with no fill or edge of its own: where the thread runs, the surface's row of
    controls, the plan's windows, and the thread's info. */
 .composer-under {
@@ -4595,9 +4598,20 @@ input.switch:checked::after {
   min-width: 0;
   min-height: 28px;
   padding: 0 var(--oct-space-1);
+  container: composer-under / inline-size;
 }
 .composer-under:empty {
   display: none;
+}
+/* At a phone's width the line cannot be one. It is then two: where the thread
+   runs with the thread's info at its trailing edge, and the row of controls
+   under them. In source order the info fell to a third line of its own. A
+   thread with no place to name keeps the order, since its row and its info
+   still share a line. */
+@container composer-under (max-width: 440px) {
+  .thread-composer__context:not(:empty, :has(> :only-child:empty)) ~ .composer-row {
+    order: 1;
+  }
 }
 .composer-under > .thread-plan-windows {
   flex: 0 1 auto;
@@ -4664,9 +4678,12 @@ input.switch:checked::after {
 }
 /* An icon control in the row is a square tile with the control corner, as
    attach and send are in the card. */
-.composer-row button[data-size="icon"] {
+.composer-row button[data-size="icon"],
+.thread-info > button[data-size="icon"] {
   width: 28px;
   min-width: 28px;
+  height: 28px;
+  min-height: 28px;
   padding: 0;
   border-radius: var(--oct-radius-sm);
 }
@@ -4769,15 +4786,37 @@ input.switch:checked::after {
 }
 
 /* Every composer keeps the message surface distinct from the thread's facts:
-   the row under it (controls, context and stats) sits on the page, and only
-   the surface where the person types is raised. Feedback appears only when
-   there is something to act on. */
+   the rows beside it (where the thread runs, its controls) are in the tray,
+   and only the surface where the person types is raised out of it. Feedback
+   appears only when there is something to act on. */
 .composer.composer--carded {
   display: grid;
   gap: var(--oct-space-1);
   background: transparent;
   border-radius: var(--oct-radius-lg);
   box-shadow: none;
+}
+/* The tray: one frame around the start row, the card and the line under it.
+   It is a raised surface a step under the card, with the card's corner
+   carried out by its own inset, so the two edges run parallel. The rows were
+   text standing on the page above and below the card, and the composer read
+   as a field with labels around it, not as one object. */
+.composer-frame {
+  display: grid;
+  gap: var(--oct-space-1);
+  min-width: 0;
+  padding: var(--oct-space-1);
+  border-radius: var(--oct-radius-tray);
+  background: var(--octant-tray);
+  box-shadow: var(--octant-shadow-xs);
+}
+/* A held thread has no card to frame; its line stands where it stood. */
+.composer-frame--held {
+  display: contents;
+}
+/* A row in the tray keeps clear of the tray's corner. */
+.composer-frame:not(.composer-frame--held) > :is(.composer-start, .composer-under) {
+  padding-inline: var(--oct-space-2);
 }
 .thread-composer__surface {
   min-width: 0;
@@ -4817,7 +4856,9 @@ input.switch:checked::after {
   align-items: center;
   min-height: 0;
   min-width: 0;
-  padding-inline: 12px;
+  /* Room under the line: without it a notice's descenders sat on the card's
+     bottom edge. */
+  padding: 0 12px var(--oct-space-2);
   overflow: auto;
 }
 .thread-composer__feedback:empty,
@@ -4846,13 +4887,16 @@ input.switch:checked::after {
   color: var(--oct-meta);
   font-size: var(--oct-text-xs);
 }
-.thread-composer__context:empty {
+/* A surface's context can be a wrapper with nothing in it yet (a Code thread
+   whose checkout has not been read): it then holds no place in the line. */
+.thread-composer__context:empty,
+.thread-composer__context:has(> :only-child:empty) {
   display: none;
 }
-/* The thread's info panel: a quiet button at the end of the row and one
-   floating card above it. What it holds (access level, credential commands,
-   provider cloud sessions, continuing elsewhere) used to sit at four places
-   on the thread page, two of them outside the reading column. */
+/* The thread's info panel: a quiet icon button at the end of the row and one
+   menu above it. What it holds (access level, credential commands, provider
+   cloud sessions, continuing elsewhere) used to sit at four places on the
+   thread page, two of them outside the reading column. */
 .thread-info {
   position: relative;
   display: inline-flex;
@@ -4861,51 +4905,196 @@ input.switch:checked::after {
 .thread-info__attention {
   color: var(--oct-warn-fg);
 }
+/* The panel is the menu every other control in the line opens: the same
+   edge, corner, inset and row. As a padded card of loose text links it read
+   as a piece of a web page, not as part of the window. */
 .thread-info__panel {
   position: absolute;
   right: 0;
   bottom: calc(100% + var(--oct-space-1));
   z-index: 5;
   display: grid;
-  /* Measured against the pane, as the composer is: in a split the viewport is
-     wider than the pane and a viewport width ran into the neighbour. */
-  width: min(440px, calc(var(--octant-split-composer-width, 100vw) - 48px));
+  /* Never wider than the line it opens from: it is anchored to that line's
+     trailing edge, and at a phone's width a card measured against the pane
+     ran off the leading edge and lost the start of every row. */
+  width: min(288px, 100cqi);
   max-height: min(60vh, 520px);
   overflow-y: auto;
-  padding: var(--oct-space-2) var(--oct-space-3);
+  padding: var(--oct-space-1);
+  border: 0;
   border-radius: var(--oct-radius-md);
-  background: var(--octant-floating);
+  background: var(--octant-float);
   box-shadow: var(--octant-shadow-overlay);
-  color: var(--oct-fg-2);
+  color: var(--oct-fg);
   font-size: var(--oct-text-sm);
   line-height: var(--oct-leading-snug);
 }
 .thread-info__panel[hidden] {
   display: none;
 }
-/* Each row is one fact or one action; a hairline separates them. */
+/* A row opened in place (the access details) needs room for its facts. */
+.thread-info__panel:has(> .task-access-details > section) {
+  width: min(440px, 100cqi);
+}
 .thread-info__panel > * {
   min-width: 0;
   margin: 0;
-  padding-block: var(--oct-space-2);
-  border-top: 1px solid var(--oct-hairline);
 }
-.thread-info__panel > :first-child {
-  border-top: 0;
-}
-.thread-info__panel > button {
-  justify-self: start;
-  margin-block: var(--oct-space-1);
-  padding-block: 0;
-  border-top: 0;
-}
-.thread-info__panel summary {
+/* One row: its name leading, its value and its arrow at the trailing edge,
+   the whole width answering the pointer. */
+.thread-info__panel > button,
+.thread-info__panel > .task-access-details > button,
+.thread-info__panel > details > summary {
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: var(--oct-space-2);
+  width: 100%;
+  min-width: 0;
+  max-width: none;
+  height: auto;
+  min-height: 30px;
+  padding: var(--oct-space-1) var(--oct-space-2);
+  border-radius: var(--oct-radius-sm);
   color: var(--oct-fg);
-  font-weight: var(--oct-weight-medium);
+  font-size: var(--oct-text-sm);
+  font-weight: var(--oct-weight-regular);
+  text-align: start;
+  cursor: default;
+}
+/* A summary has no edge of its own; the button rows carry a 1px clear one. */
+.thread-info__panel > details > summary {
+  border: 1px solid transparent;
+}
+.thread-info__panel > details > summary:hover {
+  background: var(--octant-control-hover);
+}
+.thread-info__panel > button > svg:last-child,
+.thread-info__panel > .task-access-details > button > svg:last-child {
+  flex: 0 0 auto;
+  margin-inline-start: auto;
+  color: var(--oct-muted);
+}
+.thread-info__value {
+  overflow: hidden;
+  margin-inline-start: auto;
+  color: var(--oct-muted);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.thread-info__panel .thread-info__value + svg:last-child {
+  margin-inline-start: 0;
+}
+.thread-info__panel > .task-access-details > button > svg {
+  transition: transform var(--oct-motion-fast) var(--oct-ease-standard);
+}
+.thread-info__panel > .task-access-details > button[aria-expanded="true"] > svg {
+  transform: rotate(90deg);
+}
+/* The level in force heads the menu: its name, and under it where it came
+   from. Its details are the row below, and a hairline closes the group. */
+.thread-info__panel > .guardrail-level {
+  display: grid;
+  gap: 1px;
+  padding: var(--oct-space-2) calc(var(--oct-space-2) + 1px) var(--oct-space-1);
+}
+.thread-info__panel .guardrail-level__mode {
+  color: var(--oct-fg);
+  font-size: var(--oct-text-sm);
+}
+.thread-info__panel > .task-access-details {
+  color: inherit;
+}
+/* The access report opens under its row as part of the menu, not as a
+   bordered box inside it: each fact is its name leading and its value
+   trailing, and the prose around them is the small muted note it is. */
+.task-access-details__report {
+  margin: 0;
+  padding: var(--oct-space-1) calc(var(--oct-space-2) + 1px) var(--oct-space-2);
+  color: var(--oct-muted);
+  font-size: var(--oct-text-xs);
+}
+.task-access-details__report:focus {
+  outline: none;
+}
+.task-access-details__report ul {
+  display: grid;
+  gap: var(--oct-space-1);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.task-access-details__facts {
+  display: grid;
+  grid-template-columns: minmax(0, auto) minmax(0, 1fr);
+  gap: var(--oct-space-1) var(--oct-space-4);
+  margin: 0;
+  font-size: var(--oct-text-sm);
+}
+.task-access-details__facts dt {
+  color: var(--oct-muted);
+}
+.task-access-details__facts dd {
+  margin: 0;
+  color: var(--oct-fg);
+  text-align: end;
+  overflow-wrap: anywhere;
+}
+.task-access-details__actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: var(--oct-space-2);
+}
+.thread-info__panel > .task-access-details:not(:last-child)::after {
+  display: block;
+  height: 1px;
+  margin: var(--oct-space-1) var(--oct-space-2);
+  background: var(--oct-hairline);
+  content: "";
+}
+/* A row that opens in place draws the arrow the other rows carry, and turns
+   it when its content is under it. */
+.thread-info__panel > details > summary {
+  list-style: none;
+}
+.thread-info__panel > details > summary::-webkit-details-marker {
+  display: none;
+}
+.thread-info__panel > details > summary::after {
+  flex: 0 0 auto;
+  width: 5px;
+  height: 5px;
+  margin-inline: auto var(--oct-space-1);
+  border-block-end: 1px solid var(--oct-muted);
+  border-inline-end: 1px solid var(--oct-muted);
+  transform: rotate(-45deg);
+  transition: transform var(--oct-motion-fast) var(--oct-ease-standard);
+  content: "";
+}
+.thread-info__panel > details[open] > summary::after {
+  transform: rotate(45deg);
+}
+.thread-info__panel > details > :not(summary) {
+  margin-inline: calc(var(--oct-space-2) + 1px);
+}
+.thread-info__panel > details > p {
+  font-size: var(--oct-text-xs);
+}
+/* A row is its summary alone while closed, whatever block the surface that
+   owns it draws elsewhere. */
+.thread-info__panel > details {
+  padding: 0;
+}
+.thread-info__panel > details[open] {
+  padding-bottom: var(--oct-space-2);
 }
 .thread-info__panel p {
   margin-block: var(--oct-space-1);
   color: var(--oct-muted);
+}
+.thread-info__panel > .guardrail-level {
+  margin: 0;
 }
 /* The quiet line under the composer's toolbar: the keyboard hint or a
    receipt on the left, spend and limits on the right. One recipe replaces
@@ -6419,13 +6608,14 @@ html[data-octant-reduced-transparency="true"] .code-home__card {
         inset 0 0 0 1px var(--oct-glass-stroke),
         var(--octant-shadow-md);
     }
-    /* A follow-up composer's strip sits on the page, so its wrapper takes no
-       glass; the surface where the person types takes the whole material the
-       composer has elsewhere: floor, thick tint, blur, ring, and shadow. */
+    /* The tray takes the whole material the composer has over a ground or
+       under Glass: floor, thick tint, blur, ring, and shadow. The card keeps
+       the raised card's own fill on it. When the card was the glass, it
+       blurred the tray it stood in and came out darker than the tray, a well
+       where a raised surface should be. */
     html:not([data-octant-reduced-transparency="true"])
       :is(.shell--app-backdrop, .shell--material-translucent)
-      .thread-composer__surface {
-      border-color: var(--oct-glass-stroke);
+      .composer-frame:not(.composer-frame--held) {
       background-color: var(--oct-glass-floor);
       background-image: linear-gradient(var(--oct-glass-thick), var(--oct-glass-thick));
       backdrop-filter: blur(var(--oct-glass-blur-thick)) saturate(150%);
@@ -6433,6 +6623,25 @@ html[data-octant-reduced-transparency="true"] .code-home__card {
       box-shadow:
         inset 0 0 0 1px var(--oct-glass-stroke),
         var(--octant-shadow-md);
+    }
+    /* The card's own ring is the glass stroke there: the opaque border is
+       near black and drew a dark outline around the card on the tray. */
+    html:not([data-octant-reduced-transparency="true"])
+      :is(.shell--app-backdrop, .shell--material-translucent)
+      .thread-composer__surface {
+      box-shadow:
+        var(--octant-shadow-md),
+        inset 0 0 0 1px var(--oct-glass-stroke);
+    }
+    /* Under Window glass the card takes the control tint, a clear step over
+       the tray. The card tint is 4% of the ink and the tray already carries
+       the floor and the thick tint, so on a real window the two read as one
+       grey and the card was told from the tray by its ring alone. */
+    html:not([data-octant-reduced-transparency="true"])
+      .shell--material-translucent
+      .composer-frame
+      .thread-composer__surface {
+      background: var(--octant-control);
     }
   }
 }
@@ -7393,7 +7602,7 @@ html[data-octant-reduced-transparency="true"] .code-home__card {
   display: none;
 }
 .thinking > summary .chev {
-  transition: transform var(--oct-motion-fast) ease;
+  transition: transform var(--oct-motion-fast) var(--oct-ease-standard);
 }
 .thinking[open] > summary .chev {
   transform: rotate(90deg);
@@ -7675,6 +7884,7 @@ html[data-octant-reduced-transparency="true"] .code-home__card {
    Onyx the open page read as a green slab on the glass. */
 .setnav-item[aria-current="page"] {
   background: color-mix(in oklab, var(--oct-fg) 9%, transparent);
+  box-shadow: var(--octant-shadow-selected);
   color: var(--oct-fg);
 }
 
@@ -8834,7 +9044,7 @@ html[data-octant-reduced-transparency="true"] .code-home__card {
   display: none;
 }
 .mreason .chev {
-  transition: transform var(--oct-motion-fast) ease;
+  transition: transform var(--oct-motion-fast) var(--oct-ease-standard);
 }
 .mreason[open] .chev {
   transform: rotate(90deg);

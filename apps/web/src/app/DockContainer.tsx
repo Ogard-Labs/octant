@@ -1,3 +1,4 @@
+import { coordinatorWorkersOf } from "../agents/coordinatorWorkers";
 import { requestThreadControl } from "../composer/threadControlNavigation";
 import type { CodeReviewFileRequest } from "../code/codeReviewNavigation";
 import type { ChatThreadId } from "@octant/contracts/chat";
@@ -294,6 +295,15 @@ export const DockContainer = memo(function DockContainer(props: DockContainerPro
     }));
   }, [actions, dockPullRequests, dockThreadProjectId, dockThreadRepository]);
 
+  // A coordinator's workers, from the thread list this window already holds:
+  // the Agents tool lists them and asks the host only for their runs.
+  const codeProjectThreads = navigation.codeProjectThreads;
+  const coordinatorThreadId = dockThread?.mode === "code" ? dockThread.threadId : undefined;
+  const coordinatorWorkers = useMemo(
+    () => coordinatorWorkersOf(codeProjectThreads, coordinatorThreadId),
+    [codeProjectThreads, coordinatorThreadId],
+  );
+
   function threadUtility(surface: RightUtilityDockSurfaceId, utilityTab?: ThreadUtilityDockTab) {
     if (dockThread === undefined || dockThreadKey === undefined) return null;
     if (providerController === undefined) return null;
@@ -323,6 +333,17 @@ export const DockContainer = memo(function DockContainer(props: DockContainerPro
         }}
         agentRunClient={agentRunClient}
         agentRunSettingsClient={agentRunSettingsClient}
+        {...(coordinatorWorkers === undefined
+          ? {}
+          : {
+              coordinatorWorkers,
+              onOpenCoordinatorWorker: (threadId: string) => {
+                // The shell opens a thread by its navigation id, which differs
+                // from the thread id for a thread on another computer.
+                const row = codeProjectThreads.find((thread) => thread.threadId === threadId);
+                if (row !== undefined) actions.selectCodeThread(row.navigationId ?? row.threadId);
+              },
+            })}
         onReviewAgentChanges={(request) => {
           if (String(request.packet.parentThreadId) !== dockThread.threadId) return;
           actions.setSelectedProjectPullRequest(undefined);

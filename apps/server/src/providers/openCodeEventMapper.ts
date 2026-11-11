@@ -283,8 +283,10 @@ export function mapOpenCodeEvent(
   if (parts !== undefined) return parts.map((part, index) => mappedEvent(context, part, index));
   switch (event.type) {
     case "session.next.text.delta": {
-      const text = nonEmptyText(event.properties.delta);
-      return text === undefined ? [] : [mappedEvent(context, { kind: "text-delta", text })];
+      const delta = nonEmptyText(event.properties.delta);
+      if (delta === undefined) return [];
+      const text = context.messageParts?.withMessageBreak(delta) ?? delta;
+      return [mappedEvent(context, { kind: "text-delta", text })];
     }
     case "session.next.reasoning.delta": {
       const text = nonEmptyText(event.properties.delta);

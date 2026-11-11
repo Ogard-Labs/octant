@@ -68,9 +68,21 @@ single-click continuation, and preservation of the composer draft.
 ## Thread info
 
 What is true about a thread but is not part of its conversation has one home:
-a quiet **Thread info** button at the end of the row under the follow-up
-composer, after the plan meters and the model. It opens one floating card above the row,
-at most 440px wide, whose rows are, in order and each only where it applies:
+a quiet icon button named **Thread info** at the end of the line under the
+follow-up composer, after the plan meters and the model. Its name is its
+tooltip and its accessible name; written out, its two words wrapped the line in
+a split pane and left the button on a line of its own. It opens one menu above
+the line, drawn as every other menu the line opens: the same edge, corner and
+4px inset, 288px wide and never wider than the line, with rows 30px tall that
+answer the pointer across their whole width. A row is its name leading, and at
+the trailing edge its current value in muted ink and its arrow. The level in
+force heads the menu, its name over where it came from ("Matches your
+default"), and a hairline closes that group. A row that opens in place
+(**Access details**, **Credential commands**, **Provider cloud sessions**)
+turns its arrow and puts its content under it; the access report is a list of
+facts, each name leading and its value trailing, and the menu widens to 440px
+while it is open. As a padded card of loose text links the panel read as a
+piece of a web page. Its rows are, in order and each only where it applies:
 the access level in force and where it came from (Work and Code) with its
 **Access details**, **Reply detail**, how the thread delivers documents
 (Code), **Provider tools** (a key provider's own setup for this thread),
@@ -85,8 +97,8 @@ places, two of them outside the reading column.
 
 The rows stay mounted while the card is closed, so a read or a review in one
 of them does not restart when it opens. A row that waits for the person (a
-credential command awaiting review) marks the button "Review required" in the
-warning ink. A control elsewhere that leads to a row (the access shortcut)
+credential command awaiting review) writes "Review required" on the button in
+the warning ink, the one thing the button says in words. A control elsewhere that leads to a row (the access shortcut)
 opens the card. Escape or a press outside closes it and returns focus to the
 button; a dialog or menu a row opened does not count as outside, and Escape
 inside one closes only that. While a move holds the thread and its composer
@@ -314,6 +326,20 @@ where a coordinator and its workers appear. Built; rendered against mocked threa
   per coordinator**, and a Code Project's overview holds its own **Starting
   workers** choice (Use Settings, Start without asking, Propose for approval)
   after the Project planner section.
+- **Agents dock.** A coordinator's Agents dock has a **Workers** section under
+  its own subagents: one row per worker in the window's thread list, with the
+  provider's mark, the title, the thread's state in words (Working, Needs
+  attention, Done, Idle), and how many subagents it handed off and how many of
+  them are working. A row opens the worker. In Graph, each worker's subagents
+  are drawn under its row as the same cards and arrows a thread's own graph
+  uses, and a card there opens the worker, since its subagents' pages and
+  controls are the worker's. The List and Graph switch is offered when the
+  coordinator or any worker has subagents. When the coordinator has more workers
+  than the host reads, the section says subagents are shown for the most
+  recently changed workers only, since an older worker's row cannot otherwise
+  tell "not read" from "handed off nothing". When the host refuses the read, the
+  rows stay and the section says the workers' subagents cannot be read here
+  ([Coordinator threads: Seeing workers' subagents](coordinator-threads.md#seeing-workers-subagents)).
 - **Requests.** A coordinator's composer lists its workers' pending approvals
   and questions in the same bounded region as its child runs' requests, each
   naming its worker, with an Open worker action. The rows come from the
@@ -1099,9 +1125,20 @@ Harness `delegate` tool, and collects its result. The list has one title, then
 Working and Finished sections of one-button rows —
 status icon, task, and state, role, model, and age in words — with finished
 rows newest first and an unreviewed result marked "Needs review" unless the
-parent already received it. A row opens
+parent already received it. On a thread with at least one subagent, a List and
+Graph switch sits beside the title. **Graph** arranges the same subagents by
+what waits for what: a run sits below every run it runs after and below the run
+that started it, with an arrow from each run it waits for and a dashed line
+from the run that started it, and a row keeps the order its runs were requested
+in. A card carries the task, the provider's mark and the model, the effort and
+role, and the state in words, which reads "Waiting on N" while the host holds
+the run for N unfinished runs; it opens the page a row opens, and Back returns
+to the graph. A row of cards wider than the dock scrolls sideways.
+Provider-observed children have no such links and stay a list above the graph.
+The host names a run another run waits for only when the window may read that
+run. A row opens
 that subagent's page in place of the list, with a back control: its task as
-the title, a status line, and a small transcript that starts with the task as
+the title, a status line, the runs it runs after, and a small transcript that starts with the task as
 the brief, then the replies as rendered Markdown and status events as quiet
 lines, live while it runs. When the live read is unavailable or gone after
 completion, the retained final reply stands in; when neither exists the page
@@ -1113,7 +1150,7 @@ scheduled resume while it is armed; the row never presents that wait as a
 finished or failed run. A thread with none says subagents appear when the agent
 hands off part of its work, or that they are turned off in Settings. The workspace-rail Agents Center is that same
 hierarchy across modes for the threads this window holds (the thread in each mode's panes, pinned ones included), because the host
-authorizes a parent's runs only to a window whose workspace contains that thread on the matching Project; on a wide window it can draw the current query as a
+authorizes a parent's runs only to a window whose workspace contains that thread on the matching Project (a coordinator's window may also read its workers' runs as facts, without replies or controls: [Coordinator threads](coordinator-threads.md#seeing-workers-subagents)); on a wide window it can draw the current query as a
 forest of parent threads and the runs they launched, and Graph can save that forest as a Canvas diagram document for the parent thread. The Agents dock shows the host's bounded, process-local child conversation read: entries are
 cursor-readable and byte- and count-bounded, with explicit complete, stale, and
 unavailable states. Provider-native live transcripts remain unavailable unless

@@ -88,6 +88,7 @@ import { dockToolReads } from "./shell/dockModuleRegistry";
 import { useHomeStart } from "./app/homeStart";
 import { ReaderPagesContainer } from "./app/ReaderPagesContainer";
 import { SettingsContainer } from "./app/SettingsContainer";
+import { OctantSheet } from "./ui/base/OctantSheet";
 import type { ShellActions } from "./app/shellActions";
 import { SidebarContainer } from "./app/SidebarContainer";
 import { ThreadPaneContainer } from "./app/ThreadPaneContainer";
@@ -817,6 +818,17 @@ function LaunchedShell(
     windowCapability: props.projectWindowCapability,
     windowId: props.launch.windowId,
   });
+  // How Settings is presented is decided when it opens and kept until it
+  // closes. Deciding it from the live window width remounted Settings when a
+  // resize crossed the narrow breakpoint, and the page a person was on went
+  // back to the first one.
+  const [settingsSheetAtOpen, setSettingsSheetAtOpen] = useState<boolean>();
+  if (!controller.settingsOpen && settingsSheetAtOpen !== undefined) {
+    setSettingsSheetAtOpen(undefined);
+  }
+  if (controller.settingsOpen && settingsSheetAtOpen === undefined) {
+    setSettingsSheetAtOpen(!isNarrow);
+  }
   const themeController = useThemeController({
     ...(props.themeClient === undefined ? {} : { client: props.themeClient }),
     serverUrl: props.launch.serverUrl,
@@ -7234,6 +7246,53 @@ function LaunchedShell(
       ? undefined
       : String(dockThreadId);
 
+  // Settings floats over the workspace as a sheet in a wide window, so a
+  // change to how the app looks can be seen behind it as it is made. A narrow
+  // window has no room around a sheet, so Settings covers it there, as the
+  // Usage page does at every width.
+  const settingsAsSheet = controller.settingsOpen && (settingsSheetAtOpen ?? !isNarrow);
+  // Read here, where the loaded settings are known to be present: a function
+  // body does not keep that narrowing.
+  const loadedSettings = controller.settings;
+  const settingsContainer = (surface: "settings" | "usage", presentation: "page" | "sheet") => (
+    <SettingsContainer
+      onOpenServerProject={(project) => {
+        controller.closeSettings();
+        void openDraftInKnownProject(project.id, project.mode ?? "code", project.name);
+      }}
+      projectTerminalClient={projectTerminalClient}
+      projectActionStoragePrefix={`octant.action-run:${props.launch.serverUrl}:${props.launch.windowId}:server-settings`}
+      actions={actions}
+      allProjects={projectController.allProjects}
+      {...(props.availableFonts === undefined ? {} : { availableFonts: props.availableFonts })}
+      backgroundImageLibrary={backgroundImageLibrary}
+      {...(browserAutomationClient === undefined ? {} : { browserAutomationClient })}
+      chatController={chatController}
+      clients={launchedClients}
+      codeController={codeController}
+      controller={controller}
+      discoveryController={discoveryController}
+      githubClient={githubClient}
+      {...(props.hostBridge === undefined ? {} : { hostBridge: props.hostBridge })}
+      {...(hostFederationLifecycle === undefined ? {} : { hostFederationLifecycle })}
+      hostReservesTitlebarInset={(presentation === "page" || isNarrow) && hostReservesTitlebarInset}
+      isNarrow={isNarrow}
+      linearClient={linearClient}
+      nativeBoundsAvailable={nativeHost !== undefined}
+      {...(pendingUsageFilter === undefined ? {} : { pendingUsageFilter })}
+      projectNamesById={projectNamesById}
+      providerController={providerController}
+      settings={loadedSettings}
+      presentation={presentation}
+      surface={surface}
+      sidebarVibrancySupported={sidebarVibrancySupported}
+      themeController={themeController}
+      {...(props.typography === undefined ? {} : { typography: props.typography })}
+      workNavigation={workNavigation}
+      workSettings={workSettings}
+    />
+  );
+
   const shell = (
     <ZenContainer
       actions={actions}
@@ -7257,44 +7316,22 @@ function LaunchedShell(
       )}
       <ShellFrame
         standaloneSurface={
-          controller.settingsOpen || usageOpen ? (
-            <SettingsContainer
-              onOpenServerProject={(project) => {
-                controller.closeSettings();
-                void openDraftInKnownProject(project.id, project.mode ?? "code", project.name);
-              }}
-              projectTerminalClient={projectTerminalClient}
-              projectActionStoragePrefix={`octant.action-run:${props.launch.serverUrl}:${props.launch.windowId}:server-settings`}
-              actions={actions}
-              allProjects={projectController.allProjects}
-              {...(props.availableFonts === undefined
-                ? {}
-                : { availableFonts: props.availableFonts })}
-              backgroundImageLibrary={backgroundImageLibrary}
-              {...(browserAutomationClient === undefined ? {} : { browserAutomationClient })}
-              chatController={chatController}
-              clients={launchedClients}
-              codeController={codeController}
-              controller={controller}
-              discoveryController={discoveryController}
-              githubClient={githubClient}
-              {...(props.hostBridge === undefined ? {} : { hostBridge: props.hostBridge })}
-              {...(hostFederationLifecycle === undefined ? {} : { hostFederationLifecycle })}
-              hostReservesTitlebarInset={hostReservesTitlebarInset}
-              isNarrow={isNarrow}
-              linearClient={linearClient}
-              nativeBoundsAvailable={nativeHost !== undefined}
-              {...(pendingUsageFilter === undefined ? {} : { pendingUsageFilter })}
-              projectNamesById={projectNamesById}
-              providerController={providerController}
-              settings={controller.settings}
-              surface={controller.settingsOpen ? "settings" : "usage"}
-              sidebarVibrancySupported={sidebarVibrancySupported}
-              themeController={themeController}
-              {...(props.typography === undefined ? {} : { typography: props.typography })}
-              workNavigation={workNavigation}
-              workSettings={workSettings}
-            />
+          controller.settingsOpen && !settingsAsSheet
+            ? settingsContainer("settings", "page")
+            : usageOpen
+              ? settingsContainer("usage", "page")
+              : undefined
+        }
+        sheet={
+          settingsAsSheet ? (
+            <OctantSheet
+              {...(material === "translucent" ? { className: "octant-sheet--over-glass" } : {})}
+              label="Settings"
+              onClose={controller.closeSettings}
+              open
+            >
+              {settingsContainer("settings", "sheet")}
+            </OctantSheet>
           ) : undefined
         }
         {...(shellBackdrop === undefined

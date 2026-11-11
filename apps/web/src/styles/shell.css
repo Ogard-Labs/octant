@@ -57,6 +57,15 @@
   --octant-card: color-mix(in srgb, var(--octant-text-primary) 4%, transparent);
   --card: var(--octant-card);
   --octant-outline-rest: var(--octant-card);
+  /* The composer's tray is a lighter step of the same ink, so the card on it
+     is still the lighter of the two. */
+  --octant-tray: color-mix(in srgb, var(--octant-text-primary) 3%, transparent);
+  /* A raised card's shadow goes with its tint. A shadow token is resolved
+     where it is declared, with the opaque border in it, and that border is
+     near black on the grey a desktop shows through. */
+  --octant-shadow-xs: var(--octant-shadow-raised-glass);
+  --octant-shadow-sm: var(--octant-shadow-raised-glass);
+  --octant-shadow-md: var(--octant-shadow-raised-glass);
 }
 
 .shell.shell--material-translucent[data-octant-sidebar-vibrancy="subtle"] {
@@ -83,13 +92,21 @@ html[data-octant-reduced-transparency="true"] :is(.shell, .shell[data-octant-sid
   --octant-stage-surface: var(--octant-app-background);
   --octant-card: inherit;
   --card: inherit;
+  --octant-tray: inherit;
   --octant-outline-rest: initial;
+  --octant-shadow-xs: inherit;
+  --octant-shadow-sm: inherit;
+  --octant-shadow-md: inherit;
 }
 
 html[data-octant-increased-contrast="true"] .shell {
   --octant-card: inherit;
   --card: inherit;
+  --octant-tray: inherit;
   --octant-outline-rest: initial;
+  --octant-shadow-xs: inherit;
+  --octant-shadow-sm: inherit;
+  --octant-shadow-md: inherit;
 }
 
 @media (prefers-reduced-transparency: reduce) {
@@ -99,7 +116,11 @@ html[data-octant-increased-contrast="true"] .shell {
     --octant-stage-surface: var(--octant-app-background);
     --octant-card: inherit;
     --card: inherit;
+    --octant-tray: inherit;
     --octant-outline-rest: initial;
+    --octant-shadow-xs: inherit;
+    --octant-shadow-sm: inherit;
+    --octant-shadow-md: inherit;
   }
 }
 
@@ -1208,6 +1229,7 @@ html[data-octant-native-host="true"]
 .sidebar-navigation__thread[aria-current="page"] {
   color: var(--oct-fg);
   background: color-mix(in oklab, var(--oct-fg) 9%, transparent);
+  box-shadow: var(--octant-shadow-selected);
 }
 
 /* A window can show several threads at once, and exactly one marked row

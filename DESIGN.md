@@ -136,17 +136,19 @@ nothing essential sits under 12px at the default. The roles live in
 `styles/surface.css`; the size tokens are listed under
 [Typography](#typography).
 
-| Role          | Size | Weight | Leading | Colour      | Where                                                                                                   |
-| ------------- | ---- | ------ | ------- | ----------- | ------------------------------------------------------------------------------------------------------- |
-| Hero          | 26   | 400    | 30px    | primary     | Welcome question only (`oct-title--hero` with `welcome__question`, `--oct-text-2xl`; 20 at phone width) |
-| Title         | 28   | 700    | 1.15    | primary     | A page about one thing: a Project, a thread under review (`oct-title`; a role size, not a size token)   |
-| Page title    | 14   | 600    | 1.35    | primary     | A destination or Settings page, on a toolbar's row (`oct-page-title`)                                   |
-| Section label | 14   | 600    | 1.3     | secondary   | Group heading over a hairline (`oct-section-label`), and a Settings section's label                     |
-| Row label     | 14   | 500    | 1.35    | primary     | Setting, list row, menu option                                                                          |
-| Body          | 13   | 400    | 1.5     | primary     | Interface text and the transcript (the interface size, `body`)                                          |
-| Detail        | 13   | 400    | 1.45    | secondary   | Row description, menu detail (`oct-row-detail`)                                                         |
-| Meta          | 12   | 400    | 1.4     | muted       | Timestamps, counts, hints (`oct-meta`)                                                                  |
-| Identifier    | 12   | 400    | 1.4     | muted, mono | Paths, branches, ids (`oct-meta--mono`)                                                                 |
+| Role          | Size           | Weight | Leading | Colour      | Where                                                                                                   |
+| ------------- | -------------- | ------ | ------- | ----------- | ------------------------------------------------------------------------------------------------------- |
+| Hero          | 26             | 400    | 30px    | primary     | Welcome question only (`oct-title--hero` with `welcome__question`, `--oct-text-2xl`; 20 at phone width) |
+| Title         | 28             | 700    | 1.15    | primary     | A page about one thing: a Project, a thread under review (`oct-title`; a role size, not a size token)   |
+| Page title    | 14             | 600    | 1.35    | primary     | A destination or Settings page, on a toolbar's row (`oct-page-title`)                                   |
+| Dialog title  | 17             | 600    | 1.3     | primary     | What a dialog is about (its `h2`); a part of a dialog is headed at 15 / 600 (its `h3`)                  |
+| Reply heading | 20, 17, 15, 14 | 600    | 1.3     | primary     | Markdown `#` to `####` in a reply, with 24px above and 12px below                                       |
+| Section label | 14             | 600    | 1.3     | secondary   | Group heading over a hairline (`oct-section-label`), and a Settings section's label                     |
+| Row label     | 14             | 500    | 1.35    | primary     | Setting, list row, menu option                                                                          |
+| Body          | 13             | 400    | 1.5     | primary     | Interface text and the transcript (the interface size, `body`)                                          |
+| Detail        | 13             | 400    | 1.45    | secondary   | Row description, menu detail (`oct-row-detail`)                                                         |
+| Meta          | 12             | 400    | 1.4     | muted       | Timestamps, counts, hints (`oct-meta`)                                                                  |
+| Identifier    | 12             | 400    | 1.4     | muted, mono | Paths, branches, ids (`oct-meta--mono`)                                                                 |
 
 Weights are one ladder, as tokens in `octant.css`: 400 (`--oct-weight-regular`)
 for reading text, 500 (`--oct-weight-medium`, `--oct-weight-display`) for
@@ -157,6 +159,13 @@ card titles, counts, `strong`, the app's name, a destination's page title), and
 700 (`--oct-weight-title`) only for the large title. The welcome question is a prompt to answer, so it is regular weight. `bun run ui:check` counts a
 weight above 600 outside the title roles in `styles/surface.css` as a
 `heavy-weight` finding and ratchets it against the baseline.
+
+A title is never the size and the weight of the text it heads. It is
+larger, heavier, or both, and has more room above it than below, so a reader
+finds the parts of a page, a dialog or a long reply without reading them. A
+fact in a list is its name in muted ink and its value in primary ink. (A
+dialog's title was the body's 15px, and a reply's headings were 15/14/14 at
+medium weight: each was one more line of the text under it.)
 
 Titles and the welcome question use `--oct-tracking-tight` (-0.025em); section labels use `--oct-tracking-snug`;
 body and detail use none.
@@ -226,6 +235,7 @@ this document names the token, not the number.
 | `--oct-radius-inset`  | 8px    | An object resting inside a card or well: a board card in its column                    |
 | `--oct-radius-md`     | 12px   | A card, panel, or well; a Settings section card; the window-frame cards; a user bubble |
 | `--oct-radius-lg`     | 14px   | Every composer and a dialog                                                            |
+| `--oct-radius-tray`   | 18px   | The composer's tray: the composer's corner carried out by the tray's 4px inset         |
 | `--oct-radius-pill`   | 9999px | Compact chips, meters, and circular icon controls only                                 |
 | `--radius` (`md`)     | 6px    | The recipes' compact step: xs and sm buttons, menu items (`rounded-md`)                |
 | `--radius-lg` / `-xl` | 8 / 12 | The recipes' control and card steps (`rounded-lg`, `rounded-xl`): a menu and a popover |
@@ -237,10 +247,44 @@ their scale in `tailwind.css` from `--radius`, which `shadcn-theme.css` sets to
 beside it. Phone-only surfaces use the mobile radii
 (`--oct-radius-bubble`, `--oct-radius-card-m`, `--oct-radius-sheet`).
 
-A surface is flat by default. A discrete object is
-bounded by a hairline ring, not lifted; shadow means something that genuinely
-floats — a welcome composer (`--octant-shadow-md`) or an overlay
-(`--octant-shadow-overlay`). A card is for a discrete object a person acts on
+Depth has three levels. Each is one step lighter than the level under it,
+and each has one fill and one shadow token, so a card, a menu and a dialog are
+never told from the page by an outline alone.
+
+| Level    | What it is                                            | Fill                                 | Edge and shadow                                                                                                                                                         |
+| -------- | ----------------------------------------------------- | ------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Page     | The sheet, lists, headers, empty states               | the workspace                        | none                                                                                                                                                                    |
+| Raised   | A card, a Settings group, a composer, a filled button | `--octant-card`; a button's own fill | `--octant-shadow-xs` to `-md`, `--octant-shadow-control`: light on the top edge, a hairline, a short shadow                                                             |
+| Floating | A menu, popover, hover card, toast, dialog            | `--octant-float`                     | `--octant-shadow-overlay`, `--octant-shadow-pop`: a light rim brighter along the top, a dark line outside it, a short shadow that seats it and a long one that lifts it |
+
+- **The light an edge catches is the bevel** (`--octant-bevel`,
+  `--octant-bevel-strong`): an inset line along the top of every raised and
+  floating surface. In dark a shadow cannot be seen on a near-black page, so
+  the fill and the bevel carry the lift and the shadow helps only where the
+  surface crosses something lighter; in light the surfaces are already the
+  lightest thing on the page and the shadow carries it.
+- **What sits on a floating surface is based on that surface.** Its control
+  fills, its pointed-at row and its hairlines step up from `--octant-float`
+  (`--octant-float-control`, `-hover`, `-pressed`, `-line`); the page's own
+  control fills are darker than a lifted menu and showed there as dents.
+- **A filled button is a raised tile** (default, solid, outline, secondary):
+  light on its top edge, a short shadow under it, and pressing sinks it
+  (`--octant-shadow-control-pressed`). Ghost, link, bare and chip buttons draw
+  no tile and stay flat, as do the quiet controls of a row (the line under a
+  composer).
+- **The row a list is showing is a raised tile** (`--octant-shadow-selected`):
+  a light rim, brighter along its top, and a short shadow, on the thread list,
+  the sidebar and the Settings rail. The row under the pointer stays a flat
+  wash, so "here" and "pointed at" are two states.
+- **On Window glass** a raised surface takes a light rim and a shadow that
+  can be seen on the desktop behind it (`--octant-shadow-raised-glass`); the
+  opaque border is near black and drew a heavy outline there.
+- A shadow or a bevel never decorates a flat row: plain lists, empty states
+  and headers stay on the page.
+
+(Every card and popup drew the theme's one floating colour, a hair off the
+page, inside a hairline. On an OLED preset a menu was a black box outlined on
+black, and a pointed-at row could not be seen.) A card is for a discrete object a person acts on
 as a whole: a count tile, a live running-thread card, an action tile, a board
 card, a provider, a Settings group of rows (see "Page shell"). Plain lists, empty states, and
 headers are never cards. A button shaped like a card asks the shared button
@@ -284,6 +328,26 @@ workspace sidebar is an overlay drawer and the frame stays flat, with a scrim
 starts closed on every load, closes on Escape, on a tap outside it, and on
 choosing somewhere to go, and never changes the saved wide-window choice.
 Settings keeps its own narrow layout, a drawer with a flat page, at 960px and below (see [breakpoints](#breakpoints)).
+
+Settings opens as a sheet over the app (`OctantSheet`): a floating surface
+at most 1040 by 760px, on the float fill with the pop shadow, over a light
+scrim through which the window stays drawn. The app behind it is mounted and
+live, so a change to the theme, the accent, the type or the sidebar shows
+where it lands while the control is still under the pointer. As a page that
+replaced the window, Settings showed none of what a change did until a person
+went back. The sheet holds the Settings rail and the page, divided by one
+line; the rail is 232px wide there and is not resized (the saved sidebar
+width is the full-window page's). A section's card steps up from the sheet's
+own fill. A native Browser page leaves the window while the sheet is up, as it
+does for a dialog. It closes with the
+close control in its corner, with Escape, or with a press on the window behind
+it, and focus returns to where it was. It carries no "Back to app": the person
+never left. The presentation is decided when Settings opens and kept until it
+closes. While Settings loads, the sheet shows the loading line on its own
+fill, inside its own box. In a window at the narrow breakpoint Settings covers the window, as
+before, with "Back to app"; a sheet open while the window is made narrow
+fills the window and keeps its page. The Usage page still covers the
+workspace at every width.
 
 ### Page shell
 
@@ -409,8 +473,8 @@ error instead of retaining another integration's account controls.
   never names one that is not drawn.
 - **Section.** A 14px label in medium weight, an optional one-line
   description in the secondary ink below it, then one grouped card: the
-  `--oct-radius-md` card radius, one hairline, a fill one step above the workspace
-  (`color-mix(in oklab, var(--oct-fg) 3%, var(--oct-bg))`), no shadow. The
+  `--oct-radius-md` card radius, the raised card's fill (`--octant-card`) and
+  its shadow (`--octant-shadow-xs`), which carries the edge. The
   card never clips: a section keeps `overflow: visible` because its rows hold
   menus and popovers, so the first and last row round themselves instead.
   Rows are divided by a hairline inset 16px from the card's edges. A section
@@ -610,7 +674,7 @@ just before send, and send is the round accent-filled button with an up arrow.
 
 **Usage-limit warning.** On a start screen, when the chosen account has a window
 that is spent or at 80% used (the same levels the meters colour), a warning
-callout takes the full row above the context chips, on the page above the
+callout takes the full row above the context chips, in the tray above the
 card: which account, that it has
 reached or is close to its usage limit, and the reset time the provider gave.
 For each other ready account that has room (an observed window below the near
@@ -679,7 +743,20 @@ composer takes the narrowest pane's room, so composers side by side match
 instead of each filling its own pane. A start screen's composer docks 12px
 above the pane's foot, where a thread's sits, so the two line up across a
 split; a start screen's card is the same box, with its row of where-it-runs
-chips on the page above it. Nothing about the box changes while a turn runs.
+chips above it. Nothing about the box changes while a turn runs.
+The composer is one object in two layers. The outer layer is the tray: one
+frame (`--oct-radius-tray`, the tray fill, the smallest raised shadow, a 4px
+inset) around the start row, the card and the line under the card. The card
+is the raised card, a step lighter than the tray, so the surface a person
+types on is the highest thing in the composer. Over an application ground or
+under Window glass the tray is the glass surface (floor, thick tint, blur and
+stroke) and the card keeps the raised card's fill on it; a card that was glass
+too blurred the tray it stood in and came out darker than the tray. Under
+Window glass the card takes the control tint, a clear step over the tray: at
+the card tint the two read as one grey in the packaged app. The
+figures of the last turn stand on the page under the tray. A held thread has
+no card and draws no tray. (The rows were text standing on the page above and
+below the card, and the composer read as a field with labels around it.)
 The card holds what acts on the message being written and nothing else: attach
 at its leading edge, the prompt, and send (with Stop while a response streams)
 at its trailing edge, the two controls riding the prompt's last line. Both are
@@ -688,10 +765,15 @@ fill until there is something to send, then the card's one solid control: the
 primary text colour as its fill, with the page colour on it. It is not the
 accent: a filled accent circle was the loudest thing on the page under an
 empty prompt, and the one round control on it. How the
-thread runs is one quiet line on the page under the card, with no fill or edge
+thread runs is one quiet line in the tray under the card, with no fill or edge
 of its own, in reading order: a thread's own context (Project, branch,
 checkout), the surface's row (image and access leading; the context ring, the
-model and the microphone trailing), the plan meters, and Thread info. Only the
+model and the microphone trailing), the plan meters, and the Thread info icon
+button. The line is one row in a split pane as narrow as 520px: a Work
+Project made from a folder names that folder once, not as Project and folder
+both, and a context with nothing in it holds no place. At a phone's width the
+line is two rows, the context with Thread info at its trailing edge and the
+surface's row under them. Only the
 surface's row gives its controls the row's one quiet treatment; the checkout's
 actions and the info panel's fields keep their own. With that row inside
 it the card was a third taller than its prompt and read as a form; an empty
@@ -700,7 +782,7 @@ one line and 93px after.
 The model button names a chosen reasoning effort after the model in muted ink
 ("GPT-6 Astra Medium"); the provider default names none. Where the thread runs
 (Project, working folder, base branch, checkout, Environment, repository) is
-one row on the page just above the card, as quiet chips set together from the
+one row in the tray just above the card, as quiet chips set together from the
 left: meta ink and no fill at rest, a fill only under the pointer or while the
 chip's menu is open, the same as the access and model controls under the
 card. Plan meters keep the right end of that row. The card itself holds only
@@ -1000,8 +1082,9 @@ scroll frame, so a reply never touches the input. Running text, tables and code
 blocks all run the column's width, which is the reading width the person chose,
 and end on the same edge as the divider, the bubble and the composer (a 72ch cap
 on prose stopped paragraphs at about 635px at every width past Narrow, so the
-setting only ever moved tables); markdown headings inside it are labels
-(14/13/13, weight 500), lists sit 4px apart, and a fenced block is a
+setting only ever moved tables); markdown headings inside it are headings on
+the type scale (20/17/15/14 at weight 600, 24px above and 12px below), lists
+sit 4px apart, and a fenced block is a
 `CodeBlock`: a 28px header strip naming the language with a ghost copy control,
 then detail-size mono on the application ground. Tool rows are 28px each, the
 name at the body size and the state at the right as detail text with a 12px
@@ -1056,9 +1139,9 @@ Code, wherever `TurnActivityRows` and `AssistantMessageBody` draw a turn:
   decides whether the partial answer shows, at every level.
 
 The thread's own choice is a row of the thread's
-[info panel](docs/design/workspace.md#thread-info) in Chat, Work, and Code. Its
-trigger writes the level in effect ("Reply detail: Low") beside the
-`ListCollapse` glyph, and its name also says whose the level is ("Reply
+[info panel](docs/design/workspace.md#thread-info) in Chat, Work, and Code. The
+row reads "Reply detail" with the level in effect ("Low") at its trailing
+edge, and its accessible name also says whose the level is ("Reply
 detail: High, this thread's own" or "Reply detail: Low, the default"). As a
 bare glyph in the composer row it read as one of two unexplained list icons.
 Its radio items are **Use default (Low)**
@@ -1646,7 +1729,8 @@ Shadow tokens are `--octant-shadow-hairline`, `--octant-shadow-xs`,
 `--octant-shadow-sm`, `--octant-shadow-md`, `--octant-shadow-lg`,
 `--octant-shadow-overlay`, and `--octant-shadow-pop`. Use the smallest level
 that establishes a genuine layer: navigation panes and open form layouts stay
-unshadowed; the card recipe uses a hairline ring instead of a shadow;
+unshadowed; the card recipe and a Settings group use `--octant-shadow-xs`; a
+filled button uses `--octant-shadow-control`;
 compact state and grouped surfaces use `--octant-shadow-sm`; welcome composers
 and follow-up composers use `--octant-shadow-md` over a hairline ring; focused or promoted raised
 objects may use `--octant-shadow-lg`; overlays use only their overlay or pop

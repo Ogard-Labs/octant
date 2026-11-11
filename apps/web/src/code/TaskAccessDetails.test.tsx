@@ -95,7 +95,7 @@ describe("server-reported task access details", () => {
   it("uses the host's running Plan ceiling and qualifies the selected default instead of claiming Full access", async () => {
     render(header(client(async () => facts())));
     expect(await screen.findByText("Plan", { selector: ".guardrail-level__mode" })).toBeVisible();
-    expect(screen.getByText(/selected level matches the current Project default/)).toBeVisible();
+    expect(screen.getByText("Matches this Project’s default")).toBeVisible();
     fireEvent.click(screen.getByRole("button", { name: "Access details" }));
     expect(await screen.findByRole("region", { name: "Task access details" })).toHaveTextContent(
       "Current turn/session limit",

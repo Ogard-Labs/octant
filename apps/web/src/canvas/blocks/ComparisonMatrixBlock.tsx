@@ -68,6 +68,7 @@ export function ComparisonMatrixBlock({ block }: { readonly block: CanvasCompari
               {layout.options.map((option) => (
                 <th
                   className={optionClass("canvas-block__matrix-option", option)}
+                  data-node-id={option.optionId}
                   key={option.optionId}
                   scope="col"
                 >
@@ -85,7 +86,11 @@ export function ComparisonMatrixBlock({ block }: { readonly block: CanvasCompari
           <tbody>
             {layout.rows.map((row) => (
               <tr key={row.criterionId}>
-                <th className="canvas-block__matrix-criterion" scope="row">
+                <th
+                  className="canvas-block__matrix-criterion"
+                  data-node-id={row.criterionId}
+                  scope="row"
+                >
                   <span className="canvas-block__matrix-criterion-label">{row.label}</span>
                   {row.detail === undefined ? null : (
                     <span className="canvas-block__matrix-detail">{row.detail}</span>

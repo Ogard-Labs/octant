@@ -31,7 +31,7 @@ import {
   threadAccessOf,
   type PickerGroup,
 } from "@octant/domain";
-import { ChevronDown, CirclePause, FileOutput, X } from "lucide-react";
+import { ChevronDown, CirclePause, X } from "lucide-react";
 import { OctantMenu } from "../ui/base/OctantMenu";
 import { ThreadReplyDetailMenu, ThreadReplyDetailScope } from "../transcript/ThreadReplyDetail";
 import {
@@ -2354,9 +2354,8 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
                   selectionMode="action"
                   trigger={
                     <>
-                      <FileOutput aria-hidden="true" size={14} strokeWidth={1.7} />
-                      <span>
-                        Documents:{" "}
+                      <span>Documents</span>
+                      <span className="thread-info__value">
                         {thread.documentDelivery === "native-artifacts"
                           ? "Claude artifacts"
                           : "Canvas"}

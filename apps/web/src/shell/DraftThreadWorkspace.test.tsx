@@ -158,7 +158,7 @@ describe("DraftThreadWorkspace", () => {
       }
     },
   );
-  it("keeps the context chips on the page above the composer card with model controls below the prompt", () => {
+  it("keeps the context chips in the tray above the composer card with model controls below the prompt", () => {
     const { container } = render(<DraftThreadWorkspace {...baseProps} startPresentation="home" />);
     const composer = container.querySelector(".composer");
     const contextBar = container.querySelector(".composer-tray");
@@ -166,7 +166,9 @@ describe("DraftThreadWorkspace", () => {
       screen.getByRole("button", { name: "Provider and model" }).closest(".composer-row"),
     ).not.toBeNull();
     expect(contextBar).not.toBeNull();
-    expect(composer?.contains(contextBar)).toBe(false);
+    // The chips are a row of the tray, outside the card the person types in.
+    expect(composer?.querySelector(".composer-frame")).toContainElement(contextBar as HTMLElement);
+    expect(container.querySelector(".thread-composer__surface")?.contains(contextBar)).toBe(false);
     expect(
       contextBar?.compareDocumentPosition(screen.getByRole("textbox", { name: "First message" })),
     ).toBe(Node.DOCUMENT_POSITION_FOLLOWING);

@@ -63,6 +63,70 @@ describe("canvasCommentAgentPrompt", () => {
     expect(prompt).toContain("Reply: Yes, a queue.");
   });
 
+  it("tells the agent where on the drawn block a marked area sits, in percent", () => {
+    const prompt = canvasCommentAgentPrompt({
+      definition: canvasFixture,
+      canvasId,
+      sequence: 3,
+      thread: {
+        ...thread,
+        comment: {
+          ...thread.comment,
+          anchor: {
+            kind: "region" as const,
+            blockId: "chart-1" as never,
+            regionId: "44444444-4444-4444-8444-444444444444" as never,
+            x: 25,
+            y: 10,
+            width: 50,
+            height: 30,
+          },
+        },
+      },
+      anchorLabel: "Area · Chart",
+    });
+    expect(prompt).toContain(
+      'Change only the area 25% from the left and 10% from the top, 50% wide and 30% tall, of the chart block "chart-1" as drawn.',
+    );
+  });
+
+  it("tells the agent the point a note is pinned to and the box a pen line stays inside", () => {
+    const promptFor = (anchor: typeof thread.comment.anchor) =>
+      canvasCommentAgentPrompt({
+        definition: canvasFixture,
+        canvasId,
+        sequence: 3,
+        thread: { ...thread, comment: { ...thread.comment, anchor } },
+        anchorLabel: "Chart",
+      });
+    expect(
+      promptFor({
+        kind: "region",
+        blockId: "chart-1" as never,
+        regionId: "44444444-4444-4444-8444-444444444444" as never,
+        x: 25,
+        y: 10,
+        width: 0,
+        height: 0,
+      }),
+    ).toContain(
+      'Change only the point 25% from the left and 10% from the top of the chart block "chart-1" as drawn.',
+    );
+    expect(
+      promptFor({
+        kind: "stroke",
+        blockId: "chart-1" as never,
+        strokeId: "44444444-4444-4444-8444-444444444444" as never,
+        points: [
+          { x: 20, y: 60 },
+          { x: 45, y: 30 },
+        ],
+      }),
+    ).toContain(
+      'Change only what a freehand line marks inside the area 20% from the left and 30% from the top, 25% wide and 30% tall, of the chart block "chart-1" as drawn.',
+    );
+  });
+
   it("says when the anchored block has left the canvas rather than inventing its kind", () => {
     const prompt = canvasCommentAgentPrompt({
       definition: { ...canvasFixture, blocks: [] },

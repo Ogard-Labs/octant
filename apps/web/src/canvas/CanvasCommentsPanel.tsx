@@ -1,5 +1,6 @@
 import {
   CANVAS_COMMENT_BODY_MAX_CHARS,
+  decodeCanvasCommentAnchor,
   decodeCanvasCommentId,
   decodeCanvasCommentReplyId,
   type CanvasCommentAnchor,
@@ -22,6 +23,12 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { canvasBlockLabel } from "./canvasBlockLabel";
 import { canvasTableRowLabel } from "./blocks/TableBlock";
 import { canvasCommentAgentState } from "./canvasCommentAgentTurn";
+import {
+  canvasAnchorInputOfMark,
+  canvasMarkLabel,
+  canvasMarkOfAnchor,
+  type CanvasCommentMark,
+} from "./canvasTools";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantSelectField } from "../ui/base/OctantSelect";
 import { OctantTextarea } from "../ui/base/OctantTextarea";
@@ -47,6 +54,18 @@ export interface CanvasCommentsPanelProps {
    * The list narrows to that row's threads and a new comment lands on it.
    */
   readonly focusedRowId?: string;
+  /**
+   * The node or edge, inside the focused block, a reader pointed at. The list
+   * narrows to its threads and a new comment lands on it.
+   */
+  readonly focusedPart?: { readonly kind: "node" | "edge"; readonly id: string };
+  /**
+   * An area a reader has just marked on a block. The next comment lands on
+   * it unless the reader picks another anchor, which gives the area up.
+   */
+  readonly draftMark?: CanvasCommentMark;
+  /** The marked area was commented on or given up. */
+  readonly onDraftMarkDone?: () => void;
   readonly onShowAllBlocks?: () => void;
   /** Every journaled thread, reported whenever the host's list is reloaded. */
   readonly onThreadsChange?: (threads: ReadonlyArray<CanvasCommentThread>) => void;
@@ -75,13 +94,19 @@ const FILTERS: ReadonlyArray<{ readonly id: CommentFilter; readonly label: strin
   { id: "all", label: "All" },
 ];
 
-interface AnchorChoice {
+export interface AnchorChoice {
   readonly id: string;
   readonly label: string;
   readonly anchor: CanvasCommentAnchor;
 }
 
-function anchorChoices(definition: CanvasDefinition): ReadonlyArray<AnchorChoice> {
+/**
+ * Every place the Canvas takes a comment by name: each block, and the nodes,
+ * edges, and rows the comment contract can anchor to.
+ */
+export function canvasCommentAnchorChoices(
+  definition: CanvasDefinition,
+): ReadonlyArray<AnchorChoice> {
   const choices: AnchorChoice[] = [];
   for (const block of definition.blocks) {
     const blockLabel = canvasBlockLabel(block);
@@ -225,6 +250,12 @@ function anchorChoices(definition: CanvasDefinition): ReadonlyArray<AnchorChoice
 }
 
 function anchorLabel(anchor: CanvasCommentAnchor, choices: ReadonlyArray<AnchorChoice>): string {
+  const mark = canvasMarkOfAnchor(anchor);
+  if (mark !== undefined) {
+    // A drawn mark is not a named part, so it reads as its block's.
+    const block = choices.find((choice) => choice.id === `block:${mark.blockId}`);
+    return block === undefined ? OUTDATED_ANCHOR_LABEL : canvasMarkLabel(mark.kind, block.label);
+  }
   const match = choices.find((choice) => sameAnchor(choice.anchor, anchor));
   // A comment whose anchor left the document is shown, not dropped: the
   // conversation outlives the block it was about.
@@ -247,6 +278,7 @@ function sameAnchor(left: CanvasCommentAnchor, right: CanvasCommentAnchor): bool
 }
 
 const OUTDATED_ANCHOR_LABEL = "No longer on the canvas";
+const DRAFT_MARK_CHOICE_ID = "draft-mark";
 
 function authorLabel(item: Pick<CanvasCommentThread["comment"], "author" | "origin">): string {
   const who = item.author.kind === "agent" ? "Agent" : "You";
@@ -273,15 +305,17 @@ export function CanvasCommentsPanel(props: CanvasCommentsPanelProps) {
   const [replyBodies, setReplyBodies] = useState<ReadonlyMap<string, string>>(new Map());
   const [message, setMessage] = useState<string>();
   const [working, setWorking] = useState(false);
-  const choices = useMemo(() => anchorChoices(props.definition), [props.definition]);
+  const choices = useMemo(() => canvasCommentAnchorChoices(props.definition), [props.definition]);
   const [anchorId, setAnchorId] = useState<string>();
   const [filter, setFilter] = useState<CommentFilter>("open");
   const focusedChoiceId =
     props.focusedBlockId === undefined
       ? undefined
-      : props.focusedRowId === undefined
-        ? `block:${props.focusedBlockId}`
-        : `row:${props.focusedBlockId}:${props.focusedRowId}`;
+      : props.focusedRowId !== undefined
+        ? `row:${props.focusedBlockId}:${props.focusedRowId}`
+        : props.focusedPart !== undefined
+          ? `${props.focusedPart.kind}:${props.focusedBlockId}:${props.focusedPart.id}`
+          : `block:${props.focusedBlockId}`;
   useEffect(() => {
     if (focusedChoiceId !== undefined) setAnchorId(focusedChoiceId);
   }, [focusedChoiceId]);
@@ -293,9 +327,32 @@ export function CanvasCommentsPanel(props: CanvasCommentsPanelProps) {
     focusedChoiceId !== undefined &&
     anchorId === focusedChoiceId &&
     !choices.some((choice) => choice.id === focusedChoiceId);
-  const selectedAnchor = focusLeftCanvas
-    ? undefined
-    : (choices.find((choice) => choice.id === anchorId) ?? choices[0]);
+  // A drawn mark leads the picker while it waits for its comment. Its block
+  // may have left the Canvas since it was made, and then there is no mark.
+  const draftMark = props.draftMark;
+  const draftBlock =
+    draftMark === undefined
+      ? undefined
+      : choices.find((choice) => choice.id === `block:${draftMark.blockId}`);
+  const draftBlockLabel = draftBlock?.label;
+  const draftChoice = useMemo<AnchorChoice | undefined>(
+    () =>
+      draftMark === undefined || draftBlockLabel === undefined
+        ? undefined
+        : {
+            id: DRAFT_MARK_CHOICE_ID,
+            label: canvasMarkLabel(draftMark.kind, draftBlockLabel),
+            anchor: decodeCanvasCommentAnchor(
+              canvasAnchorInputOfMark(draftMark, globalThis.crypto.randomUUID()),
+            ),
+          },
+    [draftMark, draftBlockLabel],
+  );
+  const selectedAnchor =
+    draftChoice ??
+    (focusLeftCanvas
+      ? undefined
+      : (choices.find((choice) => choice.id === anchorId) ?? choices[0]));
   const { onThreadsChange } = props;
 
   const reload = useCallback(async () => {
@@ -392,10 +449,14 @@ export function CanvasCommentsPanel(props: CanvasCommentsPanelProps) {
     const anchor = thread.comment.anchor;
     if (props.focusedBlockId === undefined) return true;
     if (String(anchor.blockId) !== props.focusedBlockId) return false;
-    return (
-      props.focusedRowId === undefined ||
-      (anchor.kind === "row" && String(anchor.rowId) === props.focusedRowId)
-    );
+    if (props.focusedRowId !== undefined) {
+      return anchor.kind === "row" && String(anchor.rowId) === props.focusedRowId;
+    }
+    const part = props.focusedPart;
+    if (part === undefined) return true;
+    return part.kind === "node"
+      ? anchor.kind === "node" && String(anchor.nodeId) === part.id
+      : anchor.kind === "edge" && String(anchor.edgeId) === part.id;
   });
 
   return (
@@ -587,7 +648,10 @@ export function CanvasCommentsPanel(props: CanvasCommentsPanelProps) {
                 expectedSequence,
                 issuedAt: now(),
               }),
-              () => setBody(""),
+              () => {
+                setBody("");
+                if (selectedAnchor.id === DRAFT_MARK_CHOICE_ID) props.onDraftMarkDone?.();
+              },
             );
           }}
         >
@@ -596,8 +660,14 @@ export function CanvasCommentsPanel(props: CanvasCommentsPanelProps) {
             <OctantSelectField
               aria-label="Comment anchor"
               disabled={working}
-              onValueChange={setAnchorId}
-              options={choices.map((choice) => ({ id: choice.id, label: choice.label }))}
+              onValueChange={(id) => {
+                if (id === DRAFT_MARK_CHOICE_ID) return;
+                setAnchorId(id);
+                if (draftChoice !== undefined) props.onDraftMarkDone?.();
+              }}
+              options={(draftChoice === undefined ? choices : [draftChoice, ...choices]).map(
+                (choice) => ({ id: choice.id, label: choice.label }),
+              )}
               value={selectedAnchor.id}
             />
           </label>

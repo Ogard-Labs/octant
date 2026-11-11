@@ -32,7 +32,7 @@ describe("a thread's own-setup choice", () => {
     await userEvent.click(await screen.findByRole("button", { name: "Provider’s own setup" }));
     await userEvent.click(await screen.findByRole("menuitemradio", { name: /Off/ }));
     await waitFor(() => expect(host.change).toHaveBeenCalledWith(threadId, codexId, "off"));
-    expect(await screen.findByText("Provider tools off")).toBeTruthy();
+    expect(await screen.findByText("Off", { selector: ".thread-info__value" })).toBeTruthy();
   });
 
   it("shows the choice already made for the thread", async () => {
@@ -41,7 +41,7 @@ describe("a thread's own-setup choice", () => {
         <ThreadNativeSetupControl providerInstanceId={codexId} threadId={threadId} />
       </ThreadNativeSetupProvider>,
     );
-    expect(await screen.findByText("Provider tools on")).toBeTruthy();
+    expect(await screen.findByText("On", { selector: ".thread-info__value" })).toBeTruthy();
   });
 
   it("stays out of the way for a provider that is not a key provider", () => {

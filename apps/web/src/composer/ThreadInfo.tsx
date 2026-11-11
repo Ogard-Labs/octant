@@ -11,6 +11,7 @@ import {
   type ReactNode,
 } from "react";
 import { OctantButton } from "../ui/base/OctantButton";
+import { OctantTooltip } from "../ui/base/OctantTooltip";
 
 interface ThreadInfoPanel {
   /** Opens the panel, for a control elsewhere that leads to one of its rows. */
@@ -99,24 +100,27 @@ export function ThreadInfo(props: { readonly children: ReactNode }) {
         }}
         ref={root}
       >
-        <OctantButton
-          aria-controls={panelId}
-          aria-expanded={open}
-          // Two inline labels would run together in the button's name.
-          {...(flags.size === 0 ? {} : { "aria-label": "Thread info, review required" })}
-          className="thread-info__trigger"
-          onClick={() => setOpen((value) => !value)}
-          ref={trigger}
-          size="sm"
-          type="button"
-          variant="ghost"
-        >
-          <Info aria-hidden="true" size={12} strokeWidth={1.8} />
-          <span>Thread info</span>
-          {flags.size === 0 ? null : (
-            <span className="thread-info__attention">Review required</span>
-          )}
-        </OctantButton>
+        {/* The button is its icon alone: its two words made the line under
+            the card wrap in a split pane, and left the trailing control on a
+            line of its own. A waiting review still says so in words. */}
+        <OctantTooltip align="end" label="Thread info" side="top">
+          <OctantButton
+            aria-controls={panelId}
+            aria-expanded={open}
+            aria-label={flags.size === 0 ? "Thread info" : "Thread info, review required"}
+            className="thread-info__trigger"
+            onClick={() => setOpen((value) => !value)}
+            ref={trigger}
+            size={flags.size === 0 ? "icon" : "sm"}
+            type="button"
+            variant="ghost"
+          >
+            <Info aria-hidden="true" size={14} strokeWidth={1.8} />
+            {flags.size === 0 ? null : (
+              <span className="thread-info__attention">Review required</span>
+            )}
+          </OctantButton>
+        </OctantTooltip>
         <section
           aria-label="Thread info"
           className="thread-info__panel"
