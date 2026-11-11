@@ -124,7 +124,7 @@ jobs:
           downloads="${RUNNER_TEMP}/assets"
           mkdir -p "$downloads"
           # Candidate builds publish as `Octant-<version>…`, the exact
-          # space-free name `release-preview.yml` uploads.
+          # space-free name `release-build.yml` uploads.
           gh release download "$TAG" --repo "$GITHUB_REPOSITORY" --pattern "Octant-${VERSION}${ASSET_SUFFIX}" --dir "$downloads"
           archive=$(ls "$downloads"/*"${ASSET_SUFFIX}")
           # The bare `${TARGET}.json` name on purpose: it is the name installs

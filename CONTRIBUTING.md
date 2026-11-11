@@ -188,11 +188,18 @@ artifact on the same matrix. Feed documents use the rings layout
 In-app update still requires that signed feed, and refuses a package, an
 archive, or a location it cannot write.
 
-- **Preview** — `.github/workflows/release-preview.yml` runs nightly, builds
-  `main`, and publishes feeds under `<base>/preview/` for each matrix arch
+- **Nightly** — `.github/workflows/release-nightly.yml` (`Release (nightly)`)
+  runs on a schedule, builds `main` as Octant Nightly, and publishes feeds
+  under `<base>/preview/` for each matrix arch
   (`darwin-arm64.json`, and `linux-x64.json` when feed signing material is
   present). It skips itself when `main` has not moved since the last preview.
-  Force one with `gh workflow run 'Release (preview)' -f force=true`.
+  Roll a bad Nightly forward with
+  `gh workflow run 'Release (nightly)' -f rollback_ref=<tag>`.
+- **Preview** — `.github/workflows/release-preview.yml` (`Release (preview)`)
+  is started by hand. It builds the ref you pick as Octant on the `candidate`
+  ring, which Octant offers as its Preview channel:
+  `gh workflow run 'Release (preview)' --ref <branch>`. It never runs on a
+  schedule.
 - **Stable** — `.github/workflows/release-stable.yml` runs on a
   `vMAJOR.MINOR.PATCH` tag and publishes under `<base>/stable/` for the same
   matrix. The `stable` environment requires an approval, so pushing the tag
