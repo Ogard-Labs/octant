@@ -3,8 +3,10 @@ import type { ComponentProps } from "react";
 import { cn } from "./utils";
 
 /*
- * A card is bounded by a hairline ring rather than lifted by a shadow:
- * it sits in the page, and shadow now means something that floats above it.
+ * A card is raised one step off the page: the smallest raised shadow draws
+ * its edge, the light its top catches and a short shadow under it. Forced
+ * colours drop shadows, so an outline stands in there, and increased contrast
+ * adds the strong ring.
  * Semantic elements stay — a card is a section with a heading, not a stack of
  * divs.
  *
@@ -22,7 +24,8 @@ const cardVariants = cva(
   {
     variants: {
       variant: {
-        default: "bg-card ring-1 ring-foreground/10",
+        default:
+          "bg-card shadow-(--octant-shadow-xs) forced-colors:outline forced-colors:outline-1 [html[data-octant-increased-contrast=true]_&]:ring-1 [html[data-octant-increased-contrast=true]_&]:ring-(--octant-border-strong)",
         glass: "",
       },
     },

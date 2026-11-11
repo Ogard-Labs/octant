@@ -28,7 +28,7 @@ describe("shared control paint ownership", () => {
     expect(controlRules).not.toMatch(/rgb\(/);
   });
 
-  it("keeps composer depth while preference groups stay flat, shadowless cards", () => {
+  it("keeps composer depth while a preference group is a raised card", () => {
     const composerRules = between(
       systemStyles,
       "/* The composer is a raised object, not a field ruled onto the page:",
@@ -43,11 +43,11 @@ describe("shared control paint ownership", () => {
     expect(settingsGroupRules).toMatch(/box-shadow:\s*none/);
     expect(settingsGroupRules).not.toMatch(/rgb\(/);
     // Inside Settings the group is a card one step above the page: raised by
-    // fill and a hairline, never by shadow.
+    // its fill and by the smallest raised shadow, which carries its edge.
     const card = settingsStyles
       .replace(/\s+/g, " ")
       .match(/\.settings-view \.settings-card-section--open > :is\([^)]*\) \{([^}]*)\}/)?.[1];
-    expect(card).toMatch(/box-shadow:\s*none/);
+    expect(card).toMatch(/box-shadow:\s*var\(--octant-shadow-xs\)/);
     expect(card).not.toMatch(/rgb\(/);
   });
 

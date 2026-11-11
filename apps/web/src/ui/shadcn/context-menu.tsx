@@ -27,6 +27,7 @@ export function ContextMenuContent({
     <ContextMenuPrimitive.Portal>
       <ContextMenuPrimitive.Positioner className="outline-none window-no-drag">
         <ContextMenuPrimitive.Popup
+          data-slot="context-menu-content"
           className={cn(
             "window-no-drag min-w-48 rounded-xl bg-popover p-1 text-popover-foreground shadow-[var(--octant-shadow-overlay)] outline-none",
             className,
@@ -125,6 +126,7 @@ export function ContextMenuSubContent({
         sideOffset={0}
       >
         <ContextMenuPrimitive.Popup
+          data-slot="context-menu-content"
           className={cn(
             "window-no-drag min-w-48 rounded-xl bg-popover p-1 text-popover-foreground shadow-[var(--octant-shadow-overlay)] outline-none",
             className,

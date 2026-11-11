@@ -774,11 +774,34 @@ html[data-octant-reduced-motion="true"] :is(.octant-dialog__popup, .octant-dialo
    ran from 14px to 17px at two weights, and footers put the answer first or
    last, filled or bare, at two heights. A family's title rule names these
    values; a dialog with no family uses the classes. */
+/* What a dialog is about is the largest thing in it, and a part of it is
+   headed in the strong weight: read at the body's size, a title was one more
+   line of the text under it. A fact's name is muted so its value is what the
+   eye lands on. Each rule weighs one element, so it replaces the page's
+   own heading sizes and gives way to any class a heading carries. */
+:where(.octant-dialog__popup) h2 {
+  margin: 0;
+  color: var(--oct-fg);
+  font-size: var(--oct-text-lg);
+  font-weight: var(--oct-weight-strong);
+  letter-spacing: var(--oct-tracking-tight);
+  line-height: 1.3;
+}
+:where(.octant-dialog__popup) h3 {
+  margin: 0;
+  color: var(--oct-fg);
+  font-size: var(--oct-text-base);
+  font-weight: var(--oct-weight-strong);
+  line-height: 1.35;
+}
+:where(.octant-dialog__popup) dt {
+  color: var(--oct-muted);
+}
 .octant-dialog__title,
 .octant-confirmation__title {
   margin: 0;
   color: var(--oct-fg);
-  font-size: var(--oct-text-base);
+  font-size: var(--oct-text-lg);
   font-weight: var(--oct-weight-strong);
   line-height: 1.35;
   overflow-wrap: anywhere;
