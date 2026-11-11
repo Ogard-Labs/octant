@@ -320,6 +320,14 @@ export interface ProjectSidebarSectionProps {
     presentation: ProjectViewSwitcherPresentation,
   ) => void;
   /**
+   * Pinning a Project to the icon rail. Absent hides the menu item, as in
+   * surfaces that draw no rail.
+   */
+  readonly railPins?: {
+    readonly pinnedIds: ReadonlySet<string>;
+    readonly onChange: (projectId: ProjectId, pinned: boolean) => void;
+  };
+  /**
    * Which facts a thread row may show. The host-backed shell settings own the
    * choice; the sidebar only reads it. Absent keeps each view's defaults.
    */
@@ -662,6 +670,7 @@ export function ProjectSidebarSection(props: ProjectSidebarSectionProps) {
         onArchive={props.onArchive}
         {...(props.onColorChange === undefined ? {} : { onColorChange: props.onColorChange })}
         onMove={props.onMove}
+        {...(props.railPins === undefined ? {} : { railPins: props.railPins })}
         onRestore={props.onRestore}
         {...(onNewThread === undefined ? {} : { newThreadVerb, onNewThreadInProject: onNewThread })}
         {...(props.onNewCoordinatorInProject === undefined
@@ -970,6 +979,7 @@ function ProjectGroup(props: {
   readonly onArchive: (projectId: ProjectId) => void;
   readonly onColorChange?: (projectId: ProjectId, color: ProjectColor | null) => void;
   readonly onMove: (projectId: ProjectId, pinned: boolean) => void;
+  readonly railPins?: ProjectSidebarSectionProps["railPins"];
   readonly onRestore: (projectId: ProjectId) => void;
   readonly newThreadVerb?: "chat" | "thread";
   readonly onNewThreadInProject?: (projectId: ProjectId) => void;
@@ -1162,6 +1172,7 @@ function ProjectGroup(props: {
                   ? {}
                   : { onColorChange: props.onColorChange })}
                 onMove={props.onMove}
+                {...(props.railPins === undefined ? {} : { railPins: props.railPins })}
                 {...(props.onNewCoordinatorInProject === undefined
                   ? {}
                   : { onNewCoordinator: props.onNewCoordinatorInProject })}
@@ -1285,8 +1296,15 @@ function ProjectActionsMenu(props: {
   readonly onRestore: (projectId: ProjectId) => void;
   readonly previousProjectId?: ProjectId;
   readonly project: ProjectSummary;
+  readonly railPins?: {
+    readonly pinnedIds: ReadonlySet<string>;
+    readonly onChange: (projectId: ProjectId, pinned: boolean) => void;
+  };
 }) {
   const { project } = props;
+  // An archived Project has no rail tile to pin.
+  const railPins = project.lifecycle === "archived" ? undefined : props.railPins;
+  const railPinned = railPins?.pinnedIds.has(String(project.id)) === true;
   const archived = project.lifecycle === "archived";
   // An archived Project is read-only, so its colour is as fixed as its name.
   const onColorChange = archived ? undefined : props.onColorChange;
@@ -1316,6 +1334,11 @@ function ProjectActionsMenu(props: {
             <OctantMenuActionItem onClick={() => props.onMove(project.id, !project.pinned)}>
               {project.pinned ? "Unpin Project" : "Pin Project"}
             </OctantMenuActionItem>
+            {railPins === undefined ? null : (
+              <OctantMenuActionItem onClick={() => railPins.onChange(project.id, !railPinned)}>
+                {railPinned ? "Unpin from rail" : "Pin to rail"}
+              </OctantMenuActionItem>
+            )}
             <OctantMenuActionItem
               disabled={!props.canMoveUp}
               onClick={() => props.onReorder(project.id, project.pinned, props.previousProjectId)}

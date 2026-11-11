@@ -1193,6 +1193,51 @@ describe("ShellSidebar", () => {
     expect(within(sidebar).queryByRole("button", { name: "More destinations" })).toBeNull();
   });
 
+  it("draws a pinned Project in the rail beside the sidebar and in the collapsed rail, and leaves More as it was", async () => {
+    const user = userEvent.setup();
+    const onOpen = vi.fn();
+    const onUnpin = vi.fn();
+    const railPins = {
+      projects: [{ id: "p9", name: "Harbor", active: false, onOpen }],
+      onUnpin,
+    };
+    const common = {
+      codeNavigation: {
+        actions: {
+          "new-code-thread": vi.fn(),
+          inbox: vi.fn(),
+          "thread-board": vi.fn(),
+          projects: vi.fn(),
+          agents: vi.fn(),
+        },
+      },
+      onAddFolder: vi.fn(),
+      onOpenNavigator: vi.fn(),
+      onOpenSettings: vi.fn(),
+      onSelectMode: vi.fn(),
+      projectSection: <nav aria-label="Projects">Project navigation</nav>,
+      railPins,
+      settings: defaultShellSettings(),
+      workspace: { ...defaultWindowWorkspace(windowId), activeMode: "code" as const },
+    };
+    const { unmount } = render(<ShellSidebar {...common} railBeside={{}} />);
+    const beside = screen.getByRole("complementary", { name: "Destinations" });
+    await user.click(within(beside).getByRole("button", { name: "Harbor" }));
+    expect(onOpen).toHaveBeenCalledOnce();
+    // Pinning adds no check items to More: it lists destinations only.
+    const more = within(beside).queryByRole("button", { name: "More destinations" });
+    if (more !== null) {
+      await user.click(more);
+      expect(screen.queryByRole("menuitemcheckbox")).toBeNull();
+      expect(screen.queryByRole("menuitem", { name: /rail/i })).toBeNull();
+    }
+    unmount();
+
+    render(<ShellSidebar {...common} rail={{ projects: [] }} />);
+    const collapsed = screen.getByRole("complementary", { name: "Octant sidebar, collapsed" });
+    expect(within(collapsed).getByRole("button", { name: "Harbor" })).toBeInTheDocument();
+  });
+
   it("renders the rows in the customized order", () => {
     render(
       <ShellSidebar

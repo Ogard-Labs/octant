@@ -622,6 +622,41 @@ describe("ProjectSidebarSection pinned ordering", () => {
   });
 });
 
+describe("ProjectSidebarSection rail pins", () => {
+  it("pins and unpins a Project to the icon rail from its row menu", async () => {
+    const user = userEvent.setup();
+    const onChange = vi.fn();
+    const props = {
+      archivedProjects: [],
+      availabilityByProject: new Map(),
+      onArchive: vi.fn(),
+      onMove: vi.fn(),
+      onProjectOpen: vi.fn(),
+      onReorder: vi.fn(),
+      onRestore: vi.fn(),
+      projects: [chatProjectA],
+    };
+    const { rerender } = render(
+      <ProjectSidebarSection {...props} railPins={{ pinnedIds: new Set(), onChange }} />,
+    );
+    screen.getByRole("button", { name: `Project actions for ${chatProjectA.name}` }).focus();
+    await user.keyboard("{ArrowDown}");
+    await user.click(await screen.findByRole("menuitem", { name: "Pin to rail" }));
+    expect(onChange).toHaveBeenCalledWith(chatProjectA.id, true);
+
+    rerender(
+      <ProjectSidebarSection
+        {...props}
+        railPins={{ pinnedIds: new Set([String(chatProjectA.id)]), onChange }}
+      />,
+    );
+    screen.getByRole("button", { name: `Project actions for ${chatProjectA.name}` }).focus();
+    await user.keyboard("{ArrowDown}");
+    await user.click(await screen.findByRole("menuitem", { name: "Unpin from rail" }));
+    expect(onChange).toHaveBeenLastCalledWith(chatProjectA.id, false);
+  });
+});
+
 describe("ProjectSidebarSection archive", () => {
   it("archives a Project from its row menu", async () => {
     const user = userEvent.setup();

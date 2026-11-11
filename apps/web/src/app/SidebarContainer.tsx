@@ -40,6 +40,7 @@ import {
 } from "../shell/pluginSidebarDestinationRegistry";
 import type { projectThreadsAccessForMode } from "../shell/shellModeRouting";
 import { ShellSidebar, type ShellSidebarProps } from "../shell/ShellSidebar";
+import { resolveRailPins, savedRailPins } from "../shell/SidebarRail";
 import type { countSidebarTiles } from "../shell/sidebarTileCounts";
 import { githubPullRequestUrl } from "../threadBoard/githubPullRequestUrl";
 import { exportThreadBundle, type resolveThreadExportClient } from "../thread/threadExport";
@@ -521,6 +522,24 @@ export const SidebarContainer = memo(function SidebarContainer(props: SidebarCon
       ),
     [allProjects],
   );
+  // Pins are saved by Project id and resolve against every active Project, in
+  // any mode: opening one is the same action as clicking it in the Projects
+  // page, and a pin must survive a visit to a mode that does not list it. A pin
+  // for a Project that no longer exists draws nothing, and is dropped from the
+  // next saved list.
+  const railPinnedSetting = settings.sidebarPinnedProjects;
+  const railPinnedProjects = useMemo(() => {
+    return resolveRailPins(
+      railPinnedSetting,
+      allProjects.filter((project) => project.lifecycle === "active"),
+    );
+  }, [allProjects, railPinnedSetting]);
+  const setRailPin = (projectId: ProjectId, pinned: boolean) => {
+    const existing = new Set<string>(allProjects.map((project) => project.id));
+    void updateSettings({
+      sidebarPinnedProjects: savedRailPins(railPinnedSetting, existing, projectId, pinned),
+    });
+  };
   const workSideArchivedProjects = useMemo(
     () =>
       allProjects.filter(
@@ -684,6 +703,23 @@ export const SidebarContainer = memo(function SidebarContainer(props: SidebarCon
           onOpenReview: openReview,
           onOpenDone: () => openSidebarList("completed"),
         }}
+        {...(sidebarRail || sidebarRailBeside
+          ? {
+              railPins: {
+                projects: railPinnedProjects.map((project) => ({
+                  id: String(project.id),
+                  name: project.name,
+                  active:
+                    activeProjectId !== undefined && String(activeProjectId) === String(project.id),
+                  onOpen: () => void openSelectedProject(project),
+                })),
+                onUnpin: (projectId: string) => {
+                  const project = railPinnedProjects.find((p) => String(p.id) === projectId);
+                  if (project !== undefined) setRailPin(project.id, false);
+                },
+              },
+            }
+          : {})}
         {...(sidebarRailBeside
           ? { railBeside: { onOpenActivity: () => openSidebarList("activity") } }
           : {})}
@@ -740,6 +776,10 @@ export const SidebarContainer = memo(function SidebarContainer(props: SidebarCon
                   activityMode={activeMode === "code" ? "code" : "work"}
                   {...(sidebarFilterQuery === "" ? {} : { searchQuery: sidebarFilterQuery })}
                   {...(sidebarListRequest === undefined ? {} : { listRequest: sidebarListRequest })}
+                  railPins={{
+                    pinnedIds: new Set(railPinnedProjects.map((project) => String(project.id))),
+                    onChange: setRailPin,
+                  }}
                   rowProperties={settings.sidebarRowProperties}
                   onRowPropertiesChange={(sidebarRowProperties) => {
                     void updateSettings({ sidebarRowProperties });
