@@ -204,9 +204,12 @@ describe("agent grants", () => {
     const first = service.authenticate(bearer);
     if (first.kind !== "authenticated") throw new Error(first.kind);
     expect(first.credential).toBe("direct");
-    expect(
-      service.authenticate({ ...bearer, authorization: `Bearer ${key.key.slice(0, -1)}A` }).kind,
-    ).toBe("unauthorized");
+    // Changes the key's last character, whatever it is; replacing it with a
+    // fixed "A" left the key unchanged whenever it already ended in one.
+    const wrongKey = `${key.key.slice(0, -1)}${key.key.endsWith("A") ? "B" : "A"}`;
+    expect(service.authenticate({ ...bearer, authorization: `Bearer ${wrongKey}` }).kind).toBe(
+      "unauthorized",
+    );
 
     clock.now += 1_000;
     expect(
