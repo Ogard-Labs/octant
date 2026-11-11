@@ -548,7 +548,7 @@ export const SidebarContainer = memo(function SidebarContainer(props: SidebarCon
   const setRailPin = useRailPinSetter<ProjectId>(
     railPinnedSetting,
     completeProjectIds,
-    (sidebarPinnedProjects) => void updateSettings({ sidebarPinnedProjects }),
+    (sidebarPinnedProjects) => updateSettings({ sidebarPinnedProjects }),
   );
   const workSideArchivedProjects = useMemo(
     () =>
