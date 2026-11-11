@@ -1867,6 +1867,9 @@ rounded letter tile: the Project's first letter, white, on the colour the person
 picked from the theme palette, or a neutral tile when none is set. The same tile
 heads the Project overview, where it is the colour picker; the row's actions menu
 offers Colour with a No colour choice, and an archived Project cannot change it.
+A Project whose folder holds a favicon or app icon shows that picture, drawn as
+an image at the same 20px, in place of the tile (and in place of the folder
+glyph in lists); the tile and glyph remain for a Project without one.
 The colour is identity, never status: it never stands in for a warning, a
 selection, or an activity mark. One fixed trailing
 status position shows a working spinner, an attention symbol, a clock when a

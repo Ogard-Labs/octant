@@ -391,6 +391,15 @@
   color: var(--oct-muted);
 }
 
+/* A Project's own icon is the picture from its folder, drawn as an image at the
+   icon scale. It keeps its proportions rather than being cropped to a square. */
+.project-icon {
+  display: block;
+  flex: none;
+  border-radius: var(--oct-radius-sm);
+  object-fit: contain;
+}
+
 .project-tile__dot {
   display: inline-block;
   width: 12px;

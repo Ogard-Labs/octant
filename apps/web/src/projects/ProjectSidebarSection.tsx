@@ -45,6 +45,7 @@ import {
   projectColorFromMenuValue,
   projectColorMenuValue,
 } from "./ProjectTile";
+import { ProjectIcon } from "./ProjectIcon";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantCheckbox } from "../ui/base/OctantCheckbox";
 import { OctantContextMenu } from "../ui/base/OctantContextMenu";
@@ -1123,7 +1124,11 @@ function ProjectGroup(props: {
                 type="button"
                 variant="bare"
               >
-                <ProjectTile project={project} />
+                <ProjectIcon
+                  fallback={<ProjectTile project={project} />}
+                  projectId={String(project.id)}
+                  size={20}
+                />
                 <span className="project-row__copy">
                   <span>
                     {project.name}

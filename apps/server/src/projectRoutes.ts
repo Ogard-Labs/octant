@@ -11,6 +11,7 @@ import {
 import type { CodeEnvironmentServiceApi } from "./codeEnvironmentService";
 import { authenticateProjectRequest } from "./projectBindingRoutes";
 import { readPrincipalRouteContext } from "./principalRouteContext";
+import type { ProjectIconReader } from "./projectIcon";
 import { ProjectServiceError, type ProjectServiceApi } from "./projectService";
 import type { ProjectMemoryProposalService } from "./projectMemory/projectMemoryProposalService";
 import { isLoopbackHostname } from "./shellRoutes";
@@ -24,6 +25,8 @@ export interface ProjectRouteDependencies {
   readonly service: ProjectServiceApi;
   readonly environmentService: CodeEnvironmentServiceApi;
   readonly windowAuthorityStore: WindowAuthorityStore;
+  /** Absent on a host with no icon lookup: every Project then has no icon. */
+  readonly icons?: ProjectIconReader;
   /** Memory changes agents asked for, answered by the window whose turn raised them. */
   readonly memoryProposals?: Pick<ProjectMemoryProposalService, "list" | "decide">;
   readonly maxRequestBodySize?: number;
@@ -62,6 +65,8 @@ export function createProjectRouteHandler(dependencies: ProjectRouteDependencies
     const isMemory = memoryMatch !== null;
     const environmentMatch = /^\/api\/projects\/([^/]+)\/environment$/.exec(url.pathname);
     const isEnvironment = environmentMatch !== null;
+    const iconMatch = /^\/api\/projects\/([^/]+)\/icon$/.exec(url.pathname);
+    const isIcon = iconMatch !== null;
     if (
       !isBootstrap &&
       !isSearch &&
@@ -70,12 +75,13 @@ export function createProjectRouteHandler(dependencies: ProjectRouteDependencies
       !isMemoryProposals &&
       !isMemoryProposalDecision &&
       !isMemory &&
-      !isEnvironment
+      !isEnvironment &&
+      !isIcon
     )
       return undefined;
     const isPost = isCommands || isMemoryCommands || isMemoryProposalDecision;
     if (
-      ((isBootstrap || isSearch || isMemory || isMemoryProposals || isEnvironment) &&
+      ((isBootstrap || isSearch || isMemory || isMemoryProposals || isEnvironment || isIcon) &&
         request.method !== "GET") ||
       (isPost && request.method !== "POST")
     ) {
@@ -106,7 +112,7 @@ export function createProjectRouteHandler(dependencies: ProjectRouteDependencies
     if (
       (isBootstrap && url.search !== "") ||
       (isSearch && [...url.searchParams.keys()].some((key) => key !== "q")) ||
-      ((isPost || isMemory || isMemoryProposals) && url.search !== "") ||
+      ((isPost || isMemory || isMemoryProposals || isIcon) && url.search !== "") ||
       (isEnvironment &&
         [...url.searchParams.keys()].some((key) => key !== "threadId" && key !== "fresh"))
     ) {
@@ -139,6 +145,38 @@ export function createProjectRouteHandler(dependencies: ProjectRouteDependencies
           200,
           origin,
         );
+      if (isIcon) {
+        let projectId;
+        try {
+          projectId = decodeProjectId(decodeURIComponent(iconMatch[1] ?? ""));
+        } catch {
+          return response({ category: "invalid", message: "Project ID is invalid." }, 400, origin);
+        }
+        const icon = (await dependencies.icons?.read(windowId, projectId)) ?? { status: "none" };
+        // No icon is the ordinary case, so it is a plain refusal, not a failure.
+        if (icon.status === "none") {
+          return response(
+            { category: "not-found", message: "This Project has no icon." },
+            404,
+            origin,
+          );
+        }
+        const headers = corsHeaders(origin);
+        headers.set("etag", icon.etag);
+        // Revalidate on every use; the body is small and the person may edit the file.
+        headers.set("cache-control", "private, no-cache");
+        headers.set("x-content-type-options", "nosniff");
+        // An SVG here is the Project's own file: it may draw, never run.
+        headers.set(
+          "content-security-policy",
+          "default-src 'none'; style-src 'unsafe-inline'; sandbox",
+        );
+        if (request.headers.get("if-none-match") === icon.etag) {
+          return new Response(null, { status: 304, headers });
+        }
+        headers.set("content-type", icon.mediaType);
+        return new Response(icon.bytes, { status: 200, headers });
+      }
       if (isEnvironment) {
         const freshValue = url.searchParams.get("fresh");
         if (freshValue !== null && freshValue !== "1") {
