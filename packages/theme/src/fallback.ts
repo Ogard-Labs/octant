@@ -77,10 +77,12 @@ export function applySemanticOverrides(
   return { tokens, droppedOverrides: dropped };
 }
 
-// Text roles are checked against the surface they sit on, so every surface
-// lands first; within each group an override scoped to this mode follows the
-// shared ones and wins. Array order alone checked a shared accent-foreground
-// against the preset accent when a dark-only accent came after it.
+// Only the override that wins a role in this mode is applied: one scoped to
+// the mode replaces a shared one, which is never checked, or a shared ink
+// meant for the other mode was refused here. Text roles are checked against
+// the surface they sit on, so every surface lands first; array order alone
+// checked a shared accent-foreground against the preset accent when a
+// dark-only accent came after it.
 function inApplyOrder(
   overrides: ReadonlyArray<ThemeSemanticOverrideEntry>,
   mode: "light" | "dark",
@@ -90,10 +92,15 @@ function inApplyOrder(
       ? getRoleDefinition(entry.role).contrastLevel
       : undefined;
     const text = level === "normal-text" || level === "large-text";
-    return (text ? 2 : 0) + (entry.mode === undefined ? 0 : 1);
+    return text ? 1 : 0;
   };
+  const scopedRoles = new Set(
+    overrides.filter((entry) => entry.mode === mode).map((entry) => entry.role),
+  );
   return overrides
-    .filter((entry) => entry.mode === undefined || entry.mode === mode)
+    .filter((entry) =>
+      entry.mode === undefined ? !scopedRoles.has(entry.role) : entry.mode === mode,
+    )
     .toSorted((a, b) => rank(a) - rank(b));
 }
 

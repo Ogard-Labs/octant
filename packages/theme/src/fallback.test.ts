@@ -154,6 +154,18 @@ describe("theme fallback policy", () => {
     ]);
   });
 
+  it("never checks a shared override that a mode-scoped one replaces", () => {
+    const semanticOverrides = [
+      { role: "accent-foreground", color: "#ffffff" },
+      { role: "accent", color: "#ffffff", mode: "dark" },
+      { role: "accent-foreground", color: "#141414", mode: "dark" },
+    ] as const;
+    for (const mode of ["light", "dark"] as const) {
+      const resolved = resolveEffectiveTokens(makeSettings({ mode, semanticOverrides }), false);
+      expect(resolved.droppedOverrides).toEqual([]);
+    }
+  });
+
   it("keeps a non-text accent override even when its contrast against the workspace is low", () => {
     const resolved = resolveEffectiveTokens(
       makeSettings({ mode: "dark", semanticOverrides: [{ role: "accent", color: "#222225" }] }),
