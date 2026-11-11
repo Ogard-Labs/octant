@@ -2504,12 +2504,14 @@ Status: Built. Since: —. Detail: [Canvas visuals: Data visualisation](canvas-v
 
 ### Project design systems
 
-A Work or Code Project's design system is a `DESIGN.md` in its folder. Octant lists, draws, edits, and creates these files, every Work and Code turn follows the governing one, and Canvas designs draw with its tokens (maintainer request, 2026-11-10).
+A Work or Code Project's design system is a `DESIGN.md` in its folder. Octant lists, draws, edits, and creates these files, every Work and Code turn follows the governing one, Canvas designs draw with its tokens, typed Canvas blocks take its colours, and a person can swap the design system a Project or a single Canvas follows (maintainer requests, 2026-11-10 and 2026-11-11).
 
-- The file is the only source: nothing is stored on the Project record or journaled. The top-level `DESIGN.md` is the Project's own, else the only one; the nearest `DESIGN.md` above a file governs it.
+- The file is the source of its content, never copied onto the Project record or journaled. Which file is the Project's own is the person's choice (any `DESIGN.md`, or none), journaled as `project.design-system-changed@1`; without one, the top-level file, else the only one. A chosen file that is gone leaves the Project with none. The nearest `DESIGN.md` above a file governs it.
 - Front-matter colours, typography, radii, and spacing become Canvas brand tokens under the design brand rule; each is reported carried, adjusted (a font stack without web faces), or refused with its reason. At most 32 are carried.
 - Every Work and Code turn carries the rule to follow it and the Project's own file as keyed standing context, read from the folder each turn (a Code turn from its worktree). Nothing is added for a server Project's remote folder.
-- Canvas `describe` returns the design system's tokens for every design kind (documents, decks, sites, screens, UI kits, flows); a running design copies the values into its own stylesheet, and typed blocks keep the reader's theme. Tokens from `DESIGN.md` take the place of the brand kit.
+- Canvas `describe` returns the design system's tokens for every design kind (documents, decks, sites, screens, UI kits, flows); a running design copies the values into its own stylesheet. Tokens from `DESIGN.md` take the place of the brand kit.
+- A Canvas may follow a design system (Canvas schema version 27): its charts, tables, metrics, treemaps, and diagrams take their series colours (the `chart-1` to `chart-6` palette, else primary and secondary) and accent from it on screen, in Present, and in the HTML export; tones and text keep the reader's theme. A Canvas an agent creates in the Project follows it.
+- A person switches a Canvas to another of its Project's design systems, or none, from its More menu; the host reads the file under the Canvas's own Project and journals the switch as a version that also redraws brand designs. Not admitted for a paired device.
 - Only a window on this host may list, read, create, or save one; a save replaces only the revision it opened; no read or write follows a link; files over 256 KiB are left to the editor.
 
 Status: Built. Since: 2026-11-10. Detail: [Project design systems](design-systems.md).

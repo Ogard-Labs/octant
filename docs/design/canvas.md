@@ -240,8 +240,10 @@ Canvas owned by its thread (a chat provenance with no Project) at version
 `title`, `subtitle`, and point `note` and `emphasis` at version 22, the
 `flow` block at version 23, the mockup library at version 24 (its new
 components, a node's `progress` and `defId` fields, and a block's
-`definitions`), the `deck` block at version 25, and flow callouts at
-version 26, so a document that
+`definitions`), the `deck` block at version 25, flow callouts at
+version 26, and a document's `designSystem` at version 27 (the design system
+its typed blocks draw their colours from; see
+[Project design systems](design-systems.md#where-it-is-used)), so a document that
 declares an earlier version and carries one is refused as a declared future
 version. Version 20 adds no block or field a share carries, so a share names a
 block authored at 20 as 19 under share version 10. Version 21 adds the
@@ -300,7 +302,11 @@ copy of the tokens, so later edits to the kit change new designs, not ones
 already made. A Work or Code Project whose own `DESIGN.md` carries tokens lends
 those instead: `describe` returns them as `designSystem` (path, name, `brand`)
 with guidance that every design kind follows the design system, and the kit is
-not returned ([Project design systems](design-systems.md#where-it-is-used)).
+not returned. A Canvas the agent creates there carries that design system, so
+its typed blocks draw in its colours, and a person switches a Canvas to
+another of the Project's design systems, or none, from its More menu
+(`canvas-design-system-apply`, journaled as a version)
+([Project design systems](design-systems.md#where-it-is-used)).
 
 A share carries a brand (validated again before it leaves) and the diagram
 fields, so share version 11 names blocks up to Canvas version 21 and a share
