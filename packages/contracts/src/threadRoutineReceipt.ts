@@ -1,5 +1,5 @@
 import { Schema } from "effect";
-import { AutomationScheduledTrigger } from "./automation";
+import { AutomationScheduledTrigger, MAX_AUTOMATION_DISPLAY_NAME_LENGTH } from "./automation";
 import { UtcTimestamp } from "./events";
 
 const strict = { parseOptions: { onExcessProperty: "error" as const } };
@@ -19,7 +19,9 @@ const boundedNonEmptyText = (maximumBytes: number) =>
  */
 export const ThreadRoutineReceipt = Schema.Struct({
   routineId: boundedNonEmptyText(255),
-  name: boundedNonEmptyText(256),
+  // The routine's own name limit, in characters: a byte limit would reject a
+  // long non-ASCII name the routine accepted, after the routine already exists.
+  name: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(MAX_AUTOMATION_DISPLAY_NAME_LENGTH)),
   trigger: AutomationScheduledTrigger,
   firstRunAt: UtcTimestamp,
   paused: Schema.Boolean,
