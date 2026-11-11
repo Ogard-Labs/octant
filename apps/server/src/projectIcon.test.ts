@@ -1,3 +1,4 @@
+import { execFileSync } from "node:child_process";
 import { mkdir, mkdtemp, realpath, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -107,6 +108,16 @@ describe("Project icon lookup", () => {
     await mkdir(join(root, "favicon.svg"));
 
     expect(await findProjectIcon(root)).toEqual({ status: "none" });
+  });
+
+  it("refuses a named pipe that is called like an icon without waiting on it", async () => {
+    const root = await folder();
+    execFileSync("mkfifo", [join(root, "favicon.svg")]);
+    await writeFile(join(root, "icon.png"), PNG);
+
+    const found = await findProjectIcon(root);
+
+    expect(found.status === "found" && found.mediaType).toBe("image/png");
   });
 
   it("accepts an SVG that opens with an XML declaration and a comment", async () => {

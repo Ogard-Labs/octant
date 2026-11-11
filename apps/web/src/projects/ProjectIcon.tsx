@@ -42,7 +42,11 @@ export function createProjectIconSource(input: {
       if (input.windowCapability !== undefined) {
         headers["x-octant-window-capability"] = input.windowCapability;
       }
-      const request = (async (): Promise<string | null> => {
+      // Only a definite answer is kept: the icon (200) or none (404). A thrown
+      // error, a 401 or a 5xx says nothing about the folder, so the entry is
+      // dropped and the next mount asks once more. The effect runs per mount,
+      // never per render or navigation refresh, so this cannot become a loop.
+      const request = (async (): Promise<{ url: string | null; definite: boolean }> => {
         try {
           // A redirect from the judged URL could forward the credential to
           // another host in plaintext, so none is followed.
@@ -50,13 +54,15 @@ export function createProjectIconSource(input: {
             new URL(`/api/projects/${encodeURIComponent(projectId)}/icon`, input.serverUrl),
             { headers, redirect: "error" },
           );
-          if (!response.ok) return null;
-          return URL.createObjectURL(await response.blob());
+          if (response.status === 404) return { url: null, definite: true };
+          if (!response.ok) return { url: null, definite: false };
+          return { url: URL.createObjectURL(await response.blob()), definite: true };
         } catch {
-          return null;
+          return { url: null, definite: false };
         }
-      })().then((url) => {
-        answers.set(projectId, url);
+      })().then(({ url, definite }) => {
+        if (definite) answers.set(projectId, url);
+        else pending.delete(projectId);
         return url;
       });
       pending.set(projectId, request);

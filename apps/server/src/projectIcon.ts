@@ -1,5 +1,5 @@
 import { constants } from "node:fs";
-import { open, realpath } from "node:fs/promises";
+import { lstat, open, realpath } from "node:fs/promises";
 import { join, sep } from "node:path";
 import type { ProjectId, WindowId } from "@octant/contracts";
 import type { ProjectService } from "./projectService";
@@ -96,10 +96,18 @@ async function readCandidate(
     // the person's own arrangement, one that leaves it is never followed.
     const real = await realpath(join(root, candidate));
     if (!insideRoot(root, real)) return undefined;
-    // Non-blocking so a FIFO swapped in under the name cannot hold the open.
-    const handle = await open(real, constants.O_RDONLY | (constants.O_NONBLOCK ?? 0));
+    const resolved = await lstat(real, { bigint: true });
+    // Non-blocking so a FIFO swapped in under the name cannot hold the open, and
+    // no-follow so a link swapped in after the check is refused by the open.
+    const handle = await open(
+      real,
+      constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0) | (constants.O_NONBLOCK ?? 0),
+    );
     try {
       const details = await handle.stat();
+      // The handle must be the very file that was judged inside the folder.
+      const opened = await handle.stat({ bigint: true });
+      if (opened.dev !== resolved.dev || opened.ino !== resolved.ino) return undefined;
       if (!details.isFile() || details.size > MAX_PROJECT_ICON_BYTES || details.size === 0) {
         return undefined;
       }
