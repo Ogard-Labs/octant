@@ -3502,6 +3502,15 @@ html:not([data-octant-reduced-transparency="true"]) .shell--material-translucent
   background: transparent;
 }
 
+/* Before the shell exists the boundary is the whole window, and the document
+   already carries the right ground: the page colour in a browser, the app
+   ground in a native window, and nothing at all once the host's glass is on.
+   Painting the theme's workspace colour on top of that was a flat panel (black
+   on the dark default) between the window opening and the shell arriving. */
+#root > .shell-boundary {
+  background: transparent;
+}
+
 /* In a sheet the boundary reports on the sheet, on the sheet's own fill and
    inside its box. A sheet is drawn outside the shell, so the rule above does
    not reach it: in the packaged app Settings' sheet was a black panel the
