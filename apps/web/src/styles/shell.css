@@ -595,7 +595,7 @@ html[data-octant-native-host="true"]
   gap: var(--oct-space-1);
   padding: 0 var(--oct-space-2);
   border: 1px solid var(--oct-border);
-  border-radius: var(--oct-radius-md);
+  border-radius: var(--oct-radius-sm);
   /* Outlined, not filled. The fill named here was a token nothing defined, so
      this control has always drawn clear; the rule now says what is rendered. */
   background: transparent;
@@ -818,10 +818,16 @@ html[data-octant-native-host="true"]
   content: "";
 }
 
-/* The hairline darkens to the meta ink under the pointer, and no accent comes
-   with a press: the accent line stayed lit on a handle that had only been
-   clicked. Keyboard focus draws the shared focus edge, not a second colour. */
+/* A handle's hairline is the border at rest, the strong border under the
+   pointer, and the meta ink, doubled in width, while it is grabbed; no accent
+   comes with a press (the accent line stayed lit on a handle that had only
+   been clicked). Keyboard focus draws the shared focus edge, not a colour. */
 .shell-frame__sidebar-resize:hover::before {
+  background: var(--octant-border-strong);
+}
+
+.shell-frame__sidebar-resize:active::before {
+  width: 2px;
   background: var(--oct-meta);
 }
 
@@ -2139,6 +2145,12 @@ html[data-octant-native-host="true"]
     border-bottom-left-radius: var(--oct-radius-md);
   }
 
+  /* With the dock open the panel's right edge meets the dock, not the window:
+     an inner seam, square. The dock carries the window's corner. */
+  .shell--wide-context-open .bottom-utility-panel {
+    border-bottom-right-radius: 0;
+  }
+
   /* The window controls float over the workspace's first rail. A reader
      page's header started inside that rail and crowded the controls, so the
      page starts below it and its header pins there. */
@@ -2163,6 +2175,15 @@ html[data-octant-native-host="true"]
     )
     > .workspace-pane__panel {
     border-top-left-radius: var(--oct-radius-md);
+  }
+
+  /* With no rail the panel meets the window's edge: square, as the sheet is. */
+  .shell--sidebar-collapsed:not(.shell--sidebar-rail).shell-frame
+    .workspace-pane:is([data-surface-kind="welcome"], [data-surface-kind="draft-thread"]):not(
+      :has(> .workspace-pane__header)
+    )
+    > .workspace-pane__panel {
+    border-top-left-radius: 0;
   }
 
   /* A start screen has no pane heading to hold the title band open. Without

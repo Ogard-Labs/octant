@@ -30,10 +30,16 @@
   content: "";
 }
 
-/* The hairline darkens to the meta ink under the pointer, and no accent comes
-   with a press: the accent line stayed lit on a handle that had only been
-   clicked. Keyboard focus draws the shared focus edge, not a second colour. */
+/* A handle's hairline is the border at rest, the strong border under the
+   pointer, and the meta ink, doubled in width, while it is grabbed; no accent
+   comes with a press (the accent line stayed lit on a handle that had only
+   been clicked). Keyboard focus draws the shared focus edge, not a colour. */
 .right-utility-dock__resize:hover::before {
+  background: var(--octant-border-strong);
+}
+
+.right-utility-dock__resize:active::before {
+  width: 2px;
   background: var(--oct-meta);
 }
 
@@ -667,6 +673,11 @@
 }
 
 .bottom-utility-panel__resize:hover::before {
+  background: var(--octant-border-strong);
+}
+
+.bottom-utility-panel__resize:active::before {
+  height: 2px;
   background: var(--oct-meta);
 }
 

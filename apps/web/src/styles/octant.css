@@ -447,8 +447,14 @@ h4 {
    control they were on from the one under the pointer (WCAG 2.4.7). The edge
    is an outline, so it moves no layout and follows the control's own radius;
    it is inset, so a dense row or a scrolling container cannot clip it; and a
-   pointer press does not match :focus-visible, so clicking paints nothing. */
+   pointer press does not match :focus-visible, so clicking paints nothing. A
+   pane split's focusable element is an invisible range input inside its
+   visible handle, so the handle takes the edge when the input has it. */
 :focus-visible {
+  outline: 2px solid var(--oct-focus-edge);
+  outline-offset: -2px;
+}
+.workspace-split__resize:has(:focus-visible) {
   outline: 2px solid var(--oct-focus-edge);
   outline-offset: -2px;
 }
@@ -3843,6 +3849,9 @@ input.switch:checked::after {
   inset-inline: -12px;
 }
 .split-handle:hover {
+  background: var(--octant-border-strong);
+}
+.split-handle:active {
   background: var(--oct-meta);
 }
 /* while dragging, stop the pointer selecting text in the panes it crosses */

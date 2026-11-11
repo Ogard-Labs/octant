@@ -102,6 +102,60 @@ describe("the public-block visual language", () => {
     expect(shell).not.toMatch(/border-radius: 0 0 var\(--oct-radius-md\) var\(--oct-radius-md\);/);
   });
 
+  it("squares the corners that meet the window's edge or an inner seam", () => {
+    const shell = readFileSync(join(webRoot, "styles/shell.css"), "utf8");
+    const surface = readFileSync(join(webRoot, "styles/surface.css"), "utf8");
+    // With no rail the ground and the start-screen clip reach the window's left
+    // edge like the sheet, so their left corners are square, not a nick of frame.
+    expect(surface).toMatch(
+      /\.shell--app-backdrop-sidebar:not\(\s*\.shell--rail-beside,\s*\.shell--sidebar-rail\s*\)\s*> \.app-backdrop\[data-placement="shell"\] \{\s*border-radius: 0 var\(--oct-radius-md\) var\(--octant-sheet-corner-outer\) 0;/,
+    );
+    expect(shell).toMatch(
+      /\.shell--sidebar-collapsed:not\(\.shell--sidebar-rail\)\.shell-frame\s+\.workspace-pane:is\([^{]*> \.workspace-pane__panel \{\s*border-top-left-radius: 0;/,
+    );
+    // The bottom panel meets the dock, not the window, while the dock is open.
+    expect(shell).toMatch(
+      /\.shell--wide-context-open \.bottom-utility-panel \{\s*border-bottom-right-radius: 0;/,
+    );
+    // The find bar sits below the transcript's edge fade so it is never dimmed.
+    const chat = readFileSync(join(webRoot, "styles/chat.css"), "utf8");
+    expect(chat).toMatch(/\.transcript-find \{[^}]*top: var\(--oct-space-3\);/);
+    // The Open in trigger is a band control: the control radius, not the card's.
+    expect(shell).toMatch(/\.open-in-menu__trigger \{[^}]*border-radius: var\(--oct-radius-sm\);/);
+  });
+
+  it("gives every divider a rest, hover, grabbed and keyboard state without accent", () => {
+    const dock = readFileSync(join(webRoot, "styles/dock.css"), "utf8");
+    const shell = readFileSync(join(webRoot, "styles/shell.css"), "utf8");
+    const styles = readFileSync(join(webRoot, "styles.css"), "utf8");
+    const system = readFileSync(join(webRoot, "styles/octant.css"), "utf8");
+    for (const [source, handle] of [
+      [dock, ".right-utility-dock__resize"],
+      [dock, ".bottom-utility-panel__resize"],
+      [shell, ".shell-frame__sidebar-resize"],
+    ] as const) {
+      expect(source).toContain(
+        `${handle}:hover::before {\n  background: var(--octant-border-strong);`,
+      );
+      expect(source).toMatch(
+        new RegExp(
+          `${handle.replace(/\./g, "\\.")}:active::before \\{\\s*(?:width|height): 2px;\\s*background: var\\(--oct-meta\\);`,
+        ),
+      );
+    }
+    expect(styles).toMatch(
+      /\.workspace-split\[data-orientation="horizontal"\] > \.workspace-split__resize:active::before \{\s*width: 2px;\s*background: var\(--oct-meta\);/,
+    );
+    expect(styles).toMatch(
+      /\.workspace-split\[data-orientation="vertical"\] > \.workspace-split__resize:active::before \{\s*height: 2px;\s*background: var\(--oct-meta\);/,
+    );
+    // A pane split's focusable element is an invisible range input; the
+    // visible handle takes the one shared focus edge when it has the keyboard.
+    expect(system).toMatch(
+      /\n\.workspace-split__resize:has\(:focus-visible\) \{\s*outline: 2px solid var\(--oct-focus-edge\);\s*outline-offset: -2px;/,
+    );
+  });
+
   it("fades the transcript at its edges and keeps the rail's foot on screen", () => {
     const system = readFileSync(join(webRoot, "styles/octant.css"), "utf8");
     const code = readFileSync(join(webRoot, "styles/code.css"), "utf8");
@@ -138,7 +192,8 @@ describe("the public-block visual language", () => {
       /\.dock-quick-tools__tool:not\(\[data-labelled="true"\]\) \{\s*width: var\(--oct-rail-button-h\);/,
     );
     // A divider the pointer rests on after a click kept a bright accent line.
-    // Hover is the meta ink; keyboard focus is the one shared focus edge.
+    // Hover is the strong border, grabbed the meta ink; keyboard focus is the one
+    // shared focus edge.
     const strays: string[] = [];
     for (const path of cssFiles(webRoot)) {
       const css = readFileSync(path, "utf8").replace(/\/\*[\s\S]*?\*\//g, "");
