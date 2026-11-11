@@ -165,7 +165,9 @@ replace the directory while preserving the underlying Project selection.
 
 **Project icons.** A Project shows its own icon wherever Projects are listed:
 the sidebar's Project rows, the icon rail's Project tiles, the Projects
-directory, and the Project options in the composer's Project picker. The icon is
+directory, the Project options in the composer's Project picker and in the move
+dialog, the Project chip on a thread row, the Work overview's Project line, the
+Inbox's Project group headings, and the Continue cards on Code Home. The icon is
 the favicon or app icon in the Project's folder. The host finds it, because the
 renderer never reads disk: it tries a short fixed list of well-known relative
 paths (`favicon.*`, `public/`, `static/`, `app/`, `src/app/`, `assets/` and
@@ -184,8 +186,8 @@ inlines SVG markup. The picture is fetched once per Project per session, not
 per render or per navigation poll. The row's letter tile or folder glyph shows
 while it loads, when the Project has none, and when the image fails. A Project's
 colour still shows in its overview and menus but not on a row that shows an
-icon. Chips that carry only a Project's name (the thread-row Project chip, the
-Work overview, the inbox) keep the folder glyph. Nothing is fetched from a
+icon. A thread with no Project keeps the folder glyph and asks for nothing, and
+many rows in one Project share the one request. Nothing is fetched from a
 network, and a thread's authority does not change: the host shows the person
 their own files.
 

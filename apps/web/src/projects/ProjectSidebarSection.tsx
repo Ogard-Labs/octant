@@ -1588,6 +1588,9 @@ function ActivityThreadButton(props: {
           ? {}
           : { coordinatorName: props.thread.coordinatorTitle })}
         {...(shows.project ? { projectName: props.thread.projectName } : {})}
+        {...(shows.project && props.thread.projectId !== undefined
+          ? { projectId: String(props.thread.projectId) }
+          : {})}
         {...(props.thread.provider === undefined ? {} : { provider: props.thread.provider })}
         {...(pullRequest === undefined ? {} : { pullRequest })}
         status={

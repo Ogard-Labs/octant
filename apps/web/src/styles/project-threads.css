@@ -803,6 +803,13 @@
   text-align: left;
 }
 
+.move-thread__title {
+  display: inline-flex;
+  min-width: 0;
+  align-items: center;
+  gap: var(--oct-space-2);
+}
+
 .move-thread__folder,
 .move-thread__reason {
   color: var(--oct-muted);
