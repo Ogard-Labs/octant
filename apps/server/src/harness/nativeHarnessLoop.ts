@@ -264,6 +264,12 @@ interface SessionState {
   steps: number;
   /** Steps this turn whose tool calls arrived malformed; a model that will not correct itself is cut off. */
   selfCorrections: number;
+  /**
+   * Where the agent's own text stands in this turn, once it has written any:
+   * whether the request that wrote it has ended, and whether it ends in a line
+   * break.
+   */
+  agentText: { messageEnded: boolean; endsWithNewline: boolean } | undefined;
   /** Whether this turn sent a request to summarize earlier turns; what it cost is in `usage`. */
   compactedThisTurn: boolean;
   /** The person's compaction point for this session; earlier turns are summarized once a step passes it. */
@@ -414,6 +420,7 @@ export function createNativeHarnessConnection(
       stopped: false,
       steps: 0,
       selfCorrections: 0,
+      agentText: undefined,
       compactedThisTurn: false,
       compactionPoint: input.compactionPoint,
       contextTokens: undefined,
@@ -578,7 +585,9 @@ export function createNativeHarnessConnection(
                     : { requestStartedAt: state.requestStartedAt }),
                   estimatedCostUsd: state.requestEstimateUsd,
                 }
-              : { ...event },
+              : event.kind === "text-delta"
+                ? { ...event, text: withMessageBreak(state, event.text) }
+                : { ...event },
           );
         },
       };
@@ -795,6 +804,7 @@ export function createNativeHarnessConnection(
       // This request is now included in the settled total even if journaling fails below.
       chargeRequest(state, response.usage);
       state.requestEstimateUsd = 0;
+      if (state.agentText !== undefined) state.agentText.messageEnded = true;
       if (response.toolCalls.length > 0) {
         const calls = response.toolCalls;
         // The model's own call is journaled either way: a malformed call is
@@ -1375,6 +1385,7 @@ export function createNativeHarnessConnection(
             state.turnMessage = user;
             state.steps = 0;
             state.selfCorrections = 0;
+            state.agentText = undefined;
             state.compactedThisTurn = false;
             state.usage = { inputTokens: 0, outputTokens: 0, costUsd: 0 };
             state.latestReportedUsage = undefined;
@@ -1769,6 +1780,26 @@ function interruptedResults(
           },
     ),
   }));
+}
+
+/**
+ * The agent's text as it is delivered. Each request is one agent message, a
+ * model puts no break at a message's edges, and a turn's deltas are joined
+ * into one transcript, so an agent's note before a tool step and its text
+ * after it read as one sentence ("I will list the files now.I saw 3 files.",
+ * from a live turn). The first text of a later request in the turn therefore
+ * opens a new paragraph, unless a line break is already there. The model's
+ * own history keeps each message as it was sent.
+ */
+function withMessageBreak(state: SessionState, text: string): string {
+  if (text.length === 0) return text;
+  const previous = state.agentText;
+  const separator =
+    previous?.messageEnded === true && !previous.endsWithNewline && !text.startsWith("\n")
+      ? "\n\n"
+      : "";
+  state.agentText = { messageEnded: false, endsWithNewline: text.endsWith("\n") };
+  return `${separator}${text}`;
 }
 
 /**
