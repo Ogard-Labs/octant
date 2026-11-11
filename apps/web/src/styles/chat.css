@@ -708,7 +708,7 @@
   padding: var(--oct-space-1) var(--oct-space-1);
   color: var(--oct-fg);
   background: var(--octant-control);
-  border: 1px solid var(--octant-border-strong);
+  border: 1px solid var(--input);
   border-radius: 4px;
   font: inherit;
 }

@@ -40,6 +40,10 @@ export function ThemeAppearanceEditor(props: {
   const focusedSetting = props.focusedSetting;
   const theme = props.controller;
   const draft = theme.draft;
+  const systemPrefersDark = useMediaQueryMatches("(prefers-color-scheme: dark)");
+  // The chips show the fill the page will really use in the current mode.
+  const shownMode: "light" | "dark" =
+    draft?.mode === "dark" || (draft?.mode !== "light" && systemPrefersDark) ? "dark" : "light";
   // Stored "default" and the retired "vivid" both draw the colour look.
   const shownStyle: ThemeStyle = draft?.style === "mono" ? "mono" : "default";
   const availablePresets = THEME_PRESETS.filter((preset) =>
@@ -215,7 +219,7 @@ export function ThemeAppearanceEditor(props: {
                     style={
                       {
                         "--settings-accent-swatch":
-                          swatchDotColor(swatch) ?? "var(--octant-text-primary)",
+                          swatchDotColor(swatch, shownMode) ?? "var(--octant-text-primary)",
                       } as CSSProperties
                     }
                     title={swatch.label}
@@ -523,4 +527,5 @@ function ThemeTransfer(props: { readonly controller: ThemeController; readonly f
 
 import { useState, type CSSProperties, type ReactNode } from "react";
 import { OctantAlert } from "../ui/base/OctantAlert";
+import { useMediaQueryMatches } from "./useMediaQueryMatches";
 import { moveWithinRadioGroup } from "../ui/base/radioGroupKeys";

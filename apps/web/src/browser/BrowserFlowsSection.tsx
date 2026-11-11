@@ -5,6 +5,7 @@ import { useCallback, useEffect, useState } from "react";
 import { SettingRow, SettingsSection, SettingsState } from "../settings/primitives";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantConfirmDialog } from "../ui/base/OctantConfirmDialog";
+import { OctantDialogPresence } from "../ui/base/OctantDialogPresence";
 
 export interface BrowserFlowsSectionProps {
   readonly client: Pick<BrowserAutomationClient, "manageFlows">;
@@ -127,27 +128,31 @@ export function BrowserFlowsSection(props: BrowserFlowsSectionProps) {
         </div>
       ) : null}
       {notice === undefined ? null : <SettingsState kind="empty">{notice}</SettingsState>}
-      {running === undefined ? null : (
-        <BrowserFlowRunDialog
-          key={`${running.projectId}:${running.name}`}
-          client={client}
-          flow={running}
-          onClose={() => setRunning(undefined)}
-        />
-      )}
-      {confirming === undefined ? null : (
-        <OctantConfirmDialog
-          confirmLabel="Delete"
-          destructive
-          onCancel={() => setConfirming(undefined)}
-          onConfirm={() => void remove(confirming)}
-          pending={deleting}
-          title={`Delete “${confirming.name}”?`}
-        >
-          The agent can no longer replay this flow in {confirming.projectLabel}. You can ask it to
-          record the check again.
-        </OctantConfirmDialog>
-      )}
+      <OctantDialogPresence>
+        {running === undefined ? null : (
+          <BrowserFlowRunDialog
+            key={`${running.projectId}:${running.name}`}
+            client={client}
+            flow={running}
+            onClose={() => setRunning(undefined)}
+          />
+        )}
+      </OctantDialogPresence>
+      <OctantDialogPresence>
+        {confirming === undefined ? null : (
+          <OctantConfirmDialog
+            confirmLabel="Delete"
+            destructive
+            onCancel={() => setConfirming(undefined)}
+            onConfirm={() => void remove(confirming)}
+            pending={deleting}
+            title={`Delete “${confirming.name}”?`}
+          >
+            The agent can no longer replay this flow in {confirming.projectLabel}. You can ask it to
+            record the check again.
+          </OctantConfirmDialog>
+        )}
+      </OctantDialogPresence>
     </SettingsSection>
   );
 }

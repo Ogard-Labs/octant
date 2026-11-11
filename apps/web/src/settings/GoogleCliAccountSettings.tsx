@@ -9,6 +9,7 @@ import { useEffect, useRef, useState, type FormEvent } from "react";
 import { absoluteTimeFormatter } from "../lib/relativeTime";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantConfirmDialog } from "../ui/base/OctantConfirmDialog";
+import { OctantDialogPresence } from "../ui/base/OctantDialogPresence";
 import { OctantInput } from "../ui/base/OctantInput";
 import { OctantTextarea } from "../ui/base/OctantTextarea";
 import { SettingRow, SettingsSection, SettingsState } from "./primitives";
@@ -329,30 +330,32 @@ export function GoogleCliAccountSettings({
           <SettingsState kind="error">{shown.problem}</SettingsState>
         )}
       </div>
-      {selection === undefined ? null : (
-        <OctantConfirmDialog
-          title="Use this service account for commands?"
-          confirmLabel="Use this service account"
-          pending={busy}
-          restoreFocus={review}
-          onCancel={() => setCandidate(undefined)}
-          onConfirm={() => void configure()}
-          details={
-            <div className="break-words">
-              <p>{selection.serviceAccountEmail}</p>
-              <ul>
-                {selection.scopes.map((scope) => (
-                  <li key={scope}>{scope}</li>
-                ))}
-              </ul>
-            </div>
-          }
-        >
-          Allow gcloud commands in Octant&apos;s own shell to use short-lived tokens for this
-          account and these scopes. The service-account key remains in the linked store and broker.
-          The account&apos;s IAM roles can allow access to several Projects.
-        </OctantConfirmDialog>
-      )}
+      <OctantDialogPresence>
+        {selection === undefined ? null : (
+          <OctantConfirmDialog
+            title="Use this service account for commands?"
+            confirmLabel="Use this service account"
+            pending={busy}
+            restoreFocus={review}
+            onCancel={() => setCandidate(undefined)}
+            onConfirm={() => void configure()}
+            details={
+              <div className="break-words">
+                <p>{selection.serviceAccountEmail}</p>
+                <ul>
+                  {selection.scopes.map((scope) => (
+                    <li key={scope}>{scope}</li>
+                  ))}
+                </ul>
+              </div>
+            }
+          >
+            Allow gcloud commands in Octant&apos;s own shell to use short-lived tokens for this
+            account and these scopes. The service-account key remains in the linked store and
+            broker. The account&apos;s IAM roles can allow access to several Projects.
+          </OctantConfirmDialog>
+        )}
+      </OctantDialogPresence>
     </SettingsSection>
   );
 }

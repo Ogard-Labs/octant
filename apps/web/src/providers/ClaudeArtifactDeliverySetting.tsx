@@ -2,6 +2,7 @@ import type { ClaudeProviderInstance, ProviderObservedState } from "@octant/cont
 import { useRef, useState } from "react";
 import { OctantAlert } from "../ui/base/OctantAlert";
 import { OctantConfirmDialog } from "../ui/base/OctantConfirmDialog";
+import { OctantDialogPresence } from "../ui/base/OctantDialogPresence";
 import { OctantSwitch } from "../ui/base/OctantSwitch";
 import { SettingRow } from "../settings/primitives";
 
@@ -71,20 +72,22 @@ export function ClaudeArtifactDeliverySetting(props: ClaudeArtifactDeliverySetti
       <OctantAlert id={warningId} role="status" tone="warning">
         {CLAUDE_ARTIFACTS_TELEMETRY_WARNING}
       </OctantAlert>
-      {confirming ? (
-        <OctantConfirmDialog
-          confirmLabel="Enable Claude artifacts"
-          onCancel={() => setConfirming(false)}
-          onConfirm={() => {
-            setConfirming(false);
-            void props.onChange(true);
-          }}
-          restoreFocus={opener}
-          title={`Enable Claude artifacts for ${props.instance.displayName}?`}
-        >
-          {CLAUDE_ARTIFACTS_TELEMETRY_WARNING}
-        </OctantConfirmDialog>
-      ) : null}
+      <OctantDialogPresence>
+        {confirming ? (
+          <OctantConfirmDialog
+            confirmLabel="Enable Claude artifacts"
+            onCancel={() => setConfirming(false)}
+            onConfirm={() => {
+              setConfirming(false);
+              void props.onChange(true);
+            }}
+            restoreFocus={opener}
+            title={`Enable Claude artifacts for ${props.instance.displayName}?`}
+          >
+            {CLAUDE_ARTIFACTS_TELEMETRY_WARNING}
+          </OctantConfirmDialog>
+        ) : null}
+      </OctantDialogPresence>
     </div>
   );
 }

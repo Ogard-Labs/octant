@@ -1,6 +1,7 @@
 import type { PermissionMode } from "@octant/contracts/providers";
 import { useState, type ReactNode } from "react";
 import { OctantConfirmDialog } from "../ui/base/OctantConfirmDialog";
+import { OctantDialogPresence } from "../ui/base/OctantDialogPresence";
 
 export const FULL_ACCESS_WARNING =
   "Agents can change any file and run any command without asking, with no sandbox. Protected files, such as SSH and cloud keys, are guarded by Octant's own tools and redaction only, and a shell command can read them.";
@@ -64,21 +65,24 @@ export function useFullAccessWarning(
       }
       setPending(() => apply);
     },
-    dialog:
-      pending === undefined ? null : (
-        <OctantConfirmDialog
-          confirmLabel="Use Full access"
-          destructive
-          onCancel={() => setPending(undefined)}
-          onConfirm={() => {
-            markWarned(scope, storage);
-            setPending(undefined);
-            pending();
-          }}
-          title="Use Full access?"
-        >
-          {FULL_ACCESS_WARNING}
-        </OctantConfirmDialog>
-      ),
+    dialog: (
+      <OctantDialogPresence>
+        {pending === undefined ? null : (
+          <OctantConfirmDialog
+            confirmLabel="Use Full access"
+            destructive
+            onCancel={() => setPending(undefined)}
+            onConfirm={() => {
+              markWarned(scope, storage);
+              setPending(undefined);
+              pending();
+            }}
+            title="Use Full access?"
+          >
+            {FULL_ACCESS_WARNING}
+          </OctantConfirmDialog>
+        )}
+      </OctantDialogPresence>
+    ),
   };
 }

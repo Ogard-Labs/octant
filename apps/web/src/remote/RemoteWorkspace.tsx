@@ -21,6 +21,7 @@ import { useProviderController } from "../providers/useProviderController";
 import { ShellState } from "../shell/ShellState";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantDialog } from "../ui/base/OctantDialog";
+import { OctantDialogPresence } from "../ui/base/OctantDialogPresence";
 import { WorkThreadWorkspace } from "../work/WorkThreadWorkspace";
 import { useWorkThreadNavigation } from "../work/useWorkThreadNavigation";
 import { SurfaceEmpty } from "../surface/SurfaceHeader";
@@ -160,24 +161,26 @@ function RemoteModeSurface(props: RemoteWorkspaceProps) {
   return (
     <>
       {surface}
-      {canvas === undefined ||
-      canvas.client !== props.clients.canvas ||
-      canvas.card.scope.mode !== props.mode ? null : (
-        <OctantDialog label={canvas.card.title} onClose={() => setCanvas(undefined)} open>
-          <CanvasWorkspaceTab
-            key={String(canvas.card.canvasId)}
-            client={canvas.client}
-            tab={{
-              kind: "canvas",
-              id: canvas.tabId,
-              mode: canvas.card.scope.mode,
-              title: canvas.card.title,
-              canvasId: canvas.card.canvasId,
-              projectId: canvas.card.scope.workspace.projectId,
-            }}
-          />
-        </OctantDialog>
-      )}
+      <OctantDialogPresence>
+        {canvas === undefined ||
+        canvas.client !== props.clients.canvas ||
+        canvas.card.scope.mode !== props.mode ? null : (
+          <OctantDialog label={canvas.card.title} onClose={() => setCanvas(undefined)} open>
+            <CanvasWorkspaceTab
+              key={String(canvas.card.canvasId)}
+              client={canvas.client}
+              tab={{
+                kind: "canvas",
+                id: canvas.tabId,
+                mode: canvas.card.scope.mode,
+                title: canvas.card.title,
+                canvasId: canvas.card.canvasId,
+                projectId: canvas.card.scope.workspace.projectId,
+              }}
+            />
+          </OctantDialog>
+        )}
+      </OctantDialogPresence>
     </>
   );
 }

@@ -4,6 +4,7 @@ import type { BrowserProfileChoice } from "@octant/contracts/project-browser";
 import { EyeOff, FolderOpen, LogOut, UserRound } from "lucide-react";
 import { useState } from "react";
 import { OctantConfirmDialog } from "../ui/base/OctantConfirmDialog";
+import { OctantDialogPresence } from "../ui/base/OctantDialogPresence";
 import { OctantMenu } from "../ui/base/OctantMenu";
 import {
   BROWSER_PROFILE_DESCRIPTIONS,
@@ -106,25 +107,27 @@ export function BrowserProfileControl(props: BrowserProfileControlProps) {
         triggerLabel={`${props.label ?? "Browser profile"}: ${label(props.profile)}`}
         value={props.profile}
       />
-      {confirmingSignOut ? (
-        <OctantConfirmDialog
-          confirmLabel="Sign out"
-          destructive
-          onCancel={() => setConfirmingSignOut(false)}
-          onConfirm={() => {
-            setSigningOut(true);
-            void Promise.resolve(props.onSignOut?.()).finally(() => {
-              setSigningOut(false);
-              setConfirmingSignOut(false);
-            });
-          }}
-          pending={signingOut}
-          title={`Sign out of the ${label(props.profile)} profile?`}
-        >
-          Every page in this profile closes, and its cookies, site storage and cache are removed.
-          Sites you were signed in to will ask you to sign in again.
-        </OctantConfirmDialog>
-      ) : null}
+      <OctantDialogPresence>
+        {confirmingSignOut ? (
+          <OctantConfirmDialog
+            confirmLabel="Sign out"
+            destructive
+            onCancel={() => setConfirmingSignOut(false)}
+            onConfirm={() => {
+              setSigningOut(true);
+              void Promise.resolve(props.onSignOut?.()).finally(() => {
+                setSigningOut(false);
+                setConfirmingSignOut(false);
+              });
+            }}
+            pending={signingOut}
+            title={`Sign out of the ${label(props.profile)} profile?`}
+          >
+            Every page in this profile closes, and its cookies, site storage and cache are removed.
+            Sites you were signed in to will ask you to sign in again.
+          </OctantConfirmDialog>
+        ) : null}
+      </OctantDialogPresence>
     </>
   );
 }

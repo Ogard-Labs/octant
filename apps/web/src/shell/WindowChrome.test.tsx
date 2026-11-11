@@ -497,7 +497,9 @@ describe("WindowChrome", () => {
     const more = cssRule(".project-threads__more");
     expect(more).toContain("min-height: var(--oct-space-6);");
     expect(more).toContain("font-size: var(--oct-text-xs);");
-    expect(more).toContain("opacity: 0.78;");
+    // It recedes by its role colour alone: a dimmed meta ink fell under 4.5:1.
+    expect(more).toContain("color: var(--oct-meta);");
+    expect(more).not.toContain("opacity");
 
     // Project actions are available on hover/focus, not as permanent noise
     // beside every folder.

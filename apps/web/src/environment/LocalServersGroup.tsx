@@ -18,6 +18,7 @@ import {
 import { useEffect, useState } from "react";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantConfirmDialog } from "../ui/base/OctantConfirmDialog";
+import { OctantDialogPresence } from "../ui/base/OctantDialogPresence";
 import {
   OctantMenuRoot,
   OctantMenuTrigger,
@@ -361,20 +362,22 @@ function LocalServerRow(props: {
         )}
       </div>
 
-      {props.confirming && needsConfirmation ? (
-        <OctantConfirmDialog
-          cancelLabel="Keep it running"
-          confirmLabel="Stop this server"
-          destructive
-          onCancel={props.onCancelConfirm}
-          onConfirm={() => void props.onStop()}
-          title="Confirm stop"
-        >
-          Stop {listener.processName} on port {listener.port}
-          {listener.workingDirectory === undefined ? "" : ` in ${listener.workingDirectory}`}?
-          Octant cannot verify that it still owns this server.
-        </OctantConfirmDialog>
-      ) : null}
+      <OctantDialogPresence>
+        {props.confirming && needsConfirmation ? (
+          <OctantConfirmDialog
+            cancelLabel="Keep it running"
+            confirmLabel="Stop this server"
+            destructive
+            onCancel={props.onCancelConfirm}
+            onConfirm={() => void props.onStop()}
+            title="Confirm stop"
+          >
+            Stop {listener.processName} on port {listener.port}
+            {listener.workingDirectory === undefined ? "" : ` in ${listener.workingDirectory}`}?
+            Octant cannot verify that it still owns this server.
+          </OctantConfirmDialog>
+        ) : null}
+      </OctantDialogPresence>
     </div>
   );
 }

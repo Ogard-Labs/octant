@@ -670,6 +670,20 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
             "worktrees managed worktree archived threads disk space storage clean up cleanup remove delete reclaim build output",
         },
         {
+          id: settingId("host-worktrees"),
+          label: "Worktrees on this computer",
+          scope: "host",
+          keywords:
+            "worktrees agents stale scan computer home folder other tools git worktree remove prune disk space",
+        },
+        {
+          id: settingId("xcode-build-data"),
+          label: "Xcode builds",
+          scope: "host",
+          keywords:
+            "xcode derived data deriveddata build folders cache stale orphaned disk space remove",
+        },
+        {
           id: settingId("open-in-applications"),
           label: "Open in applications",
           scope: "app",

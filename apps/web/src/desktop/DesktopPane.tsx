@@ -21,6 +21,7 @@ import { DeviceLine } from "../device/DeviceLine";
 import { DeviceSpinner } from "../device/DeviceStage";
 import { OctantButton, OctantIconButton } from "../ui/base/OctantButton";
 import { OctantConfirmDialog } from "../ui/base/OctantConfirmDialog";
+import { OctantDialogPresence } from "../ui/base/OctantDialogPresence";
 import { DesktopPreview } from "./DesktopPreview";
 import {
   desktopDollars,
@@ -361,25 +362,29 @@ export function DesktopPane(props: {
           view={view}
         />
       </div>
-      {confirmRelease && selected !== undefined ? (
-        <OctantConfirmDialog
-          confirmLabel="Release"
-          destructive
-          onCancel={() => setConfirmRelease(false)}
-          onConfirm={() => void release(selected)}
-          title="Release this desktop?"
-        >
-          The desktop and everything in it are destroyed. Octant confirms it is gone before it says
-          so.
-        </OctantConfirmDialog>
-      ) : null}
-      {confirmStart === undefined ? null : (
-        <StartConfirmation
-          confirm={confirmStart}
-          onCancel={() => setConfirmStart(undefined)}
-          onConfirm={() => void start(confirmStart)}
-        />
-      )}
+      <OctantDialogPresence>
+        {confirmRelease && selected !== undefined ? (
+          <OctantConfirmDialog
+            confirmLabel="Release"
+            destructive
+            onCancel={() => setConfirmRelease(false)}
+            onConfirm={() => void release(selected)}
+            title="Release this desktop?"
+          >
+            The desktop and everything in it are destroyed. Octant confirms it is gone before it
+            says so.
+          </OctantConfirmDialog>
+        ) : null}
+      </OctantDialogPresence>
+      <OctantDialogPresence>
+        {confirmStart === undefined ? null : (
+          <StartConfirmation
+            confirm={confirmStart}
+            onCancel={() => setConfirmStart(undefined)}
+            onConfirm={() => void start(confirmStart)}
+          />
+        )}
+      </OctantDialogPresence>
     </section>
   );
 }

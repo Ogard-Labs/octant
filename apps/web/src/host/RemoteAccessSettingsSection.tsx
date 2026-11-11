@@ -28,6 +28,7 @@ import type {
 } from "../shell/hostBridge";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantConfirmDialog } from "../ui/base/OctantConfirmDialog";
+import { OctantDialogPresence } from "../ui/base/OctantDialogPresence";
 import { OctantField, OctantFieldLabel } from "../ui/base/OctantField";
 import { OctantInput } from "../ui/base/OctantInput";
 import { OctantSelectField } from "../ui/base/OctantSelect";
@@ -543,36 +544,38 @@ export function RemoteAccessSettingsSection({
             </div>
           </SettingRow>
         </div>
-        {confirming === undefined ? null : (
-          <OctantConfirmDialog
-            confirmLabel={status?.enabled === true ? "Confirm move" : "Confirm enable"}
-            destructive={false}
-            details={
-              <SettingsFactList
-                facts={[
-                  { label: "Address", value: `${confirming.hostname}:${confirming.port}` },
-                  { label: "Origin", value: confirming.origin },
-                  {
-                    label: "Reach",
-                    value:
-                      classifyRemoteListenerAddress(confirming.hostname) === "tailscale"
-                        ? "Tailscale"
-                        : "Private LAN",
-                  },
-                  { label: "Certificate", value: "Provided; fingerprint shown once it loads." },
-                ]}
-              />
-            }
-            onCancel={() => setConfirming(undefined)}
-            onConfirm={() => void applyListener(confirming)}
-            pending={listenerBusy}
-            restoreFocus={listenerOpener}
-            title={status?.enabled === true ? "Move remote listener?" : "Enable remote listener?"}
-          >
-            Other devices on this network will be able to reach this host. Pairing still requires
-            your approval here for every device.
-          </OctantConfirmDialog>
-        )}
+        <OctantDialogPresence>
+          {confirming === undefined ? null : (
+            <OctantConfirmDialog
+              confirmLabel={status?.enabled === true ? "Confirm move" : "Confirm enable"}
+              destructive={false}
+              details={
+                <SettingsFactList
+                  facts={[
+                    { label: "Address", value: `${confirming.hostname}:${confirming.port}` },
+                    { label: "Origin", value: confirming.origin },
+                    {
+                      label: "Reach",
+                      value:
+                        classifyRemoteListenerAddress(confirming.hostname) === "tailscale"
+                          ? "Tailscale"
+                          : "Private LAN",
+                    },
+                    { label: "Certificate", value: "Provided; fingerprint shown once it loads." },
+                  ]}
+                />
+              }
+              onCancel={() => setConfirming(undefined)}
+              onConfirm={() => void applyListener(confirming)}
+              pending={listenerBusy}
+              restoreFocus={listenerOpener}
+              title={status?.enabled === true ? "Move remote listener?" : "Enable remote listener?"}
+            >
+              Other devices on this network will be able to reach this host. Pairing still requires
+              your approval here for every device.
+            </OctantConfirmDialog>
+          )}
+        </OctantDialogPresence>
         {listenerMessage === undefined ? null : (
           <SettingsState kind="error">{listenerMessage}</SettingsState>
         )}
@@ -840,20 +843,22 @@ export function RemoteAccessSettingsSection({
               </OctantButton>
             </div>
           )}
-          {activeDevices.length !== 0 && confirmRevokeAll ? (
-            <OctantConfirmDialog
-              cancelLabel="Keep them"
-              destructive
-              confirmLabel="Revoke all devices"
-              onCancel={() => setConfirmRevokeAll(false)}
-              onConfirm={() => void revokeAll()}
-              restoreFocus={revokeAllOpener}
-              title="Revoke every paired device?"
-            >
-              Every paired device will lose access to this host. You will need to pair each device
-              again.
-            </OctantConfirmDialog>
-          ) : null}
+          <OctantDialogPresence>
+            {activeDevices.length !== 0 && confirmRevokeAll ? (
+              <OctantConfirmDialog
+                cancelLabel="Keep them"
+                destructive
+                confirmLabel="Revoke all devices"
+                onCancel={() => setConfirmRevokeAll(false)}
+                onConfirm={() => void revokeAll()}
+                restoreFocus={revokeAllOpener}
+                title="Revoke every paired device?"
+              >
+                Every paired device will lose access to this host. You will need to pair each device
+                again.
+              </OctantConfirmDialog>
+            ) : null}
+          </OctantDialogPresence>
           {inventoryMessage === undefined || listenerNotEnabled ? null : (
             <SettingsState kind="error">{inventoryMessage}</SettingsState>
           )}

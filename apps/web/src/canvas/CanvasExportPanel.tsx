@@ -23,6 +23,7 @@ import { OctantApprovalCard } from "../ui/base/OctantApprovalCard";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantInput } from "../ui/base/OctantInput";
 import { OctantSelectField } from "../ui/base/OctantSelect";
+import { OctantDialogPresence } from "../ui/base/OctantDialogPresence";
 import type { CanvasExportFolderState } from "./useCanvasExportFolder";
 
 export interface CanvasExportPanelProps {
@@ -429,18 +430,20 @@ export function CanvasExportPanel(props: CanvasExportPanelProps) {
           {folder.message}
         </p>
       )}
-      {pickingFolder && folderView !== undefined && folderBrowse !== undefined ? (
-        <FolderPicker
-          client={{ browse: (request) => browseRequest(folderBrowse, request) }}
-          hint="Pick the folder Octant writes exported files into."
-          hostId={folderView.hostId}
-          mode={folderView.mode}
-          onCancel={() => setPickingFolder(false)}
-          onSelectCandidate={(candidate) => void chooseFolder(candidate.candidateId)}
-          showGitInit={false}
-          title="Export folder"
-        />
-      ) : null}
+      <OctantDialogPresence>
+        {pickingFolder && folderView !== undefined && folderBrowse !== undefined ? (
+          <FolderPicker
+            client={{ browse: (request) => browseRequest(folderBrowse, request) }}
+            hint="Pick the folder Octant writes exported files into."
+            hostId={folderView.hostId}
+            mode={folderView.mode}
+            onCancel={() => setPickingFolder(false)}
+            onSelectCandidate={(candidate) => void chooseFolder(candidate.candidateId)}
+            showGitInit={false}
+            title="Export folder"
+          />
+        ) : null}
+      </OctantDialogPresence>
     </div>
   );
 }

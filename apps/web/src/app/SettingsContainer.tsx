@@ -113,6 +113,7 @@ export const SettingsContainer = memo(function SettingsContainer(props: Settings
     hostControlClient,
     protectedFilesClient,
     archivedWorktreesClient,
+    diskCleanupClient,
     personMemoryClient,
     localUsageHistoryClient,
     nativeHarnessClient,
@@ -279,6 +280,7 @@ export const SettingsContainer = memo(function SettingsContainer(props: Settings
         : { browserAutomationClient: props.browserAutomationClient })}
       protectedFilesClient={protectedFilesClient}
       archivedWorktreesClient={archivedWorktreesClient}
+      diskCleanupClient={diskCleanupClient}
       personMemoryClient={personMemoryClient}
       {...(canvasClient === undefined ? {} : { canvasClient })}
       {...(desktopPaneClient === undefined ? {} : { desktopPaneClient })}
