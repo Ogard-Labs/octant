@@ -10,6 +10,7 @@ import {
   CodeBootstrap,
   CodeConversationPage,
   CodeConversationWindow,
+  CodePlannerView,
   CodeEvidenceBatchResponse,
   CodeEvidenceReference,
   decodeCodeAttachmentId,
@@ -69,6 +70,36 @@ export async function loadMobileCodeThread(
     throw new MobileInboxFailure("unavailable", "Code thread is not available on this host.");
   }
   return decodeHostAnswer(CodeThread)(thread);
+}
+
+/** One pending worker a coordinator proposed, as a paired client may show it. */
+export type MobileCoordinatorProposal = CodePlannerView["proposals"][number]["proposal"];
+
+/**
+ * A coordinator's own pending proposals, read through the planner view the
+ * remote session may read. Approving and declining stay with a window on the
+ * host, whose proposal routes refuse a paired caller, so this only reads.
+ */
+export async function loadMobileCoordinatorProposals(
+  transport: MobileRemoteTransport,
+  thread: Pick<CodeThread, "id" | "projectId">,
+): Promise<ReadonlyArray<MobileCoordinatorProposal>> {
+  const view = await decodeJson(
+    await transport.authenticatedFetch({
+      method: "GET",
+      path: `/api/code/planner/${encodeURIComponent(String(thread.projectId))}`,
+    }),
+    decodeHostAnswer(CodePlannerView),
+    "Proposed workers could not be read over the remote session.",
+  );
+  return view.proposals
+    .map((entry) => entry.proposal)
+    .filter(
+      (proposal) =>
+        proposal.fromCoordinator === true &&
+        proposal.status === "pending" &&
+        String(proposal.plannerThreadId) === String(thread.id),
+    );
 }
 
 export async function executeMobileCodeOperation(
