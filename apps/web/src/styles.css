@@ -1455,9 +1455,8 @@ html[data-octant-reduced-motion="true"] .workspace-cross-context-banner--inline 
   height: 1px;
 }
 
-.workspace-split__resize:hover::before,
-.workspace-split__resize:focus-visible::before {
-  background: color-mix(in srgb, var(--octant-focus-ring) 35%, var(--octant-border));
+.workspace-split__resize:hover::before {
+  background: var(--oct-meta);
 }
 
 .workspace-split__resize-input {

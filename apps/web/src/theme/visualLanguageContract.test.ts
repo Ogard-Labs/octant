@@ -61,7 +61,7 @@ describe("the public-block visual language", () => {
     // of a mark. Rem literals rounded seven panels at seven sizes, and a rem
     // corner also shrinks with the interface font size while a token does not.
     const corner =
-      /^(?:0|50%|inherit|[1-4]px|var\(--(?:oct-radius-[a-z-]+|radius-(?:sm|md|lg|xl))\))$/;
+      /^(?:0|50%|inherit|[1-4]px|var\(--(?:oct-radius-[a-z-]+|radius-(?:sm|md|lg|xl)|octant-sheet-corner-outer)\))$/;
     const declaration = /border(?:-[a-z]+-[a-z]+)?-radius:\s*([^;]+);/g;
     const strays = cssFiles(webRoot).flatMap((path) =>
       [...readFileSync(path, "utf8").matchAll(declaration)]
@@ -70,6 +70,86 @@ describe("the public-block visual language", () => {
         .map((value) => `${relative(webRoot, path)}: ${value}`),
     );
 
+    expect(strays).toEqual([]);
+  });
+
+  it("carries the window's curve into a sheet corner that sits one inset from it", () => {
+    // The OS rounds the window, and the sheet stops one inset short of its
+    // right and bottom edges. At the card radius the frame between the two
+    // curves swelled at the corner; the bottom corners take the window's radius
+    // less the inset, so it stays one width. The corners where the frame turns,
+    // far from the window's own, keep the card radius, and a sheet edge that
+    // meets the window's edge (no rail beside it) has no corner of its own.
+    const shell = readFileSync(join(webRoot, "styles/shell.css"), "utf8");
+    const surface = readFileSync(join(webRoot, "styles/surface.css"), "utf8");
+    expect(shell).toMatch(/--octant-window-radius:\s*var\(--oct-radius-md\);/);
+    expect(shell).toMatch(
+      /--octant-sheet-corner-outer:\s*calc\(var\(--octant-window-radius\) - var\(--octant-sheet-inset\)\);/,
+    );
+    const sheetRounds = [
+      /\.shell-frame > \.workspace-layer::before \{[^}]*border-radius: 0 var\(--oct-radius-md\) var\(--octant-sheet-corner-outer\) 0;/,
+      /\.shell-frame \.right-utility-dock::before \{[^}]*border-radius: 0 var\(--oct-radius-md\) var\(--octant-sheet-corner-outer\) 0;/,
+      /\.shell-frame \.bottom-utility-panel \{[^}]*border-radius: 0 0 var\(--octant-sheet-corner-outer\) 0;/,
+      /\.shell-frame:not\(\.shell--rail-beside\) > \.sidebar::before \{\s*border-radius: 0;/,
+      /\.shell--sidebar-collapsed:not\(\.shell--sidebar-rail\)\.shell-frame > \.workspace-layer::before \{\s*border-radius: 0 var\(--oct-radius-md\) var\(--octant-sheet-corner-outer\) 0;/,
+    ];
+    for (const pattern of sheetRounds) expect(shell).toMatch(pattern);
+    expect(surface).toMatch(
+      /> \.app-backdrop\[data-placement="shell"\] \{[^}]*border-radius: 0 var\(--oct-radius-md\) var\(--octant-sheet-corner-outer\) 0;/,
+    );
+    // The window's bottom-right corner is never the card radius again.
+    expect(shell).not.toMatch(/border-radius: 0 var\(--oct-radius-md\) var\(--oct-radius-md\) 0;/);
+    expect(shell).not.toMatch(/border-radius: 0 0 var\(--oct-radius-md\) var\(--oct-radius-md\);/);
+  });
+
+  it("fades the transcript at its edges and keeps the rail's foot on screen", () => {
+    const system = readFileSync(join(webRoot, "styles/octant.css"), "utf8");
+    const code = readFileSync(join(webRoot, "styles/code.css"), "utf8");
+    const shell = readFileSync(join(webRoot, "styles/shell.css"), "utf8");
+    const rail = readFileSync(join(webRoot, "shell/SidebarRail.tsx"), "utf8");
+    // Chat, Work, and Code share one frame, so one fade: text under the title
+    // band's edge or above the composer ends in a fade, not a cut line.
+    expect(system).toMatch(
+      /\.transcript-scroll \{[^}]*mask-image: linear-gradient\(\s*to bottom,\s*transparent,\s*var\(--oct-fg\) var\(--oct-space-3\),\s*var\(--oct-fg\) calc\(100% - var\(--oct-space-3\)\),\s*transparent\s*\);/,
+    );
+    expect(code).not.toMatch(/\.code-thread-workspace__conversation \{[^}]*mask-image/);
+    // Only the destinations scroll; Settings and usage stay put, so a short
+    // window never cuts the last item through its icon or hides the foot.
+    expect(shell).toMatch(/\.sidebar-rail__scroll \{[^}]*overflow-y: auto;[^}]*mask-image:/);
+    expect(shell).toMatch(/\.sidebar-rail__column \{[^}]*overflow: hidden;/);
+    expect(shell).toMatch(/\.sidebar-rail__foot \{[^}]*flex: none;/);
+    expect(rail).toContain('className="sidebar-rail__scroll"');
+    expect(rail).toContain('className="sidebar-rail__foot"');
+  });
+
+  it("gives title-band controls one shape and no accent on a pressed divider", () => {
+    const shell = readFileSync(join(webRoot, "styles/shell.css"), "utf8");
+    const dock = readFileSync(join(webRoot, "styles/dock.css"), "utf8");
+    // A label, a pill with a chevron, and a square icon sat in the band as
+    // three shapes at 24px and 28px: they are the 28px rail button's shape.
+    expect(shell).toMatch(
+      /\.project-action-buttons \[data-slot="button"\] \{\s*height: var\(--oct-rail-button-h\);\s*border-radius: var\(--oct-radius-sm\);/,
+    );
+    expect(dock).toMatch(/\.dock-quick-tools__tool \{\s*height: var\(--oct-rail-button-h\);\s*\}/);
+    expect(readFileSync(join(webRoot, "shell/RightUtilityDockSurface.tsx"), "utf8")).toContain(
+      'className="dock-quick-tools__tool window-no-drag rounded-lg"',
+    );
+    expect(dock).toMatch(
+      /\.dock-quick-tools__tool:not\(\[data-labelled="true"\]\) \{\s*width: var\(--oct-rail-button-h\);/,
+    );
+    // A divider the pointer rests on after a click kept a bright accent line.
+    // Hover is the meta ink; keyboard focus is the one shared focus edge.
+    const strays: string[] = [];
+    for (const path of cssFiles(webRoot)) {
+      const css = readFileSync(path, "utf8").replace(/\/\*[\s\S]*?\*\//g, "");
+      for (const match of css.matchAll(/([^{}]+)\{([^{}]*)\}/g)) {
+        const selector = (match[1] ?? "").trim();
+        if (!/(?:resize|split-handle)/.test(selector)) continue;
+        if (!/:(?:hover|focus-visible|active)/.test(selector)) continue;
+        if (/accent|focus-ring/.test(match[2] ?? ""))
+          strays.push(`${relative(webRoot, path)}: ${selector}`);
+      }
+    }
     expect(strays).toEqual([]);
   });
 
@@ -1090,7 +1170,7 @@ describe("the public-block visual language", () => {
         ".dock-browser-pages",
         ".phone-scroll",
         ".setnav",
-        ".sidebar-rail__column",
+        ".sidebar-rail__scroll",
       ];
       const strays: string[] = [];
       for (const path of cssFiles(webRoot)) {

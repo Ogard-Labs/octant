@@ -30,12 +30,11 @@
   content: "";
 }
 
-/* The same feedback the system's .split-handle gives: the hairline takes the
-   accent ink while grabbed. Keyboard focus also draws the shared focus edge,
-   which is what tells it apart from the pointer. */
-.right-utility-dock__resize:hover::before,
-.right-utility-dock__resize:focus-visible::before {
-  background: var(--oct-accent-fg);
+/* The hairline darkens to the meta ink under the pointer, and no accent comes
+   with a press: the accent line stayed lit on a handle that had only been
+   clicked. Keyboard focus draws the shared focus edge, not a second colour. */
+.right-utility-dock__resize:hover::before {
+  background: var(--oct-meta);
 }
 
 .right-utility-dock__surface {
@@ -92,6 +91,20 @@
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+/* A band control is the 28px rail button's shape, whatever it holds: the
+   recipe's compact step drew these tools 24px tall at the compact radius,
+   beside square 28px window buttons at the control radius, and a label, an
+   icon, and a square sat together as three shapes. The control radius comes
+   from the button's own `rounded-lg`; an icon alone is square. */
+.dock-quick-tools__tool {
+  height: var(--oct-rail-button-h);
+}
+
+.dock-quick-tools__tool:not([data-labelled="true"]) {
+  width: var(--oct-rail-button-h);
+  padding: 0;
 }
 
 .dock-quick-tools__tool > svg {
@@ -653,9 +666,8 @@
   content: "";
 }
 
-.bottom-utility-panel__resize:hover::before,
-.bottom-utility-panel__resize:focus-visible::before {
-  background: var(--oct-accent-fg);
+.bottom-utility-panel__resize:hover::before {
+  background: var(--oct-meta);
 }
 
 .bottom-utility-panel__toolbar {

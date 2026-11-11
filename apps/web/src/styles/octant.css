@@ -2570,6 +2570,17 @@ input.switch:checked::after {
   padding: 12px 0 32px;
   overflow: auto;
   overscroll-behavior: contain;
+  /* Text scrolling under the frame's top edge, which is the sheet's hairline
+     below the title band, or into the composer at its foot, fades out over
+     the frame's own padding instead of ending in half a line cut flat by the
+     edge. At rest the first line sits below the fade. */
+  mask-image: linear-gradient(
+    to bottom,
+    transparent,
+    var(--oct-fg) var(--oct-space-3),
+    var(--oct-fg) calc(100% - var(--oct-space-3)),
+    transparent
+  );
 }
 .turn-user {
   display: grid;
@@ -3832,10 +3843,7 @@ input.switch:checked::after {
   inset-inline: -12px;
 }
 .split-handle:hover {
-  background: var(--oct-accent-fg);
-}
-.split-handle:focus-visible {
-  background: var(--oct-accent-fg);
+  background: var(--oct-meta);
 }
 /* while dragging, stop the pointer selecting text in the panes it crosses */
 .is-dragging,

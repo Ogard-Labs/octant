@@ -247,6 +247,18 @@ this document names the token, not the number.
 | `--radius` (`md`)       | 6px    | The recipes' compact step: xs and sm buttons, menu items (`rounded-md`)                |
 | `--radius-lg` / `-xl`   | 8 / 12 | The recipes' control and card steps (`rounded-lg`, `rounded-xl`): a menu and a popover |
 
+A corner that sits within one radius of a rounded parent's corner is concentric
+with it: the parent's radius less the gap between them, or square when the gap
+is at least the radius, never the same token again. Two equal radii one inset
+apart leave a frame that swells at the corner (the sheet's bottom corners, 8px
+in from the window's own, did). So the sheet's bottom corners are the window's
+radius (`--octant-window-radius`, the card radius, as the OS rounds a window
+about that much) less the sheet inset, `--octant-sheet-corner-outer`, written
+once with `calc()` in `shell.css`; the corners where the frame turns, under the
+title band and beside the rail, keep the card radius, since the window's corner
+is far from them; and a sheet edge that meets the window's edge, with no rail
+beside it, is square. The desktop app confirms the OS's own radius.
+
 The `--oct-radius-*` tokens live in `octant.css`. The shadcn recipes derive
 their scale in `tailwind.css` from `--radius`, which `shadcn-theme.css` sets to
 `--oct-radius-sm` less 2px, so `rounded-lg` lands on the control's 8px and
@@ -322,8 +334,9 @@ The window is a frame and one sheet. The rail and the title band form one
 L-shaped frame in the window surface (the sidebar colour), with no line where
 they meet. The sidebar, the stage (the primary workspace), the right dock, and
 the bottom panel sit inside it as one sheet: it starts under the title band,
-stops 8px short of the window's right and bottom edges, rounds its outer
-corners (`--oct-radius-md`) where the frame turns and along the bottom, and
+stops 8px short of the window's right and bottom edges, rounds its corners
+where the frame turns (`--oct-radius-md`) and its bottom corners concentric with
+the window's (see the radius rule above), and
 divides its parts with one soft hairline (`--octant-border-soft`); no
 stronger line doubles it, and none runs on through the band or the inset
 below the sheet. The sidebar's side is the workspace colour,
