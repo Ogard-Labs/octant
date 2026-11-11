@@ -108,7 +108,11 @@ export function currentAccentSwatch(settings: ThemeSettings): AccentSwatchId | "
 function paintOverrides(
   paint: AccentPaint,
   mode: "light" | "dark" | undefined,
-): ReadonlyArray<{ readonly role: string; readonly color: string; readonly mode?: string }> {
+): ReadonlyArray<{
+  readonly role: string;
+  readonly color: string;
+  readonly mode?: "light" | "dark";
+}> {
   const scope = mode === undefined ? {} : { mode };
   return [
     { role: "accent", color: paint.fill, ...scope },

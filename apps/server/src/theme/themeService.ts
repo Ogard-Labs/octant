@@ -25,6 +25,24 @@ const decodeCorrelationId = Schema.decodeUnknownSync(CorrelationId);
 const decodeEventId = Schema.decodeUnknownSync(EventId);
 const decodeTimestamp = Schema.decodeUnknownSync(UtcTimestamp);
 
+/**
+ * Checks the overrides in the mode the theme resolves to, and also in every
+ * mode a scoped override names. Resolving one mode alone skipped a dark-only
+ * override while the theme followed the system, so the server accepted a
+ * colour the renderer then dropped in dark mode.
+ */
+function overridesDroppedInAnyShownMode(settings: ThemeSettings): boolean {
+  const modes = new Set<"light" | "dark" | undefined>([undefined]);
+  for (const entry of settings.semanticOverrides) {
+    if (entry.mode !== undefined) modes.add(entry.mode);
+  }
+  return [...modes].some(
+    (mode) =>
+      resolveEffectiveTokens(mode === undefined ? settings : { ...settings, mode }, false)
+        .droppedOverrides.length > 0,
+  );
+}
+
 export interface ThemeServiceApi {
   readonly bootstrap: () => ThemeBootstrap;
   readonly execute: (input: unknown) => ThemeCommandResult;
@@ -79,8 +97,7 @@ export class ThemeService implements ThemeServiceApi {
         });
       }
       const settings = command.settings;
-      const resolved = resolveEffectiveTokens(settings, false);
-      if (resolved.droppedOverrides.length > 0) {
+      if (overridesDroppedInAnyShownMode(settings)) {
         throw new ThemeServiceError({
           category: "invalid",
           message: "One or more semantic color overrides fail contrast or role validation.",
