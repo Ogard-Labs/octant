@@ -1148,9 +1148,10 @@ describe("the public-block visual language", () => {
     const layer = (name: string) =>
       Number(new RegExp(`--oct-z-${name}:\\s*(\\d+);`).exec(system)?.[1]);
     const ruleBody = (css: string, selector: string) =>
-      new RegExp(`(?:^|\\})\\s*${selector.replace(/[.]/g, "\\.")}\\s*\\{([^}]*)\\}`, "m").exec(
-        css,
-      )?.[1] ?? "";
+      new RegExp(
+        `(?:^|\\})\\s*${selector.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\s*\\{([^}]*)\\}`,
+        "m",
+      ).exec(css)?.[1] ?? "";
 
     it("stands a notice above dialogs and sheets and below everything a person aims at", () => {
       // Under a dialog's backdrop a notice could be neither read nor dismissed;
