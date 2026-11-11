@@ -63,6 +63,10 @@ export function ComposerContextMeterShortcut() {
   useEffect(() => {
     function onKeyDown(event: KeyboardEvent) {
       if (matchKeybinding(keybindings, event, isApplePlatform()) !== "context-usage") return;
+      // The workspace stays mounted behind Settings' sheet. Opening the meter
+      // there would put a popover behind the scrim and take the keyboard out
+      // of the sheet.
+      if (document.querySelector(".octant-sheet__popup") !== null) return;
       event.preventDefault();
       requestOpen();
     }

@@ -1973,7 +1973,9 @@ textarea.settings-view__text-input {
   min-height: 120px;
 }
 
-.shell--material-translucent .settings-view__effective-note {
+/* The sheet is drawn outside the shell, so it carries the fact itself. */
+.shell--material-translucent .settings-view__effective-note,
+.octant-sheet--over-glass .settings-view__effective-note {
   display: none;
 }
 

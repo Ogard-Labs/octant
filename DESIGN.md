@@ -335,7 +335,10 @@ live, so a change to the theme, the accent, the type or the sidebar shows
 where it lands while the control is still under the pointer. As a page that
 replaced the window, Settings showed none of what a change did until a person
 went back. The sheet holds the Settings rail and the page, divided by one
-line; a section's card steps up from the sheet's own fill. It closes with the
+line; the rail is 232px wide there and is not resized (the saved sidebar
+width is the full-window page's). A section's card steps up from the sheet's
+own fill. A native Browser page leaves the window while the sheet is up, as it
+does for a dialog. It closes with the
 close control in its corner, with Escape, or with a press on the window behind
 it, and focus returns to where it was. It carries no "Back to app": the person
 never left. The presentation is decided when Settings opens and kept until it

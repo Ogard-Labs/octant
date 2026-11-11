@@ -7323,7 +7323,12 @@ function LaunchedShell(
         }
         sheet={
           settingsAsSheet ? (
-            <OctantSheet label="Settings" onClose={controller.closeSettings} open>
+            <OctantSheet
+              {...(material === "translucent" ? { className: "octant-sheet--over-glass" } : {})}
+              label="Settings"
+              onClose={controller.closeSettings}
+              open
+            >
               {settingsContainer("settings", "sheet")}
             </OctantSheet>
           ) : undefined
